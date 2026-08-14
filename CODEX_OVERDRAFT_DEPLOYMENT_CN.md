@@ -20,10 +20,11 @@
 - 支持 `/v1/responses`、转换为 Responses 的 `/v1/chat/completions` 和 `/v1/messages`，以及 Responses WebSocket v2。
 - 在适用请求的最后一条用户消息后注入一对无操作工具调用，用于保持与参考实现一致的请求形态。
 - 当 5h 或 7d 额度首次达到 100%，或收到带明确额度证据的 429 时，最多执行 5 次真实探测。
+- 管理页面的 OpenAI OAuth 常规文本“测试账号连接”也使用相同请求形态，并接入同一套额度探测状态机。
 - 分别维护 5h、7d 透支周期，并在管理页面显示状态、请求数、Token、账号金额和预计恢复时间。
 - 将探测状态保存在现有 `accounts.extra` JSONB 字段中，不新增数据库表，不需要手动执行数据库迁移（migration）。
 
-以下端点不启用透支：`/responses/compact`、图片生成、Embedding、Count Tokens 和 Live。
+以下端点不启用透支：`/responses/compact`、图片生成、Embedding、Count Tokens 和 Live；API Key、Shadow、图片及 Compact 的后台测试也不启用透支。
 
 ## 前置条件
 
@@ -255,11 +256,11 @@ docker compose \
 
 ### 第三层：查看真实探测日志
 
-只有账号 5h/7d 额度达到 100%，或者收到带明确额度信息的上游 429，才会启动探测。额度未耗尽时没有相关日志是正常现象。
+只有账号 5h/7d 额度达到 100%，或者收到带明确额度信息的上游 429，才会启动探测。额度达到 100% 后，可以在管理页面对该 OpenAI OAuth 账号执行常规文本“测试账号连接”；测试请求本身会使用透支请求形态，并触发或接续同一额度周期的探测。额度未耗尽时没有相关日志是正常现象。
 
 ```bash
 docker logs --since 30m sub2api 2>&1 | \
-  grep -E 'codex_quota_overdraft_(probe|state|pause)'
+  grep -E 'codex_quota_overdraft_(probe|state|pause|stale_rate_limit)'
 ```
 
 关键日志：
@@ -271,6 +272,7 @@ docker logs --since 30m sub2api 2>&1 | \
 | `codex_quota_overdraft_probe_inconclusive` | 网络、超时、5xx 等导致无法确认，约 1 分钟后可重试 |
 | `codex_quota_overdraft_probe_claim_failed` | 无法在 PostgreSQL 中原子领取探测任务，需要排查数据库或版本 |
 | `codex_quota_overdraft_state_persist_failed` | 状态无法写入 `accounts.extra`，页面可能不显示最新结果 |
+| `codex_quota_overdraft_stale_rate_limit_cleared` | 探测已证明账号可用，并清除了并发 429 遗留的账号级限流状态 |
 
 真正“透支成功”的最直接证据是：
 
@@ -467,7 +469,9 @@ docker compose \
 
 ### 页面仍显示“限流中”
 
-本功能只绕过 5h/7d 额度阈值产生的预暂停。以下情况仍会正常限流或暂停：账号禁用、401/403、5 次探测均确认额度耗尽、代理/网络错误、模型级冷却、并发限制或其他上游 429。先按 `account_id` 检查应用日志和数据库中的 `reason_code`。
+页面的“限流中”直接来自账号记录的 `rate_limit_reset_at`。旧实现存在竞态：探测开始后若另一个 429 更新了该时间，即使探测最终 `passed`，严格时间比较也可能不清理它，因此出现“实际透支可用但页面限流中”。当前版本在 `passed/recovered` 时会清除该残留状态，并记录 `codex_quota_overdraft_stale_rate_limit_cleared`；`failed` 不会清理。
+
+其他真实限制仍会正常生效，包括账号禁用、401/403、5 次探测均确认额度耗尽、代理/网络错误、模型级冷却、并发限制或没有明确额度证据的其他上游 429。若状态持续存在，先按 `account_id` 检查上述日志、数据库中的 `extra->'codex_quota_overdraft_probe'` 和 `rate_limit_reset_at`，区分额度透支与普通限流。
 
 ### `pq: could not determine data type of parameter $1`
 

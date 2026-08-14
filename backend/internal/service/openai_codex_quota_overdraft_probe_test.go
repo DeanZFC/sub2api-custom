@@ -22,6 +22,16 @@ type codexOverdraftProbeRepoStub struct {
 	clearLimitCalls int
 }
 
+type codexOverdraftRuntimeBlockerStub struct {
+	clearCalls int
+}
+
+func (b *codexOverdraftRuntimeBlockerStub) BlockAccountScheduling(*Account, time.Time, string) {}
+
+func (b *codexOverdraftRuntimeBlockerStub) ClearAccountSchedulingBlock(int64) {
+	b.clearCalls++
+}
+
 func (r *codexOverdraftProbeRepoStub) GetByID(context.Context, int64) (*Account, error) {
 	return r.account, nil
 }
@@ -259,6 +269,49 @@ func TestCodexQuotaOverdraftRecoveryClearsWindowState(t *testing.T) {
 	require.Nil(t, recovered.FiveHourStartedAt)
 	require.Nil(t, recovered.FiveHourRecoverAt)
 	require.Zero(t, repo.tempPauseCalls)
+}
+
+func TestCodexQuotaOverdraftAvailableStateClearsMismatchedStaleRateLimit(t *testing.T) {
+	now := time.Date(2026, time.August, 14, 10, 0, 0, 0, time.UTC)
+	for _, status := range []string{codexQuotaOverdraftProbePassed, codexQuotaOverdraftProbeRecovered} {
+		t.Run(status, func(t *testing.T) {
+			account := newCodexOverdraftProbeTestAccount(now)
+			account.RateLimitedAt = codexQuotaOverdraftTimePtr(now.Add(-time.Minute))
+			account.RateLimitResetAt = codexQuotaOverdraftTimePtr(now.Add(2 * time.Hour))
+			repo := &codexOverdraftProbeRepoStub{account: account}
+			blocker := &codexOverdraftRuntimeBlockerStub{}
+			coordinator := &CodexQuotaOverdraftCoordinator{accountRepo: repo, runtimeBlocker: blocker}
+			state := &CodexQuotaOverdraftProbeState{
+				Status:            status,
+				ObservedRateLimit: codexQuotaOverdraftTimePtr(now.Add(time.Hour)),
+			}
+
+			coordinator.clearQuotaPause(account.ID, state)
+
+			require.Equal(t, 1, repo.clearLimitCalls)
+			require.Nil(t, account.RateLimitResetAt)
+			require.Equal(t, 1, blocker.clearCalls)
+		})
+	}
+}
+
+func TestCodexQuotaOverdraftFailedStateDoesNotClearRateLimit(t *testing.T) {
+	now := time.Date(2026, time.August, 14, 10, 0, 0, 0, time.UTC)
+	account := newCodexOverdraftProbeTestAccount(now)
+	account.RateLimitResetAt = codexQuotaOverdraftTimePtr(now.Add(2 * time.Hour))
+	repo := &codexOverdraftProbeRepoStub{account: account}
+	blocker := &codexOverdraftRuntimeBlockerStub{}
+	coordinator := &CodexQuotaOverdraftCoordinator{accountRepo: repo, runtimeBlocker: blocker}
+	state := &CodexQuotaOverdraftProbeState{
+		Status:            codexQuotaOverdraftProbeFailed,
+		ObservedRateLimit: codexQuotaOverdraftTimePtr(now.Add(time.Hour)),
+	}
+
+	coordinator.clearQuotaPause(account.ID, state)
+
+	require.Zero(t, repo.clearLimitCalls)
+	require.NotNil(t, account.RateLimitResetAt)
+	require.Zero(t, blocker.clearCalls)
 }
 
 func TestClassifyCodexQuotaOverdraftProbeResponses(t *testing.T) {

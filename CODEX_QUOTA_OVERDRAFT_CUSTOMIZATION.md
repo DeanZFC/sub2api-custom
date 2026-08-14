@@ -10,6 +10,12 @@
 - 功能开关：`gateway.codex_quota_overdraft_enabled`
 - 代码默认值：关闭；`deploy/config.example.yaml` 部署示例默认开启
 
+## 后台测试连接与残留限流修复
+
+管理页面的 OpenAI OAuth 常规文本“测试账号连接”使用与真实业务请求相同的透支请求形态。测试成功并取得 5h/7d 快照后会触发额度观察；测试返回带明确额度证据的 429 时交给透支协调器执行最多 5 次真实探测，不再直接写入普通账号级限流。API Key、Shadow、图片和 Compact 测试不启用该行为。
+
+探测得到 `passed`，或额度周期进入 `recovered` 后，会清除仍残留的账号级 `rate_limit_reset_at` 以及本功能或额度阈值产生的暂停。这里不再要求当前重置时间与探测开始时记录的 `observed_rate_limit_reset_at` 完全相同，因为并发 429 可能在探测期间更新该字段；`failed` 状态不会清理限流。发生清理时记录 `codex_quota_overdraft_stale_rate_limit_cleared`。
+
 ## PostgreSQL 兼容性修复
 
 探测计划使用原子 claim 写入 `accounts.extra`。`jsonb_build_object` 的键参数必须显式
@@ -39,6 +45,7 @@ gateway:
 - `/v1/chat/completions` 转换到 Responses 的请求
 - `/v1/messages` 转换到 Responses 的请求
 - Responses WebSocket v2 首轮和后续轮
+- 管理页面 OpenAI OAuth 常规文本“测试账号连接”
 
 每次最终发往上游前，如果 `input` 最后一项是用户消息，则追加一对与参考项目相同的无操作 `custom_tool_call` 和 `custom_tool_call_output`。请求体超过 32 MiB、JSON 无效、形状不匹配或已经注入时保持原样。
 
@@ -85,6 +92,9 @@ gateway:
 - `backend/internal/service/openai_ws_v2_passthrough_adapter.go`
 - `backend/internal/service/ratelimit_service.go`
 - `backend/internal/service/account_usage_service.go`
+- `backend/internal/service/account_test_service.go`
+- `backend/internal/service/account_test_service_openai_test.go`
+- `backend/internal/service/account_test_service_openai_compact_test.go`
 - `backend/internal/service/wire.go`
 - `backend/cmd/server/wire_gen.go`
 
@@ -115,7 +125,7 @@ gateway:
 cd backend
 gofmt -w internal/service/openai_codex_quota_overdraft*.go
 go test -tags=unit ./internal/repository ./internal/handler ./internal/service \
-  -run 'CodexQuotaOverdraft|AccountSchedulingThreshold|SchedulerSnapshot|SchedulableAccountQueryScopesCodex' -count=1
+  -run 'CodexQuotaOverdraft|AccountTestService_OpenAI|AccountSchedulingThreshold|SchedulerSnapshot|SchedulableAccountQueryScopesCodex' -count=1
 go test ./internal/repository ./internal/handler ./internal/service ./cmd/server -run '^$' -count=1
 
 cd ../frontend
@@ -135,6 +145,7 @@ git diff --check
 codex_quota_overdraft_probe_passed
 codex_quota_overdraft_probe_failed
 codex_quota_overdraft_probe_inconclusive
+codex_quota_overdraft_stale_rate_limit_cleared
 ```
 
 数据库状态可这样检查：

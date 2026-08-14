@@ -64,10 +64,10 @@ gateway:
 
 ```bash
 docker logs --since 30m sub2api 2>&1 | \
-  grep -E 'codex_quota_overdraft_(probe|state|pause)'
+  grep -E 'codex_quota_overdraft_(probe|state|pause|stale_rate_limit)'
 ```
 
-出现 `codex_quota_overdraft_probe_passed`，页面显示“透支中”，并且后续真实业务请求成功，即可确认透支功能完整生效。额度未达到 100% 时没有探测日志是正常现象。
+出现 `codex_quota_overdraft_probe_passed`，页面显示“透支中”，并且后续真实业务请求成功，即可确认透支功能完整生效。OpenAI OAuth 常规文本“测试账号连接”也会使用透支请求形态并接入同一探测状态机；API Key、Shadow、图片和 Compact 测试除外。额度未达到 100% 时没有探测日志是正常现象。
 
 ## 来源、许可证与风险
 

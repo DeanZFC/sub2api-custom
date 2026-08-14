@@ -44,6 +44,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthSuccessPersi
 	svc := &AccountTestService{
 		accountRepo:  repo,
 		httpUpstream: upstream,
+		cfg:          &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}},
 	}
 
 	rec := httptest.NewRecorder()
@@ -63,6 +64,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthSuccessPersi
 	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
 	require.Equal(t, "true", upstream.lastReq.Header.Get("x-openai-fedramp"))
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "input.1").Exists())
 
 	updates := <-updateCalls
 	require.Equal(t, true, updates["openai_compact_supported"])

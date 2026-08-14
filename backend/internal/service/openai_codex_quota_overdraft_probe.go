@@ -530,9 +530,16 @@ func (c *CodexQuotaOverdraftCoordinator) clearQuotaPause(accountID int64, state 
 		return
 	}
 	clearedSchedulingState := false
-	if state != nil && sameCodexQuotaOverdraftTime(account.RateLimitResetAt, state.ObservedRateLimit) {
-		_ = c.accountRepo.ClearRateLimit(ctx, accountID)
-		clearedSchedulingState = true
+	probeProvedAvailable := state != nil &&
+		(state.Status == codexQuotaOverdraftProbePassed || state.Status == codexQuotaOverdraftProbeRecovered)
+	if probeProvedAvailable && account.RateLimitResetAt != nil {
+		staleResetAt := account.RateLimitResetAt.UTC()
+		if err := c.accountRepo.ClearRateLimit(ctx, accountID); err != nil {
+			slog.Warn("codex_quota_overdraft_stale_rate_limit_clear_failed", "account_id", accountID, "reset_at", staleResetAt, "error", err)
+		} else {
+			clearedSchedulingState = true
+			slog.Info("codex_quota_overdraft_stale_rate_limit_cleared", "account_id", accountID, "reset_at", staleResetAt, "probe_status", state.Status)
+		}
 	}
 	if IsAccountSchedulingThresholdReason(account.TempUnschedulableReason) || codexQuotaOverdraftPauseReason(account.TempUnschedulableReason) {
 		_ = c.accountRepo.ClearTempUnschedulable(ctx, accountID)
@@ -894,17 +901,6 @@ func earlierCodexQuotaOverdraftStart(left, right *time.Time) *time.Time {
 func codexQuotaOverdraftPauseReason(reason string) bool {
 	payload, ok := parseTempUnschedReasonPayload(reason)
 	return ok && payload.Source == codexQuotaOverdraftPauseSource
-}
-
-func sameCodexQuotaOverdraftTime(left, right *time.Time) bool {
-	if left == nil || right == nil {
-		return false
-	}
-	delta := left.Sub(*right)
-	if delta < 0 {
-		delta = -delta
-	}
-	return delta <= time.Second
 }
 
 func codexQuotaOverdraftResetAt(raw any, now time.Time) *time.Time {

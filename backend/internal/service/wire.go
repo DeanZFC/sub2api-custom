@@ -259,6 +259,7 @@ func ProvideAccountTestService(
 	tlsFPProfileService *TLSFingerprintProfileService,
 	openAIGatewayService *OpenAIGatewayService,
 	settingService *SettingService,
+	codexQuotaOverdraft *CodexQuotaOverdraftCoordinator,
 ) *AccountTestService {
 	service := NewAccountTestService(
 		accountRepo,
@@ -272,6 +273,7 @@ func ProvideAccountTestService(
 	)
 	service.agentIdentityWS = openAIGatewayService
 	service.SetSettingService(settingService)
+	service.SetCodexQuotaOverdraftCoordinator(codexQuotaOverdraft)
 	return service
 }
 
