@@ -73,6 +73,14 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		return false
 	}
 	stateCtx = withTempUnschedulableModel(stateCtx, canonicalModel)
+	preferredModel := ""
+	if len(canonicalModel) > 0 {
+		preferredModel = canonicalModel[0]
+	}
+	if statusCode == http.StatusTooManyRequests && s.codexQuotaOverdraft != nil &&
+		s.codexQuotaOverdraft.HandleQuota429(stateCtx, account, headers, responseBody, preferredModel) {
+		return false
+	}
 	if s.rateLimitService != nil && len(canonicalModel) > 0 && s.rateLimitService.HandleUpstreamModelNotFound(stateCtx, account, canonicalModel[0], statusCode, responseBody) {
 		return true
 	}
