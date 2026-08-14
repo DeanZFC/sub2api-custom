@@ -1,4 +1,7 @@
-# Codex 5h / 7d 额度透支定制记录
+# sub2api-overdraft 5h / 7d 额度透支定制记录
+
+本文件是维护者实现与升级记录。面向部署者的完整安装、验证、升级和故障排查说明见
+[CODEX_OVERDRAFT_DEPLOYMENT_CN.md](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)。
 
 ## 基本信息
 
@@ -52,7 +55,7 @@ gateway:
 
 状态值包括 `pending`、`passed`、`failed`、`inconclusive`、`recovered`。账号用量页面显示探测状态、尝试次数、额度周期、透支期成功请求数、Token、账号金额及预计恢复时间。
 
-不需要新增数据库表或执行 schema migration；周期状态保存在现有 `accounts.extra` JSONB 字段，透支统计读取现有 `usage_logs`。
+不需要新增数据库表或执行数据库结构迁移（schema migration）；周期状态保存在现有 `accounts.extra` JSONB 字段，透支统计读取现有 `usage_logs`。
 
 `/responses/compact`、生图请求、Embedding、Count Tokens、Live 等端点不启用额度透支。
 

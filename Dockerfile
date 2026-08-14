@@ -108,9 +108,10 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 FROM ${ALPINE_IMAGE}
 
 # Labels
-LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
-LABEL description="Sub2API - AI API Gateway Platform"
-LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
+LABEL maintainer="DeanZFC <github.com/DeanZFC>"
+LABEL description="sub2api-overdraft - Sub2API fork with Codex quota overdraft support"
+LABEL org.opencontainers.image.source="https://github.com/DeanZFC/sub2api-overdraft"
+LABEL org.opencontainers.image.licenses="LGPL-3.0-or-later"
 
 # Install runtime dependencies
 RUN apk add --no-cache \
