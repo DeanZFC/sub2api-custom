@@ -2,15 +2,15 @@
 
 ## Patch 信息
 
-- 文件：`sub2api-overdraft-v0.1.176-fbfdcef81.patch`
+- 文件：`sub2api-overdraft-v0.1.177-baeac1f3d.patch`
 - 上游项目：<https://github.com/Wei-Shaw/sub2api>
-- Sub2API 基础版本：`0.1.176`
-- Git 描述：`v0.1.176-5-gfbfdcef81`
-- 基础提交：`fbfdcef8184ae4b2e224d5cfc47cf1d0e3742710`
-- 目标源码提交：`d3c2164e3c07a65eb47a6f11a55e0f03f70d59bc`
-- 目标 Git tree（不含 `patches/`）：`8b0971756b761512b33dac6b2ffdda15afe90f16`
-- SHA-256：`598d800e855b65ed2ad8230a92b6c8b23cf20033ba38e637a183251270575982`
-- 文件大小：200,905 字节
+- Sub2API 基础版本：`0.1.177`
+- Git 描述：`v0.1.177-1-gbaeac1f3d`
+- 基础提交：`baeac1f3de21d37b129405f092ef86c24b3f203d`
+- 目标源码提交：`f48d8ed7ed63cb7eee85306ae8f6f183a82eba91`
+- 目标 Git tree（不含 `patches/`）：`9aca85e55803fa59698c3a57e5a632818d072754`
+- SHA-256：`72076ac6ea09e9c5719c191dacec6e79e0b478309b8f92ae1d6deb1bb6e411de`
+- 文件大小：202,451 字节
 
 该 Patch 包含 Codex 5h / 7d 额度透支后端、前端显示、配置、源码构建 Compose、品牌和公开部署文档，并额外包含以下修复：
 
@@ -19,9 +19,10 @@
 - API Key、Shadow、图片和 Compact 测试保持原行为。
 - 更新检查跟踪 `DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支和 `FORK_VERSION`，不再把官方 Release 误报为 Fork 更新。
 - 源码构建只提示 `git pull` 和重新构建，禁用可能覆盖 Fork 功能的二进制在线更新与回退。
+- 兼容 Sub2API `v0.1.177` 的原生 remote compaction v2，旧 Compact 与原生 v2 均不会误启用透支调度。
 - 新增对应后端单元测试和故障排查日志。
 
-Patch 共修改 50 个源码和文档文件。`patches/` 目录本身不包含在 Patch 中，避免 Patch 递归包含自身。
+Patch 共修改 51 个源码和文档文件。`patches/` 目录本身不包含在 Patch 中，避免 Patch 递归包含自身。
 
 ## 在精确基线上应用
 
@@ -29,7 +30,7 @@ Patch 共修改 50 个源码和文档文件。`patches/` 目录本身不包含�
 
 ```bash
 curl -L \
-  https://raw.githubusercontent.com/DeanZFC/sub2api-overdraft/codex-overdraft/patches/sub2api-overdraft-v0.1.176-fbfdcef81.patch \
+  https://raw.githubusercontent.com/DeanZFC/sub2api-overdraft/codex-overdraft/patches/sub2api-overdraft-v0.1.177-baeac1f3d.patch \
   -o /tmp/sub2api-overdraft.patch
 ```
 
@@ -37,7 +38,7 @@ curl -L \
 
 ```bash
 git switch -c codex-overdraft-patched \
-  fbfdcef8184ae4b2e224d5cfc47cf1d0e3742710
+  baeac1f3de21d37b129405f092ef86c24b3f203d
 git apply --check /tmp/sub2api-overdraft.patch
 git apply --3way /tmp/sub2api-overdraft.patch
 ```
@@ -46,7 +47,7 @@ git apply --3way /tmp/sub2api-overdraft.patch
 
 ## 应用到较新的官方版本
 
-Patch 的精确基线是 `fbfdcef81`。应用到后续 Sub2API 版本时，先创建独立分支，再使用三方合并模式：
+Patch 的精确基线是 `baeac1f3d`。应用到后续 Sub2API 版本时，先创建独立分支，再使用三方合并模式：
 
 ```bash
 git switch -c codex-overdraft-reapply
@@ -60,7 +61,13 @@ git apply --3way /tmp/sub2api-overdraft.patch
 本 Patch 已在临时工作树中从基础提交执行 `git apply --check` 和三方应用。应用后写入的 Git tree 为：
 
 ```text
-8b0971756b761512b33dac6b2ffdda15afe90f16
+9aca85e55803fa59698c3a57e5a632818d072754
 ```
 
-它与目标源码提交 `d3c2164e3c07a65eb47a6f11a55e0f03f70d59bc` 排除 `patches/` 后的 Git tree 完全一致。
+它与目标源码提交 `f48d8ed7ed63cb7eee85306ae8f6f183a82eba91` 排除 `patches/` 后的 Git tree 完全一致。
+
+## 历史 Patch
+
+- Sub2API `v0.1.176`：`sub2api-overdraft-v0.1.176-fbfdcef81.patch`
+
+历史 Patch 仅用于对应的旧官方基线；新部署应使用本文顶部列出的 `v0.1.177` Patch。
