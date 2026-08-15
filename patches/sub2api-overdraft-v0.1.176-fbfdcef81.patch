@@ -1,9 +1,9 @@
 diff --git a/CODEX_OVERDRAFT_DEPLOYMENT_CN.md b/CODEX_OVERDRAFT_DEPLOYMENT_CN.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..28b57e0a78a10ac82987a095c9d0f34c74d4a208
+index 0000000000000000000000000000000000000000..d3b682534b997a725da80fa4738056020669c465
 --- /dev/null
 +++ b/CODEX_OVERDRAFT_DEPLOYMENT_CN.md
-@@ -0,0 +1,515 @@
+@@ -0,0 +1,526 @@
 +# sub2api-overdraft 部署与运维指南
 +
 +本文档面向希望部署本项目、验证 Codex 5h / 7d 额度透支状态，以及后续安全升级的使用者。
@@ -17,6 +17,7 @@ index 0000000000000000000000000000000000000000..28b57e0a78a10ac82987a095c9d0f34c
 +- 探测请求和透支期请求都可能产生真实上游用量和费用。
 +- 此行为可能不符合上游服务条款。部署者必须自行确认合规性，并承担账号限制、服务中断等风险。
 +- 官方 Sub2API 安装脚本和 `weishaw/sub2api:latest` 镜像不包含本 Fork 的透支功能。
++- 本 Fork 的后台更新检查读取 `DeanZFC/sub2api-overdraft`，不会把官方 Sub2API Release 当作本项目更新。
 +
 +## 功能范围
 +
@@ -364,6 +365,8 @@ index 0000000000000000000000000000000000000000..28b57e0a78a10ac82987a095c9d0f34c
 +
 +## 日常升级本 Fork
 +
++源码镜像的当前版本来自仓库根目录的 `FORK_VERSION`。后台检查更新时读取 GitHub 上 `codex-overdraft` 分支的同名文件：远端版本更高时显示更新提示，版本一致时显示最新。源码构建不会执行二进制在线更新或在线回退，以免官方程序覆盖 Fork 功能。
++
 +运行数据均位于被 Git 忽略的目录中，正常 `git pull` 不会覆盖：
 +
 +```text
@@ -389,6 +392,14 @@ index 0000000000000000000000000000000000000000..28b57e0a78a10ac82987a095c9d0f34c
 +```
 +
 +如果服务器目录是 `/opt/sub2api`，只需替换第一条路径。升级完成后重新执行“判断功能是否生效”中的镜像、环境变量和日志检查。
++
++更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.176-overdraft.1`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
++
++```bash
++docker exec sub2api /app/sub2api -version
++```
++
++维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.176-overdraft.1` 改为 `0.1.176-overdraft.2`。同步到新的上游 Sub2API 版本时，使用 `0.1.177-overdraft.1` 这样的版本号。
 +
 +## 合并 Sub2API 官方更新
 +
@@ -521,10 +532,10 @@ index 0000000000000000000000000000000000000000..28b57e0a78a10ac82987a095c9d0f34c
 +- 本项目不是 Sub2API 官方发行版，也不受 OpenAI 或其他上游服务商认可或支持。
 diff --git a/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md b/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..ec5f417f6fa910f6f08d20a142b36b9fceae4b9e
+index 0000000000000000000000000000000000000000..ae1cd6c60ba753c6e950c64d86391029e89f7fc8
 --- /dev/null
 +++ b/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,165 @@
 +# sub2api-overdraft 5h / 7d 额度透支定制记录
 +
 +本文件是维护者实现与升级记录。面向部署者的完整安装、验证、升级和故障排查说明见
@@ -536,6 +547,14 @@ index 0000000000000000000000000000000000000000..ec5f417f6fa910f6f08d20a142b36b9f
 +- 参考实现：<https://github.com/Mxucc/cpa-account-config-manager>
 +- 功能开关：`gateway.codex_quota_overdraft_enabled`
 +- 代码默认值：关闭；`deploy/config.example.yaml` 部署示例默认开启
++- Fork 版本文件：`FORK_VERSION`
++- 更新源：`DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支
++
++## Fork 更新检查
++
++源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
++
++源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；普通补丁使用 `0.1.176-overdraft.2`，同步上游版本后使用 `0.1.177-overdraft.1`。
 +
 +## 后台测试连接与残留限流修复
 +
@@ -683,10 +702,44 @@ index 0000000000000000000000000000000000000000..ec5f417f6fa910f6f08d20a142b36b9f
 +WHERE platform = 'openai' AND type = 'oauth';
 +```
 diff --git a/Dockerfile b/Dockerfile
-index b2dfd7034f769abd7e8640090282e6b05a2af4a1..9f50fe85a1ca942a488715afef4628cde5795a1a 100644
+index b2dfd7034f769abd7e8640090282e6b05a2af4a1..657985091514edeb8358800d4ac49ce7299edd38 100644
 --- a/Dockerfile
 +++ b/Dockerfile
-@@ -108,9 +108,10 @@ FROM ${POSTGRES_IMAGE} AS pg-client
+@@ -56,6 +56,7 @@ FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS backend-builder
+ ARG VERSION=
+ ARG COMMIT=docker
+ ARG DATE
++ARG BUILD_TYPE=source
+ ARG GOPROXY
+ ARG GOSUMDB
+ # Populated by buildx from the --platform target (e.g. linux/amd64).
+@@ -79,20 +80,22 @@ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
+ 
+ # Copy backend source first
+ COPY backend/ ./
++COPY FORK_VERSION /app/FORK_VERSION
+ 
+ # Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
+ COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
+ 
+-# Build the binary (BuildType=release for CI builds, embed frontend)
+-# Version precedence: build arg VERSION > exact git tag > cmd/server/VERSION
++# Build the binary and embed the frontend. Fork source builds read FORK_VERSION;
++# CI release builds still override VERSION and BUILD_TYPE explicitly.
+ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
+     --mount=type=cache,id=sub2api-gobuild,target=/root/.cache/go-build \
+     VERSION_VALUE="${VERSION}" && \
++    if [ -z "${VERSION_VALUE}" ] && [ -s /app/FORK_VERSION ]; then VERSION_VALUE="$(tr -d '\r\n' < /app/FORK_VERSION)"; fi && \
+     if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(./scripts/resolve-version.sh)"; fi && \
+     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
+     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+     -tags embed \
+-    -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release" \
++    -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=${BUILD_TYPE}" \
+     -trimpath \
+     -o /app/sub2api \
+     ./cmd/server
+@@ -108,9 +111,10 @@ FROM ${POSTGRES_IMAGE} AS pg-client
  FROM ${ALPINE_IMAGE}
  
  # Labels
@@ -700,6 +753,13 @@ index b2dfd7034f769abd7e8640090282e6b05a2af4a1..9f50fe85a1ca942a488715afef4628cd
  
  # Install runtime dependencies
  RUN apk add --no-cache \
+diff --git a/FORK_VERSION b/FORK_VERSION
+new file mode 100644
+index 0000000000000000000000000000000000000000..7770a2f7520859e155c2a8049db506d7a54063e6
+--- /dev/null
++++ b/FORK_VERSION
+@@ -0,0 +1 @@
++0.1.176-overdraft.1
 diff --git a/README.md b/README.md
 index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..4e0f4be6eea519b4c5c64928924776ebc4721b08 100644
 --- a/README.md
@@ -763,7 +823,7 @@ index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..4e0f4be6eea519b4c5c64928924776eb
  
  Please read the following carefully before using this project:
 diff --git a/README_CN.md b/README_CN.md
-index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..dbfe54d7344edb53293d74d65f15b2fc9f600cd3 100644
+index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..780544e69d8c4bcf48f7ab8c1e1679c99f39c376 100644
 --- a/README_CN.md
 +++ b/README_CN.md
 @@ -1,8 +1,8 @@
@@ -777,7 +837,7 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..dbfe54d7344edb53293d74d65f15b2fc
  
  [![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
  [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
-@@ -10,14 +10,73 @@
+@@ -10,14 +10,76 @@
  [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
  [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
  
@@ -801,6 +861,7 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..dbfe54d7344edb53293d74d65f15b2fc
 +- 网络、超时、5xx 和普通瞬时 429 不会被误判为额度耗尽；401/403、账号禁用和其他风控仍使用原有策略。
 +- 多实例通过 PostgreSQL 原子领取（atomic claim）去重；状态保存在现有 `accounts.extra`，无需新增数据表。
 +- 可通过一个配置开关立即关闭，恢复上游 Sub2API 的调度和请求行为。
++- 管理后台从 `DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支检查更新，不再使用官方 Sub2API 的版本结果。
 +
 +## 快速部署
 +
@@ -832,6 +893,8 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..dbfe54d7344edb53293d74d65f15b2fc
 +
 +公开的 `docker-compose.overdraft.yml` 已通过环境变量默认开启该功能。
 +
++源码镜像会把根目录的 `FORK_VERSION` 写入版本信息。管理后台检测到 Fork 新版本后只提示使用 `git pull` 更新源码，不会下载官方二进制覆盖透支功能。完整更新命令见部署指南的“日常升级本 Fork”。
++
 +## 如何确认透支成功
 +
 +账号额度达到 100% 后检查日志：
@@ -853,6 +916,21 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..dbfe54d7344edb53293d74d65f15b2fc
 +下面的功能、部署和赞助信息继承自上游 Sub2API 文档。上游赞助关系不代表这些组织赞助或认可本 Fork；需要透支功能时，请以上方本 Fork 部署指南为准。
  
  ## ⚠️ 重要提醒
+ 
+@@ -273,12 +335,9 @@ sudo systemctl enable sub2api
+ 
+ #### 升级
+ 
+-可以直接在 **管理后台** 左上角点击 **检测更新** 按钮进行在线升级。
++官方发行版可以直接在管理后台进行二进制在线升级。本 Fork 使用源码构建，管理后台会读取 `DeanZFC/sub2api-overdraft` 的 `FORK_VERSION` 检测新版本，并提示使用 `git pull` 后重新构建；不会在线替换二进制。
+ 
+-网页升级功能支持：
+-- 自动检测新版本
+-- 一键下载并应用更新
+-- 支持回滚
++本 Fork 的升级命令见 [日常升级本 Fork](CODEX_OVERDRAFT_DEPLOYMENT_CN.md#日常升级本-fork)。源码构建不支持页面内一键升级和在线回退，避免误装官方二进制而丢失透支功能。
+ 
+ #### 常用命令
  
 diff --git a/README_JA.md b/README_JA.md
 index 09aa77ee48aec83440ee76054887b2627c1e3792..03c1c30a544c193fd1ffc05a4297344905c2a011 100644
@@ -1214,6 +1292,138 @@ index 76d7e0bdc5fe272bbb4aa1cf24e543ec9acb4a43..328e9f2853005aa9d9287f0de6bca64d
 +	require.Contains(t, overdraftSQL, `"type" =`)
 +	require.Contains(t, overdraftSQL, `"parent_account_id" IS NULL`)
 +}
+diff --git a/backend/internal/repository/github_release_service.go b/backend/internal/repository/github_release_service.go
+index 282a215361b33d99f62d6e0fd259d21f5c58e164..f3898d23cc60256a37a4f7ada67f366f4e5f3175 100644
+--- a/backend/internal/repository/github_release_service.go
++++ b/backend/internal/repository/github_release_service.go
+@@ -2,6 +2,7 @@ package repository
+ 
+ import (
+ 	"context"
++	"encoding/base64"
+ 	"encoding/json"
+ 	"fmt"
+ 	"io"
+@@ -112,6 +113,10 @@ func (c *githubReleaseClientError) FetchRecentReleases(ctx context.Context, repo
+ 	return nil, c.err
+ }
+ 
++func (c *githubReleaseClientError) FetchRepositoryFile(ctx context.Context, repo, ref, filePath string) ([]byte, error) {
++	return nil, c.err
++}
++
+ func (c *githubReleaseClientError) DownloadFile(ctx context.Context, url, dest string, maxSize int64) error {
+ 	return c.err
+ }
+@@ -178,6 +183,56 @@ func (c *githubReleaseClient) FetchRecentReleases(ctx context.Context, repo stri
+ 	return releases, nil
+ }
+ 
++func (c *githubReleaseClient) FetchRepositoryFile(ctx context.Context, repo, ref, filePath string) ([]byte, error) {
++	repo = strings.Trim(strings.TrimSpace(repo), "/")
++	ref = strings.TrimSpace(ref)
++	filePath = strings.Trim(strings.TrimSpace(filePath), "/")
++	if repo == "" || ref == "" || filePath == "" || strings.Contains(filePath, "..") {
++		return nil, fmt.Errorf("invalid GitHub repository file reference")
++	}
++
++	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/contents/%s", repo, filePath)
++	parsed, err := url.Parse(endpoint)
++	if err != nil {
++		return nil, err
++	}
++	query := parsed.Query()
++	query.Set("ref", ref)
++	parsed.RawQuery = query.Encode()
++	req, err := c.newAPIRequest(ctx, parsed.String())
++	if err != nil {
++		return nil, err
++	}
++
++	resp, err := c.httpClient.Do(req)
++	if err != nil {
++		return nil, err
++	}
++	defer func() { _ = resp.Body.Close() }()
++	if resp.StatusCode != http.StatusOK {
++		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
++	}
++
++	var payload struct {
++		Encoding string `json:"encoding"`
++		Content  string `json:"content"`
++	}
++	if err := json.NewDecoder(io.LimitReader(resp.Body, 256<<10)).Decode(&payload); err != nil {
++		return nil, err
++	}
++	if payload.Encoding != "base64" {
++		return nil, fmt.Errorf("unsupported GitHub file encoding %q", payload.Encoding)
++	}
++	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(payload.Content, "\n", ""))
++	if err != nil {
++		return nil, fmt.Errorf("decode GitHub repository file: %w", err)
++	}
++	if len(decoded) > 64<<10 {
++		return nil, fmt.Errorf("GitHub repository file is too large")
++	}
++	return decoded, nil
++}
++
+ func (c *githubReleaseClient) DownloadFile(ctx context.Context, url, dest string, maxSize int64) error {
+ 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+ 	if err != nil {
+diff --git a/backend/internal/repository/github_release_service_test.go b/backend/internal/repository/github_release_service_test.go
+index 3f93f0dfb607f32f078434f1ae1f1e75a05696be..fd7c28dd7a7cd18d07e0165ac6e1b8c950ceb947 100644
+--- a/backend/internal/repository/github_release_service_test.go
++++ b/backend/internal/repository/github_release_service_test.go
+@@ -3,6 +3,7 @@ package repository
+ import (
+ 	"bytes"
+ 	"context"
++	"encoding/base64"
+ 	"io"
+ 	"net/http"
+ 	"net/http/httptest"
+@@ -393,6 +394,39 @@ func (s *GitHubReleaseServiceSuite) TestFetchRecentReleases_Success() {
+ 	require.Equal(s.T(), "v1.0.0", releases[2].TagName)
+ }
+ 
++func (s *GitHubReleaseServiceSuite) TestFetchRepositoryFile_Success() {
++	encoded := base64.StdEncoding.EncodeToString([]byte("0.1.176-overdraft.1\n"))
++	s.srv = newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		require.Equal(s.T(), "/repos/DeanZFC/sub2api-overdraft/contents/FORK_VERSION", r.URL.Path)
++		require.Equal(s.T(), "codex-overdraft", r.URL.Query().Get("ref"))
++		require.Equal(s.T(), "application/vnd.github.v3+json", r.Header.Get("Accept"))
++		w.Header().Set("Content-Type", "application/json")
++		_, _ = w.Write([]byte(`{"encoding":"base64","content":"` + encoded + `"}`))
++	}))
++	s.client = &githubReleaseClient{
++		httpClient:         &http.Client{Transport: &testTransport{testServerURL: s.srv.URL}},
++		downloadHTTPClient: &http.Client{},
++	}
++
++	content, err := s.client.FetchRepositoryFile(
++		context.Background(),
++		"DeanZFC/sub2api-overdraft",
++		"codex-overdraft",
++		"FORK_VERSION",
++	)
++
++	require.NoError(s.T(), err)
++	require.Equal(s.T(), "0.1.176-overdraft.1\n", string(content))
++}
++
++func (s *GitHubReleaseServiceSuite) TestFetchRepositoryFile_RejectsTraversal() {
++	s.client = newTestGitHubReleaseClient()
++
++	_, err := s.client.FetchRepositoryFile(context.Background(), "test/repo", "main", "../secret")
++
++	require.Error(s.T(), err)
++}
++
+ func (s *GitHubReleaseServiceSuite) TestFetchRecentReleases_Non200() {
+ 	s.srv = newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+ 		w.WriteHeader(http.StatusForbidden)
 diff --git a/backend/internal/service/account_test_service.go b/backend/internal/service/account_test_service.go
 index 9e1d29c2f945b42a9ce5d1e5d7990ef72d7d7a95..450af91c8d7d3608c68087da7369c692f3d40436 100644
 --- a/backend/internal/service/account_test_service.go
@@ -3632,6 +3842,310 @@ index ee5b09bbb4b18afcc9f423b74ebea2419a82392b..b56b2b015273d6e463d3e50f8714c6e0
  
  	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, *decision.Until, reason); err != nil {
  		slog.Warn("account_scheduling_threshold_set_temp_unsched_failed",
+diff --git a/backend/internal/service/update_service.go b/backend/internal/service/update_service.go
+index 82df3bb024605360f36e75daa3891b1483995d27..659ee2c33189c22945278c5d85468cb6b72906ae 100644
+--- a/backend/internal/service/update_service.go
++++ b/backend/internal/service/update_service.go
+@@ -20,17 +20,21 @@ import (
+ 	"time"
+ 
+ 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
++	"golang.org/x/mod/semver"
+ )
+ 
+ var (
+ 	ErrNoUpdateAvailable         = infraerrors.Conflict("ALREADY_UP_TO_DATE", "no update available; current version is latest")
+ 	ErrRollbackVersionNotAllowed = infraerrors.BadRequest("ROLLBACK_VERSION_NOT_ALLOWED", "version is not in the allowed rollback list")
++	ErrSourceBuildUpdateRequired = infraerrors.Conflict("SOURCE_BUILD_UPDATE_REQUIRED", "source builds must be updated with git pull and rebuilt")
+ )
+ 
+ const (
+-	updateCacheKey = "update_check_cache"
+-	updateCacheTTL = 1200 // 20 minutes
+-	githubRepo     = "Wei-Shaw/sub2api"
++	updateCacheTTL        = 1200 // 20 minutes
++	githubRepo            = "DeanZFC/sub2api-overdraft"
++	githubSourceBranch    = "codex-overdraft"
++	githubForkVersionFile = "FORK_VERSION"
++	githubSourceUpdateURL = "https://github.com/DeanZFC/sub2api-overdraft/commits/codex-overdraft"
+ 
+ 	// Security: allowed download domains for updates
+ 	allowedDownloadHost = "github.com"
+@@ -55,6 +59,7 @@ type UpdateCache interface {
+ type GitHubReleaseClient interface {
+ 	FetchLatestRelease(ctx context.Context, repo string) (*GitHubRelease, error)
+ 	FetchRecentReleases(ctx context.Context, repo string, perPage int) ([]*GitHubRelease, error)
++	FetchRepositoryFile(ctx context.Context, repo, ref, filePath string) ([]byte, error)
+ 	DownloadFile(ctx context.Context, url, dest string, maxSize int64) error
+ 	FetchChecksumFile(ctx context.Context, url string) ([]byte, error)
+ }
+@@ -138,8 +143,15 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
+ 		}
+ 	}
+ 
+-	// Fetch from GitHub
+-	info, err := s.fetchLatestRelease(ctx)
++	// Source builds track the Fork branch version file. Release builds track the
++	// Fork's GitHub Releases and remain eligible for binary replacement.
++	var info *UpdateInfo
++	var err error
++	if s.isSourceBuild() {
++		info, err = s.fetchLatestSourceVersion(ctx)
++	} else {
++		info, err = s.fetchLatestRelease(ctx)
++	}
+ 	if err != nil {
+ 		// Return cached on error
+ 		if cached, cacheErr := s.getFromCache(ctx); cacheErr == nil && cached != nil {
+@@ -163,6 +175,9 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
+ // PerformUpdate downloads and applies the update
+ // Uses atomic file replacement pattern for safe in-place updates
+ func (s *UpdateService) PerformUpdate(ctx context.Context) error {
++	if s.isSourceBuild() {
++		return ErrSourceBuildUpdateRequired
++	}
+ 	info, err := s.CheckUpdate(ctx, true)
+ 	if err != nil {
+ 		return err
+@@ -307,6 +322,9 @@ func (s *UpdateService) Rollback() error {
+ // strictly older than the current version (the current version itself is excluded),
+ // newest first. Draft and prerelease entries are skipped.
+ func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVersion, error) {
++	if s.isSourceBuild() {
++		return []RollbackVersion{}, nil
++	}
+ 	releases, err := s.fetchRollbackCandidates(ctx)
+ 	if err != nil {
+ 		return nil, err
+@@ -327,6 +345,9 @@ func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVer
+ // The target must be one of the versions returned by ListRollbackVersions;
+ // anything else (including the current version) is rejected.
+ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) error {
++	if s.isSourceBuild() {
++		return ErrSourceBuildUpdateRequired
++	}
+ 	target := strings.TrimPrefix(strings.TrimSpace(version), "v")
+ 	if target == "" {
+ 		return ErrRollbackVersionNotAllowed
+@@ -432,6 +453,33 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
+ 	}, nil
+ }
+ 
++func (s *UpdateService) fetchLatestSourceVersion(ctx context.Context) (*UpdateInfo, error) {
++	raw, err := s.githubClient.FetchRepositoryFile(ctx, githubRepo, githubSourceBranch, githubForkVersionFile)
++	if err != nil {
++		return nil, err
++	}
++	latestVersion := strings.TrimSpace(string(raw))
++	if canonicalVersion(latestVersion) == "" {
++		return nil, fmt.Errorf("Fork version file contains invalid semantic version %q", latestVersion)
++	}
++
++	return &UpdateInfo{
++		CurrentVersion: s.currentVersion,
++		LatestVersion:  latestVersion,
++		HasUpdate:      compareVersions(s.currentVersion, latestVersion) < 0,
++		ReleaseInfo: &ReleaseInfo{
++			Name:    "sub2api-overdraft " + latestVersion,
++			HTMLURL: githubSourceUpdateURL,
++		},
++		Cached:    false,
++		BuildType: s.buildType,
++	}, nil
++}
++
++func (s *UpdateService) isSourceBuild() bool {
++	return strings.EqualFold(strings.TrimSpace(s.buildType), "source")
++}
++
+ func (s *UpdateService) downloadFile(ctx context.Context, downloadURL, dest string) error {
+ 	return s.githubClient.DownloadFile(ctx, downloadURL, dest, maxDownloadSize)
+ }
+@@ -603,6 +651,8 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
+ 		Latest      string       `json:"latest"`
+ 		ReleaseInfo *ReleaseInfo `json:"release_info"`
+ 		Timestamp   int64        `json:"timestamp"`
++		Repository  string       `json:"repository"`
++		BuildType   string       `json:"build_type"`
+ 	}
+ 	if err := json.Unmarshal([]byte(data), &cached); err != nil {
+ 		return nil, err
+@@ -611,6 +661,9 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
+ 	if time.Now().Unix()-cached.Timestamp > updateCacheTTL {
+ 		return nil, fmt.Errorf("cache expired")
+ 	}
++	if cached.Repository != githubRepo || cached.BuildType != s.buildType {
++		return nil, fmt.Errorf("cache belongs to a different update source")
++	}
+ 
+ 	return &UpdateInfo{
+ 		CurrentVersion: s.currentVersion,
+@@ -627,10 +680,14 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
+ 		Latest      string       `json:"latest"`
+ 		ReleaseInfo *ReleaseInfo `json:"release_info"`
+ 		Timestamp   int64        `json:"timestamp"`
++		Repository  string       `json:"repository"`
++		BuildType   string       `json:"build_type"`
+ 	}{
+ 		Latest:      info.LatestVersion,
+ 		ReleaseInfo: info.ReleaseInfo,
+ 		Timestamp:   time.Now().Unix(),
++		Repository:  githubRepo,
++		BuildType:   s.buildType,
+ 	}
+ 
+ 	data, _ := json.Marshal(cacheData)
+@@ -639,6 +696,12 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
+ 
+ // compareVersions compares two semantic versions
+ func compareVersions(current, latest string) int {
++	currentSemver := canonicalVersion(current)
++	latestSemver := canonicalVersion(latest)
++	if currentSemver != "" && latestSemver != "" {
++		return semver.Compare(currentSemver, latestSemver)
++	}
++
+ 	currentParts := parseVersion(current)
+ 	latestParts := parseVersion(latest)
+ 
+@@ -653,6 +716,20 @@ func compareVersions(current, latest string) int {
+ 	return 0
+ }
+ 
++func canonicalVersion(value string) string {
++	value = strings.TrimSpace(value)
++	if value == "" {
++		return ""
++	}
++	if !strings.HasPrefix(value, "v") {
++		value = "v" + value
++	}
++	if !semver.IsValid(value) {
++		return ""
++	}
++	return value
++}
++
+ func parseVersion(v string) [3]int {
+ 	v = strings.TrimPrefix(v, "v")
+ 	parts := strings.Split(v, ".")
+diff --git a/backend/internal/service/update_service_test.go b/backend/internal/service/update_service_test.go
+index 243e25d1e47d891434afabb274c709abbdaac935..99ef67944e07fe28af9ddc73161a616ba2d4e6d1 100644
+--- a/backend/internal/service/update_service_test.go
++++ b/backend/internal/service/update_service_test.go
+@@ -28,12 +28,20 @@ func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, data string, _
+ }
+ 
+ type updateServiceGitHubClientStub struct {
+-	release        *GitHubRelease
+-	recentReleases []*GitHubRelease
+-	recentErr      error
++	release           *GitHubRelease
++	recentReleases    []*GitHubRelease
++	recentErr         error
++	repositoryFile    []byte
++	repositoryFileErr error
++	latestRepo        string
++	fileRepo          string
++	fileRef           string
++	filePath          string
++	fileCalls         int
+ }
+ 
+-func (s *updateServiceGitHubClientStub) FetchLatestRelease(context.Context, string) (*GitHubRelease, error) {
++func (s *updateServiceGitHubClientStub) FetchLatestRelease(_ context.Context, repo string) (*GitHubRelease, error) {
++	s.latestRepo = repo
+ 	return s.release, nil
+ }
+ 
+@@ -41,6 +49,14 @@ func (s *updateServiceGitHubClientStub) FetchRecentReleases(context.Context, str
+ 	return s.recentReleases, s.recentErr
+ }
+ 
++func (s *updateServiceGitHubClientStub) FetchRepositoryFile(_ context.Context, repo, ref, filePath string) ([]byte, error) {
++	s.fileCalls++
++	s.fileRepo = repo
++	s.fileRef = ref
++	s.filePath = filePath
++	return s.repositoryFile, s.repositoryFileErr
++}
++
+ func (s *updateServiceGitHubClientStub) DownloadFile(context.Context, string, string, int64) error {
+ 	panic("DownloadFile should not be called when no update is available")
+ }
+@@ -69,6 +85,72 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
+ 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
+ }
+ 
++func TestUpdateServiceSourceBuildTracksForkVersionFile(t *testing.T) {
++	client := &updateServiceGitHubClientStub{repositoryFile: []byte("0.1.176-overdraft.2\n")}
++	svc := NewUpdateService(
++		&updateServiceCacheStub{},
++		client,
++		"0.1.176-overdraft.1",
++		"source",
++	)
++
++	info, err := svc.CheckUpdate(context.Background(), true)
++
++	require.NoError(t, err)
++	require.Equal(t, "0.1.176-overdraft.1", info.CurrentVersion)
++	require.Equal(t, "0.1.176-overdraft.2", info.LatestVersion)
++	require.True(t, info.HasUpdate)
++	require.Equal(t, "source", info.BuildType)
++	require.Equal(t, githubSourceUpdateURL, info.ReleaseInfo.HTMLURL)
++	require.Equal(t, githubRepo, client.fileRepo)
++	require.Equal(t, githubSourceBranch, client.fileRef)
++	require.Equal(t, githubForkVersionFile, client.filePath)
++	require.Empty(t, client.latestRepo, "源码构建不能查询官方或 Fork 的二进制 Release")
++}
++
++func TestUpdateServiceSourceBuildIgnoresLegacyOfficialCache(t *testing.T) {
++	cache := &updateServiceCacheStub{data: `{"latest":"0.1.176","timestamp":4102444800}`}
++	client := &updateServiceGitHubClientStub{repositoryFile: []byte("0.1.176-overdraft.1\n")}
++	svc := NewUpdateService(cache, client, "0.1.176-overdraft.1", "source")
++
++	info, err := svc.CheckUpdate(context.Background(), false)
++
++	require.NoError(t, err)
++	require.False(t, info.HasUpdate)
++	require.Equal(t, "0.1.176-overdraft.1", info.LatestVersion)
++	require.Equal(t, 1, client.fileCalls)
++}
++
++func TestUpdateServiceSourceBuildRejectsBinaryUpdate(t *testing.T) {
++	svc := NewUpdateService(
++		&updateServiceCacheStub{},
++		&updateServiceGitHubClientStub{},
++		"0.1.176-overdraft.1",
++		"source",
++	)
++
++	err := svc.PerformUpdate(context.Background())
++
++	require.ErrorIs(t, err, ErrSourceBuildUpdateRequired)
++}
++
++func TestUpdateServiceReleaseBuildUsesForkRepository(t *testing.T) {
++	client := &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.1.177-overdraft.1"}}
++	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.176-overdraft.1", "release")
++
++	info, err := svc.CheckUpdate(context.Background(), true)
++
++	require.NoError(t, err)
++	require.True(t, info.HasUpdate)
++	require.Equal(t, githubRepo, client.latestRepo)
++}
++
++func TestCompareVersionsSupportsForkPrereleaseRevisions(t *testing.T) {
++	require.Less(t, compareVersions("0.1.176-overdraft.1", "0.1.176-overdraft.2"), 0)
++	require.Zero(t, compareVersions("v0.1.176-overdraft.2", "0.1.176-overdraft.2"))
++	require.Greater(t, compareVersions("0.1.177-overdraft.1", "0.1.176-overdraft.9"), 0)
++}
++
+ func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
+ 	return NewUpdateService(
+ 		&updateServiceCacheStub{},
 diff --git a/backend/internal/service/wire.go b/backend/internal/service/wire.go
 index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..1e853b64c4d4133aa2ddf940c63c07f94f8fcd7f 100644
 --- a/backend/internal/service/wire.go
@@ -3746,10 +4260,10 @@ index 095c550993527ea2b53871088f58b02e4082fc63..cd71e4a3d60fd8d9e5db3c8e8b96d28b
    #
 diff --git a/deploy/docker-compose.overdraft.yml b/deploy/docker-compose.overdraft.yml
 new file mode 100644
-index 0000000000000000000000000000000000000000..3d81a0d37476034f0cc4649107dcfbf7a27c31b9
+index 0000000000000000000000000000000000000000..eeb8525db74c458ecc7a213f0732d871799b5300
 --- /dev/null
 +++ b/deploy/docker-compose.overdraft.yml
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,16 @@
 +# sub2api-overdraft source-build overlay.
 +# Use together with docker-compose.local.yml from this directory:
 +#   docker compose -f docker-compose.local.yml -f docker-compose.overdraft.yml up -d --build
@@ -3761,8 +4275,9 @@ index 0000000000000000000000000000000000000000..3d81a0d37476034f0cc4649107dcfbf7
 +      context: ..
 +      dockerfile: Dockerfile
 +      args:
-+        VERSION: ${BUILD_VERSION:-codex-overdraft}
++        VERSION: ${BUILD_VERSION:-}
 +        COMMIT: ${BUILD_COMMIT:-local}
++        BUILD_TYPE: source
 +    environment:
 +      - GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED=${GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED:-true}
 diff --git a/frontend/index.html b/frontend/index.html
@@ -4045,6 +4560,19 @@ index af5fc5d66d8646f5565a816e4a146adc515edd22..b7abe23af3e7a2309311f00aaeed0eee
 +    expect(wrapper.text()).toContain('$1.23')
 +  })
  })
+diff --git a/frontend/src/components/common/VersionBadge.vue b/frontend/src/components/common/VersionBadge.vue
+index 7fd62947f7ea83afa1c68a2e070b1d7733374be6..f3c74b52f0182a96fb649448bc57a3e02b0b85c6 100644
+--- a/frontend/src/components/common/VersionBadge.vue
++++ b/frontend/src/components/common/VersionBadge.vue
+@@ -651,7 +651,7 @@ import {
+ import { useClipboard } from '@/composables/useClipboard'
+ import Icon from '@/components/icons/Icon.vue'
+ 
+-const GITHUB_REPO = 'Wei-Shaw/sub2api'
++const GITHUB_REPO = 'DeanZFC/sub2api-overdraft'
+ // Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
+ const DOCKER_IMAGE = 'weishaw/sub2api'
+ 
 diff --git a/frontend/src/i18n/locales/en/dashboard.ts b/frontend/src/i18n/locales/en/dashboard.ts
 index 4204a9d679c54ad0c38e544c47edcec3074fe184..d51f339950e39d14e2fda2df4fbdd6e43abe56c8 100644
 --- a/frontend/src/i18n/locales/en/dashboard.ts

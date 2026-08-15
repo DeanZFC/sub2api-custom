@@ -7,19 +7,21 @@
 - Sub2API 基础版本：`0.1.176`
 - Git 描述：`v0.1.176-5-gfbfdcef81`
 - 基础提交：`fbfdcef8184ae4b2e224d5cfc47cf1d0e3742710`
-- 目标源码提交：`8f002e1f74b12cf827153d34c5053043ff4e0549`
-- 目标 Git tree：`ce07803e4ecc68499cf0d2149b08db4a2c53495b`
-- SHA-256：`fb0cb5e8aa6fd9c8ab01f318d270082c11668b9030264bfaa35ae462eeb0fe29`
-- 文件大小：178,340 字节
+- 目标源码提交：`d3c2164e3c07a65eb47a6f11a55e0f03f70d59bc`
+- 目标 Git tree（不含 `patches/`）：`8b0971756b761512b33dac6b2ffdda15afe90f16`
+- SHA-256：`598d800e855b65ed2ad8230a92b6c8b23cf20033ba38e637a183251270575982`
+- 文件大小：200,905 字节
 
 该 Patch 包含 Codex 5h / 7d 额度透支后端、前端显示、配置、源码构建 Compose、品牌和公开部署文档，并额外包含以下修复：
 
 - OpenAI OAuth 常规文本“测试账号连接”使用透支请求形态，并接入额度观察及明确额度 429 探测。
 - `passed/recovered` 后清理并发 429 遗留的账号级限流状态，避免账号实际可用但页面仍显示“限流中”。
 - API Key、Shadow、图片和 Compact 测试保持原行为。
+- 更新检查跟踪 `DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支和 `FORK_VERSION`，不再把官方 Release 误报为 Fork 更新。
+- 源码构建只提示 `git pull` 和重新构建，禁用可能覆盖 Fork 功能的二进制在线更新与回退。
 - 新增对应后端单元测试和故障排查日志。
 
-Patch 共修改 44 个源码和文档文件。`patches/` 目录本身不包含在 Patch 中，避免 Patch 递归包含自身。
+Patch 共修改 50 个源码和文档文件。`patches/` 目录本身不包含在 Patch 中，避免 Patch 递归包含自身。
 
 ## 在精确基线上应用
 
@@ -55,10 +57,10 @@ git apply --3way /tmp/sub2api-overdraft.patch
 
 ## 完整性验证
 
-本 Patch 已在临时工作树中从基础提交执行正向应用和反向检查。应用后写入的 Git tree 为：
+本 Patch 已在临时工作树中从基础提交执行 `git apply --check` 和三方应用。应用后写入的 Git tree 为：
 
 ```text
-ce07803e4ecc68499cf0d2149b08db4a2c53495b
+8b0971756b761512b33dac6b2ffdda15afe90f16
 ```
 
-它与目标源码提交 `8f002e1f74b12cf827153d34c5053043ff4e0549` 的 Git tree 完全一致。
+它与目标源码提交 `d3c2164e3c07a65eb47a6f11a55e0f03f70d59bc` 排除 `patches/` 后的 Git tree 完全一致。
