@@ -9,6 +9,14 @@
 - 参考实现：<https://github.com/Mxucc/cpa-account-config-manager>
 - 功能开关：`gateway.codex_quota_overdraft_enabled`
 - 代码默认值：关闭；`deploy/config.example.yaml` 部署示例默认开启
+- Fork 版本文件：`FORK_VERSION`
+- 更新源：`DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支
+
+## Fork 更新检查
+
+源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
+
+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；普通补丁使用 `0.1.176-overdraft.2`，同步上游版本后使用 `0.1.177-overdraft.1`。
 
 ## 后台测试连接与残留限流修复
 

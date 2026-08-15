@@ -27,6 +27,7 @@
 - 网络、超时、5xx 和普通瞬时 429 不会被误判为额度耗尽；401/403、账号禁用和其他风控仍使用原有策略。
 - 多实例通过 PostgreSQL 原子领取（atomic claim）去重；状态保存在现有 `accounts.extra`，无需新增数据表。
 - 可通过一个配置开关立即关闭，恢复上游 Sub2API 的调度和请求行为。
+- 管理后台从 `DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支检查更新，不再使用官方 Sub2API 的版本结果。
 
 ## 快速部署
 
@@ -57,6 +58,8 @@ gateway:
 ```
 
 公开的 `docker-compose.overdraft.yml` 已通过环境变量默认开启该功能。
+
+源码镜像会把根目录的 `FORK_VERSION` 写入版本信息。管理后台检测到 Fork 新版本后只提示使用 `git pull` 更新源码，不会下载官方二进制覆盖透支功能。完整更新命令见部署指南的“日常升级本 Fork”。
 
 ## 如何确认透支成功
 
@@ -332,12 +335,9 @@ sudo systemctl enable sub2api
 
 #### 升级
 
-可以直接在 **管理后台** 左上角点击 **检测更新** 按钮进行在线升级。
+官方发行版可以直接在管理后台进行二进制在线升级。本 Fork 使用源码构建，管理后台会读取 `DeanZFC/sub2api-overdraft` 的 `FORK_VERSION` 检测新版本，并提示使用 `git pull` 后重新构建；不会在线替换二进制。
 
-网页升级功能支持：
-- 自动检测新版本
-- 一键下载并应用更新
-- 支持回滚
+本 Fork 的升级命令见 [日常升级本 Fork](CODEX_OVERDRAFT_DEPLOYMENT_CN.md#日常升级本-fork)。源码构建不支持页面内一键升级和在线回退，避免误装官方二进制而丢失透支功能。
 
 #### 常用命令
 

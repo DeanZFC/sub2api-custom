@@ -28,17 +28,33 @@ func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, data string, _
 }
 
 type updateServiceGitHubClientStub struct {
-	release        *GitHubRelease
-	recentReleases []*GitHubRelease
-	recentErr      error
+	release           *GitHubRelease
+	recentReleases    []*GitHubRelease
+	recentErr         error
+	repositoryFile    []byte
+	repositoryFileErr error
+	latestRepo        string
+	fileRepo          string
+	fileRef           string
+	filePath          string
+	fileCalls         int
 }
 
-func (s *updateServiceGitHubClientStub) FetchLatestRelease(context.Context, string) (*GitHubRelease, error) {
+func (s *updateServiceGitHubClientStub) FetchLatestRelease(_ context.Context, repo string) (*GitHubRelease, error) {
+	s.latestRepo = repo
 	return s.release, nil
 }
 
 func (s *updateServiceGitHubClientStub) FetchRecentReleases(context.Context, string, int) ([]*GitHubRelease, error) {
 	return s.recentReleases, s.recentErr
+}
+
+func (s *updateServiceGitHubClientStub) FetchRepositoryFile(_ context.Context, repo, ref, filePath string) ([]byte, error) {
+	s.fileCalls++
+	s.fileRepo = repo
+	s.fileRef = ref
+	s.filePath = filePath
+	return s.repositoryFile, s.repositoryFileErr
 }
 
 func (s *updateServiceGitHubClientStub) DownloadFile(context.Context, string, string, int64) error {
@@ -67,6 +83,72 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNoUpdateAvailable))
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
+}
+
+func TestUpdateServiceSourceBuildTracksForkVersionFile(t *testing.T) {
+	client := &updateServiceGitHubClientStub{repositoryFile: []byte("0.1.176-overdraft.2\n")}
+	svc := NewUpdateService(
+		&updateServiceCacheStub{},
+		client,
+		"0.1.176-overdraft.1",
+		"source",
+	)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+
+	require.NoError(t, err)
+	require.Equal(t, "0.1.176-overdraft.1", info.CurrentVersion)
+	require.Equal(t, "0.1.176-overdraft.2", info.LatestVersion)
+	require.True(t, info.HasUpdate)
+	require.Equal(t, "source", info.BuildType)
+	require.Equal(t, githubSourceUpdateURL, info.ReleaseInfo.HTMLURL)
+	require.Equal(t, githubRepo, client.fileRepo)
+	require.Equal(t, githubSourceBranch, client.fileRef)
+	require.Equal(t, githubForkVersionFile, client.filePath)
+	require.Empty(t, client.latestRepo, "源码构建不能查询官方或 Fork 的二进制 Release")
+}
+
+func TestUpdateServiceSourceBuildIgnoresLegacyOfficialCache(t *testing.T) {
+	cache := &updateServiceCacheStub{data: `{"latest":"0.1.176","timestamp":4102444800}`}
+	client := &updateServiceGitHubClientStub{repositoryFile: []byte("0.1.176-overdraft.1\n")}
+	svc := NewUpdateService(cache, client, "0.1.176-overdraft.1", "source")
+
+	info, err := svc.CheckUpdate(context.Background(), false)
+
+	require.NoError(t, err)
+	require.False(t, info.HasUpdate)
+	require.Equal(t, "0.1.176-overdraft.1", info.LatestVersion)
+	require.Equal(t, 1, client.fileCalls)
+}
+
+func TestUpdateServiceSourceBuildRejectsBinaryUpdate(t *testing.T) {
+	svc := NewUpdateService(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{},
+		"0.1.176-overdraft.1",
+		"source",
+	)
+
+	err := svc.PerformUpdate(context.Background())
+
+	require.ErrorIs(t, err, ErrSourceBuildUpdateRequired)
+}
+
+func TestUpdateServiceReleaseBuildUsesForkRepository(t *testing.T) {
+	client := &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.1.177-overdraft.1"}}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.176-overdraft.1", "release")
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+
+	require.NoError(t, err)
+	require.True(t, info.HasUpdate)
+	require.Equal(t, githubRepo, client.latestRepo)
+}
+
+func TestCompareVersionsSupportsForkPrereleaseRevisions(t *testing.T) {
+	require.Less(t, compareVersions("0.1.176-overdraft.1", "0.1.176-overdraft.2"), 0)
+	require.Zero(t, compareVersions("v0.1.176-overdraft.2", "0.1.176-overdraft.2"))
+	require.Greater(t, compareVersions("0.1.177-overdraft.1", "0.1.176-overdraft.9"), 0)
 }
 
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {

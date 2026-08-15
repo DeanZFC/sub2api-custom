@@ -20,17 +20,21 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"golang.org/x/mod/semver"
 )
 
 var (
 	ErrNoUpdateAvailable         = infraerrors.Conflict("ALREADY_UP_TO_DATE", "no update available; current version is latest")
 	ErrRollbackVersionNotAllowed = infraerrors.BadRequest("ROLLBACK_VERSION_NOT_ALLOWED", "version is not in the allowed rollback list")
+	ErrSourceBuildUpdateRequired = infraerrors.Conflict("SOURCE_BUILD_UPDATE_REQUIRED", "source builds must be updated with git pull and rebuilt")
 )
 
 const (
-	updateCacheKey = "update_check_cache"
-	updateCacheTTL = 1200 // 20 minutes
-	githubRepo     = "Wei-Shaw/sub2api"
+	updateCacheTTL        = 1200 // 20 minutes
+	githubRepo            = "DeanZFC/sub2api-overdraft"
+	githubSourceBranch    = "codex-overdraft"
+	githubForkVersionFile = "FORK_VERSION"
+	githubSourceUpdateURL = "https://github.com/DeanZFC/sub2api-overdraft/commits/codex-overdraft"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -55,6 +59,7 @@ type UpdateCache interface {
 type GitHubReleaseClient interface {
 	FetchLatestRelease(ctx context.Context, repo string) (*GitHubRelease, error)
 	FetchRecentReleases(ctx context.Context, repo string, perPage int) ([]*GitHubRelease, error)
+	FetchRepositoryFile(ctx context.Context, repo, ref, filePath string) ([]byte, error)
 	DownloadFile(ctx context.Context, url, dest string, maxSize int64) error
 	FetchChecksumFile(ctx context.Context, url string) ([]byte, error)
 }
@@ -138,8 +143,15 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 		}
 	}
 
-	// Fetch from GitHub
-	info, err := s.fetchLatestRelease(ctx)
+	// Source builds track the Fork branch version file. Release builds track the
+	// Fork's GitHub Releases and remain eligible for binary replacement.
+	var info *UpdateInfo
+	var err error
+	if s.isSourceBuild() {
+		info, err = s.fetchLatestSourceVersion(ctx)
+	} else {
+		info, err = s.fetchLatestRelease(ctx)
+	}
 	if err != nil {
 		// Return cached on error
 		if cached, cacheErr := s.getFromCache(ctx); cacheErr == nil && cached != nil {
@@ -163,6 +175,9 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 // PerformUpdate downloads and applies the update
 // Uses atomic file replacement pattern for safe in-place updates
 func (s *UpdateService) PerformUpdate(ctx context.Context) error {
+	if s.isSourceBuild() {
+		return ErrSourceBuildUpdateRequired
+	}
 	info, err := s.CheckUpdate(ctx, true)
 	if err != nil {
 		return err
@@ -307,6 +322,9 @@ func (s *UpdateService) Rollback() error {
 // strictly older than the current version (the current version itself is excluded),
 // newest first. Draft and prerelease entries are skipped.
 func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVersion, error) {
+	if s.isSourceBuild() {
+		return []RollbackVersion{}, nil
+	}
 	releases, err := s.fetchRollbackCandidates(ctx)
 	if err != nil {
 		return nil, err
@@ -327,6 +345,9 @@ func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVer
 // The target must be one of the versions returned by ListRollbackVersions;
 // anything else (including the current version) is rejected.
 func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) error {
+	if s.isSourceBuild() {
+		return ErrSourceBuildUpdateRequired
+	}
 	target := strings.TrimPrefix(strings.TrimSpace(version), "v")
 	if target == "" {
 		return ErrRollbackVersionNotAllowed
@@ -430,6 +451,33 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 		Cached:    false,
 		BuildType: s.buildType,
 	}, nil
+}
+
+func (s *UpdateService) fetchLatestSourceVersion(ctx context.Context) (*UpdateInfo, error) {
+	raw, err := s.githubClient.FetchRepositoryFile(ctx, githubRepo, githubSourceBranch, githubForkVersionFile)
+	if err != nil {
+		return nil, err
+	}
+	latestVersion := strings.TrimSpace(string(raw))
+	if canonicalVersion(latestVersion) == "" {
+		return nil, fmt.Errorf("Fork version file contains invalid semantic version %q", latestVersion)
+	}
+
+	return &UpdateInfo{
+		CurrentVersion: s.currentVersion,
+		LatestVersion:  latestVersion,
+		HasUpdate:      compareVersions(s.currentVersion, latestVersion) < 0,
+		ReleaseInfo: &ReleaseInfo{
+			Name:    "sub2api-overdraft " + latestVersion,
+			HTMLURL: githubSourceUpdateURL,
+		},
+		Cached:    false,
+		BuildType: s.buildType,
+	}, nil
+}
+
+func (s *UpdateService) isSourceBuild() bool {
+	return strings.EqualFold(strings.TrimSpace(s.buildType), "source")
 }
 
 func (s *UpdateService) downloadFile(ctx context.Context, downloadURL, dest string) error {
@@ -603,6 +651,8 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 		Latest      string       `json:"latest"`
 		ReleaseInfo *ReleaseInfo `json:"release_info"`
 		Timestamp   int64        `json:"timestamp"`
+		Repository  string       `json:"repository"`
+		BuildType   string       `json:"build_type"`
 	}
 	if err := json.Unmarshal([]byte(data), &cached); err != nil {
 		return nil, err
@@ -610,6 +660,9 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 
 	if time.Now().Unix()-cached.Timestamp > updateCacheTTL {
 		return nil, fmt.Errorf("cache expired")
+	}
+	if cached.Repository != githubRepo || cached.BuildType != s.buildType {
+		return nil, fmt.Errorf("cache belongs to a different update source")
 	}
 
 	return &UpdateInfo{
@@ -627,10 +680,14 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 		Latest      string       `json:"latest"`
 		ReleaseInfo *ReleaseInfo `json:"release_info"`
 		Timestamp   int64        `json:"timestamp"`
+		Repository  string       `json:"repository"`
+		BuildType   string       `json:"build_type"`
 	}{
 		Latest:      info.LatestVersion,
 		ReleaseInfo: info.ReleaseInfo,
 		Timestamp:   time.Now().Unix(),
+		Repository:  githubRepo,
+		BuildType:   s.buildType,
 	}
 
 	data, _ := json.Marshal(cacheData)
@@ -639,6 +696,12 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 
 // compareVersions compares two semantic versions
 func compareVersions(current, latest string) int {
+	currentSemver := canonicalVersion(current)
+	latestSemver := canonicalVersion(latest)
+	if currentSemver != "" && latestSemver != "" {
+		return semver.Compare(currentSemver, latestSemver)
+	}
+
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
 
@@ -651,6 +714,20 @@ func compareVersions(current, latest string) int {
 		}
 	}
 	return 0
+}
+
+func canonicalVersion(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if !strings.HasPrefix(value, "v") {
+		value = "v" + value
+	}
+	if !semver.IsValid(value) {
+		return ""
+	}
+	return value
 }
 
 func parseVersion(v string) [3]int {

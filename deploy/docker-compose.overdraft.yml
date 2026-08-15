@@ -9,7 +9,8 @@ services:
       context: ..
       dockerfile: Dockerfile
       args:
-        VERSION: ${BUILD_VERSION:-codex-overdraft}
+        VERSION: ${BUILD_VERSION:-}
         COMMIT: ${BUILD_COMMIT:-local}
+        BUILD_TYPE: source
     environment:
       - GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED=${GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED:-true}
