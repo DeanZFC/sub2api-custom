@@ -7,18 +7,19 @@
 - Sub2API 基础版本：`0.1.177`
 - Git 描述：`v0.1.177-1-gbaeac1f3d`
 - 基础提交：`baeac1f3de21d37b129405f092ef86c24b3f203d`
-- Patch 生成基准 Fork 提交：`b3297a6ecce68412d70a815157abf4aec268a302`
-- 目标 Git tree（不含 `patches/`）：`0da3722c8deaf4f59a528773a62fe204208a08a4`
-- SHA-256：`f5ba3b1022c0c95c0eee5208f153e2cadd575b66d632aa4e794b3fb74e55a1f7`
-- 文件大小：240,849 字节
+- Patch 生成基准 Fork 提交：`9e4ba889a754c7866d15192e9f69aa5d4f99e25b`
+- 目标 Git tree（不含 `patches/`）：`9da1f31cab74c8ff4ce25de46eb6412507c7d5e9`
+- SHA-256：`f2d1074209212e3801ee9845f7b9dda9b8faf0920d50f259126e777a10eedcff`
+- 文件大小：261,982 字节
 
 该 Patch 包含 Codex 5h / 7d 额度透支后端、前端显示、配置、源码构建 Compose、品牌和公开部署文档，并额外包含以下修复：
 
 - OpenAI OAuth 常规文本“测试账号连接”使用透支请求形态，并接入额度观察及明确额度 429 探测。
 - `passed/recovered` 后清理并发 429 遗留的账号级限流状态，避免账号实际可用但页面仍显示“限流中”。
 - API Key、Shadow、图片和 Compact 测试保持原行为。
-- 无法确认的探测按 1、3、10 分钟主动退避，每个额度周期最多自动重试 3 轮；服务重启后会从 PostgreSQL 恢复到期任务和遗留 `pending` 状态。
-- 400/404 会轮换全部探测模型；普通瞬时 429、网络错误和 5xx 不会误停账号，401/403 仍交给原认证异常逻辑处理。
+- 用量达到 95% 后开始为普通 OAuth 文本请求注入；100% 时用真实业务成功直接确认 `passed`，明确额度 429 直接确认 `failed` 并切号冷却。
+- 没有业务证据时，每个额度周期仅补充 1 次独立探测且不自动重试；普通瞬时 429、网络错误和 5xx 不会误判为透支结束，401/403 仍交给原认证异常逻辑处理。
+- 同周期 `failed` 为终态，晚到的成功结果不能覆盖；并发 claim 冲突会重新读取数据库状态后完成业务失败收敛。
 - 扩充结构化额度证据解析并记录逐次探测日志，便于区分明确额度耗尽与临时上游故障。
 - `failed` 状态、账号暂停和 scheduler outbox 在同一个数据库事务内提交，并对持久化失败进行有限重试和同周期幂等保护。
 - 更新检查跟踪 `DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支和 `FORK_VERSION`，不再把官方 Release 误报为 Fork 更新。
@@ -28,7 +29,7 @@
 - 兼容 Sub2API `v0.1.177` 的原生 remote compaction v2，旧 Compact 与原生 v2 均不会误启用透支调度。
 - 新增对应后端单元测试和故障排查日志。
 
-Patch 共修改 59 个源码和文档文件。`patches/` 目录本身不包含在 Patch 中，避免 Patch 递归包含自身。
+Patch 共修改 60 个源码和文档文件。`patches/` 目录本身不包含在 Patch 中，避免 Patch 递归包含自身。
 
 ## 在精确基线上应用
 
@@ -67,10 +68,10 @@ git apply --3way /tmp/sub2api-overdraft.patch
 本 Patch 已在临时工作树中从基础提交执行 `git apply --check` 和三方应用。应用后写入的 Git tree 为：
 
 ```text
-0da3722c8deaf4f59a528773a62fe204208a08a4
+9da1f31cab74c8ff4ce25de46eb6412507c7d5e9
 ```
 
-它与生成 Patch 时本地源码快照排除 `patches/` 后的 Git tree 完全一致；该快照基于 Fork 提交 `b3297a6ecce68412d70a815157abf4aec268a302` 生成。
+它与生成 Patch 时本地源码快照排除 `patches/` 后的 Git tree 完全一致；该快照基于 Fork 提交 `9e4ba889a754c7866d15192e9f69aa5d4f99e25b` 生成。
 
 ## 历史 Patch
 

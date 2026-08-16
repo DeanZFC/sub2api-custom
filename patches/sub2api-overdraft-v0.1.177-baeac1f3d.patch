@@ -1,9 +1,9 @@
 diff --git a/CODEX_OVERDRAFT_DEPLOYMENT_CN.md b/CODEX_OVERDRAFT_DEPLOYMENT_CN.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd7992f8faaba
+index 0000000000000000000000000000000000000000..a0e777ee34adef258dc1d145780d24bbc08a0bce
 --- /dev/null
 +++ b/CODEX_OVERDRAFT_DEPLOYMENT_CN.md
-@@ -0,0 +1,532 @@
+@@ -0,0 +1,529 @@
 +# sub2api-overdraft 部署与运维指南
 +
 +本文档面向希望部署本项目、验证 Codex 5h / 7d 额度透支状态，以及后续安全升级的使用者。
@@ -12,7 +12,7 @@ index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd799
 +
 +## 重要说明
 +
-+- 本功能仅表示：当 Codex 5h 或 7d 页面额度达到 100% 后，通过真实请求确认上游是否仍允许继续调用。
++- 本功能仅表示：Codex 5h 或 7d 用量达到 95% 后开始注入兼容请求形态，并在额度达到 100% 后通过真实业务结果或单次独立探测确认上游是否仍允许继续调用。
 +- `passed` 只代表探测时上游仍返回有效响应，不承诺之后始终可用，也不会绕过认证失效、账号禁用、网络故障或其他风控限制。
 +- 探测请求和透支期请求都可能产生真实上游用量和费用。
 +- 此行为可能不符合上游服务条款。部署者必须自行确认合规性，并承担账号限制、服务中断等风险。
@@ -26,7 +26,7 @@ index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd799
 +- 对符合条件的 OpenAI OAuth 普通账号和 Agent Identity 账号启用透支调度，Shadow 子账号除外。
 +- 支持 `/v1/responses`、转换为 Responses 的 `/v1/chat/completions` 和 `/v1/messages`，以及 Responses WebSocket v2。
 +- 在适用请求的最后一条用户消息后注入一对无操作工具调用，用于保持与参考实现一致的请求形态。
-+- 当 5h 或 7d 额度首次达到 100%，或收到带明确额度证据的 429 时，最多执行 5 次真实探测。
++- 用量达到 95% 后开始对适用业务请求注入；达到 100% 后，注入业务成功直接确认 `passed`，明确额度 429 直接确认 `failed`。没有业务结果可用时，同周期最多补充 1 次独立探测。
 +- 管理页面的 OpenAI OAuth 常规文本“测试账号连接”也使用相同请求形态，并接入同一套额度探测状态机。
 +- 分别维护 5h、7d 透支周期，并在管理页面显示状态、请求数、Token、账号金额和预计恢复时间。
 +- 将探测状态保存在现有 `accounts.extra` JSONB 字段中，不新增数据库表，不需要手动执行数据库迁移（migration）。
@@ -263,7 +263,7 @@ index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd799
 +
 +### 第三层：查看真实探测日志
 +
-+只有账号 5h/7d 额度达到 100%，或者收到带明确额度信息的上游 429，才会启动探测。额度达到 100% 后，可以在管理页面对该 OpenAI OAuth 账号执行常规文本“测试账号连接”；测试请求本身会使用透支请求形态，并触发或接续同一额度周期的探测。额度未耗尽时没有相关日志是正常现象。
++账号 5h/7d 用量达到 95% 后开始注入；只有额度达到 100%，或者收到带明确额度信息的上游 429，才会产生透支确认状态。额度达到 100% 后，可以在管理页面对该 OpenAI OAuth 账号执行常规文本“测试账号连接”；测试请求本身会使用透支请求形态，并直接参与同一额度周期的判定。额度未耗尽时没有探测日志是正常现象。
 +
 +```bash
 +docker logs --since 30m sub2api 2>&1 | \
@@ -274,12 +274,12 @@ index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd799
 +
 +| 日志 | 含义 |
 +| --- | --- |
++| `codex_quota_overdraft_business_passed` | 注入后的真实业务或账号测试成功，直接确认透支可用 |
++| `codex_quota_overdraft_business_exhausted` | 注入后的业务请求收到明确额度 429，直接确认额度耗尽并暂停账号 |
 +| `codex_quota_overdraft_probe_passed` | 至少一次真实探测成功，透支成立，账号继续参与调度 |
-+| `codex_quota_overdraft_probe_failed` | 5 次都明确返回额度限制，账号暂停至额度恢复时间 |
++| `codex_quota_overdraft_probe_failed` | 单次独立探测明确返回额度限制，账号暂停至额度恢复时间 |
 +| `codex_quota_overdraft_probe_attempt` | 单次探测结果，包含模型、HTTP 状态码、结果和原因，不记录凭据及完整响应正文 |
-+| `codex_quota_overdraft_probe_inconclusive` | 网络、超时、5xx 等导致无法确认，按 1、3、10 分钟退避重试 |
-+| `codex_quota_overdraft_retry_scheduled` | 已安排主动重试 |
-+| `codex_quota_overdraft_retry_started` | 主动重试开始；服务重启后也会由数据库到期扫描恢复 |
++| `codex_quota_overdraft_probe_inconclusive` | 网络、超时、5xx、普通瞬时 429 等导致无法确认；同周期不自动重试 |
 +| `codex_quota_overdraft_probe_claim_failed` | 无法在 PostgreSQL 中原子领取探测任务，需要排查数据库或版本 |
 +| `codex_quota_overdraft_state_persist_failed` | 状态无法写入 `accounts.extra`，页面可能不显示最新结果 |
 +| `codex_quota_overdraft_pause_applied` | `failed` 状态、账号暂停和调度通知已经原子提交 |
@@ -288,10 +288,10 @@ index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd799
 +真正“透支成功”的最直接证据是：
 +
 +```text
-+codex_quota_overdraft_probe_passed
++codex_quota_overdraft_business_passed
 +```
 +
-+其中会包含 `account_id`、`attempts`、`model` 和 `quota_window`。
++如果没有业务成功证据，也可以由 `codex_quota_overdraft_probe_passed` 确认。其中会包含 `account_id`、`model` 和 `quota_window`。
 +
 +### 第四层：查看数据库持久化状态
 +
@@ -312,29 +312,26 @@ index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd799
 +
 +| 状态 | 页面显示 | 含义 |
 +| --- | --- | --- |
-+| `pending` | 透支探测中 | 最多 5 次真实探测正在执行 |
-+| `passed` | 透支中 | 上游仍可调用，账号继续调度并开始统计透支用量 |
-+| `failed` | 已确认限额 | 5 次均明确受额度限制，暂停到恢复时间 |
-+| `inconclusive` | 探测无法确认 | 暂时无法判断，查看 `reason_code` 和 `retry_at` |
++| `pending` | 透支探测中 | 单次独立探测正在执行 |
++| `passed` | 透支中 | 注入业务或独立探测成功，账号继续调度并开始统计透支用量 |
++| `failed` | 已确认限额 | 注入业务或独立探测明确受额度限制，暂停到恢复时间 |
++| `inconclusive` | 探测无法确认 | 单次探测受网络、瞬时限流或上游异常干扰；同周期不自动重试 |
 +| `recovered` | 额度已恢复 | 原额度周期结束，相关暂停已清理 |
 +
 +页面显示 `透支中`，数据库为 `passed`，并且后续业务请求返回成功，三者同时满足即可确认功能完整生效。
 +
 +## 探测逻辑
 +
-+每个额度周期的单轮计划最多探测 5 次，每次最长 20 秒。模型按以下顺序循环：
++每个额度周期采用以下混合判定流程：
 +
-+```text
-+首选模型 -> gpt-5.5 -> gpt-5.4-mini -> 首选模型 -> gpt-5.5
-+```
-+
-+- 任意一次返回有效 `response.completed` 或 `response.output_item.done`，立即记为 `passed`。
-+- 只有 5 次都明确返回 `quota_limited`，才记为 `failed`。
++- 用量低于 95% 时不注入，达到 95% 后对适用的普通 OAuth 文本请求持续注入。
++- 达到 100% 后，注入业务返回成功即记为 `passed`；返回明确 `quota_limited` 即记为 `failed`，暂停账号并切换到其他账号。
++- 如果额度刚从 95% 以下跳到 100%，当前业务请求没有注入，系统仅补充 1 次独立 Responses 探测，最长 20 秒，并优先使用当前业务模型。
 +- 网络错误、超时、5xx、普通瞬时 429、无效响应等记为 `inconclusive`，不会因此误停账号。
 +- 401/403 继续由原有认证失效逻辑处理。
 +- 账号禁用、过载、代理故障、模型冷却等非额度限制不会被本功能绕过。
 +
-+无法确认时，`retry_count` 记录当前退避轮次。后台会依次等待 1 分钟、3 分钟和 10 分钟执行最多 3 轮自动重试；每分钟的数据库扫描会恢复因容器重启而丢失的内存定时器，并接续超过 2 分钟的遗留 `pending` 状态。达到自动重试上限后不会持续消耗上游请求，但后续额度刷新、账号测试或新的明确额度响应仍可继续观察。
++独立探测无法确认后，同一额度周期不会自动重试，也不会持续消耗探测请求。后续已经注入的真实业务成功或明确额度 429 仍可把状态更新为 `passed` 或 `failed`；同周期 `failed` 为终态，成功结果不能覆盖它。
 +
 +多实例部署通过 PostgreSQL 原子领取（atomic claim）保证同一账号、同一额度周期只有一个实例发起探测。
 +
@@ -494,7 +491,7 @@ index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd799
 +
 +页面的“限流中”直接来自账号记录的 `rate_limit_reset_at`。旧实现存在竞态：探测开始后若另一个 429 更新了该时间，即使探测最终 `passed`，严格时间比较也可能不清理它，因此出现“实际透支可用但页面限流中”。当前版本在 `passed/recovered` 时会清除该残留状态，并记录 `codex_quota_overdraft_stale_rate_limit_cleared`；`failed` 不会清理。
 +
-+其他真实限制仍会正常生效，包括账号禁用、401/403、5 次探测均确认额度耗尽、代理/网络错误、模型级冷却、并发限制或没有明确额度证据的其他上游 429。若状态持续存在，先按 `account_id` 检查上述日志、数据库中的 `extra->'codex_quota_overdraft_probe'` 和 `rate_limit_reset_at`，区分额度透支与普通限流。
++其他真实限制仍会正常生效，包括账号禁用、401/403、注入业务或单次探测确认额度耗尽、代理/网络错误、模型级冷却、并发限制或没有明确额度证据的其他上游 429。若状态持续存在，先按 `account_id` 检查上述日志、数据库中的 `extra->'codex_quota_overdraft_probe'` 和 `rate_limit_reset_at`，区分额度透支与普通限流。
 +
 +### `pq: could not determine data type of parameter $1`
 +
@@ -538,10 +535,10 @@ index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd799
 +- 本项目不是 Sub2API 官方发行版，也不受 OpenAI 或其他上游服务商认可或支持。
 diff --git a/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md b/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..ca924d4b10e0bb63a292e4aaadafeafe03eb4d7b
+index 0000000000000000000000000000000000000000..2df3b7a41ef588761c5e8d3eaac7289aee084e04
 --- /dev/null
 +++ b/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,171 @@
 +# sub2api-overdraft 5h / 7d 额度透支定制记录
 +
 +本文件是维护者实现与升级记录。面向部署者的完整安装、验证、升级和故障排查说明见
@@ -560,13 +557,13 @@ index 0000000000000000000000000000000000000000..ca924d4b10e0bb63a292e4aaadafeafe
 +
 +源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 +
-+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.4`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
++源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.5`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
 +
 +Sub2API `v0.1.177` 将原生 remote compaction v2 保留在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 +
 +## 后台测试连接与残留限流修复
 +
-+管理页面的 OpenAI OAuth 常规文本“测试账号连接”使用与真实业务请求相同的透支请求形态。测试成功并取得 5h/7d 快照后会触发额度观察；测试返回带明确额度证据的 429 时交给透支协调器执行最多 5 次真实探测，不再直接写入普通账号级限流。API Key、Shadow、图片和 Compact 测试不启用该行为。
++管理页面的 OpenAI OAuth 常规文本“测试账号连接”与真实业务请求使用相同策略：用量达到 95% 后注入；100% 时成功直接确认 `passed`，明确额度 429 直接确认 `failed`。API Key、Shadow、图片和 Compact 测试不启用该行为。
 +
 +探测得到 `passed`，或额度周期进入 `recovered` 后，会清除仍残留的账号级 `rate_limit_reset_at` 以及本功能或额度阈值产生的暂停。这里不再要求当前重置时间与探测开始时记录的 `observed_rate_limit_reset_at` 完全相同，因为并发 429 可能在探测期间更新该字段；`failed` 状态不会清理限流。发生清理时记录 `codex_quota_overdraft_stale_rate_limit_cleared`。
 +
@@ -601,19 +598,18 @@ index 0000000000000000000000000000000000000000..ca924d4b10e0bb63a292e4aaadafeafe
 +- Responses WebSocket v2 首轮和后续轮
 +- 管理页面 OpenAI OAuth 常规文本“测试账号连接”
 +
-+每次最终发往上游前，如果 `input` 最后一项是用户消息，则追加一对与参考项目相同的无操作 `custom_tool_call` 和 `custom_tool_call_output`。请求体超过 32 MiB、JSON 无效、形状不匹配或已经注入时保持原样。
++用量达到 95% 后，每次最终发往上游前，如果 `input` 最后一项是用户消息，则追加一对与参考项目相同的无操作 `custom_tool_call` 和 `custom_tool_call_output`。请求体超过 32 MiB、JSON 无效、形状不匹配或已经注入时保持原样。
 +
-+5h 或 7d 额度首次达到 100%，或者收到包含明确额度证据的真实 429 时，按参考项目执行复核：
++5h 或 7d 额度达到 100%，或者收到包含明确额度证据的真实 429 时，执行以下混合判定：
 +
-+1. 同一额度周期只启动一个探测计划，状态持久化在 `accounts.extra.codex_quota_overdraft_probe`，多实例使用数据库原子 claim 去重。
-+2. 最多执行 5 次真实 Responses 请求，每次独立 20 秒超时。
-+3. 模型按“首选模型、`gpt-5.5`、`gpt-5.4-mini`”循环。例如首选为 `gpt-5.4` 时，顺序是 `gpt-5.4`、`gpt-5.5`、`gpt-5.4-mini`、`gpt-5.4`、`gpt-5.5`。
-+4. 任意一次返回有效的 `response.completed` 或 `response.output_item.done` 即判定 `passed`，账号继续调度并开始透支统计。
-+5. 只有 5 次均返回明确 `quota_limited` 才判定 `failed`，账号暂停到对应额度恢复时间；5h 和 7d 同时耗尽时取最晚恢复时间。`failed` 状态、临时暂停和调度 outbox 在同一数据库事务中提交，避免出现状态已失败但账号没有暂停。
-+6. 网络错误、超时、5xx、普通瞬时 429 和无效响应均判定 `inconclusive`，不会误停账号；后台按 1 分钟、3 分钟、10 分钟主动重试，并每分钟扫描数据库恢复服务重启前已到期的任务。重启时遗留超过 2 分钟的 `pending` 状态也会自动接续。每个额度周期最多自动重试 3 轮，之后仍可由额度刷新或新请求继续观察。
-+7. 401/403、账号停用等认证问题交给原有认证异常逻辑处理，不加入额度重试；400/404 会轮换全部探测模型后再判定为 `inconclusive`，不会暂停整个账号。
-+8. 账号禁用、过载、代理/传输故障、模型级冷却及其他临时不可调度原因不被绕过。
-+9. 额度恢复后状态改为 `recovered`，清理本功能或额度阈值产生的暂停；5h 与 7d 分别维护透支起点，不会因另一窗口后来耗尽而重置已有统计。
++1. 实际注入的业务请求成功时直接判定 `passed`，账号继续调度并开始透支统计，不额外消耗探测请求。
++2. 实际注入的业务请求返回明确额度 429 时直接判定 `failed`，账号暂停到对应额度恢复时间并切号；5h 和 7d 同时耗尽时取最晚恢复时间。
++3. 如果没有可用的业务成功证据，同一额度周期仅启动 1 次独立 Responses 探测，最长 20 秒并优先使用当前业务模型。多实例使用 PostgreSQL 原子 claim 去重。
++4. 独立探测成功即判定 `passed`，明确 `quota_limited` 即判定 `failed`；网络错误、超时、5xx、普通瞬时 429 和无效响应判定 `inconclusive`，同周期不自动重试。
++5. `failed` 状态、临时暂停和调度 outbox 在同一数据库事务中提交。同周期 `failed` 为终态，晚到的业务成功或探测结果不能覆盖；业务明确额度 429 可以把并发产生的 `passed` 或 `inconclusive` 收敛为 `failed`。
++6. 401/403、账号停用等认证问题交给原有认证异常逻辑处理；400/404 判定为 `inconclusive`，不会暂停整个账号。
++7. 账号禁用、过载、代理/传输故障、模型级冷却及其他临时不可调度原因不被绕过。
++8. 额度恢复后状态改为 `recovered`，清理本功能或额度阈值产生的暂停；5h 与 7d 分别维护透支起点，不会因另一窗口后来耗尽而重置已有统计。
 +
 +状态值包括 `pending`、`passed`、`failed`、`inconclusive`、`recovered`。账号用量页面显示探测状态、尝试次数、额度周期、透支期成功请求数、Token、账号金额及预计恢复时间。
 +
@@ -701,8 +697,8 @@ index 0000000000000000000000000000000000000000..ca924d4b10e0bb63a292e4aaadafeafe
 +codex_quota_overdraft_probe_failed
 +codex_quota_overdraft_probe_inconclusive
 +codex_quota_overdraft_probe_attempt
-+codex_quota_overdraft_retry_scheduled
-+codex_quota_overdraft_retry_started
++codex_quota_overdraft_business_passed
++codex_quota_overdraft_business_exhausted
 +codex_quota_overdraft_pause_applied
 +codex_quota_overdraft_stale_rate_limit_cleared
 +```
@@ -790,16 +786,16 @@ index b2dfd7034f769abd7e8640090282e6b05a2af4a1..defdbaf0886aff73a04cb2590675984c
  RUN apk add --no-cache \
 diff --git a/FORK_VERSION b/FORK_VERSION
 new file mode 100644
-index 0000000000000000000000000000000000000000..47f07b4999923c5b44c203790191ca8907723b15
+index 0000000000000000000000000000000000000000..3c106b5d20bb5b21cfb6a882b424c95a654a5807
 --- /dev/null
 +++ b/FORK_VERSION
 @@ -0,0 +1 @@
-+0.1.177-overdraft.4
++0.1.177-overdraft.5
 diff --git a/README.md b/README.md
-index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..ad20771cd7880e2dd695de1a410012aaef4665c3 100644
+index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..34d6dfeb494f08476a4fd912d9ee397170781330 100644
 --- a/README.md
 +++ b/README.md
-@@ -1,23 +1,53 @@
+@@ -1,23 +1,54 @@
  <div align="center">
  
 -<img src="assets/logo.svg" alt="Sub2API Logo" width="128" />
@@ -829,10 +825,11 @@ index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..ad20771cd7880e2dd695de1a410012aa
 +
 +## Fork Features
 +
-+- Runs up to five real probes after the reported Codex 5h or 7d quota reaches 100%.
++- Pre-arms ordinary OAuth text traffic with the overdraft payload at 95% usage and uses successful business traffic as direct evidence after usage reaches 100%.
++- Marks an injected request's explicit quota 429 as terminal for that cycle; when business evidence is unavailable, runs at most one independent probe per quota cycle.
 +- Keeps an account schedulable after a successful probe and tracks overdraft requests, tokens, cost, and recovery for both windows independently.
 +- Exposes `pending`, `passed`, `failed`, `inconclusive`, and `recovered` states in the admin UI and PostgreSQL.
-+- Actively retries inconclusive probes after 1, 3, and 10 minutes, including recovery from persisted retry state after a restart.
++- Treats transient 429s, timeouts, network failures, and 5xx responses as inconclusive without automatic background retries.
 +- Uses an atomic PostgreSQL claim for multi-instance deployments and atomically commits terminal failure, account pause, and scheduler notification without a schema migration.
 +- Supports an immediate configuration rollback to the upstream scheduling behavior.
 +
@@ -859,7 +856,7 @@ index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..ad20771cd7880e2dd695de1a410012aa
  ## ⚠️ Important Notice
  
  Please read the following carefully before using this project:
-@@ -206,7 +236,7 @@ Community projects that extend or integrate with Sub2API:
+@@ -206,7 +237,7 @@ Community projects that extend or integrate with Sub2API:
  
  | Component | Technology |
  |-----------|------------|
@@ -869,10 +866,10 @@ index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..ad20771cd7880e2dd695de1a410012aa
  | Database | PostgreSQL 15+ |
  | Cache/Queue | Redis 7+ |
 diff --git a/README_CN.md b/README_CN.md
-index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..d46fdb8ab10d3ac8cfa07fd0034c42d9ab787a29 100644
+index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..e1c99262012ec6094c84d6e3c52fe3c734527c2f 100644
 --- a/README_CN.md
 +++ b/README_CN.md
-@@ -1,23 +1,85 @@
+@@ -1,23 +1,86 @@
  <div align="center">
  
 -<img src="assets/logo.svg" alt="Sub2API Logo" width="128" />
@@ -902,8 +899,9 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..d46fdb8ab10d3ac8cfa07fd0034c42d9
 +
 +## 本 Fork 增加的功能
 +
-+- Codex 5h / 7d 额度达到 100% 后，最多执行 5 次真实请求探测，判断账号是否仍可继续调用。
-+- 探测成功后继续参与账号调度，并分别统计 5h / 7d 透支期请求数、Token 和金额。
++- Codex 5h / 7d 用量达到 95% 后，为普通 OAuth 文本业务请求注入透支请求形态；达到 100% 后直接使用真实业务结果确认透支状态。
++- 注入业务请求成功即记为 `passed`；返回明确额度 429 即记为 `failed` 并切号冷却。缺少业务证据时，同一额度周期最多补充 1 次独立探测。
++- 确认成功后继续参与账号调度，并分别统计 5h / 7d 透支期请求数、Token 和金额。
 +- 管理页面显示“透支探测中”“透支中”“已确认限额”“探测无法确认”和“额度已恢复”。
 +- 网络、超时、5xx 和普通瞬时 429 不会被误判为额度耗尽；401/403、账号禁用和其他风控仍使用原有策略。
 +- 多实例通过 PostgreSQL 原子领取（atomic claim）去重；状态保存在现有 `accounts.extra`，无需新增数据表。
@@ -951,7 +949,7 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..d46fdb8ab10d3ac8cfa07fd0034c42d9
 +  grep -E 'codex_quota_overdraft_(probe|state|pause|stale_rate_limit)'
 +```
 +
-+出现 `codex_quota_overdraft_probe_passed`，页面显示“透支中”，并且后续真实业务请求成功，即可确认透支功能完整生效。无法确认的探测会按 1、3、10 分钟主动重试，容器重启后由持久化状态继续；5 次明确额度失败时，探测状态、账号暂停和调度通知会原子提交。OpenAI OAuth 常规文本“测试账号连接”也会使用透支请求形态并接入同一探测状态机；API Key、Shadow、图片和 Compact 测试除外。额度未达到 100% 时没有探测日志是正常现象。
++出现 `codex_quota_overdraft_business_passed` 或 `codex_quota_overdraft_probe_passed`，页面显示“透支中”，并且后续真实业务请求成功，即可确认透支功能完整生效。注入业务请求返回明确额度 429 时会出现 `codex_quota_overdraft_business_exhausted`，状态、账号暂停和调度通知会原子提交。网络错误、5xx、超时和普通瞬时 429 不会判定透支结束；独立探测为 `inconclusive` 后同周期不自动重试。OpenAI OAuth 常规文本“测试账号连接”也使用同一请求形态和状态机；API Key、Shadow、图片和 Compact 测试除外。额度未达到 95% 时没有透支注入，未达到 100% 时没有探测日志，均属正常现象。
 +
 +## 来源、许可证与风险
 +
@@ -964,7 +962,7 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..d46fdb8ab10d3ac8cfa07fd0034c42d9
  
  ## ⚠️ 重要提醒
  
-@@ -208,7 +270,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
+@@ -208,7 +271,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
  
  | 组件 | 技术 |
  |------|------|
@@ -973,7 +971,7 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..d46fdb8ab10d3ac8cfa07fd0034c42d9
  | 前端 | Vue 3.4+, Vite 5+, TailwindCSS |
  | 数据库 | PostgreSQL 15+ |
  | 缓存/队列 | Redis 7+ |
-@@ -273,12 +335,9 @@ sudo systemctl enable sub2api
+@@ -273,12 +336,9 @@ sudo systemctl enable sub2api
  
  #### 升级
  
@@ -1067,7 +1065,7 @@ index 9976abe46b5494b1bed2a5ea1ec712137f812791..1efbd3859da876eaf6c3843080f6c9dc
  WORKDIR /app
  
 diff --git a/backend/cmd/server/wire_gen.go b/backend/cmd/server/wire_gen.go
-index ab9f4530b8663c00be9f04cf9c46c3822d6f9fb6..e8d4ad8cf22783a55505f7d85eb7b4b340a3cb0b 100644
+index ab9f4530b8663c00be9f04cf9c46c3822d6f9fb6..5f2d628569e4ebfdf682f810c9022af8131b7c8f 100644
 --- a/backend/cmd/server/wire_gen.go
 +++ b/backend/cmd/server/wire_gen.go
 @@ -199,8 +199,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
@@ -1076,7 +1074,7 @@ index ab9f4530b8663c00be9f04cf9c46c3822d6f9fb6..e8d4ad8cf22783a55505f7d85eb7b4b3
  	usageCache := service.NewUsageCache()
 -	accountUsageService := service.ProvideAccountUsageService(accountRepository, usageLogRepository, claudeUsageFetcher, geminiQuotaService, antigravityQuotaFetcher, grokQuotaFetcher, grokQuotaService, openAIQuotaService, usageCache, identityCache, tlsFingerprintProfileService, openAIGatewayService)
 -	accountTestService := service.ProvideAccountTestService(accountRepository, geminiTokenProvider, claudeTokenProvider, grokTokenProvider, antigravityGatewayService, httpUpstream, configConfig, tlsFingerprintProfileService, openAIGatewayService, settingService)
-+	codexQuotaOverdraftCoordinator := service.ProvideCodexQuotaOverdraftCoordinator(accountRepository, httpUpstream, openAITokenProvider, tlsFingerprintProfileService, configConfig, tempUnschedCache, openAIGatewayService, rateLimitService, timingWheelService)
++	codexQuotaOverdraftCoordinator := service.ProvideCodexQuotaOverdraftCoordinator(accountRepository, httpUpstream, openAITokenProvider, tlsFingerprintProfileService, configConfig, tempUnschedCache, openAIGatewayService, rateLimitService)
 +	accountUsageService := service.ProvideAccountUsageService(accountRepository, usageLogRepository, claudeUsageFetcher, geminiQuotaService, antigravityQuotaFetcher, grokQuotaFetcher, grokQuotaService, openAIQuotaService, usageCache, identityCache, tlsFingerprintProfileService, openAIGatewayService, codexQuotaOverdraftCoordinator)
 +	accountTestService := service.ProvideAccountTestService(accountRepository, geminiTokenProvider, claudeTokenProvider, grokTokenProvider, antigravityGatewayService, httpUpstream, configConfig, tlsFingerprintProfileService, openAIGatewayService, settingService, codexQuotaOverdraftCoordinator)
  	crsSyncService := service.NewCRSSyncService(accountRepository, proxyRepository, oAuthService, openAIOAuthService, geminiOAuthService, configConfig)
@@ -1105,7 +1103,7 @@ index 2c5d5cf545fe0b0cff187b31c9bac0550cc86b4e..12faf126aa731109be02afb9f4b9c8e6
  	viper.SetDefault("gateway.openai_compact_model", "gpt-5.4")
  	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)
 diff --git a/backend/internal/handler/openai_chat_completions.go b/backend/internal/handler/openai_chat_completions.go
-index 42dc13112a791aad5f0ce460a54630c6fade0d7a..17b47905886e1f845337b653ad73db03b23a00dd 100644
+index 42dc13112a791aad5f0ce460a54630c6fade0d7a..51add5121e138a40b43ed2b51556d0c49853cfce 100644
 --- a/backend/internal/handler/openai_chat_completions.go
 +++ b/backend/internal/handler/openai_chat_completions.go
 @@ -149,7 +149,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
@@ -1118,6 +1116,18 @@ index 42dc13112a791aad5f0ce460a54630c6fade0d7a..17b47905886e1f845337b653ad73db03
  	c.Request = c.Request.WithContext(ccPricingCtx)
  
  	for {
+@@ -343,9 +344,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
+ 			}
+ 		}
+ 		if result != nil {
+-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), true, result.FirstTokenMs)
++			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), true, result.FirstTokenMs, c.Request.Context())
+ 		} else {
+-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), true, nil)
++			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), true, nil, c.Request.Context())
+ 		}
+ 
+ 		userAgent := c.GetHeader("User-Agent")
 diff --git a/backend/internal/handler/openai_gateway_compact_body_signal_test.go b/backend/internal/handler/openai_gateway_compact_body_signal_test.go
 index 370abaeba55d47e04c6d2d1a08291cf39755a612..ca1f94a359e8736d186b8635afec8f5806bcf827 100644
 --- a/backend/internal/handler/openai_gateway_compact_body_signal_test.go
@@ -1155,7 +1165,7 @@ index 370abaeba55d47e04c6d2d1a08291cf39755a612..ca1f94a359e8736d186b8635afec8f58
  	h := &OpenAIGatewayHandler{}
  	tests := []struct {
 diff --git a/backend/internal/handler/openai_gateway_handler.go b/backend/internal/handler/openai_gateway_handler.go
-index 1695eccc1ba5c0c993b62f6f6adb95b2e8fd6eb3..84f3711a89a9c95aac6ddd2bc75dac8fd154668a 100644
+index 1695eccc1ba5c0c993b62f6f6adb95b2e8fd6eb3..aad3c87514a54bd138c57c56c135d40bc0e16f36 100644
 --- a/backend/internal/handler/openai_gateway_handler.go
 +++ b/backend/internal/handler/openai_gateway_handler.go
 @@ -192,6 +192,10 @@ func openAIResponsesRequiredCapabilityForRequest(imageIntent bool, needsResponse
@@ -1182,6 +1192,18 @@ index 1695eccc1ba5c0c993b62f6f6adb95b2e8fd6eb3..84f3711a89a9c95aac6ddd2bc75dac8f
  	c.Request = c.Request.WithContext(pricingCtx)
  
  	for {
+@@ -709,9 +717,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
+ 			if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
+ 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
+ 			}
+-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
++			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), openAIForwardSucceededForScheduling(result), result.FirstTokenMs, c.Request.Context())
+ 		} else {
+-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), openAIForwardSucceededForScheduling(result), nil)
++			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), openAIForwardSucceededForScheduling(result), nil, c.Request.Context())
+ 		}
+ 
+ 		// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 @@ -1034,7 +1042,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
  	effectiveMappedModel := preferredMappedModel
  
@@ -1192,6 +1214,18 @@ index 1695eccc1ba5c0c993b62f6f6adb95b2e8fd6eb3..84f3711a89a9c95aac6ddd2bc75dac8f
  	c.Request = c.Request.WithContext(msgPricingCtx)
  
  	for {
+@@ -1232,9 +1241,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
+ 			}
+ 		}
+ 		if result != nil {
+-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), true, result.FirstTokenMs)
++			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), true, result.FirstTokenMs, c.Request.Context())
+ 		} else {
+-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), true, nil)
++			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), true, nil, c.Request.Context())
+ 		}
+ 
+ 		userAgent := c.GetHeader("User-Agent")
 @@ -1753,6 +1762,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
  		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
  		return
@@ -1203,8 +1237,17 @@ index 1695eccc1ba5c0c993b62f6f6adb95b2e8fd6eb3..84f3711a89a9c95aac6ddd2bc75dac8f
  
  	// F5a: 握手层会话屏蔽检查。WS 握手无 body，显式标识仅来自握手 header
  	// （session_id / conversation_id）；无标识则放行，连接内仍有本地 flag 兜底。
+@@ -2191,7 +2204,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
+ 				if scheduleModel == "" {
+ 					scheduleModel = turnRequestedModel
+ 				}
+-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
++				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs, ctx)
+ 				inboundEndpoint := GetInboundEndpoint(c)
+ 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
+ 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 diff --git a/backend/internal/repository/account_repo.go b/backend/internal/repository/account_repo.go
-index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914b2e58d17 100644
+index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..0c2fe07067d74f0d298a023e272520166d2d75f8 100644
 --- a/backend/internal/repository/account_repo.go
 +++ b/backend/internal/repository/account_repo.go
 @@ -56,6 +56,7 @@ var schedulerNeutralExtraKeyPrefixes = []string{
@@ -1284,12 +1327,12 @@ index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914
  			notExpiredPredicate(now),
  			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
  			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
-@@ -2592,6 +2593,188 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
+@@ -2592,6 +2593,207 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
  	return nil
  }
  
-+// ClaimCodexQuotaOverdraftProbe atomically reserves one quota cycle. This
-+// prevents duplicate five-request probe plans across multiple sub2api replicas.
++// ClaimCodexQuotaOverdraftProbe atomically reserves one quota cycle. A cycle is
++// claimed at most once across all sub2api replicas.
 +func (r *accountRepository) ClaimCodexQuotaOverdraftProbe(
 +	ctx context.Context,
 +	id int64,
@@ -1308,16 +1351,42 @@ index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914
 +			updated_at = NOW()
 +		WHERE id = $3
 +			AND deleted_at IS NULL
++			AND COALESCE(extra #>> '{codex_quota_overdraft_probe,cycle_key}', '') <> $4
++	`, service.CodexQuotaOverdraftProbeExtraKey, string(payload), id, state.CycleKey)
++	if err != nil {
++		return false, err
++	}
++	affected, err := result.RowsAffected()
++	if err != nil || affected == 0 {
++		return false, err
++	}
++	r.syncSchedulerAccountSnapshot(ctx, id)
++	return true, nil
++}
++
++// PersistCodexQuotaOverdraftProbeUnlessFailed stores a non-failure result while
++// preserving a terminal failure already confirmed for the same quota cycle.
++func (r *accountRepository) PersistCodexQuotaOverdraftProbeUnlessFailed(
++	ctx context.Context,
++	id int64,
++	state *service.CodexQuotaOverdraftProbeState,
++) (bool, error) {
++	if state == nil || state.Status == "failed" || strings.TrimSpace(state.CycleKey) == "" {
++		return false, nil
++	}
++	payload, err := json.Marshal(state)
++	if err != nil {
++		return false, err
++	}
++	result, err := r.sql.ExecContext(ctx, `
++		UPDATE accounts
++		SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb),
++			updated_at = NOW()
++		WHERE id = $3
++			AND deleted_at IS NULL
 +			AND (
 +				COALESCE(extra #>> '{codex_quota_overdraft_probe,cycle_key}', '') <> $4
-+				OR (
-+					extra #>> '{codex_quota_overdraft_probe,status}' = 'inconclusive'
-+					AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,retry_at}', '')::timestamptz, '1970-01-01'::timestamptz) <= NOW()
-+				)
-+				OR (
-+					extra #>> '{codex_quota_overdraft_probe,status}' = 'pending'
-+					AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,started_at}', '')::timestamptz, '1970-01-01'::timestamptz) <= NOW() - INTERVAL '2 minutes'
-+				)
++				OR COALESCE(extra #>> '{codex_quota_overdraft_probe,status}', '') <> 'failed'
 +			)
 +	`, service.CodexQuotaOverdraftProbeExtraKey, string(payload), id, state.CycleKey)
 +	if err != nil {
@@ -1329,6 +1398,68 @@ index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914
 +	}
 +	r.syncSchedulerAccountSnapshot(ctx, id)
 +	return true, nil
++}
++
++// ClearCodexQuotaOverdraftPauseIfState clears stale scheduling state only when
++// the persisted overdraft result is still the expected available state.
++func (r *accountRepository) ClearCodexQuotaOverdraftPauseIfState(
++	ctx context.Context,
++	id int64,
++	cycleKey string,
++	status string,
++	expectedTempReason string,
++) (bool, bool, error) {
++	if id <= 0 || strings.TrimSpace(cycleKey) == "" || (status != "passed" && status != "recovered") {
++		return false, false, nil
++	}
++	beginner, ok := r.sql.(codexQuotaOverdraftTxBeginner)
++	if !ok {
++		return false, false, errors.New("account repository does not support transactions")
++	}
++	tx, err := beginner.BeginTx(ctx, nil)
++	if err != nil {
++		return false, false, err
++	}
++	defer func() { _ = tx.Rollback() }()
++
++	var clearedRateLimit, clearedTemp bool
++	err = tx.QueryRowContext(ctx, `
++		WITH target AS (
++			SELECT id,
++				(rate_limited_at IS NOT NULL OR rate_limit_reset_at IS NOT NULL) AS clear_rate_limit,
++				($4::text <> '' AND COALESCE(temp_unschedulable_reason = $4, FALSE)) AS clear_temp
++			FROM accounts
++			WHERE id = $1
++				AND deleted_at IS NULL
++				AND extra #>> '{codex_quota_overdraft_probe,cycle_key}' = $2
++				AND extra #>> '{codex_quota_overdraft_probe,status}' = $3
++			FOR UPDATE
++		)
++		UPDATE accounts AS a
++		SET rate_limited_at = CASE WHEN target.clear_rate_limit THEN NULL ELSE a.rate_limited_at END,
++			rate_limit_reset_at = CASE WHEN target.clear_rate_limit THEN NULL ELSE a.rate_limit_reset_at END,
++			temp_unschedulable_until = CASE WHEN target.clear_temp THEN NULL ELSE a.temp_unschedulable_until END,
++			temp_unschedulable_reason = CASE WHEN target.clear_temp THEN NULL ELSE a.temp_unschedulable_reason END,
++			updated_at = NOW()
++		FROM target
++		WHERE a.id = target.id
++			AND (target.clear_rate_limit OR target.clear_temp)
++		RETURNING target.clear_rate_limit, target.clear_temp
++	`, id, cycleKey, status, expectedTempReason).Scan(&clearedRateLimit, &clearedTemp)
++	if errors.Is(err, sql.ErrNoRows) {
++		return false, false, nil
++	}
++	if err != nil {
++		return false, false, err
++	}
++	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
++		return false, false, err
++	}
++	if err := tx.Commit(); err != nil {
++		return false, false, err
++	}
++	r.syncSchedulerAccountSnapshotDetached(ctx, id)
++	return clearedRateLimit, clearedTemp, nil
 +}
 +
 +type codexQuotaOverdraftTxBeginner interface {
@@ -1376,8 +1507,11 @@ index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914
 +		WHERE id = $5
 +			AND deleted_at IS NULL
 +			AND extra #>> '{codex_quota_overdraft_probe,cycle_key}' = $6
-+			AND extra #>> '{codex_quota_overdraft_probe,status}' IN ('pending', 'failed')
-+	`, service.CodexQuotaOverdraftProbeExtraKey, string(payload), until, reason, id, state.CycleKey)
++			AND (
++				extra #>> '{codex_quota_overdraft_probe,status}' IN ('pending', 'failed')
++				OR ($7::boolean AND extra #>> '{codex_quota_overdraft_probe,status}' IN ('passed', 'inconclusive', 'recovered'))
++			)
++	`, service.CodexQuotaOverdraftProbeExtraKey, string(payload), until, reason, id, state.CycleKey, state.ReasonCode == "business_quota_limited")
 +	if err != nil {
 +		return false, err
 +	}
@@ -1398,82 +1532,10 @@ index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914
 +	return true, nil
 +}
 +
-+// ListDueCodexQuotaOverdraftProbes returns a bounded set of persisted
-+// inconclusive or stale pending probes so the retry sweep can resume work.
-+func (r *accountRepository) ListDueCodexQuotaOverdraftProbes(ctx context.Context, now time.Time, limit int) ([]*service.Account, error) {
-+	if limit <= 0 {
-+		limit = 100
-+	}
-+	if limit > 1000 {
-+		limit = 1000
-+	}
-+	rows, err := r.sql.QueryContext(ctx, `
-+		SELECT id
-+		FROM accounts
-+		WHERE deleted_at IS NULL
-+			AND platform = $1
-+			AND type = $2
-+			AND status = $3
-+			AND schedulable IS TRUE
-+			AND parent_account_id IS NULL
-+			AND (
-+				(
-+					extra #>> '{codex_quota_overdraft_probe,status}' = 'inconclusive'
-+					AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,retry_at}', '')::timestamptz, 'infinity'::timestamptz) <= $4
-+					AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,retry_count}', '')::integer, 0) <= $5
-+				)
-+				OR (
-+					extra #>> '{codex_quota_overdraft_probe,status}' = 'pending'
-+					AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,started_at}', '')::timestamptz, 'infinity'::timestamptz) <= $4 - INTERVAL '2 minutes'
-+				)
-+			)
-+			AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,recover_at}', '')::timestamptz, 'infinity'::timestamptz) > $4
-+		ORDER BY COALESCE(
-+			NULLIF(extra #>> '{codex_quota_overdraft_probe,retry_at}', '')::timestamptz,
-+			NULLIF(extra #>> '{codex_quota_overdraft_probe,started_at}', '')::timestamptz
-+		) ASC, id ASC
-+		LIMIT $6
-+	`, service.PlatformOpenAI, service.AccountTypeOAuth, service.StatusActive, now, 3, limit)
-+	if err != nil {
-+		return nil, err
-+	}
-+	defer rows.Close()
-+	ids := make([]int64, 0, limit)
-+	for rows.Next() {
-+		var id int64
-+		if err := rows.Scan(&id); err != nil {
-+			return nil, err
-+		}
-+		ids = append(ids, id)
-+	}
-+	if err := rows.Err(); err != nil {
-+		return nil, err
-+	}
-+	if len(ids) == 0 {
-+		return nil, nil
-+	}
-+	accounts, err := r.GetByIDs(ctx, ids)
-+	if err != nil {
-+		return nil, err
-+	}
-+	byID := make(map[int64]*service.Account, len(accounts))
-+	for i := range accounts {
-+		account := accounts[i]
-+		byID[account.ID] = account
-+	}
-+	ordered := make([]*service.Account, 0, len(accounts))
-+	for _, id := range ids {
-+		if account := byID[id]; account != nil {
-+			ordered = append(ordered, account)
-+		}
-+	}
-+	return ordered, nil
-+}
-+
  // UpdateUpstreamBillingProbeSnapshot stores a probe result only while the
  // network identity used by that probe is still current.
  func (r *accountRepository) UpdateUpstreamBillingProbeSnapshot(
-@@ -3029,7 +3212,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
+@@ -3029,7 +3231,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
  		if !opts.ignoreTransientState {
  			now := time.Now()
  			preds = append(preds,
@@ -1482,7 +1544,7 @@ index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914
  				notExpiredPredicate(now),
  				dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
  				dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
-@@ -3134,13 +3317,23 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
+@@ -3134,13 +3336,23 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
  	return outAccounts, nil
  }
  
@@ -1511,10 +1573,10 @@ index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914
  
 diff --git a/backend/internal/repository/account_repo_codex_overdraft_test.go b/backend/internal/repository/account_repo_codex_overdraft_test.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..7233698db0c0ecfcac47cda66d7144335e0176bd
+index 0000000000000000000000000000000000000000..3ad7054a54c340399f3f79bd11a5e5e315ed29f3
 --- /dev/null
 +++ b/backend/internal/repository/account_repo_codex_overdraft_test.go
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,170 @@
 +package repository
 +
 +import (
@@ -1540,8 +1602,8 @@ index 0000000000000000000000000000000000000000..7233698db0c0ecfcac47cda66d714433
 +		Status:      "failed",
 +		CycleKey:    "5h:quota-cycle",
 +		QuotaWindow: "5h",
-+		Attempts:    5,
-+		Limit:       5,
++		Attempts:    1,
++		Limit:       1,
 +		StartedAt:   now,
 +		RecoverAt:   &until,
 +	}
@@ -1549,7 +1611,7 @@ index 0000000000000000000000000000000000000000..7233698db0c0ecfcac47cda66d714433
 +
 +	mock.ExpectBegin()
 +	mock.ExpectExec(`(?s)UPDATE accounts.*temp_unschedulable_until.*codex_quota_overdraft_probe`).
-+		WithArgs(service.CodexQuotaOverdraftProbeExtraKey, sqlmock.AnyArg(), until, reason, int64(77), state.CycleKey).
++		WithArgs(service.CodexQuotaOverdraftProbeExtraKey, sqlmock.AnyArg(), until, reason, int64(77), state.CycleKey, false).
 +		WillReturnResult(sqlmock.NewResult(0, 1))
 +	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)")).
 +		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(77), nil, nil, sqlmock.AnyArg()).
@@ -1575,8 +1637,8 @@ index 0000000000000000000000000000000000000000..7233698db0c0ecfcac47cda66d714433
 +		Status:      "failed",
 +		CycleKey:    "5h:quota-cycle",
 +		QuotaWindow: "5h",
-+		Attempts:    5,
-+		Limit:       5,
++		Attempts:    1,
++		Limit:       1,
 +		StartedAt:   now,
 +		RecoverAt:   &until,
 +	}
@@ -1596,21 +1658,93 @@ index 0000000000000000000000000000000000000000..7233698db0c0ecfcac47cda66d714433
 +	require.NoError(t, mock.ExpectationsWereMet())
 +}
 +
-+func TestListDueCodexQuotaOverdraftProbesIncludesInconclusiveAndStalePending(t *testing.T) {
++func TestPersistCodexQuotaOverdraftProbeUnlessFailedPreservesTerminalFailure(t *testing.T) {
 +	db, mock, err := sqlmock.New()
 +	require.NoError(t, err)
 +	t.Cleanup(func() { _ = db.Close() })
 +
 +	now := time.Now().UTC()
-+	mock.ExpectQuery(`(?s)SELECT id.*status}' = 'inconclusive'.*retry_count.*status}' = 'pending'.*INTERVAL '2 minutes'`).
-+		WithArgs(service.PlatformOpenAI, service.AccountTypeOAuth, service.StatusActive, now, 3, 100).
-+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
++	state := &service.CodexQuotaOverdraftProbeState{
++		Status:      "passed",
++		CycleKey:    "5h:quota-cycle",
++		QuotaWindow: "5h",
++		Limit:       1,
++		StartedAt:   now,
++	}
++	mock.ExpectExec(`(?s)UPDATE accounts.*status}', ''\) <> 'failed'`).
++		WithArgs(service.CodexQuotaOverdraftProbeExtraKey, sqlmock.AnyArg(), int64(77), state.CycleKey).
++		WillReturnResult(sqlmock.NewResult(0, 0))
 +
 +	repo := newAccountRepositoryWithSQL(nil, db, nil)
-+	accounts, err := repo.ListDueCodexQuotaOverdraftProbes(context.Background(), now, 100)
++	persisted, err := repo.PersistCodexQuotaOverdraftProbeUnlessFailed(context.Background(), 77, state)
 +
 +	require.NoError(t, err)
-+	require.Empty(t, accounts)
++	require.False(t, persisted)
++	require.NoError(t, mock.ExpectationsWereMet())
++}
++
++func TestClearCodexQuotaOverdraftPauseIfStateIsAtomic(t *testing.T) {
++	db, mock, err := sqlmock.New()
++	require.NoError(t, err)
++	t.Cleanup(func() { _ = db.Close() })
++
++	reason := service.BuildTempUnschedReasonPayload("codex_quota_overdraft", "quota exhausted")
++	mock.ExpectBegin()
++	mock.ExpectQuery(`(?s)WITH target AS.*codex_quota_overdraft_probe,cycle_key.*FOR UPDATE.*RETURNING target.clear_rate_limit, target.clear_temp`).
++		WithArgs(int64(77), "5h:quota-cycle", "passed", reason).
++		WillReturnRows(sqlmock.NewRows([]string{"clear_rate_limit", "clear_temp"}).AddRow(true, true))
++	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)")).
++		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(77), nil, nil, sqlmock.AnyArg()).
++		WillReturnResult(sqlmock.NewResult(1, 1))
++	mock.ExpectCommit()
++
++	repo := newAccountRepositoryWithSQL(nil, db, nil)
++	clearedRate, clearedTemp, err := repo.ClearCodexQuotaOverdraftPauseIfState(
++		context.Background(),
++		77,
++		"5h:quota-cycle",
++		"passed",
++		reason,
++	)
++
++	require.NoError(t, err)
++	require.True(t, clearedRate)
++	require.True(t, clearedTemp)
++	require.NoError(t, mock.ExpectationsWereMet())
++}
++
++func TestFinalizeCodexQuotaOverdraftBusinessFailureCanReplacePassedState(t *testing.T) {
++	db, mock, err := sqlmock.New()
++	require.NoError(t, err)
++	t.Cleanup(func() { _ = db.Close() })
++
++	now := time.Now().UTC()
++	until := now.Add(5 * time.Hour)
++	state := &service.CodexQuotaOverdraftProbeState{
++		Status:      "failed",
++		CycleKey:    "5h:quota-cycle",
++		QuotaWindow: "5h",
++		Limit:       1,
++		ReasonCode:  "business_quota_limited",
++		StartedAt:   now,
++		RecoverAt:   &until,
++	}
++	reason := service.BuildTempUnschedReasonPayload("codex_quota_overdraft", "quota exhausted")
++
++	mock.ExpectBegin()
++	mock.ExpectExec(`(?s)UPDATE accounts.*'passed', 'inconclusive', 'recovered'`).
++		WithArgs(service.CodexQuotaOverdraftProbeExtraKey, sqlmock.AnyArg(), until, reason, int64(77), state.CycleKey, true).
++		WillReturnResult(sqlmock.NewResult(0, 1))
++	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)")).
++		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(77), nil, nil, sqlmock.AnyArg()).
++		WillReturnResult(sqlmock.NewResult(1, 1))
++	mock.ExpectCommit()
++
++	repo := newAccountRepositoryWithSQL(nil, db, nil)
++	finalized, err := repo.FinalizeCodexQuotaOverdraftProbeFailed(context.Background(), 77, state, until, reason)
++
++	require.NoError(t, err)
++	require.True(t, finalized)
 +	require.NoError(t, mock.ExpectationsWereMet())
 +}
 diff --git a/backend/internal/repository/account_repo_schedulable_projection_test.go b/backend/internal/repository/account_repo_schedulable_projection_test.go
@@ -1792,7 +1926,7 @@ index 3f93f0dfb607f32f078434f1ae1f1e75a05696be..fd7c28dd7a7cd18d07e0165ac6e1b8c9
  	s.srv = newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
  		w.WriteHeader(http.StatusForbidden)
 diff --git a/backend/internal/service/account_test_service.go b/backend/internal/service/account_test_service.go
-index 496ef57aed85879bcfd65564dbf3fa81a81a8223..6a1b94249b06a481cfc92784984f02316c3af942 100644
+index 496ef57aed85879bcfd65564dbf3fa81a81a8223..b4f21f20e73f9d443de98e20554dd94b83d858ca 100644
 --- a/backend/internal/service/account_test_service.go
 +++ b/backend/internal/service/account_test_service.go
 @@ -146,6 +146,7 @@ type AccountTestService struct {
@@ -1803,12 +1937,13 @@ index 496ef57aed85879bcfd65564dbf3fa81a81a8223..6a1b94249b06a481cfc92784984f0231
  	agentIdentityTaskMu       sync.Mutex
  	agentIdentityWS           agentIdentityWSConnectionInvalidator
  	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
-@@ -153,12 +154,23 @@ type AccountTestService struct {
+@@ -153,12 +154,24 @@ type AccountTestService struct {
  	grokWSDialer openAIWSClientDialer
  }
  
 +type codexQuotaOverdraftAccountTestCoordinator interface {
 +	ObserveAccount(account *Account, preferredModel string)
++	ObserveBusinessSuccess(account *Account, preferredModel string)
 +	HandleQuota429(ctx context.Context, account *Account, headers http.Header, body []byte, preferredModel string) bool
 +}
 +
@@ -1827,19 +1962,23 @@ index 496ef57aed85879bcfd65564dbf3fa81a81a8223..6a1b94249b06a481cfc92784984f0231
  // NewAccountTestService creates a new AccountTestService
  func NewAccountTestService(
  	accountRepo AccountRepository,
-@@ -694,6 +706,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
+@@ -694,6 +707,15 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
  	}
  	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
  	payloadBytes, _ := json.Marshal(payload)
-+	if s.codexQuotaOverdraftTestEnabled(account) {
++	overdraftInjected := false
++	if s.codexQuotaOverdraftTestEnabled(account) && codexQuotaOverdraftInjectionEligible(account, time.Now().UTC()) {
++		ctx = WithCodexQuotaOverdraftScheduling(ctx)
 +		if updated, changed, err := injectCodexQuotaOverdraft(payloadBytes); err == nil && changed {
 +			payloadBytes = updated
++			overdraftInjected = true
++			markCodexQuotaOverdraftInjected(ctx, account.ID)
 +		}
 +	}
  
  	// Send test_start event once. A task-invalid Agent Identity response may
  	// restart this probe after registering a replacement task.
-@@ -777,7 +794,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
+@@ -777,7 +799,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
  			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
  		}
  		if resp.StatusCode == http.StatusTooManyRequests {
@@ -1852,7 +1991,7 @@ index 496ef57aed85879bcfd65564dbf3fa81a81a8223..6a1b94249b06a481cfc92784984f0231
  		}
  		// 401 Unauthorized: 标记账号为永久错误
  		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-@@ -786,9 +807,19 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
+@@ -786,9 +812,23 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
  		}
  		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
  	}
@@ -1863,7 +2002,11 @@ index 496ef57aed85879bcfd65564dbf3fa81a81a8223..6a1b94249b06a481cfc92784984f0231
 +		return err
 +	}
 +	if s.codexQuotaOverdraft != nil && s.codexQuotaOverdraftTestEnabled(account) {
-+		s.codexQuotaOverdraft.ObserveAccount(account, upstreamTestModelID)
++		if overdraftInjected {
++			s.codexQuotaOverdraft.ObserveBusinessSuccess(account, upstreamTestModelID)
++		} else {
++			s.codexQuotaOverdraft.ObserveAccount(account, upstreamTestModelID)
++		}
 +	}
 +	return nil
 +}
@@ -1874,7 +2017,7 @@ index 496ef57aed85879bcfd65564dbf3fa81a81a8223..6a1b94249b06a481cfc92784984f0231
  }
  
  // testGrokAccountConnection routes Grok admin connectivity tests by explicit mode first,
-@@ -2568,6 +2599,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
+@@ -2568,6 +2608,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
  		"model": modelID,
  		"input": []map[string]any{
  			{
@@ -1895,15 +2038,16 @@ index 5b4772508439d89e8823c643f61f6f5b8ae67339..8d1f1d7529e42597288f75da3a819d6a
  
  	rec := httptest.NewRecorder()
 diff --git a/backend/internal/service/account_test_service_openai_test.go b/backend/internal/service/account_test_service_openai_test.go
-index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231c266884c 100644
+index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..bc41a4362013036d8092147bd302cd93f1cd8c40 100644
 --- a/backend/internal/service/account_test_service_openai_test.go
 +++ b/backend/internal/service/account_test_service_openai_test.go
-@@ -73,6 +73,35 @@ type openAIAccountTestRepo struct {
+@@ -73,6 +73,42 @@ type openAIAccountTestRepo struct {
  	setErrorMsg        string
  }
  
 +type accountTestOverdraftCoordinatorStub struct {
 +	observeCalls    int
++	businessCalls   int
 +	observedAccount *Account
 +	observedModel   string
 +	handleCalls     int
@@ -1914,6 +2058,12 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
 +
 +func (s *accountTestOverdraftCoordinatorStub) ObserveAccount(account *Account, preferredModel string) {
 +	s.observeCalls++
++	s.observedAccount = account
++	s.observedModel = preferredModel
++}
++
++func (s *accountTestOverdraftCoordinatorStub) ObserveBusinessSuccess(account *Account, preferredModel string) {
++	s.businessCalls++
 +	s.observedAccount = account
 +	s.observedModel = preferredModel
 +}
@@ -1934,7 +2084,7 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
  func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
  	r.updatedExtra = updates
  	return nil
-@@ -137,6 +166,47 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
+@@ -137,6 +173,52 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
  	require.Contains(t, recorder.Body.String(), "test_complete")
  }
  
@@ -1962,6 +2112,10 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
 +		Type:        AccountTypeOAuth,
 +		Concurrency: 1,
 +		Credentials: map[string]any{"access_token": "test-token"},
++		Extra: map[string]any{
++			"codex_5h_used_percent": 95,
++			"codex_5h_reset_at":     time.Now().Add(5 * time.Hour).Format(time.RFC3339),
++		},
 +	}
 +
 +	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -1973,7 +2127,8 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
 +	require.Equal(t, "custom_tool_call", gjson.GetBytes(body, "input.1.type").String())
 +	require.Equal(t, "custom_tool_call_output", gjson.GetBytes(body, "input.2.type").String())
 +	require.Equal(t, gjson.GetBytes(body, "input.1.call_id").String(), gjson.GetBytes(body, "input.2.call_id").String())
-+	require.Equal(t, 1, coordinator.observeCalls)
++	require.Zero(t, coordinator.observeCalls)
++	require.Equal(t, 1, coordinator.businessCalls)
 +	require.Same(t, account, coordinator.observedAccount)
 +	require.Equal(t, "gpt-5.4", coordinator.observedModel)
 +	require.Equal(t, 100.0, account.Extra["codex_5h_used_percent"])
@@ -1982,7 +2137,7 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
  func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
  	gin.SetMode(gin.TestMode)
  	ctx, _ := newTestContext()
-@@ -163,6 +233,8 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
+@@ -163,6 +245,8 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
  	body, err := io.ReadAll(upstream.requests[0].Body)
  	require.NoError(t, err)
  	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(body, "model").String())
@@ -1991,7 +2146,7 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
  }
  
  func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {
-@@ -209,7 +281,13 @@ func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *t
+@@ -209,7 +293,13 @@ func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *t
  		},
  	}
  	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
@@ -2006,7 +2161,7 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
  
  	err := svc.TestAccountConnection(ctx, shadow.ID, "gpt-5.3-codex-spark", "", "")
  	require.NoError(t, err)
-@@ -220,6 +298,9 @@ func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *t
+@@ -220,6 +310,9 @@ func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *t
  	body, err := io.ReadAll(req.Body)
  	require.NoError(t, err)
  	require.Equal(t, "gpt-5.3-codex-spark", gjson.GetBytes(body, "model").String())
@@ -2016,7 +2171,7 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
  	require.Contains(t, recorder.Body.String(), `"success":true`)
  }
  
-@@ -284,6 +365,72 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
+@@ -284,6 +377,72 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
  	require.NotNil(t, account.RateLimitResetAt)
  }
  
@@ -2089,7 +2244,7 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
  func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleError(t *testing.T) {
  	gin.SetMode(gin.TestMode)
  	ctx, _ := newTestContext()
-@@ -432,8 +579,9 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testin
+@@ -432,8 +591,9 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testin
  	resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
  	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
  	svc := &AccountTestService{
@@ -2101,7 +2256,7 @@ index 2cd63ebe3fa98ac99643ce3aa54965eff4d7c008..00813e04e9fe9f99f2580e57ef0d0231
  	}
  	account := &Account{
  		ID:          95,
-@@ -453,6 +601,10 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testin
+@@ -453,6 +613,10 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testin
  	req := upstream.requests[0]
  	require.Equal(t, "https://compat-upstream.example/v1/responses", req.URL.String())
  	requireOpenAICodexProbeHeaders(t, req.Header)
@@ -2225,7 +2380,7 @@ index ace8366a0eb0911f4854c027767f749e15646e5a..076004067c8d2aa027c62bf00e9df2a0
  		return true
  	}
 diff --git a/backend/internal/service/openai_account_scheduler.go b/backend/internal/service/openai_account_scheduler.go
-index 6db0db766d1c2e08be411b716437c8eb1a092a3b..6b4513753def8c1c7886a4ee1178c1ae003f49f4 100644
+index 6db0db766d1c2e08be411b716437c8eb1a092a3b..a5429668c1a8057e4832a2f60e6f9ec10aedab67 100644
 --- a/backend/internal/service/openai_account_scheduler.go
 +++ b/backend/internal/service/openai_account_scheduler.go
 @@ -1395,7 +1395,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
@@ -2237,12 +2392,26 @@ index 6db0db766d1c2e08be411b716437c8eb1a092a3b..6b4513753def8c1c7886a4ee1178c1ae
  		if req.ExcludedIDs != nil {
  			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
  				filterStats.exclude("excluded")
+@@ -2299,9 +2299,12 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
+ 	return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == requiredTransport
+ }
+ 
+-func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, model string, success bool, firstTokenMs *int) {
++func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, model string, success bool, firstTokenMs *int, requestCtx ...context.Context) {
+ 	if success {
+ 		s.clearOpenAIAccountModelTransientState(accountID, normalizeOpenAIAccountModelTransientModel(model))
++		if len(requestCtx) > 0 && s.codexQuotaOverdraft != nil && codexQuotaOverdraftWasInjected(requestCtx[0], accountID) {
++			s.codexQuotaOverdraft.ObserveBusinessSuccessByID(accountID, model)
++		}
+ 	}
+ 	scheduler := s.getOpenAIAccountScheduler(context.Background())
+ 	if scheduler == nil {
 diff --git a/backend/internal/service/openai_codex_quota_overdraft.go b/backend/internal/service/openai_codex_quota_overdraft.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e388d80766f
+index 0000000000000000000000000000000000000000..6274818b94a771f6f604c7c8f19593f0eb5114a7
 --- /dev/null
 +++ b/backend/internal/service/openai_codex_quota_overdraft.go
-@@ -0,0 +1,210 @@
+@@ -0,0 +1,295 @@
 +package service
 +
 +import (
@@ -2251,6 +2420,7 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +	"encoding/hex"
 +	"encoding/json"
 +	"strings"
++	"sync"
 +	"sync/atomic"
 +	"time"
 +
@@ -2258,9 +2428,10 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +)
 +
 +const (
-+	codexQuotaOverdraftCallIDPrefix = "call_sub2api_overdraft_"
-+	codexQuotaOverdraftExecInput    = `const r = await tools.exec_command({"cmd":"true","yield_time_ms":1000,"max_output_tokens":1000}); text(r.output);`
-+	codexQuotaOverdraftMaxBodyBytes = 32 << 20
++	codexQuotaOverdraftCallIDPrefix  = "call_sub2api_overdraft_"
++	codexQuotaOverdraftExecInput     = `const r = await tools.exec_command({"cmd":"true","yield_time_ms":1000,"max_output_tokens":1000}); text(r.output);`
++	codexQuotaOverdraftMaxBodyBytes  = 32 << 20
++	codexQuotaOverdraftPrearmPercent = 95
 +)
 +
 +var codexQuotaOverdraftEnabled atomic.Bool
@@ -2285,6 +2456,10 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +
 +type codexQuotaOverdraftSchedulingCtxKey struct{}
 +
++type codexQuotaOverdraftRequestState struct {
++	injectedAccounts sync.Map
++}
++
 +// WithCodexQuotaOverdraftScheduling marks normal text-generation requests as
 +// eligible for the experimental quota-overdraft behavior. The process-wide
 +// configuration switch is still checked at every scheduling and mutation gate.
@@ -2292,7 +2467,10 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +	if ctx == nil {
 +		ctx = context.Background()
 +	}
-+	return context.WithValue(ctx, codexQuotaOverdraftSchedulingCtxKey{}, true)
++	if codexQuotaOverdraftRequestStateFromContext(ctx) != nil {
++		return ctx
++	}
++	return context.WithValue(ctx, codexQuotaOverdraftSchedulingCtxKey{}, &codexQuotaOverdraftRequestState{})
 +}
 +
 +// CodexQuotaOverdraftSchedulingEnabled reports whether the global switch and
@@ -2301,18 +2479,70 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +	if !CodexQuotaOverdraftEnabled() || ctx == nil {
 +		return false
 +	}
-+	enabled, _ := ctx.Value(codexQuotaOverdraftSchedulingCtxKey{}).(bool)
-+	return enabled
++	return codexQuotaOverdraftRequestStateFromContext(ctx) != nil
 +}
 +
 +func codexQuotaOverdraftSchedulingEnabled(ctx context.Context) bool {
 +	return CodexQuotaOverdraftSchedulingEnabled(ctx)
 +}
 +
++func codexQuotaOverdraftRequestStateFromContext(ctx context.Context) *codexQuotaOverdraftRequestState {
++	if ctx == nil {
++		return nil
++	}
++	state, _ := ctx.Value(codexQuotaOverdraftSchedulingCtxKey{}).(*codexQuotaOverdraftRequestState)
++	return state
++}
++
++func markCodexQuotaOverdraftInjected(ctx context.Context, accountID int64) {
++	if accountID <= 0 {
++		return
++	}
++	if state := codexQuotaOverdraftRequestStateFromContext(ctx); state != nil {
++		state.injectedAccounts.Store(accountID, struct{}{})
++	}
++}
++
++func codexQuotaOverdraftWasInjected(ctx context.Context, accountID int64) bool {
++	if accountID <= 0 {
++		return false
++	}
++	state := codexQuotaOverdraftRequestStateFromContext(ctx)
++	if state == nil {
++		return false
++	}
++	_, ok := state.injectedAccounts.Load(accountID)
++	return ok
++}
++
++func codexQuotaOverdraftInjectionEligible(account *Account, now time.Time) bool {
++	if !isCodexQuotaOverdraftAccount(account) {
++		return false
++	}
++	state, _ := codexQuotaOverdraftStateFromAccount(account)
++	if state != nil && state.RecoverAt != nil && state.RecoverAt.After(now) {
++		switch state.Status {
++		case codexQuotaOverdraftProbePending, codexQuotaOverdraftProbePassed, codexQuotaOverdraftProbeInconclusive:
++			return true
++		case codexQuotaOverdraftProbeFailed:
++			return false
++		}
++	}
++	windowEligible := func(usedKey, resetKey string) bool {
++		if parseExtraFloat64(account.Extra[usedKey]) < codexQuotaOverdraftPrearmPercent {
++			return false
++		}
++		resetAt := codexQuotaOverdraftResetAt(account.Extra[resetKey], now)
++		return resetAt == nil || resetAt.After(now)
++	}
++	return windowEligible("codex_5h_used_percent", "codex_5h_reset_at") ||
++		windowEligible("codex_7d_used_percent", "codex_7d_reset_at")
++}
++
 +func (s *OpenAIGatewayService) shouldInjectCodexQuotaOverdraft(ctx context.Context, account *Account, compact bool) bool {
 +	return codexQuotaOverdraftSchedulingEnabled(ctx) && !compact &&
 +		s != nil && s.cfg != nil && s.cfg.Gateway.CodexQuotaOverdraftEnabled &&
-+		isCodexQuotaOverdraftAccount(account)
++		codexQuotaOverdraftInjectionEligible(account, time.Now().UTC())
 +}
 +
 +func (s *OpenAIGatewayService) prepareCodexQuotaOverdraftBody(ctx context.Context, account *Account, compact bool, body []byte) []byte {
@@ -2320,10 +2550,14 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +		return body
 +	}
 +	updated, changed, _ := injectCodexQuotaOverdraft(body)
-+	if !changed {
-+		return body
++	if changed {
++		markCodexQuotaOverdraftInjected(ctx, account.ID)
++		return updated
 +	}
-+	return updated
++	if codexQuotaOverdraftBodyHasInjection(body) {
++		markCodexQuotaOverdraftInjected(ctx, account.ID)
++	}
++	return body
 +}
 +
 +func (s *OpenAIGatewayService) prepareCodexQuotaOverdraftPayload(ctx context.Context, account *Account, payload map[string]any) map[string]any {
@@ -2335,6 +2569,11 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +		return payload
 +	}
 +	updated, changed, _ := injectCodexQuotaOverdraft(raw)
++	if changed {
++		markCodexQuotaOverdraftInjected(ctx, account.ID)
++	} else if codexQuotaOverdraftBodyHasInjection(raw) {
++		markCodexQuotaOverdraftInjected(ctx, account.ID)
++	}
 +	if !changed {
 +		return payload
 +	}
@@ -2355,6 +2594,26 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +	CallID string `json:"call_id"`
 +}
 +
++func codexQuotaOverdraftBodyHasInjection(body []byte) bool {
++	var document codexQuotaOverdraftDocument
++	if len(body) == 0 || json.Unmarshal(body, &document) != nil {
++		return false
++	}
++	return codexQuotaOverdraftInputHasInjection(document.Input)
++}
++
++func codexQuotaOverdraftInputHasInjection(input []json.RawMessage) bool {
++	for _, raw := range input {
++		var item codexQuotaOverdraftInputItem
++		if err := json.Unmarshal(raw, &item); err == nil &&
++			item.Type == "custom_tool_call" &&
++			strings.HasPrefix(item.CallID, codexQuotaOverdraftCallIDPrefix) {
++			return true
++		}
++	}
++	return false
++}
++
 +// injectCodexQuotaOverdraft appends the same no-op custom tool call pair used by
 +// cpa-account-config-manager. Unsupported request shapes fail open unchanged.
 +func injectCodexQuotaOverdraft(body []byte) ([]byte, bool, error) {
@@ -2370,13 +2629,8 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +		return body, false, nil
 +	}
 +
-+	for _, raw := range document.Input {
-+		var item codexQuotaOverdraftInputItem
-+		if err := json.Unmarshal(raw, &item); err == nil &&
-+			item.Type == "custom_tool_call" &&
-+			strings.HasPrefix(item.CallID, codexQuotaOverdraftCallIDPrefix) {
-+			return body, false, nil
-+		}
++	if codexQuotaOverdraftInputHasInjection(document.Input) {
++		return body, false, nil
 +	}
 +
 +	var last codexQuotaOverdraftInputItem
@@ -2455,10 +2709,10 @@ index 0000000000000000000000000000000000000000..2aba1fd711b4d538fa4230a73ca07e38
 +}
 diff --git a/backend/internal/service/openai_codex_quota_overdraft_probe.go b/backend/internal/service/openai_codex_quota_overdraft_probe.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b56403600fe1
+index 0000000000000000000000000000000000000000..92cc225e63d45aab93bba10c98d9d8e51c34d2d2
 --- /dev/null
 +++ b/backend/internal/service/openai_codex_quota_overdraft_probe.go
-@@ -0,0 +1,1268 @@
+@@ -0,0 +1,1356 @@
 +package service
 +
 +import (
@@ -2488,15 +2742,12 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	codexQuotaOverdraftProbeInconclusive = "inconclusive"
 +	codexQuotaOverdraftProbeRecovered    = "recovered"
 +
-+	codexQuotaOverdraftProbeAttemptLimit   = 5
++	codexQuotaOverdraftProbeAttemptLimit   = 1
 +	codexQuotaOverdraftProbeAttemptTimeout = 20 * time.Second
 +	codexQuotaOverdraftProbePlanTimeout    = codexQuotaOverdraftProbeAttemptLimit * codexQuotaOverdraftProbeAttemptTimeout
 +	codexQuotaOverdraftProbeBodyLimit      = 256 << 10
 +	codexQuotaOverdraftPauseSource         = "codex_quota_overdraft"
 +	codexQuotaOverdraftPersistAttempts     = 3
-+	codexQuotaOverdraftAutomaticRetries    = 3
-+	codexQuotaOverdraftRetrySweepInterval  = time.Minute
-+	codexQuotaOverdraftRetrySweepLimit     = 100
 +
 +	codexQuotaOverdraftFallbackModel      = "gpt-5.5"
 +	codexQuotaOverdraftCompatibilityModel = "gpt-5.4-mini"
@@ -2550,14 +2801,12 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	FinalizeCodexQuotaOverdraftProbeFailed(context.Context, int64, *CodexQuotaOverdraftProbeState, time.Time, string) (bool, error)
 +}
 +
-+type codexQuotaOverdraftDueProbeLister interface {
-+	ListDueCodexQuotaOverdraftProbes(context.Context, time.Time, int) ([]*Account, error)
++type codexQuotaOverdraftNonFailedPersister interface {
++	PersistCodexQuotaOverdraftProbeUnlessFailed(context.Context, int64, *CodexQuotaOverdraftProbeState) (bool, error)
 +}
 +
-+type codexQuotaOverdraftRetryScheduler interface {
-+	Schedule(string, time.Duration, func())
-+	ScheduleRecurring(string, time.Duration, func())
-+	Cancel(string)
++type codexQuotaOverdraftPauseClearer interface {
++	ClearCodexQuotaOverdraftPauseIfState(context.Context, int64, string, string, string) (bool, bool, error)
 +}
 +
 +// CodexQuotaOverdraftCoordinator implements the bounded real-request gate used
@@ -2574,7 +2823,6 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	agentIdentityWS     agentIdentityWSConnectionInvalidator
 +	agentIdentityTaskMu sync.Mutex
 +	running             sync.Map
-+	retryScheduler      codexQuotaOverdraftRetryScheduler
 +	now                 func() time.Time
 +	probeAttemptForTest func(context.Context, *Account, string) codexQuotaOverdraftProbeResult
 +}
@@ -2603,17 +2851,6 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	coordinator.agentIdentityWS, _ = runtimeBlocker.(agentIdentityWSConnectionInvalidator)
 +	return coordinator
 +}
-+
-+// SetRetryScheduler enables active retry timers and a small persisted-state
-+// sweep so inconclusive or stale pending probes resume after a restart.
-+func (c *CodexQuotaOverdraftCoordinator) SetRetryScheduler(scheduler codexQuotaOverdraftRetryScheduler) {
-+	if c == nil || scheduler == nil {
-+		return
-+	}
-+	c.retryScheduler = scheduler
-+	scheduler.ScheduleRecurring("codex-overdraft:retry-sweep", codexQuotaOverdraftRetrySweepInterval, c.resumeDueProbes)
-+}
-+
 +func (c *CodexQuotaOverdraftCoordinator) enabled() bool {
 +	return c != nil && c.cfg != nil && c.cfg.Gateway.CodexQuotaOverdraftEnabled &&
 +		c.accountRepo != nil && c.httpUpstream != nil
@@ -2627,6 +2864,77 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	}
 +	accountCopy := cloneCodexQuotaOverdraftAccount(account)
 +	go c.observeAccount(accountCopy, preferredModel)
++}
++
++// ObserveBusinessSuccess treats a successful request that actually carried the
++// overdraft payload as stronger evidence than a synthetic probe.
++func (c *CodexQuotaOverdraftCoordinator) ObserveBusinessSuccess(account *Account, preferredModel string) {
++	if !c.enabled() || !isCodexQuotaOverdraftAccount(account) || account.ID <= 0 {
++		return
++	}
++	accountCopy := cloneCodexQuotaOverdraftAccount(account)
++	go c.observeBusinessSuccess(accountCopy, preferredModel)
++}
++
++func (c *CodexQuotaOverdraftCoordinator) ObserveBusinessSuccessByID(accountID int64, preferredModel string) {
++	if !c.enabled() || accountID <= 0 {
++		return
++	}
++	go func() {
++		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++		account, err := c.accountRepo.GetByID(ctx, accountID)
++		cancel()
++		if err != nil || !isCodexQuotaOverdraftAccount(account) {
++			return
++		}
++		c.observeBusinessSuccess(account, preferredModel)
++	}()
++}
++
++func (c *CodexQuotaOverdraftCoordinator) observeBusinessSuccess(account *Account, preferredModel string) {
++	if account == nil {
++		return
++	}
++	now := c.currentTime()
++	current, _ := codexQuotaOverdraftStateFromAccount(account)
++	signal, exhausted := codexQuotaOverdraftSignalFromAccount(account, current, now)
++	if !exhausted {
++		return
++	}
++	if current != nil && current.Status == codexQuotaOverdraftProbePassed && codexQuotaOverdraftStateCoversSignal(current, signal) {
++		return
++	}
++	if current != nil && current.Status == codexQuotaOverdraftProbeFailed && codexQuotaOverdraftStateCoversSignal(current, signal) {
++		return
++	}
++	state := &CodexQuotaOverdraftProbeState{
++		Status:            codexQuotaOverdraftProbePassed,
++		QuotaWindow:       signal.Window,
++		CycleKey:          signal.CycleKey,
++		Attempts:          1,
++		Limit:             codexQuotaOverdraftProbeAttemptLimit,
++		Model:             strings.TrimSpace(preferredModel),
++		ReasonCode:        "business_request_ok",
++		StartedAt:         now,
++		TestedAt:          codexQuotaOverdraftTimePtr(now),
++		RecoverAt:         codexQuotaOverdraftTimePtr(signal.RecoverAt),
++		FiveHourRecoverAt: cloneTimePtr(signal.FiveHourRecoverAt),
++		SevenDayRecoverAt: cloneTimePtr(signal.SevenDayRecoverAt),
++		ObservedRateLimit: cloneTimePtr(account.RateLimitResetAt),
++	}
++	carryCodexQuotaOverdraftWindowStarts(state, current, signal, now)
++	startCodexQuotaOverdraftWindows(state, signal, now)
++	if !c.persistNonFailedState(account.ID, state) {
++		return
++	}
++	mergeAccountExtra(account, map[string]any{CodexQuotaOverdraftProbeExtraKey: state})
++	c.clearQuotaPause(account.ID, state)
++	slog.Info("codex_quota_overdraft_business_passed",
++		"account_id", account.ID,
++		"model", state.Model,
++		"quota_window", signal.Window,
++		"cycle_key", signal.CycleKey,
++	)
 +}
 +
 +func (c *CodexQuotaOverdraftCoordinator) observeAccount(account *Account, preferredModel string) {
@@ -2677,7 +2985,79 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	if signal.CycleKey == "" {
 +		return false
 +	}
++	if codexQuotaOverdraftWasInjected(ctx, account.ID) {
++		return c.finishBusinessQuotaFailure(accountCopy, signal, preferredModel)
++	}
 +	c.startProbe(accountCopy, signal, preferredModel)
++	return true
++}
++
++func (c *CodexQuotaOverdraftCoordinator) finishBusinessQuotaFailure(
++	account *Account,
++	signal codexQuotaOverdraftSignal,
++	preferredModel string,
++) bool {
++	if account == nil || signal.CycleKey == "" {
++		return false
++	}
++	now := c.currentTime()
++	current, hasCurrent := codexQuotaOverdraftStateFromAccount(account)
++	if hasCurrent && codexQuotaOverdraftStateCoversSignal(current, signal) && current.Status == codexQuotaOverdraftProbeFailed {
++		return c.ensureFailedPause(account, current)
++	}
++	if !hasCurrent || !codexQuotaOverdraftStateCoversSignal(current, signal) {
++		current = &CodexQuotaOverdraftProbeState{
++			Status:            codexQuotaOverdraftProbePending,
++			QuotaWindow:       signal.Window,
++			CycleKey:          signal.CycleKey,
++			Limit:             codexQuotaOverdraftProbeAttemptLimit,
++			StartedAt:         now,
++			RecoverAt:         codexQuotaOverdraftTimePtr(signal.RecoverAt),
++			FiveHourRecoverAt: cloneTimePtr(signal.FiveHourRecoverAt),
++			SevenDayRecoverAt: cloneTimePtr(signal.SevenDayRecoverAt),
++			ObservedRateLimit: cloneTimePtr(account.RateLimitResetAt),
++		}
++		claimed, err := c.claimProbe(account.ID, current)
++		if err != nil {
++			slog.Warn("codex_quota_overdraft_business_failure_claim_failed", "account_id", account.ID, "error", err)
++			return false
++		}
++		if !claimed {
++			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++			latest, loadErr := c.accountRepo.GetByID(ctx, account.ID)
++			cancel()
++			latestState, ok := codexQuotaOverdraftStateFromAccount(latest)
++			if loadErr != nil || !ok || !codexQuotaOverdraftStateCoversSignal(latestState, signal) {
++				return false
++			}
++			account = latest
++			current = latestState
++			if current.Status == codexQuotaOverdraftProbeFailed {
++				return c.ensureFailedPause(account, current)
++			}
++		}
++	}
++	state := *current
++	state.Status = codexQuotaOverdraftProbeFailed
++	if state.Attempts < 1 {
++		state.Attempts = 1
++	}
++	state.Model = strings.TrimSpace(preferredModel)
++	state.ReasonCode = "business_quota_limited"
++	state.TestedAt = codexQuotaOverdraftTimePtr(now)
++	state.RetryAt = nil
++	state.RecoverAt = codexQuotaOverdraftTimePtr(signal.RecoverAt)
++	state.FiveHourRecoverAt = cloneTimePtr(signal.FiveHourRecoverAt)
++	state.SevenDayRecoverAt = cloneTimePtr(signal.SevenDayRecoverAt)
++	if !c.ensureFailedPause(account, &state) {
++		return false
++	}
++	slog.Warn("codex_quota_overdraft_business_exhausted",
++		"account_id", account.ID,
++		"model", state.Model,
++		"quota_window", signal.Window,
++		"recover_at", state.RecoverAt,
++	)
 +	return true
 +}
 +
@@ -2693,14 +3073,8 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +		case codexQuotaOverdraftProbeFailed:
 +			c.ensureFailedPause(account, current)
 +			return
-+		case codexQuotaOverdraftProbePending:
-+			if c.currentTime().Sub(current.StartedAt) < 2*time.Minute {
-+				return
-+			}
-+		case codexQuotaOverdraftProbeInconclusive:
-+			if current.RetryAt != nil && c.currentTime().Before(*current.RetryAt) {
-+				return
-+			}
++		case codexQuotaOverdraftProbePending, codexQuotaOverdraftProbeInconclusive:
++			return
 +		}
 +	}
 +
@@ -2715,9 +3089,6 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +		FiveHourRecoverAt: cloneTimePtr(signal.FiveHourRecoverAt),
 +		SevenDayRecoverAt: cloneTimePtr(signal.SevenDayRecoverAt),
 +		ObservedRateLimit: cloneTimePtr(account.RateLimitResetAt),
-+	}
-+	if current != nil && codexQuotaOverdraftStateCoversSignal(current, signal) {
-+		state.RetryCount = current.RetryCount
 +	}
 +	carryCodexQuotaOverdraftWindowStarts(state, current, signal, startedAt)
 +	claimed, err := c.claimProbe(account.ID, state)
@@ -2763,7 +3134,7 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +
 +	account, err := c.accountRepo.GetByID(planCtx, accountID)
 +	if err != nil || !isCodexQuotaOverdraftAccount(account) {
-+		c.finishInconclusive(accountID, signal, preferredModel, state, "upstream_unavailable")
++		c.finishInconclusive(accountID, state, "upstream_unavailable")
 +		return
 +	}
 +	models := codexQuotaOverdraftProbeModels(preferredModel)
@@ -2771,7 +3142,7 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	quotaLimitedAttempts := 0
 +	for attempt := 0; attempt < codexQuotaOverdraftProbeAttemptLimit; attempt++ {
 +		if planCtx.Err() != nil {
-+			c.finishInconclusive(accountID, signal, preferredModel, state, "request_timeout")
++			c.finishInconclusive(accountID, state, "request_timeout")
 +			return
 +		}
 +		model := models[attempt%len(models)]
@@ -2797,40 +3168,40 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +			"reason", result.ReasonCode,
 +			"quota_window", signal.Window,
 +		)
-+		c.persistState(accountID, state)
-+
 +		if result.Status == "available" {
 +			state.Status = codexQuotaOverdraftProbePassed
 +			state.ReasonCode = "model_response_ok"
 +			state.RetryAt = nil
++			state.RetryCount = 0
 +			startCodexQuotaOverdraftWindows(state, signal, testedAt)
-+			c.persistState(accountID, state)
-+			c.cancelRetry(accountID)
++			if !c.persistNonFailedState(accountID, state) {
++				return
++			}
 +			c.clearQuotaPause(accountID, state)
 +			slog.Info("codex_quota_overdraft_probe_passed", "account_id", accountID, "attempts", state.Attempts, "model", state.Model, "quota_window", signal.Window)
 +			return
 +		}
 +		if result.Status == "inconclusive" {
-+			c.finishInconclusive(accountID, signal, preferredModel, state, result.ReasonCode)
++			c.finishInconclusive(accountID, state, result.ReasonCode)
 +			return
 +		}
 +		if result.Status == "authentication_failed" {
 +			if c.rateLimitService != nil {
 +				c.rateLimitService.HandleUpstreamError(context.Background(), account, result.StatusCode, result.Headers, result.Body)
 +			}
-+			c.finishInconclusive(accountID, signal, preferredModel, state, result.ReasonCode)
++			c.finishInconclusive(accountID, state, result.ReasonCode)
 +			return
 +		}
 +	}
 +	if quotaLimitedAttempts < codexQuotaOverdraftProbeAttemptLimit {
-+		c.finishInconclusive(accountID, signal, preferredModel, state, lastReason)
++		c.finishInconclusive(accountID, state, lastReason)
 +		return
 +	}
 +
 +	state.Status = codexQuotaOverdraftProbeFailed
 +	state.ReasonCode = lastReason
 +	state.RetryAt = nil
-+	c.cancelRetry(accountID)
++	state.RetryCount = 0
 +	if !c.ensureFailedPause(account, state) {
 +		return
 +	}
@@ -2839,148 +3210,23 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +
 +func (c *CodexQuotaOverdraftCoordinator) finishInconclusive(
 +	accountID int64,
-+	signal codexQuotaOverdraftSignal,
-+	preferredModel string,
 +	state *CodexQuotaOverdraftProbeState,
 +	reason string,
 +) {
 +	now := c.currentTime().UTC()
-+	retryable := reason != "authentication_failed" && reason != "account_deactivated"
 +	state.Status = codexQuotaOverdraftProbeInconclusive
 +	state.ReasonCode = reason
 +	state.TestedAt = &now
 +	state.RetryAt = nil
-+	if retryable && state.RetryCount < codexQuotaOverdraftAutomaticRetries {
-+		state.RetryCount++
-+		retryAt := now.Add(codexQuotaOverdraftRetryDelay(state.RetryCount))
-+		state.RetryAt = &retryAt
-+	}
-+	c.persistState(accountID, state)
-+	if state.RetryAt != nil {
-+		c.scheduleRetry(accountID, signal.CycleKey, preferredModel, *state.RetryAt)
++	state.RetryCount = 0
++	if !c.persistNonFailedState(accountID, state) {
++		return
 +	}
 +	slog.Warn("codex_quota_overdraft_probe_inconclusive",
 +		"account_id", accountID,
 +		"attempts", state.Attempts,
 +		"reason", reason,
-+		"retry_count", state.RetryCount,
-+		"retry_at", state.RetryAt,
 +	)
-+}
-+
-+func codexQuotaOverdraftRetryDelay(retryCount int) time.Duration {
-+	switch retryCount {
-+	case 1:
-+		return time.Minute
-+	case 2:
-+		return 3 * time.Minute
-+	default:
-+		return 10 * time.Minute
-+	}
-+}
-+
-+func codexQuotaOverdraftRetryTaskName(accountID int64) string {
-+	return fmt.Sprintf("codex-overdraft:retry:%d", accountID)
-+}
-+
-+func (c *CodexQuotaOverdraftCoordinator) scheduleRetry(accountID int64, cycleKey, preferredModel string, retryAt time.Time) {
-+	if c == nil || c.retryScheduler == nil || accountID <= 0 {
-+		return
-+	}
-+	delay := retryAt.Sub(c.currentTime())
-+	if delay < time.Second {
-+		delay = time.Second
-+	}
-+	name := codexQuotaOverdraftRetryTaskName(accountID)
-+	c.retryScheduler.Schedule(name, delay, func() {
-+		c.resumeProbe(accountID, cycleKey, preferredModel)
-+	})
-+	slog.Info("codex_quota_overdraft_retry_scheduled",
-+		"account_id", accountID,
-+		"cycle_key", cycleKey,
-+		"retry_at", retryAt,
-+	)
-+}
-+
-+func (c *CodexQuotaOverdraftCoordinator) cancelRetry(accountID int64) {
-+	if c == nil || c.retryScheduler == nil || accountID <= 0 {
-+		return
-+	}
-+	c.retryScheduler.Cancel(codexQuotaOverdraftRetryTaskName(accountID))
-+}
-+
-+func (c *CodexQuotaOverdraftCoordinator) resumeProbe(accountID int64, cycleKey, preferredModel string) {
-+	if !c.enabled() || accountID <= 0 {
-+		return
-+	}
-+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-+	account, err := c.accountRepo.GetByID(ctx, accountID)
-+	cancel()
-+	if err != nil || !isCodexQuotaOverdraftAccount(account) {
-+		slog.Warn("codex_quota_overdraft_retry_load_failed", "account_id", accountID, "error", err)
-+		return
-+	}
-+	state, ok := codexQuotaOverdraftStateFromAccount(account)
-+	if !ok || (cycleKey != "" && state.CycleKey != cycleKey) {
-+		return
-+	}
-+	switch state.Status {
-+	case codexQuotaOverdraftProbeInconclusive:
-+		if state.RetryAt == nil {
-+			return
-+		}
-+		if c.currentTime().Before(*state.RetryAt) {
-+			c.scheduleRetry(accountID, state.CycleKey, preferredModel, *state.RetryAt)
-+			return
-+		}
-+	case codexQuotaOverdraftProbePending:
-+		staleAt := state.StartedAt.Add(2 * time.Minute)
-+		if c.currentTime().Before(staleAt) {
-+			c.scheduleRetry(accountID, state.CycleKey, preferredModel, staleAt)
-+			return
-+		}
-+	default:
-+		return
-+	}
-+	if strings.TrimSpace(preferredModel) == "" {
-+		preferredModel = state.Model
-+	}
-+	slog.Info("codex_quota_overdraft_retry_started",
-+		"account_id", accountID,
-+		"cycle_key", state.CycleKey,
-+		"retry_count", state.RetryCount,
-+	)
-+	c.observeAccount(account, preferredModel)
-+}
-+
-+func (c *CodexQuotaOverdraftCoordinator) resumeDueProbes() {
-+	if !c.enabled() {
-+		return
-+	}
-+	lister, ok := c.accountRepo.(codexQuotaOverdraftDueProbeLister)
-+	if !ok {
-+		return
-+	}
-+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-+	accounts, err := lister.ListDueCodexQuotaOverdraftProbes(ctx, c.currentTime(), codexQuotaOverdraftRetrySweepLimit)
-+	cancel()
-+	if err != nil {
-+		slog.Warn("codex_quota_overdraft_retry_sweep_failed", "error", err)
-+		return
-+	}
-+	for _, account := range accounts {
-+		if account == nil {
-+			continue
-+		}
-+		state, _ := codexQuotaOverdraftStateFromAccount(account)
-+		cycleKey := ""
-+		preferredModel := ""
-+		if state != nil {
-+			cycleKey = state.CycleKey
-+			preferredModel = state.Model
-+		}
-+		go c.resumeProbe(account.ID, cycleKey, preferredModel)
-+	}
 +}
 +
 +func (c *CodexQuotaOverdraftCoordinator) runProbeAttempt(ctx context.Context, account *Account, model string) codexQuotaOverdraftProbeResult {
@@ -3158,6 +3404,39 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	return false
 +}
 +
++// persistNonFailedState keeps an already-confirmed quota failure terminal for
++// the current cycle, even when a concurrent success or probe finishes later.
++func (c *CodexQuotaOverdraftCoordinator) persistNonFailedState(accountID int64, state *CodexQuotaOverdraftProbeState) bool {
++	if state == nil || state.Status == codexQuotaOverdraftProbeFailed {
++		return false
++	}
++	persister, ok := c.accountRepo.(codexQuotaOverdraftNonFailedPersister)
++	if !ok {
++		return c.persistState(accountID, state)
++	}
++	var (
++		persisted bool
++		lastErr   error
++	)
++	for attempt := 1; attempt <= codexQuotaOverdraftPersistAttempts; attempt++ {
++		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++		persisted, lastErr = persister.PersistCodexQuotaOverdraftProbeUnlessFailed(ctx, accountID, state)
++		cancel()
++		if lastErr == nil {
++			return persisted
++		}
++		if attempt < codexQuotaOverdraftPersistAttempts {
++			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
++		}
++	}
++	slog.Warn("codex_quota_overdraft_state_persist_failed",
++		"account_id", accountID,
++		"attempts", codexQuotaOverdraftPersistAttempts,
++		"error", lastErr,
++	)
++	return false
++}
++
 +func (c *CodexQuotaOverdraftCoordinator) ensureFailedPause(account *Account, state *CodexQuotaOverdraftProbeState) bool {
 +	if account == nil || state == nil || state.RecoverAt == nil || !state.RecoverAt.After(c.currentTime()) {
 +		return false
@@ -3167,7 +3446,7 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +		account.TempUnschedulableUntil != nil && !account.TempUnschedulableUntil.Before(*state.RecoverAt) {
 +		return true
 +	}
-+	reason := BuildTempUnschedReasonPayload(codexQuotaOverdraftPauseSource, "five real overdraft probes confirmed quota exhaustion")
++	reason := BuildTempUnschedReasonPayload(codexQuotaOverdraftPauseSource, "injected overdraft request confirmed quota exhaustion")
 +	if finalizer, ok := c.accountRepo.(codexQuotaOverdraftFailedFinalizer); ok {
 +		finalized := false
 +		var lastErr error
@@ -3219,7 +3498,6 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +			return false
 +		}
 +	}
-+	c.cancelRetry(account.ID)
 +	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 +	defer cancel()
 +	if c.tempUnschedCache != nil {
@@ -3227,7 +3505,7 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +			UntilUnix:       state.RecoverAt.Unix(),
 +			TriggeredAtUnix: c.currentTime().Unix(),
 +			StatusCode:      http.StatusTooManyRequests,
-+			ErrorMessage:    "five real overdraft probes confirmed quota exhaustion",
++			ErrorMessage:    "injected overdraft request confirmed quota exhaustion",
 +		})
 +	}
 +	if c.runtimeBlocker != nil {
@@ -3238,17 +3516,46 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +}
 +
 +func (c *CodexQuotaOverdraftCoordinator) clearQuotaPause(accountID int64, state *CodexQuotaOverdraftProbeState) {
-+	c.cancelRetry(accountID)
 +	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 +	defer cancel()
 +	account, err := c.accountRepo.GetByID(ctx, accountID)
 +	if err != nil || account == nil {
 +		return
 +	}
++	persisted, ok := codexQuotaOverdraftStateFromAccount(account)
++	if !ok || state == nil || persisted.CycleKey != state.CycleKey || persisted.Status != state.Status ||
++		(state.Status != codexQuotaOverdraftProbePassed && state.Status != codexQuotaOverdraftProbeRecovered) {
++		return
++	}
++	expectedTempReason := ""
++	if IsAccountSchedulingThresholdReason(account.TempUnschedulableReason) || codexQuotaOverdraftPauseReason(account.TempUnschedulableReason) {
++		expectedTempReason = account.TempUnschedulableReason
++	}
++	if clearer, ok := c.accountRepo.(codexQuotaOverdraftPauseClearer); ok {
++		clearedRateLimit, clearedTemp, clearErr := clearer.ClearCodexQuotaOverdraftPauseIfState(
++			ctx,
++			accountID,
++			state.CycleKey,
++			state.Status,
++			expectedTempReason,
++		)
++		if clearErr != nil {
++			slog.Warn("codex_quota_overdraft_stale_rate_limit_clear_failed", "account_id", accountID, "error", clearErr)
++			return
++		}
++		if clearedRateLimit {
++			slog.Info("codex_quota_overdraft_stale_rate_limit_cleared", "account_id", accountID, "probe_status", state.Status)
++		}
++		if clearedTemp && c.tempUnschedCache != nil {
++			_ = c.tempUnschedCache.DeleteTempUnsched(ctx, accountID)
++		}
++		if (clearedRateLimit || clearedTemp) && c.runtimeBlocker != nil {
++			c.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
++		}
++		return
++	}
 +	clearedSchedulingState := false
-+	probeProvedAvailable := state != nil &&
-+		(state.Status == codexQuotaOverdraftProbePassed || state.Status == codexQuotaOverdraftProbeRecovered)
-+	if probeProvedAvailable && account.RateLimitResetAt != nil {
++	if account.RateLimitResetAt != nil {
 +		staleResetAt := account.RateLimitResetAt.UTC()
 +		if err := c.accountRepo.ClearRateLimit(ctx, accountID); err != nil {
 +			slog.Warn("codex_quota_overdraft_stale_rate_limit_clear_failed", "account_id", accountID, "reset_at", staleResetAt, "error", err)
@@ -3257,7 +3564,7 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +			slog.Info("codex_quota_overdraft_stale_rate_limit_cleared", "account_id", accountID, "reset_at", staleResetAt, "probe_status", state.Status)
 +		}
 +	}
-+	if IsAccountSchedulingThresholdReason(account.TempUnschedulableReason) || codexQuotaOverdraftPauseReason(account.TempUnschedulableReason) {
++	if expectedTempReason != "" {
 +		_ = c.accountRepo.ClearTempUnschedulable(ctx, accountID)
 +		clearedSchedulingState = true
 +		if c.tempUnschedCache != nil {
@@ -3314,15 +3621,9 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +}
 +
 +func codexQuotaOverdraftResponseIsQuotaLimited(headers http.Header, body []byte) bool {
-+	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
-+		if normalized := snapshot.Normalize(); normalized != nil &&
-+			(normalized.Used5hPercent != nil && *normalized.Used5hPercent >= 100 ||
-+				normalized.Used7dPercent != nil && *normalized.Used7dPercent >= 100) {
-+			return true
-+		}
-+	}
 +	var payload any
-+	if len(bytes.TrimSpace(body)) > 0 && json.Unmarshal(body, &payload) == nil && codexQuotaOverdraftJSONHasQuotaEvidence(payload, 0) {
++	parsedPayload := len(bytes.TrimSpace(body)) > 0 && json.Unmarshal(body, &payload) == nil
++	if parsedPayload && codexQuotaOverdraftJSONHasQuotaEvidence(payload, 0) {
 +		return true
 +	}
 +	text := strings.ToLower(strings.Join(strings.Fields(string(body)), " "))
@@ -3336,6 +3637,16 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +		"weekly_limit_reached",
 +	} {
 +		if strings.Contains(text, marker) {
++			return true
++		}
++	}
++	if parsedPayload && codexQuotaOverdraftJSONHasTransientRateLimitEvidence(payload, 0) {
++		return false
++	}
++	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
++		if normalized := snapshot.Normalize(); normalized != nil &&
++			(normalized.Used5hPercent != nil && *normalized.Used5hPercent >= 100 ||
++				normalized.Used7dPercent != nil && *normalized.Used7dPercent >= 100) {
 +			return true
 +		}
 +	}
@@ -3403,6 +3714,37 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	default:
 +		return false
 +	}
++}
++
++func codexQuotaOverdraftJSONHasTransientRateLimitEvidence(value any, depth int) bool {
++	if depth > 6 {
++		return false
++	}
++	switch typed := value.(type) {
++	case map[string]any:
++		for key, raw := range typed {
++			normalizedKey := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"))
++			if normalizedKey == "type" || normalizedKey == "code" || normalizedKey == "reason" || normalizedKey == "error_code" {
++				if marker, ok := raw.(string); ok {
++					marker = strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(strings.TrimSpace(marker)))
++					switch marker {
++					case "rate_limit_exceeded", "too_many_requests", "request_rate_limited", "token_rate_limited":
++						return true
++					}
++				}
++			}
++			if codexQuotaOverdraftJSONHasTransientRateLimitEvidence(raw, depth+1) {
++				return true
++			}
++		}
++	case []any:
++		for _, item := range typed {
++			if codexQuotaOverdraftJSONHasTransientRateLimitEvidence(item, depth+1) {
++				return true
++			}
++		}
++	}
++	return false
 +}
 +
 +func codexQuotaOverdraftSignalFromAccount(account *Account, state *CodexQuotaOverdraftProbeState, now time.Time) (codexQuotaOverdraftSignal, bool) {
@@ -3518,7 +3860,7 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +}
 +
 +func codexQuotaOverdraftSchedulingAllowed(account *Account, now time.Time) bool {
-+	if !isCodexQuotaOverdraftAccount(account) {
++	if !codexQuotaOverdraftInjectionEligible(account, now) {
 +		return false
 +	}
 +	state, _ := codexQuotaOverdraftStateFromAccount(account)
@@ -3529,12 +3871,12 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +	return state.Status != codexQuotaOverdraftProbeFailed
 +}
 +
-+func codexQuotaOverdraftSnapshotExhausted(updates map[string]any) bool {
++func codexQuotaOverdraftSnapshotPrearmReached(updates map[string]any) bool {
 +	if len(updates) == 0 {
 +		return false
 +	}
-+	return parseExtraFloat64(updates["codex_5h_used_percent"]) >= 100 ||
-+		parseExtraFloat64(updates["codex_7d_used_percent"]) >= 100
++	return parseExtraFloat64(updates["codex_5h_used_percent"]) >= codexQuotaOverdraftPrearmPercent ||
++		parseExtraFloat64(updates["codex_7d_used_percent"]) >= codexQuotaOverdraftPrearmPercent
 +}
 +
 +func applyCodexQuotaOverdraftUsage(
@@ -3729,10 +4071,10 @@ index 0000000000000000000000000000000000000000..a1ace2fe77c4e7e915ed1f1b92a3b564
 +}
 diff --git a/backend/internal/service/openai_codex_quota_overdraft_probe_test.go b/backend/internal/service/openai_codex_quota_overdraft_probe_test.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac3910a501e9
+index 0000000000000000000000000000000000000000..31ea45f69f093ceee1b0bf1c2e26d0d1e9598fd6
 --- /dev/null
 +++ b/backend/internal/service/openai_codex_quota_overdraft_probe_test.go
-@@ -0,0 +1,523 @@
+@@ -0,0 +1,581 @@
 +//go:build unit
 +
 +package service
@@ -3745,6 +4087,7 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +	"testing"
 +	"time"
 +
++	"github.com/Wei-Shaw/sub2api/internal/config"
 +	"github.com/stretchr/testify/require"
 +)
 +
@@ -3761,28 +4104,16 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +	clearCalls int
 +}
 +
-+type codexOverdraftRetrySchedulerStub struct {
-+	scheduledName  string
-+	scheduledDelay time.Duration
-+	scheduledFn    func()
-+	recurringName  string
-+	recurringDelay time.Duration
-+	canceledName   string
++type codexOverdraftClaimConflictRepoStub struct {
++	*codexOverdraftProbeRepoStub
 +}
 +
-+func (s *codexOverdraftRetrySchedulerStub) Schedule(name string, delay time.Duration, fn func()) {
-+	s.scheduledName = name
-+	s.scheduledDelay = delay
-+	s.scheduledFn = fn
-+}
-+
-+func (s *codexOverdraftRetrySchedulerStub) ScheduleRecurring(name string, delay time.Duration, _ func()) {
-+	s.recurringName = name
-+	s.recurringDelay = delay
-+}
-+
-+func (s *codexOverdraftRetrySchedulerStub) Cancel(name string) {
-+	s.canceledName = name
++func (r *codexOverdraftClaimConflictRepoStub) ClaimCodexQuotaOverdraftProbe(
++	context.Context,
++	int64,
++	*CodexQuotaOverdraftProbeState,
++) (bool, error) {
++	return false, nil
 +}
 +
 +func (b *codexOverdraftRuntimeBlockerStub) BlockAccountScheduling(*Account, time.Time, string) {}
@@ -3843,7 +4174,7 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +	}
 +}
 +
-+func TestCodexQuotaOverdraftProbeModelsMatchPluginRotation(t *testing.T) {
++func TestCodexQuotaOverdraftProbeUsesOnePreferredModel(t *testing.T) {
 +	models := codexQuotaOverdraftProbeModels("gpt-5.4")
 +	require.Equal(t, []string{"gpt-5.4", "gpt-5.5", "gpt-5.4-mini"}, models)
 +
@@ -3851,7 +4182,7 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +	for attempt := 0; attempt < codexQuotaOverdraftProbeAttemptLimit; attempt++ {
 +		got = append(got, models[attempt%len(models)])
 +	}
-+	require.Equal(t, []string{"gpt-5.4", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4", "gpt-5.5"}, got)
++	require.Equal(t, []string{"gpt-5.4"}, got)
 +}
 +
 +func TestCodexQuotaOverdraftSignalsKeepFiveHourAndSevenDayCyclesSeparate(t *testing.T) {
@@ -3876,18 +4207,15 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +	require.Contains(t, multiple.CycleKey, "|7d:")
 +}
 +
-+func TestCodexQuotaOverdraftProbePassesOnAnySuccessfulAttempt(t *testing.T) {
++func TestCodexQuotaOverdraftSingleProbePassesOnSuccess(t *testing.T) {
 +	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
 +	account := newCodexOverdraftProbeTestAccount(now)
 +	repo := &codexOverdraftProbeRepoStub{account: account}
 +	coordinator := &CodexQuotaOverdraftCoordinator{accountRepo: repo, now: func() time.Time { return now }}
-+	models := make([]string, 0, 3)
++	models := make([]string, 0, 1)
 +	coordinator.probeAttemptForTest = func(_ context.Context, _ *Account, model string) codexQuotaOverdraftProbeResult {
 +		models = append(models, model)
-+		if len(models) == 3 {
-+			return codexQuotaOverdraftProbeResult{Status: "available", ReasonCode: "model_response_ok", StatusCode: http.StatusOK, Model: model}
-+		}
-+		return codexQuotaOverdraftProbeResult{Status: "retry", ReasonCode: "quota_limited", StatusCode: http.StatusTooManyRequests, Model: model}
++		return codexQuotaOverdraftProbeResult{Status: "available", ReasonCode: "model_response_ok", StatusCode: http.StatusOK, Model: model}
 +	}
 +	signal, exhausted := codexQuotaOverdraftSignalFromAccount(account, nil, now)
 +	require.True(t, exhausted)
@@ -3896,13 +4224,13 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +	coordinator.runProbePlan(account.ID, signal, "gpt-5.4", state)
 +
 +	require.Equal(t, codexQuotaOverdraftProbePassed, state.Status)
-+	require.Equal(t, 3, state.Attempts)
-+	require.Equal(t, []string{"gpt-5.4", "gpt-5.5", "gpt-5.4-mini"}, models)
++	require.Equal(t, 1, state.Attempts)
++	require.Equal(t, []string{"gpt-5.4"}, models)
 +	require.NotNil(t, state.FiveHourStartedAt)
 +	require.Zero(t, repo.tempPauseCalls)
 +}
 +
-+func TestCodexQuotaOverdraftProbeRequiresFiveExplicitQuotaFailures(t *testing.T) {
++func TestCodexQuotaOverdraftSingleProbeQuotaFailurePauses(t *testing.T) {
 +	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
 +	account := newCodexOverdraftProbeTestAccount(now)
 +	repo := &codexOverdraftProbeRepoStub{account: account}
@@ -3923,6 +4251,129 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +	require.Equal(t, 1, repo.tempPauseCalls)
 +	require.True(t, codexQuotaOverdraftPauseReason(account.TempUnschedulableReason))
 +	require.False(t, codexQuotaOverdraftSchedulingAllowed(account, now), "同周期确认失败后不得继续绕过限额")
++}
++
++func TestCodexQuotaOverdraftBusinessSuccessAtExhaustionPassesWithoutProbe(t *testing.T) {
++	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
++	account := newCodexOverdraftProbeTestAccount(now)
++	repo := &codexOverdraftProbeRepoStub{account: account}
++	coordinator := &CodexQuotaOverdraftCoordinator{accountRepo: repo, now: func() time.Time { return now }}
++
++	coordinator.observeBusinessSuccess(account, "gpt-5.4")
++
++	state, ok := codexQuotaOverdraftStateFromAccount(account)
++	require.True(t, ok)
++	require.Equal(t, codexQuotaOverdraftProbePassed, state.Status)
++	require.Equal(t, "business_request_ok", state.ReasonCode)
++	require.Equal(t, "gpt-5.4", state.Model)
++	require.Equal(t, 1, state.Attempts)
++	require.Equal(t, 1, state.Limit)
++	require.NotNil(t, state.FiveHourStartedAt)
++}
++
++func TestCodexQuotaOverdraftBusinessSuccessCannotReplaceFailedCycle(t *testing.T) {
++	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
++	account := newCodexOverdraftProbeTestAccount(now)
++	signal, _ := codexQuotaOverdraftSignalFromAccount(account, nil, now)
++	failed := newCodexOverdraftPendingState(signal, now)
++	failed.Status = codexQuotaOverdraftProbeFailed
++	failed.ReasonCode = "business_quota_limited"
++	account.Extra[CodexQuotaOverdraftProbeExtraKey] = failed
++	repo := &codexOverdraftProbeRepoStub{account: account}
++	coordinator := &CodexQuotaOverdraftCoordinator{accountRepo: repo, now: func() time.Time { return now }}
++
++	coordinator.observeBusinessSuccess(account, "gpt-5.4")
++
++	state, ok := codexQuotaOverdraftStateFromAccount(account)
++	require.True(t, ok)
++	require.Equal(t, codexQuotaOverdraftProbeFailed, state.Status)
++	require.Empty(t, repo.states)
++}
++
++func TestCodexQuotaOverdraftInjectedBusinessQuota429FailsImmediately(t *testing.T) {
++	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
++	account := newCodexOverdraftProbeTestAccount(now)
++	repo := &codexOverdraftProbeRepoStub{account: account}
++	coordinator := &CodexQuotaOverdraftCoordinator{
++		accountRepo:  repo,
++		httpUpstream: &queuedHTTPUpstream{},
++		cfg: &config.Config{Gateway: config.GatewayConfig{
++			CodexQuotaOverdraftEnabled: true,
++		}},
++		now: func() time.Time { return now },
++	}
++	ctx := WithCodexQuotaOverdraftScheduling(context.Background())
++	markCodexQuotaOverdraftInjected(ctx, account.ID)
++
++	handled := coordinator.HandleQuota429(
++		ctx,
++		account,
++		nil,
++		[]byte(`{"error":{"type":"usage_limit_reached"}}`),
++		"gpt-5.4",
++	)
++
++	require.True(t, handled)
++	state, ok := codexQuotaOverdraftStateFromAccount(account)
++	require.True(t, ok)
++	require.Equal(t, codexQuotaOverdraftProbeFailed, state.Status)
++	require.Equal(t, "business_quota_limited", state.ReasonCode)
++	require.Equal(t, 1, repo.tempPauseCalls)
++}
++
++func TestCodexQuotaOverdraftTransient429DoesNotEnterQuotaCooldown(t *testing.T) {
++	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
++	account := newCodexOverdraftProbeTestAccount(now)
++	repo := &codexOverdraftProbeRepoStub{account: account}
++	coordinator := &CodexQuotaOverdraftCoordinator{
++		accountRepo:  repo,
++		httpUpstream: &queuedHTTPUpstream{},
++		cfg: &config.Config{Gateway: config.GatewayConfig{
++			CodexQuotaOverdraftEnabled: true,
++		}},
++		now: func() time.Time { return now },
++	}
++	ctx := WithCodexQuotaOverdraftScheduling(context.Background())
++	markCodexQuotaOverdraftInjected(ctx, account.ID)
++	headers := http.Header{}
++	headers.Set("x-codex-primary-used-percent", "100")
++	headers.Set("x-codex-primary-reset-after-seconds", "3600")
++	headers.Set("x-codex-primary-window-minutes", "300")
++
++	handled := coordinator.HandleQuota429(
++		ctx,
++		account,
++		headers,
++		[]byte(`{"error":{"type":"rate_limit_exceeded","message":"too many requests"}}`),
++		"gpt-5.4",
++	)
++
++	require.False(t, handled)
++	require.Zero(t, repo.tempPauseCalls)
++	_, hasState := codexQuotaOverdraftStateFromAccount(account)
++	require.False(t, hasState)
++}
++
++func TestCodexQuotaOverdraftBusinessFailureReloadsAfterClaimConflict(t *testing.T) {
++	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
++	latest := newCodexOverdraftProbeTestAccount(now)
++	signal, _ := codexQuotaOverdraftSignalFromAccount(latest, nil, now)
++	passed := newCodexOverdraftPendingState(signal, now)
++	passed.Status = codexQuotaOverdraftProbePassed
++	latest.Extra[CodexQuotaOverdraftProbeExtraKey] = passed
++	baseRepo := &codexOverdraftProbeRepoStub{account: latest}
++	repo := &codexOverdraftClaimConflictRepoStub{codexOverdraftProbeRepoStub: baseRepo}
++	coordinator := &CodexQuotaOverdraftCoordinator{accountRepo: repo, now: func() time.Time { return now }}
++	stale := newCodexOverdraftProbeTestAccount(now)
++	delete(stale.Extra, CodexQuotaOverdraftProbeExtraKey)
++
++	handled := coordinator.finishBusinessQuotaFailure(stale, signal, "gpt-5.4")
++
++	require.True(t, handled)
++	state, ok := codexQuotaOverdraftStateFromAccount(latest)
++	require.True(t, ok)
++	require.Equal(t, codexQuotaOverdraftProbeFailed, state.Status)
++	require.Equal(t, 1, baseRepo.tempPauseCalls)
 +}
 +
 +func TestCodexQuotaOverdraftFailedPauseIsIdempotentForPersistedCycle(t *testing.T) {
@@ -3967,13 +4418,14 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +
 +			require.Equal(t, codexQuotaOverdraftProbeInconclusive, state.Status)
 +			require.Equal(t, 1, state.Attempts)
-+			require.NotNil(t, state.RetryAt)
++			require.Nil(t, state.RetryAt)
++			require.Zero(t, state.RetryCount)
 +			require.Zero(t, repo.tempPauseCalls)
 +		})
 +	}
 +}
 +
-+func TestCodexQuotaOverdraftProbeRotatesModelsBeforeInconclusive(t *testing.T) {
++func TestCodexQuotaOverdraftModelNotFoundIsInconclusiveWithoutRetry(t *testing.T) {
 +	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
 +	account := newCodexOverdraftProbeTestAccount(now)
 +	repo := &codexOverdraftProbeRepoStub{account: account}
@@ -3990,74 +4442,10 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +
 +	require.Equal(t, codexQuotaOverdraftProbeInconclusive, state.Status)
 +	require.Equal(t, codexQuotaOverdraftProbeAttemptLimit, state.Attempts)
-+	require.Equal(t, 1, state.RetryCount)
-+	require.Equal(t, []string{"gpt-5.4", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4", "gpt-5.5"}, models)
-+	require.Zero(t, repo.tempPauseCalls)
-+}
-+
-+func TestCodexQuotaOverdraftInconclusiveSchedulesBackoffRetry(t *testing.T) {
-+	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
-+	account := newCodexOverdraftProbeTestAccount(now)
-+	repo := &codexOverdraftProbeRepoStub{account: account}
-+	scheduler := &codexOverdraftRetrySchedulerStub{}
-+	coordinator := &CodexQuotaOverdraftCoordinator{
-+		accountRepo:    repo,
-+		retryScheduler: scheduler,
-+		now:            func() time.Time { return now },
-+	}
-+	signal, _ := codexQuotaOverdraftSignalFromAccount(account, nil, now)
-+	state := newCodexOverdraftPendingState(signal, now)
-+
-+	coordinator.finishInconclusive(account.ID, signal, "gpt-5.4", state, "upstream_unavailable")
-+
-+	require.Equal(t, codexQuotaOverdraftProbeInconclusive, state.Status)
-+	require.Equal(t, 1, state.RetryCount)
-+	require.WithinDuration(t, now.Add(time.Minute), *state.RetryAt, time.Second)
-+	require.Equal(t, codexQuotaOverdraftRetryTaskName(account.ID), scheduler.scheduledName)
-+	require.Equal(t, time.Minute, scheduler.scheduledDelay)
-+	require.NotNil(t, scheduler.scheduledFn)
-+
-+	state.RetryCount = 1
-+	coordinator.finishInconclusive(account.ID, signal, "gpt-5.4", state, "upstream_unavailable")
-+	require.Equal(t, 2, state.RetryCount)
-+	require.Equal(t, 3*time.Minute, scheduler.scheduledDelay)
-+}
-+
-+func TestCodexQuotaOverdraftAuthenticationFailureDoesNotScheduleQuotaRetry(t *testing.T) {
-+	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
-+	account := newCodexOverdraftProbeTestAccount(now)
-+	repo := &codexOverdraftProbeRepoStub{account: account}
-+	scheduler := &codexOverdraftRetrySchedulerStub{}
-+	coordinator := &CodexQuotaOverdraftCoordinator{accountRepo: repo, retryScheduler: scheduler, now: func() time.Time { return now }}
-+	signal, _ := codexQuotaOverdraftSignalFromAccount(account, nil, now)
-+	state := newCodexOverdraftPendingState(signal, now)
-+
-+	coordinator.finishInconclusive(account.ID, signal, "gpt-5.4", state, "authentication_failed")
-+
-+	require.Empty(t, scheduler.scheduledName)
-+	require.Nil(t, state.RetryAt)
 +	require.Zero(t, state.RetryCount)
-+}
-+
-+func TestCodexQuotaOverdraftInconclusiveStopsAtAutomaticRetryLimit(t *testing.T) {
-+	now := time.Date(2026, time.August, 13, 14, 0, 0, 0, time.UTC)
-+	account := newCodexOverdraftProbeTestAccount(now)
-+	repo := &codexOverdraftProbeRepoStub{account: account}
-+	scheduler := &codexOverdraftRetrySchedulerStub{}
-+	coordinator := &CodexQuotaOverdraftCoordinator{
-+		accountRepo:    repo,
-+		retryScheduler: scheduler,
-+		now:            func() time.Time { return now },
-+	}
-+	signal, _ := codexQuotaOverdraftSignalFromAccount(account, nil, now)
-+	state := newCodexOverdraftPendingState(signal, now)
-+	state.RetryCount = codexQuotaOverdraftAutomaticRetries
-+
-+	coordinator.finishInconclusive(account.ID, signal, "gpt-5.4", state, "upstream_unavailable")
-+
-+	require.Equal(t, codexQuotaOverdraftAutomaticRetries, state.RetryCount)
 +	require.Nil(t, state.RetryAt)
-+	require.Empty(t, scheduler.scheduledName)
++	require.Equal(t, []string{"gpt-5.4"}, models)
++	require.Zero(t, repo.tempPauseCalls)
 +}
 +
 +func TestCodexQuotaOverdraftNewWindowPreservesExistingWindowBaseline(t *testing.T) {
@@ -4151,10 +4539,14 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +			repo := &codexOverdraftProbeRepoStub{account: account}
 +			blocker := &codexOverdraftRuntimeBlockerStub{}
 +			coordinator := &CodexQuotaOverdraftCoordinator{accountRepo: repo, runtimeBlocker: blocker}
++			signal, _ := codexQuotaOverdraftSignalFromAccount(account, nil, now)
 +			state := &CodexQuotaOverdraftProbeState{
 +				Status:            status,
++				CycleKey:          signal.CycleKey,
++				QuotaWindow:       signal.Window,
 +				ObservedRateLimit: codexQuotaOverdraftTimePtr(now.Add(time.Hour)),
 +			}
++			account.Extra[CodexQuotaOverdraftProbeExtraKey] = state
 +
 +			coordinator.clearQuotaPause(account.ID, state)
 +
@@ -4202,6 +4594,14 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +	require.Equal(t, "quota_limited", reason)
 +
 +	status, reason = classifyCodexQuotaOverdraftProbe(http.StatusTooManyRequests, nil, []byte(`{"error":{"type":"rate_limit_exceeded","message":"too many requests"}}`))
++	require.Equal(t, "inconclusive", status)
++	require.Equal(t, "transient_failure", reason)
++
++	headers := http.Header{}
++	headers.Set("x-codex-primary-used-percent", "100")
++	headers.Set("x-codex-primary-reset-after-seconds", "3600")
++	headers.Set("x-codex-primary-window-minutes", "300")
++	status, reason = classifyCodexQuotaOverdraftProbe(http.StatusTooManyRequests, headers, []byte(`{"error":{"type":"rate_limit_exceeded","message":"too many requests"}}`))
 +	require.Equal(t, "inconclusive", status)
 +	require.Equal(t, "transient_failure", reason)
 +
@@ -4258,10 +4658,10 @@ index 0000000000000000000000000000000000000000..b24380560b82be549465a1c45c4cac39
 +}
 diff --git a/backend/internal/service/openai_codex_quota_overdraft_test.go b/backend/internal/service/openai_codex_quota_overdraft_test.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..4d20e2bc45754018fce259452ed10ba45d60ff24
+index 0000000000000000000000000000000000000000..86825cdb7d5b41927eba04aa00ea31b02e664344
 --- /dev/null
 +++ b/backend/internal/service/openai_codex_quota_overdraft_test.go
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,186 @@
 +//go:build unit
 +
 +package service
@@ -4282,11 +4682,20 @@ index 0000000000000000000000000000000000000000..4d20e2bc45754018fce259452ed10ba4
 +	SetCodexQuotaOverdraftEnabled(true)
 +	ctx := WithCodexQuotaOverdraftScheduling(context.Background())
 +	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}}}
-+	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
++	oauth := &Account{
++		ID:       77,
++		Platform: PlatformOpenAI,
++		Type:     AccountTypeOAuth,
++		Extra: map[string]any{
++			"codex_5h_used_percent": 95,
++			"codex_5h_reset_at":     time.Now().Add(time.Hour).Format(time.RFC3339),
++		},
++	}
 +	body := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`)
 +
 +	updated := svc.prepareCodexQuotaOverdraftBody(ctx, oauth, false, body)
 +	require.NotEqual(t, string(body), string(updated))
++	require.True(t, codexQuotaOverdraftWasInjected(ctx, oauth.ID))
 +
 +	var document codexQuotaOverdraftDocument
 +	require.NoError(t, json.Unmarshal(updated, &document))
@@ -4306,7 +4715,15 @@ index 0000000000000000000000000000000000000000..4d20e2bc45754018fce259452ed10ba4
 +func TestCodexQuotaOverdraftInjectionGuards(t *testing.T) {
 +	t.Cleanup(func() { SetCodexQuotaOverdraftEnabled(false) })
 +	body := []byte(`{"input":[{"type":"message","role":"user"}]}`)
-+	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
++	oauth := &Account{
++		ID:       78,
++		Platform: PlatformOpenAI,
++		Type:     AccountTypeOAuth,
++		Extra: map[string]any{
++			"codex_5h_used_percent": 95,
++			"codex_5h_reset_at":     time.Now().Add(time.Hour).Format(time.RFC3339),
++		},
++	}
 +	enabledCfg := &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}}
 +	svc := &OpenAIGatewayService{cfg: enabledCfg}
 +
@@ -4314,6 +4731,8 @@ index 0000000000000000000000000000000000000000..4d20e2bc45754018fce259452ed10ba4
 +	require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(WithCodexQuotaOverdraftScheduling(context.Background()), oauth, false, body)))
 +
 +	SetCodexQuotaOverdraftEnabled(true)
++	underPrearm := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_5h_used_percent": 94}}
++	require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(WithCodexQuotaOverdraftScheduling(context.Background()), underPrearm, false, body)), "95% 以下不能注入")
 +	require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(context.Background(), oauth, false, body)), "未标记的端点不能注入")
 +	require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(WithCodexQuotaOverdraftScheduling(context.Background()), oauth, true, body)), "compact 不能注入")
 +
@@ -4324,7 +4743,15 @@ index 0000000000000000000000000000000000000000..4d20e2bc45754018fce259452ed10ba4
 +	} {
 +		require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(ctx, account, false, body)))
 +	}
-+	agentIdentity := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{openAIAuthModeCredentialKey: OpenAIAuthModeAgentIdentity}}
++	agentIdentity := &Account{
++		Platform:    PlatformOpenAI,
++		Type:        AccountTypeOAuth,
++		Credentials: map[string]any{openAIAuthModeCredentialKey: OpenAIAuthModeAgentIdentity},
++		Extra: map[string]any{
++			"codex_7d_used_percent": 95,
++			"codex_7d_reset_at":     time.Now().Add(24 * time.Hour).Format(time.RFC3339),
++		},
++	}
 +	require.NotEqual(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(ctx, agentIdentity, false, body)), "Agent Identity 必须支持透支请求注入")
 +
 +	notUserLast := []byte(`{"input":[{"type":"message","role":"assistant"}]}`)
@@ -4333,6 +4760,23 @@ index 0000000000000000000000000000000000000000..4d20e2bc45754018fce259452ed10ba4
 +	require.Equal(t, string(invalid), string(svc.prepareCodexQuotaOverdraftBody(ctx, oauth, false, invalid)))
 +	oversized := make([]byte, codexQuotaOverdraftMaxBodyBytes+1)
 +	require.Equal(t, oversized, svc.prepareCodexQuotaOverdraftBody(ctx, oauth, false, oversized))
++}
++
++func TestCodexQuotaOverdraftSchedulingDoesNotBypassThresholdBelowPrearm(t *testing.T) {
++	t.Cleanup(func() { SetCodexQuotaOverdraftEnabled(false) })
++	SetCodexQuotaOverdraftEnabled(true)
++	ctx := WithCodexQuotaOverdraftScheduling(context.Background())
++	account := &Account{
++		Platform: PlatformOpenAI,
++		Type:     AccountTypeOAuth,
++		Extra: map[string]any{
++			"codex_5h_used_percent": 94,
++		},
++	}
++	quotaCtx := withOpenAIQuotaAutoPauseSettings(ctx, OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold5h: 0.9})
++
++	paused, _ := shouldAutoPauseOpenAIAccountByQuota(quotaCtx, account)
++	require.True(t, paused)
 +}
 +
 +func TestCodexQuotaOverdraftSchedulingOnlyBypassesQuotaThresholds(t *testing.T) {
@@ -4549,17 +4993,18 @@ index a9200b10b744f7004144bfd69123f0d6dc2ab2d4..0c4e18a1226ba35735f1f47d0e91c98d
  	svc := &OpenAIGatewayService{
  		accountRepo:         accountRepo,
 diff --git a/backend/internal/service/openai_gateway_usage.go b/backend/internal/service/openai_gateway_usage.go
-index c55bcdbeac89b7f58f50daaa80c22964a27628d0..baa644ff525cdcf6e438eed335ac1c158784cadb 100644
+index c55bcdbeac89b7f58f50daaa80c22964a27628d0..43973f90cb9c9803fa2d4c65a8daa6d80481a45f 100644
 --- a/backend/internal/service/openai_gateway_usage.go
 +++ b/backend/internal/service/openai_gateway_usage.go
-@@ -1028,14 +1028,38 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
+@@ -1028,14 +1028,43 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
  	if len(updates) == 0 {
  		return
  	}
 -	if !s.getCodexSnapshotThrottle().Allow(accountID, now) {
 -		return
 -	}
-+	persistSnapshot := codexQuotaOverdraftSnapshotExhausted(updates) || s.getCodexSnapshotThrottle().Allow(accountID, now)
++	persistSnapshot := codexQuotaOverdraftSnapshotPrearmReached(updates) || s.getCodexSnapshotThrottle().Allow(accountID, now)
++	businessSuccess := codexQuotaOverdraftWasInjected(ctx, accountID)
  
  	go func() {
  		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -4591,7 +5036,11 @@ index c55bcdbeac89b7f58f50daaa80c22964a27628d0..baa644ff525cdcf6e438eed335ac1c15
 +			account = current
 +		}
 +		mergeAccountExtra(account, updates)
-+		s.codexQuotaOverdraft.ObserveAccount(account, "")
++		if businessSuccess {
++			s.codexQuotaOverdraft.observeBusinessSuccess(account, "")
++		} else {
++			s.codexQuotaOverdraft.observeAccount(account, "")
++		}
  	}()
  }
  
@@ -4633,6 +5082,52 @@ index e0dbd58bd4f504b32112d9fc5a0c269366330be6..5ea286779bcf83b75760275bcb1789c5
  
  	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
  		lease.MarkBroken()
+diff --git a/backend/internal/service/openai_ws_ratelimit_signal_test.go b/backend/internal/service/openai_ws_ratelimit_signal_test.go
+index 9d1fdaf76515237eaf5e6b32a679601d8e43c5af..95a1648dbae6e6b1195183d7545ffe01d84368aa 100644
+--- a/backend/internal/service/openai_ws_ratelimit_signal_test.go
++++ b/backend/internal/service/openai_ws_ratelimit_signal_test.go
+@@ -486,6 +486,41 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_ThrottlesExtraWrites(t *t
+ 	}
+ }
+ 
++func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_PrearmBypassesThrottle(t *testing.T) {
++	repo := &openAICodexSnapshotAsyncRepo{
++		updateExtraCh: make(chan map[string]any, 2),
++	}
++	svc := &OpenAIGatewayService{
++		accountRepo:           repo,
++		codexSnapshotThrottle: newAccountWriteThrottle(time.Hour),
++	}
++	belowPrearm := &OpenAICodexUsageSnapshot{
++		PrimaryUsedPercent:         ptrFloat64WS(94),
++		PrimaryResetAfterSeconds:   ptrIntWS(3600),
++		PrimaryWindowMinutes:       ptrIntWS(10080),
++		SecondaryUsedPercent:       ptrFloat64WS(22),
++		SecondaryResetAfterSeconds: ptrIntWS(1200),
++		SecondaryWindowMinutes:     ptrIntWS(300),
++	}
++	atPrearm := *belowPrearm
++	atPrearm.PrimaryUsedPercent = ptrFloat64WS(95)
++
++	svc.updateCodexUsageSnapshot(context.Background(), 778, belowPrearm)
++	select {
++	case <-repo.updateExtraCh:
++	case <-time.After(2 * time.Second):
++		t.Fatal("等待首次 codex 快照落库超时")
++	}
++
++	svc.updateCodexUsageSnapshot(context.Background(), 778, &atPrearm)
++	select {
++	case updates := <-repo.updateExtraCh:
++		require.Equal(t, 95.0, updates["codex_7d_used_percent"])
++	case <-time.After(2 * time.Second):
++		t.Fatal("95% 预热快照不应被写入节流拦截")
++	}
++}
++
+ func ptrFloat64WS(v float64) *float64 { return &v }
+ func ptrIntWS(v int) *int             { return &v }
+ 
 diff --git a/backend/internal/service/openai_ws_v2_passthrough_adapter.go b/backend/internal/service/openai_ws_v2_passthrough_adapter.go
 index 775e26980ce0bc70e15f895f9af8be22ccd7aa7e..3bf082a92a8d0759815a52ca68f2ba95698a2238 100644
 --- a/backend/internal/service/openai_ws_v2_passthrough_adapter.go
@@ -4987,7 +5482,7 @@ index 243e25d1e47d891434afabb274c709abbdaac935..99ef67944e07fe28af9ddc73161a616b
  	return NewUpdateService(
  		&updateServiceCacheStub{},
 diff --git a/backend/internal/service/wire.go b/backend/internal/service/wire.go
-index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..75e7406f62319ed365ddb4d25ee3187ad44f3990 100644
+index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..1e853b64c4d4133aa2ddf940c63c07f94f8fcd7f 100644
 --- a/backend/internal/service/wire.go
 +++ b/backend/internal/service/wire.go
 @@ -202,6 +202,7 @@ func ProvideAccountUsageService(
@@ -4998,7 +5493,7 @@ index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..75e7406f62319ed365ddb4d25ee3187a
  ) *AccountUsageService {
  	service := NewAccountUsageService(
  		accountRepo,
-@@ -217,9 +218,38 @@ func ProvideAccountUsageService(
+@@ -217,9 +218,36 @@ func ProvideAccountUsageService(
  		tlsFPProfileService,
  	)
  	service.agentIdentityWS = openAIGatewayService
@@ -5015,7 +5510,6 @@ index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..75e7406f62319ed365ddb4d25ee3187a
 +	tempUnschedCache TempUnschedCache,
 +	runtimeBlocker AccountRuntimeBlocker,
 +	rateLimitService *RateLimitService,
-+	timingWheel *TimingWheelService,
 +) *CodexQuotaOverdraftCoordinator {
 +	coordinator := NewCodexQuotaOverdraftCoordinator(
 +		accountRepo,
@@ -5027,7 +5521,6 @@ index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..75e7406f62319ed365ddb4d25ee3187a
 +		runtimeBlocker,
 +		rateLimitService,
 +	)
-+	coordinator.SetRetryScheduler(timingWheel)
 +	if gateway, ok := runtimeBlocker.(*OpenAIGatewayService); ok {
 +		gateway.SetCodexQuotaOverdraftCoordinator(coordinator)
 +	}
@@ -5037,7 +5530,7 @@ index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..75e7406f62319ed365ddb4d25ee3187a
  func ProvideAccountTestService(
  	accountRepo AccountRepository,
  	geminiTokenProvider *GeminiTokenProvider,
-@@ -231,6 +261,7 @@ func ProvideAccountTestService(
+@@ -231,6 +259,7 @@ func ProvideAccountTestService(
  	tlsFPProfileService *TLSFingerprintProfileService,
  	openAIGatewayService *OpenAIGatewayService,
  	settingService *SettingService,
@@ -5045,7 +5538,7 @@ index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..75e7406f62319ed365ddb4d25ee3187a
  ) *AccountTestService {
  	service := NewAccountTestService(
  		accountRepo,
-@@ -244,6 +275,7 @@ func ProvideAccountTestService(
+@@ -244,6 +273,7 @@ func ProvideAccountTestService(
  	)
  	service.agentIdentityWS = openAIGatewayService
  	service.SetSettingService(settingService)
@@ -5053,7 +5546,7 @@ index 2e26c0035c22c55a4b89eb7bd39cc2b05ed2f7f4..75e7406f62319ed365ddb4d25ee3187a
  	return service
  }
  
-@@ -799,6 +831,7 @@ var ProviderSet = wire.NewSet(
+@@ -799,6 +829,7 @@ var ProviderSet = wire.NewSet(
  	ProvideClaudeTokenProvider,
  	NewAntigravityGatewayService,
  	ProvideRateLimitService,
@@ -5196,7 +5689,7 @@ index 4130ecd8ec8b45ecf90fc307c80368f2105f8710..ee81ad9edd09678ae74193da6d30ec82
    }
    if (props.account.status !== 'active') {
 diff --git a/frontend/src/components/account/AccountUsageCell.vue b/frontend/src/components/account/AccountUsageCell.vue
-index 485b4b8701020a68bb1b38606d68cd3991c87e0b..43f3fb7026cae745d31009161bdef742afc6e6c2 100644
+index 485b4b8701020a68bb1b38606d68cd3991c87e0b..96deb961c2ad9e0113ebbf7a0e8912929f2c9199 100644
 --- a/frontend/src/components/account/AccountUsageCell.vue
 +++ b/frontend/src/components/account/AccountUsageCell.vue
 @@ -119,12 +119,32 @@
@@ -5243,7 +5736,7 @@ index 485b4b8701020a68bb1b38606d68cd3991c87e0b..43f3fb7026cae745d31009161bdef742
            :show-now-when-idle="true"
            color="emerald"
          />
-@@ -731,7 +755,72 @@ const geminiUsageAvailable = computed(() => {
+@@ -731,7 +755,68 @@ const geminiUsageAvailable = computed(() => {
  
  const hasOpenAIUsageFallback = computed(() => {
    if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return false
@@ -5256,19 +5749,15 @@ index 485b4b8701020a68bb1b38606d68cd3991c87e0b..43f3fb7026cae745d31009161bdef742
 +  if (!probe) return null
 +
 +  const attempts = Math.max(0, probe.attempts || 0)
-+  const limit = Math.max(1, probe.limit || 5)
++  const limit = Math.max(1, probe.limit || 1)
 +  const windowLabel = probe.quota_window === 'multiple' ? '5h / 7d' : probe.quota_window
 +  const testedAt = probe.tested_at ? new Date(probe.tested_at).toLocaleString() : ''
 +  const recoverAt = probe.recover_at ? new Date(probe.recover_at).toLocaleString() : ''
-+  const retryAt = probe.retry_at ? new Date(probe.retry_at).toLocaleString() : ''
-+  const retryCount = Math.max(0, probe.retry_count || 0)
 +  const titleParts = [windowLabel]
 +  if (probe.model) titleParts.push(probe.model)
 +  if (probe.reason_code) titleParts.push(probe.reason_code)
 +  if (testedAt) titleParts.push(`${t('usage.overdraftTestedAt')}: ${testedAt}`)
 +  if (recoverAt) titleParts.push(`${t('usage.overdraftRecoverAt')}: ${recoverAt}`)
-+  if (retryAt) titleParts.push(`${t('usage.overdraftRetryAt')}: ${retryAt}`)
-+  if (retryCount > 0) titleParts.push(`${t('usage.overdraftRetryCount')}: ${retryCount}`)
 +
 +  switch (probe.status) {
 +    case 'pending':
@@ -5416,14 +5905,14 @@ index e38f43aa6ab3e7c300422ecb4250baee0733c8cb..233ffb3d03c9ce4e020c4cf86237145a
      const wrapper = mount(AccountStatusIndicator, {
        props: {
 diff --git a/frontend/src/components/account/__tests__/AccountUsageCell.spec.ts b/frontend/src/components/account/__tests__/AccountUsageCell.spec.ts
-index ff0e94d6647ec290dbb79f366228d75055254f8f..c091946f9a93febb6364c63f5968f23ddfbf5971 100644
+index ff0e94d6647ec290dbb79f366228d75055254f8f..c3510ef75da50a05e686a11440d9a6b0a70ef6c1 100644
 --- a/frontend/src/components/account/__tests__/AccountUsageCell.spec.ts
 +++ b/frontend/src/components/account/__tests__/AccountUsageCell.spec.ts
-@@ -615,6 +615,98 @@ describe('AccountUsageCell', () => {
+@@ -615,6 +615,99 @@ describe('AccountUsageCell', () => {
    expect(wrapper.text()).toContain('7d|100|106540000')
    })
  
-+  it('OpenAI OAuth 会显示五次探测确认的限额状态', async () => {
++  it('OpenAI OAuth 会显示单次确认的限额状态', async () => {
 +    getUsage.mockResolvedValue({
 +      five_hour: {
 +        utilization: 100,
@@ -5435,8 +5924,8 @@ index ff0e94d6647ec290dbb79f366228d75055254f8f..c091946f9a93febb6364c63f5968f23d
 +        status: 'failed',
 +        quota_window: '5h',
 +        cycle_key: '5h:4076577600',
-+        attempts: 5,
-+        limit: 5,
++        attempts: 1,
++        limit: 1,
 +        model: 'gpt-5.5',
 +        reason_code: 'quota_limited',
 +        started_at: '2099-03-07T10:00:00Z',
@@ -5465,10 +5954,10 @@ index ff0e94d6647ec290dbb79f366228d75055254f8f..c091946f9a93febb6364c63f5968f23d
 +    await flushPromises()
 +
 +    expect(wrapper.text()).toContain('usage.overdraftProbeFailed')
-+    expect(wrapper.text()).toContain('5/5 · 5h')
++    expect(wrapper.text()).toContain('1/1 · 5h')
 +  })
 +
-+  it('OpenAI OAuth 无法确认探测时会显示重试轮次和时间', async () => {
++  it('OpenAI OAuth 无法确认探测时不会显示自动重试信息', async () => {
 +    getUsage.mockResolvedValue({
 +      five_hour: {
 +        utilization: 100,
@@ -5480,7 +5969,7 @@ index ff0e94d6647ec290dbb79f366228d75055254f8f..c091946f9a93febb6364c63f5968f23d
 +        quota_window: '5h',
 +        cycle_key: '5h:4076577600',
 +        attempts: 1,
-+        limit: 5,
++        limit: 1,
 +        model: 'gpt-5.4',
 +        reason_code: 'upstream_unavailable',
 +        retry_count: 2,
@@ -5510,9 +5999,10 @@ index ff0e94d6647ec290dbb79f366228d75055254f8f..c091946f9a93febb6364c63f5968f23d
 +
 +    await flushPromises()
 +
-+    const status = wrapper.get('[title*="usage.overdraftRetryCount: 2"]')
++    const status = wrapper.get('[title*="upstream_unavailable"]')
 +    expect(status.text()).toContain('usage.overdraftProbeInconclusive')
-+    expect(status.attributes('title')).toContain('usage.overdraftRetryAt')
++    expect(status.text()).toContain('1/1 · 5h')
++    expect(status.attributes('title')).not.toContain('usage.overdraftRetryAt')
 +  })
 +
    it('Key 账号会展示 today stats 徽章并带 A/U 提示', async () => {
@@ -5575,17 +6065,15 @@ index 0eb245033f2f7e933069b703b7f47e6b590759ac..f1b64f3ebd943127d1e121bc1b8dda40
          unschedulable: 'Unschedulable',
          rateLimitedUntil: 'Rate limited and removed from scheduling. Auto resumes at {time}',
 diff --git a/frontend/src/i18n/locales/en/dashboard.ts b/frontend/src/i18n/locales/en/dashboard.ts
-index 4204a9d679c54ad0c38e544c47edcec3074fe184..18c15735d2eb02031ebc044f13667f4a50f6d414 100644
+index 4204a9d679c54ad0c38e544c47edcec3074fe184..ee378b0e25a92ba7f2c065151ab78ea30696e224 100644
 --- a/frontend/src/i18n/locales/en/dashboard.ts
 +++ b/frontend/src/i18n/locales/en/dashboard.ts
-@@ -282,6 +282,15 @@ export default {
+@@ -282,6 +282,13 @@ export default {
      accountCost: 'Cost',
      userBilled: 'User billed',
      accountBilled: 'Account billed',
 +    overdraftActive: 'Overdraft active',
 +    overdraftRecoverAt: 'Expected recovery',
-+    overdraftRetryAt: 'Next retry',
-+    overdraftRetryCount: 'Retry round',
 +    overdraftTestedAt: 'Probed at',
 +    overdraftProbePending: 'Overdraft probe running',
 +    overdraftProbeFailed: 'Quota limit confirmed',
@@ -5607,17 +6095,15 @@ index 1c6d000c3c7538adc4a54c03fa06b8afa0ce5927..bd89da6e07bd9b61015b9b8724c21386
          unschedulable: '不可调度',
          rateLimitedUntil: '限流中，当前不参与调度，预计 {time} 自动恢复',
 diff --git a/frontend/src/i18n/locales/zh/dashboard.ts b/frontend/src/i18n/locales/zh/dashboard.ts
-index 1d9b8f45746521dc6b35cc2f4e81385938661dc7..31cb99066c93c039fc9551457cf19bb8d7b94eb7 100644
+index 1d9b8f45746521dc6b35cc2f4e81385938661dc7..5661a0b06ddaac77722bf6fc3081f0238d6da3b6 100644
 --- a/frontend/src/i18n/locales/zh/dashboard.ts
 +++ b/frontend/src/i18n/locales/zh/dashboard.ts
-@@ -287,6 +287,15 @@ export default {
+@@ -287,6 +287,13 @@ export default {
      accountCost: '成本',
      userBilled: '用户扣费',
      accountBilled: '账号计费',
 +    overdraftActive: '透支中',
 +    overdraftRecoverAt: '预计恢复',
-+    overdraftRetryAt: '下次重试',
-+    overdraftRetryCount: '重试轮次',
 +    overdraftTestedAt: '探测时间',
 +    overdraftProbePending: '透支探测中',
 +    overdraftProbeFailed: '已确认限额',
