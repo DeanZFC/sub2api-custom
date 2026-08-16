@@ -1,6 +1,6 @@
 diff --git a/CODEX_OVERDRAFT_DEPLOYMENT_CN.md b/CODEX_OVERDRAFT_DEPLOYMENT_CN.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..033045c921fdddf1542acc930169eb7b268fef4e
+index 0000000000000000000000000000000000000000..29a38fef0c5d06020ba9f96d2a4dd7992f8faaba
 --- /dev/null
 +++ b/CODEX_OVERDRAFT_DEPLOYMENT_CN.md
 @@ -0,0 +1,532 @@
@@ -405,7 +405,7 @@ index 0000000000000000000000000000000000000000..033045c921fdddf1542acc930169eb7b
 +docker exec sub2api /app/sub2api -version
 +```
 +
-+维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.177-overdraft.2` 改为 `0.1.177-overdraft.3`。同步到新的上游 Sub2API 版本时，使用 `0.1.178-overdraft.1` 这样的版本号。
++维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.177-overdraft.3` 改为 `0.1.177-overdraft.4`。同步到新的上游 Sub2API 版本时，使用 `0.1.178-overdraft.1` 这样的版本号。
 +
 +## 合并 Sub2API 官方更新
 +
@@ -538,7 +538,7 @@ index 0000000000000000000000000000000000000000..033045c921fdddf1542acc930169eb7b
 +- 本项目不是 Sub2API 官方发行版，也不受 OpenAI 或其他上游服务商认可或支持。
 diff --git a/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md b/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..ef333abddeb14db8862f41e09ca652bf37077ce3
+index 0000000000000000000000000000000000000000..ca924d4b10e0bb63a292e4aaadafeafe03eb4d7b
 --- /dev/null
 +++ b/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md
 @@ -0,0 +1,172 @@
@@ -560,7 +560,7 @@ index 0000000000000000000000000000000000000000..ef333abddeb14db8862f41e09ca652bf
 +
 +源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 +
-+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.3`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
++源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.4`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
 +
 +Sub2API `v0.1.177` 将原生 remote compaction v2 保留在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 +
@@ -714,10 +714,32 @@ index 0000000000000000000000000000000000000000..ef333abddeb14db8862f41e09ca652bf
 +FROM accounts
 +WHERE platform = 'openai' AND type = 'oauth';
 +```
+diff --git a/DEV_GUIDE.md b/DEV_GUIDE.md
+index 349c24449159cdb222d4d415c8d09ddca307bce3..eef1c394ec4d3110fce157fdcc611d9e969a8e98 100644
+--- a/DEV_GUIDE.md
++++ b/DEV_GUIDE.md
+@@ -53,7 +53,7 @@ npm install -g pnpm
+ 
+ ### CI 要求
+ 
+-- Go 版本必须是 **1.26.5**：三个 workflow 都用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.26.5'`。升级 Go 时要同时改 `backend/go.mod` 和 `backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，否则 CI 会在版本校验步骤直接失败。
++- Go 版本必须是 **1.26.6**：三个 workflow 都用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.26.6'`。升级 Go 时要同时改 `backend/go.mod` 和 `backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，否则 CI 会在版本校验步骤直接失败。
+ - 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
+ 
+ ### 本地测试命令
 diff --git a/Dockerfile b/Dockerfile
-index b2dfd7034f769abd7e8640090282e6b05a2af4a1..657985091514edeb8358800d4ac49ce7299edd38 100644
+index b2dfd7034f769abd7e8640090282e6b05a2af4a1..defdbaf0886aff73a04cb2590675984cef834675 100644
 --- a/Dockerfile
 +++ b/Dockerfile
+@@ -8,7 +8,7 @@
+ # =============================================================================
+ 
+ ARG NODE_IMAGE=node:24-alpine
+-ARG GOLANG_IMAGE=golang:1.26.5-alpine
++ARG GOLANG_IMAGE=golang:1.26.6-alpine
+ ARG ALPINE_IMAGE=alpine:3.21
+ ARG POSTGRES_IMAGE=postgres:18-alpine
+ ARG GOPROXY=https://goproxy.cn,direct
 @@ -56,6 +56,7 @@ FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS backend-builder
  ARG VERSION=
  ARG COMMIT=docker
@@ -768,16 +790,16 @@ index b2dfd7034f769abd7e8640090282e6b05a2af4a1..657985091514edeb8358800d4ac49ce7
  RUN apk add --no-cache \
 diff --git a/FORK_VERSION b/FORK_VERSION
 new file mode 100644
-index 0000000000000000000000000000000000000000..1ae85b80e36aff6ac1d64baf355b2f82fc214bc9
+index 0000000000000000000000000000000000000000..47f07b4999923c5b44c203790191ca8907723b15
 --- /dev/null
 +++ b/FORK_VERSION
 @@ -0,0 +1 @@
-+0.1.177-overdraft.3
++0.1.177-overdraft.4
 diff --git a/README.md b/README.md
-index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..6be65ab56a9db6668cabc5ea86573b4e513816f7 100644
+index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..ad20771cd7880e2dd695de1a410012aaef4665c3 100644
 --- a/README.md
 +++ b/README.md
-@@ -1,8 +1,8 @@
+@@ -1,23 +1,53 @@
  <div align="center">
  
 -<img src="assets/logo.svg" alt="Sub2API Logo" width="128" />
@@ -786,9 +808,10 @@ index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..6be65ab56a9db6668cabc5ea86573b4e
 -# Sub2API
 +# sub2api-overdraft
  
- [![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
+-[![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
++[![Go](https://img.shields.io/badge/Go-1.26.6-00ADD8.svg)](https://golang.org/)
  [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
-@@ -10,14 +10,44 @@
+ [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
  [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
  [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
  
@@ -836,11 +859,20 @@ index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..6be65ab56a9db6668cabc5ea86573b4e
  ## ⚠️ Important Notice
  
  Please read the following carefully before using this project:
+@@ -206,7 +236,7 @@ Community projects that extend or integrate with Sub2API:
+ 
+ | Component | Technology |
+ |-----------|------------|
+-| Backend | Go 1.26.5, Gin, Ent |
++| Backend | Go 1.26.6, Gin, Ent |
+ | Frontend | Vue 3.4+, Vite 5+, TailwindCSS |
+ | Database | PostgreSQL 15+ |
+ | Cache/Queue | Redis 7+ |
 diff --git a/README_CN.md b/README_CN.md
-index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..a26e67a95aa72847ed061de71c5939994605f360 100644
+index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..d46fdb8ab10d3ac8cfa07fd0034c42d9ab787a29 100644
 --- a/README_CN.md
 +++ b/README_CN.md
-@@ -1,8 +1,8 @@
+@@ -1,23 +1,85 @@
  <div align="center">
  
 -<img src="assets/logo.svg" alt="Sub2API Logo" width="128" />
@@ -849,9 +881,10 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..a26e67a95aa72847ed061de71c593999
 -# Sub2API
 +# sub2api-overdraft
  
- [![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
+-[![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
++[![Go](https://img.shields.io/badge/Go-1.26.6-00ADD8.svg)](https://golang.org/)
  [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
-@@ -10,14 +10,76 @@
+ [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
  [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
  [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
  
@@ -931,6 +964,15 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..a26e67a95aa72847ed061de71c593999
  
  ## ⚠️ 重要提醒
  
+@@ -208,7 +270,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
+ 
+ | 组件 | 技术 |
+ |------|------|
+-| 后端 | Go 1.26.5, Gin, Ent |
++| 后端 | Go 1.26.6, Gin, Ent |
+ | 前端 | Vue 3.4+, Vite 5+, TailwindCSS |
+ | 数据库 | PostgreSQL 15+ |
+ | 缓存/队列 | Redis 7+ |
 @@ -273,12 +335,9 @@ sudo systemctl enable sub2api
  
  #### 升级
@@ -947,10 +989,10 @@ index 2d2a57a9ff3a363618001dda3ffbfae84bcd0f41..a26e67a95aa72847ed061de71c593999
  #### 常用命令
  
 diff --git a/README_JA.md b/README_JA.md
-index 09aa77ee48aec83440ee76054887b2627c1e3792..d17d4af9fa620bc5faf9a9217c57f3dc261be7a5 100644
+index 09aa77ee48aec83440ee76054887b2627c1e3792..e623063b29825d75c63323fc737b3bc6b1568fc8 100644
 --- a/README_JA.md
 +++ b/README_JA.md
-@@ -1,8 +1,8 @@
+@@ -1,23 +1,48 @@
  <div align="center">
  
 -<img src="assets/logo.svg" alt="Sub2API Logo" width="128" />
@@ -959,9 +1001,10 @@ index 09aa77ee48aec83440ee76054887b2627c1e3792..d17d4af9fa620bc5faf9a9217c57f3dc
 -# Sub2API
 +# sub2api-overdraft
  
- [![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
+-[![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
++[![Go](https://img.shields.io/badge/Go-1.26.6-00ADD8.svg)](https://golang.org/)
  [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
-@@ -10,14 +10,39 @@
+ [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
  [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
  [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
  
@@ -1004,6 +1047,25 @@ index 09aa77ee48aec83440ee76054887b2627c1e3792..d17d4af9fa620bc5faf9a9217c57f3dc
  ## ⚠️ 重要なお知らせ
  
  本プロジェクトをご利用になる前に、以下の内容を必ずよくお読みください：
+@@ -207,7 +232,7 @@ Sub2API を拡張・統合するコミュニティプロジェクト:
+ 
+ | コンポーネント | 技術 |
+ |-----------|------------|
+-| バックエンド | Go 1.26.5, Gin, Ent |
++| バックエンド | Go 1.26.6, Gin, Ent |
+ | フロントエンド | Vue 3.4+, Vite 5+, TailwindCSS |
+ | データベース | PostgreSQL 15+ |
+ | キャッシュ/キュー | Redis 7+ |
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 9976abe46b5494b1bed2a5ea1ec712137f812791..1efbd3859da876eaf6c3843080f6c9dc5ad3e33e 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -1,4 +1,4 @@
+-FROM golang:1.26.5-alpine
++FROM golang:1.26.6-alpine
+ 
+ WORKDIR /app
+ 
 diff --git a/backend/cmd/server/wire_gen.go b/backend/cmd/server/wire_gen.go
 index ab9f4530b8663c00be9f04cf9c46c3822d6f9fb6..e8d4ad8cf22783a55505f7d85eb7b4b340a3cb0b 100644
 --- a/backend/cmd/server/wire_gen.go
@@ -5013,6 +5075,19 @@ index 6beca88308572880c2ffdad0ff051c571ac223ff..da4b71fc93cb85084e669ae94e65580b
  # OpenAI /responses/compact 上游模型（默认 gpt-5.4）。
  # 当 compact 端点暂未支持更新模型时，可通过这里降级规避失败。
  GATEWAY_OPENAI_COMPACT_MODEL=gpt-5.4
+diff --git a/deploy/Dockerfile b/deploy/Dockerfile
+index 325520f308fb279dfabe1e6826f5f4f3c93413c4..30c7a1a240f1c74f3f46a868b1bffe309a732e21 100644
+--- a/deploy/Dockerfile
++++ b/deploy/Dockerfile
+@@ -7,7 +7,7 @@
+ # =============================================================================
+ 
+ ARG NODE_IMAGE=node:24-alpine
+-ARG GOLANG_IMAGE=golang:1.26.5-alpine
++ARG GOLANG_IMAGE=golang:1.26.6-alpine
+ ARG ALPINE_IMAGE=alpine:3.20
+ ARG GOPROXY=https://goproxy.cn,direct
+ ARG GOSUMDB=sum.golang.google.cn
 diff --git a/deploy/config.example.yaml b/deploy/config.example.yaml
 index 095c550993527ea2b53871088f58b02e4082fc63..cd71e4a3d60fd8d9e5db3c8e8b96d28b49e6720c 100644
 --- a/deploy/config.example.yaml

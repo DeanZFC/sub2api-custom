@@ -7,10 +7,10 @@
 - Sub2API 基础版本：`0.1.177`
 - Git 描述：`v0.1.177-1-gbaeac1f3d`
 - 基础提交：`baeac1f3de21d37b129405f092ef86c24b3f203d`
-- Patch 生成基准 Fork 提交：`2a3d7200ef78c18b8fea93916166048e75f2c5fa`
-- 目标 Git tree（不含 `patches/`）：`9f9e51bfaeace5872f6fd467a7c4abc8a3f68c45`
-- SHA-256：`2242ef5be99144b1ab7067c8bf592b2df2dc0473bc9ddb0814fe07af945d87ca`
-- 文件大小：237,205 字节
+- Patch 生成基准 Fork 提交：`b3297a6ecce68412d70a815157abf4aec268a302`
+- 目标 Git tree（不含 `patches/`）：`0da3722c8deaf4f59a528773a62fe204208a08a4`
+- SHA-256：`f5ba3b1022c0c95c0eee5208f153e2cadd575b66d632aa4e794b3fb74e55a1f7`
+- 文件大小：240,849 字节
 
 该 Patch 包含 Codex 5h / 7d 额度透支后端、前端显示、配置、源码构建 Compose、品牌和公开部署文档，并额外包含以下修复：
 
@@ -24,10 +24,11 @@
 - 更新检查跟踪 `DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支和 `FORK_VERSION`，不再把官方 Release 误报为 Fork 更新。
 - 源码构建只提示 `git pull` 和重新构建，禁用可能覆盖 Fork 功能的二进制在线更新与回退。
 - 源码 Compose 构建固定从仓库 `FORK_VERSION` 读取版本，避免宿主机遗留的 `BUILD_VERSION` 把页面版本覆盖成分支名。
+- 根目录、部署目录和后端开发 Dockerfile 统一使用 Go `1.26.6`，与 `backend/go.mod` 及 CI 约束保持一致。
 - 兼容 Sub2API `v0.1.177` 的原生 remote compaction v2，旧 Compact 与原生 v2 均不会误启用透支调度。
 - 新增对应后端单元测试和故障排查日志。
 
-Patch 共修改 56 个源码和文档文件。`patches/` 目录本身不包含在 Patch 中，避免 Patch 递归包含自身。
+Patch 共修改 59 个源码和文档文件。`patches/` 目录本身不包含在 Patch 中，避免 Patch 递归包含自身。
 
 ## 在精确基线上应用
 
@@ -66,10 +67,10 @@ git apply --3way /tmp/sub2api-overdraft.patch
 本 Patch 已在临时工作树中从基础提交执行 `git apply --check` 和三方应用。应用后写入的 Git tree 为：
 
 ```text
-9f9e51bfaeace5872f6fd467a7c4abc8a3f68c45
+0da3722c8deaf4f59a528773a62fe204208a08a4
 ```
 
-它与生成 Patch 时本地源码快照排除 `patches/` 后的 Git tree 完全一致；该快照基于 Fork 提交 `2a3d7200ef78c18b8fea93916166048e75f2c5fa` 生成。
+它与生成 Patch 时本地源码快照排除 `patches/` 后的 Git tree 完全一致；该快照基于 Fork 提交 `b3297a6ecce68412d70a815157abf4aec268a302` 生成。
 
 ## 历史 Patch
 
