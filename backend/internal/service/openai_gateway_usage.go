@@ -1028,7 +1028,8 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
 	if len(updates) == 0 {
 		return
 	}
-	persistSnapshot := codexQuotaOverdraftSnapshotExhausted(updates) || s.getCodexSnapshotThrottle().Allow(accountID, now)
+	persistSnapshot := codexQuotaOverdraftSnapshotPrearmReached(updates) || s.getCodexSnapshotThrottle().Allow(accountID, now)
+	businessSuccess := codexQuotaOverdraftWasInjected(ctx, accountID)
 
 	go func() {
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1059,7 +1060,11 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
 			account = current
 		}
 		mergeAccountExtra(account, updates)
-		s.codexQuotaOverdraft.ObserveAccount(account, "")
+		if businessSuccess {
+			s.codexQuotaOverdraft.observeBusinessSuccess(account, "")
+		} else {
+			s.codexQuotaOverdraft.observeAccount(account, "")
+		}
 	}()
 }
 

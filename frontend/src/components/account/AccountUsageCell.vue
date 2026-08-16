@@ -763,19 +763,15 @@ const codexOverdraftStatus = computed(() => {
   if (!probe) return null
 
   const attempts = Math.max(0, probe.attempts || 0)
-  const limit = Math.max(1, probe.limit || 5)
+  const limit = Math.max(1, probe.limit || 1)
   const windowLabel = probe.quota_window === 'multiple' ? '5h / 7d' : probe.quota_window
   const testedAt = probe.tested_at ? new Date(probe.tested_at).toLocaleString() : ''
   const recoverAt = probe.recover_at ? new Date(probe.recover_at).toLocaleString() : ''
-  const retryAt = probe.retry_at ? new Date(probe.retry_at).toLocaleString() : ''
-  const retryCount = Math.max(0, probe.retry_count || 0)
   const titleParts = [windowLabel]
   if (probe.model) titleParts.push(probe.model)
   if (probe.reason_code) titleParts.push(probe.reason_code)
   if (testedAt) titleParts.push(`${t('usage.overdraftTestedAt')}: ${testedAt}`)
   if (recoverAt) titleParts.push(`${t('usage.overdraftRecoverAt')}: ${recoverAt}`)
-  if (retryAt) titleParts.push(`${t('usage.overdraftRetryAt')}: ${retryAt}`)
-  if (retryCount > 0) titleParts.push(`${t('usage.overdraftRetryCount')}: ${retryCount}`)
 
   switch (probe.status) {
     case 'pending':

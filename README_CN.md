@@ -21,8 +21,9 @@
 
 ## 本 Fork 增加的功能
 
-- Codex 5h / 7d 额度达到 100% 后，最多执行 5 次真实请求探测，判断账号是否仍可继续调用。
-- 探测成功后继续参与账号调度，并分别统计 5h / 7d 透支期请求数、Token 和金额。
+- Codex 5h / 7d 用量达到 95% 后，为普通 OAuth 文本业务请求注入透支请求形态；达到 100% 后直接使用真实业务结果确认透支状态。
+- 注入业务请求成功即记为 `passed`；返回明确额度 429 即记为 `failed` 并切号冷却。缺少业务证据时，同一额度周期最多补充 1 次独立探测。
+- 确认成功后继续参与账号调度，并分别统计 5h / 7d 透支期请求数、Token 和金额。
 - 管理页面显示“透支探测中”“透支中”“已确认限额”“探测无法确认”和“额度已恢复”。
 - 网络、超时、5xx 和普通瞬时 429 不会被误判为额度耗尽；401/403、账号禁用和其他风控仍使用原有策略。
 - 多实例通过 PostgreSQL 原子领取（atomic claim）去重；状态保存在现有 `accounts.extra`，无需新增数据表。
@@ -70,7 +71,7 @@ docker logs --since 30m sub2api 2>&1 | \
   grep -E 'codex_quota_overdraft_(probe|state|pause|stale_rate_limit)'
 ```
 
-出现 `codex_quota_overdraft_probe_passed`，页面显示“透支中”，并且后续真实业务请求成功，即可确认透支功能完整生效。无法确认的探测会按 1、3、10 分钟主动重试，容器重启后由持久化状态继续；5 次明确额度失败时，探测状态、账号暂停和调度通知会原子提交。OpenAI OAuth 常规文本“测试账号连接”也会使用透支请求形态并接入同一探测状态机；API Key、Shadow、图片和 Compact 测试除外。额度未达到 100% 时没有探测日志是正常现象。
+出现 `codex_quota_overdraft_business_passed` 或 `codex_quota_overdraft_probe_passed`，页面显示“透支中”，并且后续真实业务请求成功，即可确认透支功能完整生效。注入业务请求返回明确额度 429 时会出现 `codex_quota_overdraft_business_exhausted`，状态、账号暂停和调度通知会原子提交。网络错误、5xx、超时和普通瞬时 429 不会判定透支结束；独立探测为 `inconclusive` 后同周期不自动重试。OpenAI OAuth 常规文本“测试账号连接”也使用同一请求形态和状态机；API Key、Shadow、图片和 Compact 测试除外。额度未达到 95% 时没有透支注入，未达到 100% 时没有探测日志，均属正常现象。
 
 ## 来源、许可证与风险
 

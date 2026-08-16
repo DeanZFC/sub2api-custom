@@ -16,13 +16,13 @@
 
 源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 
-源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.4`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.5`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
 
 Sub2API `v0.1.177` 将原生 remote compaction v2 保留在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 
 ## 后台测试连接与残留限流修复
 
-管理页面的 OpenAI OAuth 常规文本“测试账号连接”使用与真实业务请求相同的透支请求形态。测试成功并取得 5h/7d 快照后会触发额度观察；测试返回带明确额度证据的 429 时交给透支协调器执行最多 5 次真实探测，不再直接写入普通账号级限流。API Key、Shadow、图片和 Compact 测试不启用该行为。
+管理页面的 OpenAI OAuth 常规文本“测试账号连接”与真实业务请求使用相同策略：用量达到 95% 后注入；100% 时成功直接确认 `passed`，明确额度 429 直接确认 `failed`。API Key、Shadow、图片和 Compact 测试不启用该行为。
 
 探测得到 `passed`，或额度周期进入 `recovered` 后，会清除仍残留的账号级 `rate_limit_reset_at` 以及本功能或额度阈值产生的暂停。这里不再要求当前重置时间与探测开始时记录的 `observed_rate_limit_reset_at` 完全相同，因为并发 429 可能在探测期间更新该字段；`failed` 状态不会清理限流。发生清理时记录 `codex_quota_overdraft_stale_rate_limit_cleared`。
 
@@ -57,19 +57,18 @@ gateway:
 - Responses WebSocket v2 首轮和后续轮
 - 管理页面 OpenAI OAuth 常规文本“测试账号连接”
 
-每次最终发往上游前，如果 `input` 最后一项是用户消息，则追加一对与参考项目相同的无操作 `custom_tool_call` 和 `custom_tool_call_output`。请求体超过 32 MiB、JSON 无效、形状不匹配或已经注入时保持原样。
+用量达到 95% 后，每次最终发往上游前，如果 `input` 最后一项是用户消息，则追加一对与参考项目相同的无操作 `custom_tool_call` 和 `custom_tool_call_output`。请求体超过 32 MiB、JSON 无效、形状不匹配或已经注入时保持原样。
 
-5h 或 7d 额度首次达到 100%，或者收到包含明确额度证据的真实 429 时，按参考项目执行复核：
+5h 或 7d 额度达到 100%，或者收到包含明确额度证据的真实 429 时，执行以下混合判定：
 
-1. 同一额度周期只启动一个探测计划，状态持久化在 `accounts.extra.codex_quota_overdraft_probe`，多实例使用数据库原子 claim 去重。
-2. 最多执行 5 次真实 Responses 请求，每次独立 20 秒超时。
-3. 模型按“首选模型、`gpt-5.5`、`gpt-5.4-mini`”循环。例如首选为 `gpt-5.4` 时，顺序是 `gpt-5.4`、`gpt-5.5`、`gpt-5.4-mini`、`gpt-5.4`、`gpt-5.5`。
-4. 任意一次返回有效的 `response.completed` 或 `response.output_item.done` 即判定 `passed`，账号继续调度并开始透支统计。
-5. 只有 5 次均返回明确 `quota_limited` 才判定 `failed`，账号暂停到对应额度恢复时间；5h 和 7d 同时耗尽时取最晚恢复时间。`failed` 状态、临时暂停和调度 outbox 在同一数据库事务中提交，避免出现状态已失败但账号没有暂停。
-6. 网络错误、超时、5xx、普通瞬时 429 和无效响应均判定 `inconclusive`，不会误停账号；后台按 1 分钟、3 分钟、10 分钟主动重试，并每分钟扫描数据库恢复服务重启前已到期的任务。重启时遗留超过 2 分钟的 `pending` 状态也会自动接续。每个额度周期最多自动重试 3 轮，之后仍可由额度刷新或新请求继续观察。
-7. 401/403、账号停用等认证问题交给原有认证异常逻辑处理，不加入额度重试；400/404 会轮换全部探测模型后再判定为 `inconclusive`，不会暂停整个账号。
-8. 账号禁用、过载、代理/传输故障、模型级冷却及其他临时不可调度原因不被绕过。
-9. 额度恢复后状态改为 `recovered`，清理本功能或额度阈值产生的暂停；5h 与 7d 分别维护透支起点，不会因另一窗口后来耗尽而重置已有统计。
+1. 实际注入的业务请求成功时直接判定 `passed`，账号继续调度并开始透支统计，不额外消耗探测请求。
+2. 实际注入的业务请求返回明确额度 429 时直接判定 `failed`，账号暂停到对应额度恢复时间并切号；5h 和 7d 同时耗尽时取最晚恢复时间。
+3. 如果没有可用的业务成功证据，同一额度周期仅启动 1 次独立 Responses 探测，最长 20 秒并优先使用当前业务模型。多实例使用 PostgreSQL 原子 claim 去重。
+4. 独立探测成功即判定 `passed`，明确 `quota_limited` 即判定 `failed`；网络错误、超时、5xx、普通瞬时 429 和无效响应判定 `inconclusive`，同周期不自动重试。
+5. `failed` 状态、临时暂停和调度 outbox 在同一数据库事务中提交。同周期 `failed` 为终态，晚到的业务成功或探测结果不能覆盖；业务明确额度 429 可以把并发产生的 `passed` 或 `inconclusive` 收敛为 `failed`。
+6. 401/403、账号停用等认证问题交给原有认证异常逻辑处理；400/404 判定为 `inconclusive`，不会暂停整个账号。
+7. 账号禁用、过载、代理/传输故障、模型级冷却及其他临时不可调度原因不被绕过。
+8. 额度恢复后状态改为 `recovered`，清理本功能或额度阈值产生的暂停；5h 与 7d 分别维护透支起点，不会因另一窗口后来耗尽而重置已有统计。
 
 状态值包括 `pending`、`passed`、`failed`、`inconclusive`、`recovered`。账号用量页面显示探测状态、尝试次数、额度周期、透支期成功请求数、Token、账号金额及预计恢复时间。
 
@@ -157,8 +156,8 @@ codex_quota_overdraft_probe_passed
 codex_quota_overdraft_probe_failed
 codex_quota_overdraft_probe_inconclusive
 codex_quota_overdraft_probe_attempt
-codex_quota_overdraft_retry_scheduled
-codex_quota_overdraft_retry_started
+codex_quota_overdraft_business_passed
+codex_quota_overdraft_business_exhausted
 codex_quota_overdraft_pause_applied
 codex_quota_overdraft_stale_rate_limit_cleared
 ```

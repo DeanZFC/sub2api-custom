@@ -156,6 +156,7 @@ type AccountTestService struct {
 
 type codexQuotaOverdraftAccountTestCoordinator interface {
 	ObserveAccount(account *Account, preferredModel string)
+	ObserveBusinessSuccess(account *Account, preferredModel string)
 	HandleQuota429(ctx context.Context, account *Account, headers http.Header, body []byte, preferredModel string) bool
 }
 
@@ -706,9 +707,13 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	payloadBytes, _ := json.Marshal(payload)
-	if s.codexQuotaOverdraftTestEnabled(account) {
+	overdraftInjected := false
+	if s.codexQuotaOverdraftTestEnabled(account) && codexQuotaOverdraftInjectionEligible(account, time.Now().UTC()) {
+		ctx = WithCodexQuotaOverdraftScheduling(ctx)
 		if updated, changed, err := injectCodexQuotaOverdraft(payloadBytes); err == nil && changed {
 			payloadBytes = updated
+			overdraftInjected = true
+			markCodexQuotaOverdraftInjected(ctx, account.ID)
 		}
 	}
 
@@ -812,7 +817,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		return err
 	}
 	if s.codexQuotaOverdraft != nil && s.codexQuotaOverdraftTestEnabled(account) {
-		s.codexQuotaOverdraft.ObserveAccount(account, upstreamTestModelID)
+		if overdraftInjected {
+			s.codexQuotaOverdraft.ObserveBusinessSuccess(account, upstreamTestModelID)
+		} else {
+			s.codexQuotaOverdraft.ObserveAccount(account, upstreamTestModelID)
+		}
 	}
 	return nil
 }

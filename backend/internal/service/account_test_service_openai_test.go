@@ -75,6 +75,7 @@ type openAIAccountTestRepo struct {
 
 type accountTestOverdraftCoordinatorStub struct {
 	observeCalls    int
+	businessCalls   int
 	observedAccount *Account
 	observedModel   string
 	handleCalls     int
@@ -85,6 +86,12 @@ type accountTestOverdraftCoordinatorStub struct {
 
 func (s *accountTestOverdraftCoordinatorStub) ObserveAccount(account *Account, preferredModel string) {
 	s.observeCalls++
+	s.observedAccount = account
+	s.observedModel = preferredModel
+}
+
+func (s *accountTestOverdraftCoordinatorStub) ObserveBusinessSuccess(account *Account, preferredModel string) {
+	s.businessCalls++
 	s.observedAccount = account
 	s.observedModel = preferredModel
 }
@@ -190,6 +197,10 @@ func TestAccountTestService_OpenAIOAuthOverdraftTestInjectsAndObservesSnapshot(t
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "test-token"},
+		Extra: map[string]any{
+			"codex_5h_used_percent": 95,
+			"codex_5h_reset_at":     time.Now().Add(5 * time.Hour).Format(time.RFC3339),
+		},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -201,7 +212,8 @@ func TestAccountTestService_OpenAIOAuthOverdraftTestInjectsAndObservesSnapshot(t
 	require.Equal(t, "custom_tool_call", gjson.GetBytes(body, "input.1.type").String())
 	require.Equal(t, "custom_tool_call_output", gjson.GetBytes(body, "input.2.type").String())
 	require.Equal(t, gjson.GetBytes(body, "input.1.call_id").String(), gjson.GetBytes(body, "input.2.call_id").String())
-	require.Equal(t, 1, coordinator.observeCalls)
+	require.Zero(t, coordinator.observeCalls)
+	require.Equal(t, 1, coordinator.businessCalls)
 	require.Same(t, account, coordinator.observedAccount)
 	require.Equal(t, "gpt-5.4", coordinator.observedModel)
 	require.Equal(t, 100.0, account.Extra["codex_5h_used_percent"])

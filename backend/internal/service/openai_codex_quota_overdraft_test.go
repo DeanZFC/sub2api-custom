@@ -18,11 +18,20 @@ func TestCodexQuotaOverdraftInjection(t *testing.T) {
 	SetCodexQuotaOverdraftEnabled(true)
 	ctx := WithCodexQuotaOverdraftScheduling(context.Background())
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}}}
-	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	oauth := &Account{
+		ID:       77,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"codex_5h_used_percent": 95,
+			"codex_5h_reset_at":     time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+	}
 	body := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`)
 
 	updated := svc.prepareCodexQuotaOverdraftBody(ctx, oauth, false, body)
 	require.NotEqual(t, string(body), string(updated))
+	require.True(t, codexQuotaOverdraftWasInjected(ctx, oauth.ID))
 
 	var document codexQuotaOverdraftDocument
 	require.NoError(t, json.Unmarshal(updated, &document))
@@ -42,7 +51,15 @@ func TestCodexQuotaOverdraftInjection(t *testing.T) {
 func TestCodexQuotaOverdraftInjectionGuards(t *testing.T) {
 	t.Cleanup(func() { SetCodexQuotaOverdraftEnabled(false) })
 	body := []byte(`{"input":[{"type":"message","role":"user"}]}`)
-	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	oauth := &Account{
+		ID:       78,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"codex_5h_used_percent": 95,
+			"codex_5h_reset_at":     time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+	}
 	enabledCfg := &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}}
 	svc := &OpenAIGatewayService{cfg: enabledCfg}
 
@@ -50,6 +67,8 @@ func TestCodexQuotaOverdraftInjectionGuards(t *testing.T) {
 	require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(WithCodexQuotaOverdraftScheduling(context.Background()), oauth, false, body)))
 
 	SetCodexQuotaOverdraftEnabled(true)
+	underPrearm := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_5h_used_percent": 94}}
+	require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(WithCodexQuotaOverdraftScheduling(context.Background()), underPrearm, false, body)), "95% 以下不能注入")
 	require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(context.Background(), oauth, false, body)), "未标记的端点不能注入")
 	require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(WithCodexQuotaOverdraftScheduling(context.Background()), oauth, true, body)), "compact 不能注入")
 
@@ -60,7 +79,15 @@ func TestCodexQuotaOverdraftInjectionGuards(t *testing.T) {
 	} {
 		require.Equal(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(ctx, account, false, body)))
 	}
-	agentIdentity := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{openAIAuthModeCredentialKey: OpenAIAuthModeAgentIdentity}}
+	agentIdentity := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{openAIAuthModeCredentialKey: OpenAIAuthModeAgentIdentity},
+		Extra: map[string]any{
+			"codex_7d_used_percent": 95,
+			"codex_7d_reset_at":     time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		},
+	}
 	require.NotEqual(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(ctx, agentIdentity, false, body)), "Agent Identity 必须支持透支请求注入")
 
 	notUserLast := []byte(`{"input":[{"type":"message","role":"assistant"}]}`)
@@ -69,6 +96,23 @@ func TestCodexQuotaOverdraftInjectionGuards(t *testing.T) {
 	require.Equal(t, string(invalid), string(svc.prepareCodexQuotaOverdraftBody(ctx, oauth, false, invalid)))
 	oversized := make([]byte, codexQuotaOverdraftMaxBodyBytes+1)
 	require.Equal(t, oversized, svc.prepareCodexQuotaOverdraftBody(ctx, oauth, false, oversized))
+}
+
+func TestCodexQuotaOverdraftSchedulingDoesNotBypassThresholdBelowPrearm(t *testing.T) {
+	t.Cleanup(func() { SetCodexQuotaOverdraftEnabled(false) })
+	SetCodexQuotaOverdraftEnabled(true)
+	ctx := WithCodexQuotaOverdraftScheduling(context.Background())
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"codex_5h_used_percent": 94,
+		},
+	}
+	quotaCtx := withOpenAIQuotaAutoPauseSettings(ctx, OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold5h: 0.9})
+
+	paused, _ := shouldAutoPauseOpenAIAccountByQuota(quotaCtx, account)
+	require.True(t, paused)
 }
 
 func TestCodexQuotaOverdraftSchedulingOnlyBypassesQuotaThresholds(t *testing.T) {

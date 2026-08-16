@@ -21,10 +21,11 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## Fork Features
 
-- Runs up to five real probes after the reported Codex 5h or 7d quota reaches 100%.
+- Pre-arms ordinary OAuth text traffic with the overdraft payload at 95% usage and uses successful business traffic as direct evidence after usage reaches 100%.
+- Marks an injected request's explicit quota 429 as terminal for that cycle; when business evidence is unavailable, runs at most one independent probe per quota cycle.
 - Keeps an account schedulable after a successful probe and tracks overdraft requests, tokens, cost, and recovery for both windows independently.
 - Exposes `pending`, `passed`, `failed`, `inconclusive`, and `recovered` states in the admin UI and PostgreSQL.
-- Actively retries inconclusive probes after 1, 3, and 10 minutes, including recovery from persisted retry state after a restart.
+- Treats transient 429s, timeouts, network failures, and 5xx responses as inconclusive without automatic background retries.
 - Uses an atomic PostgreSQL claim for multi-instance deployments and atomically commits terminal failure, account pause, and scheduler notification without a schema migration.
 - Supports an immediate configuration rollback to the upstream scheduling behavior.
 

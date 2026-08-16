@@ -6,7 +6,7 @@
 
 ## 重要说明
 
-- 本功能仅表示：当 Codex 5h 或 7d 页面额度达到 100% 后，通过真实请求确认上游是否仍允许继续调用。
+- 本功能仅表示：Codex 5h 或 7d 用量达到 95% 后开始注入兼容请求形态，并在额度达到 100% 后通过真实业务结果或单次独立探测确认上游是否仍允许继续调用。
 - `passed` 只代表探测时上游仍返回有效响应，不承诺之后始终可用，也不会绕过认证失效、账号禁用、网络故障或其他风控限制。
 - 探测请求和透支期请求都可能产生真实上游用量和费用。
 - 此行为可能不符合上游服务条款。部署者必须自行确认合规性，并承担账号限制、服务中断等风险。
@@ -20,7 +20,7 @@
 - 对符合条件的 OpenAI OAuth 普通账号和 Agent Identity 账号启用透支调度，Shadow 子账号除外。
 - 支持 `/v1/responses`、转换为 Responses 的 `/v1/chat/completions` 和 `/v1/messages`，以及 Responses WebSocket v2。
 - 在适用请求的最后一条用户消息后注入一对无操作工具调用，用于保持与参考实现一致的请求形态。
-- 当 5h 或 7d 额度首次达到 100%，或收到带明确额度证据的 429 时，最多执行 5 次真实探测。
+- 用量达到 95% 后开始对适用业务请求注入；达到 100% 后，注入业务成功直接确认 `passed`，明确额度 429 直接确认 `failed`。没有业务结果可用时，同周期最多补充 1 次独立探测。
 - 管理页面的 OpenAI OAuth 常规文本“测试账号连接”也使用相同请求形态，并接入同一套额度探测状态机。
 - 分别维护 5h、7d 透支周期，并在管理页面显示状态、请求数、Token、账号金额和预计恢复时间。
 - 将探测状态保存在现有 `accounts.extra` JSONB 字段中，不新增数据库表，不需要手动执行数据库迁移（migration）。
@@ -257,7 +257,7 @@ docker compose \
 
 ### 第三层：查看真实探测日志
 
-只有账号 5h/7d 额度达到 100%，或者收到带明确额度信息的上游 429，才会启动探测。额度达到 100% 后，可以在管理页面对该 OpenAI OAuth 账号执行常规文本“测试账号连接”；测试请求本身会使用透支请求形态，并触发或接续同一额度周期的探测。额度未耗尽时没有相关日志是正常现象。
+账号 5h/7d 用量达到 95% 后开始注入；只有额度达到 100%，或者收到带明确额度信息的上游 429，才会产生透支确认状态。额度达到 100% 后，可以在管理页面对该 OpenAI OAuth 账号执行常规文本“测试账号连接”；测试请求本身会使用透支请求形态，并直接参与同一额度周期的判定。额度未耗尽时没有探测日志是正常现象。
 
 ```bash
 docker logs --since 30m sub2api 2>&1 | \
@@ -268,12 +268,12 @@ docker logs --since 30m sub2api 2>&1 | \
 
 | 日志 | 含义 |
 | --- | --- |
+| `codex_quota_overdraft_business_passed` | 注入后的真实业务或账号测试成功，直接确认透支可用 |
+| `codex_quota_overdraft_business_exhausted` | 注入后的业务请求收到明确额度 429，直接确认额度耗尽并暂停账号 |
 | `codex_quota_overdraft_probe_passed` | 至少一次真实探测成功，透支成立，账号继续参与调度 |
-| `codex_quota_overdraft_probe_failed` | 5 次都明确返回额度限制，账号暂停至额度恢复时间 |
+| `codex_quota_overdraft_probe_failed` | 单次独立探测明确返回额度限制，账号暂停至额度恢复时间 |
 | `codex_quota_overdraft_probe_attempt` | 单次探测结果，包含模型、HTTP 状态码、结果和原因，不记录凭据及完整响应正文 |
-| `codex_quota_overdraft_probe_inconclusive` | 网络、超时、5xx 等导致无法确认，按 1、3、10 分钟退避重试 |
-| `codex_quota_overdraft_retry_scheduled` | 已安排主动重试 |
-| `codex_quota_overdraft_retry_started` | 主动重试开始；服务重启后也会由数据库到期扫描恢复 |
+| `codex_quota_overdraft_probe_inconclusive` | 网络、超时、5xx、普通瞬时 429 等导致无法确认；同周期不自动重试 |
 | `codex_quota_overdraft_probe_claim_failed` | 无法在 PostgreSQL 中原子领取探测任务，需要排查数据库或版本 |
 | `codex_quota_overdraft_state_persist_failed` | 状态无法写入 `accounts.extra`，页面可能不显示最新结果 |
 | `codex_quota_overdraft_pause_applied` | `failed` 状态、账号暂停和调度通知已经原子提交 |
@@ -282,10 +282,10 @@ docker logs --since 30m sub2api 2>&1 | \
 真正“透支成功”的最直接证据是：
 
 ```text
-codex_quota_overdraft_probe_passed
+codex_quota_overdraft_business_passed
 ```
 
-其中会包含 `account_id`、`attempts`、`model` 和 `quota_window`。
+如果没有业务成功证据，也可以由 `codex_quota_overdraft_probe_passed` 确认。其中会包含 `account_id`、`model` 和 `quota_window`。
 
 ### 第四层：查看数据库持久化状态
 
@@ -306,29 +306,26 @@ docker compose \
 
 | 状态 | 页面显示 | 含义 |
 | --- | --- | --- |
-| `pending` | 透支探测中 | 最多 5 次真实探测正在执行 |
-| `passed` | 透支中 | 上游仍可调用，账号继续调度并开始统计透支用量 |
-| `failed` | 已确认限额 | 5 次均明确受额度限制，暂停到恢复时间 |
-| `inconclusive` | 探测无法确认 | 暂时无法判断，查看 `reason_code` 和 `retry_at` |
+| `pending` | 透支探测中 | 单次独立探测正在执行 |
+| `passed` | 透支中 | 注入业务或独立探测成功，账号继续调度并开始统计透支用量 |
+| `failed` | 已确认限额 | 注入业务或独立探测明确受额度限制，暂停到恢复时间 |
+| `inconclusive` | 探测无法确认 | 单次探测受网络、瞬时限流或上游异常干扰；同周期不自动重试 |
 | `recovered` | 额度已恢复 | 原额度周期结束，相关暂停已清理 |
 
 页面显示 `透支中`，数据库为 `passed`，并且后续业务请求返回成功，三者同时满足即可确认功能完整生效。
 
 ## 探测逻辑
 
-每个额度周期的单轮计划最多探测 5 次，每次最长 20 秒。模型按以下顺序循环：
+每个额度周期采用以下混合判定流程：
 
-```text
-首选模型 -> gpt-5.5 -> gpt-5.4-mini -> 首选模型 -> gpt-5.5
-```
-
-- 任意一次返回有效 `response.completed` 或 `response.output_item.done`，立即记为 `passed`。
-- 只有 5 次都明确返回 `quota_limited`，才记为 `failed`。
+- 用量低于 95% 时不注入，达到 95% 后对适用的普通 OAuth 文本请求持续注入。
+- 达到 100% 后，注入业务返回成功即记为 `passed`；返回明确 `quota_limited` 即记为 `failed`，暂停账号并切换到其他账号。
+- 如果额度刚从 95% 以下跳到 100%，当前业务请求没有注入，系统仅补充 1 次独立 Responses 探测，最长 20 秒，并优先使用当前业务模型。
 - 网络错误、超时、5xx、普通瞬时 429、无效响应等记为 `inconclusive`，不会因此误停账号。
 - 401/403 继续由原有认证失效逻辑处理。
 - 账号禁用、过载、代理故障、模型冷却等非额度限制不会被本功能绕过。
 
-无法确认时，`retry_count` 记录当前退避轮次。后台会依次等待 1 分钟、3 分钟和 10 分钟执行最多 3 轮自动重试；每分钟的数据库扫描会恢复因容器重启而丢失的内存定时器，并接续超过 2 分钟的遗留 `pending` 状态。达到自动重试上限后不会持续消耗上游请求，但后续额度刷新、账号测试或新的明确额度响应仍可继续观察。
+独立探测无法确认后，同一额度周期不会自动重试，也不会持续消耗探测请求。后续已经注入的真实业务成功或明确额度 429 仍可把状态更新为 `passed` 或 `failed`；同周期 `failed` 为终态，成功结果不能覆盖它。
 
 多实例部署通过 PostgreSQL 原子领取（atomic claim）保证同一账号、同一额度周期只有一个实例发起探测。
 
@@ -488,7 +485,7 @@ docker compose \
 
 页面的“限流中”直接来自账号记录的 `rate_limit_reset_at`。旧实现存在竞态：探测开始后若另一个 429 更新了该时间，即使探测最终 `passed`，严格时间比较也可能不清理它，因此出现“实际透支可用但页面限流中”。当前版本在 `passed/recovered` 时会清除该残留状态，并记录 `codex_quota_overdraft_stale_rate_limit_cleared`；`failed` 不会清理。
 
-其他真实限制仍会正常生效，包括账号禁用、401/403、5 次探测均确认额度耗尽、代理/网络错误、模型级冷却、并发限制或没有明确额度证据的其他上游 429。若状态持续存在，先按 `account_id` 检查上述日志、数据库中的 `extra->'codex_quota_overdraft_probe'` 和 `rate_limit_reset_at`，区分额度透支与普通限流。
+其他真实限制仍会正常生效，包括账号禁用、401/403、注入业务或单次探测确认额度耗尽、代理/网络错误、模型级冷却、并发限制或没有明确额度证据的其他上游 429。若状态持续存在，先按 `account_id` 检查上述日志、数据库中的 `extra->'codex_quota_overdraft_probe'` 和 `rate_limit_reset_at`，区分额度透支与普通限流。
 
 ### `pq: could not determine data type of parameter $1`
 

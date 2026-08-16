@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,9 +14,10 @@ import (
 )
 
 const (
-	codexQuotaOverdraftCallIDPrefix = "call_sub2api_overdraft_"
-	codexQuotaOverdraftExecInput    = `const r = await tools.exec_command({"cmd":"true","yield_time_ms":1000,"max_output_tokens":1000}); text(r.output);`
-	codexQuotaOverdraftMaxBodyBytes = 32 << 20
+	codexQuotaOverdraftCallIDPrefix  = "call_sub2api_overdraft_"
+	codexQuotaOverdraftExecInput     = `const r = await tools.exec_command({"cmd":"true","yield_time_ms":1000,"max_output_tokens":1000}); text(r.output);`
+	codexQuotaOverdraftMaxBodyBytes  = 32 << 20
+	codexQuotaOverdraftPrearmPercent = 95
 )
 
 var codexQuotaOverdraftEnabled atomic.Bool
@@ -40,6 +42,10 @@ func isCodexQuotaOverdraftAccount(account *Account) bool {
 
 type codexQuotaOverdraftSchedulingCtxKey struct{}
 
+type codexQuotaOverdraftRequestState struct {
+	injectedAccounts sync.Map
+}
+
 // WithCodexQuotaOverdraftScheduling marks normal text-generation requests as
 // eligible for the experimental quota-overdraft behavior. The process-wide
 // configuration switch is still checked at every scheduling and mutation gate.
@@ -47,7 +53,10 @@ func WithCodexQuotaOverdraftScheduling(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, codexQuotaOverdraftSchedulingCtxKey{}, true)
+	if codexQuotaOverdraftRequestStateFromContext(ctx) != nil {
+		return ctx
+	}
+	return context.WithValue(ctx, codexQuotaOverdraftSchedulingCtxKey{}, &codexQuotaOverdraftRequestState{})
 }
 
 // CodexQuotaOverdraftSchedulingEnabled reports whether the global switch and
@@ -56,18 +65,70 @@ func CodexQuotaOverdraftSchedulingEnabled(ctx context.Context) bool {
 	if !CodexQuotaOverdraftEnabled() || ctx == nil {
 		return false
 	}
-	enabled, _ := ctx.Value(codexQuotaOverdraftSchedulingCtxKey{}).(bool)
-	return enabled
+	return codexQuotaOverdraftRequestStateFromContext(ctx) != nil
 }
 
 func codexQuotaOverdraftSchedulingEnabled(ctx context.Context) bool {
 	return CodexQuotaOverdraftSchedulingEnabled(ctx)
 }
 
+func codexQuotaOverdraftRequestStateFromContext(ctx context.Context) *codexQuotaOverdraftRequestState {
+	if ctx == nil {
+		return nil
+	}
+	state, _ := ctx.Value(codexQuotaOverdraftSchedulingCtxKey{}).(*codexQuotaOverdraftRequestState)
+	return state
+}
+
+func markCodexQuotaOverdraftInjected(ctx context.Context, accountID int64) {
+	if accountID <= 0 {
+		return
+	}
+	if state := codexQuotaOverdraftRequestStateFromContext(ctx); state != nil {
+		state.injectedAccounts.Store(accountID, struct{}{})
+	}
+}
+
+func codexQuotaOverdraftWasInjected(ctx context.Context, accountID int64) bool {
+	if accountID <= 0 {
+		return false
+	}
+	state := codexQuotaOverdraftRequestStateFromContext(ctx)
+	if state == nil {
+		return false
+	}
+	_, ok := state.injectedAccounts.Load(accountID)
+	return ok
+}
+
+func codexQuotaOverdraftInjectionEligible(account *Account, now time.Time) bool {
+	if !isCodexQuotaOverdraftAccount(account) {
+		return false
+	}
+	state, _ := codexQuotaOverdraftStateFromAccount(account)
+	if state != nil && state.RecoverAt != nil && state.RecoverAt.After(now) {
+		switch state.Status {
+		case codexQuotaOverdraftProbePending, codexQuotaOverdraftProbePassed, codexQuotaOverdraftProbeInconclusive:
+			return true
+		case codexQuotaOverdraftProbeFailed:
+			return false
+		}
+	}
+	windowEligible := func(usedKey, resetKey string) bool {
+		if parseExtraFloat64(account.Extra[usedKey]) < codexQuotaOverdraftPrearmPercent {
+			return false
+		}
+		resetAt := codexQuotaOverdraftResetAt(account.Extra[resetKey], now)
+		return resetAt == nil || resetAt.After(now)
+	}
+	return windowEligible("codex_5h_used_percent", "codex_5h_reset_at") ||
+		windowEligible("codex_7d_used_percent", "codex_7d_reset_at")
+}
+
 func (s *OpenAIGatewayService) shouldInjectCodexQuotaOverdraft(ctx context.Context, account *Account, compact bool) bool {
 	return codexQuotaOverdraftSchedulingEnabled(ctx) && !compact &&
 		s != nil && s.cfg != nil && s.cfg.Gateway.CodexQuotaOverdraftEnabled &&
-		isCodexQuotaOverdraftAccount(account)
+		codexQuotaOverdraftInjectionEligible(account, time.Now().UTC())
 }
 
 func (s *OpenAIGatewayService) prepareCodexQuotaOverdraftBody(ctx context.Context, account *Account, compact bool, body []byte) []byte {
@@ -75,10 +136,14 @@ func (s *OpenAIGatewayService) prepareCodexQuotaOverdraftBody(ctx context.Contex
 		return body
 	}
 	updated, changed, _ := injectCodexQuotaOverdraft(body)
-	if !changed {
-		return body
+	if changed {
+		markCodexQuotaOverdraftInjected(ctx, account.ID)
+		return updated
 	}
-	return updated
+	if codexQuotaOverdraftBodyHasInjection(body) {
+		markCodexQuotaOverdraftInjected(ctx, account.ID)
+	}
+	return body
 }
 
 func (s *OpenAIGatewayService) prepareCodexQuotaOverdraftPayload(ctx context.Context, account *Account, payload map[string]any) map[string]any {
@@ -90,6 +155,11 @@ func (s *OpenAIGatewayService) prepareCodexQuotaOverdraftPayload(ctx context.Con
 		return payload
 	}
 	updated, changed, _ := injectCodexQuotaOverdraft(raw)
+	if changed {
+		markCodexQuotaOverdraftInjected(ctx, account.ID)
+	} else if codexQuotaOverdraftBodyHasInjection(raw) {
+		markCodexQuotaOverdraftInjected(ctx, account.ID)
+	}
 	if !changed {
 		return payload
 	}
@@ -110,6 +180,26 @@ type codexQuotaOverdraftInputItem struct {
 	CallID string `json:"call_id"`
 }
 
+func codexQuotaOverdraftBodyHasInjection(body []byte) bool {
+	var document codexQuotaOverdraftDocument
+	if len(body) == 0 || json.Unmarshal(body, &document) != nil {
+		return false
+	}
+	return codexQuotaOverdraftInputHasInjection(document.Input)
+}
+
+func codexQuotaOverdraftInputHasInjection(input []json.RawMessage) bool {
+	for _, raw := range input {
+		var item codexQuotaOverdraftInputItem
+		if err := json.Unmarshal(raw, &item); err == nil &&
+			item.Type == "custom_tool_call" &&
+			strings.HasPrefix(item.CallID, codexQuotaOverdraftCallIDPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // injectCodexQuotaOverdraft appends the same no-op custom tool call pair used by
 // cpa-account-config-manager. Unsupported request shapes fail open unchanged.
 func injectCodexQuotaOverdraft(body []byte) ([]byte, bool, error) {
@@ -125,13 +215,8 @@ func injectCodexQuotaOverdraft(body []byte) ([]byte, bool, error) {
 		return body, false, nil
 	}
 
-	for _, raw := range document.Input {
-		var item codexQuotaOverdraftInputItem
-		if err := json.Unmarshal(raw, &item); err == nil &&
-			item.Type == "custom_tool_call" &&
-			strings.HasPrefix(item.CallID, codexQuotaOverdraftCallIDPrefix) {
-			return body, false, nil
-		}
+	if codexQuotaOverdraftInputHasInjection(document.Input) {
+		return body, false, nil
 	}
 
 	var last codexQuotaOverdraftInputItem
