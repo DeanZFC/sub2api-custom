@@ -231,6 +231,7 @@ func ProvideCodexQuotaOverdraftCoordinator(
 	tempUnschedCache TempUnschedCache,
 	runtimeBlocker AccountRuntimeBlocker,
 	rateLimitService *RateLimitService,
+	timingWheel *TimingWheelService,
 ) *CodexQuotaOverdraftCoordinator {
 	coordinator := NewCodexQuotaOverdraftCoordinator(
 		accountRepo,
@@ -242,6 +243,7 @@ func ProvideCodexQuotaOverdraftCoordinator(
 		runtimeBlocker,
 		rateLimitService,
 	)
+	coordinator.SetRetryScheduler(timingWheel)
 	if gateway, ok := runtimeBlocker.(*OpenAIGatewayService); ok {
 		gateway.SetCodexQuotaOverdraftCoordinator(coordinator)
 	}

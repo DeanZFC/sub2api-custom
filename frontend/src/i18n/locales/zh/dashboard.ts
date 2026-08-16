@@ -290,6 +290,7 @@ export default {
     overdraftActive: '透支中',
     overdraftRecoverAt: '预计恢复',
     overdraftRetryAt: '下次重试',
+    overdraftRetryCount: '重试轮次',
     overdraftTestedAt: '探测时间',
     overdraftProbePending: '透支探测中',
     overdraftProbeFailed: '已确认限额',

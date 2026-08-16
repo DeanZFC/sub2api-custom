@@ -2636,6 +2636,145 @@ func (r *accountRepository) ClaimCodexQuotaOverdraftProbe(
 	return true, nil
 }
 
+type codexQuotaOverdraftTxBeginner interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+// FinalizeCodexQuotaOverdraftProbeFailed persists the terminal probe state,
+// account pause, and scheduler notification in one transaction.
+func (r *accountRepository) FinalizeCodexQuotaOverdraftProbeFailed(
+	ctx context.Context,
+	id int64,
+	state *service.CodexQuotaOverdraftProbeState,
+	until time.Time,
+	reason string,
+) (bool, error) {
+	if state == nil || state.Status != "failed" || strings.TrimSpace(state.CycleKey) == "" || until.IsZero() {
+		return false, nil
+	}
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return false, err
+	}
+	beginner, ok := r.sql.(codexQuotaOverdraftTxBeginner)
+	if !ok {
+		return false, errors.New("account repository does not support transactions")
+	}
+	tx, err := beginner.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE accounts
+		SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb),
+			temp_unschedulable_until = CASE
+				WHEN temp_unschedulable_until IS NULL OR temp_unschedulable_until < $3 THEN $3
+				ELSE temp_unschedulable_until
+			END,
+			temp_unschedulable_reason = CASE
+				WHEN temp_unschedulable_until IS NULL OR temp_unschedulable_until < $3 THEN $4
+				ELSE temp_unschedulable_reason
+			END,
+			updated_at = NOW()
+		WHERE id = $5
+			AND deleted_at IS NULL
+			AND extra #>> '{codex_quota_overdraft_probe,cycle_key}' = $6
+			AND extra #>> '{codex_quota_overdraft_probe,status}' IN ('pending', 'failed')
+	`, service.CodexQuotaOverdraftProbeExtraKey, string(payload), until, reason, id, state.CycleKey)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	return true, nil
+}
+
+// ListDueCodexQuotaOverdraftProbes returns a bounded set of persisted
+// inconclusive or stale pending probes so the retry sweep can resume work.
+func (r *accountRepository) ListDueCodexQuotaOverdraftProbes(ctx context.Context, now time.Time, limit int) ([]*service.Account, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT id
+		FROM accounts
+		WHERE deleted_at IS NULL
+			AND platform = $1
+			AND type = $2
+			AND status = $3
+			AND schedulable IS TRUE
+			AND parent_account_id IS NULL
+			AND (
+				(
+					extra #>> '{codex_quota_overdraft_probe,status}' = 'inconclusive'
+					AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,retry_at}', '')::timestamptz, 'infinity'::timestamptz) <= $4
+					AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,retry_count}', '')::integer, 0) <= $5
+				)
+				OR (
+					extra #>> '{codex_quota_overdraft_probe,status}' = 'pending'
+					AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,started_at}', '')::timestamptz, 'infinity'::timestamptz) <= $4 - INTERVAL '2 minutes'
+				)
+			)
+			AND COALESCE(NULLIF(extra #>> '{codex_quota_overdraft_probe,recover_at}', '')::timestamptz, 'infinity'::timestamptz) > $4
+		ORDER BY COALESCE(
+			NULLIF(extra #>> '{codex_quota_overdraft_probe,retry_at}', '')::timestamptz,
+			NULLIF(extra #>> '{codex_quota_overdraft_probe,started_at}', '')::timestamptz
+		) ASC, id ASC
+		LIMIT $6
+	`, service.PlatformOpenAI, service.AccountTypeOAuth, service.StatusActive, now, 3, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]int64, 0, limit)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	accounts, err := r.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]*service.Account, len(accounts))
+	for i := range accounts {
+		account := accounts[i]
+		byID[account.ID] = account
+	}
+	ordered := make([]*service.Account, 0, len(accounts))
+	for _, id := range ids {
+		if account := byID[id]; account != nil {
+			ordered = append(ordered, account)
+		}
+	}
+	return ordered, nil
+}
+
 // UpdateUpstreamBillingProbeSnapshot stores a probe result only while the
 // network identity used by that probe is still current.
 func (r *accountRepository) UpdateUpstreamBillingProbeSnapshot(

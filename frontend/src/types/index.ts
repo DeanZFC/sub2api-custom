@@ -1278,6 +1278,7 @@ export interface CodexQuotaOverdraftProbeState {
   started_at: string
   tested_at?: string | null
   retry_at?: string | null
+  retry_count?: number
   recover_at?: string | null
   five_hour_recover_at?: string | null
   seven_day_recover_at?: string | null

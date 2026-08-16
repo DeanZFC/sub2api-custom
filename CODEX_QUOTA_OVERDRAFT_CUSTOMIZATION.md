@@ -65,10 +65,11 @@ gateway:
 2. 最多执行 5 次真实 Responses 请求，每次独立 20 秒超时。
 3. 模型按“首选模型、`gpt-5.5`、`gpt-5.4-mini`”循环。例如首选为 `gpt-5.4` 时，顺序是 `gpt-5.4`、`gpt-5.5`、`gpt-5.4-mini`、`gpt-5.4`、`gpt-5.5`。
 4. 任意一次返回有效的 `response.completed` 或 `response.output_item.done` 即判定 `passed`，账号继续调度并开始透支统计。
-5. 只有 5 次均返回明确 `quota_limited` 才判定 `failed`，账号暂停到对应额度恢复时间；5h 和 7d 同时耗尽时取最晚恢复时间。
-6. 网络错误、超时、5xx、普通瞬时 429、无效响应、认证依赖不可用均判定 `inconclusive`，不会误停账号，一分钟后允许重试。
-7. 401/403 仍交给原有认证失效策略处理；账号禁用、过载、代理/传输故障、模型级冷却及其他临时不可调度原因不被绕过。
-8. 额度恢复后状态改为 `recovered`，清理本功能或额度阈值产生的暂停；5h 与 7d 分别维护透支起点，不会因另一窗口后来耗尽而重置已有统计。
+5. 只有 5 次均返回明确 `quota_limited` 才判定 `failed`，账号暂停到对应额度恢复时间；5h 和 7d 同时耗尽时取最晚恢复时间。`failed` 状态、临时暂停和调度 outbox 在同一数据库事务中提交，避免出现状态已失败但账号没有暂停。
+6. 网络错误、超时、5xx、普通瞬时 429 和无效响应均判定 `inconclusive`，不会误停账号；后台按 1 分钟、3 分钟、10 分钟主动重试，并每分钟扫描数据库恢复服务重启前已到期的任务。重启时遗留超过 2 分钟的 `pending` 状态也会自动接续。每个额度周期最多自动重试 3 轮，之后仍可由额度刷新或新请求继续观察。
+7. 401/403、账号停用等认证问题交给原有认证异常逻辑处理，不加入额度重试；400/404 会轮换全部探测模型后再判定为 `inconclusive`，不会暂停整个账号。
+8. 账号禁用、过载、代理/传输故障、模型级冷却及其他临时不可调度原因不被绕过。
+9. 额度恢复后状态改为 `recovered`，清理本功能或额度阈值产生的暂停；5h 与 7d 分别维护透支起点，不会因另一窗口后来耗尽而重置已有统计。
 
 状态值包括 `pending`、`passed`、`failed`、`inconclusive`、`recovered`。账号用量页面显示探测状态、尝试次数、额度周期、透支期成功请求数、Token、账号金额及预计恢复时间。
 
@@ -155,6 +156,10 @@ git diff --check
 codex_quota_overdraft_probe_passed
 codex_quota_overdraft_probe_failed
 codex_quota_overdraft_probe_inconclusive
+codex_quota_overdraft_probe_attempt
+codex_quota_overdraft_retry_scheduled
+codex_quota_overdraft_retry_started
+codex_quota_overdraft_pause_applied
 codex_quota_overdraft_stale_rate_limit_cleared
 ```
 

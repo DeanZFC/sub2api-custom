@@ -270,9 +270,13 @@ docker logs --since 30m sub2api 2>&1 | \
 | --- | --- |
 | `codex_quota_overdraft_probe_passed` | 至少一次真实探测成功，透支成立，账号继续参与调度 |
 | `codex_quota_overdraft_probe_failed` | 5 次都明确返回额度限制，账号暂停至额度恢复时间 |
-| `codex_quota_overdraft_probe_inconclusive` | 网络、超时、5xx 等导致无法确认，约 1 分钟后可重试 |
+| `codex_quota_overdraft_probe_attempt` | 单次探测结果，包含模型、HTTP 状态码、结果和原因，不记录凭据及完整响应正文 |
+| `codex_quota_overdraft_probe_inconclusive` | 网络、超时、5xx 等导致无法确认，按 1、3、10 分钟退避重试 |
+| `codex_quota_overdraft_retry_scheduled` | 已安排主动重试 |
+| `codex_quota_overdraft_retry_started` | 主动重试开始；服务重启后也会由数据库到期扫描恢复 |
 | `codex_quota_overdraft_probe_claim_failed` | 无法在 PostgreSQL 中原子领取探测任务，需要排查数据库或版本 |
 | `codex_quota_overdraft_state_persist_failed` | 状态无法写入 `accounts.extra`，页面可能不显示最新结果 |
+| `codex_quota_overdraft_pause_applied` | `failed` 状态、账号暂停和调度通知已经原子提交 |
 | `codex_quota_overdraft_stale_rate_limit_cleared` | 探测已证明账号可用，并清除了并发 429 遗留的账号级限流状态 |
 
 真正“透支成功”的最直接证据是：
@@ -312,7 +316,7 @@ docker compose \
 
 ## 探测逻辑
 
-每个额度周期最多探测 5 次，每次最长 20 秒。模型按以下顺序循环：
+每个额度周期的单轮计划最多探测 5 次，每次最长 20 秒。模型按以下顺序循环：
 
 ```text
 首选模型 -> gpt-5.5 -> gpt-5.4-mini -> 首选模型 -> gpt-5.5
@@ -323,6 +327,8 @@ docker compose \
 - 网络错误、超时、5xx、普通瞬时 429、无效响应等记为 `inconclusive`，不会因此误停账号。
 - 401/403 继续由原有认证失效逻辑处理。
 - 账号禁用、过载、代理故障、模型冷却等非额度限制不会被本功能绕过。
+
+无法确认时，`retry_count` 记录当前退避轮次。后台会依次等待 1 分钟、3 分钟和 10 分钟执行最多 3 轮自动重试；每分钟的数据库扫描会恢复因容器重启而丢失的内存定时器，并接续超过 2 分钟的遗留 `pending` 状态。达到自动重试上限后不会持续消耗上游请求，但后续额度刷新、账号测试或新的明确额度响应仍可继续观察。
 
 多实例部署通过 PostgreSQL 原子领取（atomic claim）保证同一账号、同一额度周期只有一个实例发起探测。
 

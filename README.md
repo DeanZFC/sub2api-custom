@@ -24,7 +24,8 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 - Runs up to five real probes after the reported Codex 5h or 7d quota reaches 100%.
 - Keeps an account schedulable after a successful probe and tracks overdraft requests, tokens, cost, and recovery for both windows independently.
 - Exposes `pending`, `passed`, `failed`, `inconclusive`, and `recovered` states in the admin UI and PostgreSQL.
-- Uses an atomic PostgreSQL claim for multi-instance deployments and requires no schema migration.
+- Actively retries inconclusive probes after 1, 3, and 10 minutes, including recovery from persisted retry state after a restart.
+- Uses an atomic PostgreSQL claim for multi-instance deployments and atomically commits terminal failure, account pause, and scheduler notification without a schema migration.
 - Supports an immediate configuration rollback to the upstream scheduling behavior.
 
 See the **[Chinese deployment and operations guide](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)** for source builds, migration, verification, upgrades, rollback, Nginx, and troubleshooting. Maintainers should also read [CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md](CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md).
