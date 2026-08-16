@@ -184,3 +184,14 @@ func TestRateLimitServiceCodexQuotaOverdraftDoesNotCreateRuntimeThresholdBlock(t
 func int64PtrForCodexQuotaOverdraftTest(value int64) *int64 {
 	return &value
 }
+
+func TestCodexQuotaOverdraftCoordinatorOwnedByGateway(t *testing.T) {
+	gateway := &OpenAIGatewayService{}
+
+	first := gateway.codexQuotaOverdraftCoordinator(nil)
+	second := gateway.codexQuotaOverdraftCoordinator(&TLSFingerprintProfileService{})
+
+	require.NotNil(t, first)
+	require.Same(t, first, second)
+	require.Same(t, gateway, first.runtimeBlocker)
+}

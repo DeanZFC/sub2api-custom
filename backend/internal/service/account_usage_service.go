@@ -312,12 +312,6 @@ type AccountUsageService struct {
 	agentIdentityWS         agentIdentityWSConnectionInvalidator
 }
 
-func (s *AccountUsageService) SetCodexQuotaOverdraftCoordinator(coordinator *CodexQuotaOverdraftCoordinator) {
-	if s != nil {
-		s.codexQuotaOverdraft = coordinator
-	}
-}
-
 // NewAccountUsageService 创建AccountUsageService实例
 func NewAccountUsageService(
 	accountRepo AccountRepository,

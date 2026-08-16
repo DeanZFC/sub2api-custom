@@ -16,7 +16,7 @@
 
 源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 
-源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.5`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.6`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
 
 Sub2API `v0.1.177` 将原生 remote compaction v2 保留在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 
@@ -76,6 +76,18 @@ gateway:
 
 `/responses/compact`、生图请求、Embedding、Count Tokens、Live 等端点不启用额度透支。
 
+## 低冲突集成结构
+
+从 `0.1.177-overdraft.6` 起，透支行为保持不变，但实现按“独立模块 + 固定钩子”组织，以减少同步官方更新时的冲突：
+
+- 四个 PostgreSQL 原子状态方法及临时暂停查询扩展位于 `backend/internal/repository/account_repo_codex_overdraft.go`，`account_repo.go` 不再承载大段透支 SQL。
+- Gateway 通过 `sync.Once` 懒加载并持有全进程唯一协调器；账号用量服务和账号测试服务从同一个 Gateway 获取实例，不再向 Wire 图添加 Fork 专用 Provider。
+- `backend/cmd/server/wire_gen.go` 由官方 Wire 图正常生成，不包含透支专用变量或参数。
+- 调度、429、业务成功、用量快照和账号测试接线统一放在 `openai_codex_quota_overdraft_hooks.go`、`openai_codex_quota_overdraft_integration.go` 和 `account_test_codex_overdraft.go`；官方热点文件仅保留短调用。
+- 前端状态徽标和透支统计分别位于 `CodexOverdraftStatus.vue`、`CodexOverdraftStats.vue`，官方账号用量组件仅负责传入原有数据。
+
+这次调整没有修改 95% 注入门槛、Payload 内容、额度信号解析、429 分类、探测次数、状态转换、事务边界、暂停/恢复规则、统计口径或页面文案。升级时应优先保留独立文件，再逐一核对官方文件中的短钩子。
+
 ## 修改文件
 
 后端配置、路由和调度：
@@ -84,10 +96,14 @@ gateway:
 - `backend/internal/handler/openai_chat_completions.go`
 - `backend/internal/handler/openai_gateway_handler.go`
 - `backend/internal/repository/account_repo.go`
+- `backend/internal/repository/account_repo_codex_overdraft.go`
 - `backend/internal/repository/account_repo_schedulable_projection_test.go`
+- `backend/internal/service/account_test_codex_overdraft.go`
 - `backend/internal/service/openai_account_runtime_block_fastpath.go`
 - `backend/internal/service/openai_account_scheduler.go`
 - `backend/internal/service/openai_codex_quota_overdraft.go`
+- `backend/internal/service/openai_codex_quota_overdraft_hooks.go`
+- `backend/internal/service/openai_codex_quota_overdraft_integration.go`
 - `backend/internal/service/openai_codex_quota_overdraft_probe.go`
 - `backend/internal/service/openai_codex_quota_overdraft_test.go`
 - `backend/internal/service/openai_codex_quota_overdraft_probe_test.go`
@@ -106,11 +122,12 @@ gateway:
 - `backend/internal/service/account_test_service_openai_test.go`
 - `backend/internal/service/account_test_service_openai_compact_test.go`
 - `backend/internal/service/wire.go`
-- `backend/cmd/server/wire_gen.go`
 
 前端、配置示例和测试：
 
 - `frontend/src/types/index.ts`
+- `frontend/src/components/account/CodexOverdraftStats.vue`
+- `frontend/src/components/account/CodexOverdraftStatus.vue`
 - `frontend/src/components/account/UsageProgressBar.vue`
 - `frontend/src/components/account/AccountUsageCell.vue`
 - `frontend/src/components/account/__tests__/UsageProgressBar.spec.ts`
