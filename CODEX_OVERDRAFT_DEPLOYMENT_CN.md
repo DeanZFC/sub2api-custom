@@ -399,7 +399,7 @@ docker compose \
 docker exec sub2api /app/sub2api -version
 ```
 
-维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.177-overdraft.1` 改为 `0.1.177-overdraft.2`。同步到新的上游 Sub2API 版本时，使用 `0.1.178-overdraft.1` 这样的版本号。
+维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.177-overdraft.2` 改为 `0.1.177-overdraft.3`。同步到新的上游 Sub2API 版本时，使用 `0.1.178-overdraft.1` 这样的版本号。
 
 ## 合并 Sub2API 官方更新
 

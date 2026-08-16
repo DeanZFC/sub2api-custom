@@ -1,6 +1,6 @@
 diff --git a/CODEX_OVERDRAFT_DEPLOYMENT_CN.md b/CODEX_OVERDRAFT_DEPLOYMENT_CN.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..b56121befe9bc0d66fc1a8c66723aa3f80f322cd
+index 0000000000000000000000000000000000000000..033045c921fdddf1542acc930169eb7b268fef4e
 --- /dev/null
 +++ b/CODEX_OVERDRAFT_DEPLOYMENT_CN.md
 @@ -0,0 +1,532 @@
@@ -405,7 +405,7 @@ index 0000000000000000000000000000000000000000..b56121befe9bc0d66fc1a8c66723aa3f
 +docker exec sub2api /app/sub2api -version
 +```
 +
-+维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.177-overdraft.1` 改为 `0.1.177-overdraft.2`。同步到新的上游 Sub2API 版本时，使用 `0.1.178-overdraft.1` 这样的版本号。
++维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.177-overdraft.2` 改为 `0.1.177-overdraft.3`。同步到新的上游 Sub2API 版本时，使用 `0.1.178-overdraft.1` 这样的版本号。
 +
 +## 合并 Sub2API 官方更新
 +
@@ -538,7 +538,7 @@ index 0000000000000000000000000000000000000000..b56121befe9bc0d66fc1a8c66723aa3f
 +- 本项目不是 Sub2API 官方发行版，也不受 OpenAI 或其他上游服务商认可或支持。
 diff --git a/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md b/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..cd63fe9772c27afb078a9f142f0f758213e6fee9
+index 0000000000000000000000000000000000000000..ef333abddeb14db8862f41e09ca652bf37077ce3
 --- /dev/null
 +++ b/CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md
 @@ -0,0 +1,172 @@
@@ -560,7 +560,7 @@ index 0000000000000000000000000000000000000000..cd63fe9772c27afb078a9f142f0f7582
 +
 +源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 +
-+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；普通补丁使用 `0.1.177-overdraft.2`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
++源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.177-overdraft.3`，同步下一上游版本后使用 `0.1.178-overdraft.1`。
 +
 +Sub2API `v0.1.177` 将原生 remote compaction v2 保留在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 +
@@ -768,11 +768,11 @@ index b2dfd7034f769abd7e8640090282e6b05a2af4a1..657985091514edeb8358800d4ac49ce7
  RUN apk add --no-cache \
 diff --git a/FORK_VERSION b/FORK_VERSION
 new file mode 100644
-index 0000000000000000000000000000000000000000..115bae05560ec061ef244db4d0bef9d08ce386e0
+index 0000000000000000000000000000000000000000..1ae85b80e36aff6ac1d64baf355b2f82fc214bc9
 --- /dev/null
 +++ b/FORK_VERSION
 @@ -0,0 +1 @@
-+0.1.177-overdraft.2
++0.1.177-overdraft.3
 diff --git a/README.md b/README.md
 index f4ad2fa6b028bdc70ac0b502104a345dd8d940c1..6be65ab56a9db6668cabc5ea86573b4e513816f7 100644
 --- a/README.md
@@ -1447,6 +1447,110 @@ index 010442eb6bcf3b80d4e7d65c27d8b9dd966259d4..cc767ff48e0616b8c0772a969424f914
  	})
  }
  
+diff --git a/backend/internal/repository/account_repo_codex_overdraft_test.go b/backend/internal/repository/account_repo_codex_overdraft_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..7233698db0c0ecfcac47cda66d7144335e0176bd
+--- /dev/null
++++ b/backend/internal/repository/account_repo_codex_overdraft_test.go
+@@ -0,0 +1,98 @@
++package repository
++
++import (
++	"context"
++	"errors"
++	"regexp"
++	"testing"
++	"time"
++
++	"github.com/DATA-DOG/go-sqlmock"
++	"github.com/Wei-Shaw/sub2api/internal/service"
++	"github.com/stretchr/testify/require"
++)
++
++func TestFinalizeCodexQuotaOverdraftProbeFailedIsAtomic(t *testing.T) {
++	db, mock, err := sqlmock.New()
++	require.NoError(t, err)
++	t.Cleanup(func() { _ = db.Close() })
++
++	now := time.Now().UTC()
++	until := now.Add(5 * time.Hour)
++	state := &service.CodexQuotaOverdraftProbeState{
++		Status:      "failed",
++		CycleKey:    "5h:quota-cycle",
++		QuotaWindow: "5h",
++		Attempts:    5,
++		Limit:       5,
++		StartedAt:   now,
++		RecoverAt:   &until,
++	}
++	reason := service.BuildTempUnschedReasonPayload("codex_quota_overdraft", "quota exhausted")
++
++	mock.ExpectBegin()
++	mock.ExpectExec(`(?s)UPDATE accounts.*temp_unschedulable_until.*codex_quota_overdraft_probe`).
++		WithArgs(service.CodexQuotaOverdraftProbeExtraKey, sqlmock.AnyArg(), until, reason, int64(77), state.CycleKey).
++		WillReturnResult(sqlmock.NewResult(0, 1))
++	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)")).
++		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(77), nil, nil, sqlmock.AnyArg()).
++		WillReturnResult(sqlmock.NewResult(1, 1))
++	mock.ExpectCommit()
++
++	repo := newAccountRepositoryWithSQL(nil, db, nil)
++	finalized, err := repo.FinalizeCodexQuotaOverdraftProbeFailed(context.Background(), 77, state, until, reason)
++
++	require.NoError(t, err)
++	require.True(t, finalized)
++	require.NoError(t, mock.ExpectationsWereMet())
++}
++
++func TestFinalizeCodexQuotaOverdraftProbeFailedRollsBackWhenOutboxFails(t *testing.T) {
++	db, mock, err := sqlmock.New()
++	require.NoError(t, err)
++	t.Cleanup(func() { _ = db.Close() })
++
++	now := time.Now().UTC()
++	until := now.Add(5 * time.Hour)
++	state := &service.CodexQuotaOverdraftProbeState{
++		Status:      "failed",
++		CycleKey:    "5h:quota-cycle",
++		QuotaWindow: "5h",
++		Attempts:    5,
++		Limit:       5,
++		StartedAt:   now,
++		RecoverAt:   &until,
++	}
++
++	mock.ExpectBegin()
++	mock.ExpectExec(`(?s)UPDATE accounts.*temp_unschedulable_until.*codex_quota_overdraft_probe`).
++		WillReturnResult(sqlmock.NewResult(0, 1))
++	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)")).
++		WillReturnError(errors.New("outbox unavailable"))
++	mock.ExpectRollback()
++
++	repo := newAccountRepositoryWithSQL(nil, db, nil)
++	finalized, err := repo.FinalizeCodexQuotaOverdraftProbeFailed(context.Background(), 77, state, until, "quota exhausted")
++
++	require.ErrorContains(t, err, "outbox unavailable")
++	require.False(t, finalized)
++	require.NoError(t, mock.ExpectationsWereMet())
++}
++
++func TestListDueCodexQuotaOverdraftProbesIncludesInconclusiveAndStalePending(t *testing.T) {
++	db, mock, err := sqlmock.New()
++	require.NoError(t, err)
++	t.Cleanup(func() { _ = db.Close() })
++
++	now := time.Now().UTC()
++	mock.ExpectQuery(`(?s)SELECT id.*status}' = 'inconclusive'.*retry_count.*status}' = 'pending'.*INTERVAL '2 minutes'`).
++		WithArgs(service.PlatformOpenAI, service.AccountTypeOAuth, service.StatusActive, now, 3, 100).
++		WillReturnRows(sqlmock.NewRows([]string{"id"}))
++
++	repo := newAccountRepositoryWithSQL(nil, db, nil)
++	accounts, err := repo.ListDueCodexQuotaOverdraftProbes(context.Background(), now, 100)
++
++	require.NoError(t, err)
++	require.Empty(t, accounts)
++	require.NoError(t, mock.ExpectationsWereMet())
++}
 diff --git a/backend/internal/repository/account_repo_schedulable_projection_test.go b/backend/internal/repository/account_repo_schedulable_projection_test.go
 index 76d7e0bdc5fe272bbb4aa1cf24e543ec9acb4a43..328e9f2853005aa9d9287f0de6bca64dbf5f1e2c 100644
 --- a/backend/internal/repository/account_repo_schedulable_projection_test.go
@@ -4936,10 +5040,10 @@ index 095c550993527ea2b53871088f58b02e4082fc63..cd71e4a3d60fd8d9e5db3c8e8b96d28b
    #
 diff --git a/deploy/docker-compose.overdraft.yml b/deploy/docker-compose.overdraft.yml
 new file mode 100644
-index 0000000000000000000000000000000000000000..eeb8525db74c458ecc7a213f0732d871799b5300
+index 0000000000000000000000000000000000000000..0ba503eda086a93e2e2fe4e9c3c612644e2c38cf
 --- /dev/null
 +++ b/deploy/docker-compose.overdraft.yml
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,18 @@
 +# sub2api-overdraft source-build overlay.
 +# Use together with docker-compose.local.yml from this directory:
 +#   docker compose -f docker-compose.local.yml -f docker-compose.overdraft.yml up -d --build
@@ -4951,7 +5055,9 @@ index 0000000000000000000000000000000000000000..eeb8525db74c458ecc7a213f0732d871
 +      context: ..
 +      dockerfile: Dockerfile
 +      args:
-+        VERSION: ${BUILD_VERSION:-}
++        # Keep this empty so source builds always read the tracked FORK_VERSION.
++        # This avoids unrelated host BUILD_VERSION values overriding the Fork version.
++        VERSION: ""
 +        COMMIT: ${BUILD_COMMIT:-local}
 +        BUILD_TYPE: source
 +    environment:
@@ -5489,107 +5595,3 @@ index 19ef541bc61fe6cc69fbc27f36c3258111536220..b04c81ccbcb64b9ecce2511fbd443b96
    seven_day_sonnet: UsageProgress | null
    seven_day_fable?: UsageProgress | null
    thirty_day?: UsageProgress | null
-diff --git a/backend/internal/repository/account_repo_codex_overdraft_test.go b/backend/internal/repository/account_repo_codex_overdraft_test.go
-new file mode 100644
-index 000000000..7233698db
---- /dev/null
-+++ b/backend/internal/repository/account_repo_codex_overdraft_test.go
-@@ -0,0 +1,98 @@
-+package repository
-+
-+import (
-+	"context"
-+	"errors"
-+	"regexp"
-+	"testing"
-+	"time"
-+
-+	"github.com/DATA-DOG/go-sqlmock"
-+	"github.com/Wei-Shaw/sub2api/internal/service"
-+	"github.com/stretchr/testify/require"
-+)
-+
-+func TestFinalizeCodexQuotaOverdraftProbeFailedIsAtomic(t *testing.T) {
-+	db, mock, err := sqlmock.New()
-+	require.NoError(t, err)
-+	t.Cleanup(func() { _ = db.Close() })
-+
-+	now := time.Now().UTC()
-+	until := now.Add(5 * time.Hour)
-+	state := &service.CodexQuotaOverdraftProbeState{
-+		Status:      "failed",
-+		CycleKey:    "5h:quota-cycle",
-+		QuotaWindow: "5h",
-+		Attempts:    5,
-+		Limit:       5,
-+		StartedAt:   now,
-+		RecoverAt:   &until,
-+	}
-+	reason := service.BuildTempUnschedReasonPayload("codex_quota_overdraft", "quota exhausted")
-+
-+	mock.ExpectBegin()
-+	mock.ExpectExec(`(?s)UPDATE accounts.*temp_unschedulable_until.*codex_quota_overdraft_probe`).
-+		WithArgs(service.CodexQuotaOverdraftProbeExtraKey, sqlmock.AnyArg(), until, reason, int64(77), state.CycleKey).
-+		WillReturnResult(sqlmock.NewResult(0, 1))
-+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)")).
-+		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(77), nil, nil, sqlmock.AnyArg()).
-+		WillReturnResult(sqlmock.NewResult(1, 1))
-+	mock.ExpectCommit()
-+
-+	repo := newAccountRepositoryWithSQL(nil, db, nil)
-+	finalized, err := repo.FinalizeCodexQuotaOverdraftProbeFailed(context.Background(), 77, state, until, reason)
-+
-+	require.NoError(t, err)
-+	require.True(t, finalized)
-+	require.NoError(t, mock.ExpectationsWereMet())
-+}
-+
-+func TestFinalizeCodexQuotaOverdraftProbeFailedRollsBackWhenOutboxFails(t *testing.T) {
-+	db, mock, err := sqlmock.New()
-+	require.NoError(t, err)
-+	t.Cleanup(func() { _ = db.Close() })
-+
-+	now := time.Now().UTC()
-+	until := now.Add(5 * time.Hour)
-+	state := &service.CodexQuotaOverdraftProbeState{
-+		Status:      "failed",
-+		CycleKey:    "5h:quota-cycle",
-+		QuotaWindow: "5h",
-+		Attempts:    5,
-+		Limit:       5,
-+		StartedAt:   now,
-+		RecoverAt:   &until,
-+	}
-+
-+	mock.ExpectBegin()
-+	mock.ExpectExec(`(?s)UPDATE accounts.*temp_unschedulable_until.*codex_quota_overdraft_probe`).
-+		WillReturnResult(sqlmock.NewResult(0, 1))
-+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)")).
-+		WillReturnError(errors.New("outbox unavailable"))
-+	mock.ExpectRollback()
-+
-+	repo := newAccountRepositoryWithSQL(nil, db, nil)
-+	finalized, err := repo.FinalizeCodexQuotaOverdraftProbeFailed(context.Background(), 77, state, until, "quota exhausted")
-+
-+	require.ErrorContains(t, err, "outbox unavailable")
-+	require.False(t, finalized)
-+	require.NoError(t, mock.ExpectationsWereMet())
-+}
-+
-+func TestListDueCodexQuotaOverdraftProbesIncludesInconclusiveAndStalePending(t *testing.T) {
-+	db, mock, err := sqlmock.New()
-+	require.NoError(t, err)
-+	t.Cleanup(func() { _ = db.Close() })
-+
-+	now := time.Now().UTC()
-+	mock.ExpectQuery(`(?s)SELECT id.*status}' = 'inconclusive'.*retry_count.*status}' = 'pending'.*INTERVAL '2 minutes'`).
-+		WithArgs(service.PlatformOpenAI, service.AccountTypeOAuth, service.StatusActive, now, 3, 100).
-+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
-+
-+	repo := newAccountRepositoryWithSQL(nil, db, nil)
-+	accounts, err := repo.ListDueCodexQuotaOverdraftProbes(context.Background(), now, 100)
-+
-+	require.NoError(t, err)
-+	require.Empty(t, accounts)
-+	require.NoError(t, mock.ExpectationsWereMet())
-+}
