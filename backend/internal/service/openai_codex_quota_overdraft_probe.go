@@ -554,9 +554,12 @@ func (c *CodexQuotaOverdraftCoordinator) runProbeAttempt(ctx context.Context, ac
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
-	req.Header.Set("Originator", openai.CodexDefaultOriginator)
-	req.Header.Set("Version", openAICodexProbeVersion)
-	req.Header.Set("User-Agent", codexCLIUserAgent)
+	// Keep the overdraft probe aligned with the official outbound identity
+	// resolver so automatic Codex client-version updates apply to probes too.
+	canonical := resolveCodexOutboundIdentity("")
+	req.Header.Set("Originator", canonical.originator)
+	req.Header.Set("Version", canonical.version)
+	req.Header.Set("User-Agent", canonical.userAgent)
 
 	if account.IsOpenAIAgentIdentity() {
 		authHeaders, authErr := buildAgentIdentityAuthenticationHeaders(ctx, c.accountRepo, c.agentIdentityWS, &c.agentIdentityTaskMu, account)
