@@ -108,6 +108,16 @@ func TestUpdateServiceSourceBuildTracksForkVersionFile(t *testing.T) {
 	require.Empty(t, client.latestRepo, "源码构建不能查询官方或 Fork 的二进制 Release")
 }
 
+func TestUpdateServiceSourceBuildRejectsInvalidForkVersion(t *testing.T) {
+	client := &updateServiceGitHubClientStub{repositoryFile: []byte("not-semver\n")}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.176-overdraft.1", "source")
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+
+	require.NoError(t, err)
+	require.Equal(t, `fork version file contains invalid semantic version "not-semver"`, info.Warning)
+}
+
 func TestUpdateServiceSourceBuildIgnoresLegacyOfficialCache(t *testing.T) {
 	cache := &updateServiceCacheStub{data: `{"latest":"0.1.176","timestamp":4102444800}`}
 	client := &updateServiceGitHubClientStub{repositoryFile: []byte("0.1.176-overdraft.1\n")}

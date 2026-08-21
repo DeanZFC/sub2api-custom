@@ -460,7 +460,7 @@ func (s *UpdateService) fetchLatestSourceVersion(ctx context.Context) (*UpdateIn
 	}
 	latestVersion := strings.TrimSpace(string(raw))
 	if canonicalVersion(latestVersion) == "" {
-		return nil, fmt.Errorf("Fork version file contains invalid semantic version %q", latestVersion)
+		return nil, fmt.Errorf("fork version file contains invalid semantic version %q", latestVersion)
 	}
 
 	return &UpdateInfo{
