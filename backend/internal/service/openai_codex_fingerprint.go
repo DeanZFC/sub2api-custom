@@ -88,6 +88,10 @@ const (
 	// 账号 extra 未显式配置模式时，GetCodexFingerprintMode 返回此值；
 	// 出站请求是否按全局开关提升到 device 模式由 resolveCodexFingerprintMode 决定。
 	codexFingerprintOff codexFingerprintMode = "off"
+	// codexFingerprintAccountDevice 使用账号 ID（已有系统种子优先）派生
+	// 唯一且稳定的设备指纹，仅收敛 installation_id。这是全局默认行为的
+	// 显式账号级选项，不要求把系统种子写入账号 extra。
+	codexFingerprintAccountDevice codexFingerprintMode = "account_device"
 	// codexFingerprintDevice 仅收敛 installation_id 为账号级恒定值。
 	// 上游看到 1 台设备 + 多会话（每用户各自的 session）。
 	codexFingerprintDevice codexFingerprintMode = "device"
@@ -137,7 +141,7 @@ func codexFingerprintModeFromExtra(extra map[string]any) codexFingerprintMode {
 	}
 	raw, _ := extra[codexFingerprintModeExtraKey].(string)
 	switch codexFingerprintMode(strings.TrimSpace(raw)) {
-	case codexFingerprintOff, codexFingerprintDevice, codexFingerprintSession, codexFingerprintFull:
+	case codexFingerprintOff, codexFingerprintAccountDevice, codexFingerprintDevice, codexFingerprintSession, codexFingerprintFull:
 		return codexFingerprintMode(strings.TrimSpace(raw))
 	default:
 		return codexFingerprintOff
@@ -239,7 +243,8 @@ func resolveCodexFingerprintMode(account *Account, enabled bool) (codexFingerpri
 	}
 	if account.Extra != nil {
 		if _, configured := account.Extra[codexFingerprintModeExtraKey]; configured {
-			return codexFingerprintModeFromExtra(account.Extra), false
+			mode := codexFingerprintModeFromExtra(account.Extra)
+			return mode, mode == codexFingerprintAccountDevice
 		}
 	}
 	if enabled {
@@ -361,7 +366,7 @@ func resolveCodexFingerprintIDsWithSeed(account *Account, clientSessionID string
 	}
 
 	switch mode {
-	case codexFingerprintDevice:
+	case codexFingerprintAccountDevice, codexFingerprintDevice:
 		return ids
 
 	case codexFingerprintSession:
@@ -433,7 +438,7 @@ func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs) {
 	// 所有非 off 模式都收敛 installation_id
 	h.Set("x-codex-installation-id", ids.installationID)
 
-	if ids.mode == codexFingerprintDevice {
+	if ids.mode == codexFingerprintAccountDevice || ids.mode == codexFingerprintDevice {
 		rewriteCodexTurnMetadataFields(h, map[string]any{
 			"installation_id": ids.installationID,
 		})
@@ -519,7 +524,7 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 		modified = true
 	}
 
-	if ids.mode == codexFingerprintDevice {
+	if ids.mode == codexFingerprintAccountDevice || ids.mode == codexFingerprintDevice {
 		rewriteClientMetadataEmbeddedTurnMetadata(existing, map[string]any{
 			"installation_id": ids.installationID,
 		})

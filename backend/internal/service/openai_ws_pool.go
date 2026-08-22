@@ -2040,7 +2040,7 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 	} else {
 		key.codexInstallationID = normalizeOpenAIWSStableIdentityHeader(headers, "x-codex-installation-id")
 	}
-	if mode == codexFingerprintDevice {
+	if mode == codexFingerprintAccountDevice || mode == codexFingerprintDevice {
 		return key
 	}
 	key.sessionIDHyphen = normalizeOpenAIWSStableIdentityHeader(headers, "session-id")

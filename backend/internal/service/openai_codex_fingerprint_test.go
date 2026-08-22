@@ -70,6 +70,7 @@ func TestGetCodexFingerprintMode(t *testing.T) {
 		{"空值默认 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: ""}), codexFingerprintOff},
 		{"非法值默认 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "invalid"}), codexFingerprintOff},
 		{"显式 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "off"}), codexFingerprintOff},
+		{"账号唯一设备", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "account_device"}), codexFingerprintAccountDevice},
 		{"device", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "device"}), codexFingerprintDevice},
 		{"session", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "session"}), codexFingerprintSession},
 		{"full", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "full"}), codexFingerprintFull},
@@ -79,6 +80,18 @@ func TestGetCodexFingerprintMode(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.account.GetCodexFingerprintMode())
 		})
 	}
+}
+
+func TestResolveCodexFingerprintIDsFromRequest_AccountDeviceModeUsesStableAccountSeed(t *testing.T) {
+	account := newTestOAuthAccount(904, map[string]any{codexFingerprintModeExtraKey: "account_device"})
+	first := resolveCodexFingerprintIDsFromRequest(account, nil)
+	second := resolveCodexFingerprintIDsFromRequest(account, nil)
+	require.NotNil(t, first)
+	require.NotNil(t, second)
+	assert.Equal(t, codexFingerprintAccountDevice, first.mode)
+	assert.Equal(t, first.installationID, second.installationID)
+	assert.Equal(t, resolveConvergedInstallationID(account, deriveAccountCodexFingerprintSeed(account)), first.installationID)
+	assert.Empty(t, account.Extra[codexFingerprintSeedExtraKey], "账号唯一设备模式不需要写入系统种子")
 }
 
 // --- resolveConvergedInstallationID ---

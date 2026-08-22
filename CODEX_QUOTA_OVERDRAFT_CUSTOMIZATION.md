@@ -11,6 +11,7 @@
 - 代码默认值：关闭；`deploy/config.example.yaml` 部署示例默认开启
 - OpenAI 账号固定指纹开关：`gateway.openai_account_unique_fingerprint_enabled`
 - 固定指纹开关默认开启；没有显式账号模式时按账号 ID 派生稳定设备指纹，账号 extra 中显式设置 `codex_fingerprint_mode: off` 可单独关闭
+- 账号编辑页新增 `账号唯一设备（新增，推荐）` 选项，对应 `codex_fingerprint_mode: account_device`；它只固定该账号的设备指纹，不改变会话/线程收敛
 - Fork 版本文件：`FORK_VERSION`
 - 更新源：`DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支
 
@@ -18,7 +19,7 @@
 
 源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 
-源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.179-overdraft.2`。
+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.179-overdraft.3`。
 
 Sub2API `v0.1.179` 继续保留原生 remote compaction v2 在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 
