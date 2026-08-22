@@ -471,6 +471,40 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersDeviceModePreservesClientSessi
 	require.Equal(t, "client-request", headers.Get("x-client-request-id"))
 }
 
+func TestOpenAIGatewayService_BuildOpenAIWSHeaders_DefaultFingerprintIsStablePerAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
+	c.Request.Header.Set("X-Codex-Installation-ID", "client-installation")
+	c.Request.Header.Set("session-id", "client-session")
+
+	account := &Account{ID: 1301, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		OpenAIAccountUniqueFingerprintEnabled: true,
+	}}}
+
+	first, _, err := svc.buildOpenAIWSHeaders(
+		context.Background(), c, account, "token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true, "", "", "", "", "",
+	)
+	require.NoError(t, err)
+	second, _, err := svc.buildOpenAIWSHeaders(
+		context.Background(), c, account, "token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true, "", "", "", "", "",
+	)
+	require.NoError(t, err)
+
+	installationID := first.Get("x-codex-installation-id")
+	require.NotEmpty(t, installationID)
+	require.Equal(t, installationID, second.Get("x-codex-installation-id"))
+	require.NotEqual(t, "client-installation", installationID)
+	require.Equal(t, installationID, resolveConvergedInstallationID(account, deriveAccountCodexFingerprintSeed(account)))
+}
+
 func TestLogOpenAIWSBindResponseAccountWarn(t *testing.T) {
 	require.NotPanics(t, func() {
 		logOpenAIWSBindResponseAccountWarn(1, 2, "resp_ok", nil)

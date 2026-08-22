@@ -528,6 +528,18 @@ func TestClassifyCodexQuotaOverdraftProbeResponses(t *testing.T) {
 	require.Equal(t, "inconclusive", status)
 	require.Equal(t, "transient_failure", reason)
 
+	status, reason = classifyCodexQuotaOverdraftProbe(http.StatusTooManyRequests, headers, []byte(`{"error":{"type":"rate_limit_error","message":"temporarily limited"}}`))
+	require.Equal(t, "inconclusive", status)
+	require.Equal(t, "transient_failure", reason)
+
+	status, reason = classifyCodexQuotaOverdraftProbe(http.StatusTooManyRequests, headers, []byte(`{"error":{"type":"rate_limit_error"},"usage":{"used_percent":100}}`))
+	require.Equal(t, "inconclusive", status)
+	require.Equal(t, "transient_failure", reason)
+
+	status, reason = classifyCodexQuotaOverdraftProbe(http.StatusTooManyRequests, headers, []byte("data: {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}\n\n"))
+	require.Equal(t, "inconclusive", status)
+	require.Equal(t, "transient_failure", reason)
+
 	status, reason = classifyCodexQuotaOverdraftProbe(http.StatusServiceUnavailable, nil, nil)
 	require.Equal(t, "inconclusive", status)
 	require.Equal(t, "upstream_unavailable", reason)

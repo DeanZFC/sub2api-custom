@@ -129,6 +129,39 @@ func TestResolveCodexFingerprintIDsFromRequest_ExplicitOff(t *testing.T) {
 	assert.Nil(t, ids, "显式 off 模式应返回 nil")
 }
 
+func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledIsStablePerAccount(t *testing.T) {
+	account := &Account{ID: 901, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	first := resolveCodexFingerprintIDsFromRequest(account, nil, true)
+	second := resolveCodexFingerprintIDsFromRequest(account, nil, true)
+	other := resolveCodexFingerprintIDsFromRequest(&Account{ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, nil, true)
+
+	require.NotNil(t, first)
+	require.NotNil(t, second)
+	require.NotNil(t, other)
+	assert.Equal(t, codexFingerprintDevice, first.mode)
+	assert.Equal(t, first.installationID, second.installationID)
+	assert.NotEqual(t, first.installationID, other.installationID)
+	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil, false))
+	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(&Account{
+		ID:       account.ID,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{codexFingerprintModeExtraKey: "off"},
+	}, nil, true))
+}
+
+func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledUsesPersistedSeed(t *testing.T) {
+	account := &Account{
+		ID:       903,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
+	}
+	ids := resolveCodexFingerprintIDsFromRequest(account, nil, true)
+	require.NotNil(t, ids)
+	assert.Equal(t, resolveConvergedInstallationID(account, testCodexFingerprintSeed), ids.installationID)
+}
+
 // 未显式配置的存量账号不得被收敛（#5610）：默认返回 nil，出站身份保持
 // v0.1.175 之前的客户端原值。
 func TestResolveCodexFingerprintIDsFromRequest_DefaultIsOff(t *testing.T) {

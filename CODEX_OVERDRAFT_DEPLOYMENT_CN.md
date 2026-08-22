@@ -92,6 +92,15 @@ openssl rand -hex 32
 GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED=true
 ```
 
+OpenAI OAuth 账号固定指纹默认开启，配置键为：
+
+```bash
+GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED=true
+```
+
+它会按账号固定 Codex 设备指纹；单个账号可在 `extra` 中设置
+`codex_fingerprint_mode: off` 关闭。该开关只影响 OpenAI OAuth/Codex 账号，不影响 API Key。
+
 ### 3. 创建数据目录
 
 ```bash
@@ -390,13 +399,13 @@ docker compose \
 
 如果服务器目录是 `/opt/sub2api`，只需替换第一条路径。升级完成后重新执行“判断功能是否生效”中的镜像、环境变量和日志检查。
 
-更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.179-overdraft.1`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
+更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.179-overdraft.2`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
 
 ```bash
 docker exec sub2api /app/sub2api -version
 ```
 
-维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.177-overdraft.3` 改为 `0.1.177-overdraft.4`。同步到新的上游 Sub2API 版本时，使用 `0.1.179-overdraft.1` 这样的版本号。
+维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.177-overdraft.3` 改为 `0.1.177-overdraft.4`。同步到新的上游 Sub2API 版本时，使用 `0.1.179-overdraft.2` 这样的版本号。
 
 ## 合并 Sub2API 官方更新
 

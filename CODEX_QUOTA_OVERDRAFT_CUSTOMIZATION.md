@@ -9,6 +9,8 @@
 - 参考实现：<https://github.com/Mxucc/cpa-account-config-manager>
 - 功能开关：`gateway.codex_quota_overdraft_enabled`
 - 代码默认值：关闭；`deploy/config.example.yaml` 部署示例默认开启
+- OpenAI 账号固定指纹开关：`gateway.openai_account_unique_fingerprint_enabled`
+- 固定指纹开关默认开启；没有显式账号模式时按账号 ID 派生稳定设备指纹，账号 extra 中显式设置 `codex_fingerprint_mode: off` 可单独关闭
 - Fork 版本文件：`FORK_VERSION`
 - 更新源：`DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支
 
@@ -16,7 +18,7 @@
 
 源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 
-源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.179-overdraft.1`。
+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.179-overdraft.2`。
 
 Sub2API `v0.1.179` 继续保留原生 remote compaction v2 在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 
@@ -43,9 +45,21 @@ jsonb_build_object($1::text, $2::jsonb)
 ```yaml
 gateway:
   codex_quota_overdraft_enabled: true
+  openai_account_unique_fingerprint_enabled: true
 ```
 
 修改配置后重启 sub2api。出现上游兼容问题时可改为 `false` 并重启，立即恢复官方调度和请求行为。
+
+## OpenAI 账号固定指纹
+
+固定指纹行为覆盖 HTTP Responses、OpenAI 透传、Responses WebSocket 和账号测试/额度探测。
+默认模式为 `device`：同一 OpenAI OAuth 账号的 `x-codex-installation-id` 在请求、重启和
+重新构建后保持不变，不同账号按账号 ID 派生不同 UUID。已经配置 `device`、`session`、`full`
+或 `off` 的账号保持原有显式配置优先级；全局开关关闭后，未显式配置模式的账号恢复原样。
+
+老账号即使没有 `codex_fingerprint_seed` 也不需要立即执行迁移，运行时会使用账号 ID 派生稳定
+种子；显式 `device/session/full` 模式仍要求账号已有有效种子。该功能只对 OpenAI OAuth/Codex
+账号生效，不会改写 API Key 或其他平台账号。
 
 ## 完整行为
 
@@ -64,7 +78,7 @@ gateway:
 1. 实际注入的业务请求成功时直接判定 `passed`，账号继续调度并开始透支统计，不额外消耗探测请求。
 2. 实际注入的业务请求返回明确额度 429 时直接判定 `failed`，账号暂停到对应额度恢复时间并切号；5h 和 7d 同时耗尽时取最晚恢复时间。
 3. 如果没有可用的业务成功证据，同一额度周期仅启动 1 次独立 Responses 探测，最长 20 秒并优先使用当前业务模型。多实例使用 PostgreSQL 原子 claim 去重。
-4. 独立探测成功即判定 `passed`，明确 `quota_limited` 即判定 `failed`；网络错误、超时、5xx、普通瞬时 429 和无效响应判定 `inconclusive`，同周期不自动重试。
+4. 独立探测成功即判定 `passed`，明确 `quota_limited` 即判定 `failed`；网络错误、超时、5xx、普通瞬时 429（包括 `error.type=rate_limit_error`）和无效响应判定 `inconclusive`，同周期不自动重试。
 5. `failed` 状态、临时暂停和调度 outbox 在同一数据库事务中提交。同周期 `failed` 为终态，晚到的业务成功或探测结果不能覆盖；业务明确额度 429 可以把并发产生的 `passed` 或 `inconclusive` 收敛为 `failed`。
 6. 401/403、账号停用等认证问题交给原有认证异常逻辑处理；400/404 判定为 `inconclusive`，不会暂停整个账号。
 7. 账号禁用、过载、代理/传输故障、模型级冷却及其他临时不可调度原因不被绕过。

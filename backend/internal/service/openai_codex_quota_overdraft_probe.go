@@ -911,9 +911,6 @@ func codexQuotaOverdraftProbeModels(preferred string) []string {
 func codexQuotaOverdraftResponseIsQuotaLimited(headers http.Header, body []byte) bool {
 	var payload any
 	parsedPayload := len(bytes.TrimSpace(body)) > 0 && json.Unmarshal(body, &payload) == nil
-	if parsedPayload && codexQuotaOverdraftJSONHasQuotaEvidence(payload, 0) {
-		return true
-	}
 	text := strings.ToLower(strings.Join(strings.Fields(string(body)), " "))
 	for _, marker := range []string{
 		"usage_limit_reached",
@@ -928,13 +925,35 @@ func codexQuotaOverdraftResponseIsQuotaLimited(headers http.Header, body []byte)
 			return true
 		}
 	}
+	if codexQuotaOverdraftTextHasTransientRateLimitEvidence(text) {
+		return false
+	}
 	if parsedPayload && codexQuotaOverdraftJSONHasTransientRateLimitEvidence(payload, 0) {
 		return false
+	}
+	if parsedPayload && codexQuotaOverdraftJSONHasQuotaEvidence(payload, 0) {
+		return true
 	}
 	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
 		if normalized := snapshot.Normalize(); normalized != nil &&
 			(normalized.Used5hPercent != nil && *normalized.Used5hPercent >= 100 ||
 				normalized.Used7dPercent != nil && *normalized.Used7dPercent >= 100) {
+			return true
+		}
+	}
+	return false
+}
+
+func codexQuotaOverdraftTextHasTransientRateLimitEvidence(text string) bool {
+	normalized := strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(text))
+	for _, marker := range []string{
+		"rate_limit_error",
+		"rate_limit_exceeded",
+		"too_many_requests",
+		"request_rate_limited",
+		"token_rate_limited",
+	} {
+		if strings.Contains(normalized, marker) {
 			return true
 		}
 	}
@@ -1016,7 +1035,7 @@ func codexQuotaOverdraftJSONHasTransientRateLimitEvidence(value any, depth int) 
 				if marker, ok := raw.(string); ok {
 					marker = strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(strings.TrimSpace(marker)))
 					switch marker {
-					case "rate_limit_exceeded", "too_many_requests", "request_rate_limited", "token_rate_limited":
+					case "rate_limit_error", "rate_limit_exceeded", "too_many_requests", "request_rate_limited", "token_rate_limited":
 						return true
 					}
 				}

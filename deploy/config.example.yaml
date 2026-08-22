@@ -275,6 +275,9 @@ gateway:
   # 实验性 Codex 额度透支：为符合条件的 OAuth 请求注入空操作工具调用，并忽略
   # 5h/7d 用量百分比预暂停。真实上游 429 仍会触发账号冷却。此部署示例默认开启。
   codex_quota_overdraft_enabled: true
+  # 为每个 OpenAI OAuth 账号固定唯一且稳定的 Codex 设备指纹；默认开启。
+  # 单个账号可在 extra 中显式设置 codex_fingerprint_mode: off 关闭。
+  openai_account_unique_fingerprint_enabled: true
   # Optional: template file used to build the final top-level Codex `instructions`.
   # 可选：用于构建最终 Codex 顶层 `instructions` 的模板文件路径。
   #
