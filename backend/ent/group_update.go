@@ -4,7 +4,7 @@ package ent
 
 import (
 	"context"
-	"encoding/json/jsontext"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -803,13 +803,13 @@ func (_u *GroupUpdate) SetNillableLongContextPricingEnabled(v *bool) *GroupUpdat
 }
 
 // SetModelPricing sets the "model_pricing" field.
-func (_u *GroupUpdate) SetModelPricing(v jsontext.Value) *GroupUpdate {
+func (_u *GroupUpdate) SetModelPricing(v json.RawMessage) *GroupUpdate {
 	_u.mutation.SetModelPricing(v)
 	return _u
 }
 
 // AppendModelPricing appends value to the "model_pricing" field.
-func (_u *GroupUpdate) AppendModelPricing(v jsontext.Value) *GroupUpdate {
+func (_u *GroupUpdate) AppendModelPricing(v json.RawMessage) *GroupUpdate {
 	_u.mutation.AppendModelPricing(v)
 	return _u
 }
@@ -2924,13 +2924,13 @@ func (_u *GroupUpdateOne) SetNillableLongContextPricingEnabled(v *bool) *GroupUp
 }
 
 // SetModelPricing sets the "model_pricing" field.
-func (_u *GroupUpdateOne) SetModelPricing(v jsontext.Value) *GroupUpdateOne {
+func (_u *GroupUpdateOne) SetModelPricing(v json.RawMessage) *GroupUpdateOne {
 	_u.mutation.SetModelPricing(v)
 	return _u
 }
 
 // AppendModelPricing appends value to the "model_pricing" field.
-func (_u *GroupUpdateOne) AppendModelPricing(v jsontext.Value) *GroupUpdateOne {
+func (_u *GroupUpdateOne) AppendModelPricing(v json.RawMessage) *GroupUpdateOne {
 	_u.mutation.AppendModelPricing(v)
 	return _u
 }

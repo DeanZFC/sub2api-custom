@@ -121,11 +121,9 @@ func (h *UserMsgQueueHelper) waitForLockWithPing(
 				c.Header("X-Accel-Buffering", "no")
 				*streamStarted = true
 			}
-			written, err := fmt.Fprint(c.Writer, string(h.pingFormat))
-			if err != nil {
+			if _, err := fmt.Fprint(c.Writer, string(h.pingFormat)); err != nil {
 				return nil, err
 			}
-			recordGatewayStreamHeartbeat(c, written)
 			flusher.Flush()
 
 		case <-timer.C:
@@ -228,11 +226,9 @@ func (h *UserMsgQueueHelper) ThrottleWithPing(
 				c.Header("X-Accel-Buffering", "no")
 				*streamStarted = true
 			}
-			written, err := fmt.Fprint(c.Writer, string(h.pingFormat))
-			if err != nil {
+			if _, err := fmt.Fprint(c.Writer, string(h.pingFormat)); err != nil {
 				return err
 			}
-			recordGatewayStreamHeartbeat(c, written)
 			flusher.Flush()
 		case <-timer.C:
 			return nil

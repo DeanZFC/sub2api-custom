@@ -7,17 +7,6 @@ import (
 	"strings"
 )
 
-type openAIResponsesLiteValidationError struct {
-	param   string
-	message string
-}
-
-func (e *openAIResponsesLiteValidationError) Error() string { return e.message }
-
-func newOpenAIResponsesLiteValidationError(param, format string, args ...any) error {
-	return &openAIResponsesLiteValidationError{param: param, message: fmt.Sprintf(format, args...)}
-}
-
 // normalizeOpenAIResponsesLiteTools applies the Responses Lite request
 // contract: reasoning must cover all turns, and private namespace declarations
 // use the input.additional_tools carrier. Other top-level tools must belong to
@@ -27,27 +16,18 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 	if reqBody == nil {
 		return false, nil
 	}
-	if parallel, exists := reqBody["parallel_tool_calls"]; exists {
-		if _, ok := parallel.(bool); !ok {
-			return false, newOpenAIResponsesLiteValidationError("parallel_tool_calls", "responses Lite requires parallel_tool_calls to be a boolean")
-		}
-	}
 	if rawReasoning, exists := reqBody["reasoning"]; exists && rawReasoning != nil {
 		if _, ok := rawReasoning.(map[string]any); !ok {
-			return false, newOpenAIResponsesLiteValidationError("reasoning", "responses Lite requires reasoning to be an object")
+			return false, fmt.Errorf("responses Lite requires reasoning to be an object")
 		}
 	}
 	rawTools, exists := reqBody["tools"]
 	if !exists || rawTools == nil {
-		changed, err := ensureOpenAIResponsesLiteReasoningContext(reqBody)
-		if err != nil {
-			return false, err
-		}
-		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed)
+		return ensureOpenAIResponsesLiteReasoningContext(reqBody)
 	}
 	tools, ok := rawTools.([]any)
 	if !ok {
-		return false, newOpenAIResponsesLiteValidationError("tools", "responses Lite requires tools to be an array")
+		return false, fmt.Errorf("responses Lite requires tools to be an array")
 	}
 
 	topLevelTools := make([]any, 0, len(tools))
@@ -77,11 +57,7 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 		}
 	}
 	if len(namespaceTools) == 0 {
-		changed, err := ensureOpenAIResponsesLiteReasoningContext(reqBody)
-		if err != nil {
-			return false, err
-		}
-		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed)
+		return ensureOpenAIResponsesLiteReasoningContext(reqBody)
 	}
 
 	input, err := appendOpenAIResponsesLiteAdditionalTools(reqBody["input"], namespaceTools)
@@ -97,36 +73,7 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 	} else {
 		reqBody["tools"] = topLevelTools
 	}
-	return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, true)
-}
-
-func ensureOpenAIResponsesLiteParallelToolCalls(reqBody map[string]any, changed bool) (bool, error) {
-	parallel := reqBody["parallel_tool_calls"]
-	if !openAIResponsesLiteHasTools(reqBody) {
-		return changed, nil
-	}
-	if parallel == false {
-		return changed, nil
-	}
-	reqBody["parallel_tool_calls"] = false
 	return true, nil
-}
-
-func openAIResponsesLiteHasTools(reqBody map[string]any) bool {
-	if tools, ok := reqBody["tools"].([]any); ok && len(tools) > 0 {
-		return true
-	}
-	input, _ := reqBody["input"].([]any)
-	for _, rawItem := range input {
-		item, ok := rawItem.(map[string]any)
-		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" {
-			continue
-		}
-		if tools, ok := item["tools"].([]any); ok && len(tools) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func ensureOpenAIResponsesLiteReasoningContext(reqBody map[string]any) (bool, error) {
@@ -137,7 +84,7 @@ func ensureOpenAIResponsesLiteReasoningContext(reqBody map[string]any) (bool, er
 	}
 	reasoning, ok := rawReasoning.(map[string]any)
 	if !ok {
-		return false, newOpenAIResponsesLiteValidationError("reasoning", "responses Lite requires reasoning to be an object")
+		return false, fmt.Errorf("responses Lite requires reasoning to be an object")
 	}
 	if context, ok := reasoning["context"].(string); ok && context == "all_turns" {
 		return false, nil

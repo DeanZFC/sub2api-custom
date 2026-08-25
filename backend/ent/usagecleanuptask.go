@@ -4,7 +4,6 @@ package ent
 
 import (
 	"encoding/json"
-	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"time"
@@ -26,7 +25,7 @@ type UsageCleanupTask struct {
 	// Status holds the value of the "status" field.
 	Status string `json:"status,omitempty"`
 	// Filters holds the value of the "filters" field.
-	Filters jsontext.Value `json:"filters,omitempty"`
+	Filters json.RawMessage `json:"filters,omitempty"`
 	// CreatedBy holds the value of the "created_by" field.
 	CreatedBy int64 `json:"created_by,omitempty"`
 	// DeletedRows holds the value of the "deleted_rows" field.

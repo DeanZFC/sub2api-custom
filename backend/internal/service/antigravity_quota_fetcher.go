@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 )
 
@@ -29,12 +28,11 @@ const (
 // AntigravityQuotaFetcher 从 Antigravity API 获取额度
 type AntigravityQuotaFetcher struct {
 	proxyRepo ProxyRepository
-	cfg       *config.Config
 }
 
 // NewAntigravityQuotaFetcher 创建 AntigravityQuotaFetcher
-func NewAntigravityQuotaFetcher(proxyRepo ProxyRepository, cfg *config.Config) *AntigravityQuotaFetcher {
-	return &AntigravityQuotaFetcher{proxyRepo: proxyRepo, cfg: cfg}
+func NewAntigravityQuotaFetcher(proxyRepo ProxyRepository) *AntigravityQuotaFetcher {
+	return &AntigravityQuotaFetcher{proxyRepo: proxyRepo}
 }
 
 // CanFetch 检查是否可以获取此账户的额度
@@ -57,7 +55,7 @@ func (f *AntigravityQuotaFetcher) FetchQuota(ctx context.Context, account *Accou
 	}
 
 	// 调用 API 获取配额
-	modelsResp, modelsRaw, err := client.FetchAvailableModels(ctx, accessToken, projectID, resolveModelsListReadLimit(f.cfg))
+	modelsResp, modelsRaw, err := client.FetchAvailableModels(ctx, accessToken, projectID)
 	if err != nil {
 		// 403 Forbidden: 不报错，返回 is_forbidden 标记
 		var forbiddenErr *antigravity.ForbiddenError

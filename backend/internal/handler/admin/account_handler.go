@@ -2614,14 +2614,8 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 	// Handle Gemini accounts
 	if account.IsGemini() {
-		// Consumer Google One OAuth still uses the legacy Gemini CLI / Code
-		// Assist channel. Do not advertise newer 3.x or image models that the
-		// channel cannot serve.
+		// For OAuth accounts: return default Gemini models
 		if account.IsOAuth() {
-			if account.IsGeminiGoogleOne() {
-				response.Success(c, geminicli.GoogleOneModels)
-				return
-			}
 			response.Success(c, geminicli.DefaultModels)
 			return
 		}

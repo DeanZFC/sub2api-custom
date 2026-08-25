@@ -161,15 +161,12 @@ func openAIWSEventMayContainToolCalls(eventType string) bool {
 }
 
 func openAIWSEventShouldParseUsage(eventType string) bool {
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "error" || openAIStreamEventTypeIsTerminal(eventType) {
+	switch strings.TrimSpace(eventType) {
+	case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 		return true
+	default:
+		return false
 	}
-	return strings.HasPrefix(eventType, "response.") && !strings.HasSuffix(eventType, ".delta")
-}
-
-func openAIWSMessageShouldParseUsage(eventType string, message []byte) bool {
-	return openAIWSEventShouldParseUsage(eventType) && bytes.Contains(message, []byte(`"usage"`))
 }
 
 func parseOpenAIWSEventEnvelope(message []byte) (eventType string, responseID string, response gjson.Result) {
@@ -196,18 +193,11 @@ func openAIWSMessageLikelyContainsToolCalls(message []byte) bool {
 }
 
 func parseOpenAIWSResponseUsageFromCompletedEvent(message []byte, usage *OpenAIUsage) {
-	if usage == nil || len(message) == 0 || !bytes.Contains(message, []byte(`"usage"`)) {
+	if usage == nil || len(message) == 0 {
 		return
 	}
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(message); ok {
-		if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(message, "")) {
-			if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
-				return
-			}
-			*usage = parsedUsage
-		} else {
-			mergeOpenAIUsageNonZero(usage, parsedUsage)
-		}
+		*usage = parsedUsage
 	}
 }
 

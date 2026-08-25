@@ -235,16 +235,16 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 		return coverage
 	}
 	input := parseRawJSONView(body).Get("input")
-	if !input.IsArray() && !input.IsObject() {
+	if !input.IsArray() {
 		return coverage
 	}
 
 	missingCallID := false
 	var outputCallIDs map[string]struct{}
 	var contextIDs map[string]struct{}
-	analyzeItem := func(item gjson.Result) {
+	input.ForEach(func(_, item gjson.Result) bool {
 		if !item.IsObject() {
-			return
+			return true
 		}
 		itemType := item.Get("type").String()
 		switch {
@@ -253,7 +253,7 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 			callID := strings.TrimSpace(item.Get("call_id").String())
 			if callID == "" {
 				missingCallID = true
-				return
+				return true
 			}
 			if outputCallIDs == nil {
 				outputCallIDs = make(map[string]struct{})
@@ -262,7 +262,7 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 		case isCodexToolCallContextItemType(itemType):
 			callID := strings.TrimSpace(item.Get("call_id").String())
 			if callID == "" {
-				return
+				return true
 			}
 			if contextIDs == nil {
 				contextIDs = make(map[string]struct{})
@@ -271,22 +271,15 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 		case itemType == "item_reference":
 			idValue := strings.TrimSpace(item.Get("id").String())
 			if idValue == "" {
-				return
+				return true
 			}
 			if contextIDs == nil {
 				contextIDs = make(map[string]struct{})
 			}
 			contextIDs[idValue] = struct{}{}
 		}
-	}
-	if input.IsArray() {
-		input.ForEach(func(_, item gjson.Result) bool {
-			analyzeItem(item)
-			return true
-		})
-	} else {
-		analyzeItem(input)
-	}
+		return true
+	})
 
 	if !coverage.HasFunctionCallOutput || missingCallID {
 		return coverage

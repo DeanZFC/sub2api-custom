@@ -486,6 +486,41 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_ThrottlesExtraWrites(t *t
 	}
 }
 
+func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_PrearmBypassesThrottle(t *testing.T) {
+	repo := &openAICodexSnapshotAsyncRepo{
+		updateExtraCh: make(chan map[string]any, 2),
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:           repo,
+		codexSnapshotThrottle: newAccountWriteThrottle(time.Hour),
+	}
+	belowPrearm := &OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent:         ptrFloat64WS(94),
+		PrimaryResetAfterSeconds:   ptrIntWS(3600),
+		PrimaryWindowMinutes:       ptrIntWS(10080),
+		SecondaryUsedPercent:       ptrFloat64WS(22),
+		SecondaryResetAfterSeconds: ptrIntWS(1200),
+		SecondaryWindowMinutes:     ptrIntWS(300),
+	}
+	atPrearm := *belowPrearm
+	atPrearm.PrimaryUsedPercent = ptrFloat64WS(95)
+
+	svc.updateCodexUsageSnapshot(context.Background(), 778, belowPrearm)
+	select {
+	case <-repo.updateExtraCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待首次 codex 快照落库超时")
+	}
+
+	svc.updateCodexUsageSnapshot(context.Background(), 778, &atPrearm)
+	select {
+	case updates := <-repo.updateExtraCh:
+		require.Equal(t, 95.0, updates["codex_7d_used_percent"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("95% 预热快照不应被写入节流拦截")
+	}
+}
+
 func ptrFloat64WS(v float64) *float64 { return &v }
 func ptrIntWS(v int) *int             { return &v }
 
@@ -551,31 +586,4 @@ func TestAdminService_ListAccounts_ExhaustedCodexExtraDoesNotSetRateLimit(t *tes
 func TestOpenAIWSErrorHTTPStatusFromRaw_UsageLimitReachedIs429(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, openAIWSErrorHTTPStatusFromRaw("", "usage_limit_reached"))
 	require.Equal(t, http.StatusTooManyRequests, openAIWSErrorHTTPStatusFromRaw("rate_limit_exceeded", ""))
-}
-
-func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing.T) {
-	svc := &OpenAIGatewayService{}
-	headers := http.Header{"Retry-After": []string{"30"}}
-	body := []byte(`{"error":{"type":"rate_limit_error","message":"limited"}}`)
-
-	oauthErr := svc.newOpenAIWSRateLimitFailoverError(&Account{
-		ID:       904,
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-	}, headers, body, "limited")
-	require.True(t, oauthErr.RetryableOnSameAccount)
-	require.False(t, oauthErr.SameAccountRetryDeadline.IsZero())
-	require.Positive(t, oauthErr.SameAccountRetryDelay)
-	require.LessOrEqual(t, oauthErr.SameAccountRetryDelay, openAIOAuth429MaxRetryDelay)
-	require.Equal(t, body, oauthErr.ResponseBody)
-	require.Equal(t, "30", oauthErr.ResponseHeaders.Get("Retry-After"))
-
-	apiKeyErr := svc.newOpenAIWSRateLimitFailoverError(&Account{
-		ID:       905,
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeAPIKey,
-	}, headers, body, "limited")
-	require.False(t, apiKeyErr.RetryableOnSameAccount)
-	require.True(t, apiKeyErr.SameAccountRetryDeadline.IsZero())
-	require.Zero(t, apiKeyErr.SameAccountRetryDelay)
 }

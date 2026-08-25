@@ -273,7 +273,6 @@ export interface PublicSettings {
   available_channels_enabled: boolean
   model_plaza_enabled: boolean
   model_plaza_require_auth: boolean
-  plugin_management_enabled: boolean
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean
@@ -1134,17 +1133,6 @@ export interface Account {
       available_count?: number
       credits?: { expires_at?: string }[]
     }
-    auto_reset_credit_enabled?: boolean
-    auto_reset_credit_5h_threshold?: number
-    auto_reset_credit_7d_threshold?: number
-    codex_auto_reset_credit_state?: {
-      status?: 'checking' | 'available' | 'resetting' | 'success' | 'no_credit' | 'failed'
-      trigger_window?: string
-      available_count?: number
-      checked_at?: string
-      last_result_at?: string
-      error_code?: string
-    }
   } & Record<string, unknown>)
   proxy_id: number | null
   proxy_fallback_origin_id?: number | null
@@ -1275,6 +1263,31 @@ export interface UsageProgress {
   window_stats?: WindowStats | null // 窗口期统计（从窗口开始到当前的使用量）
   used_requests?: number
   limit_requests?: number
+  overdraft_active?: boolean
+  overdraft_stats?: WindowStats | null
+  overdraft_started_at?: string | null
+  overdraft_recover_at?: string | null
+}
+
+export interface CodexQuotaOverdraftProbeState {
+  status: 'pending' | 'passed' | 'failed' | 'inconclusive' | 'recovered'
+  quota_window: '5h' | '7d' | 'multiple'
+  cycle_key: string
+  attempts: number
+  limit: number
+  model?: string
+  reason_code?: string
+  started_at: string
+  tested_at?: string | null
+  retry_at?: string | null
+  retry_count?: number
+  recover_at?: string | null
+  five_hour_recover_at?: string | null
+  seven_day_recover_at?: string | null
+  overdraft_started_at?: string | null
+  five_hour_overdraft_started_at?: string | null
+  seven_day_overdraft_started_at?: string | null
+  observed_rate_limit_reset_at?: string | null
 }
 
 // Antigravity 单个模型的配额信息
@@ -1331,6 +1344,7 @@ export interface AccountUsageInfo {
   updated_at: string | null
   five_hour: UsageProgress | null
   seven_day: UsageProgress | null
+  codex_quota_overdraft?: CodexQuotaOverdraftProbeState | null
   seven_day_sonnet: UsageProgress | null
   seven_day_fable?: UsageProgress | null
   thirty_day?: UsageProgress | null
