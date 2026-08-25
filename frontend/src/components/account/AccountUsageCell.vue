@@ -119,17 +119,12 @@
     <!-- OpenAI OAuth accounts: single source from /usage API -->
     <template v-else-if="account.platform === 'openai' && account.type === 'oauth'">
       <div v-if="hasOpenAIUsageFallback" class="space-y-1">
-        <CodexOverdraftStatus :state="usageInfo?.codex_quota_overdraft" />
         <UsageProgressBar
           v-if="usageInfo?.five_hour"
           label="5h"
           :utilization="usageInfo.five_hour.utilization"
           :resets-at="usageInfo.five_hour.resets_at"
           :window-stats="usageInfo.five_hour.window_stats"
-          :overdraft-active="usageInfo.five_hour.overdraft_active"
-          :overdraft-stats="usageInfo.five_hour.overdraft_stats"
-          :overdraft-started-at="usageInfo.five_hour.overdraft_started_at"
-          :overdraft-recover-at="usageInfo.five_hour.overdraft_recover_at"
           :show-now-when-idle="true"
           color="indigo"
         />
@@ -139,10 +134,6 @@
           :utilization="usageInfo.seven_day.utilization"
           :resets-at="usageInfo.seven_day.resets_at"
           :window-stats="usageInfo.seven_day.window_stats"
-          :overdraft-active="usageInfo.seven_day.overdraft_active"
-          :overdraft-stats="usageInfo.seven_day.overdraft_stats"
-          :overdraft-started-at="usageInfo.seven_day.overdraft_started_at"
-          :overdraft-recover-at="usageInfo.seven_day.overdraft_recover_at"
           :show-now-when-idle="true"
           color="emerald"
         />
@@ -654,7 +645,6 @@ import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
-import CodexOverdraftStatus from './CodexOverdraftStatus.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
@@ -785,7 +775,7 @@ const geminiUsageAvailable = computed(() => {
 
 const hasOpenAIUsageFallback = computed(() => {
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return false
-  return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day || !!usageInfo.value?.codex_quota_overdraft
+  return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
 
 const openAIUsageRefreshKey = computed(() => buildOpenAIUsageRefreshKey(props.account))

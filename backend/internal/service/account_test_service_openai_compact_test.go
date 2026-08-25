@@ -50,7 +50,6 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthSuccessPersi
 	svc := &AccountTestService{
 		accountRepo:  repo,
 		httpUpstream: upstream,
-		cfg:          &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}},
 	}
 
 	rec := httptest.NewRecorder()

@@ -64,13 +64,14 @@ func TestGetCodexFingerprintMode(t *testing.T) {
 	}{
 		{"nil 账号", nil, codexFingerprintOff},
 		{"非 OAuth 账号", &Account{Platform: PlatformOpenAI, Type: "api_key"}, codexFingerprintOff},
+		{"OpenAI setup token", &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken, Extra: map[string]any{codexFingerprintModeExtraKey: "session"}}, codexFingerprintSession},
+		{"Anthropic setup token", &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Extra: map[string]any{codexFingerprintModeExtraKey: "session"}}, codexFingerprintOff},
 		// 收敛是显式 opt-in：缺省/空/非法一律 off（#5610）。存量账号普遍没有这个
 		// extra 键，升级不得把它们静默切进收敛。
 		{"无 extra 默认 off", newTestOAuthAccount(1, nil), codexFingerprintOff},
 		{"空值默认 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: ""}), codexFingerprintOff},
 		{"非法值默认 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "invalid"}), codexFingerprintOff},
 		{"显式 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "off"}), codexFingerprintOff},
-		{"账号唯一设备", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "account_device"}), codexFingerprintAccountDevice},
 		{"device", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "device"}), codexFingerprintDevice},
 		{"session", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "session"}), codexFingerprintSession},
 		{"full", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "full"}), codexFingerprintFull},
@@ -80,18 +81,6 @@ func TestGetCodexFingerprintMode(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.account.GetCodexFingerprintMode())
 		})
 	}
-}
-
-func TestResolveCodexFingerprintIDsFromRequest_AccountDeviceModeUsesStableAccountSeed(t *testing.T) {
-	account := newTestOAuthAccount(904, map[string]any{codexFingerprintModeExtraKey: "account_device"})
-	first := resolveCodexFingerprintIDsFromRequest(account, nil)
-	second := resolveCodexFingerprintIDsFromRequest(account, nil)
-	require.NotNil(t, first)
-	require.NotNil(t, second)
-	assert.Equal(t, codexFingerprintAccountDevice, first.mode)
-	assert.Equal(t, first.installationID, second.installationID)
-	assert.Equal(t, resolveConvergedInstallationID(account, deriveAccountCodexFingerprintSeed(account)), first.installationID)
-	assert.Empty(t, account.Extra[codexFingerprintSeedExtraKey], "账号唯一设备模式不需要写入系统种子")
 }
 
 // --- resolveConvergedInstallationID ---
@@ -140,39 +129,6 @@ func TestResolveCodexFingerprintIDsFromRequest_ExplicitOff(t *testing.T) {
 	account := newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "off"})
 	ids := resolveCodexFingerprintIDsFromRequest(account, nil)
 	assert.Nil(t, ids, "显式 off 模式应返回 nil")
-}
-
-func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledIsStablePerAccount(t *testing.T) {
-	account := &Account{ID: 901, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	first := resolveCodexFingerprintIDsFromRequest(account, nil, true)
-	second := resolveCodexFingerprintIDsFromRequest(account, nil, true)
-	other := resolveCodexFingerprintIDsFromRequest(&Account{ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, nil, true)
-
-	require.NotNil(t, first)
-	require.NotNil(t, second)
-	require.NotNil(t, other)
-	assert.Equal(t, codexFingerprintDevice, first.mode)
-	assert.Equal(t, first.installationID, second.installationID)
-	assert.NotEqual(t, first.installationID, other.installationID)
-	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil, false))
-	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(&Account{
-		ID:       account.ID,
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-		Extra:    map[string]any{codexFingerprintModeExtraKey: "off"},
-	}, nil, true))
-}
-
-func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledUsesPersistedSeed(t *testing.T) {
-	account := &Account{
-		ID:       903,
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-		Extra:    map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
-	}
-	ids := resolveCodexFingerprintIDsFromRequest(account, nil, true)
-	require.NotNil(t, ids)
-	assert.Equal(t, resolveConvergedInstallationID(account, testCodexFingerprintSeed), ids.installationID)
 }
 
 // 未显式配置的存量账号不得被收敛（#5610）：默认返回 nil，出站身份保持

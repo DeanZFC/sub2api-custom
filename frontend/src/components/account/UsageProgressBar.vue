@@ -25,13 +25,6 @@
       </div>
     </div>
 
-    <CodexOverdraftStats
-      :active="overdraftActive"
-      :stats="overdraftStats"
-      :started-at="overdraftStartedAt"
-      :recover-at="overdraftRecoverAt"
-    />
-
     <!-- Progress bar row -->
     <div class="flex items-center gap-1">
       <!-- Label badge (fixed width for alignment) -->
@@ -68,7 +61,6 @@ import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
 import { formatCompactNumber } from '@/utils/format'
-import CodexOverdraftStats from './CodexOverdraftStats.vue'
 
 const props = defineProps<{
   label: string
@@ -78,10 +70,6 @@ const props = defineProps<{
   windowStats?: WindowStats | null
   showNowWhenIdle?: boolean
   remainingCapacity?: boolean
-  overdraftActive?: boolean
-  overdraftStats?: WindowStats | null
-  overdraftStartedAt?: string | null
-  overdraftRecoverAt?: string | null
 }>()
 
 const { t } = useI18n()
