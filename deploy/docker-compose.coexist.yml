@@ -1,0 +1,15 @@
+# Coexistence overlay for running the Fork beside an existing Sub2API install.
+# Use after docker-compose.local.yml and docker-compose.overdraft.yml.
+# The overlay isolates container names. Set SERVER_PORT=8081 in the deployment
+# .env (or in the shell) to expose this instance on 8081. PostgreSQL and Redis
+# stay private to this Compose project.
+
+services:
+  sub2api:
+    container_name: sub2api-overdraft
+
+  postgres:
+    container_name: sub2api-overdraft-postgres
+
+  redis:
+    container_name: sub2api-overdraft-redis
