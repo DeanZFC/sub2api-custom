@@ -403,13 +403,13 @@ docker compose \
 
 如果服务器目录是 `/opt/sub2api`，只需替换第一条路径。升级完成后重新执行“判断功能是否生效”中的镜像、环境变量和日志检查。
 
-更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.181-overdraft.4`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
+更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.182-overdraft.5`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
 
 ```bash
 docker exec sub2api /app/sub2api -version
 ```
 
-维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.181-overdraft.3` 改为 `0.1.181-overdraft.4`。同步到新的上游 Sub2API 版本时，版本号应同时反映官方版本和 Fork 修订号，例如 `0.1.181-overdraft.4`。
+维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.181-overdraft.4` 改为 `0.1.182-overdraft.5`。同步到新的上游 Sub2API 版本时，版本号应同时反映官方版本和 Fork 修订号，例如 `0.1.182-overdraft.5`。
 
 ## 合并 Sub2API 官方更新
 
