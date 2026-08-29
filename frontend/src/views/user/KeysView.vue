@@ -134,43 +134,98 @@
           </template>
 
           <template #cell-group="{ row }">
-            <div class="group/dropdown relative">
-              <button
-                :ref="(el) => setGroupButtonRef(row.id, el)"
-                @click="openGroupSelector(row)"
-                class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
-                :title="t('keys.clickToChangeGroup')"
-              >
-                <GroupBadge
-                  v-if="row.group"
-                  :name="row.group.name"
-                  :platform="row.group.platform"
-                  :subscription-type="row.group.subscription_type"
-                  :rate-multiplier="row.group.rate_multiplier"
-                  :user-rate-multiplier="userGroupRates[row.group.id]"
-                  :peak-rate-enabled="row.group.peak_rate_enabled"
-                  :peak-start="row.group.peak_start"
-                  :peak-end="row.group.peak_end"
-                  :peak-rate-multiplier="row.group.peak_rate_multiplier"
-                />
-                <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
-                  t('keys.noGroup')
-                }}</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
-                <svg
-                  class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  stroke-width="2"
+            <div class="flex min-w-[260px] flex-col gap-1.5 py-1">
+              <div class="group/dropdown relative">
+                <button
+                  :ref="(el) => setGroupButtonRef(row.id, 'primary', el)"
+                  :data-test="`primary-group-trigger-${row.id}`"
+                  @click="openGroupSelector(row, 'primary')"
+                  class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
+                  :title="t('keys.clickToChangeGroup')"
                 >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"
+                  <GroupBadge
+                    v-if="row.group"
+                    :name="row.group.name"
+                    :platform="row.group.platform"
+                    :subscription-type="row.group.subscription_type"
+                    :rate-multiplier="row.group.rate_multiplier"
+                    :user-rate-multiplier="userGroupRates[row.group.id]"
+                    :peak-rate-enabled="row.group.peak_rate_enabled"
+                    :peak-start="row.group.peak_start"
+                    :peak-end="row.group.peak_end"
+                    :peak-rate-multiplier="row.group.peak_rate_multiplier"
                   />
-                </svg>
-              </button>
+                  <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
+                    t('keys.noGroup')
+                  }}</span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
+                  <svg
+                    class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    stroke-width="2"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div class="group/dropdown relative">
+                <button
+                  :ref="(el) => setGroupButtonRef(row.id, 'fallback', el)"
+                  :data-test="`fallback-group-trigger-${row.id}`"
+                  :disabled="!row.group_id"
+                  @click="openGroupSelector(row, 'fallback')"
+                  class="-mx-2 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700"
+                  :title="t('keys.clickToChangeFallbackGroup')"
+                >
+                  <span class="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/25 dark:text-amber-300">
+                    {{ t('keys.fallbackGroupShortLabel') }}
+                  </span>
+                  <GroupBadge
+                    v-if="row.fallback_group"
+                    :name="row.fallback_group.name"
+                    :platform="row.fallback_group.platform"
+                    :subscription-type="row.fallback_group.subscription_type"
+                    :rate-multiplier="row.fallback_group.rate_multiplier"
+                    :user-rate-multiplier="userGroupRates[row.fallback_group.id]"
+                    :peak-rate-enabled="row.fallback_group.peak_rate_enabled"
+                    :peak-start="row.fallback_group.peak_start"
+                    :peak-end="row.fallback_group.peak_end"
+                    :peak-rate-multiplier="row.fallback_group.peak_rate_multiplier"
+                  />
+                  <span
+                    v-else-if="row.fallback_group_id"
+                    class="text-sm text-gray-500 dark:text-gray-400"
+                  >
+                    #{{ row.fallback_group_id }}
+                  </span>
+                  <span v-else class="text-sm text-gray-400 dark:text-dark-500">
+                    {{ t('keys.noFallbackGroup') }}
+                  </span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{
+                    t('keys.selectFallbackGroup')
+                  }}</span>
+                  <svg
+                    class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    stroke-width="2"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
           </template>
 
@@ -1090,14 +1145,33 @@
         <!-- Group list -->
         <div class="max-h-80 overflow-y-auto p-1.5">
           <button
+            v-if="groupSelectorTarget === 'fallback'"
+            data-test="clear-fallback-group"
+            @click="changeGroup(selectedKeyForGroup!, null)"
+            :class="[
+              'flex w-full items-center justify-between rounded-lg border-b border-gray-100 px-3 py-2.5 text-sm transition-colors dark:border-dark-700',
+              selectedGroupIdForSelector === null
+                ? 'bg-primary-50 dark:bg-primary-900/20'
+                : 'hover:bg-gray-100 dark:hover:bg-dark-700'
+            ]"
+          >
+            <span class="text-gray-600 dark:text-gray-300">{{ t('keys.noFallbackGroup') }}</span>
+            <Icon
+              v-if="selectedGroupIdForSelector === null"
+              name="check"
+              size="sm"
+              class="text-primary-500"
+              :stroke-width="2"
+            />
+          </button>
+          <button
             v-for="option in filteredGroupOptions"
-            :key="option.value ?? 'null'"
+            :key="option.value"
             @click="changeGroup(selectedKeyForGroup!, option.value)"
             :class="[
               'flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors',
               'border-b border-gray-100 last:border-0 dark:border-dark-700',
-              selectedKeyForGroup?.group_id === option.value ||
-              (!selectedKeyForGroup?.group_id && option.value === null)
+              selectedGroupIdForSelector === option.value
                 ? 'bg-primary-50 dark:bg-primary-900/20'
                 : 'hover:bg-gray-100 dark:hover:bg-dark-700'
             ]"
@@ -1114,10 +1188,7 @@
               :peak-end="option.peakEnd"
               :peak-rate-multiplier="option.peakRateMultiplier"
               :description="option.description"
-              :selected="
-                selectedKeyForGroup?.group_id === option.value ||
-                (!selectedKeyForGroup?.group_id && option.value === null)
-              "
+              :selected="selectedGroupIdForSelector === option.value"
             />
           </button>
           <!-- Empty state when search has no results -->
@@ -1184,6 +1255,8 @@ interface GroupOption {
   subscriptionType: SubscriptionType
   platform: GroupPlatform
 }
+
+type GroupSelectorTarget = 'primary' | 'fallback'
 
 const appStore = useAppStore()
 const onboardingStore = useOnboardingStore()
@@ -1320,11 +1393,12 @@ const pendingCcsRow = ref<ApiKey | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
 const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
+const groupSelectorTarget = ref<GroupSelectorTarget>('primary')
 const publicSettings = ref<PublicSettings | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
 const columnDropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
-const groupButtonRefs = ref<Map<number, HTMLElement>>(new Map())
+const groupButtonRefs = ref<Map<string, HTMLElement>>(new Map())
 let abortController: AbortController | null = null
 
 // Get the currently selected key for group change
@@ -1333,11 +1407,24 @@ const selectedKeyForGroup = computed(() => {
   return apiKeys.value.find((k) => k.id === groupSelectorKeyId.value) || null
 })
 
-const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance | null) => {
+const selectedGroupIdForSelector = computed(() => {
+  const key = selectedKeyForGroup.value
+  if (!key) return null
+  return groupSelectorTarget.value === 'fallback' ? key.fallback_group_id : key.group_id
+})
+
+const groupButtonRefKey = (keyId: number, target: GroupSelectorTarget) => `${keyId}:${target}`
+
+const setGroupButtonRef = (
+  keyId: number,
+  target: GroupSelectorTarget,
+  el: Element | ComponentPublicInstance | null
+) => {
+  const refKey = groupButtonRefKey(keyId, target)
   if (el instanceof HTMLElement) {
-    groupButtonRefs.value.set(keyId, el)
+    groupButtonRefs.value.set(refKey, el)
   } else {
-    groupButtonRefs.value.delete(keyId)
+    groupButtonRefs.value.delete(refKey)
   }
 }
 
@@ -1452,10 +1539,27 @@ const fallbackGroupOptions = computed(() => {
 
 // Group dropdown search
 const groupSearchQuery = ref('')
+const groupSelectorOptions = computed(() => {
+  if (groupSelectorTarget.value === 'primary') {
+    return groupOptions.value
+  }
+
+  const key = selectedKeyForGroup.value
+  if (!key?.group_id) return []
+
+  const primaryPlatform =
+    key.group?.platform || groups.value.find((group) => group.id === key.group_id)?.platform
+  if (!primaryPlatform) return []
+
+  return groupOptions.value.filter(
+    (option) => option.value !== key.group_id && option.platform === primaryPlatform
+  )
+})
+
 const filteredGroupOptions = computed(() => {
   const query = groupSearchQuery.value.trim().toLowerCase()
-  if (!query) return groupOptions.value
-  return groupOptions.value.filter((opt) => {
+  if (!query) return groupSelectorOptions.value
+  return groupSelectorOptions.value.filter((opt) => {
     return opt.label.toLowerCase().includes(query) ||
       (opt.description && opt.description.toLowerCase().includes(query))
   })
@@ -1623,12 +1727,19 @@ const toggleKeyStatus = async (key: ApiKey) => {
   }
 }
 
-const openGroupSelector = (key: ApiKey) => {
-  if (groupSelectorKeyId.value === key.id) {
-    groupSelectorKeyId.value = null
-    dropdownPosition.value = null
+const resetGroupSelector = () => {
+  groupSelectorKeyId.value = null
+  dropdownPosition.value = null
+  groupSearchQuery.value = ''
+}
+
+const openGroupSelector = (key: ApiKey, target: GroupSelectorTarget) => {
+  if (target === 'fallback' && !key.group_id) return
+
+  if (groupSelectorKeyId.value === key.id && groupSelectorTarget.value === target) {
+    resetGroupSelector()
   } else {
-    const buttonEl = groupButtonRefs.value.get(key.id)
+    const buttonEl = groupButtonRefs.value.get(groupButtonRefKey(key.id, target))
     if (buttonEl) {
       const rect = buttonEl.getBoundingClientRect()
       const dropdownEstHeight = 400 // estimated max dropdown height
@@ -1653,21 +1764,48 @@ const openGroupSelector = (key: ApiKey) => {
       }
     }
     groupSelectorKeyId.value = key.id
+    groupSelectorTarget.value = target
     groupSearchQuery.value = ''
   }
 }
 
 const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
-  groupSelectorKeyId.value = null
-  dropdownPosition.value = null
-  if (key.group_id === newGroupId) return
+  const target = groupSelectorTarget.value
+  resetGroupSelector()
 
   try {
-    await keysAPI.update(key.id, { group_id: newGroupId })
-    appStore.showSuccess(t('keys.groupChangedSuccess'))
+    if (target === 'fallback') {
+      if ((key.fallback_group_id ?? null) === newGroupId) return
+
+      await keysAPI.update(key.id, { fallback_group_id: newGroupId })
+      appStore.showSuccess(t('keys.fallbackGroupChangedSuccess'))
+      loadApiKeys()
+      return
+    }
+
+    if (newGroupId === null || key.group_id === newGroupId) return
+
+    const updates: UpdateApiKeyRequest = { group_id: newGroupId }
+    let fallbackCleared = false
+    if (key.fallback_group_id !== null) {
+      const primary = groups.value.find((group) => group.id === newGroupId)
+      const fallback =
+        key.fallback_group || groups.value.find((group) => group.id === key.fallback_group_id)
+      if (!primary || !fallback || primary.id === fallback.id || primary.platform !== fallback.platform) {
+        updates.fallback_group_id = null
+        fallbackCleared = true
+      }
+    }
+
+    await keysAPI.update(key.id, updates)
+    appStore.showSuccess(
+      t(fallbackCleared ? 'keys.groupChangedFallbackClearedSuccess' : 'keys.groupChangedSuccess')
+    )
     loadApiKeys()
   } catch (error) {
-    appStore.showError(t('keys.failedToChangeGroup'))
+    appStore.showError(
+      t(target === 'fallback' ? 'keys.failedToChangeFallbackGroup' : 'keys.failedToChangeGroup')
+    )
   }
 }
 
@@ -1675,8 +1813,7 @@ const closeGroupSelector = (event: MouseEvent) => {
   const target = event.target as HTMLElement
   // Check if click is inside the dropdown or the trigger button
   if (!target.closest('.group\\/dropdown') && !dropdownRef.value?.contains(target)) {
-    groupSelectorKeyId.value = null
-    dropdownPosition.value = null
+    resetGroupSelector()
   }
   if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
     showColumnDropdown.value = false

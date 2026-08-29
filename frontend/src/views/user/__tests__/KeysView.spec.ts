@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-import type { ApiKey } from '@/types'
+import type { ApiKey, Group, GroupPlatform } from '@/types'
 import KeysView from '../KeysView.vue'
 
 const {
   listKeys,
+  updateKey,
   getPublicSettings,
   getDashboardApiKeysUsage,
   getAvailableGroups,
@@ -18,6 +19,7 @@ const {
   nextStep,
 } = vi.hoisted(() => ({
   listKeys: vi.fn(),
+  updateKey: vi.fn(),
   getPublicSettings: vi.fn(),
   getDashboardApiKeysUsage: vi.fn(),
   getAvailableGroups: vi.fn(),
@@ -42,6 +44,12 @@ const messages: Record<string, string> = {
   'keys.created': 'Created',
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
+  'keys.fallbackGroupShortLabel': 'Fallback',
+  'keys.noFallbackGroup': 'No fallback group',
+  'keys.selectFallbackGroup': 'Select fallback',
+  'keys.clickToChangeFallbackGroup': 'Click to change fallback group',
+  'keys.fallbackGroupChangedSuccess': 'Fallback group changed successfully',
+  'keys.groupChangedFallbackClearedSuccess': 'Primary group changed and fallback cleared',
   'keys.id': 'ID',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
@@ -59,7 +67,7 @@ vi.mock('@/api', () => ({
   keysAPI: {
     list: listKeys,
     create: vi.fn(),
-    update: vi.fn(),
+    update: updateKey,
     delete: vi.fn(),
     toggleStatus: vi.fn(),
   },
@@ -111,6 +119,7 @@ const createApiKey = (): ApiKey => ({
   key: 'sk-test-key',
   name: 'test-key',
   group_id: null,
+  fallback_group_id: null,
   status: 'active',
   ip_whitelist: [],
   ip_blacklist: [],
@@ -135,6 +144,21 @@ const createApiKey = (): ApiKey => ({
   reset_1d_at: null,
   reset_7d_at: null,
 })
+
+const createGroup = (id: number, name: string, platform: GroupPlatform = 'openai'): Group =>
+  ({
+    id,
+    name,
+    platform,
+    description: null,
+    rate_multiplier: 1,
+    subscription_type: 'standard',
+    peak_rate_enabled: false,
+    peak_start: '',
+    peak_end: '',
+    peak_rate_multiplier: 1,
+    status: 'active',
+  }) as Group
 
 const AppLayoutStub = {
   template: '<div><slot /></div>',
@@ -170,6 +194,9 @@ const DataTableStub = {
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
         <slot name="cell-name" :value="row.name" :row="row" />
+        <div data-test="group-cell">
+          <slot name="cell-group" :value="row.group" :row="row" />
+        </div>
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
         </div>
@@ -215,6 +242,16 @@ const IconStub = {
   template: '<span data-test="icon">{{ name }}</span>',
 }
 
+const GroupBadgeStub = {
+  props: ['name'],
+  template: '<span data-test="group-badge">{{ name }}</span>',
+}
+
+const GroupOptionItemStub = {
+  props: ['name'],
+  template: '<span data-test="group-option-item">{{ name }}</span>',
+}
+
 const mountView = async () => {
   const wrapper = mount(KeysView, {
     global: {
@@ -231,8 +268,8 @@ const mountView = async () => {
         Icon: IconStub,
         UseKeyModal: true,
         EndpointPopover: true,
-        GroupBadge: true,
-        GroupOptionItem: true,
+        GroupBadge: GroupBadgeStub,
+        GroupOptionItem: GroupOptionItemStub,
         Teleport: true,
       },
     },
@@ -256,11 +293,12 @@ const getButtonByText = (wrapper: VueWrapper, text: string) => {
   return button
 }
 
-describe('user KeysView column settings', () => {
+describe('user KeysView', () => {
   beforeEach(() => {
     localStorage.clear()
 
     listKeys.mockReset()
+    updateKey.mockReset()
     getPublicSettings.mockReset()
     getDashboardApiKeysUsage.mockReset()
     getAvailableGroups.mockReset()
@@ -282,6 +320,7 @@ describe('user KeysView column settings', () => {
     getDashboardApiKeysUsage.mockResolvedValue({ stats: {} })
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
+    updateKey.mockResolvedValue(createApiKey())
     isCurrentStep.mockReturnValue(false)
   })
 
@@ -437,5 +476,104 @@ describe('user KeysView column settings', () => {
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
+  })
+
+  it('shows the fallback group in the group cell and switches it independently', async () => {
+    const primary = createGroup(10, 'Primary OpenAI')
+    const fallback = createGroup(11, 'Fallback OpenAI')
+    const candidate = createGroup(12, 'Secondary OpenAI')
+    listKeys.mockResolvedValueOnce({
+      items: [
+        {
+          ...createApiKey(),
+          group_id: primary.id,
+          fallback_group_id: fallback.id,
+          group: primary,
+          fallback_group: fallback,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getAvailableGroups.mockResolvedValueOnce([primary, fallback, candidate])
+
+    const wrapper = await mountView()
+    const fallbackTrigger = wrapper.get('[data-test="fallback-group-trigger-1"]')
+
+    expect(fallbackTrigger.text()).toContain('Fallback OpenAI')
+    expect(fallbackTrigger.text()).toContain('Select fallback')
+
+    await fallbackTrigger.trigger('click')
+    await nextTick()
+    await getButtonByText(wrapper, 'Secondary OpenAI').trigger('click')
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(1, { fallback_group_id: candidate.id })
+    expect(showSuccess).toHaveBeenCalledWith('Fallback group changed successfully')
+  })
+
+  it('clears the fallback group from the quick selector', async () => {
+    const primary = createGroup(10, 'Primary OpenAI')
+    const fallback = createGroup(11, 'Fallback OpenAI')
+    listKeys.mockResolvedValueOnce({
+      items: [
+        {
+          ...createApiKey(),
+          group_id: primary.id,
+          fallback_group_id: fallback.id,
+          group: primary,
+          fallback_group: fallback,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getAvailableGroups.mockResolvedValueOnce([primary, fallback])
+
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="fallback-group-trigger-1"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-test="clear-fallback-group"]').trigger('click')
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(1, { fallback_group_id: null })
+  })
+
+  it('clears an incompatible fallback when switching the primary group', async () => {
+    const primary = createGroup(10, 'Primary OpenAI')
+    const fallback = createGroup(11, 'Fallback OpenAI')
+    const anthropic = createGroup(20, 'Anthropic', 'anthropic')
+    listKeys.mockResolvedValueOnce({
+      items: [
+        {
+          ...createApiKey(),
+          group_id: primary.id,
+          fallback_group_id: fallback.id,
+          group: primary,
+          fallback_group: fallback,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getAvailableGroups.mockResolvedValueOnce([primary, fallback, anthropic])
+
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="primary-group-trigger-1"]').trigger('click')
+    await nextTick()
+    await getButtonByText(wrapper, 'Anthropic').trigger('click')
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(1, {
+      group_id: anthropic.id,
+      fallback_group_id: null,
+    })
+    expect(showSuccess).toHaveBeenCalledWith('Primary group changed and fallback cleared')
   })
 })
