@@ -570,7 +570,52 @@
             :placeholder="t('keys.noFallbackGroup')"
             :searchable="true"
             :search-placeholder="t('keys.searchGroup')"
-          />
+            data-test="fallback-group-select"
+          >
+            <template #selected="{ option }">
+              <GroupBadge
+                v-if="option && (option as unknown as GroupOption).value !== null"
+                :name="(option as unknown as GroupOption).label"
+                :platform="(option as unknown as GroupOption).platform"
+                :subscription-type="(option as unknown as GroupOption).subscriptionType"
+                :rate-multiplier="(option as unknown as GroupOption).rate"
+                :user-rate-multiplier="(option as unknown as GroupOption).userRate"
+                :peak-rate-enabled="(option as unknown as GroupOption).peakRateEnabled"
+                :peak-start="(option as unknown as GroupOption).peakStart"
+                :peak-end="(option as unknown as GroupOption).peakEnd"
+                :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
+              />
+              <span v-else class="text-gray-400">{{ t('keys.noFallbackGroup') }}</span>
+            </template>
+            <template #option="{ option, selected }">
+              <GroupOptionItem
+                v-if="(option as unknown as GroupOption).value !== null"
+                :name="(option as unknown as GroupOption).label"
+                :platform="(option as unknown as GroupOption).platform"
+                :subscription-type="(option as unknown as GroupOption).subscriptionType"
+                :rate-multiplier="(option as unknown as GroupOption).rate"
+                :user-rate-multiplier="(option as unknown as GroupOption).userRate"
+                :peak-rate-enabled="(option as unknown as GroupOption).peakRateEnabled"
+                :peak-start="(option as unknown as GroupOption).peakStart"
+                :peak-end="(option as unknown as GroupOption).peakEnd"
+                :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
+                :description="(option as unknown as GroupOption).description"
+                :selected="selected"
+              />
+              <div v-else class="flex w-full items-center justify-between gap-3">
+                <span class="text-gray-600 dark:text-gray-300">{{
+                  t('keys.noFallbackGroup')
+                }}</span>
+                <Icon
+                  v-if="selected"
+                  name="check"
+                  size="sm"
+                  class="shrink-0 text-primary-500"
+                  :stroke-width="2"
+                />
+              </div>
+            </template>
+          </Select>
           <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
             {{ t('keys.fallbackGroupHint') }}
           </p>
