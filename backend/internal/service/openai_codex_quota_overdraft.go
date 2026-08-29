@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,10 +15,11 @@ import (
 )
 
 const (
-	codexQuotaOverdraftCallIDPrefix  = "call_sub2api_overdraft_"
-	codexQuotaOverdraftExecInput     = `const r = await tools.exec_command({"cmd":"true","yield_time_ms":1000,"max_output_tokens":1000}); text(r.output);`
-	codexQuotaOverdraftMaxBodyBytes  = 32 << 20
-	codexQuotaOverdraftPrearmPercent = 95
+	codexQuotaOverdraftCallIDPrefix    = "call_sub2api_overdraft_"
+	codexQuotaOverdraftExecInput       = `const r = await tools.exec_command({"cmd":"true","yield_time_ms":1000,"max_output_tokens":1000}); text(r.output);`
+	codexQuotaOverdraftMaxBodyBytes    = 32 << 20
+	codexQuotaOverdraftPrearmPercent   = 95
+	CodexQuotaOverdraftEnabledExtraKey = "codex_quota_overdraft_enabled"
 )
 
 var codexQuotaOverdraftEnabled atomic.Bool
@@ -34,10 +36,39 @@ func CodexQuotaOverdraftEnabled() bool {
 }
 
 func isCodexQuotaOverdraftAccount(account *Account) bool {
-	return account != nil &&
-		account.Platform == PlatformOpenAI &&
-		account.Type == AccountTypeOAuth &&
-		!account.IsShadow()
+	if account == nil || account.Platform != PlatformOpenAI ||
+		account.Type != AccountTypeOAuth || account.IsShadow() {
+		return false
+	}
+	if account.Extra == nil {
+		return true
+	}
+	value, exists := account.Extra[CodexQuotaOverdraftEnabledExtraKey]
+	if !exists || value == nil {
+		return true
+	}
+	// Only an explicit false disables the account. Invalid legacy values fail
+	// open so upgrading does not unexpectedly disable existing accounts.
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		return err != nil || parsed
+	case float64:
+		return typed != 0
+	case float32:
+		return typed != 0
+	case int:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case json.Number:
+		parsed, err := typed.Int64()
+		return err != nil || parsed != 0
+	default:
+		return true
+	}
 }
 
 type codexQuotaOverdraftSchedulingCtxKey struct{}

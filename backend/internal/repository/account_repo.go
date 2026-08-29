@@ -146,6 +146,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetCredentials(normalizeJSONMap(account.Credentials)).
 		SetExtra(normalizeJSONMap(account.Extra)).
 		SetConcurrency(account.Concurrency).
+		SetRateLimit429RetryCount(account.GetRateLimit429RetryCount()).
 		SetPriority(account.Priority).
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
@@ -535,6 +536,7 @@ func (r *accountRepository) updateLockedAccount(
 		SetCredentials(normalizeJSONMap(account.Credentials)).
 		SetExtra(extra).
 		SetConcurrency(account.Concurrency).
+		SetRateLimit429RetryCount(account.GetRateLimit429RetryCount()).
 		SetPriority(account.Priority).
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
@@ -2801,6 +2803,11 @@ func isSchedulerNeutralExtraKey(key string) bool {
 	if key == "" {
 		return false
 	}
+	// Unlike runtime quota/probe fields, this account-level policy changes
+	// scheduling eligibility and must refresh the scheduler snapshot immediately.
+	if key == service.CodexQuotaOverdraftEnabledExtraKey {
+		return false
+	}
 	if _, ok := schedulerNeutralExtraKeys[key]; ok {
 		return true
 	}
@@ -2859,6 +2866,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if updates.Concurrency != nil {
 		setClauses = append(setClauses, "concurrency = $"+itoa(idx))
 		args = append(args, *updates.Concurrency)
+		idx++
+	}
+	if updates.RateLimit429RetryCount != nil {
+		setClauses = append(setClauses, "rate_limit_429_retry_count = $"+itoa(idx))
+		args = append(args, *updates.RateLimit429RetryCount)
 		idx++
 	}
 	if updates.Priority != nil {
@@ -3370,6 +3382,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 	}
 
 	rateMultiplier := m.RateMultiplier
+	rateLimit429RetryCount := m.RateLimit429RetryCount
 
 	return &service.Account{
 		ID:                      m.ID,
@@ -3382,6 +3395,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		ProxyID:                 m.ProxyID,
 		ProxyFallbackOriginID:   m.ProxyFallbackOriginID,
 		Concurrency:             m.Concurrency,
+		RateLimit429RetryCount:  &rateLimit429RetryCount,
 		Priority:                m.Priority,
 		RateMultiplier:          &rateMultiplier,
 		LoadFactor:              m.LoadFactor,

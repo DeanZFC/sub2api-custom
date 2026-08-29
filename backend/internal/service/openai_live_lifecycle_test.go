@@ -87,6 +87,11 @@ type liveTestDialer struct {
 	headers http.Header
 }
 
+type live429RetryDialer struct {
+	conn  *liveTestFrameConn
+	calls int
+}
+
 func (d *liveTestDialer) Dial(
 	_ context.Context,
 	wsURL string,
@@ -95,6 +100,19 @@ func (d *liveTestDialer) Dial(
 ) (openAIWSClientConn, int, http.Header, error) {
 	d.url = wsURL
 	d.headers = headers.Clone()
+	return d.conn, http.StatusSwitchingProtocols, nil, nil
+}
+
+func (d *live429RetryDialer) Dial(
+	_ context.Context,
+	_ string,
+	_ http.Header,
+	_ string,
+) (openAIWSClientConn, int, http.Header, error) {
+	d.calls++
+	if d.calls <= 2 {
+		return nil, http.StatusTooManyRequests, http.Header{"Retry-After": []string{"0"}}, errors.New("rate limited")
+	}
 	return d.conn, http.StatusSwitchingProtocols, nil, nil
 }
 
@@ -338,6 +356,42 @@ func TestGetLiveCallForIdentityRejectsMismatchedCaller(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, record.AccountID, loaded.AccountID)
+}
+
+func TestDialLiveSidebandRetries429OnSameAccount(t *testing.T) {
+	account := &Account{
+		ID:                     11,
+		Platform:               PlatformOpenAI,
+		Type:                   AccountTypeOAuth,
+		Concurrency:            2,
+		RateLimit429RetryCount: retryCountPointer(2),
+		Credentials: map[string]any{
+			"access_token":       "test-access-token",
+			"chatgpt_account_id": "acct_test",
+		},
+	}
+	attestationCipher := newLiveAttestationCipher(&config.Config{
+		JWT: config.JWTConfig{Secret: "live-sideband-retry-test-secret"},
+	})
+	ciphertext, err := attestationCipher.Encrypt(`{"v":1,"s":0,"t":"v1.sideband"}`)
+	require.NoError(t, err)
+	record := &LiveCallRecord{
+		CallID:                "call_retry",
+		AccountID:             account.ID,
+		AttestationCiphertext: ciphertext,
+	}
+	upstream := newLiveTestFrameConn()
+	dialer := &live429RetryDialer{conn: upstream}
+	service := &OpenAIGatewayService{
+		accountRepo:               &liveTestAccountRepo{account: account},
+		openaiWSPassthroughDialer: dialer,
+		liveAttestationCipher:     attestationCipher,
+	}
+
+	conn, err := service.dialLiveSideband(context.Background(), record)
+	require.NoError(t, err)
+	require.Same(t, upstream, conn)
+	require.Equal(t, 3, dialer.calls)
 }
 
 func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {

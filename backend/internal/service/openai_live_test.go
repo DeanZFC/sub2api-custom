@@ -142,6 +142,53 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	require.True(t, HTTPUpstreamRedirectsDisabled(upstream.request.Context()))
 }
 
+type live429SequenceUpstream struct {
+	calls int
+}
+
+func (s *live429SequenceUpstream) Do(request *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	s.calls++
+	return &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"0"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`)),
+		Request:    request,
+	}, nil
+}
+
+func (s *live429SequenceUpstream) DoWithTLS(request *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return s.Do(request, proxyURL, accountID, accountConcurrency)
+}
+
+func TestCreateUpstreamLiveCallMarksExhaustedAccount429(t *testing.T) {
+	upstream := &live429SequenceUpstream{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	retryCount := 1
+	account := &Account{
+		ID:                     8,
+		Platform:               PlatformOpenAI,
+		Type:                   AccountTypeOAuth,
+		Concurrency:            1,
+		RateLimit429RetryCount: &retryCount,
+		Credentials: map[string]any{
+			"access_token":       "test-access-token",
+			"chatgpt_account_id": "acct_test",
+		},
+	}
+
+	_, err := svc.createUpstreamLiveCall(context.Background(), account, &LiveCallRequest{
+		SDP:     "v=offer\r\n",
+		Session: json.RawMessage(`{"model":"gpt-live-test"}`),
+	}, `{"v":1}`)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.True(t, failoverErr.Account429RetryExhausted)
+	require.Equal(t, 2, upstream.calls, "首次请求之外应额外重试一次")
+}
+
 func TestLiveAttestationCipherRoundTripAndRejectsOtherInstanceKey(t *testing.T) {
 	first := newLiveAttestationCipher(&config.Config{
 		JWT: config.JWTConfig{Secret: "first-live-secret"},

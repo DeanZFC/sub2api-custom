@@ -723,7 +723,9 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	}
 
 	applyExtraToUsage(usage, account.Extra, now)
-	usage.CodexQuotaOverdraft, _ = codexQuotaOverdraftStateFromAccount(account)
+	if isCodexQuotaOverdraftAccount(account) {
+		usage.CodexQuotaOverdraft, _ = codexQuotaOverdraftStateFromAccount(account)
+	}
 
 	if (force || shouldRefreshOpenAICodexSnapshot(account, usage, now)) && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
 		if account.IsShadow() {
@@ -757,10 +759,12 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		}
 	}
 
-	if s.codexQuotaOverdraft != nil {
+	if s.codexQuotaOverdraft != nil && isCodexQuotaOverdraftAccount(account) {
 		s.codexQuotaOverdraft.ObserveAccount(account, "")
 	}
-	usage.CodexQuotaOverdraft, _ = codexQuotaOverdraftStateFromAccount(account)
+	if isCodexQuotaOverdraftAccount(account) {
+		usage.CodexQuotaOverdraft, _ = codexQuotaOverdraftStateFromAccount(account)
+	}
 	if s.usageLogRepo == nil {
 		return usage, nil
 	}

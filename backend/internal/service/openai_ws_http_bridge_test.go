@@ -817,6 +817,49 @@ func TestProxyOpenAIWSHTTPBridgeTurnHTTPStatusFailoverSafety(t *testing.T) {
 	}
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurnGrokPreservesExhaustedAccount429Retry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	retryCount := 2
+	responses := make([]*http.Response, retryCount+1)
+	for i := range responses {
+		responses[i] = &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Retry-After": []string{"0"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`,
+			)),
+		}
+	}
+	upstream := &httpUpstreamSequenceRecorder{responses: responses}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID:                     5767,
+		Platform:               PlatformGrok,
+		Type:                   AccountTypeOAuth,
+		Concurrency:            1,
+		RateLimit429RetryCount: &retryCount,
+		Credentials:            map[string]any{"base_url": xai.DefaultCLIBaseURL},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	payload := []byte(`{"type":"response.create","model":"grok-4.5","input":"hi"}`)
+
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(), c, account, "access-token", payload, len(payload),
+		"grok-4.5", "", "", "", "", 1, func([]byte) error { return nil },
+	)
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.True(t, failoverErr.RequestScopedTransient)
+	require.True(t, failoverErr.Account429RetryExhausted)
+	require.Equal(t, retryCount+1, upstream.callCount)
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

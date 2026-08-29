@@ -1580,6 +1580,29 @@
         </div>
       </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label" for="edit-rate-limit-429-retry-count">
+          {{ t('admin.accounts.rateLimit429RetryCount') }}
+        </label>
+        <input
+          v-model.number="form.rate_limit_429_retry_count"
+          id="edit-rate-limit-429-retry-count"
+          type="number"
+          min="0"
+          :max="MAX_RATE_LIMIT_429_RETRY_COUNT"
+          step="1"
+          class="input max-w-xs"
+          @change="form.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count)"
+        />
+        <p class="input-hint">
+          {{
+            t('admin.accounts.rateLimit429RetryCountHint', {
+              default: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
+              max: MAX_RATE_LIMIT_429_RETRY_COUNT
+            })
+          }}
+        </p>
+      </div>
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
@@ -2066,7 +2089,7 @@
         </div>
       </div>
 
-      <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
+      <!-- CPA 指纹出口（仅 OpenAI OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -2081,6 +2104,39 @@
           <div class="w-52 flex-shrink-0">
             <Select v-model="codexFingerprintMode" data-testid="edit-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
           </div>
+        </div>
+      </div>
+
+      <!-- Codex 额度透支（仅 OpenAI OAuth） -->
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexQuotaOverdraft') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexQuotaOverdraftDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="edit-codex-quota-overdraft-toggle"
+            role="switch"
+            :aria-checked="codexQuotaOverdraftEnabled"
+            @click="codexQuotaOverdraftEnabled = !codexQuotaOverdraftEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexQuotaOverdraftEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexQuotaOverdraftEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
         </div>
       </div>
 
@@ -3098,6 +3154,8 @@ const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
+const DEFAULT_RATE_LIMIT_429_RETRY_COUNT = 5
+const MAX_RATE_LIMIT_429_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const GROK_CLIENT_TOOL_CACHE_EXTRA_KEY = 'grok_client_tool_cache_enabled'
 const poolModeEnabled = ref(false)
@@ -3232,6 +3290,7 @@ const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OF
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'account_device' | 'device' | 'session' | 'full'
+const codexQuotaOverdraftEnabled = ref(true)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
@@ -3549,6 +3608,7 @@ const form = reactive({
   notes: '',
   proxy_id: null as number | null,
   concurrency: 1,
+  rate_limit_429_retry_count: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
@@ -3556,6 +3616,14 @@ const form = reactive({
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+
+const normalizeRateLimit429RetryCount = (value: unknown): number => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_RATE_LIMIT_429_RETRY_COUNT
+  }
+  return Math.min(MAX_RATE_LIMIT_429_RETRY_COUNT, Math.max(0, Math.trunc(parsed)))
+}
 
 const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
   upstreamBillingRateSyncEnabled.value = enabled
@@ -3657,6 +3725,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
   form.concurrency = newAccount.concurrency
+  form.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(
+    newAccount.rate_limit_429_retry_count ?? DEFAULT_RATE_LIMIT_429_RETRY_COUNT
+  )
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
@@ -3712,6 +3783,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexQuotaOverdraftEnabled.value = true
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
@@ -3765,6 +3837,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         extra?.codex_cli_only_allow_app_server === true
     }
     if (newAccount.type === 'oauth') {
+      codexQuotaOverdraftEnabled.value = extra?.codex_quota_overdraft_enabled !== false
       const fpMode = extra?.codex_fingerprint_mode as string | undefined
       // 缺省/非法值按 off 呈现，与后端 GetCodexFingerprintMode 的 opt-in 语义一致（#5610）
       codexFingerprintMode.value = (['off', 'account_device', 'device', 'session', 'full'].includes(fpMode || '')
@@ -4597,6 +4670,9 @@ const handleSubmit = async () => {
 
   const updatePayload: Record<string, unknown> = { ...form }
   try {
+    updatePayload.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(
+      form.rate_limit_429_retry_count
+    )
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0
@@ -5203,6 +5279,7 @@ const handleSubmit = async () => {
       // 指纹收敛模式：默认 off（不写入）；account_device/device/session/full 是显式 opt-in，
       // 必须落键，否则管理员的选择会被后端当作"未设置"而回落到 off（#5610）。
       if (props.account.type === 'oauth') {
+        newExtra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
         if (codexFingerprintMode.value !== 'off') {
           newExtra.codex_fingerprint_mode = codexFingerprintMode.value
         } else {

@@ -110,4 +110,6 @@ func TestSchedulableAccountQueryScopesCodexQuotaOverdraftToMarkedContext(t *test
 	require.Contains(t, overdraftSQL, `"platform" =`)
 	require.Contains(t, overdraftSQL, `"type" =`)
 	require.Contains(t, overdraftSQL, `"parent_account_id" IS NULL`)
+	require.Contains(t, overdraftSQL, "codex_quota_overdraft_enabled")
+	require.Contains(t, overdraftSQL, "COALESCE")
 }

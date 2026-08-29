@@ -41,6 +41,7 @@ func TestGatewayCompatPoolMode429AllowsSameAccountRetry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			zero429Retries := 0
 			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
 				StatusCode: http.StatusTooManyRequests,
 				Header:     http.Header{"X-Request-Id": []string{"pool-429"}},
@@ -55,10 +56,11 @@ func TestGatewayCompatPoolMode429AllowsSameAccountRetry(t *testing.T) {
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPost, tt.path, nil)
 			account := &Account{
-				ID:       1,
-				Name:     "pool-account",
-				Platform: PlatformAnthropic,
-				Type:     AccountTypeAPIKey,
+				ID:                     1,
+				Name:                   "pool-account",
+				Platform:               PlatformAnthropic,
+				Type:                   AccountTypeAPIKey,
+				RateLimit429RetryCount: &zero429Retries,
 				Credentials: map[string]any{
 					"api_key":   "test-key",
 					"pool_mode": true,

@@ -40,6 +40,8 @@ const (
 	FieldProxyFallbackOriginID = "proxy_fallback_origin_id"
 	// FieldConcurrency holds the string denoting the concurrency field in the database.
 	FieldConcurrency = "concurrency"
+	// FieldRateLimit429RetryCount holds the string denoting the rate_limit_429_retry_count field in the database.
+	FieldRateLimit429RetryCount = "rate_limit_429_retry_count"
 	// FieldLoadFactor holds the string denoting the load_factor field in the database.
 	FieldLoadFactor = "load_factor"
 	// FieldPriority holds the string denoting the priority field in the database.
@@ -143,6 +145,7 @@ var Columns = []string{
 	FieldProxyID,
 	FieldProxyFallbackOriginID,
 	FieldConcurrency,
+	FieldRateLimit429RetryCount,
 	FieldLoadFactor,
 	FieldPriority,
 	FieldRateMultiplier,
@@ -206,6 +209,10 @@ var (
 	DefaultExtra func() map[string]interface{}
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
 	DefaultConcurrency int
+	// DefaultRateLimit429RetryCount holds the default value on creation for the "rate_limit_429_retry_count" field.
+	DefaultRateLimit429RetryCount int
+	// RateLimit429RetryCountValidator is a validator for the "rate_limit_429_retry_count" field. It is called by the builders before save.
+	RateLimit429RetryCountValidator func(int) error
 	// DefaultPriority holds the default value on creation for the "priority" field.
 	DefaultPriority int
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
@@ -304,6 +311,11 @@ func ByProxyFallbackOriginID(opts ...sql.OrderTermOption) OrderOption {
 // ByConcurrency orders the results by the concurrency field.
 func ByConcurrency(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldConcurrency, opts...).ToFunc()
+}
+
+// ByRateLimit429RetryCount orders the results by the rate_limit_429_retry_count field.
+func ByRateLimit429RetryCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRateLimit429RetryCount, opts...).ToFunc()
 }
 
 // ByLoadFactor orders the results by the load_factor field.

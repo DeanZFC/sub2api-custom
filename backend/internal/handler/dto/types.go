@@ -51,21 +51,22 @@ type AdminUser struct {
 }
 
 type APIKey struct {
-	ID          int64      `json:"id"`
-	UserID      int64      `json:"user_id"`
-	Key         string     `json:"key"`
-	Name        string     `json:"name"`
-	GroupID     *int64     `json:"group_id"`
-	Status      string     `json:"status"`
-	IPWhitelist []string   `json:"ip_whitelist"`
-	IPBlacklist []string   `json:"ip_blacklist"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
-	LastUsedIP  *string    `json:"last_used_ip"`
-	Quota       float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
-	QuotaUsed   float64    `json:"quota_used"` // Used quota amount in USD
-	ExpiresAt   *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID              int64      `json:"id"`
+	UserID          int64      `json:"user_id"`
+	Key             string     `json:"key"`
+	Name            string     `json:"name"`
+	GroupID         *int64     `json:"group_id"`
+	FallbackGroupID *int64     `json:"fallback_group_id"`
+	Status          string     `json:"status"`
+	IPWhitelist     []string   `json:"ip_whitelist"`
+	IPBlacklist     []string   `json:"ip_blacklist"`
+	LastUsedAt      *time.Time `json:"last_used_at"`
+	LastUsedIP      *string    `json:"last_used_ip"`
+	Quota           float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
+	QuotaUsed       float64    `json:"quota_used"` // Used quota amount in USD
+	ExpiresAt       *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 	// CurrentConcurrency is the real-time active request count for this API key.
 	CurrentConcurrency int `json:"current_concurrency"`
 
@@ -83,8 +84,9 @@ type APIKey struct {
 	Reset1dAt     *time.Time `json:"reset_1d_at,omitempty"`
 	Reset7dAt     *time.Time `json:"reset_7d_at,omitempty"`
 
-	User  *User  `json:"user,omitempty"`
-	Group *Group `json:"group,omitempty"`
+	User          *User  `json:"user,omitempty"`
+	Group         *Group `json:"group,omitempty"`
+	FallbackGroup *Group `json:"fallback_group,omitempty"`
 }
 
 type Group struct {
@@ -148,6 +150,8 @@ type Group struct {
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制），设置后覆盖用户级 rpm_limit。
 	RPMLimit int `json:"rpm_limit"`
+	// 分组内每个用户的并发上限（0 = 不限制）。
+	UserConcurrencyLimit int `json:"user_concurrency_limit"`
 	// MaxReasoningEffort OpenAI/Codex 请求的推理强度上限，空字符串表示不限制。
 	MaxReasoningEffort string `json:"max_reasoning_effort"`
 	// ReasoningEffortMappings OpenAI/Codex 推理强度精确映射。
@@ -209,6 +213,7 @@ type Account struct {
 	ProxyFallbackOriginID   *int64                         `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName *string                        `json:"proxy_fallback_origin_name,omitempty"`
 	Concurrency             int                            `json:"concurrency"`
+	RateLimit429RetryCount  int                            `json:"rate_limit_429_retry_count"`
 	LoadFactor              *int                           `json:"load_factor,omitempty"`
 	Priority                int                            `json:"priority"`
 	RateMultiplier          float64                        `json:"rate_multiplier"`

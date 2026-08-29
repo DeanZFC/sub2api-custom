@@ -1365,15 +1365,16 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 
 	newAccount := func(accountType string) *Account {
 		account := &Account{
-			ID:             123,
-			Name:           "acc",
-			Platform:       PlatformOpenAI,
-			Type:           accountType,
-			Concurrency:    1,
-			Extra:          map[string]any{"openai_passthrough": true},
-			Status:         StatusActive,
-			Schedulable:    true,
-			RateMultiplier: f64p(1),
+			ID:                     123,
+			Name:                   "acc",
+			Platform:               PlatformOpenAI,
+			Type:                   accountType,
+			Concurrency:            1,
+			RateLimit429RetryCount: retryCountPointer(0),
+			Extra:                  map[string]any{"openai_passthrough": true},
+			Status:                 StatusActive,
+			Schedulable:            true,
+			RateMultiplier:         f64p(1),
 		}
 		switch accountType {
 		case AccountTypeOAuth:

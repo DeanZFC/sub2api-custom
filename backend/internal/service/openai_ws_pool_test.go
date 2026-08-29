@@ -61,6 +61,26 @@ func TestOpenAIWSConnPool_AcquireCleanupInterval(t *testing.T) {
 	require.Less(t, openAIWSAcquireCleanupInterval, openAIWSBackgroundSweepTicker)
 }
 
+func TestOpenAIWSConnPool_DialConnUsesPerAttemptTimeout(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 1
+	pool := newOpenAIWSConnPool(cfg)
+	probe := &openAIWSDeadlineProbeDialer{}
+	pool.setClientDialerForTest(probe)
+
+	account := &Account{ID: 43, RateLimit429RetryCount: retryCountPointer(0)}
+	conn, err := pool.dialConn(context.Background(), openAIWSAcquireRequest{
+		Account: account,
+		WSURL:   "wss://example.com/v1/responses",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+	require.True(t, probe.hasDeadline)
+	require.Positive(t, probe.remaining)
+	require.LessOrEqual(t, probe.remaining, time.Second)
+}
+
 func TestNormalizeOpenAIWSRoutingAffinityPrefersCanonicalAndSortsVariants(t *testing.T) {
 	headers := http.Header{
 		"X-CODEX-ROUTING-HINT": []string{" variant-uppercase "},
@@ -2023,6 +2043,25 @@ func TestOpenAIWSConnPool_Acquire_ErrorBranches(t *testing.T) {
 }
 
 type openAIWSFakeDialer struct{}
+
+type openAIWSDeadlineProbeDialer struct {
+	hasDeadline bool
+	remaining   time.Duration
+}
+
+func (d *openAIWSDeadlineProbeDialer) Dial(
+	ctx context.Context,
+	_ string,
+	_ http.Header,
+	_ string,
+) (openAIWSClientConn, int, http.Header, error) {
+	deadline, ok := ctx.Deadline()
+	d.hasDeadline = ok
+	if ok {
+		d.remaining = time.Until(deadline)
+	}
+	return &openAIWSFakeConn{}, http.StatusSwitchingProtocols, nil, nil
+}
 
 func (d *openAIWSFakeDialer) Dial(
 	ctx context.Context,

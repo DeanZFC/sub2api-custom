@@ -177,6 +177,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 		},
 		ModelsListConfig:        GroupModelsListConfig{Enabled: true, Models: []string{"gpt-5.4", "gpt-5-mini"}},
 		RPMLimit:                99,
+		UserConcurrencyLimit:    3,
 		MaxReasoningEffort:      "medium",
 		ReasoningEffortMappings: []ReasoningEffortMapping{{From: "max", To: "xhigh"}},
 		CreatedAt:               createdAt,
@@ -214,6 +215,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.MessagesDispatchModelConfig, duplicate.MessagesDispatchModelConfig)
 	require.Equal(t, source.ModelsListConfig, duplicate.ModelsListConfig)
 	require.Equal(t, source.RPMLimit, duplicate.RPMLimit)
+	require.Equal(t, source.UserConcurrencyLimit, duplicate.UserConcurrencyLimit)
 	require.Equal(t, source.MaxReasoningEffort, duplicate.MaxReasoningEffort)
 	require.Equal(t, source.ReasoningEffortMappings, duplicate.ReasoningEffortMappings)
 	require.EqualValues(t, 2, duplicate.AccountCount)

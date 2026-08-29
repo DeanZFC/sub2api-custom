@@ -130,6 +130,8 @@ const (
 	FieldModelsListConfig = "models_list_config"
 	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
 	FieldRpmLimit = "rpm_limit"
+	// FieldUserConcurrencyLimit holds the string denoting the user_concurrency_limit field in the database.
+	FieldUserConcurrencyLimit = "user_concurrency_limit"
 	// FieldMaxReasoningEffort holds the string denoting the max_reasoning_effort field in the database.
 	FieldMaxReasoningEffort = "max_reasoning_effort"
 	// FieldReasoningEffortMappings holds the string denoting the reasoning_effort_mappings field in the database.
@@ -142,6 +144,8 @@ const (
 	FieldProfitSafetyBuffer = "profit_safety_buffer"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
+	// EdgeFallbackAPIKeys holds the string denoting the fallback_api_keys edge name in mutations.
+	EdgeFallbackAPIKeys = "fallback_api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
 	EdgeRedeemCodes = "redeem_codes"
 	// EdgeSubscriptions holds the string denoting the subscriptions edge name in mutations.
@@ -165,6 +169,13 @@ const (
 	APIKeysInverseTable = "api_keys"
 	// APIKeysColumn is the table column denoting the api_keys relation/edge.
 	APIKeysColumn = "group_id"
+	// FallbackAPIKeysTable is the table that holds the fallback_api_keys relation/edge.
+	FallbackAPIKeysTable = "api_keys"
+	// FallbackAPIKeysInverseTable is the table name for the APIKey entity.
+	// It exists in this package in order to avoid circular dependency with the "apikey" package.
+	FallbackAPIKeysInverseTable = "api_keys"
+	// FallbackAPIKeysColumn is the table column denoting the fallback_api_keys relation/edge.
+	FallbackAPIKeysColumn = "fallback_group_id"
 	// RedeemCodesTable is the table that holds the redeem_codes relation/edge.
 	RedeemCodesTable = "redeem_codes"
 	// RedeemCodesInverseTable is the table name for the RedeemCode entity.
@@ -272,6 +283,7 @@ var Columns = []string{
 	FieldMessagesDispatchModelConfig,
 	FieldModelsListConfig,
 	FieldRpmLimit,
+	FieldUserConcurrencyLimit,
 	FieldMaxReasoningEffort,
 	FieldReasoningEffortMappings,
 	FieldProfitControlEnabled,
@@ -400,6 +412,8 @@ var (
 	DefaultModelsListConfig domain.GroupModelsListConfig
 	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
 	DefaultRpmLimit int
+	// DefaultUserConcurrencyLimit holds the default value on creation for the "user_concurrency_limit" field.
+	DefaultUserConcurrencyLimit int
 	// DefaultMaxReasoningEffort holds the default value on creation for the "max_reasoning_effort" field.
 	DefaultMaxReasoningEffort string
 	// MaxReasoningEffortValidator is a validator for the "max_reasoning_effort" field. It is called by the builders before save.
@@ -677,6 +691,11 @@ func ByRpmLimit(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRpmLimit, opts...).ToFunc()
 }
 
+// ByUserConcurrencyLimit orders the results by the user_concurrency_limit field.
+func ByUserConcurrencyLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUserConcurrencyLimit, opts...).ToFunc()
+}
+
 // ByMaxReasoningEffort orders the results by the max_reasoning_effort field.
 func ByMaxReasoningEffort(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMaxReasoningEffort, opts...).ToFunc()
@@ -708,6 +727,20 @@ func ByAPIKeysCount(opts ...sql.OrderTermOption) OrderOption {
 func ByAPIKeys(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	return func(s *sql.Selector) {
 		sqlgraph.OrderByNeighborTerms(s, newAPIKeysStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByFallbackAPIKeysCount orders the results by fallback_api_keys count.
+func ByFallbackAPIKeysCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newFallbackAPIKeysStep(), opts...)
+	}
+}
+
+// ByFallbackAPIKeys orders the results by fallback_api_keys terms.
+func ByFallbackAPIKeys(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newFallbackAPIKeysStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
 
@@ -813,6 +846,13 @@ func newAPIKeysStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(APIKeysInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, APIKeysTable, APIKeysColumn),
+	)
+}
+func newFallbackAPIKeysStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(FallbackAPIKeysInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, FallbackAPIKeysTable, FallbackAPIKeysColumn),
 	)
 }
 func newRedeemCodesStep() *sqlgraph.Step {

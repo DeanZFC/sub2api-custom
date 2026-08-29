@@ -86,6 +86,57 @@ func TestSameAccountRetryAllowedRequiresOptInAndDefaultsToCountLimit(t *testing.
 	require.False(t, sameAccountRetryAllowed(err, maxSameAccountRetries, maxSameAccountRetries))
 }
 
+func TestSameAccountRetryAllowedPreservesOfficialRetryAfterTransparentBudget(t *testing.T) {
+	err := &service.UpstreamFailoverError{
+		StatusCode:               http.StatusTooManyRequests,
+		RetryableOnSameAccount:   true,
+		SameAccountRetryDeadline: time.Now().Add(time.Minute),
+	}
+	require.True(t, sameAccountRetryAllowed(err, 0, maxSameAccountRetries), "流内 429 应保留原有安全重试")
+
+	err.Account429RetryExhausted = true
+	require.True(t, sameAccountRetryAllowed(err, 0, maxSameAccountRetries), "透明预算耗尽后仍须执行官方同账号重试")
+}
+
+func TestHandleFailoverErrorExhaustedAccount429ContinuesOriginalRetryAndSwitchFlow(t *testing.T) {
+	mock := &mockTempUnscheduler{}
+	state := NewFailoverState(3, false)
+	failoverErr := &service.UpstreamFailoverError{
+		StatusCode:               http.StatusTooManyRequests,
+		RetryableOnSameAccount:   true,
+		Account429RetryExhausted: true,
+	}
+
+	action := state.HandleFailoverError(
+		context.Background(),
+		mock,
+		429,
+		service.PlatformOpenAI,
+		1,
+		failoverErr,
+	)
+
+	require.Equal(t, FailoverContinue, action)
+	require.Equal(t, 1, state.SameAccountRetryCount[429], "透明预算耗尽后仍须先执行官方同账号重试")
+	require.NotContains(t, state.FailedAccountIDs, int64(429))
+	require.Zero(t, state.SwitchCount)
+	require.Empty(t, mock.calls)
+
+	action = state.HandleFailoverError(
+		context.Background(),
+		mock,
+		429,
+		service.PlatformOpenAI,
+		1,
+		failoverErr,
+	)
+	require.Equal(t, FailoverContinue, action)
+	require.Contains(t, state.FailedAccountIDs, int64(429), "最终 429 仍须进入原有账号排除/切换流程")
+	require.Equal(t, 1, state.SwitchCount)
+	require.Len(t, mock.calls, 1, "最终 429 仍须执行原有临时冷却逻辑")
+	require.Equal(t, int64(429), mock.calls[0].accountID)
+}
+
 func TestSameAccountRetryAllowedHonorsErrorMaxBeforeDeadline(t *testing.T) {
 	err := &service.UpstreamFailoverError{
 		RetryableOnSameAccount:   true,

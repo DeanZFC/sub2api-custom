@@ -98,6 +98,63 @@ func TestCodexQuotaOverdraftInjectionGuards(t *testing.T) {
 	require.Equal(t, oversized, svc.prepareCodexQuotaOverdraftBody(ctx, oauth, false, oversized))
 }
 
+func TestCodexQuotaOverdraftAccountSwitch(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		account *Account
+		enabled bool
+	}{
+		{
+			name:    "missing inherits global",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+			enabled: true,
+		},
+		{
+			name:    "explicit true",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{CodexQuotaOverdraftEnabledExtraKey: true}},
+			enabled: true,
+		},
+		{
+			name:    "explicit false",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{CodexQuotaOverdraftEnabledExtraKey: false}},
+			enabled: false,
+		},
+		{
+			name:    "non openai ignored",
+			account: &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{CodexQuotaOverdraftEnabledExtraKey: true}},
+			enabled: false,
+		},
+		{
+			name:    "shadow ignored",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: int64PtrForCodexQuotaOverdraftTest(1), Extra: map[string]any{CodexQuotaOverdraftEnabledExtraKey: true}},
+			enabled: false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.enabled, isCodexQuotaOverdraftAccount(test.account))
+		})
+	}
+}
+
+func TestCodexQuotaOverdraftDisabledAccountDoesNotInject(t *testing.T) {
+	t.Cleanup(func() { SetCodexQuotaOverdraftEnabled(false) })
+	SetCodexQuotaOverdraftEnabled(true)
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}}}
+	account := &Account{
+		ID:       79,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			CodexQuotaOverdraftEnabledExtraKey: "false",
+			"codex_5h_used_percent":            100,
+			"codex_5h_reset_at":                time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+	}
+	body := []byte(`{"input":[{"type":"message","role":"user"}]}`)
+	updated := svc.prepareCodexQuotaOverdraftBody(WithCodexQuotaOverdraftScheduling(context.Background()), account, false, body)
+	require.Equal(t, string(body), string(updated))
+}
+
 func TestCodexQuotaOverdraftSchedulingDoesNotBypassThresholdBelowPrearm(t *testing.T) {
 	t.Cleanup(func() { SetCodexQuotaOverdraftEnabled(false) })
 	SetCodexQuotaOverdraftEnabled(true)

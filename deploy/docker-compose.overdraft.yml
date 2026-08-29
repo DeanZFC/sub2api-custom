@@ -1,4 +1,5 @@
-# sub2api-overdraft source-build overlay.
+# Legacy compatibility overlay for deployments created before the generic
+# sub2api-custom branding. New deployments should use docker-compose.custom.yml.
 # Use together with docker-compose.local.yml from this directory:
 #   docker compose -p sub2api-overdraft \
 #     -f docker-compose.local.yml \
@@ -7,7 +8,7 @@
 
 services:
   sub2api:
-    image: sub2api-overdraft:local
+    image: sub2api-custom:local
     build:
       context: ..
       dockerfile: Dockerfile

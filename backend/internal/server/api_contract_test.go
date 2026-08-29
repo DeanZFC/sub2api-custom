@@ -230,6 +230,7 @@ func TestAPIContracts(t *testing.T) {
 					"key": "sk_custom_1234567890",
 					"name": "Key One",
 					"group_id": null,
+					"fallback_group_id": null,
 					"status": "active",
 					"ip_whitelist": null,
 					"ip_blacklist": null,
@@ -281,6 +282,7 @@ func TestAPIContracts(t *testing.T) {
 							"key": "sk_custom_1234567890",
 							"name": "Key One",
 							"group_id": null,
+							"fallback_group_id": null,
 							"status": "active",
 							"ip_whitelist": null,
 							"ip_blacklist": null,
@@ -394,6 +396,7 @@ func TestAPIContracts(t *testing.T) {
 						"max_reasoning_effort": "",
 						"reasoning_effort_mappings": null,
 						"rpm_limit": 0,
+						"user_concurrency_limit": 0,
 						"created_at": "2025-01-02T03:04:05Z",
 						"updated_at": "2025-01-02T03:04:05Z"
 					}

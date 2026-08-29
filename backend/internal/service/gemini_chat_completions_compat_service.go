@@ -123,7 +123,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = doAccountHTTPUpstream(s.httpUpstream, upstreamReq, proxyURL, account)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -187,7 +187,8 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			resp = &http.Response{
 				StatusCode: resp.StatusCode,
 				Header:     resp.Header.Clone(),
-				Body:       io.NopCloser(bytes.NewReader(respBody)),
+				Body:       preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody))),
+				Request:    resp.Request,
 			}
 			break
 		}
@@ -233,11 +234,11 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
-			return nil, &UpstreamFailoverError{
+			return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           evBody,
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
-			}
+			})
 		}
 
 		if policy == ErrorPolicySkipped && account.IsCustomErrorCodesEnabled() {

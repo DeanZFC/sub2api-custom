@@ -1,4 +1,4 @@
-# sub2api-overdraft 5h / 7d 额度透支定制记录
+# sub2api-custom 5h / 7d 额度透支定制记录
 
 本文件是维护者实现与升级记录。面向部署者的完整安装、验证、升级和故障排查说明见
 [CODEX_OVERDRAFT_DEPLOYMENT_CN.md](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)。
@@ -9,9 +9,10 @@
 - 参考实现：<https://github.com/Mxucc/cpa-account-config-manager>
 - 功能开关：`gateway.codex_quota_overdraft_enabled`
 - 代码默认值：关闭；`deploy/config.example.yaml` 部署示例默认开启
+- 账号级透支开关：`accounts.extra.codex_quota_overdraft_enabled`；缺省跟随全局开关，显式 `false` 仅关闭当前 OpenAI OAuth 账号
 - OpenAI 账号固定指纹开关：`gateway.openai_account_unique_fingerprint_enabled`
 - 固定指纹开关默认开启；没有显式账号模式时按账号 ID 派生稳定设备指纹，账号 extra 中显式设置 `codex_fingerprint_mode: off` 可单独关闭
-- 账号编辑页新增 `账号唯一设备（新增，推荐）` 选项，对应 `codex_fingerprint_mode: account_device`；它只固定该账号的设备指纹，不改变会话/线程收敛
+- 账号编辑页新增 `CPA 指纹出口（推荐）` 选项，对应 `codex_fingerprint_mode: account_device`；保留底层值以兼容已有账号
 - Fork 版本文件：`FORK_VERSION`
 - 更新源：`DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支
 
@@ -19,7 +20,7 @@
 
 源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 
-源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.183-overdraft.6`。
+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.183-overdraft.7`。
 
 Sub2API `v0.1.179` 继续保留原生 remote compaction v2 在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 
@@ -53,6 +54,25 @@ gateway:
 
 ## OpenAI 账号固定指纹
 
+页面上的“CPA 指纹出口”是对现有账号级 Codex 身份收敛模式的准确命名，不表示自动分配代理 IP。参考
+CLIProxyAPI 的 `codex.identity-confuse` 实现后，当前 `account_device` 与 CPA 的共同点是按账号稳定
+隔离 `x-codex-installation-id` 等身份信号；差异是当前模式默认只收敛设备 ID，CPA 会按
+`auth.ID + 信号类型 + 原始值` 对 prompt cache、session、thread、window 等信号逐项确定性映射。
+代理 IP 仍由账号独立的 Proxy 配置决定。需要完整 CPA 风格身份映射时，可为账号选择 `session` 或 `full`，
+但它们仍使用 Sub2API 的 seed 和字段兼容策略，不会改变网络出口。
+
+| 对比项 | 当前 `account_device`（页面显示 CPA 指纹出口） | CPA `identity-confuse` |
+| --- | --- | --- |
+| 账号绑定 | Sub2API 账号 ID 或持久化 seed | CPA `auth.ID` |
+| installation ID | 稳定固定 | 稳定确定性映射 |
+| session / thread | 保持客户端原值 | 按账号与原值逐项映射 |
+| prompt cache | 不强制改写 | 按账号映射 |
+| 代理 IP | 不处理 | 由独立 `ProxyURL` 配置处理 |
+| 开关条件 | Sub2API 全局开关或账号模式 | CPA `identity-confuse` 且满足 routing 条件 |
+
+因此，两者不是字节级等价实现；本项目保留 `account_device` 的旧底层值和行为，避免已有账号在升级后
+突然改变会话/线程指纹。需要更接近 CPA 的收敛强度时，应显式选择 `session` 或 `full` 并观察上游额度表现。
+
 固定指纹行为覆盖 HTTP Responses、OpenAI 透传、Responses WebSocket 和账号测试/额度探测。
 默认模式为 `device`：同一 OpenAI OAuth 账号的 `x-codex-installation-id` 在请求、重启和
 重新构建后保持不变，不同账号按账号 ID 派生不同 UUID。已经配置 `device`、`session`、`full`
@@ -84,6 +104,9 @@ gateway:
 6. 401/403、账号停用等认证问题交给原有认证异常逻辑处理；400/404 判定为 `inconclusive`，不会暂停整个账号。
 7. 账号禁用、过载、代理/传输故障、模型级冷却及其他临时不可调度原因不被绕过。
 8. 额度恢复后状态改为 `recovered`，清理本功能或额度阈值产生的暂停；5h 与 7d 分别维护透支起点，不会因另一窗口后来耗尽而重置已有统计。
+
+账号级开关为 `false` 时，上述注入、独立探测、429 透支判定、调度阈值绕过、透支状态和透支统计全部跳过；
+普通 Codex 用量快照仍按原逻辑保存。账号字段缺省时继承全局开关，非 OpenAI OAuth 和影子账号始终不参与。
 
 状态值包括 `pending`、`passed`、`failed`、`inconclusive`、`recovered`。账号用量页面显示探测状态、尝试次数、额度周期、透支期成功请求数、Token、账号金额及预计恢复时间。
 
@@ -200,4 +223,9 @@ codex_quota_overdraft_stale_rate_limit_cleared
 SELECT id, name, extra->'codex_quota_overdraft_probe'
 FROM accounts
 WHERE platform = 'openai' AND type = 'oauth';
+
+-- 查看账号级开关（NULL 表示继承全局开关）
+SELECT id, name, extra->>'codex_quota_overdraft_enabled' AS overdraft_enabled
+FROM accounts
+WHERE platform = 'openai' AND type = 'oauth' AND parent_account_id IS NULL;
 ```

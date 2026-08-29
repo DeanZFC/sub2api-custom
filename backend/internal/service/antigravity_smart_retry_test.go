@@ -92,6 +92,93 @@ func (m *mockSmartRetryUpstream) DoWithTLS(req *http.Request, proxyURL string, a
 	return m.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
+func TestHandleSmartRetryContinuesOfficialLoopWithoutRefreshingAccount429Budget(t *testing.T) {
+	modelName := "gemini-account-429-budget-test"
+	modelCapacityExhaustedMu.Lock()
+	delete(modelCapacityExhaustedUntil, modelName)
+	modelCapacityExhaustedMu.Unlock()
+	defer func() {
+		modelCapacityExhaustedMu.Lock()
+		delete(modelCapacityExhaustedUntil, modelName)
+		modelCapacityExhaustedMu.Unlock()
+	}()
+
+	final429Body := []byte(`{"error":{"status":"RESOURCE_EXHAUSTED","message":"QUOTA_EXHAUSTED"}}`)
+	upstream := &mockSmartRetryUpstream{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": []string{"0"}},
+				Body:       io.NopCloser(bytes.NewReader(final429Body)),
+			},
+			{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": []string{"0"}},
+				Body:       io.NopCloser(bytes.NewReader(final429Body)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			},
+		},
+		errors: []error{nil, nil, nil},
+	}
+	retryCount := 1
+	account := &Account{
+		ID:                     4291,
+		Type:                   AccountTypeOAuth,
+		Platform:               PlatformAntigravity,
+		Concurrency:            1,
+		RateLimit429RetryCount: &retryCount,
+	}
+	initialBody := []byte(`{
+		"error": {
+			"status": "UNAVAILABLE",
+			"details": [
+				{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"` + modelName + `"},"reason":"MODEL_CAPACITY_EXHAUSTED"},
+				{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"0.1s"}
+			]
+		}
+	}`)
+	initialResp := &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Header:     http.Header{},
+		Body:       io.NopCloser(bytes.NewReader(initialBody)),
+	}
+	handleErrorCalls := 0
+	params := antigravityRetryLoopParams{
+		ctx:          WithAccount429RetryScope(context.Background()),
+		prefix:       "[test]",
+		account:      account,
+		accessToken:  "token",
+		action:       "generateContent",
+		body:         []byte(`{"model":"test","request":{}}`),
+		httpUpstream: upstream,
+		handleError: func(_ context.Context, _ string, _ *Account, statusCode int, _ http.Header, _ []byte, _ string, _ int64, _ string, _ bool) *handleModelRateLimitResult {
+			handleErrorCalls++
+			require.Equal(t, http.StatusTooManyRequests, statusCode)
+			return nil
+		},
+	}
+
+	result := (&AntigravityGatewayService{}).handleSmartRetry(
+		params,
+		initialResp,
+		initialBody,
+		"https://ag-1.test",
+		0,
+		[]string{"https://ag-1.test"},
+	)
+
+	require.NotNil(t, result)
+	require.Equal(t, smartRetryActionBreakWithResp, result.action)
+	require.NotNil(t, result.resp)
+	require.Equal(t, http.StatusOK, result.resp.StatusCode)
+	require.Zero(t, handleErrorCalls, "the normal outer error path must apply the final 429 side effect exactly once")
+	require.Len(t, upstream.calls, 3, "官方第二轮智能重试不得重新领取透明 429 预算")
+}
+
 // TestHandleSmartRetry_URLLevelRateLimit 测试 URL 级别限流切换
 func TestHandleSmartRetry_URLLevelRateLimit(t *testing.T) {
 	account := &Account{
@@ -107,6 +194,7 @@ func TestHandleSmartRetry_URLLevelRateLimit(t *testing.T) {
 		Header:     http.Header{},
 		Body:       io.NopCloser(bytes.NewReader(respBody)),
 	}
+	markAccount429RetriesExhausted(resp, nil, DefaultRateLimit429RetryCount)
 
 	params := antigravityRetryLoopParams{
 		ctx:         context.Background(),
@@ -157,6 +245,7 @@ func TestHandleSmartRetry_LongDelay_ReturnsSwitchError(t *testing.T) {
 		Header:     http.Header{},
 		Body:       io.NopCloser(bytes.NewReader(respBody)),
 	}
+	markAccount429RetriesExhausted(resp, nil, DefaultRateLimit429RetryCount)
 
 	params := antigravityRetryLoopParams{
 		ctx:             context.Background(),
@@ -276,11 +365,13 @@ func TestHandleSmartRetry_ShortDelay_SmartRetryFailed_ReturnsSwitchError(t *test
 	}
 
 	repo := &stubAntigravityAccountRepo{}
+	disableAccount429Retry := 0
 	account := &Account{
-		ID:       2,
-		Name:     "acc-2",
-		Type:     AccountTypeOAuth,
-		Platform: PlatformAntigravity,
+		ID:                     2,
+		Name:                   "acc-2",
+		Type:                   AccountTypeOAuth,
+		Platform:               PlatformAntigravity,
+		RateLimit429RetryCount: &disableAccount429Retry,
 	}
 
 	// 3s < 7s 阈值，应该触发智能重试（最多 1 次）
@@ -630,13 +721,14 @@ func TestAntigravityRetryLoop_HandleSmartRetry_SwitchError_Propagates(t *testing
 
 	repo := &stubAntigravityAccountRepo{}
 	account := &Account{
-		ID:          7,
-		Name:        "acc-7",
-		Type:        AccountTypeOAuth,
-		Platform:    PlatformAntigravity,
-		Schedulable: true,
-		Status:      StatusActive,
-		Concurrency: 1,
+		ID:                     7,
+		Name:                   "acc-7",
+		Type:                   AccountTypeOAuth,
+		Platform:               PlatformAntigravity,
+		Schedulable:            true,
+		Status:                 StatusActive,
+		Concurrency:            1,
+		RateLimit429RetryCount: retryCountPointer(0),
 	}
 
 	svc := &AntigravityGatewayService{}
@@ -822,11 +914,13 @@ func TestHandleSmartRetry_ShortDelay_StickySession_FailedRetry_ClearsSession(t *
 
 	repo := &stubAntigravityAccountRepo{}
 	cache := &stubSmartRetryCache{}
+	disableAccount429Retry := 0
 	account := &Account{
-		ID:       10,
-		Name:     "acc-10",
-		Type:     AccountTypeOAuth,
-		Platform: PlatformAntigravity,
+		ID:                     10,
+		Name:                   "acc-10",
+		Type:                   AccountTypeOAuth,
+		Platform:               PlatformAntigravity,
+		RateLimit429RetryCount: &disableAccount429Retry,
 	}
 
 	respBody := []byte(`{
@@ -1361,13 +1455,14 @@ func TestAntigravityRetryLoop_SmartRetryFailed_StickySession_SwitchErrorPropagat
 	repo := &stubAntigravityAccountRepo{}
 	cache := &stubSmartRetryCache{}
 	account := &Account{
-		ID:          17,
-		Name:        "acc-17",
-		Type:        AccountTypeOAuth,
-		Platform:    PlatformAntigravity,
-		Schedulable: true,
-		Status:      StatusActive,
-		Concurrency: 1,
+		ID:                     17,
+		Name:                   "acc-17",
+		Type:                   AccountTypeOAuth,
+		Platform:               PlatformAntigravity,
+		Schedulable:            true,
+		Status:                 StatusActive,
+		Concurrency:            1,
+		RateLimit429RetryCount: retryCountPointer(0),
 	}
 
 	svc := &AntigravityGatewayService{cache: cache}

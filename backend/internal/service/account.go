@@ -4,6 +4,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"net/url"
@@ -32,7 +33,10 @@ type Account struct {
 	ProxyFallbackOriginID   *int64
 	ProxyFallbackOriginName *string // 仅展示用
 	Concurrency             int
-	Priority                int
+	// RateLimit429RetryCount 是首次上游 429 后的额外重试次数。
+	// 使用指针兼容不含该字段的旧调度缓存；nil 按默认值处理，0 表示显式关闭。
+	RateLimit429RetryCount *int
+	Priority               int
 	// RateMultiplier 账号计费倍率（>=0，允许 0 表示该账号计费为 0）。
 	// 使用指针用于兼容旧版本调度缓存（Redis）中缺字段的情况：nil 表示按 1.0 处理。
 	RateMultiplier     *float64
@@ -82,6 +86,33 @@ type Account struct {
 	headerOverrideCacheRawPtr         uintptr
 	headerOverrideCacheRawLen         int
 	headerOverrideCacheRawSig         uint64
+}
+
+const (
+	DefaultRateLimit429RetryCount = 5
+	MaxRateLimit429RetryCount     = 10
+)
+
+// GetRateLimit429RetryCount 返回账号的 429 额外重试次数，并兼容旧缓存数据。
+func (a *Account) GetRateLimit429RetryCount() int {
+	if a == nil || a.RateLimit429RetryCount == nil {
+		return DefaultRateLimit429RetryCount
+	}
+	count := *a.RateLimit429RetryCount
+	if count < 0 {
+		return 0
+	}
+	if count > MaxRateLimit429RetryCount {
+		return MaxRateLimit429RetryCount
+	}
+	return count
+}
+
+func ValidateRateLimit429RetryCount(count int) error {
+	if count < 0 || count > MaxRateLimit429RetryCount {
+		return fmt.Errorf("rate_limit_429_retry_count must be between 0 and %d", MaxRateLimit429RetryCount)
+	}
+	return nil
 }
 
 type OpenAIEndpointCapability string

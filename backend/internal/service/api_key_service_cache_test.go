@@ -235,13 +235,15 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t *testing.T) {
 	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
 	groupID := int64(9)
+	fallbackGroupID := int64(10)
 	apiKey := &APIKey{
-		ID:      1,
-		UserID:  2,
-		GroupID: &groupID,
-		Key:     "k-roundtrip",
-		Name:    "Audit Key",
-		Status:  StatusActive,
+		ID:              1,
+		UserID:          2,
+		GroupID:         &groupID,
+		FallbackGroupID: &fallbackGroupID,
+		Key:             "k-roundtrip",
+		Name:            "Audit Key",
+		Status:          StatusActive,
 		User: &User{
 			ID:          2,
 			Status:      StatusActive,
@@ -267,6 +269,15 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 				},
 			},
 		},
+		FallbackGroup: &Group{
+			ID:               fallbackGroupID,
+			Name:             "openai-fallback",
+			Platform:         PlatformOpenAI,
+			Status:           StatusActive,
+			Hydrated:         true,
+			SubscriptionType: SubscriptionTypeStandard,
+			RateMultiplier:   1,
+		},
 	}
 
 	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
@@ -276,6 +287,10 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.Equal(t, apiKey.Name, roundTrip.Name)
 	require.NotNil(t, roundTrip.Group)
 	require.Equal(t, apiKey.Group.MessagesDispatchModelConfig, roundTrip.Group.MessagesDispatchModelConfig)
+	require.Equal(t, &fallbackGroupID, roundTrip.FallbackGroupID)
+	require.NotNil(t, roundTrip.FallbackGroup)
+	require.Equal(t, fallbackGroupID, roundTrip.FallbackGroup.ID)
+	require.True(t, roundTrip.FallbackGroup.Hydrated)
 }
 
 func TestAPIKeyService_SnapshotRoundTrip_PreservesReasoningEffortPolicy(t *testing.T) {

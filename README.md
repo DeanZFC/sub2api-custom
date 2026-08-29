@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="sub2api-overdraft Logo" width="128" />
+<img src="assets/logo.svg" alt="sub2api-custom Logo" width="128" />
 
-# sub2api-overdraft
+# sub2api-custom
 
 [![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
@@ -10,17 +10,18 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-**AI API gateway with Codex 5h / 7d quota overdraft probing, tracking, and recovery**
+**Extensible AI API gateway with routing, quota policies, and provider integrations**
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 </div>
 
 > [!IMPORTANT]
-> This is an unofficial fork of [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api), not an official Sub2API release. The upstream install script and `weishaw/sub2api:latest` image do not contain the overdraft feature. Build this fork from source as documented below.
+> This is an unofficial fork of [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api), not an official Sub2API release. The upstream install script and `weishaw/sub2api:latest` image do not contain this Fork's additional extensions. Build this fork from source as documented below.
 
-## Fork Features
+## Included Extensions
 
+- Supports per-account upstream 429 retries: five additional same-account attempts by default, configurable from `0` (disabled) to `10` in account create, edit, and bulk-edit forms. Intermediate 429 responses do not trigger cooldown or failover; the existing error path runs only after exhaustion. HTTP requests and WebSocket handshakes are covered, while a stream that has already emitted meaningful output is never blindly replayed.
 - Pre-arms ordinary OAuth text traffic with the overdraft payload at 95% usage and uses successful business traffic as direct evidence after usage reaches 100%.
 - Marks an injected request's explicit quota 429 as terminal for that cycle; when business evidence is unavailable, runs at most one independent probe per quota cycle.
 - Keeps an account schedulable after a successful probe and tracks overdraft requests, tokens, cost, and recovery for both windows independently.
@@ -34,18 +35,18 @@ See the **[Chinese deployment and operations guide](CODEX_OVERDRAFT_DEPLOYMENT_C
 Quick start:
 
 ```bash
-git clone https://github.com/DeanZFC/sub2api-overdraft.git
-cd sub2api-overdraft/deploy
+git clone https://github.com/DeanZFC/sub2api-overdraft.git sub2api-custom
+cd sub2api-custom/deploy
 cp .env.example .env
 # Set POSTGRES_PASSWORD, JWT_SECRET, and TOTP_ENCRYPTION_KEY in .env
 mkdir -p data postgres_data redis_data
 docker compose \
   -f docker-compose.local.yml \
-  -f docker-compose.overdraft.yml \
+  -f docker-compose.custom.yml \
   up -d --build
 ```
 
-This fork remains licensed under [GNU LGPL-3.0](LICENSE) and preserves upstream attribution. The overdraft behavior may conflict with upstream provider terms and may incur real usage or account restrictions. Operators are responsible for compliance and risk.
+This fork remains licensed under [GNU LGPL-3.0](LICENSE) and preserves upstream attribution. Some optional quota behaviors may conflict with upstream provider terms and may incur real usage or account restrictions. Operators are responsible for compliance and risk.
 
 The remaining feature, deployment, sponsor, and license text is inherited from the upstream Sub2API documentation. Upstream sponsorship does not imply sponsorship or endorsement of this fork.
 
@@ -210,12 +211,27 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **API Key Distribution** - Generate and manage API Keys for users
 - **Precise Billing** - Token-level usage tracking and cost calculation
 - **Smart Scheduling** - Intelligent account selection with sticky sessions
-- **Concurrency Control** - Per-user and per-account concurrency limits
+- **API-Key Fallback Group** - Automatically route to a same-platform fallback group only after the primary group has no available accounts
+- **Concurrency Control** - Per-user, per-group-per-user, and per-account concurrency limits; group limits are counted independently by user and group
 - **Rate Limiting** - Configurable request and token rate limits
 - **Built-in Payment System** - Supports EasyPay, Alipay, WeChat Pay, and Stripe for user self-service top-up, no separate payment service needed ([Configuration Guide](docs/PAYMENT.md))
 - **Admin Dashboard** - Web interface for monitoring and management
 - **Composite Groups** - Admin routing layer that resolves requested models to concrete providers for multi-provider groups ([Operator Guide](docs/COMPOSITE_GROUPS.md))
 - **External System Integration** - Embed external systems (e.g. ticketing) via iframe to extend the admin dashboard
+
+### Per-user Group Concurrency
+
+Administrators can set `user_concurrency_limit` when creating or editing a group:
+
+- `0` disables the group-level limit;
+- A positive value limits each `(user, group)` pair independently. For example, `3` allows up to three simultaneous requests for one user in that group;
+- Different users and different groups have separate counters;
+- The existing user-wide concurrency limit still applies, so the stricter limit wins;
+- Updating a group invalidates cached API-key snapshots automatically.
+
+### API-Key Fallback Group
+
+Users can optionally select a same-platform fallback group when creating or editing an API key. Every request fully tries the primary group first; fallback is attempted only for an explicit no-available-accounts result, never for database, Redis, validation, or permission errors. Billing, quotas, RPM, concurrency, and usage attribution remain on the primary API-key group. The fallback is ignored automatically if it is disabled or deleted.
 
 ## Ecosystem
 

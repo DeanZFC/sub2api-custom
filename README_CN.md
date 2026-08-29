@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="sub2api-overdraft Logo" width="128" />
+<img src="assets/logo.svg" alt="sub2api-custom Logo" width="128" />
 
-# sub2api-overdraft
+# sub2api-custom
 
 [![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
@@ -10,17 +10,18 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-**带 Codex 5h / 7d 额度透支探测、统计与恢复的 AI API 网关**
+**支持路由、额度策略和多种服务商扩展的 AI API 网关**
 
 [English](README.md) | 中文 | [日本語](README_JA.md)
 
 </div>
 
 > [!IMPORTANT]
-> 这是基于 [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) 的非官方 Fork，不是 Sub2API 官方发行版。官方安装脚本和 `weishaw/sub2api:latest` 镜像不包含本项目的透支功能，请按本仓库的源码构建文档部署。
+> 这是基于 [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) 的非官方 Fork，不是 Sub2API 官方发行版。官方安装脚本和 `weishaw/sub2api:latest` 镜像不包含本 Fork 的扩展功能，请按本仓库的源码构建文档部署。
 
-## 本 Fork 增加的功能
+## 扩展功能
 
+- 支持账号级上游 429 自动重试：首次 429 后默认在同一账号额外重试 5 次，可在账号创建、编辑和批量编辑中配置为 `0..10`；一次用户请求内，同一账号的所有官方重试共享这份额外预算，不会重复领取。中间 429 不触发限流或冷却，预算耗尽后完整执行原有同账号重试、错误处理、冷却与切号逻辑。HTTP 请求和 WebSocket 握手均覆盖，流式响应一旦已输出有效内容则不会盲目重放。
 - Codex 5h / 7d 用量达到 95% 后，为普通 OAuth 文本业务请求注入透支请求形态；达到 100% 后直接使用真实业务结果确认透支状态。
 - 注入业务请求成功即记为 `passed`；返回明确额度 429 即记为 `failed` 并切号冷却。缺少业务证据时，同一额度周期最多补充 1 次独立探测。
 - 确认成功后继续参与账号调度，并分别统计 5h / 7d 透支期请求数、Token 和金额。
@@ -28,26 +29,26 @@
 - 网络、超时、5xx 和普通瞬时 429 不会被误判为额度耗尽；401/403、账号禁用和其他风控仍使用原有策略。
 - 多实例通过 PostgreSQL 原子领取（atomic claim）去重；状态保存在现有 `accounts.extra`，无需新增数据表。
 - 可通过一个配置开关立即关闭，恢复上游 Sub2API 的调度和请求行为。
-- 管理后台从 `DeanZFC/sub2api-overdraft` 的 `codex-overdraft` 分支检查更新，不再使用官方 Sub2API 的版本结果。
+- 管理后台从本项目的 `codex-overdraft` 分支检查更新，不再使用官方 Sub2API 的版本结果。
 
 ## 快速部署
 
 完整步骤、现有服务器迁移、Nginx、验证、升级和故障排查请阅读：
 
-**[sub2api-overdraft 部署与运维指南](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)**
+**[sub2api-custom 部署与运维指南](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)**
 
 最短部署流程：
 
 ```bash
-git clone https://github.com/DeanZFC/sub2api-overdraft.git
-cd sub2api-overdraft/deploy
+git clone https://github.com/DeanZFC/sub2api-overdraft.git sub2api-custom
+cd sub2api-custom/deploy
 cp .env.example .env
 chmod 600 .env
 # 编辑 .env，至少设置 POSTGRES_PASSWORD、JWT_SECRET 和 TOTP_ENCRYPTION_KEY
 mkdir -p data postgres_data redis_data
 docker compose \
   -f docker-compose.local.yml \
-  -f docker-compose.overdraft.yml \
+  -f docker-compose.custom.yml \
   up -d --build
 ```
 
@@ -58,16 +59,16 @@ gateway:
   codex_quota_overdraft_enabled: true
 ```
 
-公开的 `docker-compose.overdraft.yml` 已通过环境变量默认开启该功能。
+公开的 `docker-compose.custom.yml` 已通过环境变量默认开启该功能。
 
-源码镜像会把根目录的 `FORK_VERSION` 写入版本信息。管理后台检测到 Fork 新版本后只提示使用 `git pull` 更新源码，不会下载官方二进制覆盖透支功能。完整更新命令见部署指南的“日常升级本 Fork”。
+源码镜像会把根目录的 `FORK_VERSION` 写入版本信息。管理后台检测到本项目新版本后只提示使用 `git pull` 更新源码，不会下载官方二进制覆盖扩展功能。完整更新命令见部署指南的“日常升级本 Fork”。
 
 ## 如何确认透支成功
 
 账号额度达到 100% 后检查日志：
 
 ```bash
-docker logs --since 30m sub2api 2>&1 | \
+docker logs --since 30m sub2api-custom 2>&1 | \
   grep -E 'codex_quota_overdraft_(probe|state|pause|stale_rate_limit)'
 ```
 
@@ -245,11 +246,31 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - **API Key 分发** - 为用户生成和管理 API Key
 - **精确计费** - Token 级别的用量追踪和成本计算
 - **智能调度** - 智能账号选择，支持粘性会话
-- **并发控制** - 用户级和账号级并发限制
+- **API Key 兜底分组** - 主分组无可用账号时自动切换到同平台兜底分组，并保证每次请求优先主分组
+- **并发控制** - 用户级、分组内每用户、账号级并发限制；分组并发按“用户 + 分组”独立计数
 - **速率限制** - 可配置的请求和 Token 速率限制
 - **内置支付系统** - 支持 EasyPay 易支付、支付宝官方、微信官方、Stripe，用户自助充值，无需独立部署支付服务（[配置指南](docs/PAYMENT_CN.md)）
 - **管理后台** - Web 界面进行监控和管理
 - **外部系统集成** - 支持通过 iframe 嵌入外部系统（如工单等），扩展管理后台功能
+
+### 分组用户并发限制
+
+管理员可在“分组”创建或编辑表单中设置“分组用户并发上限” (`user_concurrency_limit`)：
+
+- `0` 表示不启用分组并发限制；
+- 大于 `0` 时，限制维度为“用户 + 分组”，例如设置为 `3` 后，同一用户在该分组最多同时有 3 个请求；
+- 不同用户在同一分组分别计算，不同分组也分别计算；用户自身的全局并发上限仍同时生效，取更严格的限制；
+- 修改分组配置后，已缓存的 API Key 会自动失效并重新加载，无需手动清理缓存。
+
+### API Key 兜底分组
+
+用户可在创建或编辑 API Key 时选择一个同平台的“兜底分组”：
+
+- 每次请求都先完整尝试主分组，不会在主分组可用时轮询或分流到兜底分组；
+- 只有账号调度明确返回“无可用账号”时才尝试兜底分组，数据库、Redis、参数或权限错误不会触发；
+- 主分组与兜底分组必须不同且平台一致，兜底分组被禁用或删除后自动停止使用；
+- 兜底仅改变上游账号路由，计费、额度、RPM、并发和用量统计仍归属 API Key 的主分组；
+- 可在日志中搜索 `api_key_group_fallback_attempt` 和 `api_key_group_fallback_selected` 确认触发与选中情况。
 
 ## 生态项目
 
@@ -329,7 +350,7 @@ sudo systemctl enable sub2api
 
 #### 升级
 
-官方发行版可以直接在管理后台进行二进制在线升级。本 Fork 使用源码构建，管理后台会读取 `DeanZFC/sub2api-overdraft` 的 `FORK_VERSION` 检测新版本，并提示使用 `git pull` 后重新构建；不会在线替换二进制。
+官方发行版可以直接在管理后台进行二进制在线升级。本项目使用源码构建，管理后台会读取本项目分支中的 `FORK_VERSION` 检测新版本，并提示使用 `git pull` 后重新构建；不会在线替换二进制。
 
 本 Fork 的升级命令见 [日常升级本 Fork](CODEX_OVERDRAFT_DEPLOYMENT_CN.md#日常升级本-fork)。源码构建不支持页面内一键升级和在线回退，避免误装官方二进制而丢失透支功能。
 

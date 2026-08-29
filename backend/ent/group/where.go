@@ -310,6 +310,11 @@ func RpmLimit(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRpmLimit, v))
 }
 
+// UserConcurrencyLimit applies equality check predicate on the "user_concurrency_limit" field. It's identical to UserConcurrencyLimitEQ.
+func UserConcurrencyLimit(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldUserConcurrencyLimit, v))
+}
+
 // MaxReasoningEffort applies equality check predicate on the "max_reasoning_effort" field. It's identical to MaxReasoningEffortEQ.
 func MaxReasoningEffort(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldMaxReasoningEffort, v))
@@ -2395,6 +2400,46 @@ func RpmLimitLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldRpmLimit, v))
 }
 
+// UserConcurrencyLimitEQ applies the EQ predicate on the "user_concurrency_limit" field.
+func UserConcurrencyLimitEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldUserConcurrencyLimit, v))
+}
+
+// UserConcurrencyLimitNEQ applies the NEQ predicate on the "user_concurrency_limit" field.
+func UserConcurrencyLimitNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldUserConcurrencyLimit, v))
+}
+
+// UserConcurrencyLimitIn applies the In predicate on the "user_concurrency_limit" field.
+func UserConcurrencyLimitIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldUserConcurrencyLimit, vs...))
+}
+
+// UserConcurrencyLimitNotIn applies the NotIn predicate on the "user_concurrency_limit" field.
+func UserConcurrencyLimitNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldUserConcurrencyLimit, vs...))
+}
+
+// UserConcurrencyLimitGT applies the GT predicate on the "user_concurrency_limit" field.
+func UserConcurrencyLimitGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldUserConcurrencyLimit, v))
+}
+
+// UserConcurrencyLimitGTE applies the GTE predicate on the "user_concurrency_limit" field.
+func UserConcurrencyLimitGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldUserConcurrencyLimit, v))
+}
+
+// UserConcurrencyLimitLT applies the LT predicate on the "user_concurrency_limit" field.
+func UserConcurrencyLimitLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldUserConcurrencyLimit, v))
+}
+
+// UserConcurrencyLimitLTE applies the LTE predicate on the "user_concurrency_limit" field.
+func UserConcurrencyLimitLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldUserConcurrencyLimit, v))
+}
+
 // MaxReasoningEffortEQ applies the EQ predicate on the "max_reasoning_effort" field.
 func MaxReasoningEffortEQ(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldMaxReasoningEffort, v))
@@ -2565,6 +2610,29 @@ func HasAPIKeys() predicate.Group {
 func HasAPIKeysWith(preds ...predicate.APIKey) predicate.Group {
 	return predicate.Group(func(s *sql.Selector) {
 		step := newAPIKeysStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasFallbackAPIKeys applies the HasEdge predicate on the "fallback_api_keys" edge.
+func HasFallbackAPIKeys() predicate.Group {
+	return predicate.Group(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, FallbackAPIKeysTable, FallbackAPIKeysColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasFallbackAPIKeysWith applies the HasEdge predicate on the "fallback_api_keys" edge with a given conditions (other predicates).
+func HasFallbackAPIKeysWith(preds ...predicate.APIKey) predicate.Group {
+	return predicate.Group(func(s *sql.Selector) {
+		step := newFallbackAPIKeysStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 20 // v20: group long-context and model pricing fields (force refresh of pre-fix snapshots)
+const apiKeyAuthSnapshotVersion = 22 // v22: API key fallback group routing
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -336,20 +336,21 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 		return nil
 	}
 	snapshot := &APIKeyAuthSnapshot{
-		Version:     apiKeyAuthSnapshotVersion,
-		APIKeyID:    apiKey.ID,
-		UserID:      apiKey.UserID,
-		GroupID:     apiKey.GroupID,
-		Name:        apiKey.Name,
-		Status:      apiKey.Status,
-		IPWhitelist: apiKey.IPWhitelist,
-		IPBlacklist: apiKey.IPBlacklist,
-		Quota:       apiKey.Quota,
-		QuotaUsed:   apiKey.QuotaUsed,
-		ExpiresAt:   apiKey.ExpiresAt,
-		RateLimit5h: apiKey.RateLimit5h,
-		RateLimit1d: apiKey.RateLimit1d,
-		RateLimit7d: apiKey.RateLimit7d,
+		Version:         apiKeyAuthSnapshotVersion,
+		APIKeyID:        apiKey.ID,
+		UserID:          apiKey.UserID,
+		GroupID:         apiKey.GroupID,
+		FallbackGroupID: apiKey.FallbackGroupID,
+		Name:            apiKey.Name,
+		Status:          apiKey.Status,
+		IPWhitelist:     apiKey.IPWhitelist,
+		IPBlacklist:     apiKey.IPBlacklist,
+		Quota:           apiKey.Quota,
+		QuotaUsed:       apiKey.QuotaUsed,
+		ExpiresAt:       apiKey.ExpiresAt,
+		RateLimit5h:     apiKey.RateLimit5h,
+		RateLimit1d:     apiKey.RateLimit1d,
+		RateLimit7d:     apiKey.RateLimit7d,
 		User: APIKeyAuthUserSnapshot{
 			ID:                         apiKey.User.ID,
 			Status:                     apiKey.User.Status,
@@ -421,6 +422,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
+			UserConcurrencyLimit:            apiKey.Group.UserConcurrencyLimit,
 			MaxReasoningEffort:              apiKey.Group.MaxReasoningEffort,
 			ReasoningEffortMappings:         apiKey.Group.ReasoningEffortMappings,
 			PeakRateEnabled:                 apiKey.Group.PeakRateEnabled,
@@ -432,6 +434,14 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
 		}
 	}
+	if apiKey.FallbackGroup != nil && apiKey.FallbackGroup.IsActive() && s.canUserBindGroup(ctx, apiKey.User, apiKey.FallbackGroup) {
+		snapshot.FallbackGroup = &APIKeyAuthGroupSnapshot{
+			ID:       apiKey.FallbackGroup.ID,
+			Name:     apiKey.FallbackGroup.Name,
+			Platform: apiKey.FallbackGroup.Platform,
+			Status:   apiKey.FallbackGroup.Status,
+		}
+	}
 	return snapshot
 }
 
@@ -440,20 +450,21 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		return nil
 	}
 	apiKey := &APIKey{
-		ID:          snapshot.APIKeyID,
-		UserID:      snapshot.UserID,
-		GroupID:     snapshot.GroupID,
-		Key:         key,
-		Name:        snapshot.Name,
-		Status:      snapshot.Status,
-		IPWhitelist: snapshot.IPWhitelist,
-		IPBlacklist: snapshot.IPBlacklist,
-		Quota:       snapshot.Quota,
-		QuotaUsed:   snapshot.QuotaUsed,
-		ExpiresAt:   snapshot.ExpiresAt,
-		RateLimit5h: snapshot.RateLimit5h,
-		RateLimit1d: snapshot.RateLimit1d,
-		RateLimit7d: snapshot.RateLimit7d,
+		ID:              snapshot.APIKeyID,
+		UserID:          snapshot.UserID,
+		GroupID:         snapshot.GroupID,
+		FallbackGroupID: snapshot.FallbackGroupID,
+		Key:             key,
+		Name:            snapshot.Name,
+		Status:          snapshot.Status,
+		IPWhitelist:     snapshot.IPWhitelist,
+		IPBlacklist:     snapshot.IPBlacklist,
+		Quota:           snapshot.Quota,
+		QuotaUsed:       snapshot.QuotaUsed,
+		ExpiresAt:       snapshot.ExpiresAt,
+		RateLimit5h:     snapshot.RateLimit5h,
+		RateLimit1d:     snapshot.RateLimit1d,
+		RateLimit7d:     snapshot.RateLimit7d,
 		User: &User{
 			ID:                         snapshot.User.ID,
 			Status:                     snapshot.User.Status,
@@ -518,6 +529,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
+			UserConcurrencyLimit:            snapshot.Group.UserConcurrencyLimit,
 			MaxReasoningEffort:              snapshot.Group.MaxReasoningEffort,
 			ReasoningEffortMappings:         snapshot.Group.ReasoningEffortMappings,
 			PeakRateEnabled:                 snapshot.Group.PeakRateEnabled,
@@ -527,6 +539,15 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			ProfitControlEnabled:            snapshot.Group.ProfitControlEnabled,
 			ProfitMinMargin:                 snapshot.Group.ProfitMinMargin,
 			ProfitSafetyBuffer:              snapshot.Group.ProfitSafetyBuffer,
+		}
+	}
+	if snapshot.FallbackGroup != nil {
+		apiKey.FallbackGroup = &Group{
+			ID:       snapshot.FallbackGroup.ID,
+			Name:     snapshot.FallbackGroup.Name,
+			Platform: snapshot.FallbackGroup.Platform,
+			Status:   snapshot.FallbackGroup.Status,
+			Hydrated: true,
 		}
 	}
 	s.compileAPIKeyIPRules(apiKey)

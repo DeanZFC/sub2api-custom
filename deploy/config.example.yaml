@@ -5,6 +5,7 @@
 # 复制此文件到 /etc/sub2api/config.yaml 并根据需要修改
 #
 # Documentation / 文档: https://github.com/DeanZFC/sub2api-overdraft
+# （仓库重命名完成后，将此链接切换为新的通用仓库地址。）
 
 # =============================================================================
 # Server Configuration

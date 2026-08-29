@@ -77,13 +77,28 @@ func (s *OpenAIGatewayService) processCodexQuotaOverdraftUsageSnapshot(
 	go func() {
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		if s.accountRepo == nil {
+			return
+		}
 		var account *Account
+		current, err := s.accountRepo.GetByID(updateCtx, accountID)
+		if err == nil {
+			account = current
+		}
+		// Account-level disable skips only overdraft state/coordinator work. The
+		// ordinary Codex usage snapshot must still be persisted for the UI.
+		if !isCodexQuotaOverdraftAccount(account) {
+			if persistSnapshot {
+				if err := s.accountRepo.UpdateExtra(updateCtx, accountID, updates); err == nil {
+					notifyOpenAIAutoReset(accountID)
+				}
+			}
+			return
+		}
 		if !persistSnapshot && s.codexQuotaOverdraft != nil {
-			current, err := s.accountRepo.GetByID(updateCtx, accountID)
-			if err == nil && current != nil {
-				account = current
-				state, hasState := codexQuotaOverdraftStateFromAccount(current)
-				_, wasExhausted := codexQuotaOverdraftSignalFromAccount(current, state, now)
+			if account != nil {
+				state, hasState := codexQuotaOverdraftStateFromAccount(account)
+				_, wasExhausted := codexQuotaOverdraftSignalFromAccount(account, state, now)
 				persistSnapshot = wasExhausted || hasState && state.Status != codexQuotaOverdraftProbeRecovered
 			}
 		}

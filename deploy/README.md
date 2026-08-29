@@ -16,7 +16,9 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 |------|-------------|
 | `docker-compose.yml` | Docker Compose configuration (named volumes) |
 | `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
-| `docker-compose.coexist.yml` | Isolation overlay for running this Fork beside an existing Sub2API install |
+| `docker-compose.custom.yml` | Generic source-build overlay with `sub2api-custom` image and container names |
+| `docker-compose.overdraft.yml` | Legacy source-build overlay kept for existing deployments |
+| `docker-compose.coexist.yml` | Legacy isolation overlay for existing deployments using the old container names |
 | `docker-deploy.sh` | **One-click Docker deployment script (recommended)** |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
@@ -62,8 +64,8 @@ See [APPLE_CONTAINER.md](./APPLE_CONTAINER.md) for configuration, upgrades, pers
 command -v docker >/dev/null 2>&1 || curl -fsSL https://get.docker.com | sh
 sudo systemctl enable --now docker
 
-git clone -b codex-overdraft https://github.com/DeanZFC/sub2api-overdraft.git /opt/sub2api-overdraft
-cd /opt/sub2api-overdraft/deploy
+git clone -b codex-overdraft https://github.com/DeanZFC/sub2api-overdraft.git /opt/sub2api-custom
+cd /opt/sub2api-custom/deploy
 cp .env.example .env
 chmod 600 .env
 mkdir -p data postgres_data redis_data
@@ -75,29 +77,28 @@ sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$(openssl rand -hex 32)/" .env
 sed -i "s/^TOTP_ENCRYPTION_KEY=.*/TOTP_ENCRYPTION_KEY=$(openssl rand -hex 32)/" .env
 
 docker compose \
-  -p sub2api-overdraft \
+  -p sub2api-custom \
   -f docker-compose.local.yml \
-  -f docker-compose.overdraft.yml \
-  -f docker-compose.coexist.yml \
+  -f docker-compose.custom.yml \
   up -d --build
 ```
 
-此模式使用容器名 `sub2api-overdraft`、`sub2api-overdraft-postgres`、
-`sub2api-overdraft-redis`，不会停止或删除脚本版服务。查看状态和日志：
+此模式使用容器名 `sub2api-custom`、`sub2api-custom-postgres`、
+`sub2api-custom-redis`，不会停止或删除脚本版服务。查看状态和日志：
 
 ```bash
-docker compose -p sub2api-overdraft \
-  -f docker-compose.local.yml -f docker-compose.overdraft.yml \
-  -f docker-compose.coexist.yml ps
-docker logs -f sub2api-overdraft
+docker compose -p sub2api-custom \
+  -f docker-compose.local.yml -f docker-compose.custom.yml \
+  ps
+docker logs -f sub2api-custom
 ```
 
 停止或更新 Docker 版时，只操作这个 Compose 项目；不要使用 `docker compose down -v`：
 
 ```bash
-docker compose -p sub2api-overdraft \
-  -f docker-compose.local.yml -f docker-compose.overdraft.yml \
-  -f docker-compose.coexist.yml stop
+docker compose -p sub2api-custom \
+  -f docker-compose.local.yml -f docker-compose.custom.yml \
+  stop
 ```
 
 ### Method 1: One-Click Deployment (Recommended)

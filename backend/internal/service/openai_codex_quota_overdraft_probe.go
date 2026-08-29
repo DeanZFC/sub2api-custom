@@ -1193,7 +1193,7 @@ func applyCodexQuotaOverdraftUsage(
 	usage *UsageInfo,
 	now time.Time,
 ) {
-	if repo == nil || account == nil || usage == nil {
+	if repo == nil || account == nil || usage == nil || !isCodexQuotaOverdraftAccount(account) {
 		return
 	}
 	state, ok := codexQuotaOverdraftStateFromAccount(account)

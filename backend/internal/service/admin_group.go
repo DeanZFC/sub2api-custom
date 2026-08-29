@@ -296,6 +296,9 @@ func groupSupportsOAuthOnlyFilter(platform string) bool {
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	if input != nil && input.UserConcurrencyLimit < 0 {
+		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_USER_CONCURRENCY_LIMIT", "user_concurrency_limit must be non-negative")
+	}
 	if input.RateMultiplier <= 0 {
 		return nil, errors.New("rate_multiplier must be > 0")
 	}
@@ -506,6 +509,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		MessagesDispatchModelConfig:     normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
 		ModelsListConfig:                normalizeGroupModelsListConfig(input.ModelsListConfig),
 		RPMLimit:                        input.RPMLimit,
+		UserConcurrencyLimit:            input.UserConcurrencyLimit,
 		MaxReasoningEffort:              maxReasoningEffort,
 		ReasoningEffortMappings:         reasoningEffortMappings,
 	}
@@ -874,6 +878,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.RPMLimit != nil {
 		group.RPMLimit = *input.RPMLimit
+	}
+	if input.UserConcurrencyLimit != nil {
+		if *input.UserConcurrencyLimit < 0 {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_USER_CONCURRENCY_LIMIT", "user_concurrency_limit must be non-negative")
+		}
+		group.UserConcurrencyLimit = *input.UserConcurrencyLimit
 	}
 	if input.MaxReasoningEffort != nil {
 		maxReasoningEffort, err := normalizeMaxReasoningEffortForPlatform(group.Platform, *input.MaxReasoningEffort)

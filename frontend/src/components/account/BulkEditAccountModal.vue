@@ -821,6 +821,46 @@
         </div>
       </div>
 
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <label
+            id="bulk-edit-rate-limit-429-retry-count-label"
+            class="input-label mb-0"
+            for="bulk-edit-rate-limit-429-retry-count-enabled"
+          >
+            {{ t('admin.accounts.bulkEdit.rateLimit429RetryCount') }}
+          </label>
+          <input
+            v-model="enableRateLimit429RetryCount"
+            id="bulk-edit-rate-limit-429-retry-count-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-rate-limit-429-retry-count"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <input
+          v-model.number="rateLimit429RetryCount"
+          id="bulk-edit-rate-limit-429-retry-count"
+          type="number"
+          min="0"
+          :max="MAX_RATE_LIMIT_429_RETRY_COUNT"
+          step="1"
+          :disabled="!enableRateLimit429RetryCount"
+          class="input max-w-xs"
+          :class="!enableRateLimit429RetryCount && 'cursor-not-allowed opacity-50'"
+          aria-labelledby="bulk-edit-rate-limit-429-retry-count-label"
+          @change="rateLimit429RetryCount = normalizeRateLimit429RetryCount(rateLimit429RetryCount)"
+        />
+        <p class="input-hint">
+          {{
+            t('admin.accounts.bulkEdit.rateLimit429RetryCountHint', {
+              default: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
+              max: MAX_RATE_LIMIT_429_RETRY_COUNT
+            })
+          }}
+        </p>
+      </div>
+
       <!-- Status -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -973,7 +1013,7 @@
         </div>
       </div>
 
-      <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
+      <!-- CPA 指纹出口（仅 OpenAI OAuth） -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label class="input-label mb-0">{{ t('admin.accounts.openai.codexFingerprintMode') }}</label>
@@ -988,6 +1028,41 @@
             {{ t('admin.accounts.openai.codexFingerprintModeDesc') }}
           </p>
           <Select v-model="codexFingerprintMode" data-testid="bulk-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
+        </div>
+      </div>
+
+      <!-- Codex 额度透支（仅 OpenAI OAuth） -->
+      <div v-if="allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <label class="input-label mb-0">{{ t('admin.accounts.openai.codexQuotaOverdraft') }}</label>
+          <input
+            v-model="enableCodexQuotaOverdraft"
+            type="checkbox"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div :class="!enableCodexQuotaOverdraft && 'pointer-events-none opacity-50'">
+          <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.codexQuotaOverdraftDesc') }}
+          </p>
+          <button
+            type="button"
+            data-testid="bulk-codex-quota-overdraft-toggle"
+            role="switch"
+            :aria-checked="codexQuotaOverdraftEnabled"
+            @click="codexQuotaOverdraftEnabled = !codexQuotaOverdraftEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexQuotaOverdraftEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexQuotaOverdraftEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
         </div>
       </div>
 
@@ -1539,6 +1614,16 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const DEFAULT_RATE_LIMIT_429_RETRY_COUNT = 5
+const MAX_RATE_LIMIT_429_RETRY_COUNT = 10
+
+const normalizeRateLimit429RetryCount = (value: unknown): number => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_RATE_LIMIT_429_RETRY_COUNT
+  }
+  return Math.min(MAX_RATE_LIMIT_429_RETRY_COUNT, Math.max(0, Math.trunc(parsed)))
+}
 
 // Platform awareness
 const targetMode = computed(() => props.target?.mode ?? 'selected')
@@ -1651,6 +1736,7 @@ const enableInterceptWarmup = ref(false)
 const enableHeaderOverride = ref(false)
 const enableProxy = ref(false)
 const enableConcurrency = ref(false)
+const enableRateLimit429RetryCount = ref(false)
 const enableLoadFactor = ref(false)
 const enablePriority = ref(false)
 const enableRateMultiplier = ref(false)
@@ -1686,6 +1772,7 @@ const headerOverrideEnabled = ref(false)
 const headerOverrideRows = ref<HeaderOverrideRow[]>([])
 const proxyId = ref<number | null>(null)
 const concurrency = ref(1)
+const rateLimit429RetryCount = ref(DEFAULT_RATE_LIMIT_429_RETRY_COUNT)
 const loadFactor = ref<number | null>(null)
 const priority = ref(1)
 const rateMultiplier = ref(1)
@@ -1705,7 +1792,9 @@ const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OF
 const upstreamBillingAutoProbeMode = ref<'enabled' | 'disabled'>('enabled')
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
+const enableCodexQuotaOverdraft = ref(false)
 type CodexFingerprintMode = 'off' | 'account_device' | 'device' | 'session' | 'full'
+const codexQuotaOverdraftEnabled = ref(true)
 const enableCodexFingerprintMode = ref(false)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 const codexFingerprintModeOptions = computed(() => [
@@ -1945,6 +2034,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.concurrency = concurrency.value
   }
 
+  if (enableRateLimit429RetryCount.value) {
+    updates.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(
+      rateLimit429RetryCount.value
+    )
+  }
+
   if (enableLoadFactor.value) {
     // 空值/NaN/0 时发送 0（后端约定 <= 0 表示清除）
     const lf = loadFactor.value
@@ -2088,6 +2183,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.codex_cli_only_allow_app_server = codexCLIOnlyAppServerEnabled.value
   }
 
+  if (enableCodexQuotaOverdraft.value && allOpenAIOAuthOnly.value) {
+    const extra = ensureExtra()
+    extra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
+  }
+
   if (enableCodexFingerprintMode.value) {
     const extra = ensureExtra()
     // off = 默认值，清键即可；account_device/device/session/full 是显式 opt-in，必须落键。
@@ -2201,6 +2301,7 @@ const handleSubmit = async () => {
     enableHeaderOverride.value ||
     enableProxy.value ||
     enableConcurrency.value ||
+    enableRateLimit429RetryCount.value ||
     enableLoadFactor.value ||
     enablePriority.value ||
     enableRateMultiplier.value ||
@@ -2211,6 +2312,7 @@ const handleSubmit = async () => {
     enableUpstreamBillingAutoProbe.value ||
     enableCodexCLIOnly.value ||
     enableCodexCLIOnlyAppServer.value ||
+    enableCodexQuotaOverdraft.value ||
     enableCodexFingerprintMode.value ||
     enableOpenAICompactMode.value ||
     enableOpenAICompactModelMapping.value ||
@@ -2347,6 +2449,7 @@ watch(
       enableHeaderOverride.value = false
       enableProxy.value = false
       enableConcurrency.value = false
+      enableRateLimit429RetryCount.value = false
       enableLoadFactor.value = false
       enablePriority.value = false
       enableRateMultiplier.value = false
@@ -2362,6 +2465,7 @@ watch(
       enableUpstreamBillingAutoProbe.value = false
       enableCodexCLIOnly.value = false
       enableCodexCLIOnlyAppServer.value = false
+      enableCodexQuotaOverdraft.value = false
       enableCodexFingerprintMode.value = false
       codexFingerprintMode.value = 'off'
       enableOpenAICompactMode.value = false
@@ -2385,6 +2489,7 @@ watch(
       headerOverrideRows.value = []
       proxyId.value = null
       concurrency.value = 1
+      rateLimit429RetryCount.value = DEFAULT_RATE_LIMIT_429_RETRY_COUNT
       loadFactor.value = null
       priority.value = 1
       rateMultiplier.value = 1
@@ -2395,6 +2500,7 @@ watch(
       upstreamBillingAutoProbeMode.value = 'enabled'
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
+      codexQuotaOverdraftEnabled.value = true
       openAICompactMode.value = 'auto'
       openAICompactModelMappings.value = []
       rpmLimitEnabled.value = false

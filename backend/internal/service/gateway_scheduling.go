@@ -32,6 +32,12 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+	return selectAccountWithAPIKeyGroupFallback(ctx, groupID, requestedModel, func(selectionCtx context.Context, selectedGroupID *int64) (*Account, error) {
+		return s.selectAccountForModelWithExclusionsInGroup(selectionCtx, selectedGroupID, sessionHash, requestedModel, excludedIDs)
+	})
+}
+
+func (s *GatewayService) selectAccountForModelWithExclusionsInGroup(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
 	// 优先检查 context 中的强制平台（/antigravity 路由）
 	var platform string
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
@@ -98,6 +104,29 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // sub2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
+	selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
+	fallbackGroup, fallbackCtx, ok := apiKeyFallbackGroupForSelection(ctx, groupID, err)
+	if !ok {
+		return selection, err
+	}
+	slog.Info("api_key_group_fallback_attempt",
+		"primary_group_id", derefGroupID(groupID),
+		"fallback_group_id", fallbackGroup.ID,
+		"model", requestedModel)
+	fallbackGroupID := fallbackGroup.ID
+	selection, err = s.selectAccountWithLoadAwareness(fallbackCtx, &fallbackGroupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
+	if err == nil {
+		markAPIKeyFallbackSelection(selection, fallbackGroupID)
+		slog.Info("api_key_group_fallback_selected",
+			"primary_group_id", derefGroupID(groupID),
+			"fallback_group_id", fallbackGroupID,
+			"account_id", selection.Account.ID,
+			"model", requestedModel)
+	}
+	return selection, err
+}
+
+func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
 	// 调试日志：记录调度入口参数
 	excludedIDsList := make([]int64, 0, len(excludedIDs))
 	for id := range excludedIDs {
@@ -169,7 +198,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 
 		for {
-			account, err := s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded)
+			account, err := s.selectAccountForModelWithExclusionsInGroup(ctx, groupID, sessionHash, requestedModel, localExcluded)
 			if err != nil {
 				return nil, err
 			}

@@ -273,15 +273,17 @@ func newCodexModelsFailoverTestHandlerWithAccountCount(firstStatus, accountCount
 	groupID := int64(42)
 	accounts := make([]service.Account, 0, accountCount)
 	for i := 1; i <= accountCount; i++ {
+		retryCount := 0
 		accounts = append(accounts, service.Account{
-			ID:          int64(i),
-			Name:        fmt.Sprintf("upstream-%d", i),
-			Platform:    service.PlatformOpenAI,
-			Type:        service.AccountTypeAPIKey,
-			Status:      service.StatusActive,
-			Schedulable: true,
-			Priority:    i - 1,
-			Concurrency: 1,
+			ID:                     int64(i),
+			Name:                   fmt.Sprintf("upstream-%d", i),
+			Platform:               service.PlatformOpenAI,
+			Type:                   service.AccountTypeAPIKey,
+			Status:                 service.StatusActive,
+			Schedulable:            true,
+			Priority:               i - 1,
+			Concurrency:            1,
+			RateLimit429RetryCount: &retryCount,
 			Credentials: map[string]any{
 				"api_key":  fmt.Sprintf("sk-%d", i),
 				"base_url": fmt.Sprintf("https://upstream-%d.example/v1", i),

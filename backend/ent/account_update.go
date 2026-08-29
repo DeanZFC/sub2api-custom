@@ -199,6 +199,27 @@ func (_u *AccountUpdate) AddConcurrency(v int) *AccountUpdate {
 	return _u
 }
 
+// SetRateLimit429RetryCount sets the "rate_limit_429_retry_count" field.
+func (_u *AccountUpdate) SetRateLimit429RetryCount(v int) *AccountUpdate {
+	_u.mutation.ResetRateLimit429RetryCount()
+	_u.mutation.SetRateLimit429RetryCount(v)
+	return _u
+}
+
+// SetNillableRateLimit429RetryCount sets the "rate_limit_429_retry_count" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableRateLimit429RetryCount(v *int) *AccountUpdate {
+	if v != nil {
+		_u.SetRateLimit429RetryCount(*v)
+	}
+	return _u
+}
+
+// AddRateLimit429RetryCount adds value to the "rate_limit_429_retry_count" field.
+func (_u *AccountUpdate) AddRateLimit429RetryCount(v int) *AccountUpdate {
+	_u.mutation.AddRateLimit429RetryCount(v)
+	return _u
+}
+
 // SetLoadFactor sets the "load_factor" field.
 func (_u *AccountUpdate) SetLoadFactor(v int) *AccountUpdate {
 	_u.mutation.ResetLoadFactor()
@@ -772,6 +793,11 @@ func (_u *AccountUpdate) check() error {
 			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "Account.type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.RateLimit429RetryCount(); ok {
+		if err := account.RateLimit429RetryCountValidator(v); err != nil {
+			return &ValidationError{Name: "rate_limit_429_retry_count", err: fmt.Errorf(`ent: validator failed for field "Account.rate_limit_429_retry_count": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := account.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Account.status": %w`, err)}
@@ -846,6 +872,12 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedConcurrency(); ok {
 		_spec.AddField(account.FieldConcurrency, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RateLimit429RetryCount(); ok {
+		_spec.SetField(account.FieldRateLimit429RetryCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRateLimit429RetryCount(); ok {
+		_spec.AddField(account.FieldRateLimit429RetryCount, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.LoadFactor(); ok {
 		_spec.SetField(account.FieldLoadFactor, field.TypeInt, value)
@@ -1336,6 +1368,27 @@ func (_u *AccountUpdateOne) SetNillableConcurrency(v *int) *AccountUpdateOne {
 // AddConcurrency adds value to the "concurrency" field.
 func (_u *AccountUpdateOne) AddConcurrency(v int) *AccountUpdateOne {
 	_u.mutation.AddConcurrency(v)
+	return _u
+}
+
+// SetRateLimit429RetryCount sets the "rate_limit_429_retry_count" field.
+func (_u *AccountUpdateOne) SetRateLimit429RetryCount(v int) *AccountUpdateOne {
+	_u.mutation.ResetRateLimit429RetryCount()
+	_u.mutation.SetRateLimit429RetryCount(v)
+	return _u
+}
+
+// SetNillableRateLimit429RetryCount sets the "rate_limit_429_retry_count" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableRateLimit429RetryCount(v *int) *AccountUpdateOne {
+	if v != nil {
+		_u.SetRateLimit429RetryCount(*v)
+	}
+	return _u
+}
+
+// AddRateLimit429RetryCount adds value to the "rate_limit_429_retry_count" field.
+func (_u *AccountUpdateOne) AddRateLimit429RetryCount(v int) *AccountUpdateOne {
+	_u.mutation.AddRateLimit429RetryCount(v)
 	return _u
 }
 
@@ -1925,6 +1978,11 @@ func (_u *AccountUpdateOne) check() error {
 			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "Account.type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.RateLimit429RetryCount(); ok {
+		if err := account.RateLimit429RetryCountValidator(v); err != nil {
+			return &ValidationError{Name: "rate_limit_429_retry_count", err: fmt.Errorf(`ent: validator failed for field "Account.rate_limit_429_retry_count": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := account.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Account.status": %w`, err)}
@@ -2016,6 +2074,12 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.AddedConcurrency(); ok {
 		_spec.AddField(account.FieldConcurrency, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RateLimit429RetryCount(); ok {
+		_spec.SetField(account.FieldRateLimit429RetryCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRateLimit429RetryCount(); ok {
+		_spec.AddField(account.FieldRateLimit429RetryCount, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.LoadFactor(); ok {
 		_spec.SetField(account.FieldLoadFactor, field.TypeInt, value)

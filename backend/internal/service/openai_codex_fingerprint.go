@@ -88,9 +88,9 @@ const (
 	// 账号 extra 未显式配置模式时，GetCodexFingerprintMode 返回此值；
 	// 出站请求是否按全局开关提升到 device 模式由 resolveCodexFingerprintMode 决定。
 	codexFingerprintOff codexFingerprintMode = "off"
-	// codexFingerprintAccountDevice 使用账号 ID（已有系统种子优先）派生
-	// 唯一且稳定的设备指纹，仅收敛 installation_id。这是全局默认行为的
-	// 显式账号级选项，不要求把系统种子写入账号 extra。
+	// codexFingerprintAccountDevice 是页面显示的“CPA 指纹出口”兼容模式：
+	// 使用账号 ID（已有系统种子优先）派生唯一且稳定的 installation_id。
+	// 为兼容已有 account_device 配置，它只收敛设备信号，不强制收敛会话/线程。
 	codexFingerprintAccountDevice codexFingerprintMode = "account_device"
 	// codexFingerprintDevice 仅收敛 installation_id 为账号级恒定值。
 	// 上游看到 1 台设备 + 多会话（每用户各自的 session）。

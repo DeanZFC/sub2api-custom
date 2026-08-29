@@ -262,6 +262,40 @@ func TestCreateShadow_InheritsParentConcurrency(t *testing.T) {
 	})
 }
 
+// TestCreateShadow_InheritsParent429RetryCount ensures a shadow does not
+// silently fall back to the database default when the parent explicitly
+// disables or customizes account-level 429 retries.
+func TestCreateShadow_InheritsParent429RetryCount(t *testing.T) {
+	ctx := context.Background()
+	for _, tt := range []struct {
+		name  string
+		count int
+	}{
+		{name: "disabled", count: 0},
+		{name: "custom", count: 7},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newSparkShadowRepoStub()
+			svc := &adminServiceImpl{accountRepo: repo}
+			parent := &Account{
+				Name:                   "retry-parent",
+				Platform:               PlatformOpenAI,
+				Type:                   AccountTypeOAuth,
+				Status:                 StatusActive,
+				Credentials:            map[string]any{"chatgpt_account_id": "org-r"},
+				RateLimit429RetryCount: retryCountPointer(tt.count),
+			}
+			require.NoError(t, repo.Create(ctx, parent))
+
+			shadow, err := svc.CreateShadow(ctx, parent.ID, ShadowOptions{Name: "retry-shadow"})
+			require.NoError(t, err)
+			require.NotNil(t, shadow.RateLimit429RetryCount)
+			require.Equal(t, tt.count, *shadow.RateLimit429RetryCount)
+			require.Equal(t, tt.count, repo.accounts[shadow.ID].GetRateLimit429RetryCount())
+		})
+	}
+}
+
 // TestCreateShadow_InheritsParentPriorityWhenOmitted 验证外审第5轮 P1:未指定优先级时
 // 影子继承母账号 priority,而非直写 0 抢到最高调度优先级(repo SetPriority 绕过 ent 默认 50,
 // 调度比较数值越小越优先;前端一键创建只传 name 即触发该路径)。

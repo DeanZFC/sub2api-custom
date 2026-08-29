@@ -1080,6 +1080,27 @@ func (_u *GroupUpdate) AddRpmLimit(v int) *GroupUpdate {
 	return _u
 }
 
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (_u *GroupUpdate) SetUserConcurrencyLimit(v int) *GroupUpdate {
+	_u.mutation.ResetUserConcurrencyLimit()
+	_u.mutation.SetUserConcurrencyLimit(v)
+	return _u
+}
+
+// SetNillableUserConcurrencyLimit sets the "user_concurrency_limit" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableUserConcurrencyLimit(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetUserConcurrencyLimit(*v)
+	}
+	return _u
+}
+
+// AddUserConcurrencyLimit adds value to the "user_concurrency_limit" field.
+func (_u *GroupUpdate) AddUserConcurrencyLimit(v int) *GroupUpdate {
+	_u.mutation.AddUserConcurrencyLimit(v)
+	return _u
+}
+
 // SetMaxReasoningEffort sets the "max_reasoning_effort" field.
 func (_u *GroupUpdate) SetMaxReasoningEffort(v string) *GroupUpdate {
 	_u.mutation.SetMaxReasoningEffort(v)
@@ -1175,6 +1196,21 @@ func (_u *GroupUpdate) AddAPIKeys(v ...*APIKey) *GroupUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.AddAPIKeyIDs(ids...)
+}
+
+// AddFallbackAPIKeyIDs adds the "fallback_api_keys" edge to the APIKey entity by IDs.
+func (_u *GroupUpdate) AddFallbackAPIKeyIDs(ids ...int64) *GroupUpdate {
+	_u.mutation.AddFallbackAPIKeyIDs(ids...)
+	return _u
+}
+
+// AddFallbackAPIKeys adds the "fallback_api_keys" edges to the APIKey entity.
+func (_u *GroupUpdate) AddFallbackAPIKeys(v ...*APIKey) *GroupUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddFallbackAPIKeyIDs(ids...)
 }
 
 // AddRedeemCodeIDs adds the "redeem_codes" edge to the RedeemCode entity by IDs.
@@ -1276,6 +1312,27 @@ func (_u *GroupUpdate) RemoveAPIKeys(v ...*APIKey) *GroupUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAPIKeyIDs(ids...)
+}
+
+// ClearFallbackAPIKeys clears all "fallback_api_keys" edges to the APIKey entity.
+func (_u *GroupUpdate) ClearFallbackAPIKeys() *GroupUpdate {
+	_u.mutation.ClearFallbackAPIKeys()
+	return _u
+}
+
+// RemoveFallbackAPIKeyIDs removes the "fallback_api_keys" edge to APIKey entities by IDs.
+func (_u *GroupUpdate) RemoveFallbackAPIKeyIDs(ids ...int64) *GroupUpdate {
+	_u.mutation.RemoveFallbackAPIKeyIDs(ids...)
+	return _u
+}
+
+// RemoveFallbackAPIKeys removes "fallback_api_keys" edges to APIKey entities.
+func (_u *GroupUpdate) RemoveFallbackAPIKeys(v ...*APIKey) *GroupUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveFallbackAPIKeyIDs(ids...)
 }
 
 // ClearRedeemCodes clears all "redeem_codes" edges to the RedeemCode entity.
@@ -1818,6 +1875,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(group.FieldRpmLimit, field.TypeInt, value)
 	}
+	if value, ok := _u.mutation.UserConcurrencyLimit(); ok {
+		_spec.SetField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedUserConcurrencyLimit(); ok {
+		_spec.AddField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
+	}
 	if value, ok := _u.mutation.MaxReasoningEffort(); ok {
 		_spec.SetField(group.FieldMaxReasoningEffort, field.TypeString, value)
 	}
@@ -1879,6 +1942,51 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Inverse: false,
 			Table:   group.APIKeysTable,
 			Columns: []string{group.APIKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.FallbackAPIKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.FallbackAPIKeysTable,
+			Columns: []string{group.FallbackAPIKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedFallbackAPIKeysIDs(); len(nodes) > 0 && !_u.mutation.FallbackAPIKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.FallbackAPIKeysTable,
+			Columns: []string{group.FallbackAPIKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.FallbackAPIKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.FallbackAPIKeysTable,
+			Columns: []string{group.FallbackAPIKeysColumn},
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
@@ -3201,6 +3309,27 @@ func (_u *GroupUpdateOne) AddRpmLimit(v int) *GroupUpdateOne {
 	return _u
 }
 
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (_u *GroupUpdateOne) SetUserConcurrencyLimit(v int) *GroupUpdateOne {
+	_u.mutation.ResetUserConcurrencyLimit()
+	_u.mutation.SetUserConcurrencyLimit(v)
+	return _u
+}
+
+// SetNillableUserConcurrencyLimit sets the "user_concurrency_limit" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableUserConcurrencyLimit(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetUserConcurrencyLimit(*v)
+	}
+	return _u
+}
+
+// AddUserConcurrencyLimit adds value to the "user_concurrency_limit" field.
+func (_u *GroupUpdateOne) AddUserConcurrencyLimit(v int) *GroupUpdateOne {
+	_u.mutation.AddUserConcurrencyLimit(v)
+	return _u
+}
+
 // SetMaxReasoningEffort sets the "max_reasoning_effort" field.
 func (_u *GroupUpdateOne) SetMaxReasoningEffort(v string) *GroupUpdateOne {
 	_u.mutation.SetMaxReasoningEffort(v)
@@ -3296,6 +3425,21 @@ func (_u *GroupUpdateOne) AddAPIKeys(v ...*APIKey) *GroupUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.AddAPIKeyIDs(ids...)
+}
+
+// AddFallbackAPIKeyIDs adds the "fallback_api_keys" edge to the APIKey entity by IDs.
+func (_u *GroupUpdateOne) AddFallbackAPIKeyIDs(ids ...int64) *GroupUpdateOne {
+	_u.mutation.AddFallbackAPIKeyIDs(ids...)
+	return _u
+}
+
+// AddFallbackAPIKeys adds the "fallback_api_keys" edges to the APIKey entity.
+func (_u *GroupUpdateOne) AddFallbackAPIKeys(v ...*APIKey) *GroupUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddFallbackAPIKeyIDs(ids...)
 }
 
 // AddRedeemCodeIDs adds the "redeem_codes" edge to the RedeemCode entity by IDs.
@@ -3397,6 +3541,27 @@ func (_u *GroupUpdateOne) RemoveAPIKeys(v ...*APIKey) *GroupUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAPIKeyIDs(ids...)
+}
+
+// ClearFallbackAPIKeys clears all "fallback_api_keys" edges to the APIKey entity.
+func (_u *GroupUpdateOne) ClearFallbackAPIKeys() *GroupUpdateOne {
+	_u.mutation.ClearFallbackAPIKeys()
+	return _u
+}
+
+// RemoveFallbackAPIKeyIDs removes the "fallback_api_keys" edge to APIKey entities by IDs.
+func (_u *GroupUpdateOne) RemoveFallbackAPIKeyIDs(ids ...int64) *GroupUpdateOne {
+	_u.mutation.RemoveFallbackAPIKeyIDs(ids...)
+	return _u
+}
+
+// RemoveFallbackAPIKeys removes "fallback_api_keys" edges to APIKey entities.
+func (_u *GroupUpdateOne) RemoveFallbackAPIKeys(v ...*APIKey) *GroupUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveFallbackAPIKeyIDs(ids...)
 }
 
 // ClearRedeemCodes clears all "redeem_codes" edges to the RedeemCode entity.
@@ -3969,6 +4134,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(group.FieldRpmLimit, field.TypeInt, value)
 	}
+	if value, ok := _u.mutation.UserConcurrencyLimit(); ok {
+		_spec.SetField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedUserConcurrencyLimit(); ok {
+		_spec.AddField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
+	}
 	if value, ok := _u.mutation.MaxReasoningEffort(); ok {
 		_spec.SetField(group.FieldMaxReasoningEffort, field.TypeString, value)
 	}
@@ -4030,6 +4201,51 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 			Inverse: false,
 			Table:   group.APIKeysTable,
 			Columns: []string{group.APIKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.FallbackAPIKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.FallbackAPIKeysTable,
+			Columns: []string{group.FallbackAPIKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedFallbackAPIKeysIDs(); len(nodes) > 0 && !_u.mutation.FallbackAPIKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.FallbackAPIKeysTable,
+			Columns: []string{group.FallbackAPIKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.FallbackAPIKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.FallbackAPIKeysTable,
+			Columns: []string{group.FallbackAPIKeysColumn},
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),

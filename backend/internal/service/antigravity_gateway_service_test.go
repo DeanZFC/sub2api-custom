@@ -824,6 +824,7 @@ func TestAntigravityGatewayService_ForwardGemini_ClearsStickySessionOnGeminiRate
 			"expires_at":   time.Now().Add(time.Hour).Format(time.RFC3339),
 			"project_id":   "proj",
 		},
+		RateLimit429RetryCount: retryCountPointer(0),
 		Extra: map[string]any{
 			"mixed_scheduling": true,
 		},

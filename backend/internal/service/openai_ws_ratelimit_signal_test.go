@@ -387,6 +387,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ErrorEventUsageL
 		var failoverErr *UpstreamFailoverError
 		require.ErrorAs(t, serverErr, &failoverErr)
 		require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+		require.False(t, failoverErr.Account429RetryExhausted, "建连后的流内 429 不能标记为握手重试耗尽")
 		require.Len(t, repo.rateLimitCalls, 1)
 		require.WithinDuration(t, time.Unix(resetAt, 0), repo.rateLimitCalls[0], 2*time.Second)
 	case <-time.After(5 * time.Second):
@@ -597,8 +598,9 @@ func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing
 		ID:       904,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
-	}, headers, body, "limited")
+	}, headers, body, "limited", false)
 	require.True(t, oauthErr.RetryableOnSameAccount)
+	require.False(t, oauthErr.Account429RetryExhausted)
 	require.False(t, oauthErr.SameAccountRetryDeadline.IsZero())
 	require.Positive(t, oauthErr.SameAccountRetryDelay)
 	require.LessOrEqual(t, oauthErr.SameAccountRetryDelay, openAIOAuth429MaxRetryDelay)
@@ -609,8 +611,16 @@ func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing
 		ID:       905,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeAPIKey,
-	}, headers, body, "limited")
+	}, headers, body, "limited", false)
 	require.False(t, apiKeyErr.RetryableOnSameAccount)
+	require.False(t, apiKeyErr.Account429RetryExhausted)
 	require.True(t, apiKeyErr.SameAccountRetryDeadline.IsZero())
 	require.Zero(t, apiKeyErr.SameAccountRetryDelay)
+
+	handshakeErr := svc.newOpenAIWSRateLimitFailoverError(&Account{
+		ID:       906,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}, headers, body, "limited", true)
+	require.True(t, handshakeErr.Account429RetryExhausted)
 }

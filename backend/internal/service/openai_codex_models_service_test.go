@@ -203,6 +203,33 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	}
 }
 
+func TestFetchCodexModelsManifestRetriesOAuth429OnSameAccount(t *testing.T) {
+	manifestBody := `{"models":[{"slug":"gpt-5.5"}]}`
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) <= 2 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(manifestBody))
+	}))
+	defer server.Close()
+
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+
+	account := newCodexModelsTestAccount()
+	account.RateLimit429RetryCount = retryCountPointer(2)
+	manifest, err := (&OpenAIGatewayService{}).FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	require.NoError(t, err)
+	require.Equal(t, int32(3), calls.Load())
+	require.JSONEq(t, manifestBody, string(manifest.Body))
+}
+
 func TestFetchCodexModelsManifestAgentIdentityUsesAssertionWithoutOAuthToken(t *testing.T) {
 	key, privateKey := newTestAgentIdentityKey(t)
 	account := &Account{
@@ -470,6 +497,39 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 	if manifest.ETag != `W/"api-key-manifest"` {
 		t.Errorf("etag not passed through: got %q", manifest.ETag)
 	}
+}
+
+func TestFetchCodexModelsManifestRetriesAPIKey429OnSameAccount(t *testing.T) {
+	manifestBody := `{"models":[{"slug":"gpt-5.6"}]}`
+	var calls atomic.Int32
+	upstream := &codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+		if calls.Add(1) <= 2 {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": []string{"0"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":"rate limited"}`)),
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(manifestBody)),
+			Request:    req,
+		}, nil
+	}}
+
+	account := newCodexModelsAPIKeyTestAccount("https://retry-upstream.example/v1")
+	account.RateLimit429RetryCount = retryCountPointer(2)
+	manifest, err := newCodexModelsAPIKeyTestService(upstream).FetchCodexModelsManifest(
+		context.Background(),
+		account,
+		"0.144.0",
+		"",
+	)
+	require.NoError(t, err)
+	require.Equal(t, int32(3), calls.Load())
+	require.JSONEq(t, manifestBody, string(manifest.Body))
 }
 
 func TestFetchCodexModelsManifestAPIKeyConvertsStandardOpenAIModelList(t *testing.T) {
@@ -787,8 +847,9 @@ func TestFetchCodexModelsManifestAPIKeySharedRefreshSurvivesCallerCancellation(t
 		t.Fatal("upstream body read did not start")
 	}
 	remaining := <-deadlineRemaining
-	if remaining < 14*time.Second || remaining > codexModelsManifestRequestTimeout {
-		t.Errorf("detached refresh deadline: got %s, want approximately %s", remaining, codexModelsManifestRequestTimeout)
+	expectedTimeout := account429RetryTotalTimeout(codexModelsManifestRequestTimeout, account)
+	if remaining < expectedTimeout-time.Second || remaining > expectedTimeout {
+		t.Errorf("detached refresh deadline: got %s, want approximately %s", remaining, expectedTimeout)
 	}
 	cancelFirst()
 	select {

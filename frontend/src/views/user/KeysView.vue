@@ -507,6 +507,20 @@
           </Select>
         </div>
 
+        <div>
+          <label class="input-label">{{ t('keys.fallbackGroupLabel') }}</label>
+          <Select
+            v-model="formData.fallback_group_id"
+            :options="fallbackGroupOptions"
+            :placeholder="t('keys.noFallbackGroup')"
+            :searchable="true"
+            :search-placeholder="t('keys.searchGroup')"
+          />
+          <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('keys.fallbackGroupHint') }}
+          </p>
+        </div>
+
         <!-- Custom Key Section (only for create) -->
         <div v-if="!showEditModal" class="space-y-3">
           <div class="flex items-center justify-between">
@@ -1330,6 +1344,7 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 const formData = ref({
   name: '',
   group_id: null as number | null,
+  fallback_group_id: null as number | null,
   status: 'active' as 'active' | 'inactive',
   use_custom_key: false,
   custom_key: '',
@@ -1423,6 +1438,17 @@ const groupOptions = computed(() =>
     platform: group.platform
   }))
 )
+
+const fallbackGroupOptions = computed(() => {
+  const primary = groups.value.find((group) => group.id === formData.value.group_id)
+  return [
+    { value: null, label: t('keys.noFallbackGroup') },
+    ...groupOptions.value.filter((option) =>
+      option.value !== formData.value.group_id &&
+      (!primary || option.platform === primary.platform)
+    )
+  ]
+})
 
 // Group dropdown search
 const groupSearchQuery = ref('')
@@ -1564,6 +1590,7 @@ const editKey = (key: ApiKey) => {
   formData.value = {
     name: key.name,
     group_id: key.group_id,
+    fallback_group_id: key.fallback_group_id,
     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
     use_custom_key: false,
     custom_key: '',
@@ -1668,6 +1695,15 @@ const handleSubmit = async () => {
     return
   }
 
+  if (formData.value.fallback_group_id !== null) {
+    const primary = groups.value.find((group) => group.id === formData.value.group_id)
+    const fallback = groups.value.find((group) => group.id === formData.value.fallback_group_id)
+    if (!primary || !fallback || primary.id === fallback.id || primary.platform !== fallback.platform) {
+      appStore.showError(t('keys.fallbackGroupInvalid'))
+      return
+    }
+  }
+
   // Validate custom key if enabled
   if (!showEditModal.value && formData.value.use_custom_key) {
     if (!formData.value.custom_key) {
@@ -1721,6 +1757,7 @@ const handleSubmit = async () => {
       const updates: UpdateApiKeyRequest = {
         name: formData.value.name,
         group_id: formData.value.group_id,
+        fallback_group_id: formData.value.fallback_group_id,
         ip_whitelist: ipWhitelist,
         ip_blacklist: ipBlacklist,
         quota: quota,
@@ -1739,6 +1776,7 @@ const handleSubmit = async () => {
       await keysAPI.create(
         formData.value.name,
         formData.value.group_id,
+        formData.value.fallback_group_id,
         customKey,
         ipWhitelist,
         ipBlacklist,
@@ -1790,6 +1828,7 @@ const closeModals = () => {
   formData.value = {
     name: '',
     group_id: null,
+    fallback_group_id: null,
     status: 'active',
     use_custom_key: false,
     custom_key: '',

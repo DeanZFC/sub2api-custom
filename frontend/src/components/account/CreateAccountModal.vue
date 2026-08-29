@@ -2908,6 +2908,29 @@
         </div>
       </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label" for="create-rate-limit-429-retry-count">
+          {{ t('admin.accounts.rateLimit429RetryCount') }}
+        </label>
+        <input
+          v-model.number="form.rate_limit_429_retry_count"
+          id="create-rate-limit-429-retry-count"
+          type="number"
+          min="0"
+          :max="MAX_RATE_LIMIT_429_RETRY_COUNT"
+          step="1"
+          class="input max-w-xs"
+          @change="form.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count)"
+        />
+        <p class="input-hint">
+          {{
+            t('admin.accounts.rateLimit429RetryCountHint', {
+              default: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
+              max: MAX_RATE_LIMIT_429_RETRY_COUNT
+            })
+          }}
+        </p>
+      </div>
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
@@ -3152,7 +3175,7 @@
         </div>
       </div>
 
-      <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
+      <!-- CPA 指纹出口（仅 OpenAI OAuth） -->
       <div
         v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -3167,6 +3190,39 @@
           <div class="w-52 flex-shrink-0">
             <Select v-model="codexFingerprintMode" data-testid="create-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
           </div>
+        </div>
+      </div>
+
+      <!-- Codex 额度透支（仅 OpenAI OAuth） -->
+      <div
+        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexQuotaOverdraft') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexQuotaOverdraftDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="create-codex-quota-overdraft-toggle"
+            role="switch"
+            :aria-checked="codexQuotaOverdraftEnabled"
+            @click="codexQuotaOverdraftEnabled = !codexQuotaOverdraftEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexQuotaOverdraftEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexQuotaOverdraftEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
         </div>
       </div>
 
@@ -4095,6 +4151,8 @@ const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
+const DEFAULT_RATE_LIMIT_429_RETRY_COUNT = 5
+const MAX_RATE_LIMIT_429_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
@@ -4172,6 +4230,7 @@ const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OF
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'account_device' | 'device' | 'session' | 'full'
+const codexQuotaOverdraftEnabled = ref(true)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 const codexFingerprintModeOptions = computed(() => [
   { value: 'off' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintOff') },
@@ -4457,6 +4516,7 @@ const form = reactive({
   credentials: {} as Record<string, unknown>,
   proxy_id: null as number | null,
   concurrency: 10,
+  rate_limit_429_retry_count: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
@@ -4475,6 +4535,19 @@ const isOAuthFlow = computed(() => {
     return false
   }
   return accountCategory.value === 'oauth-based'
+})
+
+const normalizeRateLimit429RetryCount = (value: unknown): number => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_RATE_LIMIT_429_RETRY_COUNT
+  }
+  return Math.min(MAX_RATE_LIMIT_429_RETRY_COUNT, Math.max(0, Math.trunc(parsed)))
+}
+
+const withRateLimit429RetryCount = (payload: CreateAccountRequest): CreateAccountRequest => ({
+  ...payload,
+  rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count)
 })
 
 const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlowRef.value?.inputMethod === 'sso_cookie')
@@ -4970,7 +5043,9 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
+    const account = await adminAPI.accounts.create(
+      withAntigravityConfirmFlag(withRateLimit429RetryCount(payload))
+    )
     if (
       payload.type === 'apikey' &&
       payload.upstream_billing_probe_enabled === true
@@ -5011,6 +5086,7 @@ const resetForm = () => {
   form.credentials = {}
   form.proxy_id = null
   form.concurrency = 10
+  form.rate_limit_429_retry_count = DEFAULT_RATE_LIMIT_429_RETRY_COUNT
   form.load_factor = null
   form.priority = 1
   form.rate_multiplier = 1
@@ -5066,6 +5142,7 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexQuotaOverdraftEnabled.value = true
   codexFingerprintMode.value = 'off'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5164,6 +5241,11 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.codex_cli_only_allow_app_server = true
   } else {
     delete extra.codex_cli_only_allow_app_server
+  }
+  if (accountCategory.value === 'oauth-based') {
+    extra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
+  } else {
+    delete extra.codex_quota_overdraft_enabled
   }
   // 收敛是显式 opt-in：off 即默认值，不落键；account_device/device/session/full 必须显式写入，
   // 否则管理员的选择会被当成默认而丢失（#5610）。
@@ -5752,6 +5834,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           extra,
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
+          rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
@@ -5929,6 +6012,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           extra,
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
+          rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
@@ -6028,6 +6112,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         extra,
         proxy_id: form.proxy_id,
         concurrency: form.concurrency,
+        rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
         load_factor: form.load_factor ?? undefined,
         priority: form.priority,
         rate_multiplier: form.rate_multiplier,
@@ -6133,6 +6218,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       notes: form.notes || null,
       proxy_id: form.proxy_id,
       concurrency: form.concurrency,
+      rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
       rate_multiplier: form.rate_multiplier,
@@ -6211,6 +6297,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       notes: form.notes || null,
       proxy_id: form.proxy_id,
       concurrency: form.concurrency,
+      rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
       rate_multiplier: form.rate_multiplier,
@@ -6309,6 +6396,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             extra,
             proxy_id: form.proxy_id,
             concurrency: form.concurrency,
+            rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
             load_factor: form.load_factor ?? undefined,
             priority: form.priority,
             rate_multiplier: form.rate_multiplier,
@@ -6408,6 +6496,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           extra: {},
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
+          rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
@@ -6771,6 +6860,11 @@ const handleCookieAuth = async (sessionKey: string) => {
           extra.custom_base_url = customBaseUrl.value.trim()
         }
 
+        // 账号级透支开关只对 OpenAI OAuth 生效；Setup Token 保持官方行为且不写入此键。
+        if (form.platform === 'openai' && addMethod.value === 'oauth') {
+          extra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
+        }
+
         const accountName = keys.length > 1 ? `${form.name} #${i + 1}` : form.name
 
         const credentials: Record<string, unknown> = { ...tokenInfo }
@@ -6789,6 +6883,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           extra,
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
+          rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,

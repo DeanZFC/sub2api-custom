@@ -119,6 +119,7 @@ func TestHandleSmartRetry_QuotaExhausted_UsesCreditsAndStoresIndependentState(t 
 		Header:     http.Header{},
 		Body:       io.NopCloser(bytes.NewReader(respBody)),
 	}
+	markAccount429RetriesExhausted(resp, nil, DefaultRateLimit429RetryCount)
 	params := antigravityRetryLoopParams{
 		ctx:            context.Background(),
 		prefix:         "[test]",
@@ -144,6 +145,129 @@ func TestHandleSmartRetry_QuotaExhausted_UsesCreditsAndStoresIndependentState(t 
 	require.Len(t, upstream.requestBodies, 1)
 	require.Contains(t, string(upstream.requestBodies[0]), "enabledCreditTypes")
 	require.Empty(t, repo.modelRateLimitCalls, "overages 成功后不应写入普通 model_rate_limits")
+}
+
+func TestAttemptCreditsOveragesRetryUsesAccount429RetryBudget(t *testing.T) {
+	finalBody := []byte(`{"error":{"status":"RESOURCE_EXHAUSTED","message":"temporary limit"}}`)
+	upstream := &mockSmartRetryUpstream{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": []string{"0"}},
+				Body:       io.NopCloser(bytes.NewReader(finalBody)),
+			},
+			{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": []string{"0"}},
+				Body:       io.NopCloser(bytes.NewReader(finalBody)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			},
+		},
+		errors: []error{nil, nil, nil},
+	}
+	retryCount := 2
+	account := &Account{
+		ID:                     4293,
+		Type:                   AccountTypeOAuth,
+		Platform:               PlatformAntigravity,
+		Concurrency:            1,
+		RateLimit429RetryCount: &retryCount,
+	}
+	params := antigravityRetryLoopParams{
+		ctx:          context.Background(),
+		prefix:       "[test]",
+		account:      account,
+		accessToken:  "token",
+		action:       "generateContent",
+		body:         []byte(`{"model":"test","request":{}}`),
+		httpUpstream: upstream,
+	}
+
+	result := (&AntigravityGatewayService{}).attemptCreditsOveragesRetry(
+		params,
+		"https://ag-1.test",
+		"gemini-test",
+		0,
+		http.StatusTooManyRequests,
+		[]byte(`{"error":{"message":"QUOTA_EXHAUSTED"}}`),
+	)
+
+	require.True(t, result.handled)
+	require.NotNil(t, result.resp)
+	require.Equal(t, http.StatusOK, result.resp.StatusCode)
+	require.Len(t, upstream.calls, 3)
+	for _, body := range upstream.requestBodies {
+		require.Contains(t, string(body), "enabledCreditTypes")
+	}
+}
+
+func TestHandleSmartRetryContinuesOriginalFlowAfterCredits429BudgetIsExhausted(t *testing.T) {
+	final429Body := []byte(`{"error":{"status":"RESOURCE_EXHAUSTED","message":"Resource has been exhausted"}}`)
+	upstream := &mockSmartRetryUpstream{
+		responses: []*http.Response{{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Retry-After": []string{"0"}},
+			Body:       io.NopCloser(bytes.NewReader(final429Body)),
+		}},
+		errors:     []error{nil},
+		repeatLast: true,
+	}
+	retryCount := 1
+	repo := &stubAntigravityAccountRepo{}
+	account := &Account{
+		ID:                     4294,
+		Type:                   AccountTypeOAuth,
+		Platform:               PlatformAntigravity,
+		Concurrency:            1,
+		RateLimit429RetryCount: &retryCount,
+		Extra: map[string]any{
+			"allow_overages": true,
+		},
+	}
+	handleErrorCalls := 0
+	params := antigravityRetryLoopParams{
+		ctx:            WithAccount429RetryScope(context.Background()),
+		prefix:         "[test]",
+		account:        account,
+		accessToken:    "token",
+		action:         "generateContent",
+		body:           []byte(`{"model":"test","request":{}}`),
+		httpUpstream:   upstream,
+		accountRepo:    repo,
+		requestedModel: "test",
+		handleError: func(_ context.Context, _ string, _ *Account, statusCode int, _ http.Header, _ []byte, _ string, _ int64, _ string, _ bool) *handleModelRateLimitResult {
+			handleErrorCalls++
+			require.Equal(t, http.StatusTooManyRequests, statusCode)
+			return nil
+		},
+	}
+	initialBody := []byte(`{"error":{"status":"RESOURCE_EXHAUSTED","message":"QUOTA_EXHAUSTED"}}`)
+	initialResp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{},
+		Body:       io.NopCloser(bytes.NewReader(initialBody)),
+	}
+
+	result := (&AntigravityGatewayService{accountRepo: repo}).handleSmartRetry(
+		params,
+		initialResp,
+		initialBody,
+		"https://ag-1.test",
+		0,
+		[]string{"https://ag-1.test"},
+	)
+
+	require.NotNil(t, result)
+	require.Equal(t, smartRetryActionContinue, result.action)
+	require.Nil(t, result.resp)
+	require.Zero(t, handleErrorCalls, "the normal outer error path must apply the final 429 side effect exactly once")
+	require.Len(t, upstream.calls, 2, "credits 请求只消费一次共享透明预算，随后交回官方外层流程")
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, creditsExhaustedKey, repo.modelRateLimitCalls[0].modelKey)
 }
 
 func TestHandleSmartRetry_RateLimited_DoesNotUseCredits(t *testing.T) {

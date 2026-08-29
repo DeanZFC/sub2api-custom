@@ -3383,7 +3383,13 @@ func TestOpenAIWSHTTPBridgeGrok429PersistsRateLimit(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`)),
 	}}
 	svc := &OpenAIGatewayService{accountRepo: repo, httpUpstream: upstream}
-	account := &Account{ID: 68, Platform: PlatformGrok, Type: AccountTypeOAuth, Concurrency: 1}
+	account := &Account{
+		ID:                     68,
+		Platform:               PlatformGrok,
+		Type:                   AccountTypeOAuth,
+		Concurrency:            1,
+		RateLimit429RetryCount: retryCountPointer(0),
+	}
 	before := time.Now()
 
 	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
