@@ -4,7 +4,7 @@
 
 本项目是 [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) 的非官方衍生版本，公开项目名为 **sub2api-custom**。内部二进制名和 Go module 仍保留 `sub2api`，新 Docker 部署使用 `sub2api-custom` 前缀；旧部署继续使用原容器名，以兼容已有数据和升级流程。
 
-当前 GitHub 仓库仍使用历史地址 `DeanZFC/sub2api-overdraft`。仓库完成重命名后，再同步修改后台更新源和部署命令中的地址。
+GitHub 仓库地址为 `DeanZFC/sub2api-custom`。历史地址 `DeanZFC/sub2api-overdraft` 由 GitHub 自动重定向，但新部署和服务器远端应使用新地址。
 
 ## 重要说明
 
@@ -13,7 +13,7 @@
 - 探测请求和透支期请求都可能产生真实上游用量和费用。
 - 此行为可能不符合上游服务条款。部署者必须自行确认合规性，并承担账号限制、服务中断等风险。
 - 官方 Sub2API 安装脚本和 `weishaw/sub2api:latest` 镜像不包含本 Fork 的透支功能。
-- 本 Fork 的后台更新检查读取 `DeanZFC/sub2api-overdraft`，不会把官方 Sub2API Release 当作本项目更新。
+- 本 Fork 的后台更新检查读取 `DeanZFC/sub2api-custom`，不会把官方 Sub2API Release 当作本项目更新。
 
 ## 功能范围
 
@@ -47,12 +47,12 @@
 ```bash
 sudo mkdir -p /opt
 cd /opt
-sudo git clone https://github.com/DeanZFC/sub2api-overdraft.git /opt/sub2api-custom
+sudo git clone https://github.com/DeanZFC/sub2api-custom.git /opt/sub2api-custom
 sudo chown -R "$(id -u):$(id -g)" /opt/sub2api-custom
 cd /opt/sub2api-custom/deploy
 ```
 
-仓库默认分支是 `codex-overdraft`。确认当前分支：
+仓库默认分支暂时保留历史兼容名称 `codex-overdraft`，避免已有服务器和更新检查失效。确认当前分支：
 
 ```bash
 git branch --show-current
@@ -220,7 +220,7 @@ git stash push -u -m "server changes before codex-overdraft switch"
 然后连接本 Fork 并切换到公开分支：
 
 ```bash
-git remote set-url origin https://github.com/DeanZFC/sub2api-overdraft.git
+git remote set-url origin https://github.com/DeanZFC/sub2api-custom.git
 git fetch origin
 git switch codex-overdraft 2>/dev/null || \
   git switch -c codex-overdraft --track origin/codex-overdraft
@@ -411,13 +411,15 @@ docker compose \
 
 如果服务器目录是 `/opt/sub2api`，只需替换第一条路径。升级完成后重新执行“判断功能是否生效”中的镜像、环境变量和日志检查。
 
-更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.183-overdraft.7`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
+更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.183-overdraft.8`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
 
 ```bash
 docker exec sub2api-custom /app/sub2api -version
 ```
 
-维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.183-overdraft.6` 改为 `0.1.183-overdraft.7`。同步到新的上游 Sub2API 版本时，版本号应同时反映官方版本和 Fork 修订号，例如 `0.1.183-overdraft.7`。
+维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.183-overdraft.7` 改为 `0.1.183-overdraft.8`。同步到新的上游 Sub2API 版本时，版本号应同时反映官方版本和 Fork 修订号，例如 `0.1.183-overdraft.8`。
+
+`-overdraft.N` 是旧版本线的兼容标识，不再代表公开项目名。为保证已部署的旧版本能按 SemVer 正确识别更新，`0.1.183` 系列继续使用该后缀；切换到更高的官方基础版本时再启用 `-custom.N`。
 
 ## 合并 Sub2API 官方更新
 

@@ -64,7 +64,7 @@ See [APPLE_CONTAINER.md](./APPLE_CONTAINER.md) for configuration, upgrades, pers
 command -v docker >/dev/null 2>&1 || curl -fsSL https://get.docker.com | sh
 sudo systemctl enable --now docker
 
-git clone -b codex-overdraft https://github.com/DeanZFC/sub2api-overdraft.git /opt/sub2api-custom
+git clone -b codex-overdraft https://github.com/DeanZFC/sub2api-custom.git /opt/sub2api-custom
 cd /opt/sub2api-custom/deploy
 cp .env.example .env
 chmod 600 .env

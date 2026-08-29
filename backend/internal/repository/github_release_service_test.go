@@ -397,7 +397,7 @@ func (s *GitHubReleaseServiceSuite) TestFetchRecentReleases_Success() {
 func (s *GitHubReleaseServiceSuite) TestFetchRepositoryFile_Success() {
 	encoded := base64.StdEncoding.EncodeToString([]byte("0.1.176-overdraft.1\n"))
 	s.srv = newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(s.T(), "/repos/DeanZFC/sub2api-overdraft/contents/FORK_VERSION", r.URL.Path)
+		require.Equal(s.T(), "/repos/DeanZFC/sub2api-custom/contents/FORK_VERSION", r.URL.Path)
 		require.Equal(s.T(), "codex-overdraft", r.URL.Query().Get("ref"))
 		require.Equal(s.T(), "application/vnd.github.v3+json", r.Header.Get("Accept"))
 		w.Header().Set("Content-Type", "application/json")
@@ -410,7 +410,7 @@ func (s *GitHubReleaseServiceSuite) TestFetchRepositoryFile_Success() {
 
 	content, err := s.client.FetchRepositoryFile(
 		context.Background(),
-		"DeanZFC/sub2api-overdraft",
+		"DeanZFC/sub2api-custom",
 		"codex-overdraft",
 		"FORK_VERSION",
 	)

@@ -35,7 +35,7 @@ See the **[Chinese deployment and operations guide](CODEX_OVERDRAFT_DEPLOYMENT_C
 Quick start:
 
 ```bash
-git clone https://github.com/DeanZFC/sub2api-overdraft.git sub2api-custom
+git clone https://github.com/DeanZFC/sub2api-custom.git sub2api-custom
 cd sub2api-custom/deploy
 cp .env.example .env
 # Set POSTGRES_PASSWORD, JWT_SECRET, and TOTP_ENCRYPTION_KEY in .env

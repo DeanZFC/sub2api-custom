@@ -31,10 +31,10 @@ var (
 
 const (
 	updateCacheTTL        = 1200 // 20 minutes
-	githubRepo            = "DeanZFC/sub2api-overdraft"
+	githubRepo            = "DeanZFC/sub2api-custom"
 	githubSourceBranch    = "codex-overdraft"
 	githubForkVersionFile = "FORK_VERSION"
-	githubSourceUpdateURL = "https://github.com/DeanZFC/sub2api-overdraft/commits/codex-overdraft"
+	githubSourceUpdateURL = "https://github.com/DeanZFC/sub2api-custom/commits/codex-overdraft"
 	projectDisplayName    = "sub2api-custom"
 
 	// Security: allowed download domains for updates

@@ -31,7 +31,7 @@
 ソースビルド、既存環境からの移行、検証、更新、ロールバック、Nginx、トラブルシューティングについては、**[中国語のデプロイ・運用ガイド](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)** を参照してください。
 
 ```bash
-git clone https://github.com/DeanZFC/sub2api-overdraft.git sub2api-custom
+git clone https://github.com/DeanZFC/sub2api-custom.git sub2api-custom
 cd sub2api-custom/deploy
 cp .env.example .env
 # .env に POSTGRES_PASSWORD、JWT_SECRET、TOTP_ENCRYPTION_KEY を設定

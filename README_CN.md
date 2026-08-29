@@ -40,7 +40,7 @@
 最短部署流程：
 
 ```bash
-git clone https://github.com/DeanZFC/sub2api-overdraft.git sub2api-custom
+git clone https://github.com/DeanZFC/sub2api-custom.git sub2api-custom
 cd sub2api-custom/deploy
 cp .env.example .env
 chmod 600 .env
