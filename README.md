@@ -22,6 +22,9 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 ## Included Extensions
 
 - Supports per-account upstream 429 retries: five additional same-account attempts by default, configurable from `0` (disabled) to `10` in account create, edit, and bulk-edit forms. Intermediate 429 responses do not trigger cooldown or failover; the existing error path runs only after exhaustion. HTTP requests and WebSocket handshakes are covered, while a stream that has already emitted meaningful output is never blindly replayed.
+- Adds an optional per-user concurrency cap to every group. Usage is counted independently by user and group, while existing user-level and account-level concurrency controls remain in effect.
+- Lets each API key select a same-platform fallback group. Every request fully tries the primary group first and uses the fallback only when the primary group has no available account; billing, quotas, RPM, concurrency, and usage attribution remain on the primary API-key group.
+- Provides an OpenAI account-level overdraft switch and a `CPA fingerprint egress` mode. The fingerprint mode keeps the device identity stable and unique per account without forcing all sessions and threads to share one identity.
 - Pre-arms ordinary OAuth text traffic with the overdraft payload at 95% usage and uses successful business traffic as direct evidence after usage reaches 100%.
 - Marks an injected request's explicit quota 429 as terminal for that cycle; when business evidence is unavailable, runs at most one independent probe per quota cycle.
 - Keeps an account schedulable after a successful probe and tracks overdraft requests, tokens, cost, and recovery for both windows independently.
