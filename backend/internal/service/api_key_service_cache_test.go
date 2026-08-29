@@ -270,13 +270,19 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 			},
 		},
 		FallbackGroup: &Group{
-			ID:               fallbackGroupID,
-			Name:             "openai-fallback",
-			Platform:         PlatformOpenAI,
-			Status:           StatusActive,
-			Hydrated:         true,
-			SubscriptionType: SubscriptionTypeStandard,
-			RateMultiplier:   1,
+			ID:                   fallbackGroupID,
+			Name:                 "openai-fallback",
+			Platform:             PlatformOpenAI,
+			Status:               StatusActive,
+			Hydrated:             true,
+			SubscriptionType:     SubscriptionTypeStandard,
+			RateMultiplier:       2.5,
+			RPMLimit:             60,
+			UserConcurrencyLimit: 3,
+			PeakRateEnabled:      true,
+			PeakStart:            "09:00",
+			PeakEnd:              "18:00",
+			PeakRateMultiplier:   1.4,
 		},
 	}
 
@@ -291,6 +297,14 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.NotNil(t, roundTrip.FallbackGroup)
 	require.Equal(t, fallbackGroupID, roundTrip.FallbackGroup.ID)
 	require.True(t, roundTrip.FallbackGroup.Hydrated)
+	require.Equal(t, SubscriptionTypeStandard, roundTrip.FallbackGroup.SubscriptionType)
+	require.Equal(t, 2.5, roundTrip.FallbackGroup.RateMultiplier)
+	require.Equal(t, 60, roundTrip.FallbackGroup.RPMLimit)
+	require.Equal(t, 3, roundTrip.FallbackGroup.UserConcurrencyLimit)
+	require.True(t, roundTrip.FallbackGroup.PeakRateEnabled)
+	require.Equal(t, "09:00", roundTrip.FallbackGroup.PeakStart)
+	require.Equal(t, "18:00", roundTrip.FallbackGroup.PeakEnd)
+	require.Equal(t, 1.4, roundTrip.FallbackGroup.PeakRateMultiplier)
 }
 
 func TestAPIKeyService_SnapshotRoundTrip_PreservesReasoningEffortPolicy(t *testing.T) {

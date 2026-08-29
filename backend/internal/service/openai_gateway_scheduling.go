@@ -1119,7 +1119,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	fallbackGroupID := fallbackGroup.ID
 	selection, err = s.selectAccountWithLoadAwarenessForAPIKeyGroup(fallbackCtx, &fallbackGroupID, sessionHash, requestedModel, excludedIDs)
 	if err == nil {
-		markAPIKeyFallbackSelection(selection, fallbackGroupID)
+		markAPIKeyFallbackSelection(ctx, selection, fallbackGroupID)
 	}
 	return selection, err
 }

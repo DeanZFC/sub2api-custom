@@ -565,6 +565,24 @@ func (s *OpenAIGatewayService) ResolveChannelMapping(ctx context.Context, groupI
 	return s.channelService.ResolveChannelMapping(ctx, groupID, model)
 }
 
+// GetActiveSubscriptionForGroup loads the user's active subscription for the
+// effective routed group. It is intentionally a small gateway-service method
+// so asynchronous handlers can rehydrate the subscription after an API-key
+// fallback route has been restored.
+func (s *OpenAIGatewayService) GetActiveSubscriptionForGroup(
+	ctx context.Context,
+	userID, groupID int64,
+) (*UserSubscription, error) {
+	if s == nil || s.userSubRepo == nil || userID <= 0 || groupID <= 0 {
+		return nil, ErrSubscriptionInvalid
+	}
+	subscription, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, userID, groupID)
+	if err != nil || subscription == nil || subscription.GroupID != groupID {
+		return nil, ErrSubscriptionInvalid
+	}
+	return subscription, nil
+}
+
 // IsModelRestricted 检查模型是否被渠道限制（代理到 ChannelService）
 func (s *OpenAIGatewayService) IsModelRestricted(ctx context.Context, groupID int64, model string) bool {
 	if s.channelService == nil {

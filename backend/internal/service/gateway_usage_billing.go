@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -551,6 +552,48 @@ type billingDeps struct {
 	cfg                   *config.Config
 }
 
+// resolveUsageSubscription makes subscription billing follow the group that
+// actually handled the request. The middleware-provided subscription belongs
+// to the API key's original group, so a fallback route may need a different
+// subscription (or no subscription at all when the fallback is balance-based).
+func resolveUsageSubscription(
+	ctx context.Context,
+	repo UserSubscriptionRepository,
+	apiKey *APIKey,
+	user *User,
+	candidate *UserSubscription,
+) (*UserSubscription, error) {
+	if apiKey == nil || apiKey.Group == nil || !apiKey.Group.IsSubscriptionType() {
+		return nil, nil
+	}
+	// Keep the historical behavior for ordinary requests: the handler may pass a
+	// nil subscription in unit/degraded paths and RecordUsage then uses balance
+	// billing. Only an actually activated API-key fallback must resolve a second
+	// subscription by group.
+	if !isAPIKeyFallbackActive(apiKey) {
+		return candidate, nil
+	}
+	groupID := apiKey.Group.ID
+	if apiKey.GroupID != nil && *apiKey.GroupID > 0 {
+		groupID = *apiKey.GroupID
+	}
+	// A routed request must never reuse a subscription without an explicit
+	// matching group. Persisted subscriptions carry their group ID; accepting a
+	// zero value here could silently reuse the primary group's subscription (or
+	// an otherwise unrelated legacy object) after fallback activation.
+	if candidate != nil && candidate.GroupID == groupID {
+		return candidate, nil
+	}
+	if repo == nil || user == nil || user.ID <= 0 || groupID <= 0 {
+		return nil, ErrSubscriptionInvalid
+	}
+	subscription, err := repo.GetActiveByUserIDAndGroupID(ctx, user.ID, groupID)
+	if err != nil || subscription == nil {
+		return nil, ErrSubscriptionInvalid
+	}
+	return subscription, nil
+}
+
 func (s *GatewayService) billingDeps() *billingDeps {
 	return &billingDeps{
 		accountRepo:           s.accountRepo,
@@ -605,10 +648,21 @@ type recordUsageOpts struct {
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
+	if input == nil {
+		return fmt.Errorf("gateway usage input is nil")
+	}
+	apiKey := input.APIKey
+	user := input.User
+	if snapshot, ok := APIKeyUsageSnapshotFromContext(ctx); ok {
+		apiKey = snapshot
+		if snapshot.User != nil {
+			user = snapshot.User
+		}
+	}
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
-		APIKey:             input.APIKey,
-		User:               input.User,
+		APIKey:             apiKey,
+		User:               user,
 		Account:            input.Account,
 		Subscription:       input.Subscription,
 		PricingAt:          input.PricingAt,
@@ -650,10 +704,21 @@ type RecordUsageLongContextInput struct {
 
 // RecordUsageWithLongContext 记录使用量并扣费，支持长上下文双倍计费（用于 Gemini）
 func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *RecordUsageLongContextInput) error {
+	if input == nil {
+		return fmt.Errorf("gateway long-context usage input is nil")
+	}
+	apiKey := input.APIKey
+	user := input.User
+	if snapshot, ok := APIKeyUsageSnapshotFromContext(ctx); ok {
+		apiKey = snapshot
+		if snapshot.User != nil {
+			user = snapshot.User
+		}
+	}
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
-		APIKey:             input.APIKey,
-		User:               input.User,
+		APIKey:             apiKey,
+		User:               user,
 		Account:            input.Account,
 		Subscription:       input.Subscription,
 		PricingAt:          input.PricingAt,
@@ -775,6 +840,20 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
+	var err error
+	subscription, err = resolveUsageSubscription(ctx, s.userSubRepo, apiKey, user, subscription)
+	if err != nil {
+		return fmt.Errorf("resolve usage subscription: %w", err)
+	}
+	input.Subscription = subscription
+	input.ChannelUsageFields = resolveAPIKeyFallbackChannelUsageFields(
+		ctx,
+		s.channelService,
+		apiKey,
+		input.ChannelUsageFields,
+		result.Model,
+		result.UpstreamModel,
+	)
 	ApplyForwardImageBillingResolution(result)
 	logServiceTierBillingDowngrade("service.gateway", account, result.RequestID, ApplyForwardServiceTierBillingResolution(result))
 
@@ -876,8 +955,21 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
+		accountStatsModel := result.UpstreamModel
+		if isAPIKeyFallbackActive(apiKey) && usageLog.ChannelID == nil {
+			// The upstream model can still contain the primary group's mapping when
+			// the fallback group has no channel. Do not let that stale mapping select
+			// a primary-only account-stat pricing rule.
+			accountStatsModel = input.ChannelMappedModel
+		}
+		if isAPIKeyFallbackActive(apiKey) && input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" {
+			// Account-stat rules are keyed by the model the routed channel maps to.
+			// This keeps the stats price aligned with the fallback channel's billing
+			// model even when the already-built request body used an earlier mapping.
+			accountStatsModel = input.ChannelMappedModel
+		}
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
+			account.ID, *apiKey.GroupID, accountStatsModel, result.Model,
 			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);
 			// OpenAI gateway uses actualInputTokens which also excludes cache_read for the same reason.
 			UsageTokens{

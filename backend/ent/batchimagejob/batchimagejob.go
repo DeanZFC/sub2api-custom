@@ -21,6 +21,8 @@ const (
 	FieldAPIKeyID = "api_key_id"
 	// FieldAccountID holds the string denoting the account_id field in the database.
 	FieldAccountID = "account_id"
+	// FieldRoutedGroupID holds the string denoting the routed_group_id field in the database.
+	FieldRoutedGroupID = "routed_group_id"
 	// FieldProvider holds the string denoting the provider field in the database.
 	FieldProvider = "provider"
 	// FieldModel holds the string denoting the model field in the database.
@@ -104,6 +106,7 @@ var Columns = []string{
 	FieldUserID,
 	FieldAPIKeyID,
 	FieldAccountID,
+	FieldRoutedGroupID,
 	FieldProvider,
 	FieldModel,
 	FieldTaskName,
@@ -237,6 +240,11 @@ func ByAPIKeyID(opts ...sql.OrderTermOption) OrderOption {
 // ByAccountID orders the results by the account_id field.
 func ByAccountID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAccountID, opts...).ToFunc()
+}
+
+// ByRoutedGroupID orders the results by the routed_group_id field.
+func ByRoutedGroupID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRoutedGroupID, opts...).ToFunc()
 }
 
 // ByProvider orders the results by the provider field.

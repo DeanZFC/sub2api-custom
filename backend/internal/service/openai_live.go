@@ -65,6 +65,53 @@ func liveGroupID(groupID *int64) int64 {
 	return *groupID
 }
 
+// resolveLiveSubscriptionID returns the subscription that belongs to the
+// effective group for this call. The HTTP handler resolves a subscription
+// before account selection, so it necessarily sees the API key's primary
+// group. When account selection activates API-key fallback, re-resolve the
+// subscription by (user, routed group) instead of carrying the primary
+// subscription into the long-lived LiveCallRecord. A standard fallback group
+// intentionally returns zero and is billed as balance-based, just like the
+// regular usage paths.
+func (s *OpenAIGatewayService) resolveLiveSubscriptionID(ctx context.Context, identity LiveCallIdentity) (int64, error) {
+	groupID := liveGroupID(identity.GroupID)
+	candidateID := liveGroupID(identity.SubscriptionID)
+	routing, fallbackActive := apiKeyFallbackRoutingForGroup(ctx, groupID)
+	if !fallbackActive {
+		return candidateID, nil
+	}
+	if routing.fallbackGroup == nil || !routing.fallbackGroup.IsSubscriptionType() {
+		return 0, nil
+	}
+	if s == nil || s.userSubRepo == nil || identity.UserID <= 0 || groupID <= 0 {
+		return 0, ErrSubscriptionInvalid
+	}
+	subscription, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, identity.UserID, groupID)
+	if err != nil || subscription == nil || subscription.ID <= 0 || subscription.GroupID != groupID {
+		logger.FromContext(ctx).Warn(
+			"OpenAI Live 兜底分组订阅解析失败",
+			zap.Int64("user_id", identity.UserID),
+			zap.Int64("group_id", groupID),
+			zap.Int64("primary_subscription_id", candidateID),
+			zap.Error(err),
+		)
+		return 0, ErrSubscriptionInvalid
+	}
+	return subscription.ID, nil
+}
+
+// liveGroupConcurrencyLimit returns the limit for the group that actually
+// selected the account. The handler computes the primary group's limit before
+// selection; after API-key fallback activation the routed group's value must
+// be used for the Live lease as well.
+func liveGroupConcurrencyLimit(ctx context.Context, identity LiveCallIdentity, primaryLimit int) int {
+	routing, active := apiKeyFallbackRoutingForGroup(ctx, liveGroupID(identity.GroupID))
+	if !active || routing.fallbackGroup == nil {
+		return primaryLimit
+	}
+	return routing.fallbackGroup.UserConcurrencyLimit
+}
+
 func liveOptionalID(value int64) *int64 {
 	if value <= 0 {
 		return nil
@@ -182,6 +229,12 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		account := selection.Account
+		effectiveSubscriptionID, subscriptionErr := s.resolveLiveSubscriptionID(ctx, identity)
+		if subscriptionErr != nil {
+			selection.ReleaseFunc()
+			return nil, fmt.Errorf("resolve live subscription: %w", subscriptionErr)
+		}
+		effectiveGroupMaxConcurrency := liveGroupConcurrencyLimit(ctx, identity, groupMaxConcurrency)
 		leaseID := generateRequestID()
 		acquired, acquireErr := s.acquireLiveLease(
 			ctx,
@@ -190,7 +243,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			account.Concurrency,
 			identity,
 			userMaxConcurrency,
-			groupMaxConcurrency,
+			effectiveGroupMaxConcurrency,
 			leaseID,
 			true,
 		)
@@ -226,8 +279,8 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			APIKeyID:              identity.APIKeyID,
 			UserID:                identity.UserID,
 			GroupID:               liveGroupID(identity.GroupID),
-			GroupConcurrencyLimit: groupMaxConcurrency,
-			SubscriptionID:        liveGroupID(identity.SubscriptionID),
+			GroupConcurrencyLimit: effectiveGroupMaxConcurrency,
+			SubscriptionID:        effectiveSubscriptionID,
 			LeaseID:               leaseID,
 			Model:                 model,
 			CreatedAt:             now,
@@ -536,13 +589,28 @@ func (s *OpenAIGatewayService) GetLiveCallForIdentity(
 	if record.CallID != callID ||
 		record.APIKeyID != identity.APIKeyID ||
 		record.UserID != identity.UserID ||
-		record.GroupID != liveGroupID(identity.GroupID) {
+		!liveIdentityGroupMatches(record.GroupID, identity) {
 		return nil, ErrLiveIdentityMismatch
 	}
 	if record.Controller == LiveControllerClosed {
 		return nil, ErrLiveCallNotFound
 	}
 	return record, nil
+}
+
+// liveIdentityGroupMatches accepts the primary group and the API key's
+// configured fallback group. The sideband request is authenticated after the
+// initial Live call, so its freshly materialized API key still points at the
+// primary group even when the stored call was created after fallback routing.
+// APIKeyID and UserID are checked by the caller, so permitting this second
+// group does not broaden access to another key or user.
+func liveIdentityGroupMatches(recordGroupID int64, identity LiveCallIdentity) bool {
+	primaryGroupID := liveGroupID(identity.GroupID)
+	if recordGroupID == primaryGroupID {
+		return true
+	}
+	fallbackGroupID := liveGroupID(identity.FallbackGroupID)
+	return fallbackGroupID > 0 && fallbackGroupID != primaryGroupID && recordGroupID == fallbackGroupID
 }
 
 // ProxyLiveSideband 让认证后的客户端接管控制连接；媒体始终不经过这里。

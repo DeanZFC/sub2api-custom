@@ -103,6 +103,33 @@ func (_u *BatchImageJobUpdate) ClearAccountID() *BatchImageJobUpdate {
 	return _u
 }
 
+// SetRoutedGroupID sets the "routed_group_id" field.
+func (_u *BatchImageJobUpdate) SetRoutedGroupID(v int64) *BatchImageJobUpdate {
+	_u.mutation.ResetRoutedGroupID()
+	_u.mutation.SetRoutedGroupID(v)
+	return _u
+}
+
+// SetNillableRoutedGroupID sets the "routed_group_id" field if the given value is not nil.
+func (_u *BatchImageJobUpdate) SetNillableRoutedGroupID(v *int64) *BatchImageJobUpdate {
+	if v != nil {
+		_u.SetRoutedGroupID(*v)
+	}
+	return _u
+}
+
+// AddRoutedGroupID adds value to the "routed_group_id" field.
+func (_u *BatchImageJobUpdate) AddRoutedGroupID(v int64) *BatchImageJobUpdate {
+	_u.mutation.AddRoutedGroupID(v)
+	return _u
+}
+
+// ClearRoutedGroupID clears the value of the "routed_group_id" field.
+func (_u *BatchImageJobUpdate) ClearRoutedGroupID() *BatchImageJobUpdate {
+	_u.mutation.ClearRoutedGroupID()
+	return _u
+}
+
 // SetProvider sets the "provider" field.
 func (_u *BatchImageJobUpdate) SetProvider(v string) *BatchImageJobUpdate {
 	_u.mutation.SetProvider(v)
@@ -937,6 +964,15 @@ func (_u *BatchImageJobUpdate) sqlSave(ctx context.Context) (_node int, err erro
 	if _u.mutation.AccountIDCleared() {
 		_spec.ClearField(batchimagejob.FieldAccountID, field.TypeInt64)
 	}
+	if value, ok := _u.mutation.RoutedGroupID(); ok {
+		_spec.SetField(batchimagejob.FieldRoutedGroupID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedRoutedGroupID(); ok {
+		_spec.AddField(batchimagejob.FieldRoutedGroupID, field.TypeInt64, value)
+	}
+	if _u.mutation.RoutedGroupIDCleared() {
+		_spec.ClearField(batchimagejob.FieldRoutedGroupID, field.TypeInt64)
+	}
 	if value, ok := _u.mutation.Provider(); ok {
 		_spec.SetField(batchimagejob.FieldProvider, field.TypeString, value)
 	}
@@ -1227,6 +1263,33 @@ func (_u *BatchImageJobUpdateOne) AddAccountID(v int64) *BatchImageJobUpdateOne 
 // ClearAccountID clears the value of the "account_id" field.
 func (_u *BatchImageJobUpdateOne) ClearAccountID() *BatchImageJobUpdateOne {
 	_u.mutation.ClearAccountID()
+	return _u
+}
+
+// SetRoutedGroupID sets the "routed_group_id" field.
+func (_u *BatchImageJobUpdateOne) SetRoutedGroupID(v int64) *BatchImageJobUpdateOne {
+	_u.mutation.ResetRoutedGroupID()
+	_u.mutation.SetRoutedGroupID(v)
+	return _u
+}
+
+// SetNillableRoutedGroupID sets the "routed_group_id" field if the given value is not nil.
+func (_u *BatchImageJobUpdateOne) SetNillableRoutedGroupID(v *int64) *BatchImageJobUpdateOne {
+	if v != nil {
+		_u.SetRoutedGroupID(*v)
+	}
+	return _u
+}
+
+// AddRoutedGroupID adds value to the "routed_group_id" field.
+func (_u *BatchImageJobUpdateOne) AddRoutedGroupID(v int64) *BatchImageJobUpdateOne {
+	_u.mutation.AddRoutedGroupID(v)
+	return _u
+}
+
+// ClearRoutedGroupID clears the value of the "routed_group_id" field.
+func (_u *BatchImageJobUpdateOne) ClearRoutedGroupID() *BatchImageJobUpdateOne {
+	_u.mutation.ClearRoutedGroupID()
 	return _u
 }
 
@@ -2093,6 +2156,15 @@ func (_u *BatchImageJobUpdateOne) sqlSave(ctx context.Context) (_node *BatchImag
 	}
 	if _u.mutation.AccountIDCleared() {
 		_spec.ClearField(batchimagejob.FieldAccountID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.RoutedGroupID(); ok {
+		_spec.SetField(batchimagejob.FieldRoutedGroupID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedRoutedGroupID(); ok {
+		_spec.AddField(batchimagejob.FieldRoutedGroupID, field.TypeInt64, value)
+	}
+	if _u.mutation.RoutedGroupIDCleared() {
+		_spec.ClearField(batchimagejob.FieldRoutedGroupID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Provider(); ok {
 		_spec.SetField(batchimagejob.FieldProvider, field.TypeString, value)

@@ -576,7 +576,8 @@ type AccountSelectionResult struct {
 	ReleaseFunc func()
 	WaitPlan    *AccountWaitPlan // nil means no wait allowed
 	// RoutedGroupID is set when API-key fallback routing selected an account from
-	// a group other than the API key's primary billing group.
+	// a group other than the API key's original group. That routed group becomes
+	// the effective billing and usage-attribution group for this request.
 	RoutedGroupID      int64
 	UsedAPIKeyFallback bool
 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的

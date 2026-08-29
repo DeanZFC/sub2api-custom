@@ -74,6 +74,43 @@ func TestAPIKeyGroupFallback_UsesFallbackOnlyAfterPrimaryUnavailable(t *testing.
 	require.Equal(t, fallbackGroupID, selection.RoutedGroupID)
 }
 
+func TestAPIKeyGroupFallback_SwitchesRequestBillingGroup(t *testing.T) {
+	primaryGroupID := int64(51013)
+	fallbackGroupID := int64(51014)
+	override := 9
+	primary := &Group{
+		ID: primaryGroupID, Name: "primary", Platform: PlatformOpenAI,
+		Status: StatusActive, Hydrated: true, RateMultiplier: 1,
+	}
+	fallback := &Group{
+		ID: fallbackGroupID, Name: "fallback", Platform: PlatformOpenAI,
+		Status: StatusActive, Hydrated: true, RateMultiplier: 2.5,
+		PeakRateEnabled: true, PeakRateMultiplier: 1.4,
+	}
+	apiKey := &APIKey{
+		GroupID:         &primaryGroupID,
+		FallbackGroupID: &fallbackGroupID,
+		Group:           primary,
+		FallbackGroup:   fallback,
+		User:            &User{ID: 77, UserGroupRPMOverride: &override},
+	}
+	ctx := WithAPIKeyGroupFallbackRouting(context.Background(), apiKey)
+
+	account, err := selectAccountWithAPIKeyGroupFallback(ctx, &primaryGroupID, "gpt-test", func(_ context.Context, groupID *int64) (*Account, error) {
+		if *groupID == primaryGroupID {
+			return nil, ErrNoAvailableAccounts
+		}
+		return &Account{ID: 52014}, nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(52014), account.ID)
+	require.Equal(t, fallbackGroupID, *apiKey.GroupID)
+	require.Same(t, fallback, apiKey.Group)
+	require.Equal(t, 2.5, apiKey.Group.RateMultiplier)
+	require.Nil(t, apiKey.User.UserGroupRPMOverride)
+}
+
 func TestAPIKeyGroupFallback_DoesNotRunForInfrastructureError(t *testing.T) {
 	primaryGroupID := int64(51021)
 	fallbackGroupID := int64(51022)

@@ -2134,7 +2134,7 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	fallbackGroupID := fallbackGroup.ID
 	selection, decision, err = s.selectAccountForImagesInGroup(fallbackCtx, &fallbackGroupID, sessionHash, requestedModel, excludedIDs, requiredCapability)
 	if err == nil {
-		markAPIKeyFallbackSelection(selection, fallbackGroupID)
+		markAPIKeyFallbackSelection(ctx, selection, fallbackGroupID)
 		s.logAPIKeyGroupFallbackSelected(groupID, fallbackGroupID, requestedModel, selection)
 	}
 	return selection, decision, err
@@ -2186,7 +2186,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerAndAPIKeyFallback(
 		"model", requestedModel)
 	selection, decision, err = s.selectAccountWithScheduler(fallbackCtx, &fallbackGroupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	if err == nil {
-		markAPIKeyFallbackSelection(selection, fallbackGroupID)
+		markAPIKeyFallbackSelection(ctx, selection, fallbackGroupID)
 		s.logAPIKeyGroupFallbackSelected(groupID, fallbackGroupID, requestedModel, selection)
 	}
 	return selection, decision, err

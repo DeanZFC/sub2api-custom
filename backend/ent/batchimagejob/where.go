@@ -74,6 +74,11 @@ func AccountID(v int64) predicate.BatchImageJob {
 	return predicate.BatchImageJob(sql.FieldEQ(FieldAccountID, v))
 }
 
+// RoutedGroupID applies equality check predicate on the "routed_group_id" field. It's identical to RoutedGroupIDEQ.
+func RoutedGroupID(v int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldEQ(FieldRoutedGroupID, v))
+}
+
 // Provider applies equality check predicate on the "provider" field. It's identical to ProviderEQ.
 func Provider(v string) predicate.BatchImageJob {
 	return predicate.BatchImageJob(sql.FieldEQ(FieldProvider, v))
@@ -457,6 +462,56 @@ func AccountIDIsNil() predicate.BatchImageJob {
 // AccountIDNotNil applies the NotNil predicate on the "account_id" field.
 func AccountIDNotNil() predicate.BatchImageJob {
 	return predicate.BatchImageJob(sql.FieldNotNull(FieldAccountID))
+}
+
+// RoutedGroupIDEQ applies the EQ predicate on the "routed_group_id" field.
+func RoutedGroupIDEQ(v int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldEQ(FieldRoutedGroupID, v))
+}
+
+// RoutedGroupIDNEQ applies the NEQ predicate on the "routed_group_id" field.
+func RoutedGroupIDNEQ(v int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldNEQ(FieldRoutedGroupID, v))
+}
+
+// RoutedGroupIDIn applies the In predicate on the "routed_group_id" field.
+func RoutedGroupIDIn(vs ...int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldIn(FieldRoutedGroupID, vs...))
+}
+
+// RoutedGroupIDNotIn applies the NotIn predicate on the "routed_group_id" field.
+func RoutedGroupIDNotIn(vs ...int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldNotIn(FieldRoutedGroupID, vs...))
+}
+
+// RoutedGroupIDGT applies the GT predicate on the "routed_group_id" field.
+func RoutedGroupIDGT(v int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldGT(FieldRoutedGroupID, v))
+}
+
+// RoutedGroupIDGTE applies the GTE predicate on the "routed_group_id" field.
+func RoutedGroupIDGTE(v int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldGTE(FieldRoutedGroupID, v))
+}
+
+// RoutedGroupIDLT applies the LT predicate on the "routed_group_id" field.
+func RoutedGroupIDLT(v int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldLT(FieldRoutedGroupID, v))
+}
+
+// RoutedGroupIDLTE applies the LTE predicate on the "routed_group_id" field.
+func RoutedGroupIDLTE(v int64) predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldLTE(FieldRoutedGroupID, v))
+}
+
+// RoutedGroupIDIsNil applies the IsNil predicate on the "routed_group_id" field.
+func RoutedGroupIDIsNil() predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldIsNull(FieldRoutedGroupID))
+}
+
+// RoutedGroupIDNotNil applies the NotNil predicate on the "routed_group_id" field.
+func RoutedGroupIDNotNil() predicate.BatchImageJob {
+	return predicate.BatchImageJob(sql.FieldNotNull(FieldRoutedGroupID))
 }
 
 // ProviderEQ applies the EQ predicate on the "provider" field.

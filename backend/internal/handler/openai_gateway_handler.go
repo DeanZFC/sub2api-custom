@@ -174,12 +174,24 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
 	}
+	// Preserve the immutable API-key snapshot captured by
+	// wrapUsageRecordTaskContext while replacing the request context with the
+	// worker's bounded timeout context.
+	if snapshot, ok := service.APIKeyUsageSnapshotFromContext(parent); ok {
+		base = service.WithAPIKeyUsageSnapshot(base, snapshot)
+	}
 	return base
 }
 
 func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecordTask) service.UsageRecordTask {
 	if task == nil {
 		return nil
+	}
+	// Capture the effective API-key/group at submission time. Fallback routing
+	// mutates the request-local API key in place, and a later WS turn or request
+	// could otherwise change what an already queued usage task observes.
+	if apiKey, ok := service.APIKeyForUsageContext(parent); ok {
+		parent = service.WithAPIKeyUsageSnapshot(parent, apiKey)
 	}
 	return func(ctx context.Context) {
 		task(usageRecordContext(parent, ctx))
@@ -3584,7 +3596,10 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	if apiKey != nil {
 		apiKeyID = apiKey.ID
 		apiKeyName = apiKey.Name
-		groupID = apiKey.GroupID
+		if apiKey.GroupID != nil {
+			groupIDValue := *apiKey.GroupID
+			groupID = &groupIDValue
+		}
 		if apiKey.User != nil {
 			userID = apiKey.User.ID
 			userEmail = apiKey.User.Email
@@ -3631,6 +3646,10 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	if apiKey != nil {
 		apiKeyPrefix = keyPrefix(apiKey.Key, 8)
 	}
+	// This path uses a detached goroutine instead of the usage worker pool.
+	// Capture the effective group/API-key now for the same reason the normal
+	// usage-task wrapper does: a later fallback switch must not rewrite billing.
+	usageAPIKey := service.CloneAPIKeyForUsage(apiKey)
 	opsMeta := cyberPolicyOpsErrorMeta{
 		RequestID:       requestID,
 		ClientRequestID: clientRequestID,
@@ -3679,7 +3698,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		}
 		if forwardErrored && gwSvc != nil {
 			gwSvc.RecordCyberPolicyUsageLog(ctx, service.CyberPolicyUsageInput{
-				APIKey:             apiKey,
+				APIKey:             usageAPIKey,
 				Account:            account,
 				Subscription:       subscription,
 				RequestID:          requestID,

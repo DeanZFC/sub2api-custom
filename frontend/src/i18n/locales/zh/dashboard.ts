@@ -106,7 +106,7 @@ export default {
     fallbackGroupShortLabel: '兜底',
     selectFallbackGroup: '选择兜底',
     noFallbackGroup: '不设置兜底分组',
-    fallbackGroupHint: '仅当主分组没有可用账号时使用；每次请求始终先尝试主分组。计费、额度和并发仍归属主分组。',
+    fallbackGroupHint: '仅当主分组没有可用账号时使用；每次请求始终先尝试主分组，命中兜底后按兜底分组计费并归属用量。',
     fallbackGroupInvalid: '兜底分组必须与主分组不同且属于同一平台',
     statusLabel: '状态',
     selectStatus: '选择状态',

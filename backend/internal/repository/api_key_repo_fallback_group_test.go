@@ -26,7 +26,13 @@ func TestAPIKeyRepository_GetByKeyForAuthLoadsFallbackGroup(t *testing.T) {
 		SetPlatform(service.PlatformOpenAI).
 		SetStatus(service.StatusActive).
 		SetSubscriptionType(service.SubscriptionTypeStandard).
-		SetRateMultiplier(1).
+		SetRateMultiplier(2.5).
+		SetRpmLimit(60).
+		SetUserConcurrencyLimit(3).
+		SetPeakRateEnabled(true).
+		SetPeakStart("09:00").
+		SetPeakEnd("18:00").
+		SetPeakRateMultiplier(1.4).
 		Save(ctx)
 	require.NoError(t, err)
 
@@ -48,6 +54,13 @@ func TestAPIKeyRepository_GetByKeyForAuthLoadsFallbackGroup(t *testing.T) {
 	require.Equal(t, fallback.ID, got.FallbackGroup.ID)
 	require.Equal(t, service.PlatformOpenAI, got.FallbackGroup.Platform)
 	require.Equal(t, service.StatusActive, got.FallbackGroup.Status)
+	require.Equal(t, 2.5, got.FallbackGroup.RateMultiplier)
+	require.Equal(t, 60, got.FallbackGroup.RPMLimit)
+	require.Equal(t, 3, got.FallbackGroup.UserConcurrencyLimit)
+	require.True(t, got.FallbackGroup.PeakRateEnabled)
+	require.Equal(t, "09:00", got.FallbackGroup.PeakStart)
+	require.Equal(t, "18:00", got.FallbackGroup.PeakEnd)
+	require.Equal(t, 1.4, got.FallbackGroup.PeakRateMultiplier)
 
 	keys, err := repo.ListKeysByGroupID(ctx, fallback.ID)
 	require.NoError(t, err)

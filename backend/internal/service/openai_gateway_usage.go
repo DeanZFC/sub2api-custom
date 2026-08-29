@@ -141,8 +141,28 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	apiKey := input.APIKey
 	user := input.User
+	if snapshot, ok := APIKeyUsageSnapshotFromContext(ctx); ok {
+		apiKey = snapshot
+		if snapshot.User != nil {
+			user = snapshot.User
+		}
+	}
 	account := input.Account
 	subscription := input.Subscription
+	subscription, err := resolveUsageSubscription(ctx, s.userSubRepo, apiKey, user, subscription)
+	if err != nil {
+		return fmt.Errorf("resolve usage subscription: %w", err)
+	}
+	input.Subscription = subscription
+	fallbackBilling := isAPIKeyFallbackActive(apiKey)
+	input.ChannelUsageFields = resolveAPIKeyFallbackChannelUsageFields(
+		ctx,
+		s.channelService,
+		apiKey,
+		input.ChannelUsageFields,
+		result.Model,
+		result.UpstreamModel,
+	)
 	if !isGrokVideoUsageResult(result, nil) {
 		ApplyOpenAIImageBillingResolution(result)
 	}
@@ -183,25 +203,45 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
 
 	var cost *CostBreakdown
-	var err error
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
-	if result.BillingModel != "" {
+	if result.BillingModel != "" && !fallbackBilling {
 		billingModel = strings.TrimSpace(result.BillingModel)
 	}
-	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
-		billingModel = input.ChannelMappedModel
+	if fallbackBilling {
+		billingModel = fallbackAwareOpenAIBillingModel(result, input.ChannelUsageFields)
+	} else {
+		if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
+			billingModel = input.ChannelMappedModel
+		}
+		if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
+			billingModel = input.OriginalModel
+		}
 	}
-	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
-		billingModel = input.OriginalModel
+	var billingModels []string
+	if fallbackBilling && !openAIResultHasMediaBilling(result) {
+		// result.BillingModel may have been produced by the primary group's
+		// channel mapping. For token requests it must not re-enter the candidate
+		// chain, otherwise a primary-only price can win after the fallback switch.
+		billingModels = usageBillingModelCandidates(
+			billingModel,
+			input.ChannelMappedModel,
+			input.OriginalModel,
+			result.UpstreamModel,
+			result.Model,
+		)
+	} else {
+		// Media bridges use result.BillingModel as an explicit semantic billing
+		// model (for example an image model alias), so retain it as a fallback
+		// candidate even when the request was routed through the fallback group.
+		billingModels = usageBillingModelCandidates(
+			billingModel,
+			result.BillingModel,
+			input.ChannelMappedModel,
+			input.OriginalModel,
+			result.UpstreamModel,
+			result.Model,
+		)
 	}
-	billingModels := usageBillingModelCandidates(
-		billingModel,
-		result.BillingModel,
-		input.ChannelMappedModel,
-		input.OriginalModel,
-		result.UpstreamModel,
-		result.Model,
-	)
 	billingModels = s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, billingModels)
 	serviceTier := ""
 	if result.ServiceTier != nil {
@@ -421,8 +461,18 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
+		accountStatsModel := result.UpstreamModel
+		if fallbackBilling && usageLog.ChannelID == nil {
+			// No fallback channel means a primary channel mapping must not drive
+			// account-stat pricing. The routed group will resolve its own model
+			// pricing (or the original requested model) below.
+			accountStatsModel = input.ChannelMappedModel
+		}
+		if fallbackBilling && input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" {
+			accountStatsModel = input.ChannelMappedModel
+		}
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
+			account.ID, *apiKey.GroupID, accountStatsModel, result.Model,
 			tokens, cost.TotalCost,
 		)
 	}

@@ -336,9 +336,13 @@ func (s *OpenAIGatewayService) ResolveGrokMediaVideoRequestAccount(
 // first observes a completed video URL. Status may omit model/duration; we fall
 // back to this snapshot, then defaults.
 type GrokVideoPendingBilling struct {
-	Model                string `json:"model"`
-	BillingModel         string `json:"billing_model,omitempty"`
-	UpstreamModel        string `json:"upstream_model,omitempty"`
+	Model         string `json:"model"`
+	BillingModel  string `json:"billing_model,omitempty"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	// BillingGroupID is the group that actually accepted the asynchronous
+	// create request. It is used to restore fallback routing on later status or
+	// content polls, after the original request context has disappeared.
+	BillingGroupID       *int64 `json:"billing_group_id,omitempty"`
 	VideoResolution      string `json:"video_resolution,omitempty"`
 	VideoDurationSeconds int    `json:"video_duration_seconds,omitempty"`
 	OriginalModel        string `json:"original_model,omitempty"`

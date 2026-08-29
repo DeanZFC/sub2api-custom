@@ -398,6 +398,11 @@ func setAPIKeyFallbackContext(c *gin.Context, apiKey *service.APIKey) {
 		return
 	}
 	ctx := service.WithAPIKeyGroupFallbackRouting(c.Request.Context(), apiKey)
+	// Keep the request-local API key in the standard context as well as Gin's
+	// key/value store. Usage records are submitted asynchronously and need to
+	// capture the effective (possibly fallback-routed) group before the worker
+	// runs; retaining only the mutable Gin pointer can misattribute queued work.
+	ctx = service.WithAPIKeyForUsageContext(ctx, apiKey)
 	c.Request = c.Request.WithContext(ctx)
 }
 

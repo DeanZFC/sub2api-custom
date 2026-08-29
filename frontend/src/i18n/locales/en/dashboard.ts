@@ -106,7 +106,7 @@ export default {
     fallbackGroupShortLabel: 'Fallback',
     selectFallbackGroup: 'Select fallback',
     noFallbackGroup: 'No fallback group',
-    fallbackGroupHint: 'Used only when the primary group has no available accounts. Every request always tries the primary group first. Billing, quotas, and concurrency remain on the primary group.',
+    fallbackGroupHint: 'Used only when the primary group has no available accounts. Every request tries the primary group first; requests routed to fallback use its pricing and usage attribution.',
     fallbackGroupInvalid: 'The fallback group must differ from the primary group and use the same platform',
     statusLabel: 'Status',
     selectStatus: 'Select status',

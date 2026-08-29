@@ -232,14 +232,10 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldProfitSafetyBuffer,
 			)
 		}).
-		WithFallbackGroup(func(q *dbent.GroupQuery) {
-			q.Select(
-				group.FieldID,
-				group.FieldName,
-				group.FieldPlatform,
-				group.FieldStatus,
-			)
-		}).
+		// The fallback group becomes the effective billing group when selected, so
+		// its complete pricing, subscription, RPM and concurrency configuration is
+		// required in the request-local auth snapshot.
+		WithFallbackGroup().
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {

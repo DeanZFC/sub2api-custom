@@ -116,7 +116,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	fallbackGroupID := fallbackGroup.ID
 	selection, err = s.selectAccountWithLoadAwareness(fallbackCtx, &fallbackGroupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
 	if err == nil {
-		markAPIKeyFallbackSelection(selection, fallbackGroupID)
+		markAPIKeyFallbackSelection(ctx, selection, fallbackGroupID)
 		slog.Info("api_key_group_fallback_selected",
 			"primary_group_id", derefGroupID(groupID),
 			"fallback_group_id", fallbackGroupID,

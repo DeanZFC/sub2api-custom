@@ -11523,6 +11523,8 @@ type BatchImageJobMutation struct {
 	addapi_key_id       *int64
 	account_id          *int64
 	addaccount_id       *int64
+	routed_group_id     *int64
+	addrouted_group_id  *int64
 	provider            *string
 	model               *string
 	task_name           *string
@@ -11902,6 +11904,76 @@ func (m *BatchImageJobMutation) ResetAccountID() {
 	m.account_id = nil
 	m.addaccount_id = nil
 	delete(m.clearedFields, batchimagejob.FieldAccountID)
+}
+
+// SetRoutedGroupID sets the "routed_group_id" field.
+func (m *BatchImageJobMutation) SetRoutedGroupID(i int64) {
+	m.routed_group_id = &i
+	m.addrouted_group_id = nil
+}
+
+// RoutedGroupID returns the value of the "routed_group_id" field in the mutation.
+func (m *BatchImageJobMutation) RoutedGroupID() (r int64, exists bool) {
+	v := m.routed_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRoutedGroupID returns the old "routed_group_id" field's value of the BatchImageJob entity.
+// If the BatchImageJob object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BatchImageJobMutation) OldRoutedGroupID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRoutedGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRoutedGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRoutedGroupID: %w", err)
+	}
+	return oldValue.RoutedGroupID, nil
+}
+
+// AddRoutedGroupID adds i to the "routed_group_id" field.
+func (m *BatchImageJobMutation) AddRoutedGroupID(i int64) {
+	if m.addrouted_group_id != nil {
+		*m.addrouted_group_id += i
+	} else {
+		m.addrouted_group_id = &i
+	}
+}
+
+// AddedRoutedGroupID returns the value that was added to the "routed_group_id" field in this mutation.
+func (m *BatchImageJobMutation) AddedRoutedGroupID() (r int64, exists bool) {
+	v := m.addrouted_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearRoutedGroupID clears the value of the "routed_group_id" field.
+func (m *BatchImageJobMutation) ClearRoutedGroupID() {
+	m.routed_group_id = nil
+	m.addrouted_group_id = nil
+	m.clearedFields[batchimagejob.FieldRoutedGroupID] = struct{}{}
+}
+
+// RoutedGroupIDCleared returns if the "routed_group_id" field was cleared in this mutation.
+func (m *BatchImageJobMutation) RoutedGroupIDCleared() bool {
+	_, ok := m.clearedFields[batchimagejob.FieldRoutedGroupID]
+	return ok
+}
+
+// ResetRoutedGroupID resets all changes to the "routed_group_id" field.
+func (m *BatchImageJobMutation) ResetRoutedGroupID() {
+	m.routed_group_id = nil
+	m.addrouted_group_id = nil
+	delete(m.clearedFields, batchimagejob.FieldRoutedGroupID)
 }
 
 // SetProvider sets the "provider" field.
@@ -13702,7 +13774,7 @@ func (m *BatchImageJobMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *BatchImageJobMutation) Fields() []string {
-	fields := make([]string, 0, 40)
+	fields := make([]string, 0, 41)
 	if m.batch_id != nil {
 		fields = append(fields, batchimagejob.FieldBatchID)
 	}
@@ -13714,6 +13786,9 @@ func (m *BatchImageJobMutation) Fields() []string {
 	}
 	if m.account_id != nil {
 		fields = append(fields, batchimagejob.FieldAccountID)
+	}
+	if m.routed_group_id != nil {
+		fields = append(fields, batchimagejob.FieldRoutedGroupID)
 	}
 	if m.provider != nil {
 		fields = append(fields, batchimagejob.FieldProvider)
@@ -13839,6 +13914,8 @@ func (m *BatchImageJobMutation) Field(name string) (ent.Value, bool) {
 		return m.APIKeyID()
 	case batchimagejob.FieldAccountID:
 		return m.AccountID()
+	case batchimagejob.FieldRoutedGroupID:
+		return m.RoutedGroupID()
 	case batchimagejob.FieldProvider:
 		return m.Provider()
 	case batchimagejob.FieldModel:
@@ -13928,6 +14005,8 @@ func (m *BatchImageJobMutation) OldField(ctx context.Context, name string) (ent.
 		return m.OldAPIKeyID(ctx)
 	case batchimagejob.FieldAccountID:
 		return m.OldAccountID(ctx)
+	case batchimagejob.FieldRoutedGroupID:
+		return m.OldRoutedGroupID(ctx)
 	case batchimagejob.FieldProvider:
 		return m.OldProvider(ctx)
 	case batchimagejob.FieldModel:
@@ -14036,6 +14115,13 @@ func (m *BatchImageJobMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetAccountID(v)
+		return nil
+	case batchimagejob.FieldRoutedGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRoutedGroupID(v)
 		return nil
 	case batchimagejob.FieldProvider:
 		v, ok := value.(string)
@@ -14306,6 +14392,9 @@ func (m *BatchImageJobMutation) AddedFields() []string {
 	if m.addaccount_id != nil {
 		fields = append(fields, batchimagejob.FieldAccountID)
 	}
+	if m.addrouted_group_id != nil {
+		fields = append(fields, batchimagejob.FieldRoutedGroupID)
+	}
 	if m.additem_count != nil {
 		fields = append(fields, batchimagejob.FieldItemCount)
 	}
@@ -14347,6 +14436,8 @@ func (m *BatchImageJobMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedAPIKeyID()
 	case batchimagejob.FieldAccountID:
 		return m.AddedAccountID()
+	case batchimagejob.FieldRoutedGroupID:
+		return m.AddedRoutedGroupID()
 	case batchimagejob.FieldItemCount:
 		return m.AddedItemCount()
 	case batchimagejob.FieldSuccessCount:
@@ -14394,6 +14485,13 @@ func (m *BatchImageJobMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddAccountID(v)
+		return nil
+	case batchimagejob.FieldRoutedGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRoutedGroupID(v)
 		return nil
 	case batchimagejob.FieldItemCount:
 		v, ok := value.(int)
@@ -14471,6 +14569,9 @@ func (m *BatchImageJobMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(batchimagejob.FieldAccountID) {
 		fields = append(fields, batchimagejob.FieldAccountID)
+	}
+	if m.FieldCleared(batchimagejob.FieldRoutedGroupID) {
+		fields = append(fields, batchimagejob.FieldRoutedGroupID)
 	}
 	if m.FieldCleared(batchimagejob.FieldProviderJobName) {
 		fields = append(fields, batchimagejob.FieldProviderJobName)
@@ -14558,6 +14659,9 @@ func (m *BatchImageJobMutation) ClearField(name string) error {
 	case batchimagejob.FieldAccountID:
 		m.ClearAccountID()
 		return nil
+	case batchimagejob.FieldRoutedGroupID:
+		m.ClearRoutedGroupID()
+		return nil
 	case batchimagejob.FieldProviderJobName:
 		m.ClearProviderJobName()
 		return nil
@@ -14643,6 +14747,9 @@ func (m *BatchImageJobMutation) ResetField(name string) error {
 		return nil
 	case batchimagejob.FieldAccountID:
 		m.ResetAccountID()
+		return nil
+	case batchimagejob.FieldRoutedGroupID:
+		m.ResetRoutedGroupID()
 		return nil
 	case batchimagejob.FieldProvider:
 		m.ResetProvider()

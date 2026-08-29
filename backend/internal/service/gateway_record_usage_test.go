@@ -522,6 +522,73 @@ func TestGatewayServiceRecordUsage_UsesFallbackRequestIDForUsageLog(t *testing.T
 	require.Equal(t, "local:gateway-local-fallback", usageRepo.lastLog.RequestID)
 }
 
+func TestGatewayServiceRecordUsage_FallbackStandardGroupUsesBalanceBilling(t *testing.T) {
+	primaryGroupID := int64(61201)
+	fallbackGroupID := int64(61202)
+	user := &User{ID: 62201}
+	primary := &Group{
+		ID: primaryGroupID, Name: "primary", Platform: PlatformAnthropic,
+		Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription,
+		RateMultiplier: 1,
+	}
+	fallback := &Group{
+		ID: fallbackGroupID, Name: "fallback-standard", Platform: PlatformAnthropic,
+		Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeStandard,
+		RateMultiplier: 1.75,
+	}
+	apiKey := &APIKey{
+		ID: 63201, UserID: user.ID, User: user,
+		GroupID: &primaryGroupID, Group: primary,
+		FallbackGroupID: &fallbackGroupID, FallbackGroup: fallback,
+	}
+	ctx := WithAPIKeyGroupFallbackRouting(context.Background(), apiKey)
+	_, err := selectAccountWithAPIKeyGroupFallback(ctx, &primaryGroupID, "claude-sonnet-4", func(_ context.Context, groupID *int64) (*Account, error) {
+		if *groupID == primaryGroupID {
+			return nil, ErrNoAvailableAccounts
+		}
+		return &Account{ID: 64201}, nil
+	})
+	require.NoError(t, err)
+	require.True(t, isAPIKeyFallbackActive(apiKey))
+
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{active: &UserSubscription{
+		ID: 65202, UserID: user.ID, GroupID: fallbackGroupID,
+	}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo)
+
+	err = svc.RecordUsage(ctx, &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_fallback_standard_billing",
+			Usage:     ClaudeUsage{InputTokens: 1000, OutputTokens: 100},
+			Model:     "claude-sonnet-4",
+			Duration:  time.Second,
+		},
+		APIKey: apiKey, User: user,
+		Account: &Account{ID: 64201, Type: AccountTypeAPIKey},
+		// Primary subscription snapshot must not be reused after fallback.
+		Subscription: &UserSubscription{ID: 65201, UserID: user.ID, GroupID: primaryGroupID},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 0, subRepo.getActiveCalls)
+	require.Equal(t, 0, subRepo.incrementCalls)
+	require.Equal(t, 0, userRepo.deductCalls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, fallbackGroupID, *usageRepo.lastLog.GroupID)
+	require.Nil(t, usageRepo.lastLog.SubscriptionID)
+	require.Equal(t, BillingTypeBalance, usageRepo.lastLog.BillingType)
+	require.Equal(t, 1.75, usageRepo.lastLog.RateMultiplier)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.Nil(t, billingRepo.lastCmd.SubscriptionID)
+	require.Zero(t, billingRepo.lastCmd.SubscriptionCost)
+	require.Greater(t, billingRepo.lastCmd.BalanceCost, 0.0)
+	require.InDelta(t, usageRepo.lastLog.ActualCost, billingRepo.lastCmd.BalanceCost, 1e-12)
+}
+
 func TestGatewayServiceRecordUsage_PrefersClientRequestIDOverUpstreamRequestID(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{}
 	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}

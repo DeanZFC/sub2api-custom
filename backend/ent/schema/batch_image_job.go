@@ -32,6 +32,9 @@ func (BatchImageJob) Fields() []ent.Field {
 		field.Int64("user_id"),
 		field.Int64("api_key_id").Optional().Nillable(),
 		field.Int64("account_id").Optional().Nillable(),
+		// The effective group is persisted because settlement is asynchronous and
+		// may outlive the API-key request context (including fallback routing).
+		field.Int64("routed_group_id").Optional().Nillable(),
 		field.String("provider").MaxLen(32),
 		field.String("model").MaxLen(128),
 		field.String("task_name").MaxLen(255).Default(""),
