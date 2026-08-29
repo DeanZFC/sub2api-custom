@@ -14,15 +14,15 @@
 - 固定指纹开关默认开启；没有显式账号模式时按账号 ID 派生稳定设备指纹，账号 extra 中显式设置 `codex_fingerprint_mode: off` 可单独关闭
 - 账号编辑页新增 `CPA 指纹出口（推荐）` 选项，对应 `codex_fingerprint_mode: account_device`；保留底层值以兼容已有账号
 - Fork 版本文件：`FORK_VERSION`
-- 更新源：`DeanZFC/sub2api-custom` 的 `codex-overdraft` 分支
+- 更新源：`DeanZFC/sub2api-custom` 的 `sub2api-custom` 分支
 
 ## Fork 更新检查
 
 源码 Docker 构建会读取根目录的 `FORK_VERSION`，并以 `BuildType=source` 写入二进制。后台更新服务通过 GitHub Contents API 读取 Fork 分支上的同名文件，使用语义化版本比较判断是否有新版本。Redis 缓存同时记录仓库和构建类型，因此旧的官方更新缓存不会继续生效。
 
-源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.183-overdraft.8`。
+源码构建仅显示 `git pull` 更新提示，`PerformUpdate`、指定版本回退和在线回退列表均被禁用，防止官方二进制覆盖透支功能。维护者每次发布 Fork 更新都必须递增 `FORK_VERSION`；当前版本为 `0.1.184-custom.1`。
 
-公开项目名已经统一为 `sub2api-custom`。`codex-overdraft` 分支和当前 `-overdraft.N` 版本后缀仅为兼容既有服务器与 SemVer 更新顺序而保留；历史标签不重写。下一次提升官方基础版本后，可从更高核心版本开始使用 `-custom.N`。
+公开项目名、默认分支和新版本后缀已经统一为 `sub2api-custom` / `sub2api-custom` / `-custom.N`。`codex-overdraft` 仅作为旧部署的过渡兼容分支保留，历史 `-overdraft.N` 标签不重写。首次切换使用更高核心版本 `0.1.184-custom.1`，保证已部署的 `0.1.183-overdraft.8` 能按 SemVer 正确识别更新；当前官方合并基线仍为 Sub2API `v0.1.183`。
 
 Sub2API `v0.1.179` 继续保留原生 remote compaction v2 在 `/responses` 路径。本定制同时检查旧 Compact 路径和原生 v2 请求信号，二者都不会开启额度透支调度或注入透支请求形态。
 

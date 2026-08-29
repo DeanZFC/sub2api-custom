@@ -22,7 +22,7 @@
 - 同周期 `failed` 为终态，晚到的成功结果不能覆盖；并发 claim 冲突会重新读取数据库状态后完成业务失败收敛。
 - 扩充结构化额度证据解析并记录逐次探测日志，便于区分明确额度耗尽与临时上游故障。
 - `failed` 状态、账号暂停和 scheduler outbox 在同一个数据库事务内提交，并对持久化失败进行有限重试和同周期幂等保护。
-- 更新检查跟踪 `DeanZFC/sub2api-custom` 的 `codex-overdraft` 分支和 `FORK_VERSION`，不再把官方 Release 误报为 Fork 更新。
+- 更新检查跟踪 `DeanZFC/sub2api-custom` 的 `sub2api-custom` 分支和 `FORK_VERSION`，不再把官方 Release 误报为 Fork 更新。
 - 源码构建只提示 `git pull` 和重新构建，禁用可能覆盖 Fork 功能的二进制在线更新与回退。
 - 源码 Compose 构建固定从仓库 `FORK_VERSION` 读取版本，避免宿主机遗留的 `BUILD_VERSION` 把页面版本覆盖成分支名。
 - 根目录、部署目录和后端开发 Dockerfile 统一使用 Go `1.26.6`，与 `backend/go.mod` 及 CI 约束保持一致。
@@ -38,14 +38,14 @@ Patch 共修改 65 个源码和文档文件。`patches/` 目录本身不包含�
 
 ```bash
 curl -L \
-  https://raw.githubusercontent.com/DeanZFC/sub2api-custom/codex-overdraft/patches/sub2api-overdraft-v0.1.177-baeac1f3d.patch \
+  https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-custom/patches/sub2api-overdraft-v0.1.177-baeac1f3d.patch \
   -o /tmp/sub2api-overdraft.patch
 ```
 
 在 Sub2API 源码目录执行：
 
 ```bash
-git switch -c codex-overdraft-patched \
+git switch -c sub2api-custom-patched \
   baeac1f3de21d37b129405f092ef86c24b3f203d
 git apply --check /tmp/sub2api-overdraft.patch
 git apply --3way /tmp/sub2api-overdraft.patch
@@ -58,7 +58,7 @@ git apply --3way /tmp/sub2api-overdraft.patch
 Patch 的精确基线是 `baeac1f3d`。应用到后续 Sub2API 版本时，先创建独立分支，再使用三方合并模式：
 
 ```bash
-git switch -c codex-overdraft-reapply
+git switch -c sub2api-custom-reapply
 git apply --3way /tmp/sub2api-overdraft.patch
 ```
 

@@ -52,7 +52,7 @@ sudo chown -R "$(id -u):$(id -g)" /opt/sub2api-custom
 cd /opt/sub2api-custom/deploy
 ```
 
-仓库默认分支暂时保留历史兼容名称 `codex-overdraft`，避免已有服务器和更新检查失效。确认当前分支：
+仓库默认分支为 `sub2api-custom`。确认当前分支：
 
 ```bash
 git branch --show-current
@@ -61,7 +61,7 @@ git branch --show-current
 预期输出：
 
 ```text
-codex-overdraft
+sub2api-custom
 ```
 
 ### 2. 创建环境配置
@@ -214,7 +214,7 @@ git remote -v
 有未提交代码时先保存：
 
 ```bash
-git stash push -u -m "server changes before codex-overdraft switch"
+git stash push -u -m "server changes before sub2api-custom switch"
 ```
 
 然后连接本 Fork 并切换到公开分支：
@@ -222,9 +222,9 @@ git stash push -u -m "server changes before codex-overdraft switch"
 ```bash
 git remote set-url origin https://github.com/DeanZFC/sub2api-custom.git
 git fetch origin
-git switch codex-overdraft 2>/dev/null || \
-  git switch -c codex-overdraft --track origin/codex-overdraft
-git pull --ff-only origin codex-overdraft
+git switch sub2api-custom 2>/dev/null || \
+  git switch -c sub2api-custom --track origin/sub2api-custom
+git pull --ff-only origin sub2api-custom
 ```
 
 如果 Git 报 `detected dubious ownership`，确认目录确实是本项目后再执行：
@@ -383,7 +383,7 @@ sudo systemctl reload nginx
 
 ## 日常升级本 Fork
 
-源码镜像的当前版本来自仓库根目录的 `FORK_VERSION`。后台检查更新时读取 GitHub 上 `codex-overdraft` 分支的同名文件：远端版本更高时显示更新提示，版本一致时显示最新。源码构建不会执行二进制在线更新或在线回退，以免官方程序覆盖 Fork 功能。
+源码镜像的当前版本来自仓库根目录的 `FORK_VERSION`。后台检查更新时读取 GitHub 上 `sub2api-custom` 分支的同名文件：远端版本更高时显示更新提示，版本一致时显示最新。源码构建不会执行二进制在线更新或在线回退，以免官方程序覆盖 Fork 功能。
 
 运行数据均位于被 Git 忽略的目录中，正常 `git pull` 不会覆盖：
 
@@ -399,8 +399,8 @@ deploy/redis_data/
 ```bash
 cd /opt/sub2api-custom
 git status --short
-git switch codex-overdraft
-git pull --ff-only origin codex-overdraft
+git switch sub2api-custom
+git pull --ff-only origin sub2api-custom
 
 cd deploy
 docker compose \
@@ -411,22 +411,23 @@ docker compose \
 
 如果服务器目录是 `/opt/sub2api`，只需替换第一条路径。升级完成后重新执行“判断功能是否生效”中的镜像、环境变量和日志检查。
 
-更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.183-overdraft.8`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
+更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.184-custom.1`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
 
 ```bash
 docker exec sub2api-custom /app/sub2api -version
 ```
 
-维护者发布新的源码版本时必须递增 `FORK_VERSION`，例如从 `0.1.183-overdraft.7` 改为 `0.1.183-overdraft.8`。同步到新的上游 Sub2API 版本时，版本号应同时反映官方版本和 Fork 修订号，例如 `0.1.183-overdraft.8`。
+维护者发布新的源码版本时必须递增 `FORK_VERSION`。项目更名后的首个版本从 `0.1.183-overdraft.8` 切换为 `0.1.184-custom.1`；同一基础版本的后续修订依次使用 `0.1.184-custom.2`、`0.1.184-custom.3`。
 
-`-overdraft.N` 是旧版本线的兼容标识，不再代表公开项目名。为保证已部署的旧版本能按 SemVer 正确识别更新，`0.1.183` 系列继续使用该后缀；切换到更高的官方基础版本时再启用 `-custom.N`。
+历史 `-overdraft.N` 标签继续保留且不重写。新版本将核心版本提升到 `0.1.184` 后再使用 `-custom.N`，确保旧版 SemVer 比较器会把 `0.1.184-custom.1` 正确判断为高于 `0.1.183-overdraft.8`。当前代码的官方合并基线仍单独记录为 Sub2API `v0.1.183`，两者不混淆。
 
 ## 合并 Sub2API 官方更新
 
-本仓库保留两个分支角色：
+本仓库保留三个分支角色：
 
 - `main`：尽量跟随官方 `Wei-Shaw/sub2api`，作为上游基线。
-- `codex-overdraft`：本项目默认分支，包含透支功能和公开文档。
+- `sub2api-custom`：本项目默认分支，包含全部二开功能和公开文档。
+- `codex-overdraft`：旧部署的过渡兼容分支；迁移期间与默认分支指向同一发布提交，不再作为新部署入口。
 
 维护者可这样合并官方更新：
 
@@ -434,7 +435,7 @@ docker exec sub2api-custom /app/sub2api -version
 git remote get-url upstream >/dev/null 2>&1 || \
   git remote add upstream https://github.com/Wei-Shaw/sub2api.git
 git fetch upstream
-git switch codex-overdraft
+git switch sub2api-custom
 git merge upstream/main
 ```
 
@@ -457,7 +458,9 @@ pnpm exec vitest run \
 
 cd ..
 git diff --check
-git push origin codex-overdraft
+git push origin sub2api-custom
+# 兼容迁移期内同步旧更新通道；全部服务器切换后可停止执行。
+git push origin sub2api-custom:codex-overdraft
 ```
 
 更详细的实现文件和升级核对清单见 [CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md](CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md)。
@@ -518,7 +521,7 @@ docker compose \
 jsonb_build_object($1::text, $2::jsonb)
 ```
 
-拉取最新 `codex-overdraft` 分支并使用 `--build --force-recreate` 重建应用容器。
+拉取最新 `sub2api-custom` 分支并使用 `--build --force-recreate` 重建应用容器。
 
 ### API 返回 503 `no available accounts`
 
