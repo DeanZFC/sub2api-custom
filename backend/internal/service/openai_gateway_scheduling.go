@@ -1156,7 +1156,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if err != nil {
 			return nil, err
 		}
-		result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+		result, err := s.tryAcquireAccountSlotForAccount(ctx, account)
 		if err == nil && result != nil && result.Acquired {
 			return s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 		}
@@ -1223,7 +1223,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					} else if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else {
-						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+						result, err := s.tryAcquireAccountSlotForAccount(ctx, account)
 						if err == nil && result != nil && result.Acquired {
 							selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 							if selectErr != nil {
@@ -1388,7 +1388,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			result, err := s.tryAcquireAccountSlotForAccount(ctx, fresh)
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1427,7 +1427,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			result, err := s.tryAcquireAccountSlotForAccount(ctx, fresh)
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1533,6 +1533,30 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
 	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+}
+
+func (s *OpenAIGatewayService) tryAcquireAccountSlotForAccount(ctx context.Context, account *Account, concurrencyOverride ...int) (*AcquireResult, error) {
+	if account == nil {
+		return nil, fmt.Errorf("account is nil")
+	}
+	maxConcurrency := account.Concurrency
+	if len(concurrencyOverride) > 0 {
+		maxConcurrency = concurrencyOverride[0]
+	}
+	if s.concurrencyService == nil {
+		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
+	}
+	if account.ProxyConcurrencyLimitEnabled() {
+		result, proxyID, err := s.concurrencyService.AcquireAccountProxySlot(ctx, account.ID, account.ProxyPoolIDs, maxConcurrency)
+		if result != nil && result.Acquired && proxyID > 0 {
+			if proxy := findProxyByID(account.ProxyPool, proxyID); proxy != nil {
+				account.Proxy = proxy
+				account.ProxyID = &proxyID
+			}
+		}
+		return result, err
+	}
+	return s.concurrencyService.AcquireAccountSlot(ctx, account.ID, maxConcurrency)
 }
 
 func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
@@ -1743,6 +1767,25 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
 		return nil, err
+	}
+	if account != nil && account.ProxyConcurrencyLimitEnabled() && account.ProxyID != nil {
+		if proxy := findProxyByID(hydrated.ProxyPool, *account.ProxyID); proxy != nil {
+			hydrated.Proxy = proxy
+			hydrated.ProxyID = account.ProxyID
+		} else if proxy := findProxyByID(account.ProxyPool, *account.ProxyID); proxy != nil {
+			hydrated.Proxy = proxy
+			hydrated.ProxyID = account.ProxyID
+		} else if s.accountRepo != nil {
+			// A pre-upgrade scheduler cache may contain pool IDs but no eager-loaded
+			// proxy objects. Recover the selected exit once from the source of truth.
+			if latest, loadErr := s.accountRepo.GetByID(ctx, account.ID); loadErr == nil && latest != nil {
+				hydrated.ProxyPool = latest.ProxyPool
+				if proxy := findProxyByID(latest.ProxyPool, *account.ProxyID); proxy != nil {
+					hydrated.Proxy = proxy
+					hydrated.ProxyID = account.ProxyID
+				}
+			}
+		}
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 		Account:     hydrated,

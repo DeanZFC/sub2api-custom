@@ -60,6 +60,8 @@ export interface GrokSSOToOAuthRequest {
   name?: string
   notes?: string | null
   proxy_id?: number | null
+  proxy_concurrency_limit_enabled?: boolean
+  proxy_pool_ids?: number[]
   group_ids?: number[]
   credentials?: Record<string, unknown>
   extra?: Record<string, unknown>

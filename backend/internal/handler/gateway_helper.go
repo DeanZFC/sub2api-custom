@@ -280,6 +280,30 @@ func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID
 	return result.ReleaseFunc, true, nil
 }
 
+func (h *ConcurrencyHelper) TryAcquireAccountSlotForAccount(ctx context.Context, account *service.Account, maxConcurrency int) (func(), bool, error) {
+	if account == nil {
+		return nil, false, fmt.Errorf("account is nil")
+	}
+	if account.ProxyConcurrencyLimitEnabled() {
+		result, proxyID, err := h.concurrencyService.AcquireAccountProxySlot(ctx, account.ID, account.ProxyPoolIDs, maxConcurrency)
+		if err != nil {
+			return nil, false, err
+		}
+		if result == nil || !result.Acquired {
+			return nil, false, nil
+		}
+		for _, proxy := range account.ProxyPool {
+			if proxy != nil && proxy.ID == proxyID {
+				account.Proxy = proxy
+				account.ProxyID = &proxyID
+				break
+			}
+		}
+		return result.ReleaseFunc, true, nil
+	}
+	return h.TryAcquireAccountSlot(ctx, account.ID, maxConcurrency)
+}
+
 // AcquireUserSlotWithWait acquires a user concurrency slot, waiting if necessary.
 // For streaming requests, sends ping events during the wait.
 // streamStarted is updated if streaming response has begun.
@@ -496,6 +520,28 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeoutUsing(c *gin.Context, slot
 // AcquireAccountSlotWithWaitTimeout acquires an account slot with a custom timeout (keeps SSE ping).
 func (h *ConcurrencyHelper) AcquireAccountSlotWithWaitTimeout(c *gin.Context, accountID int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool) (func(), error) {
 	return h.waitForSlotWithPingTimeout(c, "account", accountID, maxConcurrency, timeout, isStream, streamStarted, true)
+}
+
+func (h *ConcurrencyHelper) AcquireAccountSlotWithWaitTimeoutForAccount(c *gin.Context, account *service.Account, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool) (func(), error) {
+	ctx := c.Request.Context()
+	release, acquired, err := h.TryAcquireAccountSlotForAccount(ctx, account, maxConcurrency)
+	if err != nil || acquired {
+		return release, err
+	}
+	return h.waitForSlotWithPingTimeoutUsing(c, "account", maxConcurrency, timeout, isStream, streamStarted, true,
+		func(ctx context.Context) (*service.AcquireResult, error) {
+			result, proxyID, err := h.concurrencyService.AcquireAccountProxySlot(ctx, account.ID, account.ProxyPoolIDs, maxConcurrency)
+			if result != nil && result.Acquired && proxyID > 0 {
+				for _, proxy := range account.ProxyPool {
+					if proxy != nil && proxy.ID == proxyID {
+						account.Proxy = proxy
+						account.ProxyID = &proxyID
+						break
+					}
+				}
+			}
+			return result, err
+		})
 }
 
 // nextBackoff 计算下一次退避时间

@@ -407,9 +407,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					}
 				}
 
-				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
+				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeoutForAccount(
 					c,
-					account.ID,
+					account,
 					selection.WaitPlan.MaxConcurrency,
 					selection.WaitPlan.Timeout,
 					reqStream,
@@ -730,9 +730,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					}
 				}
 
-				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
+				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeoutForAccount(
 					c,
-					account.ID,
+					account,
 					selection.WaitPlan.MaxConcurrency,
 					selection.WaitPlan.Timeout,
 					reqStream,

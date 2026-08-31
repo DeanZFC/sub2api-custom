@@ -408,6 +408,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
+	accountExtra = ApplyProxyPoolExtra(accountExtra, input.ProxyConcurrencyLimitEnabled, input.ProxyPoolIDs, input.ProxyPoolIDs != nil)
 	rateLimit429RetryCount := DefaultRateLimit429RetryCount
 	if input.RateLimit429RetryCount != nil {
 		if err := ValidateRateLimit429RetryCount(*input.RateLimit429RetryCount); err != nil {
@@ -428,6 +429,12 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Priority:               input.Priority,
 		Status:                 StatusActive,
 		Schedulable:            true,
+	}
+	account.SyncProxyPoolConfig()
+	if account.ProxyConcurrencyLimitEnabled() {
+		// Pool mode owns proxy selection at request time; do not retain a legacy
+		// single-proxy column that could be used by non-scheduler code paths.
+		account.ProxyID = nil
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -506,6 +513,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 			return nil, err
 		}
 	}
+	if err := s.validateProxyPoolIDsExist(ctx, input.ProxyPoolIDs); err != nil {
+		return nil, err
+	}
 
 	// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
@@ -561,6 +571,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if input.ProxyPoolIDs != nil {
+		if err := s.validateProxyPoolIDsExist(ctx, *input.ProxyPoolIDs); err != nil {
+			return nil, err
+		}
 	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
@@ -673,6 +688,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			OllamaCloudUsageAutoRefreshExtraKey,
 			OllamaCloudUsageSnapshotExtraKey,
 			OpenAIAutoResetCreditStateExtraKey,
+			ProxyConcurrencyLimitEnabledExtraKey,
+			ProxyPoolIDsExtraKey,
 		} {
 			if v, ok := account.Extra[key]; ok {
 				normalizedExtra[key] = v
@@ -700,6 +717,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if input.Extra == nil {
 		account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
+	}
+	if input.ProxyConcurrencyLimitEnabled != nil || input.ProxyPoolIDs != nil {
+		var poolIDs []int64
+		if input.ProxyPoolIDs != nil {
+			poolIDs = *input.ProxyPoolIDs
+		}
+		account.Extra = ApplyProxyPoolExtra(account.Extra, input.ProxyConcurrencyLimitEnabled, poolIDs, input.ProxyPoolIDs != nil)
+		account.SyncProxyPoolConfig()
+		if account.ProxyConcurrencyLimitEnabled() && !account.IsCredentialShadow() {
+			account.ProxyID = nil
+			account.Proxy = nil
+		}
 	}
 	if requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate {
 		if requestedProbeEnabledUpdate != nil && !*requestedProbeEnabledUpdate {
@@ -740,6 +769,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			account.ProxyID = input.ProxyID
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
+	}
+	if account.ProxyConcurrencyLimitEnabled() && !account.IsCredentialShadow() {
+		// Pool mode is mutually exclusive with the legacy proxy_id column even
+		// when a caller sends both fields in the same update payload.
+		account.ProxyID = nil
+		account.Proxy = nil
 	}
 	if !reflect.DeepEqual(previousProbeIdentity, upstreamBillingProbeIdentity(account)) && account.Extra != nil {
 		delete(account.Extra, UpstreamBillingProbeExtraKey)
@@ -1546,6 +1581,39 @@ func (s *adminServiceImpl) validateGroupIDsExist(ctx context.Context, groupIDs [
 	for _, groupID := range groupIDs {
 		if _, err := s.groupRepo.GetByID(ctx, groupID); err != nil {
 			return fmt.Errorf("get group: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *adminServiceImpl) validateProxyPoolIDsExist(ctx context.Context, proxyIDs []int64) error {
+	for _, proxyID := range proxyIDs {
+		if proxyID <= 0 {
+			return fmt.Errorf("invalid proxy id %d", proxyID)
+		}
+	}
+	proxyIDs = NormalizeProxyPoolIDs(proxyIDs)
+	if len(proxyIDs) == 0 {
+		// An empty pool is valid: it means the account has no configured proxy
+		// exits and remains compatible with the legacy direct-connection mode.
+		return nil
+	}
+	if s.proxyRepo == nil {
+		return errors.New("proxy repository not configured")
+	}
+	proxies, err := s.proxyRepo.ListByIDs(ctx, proxyIDs)
+	if err != nil {
+		return fmt.Errorf("check proxy pool exists: %w", err)
+	}
+	exists := make(map[int64]struct{}, len(proxies))
+	for _, proxy := range proxies {
+		if proxy.ID > 0 {
+			exists[proxy.ID] = struct{}{}
+		}
+	}
+	for _, proxyID := range proxyIDs {
+		if _, ok := exists[proxyID]; !ok {
+			return fmt.Errorf("get proxy: %w", ErrProxyNotFound)
 		}
 	}
 	return nil

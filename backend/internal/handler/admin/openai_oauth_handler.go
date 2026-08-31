@@ -169,22 +169,24 @@ type OpenAIRefreshTokenRequest struct {
 }
 
 type OpenAICodexPATCreateRequest struct {
-	AccessToken             string         `json:"access_token" binding:"required"`
-	Name                    string         `json:"name"`
-	Notes                   *string        `json:"notes"`
-	GroupIDs                []int64        `json:"group_ids"`
-	ProxyID                 *int64         `json:"proxy_id"`
-	Concurrency             *int           `json:"concurrency"`
-	RateLimit429RetryCount  *int           `json:"rate_limit_429_retry_count"`
-	Priority                *int           `json:"priority"`
-	RateMultiplier          *float64       `json:"rate_multiplier"`
-	LoadFactor              *int           `json:"load_factor"`
-	ExpiresAt               *int64         `json:"expires_at"`
-	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
-	CredentialExtras        map[string]any `json:"credential_extras"`
-	Extra                   map[string]any `json:"extra"`
-	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind"`
-	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
+	AccessToken                  string         `json:"access_token" binding:"required"`
+	Name                         string         `json:"name"`
+	Notes                        *string        `json:"notes"`
+	GroupIDs                     []int64        `json:"group_ids"`
+	ProxyID                      *int64         `json:"proxy_id"`
+	ProxyConcurrencyLimitEnabled *bool          `json:"proxy_concurrency_limit_enabled"`
+	ProxyPoolIDs                 []int64        `json:"proxy_pool_ids"`
+	Concurrency                  *int           `json:"concurrency"`
+	RateLimit429RetryCount       *int           `json:"rate_limit_429_retry_count"`
+	Priority                     *int           `json:"priority"`
+	RateMultiplier               *float64       `json:"rate_multiplier"`
+	LoadFactor                   *int           `json:"load_factor"`
+	ExpiresAt                    *int64         `json:"expires_at"`
+	AutoPauseOnExpired           *bool          `json:"auto_pause_on_expired"`
+	CredentialExtras             map[string]any `json:"credential_extras"`
+	Extra                        map[string]any `json:"extra"`
+	SkipDefaultGroupBind         *bool          `json:"skip_default_group_bind"`
+	ConfirmMixedChannelRisk      *bool          `json:"confirm_mixed_channel_risk"`
 }
 
 // RefreshToken refreshes an OpenAI OAuth token
@@ -296,16 +298,18 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 // POST /api/v1/admin/openai/create-from-oauth
 func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 	var req struct {
-		SessionID              string  `json:"session_id" binding:"required"`
-		Code                   string  `json:"code" binding:"required"`
-		State                  string  `json:"state" binding:"required"`
-		RedirectURI            string  `json:"redirect_uri"`
-		ProxyID                *int64  `json:"proxy_id"`
-		Name                   string  `json:"name"`
-		Concurrency            int     `json:"concurrency"`
-		RateLimit429RetryCount *int    `json:"rate_limit_429_retry_count"`
-		Priority               int     `json:"priority"`
-		GroupIDs               []int64 `json:"group_ids"`
+		SessionID                    string  `json:"session_id" binding:"required"`
+		Code                         string  `json:"code" binding:"required"`
+		State                        string  `json:"state" binding:"required"`
+		RedirectURI                  string  `json:"redirect_uri"`
+		ProxyID                      *int64  `json:"proxy_id"`
+		ProxyConcurrencyLimitEnabled *bool   `json:"proxy_concurrency_limit_enabled"`
+		ProxyPoolIDs                 []int64 `json:"proxy_pool_ids"`
+		Name                         string  `json:"name"`
+		Concurrency                  int     `json:"concurrency"`
+		RateLimit429RetryCount       *int    `json:"rate_limit_429_retry_count"`
+		Priority                     int     `json:"priority"`
+		GroupIDs                     []int64 `json:"group_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -347,16 +351,18 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 
 	// Create account
 	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
-		Name:                   name,
-		Platform:               platform,
-		Type:                   "oauth",
-		Credentials:            credentials,
-		Extra:                  nil,
-		ProxyID:                req.ProxyID,
-		Concurrency:            req.Concurrency,
-		RateLimit429RetryCount: req.RateLimit429RetryCount,
-		Priority:               req.Priority,
-		GroupIDs:               req.GroupIDs,
+		Name:                         name,
+		Platform:                     platform,
+		Type:                         "oauth",
+		Credentials:                  credentials,
+		Extra:                        nil,
+		ProxyID:                      req.ProxyID,
+		ProxyConcurrencyLimitEnabled: req.ProxyConcurrencyLimitEnabled,
+		ProxyPoolIDs:                 req.ProxyPoolIDs,
+		Concurrency:                  req.Concurrency,
+		RateLimit429RetryCount:       req.RateLimit429RetryCount,
+		Priority:                     req.Priority,
+		GroupIDs:                     req.GroupIDs,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -444,23 +450,25 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 	}
 
 	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
-		Name:                   buildOpenAICodexPATAccountName(req.Name, tokenInfo),
-		Notes:                  req.Notes,
-		Platform:               service.PlatformOpenAI,
-		Type:                   service.AccountTypeOAuth,
-		Credentials:            credentials,
-		Extra:                  extra,
-		ProxyID:                req.ProxyID,
-		Concurrency:            concurrency,
-		RateLimit429RetryCount: req.RateLimit429RetryCount,
-		Priority:               priority,
-		RateMultiplier:         req.RateMultiplier,
-		LoadFactor:             req.LoadFactor,
-		GroupIDs:               req.GroupIDs,
-		ExpiresAt:              req.ExpiresAt,
-		AutoPauseOnExpired:     req.AutoPauseOnExpired,
-		SkipDefaultGroupBind:   skipDefaultGroupBind,
-		SkipMixedChannelCheck:  req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk,
+		Name:                         buildOpenAICodexPATAccountName(req.Name, tokenInfo),
+		Notes:                        req.Notes,
+		Platform:                     service.PlatformOpenAI,
+		Type:                         service.AccountTypeOAuth,
+		Credentials:                  credentials,
+		Extra:                        extra,
+		ProxyID:                      req.ProxyID,
+		ProxyConcurrencyLimitEnabled: req.ProxyConcurrencyLimitEnabled,
+		ProxyPoolIDs:                 req.ProxyPoolIDs,
+		Concurrency:                  concurrency,
+		RateLimit429RetryCount:       req.RateLimit429RetryCount,
+		Priority:                     priority,
+		RateMultiplier:               req.RateMultiplier,
+		LoadFactor:                   req.LoadFactor,
+		GroupIDs:                     req.GroupIDs,
+		ExpiresAt:                    req.ExpiresAt,
+		AutoPauseOnExpired:           req.AutoPauseOnExpired,
+		SkipDefaultGroupBind:         skipDefaultGroupBind,
+		SkipMixedChannelCheck:        req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

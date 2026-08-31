@@ -25,16 +25,18 @@ import (
 const (
 	// 并发槽位键前缀（有序集合）
 	// 格式: concurrency:account:{accountID}
-	accountSlotKeyPrefix = "concurrency:account:"
+	accountSlotKeyPrefix      = "concurrency:account:"
+	accountProxySlotKeyPrefix = "concurrency:account_proxy:"
 	// 格式: concurrency:user:{userID}
 	userSlotKeyPrefix      = "concurrency:user:"
 	userGroupSlotKeyPrefix = "concurrency:user_group:"
 	// 格式: concurrency:api_key:{apiKeyID}
-	apiKeySlotKeyPrefix        = "concurrency:api_key:"
-	liveAccountSlotKeyPrefix   = "concurrency:live:account:"
-	liveUserSlotKeyPrefix      = "concurrency:live:user:"
-	liveUserGroupSlotKeyPrefix = "concurrency:live:user_group:"
-	liveAPIKeySlotKeyPrefix    = "concurrency:live:api_key:"
+	apiKeySlotKeyPrefix           = "concurrency:api_key:"
+	liveAccountSlotKeyPrefix      = "concurrency:live:account:"
+	liveAccountProxySlotKeyPrefix = "concurrency:live:account_proxy:"
+	liveUserSlotKeyPrefix         = "concurrency:live:user:"
+	liveUserGroupSlotKeyPrefix    = "concurrency:live:user_group:"
+	liveAPIKeySlotKeyPrefix       = "concurrency:live:api_key:"
 	// API-key-scoped client WebSocket ingress leases use a shorter TTL than
 	// ordinary request slots, because idle ingress sessions do not hold a turn slot.
 	openAIWSIngressLeaseKeyPrefix  = "concurrency:openai_ws_ingress:api_key:"
@@ -106,6 +108,40 @@ var (
 		end
 
 		return {0, now}
+	`)
+	// acquireBalancedAccountProxyScript selects and reserves the least-loaded
+	// proxy in one Redis transaction. KEYS contains all slot keys followed by
+	// all live-slot keys; ARGV is maxConcurrency, slotTTL, requestID, tie offset,
+	// then the corresponding proxy IDs.
+	acquireBalancedAccountProxyScript = redis.NewScript(`
+		redis.replicate_commands()
+		local maxConcurrency = tonumber(ARGV[1])
+		local ttl = tonumber(ARGV[2])
+		local requestID = ARGV[3]
+		local offset = tonumber(ARGV[4])
+		local proxyCount = #KEYS / 2
+		local bestIndex = 0
+		local bestCount = maxConcurrency
+		local now = tonumber(redis.call('TIME')[1])
+		for step = 0, proxyCount - 1 do
+			local index = ((offset + step) % proxyCount) + 1
+			local key = KEYS[index]
+			local liveKey = KEYS[proxyCount + index]
+			redis.call('ZREMRANGEBYSCORE', key, '-inf', now - ttl)
+			redis.call('ZREMRANGEBYSCORE', liveKey, '-inf', now - 60)
+			local count = redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
+			if count < bestCount then
+				bestCount = count
+				bestIndex = index
+			end
+		end
+		if bestIndex == 0 then
+			return {0, 0, now}
+		end
+		local selectedKey = KEYS[bestIndex]
+		redis.call('ZADD', selectedKey, now, requestID)
+		redis.call('EXPIRE', selectedKey, ttl)
+		return {1, tonumber(ARGV[4 + bestIndex]), now}
 	`)
 
 	// acquireUserGroupScript checks both user-wide and per-(user,group) sets
@@ -721,6 +757,21 @@ func runScriptInt64Pair(ctx context.Context, rdb *redis.Client, script *redis.Sc
 	return first, second, nil
 }
 
+func runScriptInt64Triple(ctx context.Context, rdb *redis.Client, script *redis.Script, keys []string, args ...any) (int64, int64, int64, error) {
+	raw, err := script.Run(ctx, rdb, keys, args...).Result()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	values := [3]int64{}
+	for i := range values {
+		values[i], err = redisScriptInt64At(raw, i)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("parse script value %d: %w", i, err)
+		}
+	}
+	return values[0], values[1], values[2], nil
+}
+
 // Account slot operations
 
 func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -735,6 +786,57 @@ func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int
 		c.touchActiveIndexAt(ctx, accountActiveIndexKey, accountID, now+int64(c.slotTTLSeconds))
 	}
 	return result == 1, nil
+}
+
+func accountProxySlotKey(accountID, proxyID int64) string {
+	return accountProxySlotKeyPrefix + strconv.FormatInt(accountID, 10) + ":" + strconv.FormatInt(proxyID, 10)
+}
+
+func liveAccountProxySlotKey(accountID, proxyID int64) string {
+	return liveAccountProxySlotKeyPrefix + strconv.FormatInt(accountID, 10) + ":" + strconv.FormatInt(proxyID, 10)
+}
+
+func (c *concurrencyCache) AcquireAccountProxySlot(ctx context.Context, accountID, proxyID int64, maxConcurrency int, requestID string) (bool, error) {
+	if maxConcurrency <= 0 {
+		return true, nil
+	}
+	result, _, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, []string{accountProxySlotKey(accountID, proxyID), liveAccountProxySlotKey(accountID, proxyID)}, maxConcurrency, c.slotTTLSeconds, requestID)
+	return result == 1, err
+}
+
+func (c *concurrencyCache) AcquireAccountProxySlotBalanced(ctx context.Context, accountID int64, proxyIDs []int64, maxConcurrency int, requestID string) (bool, int64, error) {
+	if len(proxyIDs) == 0 || maxConcurrency <= 0 {
+		if len(proxyIDs) == 0 {
+			return false, 0, nil
+		}
+		return true, proxyIDs[0], nil
+	}
+	keys := make([]string, 0, len(proxyIDs)*2)
+	for _, proxyID := range proxyIDs {
+		keys = append(keys, accountProxySlotKey(accountID, proxyID))
+	}
+	for _, proxyID := range proxyIDs {
+		keys = append(keys, liveAccountProxySlotKey(accountID, proxyID))
+	}
+	offset := 0
+	for i := 0; i < len(requestID); i++ {
+		offset = (offset*31 + int(requestID[i])) % len(proxyIDs)
+	}
+	args := make([]any, 0, 4+len(proxyIDs))
+	args = append(args, maxConcurrency, c.slotTTLSeconds, requestID, offset)
+	for _, proxyID := range proxyIDs {
+		args = append(args, proxyID)
+	}
+	result, proxyID, _, err := runScriptInt64Triple(ctx, c.rdb, acquireBalancedAccountProxyScript, keys, args...)
+	return result == 1, proxyID, err
+}
+
+func (c *concurrencyCache) ReleaseAccountProxySlot(ctx context.Context, accountID, proxyID int64, requestID string) error {
+	return c.rdb.ZRem(ctx, accountProxySlotKey(accountID, proxyID), requestID).Err()
+}
+
+func (c *concurrencyCache) GetAccountProxyConcurrency(ctx context.Context, accountID, proxyID int64) (int, error) {
+	return getCountScript.Run(ctx, c.rdb, []string{accountProxySlotKey(accountID, proxyID), liveAccountProxySlotKey(accountID, proxyID)}, c.slotTTLSeconds).Int()
 }
 
 func (c *concurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
