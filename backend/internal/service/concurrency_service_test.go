@@ -550,6 +550,22 @@ func TestGetAccountsLoadBatch_NilCache(t *testing.T) {
 	require.Empty(t, result)
 }
 
+func TestBuildAccountWithConcurrencyIncludesProxyPool(t *testing.T) {
+	account := &Account{
+		ID:          42,
+		Concurrency: 10,
+		Extra: map[string]any{
+			ProxyConcurrencyLimitEnabledExtraKey: true,
+			ProxyPoolIDsExtraKey:                 []any{float64(7), float64(9)},
+		},
+	}
+	load := BuildAccountWithConcurrency(account)
+	require.Equal(t, int64(42), load.ID)
+	require.Equal(t, 10, load.MaxConcurrency)
+	require.True(t, load.ProxyConcurrencyLimitEnabled)
+	require.Equal(t, []int64{7, 9}, load.ProxyPoolIDs)
+}
+
 func TestGetAccountsLoadBatch_UsesShortTTLCache(t *testing.T) {
 	cache := &stubConcurrencyCacheForTest{
 		loadBatch: map[int64]*AccountLoadInfo{

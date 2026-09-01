@@ -453,10 +453,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 			// 2. 批量获取负载信息
 			routingLoads := make([]AccountWithConcurrency, 0, len(routingCandidates))
 			for _, acc := range routingCandidates {
-				routingLoads = append(routingLoads, AccountWithConcurrency{
-					ID:             acc.ID,
-					MaxConcurrency: acc.EffectiveLoadFactor(),
-				})
+				routingLoads = append(routingLoads, BuildAccountWithConcurrency(acc))
 			}
 			routingLoadMap, _ := s.concurrencyService.GetAccountsLoadBatch(ctx, routingLoads)
 
@@ -709,10 +706,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
-		accountLoads = append(accountLoads, AccountWithConcurrency{
-			ID:             acc.ID,
-			MaxConcurrency: acc.EffectiveLoadFactor(),
-		})
+		accountLoads = append(accountLoads, BuildAccountWithConcurrency(acc))
 	}
 
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)

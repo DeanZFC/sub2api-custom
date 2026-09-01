@@ -349,8 +349,36 @@ type AcquireResult struct {
 }
 
 type AccountWithConcurrency struct {
-	ID             int64
-	MaxConcurrency int
+	ID                           int64
+	MaxConcurrency               int
+	ProxyConcurrencyLimitEnabled bool
+	ProxyPoolIDs                 []int64
+}
+
+// BuildAccountWithConcurrency carries the routing metadata required to read
+// the correct distributed load buckets. Proxy-limited accounts use one bucket
+// per configured proxy, while ordinary accounts keep the legacy account key.
+func BuildAccountWithConcurrency(account *Account) AccountWithConcurrency {
+	if account == nil {
+		return AccountWithConcurrency{}
+	}
+	proxyPoolIDs := NormalizeProxyPoolIDs(account.ProxyPoolIDs)
+	if len(proxyPoolIDs) == 0 && account.Extra != nil {
+		proxyPoolIDs = NormalizeProxyPoolIDs(account.Extra[ProxyPoolIDsExtraKey])
+	}
+	if len(proxyPoolIDs) == 0 {
+		proxyPoolIDs = nil
+	}
+	proxyLimited := false
+	if account.Extra != nil {
+		proxyLimited, _ = account.Extra[ProxyConcurrencyLimitEnabledExtraKey].(bool)
+	}
+	return AccountWithConcurrency{
+		ID:                           account.ID,
+		MaxConcurrency:               account.EffectiveLoadFactor(),
+		ProxyConcurrencyLimitEnabled: proxyLimited && len(proxyPoolIDs) > 0,
+		ProxyPoolIDs:                 proxyPoolIDs,
+	}
 }
 
 type UserWithConcurrency struct {
@@ -848,6 +876,15 @@ func accountLoadBatchCacheKey(accounts []AccountWithConcurrency) string {
 		binary.LittleEndian.PutUint64(buf[:8], uint64(account.ID))
 		binary.LittleEndian.PutUint64(buf[8:], uint64(int64(account.MaxConcurrency)))
 		_, _ = hash.Write(buf[:])
+		if account.ProxyConcurrencyLimitEnabled {
+			_, _ = hash.Write([]byte{1})
+		} else {
+			_, _ = hash.Write([]byte{0})
+		}
+		for _, proxyID := range account.ProxyPoolIDs {
+			binary.LittleEndian.PutUint64(buf[:8], uint64(proxyID))
+			_, _ = hash.Write(buf[:8])
+		}
 	}
 	sum := hash.Sum(nil)
 	return strconv.Itoa(len(accounts)) + ":" + hex.EncodeToString(sum)

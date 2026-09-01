@@ -758,6 +758,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			return ""
 		}(),
+		ProxyID: func() int64 {
+			if account.ProxyID != nil {
+				return *account.ProxyID
+			}
+			return 0
+		}(),
 		ForceNewConn: false,
 	}
 	pool := s.getOpenAIWSConnPool()

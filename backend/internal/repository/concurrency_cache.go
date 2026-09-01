@@ -1240,7 +1240,8 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 	}
 
 	// 使用 Pipeline 替代 Lua 脚本，兼容 Redis Cluster（Lua 内动态拼 key 会 CROSSSLOT）。
-	// 每个账号执行 3 个命令：ZREMRANGEBYSCORE（清理过期）、ZCARD（并发数）、GET（等待数）。
+	// 普通账号读取账号槽位和等待数；代理池账号读取每个代理槽位并聚合，
+	// 这样调度器看到的容量与实际 AcquireAccountProxySlot 保持一致。
 	now, err := c.rdb.Time(ctx).Result()
 	if err != nil {
 		return nil, fmt.Errorf("redis TIME: %w", err)
@@ -1252,23 +1253,41 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 	type accountCmds struct {
 		id             int64
 		maxConcurrency int
+		proxyLimited   bool
 		zcardCmd       *redis.IntCmd
 		liveCmd        *redis.IntCmd
 		getCmd         *redis.StringCmd
+		proxyZCards    []*redis.IntCmd
+		proxyLiveCards []*redis.IntCmd
 	}
 	cmds := make([]accountCmds, 0, len(accounts))
 	for _, acc := range accounts {
-		slotKey := accountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
-		liveKey := liveAccountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
-		waitKey := accountWaitKeyPrefix + strconv.FormatInt(acc.ID, 10)
-		pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
-		pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10))
 		ac := accountCmds{
 			id:             acc.ID,
 			maxConcurrency: acc.MaxConcurrency,
-			zcardCmd:       pipe.ZCard(ctx, slotKey),
-			liveCmd:        pipe.ZCard(ctx, liveKey),
-			getCmd:         pipe.Get(ctx, waitKey),
+			proxyLimited:   acc.ProxyConcurrencyLimitEnabled && len(acc.ProxyPoolIDs) > 0,
+		}
+		if ac.proxyLimited {
+			for _, proxyID := range acc.ProxyPoolIDs {
+				if proxyID <= 0 {
+					continue
+				}
+				slotKey := accountProxySlotKey(acc.ID, proxyID)
+				liveKey := liveAccountProxySlotKey(acc.ID, proxyID)
+				pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
+				pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10))
+				ac.proxyZCards = append(ac.proxyZCards, pipe.ZCard(ctx, slotKey))
+				ac.proxyLiveCards = append(ac.proxyLiveCards, pipe.ZCard(ctx, liveKey))
+			}
+		} else {
+			slotKey := accountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
+			liveKey := liveAccountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
+			waitKey := accountWaitKeyPrefix + strconv.FormatInt(acc.ID, 10)
+			pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
+			pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10))
+			ac.zcardCmd = pipe.ZCard(ctx, slotKey)
+			ac.liveCmd = pipe.ZCard(ctx, liveKey)
+			ac.getCmd = pipe.Get(ctx, waitKey)
 		}
 		cmds = append(cmds, ac)
 	}
@@ -1279,14 +1298,27 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 
 	loadMap := make(map[int64]*service.AccountLoadInfo, len(accounts))
 	for _, ac := range cmds {
-		currentConcurrency := int(ac.zcardCmd.Val() + ac.liveCmd.Val())
+		currentConcurrency := 0
 		waitingCount := 0
-		if v, err := ac.getCmd.Int(); err == nil {
-			waitingCount = v
+		if ac.proxyLimited {
+			for i := range ac.proxyZCards {
+				currentConcurrency += int(ac.proxyZCards[i].Val() + ac.proxyLiveCards[i].Val())
+			}
+		} else {
+			currentConcurrency = int(ac.zcardCmd.Val() + ac.liveCmd.Val())
+			if v, err := ac.getCmd.Int(); err == nil {
+				waitingCount = v
+			}
 		}
 		loadRate := 0
 		if ac.maxConcurrency > 0 {
-			loadRate = (currentConcurrency + waitingCount) * 100 / ac.maxConcurrency
+			capacity := ac.maxConcurrency
+			if ac.proxyLimited {
+				capacity *= len(ac.proxyZCards)
+			}
+			if capacity > 0 {
+				loadRate = (currentConcurrency + waitingCount) * 100 / capacity
+			}
 		}
 		loadMap[ac.id] = &service.AccountLoadInfo{
 			AccountID:          ac.id,

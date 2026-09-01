@@ -1175,8 +1175,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		if candidate.account == nil {
 			continue
 		}
-		if candidate.loadKnown && candidate.account.Concurrency > 0 &&
-			candidate.loadInfo.CurrentConcurrency >= candidate.account.Concurrency {
+		if candidate.loadKnown && candidate.loadInfo.LoadRate >= 100 {
 			continue
 		}
 
@@ -1482,10 +1481,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			continue
 		}
 		filtered = append(filtered, account)
-		loadReq = append(loadReq, AccountWithConcurrency{
-			ID:             account.ID,
-			MaxConcurrency: account.EffectiveLoadFactor(),
-		})
+		loadReq = append(loadReq, BuildAccountWithConcurrency(account))
 	}
 	if len(filtered) == 0 {
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, filterStats.summary(""))
@@ -1662,10 +1658,7 @@ func buildOpenAIAccountLoadRequest(accounts []*Account) []AccountWithConcurrency
 		if account == nil {
 			continue
 		}
-		loadReq = append(loadReq, AccountWithConcurrency{
-			ID:             account.ID,
-			MaxConcurrency: account.EffectiveLoadFactor(),
-		})
+		loadReq = append(loadReq, BuildAccountWithConcurrency(account))
 	}
 	return loadReq
 }
@@ -1706,8 +1699,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 				continue
 			}
 			if budget != nil && budget.limited {
-				knownFull := candidate.loadKnown && candidate.account.Concurrency > 0 &&
-					candidate.loadInfo.CurrentConcurrency >= candidate.account.Concurrency
+				knownFull := candidate.loadKnown && candidate.loadInfo.LoadRate >= 100
 				if budget.wasAttempted(candidate.account.ID) != wantAttempted || knownFull != wantKnownFull {
 					continue
 				}

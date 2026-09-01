@@ -1306,10 +1306,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
-		accountLoads = append(accountLoads, AccountWithConcurrency{
-			ID:             acc.ID,
-			MaxConcurrency: acc.EffectiveLoadFactor(),
-		})
+		accountLoads = append(accountLoads, BuildAccountWithConcurrency(acc))
 	}
 
 	tryAcquireFromLoadMap := func(loadMap map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
