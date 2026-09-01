@@ -80,6 +80,37 @@ func (s *GatewayService) GatewayProfitControlVetoLatest(ctx context.Context, sel
 	return profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
 }
 
+// restoreSelectedProxyBinding keeps the proxy chosen while acquiring the
+// account/proxy slot attached to the refreshed account object. The scheduler
+// snapshot stores only the persisted default proxy, so replacing selected with
+// that object would otherwise make the request use a different exit than the
+// Redis slot it reserved.
+func restoreSelectedProxyBinding(refreshed, selected *Account) {
+	if refreshed == nil || selected == nil || !selected.ProxyConcurrencyLimitEnabled() || selected.ProxyID == nil {
+		return
+	}
+	proxyID := *selected.ProxyID
+	if proxyID <= 0 {
+		return
+	}
+
+	// Do not share the pointer with the short-lived selection object.
+	refreshedProxyID := proxyID
+	refreshed.ProxyID = &refreshedProxyID
+	if proxy := findProxyByID(refreshed.ProxyPool, proxyID); proxy != nil {
+		refreshed.Proxy = proxy
+		return
+	}
+	if selected.Proxy != nil && selected.Proxy.ID == proxyID {
+		refreshed.Proxy = selected.Proxy
+		return
+	}
+	// Never leave a different persisted proxy attached to the refreshed object:
+	// gateway forwarding requires both ProxyID and Proxy, so clearing it avoids
+	// silently routing through the wrong exit when the selected proxy is absent.
+	refreshed.Proxy = nil
+}
+
 func profitControlVetoLatest(ctx context.Context, selected *Account, snapshot *SchedulerSnapshotService) (*Account, bool, string) {
 	gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
 	if gate == nil || selected == nil {
@@ -94,6 +125,7 @@ func profitControlVetoLatest(ctx context.Context, selected *Account, snapshot *S
 		} else if !refreshed.UpdatedAt.Before(selected.UpdatedAt) {
 			// 选号路径可能已做过 DB recheck，selected 比缓存快照更新鲜；只有
 			// 快照不落后时才替换，避免终检把新鲜账号换回较旧的缓存对象。
+			restoreSelectedProxyBinding(refreshed, selected)
 			latest = refreshed
 		}
 	}
