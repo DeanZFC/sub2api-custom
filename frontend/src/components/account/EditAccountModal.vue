@@ -1591,29 +1591,6 @@
         </div>
       </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label" for="edit-rate-limit-429-retry-count">
-          {{ t('admin.accounts.rateLimit429RetryCount') }}
-        </label>
-        <input
-          v-model.number="form.rate_limit_429_retry_count"
-          id="edit-rate-limit-429-retry-count"
-          type="number"
-          min="0"
-          :max="MAX_RATE_LIMIT_429_RETRY_COUNT"
-          step="1"
-          class="input max-w-xs"
-          @change="form.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count)"
-        />
-        <p class="input-hint">
-          {{
-            t('admin.accounts.rateLimit429RetryCountHint', {
-              default: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
-              max: MAX_RATE_LIMIT_429_RETRY_COUNT
-            })
-          }}
-        </p>
-      </div>
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
@@ -3165,8 +3142,6 @@ const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
-const DEFAULT_RATE_LIMIT_429_RETRY_COUNT = 5
-const MAX_RATE_LIMIT_429_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const GROK_CLIENT_TOOL_CACHE_EXTRA_KEY = 'grok_client_tool_cache_enabled'
 const poolModeEnabled = ref(false)
@@ -3621,7 +3596,6 @@ const form = reactive({
   proxy_concurrency_limit_enabled: false,
   proxy_pool_ids: [] as number[],
   concurrency: 1,
-  rate_limit_429_retry_count: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
@@ -3633,14 +3607,6 @@ const form = reactive({
 const toggleProxyPoolMode = () => {
   form.proxy_concurrency_limit_enabled = !form.proxy_concurrency_limit_enabled
   if (form.proxy_concurrency_limit_enabled) form.proxy_id = null
-}
-
-const normalizeRateLimit429RetryCount = (value: unknown): number => {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) {
-    return DEFAULT_RATE_LIMIT_429_RETRY_COUNT
-  }
-  return Math.min(MAX_RATE_LIMIT_429_RETRY_COUNT, Math.max(0, Math.trunc(parsed)))
 }
 
 const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
@@ -3745,9 +3711,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.proxy_concurrency_limit_enabled = newAccount.proxy_concurrency_limit_enabled === true
   form.proxy_pool_ids = [...(newAccount.proxy_pool_ids || [])]
   form.concurrency = newAccount.concurrency
-  form.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(
-    newAccount.rate_limit_429_retry_count ?? DEFAULT_RATE_LIMIT_429_RETRY_COUNT
-  )
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
@@ -4690,9 +4653,6 @@ const handleSubmit = async () => {
 
   const updatePayload: Record<string, unknown> = { ...form }
   try {
-    updatePayload.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(
-      form.rate_limit_429_retry_count
-    )
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0

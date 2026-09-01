@@ -689,7 +689,7 @@ type UpstreamFailoverError struct {
 	SameAccountRetryDeadline time.Time     // 同账号重试截止时间；零值表示仅受 retryLimit 限制
 	SameAccountRetryMax      int           // 可选的错误级同账号重试上限，低于 handler 默认预算时优先采用
 	RequestScopedTransient   bool          // 故障因素与账号无关（如上游按客户端身份/模型容量降载）：可同账号重试，但不得据此对账号做临时封禁
-	Account429RetryExhausted bool          // 本请求对该账号的透明 429 额外重试预算已耗尽（仅诊断；后续仍执行官方流程）
+	Account429RetryExhausted bool          // 已废弃的兼容诊断字段；账号级透明 429 重试关闭后始终为 false
 	SafeToFailoverAfterWrite bool          // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
 	Stage                    GatewayFailureStage
 	Scope                    GatewayFailureScope

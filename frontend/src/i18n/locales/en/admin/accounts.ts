@@ -462,9 +462,6 @@ export default {
         title: 'Bulk Edit Accounts',
         selectionInfo:
           '{count} account(s) selected. Only checked or filled fields will be updated; others stay unchanged.',
-        rateLimit429RetryCount: '429 Auto-Retry Count',
-        rateLimit429RetryCountHint:
-          'When checked, overrides the selected accounts. Use 0 to disable. Default {default}, maximum {max}.',
         baseUrlPlaceholder: 'https://api.anthropic.com or https://api.openai.com',
         baseUrlNotice: 'Applies to API Key accounts and the forwarding endpoint of Grok OAuth accounts; leave empty to keep existing value',
         submit: 'Update Accounts',
@@ -929,9 +926,6 @@ export default {
       proxyPoolCount: '{count} proxies selected',
       noProxy: 'No Proxy',
       concurrency: 'Concurrency',
-      rateLimit429RetryCount: '429 Auto-Retry Count',
-      rateLimit429RetryCountHint:
-        'After the first upstream 429, retry automatically before applying the existing rate-limit handling. Use 0 to disable. Default {default}, maximum {max}.',
       loadFactor: 'Load Factor',
       loadFactorHint: 'Higher load factor increases scheduling frequency',
       priority: 'Priority',

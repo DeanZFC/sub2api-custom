@@ -5,9 +5,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Account429RetryScope gives every downstream HTTP request one shared,
-// per-account 429 retry budget. All upstream attempts and official failover
-// loops derived from the request therefore consume the same configured limit.
+// Account429RetryScope keeps the old request context hook source-compatible.
+// Account-level transparent 429 retries are disabled, so the attached budget
+// is no longer consumed by upstream requests.
 func Account429RetryScope() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c != nil && c.Request != nil {

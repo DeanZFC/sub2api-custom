@@ -48,9 +48,9 @@ func TestAccountRateLimit429RetryCountDefaultsAndBounds(t *testing.T) {
 
 func TestAccount429RetryTotalTimeout(t *testing.T) {
 	require.Equal(t, 3*time.Second, account429RetryTotalTimeout(3*time.Second, &Account{RateLimit429RetryCount: retryCountPointer(0)}))
-	require.Equal(t, 129*time.Second, account429RetryTotalTimeout(3*time.Second, &Account{RateLimit429RetryCount: retryCountPointer(2)}))
-	require.Equal(t, maxAccount429RetryTotalTime, account429RetryTotalTimeout(10*time.Second, &Account{}))
-	require.Equal(t, maxAccount429RetryTotalTime, account429RetryTotalTimeout(time.Minute, &Account{RateLimit429RetryCount: retryCountPointer(MaxRateLimit429RetryCount)}))
+	require.Equal(t, 3*time.Second, account429RetryTotalTimeout(3*time.Second, &Account{RateLimit429RetryCount: retryCountPointer(2)}))
+	require.Equal(t, 10*time.Second, account429RetryTotalTimeout(10*time.Second, &Account{}))
+	require.Equal(t, time.Minute, account429RetryTotalTimeout(time.Minute, &Account{RateLimit429RetryCount: retryCountPointer(MaxRateLimit429RetryCount)}))
 }
 
 func TestAccount429RetryScopeIsIdempotentAndConcurrencySafe(t *testing.T) {
@@ -83,32 +83,29 @@ func TestAccount429RetryScopeIsIdempotentAndConcurrencySafe(t *testing.T) {
 	require.Equal(t, retryLimit, state.retriesUsed(99))
 }
 
-func TestDoAccount429RetryReplaysSameRequestUntilSuccess(t *testing.T) {
+func TestDoAccount429RetryDoesNotReplaySameRequest(t *testing.T) {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.com/v1/responses", bytes.NewBufferString(`{"input":"hello"}`))
 	require.NoError(t, err)
 
 	account := &Account{ID: 42, RateLimit429RetryCount: retryCountPointer(2)}
 	calls := 0
-	bodies := make([]string, 0, 3)
+	bodies := make([]string, 0, 1)
 	resp, err := doAccount429Retry(req, account, func(attemptReq *http.Request) (*http.Response, error) {
 		calls++
 		body, readErr := io.ReadAll(attemptReq.Body)
 		require.NoError(t, readErr)
 		bodies = append(bodies, string(body))
-		if calls < 3 {
-			return retryTestResponse(http.StatusTooManyRequests), nil
-		}
-		return retryTestResponse(http.StatusOK), nil
+		return retryTestResponse(http.StatusTooManyRequests), nil
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, 3, calls)
-	require.Equal(t, []string{`{"input":"hello"}`, `{"input":"hello"}`, `{"input":"hello"}`}, bodies)
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	require.Equal(t, 1, calls)
+	require.Equal(t, []string{`{"input":"hello"}`}, bodies)
 	require.False(t, account429RetriesExhausted(resp))
 }
 
-func TestDoAccount429RetryReturnsOnlyFinal429(t *testing.T) {
+func TestDoAccount429RetryReturns429Immediately(t *testing.T) {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com/v1/models", nil)
 	require.NoError(t, err)
 	account := &Account{ID: 7, RateLimit429RetryCount: retryCountPointer(2)}
@@ -120,8 +117,8 @@ func TestDoAccount429RetryReturnsOnlyFinal429(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, 3, calls, "首次请求之外应额外重试两次")
-	require.True(t, account429RetriesExhausted(resp))
+	require.Equal(t, 1, calls)
+	require.False(t, account429RetriesExhausted(resp))
 	body, readErr := io.ReadAll(resp.Body)
 	require.NoError(t, readErr)
 	require.Equal(t, http.StatusText(http.StatusTooManyRequests), string(body))
@@ -139,12 +136,12 @@ func TestDoAccount429RetryTreatsResponse429AsAuthoritativeWithAdapterError(t *te
 		return retryTestResponse(http.StatusTooManyRequests), adapterErr
 	})
 
-	require.NoError(t, err, "a response-bearing 429 should continue through normal HTTP error handling")
-	require.Equal(t, 2, calls)
-	require.True(t, account429RetriesExhausted(resp))
+	require.ErrorIs(t, err, adapterErr)
+	require.Equal(t, 1, calls)
+	require.False(t, account429RetriesExhausted(resp))
 }
 
-func TestDoAccount429RetrySharesBudgetAcrossOfficialAttempts(t *testing.T) {
+func TestDoAccount429RetryDoesNotShareOrConsumeBudget(t *testing.T) {
 	ctx := WithAccount429RetryScope(context.Background())
 	account := &Account{ID: 71, RateLimit429RetryCount: retryCountPointer(2)}
 
@@ -153,18 +150,14 @@ func TestDoAccount429RetrySharesBudgetAcrossOfficialAttempts(t *testing.T) {
 	firstCalls := 0
 	firstResp, err := doAccount429Retry(firstReq, account, func(*http.Request) (*http.Response, error) {
 		firstCalls++
-		if firstCalls == 1 {
-			return retryTestResponse(http.StatusTooManyRequests), nil
-		}
-		return retryTestResponse(http.StatusOK), nil
+		return retryTestResponse(http.StatusTooManyRequests), nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, firstResp.StatusCode)
-	require.Equal(t, 2, firstCalls)
+	require.Equal(t, http.StatusTooManyRequests, firstResp.StatusCode)
+	require.Equal(t, 1, firstCalls)
 
-	// The official retry loop builds another request from the same downstream
-	// context. Only the one unused extra retry remains; it must not receive a new
-	// allowance of two retries.
+	// A later official attempt is independent because this compatibility helper
+	// no longer consumes a transparent retry budget.
 	secondReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com/second", nil)
 	require.NoError(t, err)
 	secondCalls := 0
@@ -173,8 +166,8 @@ func TestDoAccount429RetrySharesBudgetAcrossOfficialAttempts(t *testing.T) {
 		return retryTestResponse(http.StatusTooManyRequests), nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, 2, secondCalls)
-	require.True(t, account429RetriesExhausted(secondResp))
+	require.Equal(t, 1, secondCalls)
+	require.False(t, account429RetriesExhausted(secondResp))
 
 	thirdReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com/third", nil)
 	require.NoError(t, err)
@@ -184,8 +177,8 @@ func TestDoAccount429RetrySharesBudgetAcrossOfficialAttempts(t *testing.T) {
 		return retryTestResponse(http.StatusTooManyRequests), nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, thirdCalls, "预算耗尽后的官方尝试只能发送自身的一次请求")
-	require.True(t, account429RetriesExhausted(thirdResp))
+	require.Equal(t, 1, thirdCalls)
+	require.False(t, account429RetriesExhausted(thirdResp))
 }
 
 func TestDoAccount429RetryKeepsSeparateBudgetPerAccount(t *testing.T) {
@@ -199,8 +192,8 @@ func TestDoAccount429RetryKeepsSeparateBudgetPerAccount(t *testing.T) {
 			return retryTestResponse(http.StatusTooManyRequests), nil
 		})
 		require.NoError(t, err)
-		require.Equal(t, 2, calls)
-		require.True(t, account429RetriesExhausted(resp))
+		require.Equal(t, 1, calls)
+		require.False(t, account429RetriesExhausted(resp))
 	}
 }
 
@@ -215,9 +208,9 @@ func TestDoAccount429RetryClosesResponseOnContextTransportError(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusTooManyRequests, Body: body}, context.Canceled
 	})
 
-	require.Nil(t, resp)
+	require.Same(t, body, resp.Body)
 	require.ErrorIs(t, err, context.Canceled)
-	require.True(t, body.closed, "同时返回 429 与上下文错误时必须关闭响应体")
+	require.False(t, body.closed)
 }
 
 func TestDoAccountHTTPUpstreamRejectsNilAccount(t *testing.T) {
@@ -326,28 +319,25 @@ func TestDoAccount429RetryHonorsContextCancellation(t *testing.T) {
 		return retryTestResponse(http.StatusTooManyRequests), nil
 	})
 
-	require.Nil(t, resp)
-	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, resp)
+	require.NoError(t, err)
 	require.Equal(t, 1, calls)
 }
 
-func TestDialAccount429RetryRetriesHandshakeOnly(t *testing.T) {
+func TestDialAccount429RetryDoesNotReplayHandshake(t *testing.T) {
 	account := &Account{ID: 81, RateLimit429RetryCount: retryCountPointer(2)}
 	calls := 0
 	wantErr := errors.New("handshake rejected")
 	conn, status, _, exhausted, err := dialAccount429Retry(context.Background(), account, func(context.Context) (openAIWSClientConn, int, http.Header, error) {
 		calls++
-		if calls < 3 {
-			return nil, http.StatusTooManyRequests, http.Header{"Retry-After": []string{"0"}}, wantErr
-		}
-		return nil, http.StatusSwitchingProtocols, nil, nil
+		return nil, http.StatusTooManyRequests, http.Header{"Retry-After": []string{"0"}}, wantErr
 	})
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, wantErr)
 	require.Nil(t, conn)
-	require.Equal(t, http.StatusSwitchingProtocols, status)
+	require.Equal(t, http.StatusTooManyRequests, status)
 	require.False(t, exhausted)
-	require.Equal(t, 3, calls)
+	require.Equal(t, 1, calls)
 }
 
 func TestDialAccount429RetryReportsExhaustionOnlyAfterConfiguredRetries(t *testing.T) {
@@ -363,8 +353,8 @@ func TestDialAccount429RetryReportsExhaustionOnlyAfterConfiguredRetries(t *testi
 
 		require.ErrorIs(t, err, wantErr)
 		require.Equal(t, http.StatusTooManyRequests, status)
-		require.True(t, exhausted)
-		require.Equal(t, 3, calls)
+		require.False(t, exhausted)
+		require.Equal(t, 1, calls)
 	})
 
 	t.Run("zero retries is not exhaustion", func(t *testing.T) {
@@ -391,7 +381,7 @@ func TestDialAccount429RetryReportsExhaustionOnlyAfterConfiguredRetries(t *testi
 			return nil, http.StatusTooManyRequests, nil, wantErr
 		})
 
-		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, wantErr)
 		require.Equal(t, http.StatusTooManyRequests, status)
 		require.False(t, exhausted)
 		require.Equal(t, 1, calls)
@@ -409,7 +399,7 @@ func TestDialAccount429RetryReportsExhaustionOnlyAfterConfiguredRetries(t *testi
 	})
 }
 
-func TestDialAccount429RetrySharesBudgetAcrossOfficialDials(t *testing.T) {
+func TestDialAccount429RetryDoesNotConsumeBudgetAcrossDials(t *testing.T) {
 	ctx := WithAccount429RetryScope(context.Background())
 	account := &Account{ID: 86, RateLimit429RetryCount: retryCountPointer(1)}
 	wantErr := errors.New("handshake rejected")
@@ -420,8 +410,8 @@ func TestDialAccount429RetrySharesBudgetAcrossOfficialDials(t *testing.T) {
 		return nil, http.StatusTooManyRequests, http.Header{"Retry-After": []string{"0"}}, wantErr
 	})
 	require.ErrorIs(t, err, wantErr)
-	require.True(t, exhausted)
-	require.Equal(t, 2, firstCalls)
+	require.False(t, exhausted)
+	require.Equal(t, 1, firstCalls)
 
 	secondCalls := 0
 	_, _, _, exhausted, err = dialAccount429Retry(ctx, account, func(context.Context) (openAIWSClientConn, int, http.Header, error) {
@@ -429,7 +419,7 @@ func TestDialAccount429RetrySharesBudgetAcrossOfficialDials(t *testing.T) {
 		return nil, http.StatusTooManyRequests, nil, wantErr
 	})
 	require.ErrorIs(t, err, wantErr)
-	require.True(t, exhausted)
+	require.False(t, exhausted)
 	require.Equal(t, 1, secondCalls)
 }
 

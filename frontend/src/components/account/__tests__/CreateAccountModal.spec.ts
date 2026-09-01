@@ -233,21 +233,21 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await submitApiKeyAccount('openai')
 
     expect(createAccountMock).toHaveBeenCalledTimes(1)
-    expect(createAccountMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBe(5)
+    expect(createAccountMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 
-  it('submits the configured 429 retry count for normal account creation', async () => {
+  it('does not expose or submit the removed 429 retry setting', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
     await selectButtonByText(wrapper, 'API Key')
     await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI account')
     await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
-    await wrapper.get('#create-rate-limit-429-retry-count').setValue(7)
+    expect(wrapper.find('#create-rate-limit-429-retry-count').exists()).toBe(false)
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(createAccountMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBe(7)
+    expect(createAccountMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
   })
 
   // namespace 摊平是仅 OAuth 的兼容开关：API Key 走 chat completions 回退桥时由桥自行摊平
@@ -415,7 +415,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
-    expect(importCodexSessionMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBe(5)
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
   })
 
@@ -425,7 +425,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(createOpenAICodexPATMock).toHaveBeenCalledTimes(1)
-    expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBe(5)
+    expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
   })
 

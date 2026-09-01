@@ -160,7 +160,7 @@ func (s *live429SequenceUpstream) DoWithTLS(request *http.Request, proxyURL stri
 	return s.Do(request, proxyURL, accountID, accountConcurrency)
 }
 
-func TestCreateUpstreamLiveCallMarksExhaustedAccount429(t *testing.T) {
+func TestCreateUpstreamLiveCallReturns429WithoutRetryMarker(t *testing.T) {
 	upstream := &live429SequenceUpstream{}
 	svc := &OpenAIGatewayService{
 		cfg:          &config.Config{},
@@ -185,8 +185,8 @@ func TestCreateUpstreamLiveCallMarksExhaustedAccount429(t *testing.T) {
 	}, `{"v":1}`)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.True(t, failoverErr.Account429RetryExhausted)
-	require.Equal(t, 2, upstream.calls, "首次请求之外应额外重试一次")
+	require.False(t, failoverErr.Account429RetryExhausted)
+	require.Equal(t, 1, upstream.calls, "账号级透明 429 重试已关闭")
 }
 
 func TestLiveAttestationCipherRoundTripAndRejectsOtherInstanceKey(t *testing.T) {

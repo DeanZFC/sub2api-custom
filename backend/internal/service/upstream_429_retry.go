@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +14,8 @@ import (
 )
 
 const (
+	// These limits are retained for compatibility with the legacy marker and
+	// parsing helpers. Account-level transparent 429 retries are disabled.
 	defaultUpstream429RetryDelay = 500 * time.Millisecond
 	maxUpstream429RetryDelay     = 8 * time.Second
 	maxUpstream429RetryAfter     = time.Minute
@@ -107,28 +108,17 @@ func (b *account429RetryBudget) retriesUsed(accountID int64) int {
 	return b.used[accountID]
 }
 
-// account429RetryTotalTimeout returns a bounded outer timeout that can cover
-// every configured attempt plus the maximum Retry-After delay between them.
+// account429RetryTotalTimeout is kept as a compatibility helper for callers
+// that still use the old name. Transparent same-account retries are disabled,
+// so the timeout is always the original single-attempt timeout.
 func account429RetryTotalTimeout(perAttempt time.Duration, account *Account) time.Duration {
-	if perAttempt <= 0 {
-		return 0
-	}
-	retryLimit := account.GetRateLimit429RetryCount()
-	attempts := time.Duration(retryLimit + 1)
-	waits := time.Duration(retryLimit) * maxUpstream429RetryAfter
-	if attempts > 0 && perAttempt > (maxAccount429RetryTotalTime-waits)/attempts {
-		return maxAccount429RetryTotalTime
-	}
-	total := attempts*perAttempt + waits
-	if total > maxAccount429RetryTotalTime {
-		return maxAccount429RetryTotalTime
-	}
-	return total
+	return perAttempt
 }
 
-// doAccount429Retry retries a replayable request on the same selected account.
-// Intermediate 429 responses never reach provider-specific error handlers, so
-// account cooldown/rate-limit side effects only run after the final attempt.
+// doAccount429Retry is retained as a compatibility wrapper for the many
+// upstream adapters that use the old helper name. It performs exactly one
+// upstream request; a 429 is returned to the normal provider error handling
+// and account failover flow without waiting or replaying the request.
 func doAccount429Retry(req *http.Request, account *Account, do account429RetryDo) (*http.Response, error) {
 	if req == nil {
 		return nil, errors.New("upstream 429 retry: nil request")
@@ -140,77 +130,7 @@ func doAccount429Retry(req *http.Request, account *Account, do account429RetryDo
 		return nil, errors.New("upstream 429 retry: nil transport")
 	}
 
-	retryLimit := account.GetRateLimit429RetryCount()
-	if retryLimit <= 0 {
-		return do(req)
-	}
-	retryCtx, retryBudget := ensureAccount429RetryBudget(req.Context())
-	baseReq := req.WithContext(retryCtx)
-	attemptReq := baseReq
-	for {
-		resp, err := do(attemptReq)
-		if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
-			return resp, err
-		}
-		if ctxErr := attemptReq.Context().Err(); ctxErr != nil {
-			drainAndCloseRetryResponse(resp)
-			return nil, ctxErr
-		}
-		// HTTP status is authoritative for a response-bearing transport result.
-		// A plugin/adapter may return both a 429 response and a non-context error;
-		// treat that as the same retryable 429 while preserving cancellation.
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				drainAndCloseRetryResponse(resp)
-				return nil, err
-			}
-			err = nil
-		}
-
-		if !requestCanReplay(attemptReq) {
-			slog.Warn("upstream_429_same_account_retry_unreplayable",
-				"account_id", accountIDForRetryLog(account),
-				"retry_count", retryBudget.retriesUsed(account.ID),
-				"retry_limit", retryLimit,
-			)
-			return resp, nil
-		}
-
-		nextReq, cloneErr := cloneRequestForRetry(baseReq)
-		if cloneErr != nil {
-			slog.Warn("upstream_429_same_account_retry_unreplayable",
-				"account_id", accountIDForRetryLog(account),
-				"retry_count", retryBudget.retriesUsed(account.ID),
-				"retry_limit", retryLimit,
-				"error", cloneErr,
-			)
-			return resp, nil
-		}
-		retryNumber, ok := retryBudget.take(account.ID, retryLimit)
-		if !ok {
-			if nextReq.Body != nil && nextReq.Body != http.NoBody {
-				_ = nextReq.Body.Close()
-			}
-			markAccount429RetriesExhausted(resp, attemptReq, retryNumber)
-			return resp, nil
-		}
-		delay := upstream429RetryDelay(resp.Header, retryNumber-1)
-		drainAndCloseRetryResponse(resp)
-		slog.Warn("upstream_429_same_account_retry",
-			"account_id", accountIDForRetryLog(account),
-			"retry_count", retryNumber,
-			"retry_limit", retryLimit,
-			"retry_delay", delay,
-		)
-		if err := sleepUpstream429Retry(attemptReq.Context(), delay); err != nil {
-			if nextReq.Body != nil && nextReq.Body != http.NoBody {
-				_ = nextReq.Body.Close()
-			}
-			return nil, err
-		}
-
-		attemptReq = nextReq
-	}
+	return do(req)
 }
 
 func doAccountHTTPUpstream(
@@ -248,9 +168,9 @@ func doAccountHTTPUpstreamWithTLS(
 	})
 }
 
-// dialAccount429Retry retries only failed WebSocket handshakes. Once a
-// connection has been established and frames have been exchanged, replay must
-// remain at the higher-level turn state machine to avoid duplicate output.
+// dialAccount429Retry is retained as a compatibility wrapper for WebSocket
+// callers. It performs one handshake only; a 429 is handled by the normal
+// failover path instead of being retried on the same account.
 func dialAccount429Retry(
 	ctx context.Context,
 	account *Account,
@@ -262,13 +182,8 @@ func dialAccount429Retry(
 	if dial == nil {
 		return nil, 0, nil, false, errors.New("upstream 429 retry: WebSocket dialer is nil")
 	}
-	ctx, retryBudget := ensureAccount429RetryBudget(ctx)
-	retryLimit := account.GetRateLimit429RetryCount()
-	for {
-		conn, status, headers, err := dial(ctx)
-		if status != http.StatusTooManyRequests {
-			return conn, status, headers, false, err
-		}
+	conn, status, headers, err := dial(ctx)
+	if status == http.StatusTooManyRequests {
 		if conn != nil {
 			_ = conn.Close()
 			conn = nil
@@ -276,27 +191,8 @@ func dialAccount429Retry(
 		if err == nil {
 			err = errUpstreamWS429Handshake
 		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return conn, status, headers, false, ctxErr
-		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return conn, status, headers, false, err
-		}
-		retryNumber, ok := retryBudget.take(account.ID, retryLimit)
-		if !ok {
-			return conn, status, headers, retryLimit > 0 && retryNumber >= retryLimit, err
-		}
-		delay := upstream429RetryDelay(headers, retryNumber-1)
-		slog.Warn("upstream_ws_429_same_account_retry",
-			"account_id", accountIDForRetryLog(account),
-			"retry_count", retryNumber,
-			"retry_limit", retryLimit,
-			"retry_delay", delay,
-		)
-		if sleepErr := sleepUpstream429Retry(ctx, delay); sleepErr != nil {
-			return nil, status, headers, false, sleepErr
-		}
 	}
+	return conn, status, headers, false, err
 }
 
 func requestCanReplay(req *http.Request) bool {

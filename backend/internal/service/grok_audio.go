@@ -20,8 +20,8 @@ import (
 // The timeout only covers dialing; an established session is not interrupted.
 const DefaultGrokRealtimeDialTimeout = 12 * time.Second
 
-// GrokRealtimeDialTimeout 返回包含账号级 429 重试的握手总预算。
-// 每次实际拨号仍由 DefaultGrokRealtimeDialTimeout 单独限制。
+// GrokRealtimeDialTimeout 返回实时连接的单次握手超时。
+// 账号级透明 429 重试已关闭，不再额外叠加等待时间。
 func GrokRealtimeDialTimeout(account *Account) time.Duration {
 	return account429RetryTotalTimeout(DefaultGrokRealtimeDialTimeout, account)
 }

@@ -109,21 +109,6 @@ describe('BulkEditAccountModal', () => {
     )
   })
 
-  it('勾选后可批量把账号级 429 自动重试设为 0', async () => {
-    const wrapper = mountModal()
-    const retryInput = wrapper.get('#bulk-edit-rate-limit-429-retry-count')
-    expect(retryInput.attributes('disabled')).toBeDefined()
-
-    await wrapper.get('#bulk-edit-rate-limit-429-retry-count-enabled').setValue(true)
-    await retryInput.setValue(0)
-    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
-    await flushPromises()
-
-    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      rate_limit_429_retry_count: 0
-    })
-  })
-
   it('后端拒绝修改同步账号倍率时展示专用错误', async () => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockRejectedValueOnce({
       status: 409,

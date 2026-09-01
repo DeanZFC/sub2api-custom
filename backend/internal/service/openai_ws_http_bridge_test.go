@@ -856,8 +856,8 @@ func TestProxyOpenAIWSHTTPBridgeTurnGrokPreservesExhaustedAccount429Retry(t *tes
 	require.ErrorAs(t, err, &failoverErr)
 	require.True(t, failoverErr.RetryableOnSameAccount)
 	require.True(t, failoverErr.RequestScopedTransient)
-	require.True(t, failoverErr.Account429RetryExhausted)
-	require.Equal(t, retryCount+1, upstream.callCount)
+	require.False(t, failoverErr.Account429RetryExhausted)
+	require.Equal(t, 1, upstream.callCount)
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *testing.T) {

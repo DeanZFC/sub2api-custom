@@ -821,46 +821,6 @@
         </div>
       </div>
 
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between gap-4">
-          <label
-            id="bulk-edit-rate-limit-429-retry-count-label"
-            class="input-label mb-0"
-            for="bulk-edit-rate-limit-429-retry-count-enabled"
-          >
-            {{ t('admin.accounts.bulkEdit.rateLimit429RetryCount') }}
-          </label>
-          <input
-            v-model="enableRateLimit429RetryCount"
-            id="bulk-edit-rate-limit-429-retry-count-enabled"
-            type="checkbox"
-            aria-controls="bulk-edit-rate-limit-429-retry-count"
-            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-          />
-        </div>
-        <input
-          v-model.number="rateLimit429RetryCount"
-          id="bulk-edit-rate-limit-429-retry-count"
-          type="number"
-          min="0"
-          :max="MAX_RATE_LIMIT_429_RETRY_COUNT"
-          step="1"
-          :disabled="!enableRateLimit429RetryCount"
-          class="input max-w-xs"
-          :class="!enableRateLimit429RetryCount && 'cursor-not-allowed opacity-50'"
-          aria-labelledby="bulk-edit-rate-limit-429-retry-count-label"
-          @change="rateLimit429RetryCount = normalizeRateLimit429RetryCount(rateLimit429RetryCount)"
-        />
-        <p class="input-hint">
-          {{
-            t('admin.accounts.bulkEdit.rateLimit429RetryCountHint', {
-              default: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
-              max: MAX_RATE_LIMIT_429_RETRY_COUNT
-            })
-          }}
-        </p>
-      </div>
-
       <!-- Status -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1614,17 +1574,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const DEFAULT_RATE_LIMIT_429_RETRY_COUNT = 5
-const MAX_RATE_LIMIT_429_RETRY_COUNT = 10
-
-const normalizeRateLimit429RetryCount = (value: unknown): number => {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) {
-    return DEFAULT_RATE_LIMIT_429_RETRY_COUNT
-  }
-  return Math.min(MAX_RATE_LIMIT_429_RETRY_COUNT, Math.max(0, Math.trunc(parsed)))
-}
-
 // Platform awareness
 const targetMode = computed(() => props.target?.mode ?? 'selected')
 const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
@@ -1736,7 +1685,6 @@ const enableInterceptWarmup = ref(false)
 const enableHeaderOverride = ref(false)
 const enableProxy = ref(false)
 const enableConcurrency = ref(false)
-const enableRateLimit429RetryCount = ref(false)
 const enableLoadFactor = ref(false)
 const enablePriority = ref(false)
 const enableRateMultiplier = ref(false)
@@ -1772,7 +1720,6 @@ const headerOverrideEnabled = ref(false)
 const headerOverrideRows = ref<HeaderOverrideRow[]>([])
 const proxyId = ref<number | null>(null)
 const concurrency = ref(1)
-const rateLimit429RetryCount = ref(DEFAULT_RATE_LIMIT_429_RETRY_COUNT)
 const loadFactor = ref<number | null>(null)
 const priority = ref(1)
 const rateMultiplier = ref(1)
@@ -2034,11 +1981,6 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.concurrency = concurrency.value
   }
 
-  if (enableRateLimit429RetryCount.value) {
-    updates.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(
-      rateLimit429RetryCount.value
-    )
-  }
 
   if (enableLoadFactor.value) {
     // 空值/NaN/0 时发送 0（后端约定 <= 0 表示清除）
@@ -2301,7 +2243,6 @@ const handleSubmit = async () => {
     enableHeaderOverride.value ||
     enableProxy.value ||
     enableConcurrency.value ||
-    enableRateLimit429RetryCount.value ||
     enableLoadFactor.value ||
     enablePriority.value ||
     enableRateMultiplier.value ||
@@ -2449,7 +2390,6 @@ watch(
       enableHeaderOverride.value = false
       enableProxy.value = false
       enableConcurrency.value = false
-      enableRateLimit429RetryCount.value = false
       enableLoadFactor.value = false
       enablePriority.value = false
       enableRateMultiplier.value = false
@@ -2489,7 +2429,6 @@ watch(
       headerOverrideRows.value = []
       proxyId.value = null
       concurrency.value = 1
-      rateLimit429RetryCount.value = DEFAULT_RATE_LIMIT_429_RETRY_COUNT
       loadFactor.value = null
       priority.value = 1
       rateMultiplier.value = 1

@@ -328,23 +328,6 @@ describe('EditAccountModal', () => {
     authIsSimpleMode.value = true
   })
 
-  it('回填并提交账号级 429 自动重试次数', async () => {
-    const account = buildAccount()
-    account.rate_limit_429_retry_count = 7
-    updateAccountMock.mockReset().mockResolvedValue(account)
-    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
-
-    const wrapper = mountModal(account)
-    const retryInput = wrapper.get('#edit-rate-limit-429-retry-count')
-    expect((retryInput.element as HTMLInputElement).value).toBe('7')
-
-    await retryInput.setValue(3)
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.rate_limit_429_retry_count).toBe(3)
-  })
-
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()

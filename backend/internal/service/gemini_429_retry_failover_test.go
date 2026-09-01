@@ -59,6 +59,6 @@ func TestGeminiForwardPreservesExhaustedAccount429MarkerOnFailover(t *testing.T)
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.True(t, failoverErr.Account429RetryExhausted)
-	require.Equal(t, geminiMaxRetries+retryCount, upstream.calls, "透明预算只增加一次，随后仍执行官方 Gemini 重试")
+	require.False(t, failoverErr.Account429RetryExhausted)
+	require.Equal(t, geminiMaxRetries, upstream.calls, "同账号透明 429 重试已关闭，只保留 Gemini 原有重试")
 }

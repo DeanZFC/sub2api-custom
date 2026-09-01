@@ -225,7 +225,7 @@ func TestForwardEmbeddings429RetryExhaustionPreservesFailoverMarker(t *testing.T
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
-	require.True(t, failoverErr.Account429RetryExhausted)
-	require.Len(t, upstream.requests, 2, "首次请求外应只增加配置的 1 次账号级重试")
+	require.False(t, failoverErr.Account429RetryExhausted)
+	require.Len(t, upstream.requests, 1, "账号级透明 429 重试已关闭")
 	require.False(t, c.Writer.Written())
 }

@@ -203,7 +203,7 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	}
 }
 
-func TestFetchCodexModelsManifestRetriesOAuth429OnSameAccount(t *testing.T) {
+func TestFetchCodexModelsManifestReturnsOAuth429WithoutSameAccountRetry(t *testing.T) {
 	manifestBody := `{"models":[{"slug":"gpt-5.5"}]}`
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -225,9 +225,9 @@ func TestFetchCodexModelsManifestRetriesOAuth429OnSameAccount(t *testing.T) {
 	account := newCodexModelsTestAccount()
 	account.RateLimit429RetryCount = retryCountPointer(2)
 	manifest, err := (&OpenAIGatewayService{}).FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
-	require.NoError(t, err)
-	require.Equal(t, int32(3), calls.Load())
-	require.JSONEq(t, manifestBody, string(manifest.Body))
+	require.Error(t, err)
+	require.Nil(t, manifest)
+	require.Equal(t, int32(1), calls.Load())
 }
 
 func TestFetchCodexModelsManifestAgentIdentityUsesAssertionWithoutOAuthToken(t *testing.T) {
@@ -499,7 +499,7 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 	}
 }
 
-func TestFetchCodexModelsManifestRetriesAPIKey429OnSameAccount(t *testing.T) {
+func TestFetchCodexModelsManifestReturnsAPIKey429WithoutSameAccountRetry(t *testing.T) {
 	manifestBody := `{"models":[{"slug":"gpt-5.6"}]}`
 	var calls atomic.Int32
 	upstream := &codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -527,9 +527,9 @@ func TestFetchCodexModelsManifestRetriesAPIKey429OnSameAccount(t *testing.T) {
 		"0.144.0",
 		"",
 	)
-	require.NoError(t, err)
-	require.Equal(t, int32(3), calls.Load())
-	require.JSONEq(t, manifestBody, string(manifest.Body))
+	require.Error(t, err)
+	require.Nil(t, manifest)
+	require.Equal(t, int32(1), calls.Load())
 }
 
 func TestFetchCodexModelsManifestAPIKeyConvertsStandardOpenAIModelList(t *testing.T) {

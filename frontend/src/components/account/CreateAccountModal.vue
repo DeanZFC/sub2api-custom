@@ -2919,29 +2919,6 @@
         </div>
       </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label" for="create-rate-limit-429-retry-count">
-          {{ t('admin.accounts.rateLimit429RetryCount') }}
-        </label>
-        <input
-          v-model.number="form.rate_limit_429_retry_count"
-          id="create-rate-limit-429-retry-count"
-          type="number"
-          min="0"
-          :max="MAX_RATE_LIMIT_429_RETRY_COUNT"
-          step="1"
-          class="input max-w-xs"
-          @change="form.rate_limit_429_retry_count = normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count)"
-        />
-        <p class="input-hint">
-          {{
-            t('admin.accounts.rateLimit429RetryCountHint', {
-              default: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
-              max: MAX_RATE_LIMIT_429_RETRY_COUNT
-            })
-          }}
-        </p>
-      </div>
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
@@ -4162,8 +4139,6 @@ const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
-const DEFAULT_RATE_LIMIT_429_RETRY_COUNT = 5
-const MAX_RATE_LIMIT_429_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
@@ -4529,7 +4504,6 @@ const form = reactive({
   proxy_concurrency_limit_enabled: false,
   proxy_pool_ids: [] as number[],
   concurrency: 10,
-  rate_limit_429_retry_count: DEFAULT_RATE_LIMIT_429_RETRY_COUNT,
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
@@ -4566,19 +4540,6 @@ const isOAuthFlow = computed(() => {
     return false
   }
   return accountCategory.value === 'oauth-based'
-})
-
-const normalizeRateLimit429RetryCount = (value: unknown): number => {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) {
-    return DEFAULT_RATE_LIMIT_429_RETRY_COUNT
-  }
-  return Math.min(MAX_RATE_LIMIT_429_RETRY_COUNT, Math.max(0, Math.trunc(parsed)))
-}
-
-const withRateLimit429RetryCount = (payload: CreateAccountRequest): CreateAccountRequest => ({
-  ...payload,
-  rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count)
 })
 
 const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlowRef.value?.inputMethod === 'sso_cookie')
@@ -5075,7 +5036,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
     const account = await adminAPI.accounts.create(
-      withAntigravityConfirmFlag(withRateLimit429RetryCount(payload))
+      withAntigravityConfirmFlag(payload)
     )
     if (
       payload.type === 'apikey' &&
@@ -5119,7 +5080,6 @@ const resetForm = () => {
   form.proxy_concurrency_limit_enabled = false
   form.proxy_pool_ids = []
   form.concurrency = 10
-  form.rate_limit_429_retry_count = DEFAULT_RATE_LIMIT_429_RETRY_COUNT
   form.load_factor = null
   form.priority = 1
   form.rate_multiplier = 1
@@ -5870,7 +5830,6 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           extra,
           proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
-          rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
@@ -6051,7 +6010,6 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           extra,
           proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
-          rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
@@ -6154,7 +6112,6 @@ const handleOpenAIExchange = async (authCode: string) => {
         proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
         proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : [],
         concurrency: form.concurrency,
-        rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
         load_factor: form.load_factor ?? undefined,
         priority: form.priority,
         rate_multiplier: form.rate_multiplier,
@@ -6262,7 +6219,6 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
       proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : [],
       concurrency: form.concurrency,
-      rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
       rate_multiplier: form.rate_multiplier,
@@ -6342,7 +6298,6 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       notes: form.notes || null,
       proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
       concurrency: form.concurrency,
-      rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
       rate_multiplier: form.rate_multiplier,
@@ -6442,7 +6397,6 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             extra,
             proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
             concurrency: form.concurrency,
-            rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
             load_factor: form.load_factor ?? undefined,
             priority: form.priority,
             rate_multiplier: form.rate_multiplier,
@@ -6544,7 +6498,6 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
           proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : [],
           concurrency: form.concurrency,
-          rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
@@ -6932,7 +6885,6 @@ const handleCookieAuth = async (sessionKey: string) => {
           extra,
           proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
-          rate_limit_429_retry_count: normalizeRateLimit429RetryCount(form.rate_limit_429_retry_count),
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
