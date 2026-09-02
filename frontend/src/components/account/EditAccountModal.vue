@@ -1,12 +1,71 @@
 <template>
   <BaseDialog
     :show="show"
-    :title="t('admin.accounts.editAccount')"
-    width="wide"
+    :title="compact ? t('admin.accounts.editConcurrency') : t('admin.accounts.editAccount')"
+    :width="compact ? 'narrow' : 'wide'"
     @close="handleClose"
   >
     <form
-      v-if="account"
+      v-if="account && compact"
+      id="edit-account-form"
+      @submit.prevent="handleSubmit"
+      class="space-y-5"
+    >
+      <div class="flex items-center gap-3 rounded-lg border border-primary-100 bg-primary-50/70 px-4 py-3 dark:border-primary-900/50 dark:bg-primary-950/30">
+        <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-600 text-sm font-semibold text-white shadow-sm">
+          {{ account.name.slice(0, 1).toUpperCase() }}
+        </div>
+        <div class="min-w-0">
+          <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ account.name }}</p>
+          <p class="mt-0.5 font-mono text-xs text-gray-500 dark:text-gray-400">#{{ account.id }}</p>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-dark-600 dark:bg-dark-800">
+        <div class="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <label for="edit-account-concurrency" class="input-label mb-0">{{ t('admin.accounts.concurrency') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.concurrencyEditHint') }}</p>
+          </div>
+          <span class="rounded-md bg-gray-100 px-2 py-1 font-mono text-xs font-semibold text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+            {{ account.current_concurrency ?? 0 }} / {{ form.concurrency }}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-600 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500/30 disabled:cursor-not-allowed disabled:opacity-40 dark:border-dark-600 dark:text-gray-300 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
+            :disabled="form.concurrency <= 1"
+            :aria-label="t('admin.accounts.decreaseConcurrency')"
+            @click="adjustConcurrency(-1)"
+          >
+            <span aria-hidden="true">−</span>
+          </button>
+          <input
+            id="edit-account-concurrency"
+            v-model.number="form.concurrency"
+            data-testid="edit-account-concurrency"
+            type="number"
+            min="1"
+            inputmode="numeric"
+            required
+            class="input h-11 text-center font-mono text-lg font-semibold"
+            @input="form.concurrency = Math.max(1, Math.floor(form.concurrency || 1))"
+          />
+          <button
+            type="button"
+            class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-600 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:text-gray-300 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
+            :aria-label="t('admin.accounts.increaseConcurrency')"
+            @click="adjustConcurrency(1)"
+          >
+            <span aria-hidden="true">+</span>
+          </button>
+        </div>
+      </div>
+    </form>
+
+    <form
+      v-else-if="account"
       id="edit-account-form"
       @submit.prevent="handleSubmit"
       class="space-y-5"
@@ -2859,7 +2918,7 @@
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
             ></path>
           </svg>
-          {{ submitting ? t('admin.accounts.updating') : t('common.update') }}
+          {{ submitting ? t('admin.accounts.updating') : compact ? t('common.save') : t('common.update') }}
         </button>
       </div>
     </template>
@@ -2956,6 +3015,7 @@ interface Props {
   account: Account | null
   proxies: Proxy[]
   groups: AdminGroup[]
+  compact?: boolean
 }
 
 const props = defineProps<Props>()
@@ -3603,6 +3663,11 @@ const form = reactive({
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+
+const adjustConcurrency = (delta: number) => {
+  const current = Number.isFinite(form.concurrency) ? form.concurrency : 1
+  form.concurrency = Math.max(1, Math.floor(current + delta))
+}
 
 const toggleProxyPoolMode = () => {
   form.proxy_concurrency_limit_enabled = !form.proxy_concurrency_limit_enabled
@@ -4638,6 +4703,12 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 const handleSubmit = async () => {
   if (!props.account) return
   const accountID = props.account.id
+
+  if (props.compact) {
+    const concurrency = Math.max(1, Math.floor(Number(form.concurrency) || 1))
+    await submitUpdateAccount(accountID, { concurrency })
+    return
+  }
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
