@@ -272,7 +272,6 @@ func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		ProxyPoolIDs                 []int64 `json:"proxy_pool_ids"`
 		Name                         string  `json:"name"`
 		Concurrency                  int     `json:"concurrency"`
-		RateLimit429RetryCount       *int    `json:"rate_limit_429_retry_count"`
 		Priority                     int     `json:"priority"`
 		GroupIDs                     []int64 `json:"group_ids"`
 	}
@@ -310,7 +309,6 @@ func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		ProxyConcurrencyLimitEnabled: req.ProxyConcurrencyLimitEnabled,
 		ProxyPoolIDs:                 req.ProxyPoolIDs,
 		Concurrency:                  req.Concurrency,
-		RateLimit429RetryCount:       req.RateLimit429RetryCount,
 		Priority:                     req.Priority,
 		GroupIDs:                     req.GroupIDs,
 	})
@@ -334,7 +332,6 @@ type GrokSSOToOAuthRequest struct {
 	Credentials                  map[string]any `json:"credentials"`
 	Extra                        map[string]any `json:"extra"`
 	Concurrency                  int            `json:"concurrency"`
-	RateLimit429RetryCount       *int           `json:"rate_limit_429_retry_count"`
 	LoadFactor                   *int           `json:"load_factor"`
 	Priority                     int            `json:"priority"`
 	RateMultiplier               *float64       `json:"rate_multiplier"`
@@ -370,12 +367,6 @@ func (h *GrokOAuthHandler) CreateAccountsFromSSO(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
-	}
-	if req.RateLimit429RetryCount != nil {
-		if err := service.ValidateRateLimit429RetryCount(*req.RateLimit429RetryCount); err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
 	}
 	tokens := normalizeSSOImportTokens(req.SSOTokens, req.SSOToken)
 	if len(tokens) == 0 {
@@ -455,7 +446,6 @@ func (h *GrokOAuthHandler) createAccountFromSSOToken(ctx context.Context, req Gr
 		ProxyConcurrencyLimitEnabled: req.ProxyConcurrencyLimitEnabled,
 		ProxyPoolIDs:                 req.ProxyPoolIDs,
 		Concurrency:                  req.Concurrency,
-		RateLimit429RetryCount:       req.RateLimit429RetryCount,
 		LoadFactor:                   req.LoadFactor,
 		Priority:                     req.Priority,
 		RateMultiplier:               req.RateMultiplier,

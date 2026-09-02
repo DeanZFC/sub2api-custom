@@ -1741,7 +1741,8 @@ const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 const enableCodexQuotaOverdraft = ref(false)
 type CodexFingerprintMode = 'off' | 'account_device' | 'device' | 'session' | 'full'
-const codexQuotaOverdraftEnabled = ref(true)
+// 批量编辑同样采用显式 opt-in，打开应用开关后仍默认保持关闭。
+const codexQuotaOverdraftEnabled = ref(false)
 const enableCodexFingerprintMode = ref(false)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 const codexFingerprintModeOptions = computed(() => [
@@ -2439,7 +2440,7 @@ watch(
       upstreamBillingAutoProbeMode.value = 'enabled'
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
-      codexQuotaOverdraftEnabled.value = true
+      codexQuotaOverdraftEnabled.value = false
       openAICompactMode.value = 'auto'
       openAICompactModelMappings.value = []
       rpmLimitEnabled.value = false

@@ -23,8 +23,9 @@ func TestCodexQuotaOverdraftInjection(t *testing.T) {
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Extra: map[string]any{
-			"codex_5h_used_percent": 95,
-			"codex_5h_reset_at":     time.Now().Add(time.Hour).Format(time.RFC3339),
+			CodexQuotaOverdraftEnabledExtraKey: true,
+			"codex_5h_used_percent":            95,
+			"codex_5h_reset_at":                time.Now().Add(time.Hour).Format(time.RFC3339),
 		},
 	}
 	body := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`)
@@ -56,8 +57,9 @@ func TestCodexQuotaOverdraftInjectionGuards(t *testing.T) {
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Extra: map[string]any{
-			"codex_5h_used_percent": 95,
-			"codex_5h_reset_at":     time.Now().Add(time.Hour).Format(time.RFC3339),
+			CodexQuotaOverdraftEnabledExtraKey: true,
+			"codex_5h_used_percent":            95,
+			"codex_5h_reset_at":                time.Now().Add(time.Hour).Format(time.RFC3339),
 		},
 	}
 	enabledCfg := &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}}
@@ -84,8 +86,9 @@ func TestCodexQuotaOverdraftInjectionGuards(t *testing.T) {
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{openAIAuthModeCredentialKey: OpenAIAuthModeAgentIdentity},
 		Extra: map[string]any{
-			"codex_7d_used_percent": 95,
-			"codex_7d_reset_at":     time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+			CodexQuotaOverdraftEnabledExtraKey: true,
+			"codex_7d_used_percent":            95,
+			"codex_7d_reset_at":                time.Now().Add(24 * time.Hour).Format(time.RFC3339),
 		},
 	}
 	require.NotEqual(t, string(body), string(svc.prepareCodexQuotaOverdraftBody(ctx, agentIdentity, false, body)), "Agent Identity 必须支持透支请求注入")
@@ -105,9 +108,9 @@ func TestCodexQuotaOverdraftAccountSwitch(t *testing.T) {
 		enabled bool
 	}{
 		{
-			name:    "missing inherits global",
+			name:    "missing is disabled",
 			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth},
-			enabled: true,
+			enabled: false,
 		},
 		{
 			name:    "explicit true",
@@ -184,8 +187,9 @@ func TestCodexQuotaOverdraftSchedulingOnlyBypassesQuotaThresholds(t *testing.T) 
 		Status:      StatusActive,
 		Schedulable: true,
 		Extra: map[string]any{
-			"codex_5h_used_percent": 100,
-			"codex_5h_reset_at":     reset.Format(time.RFC3339),
+			CodexQuotaOverdraftEnabledExtraKey: true,
+			"codex_5h_used_percent":            100,
+			"codex_5h_reset_at":                reset.Format(time.RFC3339),
 		},
 	}
 	quotaCtx := withOpenAIQuotaAutoPauseSettings(ctx, OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold5h: 0.8})
@@ -207,7 +211,7 @@ func TestCodexQuotaOverdraftSchedulingOnlyBypassesQuotaThresholds(t *testing.T) 
 	require.NotNil(t, account.TempUnschedulableUntil, "不能修改缓存或数据库账号原对象")
 }
 
-func TestRateLimitServiceCodexQuotaOverdraftDoesNotCreateRuntimeThresholdBlock(t *testing.T) {
+func TestRateLimitServiceCodexQuotaOverdraftDisabledUsesNormalThresholdBlock(t *testing.T) {
 	t.Cleanup(func() { SetCodexQuotaOverdraftEnabled(false) })
 	SetCodexQuotaOverdraftEnabled(true)
 	accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
@@ -235,7 +239,8 @@ func TestRateLimitServiceCodexQuotaOverdraftDoesNotCreateRuntimeThresholdBlock(t
 
 	require.True(t, rl.ApplyAccountSchedulingThreshold(context.Background(), account))
 	require.Equal(t, 1, accountRepo.tempCalls, "普通端点仍应持久化阈值暂停")
-	require.Empty(t, runtimeBlocker.reasons, "阈值暂停不能误写为所有请求共享的 runtime blocker")
+	require.Len(t, runtimeBlocker.reasons, 1, "账号关闭透支后应恢复官方阈值阻断")
+	require.Equal(t, "account_scheduling_threshold", runtimeBlocker.reasons[0])
 }
 
 func int64PtrForCodexQuotaOverdraftTest(value int64) *int64 {

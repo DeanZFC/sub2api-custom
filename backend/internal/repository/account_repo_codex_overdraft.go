@@ -227,9 +227,9 @@ func extendCodexQuotaOverdraftTempUnschedulablePredicates(
 		entsql.EQ(s.C("platform"), service.PlatformOpenAI),
 		entsql.EQ(s.C("type"), service.AccountTypeOAuth),
 		entsql.IsNull(s.C("parent_account_id")),
-		// Missing means inherit the global switch; only an explicit JSON false
-		// disables overdraft for this account.
-		entsql.ExprP("COALESCE("+s.C("extra")+" ->> '"+service.CodexQuotaOverdraftEnabledExtraKey+"', 'true') <> 'false'"),
+		// Account-level overdraft is explicit opt-in. Missing/invalid values must
+		// stay out of the overdraft scheduling projection.
+		entsql.ExprP("COALESCE("+s.C("extra")+" ->> '"+service.CodexQuotaOverdraftEnabledExtraKey+"', 'false') = 'true'"),
 		entsql.Contains(reasonCol, `"source":"`+service.AccountSchedulingThresholdReasonSource+`"`),
 	))
 }

@@ -198,8 +198,9 @@ func TestAccountTestService_OpenAIOAuthOverdraftTestInjectsAndObservesSnapshot(t
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "test-token"},
 		Extra: map[string]any{
-			"codex_5h_used_percent": 95,
-			"codex_5h_reset_at":     time.Now().Add(5 * time.Hour).Format(time.RFC3339),
+			CodexQuotaOverdraftEnabledExtraKey: true,
+			"codex_5h_used_percent":            95,
+			"codex_5h_reset_at":                time.Now().Add(5 * time.Hour).Format(time.RFC3339),
 		},
 	}
 
@@ -471,6 +472,7 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
 		Concurrency:            1,
 		RateLimit429RetryCount: retryCountPointer(0),
 		Credentials:            map[string]any{"access_token": "test-token"},
+		Extra:                  map[string]any{CodexQuotaOverdraftEnabledExtraKey: true},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -510,6 +512,7 @@ func TestAccountTestService_OpenAIQuota429UsesOverdraftCoordinatorWithoutRateLim
 		Concurrency:            1,
 		RateLimit429RetryCount: retryCountPointer(0),
 		Credentials:            map[string]any{"access_token": "test-token"},
+		Extra:                  map[string]any{CodexQuotaOverdraftEnabledExtraKey: true},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -543,6 +546,7 @@ func TestAccountTestService_OpenAI429FallsBackWhenOverdraftDoesNotHandle(t *test
 		Concurrency:            1,
 		RateLimit429RetryCount: retryCountPointer(0),
 		Credentials:            map[string]any{"access_token": "test-token"},
+		Extra:                  map[string]any{CodexQuotaOverdraftEnabledExtraKey: true},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")

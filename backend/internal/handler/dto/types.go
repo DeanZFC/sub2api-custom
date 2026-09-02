@@ -216,7 +216,6 @@ type Account struct {
 	ProxyPoolIDs                 []int64                        `json:"proxy_pool_ids,omitempty"`
 	ProxyPool                    []AccountProxyCapacity         `json:"proxy_pool,omitempty"`
 	Concurrency                  int                            `json:"concurrency"`
-	RateLimit429RetryCount       int                            `json:"rate_limit_429_retry_count"`
 	LoadFactor                   *int                           `json:"load_factor,omitempty"`
 	Priority                     int                            `json:"priority"`
 	RateMultiplier               float64                        `json:"rate_multiplier"`

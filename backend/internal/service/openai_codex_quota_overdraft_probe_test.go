@@ -91,8 +91,9 @@ func newCodexOverdraftProbeTestAccount(now time.Time) *Account {
 		Status:      StatusActive,
 		Schedulable: true,
 		Extra: map[string]any{
-			"codex_5h_used_percent": 100,
-			"codex_5h_reset_at":     now.Add(5 * time.Hour).Format(time.RFC3339),
+			CodexQuotaOverdraftEnabledExtraKey: true,
+			"codex_5h_used_percent":            100,
+			"codex_5h_reset_at":                now.Add(5 * time.Hour).Format(time.RFC3339),
 		},
 	}
 }

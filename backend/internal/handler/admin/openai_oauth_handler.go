@@ -177,7 +177,6 @@ type OpenAICodexPATCreateRequest struct {
 	ProxyConcurrencyLimitEnabled *bool          `json:"proxy_concurrency_limit_enabled"`
 	ProxyPoolIDs                 []int64        `json:"proxy_pool_ids"`
 	Concurrency                  *int           `json:"concurrency"`
-	RateLimit429RetryCount       *int           `json:"rate_limit_429_retry_count"`
 	Priority                     *int           `json:"priority"`
 	RateMultiplier               *float64       `json:"rate_multiplier"`
 	LoadFactor                   *int           `json:"load_factor"`
@@ -307,19 +306,12 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		ProxyPoolIDs                 []int64 `json:"proxy_pool_ids"`
 		Name                         string  `json:"name"`
 		Concurrency                  int     `json:"concurrency"`
-		RateLimit429RetryCount       *int    `json:"rate_limit_429_retry_count"`
 		Priority                     int     `json:"priority"`
 		GroupIDs                     []int64 `json:"group_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
-	}
-	if req.RateLimit429RetryCount != nil {
-		if err := service.ValidateRateLimit429RetryCount(*req.RateLimit429RetryCount); err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
 	}
 
 	// Exchange code for tokens
@@ -360,7 +352,6 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		ProxyConcurrencyLimitEnabled: req.ProxyConcurrencyLimitEnabled,
 		ProxyPoolIDs:                 req.ProxyPoolIDs,
 		Concurrency:                  req.Concurrency,
-		RateLimit429RetryCount:       req.RateLimit429RetryCount,
 		Priority:                     req.Priority,
 		GroupIDs:                     req.GroupIDs,
 	})
@@ -399,12 +390,6 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 	if req.LoadFactor != nil && *req.LoadFactor > 10000 {
 		response.BadRequest(c, "load_factor must be <= 10000")
 		return
-	}
-	if req.RateLimit429RetryCount != nil {
-		if err := service.ValidateRateLimit429RetryCount(*req.RateLimit429RetryCount); err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
 	}
 
 	var proxyURL string
@@ -460,7 +445,6 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		ProxyConcurrencyLimitEnabled: req.ProxyConcurrencyLimitEnabled,
 		ProxyPoolIDs:                 req.ProxyPoolIDs,
 		Concurrency:                  concurrency,
-		RateLimit429RetryCount:       req.RateLimit429RetryCount,
 		Priority:                     priority,
 		RateMultiplier:               req.RateMultiplier,
 		LoadFactor:                   req.LoadFactor,

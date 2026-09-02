@@ -38,7 +38,6 @@ type CodexSessionImportRequest struct {
 	ProxyConcurrencyLimitEnabled *bool          `json:"proxy_concurrency_limit_enabled"`
 	ProxyPoolIDs                 *[]int64       `json:"proxy_pool_ids"`
 	Concurrency                  *int           `json:"concurrency"`
-	RateLimit429RetryCount       *int           `json:"rate_limit_429_retry_count"`
 	Priority                     *int           `json:"priority"`
 	RateMultiplier               *float64       `json:"rate_multiplier"`
 	LoadFactor                   *int           `json:"load_factor"`
@@ -150,12 +149,6 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 	if req.LoadFactor != nil && *req.LoadFactor > 10000 {
 		response.BadRequest(c, "load_factor must be <= 10000")
 		return
-	}
-	if req.RateLimit429RetryCount != nil {
-		if err := service.ValidateRateLimit429RetryCount(*req.RateLimit429RetryCount); err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
 	}
 
 	entries, err := parseCodexSessionImportEntries(req)
@@ -298,7 +291,6 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 				ProxyConcurrencyLimitEnabled: req.ProxyConcurrencyLimitEnabled,
 				ProxyPoolIDs:                 req.ProxyPoolIDs,
 				Concurrency:                  req.Concurrency,
-				RateLimit429RetryCount:       req.RateLimit429RetryCount,
 				Priority:                     req.Priority,
 				RateMultiplier:               req.RateMultiplier,
 				LoadFactor:                   req.LoadFactor,
@@ -358,7 +350,6 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			ProxyConcurrencyLimitEnabled: req.ProxyConcurrencyLimitEnabled,
 			ProxyPoolIDs:                 derefProxyPoolIDs(req.ProxyPoolIDs),
 			Concurrency:                  concurrency,
-			RateLimit429RetryCount:       req.RateLimit429RetryCount,
 			Priority:                     priority,
 			RateMultiplier:               req.RateMultiplier,
 			LoadFactor:                   req.LoadFactor,

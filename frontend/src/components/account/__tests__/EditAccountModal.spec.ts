@@ -668,6 +668,36 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 
+  it('defaults Codex quota overdraft to off and submits the disabled state', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="edit-codex-quota-overdraft-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.codex_quota_overdraft_enabled).toBe(false)
+  })
+
+  it('loads an enabled Codex quota overdraft account and can turn it off', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { codex_quota_overdraft_enabled: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="edit-codex-quota-overdraft-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.codex_quota_overdraft_enabled).toBe(false)
+  })
+
   it('does not render or submit the long-context billing toggle for Spark shadow accounts', async () => {
     const account = buildOpenAISparkShadowAccount()
     account.extra = {

@@ -3276,7 +3276,8 @@ const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OF
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'account_device' | 'device' | 'session' | 'full'
-const codexQuotaOverdraftEnabled = ref(true)
+// 额度透支必须由管理员对账号显式开启，编辑页缺省也保持关闭。
+const codexQuotaOverdraftEnabled = ref(false)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
@@ -3766,7 +3767,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
-  codexQuotaOverdraftEnabled.value = true
+  codexQuotaOverdraftEnabled.value = false
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
@@ -3820,7 +3821,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         extra?.codex_cli_only_allow_app_server === true
     }
     if (newAccount.type === 'oauth') {
-      codexQuotaOverdraftEnabled.value = extra?.codex_quota_overdraft_enabled !== false
+      codexQuotaOverdraftEnabled.value = extra?.codex_quota_overdraft_enabled === true
       const fpMode = extra?.codex_fingerprint_mode as string | undefined
       // 缺省/非法值按 off 呈现，与后端 GetCodexFingerprintMode 的 opt-in 语义一致（#5610）
       codexFingerprintMode.value = (['off', 'account_device', 'device', 'session', 'full'].includes(fpMode || '')
@@ -5260,8 +5261,7 @@ const handleSubmit = async () => {
         }
       }
 
-      // 指纹收敛模式：默认 off（不写入）；account_device/device/session/full 是显式 opt-in，
-      // 必须落键，否则管理员的选择会被后端当作"未设置"而回落到 off（#5610）。
+      // 额度透支是账号级显式开关；指纹收敛模式仍按下方逻辑独立处理。
       if (props.account.type === 'oauth') {
         newExtra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
         if (codexFingerprintMode.value !== 'off') {

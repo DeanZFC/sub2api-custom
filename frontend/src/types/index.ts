@@ -1160,7 +1160,6 @@ export interface Account {
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null
   concurrency: number
-  rate_limit_429_retry_count?: number
   load_factor?: number | null
   current_concurrency?: number // Real-time concurrency count from Redis
   scheduler_score?: {
@@ -1469,7 +1468,6 @@ export interface CreateAccountRequest {
   proxy_concurrency_limit_enabled?: boolean
   proxy_pool_ids?: number[]
   concurrency?: number
-  rate_limit_429_retry_count?: number
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
@@ -1490,7 +1488,6 @@ export interface UpdateAccountRequest {
   proxy_concurrency_limit_enabled?: boolean
   proxy_pool_ids?: number[]
   concurrency?: number
-  rate_limit_429_retry_count?: number
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
@@ -1581,7 +1578,6 @@ export interface AdminDataAccount {
   extra?: Record<string, unknown>
   proxy_key?: string | null
   concurrency: number
-  rate_limit_429_retry_count?: number
   priority: number
   rate_multiplier?: number | null
   expires_at?: number | null
@@ -1614,7 +1610,6 @@ export interface CodexSessionImportRequest {
   proxy_concurrency_limit_enabled?: boolean
   proxy_pool_ids?: number[]
   concurrency?: number
-  rate_limit_429_retry_count?: number
   priority?: number
   rate_multiplier?: number
   load_factor?: number | null
@@ -1636,7 +1631,6 @@ export interface OpenAICodexPATCreateRequest {
   proxy_concurrency_limit_enabled?: boolean
   proxy_pool_ids?: number[]
   concurrency?: number
-  rate_limit_429_retry_count?: number
   priority?: number
   rate_multiplier?: number
   load_factor?: number | null

@@ -40,21 +40,21 @@ func isCodexQuotaOverdraftAccount(account *Account) bool {
 		account.Type != AccountTypeOAuth || account.IsShadow() {
 		return false
 	}
+	// 账号级开关采用显式 opt-in：缺少 extra、缺少字段或字段类型无效时均关闭。
 	if account.Extra == nil {
-		return true
+		return false
 	}
 	value, exists := account.Extra[CodexQuotaOverdraftEnabledExtraKey]
 	if !exists || value == nil {
-		return true
+		return false
 	}
-	// Only an explicit false disables the account. Invalid legacy values fail
-	// open so upgrading does not unexpectedly disable existing accounts.
+	// 只有明确为 true 才启用；旧数据中的字符串/数字 true 仍兼容，其他值关闭。
 	switch typed := value.(type) {
 	case bool:
 		return typed
 	case string:
 		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
-		return err != nil || parsed
+		return err == nil && parsed
 	case float64:
 		return typed != 0
 	case float32:
@@ -65,9 +65,9 @@ func isCodexQuotaOverdraftAccount(account *Account) bool {
 		return typed != 0
 	case json.Number:
 		parsed, err := typed.Int64()
-		return err != nil || parsed != 0
+		return err == nil && parsed != 0
 	default:
-		return true
+		return false
 	}
 }
 

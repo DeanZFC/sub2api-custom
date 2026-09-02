@@ -106,11 +106,11 @@ GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED=true
 账号编辑页的“CPA 指纹出口”下拉框提供“CPA 指纹出口（推荐）”选项。选择后会写入
 `codex_fingerprint_mode: account_device`，按账号固定 installation identity；当前兼容模式不收敛会话和线程，
 与 CPA `identity-confuse` 对所有身份信号逐项映射的完整语义并不完全相同；
-不选择账号级覆盖时，仍由全局开关提供相同的默认行为。
+不选择账号级开关时按关闭处理；全局开关只作为总门控，具体账号仍需单独打开。
 
-OpenAI OAuth 账号还可在同一区域单独关闭“Codex 额度透支”。未配置时继承全局
-`gateway.codex_quota_overdraft_enabled`；显式关闭后，该账号不注入探测 Payload、不执行独立探测、
-不绕过调度阈值，也不记录透支状态和统计，但普通 Codex 用量快照仍会照常更新。
+OpenAI OAuth 账号还可在同一区域单独开启“Codex 额度透支”。账号级开关默认关闭；只有同时打开全局
+`gateway.codex_quota_overdraft_enabled` 和该账号开关时，才会注入探测 Payload、执行独立探测、
+绕过对应的额度调度阈值并记录透支状态和统计；普通 Codex 用量快照仍会照常更新。
 
 ### 3. 创建数据目录
 
@@ -131,7 +131,7 @@ docker compose \
   up -d --build
 ```
 
-`docker-compose.local.yml` 提供应用、PostgreSQL、Redis、网络和数据卷；`docker-compose.custom.yml` 把应用镜像切换为本仓库源码构建，并默认开启透支功能。
+`docker-compose.local.yml` 提供应用、PostgreSQL、Redis、网络和数据卷；`docker-compose.custom.yml` 把应用镜像切换为本仓库源码构建，并默认开启全局透支能力；具体账号仍由账号页开关控制。
 
 查看容器状态：
 
@@ -185,7 +185,7 @@ gateway:
   codex_quota_overdraft_enabled: true
 ```
 
-环境变量 `GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED` 的优先级高于 YAML。本项目提供的 Compose 覆盖文件默认将它设为 `true`，因此全新部署不需要手动编辑 `data/config.yaml`。
+环境变量 `GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED` 的优先级高于 YAML。本项目提供的 Compose 覆盖文件默认将它设为 `true`；具体账号还需要在账号页面单独打开账号开关。
 
 检查容器实际收到的环境变量：
 

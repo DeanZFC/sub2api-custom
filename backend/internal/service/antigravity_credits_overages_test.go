@@ -147,7 +147,7 @@ func TestHandleSmartRetry_QuotaExhausted_UsesCreditsAndStoresIndependentState(t 
 	require.Empty(t, repo.modelRateLimitCalls, "overages 成功后不应写入普通 model_rate_limits")
 }
 
-func TestAttemptCreditsOveragesRetryUsesAccount429RetryBudget(t *testing.T) {
+func TestAttemptCreditsOveragesRetryDoesNotReplay429(t *testing.T) {
 	finalBody := []byte(`{"error":{"status":"RESOURCE_EXHAUSTED","message":"temporary limit"}}`)
 	upstream := &mockSmartRetryUpstream{
 		responses: []*http.Response{
@@ -169,13 +169,11 @@ func TestAttemptCreditsOveragesRetryUsesAccount429RetryBudget(t *testing.T) {
 		},
 		errors: []error{nil, nil, nil},
 	}
-	retryCount := 2
 	account := &Account{
-		ID:                     4293,
-		Type:                   AccountTypeOAuth,
-		Platform:               PlatformAntigravity,
-		Concurrency:            1,
-		RateLimit429RetryCount: &retryCount,
+		ID:          4293,
+		Type:        AccountTypeOAuth,
+		Platform:    PlatformAntigravity,
+		Concurrency: 1,
 	}
 	params := antigravityRetryLoopParams{
 		ctx:          context.Background(),
@@ -197,9 +195,8 @@ func TestAttemptCreditsOveragesRetryUsesAccount429RetryBudget(t *testing.T) {
 	)
 
 	require.True(t, result.handled)
-	require.NotNil(t, result.resp)
-	require.Equal(t, http.StatusOK, result.resp.StatusCode)
-	require.Len(t, upstream.calls, 3)
+	require.Nil(t, result.resp)
+	require.Len(t, upstream.calls, 1)
 	for _, body := range upstream.requestBodies {
 		require.Contains(t, string(body), "enabledCreditTypes")
 	}
@@ -216,14 +213,12 @@ func TestHandleSmartRetryContinuesOriginalFlowAfterCredits429BudgetIsExhausted(t
 		errors:     []error{nil},
 		repeatLast: true,
 	}
-	retryCount := 1
 	repo := &stubAntigravityAccountRepo{}
 	account := &Account{
-		ID:                     4294,
-		Type:                   AccountTypeOAuth,
-		Platform:               PlatformAntigravity,
-		Concurrency:            1,
-		RateLimit429RetryCount: &retryCount,
+		ID:          4294,
+		Type:        AccountTypeOAuth,
+		Platform:    PlatformAntigravity,
+		Concurrency: 1,
 		Extra: map[string]any{
 			"allow_overages": true,
 		},
@@ -265,7 +260,7 @@ func TestHandleSmartRetryContinuesOriginalFlowAfterCredits429BudgetIsExhausted(t
 	require.Equal(t, smartRetryActionContinue, result.action)
 	require.Nil(t, result.resp)
 	require.Zero(t, handleErrorCalls, "the normal outer error path must apply the final 429 side effect exactly once")
-	require.Len(t, upstream.calls, 2, "credits 请求只消费一次共享透明预算，随后交回官方外层流程")
+	require.Len(t, upstream.calls, 1, "credits 请求只发送一次，随后交回官方外层流程")
 	require.Len(t, repo.modelRateLimitCalls, 1)
 	require.Equal(t, creditsExhaustedKey, repo.modelRateLimitCalls[0].modelKey)
 }

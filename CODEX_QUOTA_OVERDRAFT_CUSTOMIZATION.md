@@ -8,8 +8,8 @@
 - 当前官方合并基线：Sub2API `v0.1.183`，`upstream/main` 提交 `6ca1e15b0`
 - 参考实现：<https://github.com/Mxucc/cpa-account-config-manager>
 - 功能开关：`gateway.codex_quota_overdraft_enabled`
-- 代码默认值：关闭；`deploy/config.example.yaml` 部署示例默认开启
-- 账号级透支开关：`accounts.extra.codex_quota_overdraft_enabled`；缺省跟随全局开关，显式 `false` 仅关闭当前 OpenAI OAuth 账号
+- 代码默认值：关闭；`deploy/config.example.yaml` 部署示例默认开启全局能力
+- 账号级透支开关：`accounts.extra.codex_quota_overdraft_enabled`；只有明确为 `true` 才对当前 OpenAI OAuth 账号启用，缺省关闭
 - OpenAI 账号固定指纹开关：`gateway.openai_account_unique_fingerprint_enabled`
 - 固定指纹开关默认开启；没有显式账号模式时按账号 ID 派生稳定设备指纹，账号 extra 中显式设置 `codex_fingerprint_mode: off` 可单独关闭
 - 账号编辑页新增 `CPA 指纹出口（推荐）` 选项，对应 `codex_fingerprint_mode: account_device`；保留底层值以兼容已有账号
@@ -108,7 +108,7 @@ CLIProxyAPI 的 `codex.identity-confuse` 实现后，当前 `account_device` 与
 8. 额度恢复后状态改为 `recovered`，清理本功能或额度阈值产生的暂停；5h 与 7d 分别维护透支起点，不会因另一窗口后来耗尽而重置已有统计。
 
 账号级开关为 `false` 时，上述注入、独立探测、429 透支判定、调度阈值绕过、透支状态和透支统计全部跳过；
-普通 Codex 用量快照仍按原逻辑保存。账号字段缺省时继承全局开关，非 OpenAI OAuth 和影子账号始终不参与。
+普通 Codex 用量快照仍按原逻辑保存。账号字段缺省时按关闭处理，非 OpenAI OAuth 和影子账号始终不参与。
 
 状态值包括 `pending`、`passed`、`failed`、`inconclusive`、`recovered`。账号用量页面显示探测状态、尝试次数、额度周期、透支期成功请求数、Token、账号金额及预计恢复时间。
 
@@ -185,7 +185,7 @@ CLIProxyAPI 的 `codex.identity-confuse` 实现后，当前 `account_device` 与
 3. 尝试恢复补丁：`git apply --3way codex-quota-overdraft.patch`
 4. 无法自动应用时，按本文件“完整行为”和“修改文件”逐项重新接入。
 5. 在 `backend` 执行 `go generate ./cmd/server`，重新生成 Wire。
-6. 确认实际 `config.yaml` 仍有 `gateway.codex_quota_overdraft_enabled: true`。
+6. 按需确认实际 `config.yaml` 的 `gateway.codex_quota_overdraft_enabled`；全局打开后仍需在账号新增/编辑页单独打开账号开关。
 7. 运行验证：
 
 ```bash
@@ -226,7 +226,7 @@ SELECT id, name, extra->'codex_quota_overdraft_probe'
 FROM accounts
 WHERE platform = 'openai' AND type = 'oauth';
 
--- 查看账号级开关（NULL 表示继承全局开关）
+-- 查看账号级开关（NULL 表示未开启账号级透支）
 SELECT id, name, extra->>'codex_quota_overdraft_enabled' AS overdraft_enabled
 FROM accounts
 WHERE platform = 'openai' AND type = 'oauth' AND parent_account_id IS NULL;

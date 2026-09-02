@@ -254,7 +254,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		ProxyConcurrencyLimitEnabled: a.ProxyConcurrencyLimitEnabled(),
 		ProxyPoolIDs:                 append([]int64(nil), a.ProxyPoolIDs...),
 		Concurrency:                  a.Concurrency,
-		RateLimit429RetryCount:       a.GetRateLimit429RetryCount(),
 		LoadFactor:                   a.LoadFactor,
 		Priority:                     a.Priority,
 		RateMultiplier:               a.BillingRateMultiplier(),
