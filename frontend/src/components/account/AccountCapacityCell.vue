@@ -1,35 +1,22 @@
 <template>
-  <div class="min-w-[132px] space-y-1 py-0.5">
-    <!-- 并发槽位：代理池账号逐行展示，便于快速比较各出口的实时占用。 -->
-    <div class="space-y-1">
-      <div
-        v-for="proxy in proxyPool"
-        :key="proxy.proxy_id"
-        class="flex min-w-0 items-center gap-2"
-        :title="`${proxy.proxy_name}: ${proxy.current_concurrency} / ${proxy.max_concurrency}`"
-      >
-        <span :class="['h-1.5 w-1.5 flex-shrink-0 rounded-full', proxyConcurrencyDotClass(proxy.current_concurrency, proxy.max_concurrency)]" />
-        <span class="min-w-0 flex-1 truncate text-[11px] text-gray-600 dark:text-gray-300">{{ proxy.proxy_name }}</span>
-        <span :class="['flex-shrink-0 font-mono text-[11px] font-semibold tabular-nums', proxyConcurrencyTextClass(proxy.current_concurrency, proxy.max_concurrency)]">
-          {{ proxy.current_concurrency }}<span class="px-0.5 font-normal text-gray-400 dark:text-gray-500">/</span>{{ proxy.max_concurrency }}
-        </span>
-      </div>
-
-      <div
-        v-if="!proxyPool.length"
-        class="flex items-center gap-2"
-        :title="`${currentConcurrency} / ${account.concurrency}`"
-      >
-        <span :class="['h-1.5 w-1.5 flex-shrink-0 rounded-full', concurrencyDotClass]" />
-        <span class="flex-1 text-[11px] text-gray-500 dark:text-gray-400">{{ t('admin.accounts.concurrency') }}</span>
-        <span :class="['font-mono text-[11px] font-semibold tabular-nums', concurrencyTextClass]">
-          {{ currentConcurrency }}<span class="px-0.5 font-normal text-gray-400 dark:text-gray-500">/</span>{{ account.concurrency }}
-        </span>
-      </div>
-    </div>
+  <div class="flex flex-col gap-0.5">
+    <!-- 并发槽位 -->
+    <template v-if="account.proxy_concurrency_limit_enabled && account.proxy_pool?.length">
+      <CapacityBadge v-for="proxy in account.proxy_pool" :key="proxy.proxy_id"
+        :color-class="proxyConcurrencyClass(proxy.current_concurrency, proxy.max_concurrency)"
+        :current="proxy.current_concurrency" :max="proxy.max_concurrency" :suffix="proxy.proxy_name">
+        <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75A2.25 2.25 0 0115.75 13.5H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+        </svg>
+      </CapacityBadge>
+    </template>
+    <CapacityBadge v-else :color-class="concurrencyClass" :current="currentConcurrency" :max="account.concurrency">
+      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75A2.25 2.25 0 0115.75 13.5H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+      </svg>
+    </CapacityBadge>
 
     <!-- 5h窗口费用限制 -->
-    <div v-if="hasSecondaryCapacity" class="flex flex-wrap gap-1 border-t border-gray-100 pt-1.5 dark:border-dark-700">
     <CapacityBadge v-if="showWindowCost" :color-class="windowCostClass" :tooltip="windowCostTooltip" :current="'$' + formatCost(currentWindowCost)" :max="'$' + formatCost(account.window_cost_limit)">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -54,7 +41,6 @@
     <QuotaBadge v-if="showDailyQuota" :used="account.quota_daily_used ?? 0" :limit="account.quota_daily_limit!" label="D" />
     <QuotaBadge v-if="showWeeklyQuota" :used="account.quota_weekly_used ?? 0" :limit="account.quota_weekly_limit!" label="W" />
     <QuotaBadge v-if="showTotalQuota" :used="account.quota_used ?? 0" :limit="account.quota_limit!" />
-    </div>
   </div>
 </template>
 
@@ -74,38 +60,18 @@ const { t } = useI18n()
 // ====== 并发 ======
 const currentConcurrency = computed(() => props.account.current_concurrency || 0)
 
-const proxyPool = computed(() =>
-  props.account.proxy_concurrency_limit_enabled && props.account.proxy_pool?.length
-    ? props.account.proxy_pool
-    : []
-)
-
-const concurrencyTextClass = computed(() => {
+const concurrencyClass = computed(() => {
   const current = currentConcurrency.value
   const max = props.account.concurrency
-  if (current >= max) return 'text-red-600 dark:text-red-400'
-  if (current > 0) return 'text-amber-600 dark:text-amber-400'
-  return 'text-gray-700 dark:text-gray-200'
+  if (current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  if (current > 0) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+  return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
 })
 
-const concurrencyDotClass = computed(() => {
-  const current = currentConcurrency.value
-  const max = props.account.concurrency
-  if (current >= max) return 'bg-red-500'
-  if (current > 0) return 'bg-amber-500'
-  return 'bg-emerald-500'
-})
-
-const proxyConcurrencyTextClass = (current: number, max: number) => {
-  if (current >= max) return 'text-red-600 dark:text-red-400'
-  if (current > 0) return 'text-amber-600 dark:text-amber-400'
-  return 'text-gray-700 dark:text-gray-200'
-}
-
-const proxyConcurrencyDotClass = (current: number, max: number) => {
-  if (current >= max) return 'bg-red-500'
-  if (current > 0) return 'bg-amber-500'
-  return 'bg-emerald-500'
+const proxyConcurrencyClass = (current: number, max: number) => {
+  if (current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  if (current > 0) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+  return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
 }
 
 // ====== 窗口费用 ======
@@ -235,14 +201,5 @@ const showWeeklyQuota = computed(() =>
 )
 const showTotalQuota = computed(() =>
   isQuotaEligible.value && props.account.quota_limit != null && props.account.quota_limit > 0
-)
-
-const hasSecondaryCapacity = computed(() =>
-  showWindowCost.value ||
-  showSessionLimit.value ||
-  showRpmLimit.value ||
-  showDailyQuota.value ||
-  showWeeklyQuota.value ||
-  showTotalQuota.value
 )
 </script>

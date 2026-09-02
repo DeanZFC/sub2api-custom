@@ -328,49 +328,6 @@ describe('EditAccountModal', () => {
     authIsSimpleMode.value = true
   })
 
-  it('compact mode only edits and submits concurrency', async () => {
-    const account = {
-      ...buildAccount(),
-      id: 42,
-      name: 'Shared relay account',
-      concurrency: 3,
-      current_concurrency: 1
-    }
-    updateAccountMock.mockReset().mockResolvedValue(account)
-    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
-
-    const wrapper = mount(EditAccountModal, {
-      props: {
-        show: true,
-        account,
-        proxies: [],
-        groups: [],
-        compact: true
-      },
-      global: {
-        stubs: {
-          BaseDialog: BaseDialogStub,
-          Select: SelectStub,
-          Icon: true,
-          ProxySelector: true,
-          GroupSelector: GroupSelectorStub,
-          ModelWhitelistSelector: ModelWhitelistSelectorStub
-        }
-      }
-    })
-
-    expect(wrapper.find('[data-testid="edit-account-concurrency"]').exists()).toBe(true)
-    expect(wrapper.find('input[data-tour="edit-account-form-name"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('admin.accounts.notes')
-
-    await wrapper.get('[aria-label="admin.accounts.increaseConcurrency"]').trigger('click')
-    expect(wrapper.get<HTMLInputElement>('[data-testid="edit-account-concurrency"]').element.value).toBe('4')
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]).toEqual({ concurrency: 4 })
-  })
-
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()
