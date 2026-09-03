@@ -383,18 +383,53 @@ sudo systemctl reload nginx
 
 ## 日常升级本 Fork
 
-源码镜像的当前版本来自仓库根目录的 `FORK_VERSION`。后台检查更新时读取 GitHub 上 `sub2api-custom` 分支的同名文件：远端版本更高时显示更新提示，版本一致时显示最新。源码构建不会执行二进制在线更新或在线回退，以免官方程序覆盖 Fork 功能。
+### 后台页面自动更新（推荐）
 
-运行数据均位于被 Git 忽略的目录中，正常 `git pull` 不会覆盖：
+源码构建可安装宿主机 `sub2api-updater-<compose项目名>`。主应用只通过带令牌的 Unix Socket
+请求更新，宿主机服务固定执行当前仓库的 `git fetch`、`git merge --ff-only`、数据库备份、
+Docker 构建、应用容器重建和健康检查。主应用容器不挂载 Docker Socket。
+
+全新 Linux Docker 部署：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-custom/deploy/install-custom-docker.sh \
+  -o /tmp/install-custom-docker.sh
+sudo bash /tmp/install-custom-docker.sh
+```
+
+已有源码 Docker 部署：
+
+```bash
+sudo ./deploy/install-source-updater.sh \
+  --repo-dir /opt/sub2api-custom-28080 \
+  --container "$(docker inspect -f '{{.Id}}' sub2api-custom-28080)"
+```
+
+安装器从 Compose labels 获取项目和配置文件，网页请求不能传入任意命令或路径。更新器会拒绝
+有未提交源码修改、非 `sub2api-custom` 分支、非本项目 `origin` 或非快进更新；更新前自动生成
+数据库 dump。更新失败时会尝试恢复原源码和原应用镜像，绝不会执行 `docker compose down -v`。
+
+安装完成后，在后台版本菜单点击“立即更新”即可。若页面仍显示未安装更新器的提示，
+检查：
+
+```bash
+systemctl status sub2api-updater-<compose项目名>
+journalctl -u sub2api-updater-<compose项目名> -n 100 --no-pager
+```
+
+源码镜像的当前版本来自仓库根目录的 `FORK_VERSION`。后台检查更新时读取 GitHub 上 `sub2api-custom` 分支的同名文件：远端版本更高时显示更新提示，版本一致时显示最新。源码构建不会执行二进制在线更新或在线回退，以免官方程序覆盖 Fork 功能。更新成功后，更新器会从新源码重新构建并原子替换宿主机更新器自身；当前进程继续完成本次任务，下一次任务使用新版更新器。
+
+运行数据均位于被 Git 忽略的目录中，正常更新不会覆盖：
 
 ```text
 deploy/.env
 deploy/data/
 deploy/postgres_data/
 deploy/redis_data/
+deploy/backups/
 ```
 
-升级步骤：
+没有安装更新器时的手动升级步骤：
 
 ```bash
 cd /opt/sub2api-custom
@@ -411,7 +446,7 @@ docker compose \
 
 如果服务器目录是 `/opt/sub2api`，只需替换第一条路径。升级完成后重新执行“判断功能是否生效”中的镜像、环境变量和日志检查。
 
-更新后可在管理后台点击刷新，版本应显示为类似 `v0.1.184-custom.1`，更新方式应提示源码构建使用 `git pull`。也可以直接检查容器内二进制版本：
+更新后可在管理后台点击刷新，版本应显示为新的 `FORK_VERSION`。也可以直接检查容器内二进制版本：
 
 ```bash
 docker exec sub2api-custom /app/sub2api -version

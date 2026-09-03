@@ -231,7 +231,7 @@
                 </button>
               </div>
 
-              <!-- Priority 3: Update available for source build - show git pull hint -->
+              <!-- Priority 3: Source builds use the host updater when installed. -->
               <div v-else-if="hasUpdate && !isReleaseBuild" class="space-y-2">
                 <a
                   v-if="releaseInfo?.html_url && releaseInfo.html_url !== '#'"
@@ -268,9 +268,12 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </a>
-                <!-- Source build hint -->
+                <!-- Source updater status -->
                 <div
-                  class="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2 dark:border-blue-800/50 dark:bg-blue-900/20"
+                  class="flex items-center gap-2 rounded-lg border p-2"
+                  :class="sourceUpdateEnabled
+                    ? 'border-green-200 bg-green-50 dark:border-green-800/50 dark:bg-green-900/20'
+                    : 'border-blue-200 bg-blue-50 dark:border-blue-800/50 dark:bg-blue-900/20'"
                 >
                   <svg
                     class="h-3.5 w-3.5 flex-shrink-0 text-blue-500 dark:text-blue-400"
@@ -285,10 +288,37 @@
                       d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
-                  <p class="text-xs text-blue-600 dark:text-blue-400">
-                    {{ t('version.sourceModeHint') }}
+                  <p
+                    class="text-xs"
+                    :class="sourceUpdateEnabled ? 'text-green-700 dark:text-green-300' : 'text-blue-600 dark:text-blue-400'"
+                  >
+                    {{ sourceUpdateEnabled ? t('version.sourceUpdaterReady') : t('version.sourceModeHint') }}
                   </p>
                 </div>
+
+                <div
+                  v-if="sourceUpdateJob"
+                  class="rounded-lg border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 dark:border-dark-700 dark:bg-dark-900/40 dark:text-dark-300"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <span>{{ t('version.sourceUpdateStage') }}</span>
+                    <span class="font-medium">{{ sourceStageLabel }}</span>
+                  </div>
+                  <p v-if="sourceUpdateJob.message" class="mt-1 truncate">
+                    {{ sourceUpdateJob.message }}
+                  </p>
+                </div>
+
+                <button
+                  v-if="sourceUpdateEnabled"
+                  @click="handleUpdate"
+                  :disabled="updating"
+                  class="flex w-full items-center justify-center gap-2 rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Icon v-if="updating" name="refresh" size="sm" :stroke-width="2" class="animate-spin" />
+                  <Icon v-else name="download" size="sm" :stroke-width="2" />
+                  {{ updating ? t('version.updating') : t('version.updateNow') }}
+                </button>
               </div>
 
               <!-- Priority 4: Update available for release build - show update button -->
@@ -643,15 +673,18 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import {
   performUpdate,
+  getSourceUpdateStatus,
   restartService,
   getRollbackVersions,
   rollback as rollbackAPI,
-  type RollbackVersionInfo
+  type RollbackVersionInfo,
+  type SourceUpdateJob
 } from '@/api/admin/system'
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
 
 const GITHUB_REPO = 'DeanZFC/sub2api-custom'
+const SOURCE_UPDATE_JOB_KEY = 'sub2api-source-update-job'
 // Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
 const DOCKER_IMAGE = 'weishaw/sub2api'
 
@@ -674,6 +707,7 @@ const loading = computed(() => appStore.versionLoading)
 const currentVersion = computed(() => appStore.currentVersion || props.version || '')
 const latestVersion = computed(() => appStore.latestVersion)
 const hasUpdate = computed(() => appStore.hasUpdate)
+const sourceUpdateEnabled = computed(() => appStore.sourceUpdateEnabled)
 const releaseInfo = computed(() => appStore.releaseInfo)
 const buildType = computed(() => appStore.buildType)
 
@@ -684,6 +718,24 @@ const needRestart = ref(false)
 const updateError = ref('')
 const updateSuccess = ref(false)
 const restartCountdown = ref(0)
+const sourceUpdateJob = ref<SourceUpdateJob | null>(null)
+let sourcePollingTimer: ReturnType<typeof setTimeout> | null = null
+const sourceStageLabel = computed(() => {
+  const stage = sourceUpdateJob.value?.stage || sourceUpdateJob.value?.status || ''
+  const knownStages = new Set([
+    'queued',
+    'validating',
+    'backing_up',
+    'fetching',
+    'building',
+    'deploying',
+    'health_check',
+    'rolling_back',
+    'completed',
+    'failed'
+  ])
+  return knownStages.has(stage) ? t(`version.sourceStages.${stage}`) : stage
+})
 // Distinguishes the success + restart panel between update and rollback flows
 const successKind = ref<'update' | 'rollback'>('update')
 
@@ -746,6 +798,7 @@ async function refreshVersion(force = true) {
   updateError.value = ''
   updateSuccess.value = false
   needRestart.value = false
+  sourceUpdateJob.value = null
   resetRollbackState()
 
   await appStore.fetchVersion(force)
@@ -757,9 +810,19 @@ async function handleUpdate() {
   updating.value = true
   updateError.value = ''
   updateSuccess.value = false
+  sourceUpdateJob.value = null
 
   try {
     const result = await performUpdate()
+    if (result.source_update) {
+      if (!result.job?.job_id) {
+        throw new Error(t('version.sourceUpdateInvalidResponse'))
+      }
+      sourceUpdateJob.value = result.job
+      localStorage.setItem(SOURCE_UPDATE_JOB_KEY, result.job.job_id)
+      await pollSourceUpdate(result.job.job_id)
+      return
+    }
     successKind.value = 'update'
     updateSuccess.value = true
     needRestart.value = result.need_restart
@@ -771,6 +834,37 @@ async function handleUpdate() {
   } finally {
     updating.value = false
   }
+}
+
+async function pollSourceUpdate(jobID: string): Promise<void> {
+  const deadline = Date.now() + 15 * 60 * 1000
+
+  while (Date.now() < deadline) {
+    try {
+      const job = await getSourceUpdateStatus(jobID)
+      sourceUpdateJob.value = job
+      if (job.status === 'succeeded') {
+        localStorage.removeItem(SOURCE_UPDATE_JOB_KEY)
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        await refreshVersion(true)
+        return
+      }
+      if (job.status === 'failed') {
+        localStorage.removeItem(SOURCE_UPDATE_JOB_KEY)
+        updateError.value = job.error || job.message || t('version.updateFailed')
+        return
+      }
+    } catch {
+      // The app is briefly unavailable while its container is recreated.
+    }
+
+    await new Promise<void>((resolve) => {
+      sourcePollingTimer = setTimeout(resolve, 2000)
+    })
+    sourcePollingTimer = null
+  }
+
+  updateError.value = t('version.sourceUpdateTimeout')
 }
 
 function resetRollbackState() {
@@ -913,11 +1007,22 @@ onMounted(() => {
   if (isAdmin.value) {
     // Use cached version if available, otherwise fetch
     appStore.fetchVersion(false)
+    const pendingJobID = localStorage.getItem(SOURCE_UPDATE_JOB_KEY)
+    if (pendingJobID) {
+      updating.value = true
+      void pollSourceUpdate(pendingJobID).finally(() => {
+        updating.value = false
+      })
+    }
   }
   document.addEventListener('click', handleClickOutside)
 })
 
 onBeforeUnmount(() => {
+  if (sourcePollingTimer) {
+    clearTimeout(sourcePollingTimer)
+    sourcePollingTimer = null
+  }
   document.removeEventListener('click', handleClickOutside)
 })
 </script>

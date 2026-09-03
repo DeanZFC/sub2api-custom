@@ -8,7 +8,7 @@
 
 services:
   sub2api:
-    image: sub2api-custom:local
+    image: ${SUB2API_IMAGE:-sub2api-custom:local}
     build:
       context: ..
       dockerfile: Dockerfile
@@ -21,3 +21,7 @@ services:
     environment:
       - GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED=${GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED:-true}
       - GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED=${GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED:-true}
+      - SUB2API_UPDATER_SOCKET=${SUB2API_UPDATER_SOCKET:-/run/sub2api-updater/sub2api-overdraft.sock}
+      - SUB2API_UPDATER_TOKEN=${SUB2API_UPDATER_TOKEN:-}
+    volumes:
+      - ${SUB2API_UPDATER_DIR:-/run/sub2api-updater}:/run/sub2api-updater:ro

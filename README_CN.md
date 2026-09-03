@@ -39,19 +39,28 @@
 
 **[sub2api-custom 部署与运维指南](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)**
 
-最短部署流程：
+最短部署流程（Linux Docker，会自动安装宿主机更新器）：
 
 ```bash
-git clone https://github.com/DeanZFC/sub2api-custom.git sub2api-custom
-cd sub2api-custom/deploy
-cp .env.example .env
-chmod 600 .env
-# 编辑 .env，至少设置 POSTGRES_PASSWORD、JWT_SECRET 和 TOTP_ENCRYPTION_KEY
-mkdir -p data postgres_data redis_data
-docker compose \
-  -f docker-compose.local.yml \
-  -f docker-compose.custom.yml \
-  up -d --build
+curl -fsSL https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-custom/deploy/install-custom-docker.sh \
+  -o /tmp/install-custom-docker.sh
+sudo bash /tmp/install-custom-docker.sh
+```
+
+安装更新器后，管理员可在页面右上角版本菜单点击“立即更新”。更新器会自动备份
+PostgreSQL、快进拉取 `sub2api-custom`、重建应用镜像、仅重建 `sub2api` 容器并执行健康检查。
+更新器不会接收网页传入的命令、仓库或路径，也不会删除 PostgreSQL/Redis 数据卷。
+此功能仅适用于 Linux Docker + systemd。macOS Apple container 不会安装宿主机更新器，页面会保留手动更新提示。
+
+需要手动控制目录、端口或 Compose 项目名时，使用安装器参数，例如：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-custom/deploy/install-custom-docker.sh \
+  -o /tmp/install-custom-docker.sh
+sudo bash /tmp/install-custom-docker.sh \
+  --directory /opt/sub2api-custom-28080 \
+  --port 28080 \
+  --project sub2api-custom-28080
 ```
 
 源码中的 `deploy/config.example.yaml` 只是模板。运行配置通常位于 `deploy/data/config.yaml`。透支开关为：
@@ -63,7 +72,9 @@ gateway:
 
 公开的 `docker-compose.custom.yml` 已通过环境变量默认开启全局能力；具体账号仍需在账号新增/编辑页打开账号开关。
 
-源码镜像会把根目录的 `FORK_VERSION` 写入版本信息。管理后台检测到本项目新版本后只提示使用 `git pull` 更新源码，不会下载官方二进制覆盖扩展功能。完整更新命令见部署指南的“日常升级本 Fork”。
+源码镜像会把根目录的 `FORK_VERSION` 写入版本信息。安装宿主机更新器后，管理后台可直接拉取本项目
+源码、备份数据库、重建应用容器并进行健康检查；更新成功后还会原子替换宿主机更新器自身，后续版本可继续使用同一个按钮。
+完整安装和故障排查见部署指南的“后台页面自动更新”。
 
 ## 如何确认透支成功
 
@@ -362,9 +373,9 @@ sudo systemctl enable sub2api
 
 #### 升级
 
-官方发行版可以直接在管理后台进行二进制在线升级。本项目使用源码构建，管理后台会读取本项目分支中的 `FORK_VERSION` 检测新版本，并提示使用 `git pull` 后重新构建；不会在线替换二进制。
-
-本 Fork 的升级命令见 [日常升级本 Fork](CODEX_OVERDRAFT_DEPLOYMENT_CN.md#日常升级本-fork)。源码构建不支持页面内一键升级和在线回退，避免误装官方二进制而丢失透支功能。
+官方发行版可以直接在管理后台进行二进制在线升级。本项目使用源码构建，管理后台读取本项目分支中的
+`FORK_VERSION` 检测新版本，并由宿主机受限更新器完成拉取、构建、重建和健康检查，不会用官方二进制覆盖本 Fork。
+源码构建不提供在线二进制回退；失败时更新器会恢复更新前的源码和应用镜像。
 
 #### 常用命令
 
@@ -401,22 +412,17 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
 # 创建部署目录
 mkdir -p sub2api-deploy && cd sub2api-deploy
 
-# 下载并运行部署准备脚本
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
-
-# 启动服务
-docker compose up -d
-
-# 查看日志
-docker compose logs -f sub2api
+# 下载并运行源码版一键部署（自动构建并安装宿主机更新器）
+curl -fsSL https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-custom/deploy/install-custom-docker.sh \
+  -o /tmp/install-custom-docker.sh
+sudo bash /tmp/install-custom-docker.sh
 ```
 
 **脚本功能：**
-- 下载 `docker-compose.local.yml`（本地保存为 `docker-compose.yml`）和 `.env.example`
+- 克隆 `sub2api-custom` 源码并构建自定义镜像
 - 自动生成安全凭证（JWT_SECRET、TOTP_ENCRYPTION_KEY、POSTGRES_PASSWORD）
-- 创建 `.env` 文件并填充自动生成的密钥
-- 创建数据目录（使用本地目录，便于备份和迁移）
-- 显示生成的凭证供你记录
+- 创建本地数据目录，并安装宿主机 systemd 更新器
+- 后台页面可直接检查版本、备份数据库、构建和健康检查
 
 #### 手动部署
 
@@ -424,8 +430,8 @@ docker compose logs -f sub2api
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api/deploy
+git clone -b sub2api-custom https://github.com/DeanZFC/sub2api-custom.git
+cd sub2api-custom/deploy
 
 # 2. 复制环境配置文件
 cp .env.example .env

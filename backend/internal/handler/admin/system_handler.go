@@ -51,6 +51,14 @@ type systemUpdateService interface {
 	RollbackToVersion(ctx context.Context, version string) error
 }
 
+// sourceUpdateOperations is optional to keep the release updater contract and
+// existing handler test doubles compatible. UpdateService implements it when a
+// host-side source updater is configured through the deployment environment.
+type sourceUpdateOperations interface {
+	StartSourceUpdate(ctx context.Context, requestID, expectedVersion string) (service.SourceUpdateJob, error)
+	SourceUpdateStatus(ctx context.Context, jobID string) (service.SourceUpdateJob, error)
+}
+
 // NewSystemHandler creates a new SystemHandler
 func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOperationLockService) *SystemHandler {
 	return &SystemHandler{
@@ -99,6 +107,42 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 		updateCtx, cancel := systemUpdateContext(ctx)
 		defer cancel()
 
+		// Source builds are rebuilt by a preconfigured host updater. The updater
+		// runs asynchronously because it recreates this application container;
+		// the returned job can be polled through GetSourceUpdateStatus.
+		if sourceOps, ok := h.updateSvc.(sourceUpdateOperations); ok {
+			info, checkErr := h.updateSvc.CheckUpdate(updateCtx, true)
+			if checkErr != nil {
+				releaseReason = "SYSTEM_UPDATE_CHECK_FAILED"
+				return nil, checkErr
+			}
+			if info != nil && info.BuildType == "source" && info.SourceUpdateEnabled {
+				if !info.HasUpdate {
+					succeeded = true
+					return gin.H{
+						"message":            "Already up to date",
+						"already_up_to_date": true,
+						"current_version":    info.CurrentVersion,
+						"latest_version":     info.LatestVersion,
+						"operation_id":       lock.OperationID(),
+					}, nil
+				}
+				job, startErr := sourceOps.StartSourceUpdate(updateCtx, operationID, info.LatestVersion)
+				if startErr != nil {
+					releaseReason = "SYSTEM_SOURCE_UPDATE_FAILED"
+					return nil, startErr
+				}
+				succeeded = true
+				return gin.H{
+					"message":       "Source update started",
+					"need_restart":  false,
+					"source_update": true,
+					"job":           job,
+					"operation_id":  lock.OperationID(),
+				}, nil
+			}
+		}
+
 		if err := h.updateSvc.PerformUpdate(updateCtx); err != nil {
 			if errors.Is(err, service.ErrNoUpdateAvailable) {
 				info, checkErr := h.updateSvc.CheckUpdate(updateCtx, false)
@@ -126,6 +170,25 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 			"operation_id": lock.OperationID(),
 		}, nil
 	})
+}
+
+// GetSourceUpdateStatus returns the persisted status of a host-side source
+// update job. The job remains available while the application container is
+// being rebuilt and after it starts again.
+// GET /api/v1/admin/system/update-status/:job_id
+func (h *SystemHandler) GetSourceUpdateStatus(c *gin.Context) {
+	sourceOps, ok := h.updateSvc.(sourceUpdateOperations)
+	if !ok {
+		response.ErrorFrom(c, service.ErrSourceUpdaterUnavailable)
+		return
+	}
+	jobID := strings.TrimSpace(c.Param("job_id"))
+	job, err := sourceOps.SourceUpdateStatus(c.Request.Context(), jobID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, job)
 }
 
 // GetRollbackVersions lists versions available for rollback

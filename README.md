@@ -34,19 +34,15 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 See the **[Chinese deployment and operations guide](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)** for source builds, migration, verification, upgrades, rollback, Nginx, and troubleshooting. Maintainers should also read [CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md](CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md).
 
-Quick start:
+Quick start (Linux Docker, installs the host updater automatically):
 
 ```bash
-git clone https://github.com/DeanZFC/sub2api-custom.git sub2api-custom
-cd sub2api-custom/deploy
-cp .env.example .env
-# Set POSTGRES_PASSWORD, JWT_SECRET, and TOTP_ENCRYPTION_KEY in .env
-mkdir -p data postgres_data redis_data
-docker compose \
-  -f docker-compose.local.yml \
-  -f docker-compose.custom.yml \
-  up -d --build
+curl -fsSL https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-custom/deploy/install-custom-docker.sh \
+  -o /tmp/install-custom-docker.sh
+sudo bash /tmp/install-custom-docker.sh
 ```
+
+For manual Compose deployments, run `deploy/install-source-updater.sh` after the stack is running so the admin page can update this source build later.
 
 This fork remains licensed under [GNU LGPL-3.0](LICENSE) and preserves upstream attribution. Some optional quota behaviors may conflict with upstream provider terms and may incur real usage or account restrictions. Operators are responsible for compliance and risk.
 
@@ -365,22 +361,17 @@ Use the automated deployment script for easy setup:
 # Create deployment directory
 mkdir -p sub2api-deploy && cd sub2api-deploy
 
-# Download and run deployment preparation script
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
-
-# Start services
-docker compose up -d
-
-# View logs
-docker compose logs -f sub2api
+# Download and run the source deployment (builds the Fork and installs updater)
+curl -fsSL https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-custom/deploy/install-custom-docker.sh \
+  -o /tmp/install-custom-docker.sh
+sudo bash /tmp/install-custom-docker.sh
 ```
 
 **What the script does:**
-- Downloads `docker-compose.local.yml` (saved as `docker-compose.yml`) and `.env.example`
+- Clones and builds the `sub2api-custom` source branch
 - Generates secure credentials (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
-- Creates `.env` file with auto-generated secrets
-- Creates data directories (uses local directories for easy backup/migration)
-- Displays generated credentials for your reference
+- Creates local data directories and installs the host systemd updater
+- Enables one-click updates from the admin version menu
 
 #### Manual Deployment
 
@@ -388,8 +379,8 @@ If you prefer manual setup:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api/deploy
+git clone -b sub2api-custom https://github.com/DeanZFC/sub2api-custom.git
+cd sub2api-custom/deploy
 
 # 2. Copy environment configuration
 cp .env.example .env

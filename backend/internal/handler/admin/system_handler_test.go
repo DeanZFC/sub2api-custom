@@ -36,6 +36,32 @@ type systemHandlerUpdateServiceStub struct {
 	rollbackVersionsCall  int
 }
 
+type systemHandlerSourceUpdateStub struct {
+	systemHandlerUpdateServiceStub
+	startCall      int
+	statusCall     int
+	startRequestID string
+	startVersion   string
+	statusJobID    string
+	startJob       service.SourceUpdateJob
+	statusJob      service.SourceUpdateJob
+	startErr       error
+	statusErr      error
+}
+
+func (s *systemHandlerSourceUpdateStub) StartSourceUpdate(_ context.Context, requestID, expectedVersion string) (service.SourceUpdateJob, error) {
+	s.startCall++
+	s.startRequestID = requestID
+	s.startVersion = expectedVersion
+	return s.startJob, s.startErr
+}
+
+func (s *systemHandlerSourceUpdateStub) SourceUpdateStatus(_ context.Context, jobID string) (service.SourceUpdateJob, error) {
+	s.statusCall++
+	s.statusJobID = jobID
+	return s.statusJob, s.statusErr
+}
+
 func (s *systemHandlerUpdateServiceStub) CheckUpdate(_ context.Context, force bool) (*service.UpdateInfo, error) {
 	s.checkForces = append(s.checkForces, force)
 	return s.updateInfo, s.checkErr
@@ -102,6 +128,51 @@ func newSystemHandlerTestRouter(t *testing.T, updateSvc *systemHandlerUpdateServ
 	router.POST("/api/v1/admin/system/rollback", handler.Rollback)
 	router.GET("/api/v1/admin/system/rollback-versions", handler.GetRollbackVersions)
 	return router
+}
+
+func newSystemHandlerSourceRouter(t *testing.T, updateSvc *systemHandlerSourceUpdateStub, repo *memoryIdempotencyRepoStub) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	service.SetDefaultIdempotencyCoordinator(nil)
+	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(nil) })
+	lockSvc := service.NewSystemOperationLockService(repo, service.IdempotencyConfig{ProcessingTimeout: time.Second, SystemOperationTTL: time.Minute})
+	handler := NewSystemHandler(updateSvc, lockSvc)
+	router := gin.New()
+	router.POST("/api/v1/admin/system/update", handler.PerformUpdate)
+	router.GET("/api/v1/admin/system/update-status/:job_id", handler.GetSourceUpdateStatus)
+	return router
+}
+
+func TestSystemHandlerStartsSourceUpdateAndReturnsJob(t *testing.T) {
+	updateSvc := &systemHandlerSourceUpdateStub{}
+	updateSvc.updateInfo = &service.UpdateInfo{BuildType: "source", SourceUpdateEnabled: true, HasUpdate: true, LatestVersion: "0.2.0-custom.2"}
+	updateSvc.startJob = service.SourceUpdateJob{JobID: "upd-1", Status: service.SourceUpdateStatusQueued}
+	repo := newMemoryIdempotencyRepoStub()
+	router := newSystemHandlerSourceRouter(t, updateSvc, repo)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/update", nil)
+	req.Header.Set("Idempotency-Key", "source-update-1")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, updateSvc.startCall)
+	require.Equal(t, "0.2.0-custom.2", updateSvc.startVersion)
+	require.Contains(t, rec.Body.String(), `"source_update":true`)
+	require.Contains(t, rec.Body.String(), `"job_id":"upd-1"`)
+}
+
+func TestSystemHandlerReturnsSourceUpdateStatus(t *testing.T) {
+	updateSvc := &systemHandlerSourceUpdateStub{}
+	updateSvc.statusJob = service.SourceUpdateJob{JobID: "upd-1", Status: service.SourceUpdateStatusSucceeded}
+	repo := newMemoryIdempotencyRepoStub()
+	router := newSystemHandlerSourceRouter(t, updateSvc, repo)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/update-status/upd-1", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "upd-1", updateSvc.statusJobID)
+	require.Contains(t, rec.Body.String(), `"status":"succeeded"`)
 }
 
 func requireSystemLockStatus(t *testing.T, repo *memoryIdempotencyRepoStub, wantStatus string) {
