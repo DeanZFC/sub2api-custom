@@ -34,3 +34,10 @@ func TestUsageBillingModelCandidates_BareGPT56IncludesSol(t *testing.T) {
 		usageBillingModelCandidates("openai/gpt-5.6"),
 	)
 }
+
+func TestGPT6AstraAliasesAndReasoningSupport(t *testing.T) {
+	require.Equal(t, "gpt-6-astra", normalizeKnownOpenAICodexModel("openai/gpt-6-astra"))
+	require.Equal(t, "gpt-6-astra", normalizeKnownOpenAICodexModel("gpt-6-astra-high"))
+	require.True(t, isOpenAIGPT6AstraModel("gpt-6-astra"))
+	require.True(t, supportsOpenAIReasoningEffortMax("gpt-6-astra"))
+}
