@@ -175,7 +175,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now "$SERVICE_NAME.service"
+systemctl enable "$SERVICE_NAME.service"
+systemctl restart "$SERVICE_NAME.service"
 
 for _ in {1..20}; do
   if [[ -S "$SOCKET_PATH" ]]; then
