@@ -12,13 +12,14 @@ func TestDefaultModelsIncludeBareGPT56Alias(t *testing.T) {
 
 func TestDefaultModelsIncludeGPT6Astra(t *testing.T) {
 	require.Contains(t, DefaultModelIDs(), "gpt-6-astra")
+	var displayName string
 	for _, model := range DefaultModels {
 		if model.ID == "gpt-6-astra" {
-			require.Equal(t, "GPT-6 Astra", model.DisplayName)
-			return
+			displayName = model.DisplayName
+			break
 		}
 	}
-	t.Fatal("gpt-6-astra missing from DefaultModels")
+	require.Equal(t, "GPT-6 Astra", displayName)
 }
 
 func TestDefaultModelsPreferConcreteGPT56SolForAccountTests(t *testing.T) {

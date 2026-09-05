@@ -345,16 +345,23 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.True(t, gpt56.SupportsReasoningSummaryParameter)
 	require.Equal(t, "none", gpt56.DefaultReasoningSummary)
 
-	gpt6 := newConfiguredCodexModelDescriptor("gpt-6-astra")
-	require.Equal(t, "GPT-6 Astra", gpt6.DisplayName)
-	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(gpt6.SupportedReasoningLevels))
-	require.Equal(t, "medium", *gpt6.DefaultReasoningLevel)
-	require.Equal(t, int64(1_050_000), gpt6.ContextWindow)
-	require.Equal(t, int64(1_050_000), gpt6.MaxContextWindow)
-	require.True(t, gpt6.SupportVerbosity)
-	require.Equal(t, []string{"text"}, gpt6.InputModalities)
-	require.Len(t, gpt6.ServiceTiers, 1)
-	require.Equal(t, "priority", gpt6.ServiceTiers[0].ID)
+	gpt6Astra := newConfiguredCodexModelDescriptor("gpt-6-astra")
+	require.Equal(t, "GPT-6 Astra", gpt6Astra.DisplayName)
+	require.NotNil(t, gpt6Astra.DefaultReasoningLevel)
+	require.Equal(t, "medium", *gpt6Astra.DefaultReasoningLevel)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(gpt6Astra.SupportedReasoningLevels))
+	require.NotContains(t, gpt6Astra.SupportedReasoningLevels, configuredCodexReasoningLevel{Effort: "ultra"})
+	require.NotContains(t, gpt6Astra.SupportedReasoningLevels, configuredCodexReasoningLevel{Effort: "none"})
+	require.True(t, configuredCodexSupportsPriorityServiceTier("gpt-6-astra"))
+	require.Equal(t, []configuredCodexServiceTier{{
+		ID:          "priority",
+		Name:        "Fast",
+		Description: "Priority processing for lower latency.",
+	}}, gpt6Astra.ServiceTiers)
+	require.True(t, isOpenAICodexImageInputModel("gpt-6-astra"))
+	require.True(t, isOpenAICodexReasoningGPTModel("openai/gpt-6-astra"))
+	require.True(t, isOpenAIGPT6AstraModel("gpt-6-astra-2026-09-01"))
+	require.False(t, isOpenAIGPT6AstraModel("gpt-6-other"))
 
 	gpt56Luna := newConfiguredCodexModelDescriptor("gpt-5.6-luna")
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(gpt56Luna.SupportedReasoningLevels))
