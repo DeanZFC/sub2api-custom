@@ -9,3 +9,4 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /sub2api-updater ./cmd/
 
 FROM scratch
 COPY --from=builder /sub2api-updater /sub2api-updater
+ENTRYPOINT ["/sub2api-updater"]
