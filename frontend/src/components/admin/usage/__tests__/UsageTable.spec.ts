@@ -28,6 +28,7 @@ const messages: Record<string, string> = {
   'usage.inputTokenPrice': 'Input price',
   'usage.outputTokenPrice': 'Output price',
   'usage.perMillionTokens': '/ 1M tokens',
+  'usage.cacheHitRate': 'Cache hit rate',
   'usage.serviceTier': 'Service tier',
   'usage.serviceTierPriority': 'Fast',
   'usage.serviceTierUltrafast': 'Ultrafast',
@@ -273,6 +274,50 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$5.0000 / 1M tokens')
     expect(text).toContain('$30.0000 / 1M tokens')
     expect(text).toContain('$0.069568')
+  })
+
+  it('shows a compact cache hit rate in the list and exact rate in the token tooltip', async () => {
+    const row = {
+      request_id: 'req-admin-cache-hit-rate',
+      actual_cost: 0,
+      total_cost: 0,
+      account_rate_multiplier: 1,
+      rate_multiplier: 1,
+      input_cost: 0,
+      output_cost: 0,
+      cache_creation_cost: 0,
+      cache_read_cost: 0,
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 900,
+      image_input_tokens: 0,
+      image_output_tokens: 0,
+      billing_mode: 'token',
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="cache-hit-rate-cell"]').text()).toBe('90.0%')
+
+    await wrapper.findAll('.group.relative')[0].trigger('mouseenter')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="token-cache-hit-rate-tooltip"]').text()).toContain('90.00%')
   })
 
   it('shows requested and upstream models separately for admin rows', () => {
