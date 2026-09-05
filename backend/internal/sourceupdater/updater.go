@@ -30,13 +30,15 @@ const (
 var safeNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 type Config struct {
-	Token           string
-	RepoDir         string
-	StateDir        string
-	UpdaterBinary   string
-	ComposeProject  string
-	ComposeFiles    []string
-	AppService      string
+	Token          string
+	RepoDir        string
+	StateDir       string
+	UpdaterBinary  string
+	ComposeProject string
+	ComposeFiles   []string
+	AppService     string
+	// PostgresService is retained for compatibility with existing updater
+	// service units. Updates no longer run database backups.
 	PostgresService string
 	AppContainer    string
 	HealthTimeout   time.Duration
@@ -300,11 +302,6 @@ func (u *Updater) workflow(ctx context.Context, jobID string) error {
 	}
 	u.mutate(jobID, func(job *Job) { job.CurrentVersion = currentVersion })
 
-	u.update(jobID, "running", "backing_up", "backing up PostgreSQL")
-	if err := u.backupDatabase(ctx, jobID); err != nil {
-		return fmt.Errorf("database backup failed: %w", err)
-	}
-
 	u.update(jobID, "running", "fetching", "fetching source update")
 	if _, err := u.runOutput(ctx, "git", "fetch", "--prune", "origin", ExpectedBranch); err != nil {
 		return fmt.Errorf("git fetch failed: %w", err)
@@ -454,30 +451,6 @@ func (u *Updater) validateDeployment(ctx context.Context) (version, commit, imag
 		return "", "", "", "", fmt.Errorf("inspect current container image name: %w", err)
 	}
 	return version, commit, imageID, imageName, nil
-}
-
-func (u *Updater) backupDatabase(ctx context.Context, jobID string) error {
-	backupDir := filepath.Join(u.cfg.RepoDir, "deploy", "backups")
-	if err := os.MkdirAll(backupDir, 0o700); err != nil {
-		return err
-	}
-	backupPath := filepath.Join(backupDir, fmt.Sprintf("sub2api-before-update-%s-%s.dump", time.Now().UTC().Format("20060102-150405"), jobID))
-	file, err := os.OpenFile(backupPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	var output limitedBuffer
-	args := append(u.composeArgs(), "exec", "-T", u.cfg.PostgresService, "sh", "-lc", `pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc`)
-	err = u.runner.Run(ctx, filepath.Join(u.cfg.RepoDir, "deploy"), file, &output, "docker", args...)
-	closeErr := file.Close()
-	if err != nil {
-		_ = os.Remove(backupPath)
-		return fmt.Errorf("%w: %s", err, output.String())
-	}
-	if closeErr != nil {
-		_ = os.Remove(backupPath)
-	}
-	return closeErr
 }
 
 func (u *Updater) rollback(ctx context.Context, jobID, oldCommit, oldImageID, imageName string, cause error) error {

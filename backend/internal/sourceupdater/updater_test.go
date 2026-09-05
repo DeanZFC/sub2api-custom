@@ -154,7 +154,7 @@ func TestUpdaterValidateDeploymentRejectsDirtyWrongRemoteAndWrongBranch(t *testi
 	}
 }
 
-func TestUpdaterWorkflowRunsBackupBuildDeployHealthAndSelfUpdate(t *testing.T) {
+func TestUpdaterWorkflowRunsBuildDeployHealthAndSelfUpdate(t *testing.T) {
 	runner := &fakeRunner{}
 	updater := newTestUpdater(t, runner)
 	job := Job{JobID: "test-job", Status: "queued"}
@@ -168,7 +168,6 @@ func TestUpdaterWorkflowRunsBackupBuildDeployHealthAndSelfUpdate(t *testing.T) {
 	require.Equal(t, "new updater", string(binary))
 	requireCallsInOrder(t, runner.callList(),
 		"git status --porcelain --untracked-files=no",
-		"docker compose -p test-project -f "+updater.cfg.ComposeFiles[0]+" exec -T postgres sh -lc pg_dump",
 		"git fetch --prune origin "+ExpectedBranch,
 		"git merge --ff-only origin/"+ExpectedBranch,
 		"docker build --pull -f "+filepath.Join(updater.cfg.RepoDir, "deploy", "Dockerfile.updater"),

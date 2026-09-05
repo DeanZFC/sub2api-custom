@@ -16,15 +16,17 @@ import (
 
 func main() {
 	var (
-		socketPath      = flag.String("socket-path", "", "Unix socket path")
-		tokenFile       = flag.String("token-file", "", "authentication token file")
-		repoDir         = flag.String("repo-dir", "", "deployed Git repository")
-		stateDir        = flag.String("state-dir", "", "persistent job state directory")
-		updaterBinary   = flag.String("updater-binary", "/usr/local/libexec/sub2api-updater", "host updater binary path")
-		composeProject  = flag.String("compose-project", "", "fixed Docker Compose project")
-		composeFiles    = flag.String("compose-files", "", "comma-separated absolute Compose files")
-		appService      = flag.String("app-service", "sub2api", "fixed application service")
-		postgresService = flag.String("postgres-service", "postgres", "fixed PostgreSQL service")
+		socketPath     = flag.String("socket-path", "", "Unix socket path")
+		tokenFile      = flag.String("token-file", "", "authentication token file")
+		repoDir        = flag.String("repo-dir", "", "deployed Git repository")
+		stateDir       = flag.String("state-dir", "", "persistent job state directory")
+		updaterBinary  = flag.String("updater-binary", "/usr/local/libexec/sub2api-updater", "host updater binary path")
+		composeProject = flag.String("compose-project", "", "fixed Docker Compose project")
+		composeFiles   = flag.String("compose-files", "", "comma-separated absolute Compose files")
+		appService     = flag.String("app-service", "sub2api", "fixed application service")
+		// Retained for compatibility with existing systemd service units. The
+		// source updater no longer runs a PostgreSQL backup during updates.
+		postgresService = flag.String("postgres-service", "postgres", "legacy PostgreSQL service (unused)")
 		appContainer    = flag.String("app-container", "", "fixed application container")
 	)
 	flag.Parse()
