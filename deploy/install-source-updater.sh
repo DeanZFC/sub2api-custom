@@ -89,6 +89,7 @@ fi
 SOCKET_DIR="/run/sub2api-updater"
 SOCKET_PATH="$SOCKET_DIR/$PROJECT.sock"
 STATE_DIR="/var/lib/sub2api-updater/$PROJECT"
+DOCKER_CONFIG_DIR="$STATE_DIR/docker"
 TOKEN_DIR="/etc/sub2api-updater"
 TOKEN_FILE="$TOKEN_DIR/$PROJECT.token"
 SERVICE_NAME="sub2api-updater-$PROJECT"
@@ -96,7 +97,8 @@ SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 INSTALL_DIR="/usr/local/libexec"
 INSTALL_BIN="$INSTALL_DIR/sub2api-updater-$PROJECT"
 
-mkdir -p "$TOKEN_DIR" "$STATE_DIR" "$SOCKET_DIR" "$INSTALL_DIR"
+mkdir -p "$TOKEN_DIR" "$STATE_DIR" "$DOCKER_CONFIG_DIR" "$SOCKET_DIR" "$INSTALL_DIR"
+chmod 700 "$DOCKER_CONFIG_DIR"
 printf '%s\n' "$TOKEN" > "$TOKEN_FILE"
 chmod 600 "$TOKEN_FILE"
 upsert_env SUB2API_UPDATER_TOKEN "$TOKEN"
@@ -155,6 +157,7 @@ Requires=docker.service
 [Service]
 Type=simple
 ExecStart=$(systemd_quote "$INSTALL_BIN") --socket-path $(systemd_quote "$SOCKET_PATH") --token-file $(systemd_quote "$TOKEN_FILE") --repo-dir $(systemd_quote "$REPO_DIR") --state-dir $(systemd_quote "$STATE_DIR") --updater-binary $(systemd_quote "$INSTALL_BIN") --compose-project $(systemd_quote "$PROJECT") --compose-files $(systemd_quote "$COMPOSE_FILES") --app-service "sub2api" --postgres-service "postgres" --app-container $(systemd_quote "$APP_CONTAINER")
+Environment=DOCKER_CONFIG=$(systemd_quote "$DOCKER_CONFIG_DIR")
 Restart=always
 RestartSec=5
 User=root
