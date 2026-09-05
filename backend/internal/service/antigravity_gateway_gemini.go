@@ -444,6 +444,7 @@ handleSuccess:
 
 	return &ForwardResult{
 		RequestID:                     requestID,
+		UpstreamHeaders:               resp.Header,
 		Usage:                         *usage,
 		Model:                         originalModel,
 		UpstreamModel:                 forwardedModel,
