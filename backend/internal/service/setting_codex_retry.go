@@ -124,5 +124,8 @@ func (s *SettingService) GetCodexPreOutputRetrySettingsCached(ctx context.Contex
 		}
 		return s.codexRetryCache.Load().settings, nil
 	})
-	return result.(CodexPreOutputRetrySettings)
+	if value, ok := result.(CodexPreOutputRetrySettings); ok {
+		return value
+	}
+	return DefaultCodexPreOutputRetrySettings()
 }
