@@ -3301,7 +3301,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 	if failoverErr.Reason == service.CodexPreOutputRetryReason {
-		h.handleStreamingAwareError(c, failoverErr.ClientStatusCode, "server_error", failoverErr.ClientMessage, streamStarted)
+		service.WriteCodexRetryExhaustedResponse(c, failoverErr, streamStarted)
 		return
 	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {

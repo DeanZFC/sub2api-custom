@@ -1177,7 +1177,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				// 仍要按未改写的原始 payload 判定账号状态，这正是
 				// sanitizeOpenAICapacityShedErrorCodeForClient 注释里写明的前提。
 				clientMessage := upstreamMessage
-				if eventType == "error" || eventType == "response.failed" {
+				if (eventType == "error" || eventType == "response.failed") && !codexRetryWSExhausted(upstreamFrames) {
 					if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
 						clientMessage = rewritten
 					}

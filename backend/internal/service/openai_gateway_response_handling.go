@@ -563,7 +563,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					}
 				}
 				if !outputStarted {
-					if retryErr := s.newCodexPreOutputRetryError(c, account, openAIStreamFailureStatus(dataBytes, failedMessage), resp.Header, dataBytes, failedMessage); retryErr != nil {
+					if retryErr := s.newCodexPreOutputRetrySSEError(c, account, resp, dataBytes, eventType, failedMessage); retryErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = retryErr
 						return

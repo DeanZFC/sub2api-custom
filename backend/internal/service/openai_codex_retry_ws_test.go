@@ -154,6 +154,51 @@ func TestCodexPreOutputRetryHTTPBridge(t *testing.T) {
 	require.GreaterOrEqual(t, *result.FirstTokenMs, 100)
 }
 
+func TestCodexPreOutputRetryHTTPBridgeExhaustionPreservesError(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload, eventType string
+		status                   int
+	}{
+		{"http", `{"error":{"code":"auth_unavailable","type":"upstream_unavailable","message":"last error: server_is_overloaded","details":{"attempt":"last"}},"trace":"original"}`, "", 503},
+		{"sse", codexRetryTestFailure, "response.failed", 200},
+		{"sse_event_header", `{"error":{"code":"server_is_overloaded","message":"Original message","param":null}}`, "error", 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := tc.payload
+			if tc.eventType != "" {
+				body = "event: " + tc.eventType + "\ndata: " + body + "\n\n"
+			}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				codexRetryTestResponse(503, `{"error":{"code":"server_is_overloaded","message":"earlier-attempt-one"}}`),
+				codexRetryTestResponse(503, `{"error":{"code":"server_is_overloaded","message":"earlier-attempt-two"}}`),
+				codexRetryTestResponse(tc.status, body),
+			}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.settingService = codexRetryTestSettings(t)
+			c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.144.1")
+			var received [][]byte
+			request := []byte(`{"type":"response.create","model":"gpt-5.5","input":"hello"}`)
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(c.Request.Context(), c, newOpenAIImageGenerationControlTestAccount(), "test-token", request, len(request), "gpt-5.5", "", "", "", "", 1, func(message []byte) error {
+				received = append(received, append([]byte(nil), message...))
+				return nil
+			})
+			require.Error(t, err)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover), "the delivered failure must not trigger another failover")
+			require.Len(t, upstream.requests, 3)
+			require.Len(t, received, 1)
+			if tc.eventType == "response.failed" {
+				require.Equal(t, tc.payload, string(received[0]))
+			} else {
+				require.Equal(t, "error", gjson.GetBytes(received[0], "type").String())
+				require.Equal(t, gjson.Get(tc.payload, "error").Raw, gjson.GetBytes(received[0], "error").Raw)
+				require.Equal(t, gjson.Get(tc.payload, "trace").String(), gjson.GetBytes(received[0], "trace").String())
+			}
+			require.NotContains(t, string(received[0]), "earlier-attempt")
+		})
+	}
+}
+
 type codexRetryStagedConn struct {
 	*stagedPassthroughConn
 }
@@ -257,49 +302,53 @@ func TestCodexPreOutputRetryWSIngress(t *testing.T) {
 	}
 }
 
-func TestCodexPreOutputRetryWSRateLimitExhausted(t *testing.T) {
-	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough} {
-		t.Run(mode, func(t *testing.T) {
-			svc, account, upstream := codexRetryWSIngressTestService(t, mode)
-			repo := &openAIWSIngressCapacityShedRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{*account}}}
-			svc.accountRepo = repo
-			svc.rateLimitService = &RateLimitService{accountRepo: repo}
-			settings := svc.settingService.GetCodexPreOutputRetrySettingsCached(context.Background())
-			settings.Keywords = []string{"rate_limit_exceeded"}
-			require.NoError(t, svc.settingService.SetCodexPreOutputRetrySettings(context.Background(), settings))
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account)
-			defer server.Close()
-			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
-			require.NoError(t, err)
-			defer client.CloseNow()
-			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","input":"hello"}`)))
-			for attempt := 0; attempt <= settings.MaxRetries; attempt++ {
-				select {
-				case <-upstream.writes:
-				case <-ctx.Done():
-					t.Fatal("upstream request did not arrive")
+func TestCodexPreOutputRetryWSFailuresExhausted(t *testing.T) {
+	for _, code := range []string{"rate_limit_exceeded", "server_is_overloaded"} {
+		for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough} {
+			t.Run(code+"/"+mode, func(t *testing.T) {
+				svc, account, upstream := codexRetryWSIngressTestService(t, mode)
+				repo := &openAIWSIngressCapacityShedRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{*account}}}
+				svc.accountRepo = repo
+				svc.rateLimitService = &RateLimitService{accountRepo: repo}
+				settings := svc.settingService.GetCodexPreOutputRetrySettingsCached(context.Background())
+				settings.Keywords = []string{code}
+				require.NoError(t, svc.settingService.SetCodexPreOutputRetrySettings(context.Background(), settings))
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account)
+				defer server.Close()
+				client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+				require.NoError(t, err)
+				defer client.CloseNow()
+				require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","input":"hello"}`)))
+				errorEvent := fmt.Sprintf(`{"type":"error","error":{"code":%q,"message":"Original upstream failure","param":null}}`, code)
+				failedEvent := fmt.Sprintf(`{"type":"response.failed","response":{"id":"resp_limited","error":{"code":%q,"message":"Original upstream failure","details":{"attempt":"last"}}}}`, code)
+				for attempt := 0; attempt <= settings.MaxRetries; attempt++ {
+					select {
+					case <-upstream.writes:
+					case <-ctx.Done():
+						t.Fatal("upstream request did not arrive")
+					}
+					upstream.Send(errorEvent)
+					upstream.Send(failedEvent)
 				}
-				upstream.Send(`{"type":"error","error":{"code":"rate_limit_exceeded","message":"Rate limit exceeded"}}`)
-				upstream.Send(`{"type":"response.failed","response":{"id":"resp_limited","error":{"code":"rate_limit_exceeded","message":"Rate limit exceeded"}}}`)
-			}
-			for _, eventType := range []string{"error", "response.failed"} {
-				_, payload, err := client.Read(ctx)
-				require.NoError(t, err, "exhaustion must deliver the final failure, not request another account retry")
-				require.Equal(t, eventType, gjson.GetBytes(payload, "type").String())
-			}
-			require.Empty(t, upstream.writes)
-			_ = client.CloseNow()
-			cancel()
-			select {
-			case err := <-serverErr:
-				var failover *UpstreamFailoverError
-				require.False(t, errors.As(err, &failover))
-			case <-time.After(time.Second):
-				t.Fatal("ingress did not stop")
-			}
-		})
+				for _, expected := range []string{errorEvent, failedEvent} {
+					_, payload, err := client.Read(ctx)
+					require.NoError(t, err, "exhaustion must deliver the final failure, not request another account retry")
+					require.Equal(t, expected, string(payload))
+				}
+				require.Empty(t, upstream.writes)
+				_ = client.CloseNow()
+				cancel()
+				select {
+				case err := <-serverErr:
+					var failover *UpstreamFailoverError
+					require.False(t, errors.As(err, &failover))
+				case <-time.After(time.Second):
+					t.Fatal("ingress did not stop")
+				}
+			})
+		}
 	}
 }
 

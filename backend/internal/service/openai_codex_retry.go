@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const CodexPreOutputRetryReason GatewayFailureReason = "codex_pre_output_retry"
@@ -63,6 +65,9 @@ func (s *OpenAIGatewayService) newCodexPreOutputRetryError(c *gin.Context, accou
 	if status < 400 {
 		status = http.StatusBadGateway
 	}
+	if c.Request != nil {
+		payload = s.redactAgentIdentitySensitiveBody(c.Request.Context(), account, payload)
+	}
 	return &UpstreamFailoverError{
 		StatusCode: status, ResponseHeaders: headers.Clone(), ResponseBody: append([]byte(nil), payload...),
 		Reason: CodexPreOutputRetryReason, Scope: GatewayFailureScopeRequest,
@@ -70,6 +75,78 @@ func (s *OpenAIGatewayService) newCodexPreOutputRetryError(c *gin.Context, accou
 		SafeToFailoverAfterWrite: true,
 		ClientStatusCode:         status, ClientMessage: message,
 	}
+}
+
+func (s *OpenAIGatewayService) newCodexPreOutputRetrySSEError(c *gin.Context, account *Account, resp *http.Response, payload []byte, eventType, message string) *UpstreamFailoverError {
+	err := s.newCodexPreOutputRetryError(c, account, openAIStreamFailureStatus(payload, message), resp.Header, payload, message)
+	if err != nil {
+		err.ClientStatusCode = resp.StatusCode
+		err.ResponseSSEEvent = eventType
+	}
+	return err
+}
+
+// WriteCodexRetryExhaustedResponse returns the last upstream failure without
+// replacing its error fields or converting an SSE failure into an HTTP error.
+func WriteCodexRetryExhaustedResponse(c *gin.Context, failure *UpstreamFailoverError, streamStarted bool) {
+	if StopOpenAICompactSSEKeepaliveCommitted(c) {
+		streamStarted = true
+	}
+	MarkResponseCommitted(c)
+	setOpsUpstreamError(c, failure.StatusCode, failure.ClientMessage, "")
+	writeOpenAIPassthroughErrorHeaders(c.Writer.Header(), failure.ResponseHeaders)
+	if failure.ResponseSSEEvent == "" && !streamStarted && !c.Writer.Written() {
+		contentType := failure.ResponseHeaders.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/json; charset=utf-8"
+			if !gjson.ValidBytes(failure.ResponseBody) {
+				contentType = "text/plain; charset=utf-8"
+			}
+		}
+		c.Header("Content-Type", contentType)
+		c.Data(failure.ClientStatusCode, contentType, failure.ResponseBody)
+		return
+	}
+
+	eventType := failure.ResponseSSEEvent
+	payload := failure.ResponseBody
+	if eventType == "" {
+		// A keepalive may already have committed HTTP 200. Only the transport
+		// envelope changes in that case; retain the upstream error object.
+		eventType = "error"
+		var err error
+		payload, err = codexRetryFailureEvent(failure)
+		if err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	if failure.ResponseSSEEvent != "" && !c.Writer.Written() {
+		c.Status(failure.ClientStatusCode)
+	}
+	c.SSEvent(eventType, string(payload))
+	c.Writer.Flush()
+}
+
+func codexRetryFailureEvent(failure *UpstreamFailoverError) ([]byte, error) {
+	payload := failure.ResponseBody
+	if failure.ResponseSSEEvent != "" {
+		if gjson.GetBytes(payload, "type").String() != "" {
+			return payload, nil
+		}
+		return sjson.SetBytes(payload, "type", failure.ResponseSSEEvent)
+	}
+	if gjson.ValidBytes(payload) && gjson.GetBytes(payload, "error").Exists() {
+		return sjson.SetBytes(payload, "type", "error")
+	}
+	var upstreamError any = map[string]string{"message": string(payload)}
+	if gjson.ValidBytes(payload) {
+		upstreamError = json.RawMessage(payload)
+	}
+	return json.Marshal(map[string]any{"type": "error", "error": upstreamError})
 }
 
 func (s *OpenAIGatewayService) withCodexPreOutputRetry(ctx context.Context, c *gin.Context, account *Account, forward func() (*OpenAIForwardResult, error)) (*OpenAIForwardResult, error) {

@@ -410,9 +410,22 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	payload []byte, payloadBytes int, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity string,
 	turn int, writeClientMessage func([]byte) error,
 ) (*OpenAIForwardResult, error) {
-	return s.withCodexPreOutputRetry(ctx, c, account, func() (*OpenAIForwardResult, error) {
+	result, err := s.withCodexPreOutputRetry(ctx, c, account, func() (*OpenAIForwardResult, error) {
 		return s.proxyOpenAIWSHTTPBridgeAttempt(ctx, c, account, token, payload, payloadBytes, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity, turn, writeClientMessage)
 	})
+	var failure *UpstreamFailoverError
+	if !errors.As(err, &failure) || failure.Reason != CodexPreOutputRetryReason {
+		return result, err
+	}
+	clientError, eventErr := codexRetryFailureEvent(failure)
+	if eventErr != nil {
+		return result, eventErr
+	}
+	if writeErr := writeClientMessage(clientError); writeErr != nil {
+		return result, wrapOpenAIWSIngressTurnError("write_client", writeErr, false)
+	}
+	markOpenAIWSClientVisibleFailure(c, gjson.GetBytes(clientError, "type").String(), clientError)
+	return result, wrapOpenAIWSIngressTurnError("upstream_error", errors.New(failure.ClientMessage), true)
 }
 
 func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeAttempt(
@@ -825,7 +838,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeAttempt(
 			}
 			statusCode := openAIStreamFailureStatus(upstreamMessage, errMessage)
 			if !wroteDownstream {
-				if retryErr := s.newCodexPreOutputRetryError(c, account, statusCode, resp.Header, upstreamMessage, errMessage); retryErr != nil {
+				if retryErr := s.newCodexPreOutputRetrySSEError(c, account, resp, []byte(trimmedData), eventType, errMessage); retryErr != nil {
 					return nil, retryErr
 				}
 			}

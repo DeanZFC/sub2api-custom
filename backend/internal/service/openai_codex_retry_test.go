@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -98,6 +99,94 @@ func TestCodexPreOutputRetryBoundsAndOutput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCodexPreOutputRetryExhaustionPreservesLastResponse(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, tc := range []struct {
+			name, contentType, payload, eventType string
+			status                                int
+		}{
+			{"http_json", "application/json", `{"error":{"code":"auth_unavailable","type":"upstream_unavailable","message":"last upstream error: server_is_overloaded","details":{"attempt":"last"}},"trace":"upstream-trace"}`, "", 503},
+			{"http_text", "text/plain", "Our servers are currently overloaded.\nPlease try again later.\n", "", 529},
+			{"sse_failed", "text/event-stream", codexRetryTestFailure, "response.failed", 200},
+			{"sse_error", "text/event-stream", `{"error":{"code":"server_is_overloaded","message":"Original upstream message","param":null}}`, "error", 200},
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/%s", passthrough, tc.name), func(t *testing.T) {
+				body := tc.payload
+				if tc.eventType != "" {
+					body = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"buffered-preamble\"}}\n\n" +
+						"event: " + tc.eventType + "\ndata: " + tc.payload + "\n\n"
+				}
+				lastResponse := codexRetryTestResponse(tc.status, body)
+				lastResponse.Header.Set("Content-Type", tc.contentType)
+				lastResponse.Header.Set("Retry-After", "2")
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{
+					codexRetryTestResponse(503, `{"error":{"code":"server_is_overloaded","message":"earlier-attempt-one"}}`),
+					codexRetryTestResponse(503, `{"error":{"code":"server_is_overloaded","message":"earlier-attempt-two"}}`),
+					lastResponse,
+				}}
+				svc := newOpenAIImageGenerationControlTestService(upstream)
+				svc.settingService = codexRetryTestSettings(t)
+				c, recorder := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.144.1")
+				account := newOpenAIImageGenerationControlTestAccount()
+				account.Extra = map[string]any{"openai_passthrough": passthrough, "pool_mode_retry_count": 0}
+				_, err := svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"gpt-5.5","stream":true,"input":"hello"}`))
+				var failure *UpstreamFailoverError
+				require.ErrorAs(t, err, &failure)
+				require.Len(t, upstream.requests, 3)
+				require.Equal(t, tc.payload, string(failure.ResponseBody))
+				require.Equal(t, tc.eventType, failure.ResponseSSEEvent)
+				require.Empty(t, recorder.Body.String())
+
+				WriteCodexRetryExhaustedResponse(c, failure, false)
+				require.Equal(t, tc.status, recorder.Code)
+				require.Equal(t, tc.contentType, recorder.Header().Get("Content-Type"))
+				require.Equal(t, "2", recorder.Header().Get("Retry-After"))
+				if tc.eventType == "" {
+					require.Equal(t, tc.payload, recorder.Body.String())
+				} else {
+					require.Contains(t, recorder.Body.String(), tc.payload)
+					require.Equal(t, 1, strings.Count(recorder.Body.String(), "data:"))
+				}
+				require.NotContains(t, recorder.Body.String(), "earlier-attempt")
+				require.NotContains(t, recorder.Body.String(), "buffered-preamble")
+			})
+		}
+	}
+}
+
+func TestCodexPreOutputRetryWindowExhaustionPreservesResponse(t *testing.T) {
+	payload := `{"error":{"code":"server_is_overloaded","message":"Original failure"}}`
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{codexRetryTestResponse(503, payload)}}
+	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.settingService = codexRetryTestSettings(t)
+	settings := svc.settingService.GetCodexPreOutputRetrySettingsCached(context.Background())
+	settings.MaxRetryWindowSeconds, settings.RetryIntervalMs = 1, 1000
+	require.NoError(t, svc.settingService.SetCodexPreOutputRetrySettings(context.Background(), settings))
+	c, recorder := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.144.1")
+	_, err := svc.Forward(c.Request.Context(), c, newOpenAIImageGenerationControlTestAccount(), []byte(`{"model":"gpt-5.5","stream":true,"input":"hello"}`))
+	var failure *UpstreamFailoverError
+	require.ErrorAs(t, err, &failure)
+	require.Len(t, upstream.requests, 1)
+	WriteCodexRetryExhaustedResponse(c, failure, false)
+	require.Equal(t, 503, recorder.Code)
+	require.Equal(t, payload, recorder.Body.String())
+}
+
+func TestCodexPreOutputRetryPreservesCredentialRedaction(t *testing.T) {
+	c, recorder := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.144.1")
+	c.Set(codexRetrySettingsContextKey, codexRetryTestSettings(t).GetCodexPreOutputRetrySettingsCached(context.Background()))
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
+		"auth_mode": OpenAIAuthModeAgentIdentity, "access_token": "private-upstream-credential",
+	}}
+	failure := (&OpenAIGatewayService{}).newCodexPreOutputRetryError(c, account, 503, nil,
+		[]byte(`{"error":{"code":"server_is_overloaded","message":"private-upstream-credential"}}`), "server_is_overloaded")
+	require.NotNil(t, failure)
+	WriteCodexRetryExhaustedResponse(c, failure, false)
+	require.Equal(t, 503, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"code":"server_is_overloaded"`)
+	require.NotContains(t, recorder.Body.String(), "private-upstream-credential")
 }
 
 func TestCodexPreOutputRetrySettings(t *testing.T) {
