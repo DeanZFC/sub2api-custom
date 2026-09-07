@@ -355,20 +355,23 @@ type AccountListItem struct {
 	Extra             map[string]any                 `json:"extra,omitempty"`
 	OllamaCloudUsage  *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 
-	ProxyID                 *int64     `json:"proxy_id"`
-	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`
-	ProxyFallbackOriginName *string    `json:"proxy_fallback_origin_name,omitempty"`
-	Concurrency             int        `json:"concurrency"`
-	LoadFactor              *int       `json:"load_factor,omitempty"`
-	Priority                int        `json:"priority"`
-	RateMultiplier          float64    `json:"rate_multiplier"`
-	Status                  string     `json:"status"`
-	ErrorMessage            string     `json:"error_message"`
-	LastUsedAt              *time.Time `json:"last_used_at"`
-	ExpiresAt               *int64     `json:"expires_at"`
-	AutoPauseOnExpired      bool       `json:"auto_pause_on_expired"`
-	CreatedAt               time.Time  `json:"created_at"`
-	UpdatedAt               time.Time  `json:"updated_at"`
+	ProxyID                      *int64                 `json:"proxy_id"`
+	ProxyFallbackOriginID        *int64                 `json:"proxy_fallback_origin_id"`
+	ProxyFallbackOriginName      *string                `json:"proxy_fallback_origin_name,omitempty"`
+	ProxyConcurrencyLimitEnabled bool                   `json:"proxy_concurrency_limit_enabled"`
+	ProxyPoolIDs                 []int64                `json:"proxy_pool_ids,omitempty"`
+	ProxyPool                    []AccountProxyCapacity `json:"proxy_pool,omitempty"`
+	Concurrency                  int                    `json:"concurrency"`
+	LoadFactor                   *int                   `json:"load_factor,omitempty"`
+	Priority                     int                    `json:"priority"`
+	RateMultiplier               float64                `json:"rate_multiplier"`
+	Status                       string                 `json:"status"`
+	ErrorMessage                 string                 `json:"error_message"`
+	LastUsedAt                   *time.Time             `json:"last_used_at"`
+	ExpiresAt                    *int64                 `json:"expires_at"`
+	AutoPauseOnExpired           bool                   `json:"auto_pause_on_expired"`
+	CreatedAt                    time.Time              `json:"created_at"`
+	UpdatedAt                    time.Time              `json:"updated_at"`
 
 	Schedulable bool `json:"schedulable"`
 
