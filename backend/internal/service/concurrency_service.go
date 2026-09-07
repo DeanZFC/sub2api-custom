@@ -480,7 +480,7 @@ func (s *ConcurrencyService) AcquireAccountProxySlot(ctx context.Context, accoun
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_ = s.cache.(AccountProxyConcurrencyCache).ReleaseAccountProxySlot(bgCtx, accountID, proxyID, requestID)
+			_ = balanced.ReleaseAccountProxySlot(bgCtx, accountID, proxyID, requestID)
 		}}, proxyID, nil
 	}
 	ext, ok := s.cache.(AccountProxyConcurrencyCache)
