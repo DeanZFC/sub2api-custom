@@ -70,6 +70,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	ensureStagedCodexFingerprintIDs(c, account, s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIAccountUniqueFingerprintEnabled)
 	applyStagedCodexFingerprintClientMetadata(c, account, payload)
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
@@ -192,7 +193,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		account.ProxyID != nil && account.Proxy != nil,
 	)
 
-	acquireCtx, acquireCancel := context.WithTimeout(ctx, s.openAIWSAcquireTimeout())
+	acquireCtx, acquireCancel := context.WithTimeout(ctx, s.openAIWSAcquireTimeout(account))
 	defer acquireCancel()
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
@@ -209,6 +210,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				return account.Proxy.URL()
 			}
 			return ""
+		}(),
+		ProxyID: func() int64 {
+			if account.ProxyID != nil {
+				return *account.ProxyID
+			}
+			return 0
 		}(),
 	})
 	if err != nil {
@@ -331,6 +338,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	); err != nil {
 		return nil, err
 	}
+	payload = s.prepareCodexQuotaOverdraftPayload(ctx, account, payload)
 
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()

@@ -1537,10 +1537,21 @@
 
       <div v-if="!isSparkShadow">
         <div class="mb-1 flex items-center gap-2">
-          <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
+          <label class="input-label mb-0">{{ form.proxy_concurrency_limit_enabled ? t('admin.accounts.proxyPool') : t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <div class="mb-2 flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-700">
+          <div>
+            <span class="text-sm text-gray-700 dark:text-gray-200">{{ t('admin.accounts.proxyConcurrencyLimitEnabled') }}</span>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.proxyConcurrencyLimitEnabledHint') }}</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="form.proxy_concurrency_limit_enabled" @click="toggleProxyPoolMode"
+            :class="['relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors', form.proxy_concurrency_limit_enabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']">
+            <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition', form.proxy_concurrency_limit_enabled ? 'translate-x-5' : 'translate-x-0']" />
+          </button>
+        </div>
+        <ProxySelector v-if="form.proxy_concurrency_limit_enabled" v-model="form.proxy_pool_ids" :proxies="proxies" multiple />
+        <ProxySelector v-else v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
       <UpstreamRequestIdHeaderField
@@ -2143,7 +2154,7 @@
         </div>
       </div>
 
-      <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
+      <!-- CPA 指纹出口（仅 OpenAI OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -2158,6 +2169,39 @@
           <div class="w-52 flex-shrink-0">
             <Select v-model="codexFingerprintMode" data-testid="edit-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
           </div>
+        </div>
+      </div>
+
+      <!-- Codex 额度透支（仅 OpenAI OAuth） -->
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexQuotaOverdraft') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexQuotaOverdraftDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="edit-codex-quota-overdraft-toggle"
+            role="switch"
+            :aria-checked="codexQuotaOverdraftEnabled"
+            @click="codexQuotaOverdraftEnabled = !codexQuotaOverdraftEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexQuotaOverdraftEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexQuotaOverdraftEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
         </div>
       </div>
 
@@ -3327,7 +3371,9 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
-type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
+type CodexFingerprintMode = 'off' | 'account_device' | 'device' | 'session' | 'full'
+// 额度透支必须由管理员对账号显式开启，编辑页缺省也保持关闭。
+const codexQuotaOverdraftEnabled = ref(false)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
@@ -3362,6 +3408,7 @@ const editWeeklyResetHour = ref<number | null>(null)
 const editResetTimezone = ref<string | null>(null)
 const codexFingerprintModeOptions = computed(() => [
   { value: 'off' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintOff') },
+  { value: 'account_device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintAccountDevice') },
   { value: 'device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintDevice') },
   { value: 'session' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintSession') },
   { value: 'full' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintFull') },
@@ -3643,6 +3690,8 @@ const form = reactive({
   name: '',
   notes: '',
   proxy_id: null as number | null,
+  proxy_concurrency_limit_enabled: false,
+  proxy_pool_ids: [] as number[],
   concurrency: 1,
   load_factor: null as number | null,
   priority: 1,
@@ -3651,6 +3700,11 @@ const form = reactive({
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+
+const toggleProxyPoolMode = () => {
+  form.proxy_concurrency_limit_enabled = !form.proxy_concurrency_limit_enabled
+  if (form.proxy_concurrency_limit_enabled) form.proxy_id = null
+}
 
 const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
   upstreamBillingRateSyncEnabled.value = enabled
@@ -3751,6 +3805,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
+  form.proxy_concurrency_limit_enabled = newAccount.proxy_concurrency_limit_enabled === true
+  form.proxy_pool_ids = [...(newAccount.proxy_pool_ids || [])]
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -3809,6 +3865,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexQuotaOverdraftEnabled.value = false
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
@@ -3862,9 +3919,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         extra?.codex_cli_only_allow_app_server === true
     }
     if (newAccount.type === 'oauth') {
+      codexQuotaOverdraftEnabled.value = extra?.codex_quota_overdraft_enabled === true
       const fpMode = extra?.codex_fingerprint_mode as string | undefined
       // 缺省/非法值按 off 呈现，与后端 GetCodexFingerprintMode 的 opt-in 语义一致（#5610）
-      codexFingerprintMode.value = (['off', 'device', 'session', 'full'].includes(fpMode || '')
+      codexFingerprintMode.value = (['off', 'account_device', 'device', 'session', 'full'].includes(fpMode || '')
         ? fpMode as CodexFingerprintMode
         : 'off')
     }
@@ -4717,6 +4775,10 @@ const handleSubmit = async () => {
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0
     }
+    if (form.proxy_concurrency_limit_enabled) {
+      updatePayload.proxy_id = 0
+    }
+    updatePayload.proxy_pool_ids = form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : []
     if (form.expires_at === null) {
       updatePayload.expires_at = 0
     }
@@ -5334,9 +5396,9 @@ const handleSubmit = async () => {
         }
       }
 
-      // 指纹收敛模式：默认 off（不写入）；device/session/full 是显式 opt-in，
-      // 必须落键，否则管理员的选择会被后端当作"未设置"而回落到 off（#5610）。
+      // 额度透支是账号级显式开关；指纹收敛模式仍按下方逻辑独立处理。
       if (props.account.type === 'oauth') {
+        newExtra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
         if (codexFingerprintMode.value !== 'off') {
           newExtra.codex_fingerprint_mode = codexFingerprintMode.value
         } else {

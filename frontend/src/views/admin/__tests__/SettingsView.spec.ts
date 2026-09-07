@@ -97,6 +97,14 @@ vi.mock("@/api", () => ({
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
+      getCodexPreOutputRetrySettings: vi.fn().mockResolvedValue({
+        enabled: false,
+        max_retries: 3,
+        retry_interval_ms: 1000,
+        max_retry_window_seconds: 30,
+        keywords: ["servers are currently overloaded"],
+      }),
+      updateCodexPreOutputRetrySettings: vi.fn().mockImplementation(async (payload) => payload),
     },
     accounts: {
       getUpstreamBillingProbeSettings,

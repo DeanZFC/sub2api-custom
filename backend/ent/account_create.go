@@ -153,6 +153,20 @@ func (_c *AccountCreate) SetNillableConcurrency(v *int) *AccountCreate {
 	return _c
 }
 
+// SetRateLimit429RetryCount sets the "rate_limit_429_retry_count" field.
+func (_c *AccountCreate) SetRateLimit429RetryCount(v int) *AccountCreate {
+	_c.mutation.SetRateLimit429RetryCount(v)
+	return _c
+}
+
+// SetNillableRateLimit429RetryCount sets the "rate_limit_429_retry_count" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableRateLimit429RetryCount(v *int) *AccountCreate {
+	if v != nil {
+		_c.SetRateLimit429RetryCount(*v)
+	}
+	return _c
+}
+
 // SetLoadFactor sets the "load_factor" field.
 func (_c *AccountCreate) SetLoadFactor(v int) *AccountCreate {
 	_c.mutation.SetLoadFactor(v)
@@ -557,6 +571,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultConcurrency
 		_c.mutation.SetConcurrency(v)
 	}
+	if _, ok := _c.mutation.RateLimit429RetryCount(); !ok {
+		v := account.DefaultRateLimit429RetryCount
+		_c.mutation.SetRateLimit429RetryCount(v)
+	}
 	if _, ok := _c.mutation.Priority(); !ok {
 		v := account.DefaultPriority
 		_c.mutation.SetPriority(v)
@@ -624,6 +642,14 @@ func (_c *AccountCreate) check() error {
 	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		return &ValidationError{Name: "concurrency", err: errors.New(`ent: missing required field "Account.concurrency"`)}
+	}
+	if _, ok := _c.mutation.RateLimit429RetryCount(); !ok {
+		return &ValidationError{Name: "rate_limit_429_retry_count", err: errors.New(`ent: missing required field "Account.rate_limit_429_retry_count"`)}
+	}
+	if v, ok := _c.mutation.RateLimit429RetryCount(); ok {
+		if err := account.RateLimit429RetryCountValidator(v); err != nil {
+			return &ValidationError{Name: "rate_limit_429_retry_count", err: fmt.Errorf(`ent: validator failed for field "Account.rate_limit_429_retry_count": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.Priority(); !ok {
 		return &ValidationError{Name: "priority", err: errors.New(`ent: missing required field "Account.priority"`)}
@@ -728,6 +754,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Concurrency(); ok {
 		_spec.SetField(account.FieldConcurrency, field.TypeInt, value)
 		_node.Concurrency = value
+	}
+	if value, ok := _c.mutation.RateLimit429RetryCount(); ok {
+		_spec.SetField(account.FieldRateLimit429RetryCount, field.TypeInt, value)
+		_node.RateLimit429RetryCount = value
 	}
 	if value, ok := _c.mutation.LoadFactor(); ok {
 		_spec.SetField(account.FieldLoadFactor, field.TypeInt, value)
@@ -1104,6 +1134,24 @@ func (u *AccountUpsert) UpdateConcurrency() *AccountUpsert {
 // AddConcurrency adds v to the "concurrency" field.
 func (u *AccountUpsert) AddConcurrency(v int) *AccountUpsert {
 	u.Add(account.FieldConcurrency, v)
+	return u
+}
+
+// SetRateLimit429RetryCount sets the "rate_limit_429_retry_count" field.
+func (u *AccountUpsert) SetRateLimit429RetryCount(v int) *AccountUpsert {
+	u.Set(account.FieldRateLimit429RetryCount, v)
+	return u
+}
+
+// UpdateRateLimit429RetryCount sets the "rate_limit_429_retry_count" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateRateLimit429RetryCount() *AccountUpsert {
+	u.SetExcluded(account.FieldRateLimit429RetryCount)
+	return u
+}
+
+// AddRateLimit429RetryCount adds v to the "rate_limit_429_retry_count" field.
+func (u *AccountUpsert) AddRateLimit429RetryCount(v int) *AccountUpsert {
+	u.Add(account.FieldRateLimit429RetryCount, v)
 	return u
 }
 
@@ -1669,6 +1717,27 @@ func (u *AccountUpsertOne) AddConcurrency(v int) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateConcurrency() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateConcurrency()
+	})
+}
+
+// SetRateLimit429RetryCount sets the "rate_limit_429_retry_count" field.
+func (u *AccountUpsertOne) SetRateLimit429RetryCount(v int) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetRateLimit429RetryCount(v)
+	})
+}
+
+// AddRateLimit429RetryCount adds v to the "rate_limit_429_retry_count" field.
+func (u *AccountUpsertOne) AddRateLimit429RetryCount(v int) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddRateLimit429RetryCount(v)
+	})
+}
+
+// UpdateRateLimit429RetryCount sets the "rate_limit_429_retry_count" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateRateLimit429RetryCount() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateRateLimit429RetryCount()
 	})
 }
 
@@ -2454,6 +2523,27 @@ func (u *AccountUpsertBulk) AddConcurrency(v int) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateConcurrency() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateConcurrency()
+	})
+}
+
+// SetRateLimit429RetryCount sets the "rate_limit_429_retry_count" field.
+func (u *AccountUpsertBulk) SetRateLimit429RetryCount(v int) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetRateLimit429RetryCount(v)
+	})
+}
+
+// AddRateLimit429RetryCount adds v to the "rate_limit_429_retry_count" field.
+func (u *AccountUpsertBulk) AddRateLimit429RetryCount(v int) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddRateLimit429RetryCount(v)
+	})
+}
+
+// UpdateRateLimit429RetryCount sets the "rate_limit_429_retry_count" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateRateLimit429RetryCount() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateRateLimit429RetryCount()
 	})
 }
 

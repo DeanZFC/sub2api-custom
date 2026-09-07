@@ -16,7 +16,13 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 |------|-------------|
 | `docker-compose.yml` | Docker Compose configuration (named volumes) |
 | `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
-| `docker-deploy.sh` | **One-click Docker deployment script (recommended)** |
+| `docker-compose.custom.yml` | Generic source-build overlay with the `sub2api-custom` image |
+| `install-custom-docker.sh` | One-command custom Docker deployment plus host updater installation |
+| `install-source-updater.sh` | Installs the restricted systemd updater for an existing Compose instance |
+| `Dockerfile.updater` | Reproducible builder image for the host updater binary |
+| `docker-compose.overdraft.yml` | Legacy source-build overlay kept for existing deployments |
+| `docker-compose.coexist.yml` | Legacy isolation overlay for existing deployments using the old container names |
+| `docker-deploy.sh` | Legacy upstream preparation script |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
 | `.env.example` | Container environment variables template |
@@ -49,6 +55,80 @@ See [APPLE_CONTAINER.md](./APPLE_CONTAINER.md) for configuration, upgrades, pers
 ---
 
 ## Docker Deployment (Recommended)
+
+### 后台一键更新（源码 Docker 部署）
+
+源码构建使用宿主机更新器，避免把 `/var/run/docker.sock` 暴露给主应用容器。全新 Linux
+部署直接执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-custom/deploy/install-custom-docker.sh \
+  -o /tmp/install-custom-docker.sh
+sudo bash /tmp/install-custom-docker.sh
+```
+
+已有部署在仓库根目录执行：
+
+```bash
+sudo ./deploy/install-source-updater.sh \
+  --repo-dir /opt/sub2api-custom \
+  --container "$(docker compose -f deploy/docker-compose.local.yml -f deploy/docker-compose.custom.yml ps -q sub2api)"
+```
+
+安装器会读取容器 Compose labels，固定更新 `origin/sub2api-custom`，然后构建、重建应用容器并执行
+健康检查。管理员在页面版本菜单点击“立即更新”即可。更新流程默认不执行 PostgreSQL 备份，
+PostgreSQL、Redis、`.env`、`data/` 和数据库目录不会被删除；更新失败时会尝试恢复源码和旧应用镜像。
+数据库迁移是前向变更，生产环境请在更新前自行保留可恢复的数据库备份或快照。
+
+同一台服务器上的多实例需要为每个实例单独安装更新器，并分别传入各自的仓库目录和应用容器 ID。Compose 会按项目名自动隔离应用、PostgreSQL 和 Redis 容器；已有固定容器名的部署也可以直接安装，更新时会自动重新解析新容器。
+
+### 与现有脚本版共存（Fork）
+
+如果服务器已经通过脚本安装了 Sub2API，请使用独立目录、Compose 项目名和数据目录，
+不要复用原脚本版的 PostgreSQL/Redis 数据目录。下面的命令默认将 Docker 版发布到 `8081`，
+原脚本版可以继续占用 `8080`：
+
+```bash
+# Docker 未安装时执行；已安装并能运行 docker 的服务器跳过这一步
+command -v docker >/dev/null 2>&1 || curl -fsSL https://get.docker.com | sh
+sudo systemctl enable --now docker
+
+git clone -b sub2api-custom https://github.com/DeanZFC/sub2api-custom.git /opt/sub2api-custom
+cd /opt/sub2api-custom/deploy
+cp .env.example .env
+chmod 600 .env
+mkdir -p data postgres_data redis_data
+
+# 必须使用独立密码和固定密钥，不要复制原实例的 .env
+sed -i 's/^SERVER_PORT=.*/SERVER_PORT=8081/' .env
+sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 32)/" .env
+sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$(openssl rand -hex 32)/" .env
+sed -i "s/^TOTP_ENCRYPTION_KEY=.*/TOTP_ENCRYPTION_KEY=$(openssl rand -hex 32)/" .env
+
+docker compose \
+  -p sub2api-custom \
+  -f docker-compose.local.yml \
+  -f docker-compose.custom.yml \
+  up -d --build
+```
+
+此模式使用容器名 `sub2api-custom`、`sub2api-custom-postgres`、
+`sub2api-custom-redis`，不会停止或删除脚本版服务。查看状态和日志：
+
+```bash
+docker compose -p sub2api-custom \
+  -f docker-compose.local.yml -f docker-compose.custom.yml \
+  ps
+docker logs -f sub2api-custom
+```
+
+停止或更新 Docker 版时，只操作这个 Compose 项目；不要使用 `docker compose down -v`：
+
+```bash
+docker compose -p sub2api-custom \
+  -f docker-compose.local.yml -f docker-compose.custom.yml \
+  stop
+```
 
 ### Method 1: One-Click Deployment (Recommended)
 

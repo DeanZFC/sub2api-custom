@@ -470,6 +470,70 @@ func TestHandleSingleAccountRetryInPlace_Success(t *testing.T) {
 	require.Nil(t, result.err)
 }
 
+func TestHandleSingleAccountRetryInPlaceContinuesWithoutRefreshingAccount429Budget(t *testing.T) {
+	final429Body := []byte(`{"error":{"status":"RESOURCE_EXHAUSTED","message":"QUOTA_EXHAUSTED"}}`)
+	upstream := &mockSmartRetryUpstream{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": []string{"0"}},
+				Body:       io.NopCloser(bytes.NewReader(final429Body)),
+			},
+			{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": []string{"0"}},
+				Body:       io.NopCloser(bytes.NewReader(final429Body)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			},
+		},
+		errors: []error{nil, nil, nil},
+	}
+	retryCount := 1
+	account := &Account{
+		ID:                     4292,
+		Type:                   AccountTypeOAuth,
+		Platform:               PlatformAntigravity,
+		Concurrency:            1,
+		RateLimit429RetryCount: &retryCount,
+	}
+	handleErrorCalls := 0
+	params := antigravityRetryLoopParams{
+		ctx:          WithAccount429RetryScope(ctxWithSingleAccountRetry()),
+		prefix:       "[test]",
+		account:      account,
+		accessToken:  "token",
+		action:       "generateContent",
+		body:         []byte(`{"model":"test","request":{}}`),
+		httpUpstream: upstream,
+		handleError: func(_ context.Context, _ string, _ *Account, statusCode int, _ http.Header, _ []byte, _ string, _ int64, _ string, _ bool) *handleModelRateLimitResult {
+			handleErrorCalls++
+			require.Equal(t, http.StatusTooManyRequests, statusCode)
+			return nil
+		},
+	}
+	initialResp := &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}
+
+	result := (&AntigravityGatewayService{}).handleSingleAccountRetryInPlace(
+		params,
+		initialResp,
+		nil,
+		"https://ag-1.test",
+		0,
+		"gemini-test",
+	)
+
+	require.NotNil(t, result)
+	require.Equal(t, smartRetryActionBreakWithResp, result.action)
+	require.NotNil(t, result.resp)
+	require.Equal(t, http.StatusOK, result.resp.StatusCode)
+	require.Zero(t, handleErrorCalls, "the normal outer error path must apply the final 429 side effect exactly once")
+	require.Len(t, upstream.calls, 3, "官方第二轮单账号重试不得重新领取透明 429 预算")
+}
+
 // TestHandleSingleAccountRetryInPlace_AllRetriesFail 所有重试都失败，返回 503（不设限流）
 func TestHandleSingleAccountRetryInPlace_AllRetriesFail(t *testing.T) {
 	// 构造 3 个 503 响应（对应 3 次原地重试）

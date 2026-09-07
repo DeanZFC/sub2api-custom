@@ -781,7 +781,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = doAccountHTTPUpstream(s.httpUpstream, upstreamReq, proxyURL, account)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -933,7 +933,8 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			resp = &http.Response{
 				StatusCode: resp.StatusCode,
 				Header:     resp.Header.Clone(),
-				Body:       io.NopCloser(bytes.NewReader(respBody)),
+				Body:       preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody))),
+				Request:    resp.Request,
 			}
 			break
 		}
@@ -954,7 +955,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
 				}
 				if failoverErr := s.skippedErrorPolicyFailoverError(c, account, resp.StatusCode, respBody, upstreamReqID); failoverErr != nil {
-					return nil, failoverErr
+					return nil, finalizeAccount429Failover(resp, failoverErr)
 				}
 				if account.IsCustomErrorCodesEnabled() {
 					return nil, s.writeGeminiCustomCodeSkippedError(c, account, resp.StatusCode, upstreamReqID, respBody, func() {
@@ -993,7 +994,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody})
 			}
 		}
 
@@ -1029,7 +1030,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true}
+				return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true})
 			}
 		}
 		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
@@ -1059,7 +1060,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+			return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody})
 		}
 		upstreamReqID := resp.Header.Get(requestIDHeader)
 		if upstreamReqID == "" {
@@ -1333,7 +1334,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = doAccountHTTPUpstream(s.httpUpstream, upstreamReq, proxyURL, account)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -1440,7 +1441,8 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			resp = &http.Response{
 				StatusCode: resp.StatusCode,
 				Header:     resp.Header.Clone(),
-				Body:       io.NopCloser(bytes.NewReader(respBody)),
+				Body:       preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody))),
+				Request:    resp.Request,
 			}
 			break
 		}
@@ -1485,7 +1487,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			switch policy {
 			case ErrorPolicySkipped:
 				if failoverErr := s.skippedErrorPolicyFailoverError(c, account, resp.StatusCode, respBody, requestID); failoverErr != nil {
-					return nil, failoverErr
+					return nil, finalizeAccount429Failover(resp, failoverErr)
 				}
 				if account.IsCustomErrorCodesEnabled() {
 					return nil, s.writeGeminiCustomCodeSkippedError(c, account, resp.StatusCode, requestID, respBody, func() {
@@ -1521,7 +1523,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody})
 			}
 		}
 
@@ -1554,7 +1556,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, RetryableOnSameAccount: true}
+				return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, RetryableOnSameAccount: true})
 			}
 		}
 		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
@@ -1581,7 +1583,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody}
+			return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody})
 		}
 
 		return nil, s.writeGeminiNativeUpstreamError(c, account, resp, respBody, requestID, isOAuth)
@@ -1657,7 +1659,8 @@ func (s *GeminiMessagesCompatService) checkErrorPolicyInLoop(
 	rebuilt = &http.Response{
 		StatusCode: resp.StatusCode,
 		Header:     resp.Header.Clone(),
-		Body:       io.NopCloser(bytes.NewReader(body)),
+		Body:       preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(body))),
+		Request:    resp.Request,
 	}
 	policy := s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, body, mappedModel)
 	return policy != ErrorPolicyNone, rebuilt
@@ -2854,7 +2857,7 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
 	}
 
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := doAccountHTTPUpstream(s.httpUpstream, req, proxyURL, account)
 	if err != nil {
 		return nil, err
 	}

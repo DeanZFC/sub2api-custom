@@ -62,6 +62,20 @@ func (_c *BatchImageJobCreate) SetNillableAccountID(v *int64) *BatchImageJobCrea
 	return _c
 }
 
+// SetRoutedGroupID sets the "routed_group_id" field.
+func (_c *BatchImageJobCreate) SetRoutedGroupID(v int64) *BatchImageJobCreate {
+	_c.mutation.SetRoutedGroupID(v)
+	return _c
+}
+
+// SetNillableRoutedGroupID sets the "routed_group_id" field if the given value is not nil.
+func (_c *BatchImageJobCreate) SetNillableRoutedGroupID(v *int64) *BatchImageJobCreate {
+	if v != nil {
+		_c.SetRoutedGroupID(*v)
+	}
+	return _c
+}
+
 // SetProvider sets the "provider" field.
 func (_c *BatchImageJobCreate) SetProvider(v string) *BatchImageJobCreate {
 	_c.mutation.SetProvider(v)
@@ -796,6 +810,10 @@ func (_c *BatchImageJobCreate) createSpec() (*BatchImageJob, *sqlgraph.CreateSpe
 		_spec.SetField(batchimagejob.FieldAccountID, field.TypeInt64, value)
 		_node.AccountID = &value
 	}
+	if value, ok := _c.mutation.RoutedGroupID(); ok {
+		_spec.SetField(batchimagejob.FieldRoutedGroupID, field.TypeInt64, value)
+		_node.RoutedGroupID = &value
+	}
 	if value, ok := _c.mutation.Provider(); ok {
 		_spec.SetField(batchimagejob.FieldProvider, field.TypeString, value)
 		_node.Provider = value
@@ -1055,6 +1073,30 @@ func (u *BatchImageJobUpsert) AddAccountID(v int64) *BatchImageJobUpsert {
 // ClearAccountID clears the value of the "account_id" field.
 func (u *BatchImageJobUpsert) ClearAccountID() *BatchImageJobUpsert {
 	u.SetNull(batchimagejob.FieldAccountID)
+	return u
+}
+
+// SetRoutedGroupID sets the "routed_group_id" field.
+func (u *BatchImageJobUpsert) SetRoutedGroupID(v int64) *BatchImageJobUpsert {
+	u.Set(batchimagejob.FieldRoutedGroupID, v)
+	return u
+}
+
+// UpdateRoutedGroupID sets the "routed_group_id" field to the value that was provided on create.
+func (u *BatchImageJobUpsert) UpdateRoutedGroupID() *BatchImageJobUpsert {
+	u.SetExcluded(batchimagejob.FieldRoutedGroupID)
+	return u
+}
+
+// AddRoutedGroupID adds v to the "routed_group_id" field.
+func (u *BatchImageJobUpsert) AddRoutedGroupID(v int64) *BatchImageJobUpsert {
+	u.Add(batchimagejob.FieldRoutedGroupID, v)
+	return u
+}
+
+// ClearRoutedGroupID clears the value of the "routed_group_id" field.
+func (u *BatchImageJobUpsert) ClearRoutedGroupID() *BatchImageJobUpsert {
+	u.SetNull(batchimagejob.FieldRoutedGroupID)
 	return u
 }
 
@@ -1786,6 +1828,34 @@ func (u *BatchImageJobUpsertOne) UpdateAccountID() *BatchImageJobUpsertOne {
 func (u *BatchImageJobUpsertOne) ClearAccountID() *BatchImageJobUpsertOne {
 	return u.Update(func(s *BatchImageJobUpsert) {
 		s.ClearAccountID()
+	})
+}
+
+// SetRoutedGroupID sets the "routed_group_id" field.
+func (u *BatchImageJobUpsertOne) SetRoutedGroupID(v int64) *BatchImageJobUpsertOne {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.SetRoutedGroupID(v)
+	})
+}
+
+// AddRoutedGroupID adds v to the "routed_group_id" field.
+func (u *BatchImageJobUpsertOne) AddRoutedGroupID(v int64) *BatchImageJobUpsertOne {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.AddRoutedGroupID(v)
+	})
+}
+
+// UpdateRoutedGroupID sets the "routed_group_id" field to the value that was provided on create.
+func (u *BatchImageJobUpsertOne) UpdateRoutedGroupID() *BatchImageJobUpsertOne {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.UpdateRoutedGroupID()
+	})
+}
+
+// ClearRoutedGroupID clears the value of the "routed_group_id" field.
+func (u *BatchImageJobUpsertOne) ClearRoutedGroupID() *BatchImageJobUpsertOne {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.ClearRoutedGroupID()
 	})
 }
 
@@ -2784,6 +2854,34 @@ func (u *BatchImageJobUpsertBulk) UpdateAccountID() *BatchImageJobUpsertBulk {
 func (u *BatchImageJobUpsertBulk) ClearAccountID() *BatchImageJobUpsertBulk {
 	return u.Update(func(s *BatchImageJobUpsert) {
 		s.ClearAccountID()
+	})
+}
+
+// SetRoutedGroupID sets the "routed_group_id" field.
+func (u *BatchImageJobUpsertBulk) SetRoutedGroupID(v int64) *BatchImageJobUpsertBulk {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.SetRoutedGroupID(v)
+	})
+}
+
+// AddRoutedGroupID adds v to the "routed_group_id" field.
+func (u *BatchImageJobUpsertBulk) AddRoutedGroupID(v int64) *BatchImageJobUpsertBulk {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.AddRoutedGroupID(v)
+	})
+}
+
+// UpdateRoutedGroupID sets the "routed_group_id" field to the value that was provided on create.
+func (u *BatchImageJobUpsertBulk) UpdateRoutedGroupID() *BatchImageJobUpsertBulk {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.UpdateRoutedGroupID()
+	})
+}
+
+// ClearRoutedGroupID clears the value of the "routed_group_id" field.
+func (u *BatchImageJobUpsertBulk) ClearRoutedGroupID() *BatchImageJobUpsertBulk {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.ClearRoutedGroupID()
 	})
 }
 

@@ -4,16 +4,18 @@ import "time"
 
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
-	Version     int                      `json:"version"`
-	APIKeyID    int64                    `json:"api_key_id"`
-	UserID      int64                    `json:"user_id"`
-	GroupID     *int64                   `json:"group_id,omitempty"`
-	Name        string                   `json:"name"`
-	Status      string                   `json:"status"`
-	IPWhitelist []string                 `json:"ip_whitelist,omitempty"`
-	IPBlacklist []string                 `json:"ip_blacklist,omitempty"`
-	User        APIKeyAuthUserSnapshot   `json:"user"`
-	Group       *APIKeyAuthGroupSnapshot `json:"group,omitempty"`
+	Version         int                      `json:"version"`
+	APIKeyID        int64                    `json:"api_key_id"`
+	UserID          int64                    `json:"user_id"`
+	GroupID         *int64                   `json:"group_id,omitempty"`
+	FallbackGroupID *int64                   `json:"fallback_group_id,omitempty"`
+	Name            string                   `json:"name"`
+	Status          string                   `json:"status"`
+	IPWhitelist     []string                 `json:"ip_whitelist,omitempty"`
+	IPBlacklist     []string                 `json:"ip_blacklist,omitempty"`
+	User            APIKeyAuthUserSnapshot   `json:"user"`
+	Group           *APIKeyAuthGroupSnapshot `json:"group,omitempty"`
+	FallbackGroup   *APIKeyAuthGroupSnapshot `json:"fallback_group,omitempty"`
 
 	// Quota fields for API Key independent quota feature
 	Quota     float64 `json:"quota"`      // Quota limit in USD (0 = unlimited)
@@ -59,6 +61,7 @@ type APIKeyAuthUserSnapshot struct {
 type APIKeyAuthGroupSnapshot struct {
 	ID                              int64                         `json:"id"`
 	Name                            string                        `json:"name"`
+	Description                     string                        `json:"description,omitempty"`
 	Platform                        string                        `json:"platform"`
 	IsExclusive                     bool                          `json:"is_exclusive"`
 	Status                          string                        `json:"status"`
@@ -67,6 +70,7 @@ type APIKeyAuthGroupSnapshot struct {
 	DailyLimitUSD                   *float64                      `json:"daily_limit_usd,omitempty"`
 	WeeklyLimitUSD                  *float64                      `json:"weekly_limit_usd,omitempty"`
 	MonthlyLimitUSD                 *float64                      `json:"monthly_limit_usd,omitempty"`
+	DefaultValidityDays             int                           `json:"default_validity_days"`
 	AllowImageGeneration            bool                          `json:"allow_image_generation"`
 	AllowBatchImageGeneration       bool                          `json:"allow_batch_image_generation"`
 	ImageRateIndependent            bool                          `json:"image_rate_independent"`
@@ -74,6 +78,8 @@ type APIKeyAuthGroupSnapshot struct {
 	ImagePrice1K                    *float64                      `json:"image_price_1k,omitempty"`
 	ImagePrice2K                    *float64                      `json:"image_price_2k,omitempty"`
 	ImagePrice4K                    *float64                      `json:"image_price_4k,omitempty"`
+	BatchImageDiscountMultiplier    float64                       `json:"batch_image_discount_multiplier"`
+	BatchImageHoldMultiplier        float64                       `json:"batch_image_hold_multiplier"`
 	VideoRateIndependent            bool                          `json:"video_rate_independent"`
 	VideoRateMultiplier             float64                       `json:"video_rate_multiplier"`
 	VideoPrice480P                  *float64                      `json:"video_price_480p,omitempty"`
@@ -99,10 +105,13 @@ type APIKeyAuthGroupSnapshot struct {
 
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes []string `json:"supported_model_scopes,omitempty"`
+	SortOrder            int      `json:"sort_order"`
 
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
 	AllowLive                   bool                              `json:"allow_live"`
+	RequireOAuthOnly            bool                              `json:"require_oauth_only"`
+	RequirePrivacySet           bool                              `json:"require_privacy_set"`
 	ForceOpenAIFast             bool                              `json:"force_openai_fast"`
 	FreeOpenAIFast              bool                              `json:"free_openai_fast"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
@@ -114,6 +123,8 @@ type APIKeyAuthGroupSnapshot struct {
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。
 	RPMLimit int `json:"rpm_limit"`
+	// UserConcurrencyLimit 分组内每个用户的并发上限（0 = 不限制）。
+	UserConcurrencyLimit int `json:"user_concurrency_limit"`
 
 	// MaxReasoningEffort Anthropic/OpenAI 请求的推理强度上限，空字符串表示不限制。
 	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty"`

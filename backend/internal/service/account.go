@@ -4,6 +4,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"net/url"
@@ -32,7 +33,10 @@ type Account struct {
 	ProxyFallbackOriginID   *int64
 	ProxyFallbackOriginName *string // 仅展示用
 	Concurrency             int
-	Priority                int
+	// RateLimit429RetryCount 是已废弃的兼容字段。账号级透明 429 重试已关闭，
+	// 保留该字段仅用于读取旧数据库/调度缓存，当前不会影响请求行为。
+	RateLimit429RetryCount *int
+	Priority               int
 	// RateMultiplier 账号计费倍率（>=0，允许 0 表示该账号计费为 0）。
 	// 使用指针用于兼容旧版本调度缓存（Redis）中缺字段的情况：nil 表示按 1.0 处理。
 	RateMultiplier     *float64
@@ -61,7 +65,12 @@ type Account struct {
 	ParentAccountID *int64 // non-nil → 影子账号（不持凭据，透传母账号凭据）
 	QuotaDimension  string // 用量维度："" / "global" / "spark"
 
-	Proxy         *Proxy
+	Proxy *Proxy
+	// ProxyPoolIDs/ProxyPool are used when proxy concurrency limiting is enabled.
+	// The persisted source of truth is Extra[ProxyPoolIDsExtraKey], keeping old
+	// database schemas and single-proxy accounts compatible.
+	ProxyPoolIDs  []int64
+	ProxyPool     []*Proxy
 	AccountGroups []AccountGroup
 	GroupIDs      []int64
 	Groups        []*Group
@@ -82,6 +91,134 @@ type Account struct {
 	headerOverrideCacheRawPtr         uintptr
 	headerOverrideCacheRawLen         int
 	headerOverrideCacheRawSig         uint64
+}
+
+const (
+	ProxyConcurrencyLimitEnabledExtraKey = "proxy_concurrency_limit_enabled"
+	ProxyPoolIDsExtraKey                 = "proxy_pool_ids"
+)
+
+// ProxyConcurrencyLimitEnabled reports whether this account uses one
+// independent concurrency bucket per configured proxy.
+func (a *Account) ProxyConcurrencyLimitEnabled() bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	v, _ := a.Extra[ProxyConcurrencyLimitEnabledExtraKey].(bool)
+	return v && len(a.ProxyPoolIDs) > 0
+}
+
+// NormalizeProxyPoolIDs accepts JSON-decoded numbers as well as typed values.
+func NormalizeProxyPoolIDs(raw any) []int64 {
+	var values []any
+	switch v := raw.(type) {
+	case []any:
+		values = v
+	case []int64:
+		for _, id := range v {
+			values = append(values, id)
+		}
+	case []int:
+		for _, id := range v {
+			values = append(values, id)
+		}
+	default:
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(values))
+	out := make([]int64, 0, len(values))
+	for _, rawID := range values {
+		var id int64
+		switch n := rawID.(type) {
+		case int64:
+			id = n
+		case int:
+			id = int64(n)
+		case float64:
+			id = int64(n)
+		case json.Number:
+			parsed, err := n.Int64()
+			if err == nil {
+				id = parsed
+			}
+		}
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func (a *Account) SyncProxyPoolConfig() {
+	if a == nil {
+		return
+	}
+	if a.Extra == nil {
+		// Keep typed values supplied by callers/tests when no persisted Extra map
+		// exists. Database-backed accounts persist the pool in Extra and take the
+		// branch below.
+		a.ProxyPoolIDs = NormalizeProxyPoolIDs(a.ProxyPoolIDs)
+		return
+	}
+	raw, exists := a.Extra[ProxyPoolIDsExtraKey]
+	if !exists {
+		a.ProxyPoolIDs = NormalizeProxyPoolIDs(a.ProxyPoolIDs)
+		return
+	}
+	a.ProxyPoolIDs = NormalizeProxyPoolIDs(raw)
+}
+
+func ApplyProxyPoolExtra(extra map[string]any, enabled *bool, ids []int64, idsProvided bool) map[string]any {
+	if enabled == nil && !idsProvided {
+		return extra
+	}
+	if extra == nil {
+		extra = make(map[string]any)
+	}
+	if enabled != nil {
+		extra[ProxyConcurrencyLimitEnabledExtraKey] = *enabled
+	}
+	if idsProvided {
+		normalized := NormalizeProxyPoolIDs(ids)
+		if len(normalized) == 0 {
+			delete(extra, ProxyPoolIDsExtraKey)
+		} else {
+			extra[ProxyPoolIDsExtraKey] = normalized
+		}
+	}
+	return extra
+}
+
+const (
+	DefaultRateLimit429RetryCount = 5
+	MaxRateLimit429RetryCount     = 10
+)
+
+// GetRateLimit429RetryCount 返回账号的 429 额外重试次数，并兼容旧缓存数据。
+func (a *Account) GetRateLimit429RetryCount() int {
+	if a == nil || a.RateLimit429RetryCount == nil {
+		return DefaultRateLimit429RetryCount
+	}
+	count := *a.RateLimit429RetryCount
+	if count < 0 {
+		return 0
+	}
+	if count > MaxRateLimit429RetryCount {
+		return MaxRateLimit429RetryCount
+	}
+	return count
+}
+
+func ValidateRateLimit429RetryCount(count int) error {
+	if count < 0 || count > MaxRateLimit429RetryCount {
+		return fmt.Errorf("rate_limit_429_retry_count must be between 0 and %d", MaxRateLimit429RetryCount)
+	}
+	return nil
 }
 
 type OpenAIEndpointCapability string

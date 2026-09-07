@@ -168,12 +168,22 @@ type openAIRecordUsageSubRepoStub struct {
 	incrementCalls int
 	incrementErr   error
 	lastCtxErr     error
+	active         *UserSubscription
+	getActiveCalls int
 }
 
 func (s *openAIRecordUsageSubRepoStub) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
 	s.incrementCalls++
 	s.lastCtxErr = ctx.Err()
 	return s.incrementErr
+}
+
+func (s *openAIRecordUsageSubRepoStub) GetActiveByUserIDAndGroupID(_ context.Context, userID, groupID int64) (*UserSubscription, error) {
+	s.getActiveCalls++
+	if s.active != nil && s.active.UserID == userID && s.active.GroupID == groupID {
+		return s.active, nil
+	}
+	return nil, ErrSubscriptionNotFound
 }
 
 type openAIRecordUsageAPIKeyQuotaStub struct {
@@ -341,6 +351,175 @@ func TestOpenAIGatewayServiceRecordUsage_ZeroUsageStillWritesUsageLog(t *testing
 	require.Zero(t, billingRepo.lastCmd.APIKeyQuotaCost)
 	require.Zero(t, billingRepo.lastCmd.APIKeyRateLimitCost)
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_FallbackUsesRoutedGroupBilling(t *testing.T) {
+	primaryGroupID := int64(61001)
+	fallbackGroupID := int64(61002)
+	primarySubscriptionGroupID := primaryGroupID
+	user := &User{ID: 62001}
+	primary := &Group{
+		ID: primaryGroupID, Name: "primary", Platform: PlatformOpenAI,
+		Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription,
+		RateMultiplier: 1,
+	}
+	fallback := &Group{
+		ID: fallbackGroupID, Name: "fallback", Platform: PlatformOpenAI,
+		Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription,
+		RateMultiplier: 2.5,
+	}
+	apiKey := &APIKey{
+		ID: 63001, UserID: user.ID, User: user,
+		GroupID: &primaryGroupID, Group: primary,
+		FallbackGroupID: &fallbackGroupID, FallbackGroup: fallback,
+	}
+	ctx := WithAPIKeyGroupFallbackRouting(context.Background(), apiKey)
+	_, err := selectAccountWithAPIKeyGroupFallback(ctx, &primaryGroupID, "gpt-5.1", func(_ context.Context, groupID *int64) (*Account, error) {
+		if *groupID == primaryGroupID {
+			return nil, ErrNoAvailableAccounts
+		}
+		return &Account{ID: 64001}, nil
+	})
+	require.NoError(t, err)
+
+	fallbackSubscription := &UserSubscription{ID: 65002, UserID: user.ID, GroupID: fallbackGroupID}
+	primarySubscription := &UserSubscription{ID: 65001, UserID: user.ID, GroupID: primarySubscriptionGroupID}
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	subRepo := &openAIRecordUsageSubRepoStub{active: fallbackSubscription}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, subRepo, nil)
+	usage := OpenAIUsage{InputTokens: 1000, OutputTokens: 100}
+
+	err = svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_fallback_billing",
+			Usage:     usage, Model: "gpt-5.1", Duration: time.Second,
+		},
+		APIKey: apiKey, User: user,
+		Account:      &Account{ID: 64001, Type: AccountTypeAPIKey},
+		Subscription: primarySubscription,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, subRepo.getActiveCalls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, fallbackGroupID, *usageRepo.lastLog.GroupID)
+	require.Equal(t, 2.5, usageRepo.lastLog.RateMultiplier)
+	require.Equal(t, BillingTypeSubscription, usageRepo.lastLog.BillingType)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.NotNil(t, billingRepo.lastCmd.SubscriptionID)
+	require.Equal(t, fallbackSubscription.ID, *billingRepo.lastCmd.SubscriptionID)
+	require.Zero(t, billingRepo.lastCmd.BalanceCost)
+	expected := expectedOpenAICost(t, svc, "gpt-5.1", usage, 2.5)
+	require.InDelta(t, expected.ActualCost, billingRepo.lastCmd.SubscriptionCost, 1e-12)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_FallbackStandardGroupUsesBalanceBilling(t *testing.T) {
+	primaryGroupID := int64(61011)
+	fallbackGroupID := int64(61012)
+	user := &User{ID: 62011}
+	primary := &Group{
+		ID: primaryGroupID, Name: "primary", Platform: PlatformOpenAI,
+		Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription,
+		RateMultiplier: 1,
+	}
+	fallback := &Group{
+		ID: fallbackGroupID, Name: "fallback-standard", Platform: PlatformOpenAI,
+		Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeStandard,
+		RateMultiplier: 2.25,
+	}
+	apiKey := &APIKey{
+		ID: 63011, UserID: user.ID, User: user,
+		GroupID: &primaryGroupID, Group: primary,
+		FallbackGroupID: &fallbackGroupID, FallbackGroup: fallback,
+	}
+	ctx := WithAPIKeyGroupFallbackRouting(context.Background(), apiKey)
+	_, err := selectAccountWithAPIKeyGroupFallback(ctx, &primaryGroupID, "gpt-5.1", func(_ context.Context, groupID *int64) (*Account, error) {
+		if *groupID == primaryGroupID {
+			return nil, ErrNoAvailableAccounts
+		}
+		return &Account{ID: 64011}, nil
+	})
+	require.NoError(t, err)
+	require.True(t, isAPIKeyFallbackActive(apiKey))
+
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{
+		// A standard fallback group must not query or increment a subscription.
+		active: &UserSubscription{ID: 65012, UserID: user.ID, GroupID: fallbackGroupID},
+	}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo, nil)
+	usage := OpenAIUsage{InputTokens: 1000, OutputTokens: 100}
+
+	err = svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_fallback_standard_billing",
+			Usage:     usage, Model: "gpt-5.1", Duration: time.Second,
+		},
+		APIKey: apiKey, User: user,
+		Account: &Account{ID: 64011, Type: AccountTypeAPIKey},
+		// This is the primary group's subscription snapshot. It must be ignored
+		// after the request is routed to a standard fallback group.
+		Subscription: &UserSubscription{ID: 65011, UserID: user.ID, GroupID: primaryGroupID},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 0, subRepo.getActiveCalls)
+	require.Equal(t, 0, subRepo.incrementCalls)
+	require.Equal(t, 0, userRepo.deductCalls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, fallbackGroupID, *usageRepo.lastLog.GroupID)
+	require.Nil(t, usageRepo.lastLog.SubscriptionID)
+	require.Equal(t, BillingTypeBalance, usageRepo.lastLog.BillingType)
+	require.Equal(t, 2.25, usageRepo.lastLog.RateMultiplier)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.Nil(t, billingRepo.lastCmd.SubscriptionID)
+	require.Zero(t, billingRepo.lastCmd.SubscriptionCost)
+	require.Greater(t, billingRepo.lastCmd.BalanceCost, 0.0)
+	require.InDelta(t, usageRepo.lastLog.ActualCost, billingRepo.lastCmd.BalanceCost, 1e-12)
+}
+
+func TestResolveUsageSubscription_FallbackRequiresMatchingGroup(t *testing.T) {
+	primaryGroupID := int64(61101)
+	fallbackGroupID := int64(61102)
+	apiKey := &APIKey{
+		ID:              63101,
+		GroupID:         &fallbackGroupID,
+		FallbackGroupID: &fallbackGroupID,
+		Group:           &Group{ID: fallbackGroupID, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	user := &User{ID: 62101}
+	matching := &UserSubscription{ID: 65102, UserID: user.ID, GroupID: fallbackGroupID}
+	primary := &UserSubscription{ID: 65101, UserID: user.ID, GroupID: primaryGroupID}
+
+	// A matching candidate is accepted without an unnecessary repository read.
+	repo := &openAIRecordUsageSubRepoStub{active: matching}
+	got, err := resolveUsageSubscription(context.Background(), repo, apiKey, user, matching)
+	require.NoError(t, err)
+	require.Same(t, matching, got)
+	require.Zero(t, repo.getActiveCalls)
+
+	// A primary-group candidate must be replaced by the routed group's active
+	// subscription rather than silently reused.
+	got, err = resolveUsageSubscription(context.Background(), repo, userAPIKeyForFallback(apiKey), user, primary)
+	require.NoError(t, err)
+	require.Same(t, matching, got)
+	require.Equal(t, 1, repo.getActiveCalls)
+
+	// If no matching fallback subscription exists, fail closed instead of
+	// charging the primary subscription or silently switching to balance billing.
+	missingRepo := &openAIRecordUsageSubRepoStub{}
+	_, err = resolveUsageSubscription(context.Background(), missingRepo, userAPIKeyForFallback(apiKey), user, primary)
+	require.ErrorIs(t, err, ErrSubscriptionInvalid)
+}
+
+func userAPIKeyForFallback(apiKey *APIKey) *APIKey {
+	copy := *apiKey
+	return &copy
 }
 
 func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t *testing.T) {

@@ -507,7 +507,7 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 			descriptor.SupportedReasoningLevels = configuredCodexGPTReasoningLevels(modelID)
 			descriptor.DefaultReasoningSummary = "none"
 			descriptor.TruncationPolicy = configuredCodexTruncationPolicy{Mode: "tokens", Limit: configuredCodexToolOutputMaxTokens}
-			if isOpenAIGPT56Model(modelID) {
+			if isOpenAIGPT56Model(modelID) || isOpenAIGPT6AstraModel(modelID) {
 				descriptor.MaxContextWindow = configuredCodexGPT56MaxContext
 			}
 			if isOpenAIGPT6AstraModel(modelID) {
@@ -1525,6 +1525,7 @@ type openAIModelsRequest struct {
 	url                 string
 	headers             http.Header
 	proxyURL            string
+	account             *Account
 	accountID           int64
 	credentialAccountID int64
 	credentialAccount   *Account
@@ -1710,6 +1711,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		url:                 requestURL.String(),
 		headers:             headers,
 		proxyURL:            proxyURL,
+		account:             account,
 		accountID:           account.ID,
 		credentialAccountID: credAccount.ID,
 		credentialAccount:   credAccount,
@@ -1815,7 +1817,11 @@ func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, requ
 
 func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, request openAIModelsRequest, fetch func(ctx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error)) <-chan singleflight.Result {
 	return s.openAIModelsCache.refresh.DoChan(cacheKey, func() (any, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), codexModelsManifestRequestTimeout)
+		totalTimeout := account429RetryTotalTimeout(codexModelsManifestRequestTimeout, request.account)
+		if totalTimeout <= 0 {
+			totalTimeout = codexModelsManifestRequestTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), totalTimeout)
 		defer cancel()
 		cached, _ := s.openAIModelsCache.get(cacheKey, time.Now())
 		ifNoneMatch := ""
@@ -1844,7 +1850,11 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstreamForRequest(reques
 }
 
 func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, request openAIModelsRequest, ifNoneMatch string) (*OpenAIModelsResponse, error) {
-	reqCtx, cancel := context.WithTimeout(ctx, codexModelsManifestRequestTimeout)
+	totalTimeout := account429RetryTotalTimeout(codexModelsManifestRequestTimeout, request.account)
+	if totalTimeout <= 0 {
+		totalTimeout = codexModelsManifestRequestTimeout
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, totalTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, request.url, nil)
 	if err != nil {
@@ -1861,22 +1871,33 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_UPSTREAM_NOT_CONFIGURED", "Codex models upstream HTTP client is not configured")
 		}
 		req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
-		resp, err = s.httpUpstream.Do(req, request.proxyURL, request.accountID, request.accountConcurrency)
+		resp, err = doAccount429Retry(req, request.account, func(attemptReq *http.Request) (*http.Response, error) {
+			return s.httpUpstream.Do(attemptReq, request.proxyURL, request.accountID, request.accountConcurrency)
+		})
 	} else {
-		handled := false
-		if s.pluginManager != nil {
-			resp, handled, err = s.pluginManager.RoundTripOpenAIOAuth(reqCtx, req, request.proxyURL, request.credentialAccount)
-		}
-		if !handled {
-			client, clientErr := httpclient.GetClient(httpclient.Options{
-				ProxyURL:              request.proxyURL,
-				Timeout:               codexModelsManifestRequestTimeout,
-				ResponseHeaderTimeout: 10 * time.Second,
-			})
-			if clientErr != nil {
-				return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", clientErr)
+		var directClient *http.Client
+		var proxyConfigErr error
+		resp, err = doAccount429Retry(req, request.account, func(attemptReq *http.Request) (*http.Response, error) {
+			if s.pluginManager != nil {
+				pluginResp, handled, pluginErr := s.pluginManager.RoundTripOpenAIOAuth(attemptReq.Context(), attemptReq, request.proxyURL, request.credentialAccount)
+				if handled {
+					return pluginResp, pluginErr
+				}
 			}
-			resp, err = client.Do(req)
+			if directClient == nil {
+				directClient, proxyConfigErr = httpclient.GetClient(httpclient.Options{
+					ProxyURL:              request.proxyURL,
+					Timeout:               codexModelsManifestRequestTimeout,
+					ResponseHeaderTimeout: 10 * time.Second,
+				})
+				if proxyConfigErr != nil {
+					return nil, proxyConfigErr
+				}
+			}
+			return directClient.Do(attemptReq)
+		})
+		if proxyConfigErr != nil {
+			return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", proxyConfigErr)
 		}
 	}
 	if err != nil {

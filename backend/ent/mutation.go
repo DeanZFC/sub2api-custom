@@ -108,51 +108,53 @@ const (
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
 type APIKeyMutation struct {
 	config
-	op                 Op
-	typ                string
-	id                 *int64
-	created_at         *time.Time
-	updated_at         *time.Time
-	deleted_at         *time.Time
-	key                *string
-	name               *string
-	status             *string
-	last_used_at       *time.Time
-	ip_whitelist       *[]string
-	appendip_whitelist []string
-	ip_blacklist       *[]string
-	appendip_blacklist []string
-	quota              *float64
-	addquota           *float64
-	quota_used         *float64
-	addquota_used      *float64
-	expires_at         *time.Time
-	rate_limit_5h      *float64
-	addrate_limit_5h   *float64
-	rate_limit_1d      *float64
-	addrate_limit_1d   *float64
-	rate_limit_7d      *float64
-	addrate_limit_7d   *float64
-	usage_5h           *float64
-	addusage_5h        *float64
-	usage_1d           *float64
-	addusage_1d        *float64
-	usage_7d           *float64
-	addusage_7d        *float64
-	window_5h_start    *time.Time
-	window_1d_start    *time.Time
-	window_7d_start    *time.Time
-	clearedFields      map[string]struct{}
-	user               *int64
-	cleareduser        bool
-	group              *int64
-	clearedgroup       bool
-	usage_logs         map[int64]struct{}
-	removedusage_logs  map[int64]struct{}
-	clearedusage_logs  bool
-	done               bool
-	oldValue           func(context.Context) (*APIKey, error)
-	predicates         []predicate.APIKey
+	op                    Op
+	typ                   string
+	id                    *int64
+	created_at            *time.Time
+	updated_at            *time.Time
+	deleted_at            *time.Time
+	key                   *string
+	name                  *string
+	status                *string
+	last_used_at          *time.Time
+	ip_whitelist          *[]string
+	appendip_whitelist    []string
+	ip_blacklist          *[]string
+	appendip_blacklist    []string
+	quota                 *float64
+	addquota              *float64
+	quota_used            *float64
+	addquota_used         *float64
+	expires_at            *time.Time
+	rate_limit_5h         *float64
+	addrate_limit_5h      *float64
+	rate_limit_1d         *float64
+	addrate_limit_1d      *float64
+	rate_limit_7d         *float64
+	addrate_limit_7d      *float64
+	usage_5h              *float64
+	addusage_5h           *float64
+	usage_1d              *float64
+	addusage_1d           *float64
+	usage_7d              *float64
+	addusage_7d           *float64
+	window_5h_start       *time.Time
+	window_1d_start       *time.Time
+	window_7d_start       *time.Time
+	clearedFields         map[string]struct{}
+	user                  *int64
+	cleareduser           bool
+	group                 *int64
+	clearedgroup          bool
+	fallback_group        *int64
+	clearedfallback_group bool
+	usage_logs            map[int64]struct{}
+	removedusage_logs     map[int64]struct{}
+	clearedusage_logs     bool
+	done                  bool
+	oldValue              func(context.Context) (*APIKey, error)
+	predicates            []predicate.APIKey
 }
 
 var _ ent.Mutation = (*APIKeyMutation)(nil)
@@ -529,6 +531,55 @@ func (m *APIKeyMutation) GroupIDCleared() bool {
 func (m *APIKeyMutation) ResetGroupID() {
 	m.group = nil
 	delete(m.clearedFields, apikey.FieldGroupID)
+}
+
+// SetFallbackGroupID sets the "fallback_group_id" field.
+func (m *APIKeyMutation) SetFallbackGroupID(i int64) {
+	m.fallback_group = &i
+}
+
+// FallbackGroupID returns the value of the "fallback_group_id" field in the mutation.
+func (m *APIKeyMutation) FallbackGroupID() (r int64, exists bool) {
+	v := m.fallback_group
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFallbackGroupID returns the old "fallback_group_id" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldFallbackGroupID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFallbackGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFallbackGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFallbackGroupID: %w", err)
+	}
+	return oldValue.FallbackGroupID, nil
+}
+
+// ClearFallbackGroupID clears the value of the "fallback_group_id" field.
+func (m *APIKeyMutation) ClearFallbackGroupID() {
+	m.fallback_group = nil
+	m.clearedFields[apikey.FieldFallbackGroupID] = struct{}{}
+}
+
+// FallbackGroupIDCleared returns if the "fallback_group_id" field was cleared in this mutation.
+func (m *APIKeyMutation) FallbackGroupIDCleared() bool {
+	_, ok := m.clearedFields[apikey.FieldFallbackGroupID]
+	return ok
+}
+
+// ResetFallbackGroupID resets all changes to the "fallback_group_id" field.
+func (m *APIKeyMutation) ResetFallbackGroupID() {
+	m.fallback_group = nil
+	delete(m.clearedFields, apikey.FieldFallbackGroupID)
 }
 
 // SetStatus sets the "status" field.
@@ -1444,6 +1495,33 @@ func (m *APIKeyMutation) ResetGroup() {
 	m.clearedgroup = false
 }
 
+// ClearFallbackGroup clears the "fallback_group" edge to the Group entity.
+func (m *APIKeyMutation) ClearFallbackGroup() {
+	m.clearedfallback_group = true
+	m.clearedFields[apikey.FieldFallbackGroupID] = struct{}{}
+}
+
+// FallbackGroupCleared reports if the "fallback_group" edge to the Group entity was cleared.
+func (m *APIKeyMutation) FallbackGroupCleared() bool {
+	return m.FallbackGroupIDCleared() || m.clearedfallback_group
+}
+
+// FallbackGroupIDs returns the "fallback_group" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// FallbackGroupID instead. It exists only for internal usage by the builders.
+func (m *APIKeyMutation) FallbackGroupIDs() (ids []int64) {
+	if id := m.fallback_group; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetFallbackGroup resets all changes to the "fallback_group" edge.
+func (m *APIKeyMutation) ResetFallbackGroup() {
+	m.fallback_group = nil
+	m.clearedfallback_group = false
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by ids.
 func (m *APIKeyMutation) AddUsageLogIDs(ids ...int64) {
 	if m.usage_logs == nil {
@@ -1532,7 +1610,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 23)
+	fields := make([]string, 0, 24)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1553,6 +1631,9 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.group != nil {
 		fields = append(fields, apikey.FieldGroupID)
+	}
+	if m.fallback_group != nil {
+		fields = append(fields, apikey.FieldFallbackGroupID)
 	}
 	if m.status != nil {
 		fields = append(fields, apikey.FieldStatus)
@@ -1624,6 +1705,8 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case apikey.FieldGroupID:
 		return m.GroupID()
+	case apikey.FieldFallbackGroupID:
+		return m.FallbackGroupID()
 	case apikey.FieldStatus:
 		return m.Status()
 	case apikey.FieldLastUsedAt:
@@ -1679,6 +1762,8 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldName(ctx)
 	case apikey.FieldGroupID:
 		return m.OldGroupID(ctx)
+	case apikey.FieldFallbackGroupID:
+		return m.OldFallbackGroupID(ctx)
 	case apikey.FieldStatus:
 		return m.OldStatus(ctx)
 	case apikey.FieldLastUsedAt:
@@ -1768,6 +1853,13 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetGroupID(v)
+		return nil
+	case apikey.FieldFallbackGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFallbackGroupID(v)
 		return nil
 	case apikey.FieldStatus:
 		v, ok := value.(string)
@@ -2016,6 +2108,9 @@ func (m *APIKeyMutation) ClearedFields() []string {
 	if m.FieldCleared(apikey.FieldGroupID) {
 		fields = append(fields, apikey.FieldGroupID)
 	}
+	if m.FieldCleared(apikey.FieldFallbackGroupID) {
+		fields = append(fields, apikey.FieldFallbackGroupID)
+	}
 	if m.FieldCleared(apikey.FieldLastUsedAt) {
 		fields = append(fields, apikey.FieldLastUsedAt)
 	}
@@ -2056,6 +2151,9 @@ func (m *APIKeyMutation) ClearField(name string) error {
 		return nil
 	case apikey.FieldGroupID:
 		m.ClearGroupID()
+		return nil
+	case apikey.FieldFallbackGroupID:
+		m.ClearFallbackGroupID()
 		return nil
 	case apikey.FieldLastUsedAt:
 		m.ClearLastUsedAt()
@@ -2106,6 +2204,9 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldGroupID:
 		m.ResetGroupID()
+		return nil
+	case apikey.FieldFallbackGroupID:
+		m.ResetFallbackGroupID()
 		return nil
 	case apikey.FieldStatus:
 		m.ResetStatus()
@@ -2161,12 +2262,15 @@ func (m *APIKeyMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *APIKeyMutation) AddedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.user != nil {
 		edges = append(edges, apikey.EdgeUser)
 	}
 	if m.group != nil {
 		edges = append(edges, apikey.EdgeGroup)
+	}
+	if m.fallback_group != nil {
+		edges = append(edges, apikey.EdgeFallbackGroup)
 	}
 	if m.usage_logs != nil {
 		edges = append(edges, apikey.EdgeUsageLogs)
@@ -2186,6 +2290,10 @@ func (m *APIKeyMutation) AddedIDs(name string) []ent.Value {
 		if id := m.group; id != nil {
 			return []ent.Value{*id}
 		}
+	case apikey.EdgeFallbackGroup:
+		if id := m.fallback_group; id != nil {
+			return []ent.Value{*id}
+		}
 	case apikey.EdgeUsageLogs:
 		ids := make([]ent.Value, 0, len(m.usage_logs))
 		for id := range m.usage_logs {
@@ -2198,7 +2306,7 @@ func (m *APIKeyMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *APIKeyMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.removedusage_logs != nil {
 		edges = append(edges, apikey.EdgeUsageLogs)
 	}
@@ -2221,12 +2329,15 @@ func (m *APIKeyMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *APIKeyMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 4)
 	if m.cleareduser {
 		edges = append(edges, apikey.EdgeUser)
 	}
 	if m.clearedgroup {
 		edges = append(edges, apikey.EdgeGroup)
+	}
+	if m.clearedfallback_group {
+		edges = append(edges, apikey.EdgeFallbackGroup)
 	}
 	if m.clearedusage_logs {
 		edges = append(edges, apikey.EdgeUsageLogs)
@@ -2242,6 +2353,8 @@ func (m *APIKeyMutation) EdgeCleared(name string) bool {
 		return m.cleareduser
 	case apikey.EdgeGroup:
 		return m.clearedgroup
+	case apikey.EdgeFallbackGroup:
+		return m.clearedfallback_group
 	case apikey.EdgeUsageLogs:
 		return m.clearedusage_logs
 	}
@@ -2258,6 +2371,9 @@ func (m *APIKeyMutation) ClearEdge(name string) error {
 	case apikey.EdgeGroup:
 		m.ClearGroup()
 		return nil
+	case apikey.EdgeFallbackGroup:
+		m.ClearFallbackGroup()
+		return nil
 	}
 	return fmt.Errorf("unknown APIKey unique edge %s", name)
 }
@@ -2272,6 +2388,9 @@ func (m *APIKeyMutation) ResetEdge(name string) error {
 	case apikey.EdgeGroup:
 		m.ResetGroup()
 		return nil
+	case apikey.EdgeFallbackGroup:
+		m.ResetFallbackGroup()
+		return nil
 	case apikey.EdgeUsageLogs:
 		m.ResetUsageLogs()
 		return nil
@@ -2282,60 +2401,62 @@ func (m *APIKeyMutation) ResetEdge(name string) error {
 // AccountMutation represents an operation that mutates the Account nodes in the graph.
 type AccountMutation struct {
 	config
-	op                          Op
-	typ                         string
-	id                          *int64
-	created_at                  *time.Time
-	updated_at                  *time.Time
-	deleted_at                  *time.Time
-	name                        *string
-	notes                       *string
-	platform                    *string
-	_type                       *string
-	credentials                 *map[string]interface{}
-	extra                       *map[string]interface{}
-	proxy_fallback_origin_id    *int64
-	addproxy_fallback_origin_id *int64
-	concurrency                 *int
-	addconcurrency              *int
-	load_factor                 *int
-	addload_factor              *int
-	priority                    *int
-	addpriority                 *int
-	rate_multiplier             *float64
-	addrate_multiplier          *float64
-	status                      *string
-	error_message               *string
-	last_used_at                *time.Time
-	expires_at                  *time.Time
-	auto_pause_on_expired       *bool
-	schedulable                 *bool
-	rate_limited_at             *time.Time
-	rate_limit_reset_at         *time.Time
-	overload_until              *time.Time
-	temp_unschedulable_until    *time.Time
-	temp_unschedulable_reason   *string
-	session_window_start        *time.Time
-	session_window_end          *time.Time
-	session_window_status       *string
-	quota_dimension             *account.QuotaDimension
-	clearedFields               map[string]struct{}
-	groups                      map[int64]struct{}
-	removedgroups               map[int64]struct{}
-	clearedgroups               bool
-	proxy                       *int64
-	clearedproxy                bool
-	parent                      *int64
-	clearedparent               bool
-	children                    map[int64]struct{}
-	removedchildren             map[int64]struct{}
-	clearedchildren             bool
-	usage_logs                  map[int64]struct{}
-	removedusage_logs           map[int64]struct{}
-	clearedusage_logs           bool
-	done                        bool
-	oldValue                    func(context.Context) (*Account, error)
-	predicates                  []predicate.Account
+	op                            Op
+	typ                           string
+	id                            *int64
+	created_at                    *time.Time
+	updated_at                    *time.Time
+	deleted_at                    *time.Time
+	name                          *string
+	notes                         *string
+	platform                      *string
+	_type                         *string
+	credentials                   *map[string]interface{}
+	extra                         *map[string]interface{}
+	proxy_fallback_origin_id      *int64
+	addproxy_fallback_origin_id   *int64
+	concurrency                   *int
+	addconcurrency                *int
+	rate_limit_429_retry_count    *int
+	addrate_limit_429_retry_count *int
+	load_factor                   *int
+	addload_factor                *int
+	priority                      *int
+	addpriority                   *int
+	rate_multiplier               *float64
+	addrate_multiplier            *float64
+	status                        *string
+	error_message                 *string
+	last_used_at                  *time.Time
+	expires_at                    *time.Time
+	auto_pause_on_expired         *bool
+	schedulable                   *bool
+	rate_limited_at               *time.Time
+	rate_limit_reset_at           *time.Time
+	overload_until                *time.Time
+	temp_unschedulable_until      *time.Time
+	temp_unschedulable_reason     *string
+	session_window_start          *time.Time
+	session_window_end            *time.Time
+	session_window_status         *string
+	quota_dimension               *account.QuotaDimension
+	clearedFields                 map[string]struct{}
+	groups                        map[int64]struct{}
+	removedgroups                 map[int64]struct{}
+	clearedgroups                 bool
+	proxy                         *int64
+	clearedproxy                  bool
+	parent                        *int64
+	clearedparent                 bool
+	children                      map[int64]struct{}
+	removedchildren               map[int64]struct{}
+	clearedchildren               bool
+	usage_logs                    map[int64]struct{}
+	removedusage_logs             map[int64]struct{}
+	clearedusage_logs             bool
+	done                          bool
+	oldValue                      func(context.Context) (*Account, error)
+	predicates                    []predicate.Account
 }
 
 var _ ent.Mutation = (*AccountMutation)(nil)
@@ -2959,6 +3080,62 @@ func (m *AccountMutation) AddedConcurrency() (r int, exists bool) {
 func (m *AccountMutation) ResetConcurrency() {
 	m.concurrency = nil
 	m.addconcurrency = nil
+}
+
+// SetRateLimit429RetryCount sets the "rate_limit_429_retry_count" field.
+func (m *AccountMutation) SetRateLimit429RetryCount(i int) {
+	m.rate_limit_429_retry_count = &i
+	m.addrate_limit_429_retry_count = nil
+}
+
+// RateLimit429RetryCount returns the value of the "rate_limit_429_retry_count" field in the mutation.
+func (m *AccountMutation) RateLimit429RetryCount() (r int, exists bool) {
+	v := m.rate_limit_429_retry_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRateLimit429RetryCount returns the old "rate_limit_429_retry_count" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldRateLimit429RetryCount(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRateLimit429RetryCount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRateLimit429RetryCount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRateLimit429RetryCount: %w", err)
+	}
+	return oldValue.RateLimit429RetryCount, nil
+}
+
+// AddRateLimit429RetryCount adds i to the "rate_limit_429_retry_count" field.
+func (m *AccountMutation) AddRateLimit429RetryCount(i int) {
+	if m.addrate_limit_429_retry_count != nil {
+		*m.addrate_limit_429_retry_count += i
+	} else {
+		m.addrate_limit_429_retry_count = &i
+	}
+}
+
+// AddedRateLimit429RetryCount returns the value that was added to the "rate_limit_429_retry_count" field in this mutation.
+func (m *AccountMutation) AddedRateLimit429RetryCount() (r int, exists bool) {
+	v := m.addrate_limit_429_retry_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRateLimit429RetryCount resets all changes to the "rate_limit_429_retry_count" field.
+func (m *AccountMutation) ResetRateLimit429RetryCount() {
+	m.rate_limit_429_retry_count = nil
+	m.addrate_limit_429_retry_count = nil
 }
 
 // SetLoadFactor sets the "load_factor" field.
@@ -4138,7 +4315,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 32)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4174,6 +4351,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.concurrency != nil {
 		fields = append(fields, account.FieldConcurrency)
+	}
+	if m.rate_limit_429_retry_count != nil {
+		fields = append(fields, account.FieldRateLimit429RetryCount)
 	}
 	if m.load_factor != nil {
 		fields = append(fields, account.FieldLoadFactor)
@@ -4264,6 +4444,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.ProxyFallbackOriginID()
 	case account.FieldConcurrency:
 		return m.Concurrency()
+	case account.FieldRateLimit429RetryCount:
+		return m.RateLimit429RetryCount()
 	case account.FieldLoadFactor:
 		return m.LoadFactor()
 	case account.FieldPriority:
@@ -4335,6 +4517,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldProxyFallbackOriginID(ctx)
 	case account.FieldConcurrency:
 		return m.OldConcurrency(ctx)
+	case account.FieldRateLimit429RetryCount:
+		return m.OldRateLimit429RetryCount(ctx)
 	case account.FieldLoadFactor:
 		return m.OldLoadFactor(ctx)
 	case account.FieldPriority:
@@ -4465,6 +4649,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetConcurrency(v)
+		return nil
+	case account.FieldRateLimit429RetryCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRateLimit429RetryCount(v)
 		return nil
 	case account.FieldLoadFactor:
 		v, ok := value.(int)
@@ -4613,6 +4804,9 @@ func (m *AccountMutation) AddedFields() []string {
 	if m.addconcurrency != nil {
 		fields = append(fields, account.FieldConcurrency)
 	}
+	if m.addrate_limit_429_retry_count != nil {
+		fields = append(fields, account.FieldRateLimit429RetryCount)
+	}
 	if m.addload_factor != nil {
 		fields = append(fields, account.FieldLoadFactor)
 	}
@@ -4634,6 +4828,8 @@ func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedProxyFallbackOriginID()
 	case account.FieldConcurrency:
 		return m.AddedConcurrency()
+	case account.FieldRateLimit429RetryCount:
+		return m.AddedRateLimit429RetryCount()
 	case account.FieldLoadFactor:
 		return m.AddedLoadFactor()
 	case account.FieldPriority:
@@ -4662,6 +4858,13 @@ func (m *AccountMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddConcurrency(v)
+		return nil
+	case account.FieldRateLimit429RetryCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRateLimit429RetryCount(v)
 		return nil
 	case account.FieldLoadFactor:
 		v, ok := value.(int)
@@ -4851,6 +5054,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldConcurrency:
 		m.ResetConcurrency()
+		return nil
+	case account.FieldRateLimit429RetryCount:
+		m.ResetRateLimit429RetryCount()
 		return nil
 	case account.FieldLoadFactor:
 		m.ResetLoadFactor()
@@ -11317,6 +11523,8 @@ type BatchImageJobMutation struct {
 	addapi_key_id       *int64
 	account_id          *int64
 	addaccount_id       *int64
+	routed_group_id     *int64
+	addrouted_group_id  *int64
 	provider            *string
 	model               *string
 	task_name           *string
@@ -11696,6 +11904,76 @@ func (m *BatchImageJobMutation) ResetAccountID() {
 	m.account_id = nil
 	m.addaccount_id = nil
 	delete(m.clearedFields, batchimagejob.FieldAccountID)
+}
+
+// SetRoutedGroupID sets the "routed_group_id" field.
+func (m *BatchImageJobMutation) SetRoutedGroupID(i int64) {
+	m.routed_group_id = &i
+	m.addrouted_group_id = nil
+}
+
+// RoutedGroupID returns the value of the "routed_group_id" field in the mutation.
+func (m *BatchImageJobMutation) RoutedGroupID() (r int64, exists bool) {
+	v := m.routed_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRoutedGroupID returns the old "routed_group_id" field's value of the BatchImageJob entity.
+// If the BatchImageJob object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BatchImageJobMutation) OldRoutedGroupID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRoutedGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRoutedGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRoutedGroupID: %w", err)
+	}
+	return oldValue.RoutedGroupID, nil
+}
+
+// AddRoutedGroupID adds i to the "routed_group_id" field.
+func (m *BatchImageJobMutation) AddRoutedGroupID(i int64) {
+	if m.addrouted_group_id != nil {
+		*m.addrouted_group_id += i
+	} else {
+		m.addrouted_group_id = &i
+	}
+}
+
+// AddedRoutedGroupID returns the value that was added to the "routed_group_id" field in this mutation.
+func (m *BatchImageJobMutation) AddedRoutedGroupID() (r int64, exists bool) {
+	v := m.addrouted_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearRoutedGroupID clears the value of the "routed_group_id" field.
+func (m *BatchImageJobMutation) ClearRoutedGroupID() {
+	m.routed_group_id = nil
+	m.addrouted_group_id = nil
+	m.clearedFields[batchimagejob.FieldRoutedGroupID] = struct{}{}
+}
+
+// RoutedGroupIDCleared returns if the "routed_group_id" field was cleared in this mutation.
+func (m *BatchImageJobMutation) RoutedGroupIDCleared() bool {
+	_, ok := m.clearedFields[batchimagejob.FieldRoutedGroupID]
+	return ok
+}
+
+// ResetRoutedGroupID resets all changes to the "routed_group_id" field.
+func (m *BatchImageJobMutation) ResetRoutedGroupID() {
+	m.routed_group_id = nil
+	m.addrouted_group_id = nil
+	delete(m.clearedFields, batchimagejob.FieldRoutedGroupID)
 }
 
 // SetProvider sets the "provider" field.
@@ -13496,7 +13774,7 @@ func (m *BatchImageJobMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *BatchImageJobMutation) Fields() []string {
-	fields := make([]string, 0, 40)
+	fields := make([]string, 0, 41)
 	if m.batch_id != nil {
 		fields = append(fields, batchimagejob.FieldBatchID)
 	}
@@ -13508,6 +13786,9 @@ func (m *BatchImageJobMutation) Fields() []string {
 	}
 	if m.account_id != nil {
 		fields = append(fields, batchimagejob.FieldAccountID)
+	}
+	if m.routed_group_id != nil {
+		fields = append(fields, batchimagejob.FieldRoutedGroupID)
 	}
 	if m.provider != nil {
 		fields = append(fields, batchimagejob.FieldProvider)
@@ -13633,6 +13914,8 @@ func (m *BatchImageJobMutation) Field(name string) (ent.Value, bool) {
 		return m.APIKeyID()
 	case batchimagejob.FieldAccountID:
 		return m.AccountID()
+	case batchimagejob.FieldRoutedGroupID:
+		return m.RoutedGroupID()
 	case batchimagejob.FieldProvider:
 		return m.Provider()
 	case batchimagejob.FieldModel:
@@ -13722,6 +14005,8 @@ func (m *BatchImageJobMutation) OldField(ctx context.Context, name string) (ent.
 		return m.OldAPIKeyID(ctx)
 	case batchimagejob.FieldAccountID:
 		return m.OldAccountID(ctx)
+	case batchimagejob.FieldRoutedGroupID:
+		return m.OldRoutedGroupID(ctx)
 	case batchimagejob.FieldProvider:
 		return m.OldProvider(ctx)
 	case batchimagejob.FieldModel:
@@ -13830,6 +14115,13 @@ func (m *BatchImageJobMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetAccountID(v)
+		return nil
+	case batchimagejob.FieldRoutedGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRoutedGroupID(v)
 		return nil
 	case batchimagejob.FieldProvider:
 		v, ok := value.(string)
@@ -14100,6 +14392,9 @@ func (m *BatchImageJobMutation) AddedFields() []string {
 	if m.addaccount_id != nil {
 		fields = append(fields, batchimagejob.FieldAccountID)
 	}
+	if m.addrouted_group_id != nil {
+		fields = append(fields, batchimagejob.FieldRoutedGroupID)
+	}
 	if m.additem_count != nil {
 		fields = append(fields, batchimagejob.FieldItemCount)
 	}
@@ -14141,6 +14436,8 @@ func (m *BatchImageJobMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedAPIKeyID()
 	case batchimagejob.FieldAccountID:
 		return m.AddedAccountID()
+	case batchimagejob.FieldRoutedGroupID:
+		return m.AddedRoutedGroupID()
 	case batchimagejob.FieldItemCount:
 		return m.AddedItemCount()
 	case batchimagejob.FieldSuccessCount:
@@ -14188,6 +14485,13 @@ func (m *BatchImageJobMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddAccountID(v)
+		return nil
+	case batchimagejob.FieldRoutedGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRoutedGroupID(v)
 		return nil
 	case batchimagejob.FieldItemCount:
 		v, ok := value.(int)
@@ -14265,6 +14569,9 @@ func (m *BatchImageJobMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(batchimagejob.FieldAccountID) {
 		fields = append(fields, batchimagejob.FieldAccountID)
+	}
+	if m.FieldCleared(batchimagejob.FieldRoutedGroupID) {
+		fields = append(fields, batchimagejob.FieldRoutedGroupID)
 	}
 	if m.FieldCleared(batchimagejob.FieldProviderJobName) {
 		fields = append(fields, batchimagejob.FieldProviderJobName)
@@ -14352,6 +14659,9 @@ func (m *BatchImageJobMutation) ClearField(name string) error {
 	case batchimagejob.FieldAccountID:
 		m.ClearAccountID()
 		return nil
+	case batchimagejob.FieldRoutedGroupID:
+		m.ClearRoutedGroupID()
+		return nil
 	case batchimagejob.FieldProviderJobName:
 		m.ClearProviderJobName()
 		return nil
@@ -14437,6 +14747,9 @@ func (m *BatchImageJobMutation) ResetField(name string) error {
 		return nil
 	case batchimagejob.FieldAccountID:
 		m.ResetAccountID()
+		return nil
+	case batchimagejob.FieldRoutedGroupID:
+		m.ResetRoutedGroupID()
 		return nil
 	case batchimagejob.FieldProvider:
 		m.ResetProvider()
@@ -22168,6 +22481,8 @@ type GroupMutation struct {
 	codex_models_manifest_config            *domain.GroupCodexModelsManifestConfig
 	rpm_limit                               *int
 	addrpm_limit                            *int
+	user_concurrency_limit                  *int
+	adduser_concurrency_limit               *int
 	max_reasoning_effort                    *string
 	max_reasoning_effort_over_limit         *string
 	reasoning_effort_mappings               *[]domain.ReasoningEffortMapping
@@ -22181,6 +22496,9 @@ type GroupMutation struct {
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
 	clearedapi_keys                         bool
+	fallback_api_keys                       map[int64]struct{}
+	removedfallback_api_keys                map[int64]struct{}
+	clearedfallback_api_keys                bool
 	redeem_codes                            map[int64]struct{}
 	removedredeem_codes                     map[int64]struct{}
 	clearedredeem_codes                     bool
@@ -25292,6 +25610,62 @@ func (m *GroupMutation) ResetRpmLimit() {
 	m.addrpm_limit = nil
 }
 
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (m *GroupMutation) SetUserConcurrencyLimit(i int) {
+	m.user_concurrency_limit = &i
+	m.adduser_concurrency_limit = nil
+}
+
+// UserConcurrencyLimit returns the value of the "user_concurrency_limit" field in the mutation.
+func (m *GroupMutation) UserConcurrencyLimit() (r int, exists bool) {
+	v := m.user_concurrency_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserConcurrencyLimit returns the old "user_concurrency_limit" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldUserConcurrencyLimit(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserConcurrencyLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserConcurrencyLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserConcurrencyLimit: %w", err)
+	}
+	return oldValue.UserConcurrencyLimit, nil
+}
+
+// AddUserConcurrencyLimit adds i to the "user_concurrency_limit" field.
+func (m *GroupMutation) AddUserConcurrencyLimit(i int) {
+	if m.adduser_concurrency_limit != nil {
+		*m.adduser_concurrency_limit += i
+	} else {
+		m.adduser_concurrency_limit = &i
+	}
+}
+
+// AddedUserConcurrencyLimit returns the value that was added to the "user_concurrency_limit" field in this mutation.
+func (m *GroupMutation) AddedUserConcurrencyLimit() (r int, exists bool) {
+	v := m.adduser_concurrency_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetUserConcurrencyLimit resets all changes to the "user_concurrency_limit" field.
+func (m *GroupMutation) ResetUserConcurrencyLimit() {
+	m.user_concurrency_limit = nil
+	m.adduser_concurrency_limit = nil
+}
+
 // SetMaxReasoningEffort sets the "max_reasoning_effort" field.
 func (m *GroupMutation) SetMaxReasoningEffort(s string) {
 	m.max_reasoning_effort = &s
@@ -25617,6 +25991,60 @@ func (m *GroupMutation) ResetAPIKeys() {
 	m.removedapi_keys = nil
 }
 
+// AddFallbackAPIKeyIDs adds the "fallback_api_keys" edge to the APIKey entity by ids.
+func (m *GroupMutation) AddFallbackAPIKeyIDs(ids ...int64) {
+	if m.fallback_api_keys == nil {
+		m.fallback_api_keys = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.fallback_api_keys[ids[i]] = struct{}{}
+	}
+}
+
+// ClearFallbackAPIKeys clears the "fallback_api_keys" edge to the APIKey entity.
+func (m *GroupMutation) ClearFallbackAPIKeys() {
+	m.clearedfallback_api_keys = true
+}
+
+// FallbackAPIKeysCleared reports if the "fallback_api_keys" edge to the APIKey entity was cleared.
+func (m *GroupMutation) FallbackAPIKeysCleared() bool {
+	return m.clearedfallback_api_keys
+}
+
+// RemoveFallbackAPIKeyIDs removes the "fallback_api_keys" edge to the APIKey entity by IDs.
+func (m *GroupMutation) RemoveFallbackAPIKeyIDs(ids ...int64) {
+	if m.removedfallback_api_keys == nil {
+		m.removedfallback_api_keys = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.fallback_api_keys, ids[i])
+		m.removedfallback_api_keys[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedFallbackAPIKeys returns the removed IDs of the "fallback_api_keys" edge to the APIKey entity.
+func (m *GroupMutation) RemovedFallbackAPIKeysIDs() (ids []int64) {
+	for id := range m.removedfallback_api_keys {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// FallbackAPIKeysIDs returns the "fallback_api_keys" edge IDs in the mutation.
+func (m *GroupMutation) FallbackAPIKeysIDs() (ids []int64) {
+	for id := range m.fallback_api_keys {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetFallbackAPIKeys resets all changes to the "fallback_api_keys" edge.
+func (m *GroupMutation) ResetFallbackAPIKeys() {
+	m.fallback_api_keys = nil
+	m.clearedfallback_api_keys = false
+	m.removedfallback_api_keys = nil
+}
+
 // AddRedeemCodeIDs adds the "redeem_codes" edge to the RedeemCode entity by ids.
 func (m *GroupMutation) AddRedeemCodeIDs(ids ...int64) {
 	if m.redeem_codes == nil {
@@ -25921,7 +26349,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 66)
+	fields := make([]string, 0, 67)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26102,6 +26530,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.rpm_limit != nil {
 		fields = append(fields, group.FieldRpmLimit)
 	}
+	if m.user_concurrency_limit != nil {
+		fields = append(fields, group.FieldUserConcurrencyLimit)
+	}
 	if m.max_reasoning_effort != nil {
 		fields = append(fields, group.FieldMaxReasoningEffort)
 	}
@@ -26248,6 +26679,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.CodexModelsManifestConfig()
 	case group.FieldRpmLimit:
 		return m.RpmLimit()
+	case group.FieldUserConcurrencyLimit:
+		return m.UserConcurrencyLimit()
 	case group.FieldMaxReasoningEffort:
 		return m.MaxReasoningEffort()
 	case group.FieldMaxReasoningEffortOverLimit:
@@ -26389,6 +26822,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldCodexModelsManifestConfig(ctx)
 	case group.FieldRpmLimit:
 		return m.OldRpmLimit(ctx)
+	case group.FieldUserConcurrencyLimit:
+		return m.OldUserConcurrencyLimit(ctx)
 	case group.FieldMaxReasoningEffort:
 		return m.OldMaxReasoningEffort(ctx)
 	case group.FieldMaxReasoningEffortOverLimit:
@@ -26830,6 +27265,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRpmLimit(v)
 		return nil
+	case group.FieldUserConcurrencyLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserConcurrencyLimit(v)
+		return nil
 	case group.FieldMaxReasoningEffort:
 		v, ok := value.(string)
 		if !ok {
@@ -26955,6 +27397,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addrpm_limit != nil {
 		fields = append(fields, group.FieldRpmLimit)
 	}
+	if m.adduser_concurrency_limit != nil {
+		fields = append(fields, group.FieldUserConcurrencyLimit)
+	}
 	if m.addprofit_min_margin != nil {
 		fields = append(fields, group.FieldProfitMinMargin)
 	}
@@ -27019,6 +27464,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedSortOrder()
 	case group.FieldRpmLimit:
 		return m.AddedRpmLimit()
+	case group.FieldUserConcurrencyLimit:
+		return m.AddedUserConcurrencyLimit()
 	case group.FieldProfitMinMargin:
 		return m.AddedProfitMinMargin()
 	case group.FieldProfitSafetyBuffer:
@@ -27206,6 +27653,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRpmLimit(v)
+		return nil
+	case group.FieldUserConcurrencyLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUserConcurrencyLimit(v)
 		return nil
 	case group.FieldProfitMinMargin:
 		v, ok := value.(float64)
@@ -27563,6 +28017,9 @@ func (m *GroupMutation) ResetField(name string) error {
 	case group.FieldRpmLimit:
 		m.ResetRpmLimit()
 		return nil
+	case group.FieldUserConcurrencyLimit:
+		m.ResetUserConcurrencyLimit()
+		return nil
 	case group.FieldMaxReasoningEffort:
 		m.ResetMaxReasoningEffort()
 		return nil
@@ -27587,9 +28044,12 @@ func (m *GroupMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *GroupMutation) AddedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.api_keys != nil {
 		edges = append(edges, group.EdgeAPIKeys)
+	}
+	if m.fallback_api_keys != nil {
+		edges = append(edges, group.EdgeFallbackAPIKeys)
 	}
 	if m.redeem_codes != nil {
 		edges = append(edges, group.EdgeRedeemCodes)
@@ -27616,6 +28076,12 @@ func (m *GroupMutation) AddedIDs(name string) []ent.Value {
 	case group.EdgeAPIKeys:
 		ids := make([]ent.Value, 0, len(m.api_keys))
 		for id := range m.api_keys {
+			ids = append(ids, id)
+		}
+		return ids
+	case group.EdgeFallbackAPIKeys:
+		ids := make([]ent.Value, 0, len(m.fallback_api_keys))
+		for id := range m.fallback_api_keys {
 			ids = append(ids, id)
 		}
 		return ids
@@ -27655,9 +28121,12 @@ func (m *GroupMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *GroupMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.removedapi_keys != nil {
 		edges = append(edges, group.EdgeAPIKeys)
+	}
+	if m.removedfallback_api_keys != nil {
+		edges = append(edges, group.EdgeFallbackAPIKeys)
 	}
 	if m.removedredeem_codes != nil {
 		edges = append(edges, group.EdgeRedeemCodes)
@@ -27684,6 +28153,12 @@ func (m *GroupMutation) RemovedIDs(name string) []ent.Value {
 	case group.EdgeAPIKeys:
 		ids := make([]ent.Value, 0, len(m.removedapi_keys))
 		for id := range m.removedapi_keys {
+			ids = append(ids, id)
+		}
+		return ids
+	case group.EdgeFallbackAPIKeys:
+		ids := make([]ent.Value, 0, len(m.removedfallback_api_keys))
+		for id := range m.removedfallback_api_keys {
 			ids = append(ids, id)
 		}
 		return ids
@@ -27723,9 +28198,12 @@ func (m *GroupMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *GroupMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.clearedapi_keys {
 		edges = append(edges, group.EdgeAPIKeys)
+	}
+	if m.clearedfallback_api_keys {
+		edges = append(edges, group.EdgeFallbackAPIKeys)
 	}
 	if m.clearedredeem_codes {
 		edges = append(edges, group.EdgeRedeemCodes)
@@ -27751,6 +28229,8 @@ func (m *GroupMutation) EdgeCleared(name string) bool {
 	switch name {
 	case group.EdgeAPIKeys:
 		return m.clearedapi_keys
+	case group.EdgeFallbackAPIKeys:
+		return m.clearedfallback_api_keys
 	case group.EdgeRedeemCodes:
 		return m.clearedredeem_codes
 	case group.EdgeSubscriptions:
@@ -27779,6 +28259,9 @@ func (m *GroupMutation) ResetEdge(name string) error {
 	switch name {
 	case group.EdgeAPIKeys:
 		m.ResetAPIKeys()
+		return nil
+	case group.EdgeFallbackAPIKeys:
+		m.ResetFallbackAPIKeys()
 		return nil
 	case group.EdgeRedeemCodes:
 		m.ResetRedeemCodes()

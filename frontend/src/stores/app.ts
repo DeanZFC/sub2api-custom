@@ -41,6 +41,7 @@ export const useAppStore = defineStore('app', () => {
   const currentVersion = ref<string>('')
   const latestVersion = ref<string>('')
   const hasUpdate = ref<boolean>(false)
+  const sourceUpdateEnabled = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
 
@@ -247,6 +248,7 @@ export const useAppStore = defineStore('app', () => {
         current_version: currentVersion.value,
         latest_version: latestVersion.value,
         has_update: hasUpdate.value,
+        source_update_enabled: sourceUpdateEnabled.value,
         build_type: buildType.value,
         release_info: releaseInfo.value || undefined,
         cached: true
@@ -264,6 +266,7 @@ export const useAppStore = defineStore('app', () => {
       currentVersion.value = data.current_version
       latestVersion.value = data.latest_version
       hasUpdate.value = data.has_update
+      sourceUpdateEnabled.value = data.source_update_enabled === true
       buildType.value = data.build_type || 'source'
       releaseInfo.value = data.release_info || null
       versionLoaded.value = true
@@ -282,6 +285,7 @@ export const useAppStore = defineStore('app', () => {
   function clearVersionCache(): void {
     versionLoaded.value = false
     hasUpdate.value = false
+    sourceUpdateEnabled.value = false
   }
 
   // ==================== Public Settings Management ====================
@@ -458,6 +462,7 @@ export const useAppStore = defineStore('app', () => {
     currentVersion,
     latestVersion,
     hasUpdate,
+    sourceUpdateEnabled,
     buildType,
     releaseInfo,
 

@@ -303,9 +303,9 @@ func (h *GatewayHandler) acquireWebSearchAccountSlot(
 		}
 	}
 	streamStarted := false
-	slotRelease, err := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
+	slotRelease, err := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeoutForAccount(
 		c,
-		account.ID,
+		account,
 		selected.WaitPlan.MaxConcurrency,
 		selected.WaitPlan.Timeout,
 		false,

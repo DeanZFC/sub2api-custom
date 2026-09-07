@@ -316,6 +316,61 @@ func (s *ConcurrencyCacheSuite) TestUserSlot_TTL() {
 	s.AssertTTLWithin(ttl, 1*time.Second, testSlotTTL)
 }
 
+func (s *ConcurrencyCacheSuite) TestUserGroupSlot_PerUserPerGroupLimitAndIsolation() {
+	cache, ok := s.cache.(service.UserGroupConcurrencyCache)
+	require.True(s.T(), ok)
+
+	const (
+		groupID = int64(7301)
+		userA   = int64(7302)
+		userB   = int64(7303)
+	)
+
+	for i := 1; i <= 3; i++ {
+		acquired, err := cache.AcquireUserGroupSlot(s.ctx, userA, groupID, 10, 3, fmt.Sprintf("group-a-%d", i))
+		require.NoError(s.T(), err)
+		require.True(s.T(), acquired, "the first three requests for one user/group should fit")
+	}
+
+	acquired, err := cache.AcquireUserGroupSlot(s.ctx, userA, groupID, 10, 3, "group-a-4")
+	require.NoError(s.T(), err)
+	require.False(s.T(), acquired, "the fourth request for one user/group must be rejected")
+
+	acquired, err = cache.AcquireUserGroupSlot(s.ctx, userB, groupID, 10, 3, "group-b-1")
+	require.NoError(s.T(), err)
+	require.True(s.T(), acquired, "another user must have an independent group allowance")
+
+	for i := 1; i <= 3; i++ {
+		require.NoError(s.T(), cache.ReleaseUserGroupSlot(s.ctx, userA, groupID, fmt.Sprintf("group-a-%d", i)))
+	}
+	require.NoError(s.T(), cache.ReleaseUserGroupSlot(s.ctx, userB, groupID, "group-b-1"))
+
+	acquired, err = cache.AcquireUserGroupSlot(s.ctx, userA, groupID+1, 10, 3, "group-a-other")
+	require.NoError(s.T(), err)
+	require.True(s.T(), acquired, "a different group must have an independent allowance")
+	require.NoError(s.T(), cache.ReleaseUserGroupSlot(s.ctx, userA, groupID+1, "group-a-other"))
+}
+
+func (s *ConcurrencyCacheSuite) TestUserGroupSlot_UserLimitIsAlsoEnforced() {
+	cache, ok := s.cache.(service.UserGroupConcurrencyCache)
+	require.True(s.T(), ok)
+
+	userID := int64(7311)
+	groupA := int64(7312)
+	groupB := int64(7313)
+	require.True(s.T(), mustAcquireUserGroup(s, cache, userID, groupA, 2, 3, "user-limit-a"))
+	require.True(s.T(), mustAcquireUserGroup(s, cache, userID, groupA, 2, 3, "user-limit-b"))
+	require.False(s.T(), mustAcquireUserGroup(s, cache, userID, groupB, 2, 3, "user-limit-c"), "user-wide limit must remain the stricter dimension")
+	require.NoError(s.T(), cache.ReleaseUserGroupSlot(s.ctx, userID, groupA, "user-limit-a"))
+	require.NoError(s.T(), cache.ReleaseUserGroupSlot(s.ctx, userID, groupA, "user-limit-b"))
+}
+
+func mustAcquireUserGroup(s *ConcurrencyCacheSuite, cache service.UserGroupConcurrencyCache, userID, groupID int64, userMax, groupMax int, requestID string) bool {
+	acquired, err := cache.AcquireUserGroupSlot(s.ctx, userID, groupID, userMax, groupMax, requestID)
+	require.NoError(s.T(), err)
+	return acquired
+}
+
 func (s *ConcurrencyCacheSuite) TestAPIKeySlot_TrackReleaseAndBatchCount() {
 	cache := s.apiKeyConcurrencyCache()
 	apiKeyID := int64(300)

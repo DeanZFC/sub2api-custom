@@ -183,11 +183,14 @@ async function submitApiKeyAccount(
   return wrapper
 }
 
-async function openCodexImportStep(toggleClicks = 0) {
+async function openCodexImportStep(toggleClicks = 0, enableCodexQuotaOverdraft = false) {
   const wrapper = mountModal()
   await selectButtonByText(wrapper, 'OpenAI')
   for (let click = 0; click < toggleClicks; click += 1) {
     await wrapper.get('[data-testid="openai-long-context-billing-toggle"]').trigger('click')
+  }
+  if (enableCodexQuotaOverdraft) {
+    await wrapper.get('[data-testid="create-codex-quota-overdraft-toggle"]').trigger('click')
   }
   await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
   await wrapper.get('form#create-account-form').trigger('submit.prevent')
@@ -288,7 +291,42 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await submitApiKeyAccount('openai')
 
     expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+
+  it('does not expose or submit the removed 429 retry setting', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    expect(wrapper.find('#create-rate-limit-429-retry-count').exists()).toBe(false)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
+  })
+
+  it('defaults Codex quota overdraft to off for new OAuth accounts', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const toggle = wrapper.get('[data-testid="create-codex-quota-overdraft-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.codex_quota_overdraft_enabled).toBe(false)
+  })
+
+  it('submits true when Codex quota overdraft is explicitly enabled', async () => {
+    const wrapper = await openCodexImportStep(0, true)
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.codex_quota_overdraft_enabled).toBe(true)
   })
 
   it('omits the upstream request id header from extra when left empty', async () => {
@@ -587,6 +625,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
   })
 
@@ -596,6 +635,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(createOpenAICodexPATMock).toHaveBeenCalledTimes(1)
+    expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
   })
 

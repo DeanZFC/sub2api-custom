@@ -100,6 +100,13 @@ func (Account) Fields() []ent.Field {
 		field.Int("concurrency").
 			Default(3),
 
+		// rate_limit_429_retry_count: 首次收到上游 429 后，在同一账号上额外重试的次数。
+		// 0 表示关闭；默认 5，最多 10，避免单个请求长期占用并发槽。
+		field.Int("rate_limit_429_retry_count").
+			Default(5).
+			Min(0).
+			Max(10),
+
 		field.Int("load_factor").Optional().Nillable(),
 
 		// priority: 账户优先级，数值越小优先级越高

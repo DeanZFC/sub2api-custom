@@ -51,6 +51,48 @@ func TestLiveLeaseReplacesRegularSlotsAndCountsTowardLimits(t *testing.T) {
 	require.True(t, accountAcquired)
 }
 
+func TestLiveLeaseGroupDimensionCountsAndReleases(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	regular := NewConcurrencyCache(client, 15, 900)
+	_, ok := regular.(service.LiveConcurrencyCache)
+	require.True(t, ok)
+	groupRegular, ok := regular.(service.UserGroupConcurrencyCache)
+	require.True(t, ok)
+	groupLive, ok := regular.(service.LiveUserGroupConcurrencyCache)
+	require.True(t, ok)
+	ctx := context.Background()
+
+	const (
+		accountID = int64(110)
+		userID    = int64(120)
+		groupID   = int64(130)
+		apiKeyID  = int64(140)
+	)
+	regularUser, err := groupRegular.AcquireUserGroupSlot(ctx, userID, groupID, 10, 1, "regular-group")
+	require.NoError(t, err)
+	require.True(t, regularUser)
+
+	acquired, err := groupLive.AcquireLiveLeaseForGroup(ctx, accountID, 1, userID, 10, groupID, 1, apiKeyID, "group-live", true)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NoError(t, groupRegular.ReleaseUserGroupSlot(ctx, userID, groupID, "regular-group"))
+
+	blocked, err := groupRegular.AcquireUserGroupSlot(ctx, userID, groupID, 10, 1, "group-blocked")
+	require.NoError(t, err)
+	require.False(t, blocked, "the Live lease must count against the same user/group limit")
+
+	refreshed, err := groupLive.RefreshLiveLeaseForGroup(ctx, accountID, userID, groupID, apiKeyID, "group-live")
+	require.NoError(t, err)
+	require.True(t, refreshed)
+	require.NoError(t, groupLive.ReleaseLiveLeaseForGroup(ctx, accountID, userID, groupID, apiKeyID, "group-live"))
+
+	allowed, err := groupRegular.AcquireUserGroupSlot(ctx, userID, groupID, 10, 1, "group-after-release")
+	require.NoError(t, err)
+	require.True(t, allowed)
+	require.NoError(t, groupRegular.ReleaseUserGroupSlot(ctx, userID, groupID, "group-after-release"))
+}
+
 func TestLiveLeaseExpiresWithoutRefresh(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})

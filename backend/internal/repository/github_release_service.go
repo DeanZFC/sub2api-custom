@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -112,6 +113,10 @@ func (c *githubReleaseClientError) FetchRecentReleases(ctx context.Context, repo
 	return nil, c.err
 }
 
+func (c *githubReleaseClientError) FetchRepositoryFile(ctx context.Context, repo, ref, filePath string) ([]byte, error) {
+	return nil, c.err
+}
+
 func (c *githubReleaseClientError) DownloadFile(ctx context.Context, url, dest string, maxSize int64) error {
 	return c.err
 }
@@ -176,6 +181,56 @@ func (c *githubReleaseClient) FetchRecentReleases(ctx context.Context, repo stri
 	}
 
 	return releases, nil
+}
+
+func (c *githubReleaseClient) FetchRepositoryFile(ctx context.Context, repo, ref, filePath string) ([]byte, error) {
+	repo = strings.Trim(strings.TrimSpace(repo), "/")
+	ref = strings.TrimSpace(ref)
+	filePath = strings.Trim(strings.TrimSpace(filePath), "/")
+	if repo == "" || ref == "" || filePath == "" || strings.Contains(filePath, "..") {
+		return nil, fmt.Errorf("invalid GitHub repository file reference")
+	}
+
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/contents/%s", repo, filePath)
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	query := parsed.Query()
+	query.Set("ref", ref)
+	parsed.RawQuery = query.Encode()
+	req, err := c.newAPIRequest(ctx, parsed.String())
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 256<<10)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if payload.Encoding != "base64" {
+		return nil, fmt.Errorf("unsupported GitHub file encoding %q", payload.Encoding)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(payload.Content, "\n", ""))
+	if err != nil {
+		return nil, fmt.Errorf("decode GitHub repository file: %w", err)
+	}
+	if len(decoded) > 64<<10 {
+		return nil, fmt.Errorf("GitHub repository file is too large")
+	}
+	return decoded, nil
 }
 
 func (c *githubReleaseClient) DownloadFile(ctx context.Context, url, dest string, maxSize int64) error {

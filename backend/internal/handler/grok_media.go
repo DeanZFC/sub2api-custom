@@ -140,6 +140,26 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	if endpoint.IsVideoLookupRequest() {
+		var restored bool
+		subscription, restored, err = h.restoreGrokVideoFallbackRouting(
+			c.Request.Context(), apiKey, subject, requestID, subscription, reqLog,
+		)
+		if err != nil {
+			// A video created through a subscription fallback must be checked
+			// against that fallback subscription again. Do not silently fall back
+			// to the primary subscription when the routed subscription is missing.
+			if restored {
+				reqLog.Info("grok_media.fallback_subscription_unavailable", zap.Error(err))
+				status, code, message, retryAfter := billingErrorDetails(err)
+				if retryAfter > 0 {
+					c.Header("Retry-After", strconv.Itoa(retryAfter))
+				}
+				h.errorResponse(c, status, code, message)
+				return
+			}
+		}
+	}
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
 	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, false, &streamStarted, reqLog)
@@ -425,10 +445,19 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			// Defer billing until status polling observes video.url. Persist create-time
 			// model/duration/resolution so status can still price if upstream omits them.
 			// Retry once: missing pending causes silent underpricing (status omits resolution).
+			var billingGroupID *int64
+			if apiKey.GroupID != nil && *apiKey.GroupID > 0 {
+				// Copy the value instead of retaining the request API key's mutable
+				// pointer; fallback activation and later middleware work must not
+				// rewrite the persisted snapshot.
+				routedGroupID := *apiKey.GroupID
+				billingGroupID = &routedGroupID
+			}
 			pending := service.GrokVideoPendingBilling{
 				Model:                requestModel,
 				BillingModel:         firstNonEmptyString(result.BillingModel, requestModel),
 				UpstreamModel:        result.UpstreamModel,
+				BillingGroupID:       billingGroupID,
 				VideoResolution:      result.VideoResolution,
 				VideoDurationSeconds: result.VideoDurationSeconds,
 				OriginalModel:        clientRequestedModel(c, requestModel),
@@ -468,6 +497,62 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		)
 		return
 	}
+}
+
+// restoreGrokVideoFallbackRouting rehydrates the request-local fallback route
+// for an asynchronous video status/content request. The create request has
+// already ended, so the only durable routing hint is the billing group stored
+// with the pending snapshot. We accept it only when it exactly matches the
+// fallback configured on the currently authenticated API key.
+func (h *OpenAIGatewayHandler) restoreGrokVideoFallbackRouting(
+	ctx context.Context,
+	apiKey *service.APIKey,
+	subject middleware2.AuthSubject,
+	requestID string,
+	currentSubscription *service.UserSubscription,
+	reqLog *zap.Logger,
+) (*service.UserSubscription, bool, error) {
+	if h == nil || h.gatewayService == nil || apiKey == nil ||
+		subject.UserID <= 0 || apiKey.ID <= 0 || strings.TrimSpace(requestID) == "" {
+		return currentSubscription, false, nil
+	}
+	pending, err := h.gatewayService.LoadGrokVideoPendingBilling(ctx, requestID, subject.UserID, apiKey.ID)
+	if err != nil {
+		// A cache outage must not turn an ordinary status lookup into an
+		// unrelated billing error. The subsequent binding lookup still fails
+		// closed if the task cannot be found under the primary group.
+		if reqLog != nil {
+			reqLog.Warn("grok_media.video_pending_routing_load_failed",
+				zap.String("request_id", requestID), zap.Error(err))
+		}
+		return currentSubscription, false, nil
+	}
+	if pending == nil || pending.BillingGroupID == nil || *pending.BillingGroupID <= 0 ||
+		apiKey.FallbackGroupID == nil || *apiKey.FallbackGroupID <= 0 ||
+		*pending.BillingGroupID != *apiKey.FallbackGroupID {
+		return currentSubscription, false, nil
+	}
+
+	fallbackGroupID := *pending.BillingGroupID
+	if !service.ActivateAPIKeyFallbackRouting(ctx, fallbackGroupID) {
+		// The pending value did not match the request-local fallback context
+		// (for example a stale or tampered snapshot). Never trust it for routing.
+		return currentSubscription, false, nil
+	}
+
+	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() {
+		fallbackSubscription, subErr := h.gatewayService.GetActiveSubscriptionForGroup(ctx, subject.UserID, fallbackGroupID)
+		if subErr != nil || fallbackSubscription == nil {
+			if subErr == nil {
+				subErr = service.ErrSubscriptionInvalid
+			}
+			return nil, true, subErr
+		}
+		return fallbackSubscription, true, nil
+	}
+	// Standard fallback groups use balance billing and must not retain the
+	// primary group's subscription loaded by the authentication middleware.
+	return nil, true, nil
 }
 
 func (h *OpenAIGatewayHandler) ensureGrokMediaAccountEligibility(ctx context.Context, account *service.Account) (bool, string, error) {

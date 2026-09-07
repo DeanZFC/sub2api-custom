@@ -409,7 +409,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		shouldStrip := isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody) ||
 			requestHasGrokEncryptedReasoning(responsesBody)
 		if !shouldStrip {
-			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody)))
 			break
 		}
 		retryBody, changed, trimErr := trimGrokInvalidEncryptedContentRetryBody(responsesBody)
@@ -417,7 +417,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			return nil, fmt.Errorf("prepare Grok invalid encrypted_content retry: %w", trimErr)
 		}
 		if !changed {
-			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody)))
 			break
 		}
 		responsesBody = retryBody

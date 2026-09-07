@@ -15,6 +15,7 @@ export interface VersionInfo {
   current_version: string
   latest_version: string
   has_update: boolean
+  source_update_enabled?: boolean
   release_info?: ReleaseInfo
   cached: boolean
   warning?: string
@@ -43,6 +44,21 @@ export async function checkUpdates(force = false): Promise<VersionInfo> {
 export interface UpdateResult {
   message: string
   need_restart: boolean
+  source_update?: boolean
+  job?: SourceUpdateJob
+}
+
+export interface SourceUpdateJob {
+  job_id: string
+  request_id?: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | string
+  stage?: string
+  message?: string
+  error?: string
+  current_version?: string
+  target_version?: string
+  started_at?: string
+  finished_at?: string
 }
 
 export interface RollbackVersionInfo {
@@ -80,6 +96,14 @@ export async function performUpdate(): Promise<UpdateResult> {
   return data
 }
 
+/** Get the state of an asynchronous source-build update. */
+export async function getSourceUpdateStatus(jobID: string): Promise<SourceUpdateJob> {
+  const { data } = await apiClient.get<SourceUpdateJob>(
+    `/admin/system/update-status/${encodeURIComponent(jobID)}`
+  )
+  return data
+}
+
 /**
  * Rollback to a previous version
  * @param version - Target version (e.g. "0.1.146"); omit to restore the local backup binary
@@ -105,6 +129,7 @@ export const systemAPI = {
   getVersion,
   checkUpdates,
   performUpdate,
+  getSourceUpdateStatus,
   getRollbackVersions,
   rollback,
   restartService

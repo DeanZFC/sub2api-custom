@@ -791,6 +791,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
+	firstClientMessage = s.prepareCodexQuotaOverdraftBody(ctx, account, false, firstClientMessage)
+	ensureStagedCodexFingerprintIDs(c, account, s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIAccountUniqueFingerprintEnabled)
+	if fingerprintIDs := stagedCodexFingerprintIDs(c, account); fingerprintIDs != nil {
+		var fingerprintErr error
+		firstClientMessage, _, fingerprintErr = applyCodexFingerprintClientMetadataRaw(firstClientMessage, fingerprintIDs)
+		if fingerprintErr != nil {
+			return fmt.Errorf("apply codex fingerprint to first ws frame: %w", fingerprintErr)
+		}
+	}
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter 命中时 service_tier 已经从 firstClientMessage 中删除，
@@ -870,14 +879,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	var upstreamConn openAIWSClientConn
 	statusCode := 0
 	var handshakeHeaders http.Header
+	account429RetryExhausted := false
 	for {
 		headers, err = s.refreshOpenAIAgentIdentityHeaders(ctx, account, headers)
 		if err != nil {
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
-		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
-		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(dialCtx, wsURL, headers, proxyURL)
-		cancelDial()
+		upstreamConn, statusCode, handshakeHeaders, account429RetryExhausted, err = dialAccount429Retry(ctx, account, func(attemptCtx context.Context) (openAIWSClientConn, int, http.Header, error) {
+			dialCtx, cancelDial := context.WithTimeout(attemptCtx, s.openAIWSDialTimeout())
+			defer cancelDial()
+			return dialer.Dial(dialCtx, wsURL, headers, proxyURL)
+		})
 		if err == nil {
 			break
 		}
@@ -886,7 +898,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if errors.As(err, &handshakeErr) && handshakeErr != nil {
 			responseBody = handshakeErr.Body
 		}
-		dialErr := &openAIWSDialError{StatusCode: statusCode, ResponseHeaders: cloneHeader(handshakeHeaders), ResponseBody: responseBody, Err: err}
+		dialErr := &openAIWSDialError{StatusCode: statusCode, ResponseHeaders: cloneHeader(handshakeHeaders), ResponseBody: responseBody, Account429RetryExhausted: account429RetryExhausted, Err: err}
 		if s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidWSDialError(dialErr) && !agentTaskRecoveryTried {
 			agentTaskRecoveryTried = true
 			if recoveryErr := s.recoverAgentIdentityTask(ctx, account, account.GetCredential("task_id")); recoveryErr != nil {
@@ -921,8 +933,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
+	retryUpstreamFrameConn := s.codexRetryWSConn(c, account, upstreamFrameConn)
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
-		inner:             upstreamFrameConn,
+		inner:             retryUpstreamFrameConn,
 		activeReadTimeout: s.openAIWSPassthroughIdleTimeout(),
 		deadlineChanged:   make(chan struct{}, 1),
 		resolveDeadline: func(payload []byte) openAIWSPassthroughFirstOutputDeadline {
@@ -1111,6 +1124,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     覆盖（Store(nil)），因为 OpenAI 上游对该帧实际不传
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
+				out = s.prepareCodexQuotaOverdraftBody(ctx, account, false, out)
+				if fingerprintIDs := stagedCodexFingerprintIDs(c, account); fingerprintIDs != nil {
+					var fingerprintErr error
+					out, _, fingerprintErr = applyCodexFingerprintClientMetadataRaw(out, fingerprintIDs)
+					if fingerprintErr != nil {
+						return out, nil, fmt.Errorf("apply codex fingerprint to ws frame: %w", fingerprintErr)
+					}
+				}
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
@@ -1156,7 +1177,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
 				return msgType, payload, nil
 			}
-			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
+			if writeErr := relayUpstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
 				return msgType, payload, writeErr
 			}
 		}
@@ -1286,14 +1307,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return nil
 				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
-				isPreOutputRateLimit := eventType == "error" && !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw)
+				retryExhausted := codexRetryWSExhausted(retryUpstreamFrameConn)
+				isPreOutputRateLimit := eventType == "error" && !wroteDownstream && !retryExhausted && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw)
 				if (eventType == "error" || eventType == "response.failed") && !failureAccountSideEffectsApplied && !isPreOutputRateLimit {
 					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, capturedSessionModel, handshakeHeaders, payload)
 				}
 				if eventType != "error" {
 					return nil
 				}
-				if wroteDownstream || !isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
+				if wroteDownstream || retryExhausted || !isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
 					return nil
 				}
 				s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw, capturedSessionModel)
@@ -1311,7 +1333,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						errors.New("later passthrough turn was rate limited before output"),
 					)
 				}
-				return s.newOpenAIWSRateLimitFailoverError(account, handshakeHeaders, payload, errMsgRaw)
+				return s.newOpenAIWSRateLimitFailoverError(account, handshakeHeaders, payload, errMsgRaw, false)
 			},
 			OnTrace: func(event openaiwsv2.RelayTraceEvent) {
 				logOpenAIWSV2Passthrough(

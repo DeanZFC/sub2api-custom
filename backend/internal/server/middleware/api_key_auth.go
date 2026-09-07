@@ -181,6 +181,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			})
 			c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 			setGroupContext(c, apiKey.Group)
+			setAPIKeyFallbackContext(c, apiKey)
 			if !billingInfoRequest {
 				_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 			}
@@ -279,6 +280,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		})
 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
 		setGroupContext(c, apiKey.Group)
+		setAPIKeyFallbackContext(c, apiKey)
 		if !billingInfoRequest {
 			_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 		}
@@ -388,6 +390,19 @@ func setGroupContext(c *gin.Context, group *service.Group) {
 		return
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.Group, group)
+	c.Request = c.Request.WithContext(ctx)
+}
+
+func setAPIKeyFallbackContext(c *gin.Context, apiKey *service.APIKey) {
+	if c == nil || apiKey == nil {
+		return
+	}
+	ctx := service.WithAPIKeyGroupFallbackRouting(c.Request.Context(), apiKey)
+	// Keep the request-local API key in the standard context as well as Gin's
+	// key/value store. Usage records are submitted asynchronously and need to
+	// capture the effective (possibly fallback-routed) group before the worker
+	// runs; retaining only the mutable Gin pointer can misattribute queued work.
+	ctx = service.WithAPIKeyForUsageContext(ctx, apiKey)
 	c.Request = c.Request.WithContext(ctx)
 }
 

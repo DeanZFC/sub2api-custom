@@ -34,6 +34,7 @@ var (
 		{Name: "window_1d_start", Type: field.TypeTime, Nullable: true},
 		{Name: "window_7d_start", Type: field.TypeTime, Nullable: true},
 		{Name: "group_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "fallback_group_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "user_id", Type: field.TypeInt64},
 	}
 	// APIKeysTable holds the schema information for the "api_keys" table.
@@ -49,8 +50,14 @@ var (
 				OnDelete:   schema.SetNull,
 			},
 			{
-				Symbol:     "api_keys_users_api_keys",
+				Symbol:     "api_keys_groups_fallback_api_keys",
 				Columns:    []*schema.Column{APIKeysColumns[23]},
+				RefColumns: []*schema.Column{GroupsColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+			{
+				Symbol:     "api_keys_users_api_keys",
+				Columns:    []*schema.Column{APIKeysColumns[24]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -59,12 +66,17 @@ var (
 			{
 				Name:    "apikey_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[23]},
+				Columns: []*schema.Column{APIKeysColumns[24]},
 			},
 			{
 				Name:    "apikey_group_id",
 				Unique:  false,
 				Columns: []*schema.Column{APIKeysColumns[22]},
+			},
+			{
+				Name:    "apikey_fallback_group_id",
+				Unique:  false,
+				Columns: []*schema.Column{APIKeysColumns[23]},
 			},
 			{
 				Name:    "apikey_status",
@@ -107,6 +119,7 @@ var (
 		{Name: "extra", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "proxy_fallback_origin_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "concurrency", Type: field.TypeInt, Default: 3},
+		{Name: "rate_limit_429_retry_count", Type: field.TypeInt, Default: 5},
 		{Name: "load_factor", Type: field.TypeInt, Nullable: true},
 		{Name: "priority", Type: field.TypeInt, Default: 50},
 		{Name: "rate_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
@@ -136,13 +149,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "accounts_proxies_proxy",
-				Columns:    []*schema.Column{AccountsColumns[30]},
+				Columns:    []*schema.Column{AccountsColumns[31]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "accounts_accounts_children",
-				Columns:    []*schema.Column{AccountsColumns[31]},
+				Columns:    []*schema.Column{AccountsColumns[32]},
 				RefColumns: []*schema.Column{AccountsColumns[0]},
 				OnDelete:   schema.Restrict,
 			},
@@ -161,52 +174,52 @@ var (
 			{
 				Name:    "account_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[15]},
+				Columns: []*schema.Column{AccountsColumns[16]},
 			},
 			{
 				Name:    "account_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[30]},
+				Columns: []*schema.Column{AccountsColumns[31]},
 			},
 			{
 				Name:    "account_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[14]},
 			},
 			{
 				Name:    "account_last_used_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[17]},
+				Columns: []*schema.Column{AccountsColumns[18]},
 			},
 			{
 				Name:    "account_schedulable",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[20]},
+				Columns: []*schema.Column{AccountsColumns[21]},
 			},
 			{
 				Name:    "account_rate_limited_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[21]},
+				Columns: []*schema.Column{AccountsColumns[22]},
 			},
 			{
 				Name:    "account_rate_limit_reset_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[22]},
+				Columns: []*schema.Column{AccountsColumns[23]},
 			},
 			{
 				Name:    "account_overload_until",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[23]},
+				Columns: []*schema.Column{AccountsColumns[24]},
 			},
 			{
 				Name:    "account_platform_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[6], AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[6], AccountsColumns[14]},
 			},
 			{
 				Name:    "account_priority_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13], AccountsColumns[15]},
+				Columns: []*schema.Column{AccountsColumns[14], AccountsColumns[16]},
 			},
 			{
 				Name:    "account_deleted_at",
@@ -216,7 +229,7 @@ var (
 			{
 				Name:    "account_parent_account_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[31]},
+				Columns: []*schema.Column{AccountsColumns[32]},
 			},
 		},
 	}
@@ -521,6 +534,7 @@ var (
 		{Name: "user_id", Type: field.TypeInt64},
 		{Name: "api_key_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "account_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "routed_group_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "provider", Type: field.TypeString, Size: 32},
 		{Name: "model", Type: field.TypeString, Size: 128},
 		{Name: "task_name", Type: field.TypeString, Size: 255, Default: ""},
@@ -572,22 +586,22 @@ var (
 			{
 				Name:    "batchimagejob_user_id_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{BatchImageJobsColumns[2], BatchImageJobsColumns[35]},
+				Columns: []*schema.Column{BatchImageJobsColumns[2], BatchImageJobsColumns[36]},
 			},
 			{
 				Name:    "batchimagejob_status",
 				Unique:  false,
-				Columns: []*schema.Column{BatchImageJobsColumns[8]},
+				Columns: []*schema.Column{BatchImageJobsColumns[9]},
 			},
 			{
 				Name:    "batchimagejob_provider_status",
 				Unique:  false,
-				Columns: []*schema.Column{BatchImageJobsColumns[5], BatchImageJobsColumns[8]},
+				Columns: []*schema.Column{BatchImageJobsColumns[6], BatchImageJobsColumns[9]},
 			},
 			{
 				Name:    "batchimagejob_idempotency_key",
 				Unique:  false,
-				Columns: []*schema.Column{BatchImageJobsColumns[23]},
+				Columns: []*schema.Column{BatchImageJobsColumns[24]},
 				Annotation: &entsql.IndexAnnotation{
 					Where: "idempotency_key IS NOT NULL AND idempotency_key <> ''",
 				},
@@ -595,7 +609,7 @@ var (
 			{
 				Name:    "batchimagejob_manifest_hash",
 				Unique:  true,
-				Columns: []*schema.Column{BatchImageJobsColumns[25]},
+				Columns: []*schema.Column{BatchImageJobsColumns[26]},
 				Annotation: &entsql.IndexAnnotation{
 					Where: "manifest_hash IS NOT NULL AND manifest_hash <> ''",
 				},
@@ -603,17 +617,17 @@ var (
 			{
 				Name:    "batchimagejob_output_expires_at",
 				Unique:  false,
-				Columns: []*schema.Column{BatchImageJobsColumns[28]},
+				Columns: []*schema.Column{BatchImageJobsColumns[29]},
 			},
 			{
 				Name:    "batchimagejob_downloaded_at",
 				Unique:  false,
-				Columns: []*schema.Column{BatchImageJobsColumns[31]},
+				Columns: []*schema.Column{BatchImageJobsColumns[32]},
 			},
 			{
 				Name:    "batchimagejob_user_deleted_at",
 				Unique:  false,
-				Columns: []*schema.Column{BatchImageJobsColumns[32]},
+				Columns: []*schema.Column{BatchImageJobsColumns[33]},
 			},
 		},
 	}
@@ -963,6 +977,7 @@ var (
 		{Name: "model_allowlist", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "codex_models_manifest_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "rpm_limit", Type: field.TypeInt, Default: 0},
+		{Name: "user_concurrency_limit", Type: field.TypeInt, Default: 0},
 		{Name: "max_reasoning_effort", Type: field.TypeString, Size: 20, Default: ""},
 		{Name: "max_reasoning_effort_over_limit", Type: field.TypeString, Size: 20, Default: "downgrade"},
 		{Name: "reasoning_effort_mappings", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
@@ -2132,7 +2147,8 @@ var (
 
 func init() {
 	APIKeysTable.ForeignKeys[0].RefTable = GroupsTable
-	APIKeysTable.ForeignKeys[1].RefTable = UsersTable
+	APIKeysTable.ForeignKeys[1].RefTable = GroupsTable
+	APIKeysTable.ForeignKeys[2].RefTable = UsersTable
 	APIKeysTable.Annotation = &entsql.Annotation{
 		Table: "api_keys",
 	}

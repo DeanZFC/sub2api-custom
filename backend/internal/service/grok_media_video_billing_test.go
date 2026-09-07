@@ -1,11 +1,29 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestGrokVideoPendingBillingRoundTripsBillingGroupID(t *testing.T) {
+	t.Parallel()
+	groupID := int64(81234)
+	pending := GrokVideoPendingBilling{
+		Model:          "grok-imagine-video",
+		BillingGroupID: &groupID,
+	}
+	payload, err := json.Marshal(pending)
+	require.NoError(t, err)
+	require.Contains(t, string(payload), `"billing_group_id":81234`)
+
+	var decoded GrokVideoPendingBilling
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	require.NotNil(t, decoded.BillingGroupID)
+	require.Equal(t, groupID, *decoded.BillingGroupID)
+}
 
 func TestGrokVideoE2EDurationFromCreatedAt(t *testing.T) {
 	t.Parallel()

@@ -255,7 +255,10 @@ func (s *OpenAIGatewayService) SelectAccountForModel(ctx context.Context, groupI
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 // SelectAccountForModelWithExclusions 选择支持指定模型的账号，同时排除指定的账号。
 func (s *OpenAIGatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
-	return s.selectAccountForModelWithExclusions(s.withOpenAIQuotaAutoPauseContext(ctx), groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, 0, "", false)
+	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	return selectAccountWithAPIKeyGroupFallback(ctx, groupID, requestedModel, func(selectionCtx context.Context, selectedGroupID *int64) (*Account, error) {
+		return s.selectAccountForModelWithExclusions(selectionCtx, selectedGroupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, 0, "", false)
+	})
 }
 
 // SelectAccountForTokenCount selects an account for a non-billable token-count
@@ -271,18 +274,20 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 ) (*Account, error) {
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
-	return s.selectAccountForModelWithExclusions(
-		ctx,
-		groupID,
-		platform,
-		sessionHash,
-		requestedModel,
-		nil,
-		false,
-		0,
-		requiredCapability,
-		false,
-	)
+	return selectAccountWithAPIKeyGroupFallback(ctx, groupID, requestedModel, func(selectionCtx context.Context, selectedGroupID *int64) (*Account, error) {
+		return s.selectAccountForModelWithExclusions(
+			selectionCtx,
+			selectedGroupID,
+			platform,
+			sessionHash,
+			requestedModel,
+			nil,
+			false,
+			0,
+			requiredCapability,
+			false,
+		)
+	})
 }
 
 // NormalizeOpenAICompatiblePlatform 保留 grok 与国产 OpenAI 兼容供应商（kimi/zhipu/
@@ -520,6 +525,9 @@ func grokQuotaSnapshotStaleForPause(snapshot *xai.QuotaSnapshot, now time.Time) 
 
 func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) (bool, openAIQuotaAutoPauseDecision) {
 	if account == nil || !account.IsOpenAI() {
+		return false, openAIQuotaAutoPauseDecision{}
+	}
+	if codexQuotaOverdraftBypassesSchedulingThreshold(ctx, account) {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
 	// 自动用卡有独立阈值：达到消费阈值时必须先退出调度；仅达到普通暂停阈值时，
@@ -1103,6 +1111,20 @@ func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+	selection, err := s.selectAccountWithLoadAwarenessForAPIKeyGroup(ctx, groupID, sessionHash, requestedModel, excludedIDs)
+	fallbackGroup, fallbackCtx, ok := apiKeyFallbackGroupForSelection(ctx, groupID, err)
+	if !ok {
+		return selection, err
+	}
+	fallbackGroupID := fallbackGroup.ID
+	selection, err = s.selectAccountWithLoadAwarenessForAPIKeyGroup(fallbackCtx, &fallbackGroupID, sessionHash, requestedModel, excludedIDs)
+	if err == nil {
+		markAPIKeyFallbackSelection(ctx, selection, fallbackGroupID)
+	}
+	return selection, err
+}
+
+func (s *OpenAIGatewayService) selectAccountWithLoadAwarenessForAPIKeyGroup(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：legacy 公共入口同样装门，保证不经
@@ -1134,7 +1156,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if err != nil {
 			return nil, err
 		}
-		result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+		result, err := s.tryAcquireAccountSlotForAccount(ctx, account)
 		if err == nil && result != nil && result.Acquired {
 			return s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 		}
@@ -1201,7 +1223,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					} else if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else {
-						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+						result, err := s.tryAcquireAccountSlotForAccount(ctx, account)
 						if err == nil && result != nil && result.Acquired {
 							selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 							if selectErr != nil {
@@ -1284,10 +1306,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
-		accountLoads = append(accountLoads, AccountWithConcurrency{
-			ID:             acc.ID,
-			MaxConcurrency: acc.EffectiveLoadFactor(),
-		})
+		accountLoads = append(accountLoads, BuildAccountWithConcurrency(acc))
 	}
 
 	tryAcquireFromLoadMap := func(loadMap map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
@@ -1366,7 +1385,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			result, err := s.tryAcquireAccountSlotForAccount(ctx, fresh)
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1405,7 +1424,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			result, err := s.tryAcquireAccountSlotForAccount(ctx, fresh)
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1471,11 +1490,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
 	platform = NormalizeOpenAICompatiblePlatform(platform)
+	if accounts, handled, err := s.listCodexQuotaOverdraftSchedulableAccounts(ctx, groupID, platform); handled {
+		return accounts, err
+	}
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)
 		if err != nil {
 			return accounts, err
 		}
+		accounts = normalizeCodexQuotaOverdraftAccountsForScheduling(ctx, accounts)
 		accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
 		if platform == PlatformGrok {
 			accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
@@ -1494,6 +1517,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
+	accounts = normalizeCodexQuotaOverdraftAccountsForScheduling(ctx, accounts)
 	accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
@@ -1506,6 +1530,30 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
 	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+}
+
+func (s *OpenAIGatewayService) tryAcquireAccountSlotForAccount(ctx context.Context, account *Account, concurrencyOverride ...int) (*AcquireResult, error) {
+	if account == nil {
+		return nil, fmt.Errorf("account is nil")
+	}
+	maxConcurrency := account.Concurrency
+	if len(concurrencyOverride) > 0 {
+		maxConcurrency = concurrencyOverride[0]
+	}
+	if s.concurrencyService == nil {
+		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
+	}
+	if account.ProxyConcurrencyLimitEnabled() {
+		result, proxyID, err := s.concurrencyService.AcquireAccountProxySlot(ctx, account.ID, account.ProxyPoolIDs, maxConcurrency)
+		if result != nil && result.Acquired && proxyID > 0 {
+			if proxy := findProxyByID(account.ProxyPool, proxyID); proxy != nil {
+				account.Proxy = proxy
+				account.ProxyID = &proxyID
+			}
+		}
+		return result, err
+	}
+	return s.concurrencyService.AcquireAccountSlot(ctx, account.ID, maxConcurrency)
 }
 
 func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
@@ -1533,6 +1581,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 		}
 		fresh = current
 	}
+	fresh = normalizeCodexQuotaOverdraftAccountForScheduling(ctx, fresh)
 
 	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, fresh, platform, requestedModel, requireCompact, requiredCapability) {
 		return nil
@@ -1605,6 +1654,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if err != nil || latest == nil {
 		return nil
 	}
+	latest = normalizeCodexQuotaOverdraftAccountForScheduling(ctx, latest)
 	if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
 		return nil
 	}
@@ -1649,6 +1699,7 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	if err != nil || account == nil {
 		return account, err
 	}
+	account = normalizeCodexQuotaOverdraftAccountForScheduling(ctx, account)
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}
@@ -1689,6 +1740,9 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 	if s == nil || s.rateLimitService == nil || account == nil {
 		return false
 	}
+	if codexQuotaOverdraftBypassesSchedulingThreshold(ctx, account) {
+		return false
+	}
 	return s.rateLimitService.ApplyAccountSchedulingThreshold(ctx, account)
 }
 
@@ -1710,6 +1764,25 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
 		return nil, err
+	}
+	if account != nil && account.ProxyConcurrencyLimitEnabled() && account.ProxyID != nil {
+		if proxy := findProxyByID(hydrated.ProxyPool, *account.ProxyID); proxy != nil {
+			hydrated.Proxy = proxy
+			hydrated.ProxyID = account.ProxyID
+		} else if proxy := findProxyByID(account.ProxyPool, *account.ProxyID); proxy != nil {
+			hydrated.Proxy = proxy
+			hydrated.ProxyID = account.ProxyID
+		} else if s.accountRepo != nil {
+			// A pre-upgrade scheduler cache may contain pool IDs but no eager-loaded
+			// proxy objects. Recover the selected exit once from the source of truth.
+			if latest, loadErr := s.accountRepo.GetByID(ctx, account.ID); loadErr == nil && latest != nil {
+				hydrated.ProxyPool = latest.ProxyPool
+				if proxy := findProxyByID(latest.ProxyPool, *account.ProxyID); proxy != nil {
+					hydrated.Proxy = proxy
+					hydrated.ProxyID = account.ProxyID
+				}
+			}
+		}
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 		Account:     hydrated,

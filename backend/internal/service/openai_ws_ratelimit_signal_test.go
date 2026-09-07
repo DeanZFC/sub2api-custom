@@ -387,6 +387,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ErrorEventUsageL
 		var failoverErr *UpstreamFailoverError
 		require.ErrorAs(t, serverErr, &failoverErr)
 		require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+		require.False(t, failoverErr.Account429RetryExhausted, "建连后的流内 429 不能标记为握手重试耗尽")
 		require.Len(t, repo.rateLimitCalls, 1)
 		require.WithinDuration(t, time.Unix(resetAt, 0), repo.rateLimitCalls[0], 2*time.Second)
 	case <-time.After(5 * time.Second):
@@ -486,6 +487,41 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_ThrottlesExtraWrites(t *t
 	}
 }
 
+func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_PrearmBypassesThrottle(t *testing.T) {
+	repo := &openAICodexSnapshotAsyncRepo{
+		updateExtraCh: make(chan map[string]any, 2),
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:           repo,
+		codexSnapshotThrottle: newAccountWriteThrottle(time.Hour),
+	}
+	belowPrearm := &OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent:         ptrFloat64WS(94),
+		PrimaryResetAfterSeconds:   ptrIntWS(3600),
+		PrimaryWindowMinutes:       ptrIntWS(10080),
+		SecondaryUsedPercent:       ptrFloat64WS(22),
+		SecondaryResetAfterSeconds: ptrIntWS(1200),
+		SecondaryWindowMinutes:     ptrIntWS(300),
+	}
+	atPrearm := *belowPrearm
+	atPrearm.PrimaryUsedPercent = ptrFloat64WS(95)
+
+	svc.updateCodexUsageSnapshot(context.Background(), 778, belowPrearm)
+	select {
+	case <-repo.updateExtraCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待首次 codex 快照落库超时")
+	}
+
+	svc.updateCodexUsageSnapshot(context.Background(), 778, &atPrearm)
+	select {
+	case updates := <-repo.updateExtraCh:
+		require.Equal(t, 95.0, updates["codex_7d_used_percent"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("95% 预热快照不应被写入节流拦截")
+	}
+}
+
 func ptrFloat64WS(v float64) *float64 { return &v }
 func ptrIntWS(v int) *int             { return &v }
 
@@ -562,8 +598,9 @@ func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing
 		ID:       904,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
-	}, headers, body, "limited")
+	}, headers, body, "limited", false)
 	require.True(t, oauthErr.RetryableOnSameAccount)
+	require.False(t, oauthErr.Account429RetryExhausted)
 	require.False(t, oauthErr.SameAccountRetryDeadline.IsZero())
 	require.Positive(t, oauthErr.SameAccountRetryDelay)
 	require.LessOrEqual(t, oauthErr.SameAccountRetryDelay, openAIOAuth429MaxRetryDelay)
@@ -574,8 +611,16 @@ func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing
 		ID:       905,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeAPIKey,
-	}, headers, body, "limited")
+	}, headers, body, "limited", false)
 	require.False(t, apiKeyErr.RetryableOnSameAccount)
+	require.False(t, apiKeyErr.Account429RetryExhausted)
 	require.True(t, apiKeyErr.SameAccountRetryDeadline.IsZero())
 	require.Zero(t, apiKeyErr.SameAccountRetryDelay)
+
+	handshakeErr := svc.newOpenAIWSRateLimitFailoverError(&Account{
+		ID:       906,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}, headers, body, "limited", true)
+	require.True(t, handshakeErr.Account429RetryExhausted)
 }

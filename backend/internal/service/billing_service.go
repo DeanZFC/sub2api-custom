@@ -513,7 +513,6 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerToken:             0.02e-6,
 		CacheReadPricePerTokenPriority:     0.04e-6,
 	}
-
 	s.fallbackPrices["gpt-5.4-mini"] = &ModelPricing{
 		InputPricePerToken:     7.5e-7,
 		OutputPricePerToken:    4.5e-6,

@@ -150,14 +150,15 @@ func openAIFailoverCachedBodyTestAccount(id int64, name string, mapping map[stri
 		credentials["model_mapping"] = mapping
 	}
 	return &Account{
-		ID:             id,
-		Name:           name,
-		Platform:       PlatformOpenAI,
-		Type:           AccountTypeOAuth,
-		Concurrency:    1,
-		Credentials:    credentials,
-		Status:         StatusActive,
-		Schedulable:    true,
-		RateMultiplier: f64p(1),
+		ID:                     id,
+		Name:                   name,
+		Platform:               PlatformOpenAI,
+		Type:                   AccountTypeOAuth,
+		Concurrency:            1,
+		RateLimit429RetryCount: retryCountPointer(0),
+		Credentials:            credentials,
+		Status:                 StatusActive,
+		Schedulable:            true,
+		RateMultiplier:         f64p(1),
 	}
 }

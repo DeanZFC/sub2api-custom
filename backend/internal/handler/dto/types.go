@@ -54,21 +54,22 @@ type AdminUser struct {
 }
 
 type APIKey struct {
-	ID          int64      `json:"id"`
-	UserID      int64      `json:"user_id"`
-	Key         string     `json:"key"`
-	Name        string     `json:"name"`
-	GroupID     *int64     `json:"group_id"`
-	Status      string     `json:"status"`
-	IPWhitelist []string   `json:"ip_whitelist"`
-	IPBlacklist []string   `json:"ip_blacklist"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
-	LastUsedIP  *string    `json:"last_used_ip"`
-	Quota       float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
-	QuotaUsed   float64    `json:"quota_used"` // Used quota amount in USD
-	ExpiresAt   *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID              int64      `json:"id"`
+	UserID          int64      `json:"user_id"`
+	Key             string     `json:"key"`
+	Name            string     `json:"name"`
+	GroupID         *int64     `json:"group_id"`
+	FallbackGroupID *int64     `json:"fallback_group_id"`
+	Status          string     `json:"status"`
+	IPWhitelist     []string   `json:"ip_whitelist"`
+	IPBlacklist     []string   `json:"ip_blacklist"`
+	LastUsedAt      *time.Time `json:"last_used_at"`
+	LastUsedIP      *string    `json:"last_used_ip"`
+	Quota           float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
+	QuotaUsed       float64    `json:"quota_used"` // Used quota amount in USD
+	ExpiresAt       *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 	// CurrentConcurrency is the real-time active request count for this API key.
 	CurrentConcurrency int `json:"current_concurrency"`
 
@@ -86,8 +87,9 @@ type APIKey struct {
 	Reset1dAt     *time.Time `json:"reset_1d_at,omitempty"`
 	Reset7dAt     *time.Time `json:"reset_7d_at,omitempty"`
 
-	User  *User  `json:"user,omitempty"`
-	Group *Group `json:"group,omitempty"`
+	User          *User  `json:"user,omitempty"`
+	Group         *Group `json:"group,omitempty"`
+	FallbackGroup *Group `json:"fallback_group,omitempty"`
 }
 
 type Group struct {
@@ -151,6 +153,8 @@ type Group struct {
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制），设置后覆盖用户级 rpm_limit。
 	RPMLimit int `json:"rpm_limit"`
+	// 分组内每个用户的并发上限（0 = 不限制）。
+	UserConcurrencyLimit int `json:"user_concurrency_limit"`
 	// MaxReasoningEffort Anthropic/OpenAI 请求的推理强度上限，空字符串表示不限制。
 	MaxReasoningEffort string `json:"max_reasoning_effort"`
 	// MaxReasoningEffortOverLimit 超过上限时的访问控制：downgrade（默认）或 deny。
@@ -212,24 +216,27 @@ type Account struct {
 	Type     string  `json:"type"`
 	// Credentials 经 RedactCredentials 处理后只含非敏感子键；敏感 token / api_key / 私钥
 	// 的存在性通过 CredentialsStatus（has_<key>）暴露，原始值不返回前端。
-	Credentials             map[string]any                 `json:"credentials"`
-	CredentialsStatus       map[string]bool                `json:"credentials_status,omitempty"`
-	Extra                   map[string]any                 `json:"extra"`
-	OllamaCloudUsage        *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
-	ProxyID                 *int64                         `json:"proxy_id"`
-	ProxyFallbackOriginID   *int64                         `json:"proxy_fallback_origin_id"`
-	ProxyFallbackOriginName *string                        `json:"proxy_fallback_origin_name,omitempty"`
-	Concurrency             int                            `json:"concurrency"`
-	LoadFactor              *int                           `json:"load_factor,omitempty"`
-	Priority                int                            `json:"priority"`
-	RateMultiplier          float64                        `json:"rate_multiplier"`
-	Status                  string                         `json:"status"`
-	ErrorMessage            string                         `json:"error_message"`
-	LastUsedAt              *time.Time                     `json:"last_used_at"`
-	ExpiresAt               *int64                         `json:"expires_at"`
-	AutoPauseOnExpired      bool                           `json:"auto_pause_on_expired"`
-	CreatedAt               time.Time                      `json:"created_at"`
-	UpdatedAt               time.Time                      `json:"updated_at"`
+	Credentials                  map[string]any                 `json:"credentials"`
+	CredentialsStatus            map[string]bool                `json:"credentials_status,omitempty"`
+	Extra                        map[string]any                 `json:"extra"`
+	OllamaCloudUsage             *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
+	ProxyID                      *int64                         `json:"proxy_id"`
+	ProxyFallbackOriginID        *int64                         `json:"proxy_fallback_origin_id"`
+	ProxyFallbackOriginName      *string                        `json:"proxy_fallback_origin_name,omitempty"`
+	ProxyConcurrencyLimitEnabled bool                           `json:"proxy_concurrency_limit_enabled"`
+	ProxyPoolIDs                 []int64                        `json:"proxy_pool_ids,omitempty"`
+	ProxyPool                    []AccountProxyCapacity         `json:"proxy_pool,omitempty"`
+	Concurrency                  int                            `json:"concurrency"`
+	LoadFactor                   *int                           `json:"load_factor,omitempty"`
+	Priority                     int                            `json:"priority"`
+	RateMultiplier               float64                        `json:"rate_multiplier"`
+	Status                       string                         `json:"status"`
+	ErrorMessage                 string                         `json:"error_message"`
+	LastUsedAt                   *time.Time                     `json:"last_used_at"`
+	ExpiresAt                    *int64                         `json:"expires_at"`
+	AutoPauseOnExpired           bool                           `json:"auto_pause_on_expired"`
+	CreatedAt                    time.Time                      `json:"created_at"`
+	UpdatedAt                    time.Time                      `json:"updated_at"`
 
 	Schedulable bool `json:"schedulable"`
 
@@ -324,6 +331,13 @@ type Account struct {
 	Groups   []*Group `json:"groups,omitempty"`
 }
 
+type AccountProxyCapacity struct {
+	ProxyID            int64  `json:"proxy_id"`
+	ProxyName          string `json:"proxy_name"`
+	CurrentConcurrency int    `json:"current_concurrency"`
+	MaxConcurrency     int    `json:"max_concurrency"`
+}
+
 // AccountListItem is the compact representation returned by the admin account
 // list when the lite query parameter is enabled. It contains the fields used
 // by the account table and runtime indicators, but intentionally omits the
@@ -341,20 +355,23 @@ type AccountListItem struct {
 	Extra             map[string]any                 `json:"extra,omitempty"`
 	OllamaCloudUsage  *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 
-	ProxyID                 *int64     `json:"proxy_id"`
-	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`
-	ProxyFallbackOriginName *string    `json:"proxy_fallback_origin_name,omitempty"`
-	Concurrency             int        `json:"concurrency"`
-	LoadFactor              *int       `json:"load_factor,omitempty"`
-	Priority                int        `json:"priority"`
-	RateMultiplier          float64    `json:"rate_multiplier"`
-	Status                  string     `json:"status"`
-	ErrorMessage            string     `json:"error_message"`
-	LastUsedAt              *time.Time `json:"last_used_at"`
-	ExpiresAt               *int64     `json:"expires_at"`
-	AutoPauseOnExpired      bool       `json:"auto_pause_on_expired"`
-	CreatedAt               time.Time  `json:"created_at"`
-	UpdatedAt               time.Time  `json:"updated_at"`
+	ProxyID                      *int64                 `json:"proxy_id"`
+	ProxyFallbackOriginID        *int64                 `json:"proxy_fallback_origin_id"`
+	ProxyFallbackOriginName      *string                `json:"proxy_fallback_origin_name,omitempty"`
+	ProxyConcurrencyLimitEnabled bool                   `json:"proxy_concurrency_limit_enabled"`
+	ProxyPoolIDs                 []int64                `json:"proxy_pool_ids,omitempty"`
+	ProxyPool                    []AccountProxyCapacity `json:"proxy_pool,omitempty"`
+	Concurrency                  int                    `json:"concurrency"`
+	LoadFactor                   *int                   `json:"load_factor,omitempty"`
+	Priority                     int                    `json:"priority"`
+	RateMultiplier               float64                `json:"rate_multiplier"`
+	Status                       string                 `json:"status"`
+	ErrorMessage                 string                 `json:"error_message"`
+	LastUsedAt                   *time.Time             `json:"last_used_at"`
+	ExpiresAt                    *int64                 `json:"expires_at"`
+	AutoPauseOnExpired           bool                   `json:"auto_pause_on_expired"`
+	CreatedAt                    time.Time              `json:"created_at"`
+	UpdatedAt                    time.Time              `json:"updated_at"`
 
 	Schedulable bool `json:"schedulable"`
 

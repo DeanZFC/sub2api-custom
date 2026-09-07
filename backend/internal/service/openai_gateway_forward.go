@@ -19,6 +19,12 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	return s.withCodexPreOutputRetry(ctx, c, account, func() (*OpenAIForwardResult, error) {
+		return s.forwardResponsesAttempt(ctx, c, account, body)
+	})
+}
+
+func (s *OpenAIGatewayService) forwardResponsesAttempt(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
@@ -535,7 +541,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if c != nil && c.Request != nil {
 				clientHeaders = c.Request.Header
 			}
-			fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+			fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders, s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIAccountUniqueFingerprintEnabled)
 			if fpIDs != nil {
 				if applyCodexFingerprintClientMetadata(decoded, fpIDs) {
 					markDecodedModified()
@@ -1069,11 +1075,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
-			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody)))
 
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
+			if retryErr := s.newCodexPreOutputRetryError(c, account, resp.StatusCode, resp.Header, respBody, upstreamMsg); retryErr != nil {
+				return nil, retryErr
+			}
 			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
@@ -1083,7 +1092,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				continue
 			}
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
-			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody)))
 			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
 				decoded, decodeErr := ensureReqBody()
 				if decodeErr != nil {
@@ -1158,7 +1167,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				})
 
 				shouldDisable := s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
-				return nil, s.newOpenAIAccountFailoverError(
+				return nil, finalizeAccount429Failover(resp, s.newOpenAIAccountFailoverError(
 					account,
 					resp.StatusCode,
 					resp.Header,
@@ -1166,7 +1175,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					upstreamMsg,
 					shouldDisable,
 					!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
-				)
+				))
 			}
 			return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 		}
@@ -1333,6 +1342,7 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	body = s.prepareCodexQuotaOverdraftBody(ctx, account, isOpenAIResponsesCompactPath(c), body)
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {

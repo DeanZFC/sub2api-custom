@@ -87,6 +87,11 @@ type liveTestDialer struct {
 	headers http.Header
 }
 
+type live429RetryDialer struct {
+	conn  *liveTestFrameConn
+	calls int
+}
+
 func (d *liveTestDialer) Dial(
 	_ context.Context,
 	wsURL string,
@@ -95,6 +100,19 @@ func (d *liveTestDialer) Dial(
 ) (openAIWSClientConn, int, http.Header, error) {
 	d.url = wsURL
 	d.headers = headers.Clone()
+	return d.conn, http.StatusSwitchingProtocols, nil, nil
+}
+
+func (d *live429RetryDialer) Dial(
+	_ context.Context,
+	_ string,
+	_ http.Header,
+	_ string,
+) (openAIWSClientConn, int, http.Header, error) {
+	d.calls++
+	if d.calls <= 2 {
+		return nil, http.StatusTooManyRequests, http.Header{"Retry-After": []string{"0"}}, errors.New("rate limited")
+	}
 	return d.conn, http.StatusSwitchingProtocols, nil, nil
 }
 
@@ -248,6 +266,32 @@ func (r *liveTestUsageRepo) Create(_ context.Context, log *UsageLog) (bool, erro
 	return true, nil
 }
 
+type liveTestSubscriptionRepo struct {
+	UserSubscriptionRepository
+	mu          sync.Mutex
+	active      *UserSubscription
+	err         error
+	lastUserID  int64
+	lastGroupID int64
+	calls       int
+}
+
+func (r *liveTestSubscriptionRepo) GetActiveByUserIDAndGroupID(_ context.Context, userID, groupID int64) (*UserSubscription, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	r.lastUserID = userID
+	r.lastGroupID = groupID
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.active == nil || r.active.UserID != userID || r.active.GroupID != groupID {
+		return nil, ErrSubscriptionNotFound
+	}
+	copy := *r.active
+	return &copy, nil
+}
+
 func TestRunLiveControllerClosesExpiredSession(t *testing.T) {
 	upstream := newLiveTestFrameConn()
 	record := &LiveCallRecord{ExpiresAt: time.Now().Add(20 * time.Millisecond)}
@@ -338,6 +382,131 @@ func TestGetLiveCallForIdentityRejectsMismatchedCaller(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, record.AccountID, loaded.AccountID)
+}
+
+func TestGetLiveCallForIdentityAllowsConfiguredFallbackGroup(t *testing.T) {
+	primaryGroupID := int64(7401)
+	fallbackGroupID := int64(7402)
+	record := &LiveCallRecord{
+		CallID:     "call_fallback_identity",
+		CallHash:   hashLiveCallID("call_fallback_identity"),
+		APIKeyID:   22,
+		UserID:     33,
+		GroupID:    fallbackGroupID,
+		Controller: LiveControllerPending,
+	}
+	store := &liveTestStore{}
+	require.NoError(t, store.SaveLiveCall(context.Background(), record, time.Hour))
+	service := &OpenAIGatewayService{cache: store}
+
+	loaded, err := service.GetLiveCallForIdentity(context.Background(), record.CallID, LiveCallIdentity{
+		APIKeyID:        record.APIKeyID,
+		UserID:          record.UserID,
+		GroupID:         &primaryGroupID,
+		FallbackGroupID: &fallbackGroupID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, fallbackGroupID, loaded.GroupID)
+
+	_, err = service.GetLiveCallForIdentity(context.Background(), record.CallID, LiveCallIdentity{
+		APIKeyID:        record.APIKeyID,
+		UserID:          record.UserID,
+		GroupID:         &primaryGroupID,
+		FallbackGroupID: i64p(7403),
+	})
+	require.ErrorIs(t, err, ErrLiveIdentityMismatch)
+}
+
+func TestResolveLiveSubscriptionIDUsesRoutedGroupSubscription(t *testing.T) {
+	primaryGroupID := int64(7411)
+	fallbackGroupID := int64(7412)
+	primarySubscriptionID := int64(7421)
+	fallbackSubscriptionID := int64(7422)
+	primary := &Group{ID: primaryGroupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription}
+	fallback := &Group{ID: fallbackGroupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription}
+	apiKey := &APIKey{
+		GroupID:         &primaryGroupID,
+		FallbackGroupID: &fallbackGroupID,
+		Group:           primary,
+		FallbackGroup:   fallback,
+	}
+	ctx := WithAPIKeyGroupFallbackRouting(context.Background(), apiKey)
+	activateAPIKeyFallbackRouting(ctx, fallbackGroupID)
+	repo := &liveTestSubscriptionRepo{active: &UserSubscription{ID: fallbackSubscriptionID, UserID: 33, GroupID: fallbackGroupID}}
+	service := &OpenAIGatewayService{userSubRepo: repo}
+	identity := LiveCallIdentity{
+		APIKeyID:       22,
+		UserID:         33,
+		GroupID:        &primaryGroupID,
+		SubscriptionID: &primarySubscriptionID,
+	}
+	// The API key's GroupID pointer is the identity pointer in production; use
+	// the same pointer here to model activation mutating the request-local key.
+	identity.GroupID = apiKey.GroupID
+
+	id, err := service.resolveLiveSubscriptionID(ctx, identity)
+	require.NoError(t, err)
+	require.Equal(t, fallbackSubscriptionID, id)
+	repo.mu.Lock()
+	require.Equal(t, int64(33), repo.lastUserID)
+	require.Equal(t, fallbackGroupID, repo.lastGroupID)
+	require.Equal(t, 1, repo.calls)
+	repo.mu.Unlock()
+}
+
+func TestResolveLiveSubscriptionIDDoesNotCarryPrimarySubscriptionToStandardFallback(t *testing.T) {
+	primaryGroupID := int64(7431)
+	fallbackGroupID := int64(7432)
+	primary := &Group{ID: primaryGroupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription}
+	fallback := &Group{ID: fallbackGroupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeStandard}
+	apiKey := &APIKey{GroupID: &primaryGroupID, FallbackGroupID: &fallbackGroupID, Group: primary, FallbackGroup: fallback}
+	ctx := WithAPIKeyGroupFallbackRouting(context.Background(), apiKey)
+	activateAPIKeyFallbackRouting(ctx, fallbackGroupID)
+	service := &OpenAIGatewayService{userSubRepo: &liveTestSubscriptionRepo{active: &UserSubscription{ID: 7442, UserID: 33, GroupID: fallbackGroupID}}}
+	primarySubscriptionID := int64(7441)
+	id, err := service.resolveLiveSubscriptionID(ctx, LiveCallIdentity{
+		UserID:         33,
+		GroupID:        apiKey.GroupID,
+		SubscriptionID: &primarySubscriptionID,
+	})
+	require.NoError(t, err)
+	require.Zero(t, id)
+}
+
+func TestDialLiveSidebandReturns429WithoutSameAccountRetry(t *testing.T) {
+	account := &Account{
+		ID:                     11,
+		Platform:               PlatformOpenAI,
+		Type:                   AccountTypeOAuth,
+		Concurrency:            2,
+		RateLimit429RetryCount: retryCountPointer(2),
+		Credentials: map[string]any{
+			"access_token":       "test-access-token",
+			"chatgpt_account_id": "acct_test",
+		},
+	}
+	attestationCipher := newLiveAttestationCipher(&config.Config{
+		JWT: config.JWTConfig{Secret: "live-sideband-retry-test-secret"},
+	})
+	ciphertext, err := attestationCipher.Encrypt(`{"v":1,"s":0,"t":"v1.sideband"}`)
+	require.NoError(t, err)
+	record := &LiveCallRecord{
+		CallID:                "call_retry",
+		AccountID:             account.ID,
+		AttestationCiphertext: ciphertext,
+	}
+	upstream := newLiveTestFrameConn()
+	dialer := &live429RetryDialer{conn: upstream}
+	service := &OpenAIGatewayService{
+		accountRepo:               &liveTestAccountRepo{account: account},
+		openaiWSPassthroughDialer: dialer,
+		liveAttestationCipher:     attestationCipher,
+	}
+
+	conn, err := service.dialLiveSideband(context.Background(), record)
+	require.Error(t, err)
+	require.Nil(t, conn)
+	require.Equal(t, 1, dialer.calls)
 }
 
 func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {

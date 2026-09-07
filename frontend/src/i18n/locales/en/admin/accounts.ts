@@ -187,6 +187,7 @@ export default {
         rateLimited: 'Rate Limited',
         overloaded: 'Overloaded',
         tempUnschedulable: 'Temp Unschedulable',
+        codexQuotaPaused: 'Quota Paused',
         quotaExceeded: 'Quota Exceeded',
         unschedulable: 'Unschedulable',
         rateLimitedUntil: 'Rate limited and removed from scheduling. Auto resumes at {time}',
@@ -639,11 +640,14 @@ export default {
         codexCLIOnlyAppServerDesc:
           "Effective only when the switch above is on. When enabled, this account also allows third-party clients that embed the Codex engine over the app-server protocol (e.g. Claude Code's codex plugin); they still pass the global engine-fingerprint gate. OR-combined with the global app-server toggle.",
         codexFingerprintMode: 'Codex fingerprint convergence',
-        codexFingerprintModeDesc: 'When multiple users share the same OAuth account, converge device/session identifiers to account-level stable values to reduce upstream-visible device and session count. Off by default (client identifiers pass through as-is); opt in explicitly when needed. Some accounts reported quota shrinkage after enabling convergence, so choose based on your own measurements.',
+        codexFingerprintModeDesc: 'Keep Codex identity signals stable and isolated per account. This changes identity/cache/session markers, not the proxy IP or network egress.',
         codexFingerprintOff: 'Off (passthrough, default)',
+        codexFingerprintAccountDevice: 'Unique device per account (new, recommended)',
         codexFingerprintDevice: 'Device only',
         codexFingerprintSession: 'Device + Session',
         codexFingerprintFull: 'Full convergence',
+        codexQuotaOverdraft: 'Codex quota overdraft',
+        codexQuotaOverdraftDesc: 'Only applies to OpenAI OAuth. When enabled, this account may continue past the 5h/7d quota after the configured probe confirms upstream availability. Disable to use the official scheduling and quota handling for this account.',
         codexImageTool: 'Codex image bridge policy',
         codexImageToolDesc:
           'Controls the hosted image_generation bridge and client-declared image tools on Codex /responses text requests. Hosted auto-injection applies only to non-Responses Lite requests. Account policy takes precedence over channel and global settings; standalone image-generation endpoints are unaffected.',
@@ -784,7 +788,7 @@ export default {
       poolMode: 'Pool Mode',
       poolModeHint: 'Enable when upstream is an account pool; errors won\'t mark local account status',
       poolModeInfo:
-        'When enabled, upstream 429/403/401 errors will auto-retry without marking the account as rate-limited or errored. Suitable for upstream pointing to another sub2api instance.',
+        'When enabled, upstream errors will not mark the local account as rate-limited or errored. Suitable for upstream pointing to another sub2api instance.',
       poolModeRetryCount: 'Same-Account Retries',
       poolModeRetryCountHint:
         'Only applies in pool mode. Use 0 to disable in-place retry. Default {default}, maximum {max}.',
@@ -948,6 +952,10 @@ export default {
       affinityBufferInfinite: 'Unlimited',
       expired: 'Expired',
       proxy: 'Proxy',
+      proxyConcurrencyLimitEnabled: 'Enable per-proxy 429 concurrency limiting',
+      proxyConcurrencyLimitEnabledHint: 'Each selected proxy gets its own concurrency limit when enabled.',
+      proxyPool: 'Proxy exits (multi-select)',
+      proxyPoolCount: '{count} proxies selected',
       noProxy: 'No Proxy',
       concurrency: 'Concurrency',
       loadFactor: 'Load Factor',

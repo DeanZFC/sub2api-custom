@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -74,4 +75,81 @@ func TestHasResolvableTokenPricing(t *testing.T) {
 	// billingService 缺失时 fail-closed（不误判有价）
 	empty := &GatewayService{}
 	require.False(t, empty.hasResolvableTokenPricing(ctx, "claude-sonnet-4", apiKey))
+}
+
+func TestResolveAPIKeyFallbackChannelUsageFields_ClearsPrimaryFieldsWhenLookupFails(t *testing.T) {
+	fallbackGroupID := int64(61302)
+	apiKey := &APIKey{
+		ID:              63301,
+		GroupID:         &fallbackGroupID,
+		FallbackGroupID: &fallbackGroupID,
+		Group:           &Group{ID: fallbackGroupID, Platform: PlatformOpenAI},
+	}
+	// The input fields intentionally represent the primary group's channel.
+	primaryFields := ChannelUsageFields{
+		ChannelID:          9001,
+		OriginalModel:      "gpt-5.1",
+		ChannelMappedModel: "primary-alias",
+		BillingModelSource: BillingModelSourceChannelMapped,
+		ModelMappingChain:  "gpt-5.1→primary-alias",
+	}
+	channelService := NewChannelService(&mockChannelRepository{
+		listAllFn: func(context.Context) ([]Channel, error) {
+			return nil, errors.New("channel cache unavailable")
+		},
+	}, nil, nil, nil)
+
+	got := resolveAPIKeyFallbackChannelUsageFields(
+		context.Background(), channelService, apiKey, primaryFields, "gpt-5.1", "primary-alias",
+	)
+
+	require.Equal(t, int64(0), got.ChannelID)
+	require.Equal(t, "gpt-5.1", got.OriginalModel)
+	require.Equal(t, "gpt-5.1", got.ChannelMappedModel)
+	require.Equal(t, BillingModelSourceRequested, got.BillingModelSource)
+	require.Empty(t, got.ModelMappingChain)
+}
+
+func TestResolveAPIKeyFallbackChannelUsageFields_ClearsPrimaryFieldsWithoutService(t *testing.T) {
+	fallbackGroupID := int64(61312)
+	apiKey := &APIKey{
+		ID:              63312,
+		GroupID:         &fallbackGroupID,
+		FallbackGroupID: &fallbackGroupID,
+		Group:           &Group{ID: fallbackGroupID, Platform: PlatformOpenAI},
+	}
+	got := resolveAPIKeyFallbackChannelUsageFields(
+		context.Background(), nil, apiKey, ChannelUsageFields{
+			ChannelID:          9012,
+			OriginalModel:      "gpt-5.1",
+			ChannelMappedModel: "primary-alias",
+			BillingModelSource: BillingModelSourceChannelMapped,
+			ModelMappingChain:  "gpt-5.1→primary-alias",
+		}, "gpt-5.1", "primary-alias",
+	)
+	require.Zero(t, got.ChannelID)
+	require.Equal(t, "gpt-5.1", got.OriginalModel)
+	require.Equal(t, "gpt-5.1", got.ChannelMappedModel)
+	require.Equal(t, BillingModelSourceRequested, got.BillingModelSource)
+	require.Empty(t, got.ModelMappingChain)
+}
+
+func TestResolveAPIKeyFallbackChannelUsageFields_OrdinaryRequestIsUnchanged(t *testing.T) {
+	primaryGroupID := int64(61321)
+	fallbackGroupID := int64(61322)
+	apiKey := &APIKey{
+		ID:              63321,
+		GroupID:         &primaryGroupID,
+		FallbackGroupID: &fallbackGroupID,
+		Group:           &Group{ID: primaryGroupID, Platform: PlatformOpenAI},
+	}
+	fields := ChannelUsageFields{
+		ChannelID:          9021,
+		OriginalModel:      "gpt-5.1",
+		ChannelMappedModel: "primary-alias",
+		BillingModelSource: BillingModelSourceChannelMapped,
+		ModelMappingChain:  "gpt-5.1→primary-alias",
+	}
+	got := resolveAPIKeyFallbackChannelUsageFields(context.Background(), nil, apiKey, fields, "gpt-5.1", "primary-alias")
+	require.Equal(t, fields, got)
 }

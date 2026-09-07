@@ -254,12 +254,24 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
 	}
+	// Preserve the immutable API-key snapshot captured by
+	// wrapUsageRecordTaskContext while replacing the request context with the
+	// worker's bounded timeout context.
+	if snapshot, ok := service.APIKeyUsageSnapshotFromContext(parent); ok {
+		base = service.WithAPIKeyUsageSnapshot(base, snapshot)
+	}
 	return base
 }
 
 func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecordTask) service.UsageRecordTask {
 	if task == nil {
 		return nil
+	}
+	// Capture the effective API-key/group at submission time. Fallback routing
+	// mutates the request-local API key in place, and a later WS turn or request
+	// could otherwise change what an already queued usage task observes.
+	if apiKey, ok := service.APIKeyForUsageContext(parent); ok {
+		parent = service.WithAPIKeyUsageSnapshot(parent, apiKey)
 	}
 	return func(ctx context.Context) {
 		task(usageRecordContext(parent, ctx))
@@ -292,6 +304,10 @@ func openAIResponsesRequiredCapabilityForRequest(imageIntent bool, needsResponse
 		return service.OpenAIEndpointCapabilityResponses
 	}
 	return openAIResponsesRequiredCapability(imageIntent, platform)
+}
+
+func shouldEnableCodexQuotaOverdraftForResponses(legacyCompact, nativeV2, imageIntent bool) bool {
+	return !legacyCompact && !nativeV2 && !imageIntent
 }
 
 func allowOpenAICompatibleMessagesDispatch(c *gin.Context, apiKey *service.APIKey) bool {
@@ -637,7 +653,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// D 与计费高峰因子，选号、槽位终检与全部 failover 重入共用同一门与阈值。
 	// 生图意图只影响能力路由与图片计费，不关门：混合 /v1/responses 请求的
 	// token 计费部分仍受利润门保护，独立图片/视频端点才在门外。
-	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	requestCtx := c.Request.Context()
+	if shouldEnableCodexQuotaOverdraftForResponses(legacyCompact, nativeV2, imageIntent) {
+		requestCtx = service.WithCodexQuotaOverdraftScheduling(requestCtx)
+	}
+	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(requestCtx, apiKey.GroupID)
 	c.Request = c.Request.WithContext(pricingCtx)
 
 	for {
@@ -950,9 +970,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), openAIForwardSucceededForScheduling(result), result.FirstTokenMs, c.Request.Context())
 		} else {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), openAIForwardSucceededForScheduling(result), nil)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), openAIForwardSucceededForScheduling(result), nil, c.Request.Context())
 		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
@@ -1242,7 +1262,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	effectiveMappedModel := preferredMappedModel
 
 	// 分组利润控制：Messages 文本入口同样请求级装门并固定 pricingAt。
-	msgPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	msgPricingCtx := service.WithCodexQuotaOverdraftScheduling(c.Request.Context())
+	msgPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(msgPricingCtx, apiKey.GroupID)
 	c.Request = c.Request.WithContext(msgPricingCtx)
 
 	for {
@@ -1491,9 +1512,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 		}
 		if result != nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), true, result.FirstTokenMs)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), true, result.FirstTokenMs, c.Request.Context())
 		} else {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), true, nil)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), true, nil, c.Request.Context())
 		}
 
 		submitMessagesUsage(result)
@@ -2009,6 +2030,13 @@ func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 	return wrapReleaseOnDone(ctx, userReleaseFunc), true
 }
 
+func apiKeyUserConcurrencyLimit(apiKey *service.APIKey) (int64, int) {
+	if apiKey == nil || apiKey.Group == nil || apiKey.Group.ID <= 0 || apiKey.Group.UserConcurrencyLimit <= 0 {
+		return 0, 0
+	}
+	return apiKey.Group.ID, apiKey.Group.UserConcurrencyLimit
+}
+
 // openAISlotAcquireResult 是账号槽位获取的三态结果。
 type openAISlotAcquireResult int
 
@@ -2146,11 +2174,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		return nil, openAISlotAcquireFailed
 	}
 
-	fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(
-		ctx,
-		account.ID,
-		selection.WaitPlan.MaxConcurrency,
-	)
+	fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlotForAccount(ctx, account, selection.WaitPlan.MaxConcurrency)
 	if err != nil {
 		reqLog.Warn("openai.account_slot_quick_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		status, errType, code, message := concurrencyErrorResponse(err, "account")
@@ -2197,13 +2221,8 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	}
 	defer releaseWait()
 
-	accountReleaseFunc, err := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
-		c,
-		account.ID,
-		selection.WaitPlan.MaxConcurrency,
-		selection.WaitPlan.Timeout,
-		reqStream,
-		streamStarted,
+	accountReleaseFunc, err := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeoutForAccount(
+		c, account, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, reqStream, streamStarted,
 	)
 	if err != nil {
 		reqLog.Warn("openai.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
@@ -2396,6 +2415,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
 		return
 	}
+	if !imageIntent {
+		ctx = service.WithCodexQuotaOverdraftScheduling(ctx)
+		c.Request = c.Request.WithContext(ctx)
+	}
 
 	// The first response.create frame is available here, so explicit IDs are
 	// checked directly and body-derived sessions use the coarse scope gate.
@@ -2444,7 +2467,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 必须尽早注册，确保任何 early return 都能释放已获取的并发槽位。
 	defer releaseTurnSlots()
 
-	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
+	groupID, groupMax := apiKeyUserConcurrencyLimit(apiKey)
+	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKeyWithGroup(ctx, subject.UserID, subject.Concurrency, apiKey.ID, groupID, groupMax)
 	if err != nil {
 		reqLog.Warn("openai.websocket_user_slot_acquire_failed", zap.Error(err))
 		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
@@ -2459,7 +2483,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if currentUserRelease != nil {
 			return true
 		}
-		userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
+		userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKeyWithGroup(ctx, subject.UserID, subject.Concurrency, apiKey.ID, groupID, groupMax)
 		if err != nil {
 			reqLog.Warn("openai.websocket_user_slot_reacquire_failed", zap.Error(err))
 			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
@@ -2649,9 +2673,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
 				return
 			}
-			fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(
+			fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlotForAccount(
 				ctx,
-				account.ID,
+				account,
 				selection.WaitPlan.MaxConcurrency,
 			)
 			if err != nil {
@@ -2830,14 +2854,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 防御式清理：避免异常路径下旧槽位覆盖导致泄漏。
 				releaseTurnSlots()
 				// 非首轮 turn 需要重新抢占并发槽位，避免长连接空闲占槽。
-				userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
+				userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKeyWithGroup(ctx, subject.UserID, subject.Concurrency, apiKey.ID, groupID, groupMax)
 				if err != nil {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to acquire user concurrency slot", err)
 				}
 				if !userAcquired {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "too many concurrent requests, please retry later", nil)
 				}
-				accountReleaseFunc, accountAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, accountMaxConcurrency)
+				accountReleaseFunc, accountAcquired, err := h.concurrencyHelper.TryAcquireAccountSlotForAccount(ctx, account, accountMaxConcurrency)
 				if err != nil {
 					if userReleaseFunc != nil {
 						userReleaseFunc()
@@ -2925,7 +2949,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if scheduleModel == "" {
 					scheduleModel = turnRequestedModel
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs, ctx)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
@@ -3015,7 +3039,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						return
 					}
 					if currentAccountRelease == nil {
-						accountRelease, acquired, acquireErr := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, accountMaxConcurrency)
+						accountRelease, acquired, acquireErr := h.concurrencyHelper.TryAcquireAccountSlotForAccount(ctx, account, accountMaxConcurrency)
 						if acquireErr != nil || !acquired {
 							reqLog.Warn("openai.websocket_same_account_retry_slot_unavailable",
 								zap.Int64("account_id", account.ID),
@@ -3295,6 +3319,10 @@ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error,
 func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
 	if failoverErr == nil {
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
+		return
+	}
+	if failoverErr.Reason == service.CodexPreOutputRetryReason {
+		service.WriteCodexRetryExhaustedResponse(c, failoverErr, streamStarted)
 		return
 	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {
@@ -4098,7 +4126,10 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	if apiKey != nil {
 		apiKeyID = apiKey.ID
 		apiKeyName = apiKey.Name
-		groupID = apiKey.GroupID
+		if apiKey.GroupID != nil {
+			groupIDValue := *apiKey.GroupID
+			groupID = &groupIDValue
+		}
 		if apiKey.User != nil {
 			userID = apiKey.User.ID
 			userEmail = apiKey.User.Email
@@ -4146,6 +4177,10 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	if apiKey != nil {
 		apiKeyPrefix = keyPrefix(apiKey.Key, 8)
 	}
+	// This path uses a detached goroutine instead of the usage worker pool.
+	// Capture the effective group/API-key now for the same reason the normal
+	// usage-task wrapper does: a later fallback switch must not rewrite billing.
+	usageAPIKey := service.CloneAPIKeyForUsage(apiKey)
 	opsMeta := cyberPolicyOpsErrorMeta{
 		RequestID:       requestID,
 		ClientRequestID: clientRequestID,
@@ -4194,7 +4229,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		}
 		if forwardErrored && gwSvc != nil {
 			gwSvc.RecordCyberPolicyUsageLog(ctx, service.CyberPolicyUsageInput{
-				APIKey:             apiKey,
+				APIKey:             usageAPIKey,
 				Account:            account,
 				Subscription:       subscription,
 				RequestID:          requestID,

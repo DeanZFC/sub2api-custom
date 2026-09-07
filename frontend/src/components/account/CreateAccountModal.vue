@@ -2916,10 +2916,21 @@
 
       <div>
         <div class="mb-1 flex items-center gap-2">
-          <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
+          <label class="input-label mb-0">{{ form.proxy_concurrency_limit_enabled ? t('admin.accounts.proxyPool') : t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <div class="mb-2 flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-700">
+          <div>
+            <span class="text-sm text-gray-700 dark:text-gray-200">{{ t('admin.accounts.proxyConcurrencyLimitEnabled') }}</span>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.proxyConcurrencyLimitEnabledHint') }}</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="form.proxy_concurrency_limit_enabled" @click="toggleProxyPoolMode"
+            :class="['relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors', form.proxy_concurrency_limit_enabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']">
+            <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition', form.proxy_concurrency_limit_enabled ? 'translate-x-5' : 'translate-x-0']" />
+          </button>
+        </div>
+        <ProxySelector v-if="form.proxy_concurrency_limit_enabled" v-model="form.proxy_pool_ids" :proxies="proxies" multiple />
+        <ProxySelector v-else v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
       <UpstreamRequestIdHeaderField
@@ -3214,7 +3225,7 @@
         </div>
       </div>
 
-      <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
+      <!-- CPA 指纹出口（仅 OpenAI OAuth） -->
       <div
         v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -3229,6 +3240,39 @@
           <div class="w-52 flex-shrink-0">
             <Select v-model="codexFingerprintMode" data-testid="create-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
           </div>
+        </div>
+      </div>
+
+      <!-- Codex 额度透支（仅 OpenAI OAuth） -->
+      <div
+        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexQuotaOverdraft') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexQuotaOverdraftDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="create-codex-quota-overdraft-toggle"
+            role="switch"
+            :aria-checked="codexQuotaOverdraftEnabled"
+            @click="codexQuotaOverdraftEnabled = !codexQuotaOverdraftEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexQuotaOverdraftEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexQuotaOverdraftEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
         </div>
       </div>
 
@@ -4291,10 +4335,13 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
-type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
+type CodexFingerprintMode = 'off' | 'account_device' | 'device' | 'session' | 'full'
+// 额度透支必须由管理员对账号显式开启，新增账号默认关闭。
+const codexQuotaOverdraftEnabled = ref(false)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 const codexFingerprintModeOptions = computed(() => [
   { value: 'off' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintOff') },
+  { value: 'account_device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintAccountDevice') },
   { value: 'device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintDevice') },
   { value: 'session' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintSession') },
   { value: 'full' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintFull') },
@@ -4575,12 +4622,32 @@ const form = reactive({
   type: 'oauth' as AccountType, // Will be 'oauth', 'setup-token', or 'apikey'
   credentials: {} as Record<string, unknown>,
   proxy_id: null as number | null,
+  proxy_concurrency_limit_enabled: false,
+  proxy_pool_ids: [] as number[],
   concurrency: 10,
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
   group_ids: [] as number[],
   expires_at: null as number | null
+})
+
+const toggleProxyPoolMode = () => {
+  form.proxy_concurrency_limit_enabled = !form.proxy_concurrency_limit_enabled
+  if (form.proxy_concurrency_limit_enabled) form.proxy_id = null
+}
+
+// OAuth 验证只能使用一个出口；多代理模式使用池中第一个代理认证，
+// 账号保存后实际请求仍按整个代理池调度。
+const authProxyID = computed(() =>
+  form.proxy_concurrency_limit_enabled
+    ? (form.proxy_pool_ids[0] ?? null)
+    : form.proxy_id
+)
+
+const proxyPoolPayload = () => ({
+  proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
+  proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : []
 })
 
 // Helper to check if current type needs OAuth flow
@@ -5091,7 +5158,9 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
+    const account = await adminAPI.accounts.create(
+      withAntigravityConfirmFlag(payload)
+    )
     const modelMapping = payload.credentials.model_mapping
     const hasConcreteMappedTarget = payload.type === 'apikey' &&
       typeof modelMapping === 'object' &&
@@ -5151,6 +5220,8 @@ const resetForm = () => {
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
+  form.proxy_concurrency_limit_enabled = false
+  form.proxy_pool_ids = []
   form.concurrency = 10
   form.load_factor = null
   form.priority = 1
@@ -5209,6 +5280,7 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexQuotaOverdraftEnabled.value = false
   codexFingerprintMode.value = 'off'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5309,7 +5381,12 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   } else {
     delete extra.codex_cli_only_allow_app_server
   }
-  // 收敛是显式 opt-in：off 即默认值，不落键；device/session/full 必须显式写入，
+  if (accountCategory.value === 'oauth-based') {
+    extra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
+  } else {
+    delete extra.codex_quota_overdraft_enabled
+  }
+  // 收敛是显式 opt-in：off 即默认值，不落键；account_device/device/session/full 必须显式写入，
   // 否则管理员的选择会被当成默认而丢失（#5610）。
   if (codexFingerprintMode.value !== 'off') {
     extra.codex_fingerprint_mode = codexFingerprintMode.value
@@ -5732,20 +5809,20 @@ const goBackToBasicInfo = () => {
 
 const handleGenerateUrl = async () => {
   if (form.platform === 'openai') {
-    await openaiOAuth.generateAuthUrl(form.proxy_id)
+    await openaiOAuth.generateAuthUrl(authProxyID.value)
   } else if (form.platform === 'gemini') {
     await geminiOAuth.generateAuthUrl(
-      form.proxy_id,
+      authProxyID.value,
       oauthFlowRef.value?.projectId,
       geminiOAuthType.value,
       geminiSelectedTier.value
     )
   } else if (form.platform === 'antigravity') {
-    await antigravityOAuth.generateAuthUrl(form.proxy_id)
+    await antigravityOAuth.generateAuthUrl(authProxyID.value)
   } else if (form.platform === 'grok') {
-    await grokOAuth.generateAuthUrl(form.proxy_id)
+    await grokOAuth.generateAuthUrl(authProxyID.value)
   } else {
-    await oauth.generateAuthUrl(addMethod.value, form.proxy_id)
+    await oauth.generateAuthUrl(addMethod.value, authProxyID.value)
   }
 }
 
@@ -5837,7 +5914,9 @@ const createAccountAndFinish = async (
     type,
     credentials,
     extra: finalExtra,
-    proxy_id: form.proxy_id,
+    proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
+    proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
+    proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : [],
     concurrency: form.concurrency,
     load_factor: form.load_factor ?? undefined,
     priority: form.priority,
@@ -5876,7 +5955,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
   try {
     for (let i = 0; i < refreshTokens.length; i++) {
       try {
-        const tokenInfo = await grokOAuth.validateRefreshToken(refreshTokens[i], form.proxy_id)
+        const tokenInfo = await grokOAuth.validateRefreshToken(refreshTokens[i], authProxyID.value)
         if (!tokenInfo) {
           failedCount++
           errors.push(`#${i + 1}: ${grokOAuth.error.value || 'Validation failed'}`)
@@ -5898,13 +5977,14 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
         }
 
         await adminAPI.accounts.create({
+          ...proxyPoolPayload(),
           name: accountName,
           notes: form.notes,
           platform: 'grok',
           type: 'oauth',
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
-          proxy_id: form.proxy_id,
+          proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
@@ -5970,7 +6050,9 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       sso_tokens: ssoTokens,
       name: form.name || undefined,
       notes: form.notes || undefined,
-      proxy_id: form.proxy_id,
+      proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
+      proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
+      proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : [],
       group_ids: form.group_ids,
       credentials,
       concurrency: form.concurrency,
@@ -6046,7 +6128,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
   try {
     for (let i = 0; i < lines.length; i++) {
       try {
-        const tokenInfo = await grokOAuth.authorizePassword(lines[i], form.proxy_id)
+        const tokenInfo = await grokOAuth.authorizePassword(lines[i], authProxyID.value)
         if (!tokenInfo) {
           failedCount++
           errors.push(`#${i + 1}: ${grokOAuth.error.value || 'Authorization failed'}`)
@@ -6075,13 +6157,14 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
         }
 
         await adminAPI.accounts.create({
+          ...proxyPoolPayload(),
           name: accountName,
           notes: form.notes,
           platform: 'grok',
           type: 'oauth',
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
-          proxy_id: form.proxy_id,
+          proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
@@ -6144,7 +6227,7 @@ const handleOpenAIExchange = async (authCode: string) => {
       authCode.trim(),
       oauthClient.sessionId.value,
       stateToUse,
-      form.proxy_id
+      authProxyID.value
     )
     if (!tokenInfo) return
 
@@ -6174,13 +6257,14 @@ const handleOpenAIExchange = async (authCode: string) => {
 
     if (shouldCreateOpenAI) {
       await adminAPI.accounts.create({
+        ...proxyPoolPayload(),
         name: form.name,
         notes: form.notes,
         platform: 'openai',
         type: 'oauth',
         credentials,
         extra: withUpstreamRequestIdHeader(extra),
-        proxy_id: form.proxy_id,
+        proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
         concurrency: form.concurrency,
         load_factor: form.load_factor ?? undefined,
         priority: form.priority,
@@ -6285,7 +6369,9 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       content: trimmed,
       name: form.name,
       notes: form.notes || null,
-      proxy_id: form.proxy_id,
+      proxy_id: form.proxy_concurrency_limit_enabled ? 0 : form.proxy_id,
+      proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
+      proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : [],
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
@@ -6360,10 +6446,11 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
   try {
     const extra = buildOpenAICodexImportExtra()
     await adminAPI.accounts.createOpenAICodexPAT({
+      ...proxyPoolPayload(),
       access_token: trimmed,
       name: form.name,
       notes: form.notes || null,
-      proxy_id: form.proxy_id,
+      proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
@@ -6418,7 +6505,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
       try {
         const tokenInfo = await oauthClient.validateRefreshToken(
           refreshTokens[i],
-          form.proxy_id,
+          authProxyID.value,
           clientId
         )
         if (!tokenInfo) {
@@ -6455,13 +6542,14 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
 
         if (shouldCreateOpenAI) {
           await adminAPI.accounts.create({
+            ...proxyPoolPayload(),
             name: accountName,
             notes: form.notes,
             platform: 'openai',
             type: 'oauth',
             credentials,
             extra: withUpstreamRequestIdHeader(extra),
-            proxy_id: form.proxy_id,
+            proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
             concurrency: form.concurrency,
             load_factor: form.load_factor ?? undefined,
             priority: form.priority,
@@ -6537,7 +6625,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
       try {
         const tokenInfo = await antigravityOAuth.validateRefreshToken(
           refreshTokens[i],
-          form.proxy_id
+          authProxyID.value
         )
         if (!tokenInfo) {
           failedCount++
@@ -6560,7 +6648,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           type: 'oauth',
           credentials,
           extra: withUpstreamRequestIdHeader({}),
-          proxy_id: form.proxy_id,
+          proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
@@ -6622,7 +6710,7 @@ const handleGeminiExchange = async (authCode: string) => {
       code: authCode.trim(),
       sessionId: geminiOAuth.sessionId.value,
       state: stateToUse,
-      proxyId: form.proxy_id,
+      proxyId: authProxyID.value,
       oauthType: geminiOAuthType.value,
       tierId: geminiSelectedTier.value
     })
@@ -6659,7 +6747,7 @@ const handleAntigravityExchange = async (authCode: string) => {
       code: authCode.trim(),
       sessionId: antigravityOAuth.sessionId.value,
       state: stateToUse,
-      proxyId: form.proxy_id
+      proxyId: authProxyID.value
     })
 		if (!tokenInfo) return
 
@@ -6706,7 +6794,7 @@ const handleGrokExchange = async (authCode: string) => {
       code: authCode.trim(),
       sessionId: grokOAuth.sessionId.value,
       state: stateToUse,
-      proxyId: form.proxy_id
+      proxyId: authProxyID.value
     })
     if (!tokenInfo) return
 
@@ -6730,7 +6818,7 @@ const handleAnthropicExchange = async (authCode: string) => {
   oauth.error.value = ''
 
   try {
-    const proxyConfig = form.proxy_id ? { proxy_id: form.proxy_id } : {}
+    const proxyConfig = authProxyID.value ? { proxy_id: authProxyID.value } : {}
     const endpoint =
       addMethod.value === 'oauth'
         ? '/admin/accounts/exchange-code'
@@ -6834,7 +6922,7 @@ const handleCookieAuth = async (sessionKey: string) => {
   oauth.error.value = ''
 
   try {
-    const proxyConfig = form.proxy_id ? { proxy_id: form.proxy_id } : {}
+    const proxyConfig = authProxyID.value ? { proxy_id: authProxyID.value } : {}
     const keys = oauth.parseSessionKeys(sessionKey)
 
     if (keys.length === 0) {
@@ -6925,6 +7013,11 @@ const handleCookieAuth = async (sessionKey: string) => {
           extra.custom_base_url = customBaseUrl.value.trim()
         }
 
+        // 账号级透支开关只对 OpenAI OAuth 生效；Setup Token 保持官方行为且不写入此键。
+        if (form.platform === 'openai' && addMethod.value === 'oauth') {
+          extra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
+        }
+
         const accountName = keys.length > 1 ? `${form.name} #${i + 1}` : form.name
 
         const credentials: Record<string, unknown> = { ...tokenInfo }
@@ -6935,13 +7028,14 @@ const handleCookieAuth = async (sessionKey: string) => {
         }
 
         await adminAPI.accounts.create({
+          ...proxyPoolPayload(),
           name: accountName,
           notes: form.notes,
           platform: form.platform,
           type: addMethod.value, // Use addMethod as type: 'oauth' or 'setup-token'
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
-          proxy_id: form.proxy_id,
+          proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,

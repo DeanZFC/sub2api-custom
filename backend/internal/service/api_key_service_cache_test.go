@@ -235,13 +235,15 @@ func TestAPIKeyService_GetByKey_UsesL2Cache(t *testing.T) {
 func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t *testing.T) {
 	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
 	groupID := int64(9)
+	fallbackGroupID := int64(10)
 	apiKey := &APIKey{
-		ID:      1,
-		UserID:  2,
-		GroupID: &groupID,
-		Key:     "k-roundtrip",
-		Name:    "Audit Key",
-		Status:  StatusActive,
+		ID:              1,
+		UserID:          2,
+		GroupID:         &groupID,
+		FallbackGroupID: &fallbackGroupID,
+		Key:             "k-roundtrip",
+		Name:            "Audit Key",
+		Status:          StatusActive,
 		User: &User{
 			ID:          2,
 			Status:      StatusActive,
@@ -267,6 +269,21 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 				},
 			},
 		},
+		FallbackGroup: &Group{
+			ID:                   fallbackGroupID,
+			Name:                 "openai-fallback",
+			Platform:             PlatformOpenAI,
+			Status:               StatusActive,
+			Hydrated:             true,
+			SubscriptionType:     SubscriptionTypeStandard,
+			RateMultiplier:       2.5,
+			RPMLimit:             60,
+			UserConcurrencyLimit: 3,
+			PeakRateEnabled:      true,
+			PeakStart:            "09:00",
+			PeakEnd:              "18:00",
+			PeakRateMultiplier:   1.4,
+		},
 	}
 
 	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
@@ -276,6 +293,18 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.Equal(t, apiKey.Name, roundTrip.Name)
 	require.NotNil(t, roundTrip.Group)
 	require.Equal(t, apiKey.Group.MessagesDispatchModelConfig, roundTrip.Group.MessagesDispatchModelConfig)
+	require.Equal(t, &fallbackGroupID, roundTrip.FallbackGroupID)
+	require.NotNil(t, roundTrip.FallbackGroup)
+	require.Equal(t, fallbackGroupID, roundTrip.FallbackGroup.ID)
+	require.True(t, roundTrip.FallbackGroup.Hydrated)
+	require.Equal(t, SubscriptionTypeStandard, roundTrip.FallbackGroup.SubscriptionType)
+	require.Equal(t, 2.5, roundTrip.FallbackGroup.RateMultiplier)
+	require.Equal(t, 60, roundTrip.FallbackGroup.RPMLimit)
+	require.Equal(t, 3, roundTrip.FallbackGroup.UserConcurrencyLimit)
+	require.True(t, roundTrip.FallbackGroup.PeakRateEnabled)
+	require.Equal(t, "09:00", roundTrip.FallbackGroup.PeakStart)
+	require.Equal(t, "18:00", roundTrip.FallbackGroup.PeakEnd)
+	require.Equal(t, 1.4, roundTrip.FallbackGroup.PeakRateMultiplier)
 }
 
 func TestAPIKeyService_SnapshotRoundTrip_PreservesReasoningEffortPolicy(t *testing.T) {

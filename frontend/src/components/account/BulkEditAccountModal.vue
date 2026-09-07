@@ -973,7 +973,7 @@
         </div>
       </div>
 
-      <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
+      <!-- CPA 指纹出口（仅 OpenAI OAuth） -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label class="input-label mb-0">{{ t('admin.accounts.openai.codexFingerprintMode') }}</label>
@@ -989,6 +989,41 @@
             {{ t('admin.accounts.openai.codexFingerprintModeDesc') }}
           </p>
           <Select v-model="codexFingerprintMode" data-testid="bulk-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
+        </div>
+      </div>
+
+      <!-- Codex 额度透支（仅 OpenAI OAuth） -->
+      <div v-if="allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <label class="input-label mb-0">{{ t('admin.accounts.openai.codexQuotaOverdraft') }}</label>
+          <input
+            v-model="enableCodexQuotaOverdraft"
+            type="checkbox"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div :class="!enableCodexQuotaOverdraft && 'pointer-events-none opacity-50'">
+          <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.codexQuotaOverdraftDesc') }}
+          </p>
+          <button
+            type="button"
+            data-testid="bulk-codex-quota-overdraft-toggle"
+            role="switch"
+            :aria-checked="codexQuotaOverdraftEnabled"
+            @click="codexQuotaOverdraftEnabled = !codexQuotaOverdraftEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexQuotaOverdraftEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexQuotaOverdraftEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
         </div>
       </div>
 
@@ -1540,7 +1575,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
-
 // Platform awareness
 const targetMode = computed(() => props.target?.mode ?? 'selected')
 const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
@@ -1706,11 +1740,15 @@ const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OF
 const upstreamBillingAutoProbeMode = ref<'enabled' | 'disabled'>('enabled')
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
-type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
+const enableCodexQuotaOverdraft = ref(false)
+type CodexFingerprintMode = 'off' | 'account_device' | 'device' | 'session' | 'full'
+// 批量编辑同样采用显式 opt-in，打开应用开关后仍默认保持关闭。
+const codexQuotaOverdraftEnabled = ref(false)
 const enableCodexFingerprintMode = ref(false)
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 const codexFingerprintModeOptions = computed(() => [
   { value: 'off' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintOff') },
+  { value: 'account_device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintAccountDevice') },
   { value: 'device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintDevice') },
   { value: 'session' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintSession') },
   { value: 'full' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintFull') },
@@ -1945,6 +1983,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.concurrency = concurrency.value
   }
 
+
   if (enableLoadFactor.value) {
     // 空值/NaN/0 时发送 0（后端约定 <= 0 表示清除）
     const lf = loadFactor.value
@@ -2088,6 +2127,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.codex_cli_only_allow_app_server = codexCLIOnlyAppServerEnabled.value
   }
 
+  if (enableCodexQuotaOverdraft.value && allOpenAIOAuthOnly.value) {
+    const extra = ensureExtra()
+    extra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
+  }
+
   if (enableCodexFingerprintMode.value) {
     const extra = ensureExtra()
     // off 必须显式落键，不能靠删本地键表达。批量更新走 JSONB 顶层合并
@@ -2222,6 +2266,7 @@ const handleSubmit = async () => {
     enableUpstreamBillingAutoProbe.value ||
     enableCodexCLIOnly.value ||
     enableCodexCLIOnlyAppServer.value ||
+    enableCodexQuotaOverdraft.value ||
     enableCodexFingerprintMode.value ||
     enableOpenAICompactMode.value ||
     enableOpenAICompactModelMapping.value ||
@@ -2373,6 +2418,7 @@ watch(
       enableUpstreamBillingAutoProbe.value = false
       enableCodexCLIOnly.value = false
       enableCodexCLIOnlyAppServer.value = false
+      enableCodexQuotaOverdraft.value = false
       enableCodexFingerprintMode.value = false
       codexFingerprintMode.value = 'off'
       enableOpenAICompactMode.value = false
@@ -2406,6 +2452,7 @@ watch(
       upstreamBillingAutoProbeMode.value = 'enabled'
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
+      codexQuotaOverdraftEnabled.value = false
       openAICompactMode.value = 'auto'
       openAICompactModelMappings.value = []
       rpmLimitEnabled.value = false

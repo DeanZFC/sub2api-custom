@@ -121,12 +121,13 @@ func TestAntigravityRetryLoop_NoURLFallback_UsesConfiguredBaseURL(t *testing.T) 
 
 	upstream := &stubAntigravityUpstream{firstBase: base1, secondBase: base2}
 	account := &Account{
-		ID:          1,
-		Name:        "acc-1",
-		Platform:    PlatformAntigravity,
-		Schedulable: true,
-		Status:      StatusActive,
-		Concurrency: 1,
+		ID:                     1,
+		Name:                   "acc-1",
+		Platform:               PlatformAntigravity,
+		Schedulable:            true,
+		Status:                 StatusActive,
+		Concurrency:            1,
+		RateLimit429RetryCount: retryCountPointer(0),
 	}
 
 	var handleErrorCalled bool

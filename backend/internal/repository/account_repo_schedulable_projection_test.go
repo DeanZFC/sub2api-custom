@@ -9,6 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 
 	"entgo.io/ent/dialect"
@@ -39,9 +40,9 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 	repo := newAccountRepositoryWithSQL(client, db, nil)
 
 	mock.ExpectQuery("schedulable account load projection").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "concurrency", "load_factor"}).
-			AddRow(int64(11), 3, nil).
-			AddRow(int64(12), 2, 7))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "concurrency", "load_factor", "extra"}).
+			AddRow(int64(11), 3, nil, nil).
+			AddRow(int64(12), 2, 7, nil))
 
 	loads, err := repo.ListSchedulableAccountLoads(context.Background())
 	require.NoError(t, err)
@@ -55,12 +56,12 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 	normalized := normalizeSQLWhitespace(capturedSQL)
 	selectClause, _, found := strings.Cut(normalized, " FROM ")
 	require.True(t, found, "unexpected projection SQL: %s", normalized)
-	require.Equal(t, 2, strings.Count(selectClause, ","), "projection must select exactly three columns: %s", selectClause)
+	require.Equal(t, 3, strings.Count(selectClause, ","), "projection must select exactly four columns: %s", selectClause)
 	require.Contains(t, selectClause, `"id"`)
 	require.Contains(t, selectClause, `"concurrency"`)
 	require.Contains(t, selectClause, `"load_factor"`)
 	require.NotContains(t, selectClause, "credentials")
-	require.NotContains(t, selectClause, "extra")
+	require.Contains(t, selectClause, `"extra"`)
 	require.NotContains(t, selectClause, "proxy_id")
 	require.NotContains(t, normalized, "account_groups")
 	require.NotContains(t, normalized, "proxies")
@@ -79,4 +80,37 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 	_, orderClause, hasOrder := strings.Cut(normalized, " ORDER BY ")
 	require.True(t, hasOrder, "projection query must preserve schedulable account order: %s", normalized)
 	require.Contains(t, orderClause, `"priority" ASC`)
+}
+
+func TestSchedulableAccountQueryScopesCodexQuotaOverdraftToMarkedContext(t *testing.T) {
+	service.SetCodexQuotaOverdraftEnabled(true)
+	t.Cleanup(func() { service.SetCodexQuotaOverdraftEnabled(false) })
+
+	buildQuery := func(ctx context.Context) string {
+		var capturedSQL string
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureEntQueryMatcher{actual: &capturedSQL}))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = db.Close() })
+		driver := entsql.OpenDB(dialect.Postgres, db)
+		client := dbent.NewClient(dbent.Driver(driver))
+		t.Cleanup(func() { _ = client.Close() })
+		repo := newAccountRepositoryWithSQL(client, db, nil)
+		mock.ExpectQuery("schedulable query").WillReturnRows(sqlmock.NewRows([]string{"id", "concurrency", "load_factor", "extra"}))
+		_, err = repo.ListSchedulableAccountLoads(ctx)
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+		return normalizeSQLWhitespace(capturedSQL)
+	}
+
+	ordinarySQL := buildQuery(context.Background())
+	require.NotContains(t, ordinarySQL, `"temp_unschedulable_reason" LIKE`)
+
+	overdraftSQL := buildQuery(service.WithCodexQuotaOverdraftScheduling(context.Background()))
+	require.Contains(t, overdraftSQL, `"temp_unschedulable_reason" LIKE`)
+	require.Contains(t, overdraftSQL, `"platform" =`)
+	require.Contains(t, overdraftSQL, `"type" =`)
+	require.Contains(t, overdraftSQL, `"parent_account_id" IS NULL`)
+	require.Contains(t, overdraftSQL, "codex_quota_overdraft_enabled")
+	require.Contains(t, overdraftSQL, "COALESCE")
+	require.Contains(t, overdraftSQL, "'false') = 'true'")
 }

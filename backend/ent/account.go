@@ -43,6 +43,8 @@ type Account struct {
 	ProxyFallbackOriginID *int64 `json:"proxy_fallback_origin_id,omitempty"`
 	// Concurrency holds the value of the "concurrency" field.
 	Concurrency int `json:"concurrency,omitempty"`
+	// RateLimit429RetryCount holds the value of the "rate_limit_429_retry_count" field.
+	RateLimit429RetryCount int `json:"rate_limit_429_retry_count,omitempty"`
 	// LoadFactor holds the value of the "load_factor" field.
 	LoadFactor *int `json:"load_factor,omitempty"`
 	// Priority holds the value of the "priority" field.
@@ -175,7 +177,7 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case account.FieldRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case account.FieldID, account.FieldProxyID, account.FieldProxyFallbackOriginID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldPriority, account.FieldParentAccountID:
+		case account.FieldID, account.FieldProxyID, account.FieldProxyFallbackOriginID, account.FieldConcurrency, account.FieldRateLimit429RetryCount, account.FieldLoadFactor, account.FieldPriority, account.FieldParentAccountID:
 			values[i] = new(sql.NullInt64)
 		case account.FieldName, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus, account.FieldQuotaDimension:
 			values[i] = new(sql.NullString)
@@ -281,6 +283,12 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field concurrency", values[i])
 			} else if value.Valid {
 				_m.Concurrency = int(value.Int64)
+			}
+		case account.FieldRateLimit429RetryCount:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field rate_limit_429_retry_count", values[i])
+			} else if value.Valid {
+				_m.RateLimit429RetryCount = int(value.Int64)
 			}
 		case account.FieldLoadFactor:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -518,6 +526,9 @@ func (_m *Account) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("concurrency=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Concurrency))
+	builder.WriteString(", ")
+	builder.WriteString("rate_limit_429_retry_count=")
+	builder.WriteString(fmt.Sprintf("%v", _m.RateLimit429RetryCount))
 	builder.WriteString(", ")
 	if v := _m.LoadFactor; v != nil {
 		builder.WriteString("load_factor=")

@@ -373,6 +373,9 @@ func normalizeUpdateGroupInputForSimpleMode(input *UpdateGroupInput) {
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	if input != nil && input.UserConcurrencyLimit < 0 {
+		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_USER_CONCURRENCY_LIMIT", "user_concurrency_limit must be non-negative")
+	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && NormalizeGroupPlatform(input.Platform) == PlatformComposite {
 		return nil, infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
 	}
@@ -609,6 +612,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		// 成员关系无从校验（前端创建对话框也不展示）。
 		CodexModelsManifestConfig:   normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig),
 		RPMLimit:                    input.RPMLimit,
+		UserConcurrencyLimit:        input.UserConcurrencyLimit,
 		MaxReasoningEffort:          maxReasoningEffort,
 		MaxReasoningEffortOverLimit: maxReasoningEffortOverLimit,
 		ReasoningEffortMappings:     reasoningEffortMappings,
@@ -1006,6 +1010,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.RPMLimit != nil {
 		group.RPMLimit = *input.RPMLimit
+	}
+	if input.UserConcurrencyLimit != nil {
+		if *input.UserConcurrencyLimit < 0 {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_USER_CONCURRENCY_LIMIT", "user_concurrency_limit must be non-negative")
+		}
+		group.UserConcurrencyLimit = *input.UserConcurrencyLimit
 	}
 	if input.MaxReasoningEffort != nil {
 		maxReasoningEffort, err := normalizeMaxReasoningEffortForPlatform(group.Platform, *input.MaxReasoningEffort)

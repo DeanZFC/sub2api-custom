@@ -388,6 +388,46 @@ func TestGatewayProfitControlTerminalRefreshFailureFallsBackToSelectedObject(t *
 	require.Empty(t, reason)
 }
 
+func TestGatewayProfitControlTerminalRefreshPreservesSelectedProxyBinding(t *testing.T) {
+	selected := gatewayProfitTestAccount(155, PlatformAnthropic, 0.2, 1)
+	proxyA := &Proxy{ID: 501, Name: "default"}
+	proxyB := &Proxy{ID: 502, Name: "selected"}
+	selected.Extra = map[string]any{
+		ProxyConcurrencyLimitEnabledExtraKey: true,
+		ProxyPoolIDsExtraKey:                 []int64{proxyA.ID, proxyB.ID},
+	}
+	selected.ProxyPoolIDs = []int64{proxyA.ID, proxyB.ID}
+	selected.ProxyPool = []*Proxy{proxyA, proxyB}
+	selected.ProxyID = &proxyB.ID
+	selected.Proxy = proxyB
+
+	// The refreshed scheduler object carries the persisted default proxy A.
+	replacement := selected
+	replacement.ProxyID = &proxyA.ID
+	replacement.Proxy = proxyA
+	expensiveRate := 0.8
+	replacement.RateMultiplier = &expensiveRate
+	snapshot := NewSchedulerSnapshotService(
+		&gatewayProfitSnapshotCache{account: &replacement},
+		nil,
+		gatewayProfitAccountRepo{},
+		nil,
+		nil,
+	)
+	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+		groupID:   1,
+		platform:  PlatformAnthropic,
+		threshold: 0.5,
+	})
+
+	latest, vetoed, reason := profitControlVetoLatest(ctx, &selected, snapshot)
+	require.True(t, vetoed)
+	require.Equal(t, openAIProfitFilterReasonThreshold, reason)
+	require.Same(t, proxyB, latest.Proxy, "终检刷新账号后必须继续使用本次槽位选中的代理")
+	require.NotNil(t, latest.ProxyID)
+	require.Equal(t, proxyB.ID, *latest.ProxyID)
+}
+
 // 选号结果携带门：门安装在调度栈局部 ctx 上，handler 必须经
 // ContextWithSelectionProfitGate 重放后终检与准入后绑定才可见（评审修复回归）。
 func TestGatewayProfitControlSelectionCarriesGateToHandlerContext(t *testing.T) {

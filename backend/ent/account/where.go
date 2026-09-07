@@ -105,6 +105,11 @@ func Concurrency(v int) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldConcurrency, v))
 }
 
+// RateLimit429RetryCount applies equality check predicate on the "rate_limit_429_retry_count" field. It's identical to RateLimit429RetryCountEQ.
+func RateLimit429RetryCount(v int) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldRateLimit429RetryCount, v))
+}
+
 // LoadFactor applies equality check predicate on the "load_factor" field. It's identical to LoadFactorEQ.
 func LoadFactor(v int) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldLoadFactor, v))
@@ -713,6 +718,46 @@ func ConcurrencyLT(v int) predicate.Account {
 // ConcurrencyLTE applies the LTE predicate on the "concurrency" field.
 func ConcurrencyLTE(v int) predicate.Account {
 	return predicate.Account(sql.FieldLTE(FieldConcurrency, v))
+}
+
+// RateLimit429RetryCountEQ applies the EQ predicate on the "rate_limit_429_retry_count" field.
+func RateLimit429RetryCountEQ(v int) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldRateLimit429RetryCount, v))
+}
+
+// RateLimit429RetryCountNEQ applies the NEQ predicate on the "rate_limit_429_retry_count" field.
+func RateLimit429RetryCountNEQ(v int) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldRateLimit429RetryCount, v))
+}
+
+// RateLimit429RetryCountIn applies the In predicate on the "rate_limit_429_retry_count" field.
+func RateLimit429RetryCountIn(vs ...int) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldRateLimit429RetryCount, vs...))
+}
+
+// RateLimit429RetryCountNotIn applies the NotIn predicate on the "rate_limit_429_retry_count" field.
+func RateLimit429RetryCountNotIn(vs ...int) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldRateLimit429RetryCount, vs...))
+}
+
+// RateLimit429RetryCountGT applies the GT predicate on the "rate_limit_429_retry_count" field.
+func RateLimit429RetryCountGT(v int) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldRateLimit429RetryCount, v))
+}
+
+// RateLimit429RetryCountGTE applies the GTE predicate on the "rate_limit_429_retry_count" field.
+func RateLimit429RetryCountGTE(v int) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldRateLimit429RetryCount, v))
+}
+
+// RateLimit429RetryCountLT applies the LT predicate on the "rate_limit_429_retry_count" field.
+func RateLimit429RetryCountLT(v int) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldRateLimit429RetryCount, v))
+}
+
+// RateLimit429RetryCountLTE applies the LTE predicate on the "rate_limit_429_retry_count" field.
+func RateLimit429RetryCountLTE(v int) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldRateLimit429RetryCount, v))
 }
 
 // LoadFactorEQ applies the EQ predicate on the "load_factor" field.

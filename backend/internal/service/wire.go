@@ -44,7 +44,9 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 
 // ProvideUpdateService creates UpdateService with BuildInfo
 func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo) *UpdateService {
-	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+	svc := NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+	svc.SetSourceUpdateAgent(NewSourceUpdateAgentFromEnv())
+	return svc
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
@@ -240,6 +242,7 @@ func ProvideAccountUsageService(
 		tlsFPProfileService,
 	)
 	service.agentIdentityWS = openAIGatewayService
+	service.SetCodexQuotaOverdraftCoordinator(openAIGatewayService.codexQuotaOverdraftCoordinator(tlsFPProfileService))
 	return service
 }
 
@@ -269,6 +272,7 @@ func ProvideAccountTestService(
 	service.agentIdentityWS = openAIGatewayService
 	service.SetOpenAIGatewayService(openAIGatewayService)
 	service.SetSettingService(settingService)
+	service.SetCodexQuotaOverdraftCoordinator(openAIGatewayService.codexQuotaOverdraftCoordinator(tlsFPProfileService))
 	service.SetPluginManager(pluginManager)
 	return service
 }

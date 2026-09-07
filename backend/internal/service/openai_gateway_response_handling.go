@@ -569,6 +569,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					}
 				}
 				if !outputStarted {
+					if retryErr := s.newCodexPreOutputRetrySSEError(c, account, resp, dataBytes, eventType, failedMessage); retryErr != nil {
+						sawFailedEvent = true
+						streamEarlyErr = retryErr
+						return
+					}
 					shouldFailover := false
 					if !cyberHit {
 						if eventType == "error" {

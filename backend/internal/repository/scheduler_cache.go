@@ -773,6 +773,10 @@ func decodeCachedAccount(val any) (*service.Account, error) {
 	if err := json.Unmarshal(payload, &account); err != nil {
 		return nil, err
 	}
+	// Older scheduler entries may contain the pool configuration only in Extra.
+	// Rebuild the typed fields on read so those entries remain usable until the
+	// next normal cache refresh.
+	account.SyncProxyPoolConfig()
 	return &account, nil
 }
 
@@ -863,12 +867,14 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
+	account.SyncProxyPoolConfig()
 	return service.Account{
 		ID:                      account.ID,
 		Name:                    account.Name,
 		Platform:                account.Platform,
 		Type:                    account.Type,
 		Concurrency:             account.Concurrency,
+		RateLimit429RetryCount:  account.RateLimit429RetryCount,
 		LoadFactor:              account.LoadFactor,
 		Priority:                account.Priority,
 		RateMultiplier:          account.RateMultiplier,
@@ -887,6 +893,9 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		SessionWindowStatus:     account.SessionWindowStatus,
 		ParentAccountID:         account.ParentAccountID,
 		QuotaDimension:          account.QuotaDimension,
+		ProxyID:                 account.ProxyID,
+		ProxyPoolIDs:            append([]int64(nil), account.ProxyPoolIDs...),
+		ProxyPool:               append([]*service.Proxy(nil), account.ProxyPool...),
 		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
 		Credentials:             filterSchedulerCredentials(account.Credentials),
@@ -1024,6 +1033,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		service.UpstreamBillingProbeExtraKey,
 		service.GrokMediaEligibleExtraKey,
 		"grok_billing_snapshot",
+		service.ProxyConcurrencyLimitEnabledExtraKey,
+		service.ProxyPoolIDsExtraKey,
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {

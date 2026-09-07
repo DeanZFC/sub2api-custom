@@ -97,10 +97,13 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		return
 	}
 
-	userRelease, acquired, err := h.concurrencyHelper.TryAcquireUserSlot(
+	groupID, groupMax := apiKeyUserConcurrencyLimit(apiKey)
+	userRelease, acquired, err := h.concurrencyHelper.TryAcquireUserSlotForGroup(
 		c.Request.Context(),
 		subject.UserID,
 		subject.Concurrency,
+		groupID,
+		groupMax,
 	)
 	if err != nil {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Live concurrency unavailable")
@@ -113,7 +116,7 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 	defer userRelease()
 
 	identity := liveCallIdentity(c, apiKey, subject.UserID, subscription)
-	created, err := h.gatewayService.CreateLiveCall(c.Request.Context(), request, identity, subject.Concurrency)
+	created, err := h.gatewayService.CreateLiveCall(c.Request.Context(), request, identity, subject.Concurrency, groupMax)
 	if err != nil {
 		h.writeLiveCreateError(c, err)
 		return
@@ -170,6 +173,7 @@ func liveCallIdentity(
 		APIKeyID:        apiKey.ID,
 		UserID:          userID,
 		GroupID:         apiKey.GroupID,
+		FallbackGroupID: apiKey.FallbackGroupID,
 		SubscriptionID:  subscriptionID,
 		UserAgent:       c.GetHeader("User-Agent"),
 		IPAddress:       ip.GetClientIP(c),
@@ -214,9 +218,10 @@ func (h *OpenAIGatewayHandler) LiveSideband(c *gin.Context) {
 		return
 	}
 	identity := service.LiveCallIdentity{
-		APIKeyID: apiKey.ID,
-		UserID:   subject.UserID,
-		GroupID:  apiKey.GroupID,
+		APIKeyID:        apiKey.ID,
+		UserID:          subject.UserID,
+		GroupID:         apiKey.GroupID,
+		FallbackGroupID: apiKey.FallbackGroupID,
 	}
 	record, err := h.gatewayService.GetLiveCallForIdentity(c.Request.Context(), c.Param("call_id"), identity)
 	if err != nil {
