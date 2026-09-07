@@ -276,7 +276,7 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$0.069568')
   })
 
-  it('shows a compact cache hit rate in the list and exact rate in the token tooltip', async () => {
+  it('keeps cache token counts beside a compact cache hit rate in the list', async () => {
     const row = {
       request_id: 'req-admin-cache-hit-rate',
       actual_cost: 0,
@@ -289,8 +289,8 @@ describe('admin UsageTable tooltip', () => {
       cache_read_cost: 0,
       input_tokens: 100,
       output_tokens: 10,
-      cache_creation_tokens: 0,
-      cache_read_tokens: 900,
+      cache_creation_tokens: 100,
+      cache_read_tokens: 800,
       image_input_tokens: 0,
       image_output_tokens: 0,
       billing_mode: 'token',
@@ -312,12 +312,14 @@ describe('admin UsageTable tooltip', () => {
       },
     })
 
-    expect(wrapper.get('[data-testid="cache-hit-rate-cell"]').text()).toBe('90.0%')
+    expect(wrapper.get('[data-testid="cache-read-tokens-cell"]').text()).toBe('800')
+    expect(wrapper.get('[data-testid="cache-creation-tokens-cell"]').text()).toBe('100')
+    expect(wrapper.get('[data-testid="cache-hit-rate-cell"]').text()).toBe('80.0%')
 
     await wrapper.findAll('.group.relative')[0].trigger('mouseenter')
     await nextTick()
 
-    expect(wrapper.get('[data-testid="token-cache-hit-rate-tooltip"]').text()).toContain('90.00%')
+    expect(wrapper.get('[data-testid="token-cache-hit-rate-tooltip"]').text()).toContain('80.00%')
   })
 
   it('shows requested and upstream models separately for admin rows', () => {
