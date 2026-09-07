@@ -11,6 +11,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 awk '
+  /^GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED=/ { next }
   /^GATEWAY_[A-Z0-9_]+=/ {
     separator = index($0, "=")
     print substr($0, 1, separator - 1) "\t" substr($0, separator + 1)
@@ -42,6 +43,17 @@ do
       exit 1
     fi
   done < "$gateway_variables"
+done
+
+# Fork-only settings belong to the source-build overlays, not the upstream image.
+for compose_file in deploy/docker-compose.custom.yml deploy/docker-compose.overdraft.yml; do
+  expected='      - GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED=${GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED:-true}'
+  expected_count=$(grep -Fxc "$expected" "$compose_file" || true)
+  key_count=$(grep -Ec '^[[:space:]]*-[[:space:]]*GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED([[:space:]]*=.*)?[[:space:]]*$' "$compose_file" || true)
+  if [ "$expected_count" -ne 1 ] || [ "$key_count" -ne 1 ]; then
+    printf '%s must pass the fork quota setting exactly once\n' "$compose_file" >&2
+    exit 1
+  fi
 done
 
 printf 'docker compose Gateway environment test passed\n'
