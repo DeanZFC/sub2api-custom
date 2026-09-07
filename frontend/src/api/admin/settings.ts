@@ -1327,6 +1327,24 @@ export interface PanelRateLimitSettings {
   public_ip_rpm: number;
 }
 
+export interface CodexPreOutputRetrySettings {
+  enabled: boolean;
+  max_retries: number;
+  retry_interval_ms: number;
+  max_retry_window_seconds: number;
+  keywords: string[];
+}
+
+export async function getCodexPreOutputRetrySettings(): Promise<CodexPreOutputRetrySettings> {
+  const { data } = await apiClient.get<CodexPreOutputRetrySettings>("/admin/settings/codex-pre-output-retry");
+  return data;
+}
+
+export async function updateCodexPreOutputRetrySettings(settings: CodexPreOutputRetrySettings): Promise<CodexPreOutputRetrySettings> {
+  const { data } = await apiClient.put<CodexPreOutputRetrySettings>("/admin/settings/codex-pre-output-retry", settings);
+  return data;
+}
+
 export async function getPanelRateLimitSettings(): Promise<PanelRateLimitSettings> {
   const { data } = await apiClient.get<PanelRateLimitSettings>(
     "/admin/settings/panel-rate-limit",
@@ -1573,6 +1591,8 @@ export const settingsAPI = {
   updateRateLimit429CooldownSettings,
   getPanelRateLimitSettings,
   updatePanelRateLimitSettings,
+  getCodexPreOutputRetrySettings,
+  updateCodexPreOutputRetrySettings,
   getStreamTimeoutSettings,
   updateStreamTimeoutSettings,
   getRectifierSettings,

@@ -406,6 +406,16 @@ func buildOpenAIWSHTTPBridgeFailedEvent(responseID, model string, source []byte,
 }
 
 func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
+	ctx context.Context, c *gin.Context, account *Account, token string,
+	payload []byte, payloadBytes int, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity string,
+	turn int, writeClientMessage func([]byte) error,
+) (*OpenAIForwardResult, error) {
+	return s.withCodexPreOutputRetry(ctx, c, account, func() (*OpenAIForwardResult, error) {
+		return s.proxyOpenAIWSHTTPBridgeAttempt(ctx, c, account, token, payload, payloadBytes, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity, turn, writeClientMessage)
+	})
+}
+
+func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeAttempt(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
@@ -591,6 +601,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			upstreamMsg = http.StatusText(resp.StatusCode)
 		}
 		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
+		if retryErr := s.newCodexPreOutputRetryError(c, account, resp.StatusCode, resp.Header, respBody, upstreamMsg); retryErr != nil {
+			return nil, retryErr
+		}
 		if account.Platform == PlatformGrok {
 			shouldFailover = s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody)
 			s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, resolveGrokWSUpstreamModel(account, body, originalModel)), account, resp.StatusCode, resp.Header, respBody)
@@ -811,6 +824,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				errMessage = "upstream error event"
 			}
 			statusCode := openAIStreamFailureStatus(upstreamMessage, errMessage)
+			if !wroteDownstream {
+				if retryErr := s.newCodexPreOutputRetryError(c, account, statusCode, resp.Header, upstreamMessage, errMessage); retryErr != nil {
+					return nil, retryErr
+				}
+			}
 			shouldFailover := openAIStreamFailedEventShouldFailover(upstreamMessage, errMessage)
 			if eventType == "error" {
 				errCodeRaw, errTypeRaw, _ := parseOpenAIWSErrorEventFields(upstreamMessage)
