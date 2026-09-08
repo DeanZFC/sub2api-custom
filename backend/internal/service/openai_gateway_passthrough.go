@@ -1841,6 +1841,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
 	}
+	if err := s.prepareCodexBufferedResponse(ctx, resp, c, account, startTime, 0); err != nil {
+		return nil, err
+	}
+	if buffered, ok := resp.Body.(*codexRetryBufferedBody); ok {
+		defer func() { _ = buffered.Close() }()
+	}
 	retrySettings, _ := c.Get(codexRetrySettingsContextKey)
 	_, stageRetryHeaders := retrySettings.(CodexPreOutputRetrySettings)
 	applyAttemptHeaders := func() {
