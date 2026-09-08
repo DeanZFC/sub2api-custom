@@ -1329,10 +1329,6 @@ export interface UsageProgress {
   window_stats?: WindowStats | null // 窗口期统计（从窗口开始到当前的使用量）
   used_requests?: number
   limit_requests?: number
-  overdraft_active?: boolean
-  overdraft_stats?: WindowStats | null
-  overdraft_started_at?: string | null
-  overdraft_recover_at?: string | null
 }
 
 // Antigravity 单个模型的配额信息
@@ -1389,7 +1385,6 @@ export interface AccountUsageInfo {
   updated_at: string | null
   five_hour: UsageProgress | null
   seven_day: UsageProgress | null
-  codex_quota_overdraft?: CodexQuotaOverdraftProbeState | null
   seven_day_sonnet: UsageProgress | null
   seven_day_fable?: UsageProgress | null
   thirty_day?: UsageProgress | null
