@@ -304,8 +304,8 @@
             </div>
           </div>
 
-          <!-- Rate Limit Cooldown (429) Settings -->
-          <div class="card">
+          <!-- Custom 429 cooldown removed; official upstream rate-limit handling remains enabled. -->
+          <div v-if="false" class="card">
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
@@ -8983,13 +8983,11 @@ const overloadCooldownForm = reactive({
   cooldown_minutes: 10,
 });
 
-// Rate Limit Cooldown (429) 状态
-const rateLimit429CooldownLoading = ref(true);
-const rateLimit429CooldownSaving = ref(false);
-const rateLimit429CooldownForm = reactive({
-  enabled: true,
-  cooldown_seconds: 5,
-});
+// Custom 429 cooldown settings are intentionally not exposed.
+const rateLimit429CooldownLoading = ref(false)
+const rateLimit429CooldownSaving = ref(false)
+const rateLimit429CooldownForm = reactive({ enabled: false, cooldown_seconds: 0 })
+const saveRateLimit429CooldownSettings = () => undefined
 
 // Panel API Rate Limit 状态
 const panelRateLimitLoading = ref(true);
@@ -11876,8 +11874,7 @@ async function savePanelRateLimitSettings() {
   }
 }
 
-// Rate Limit Cooldown (429) 方法
-async function loadRateLimit429CooldownSettings() {
+/* async function loadRateLimit429CooldownSettings() {
   rateLimit429CooldownLoading.value = true;
   try {
     const settings = await adminAPI.settings.getRateLimit429CooldownSettings();
@@ -11887,8 +11884,9 @@ async function loadRateLimit429CooldownSettings() {
   } finally {
     rateLimit429CooldownLoading.value = false;
   }
-}
+} */
 
+/*
 async function saveRateLimit429CooldownSettings() {
   rateLimit429CooldownSaving.value = true;
   try {
@@ -11909,6 +11907,7 @@ async function saveRateLimit429CooldownSettings() {
     rateLimit429CooldownSaving.value = false;
   }
 }
+*/
 
 // Stream Timeout 方法
 async function loadStreamTimeoutSettings() {
@@ -12555,7 +12554,6 @@ onMounted(() => {
   loadUpstreamBillingProbeSettings();
   loadOllamaCloudUsageSettings();
   loadOverloadCooldownSettings();
-  loadRateLimit429CooldownSettings();
   loadPanelRateLimitSettings();
   loadStreamTimeoutSettings();
   loadRectifierSettings();
