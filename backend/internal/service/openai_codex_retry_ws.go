@@ -99,7 +99,13 @@ func (c *codexRetryWSFrameConn) ReadFrame(ctx context.Context) (coderws.MessageT
 		turn := c.turn
 		if err != nil {
 			if turn != nil && len(turn.buffer) > 0 && ctx.Err() == nil {
-				c.ready, turn.buffer = turn.buffer, nil
+				if turn.settings.BufferUntilComplete && !turn.committed && len(turn.pendingError) > 0 {
+					c.ready = codexRetryWSErrorFrames(turn.buffer)
+					turn.exhausted = true
+				} else {
+					c.ready = turn.buffer
+				}
+				turn.buffer, turn.pendingError, turn.bufferBytes = nil, nil, 0
 				c.readError = err
 				turn.committed = true
 				c.mu.Unlock()
@@ -153,10 +159,11 @@ func (c *codexRetryWSFrameConn) ReadFrame(ctx context.Context) (coderws.MessageT
 			}
 			continue
 		}
-		if matched && eventType == "response.failed" && turn.settings.BufferUntilComplete && !turn.committed {
+		if kind == coderws.MessageText && eventType == "response.failed" && turn.settings.BufferUntilComplete && !turn.committed {
 			c.ready = codexRetryWSFailureFrames(turn, kind, payload)
+			turn.exhausted = matched || (terminalErrorMissing && len(turn.pendingError) > 0)
 			turn.buffer, turn.pendingError, turn.bufferBytes = nil, nil, 0
-			turn.committed, turn.exhausted = true, true
+			turn.committed = true
 			c.mu.Unlock()
 			continue
 		}
@@ -165,8 +172,13 @@ func (c *codexRetryWSFrameConn) ReadFrame(ctx context.Context) (coderws.MessageT
 		if matched && eventType == "error" && !turn.committed && turn.bufferBytes < codexRetryWSBufferLimit && len(turn.buffer) < codexRetryWSFrameLimit && turn.settings.canRetryAfter(turn.retries, turn.started, delay) {
 			turn.pendingError = append([]byte(nil), payload...)
 		} else if turn.committed || kind != coderws.MessageText || (!turn.settings.BufferUntilComplete && openAIStreamDataStartsClientOutput(string(payload), eventType)) || openAIStreamEventTypeIsTerminal(eventType) || eventType == "error" || turn.bufferBytes >= codexRetryWSBufferLimit || len(turn.buffer) >= codexRetryWSFrameLimit || time.Since(turn.started) >= time.Duration(turn.settings.MaxRetryWindowSeconds)*time.Second {
+			if turn.settings.BufferUntilComplete && !turn.committed && eventType == "error" {
+				c.ready = codexRetryWSErrorFrames(turn.buffer)
+			} else {
+				c.ready = turn.buffer
+			}
+			turn.buffer, turn.pendingError, turn.bufferBytes = nil, nil, 0
 			turn.committed = true
-			c.ready, turn.buffer = turn.buffer, nil
 		}
 		c.mu.Unlock()
 	}
@@ -175,15 +187,20 @@ func (c *codexRetryWSFrameConn) ReadFrame(ctx context.Context) (coderws.MessageT
 func codexRetryWSFailureFrames(turn *codexRetryWSTurn, kind coderws.MessageType, payload []byte) []codexRetryWSFrame {
 	frames := turn.buffer
 	if turn.settings.BufferUntilComplete && !turn.committed {
-		frames = nil
-		for _, frame := range turn.buffer {
-			eventType := gjson.GetBytes(frame.body, "type").String()
-			if eventType == "error" || eventType == "response.failed" {
-				frames = append(frames, frame)
-			}
-		}
+		frames = codexRetryWSErrorFrames(turn.buffer)
 	}
 	return append(frames, codexRetryWSFrame{kind: kind, body: append([]byte(nil), payload...)})
+}
+
+func codexRetryWSErrorFrames(buffer []codexRetryWSFrame) []codexRetryWSFrame {
+	var frames []codexRetryWSFrame
+	for _, frame := range buffer {
+		eventType := gjson.GetBytes(frame.body, "type").String()
+		if eventType == "error" || eventType == "response.failed" {
+			frames = append(frames, frame)
+		}
+	}
+	return frames
 }
 
 func (c *codexRetryWSFrameConn) Close() error { return c.inner.Close() }
