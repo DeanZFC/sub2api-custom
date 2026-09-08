@@ -17,6 +17,7 @@ import (
 
 const CodexPreOutputRetryReason GatewayFailureReason = "codex_pre_output_retry"
 const codexRetrySettingsContextKey = "codex_pre_output_retry_settings"
+const codexRetryStartedContextKey = "codex_pre_output_retry_started"
 
 // Match only error fields: successful output and echoed request content must
 // never turn a response into a replayable failure.
@@ -169,6 +170,15 @@ func (s *OpenAIGatewayService) withCodexPreOutputRetry(ctx context.Context, c *g
 		}
 	}()
 	started := time.Now()
+	previousStart, startExisted := c.Get(codexRetryStartedContextKey)
+	c.Set(codexRetryStartedContextKey, started)
+	defer func() {
+		if startExisted {
+			c.Set(codexRetryStartedContextKey, previousStart)
+		} else {
+			c.Set(codexRetryStartedContextKey, nil)
+		}
+	}()
 	initialHeaders := c.Writer.Header().Clone()
 	for retries := 0; ; retries++ {
 		attemptStart := time.Now()
@@ -208,14 +218,14 @@ func (s *OpenAIGatewayService) withCodexPreOutputRetry(ctx context.Context, c *g
 			return result, err
 		}
 		// A delayed timer must not start another attempt outside the window.
-		if !settings.canRetryAfter(retries, started, 0) {
+		if !settings.canRetry(retries, started) {
 			return result, retryErr
 		}
 	}
 }
 
 func (v CodexPreOutputRetrySettings) canRetry(retries int, started time.Time) bool {
-	return v.canRetryAfter(retries, started, time.Duration(v.RetryIntervalMs)*time.Millisecond)
+	return v.canRetryAfter(retries, started, 0)
 }
 
 func (v CodexPreOutputRetrySettings) canRetryAfter(retries int, started time.Time, delay time.Duration) bool {
@@ -227,7 +237,9 @@ func (v CodexPreOutputRetrySettings) retryDelay(retries int, headers http.Header
 	delay := time.Duration(v.RetryIntervalMs) * time.Millisecond
 	if v.ExponentialBackoff {
 		// A 100 ms base otherwise spends all retries during the same overload.
-		delay = max(delay, time.Second)
+		if delay < time.Second {
+			delay = time.Second
+		}
 		for attempt := 0; attempt < retries && delay < 10*time.Second; attempt++ {
 			delay *= 2
 		}
@@ -235,7 +247,10 @@ func (v CodexPreOutputRetrySettings) retryDelay(retries int, headers http.Header
 		// Positive jitter never shortens the base delay or Retry-After.
 		delay += time.Duration(rand.Int64N(int64(delay/5) + 1))
 	}
-	return max(delay, codexRetryAfter(headers.Get("Retry-After"), now))
+	if retryAfter := codexRetryAfter(headers.Get("Retry-After"), now); retryAfter > delay {
+		delay = retryAfter
+	}
+	return delay
 }
 
 func codexRetryAfter(raw string, now time.Time) time.Duration {
@@ -248,10 +263,6 @@ func codexRetryAfter(raw string, now time.Time) time.Duration {
 		return min(date.Sub(now), 301*time.Second)
 	}
 	return 0
-}
-
-func (v CodexPreOutputRetrySettings) wait(ctx context.Context) error {
-	return waitCodexRetry(ctx, time.Duration(v.RetryIntervalMs)*time.Millisecond)
 }
 
 func waitCodexRetry(ctx context.Context, delay time.Duration) error {
