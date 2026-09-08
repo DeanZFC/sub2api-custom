@@ -560,9 +560,9 @@ export interface Group {
   platform: GroupPlatform
   rate_multiplier: number
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
-  user_concurrency_limit?: number // Per-user concurrent request cap inside this group (0 = unlimited)
-  max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
-  max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
+	max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
+	max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
+	user_concurrency_limit?: number // Per-user concurrent request cap inside this group (0 = unlimited)
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   is_exclusive: boolean
   status: 'active' | 'inactive'
@@ -1333,27 +1333,6 @@ export interface UsageProgress {
   overdraft_recover_at?: string | null
 }
 
-export interface CodexQuotaOverdraftProbeState {
-  status: 'pending' | 'passed' | 'failed' | 'inconclusive' | 'recovered'
-  quota_window: '5h' | '7d' | 'multiple'
-  cycle_key: string
-  attempts: number
-  limit: number
-  model?: string
-  reason_code?: string
-  started_at: string
-  tested_at?: string | null
-  retry_at?: string | null
-  retry_count?: number
-  recover_at?: string | null
-  five_hour_recover_at?: string | null
-  seven_day_recover_at?: string | null
-  overdraft_started_at?: string | null
-  five_hour_overdraft_started_at?: string | null
-  seven_day_overdraft_started_at?: string | null
-  observed_rate_limit_reset_at?: string | null
-}
-
 // Antigravity 单个模型的配额信息
 export interface AntigravityModelQuota {
   utilization: number // 使用率 0-100
@@ -1457,6 +1436,20 @@ export interface AccountUsageInfo {
   error?: string            // usage 获取失败时的错误信息
 }
 
+export interface CodexQuotaOverdraftProbeState {
+  status?: string
+  attempts?: number
+  limit?: number
+  quota_window?: string
+  tested_at?: string | null
+  model?: string
+  reason_code?: string
+  active?: boolean
+  started_at?: string | null
+  recover_at?: string | null
+  stats?: WindowStats | null
+}
+
 // OpenAI Codex usage snapshot (from response headers)
 export interface CodexUsageSnapshot {
   // Legacy fields (kept for backwards compatibility)
@@ -1527,8 +1520,6 @@ export interface UpdateAccountRequest {
   credentials?: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
   concurrency?: number
   load_factor?: number | null
   priority?: number
@@ -1670,8 +1661,6 @@ export interface OpenAICodexPATCreateRequest {
   notes?: string | null
   group_ids?: number[]
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
   concurrency?: number
   priority?: number
   rate_multiplier?: number
