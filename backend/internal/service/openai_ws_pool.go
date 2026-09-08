@@ -2235,21 +2235,6 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 	return key
 }
 
-func activeCodexFingerprintMode(account *Account, uniqueFingerprintEnabled ...bool) codexFingerprintMode {
-	enabled := len(uniqueFingerprintEnabled) > 0 && uniqueFingerprintEnabled[0]
-	mode, isDefault := resolveCodexFingerprintMode(account, enabled)
-	if mode == codexFingerprintOff {
-		return codexFingerprintOff
-	}
-	if isDefault {
-		return mode
-	}
-	if _, ok := codexFingerprintSeed(account.Extra); !ok {
-		return codexFingerprintOff
-	}
-	return mode
-}
-
 func normalizeOpenAIWSStableIdentityHeader(headers http.Header, name string) string {
 	if headers == nil {
 		return ""

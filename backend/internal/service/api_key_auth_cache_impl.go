@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 24 // v24: fallback billing plus official OpenAI fast fields
+const apiKeyAuthSnapshotVersion = 25 // v25: official model_allowlist semantics with custom fallback billing and concurrency fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -386,7 +386,7 @@ func apiKeyAuthGroupSnapshotFromGroup(group *Group) *APIKeyAuthGroupSnapshot {
 		RequirePrivacySet:               group.RequirePrivacySet,
 		DefaultMappedModel:              group.DefaultMappedModel,
 		MessagesDispatchModelConfig:     group.MessagesDispatchModelConfig,
-		ModelsListConfig:                group.ModelsListConfig,
+		ModelAllowlist:                  group.ModelAllowlist,
 		RPMLimit:                        group.RPMLimit,
 		UserConcurrencyLimit:            group.UserConcurrencyLimit,
 		MaxReasoningEffort:              group.MaxReasoningEffort,
@@ -458,7 +458,7 @@ func apiKeyAuthGroupFromSnapshot(snapshot *APIKeyAuthGroupSnapshot) *Group {
 		RequirePrivacySet:               snapshot.RequirePrivacySet,
 		DefaultMappedModel:              snapshot.DefaultMappedModel,
 		MessagesDispatchModelConfig:     snapshot.MessagesDispatchModelConfig,
-		ModelsListConfig:                snapshot.ModelsListConfig,
+		ModelAllowlist:                  snapshot.ModelAllowlist,
 		RPMLimit:                        snapshot.RPMLimit,
 		UserConcurrencyLimit:            snapshot.UserConcurrencyLimit,
 		MaxReasoningEffort:              snapshot.MaxReasoningEffort,
@@ -573,7 +573,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			FreeOpenAIFast:                  apiKey.Group.FreeOpenAIFast,
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
-			ModelsListConfig:                apiKey.Group.ModelsListConfig,
+			ModelAllowlist:                  apiKey.Group.ModelAllowlist,
 			CodexModelsManifestConfig:       apiKey.Group.CodexModelsManifestConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
 			UserConcurrencyLimit:            apiKey.Group.UserConcurrencyLimit,
@@ -691,7 +691,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			FreeOpenAIFast:                  snapshot.Group.FreeOpenAIFast,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
-			ModelsListConfig:                snapshot.Group.ModelsListConfig,
+			ModelAllowlist:                  snapshot.Group.ModelAllowlist,
 			CodexModelsManifestConfig:       snapshot.Group.CodexModelsManifestConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
 			UserConcurrencyLimit:            snapshot.Group.UserConcurrencyLimit,

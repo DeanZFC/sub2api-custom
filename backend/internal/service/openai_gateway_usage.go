@@ -523,7 +523,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
 			account.ID, *apiKey.GroupID, accountStatsModel, result.Model,
-			tokens, cost.TotalCost,
+			tokens, cost.TotalCost, pricingAt,
 		)
 	}
 

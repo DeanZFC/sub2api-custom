@@ -20,7 +20,6 @@ const (
 	maxUpstream429RetryDelay     = 8 * time.Second
 	maxUpstream429RetryAfter     = time.Minute
 	maxAccount429RetryTotalTime  = 5 * time.Minute
-	maxRetryResponseDrainBytes   = 64 << 10
 )
 
 // account429RetryResponseBody marks the final 429 returned after the account's
@@ -73,11 +72,6 @@ func account429RetryBudgetFromContext(ctx context.Context) *account429RetryBudge
 	}
 	state, _ := ctx.Value(account429RetryScopeContextKey{}).(*account429RetryBudget)
 	return state
-}
-
-func ensureAccount429RetryBudget(ctx context.Context) (context.Context, *account429RetryBudget) {
-	ctx = WithAccount429RetryScope(ctx)
-	return ctx, account429RetryBudgetFromContext(ctx)
 }
 
 // take reserves exactly one extra retry. The returned retry number is
@@ -195,29 +189,6 @@ func dialAccount429Retry(
 	return conn, status, headers, false, err
 }
 
-func requestCanReplay(req *http.Request) bool {
-	if req == nil {
-		return false
-	}
-	return req.Body == nil || req.Body == http.NoBody || req.GetBody != nil
-}
-
-func cloneRequestForRetry(req *http.Request) (*http.Request, error) {
-	clone := req.Clone(req.Context())
-	if req.Body == nil || req.Body == http.NoBody {
-		clone.Body = req.Body
-		return clone, nil
-	}
-	body, err := req.GetBody()
-	if err != nil {
-		return nil, err
-	}
-	clone.Body = body
-	clone.GetBody = req.GetBody
-	clone.ContentLength = req.ContentLength
-	return clone, nil
-}
-
 func upstream429RetryDelay(headers http.Header, retryCount int) time.Duration {
 	if headers != nil {
 		if delay, ok := parseRetryAfter(headers.Get("Retry-After"), time.Now()); ok {
@@ -261,40 +232,6 @@ func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 		return 0, true
 	}
 	return when.Sub(now), true
-}
-
-func sleepUpstream429Retry(ctx context.Context, delay time.Duration) error {
-	if delay <= 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			return nil
-		}
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func drainAndCloseRetryResponse(resp *http.Response) {
-	if resp == nil || resp.Body == nil {
-		return
-	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxRetryResponseDrainBytes))
-	_ = resp.Body.Close()
-}
-
-func accountIDForRetryLog(account *Account) int64 {
-	if account == nil {
-		return 0
-	}
-	return account.ID
 }
 
 func account429RetriesExhausted(resp *http.Response) bool {

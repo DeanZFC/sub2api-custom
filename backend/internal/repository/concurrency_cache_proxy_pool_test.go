@@ -15,7 +15,8 @@ import (
 func TestAcquireAccountProxySlotBalancedDistributesConcurrentRequests(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
-	cache := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	cache, ok := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	require.True(t, ok, "expected Redis concurrency cache")
 	ctx := context.Background()
 	proxyIDs := []int64{101, 102, 103}
 
@@ -52,7 +53,8 @@ func TestAcquireAccountProxySlotBalancedDistributesConcurrentRequests(t *testing
 func TestGetAccountsLoadBatchAggregatesProxyPoolCapacity(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
-	cache := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	cache, ok := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	require.True(t, ok, "expected Redis concurrency cache")
 	ctx := context.Background()
 	proxyIDs := []int64{201, 202, 203}
 

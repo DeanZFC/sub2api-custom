@@ -73,7 +73,7 @@ func (c *sourceUpdateAgentClient) Health(ctx context.Context) error {
 	if err != nil {
 		return ErrSourceUpdaterUnavailable.WithCause(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode != http.StatusOK {
 		return ErrSourceUpdaterUnavailable.WithCause(fmt.Errorf("updater health returned %s", resp.Status))
@@ -154,7 +154,7 @@ func (c *sourceUpdateAgentClient) do(ctx context.Context, method, target string,
 	if err != nil {
 		return SourceUpdateJob{}, ErrSourceUpdaterUnavailable.WithCause(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return SourceUpdateJob{}, ErrSourceUpdaterUnavailable.WithCause(err)
