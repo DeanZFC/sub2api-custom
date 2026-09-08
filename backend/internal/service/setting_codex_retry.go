@@ -12,6 +12,8 @@ import (
 const SettingKeyCodexPreOutputRetry = "codex_pre_output_retry"
 
 type CodexPreOutputRetrySettings struct {
+	ExponentialBackoff    bool     `json:"exponential_backoff"`
+	BufferUntilComplete   bool     `json:"buffer_until_complete"`
 	Enabled               bool     `json:"enabled"`
 	MaxRetries            int      `json:"max_retries"`
 	RetryIntervalMs       int      `json:"retry_interval_ms"`
