@@ -33,9 +33,9 @@ const (
 	updateCacheKey        = "update_check_cache"
 	updateCacheTTL        = 1200 // 20 minutes
 	githubRepo            = "DeanZFC/sub2api-custom"
-	githubSourceBranch    = "sub2api-custom"
+	githubSourceBranch    = "codex/merge-official-0.2.2"
 	githubForkVersionFile = "FORK_VERSION"
-	githubSourceUpdateURL = "https://github.com/DeanZFC/sub2api-custom/commits/sub2api-custom"
+	githubSourceUpdateURL = "https://github.com/DeanZFC/sub2api-custom/commits/codex/merge-official-0.2.2"
 	projectDisplayName    = "sub2api-custom"
 
 	// Security: allowed download domains for updates
