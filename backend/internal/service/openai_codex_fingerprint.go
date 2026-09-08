@@ -242,7 +242,7 @@ func (a *Account) GetCodexFingerprintMode() codexFingerprintMode {
 // resolveCodexFingerprintMode resolves the effective account mode. An explicit
 // per-account value always wins; when the global switch is enabled and the
 // account has no mode key, device-level convergence is enabled by default.
-func resolveCodexFingerprintMode(account *Account, enabled bool) (codexFingerprintMode, bool) {
+func resolveCodexFingerprintMode(account *Account, _ bool) (codexFingerprintMode, bool) {
 	if account == nil || !account.IsOpenAIOAuth() {
 		return codexFingerprintOff, false
 	}
@@ -252,10 +252,8 @@ func resolveCodexFingerprintMode(account *Account, enabled bool) (codexFingerpri
 			return mode, mode == codexFingerprintAccountDevice
 		}
 	}
-	if enabled {
-		return codexFingerprintDevice, true
-	}
-	return codexFingerprintOff, false
+	// New accounts use the unified single-machine multi-window identity by default.
+	return codexFingerprintSingleMachineMultiWindow, true
 }
 
 // deriveAccountCodexFingerprintSeed gives existing accounts a stable seed even
