@@ -1525,13 +1525,6 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	return accounts, nil
 }
 
-func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
-	if s.concurrencyService == nil {
-		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
-	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
-}
-
 func (s *OpenAIGatewayService) tryAcquireAccountSlotForAccount(ctx context.Context, account *Account, concurrencyOverride ...int) (*AcquireResult, error) {
 	if account == nil {
 		return nil, fmt.Errorf("account is nil")
