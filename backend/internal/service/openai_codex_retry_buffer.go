@@ -181,14 +181,20 @@ func bufferCodexRetrySSE(ctx context.Context, original io.ReadCloser, settings C
 }
 
 func (s *OpenAIGatewayService) prepareCodexBufferedResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, firstOutputTimeout time.Duration) error {
+	return s.prepareCodexBufferedResponseForTransport(ctx, resp, c, account, startTime, firstOutputTimeout, true)
+}
+
+func (s *OpenAIGatewayService) prepareCodexBufferedResponseForTransport(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, firstOutputTimeout time.Duration, httpClient bool) error {
 	raw, _ := c.Get(codexRetrySettingsContextKey)
 	settings, ok := raw.(CodexPreOutputRetrySettings)
 	if !ok || !settings.Enabled || !settings.BufferUntilComplete || account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("X-Accel-Buffering", "no")
+	if httpClient {
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("X-Accel-Buffering", "no")
+	}
 	interval := 10 * time.Second
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		interval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
@@ -211,7 +217,10 @@ func (s *OpenAIGatewayService) prepareCodexBufferedResponse(ctx context.Context,
 			return nil
 		}
 	}
-	stopKeepalive := startOpenAISSEKeepalive(c, interval)
+	stopKeepalive := func() {}
+	if httpClient {
+		stopKeepalive = startOpenAISSEKeepalive(c, interval)
+	}
 	body, failure, err := bufferCodexRetrySSE(ctx, resp.Body, settings, codexRetryHTTPBufferLimit, timeout, firstOutputRemaining)
 	stopKeepalive()
 	if err != nil {
