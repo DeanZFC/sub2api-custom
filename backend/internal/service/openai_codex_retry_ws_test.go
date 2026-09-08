@@ -21,10 +21,11 @@ import (
 )
 
 type codexRetryFrameScript struct {
-	mu      sync.Mutex
-	scripts [][]string
-	queue   []string
-	writes  [][]byte
+	mu       sync.Mutex
+	scripts  [][]string
+	queue    []string
+	writes   [][]byte
+	writeErr error
 }
 
 func (s *codexRetryFrameScript) WriteFrame(_ context.Context, _ coderws.MessageType, payload []byte) error {
@@ -32,6 +33,9 @@ func (s *codexRetryFrameScript) WriteFrame(_ context.Context, _ coderws.MessageT
 	defer s.mu.Unlock()
 	i := len(s.writes)
 	s.writes = append(s.writes, append([]byte(nil), payload...))
+	if i > 0 && s.writeErr != nil {
+		return s.writeErr
+	}
 	if i >= len(s.scripts) {
 		i = len(s.scripts) - 1
 	}
@@ -376,4 +380,63 @@ func TestCodexPreOutputRetryWSClientCancellation(t *testing.T) {
 	<-upstream.writes
 	require.NoError(t, <-done)
 	require.Empty(t, upstream.writes, "a canceled turn must not be replayed")
+}
+
+func TestCodexBufferedWSTurnRetriesPartialOutput(t *testing.T) {
+	settings := codexRetryTestSettings(t).GetCodexPreOutputRetrySettingsCached(context.Background())
+	settings.BufferUntilComplete = true
+	failure := []string{
+		`{"type":"response.output_text.delta","delta":"discarded-text"}`,
+		`{"type":"response.function_call_arguments.delta","delta":"discarded-tool"}`,
+		codexRetryTestFailure,
+	}
+	success := []string{
+		`{"type":"response.output_text.delta","delta":"hello"}`,
+		`{"type":"response.completed","response":{"id":"success"}}`,
+	}
+	script := &codexRetryFrameScript{scripts: [][]string{failure, success, failure, success}}
+	conn := &codexRetryWSFrameConn{inner: script, settings: func(context.Context) CodexPreOutputRetrySettings { return settings }}
+	for turn := 0; turn < 2; turn++ {
+		request := []byte(fmt.Sprintf(`{"type":"response.create","previous_response_id":"turn-%d","input":[]}`, turn))
+		require.NoError(t, conn.WriteFrame(context.Background(), coderws.MessageText, request))
+		for _, expected := range success {
+			_, payload, err := conn.ReadFrame(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, expected, string(payload))
+		}
+		require.Len(t, script.writes, 2*(turn+1))
+		require.Equal(t, request, script.writes[2*turn+1])
+	}
+}
+
+func TestCodexBufferedWSReplayWriteFailurePreservesUpstreamError(t *testing.T) {
+	settings := codexRetryTestSettings(t).GetCodexPreOutputRetrySettingsCached(context.Background())
+	settings.BufferUntilComplete = true
+	script := &codexRetryFrameScript{scripts: [][]string{{
+		`{"type":"response.output_text.delta","delta":"discarded-text"}`,
+		codexRetryTestFailure,
+	}}, writeErr: io.ErrClosedPipe}
+	conn := &codexRetryWSFrameConn{inner: script, settings: func(context.Context) CodexPreOutputRetrySettings { return settings }}
+	require.NoError(t, conn.WriteFrame(context.Background(), coderws.MessageText, []byte(`{"type":"response.create"}`)))
+	_, payload, err := conn.ReadFrame(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, codexRetryTestFailure, string(payload))
+	require.True(t, codexRetryWSExhausted(conn))
+	_, _, err = conn.ReadFrame(context.Background())
+	require.ErrorIs(t, err, io.ErrClosedPipe)
+}
+
+func TestCodexBufferedWSLimitStopsReplay(t *testing.T) {
+	settings := codexRetryTestSettings(t).GetCodexPreOutputRetrySettingsCached(context.Background())
+	settings.BufferUntilComplete = true
+	prefix := `{"type":"response.output_text.delta","delta":"` + strings.Repeat("x", codexRetryWSBufferLimit) + `"}`
+	script := &codexRetryFrameScript{scripts: [][]string{{prefix, codexRetryTestFailure}}}
+	conn := &codexRetryWSFrameConn{inner: script, settings: func(context.Context) CodexPreOutputRetrySettings { return settings }}
+	require.NoError(t, conn.WriteFrame(context.Background(), coderws.MessageText, []byte(`{"type":"response.create"}`)))
+	for _, expected := range []string{prefix, codexRetryTestFailure} {
+		_, payload, err := conn.ReadFrame(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, expected, string(payload))
+	}
+	require.Len(t, script.writes, 1)
 }
