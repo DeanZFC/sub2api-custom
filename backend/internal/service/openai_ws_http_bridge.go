@@ -638,8 +638,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeAttempt(
 		}
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
+	if err := s.prepareCodexBufferedResponseForTransport(ctx, resp, c, account, turnStart, 0, false); err != nil {
+		return nil, err
+	}
 	defer func() { _ = resp.Body.Close() }()
-	stopCancelBody := context.AfterFunc(ctx, func() { _ = resp.Body.Close() })
+	cancelBody := resp.Body
+	stopCancelBody := context.AfterFunc(ctx, func() { _ = cancelBody.Close() })
 	defer stopCancelBody()
 	if account.Platform == PlatformGrok {
 		s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, resolveGrokWSUpstreamModel(account, body, originalModel)), account, resp.Header, resp.StatusCode)
