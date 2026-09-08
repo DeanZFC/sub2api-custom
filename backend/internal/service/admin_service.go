@@ -300,7 +300,7 @@ type CreateGroupInput struct {
 	RPMLimit int
 	// UserConcurrencyLimit 分组内每个用户的并发上限（0 = 不限制）
 	UserConcurrencyLimit int
-	// MaxReasoningEffort Anthropic/OpenAI 请求的推理强度上限，空字符串表示不限制。
+	// MaxReasoningEffort OpenAI/Codex 请求的推理强度上限，空字符串表示不限制。
 	MaxReasoningEffort string
 	// MaxReasoningEffortOverLimit 超过上限时的访问控制：downgrade（默认）或 deny。
 	MaxReasoningEffortOverLimit string
@@ -398,24 +398,22 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
-	Name                         string
-	Notes                        *string
-	Platform                     string
-	Type                         string
-	Credentials                  map[string]any
-	Extra                        map[string]any
-	ProxyID                      *int64
-	ProxyConcurrencyLimitEnabled *bool
-	ProxyPoolIDs                 []int64
-	Concurrency                  int
-	RateLimit429RetryCount       *int
-	Priority                     int
-	RateMultiplier               *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor                   *int
-	GroupIDs                     []int64
-	ExpiresAt                    *int64
-	AutoPauseOnExpired           *bool
-	ProbeEnabled                 *bool
+	Name                   string
+	Notes                  *string
+	Platform               string
+	Type                   string
+	Credentials            map[string]any
+	Extra                  map[string]any
+	ProxyID                *int64
+	Concurrency            int
+	RateLimit429RetryCount *int
+	Priority               int
+	RateMultiplier         *float64 // 账号计费倍率（>=0，允许 0）
+	LoadFactor             *int
+	GroupIDs               []int64
+	ExpiresAt              *int64
+	AutoPauseOnExpired     *bool
+	ProbeEnabled           *bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
 	SkipDefaultGroupBind bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
@@ -433,26 +431,24 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
-	Name                         string
-	Notes                        *string
-	Type                         string // Account type: oauth, setup-token, apikey
-	Credentials                  map[string]any
-	Extra                        map[string]any
-	ProxyID                      *int64
-	ProxyConcurrencyLimitEnabled *bool
-	ProxyPoolIDs                 *[]int64
-	Concurrency                  *int // 使用指针区分"未提供"和"设置为0"
-	RateLimit429RetryCount       *int
-	Priority                     *int     // 使用指针区分"未提供"和"设置为0"
-	RateMultiplier               *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor                   *int
-	Status                       string
-	GroupIDs                     *[]int64
-	ExpiresAt                    *int64
-	AutoPauseOnExpired           *bool
-	ProbeEnabled                 *bool
-	RateSyncEnabled              *bool
-	SkipMixedChannelCheck        bool // 跳过混合渠道检查（用户已确认风险）
+	Name                   string
+	Notes                  *string
+	Type                   string // Account type: oauth, setup-token, apikey
+	Credentials            map[string]any
+	Extra                  map[string]any
+	ProxyID                *int64
+	Concurrency            *int // 使用指针区分"未提供"和"设置为0"
+	RateLimit429RetryCount *int
+	Priority               *int     // 使用指针区分"未提供"和"设置为0"
+	RateMultiplier         *float64 // 账号计费倍率（>=0，允许 0）
+	LoadFactor             *int
+	Status                 string
+	GroupIDs               *[]int64
+	ExpiresAt              *int64
+	AutoPauseOnExpired     *bool
+	ProbeEnabled           *bool
+	RateSyncEnabled        *bool
+	SkipMixedChannelCheck  bool // 跳过混合渠道检查（用户已确认风险）
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.

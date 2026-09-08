@@ -25,18 +25,16 @@ import (
 const (
 	// 并发槽位键前缀（有序集合）
 	// 格式: concurrency:account:{accountID}
-	accountSlotKeyPrefix      = "concurrency:account:"
-	accountProxySlotKeyPrefix = "concurrency:account_proxy:"
+	accountSlotKeyPrefix = "concurrency:account:"
 	// 格式: concurrency:user:{userID}
 	userSlotKeyPrefix      = "concurrency:user:"
 	userGroupSlotKeyPrefix = "concurrency:user_group:"
 	// 格式: concurrency:api_key:{apiKeyID}
-	apiKeySlotKeyPrefix           = "concurrency:api_key:"
-	liveAccountSlotKeyPrefix      = "concurrency:live:account:"
-	liveAccountProxySlotKeyPrefix = "concurrency:live:account_proxy:"
-	liveUserSlotKeyPrefix         = "concurrency:live:user:"
-	liveUserGroupSlotKeyPrefix    = "concurrency:live:user_group:"
-	liveAPIKeySlotKeyPrefix       = "concurrency:live:api_key:"
+	apiKeySlotKeyPrefix        = "concurrency:api_key:"
+	liveAccountSlotKeyPrefix   = "concurrency:live:account:"
+	liveUserSlotKeyPrefix      = "concurrency:live:user:"
+	liveUserGroupSlotKeyPrefix = "concurrency:live:user_group:"
+	liveAPIKeySlotKeyPrefix    = "concurrency:live:api_key:"
 	// API-key-scoped client WebSocket ingress leases use a shorter TTL than
 	// ordinary request slots, because idle ingress sessions do not hold a turn slot.
 	openAIWSIngressLeaseKeyPrefix  = "concurrency:openai_ws_ingress:api_key:"
@@ -108,40 +106,6 @@ var (
 		end
 
 		return {0, now}
-	`)
-	// acquireBalancedAccountProxyScript selects and reserves the least-loaded
-	// proxy in one Redis transaction. KEYS contains all slot keys followed by
-	// all live-slot keys; ARGV is maxConcurrency, slotTTL, requestID, tie offset,
-	// then the corresponding proxy IDs.
-	acquireBalancedAccountProxyScript = redis.NewScript(`
-		redis.replicate_commands()
-		local maxConcurrency = tonumber(ARGV[1])
-		local ttl = tonumber(ARGV[2])
-		local requestID = ARGV[3]
-		local offset = tonumber(ARGV[4])
-		local proxyCount = #KEYS / 2
-		local bestIndex = 0
-		local bestCount = maxConcurrency
-		local now = tonumber(redis.call('TIME')[1])
-		for step = 0, proxyCount - 1 do
-			local index = ((offset + step) % proxyCount) + 1
-			local key = KEYS[index]
-			local liveKey = KEYS[proxyCount + index]
-			redis.call('ZREMRANGEBYSCORE', key, '-inf', now - ttl)
-			redis.call('ZREMRANGEBYSCORE', liveKey, '-inf', now - 60)
-			local count = redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
-			if count < bestCount then
-				bestCount = count
-				bestIndex = index
-			end
-		end
-		if bestIndex == 0 then
-			return {0, 0, now}
-		end
-		local selectedKey = KEYS[bestIndex]
-		redis.call('ZADD', selectedKey, now, requestID)
-		redis.call('EXPIRE', selectedKey, ttl)
-		return {1, tonumber(ARGV[4 + bestIndex]), now}
 	`)
 
 	// acquireUserGroupScript checks both user-wide and per-(user,group) sets
@@ -757,21 +721,6 @@ func runScriptInt64Pair(ctx context.Context, rdb *redis.Client, script *redis.Sc
 	return first, second, nil
 }
 
-func runScriptInt64Triple(ctx context.Context, rdb *redis.Client, script *redis.Script, keys []string, args ...any) (int64, int64, int64, error) {
-	raw, err := script.Run(ctx, rdb, keys, args...).Result()
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	values := [3]int64{}
-	for i := range values {
-		values[i], err = redisScriptInt64At(raw, i)
-		if err != nil {
-			return 0, 0, 0, fmt.Errorf("parse script value %d: %w", i, err)
-		}
-	}
-	return values[0], values[1], values[2], nil
-}
-
 // Account slot operations
 
 func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -786,57 +735,6 @@ func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int
 		c.touchActiveIndexAt(ctx, accountActiveIndexKey, accountID, now+int64(c.slotTTLSeconds))
 	}
 	return result == 1, nil
-}
-
-func accountProxySlotKey(accountID, proxyID int64) string {
-	return accountProxySlotKeyPrefix + strconv.FormatInt(accountID, 10) + ":" + strconv.FormatInt(proxyID, 10)
-}
-
-func liveAccountProxySlotKey(accountID, proxyID int64) string {
-	return liveAccountProxySlotKeyPrefix + strconv.FormatInt(accountID, 10) + ":" + strconv.FormatInt(proxyID, 10)
-}
-
-func (c *concurrencyCache) AcquireAccountProxySlot(ctx context.Context, accountID, proxyID int64, maxConcurrency int, requestID string) (bool, error) {
-	if maxConcurrency <= 0 {
-		return true, nil
-	}
-	result, _, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, []string{accountProxySlotKey(accountID, proxyID), liveAccountProxySlotKey(accountID, proxyID)}, maxConcurrency, c.slotTTLSeconds, requestID)
-	return result == 1, err
-}
-
-func (c *concurrencyCache) AcquireAccountProxySlotBalanced(ctx context.Context, accountID int64, proxyIDs []int64, maxConcurrency int, requestID string) (bool, int64, error) {
-	if len(proxyIDs) == 0 || maxConcurrency <= 0 {
-		if len(proxyIDs) == 0 {
-			return false, 0, nil
-		}
-		return true, proxyIDs[0], nil
-	}
-	keys := make([]string, 0, len(proxyIDs)*2)
-	for _, proxyID := range proxyIDs {
-		keys = append(keys, accountProxySlotKey(accountID, proxyID))
-	}
-	for _, proxyID := range proxyIDs {
-		keys = append(keys, liveAccountProxySlotKey(accountID, proxyID))
-	}
-	offset := 0
-	for i := 0; i < len(requestID); i++ {
-		offset = (offset*31 + int(requestID[i])) % len(proxyIDs)
-	}
-	args := make([]any, 0, 4+len(proxyIDs))
-	args = append(args, maxConcurrency, c.slotTTLSeconds, requestID, offset)
-	for _, proxyID := range proxyIDs {
-		args = append(args, proxyID)
-	}
-	result, proxyID, _, err := runScriptInt64Triple(ctx, c.rdb, acquireBalancedAccountProxyScript, keys, args...)
-	return result == 1, proxyID, err
-}
-
-func (c *concurrencyCache) ReleaseAccountProxySlot(ctx context.Context, accountID, proxyID int64, requestID string) error {
-	return c.rdb.ZRem(ctx, accountProxySlotKey(accountID, proxyID), requestID).Err()
-}
-
-func (c *concurrencyCache) GetAccountProxyConcurrency(ctx context.Context, accountID, proxyID int64) (int, error) {
-	return getCountScript.Run(ctx, c.rdb, []string{accountProxySlotKey(accountID, proxyID), liveAccountProxySlotKey(accountID, proxyID)}, c.slotTTLSeconds).Int()
 }
 
 func (c *concurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
@@ -1240,8 +1138,7 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 	}
 
 	// 使用 Pipeline 替代 Lua 脚本，兼容 Redis Cluster（Lua 内动态拼 key 会 CROSSSLOT）。
-	// 普通账号读取账号槽位和等待数；代理池账号读取每个代理槽位并聚合，
-	// 这样调度器看到的容量与实际 AcquireAccountProxySlot 保持一致。
+	// 每个账号执行 3 个命令：ZREMRANGEBYSCORE（清理过期）、ZCARD（并发数）、GET（等待数）。
 	now, err := c.rdb.Time(ctx).Result()
 	if err != nil {
 		return nil, fmt.Errorf("redis TIME: %w", err)
@@ -1253,41 +1150,23 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 	type accountCmds struct {
 		id             int64
 		maxConcurrency int
-		proxyLimited   bool
 		zcardCmd       *redis.IntCmd
 		liveCmd        *redis.IntCmd
 		getCmd         *redis.StringCmd
-		proxyZCards    []*redis.IntCmd
-		proxyLiveCards []*redis.IntCmd
 	}
 	cmds := make([]accountCmds, 0, len(accounts))
 	for _, acc := range accounts {
+		slotKey := accountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
+		liveKey := liveAccountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
+		waitKey := accountWaitKeyPrefix + strconv.FormatInt(acc.ID, 10)
+		pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
+		pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10))
 		ac := accountCmds{
 			id:             acc.ID,
 			maxConcurrency: acc.MaxConcurrency,
-			proxyLimited:   acc.ProxyConcurrencyLimitEnabled && len(acc.ProxyPoolIDs) > 0,
-		}
-		if ac.proxyLimited {
-			for _, proxyID := range acc.ProxyPoolIDs {
-				if proxyID <= 0 {
-					continue
-				}
-				slotKey := accountProxySlotKey(acc.ID, proxyID)
-				liveKey := liveAccountProxySlotKey(acc.ID, proxyID)
-				pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
-				pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10))
-				ac.proxyZCards = append(ac.proxyZCards, pipe.ZCard(ctx, slotKey))
-				ac.proxyLiveCards = append(ac.proxyLiveCards, pipe.ZCard(ctx, liveKey))
-			}
-		} else {
-			slotKey := accountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
-			liveKey := liveAccountSlotKeyPrefix + strconv.FormatInt(acc.ID, 10)
-			waitKey := accountWaitKeyPrefix + strconv.FormatInt(acc.ID, 10)
-			pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
-			pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10))
-			ac.zcardCmd = pipe.ZCard(ctx, slotKey)
-			ac.liveCmd = pipe.ZCard(ctx, liveKey)
-			ac.getCmd = pipe.Get(ctx, waitKey)
+			zcardCmd:       pipe.ZCard(ctx, slotKey),
+			liveCmd:        pipe.ZCard(ctx, liveKey),
+			getCmd:         pipe.Get(ctx, waitKey),
 		}
 		cmds = append(cmds, ac)
 	}
@@ -1298,27 +1177,14 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 
 	loadMap := make(map[int64]*service.AccountLoadInfo, len(accounts))
 	for _, ac := range cmds {
-		currentConcurrency := 0
+		currentConcurrency := int(ac.zcardCmd.Val() + ac.liveCmd.Val())
 		waitingCount := 0
-		if ac.proxyLimited {
-			for i := range ac.proxyZCards {
-				currentConcurrency += int(ac.proxyZCards[i].Val() + ac.proxyLiveCards[i].Val())
-			}
-		} else {
-			currentConcurrency = int(ac.zcardCmd.Val() + ac.liveCmd.Val())
-			if v, err := ac.getCmd.Int(); err == nil {
-				waitingCount = v
-			}
+		if v, err := ac.getCmd.Int(); err == nil {
+			waitingCount = v
 		}
 		loadRate := 0
 		if ac.maxConcurrency > 0 {
-			capacity := ac.maxConcurrency
-			if ac.proxyLimited {
-				capacity *= len(ac.proxyZCards)
-			}
-			if capacity > 0 {
-				loadRate = (currentConcurrency + waitingCount) * 100 / capacity
-			}
+			loadRate = (currentConcurrency + waitingCount) * 100 / ac.maxConcurrency
 		}
 		loadMap[ac.id] = &service.AccountLoadInfo{
 			AccountID:          ac.id,

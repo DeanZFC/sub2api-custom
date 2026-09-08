@@ -560,9 +560,9 @@ export interface Group {
   platform: GroupPlatform
   rate_multiplier: number
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
-  user_concurrency_limit?: number // Per-user concurrent request cap inside this group (0 = unlimited)
-  max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
-  max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
+	max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
+	max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
+	user_concurrency_limit?: number // Per-user concurrent request cap inside this group (0 = unlimited)
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   is_exclusive: boolean
   status: 'active' | 'inactive'
@@ -1192,12 +1192,10 @@ export interface Account {
     }
   } & Record<string, unknown>)
   proxy_id: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
-  proxy_pool?: Array<{ proxy_id: number; proxy_name: string; current_concurrency: number; max_concurrency: number }>
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null
   concurrency: number
+  rate_limit_429_retry_count?: number
   load_factor?: number | null
   current_concurrency?: number // Real-time concurrency count from Redis
   scheduler_score?: {
@@ -1327,31 +1325,6 @@ export interface UsageProgress {
   window_stats?: WindowStats | null // 窗口期统计（从窗口开始到当前的使用量）
   used_requests?: number
   limit_requests?: number
-  overdraft_active?: boolean
-  overdraft_stats?: WindowStats | null
-  overdraft_started_at?: string | null
-  overdraft_recover_at?: string | null
-}
-
-export interface CodexQuotaOverdraftProbeState {
-  status: 'pending' | 'passed' | 'failed' | 'inconclusive' | 'recovered'
-  quota_window: '5h' | '7d' | 'multiple'
-  cycle_key: string
-  attempts: number
-  limit: number
-  model?: string
-  reason_code?: string
-  started_at: string
-  tested_at?: string | null
-  retry_at?: string | null
-  retry_count?: number
-  recover_at?: string | null
-  five_hour_recover_at?: string | null
-  seven_day_recover_at?: string | null
-  overdraft_started_at?: string | null
-  five_hour_overdraft_started_at?: string | null
-  seven_day_overdraft_started_at?: string | null
-  observed_rate_limit_reset_at?: string | null
 }
 
 // Antigravity 单个模型的配额信息
@@ -1408,7 +1381,6 @@ export interface AccountUsageInfo {
   updated_at: string | null
   five_hour: UsageProgress | null
   seven_day: UsageProgress | null
-  codex_quota_overdraft?: CodexQuotaOverdraftProbeState | null
   seven_day_sonnet: UsageProgress | null
   seven_day_fable?: UsageProgress | null
   thirty_day?: UsageProgress | null
@@ -1507,9 +1479,8 @@ export interface CreateAccountRequest {
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
   concurrency?: number
+  rate_limit_429_retry_count?: number
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
@@ -1527,9 +1498,8 @@ export interface UpdateAccountRequest {
   credentials?: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
   concurrency?: number
+  rate_limit_429_retry_count?: number
   load_factor?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
@@ -1620,6 +1590,7 @@ export interface AdminDataAccount {
   extra?: Record<string, unknown>
   proxy_key?: string | null
   concurrency: number
+  rate_limit_429_retry_count?: number
   priority: number
   rate_multiplier?: number | null
   expires_at?: number | null
@@ -1649,9 +1620,8 @@ export interface CodexSessionImportRequest {
   notes?: string | null
   group_ids?: number[]
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
   concurrency?: number
+  rate_limit_429_retry_count?: number
   priority?: number
   rate_multiplier?: number
   load_factor?: number | null
@@ -1670,9 +1640,8 @@ export interface OpenAICodexPATCreateRequest {
   notes?: string | null
   group_ids?: number[]
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
   concurrency?: number
+  rate_limit_429_retry_count?: number
   priority?: number
   rate_multiplier?: number
   load_factor?: number | null
