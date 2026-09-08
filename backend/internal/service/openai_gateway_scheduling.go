@@ -297,7 +297,7 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 // handler 调度入口仍需导出，保持导出名。）
 func NormalizeOpenAICompatiblePlatform(platform string) string {
 	switch platform {
-	case PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek:
+	case PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax:
 		return platform
 	default:
 		return PlatformOpenAI
@@ -1523,13 +1523,6 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
 	return accounts, nil
-}
-
-func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
-	if s.concurrencyService == nil {
-		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
-	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlotForAccount(ctx context.Context, account *Account, concurrencyOverride ...int) (*AcquireResult, error) {

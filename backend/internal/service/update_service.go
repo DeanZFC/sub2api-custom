@@ -30,11 +30,12 @@ var (
 )
 
 const (
+	updateCacheKey        = "update_check_cache"
 	updateCacheTTL        = 1200 // 20 minutes
 	githubRepo            = "DeanZFC/sub2api-custom"
-	githubSourceBranch    = "sub2api-custom"
+	githubSourceBranch    = "codex/merge-official-0.2.2"
 	githubForkVersionFile = "FORK_VERSION"
-	githubSourceUpdateURL = "https://github.com/DeanZFC/sub2api-custom/commits/sub2api-custom"
+	githubSourceUpdateURL = "https://github.com/DeanZFC/sub2api-custom/commits/codex/merge-official-0.2.2"
 	projectDisplayName    = "sub2api-custom"
 
 	// Security: allowed download domains for updates
@@ -183,15 +184,8 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 		}
 	}
 
-	// Source builds track the Fork branch version file. Release builds track the
-	// Fork's GitHub Releases and remain eligible for binary replacement.
-	var info *UpdateInfo
-	var err error
-	if s.isSourceBuild() {
-		info, err = s.fetchLatestSourceVersion(ctx)
-	} else {
-		info, err = s.fetchLatestRelease(ctx)
-	}
+	// Fetch from GitHub
+	info, err := s.fetchLatestRelease(ctx)
 	if err != nil {
 		// Return cached on error
 		if cached, cacheErr := s.getFromCache(ctx); cacheErr == nil && cached != nil {
@@ -218,9 +212,6 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 // PerformUpdate downloads and applies the update
 // Uses atomic file replacement pattern for safe in-place updates
 func (s *UpdateService) PerformUpdate(ctx context.Context) error {
-	if s.isSourceBuild() {
-		return ErrSourceBuildUpdateRequired
-	}
 	info, err := s.CheckUpdate(ctx, true)
 	if err != nil {
 		return err
@@ -365,9 +356,6 @@ func (s *UpdateService) Rollback() error {
 // strictly older than the current version (the current version itself is excluded),
 // newest first. Draft and prerelease entries are skipped.
 func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVersion, error) {
-	if s.isSourceBuild() {
-		return []RollbackVersion{}, nil
-	}
 	releases, err := s.fetchRollbackCandidates(ctx)
 	if err != nil {
 		return nil, err
@@ -388,9 +376,6 @@ func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVer
 // The target must be one of the versions returned by ListRollbackVersions;
 // anything else (including the current version) is rejected.
 func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) error {
-	if s.isSourceBuild() {
-		return ErrSourceBuildUpdateRequired
-	}
 	target := strings.TrimPrefix(strings.TrimSpace(version), "v")
 	if target == "" {
 		return ErrRollbackVersionNotAllowed
@@ -504,7 +489,7 @@ func (s *UpdateService) fetchLatestSourceVersion(ctx context.Context) (*UpdateIn
 	}
 	latestVersion := strings.TrimSpace(string(raw))
 	if canonicalVersion(latestVersion) == "" {
-		return nil, fmt.Errorf("Fork version file contains invalid semantic version %q", latestVersion)
+		return nil, fmt.Errorf("fork version file contains invalid semantic version %q", latestVersion)
 	}
 
 	return &UpdateInfo{
@@ -706,7 +691,7 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 	if time.Now().Unix()-cached.Timestamp > updateCacheTTL {
 		return nil, fmt.Errorf("cache expired")
 	}
-	if cached.Repository != githubRepo || cached.BuildType != s.buildType {
+	if cached.Repository != "" && (cached.Repository != githubRepo || cached.BuildType != s.buildType) {
 		return nil, fmt.Errorf("cache belongs to a different update source")
 	}
 
@@ -747,7 +732,6 @@ func compareVersions(current, latest string) int {
 	if currentSemver != "" && latestSemver != "" {
 		return semver.Compare(currentSemver, latestSemver)
 	}
-
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
 

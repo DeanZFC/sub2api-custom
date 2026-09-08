@@ -87,8 +87,6 @@ value_or_secret JWT_SECRET
 value_or_secret TOTP_ENCRYPTION_KEY
 upsert_env SERVER_PORT "$SERVER_PORT"
 upsert_env SUB2API_IMAGE "${IMAGE_PROJECT}:local"
-upsert_env GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED true
-upsert_env GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED true
 chmod 600 "$ENV_FILE"
 mkdir -p "$DEPLOY_DIR/data" "$DEPLOY_DIR/postgres_data" "$DEPLOY_DIR/redis_data"
 

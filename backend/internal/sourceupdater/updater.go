@@ -323,7 +323,7 @@ func (u *Updater) workflow(ctx context.Context, jobID string) error {
 	if err != nil {
 		return u.restoreSource(oldCommit, fmt.Errorf("updater build failed: %w", err))
 	}
-	defer os.Remove(stagedUpdater)
+	defer func() { _ = os.Remove(stagedUpdater) }()
 
 	if _, err := u.runOutput(ctx, "docker", append(u.composeArgs(), "build", "--pull", u.cfg.AppService)...); err != nil {
 		return u.restoreSource(oldCommit, fmt.Errorf("image build failed: %w", err))
@@ -386,7 +386,7 @@ func (u *Updater) installUpdater(stagedPath string) error {
 		return err
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 	if err := temp.Chmod(0o755); err != nil {
 		_ = temp.Close()
 		return err
@@ -586,7 +586,7 @@ func (u *Updater) persistLocked(job Job) error {
 		return err
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 	if err := temp.Chmod(0o600); err != nil {
 		_ = temp.Close()
 		return err

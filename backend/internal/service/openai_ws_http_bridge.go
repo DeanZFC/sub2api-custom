@@ -613,7 +613,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeAttempt(
 		if upstreamMsg == "" {
 			upstreamMsg = http.StatusText(resp.StatusCode)
 		}
-		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
+		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 		if retryErr := s.newCodexPreOutputRetryError(c, account, resp.StatusCode, resp.Header, respBody, upstreamMsg); retryErr != nil {
 			return nil, retryErr
 		}

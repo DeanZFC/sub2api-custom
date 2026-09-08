@@ -2228,26 +2228,13 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 		return key
 	}
 	key.sessionIDHyphen = normalizeOpenAIWSStableIdentityHeader(headers, "session-id")
-	key.sessionIDUnderscore = normalizeOpenAIWSStableIdentityHeader(headers, "session_id")
+	if mode != codexFingerprintSingleMachineMultiWindow {
+		key.sessionIDUnderscore = normalizeOpenAIWSStableIdentityHeader(headers, "session_id")
+	}
 	key.threadID = normalizeOpenAIWSStableIdentityHeader(headers, "thread-id")
 	key.clientRequestID = normalizeOpenAIWSStableIdentityHeader(headers, "x-client-request-id")
 	key.codexWindowID = normalizeOpenAIWSStableIdentityHeader(headers, "x-codex-window-id")
 	return key
-}
-
-func activeCodexFingerprintMode(account *Account, uniqueFingerprintEnabled ...bool) codexFingerprintMode {
-	enabled := len(uniqueFingerprintEnabled) > 0 && uniqueFingerprintEnabled[0]
-	mode, isDefault := resolveCodexFingerprintMode(account, enabled)
-	if mode == codexFingerprintOff {
-		return codexFingerprintOff
-	}
-	if isDefault {
-		return mode
-	}
-	if _, ok := codexFingerprintSeed(account.Extra); !ok {
-		return codexFingerprintOff
-	}
-	return mode
 }
 
 func normalizeOpenAIWSStableIdentityHeader(headers http.Header, name string) string {

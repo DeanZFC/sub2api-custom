@@ -107,6 +107,7 @@ export default {
         kimi: 'Kimi',
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
+        minimax: 'MiniMax',
       },
       cnProviders: {
         accountMode: {
@@ -207,6 +208,7 @@ export default {
         platform: 'Platform',
         type: 'Type',
         capacity: 'Capacity',
+        recentRequests: 'Recent Requests',
         notes: 'Notes',
         priority: 'Priority',
         billingRateMultiplier: 'Billing Rate',
@@ -229,6 +231,12 @@ export default {
         stickyShort: 'Sticky',
         ungrouped: 'Ungrouped',
         hint: 'Displayed as "group / base score / sticky bonus". The base score is computed within the current filtered candidate set and includes priority, load, queue depth, error rate, first-token latency, reset window, quota headroom, billing rate, and related factors. The sticky bonus applies only when sticky weighting is enabled for previous_response_id or session_hash. Higher scores are preferred.'
+      },
+      recentRequests: {
+        summary: '{count} recent requests',
+        empty: 'No requests',
+        unknownError: 'Unknown error',
+        errorPrefix: 'HTTP {status}'
       },
       usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by sub2api, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within sub2api.',
       ollamaCloud: {
@@ -648,6 +656,7 @@ export default {
         codexFingerprintFull: 'Full convergence',
         codexQuotaOverdraft: 'Codex quota overdraft',
         codexQuotaOverdraftDesc: 'Only applies to OpenAI OAuth. When enabled, this account may continue past the 5h/7d quota after the configured probe confirms upstream availability. Disable to use the official scheduling and quota handling for this account.',
+        codexFingerprintSingleMachineMultiWindow: 'Enable single machine, multiple windows',
         codexImageTool: 'Codex image bridge policy',
         codexImageToolDesc:
           'Controls the hosted image_generation bridge and client-declared image tools on Codex /responses text requests. Hosted auto-injection applies only to non-Responses Lite requests. Account policy takes precedence over channel and global settings; standalone image-generation endpoints are unaffected.',
@@ -752,6 +761,8 @@ export default {
       modelRestriction: 'Model Restriction (Optional)',
       modelWhitelist: 'Model Whitelist',
       modelMapping: 'Model Mapping',
+      fromModel: 'Request model',
+      toModel: 'Target model',
       selectAllowedModels: 'Select allowed models. Leave empty to support all models.',
       mapRequestModels:
         'Map request models to actual models. Left is the requested model, right is the actual model sent to API.',
@@ -846,6 +857,30 @@ export default {
       grokClientToolCache: {
         title: 'Client Tool Cache (May Change Automatic Tool Selection)',
         hint: 'For detected Grok Free OAuth accounts, this is enabled by default for client function tools such as Codex and Trae. Turn it off to opt out if the automatic tool-selection behavior is not acceptable.'
+      },
+      grokMediaEligibility: {
+        title: 'Media Generation Eligibility',
+        hint: 'Controls whether this Grok OAuth account may be selected for image and video generation.',
+        auto: 'Automatic detection',
+        enabled: 'Force enable',
+        disabled: 'Force disable',
+        current: 'Current decision:',
+        eligible: 'Eligible',
+        ineligible: 'Not eligible',
+        loading: 'Loading eligibility…',
+        loadFailed: 'Unable to load media eligibility',
+        autoHint: 'Automatic detection only clears the manual override; it does not trigger a media request.',
+        forceEnableWarning: 'Force enable bypasses automatic eligibility checks. Use only for accounts confirmed to support image/video generation.',
+        partialSave: 'Other account settings may have been saved, but media eligibility was not updated. Please retry.',
+        reasons: {
+          eligible: 'Paid entitlement confirmed',
+          billing_inconclusive: 'Billing information inconclusive',
+          billing_forbidden: 'Billing endpoint forbidden',
+          billing_free_tier: 'Free tier account',
+          billing_unobserved: 'Billing not observed yet',
+          override_enabled: 'Manually forced enabled',
+          override_disabled: 'Manually forced disabled'
+        }
       },
       autoPauseOnExpired: 'Auto Pause On Expired',
       autoPauseOnExpiredDesc: 'When enabled, the account will auto pause scheduling after it expires',
@@ -1540,7 +1575,9 @@ export default {
         grokLastProbe: 'Probe {time}',
         grokLastHeadersSeen: 'Headers {time}',
         passiveSampled: 'Passive',
-        activeQuery: 'Query'
+        activeQuery: 'Query',
+        estimatedTotalCost: 'Est. total ${cost}',
+        estimatedTotalCostTooltip: 'Estimated total cost at 100% utilization, based on current window cost and utilization'
       },
       openaiQuotaReset: {
         count: 'Credits',

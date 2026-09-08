@@ -73,8 +73,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen on updater socket: %v", err)
 	}
-	defer listener.Close()
-	defer os.Remove(path)
+	defer func() { _ = listener.Close() }()
+	defer func() { _ = os.Remove(path) }()
 	if err := os.Chmod(path, 0o666); err != nil {
 		log.Fatalf("set updater socket permissions: %v", err)
 	}

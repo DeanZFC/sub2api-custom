@@ -106,7 +106,7 @@ export default {
     fallbackGroupShortLabel: '兜底',
     selectFallbackGroup: '选择兜底',
     noFallbackGroup: '不设置兜底分组',
-    fallbackGroupHint: '仅当主分组没有可用账号时使用；每次请求始终先尝试主分组，命中兜底后按兜底分组计费并归属用量。',
+    fallbackGroupHint: '仅当主分组没有可用账号时使用；每次请求始终先尝试主分组。计费、额度和并发仍归属主分组。',
     fallbackGroupInvalid: '兜底分组必须与主分组不同且属于同一平台',
     statusLabel: '状态',
     selectStatus: '选择状态',
@@ -208,6 +208,12 @@ export default {
         codexConfigTomlHint: '下载下方模型目录，将两个文件保存到 Codex 配置目录后重启 Codex。',
         codexNote: '启动 Codex 前先导出 SUB2API_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
+      minimax: {
+        description: '通过当前 MiniMax 分组配置 Claude Code、Codex 或 OpenCode。',
+        codexDescription: '使用 API Key 配置 Codex，并通过当前 MiniMax 分组发送请求。',
+        codexConfigTomlHint: '下载下方模型目录，将两个文件保存到 Codex 配置目录后重启 Codex。',
+        codexNote: '启动 Codex 前先导出 SUB2API_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
+      },
       composite: {
         description: '通过当前 Composite 路由分组配置受支持的客户端。',
         codexDescription: '使用 API Key 和当前 Composite 分组的完整模型目录配置 Codex。',
@@ -303,6 +309,13 @@ export default {
 
   // Usage
   usage: {
+    overdraftActive: '额度透支中',
+    overdraftProbeFailed: '额度探测失败',
+    overdraftProbeInconclusive: '额度探测结果不确定',
+    overdraftProbePending: '额度探测中',
+    overdraftRecoverAt: '预计恢复：{time}',
+    overdraftRecovered: '额度已恢复',
+    overdraftTestedAt: '探测时间：{time}',
     title: '使用记录',
     description: '查看和分析您的 API 使用历史',
     costDetails: '费用明细',
@@ -323,13 +336,6 @@ export default {
     accountCost: '成本',
     userBilled: '用户扣费',
     accountBilled: '账号计费',
-    overdraftActive: '透支中',
-    overdraftRecoverAt: '预计恢复',
-    overdraftTestedAt: '探测时间',
-    overdraftProbePending: '透支探测中',
-    overdraftProbeFailed: '已确认限额',
-    overdraftProbeInconclusive: '探测无法确认',
-    overdraftRecovered: '额度已恢复',
     resetNow: '现在',
     resetPending: '待刷新',
     accountMultiplier: '账号倍率',
@@ -420,7 +426,6 @@ export default {
     cacheWrite: '写入',
     serviceTier: '服务档位',
     serviceTierPriority: 'Fast',
-    serviceTierUltrafast: 'Ultrafast',
     serviceTierFlex: 'Flex',
     serviceTierStandard: 'Standard',
     rate: '倍率',
@@ -488,7 +493,8 @@ export default {
       antigravity: 'Antigravity',
       kimi: 'Kimi',
       zhipu: '智谱 GLM',
-      deepseek: 'DeepSeek'
+      deepseek: 'DeepSeek',
+      minimax: 'MiniMax'
     },
     // 检查模式（监控条目的工作方式）
     checkMode: {
@@ -499,6 +505,7 @@ export default {
     // 配额快照展示（MonitorQuotaView，管理端与用户端共用）
     quota: {
       unavailable: '配额信息不可用',
+      resetSoon: '即将重置',
       windows: {
         '5h': '5 小时',
         '7d': '7 天',
@@ -608,8 +615,6 @@ export default {
       inputPrice: '输入',
       outputPrice: '输出',
       cacheWritePrice: '缓存写入',
-      cacheWrite5mPrice: '缓存写入（5m）',
-      cacheWrite1hPrice: '缓存写入（1h）',
       cacheReadPrice: '缓存读取',
       imageInputPrice: '图片输入',
       imageOutputPrice: '图片输出',

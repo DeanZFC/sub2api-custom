@@ -191,9 +191,15 @@ func TestAccountHandlerListPreservesProxyPoolRuntimeAndETag(t *testing.T) {
 			require.NoError(t, json.Unmarshal(recRefresh.Body.Bytes(), &payload))
 			item = payload.Data.Items[0]
 			require.Equal(t, float64(3), item["current_concurrency"])
-			pool := item["proxy_pool"].([]any)
-			require.Equal(t, float64(2), pool[0].(map[string]any)["current_concurrency"])
-			require.Equal(t, float64(1), pool[1].(map[string]any)["current_concurrency"])
+			pool, ok := item["proxy_pool"].([]any)
+			require.True(t, ok)
+			require.Len(t, pool, 2)
+			pool0, ok := pool[0].(map[string]any)
+			require.True(t, ok)
+			pool1, ok := pool[1].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, float64(2), pool0["current_concurrency"])
+			require.Equal(t, float64(1), pool1["current_concurrency"])
 		})
 	}
 }

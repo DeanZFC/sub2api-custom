@@ -142,7 +142,7 @@ func cloneUsageGroup(src *Group) *Group {
 	clone.SupportedModelScopes = append([]string(nil), src.SupportedModelScopes...)
 	clone.ReasoningEffortMappings = append([]ReasoningEffortMapping(nil), src.ReasoningEffortMappings...)
 	clone.MessagesDispatchModelConfig = cloneGroupMessagesDispatchModelConfig(src.MessagesDispatchModelConfig)
-	clone.ModelsListConfig.Models = append([]string(nil), src.ModelsListConfig.Models...)
+	clone.ModelAllowlist.Models = append([]string(nil), src.ModelAllowlist.Models...)
 	if src.ModelPricing != nil {
 		clone.ModelPricing = make([]ChannelModelPricing, len(src.ModelPricing))
 		for i := range src.ModelPricing {

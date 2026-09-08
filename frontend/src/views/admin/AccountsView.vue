@@ -195,6 +195,7 @@
         <DataTable
           ref="dataTableRef"
           :columns="cols"
+          :resizable-columns="true"
           :data="accounts"
           :loading="loading"
           row-key="id"
@@ -285,6 +286,12 @@
           </template>
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" />
+          </template>
+          <template #cell-recent_requests="{ row }">
+            <RecentRequestsCell
+              :requests="recentRequestsByAccountId[String(row.id)] ?? []"
+              :loading="recentRequestsLoadingByAccountId[String(row.id)] === true"
+            />
           </template>
           <template #cell-status="{ row }">
             <div class="flex items-center gap-1.5">
@@ -456,7 +463,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -519,6 +526,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import RecentRequestsCell from '@/components/account/RecentRequestsCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -532,6 +540,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
+import type { OpsRequestDetail } from '@/api/admin/ops'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const { t } = useI18n()
@@ -614,7 +623,7 @@ const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
-const menu = reactive<{show:boolean, acc:Account|null, pos:{top:number, left:number}|null}>({ show: false, acc: null, pos: null })
+const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
@@ -704,6 +713,10 @@ const todayStatsError = ref<string | null>(null)
 const todayStatsReqSeq = ref(0)
 const pendingTodayStatsRefresh = ref(false)
 const usageManualRefreshToken = ref(0)
+const recentRequestsByAccountId = ref<Record<string, OpsRequestDetail[]>>({})
+const recentRequestsLoadingByAccountId = ref<Record<string, boolean>>({})
+let recentRequestsReqSeq = 0
+let recentRequestsRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 const desktopViewportQuery = '(min-width: 768px)'
 const isDesktopViewport = ref(
@@ -1049,6 +1062,11 @@ const toggleColumn = (key: string) => {
       console.error('Failed to load account today stats after showing column:', error)
     })
   }
+  if (key === 'recent_requests' && wasHidden) {
+    refreshRecentRequests().catch((error) => {
+      console.error('Failed to load recent account requests after showing column:', error)
+    })
+  }
   if (key === 'scheduler_score') {
     // The server only returns scheduler scores when this column is visible, so reload the current page immediately.
     syncAccountListDerivedParams()
@@ -1147,6 +1165,40 @@ useSwipeSelect(accountTableRef, {
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
+}
+
+const refreshRecentRequests = async () => {
+  const rows = accounts.value
+  const requestSeq = ++recentRequestsReqSeq
+  if (!isColumnVisible('recent_requests') || rows.length === 0) {
+    recentRequestsByAccountId.value = {}
+    recentRequestsLoadingByAccountId.value = {}
+    return
+  }
+
+  const visibleIDs = new Set(rows.map(row => String(row.id)))
+  recentRequestsLoadingByAccountId.value = Object.fromEntries(rows.map(row => [String(row.id), true]))
+  const results = await Promise.allSettled(rows.map(async row => {
+    const response = await adminAPI.ops.listRequestDetails({
+      account_id: row.id,
+      time_range: '24h',
+      kind: 'all',
+      sort: 'created_at_desc',
+      page: 1,
+      page_size: 10
+    })
+    return [String(row.id), response.items.slice(0, 10)] as const
+  }))
+
+  if (requestSeq !== recentRequestsReqSeq) return
+  const next: Record<string, OpsRequestDetail[]> = {}
+  results.forEach(result => {
+    if (result.status === 'fulfilled') next[result.value[0]] = result.value[1]
+  })
+  recentRequestsByAccountId.value = Object.fromEntries(
+    Object.entries(next).filter(([key]) => visibleIDs.has(key))
+  )
+  recentRequestsLoadingByAccountId.value = {}
 }
 
 type AccountLoadOptions = {
@@ -1329,6 +1381,7 @@ const handleSort = (key: string, order: AccountSortOrder) => {
 watch(loading, (isLoading, wasLoading) => {
   if (wasLoading && !isLoading) {
     upstreamBillingNow.value = Date.now()
+    void refreshRecentRequests()
   }
   if (wasLoading && !isLoading && pendingTodayStatsRefresh.value) {
     pendingTodayStatsRefresh.value = false
@@ -1340,6 +1393,12 @@ watch(loading, (isLoading, wasLoading) => {
 
 watch(accounts, (rows) => {
   const visibleIDs = new Set(rows.map((row) => String(row.id)))
+  recentRequestsByAccountId.value = Object.fromEntries(
+    Object.entries(recentRequestsByAccountId.value).filter(([key]) => visibleIDs.has(key))
+  )
+  recentRequestsLoadingByAccountId.value = Object.fromEntries(
+    Object.entries(recentRequestsLoadingByAccountId.value).filter(([key]) => visibleIDs.has(key))
+  )
   usageBatchByAccountId.value = Object.fromEntries(
     Object.entries(usageBatchByAccountId.value).filter(([key]) => visibleIDs.has(key))
   )
@@ -1472,6 +1531,7 @@ const refreshAccountsIncrementally = async () => {
     upstreamBillingNow.value = Date.now()
 
     await refreshTodayStatsBatch()
+    await refreshRecentRequests()
   } catch (error) {
     console.error('Auto refresh failed:', error)
   } finally {
@@ -1788,6 +1848,7 @@ const allColumns = computed(() => {
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
+    { key: 'recent_requests', label: t('admin.accounts.columns.recentRequests'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
@@ -1846,53 +1907,8 @@ const handleEdit = async (a: AccountListItem) => {
 }
 const openMenu = (a: Account, e: MouseEvent) => {
   menu.acc = a
-
   const target = e.currentTarget as HTMLElement
-  if (target) {
-    const rect = target.getBoundingClientRect()
-    const menuWidth = 200
-    const menuHeight = 240
-    const padding = 8
-    const viewportWidth = window.innerWidth
-    const viewportHeight = window.innerHeight
-
-    let left: number
-    let top: number
-
-    if (viewportWidth < 768) {
-      // 居中显示,水平位置
-      left = Math.max(padding, Math.min(
-        rect.left + rect.width / 2 - menuWidth / 2,
-        viewportWidth - menuWidth - padding
-      ))
-
-      // 优先显示在按钮下方
-      top = rect.bottom + 4
-
-      // 如果下方空间不够,显示在上方
-      if (top + menuHeight > viewportHeight - padding) {
-        top = rect.top - menuHeight - 4
-        // 如果上方也不够,就贴在视口顶部
-        if (top < padding) {
-          top = padding
-        }
-      }
-    } else {
-      left = Math.max(padding, Math.min(
-        e.clientX - menuWidth,
-        viewportWidth - menuWidth - padding
-      ))
-      top = e.clientY
-      if (top + menuHeight > viewportHeight - padding) {
-        top = viewportHeight - menuHeight - padding
-      }
-    }
-
-    menu.pos = { top, left }
-  } else {
-    menu.pos = { top: e.clientY, left: e.clientX - 200 }
-  }
-
+  menu.anchorRect = target.getBoundingClientRect()
   menu.show = true
 }
 const toggleSelectAllVisible = (event: Event) => {
@@ -1938,10 +1954,13 @@ const handleBulkResetStatus = async () => {
 }
 const handleBulkRefreshToken = async () => {
   if (!confirm(t('common.confirm'))) return
+  const accountIds = [...selIds.value]
   try {
-    const result = await adminAPI.accounts.batchRefresh(selIds.value)
+    const result = await adminAPI.accounts.batchRefresh(accountIds)
     if (result.failed > 0) {
       appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
+      const failedIds = result.errors?.map(error => error.account_id) ?? []
+      setSelectedIds(failedIds.length > 0 ? failedIds : accountIds)
     } else {
       appStore.showSuccess(t('admin.accounts.bulkActions.refreshTokenSuccess', { count: result.success }))
       clearSelection()
@@ -2540,7 +2559,8 @@ const proxyExpiryText = (p: AccountProxy): string => {
 }
 
 // 表格滚动时关闭行操作菜单，并让顶部工具菜单继续贴紧触发按钮。
-const handleScroll = () => {
+const handleScroll = (event: Event) => {
+  if (event.target instanceof Element && event.target.closest('.action-menu-content')) return
   menu.show = false
   if (showAccountToolsDropdown.value) updateAccountToolsDropdownPosition()
 }
@@ -2575,6 +2595,12 @@ onMounted(async () => {
   }
 
   load()
+  // Recent request indicators refresh independently of the account-list auto refresh.
+  recentRequestsRefreshTimer = setInterval(() => {
+    if (!document.hidden && !loading.value && !isAnyModalOpen.value) {
+      refreshRecentRequests().catch(error => console.error('Failed to refresh recent requests:', error))
+    }
+  }, 3000)
   loadUpstreamBillingProbeGlobalState()
   const [proxiesResult, groupsResult] = await Promise.allSettled([
     adminAPI.proxies.getAll(),
@@ -2603,6 +2629,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (recentRequestsRefreshTimer !== null) {
+    clearInterval(recentRequestsRefreshTimer)
+    recentRequestsRefreshTimer = null
+  }
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

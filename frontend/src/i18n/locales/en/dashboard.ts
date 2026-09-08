@@ -106,7 +106,7 @@ export default {
     fallbackGroupShortLabel: 'Fallback',
     selectFallbackGroup: 'Select fallback',
     noFallbackGroup: 'No fallback group',
-    fallbackGroupHint: 'Used only when the primary group has no available accounts. Every request tries the primary group first; requests routed to fallback use its pricing and usage attribution.',
+    fallbackGroupHint: 'Used only when the primary group has no available accounts. Every request always tries the primary group first. Billing, quotas, and concurrency remain on the primary group.',
     fallbackGroupInvalid: 'The fallback group must differ from the primary group and use the same platform',
     statusLabel: 'Status',
     selectStatus: 'Select status',
@@ -204,6 +204,12 @@ export default {
         codexConfigTomlHint: 'Download the model catalog below, save both files under the Codex config directory, and restart Codex.',
         codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
       },
+      minimax: {
+        description: 'Configure Claude Code, Codex, or OpenCode through the current MiniMax group.',
+        codexDescription: 'Configure Codex with API key authentication through the current MiniMax group.',
+        codexConfigTomlHint: 'Download the model catalog below, save both files under the Codex config directory, and restart Codex.',
+        codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+      },
       composite: {
         description: 'Configure supported clients through the current Composite routing group.',
         codexDescription: 'Configure Codex with API key authentication and the complete model catalog for this Composite group.',
@@ -298,6 +304,13 @@ export default {
 
   // Usage
   usage: {
+    overdraftActive: 'Quota overdraft active',
+    overdraftProbeFailed: 'Quota probe failed',
+    overdraftProbeInconclusive: 'Quota probe inconclusive',
+    overdraftProbePending: 'Quota probe pending',
+    overdraftRecoverAt: 'Quota recovery: {time}',
+    overdraftRecovered: 'Quota recovered',
+    overdraftTestedAt: 'Tested: {time}',
     title: 'Usage Records',
     description: 'View and analyze your API usage history',
     costDetails: 'Cost Breakdown',
@@ -318,13 +331,6 @@ export default {
     accountCost: 'Cost',
     userBilled: 'User billed',
     accountBilled: 'Account billed',
-    overdraftActive: 'Overdraft active',
-    overdraftRecoverAt: 'Expected recovery',
-    overdraftTestedAt: 'Probed at',
-    overdraftProbePending: 'Overdraft probe running',
-    overdraftProbeFailed: 'Quota limit confirmed',
-    overdraftProbeInconclusive: 'Probe inconclusive',
-    overdraftRecovered: 'Quota recovered',
     resetNow: 'Now',
     resetPending: 'Pending refresh',
     accountMultiplier: 'Account rate',
@@ -415,7 +421,6 @@ export default {
     cacheWrite: 'Write',
     serviceTier: 'Service tier',
     serviceTierPriority: 'Fast',
-    serviceTierUltrafast: 'Ultrafast',
     serviceTierFlex: 'Flex',
     serviceTierStandard: 'Standard',
     rate: 'Rate',
@@ -483,7 +488,8 @@ export default {
       antigravity: 'Antigravity',
       kimi: 'Kimi',
       zhipu: 'Zhipu GLM',
-      deepseek: 'DeepSeek'
+      deepseek: 'DeepSeek',
+      minimax: 'MiniMax'
     },
     // Check modes (how a monitor performs its checks)
     checkMode: {
@@ -494,6 +500,7 @@ export default {
     // Quota snapshot rendering (MonitorQuotaView, shared by admin + user views)
     quota: {
       unavailable: 'Quota unavailable',
+      resetSoon: 'resetting',
       windows: {
         '5h': '5h',
         '7d': '7d',
@@ -603,8 +610,6 @@ export default {
       inputPrice: 'Input',
       outputPrice: 'Output',
       cacheWritePrice: 'Cache Write',
-      cacheWrite5mPrice: 'Cache Write (5m)',
-      cacheWrite1hPrice: 'Cache Write (1h)',
       cacheReadPrice: 'Cache Read',
       imageInputPrice: 'Image Input',
       imageOutputPrice: 'Image Output',

@@ -273,6 +273,8 @@ export interface PublicSettings {
   channel_monitor_hide_throughput?: boolean
   /** When true, user monitor shows account quota/balance snapshots (default off). */
   channel_monitor_show_quota?: boolean
+  /** When true, user monitor hides the user ranking tab and /users payload. */
+  channel_monitor_hide_user_ranking?: boolean
   available_channels_enabled: boolean
   model_plaza_enabled: boolean
   model_plaza_require_auth: boolean
@@ -531,7 +533,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'composite'
+export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'composite'
 
 export type VideoModelPrices = Record<string, Record<string, number>>
 
@@ -560,9 +562,9 @@ export interface Group {
   platform: GroupPlatform
   rate_multiplier: number
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
-  user_concurrency_limit?: number // Per-user concurrent request cap inside this group (0 = unlimited)
-  max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
-  max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
+	max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
+	max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
+	user_concurrency_limit?: number // Per-user concurrent request cap inside this group (0 = unlimited)
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   is_exclusive: boolean
   status: 'active' | 'inactive'
@@ -644,14 +646,14 @@ export interface AdminGroup extends Group {
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   default_mapped_model?: string
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
-  models_list_config?: ModelsListConfig
+  model_allowlist?: ModelAllowlist
   codex_models_manifest_config?: CodexModelsManifestConfig
 
   // 分组排序
   sort_order: number
 }
 
-export interface ModelsListConfig {
+export interface ModelAllowlist {
   enabled: boolean
   models: string[]
 }
@@ -831,7 +833,7 @@ export interface CreateGroupRequest {
   fallback_group_id_on_invalid_request?: number | null
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
-  models_list_config?: ModelsListConfig
+  model_allowlist?: ModelAllowlist
   codex_models_manifest_config?: CodexModelsManifestConfig
   allow_messages_dispatch?: boolean
   allow_live?: boolean
@@ -898,7 +900,7 @@ export interface UpdateGroupRequest {
   fallback_group_id_on_invalid_request?: number | null
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
-  models_list_config?: ModelsListConfig
+  model_allowlist?: ModelAllowlist
   codex_models_manifest_config?: CodexModelsManifestConfig
   allow_messages_dispatch?: boolean
   allow_live?: boolean
@@ -918,7 +920,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -1333,27 +1335,6 @@ export interface UsageProgress {
   overdraft_recover_at?: string | null
 }
 
-export interface CodexQuotaOverdraftProbeState {
-  status: 'pending' | 'passed' | 'failed' | 'inconclusive' | 'recovered'
-  quota_window: '5h' | '7d' | 'multiple'
-  cycle_key: string
-  attempts: number
-  limit: number
-  model?: string
-  reason_code?: string
-  started_at: string
-  tested_at?: string | null
-  retry_at?: string | null
-  retry_count?: number
-  recover_at?: string | null
-  five_hour_recover_at?: string | null
-  seven_day_recover_at?: string | null
-  overdraft_started_at?: string | null
-  five_hour_overdraft_started_at?: string | null
-  seven_day_overdraft_started_at?: string | null
-  observed_rate_limit_reset_at?: string | null
-}
-
 // Antigravity 单个模型的配额信息
 export interface AntigravityModelQuota {
   utilization: number // 使用率 0-100
@@ -1457,6 +1438,20 @@ export interface AccountUsageInfo {
   error?: string            // usage 获取失败时的错误信息
 }
 
+export interface CodexQuotaOverdraftProbeState {
+  status?: string
+  attempts?: number
+  limit?: number
+  quota_window?: string
+  tested_at?: string | null
+  model?: string
+  reason_code?: string
+  active?: boolean
+  started_at?: string | null
+  recover_at?: string | null
+  stats?: WindowStats | null
+}
+
 // OpenAI Codex usage snapshot (from response headers)
 export interface CodexUsageSnapshot {
   // Legacy fields (kept for backwards compatibility)
@@ -1527,8 +1522,6 @@ export interface UpdateAccountRequest {
   credentials?: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
   concurrency?: number
   load_factor?: number | null
   priority?: number
@@ -1541,6 +1534,15 @@ export interface UpdateAccountRequest {
   upstream_billing_probe_enabled?: boolean
   upstream_billing_rate_sync_enabled?: boolean
   confirm_mixed_channel_risk?: boolean
+}
+
+export type GrokMediaEligibilityMode = 'auto' | 'enabled' | 'disabled'
+
+export interface GrokMediaEligibilityState {
+  account_id: number
+  mode: GrokMediaEligibilityMode
+  eligible: boolean
+  reason: string
 }
 
 export interface CheckMixedChannelRequest {
@@ -1670,8 +1672,6 @@ export interface OpenAICodexPATCreateRequest {
   notes?: string | null
   group_ids?: number[]
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
   concurrency?: number
   priority?: number
   rate_multiplier?: number

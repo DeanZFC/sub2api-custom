@@ -136,6 +136,35 @@ func TestResolveConvergedThreadID_EmptySession(t *testing.T) {
 	assert.Equal(t, "", resolveConvergedThreadID(testCodexFingerprintSeed, ""))
 }
 
+func TestSingleMachineMultiWindow_PreservesSessionBoundaryAndStableWindow(t *testing.T) {
+	account := newTestOAuthAccount(7, map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSingleMachineMultiWindow)})
+	clientA := http.Header{}
+	clientA.Set("User-Agent", "codex_cli_rs/0.146.0")
+	clientA.Set("session-id", "session-a")
+	clientB := http.Header{}
+	clientB.Set("User-Agent", "codex_cli_rs/0.146.0")
+	clientB.Set("session-id", "session-b")
+	a := resolveCodexFingerprintIDsFromRequest(account, clientA)
+	b := resolveCodexFingerprintIDsFromRequest(account, clientB)
+	require.NotNil(t, a)
+	require.NotNil(t, b)
+	assert.Equal(t, a.installationID, b.installationID)
+	assert.NotEqual(t, a.sessionID, b.sessionID)
+	assert.NotEqual(t, a.windowID, b.windowID)
+	assert.Equal(t, a.sessionID, resolveSingleMachineMultiWindowSessionID(testCodexFingerprintSeed, "session-a"))
+
+	h := http.Header{"session_id": []string{"legacy"}}
+	applyCodexFingerprintHeaders(h, a)
+	assert.Empty(t, h.Get("session_id"))
+	assert.Equal(t, a.sessionID, h.Get("session-id"))
+}
+
+func TestSingleMachineMultiWindow_NonCodexDoesNotCreateWindowIdentity(t *testing.T) {
+	account := newTestOAuthAccount(8, map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSingleMachineMultiWindow)})
+	h := http.Header{"User-Agent": []string{"opencode/1.0"}, "session-id": []string{"session-a"}}
+	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, h))
+}
+
 // --- off 模式：resolveCodexFingerprintIDsFromRequest 返回 nil ---
 
 func TestResolveCodexFingerprintIDsFromRequest_ExplicitOff(t *testing.T) {
