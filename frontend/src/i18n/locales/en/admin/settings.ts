@@ -527,6 +527,11 @@ export default {
         codexHardeningTitle: "Codex Settings",
         codexRetry: {
           title: "Automatic error retry",
+          resilienceHint: "Suggested: 10 retries, 1000 ms, a 120-second window, and both options below. The window includes upstream processing and waits from the first attempt of a turn. No new retry starts after it expires; the last upstream error is preserved.",
+          backoff: "Increase retry delays gradually",
+          backoffHint: "Start at at least 1 second, increase to about 10 seconds with jitter, and honor a longer upstream Retry-After.",
+          buffer: "Send the response after successful completion",
+          bufferHint: "Hold text and tool calls for this turn and retry matching failures before delivery. This increases waiting time. Buffering is limited to 4 MiB, 8192 WebSocket frames, and the retry window. At a limit, resume streaming and stop replaying after output is delivered.",
           maxRetries: "Maximum retries",
           interval: "Retry interval (ms)",
           window: "Retry window (seconds)",
