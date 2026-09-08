@@ -123,14 +123,16 @@
             scope="col"
             :aria-sort="column.sortable ? getColumnAriaSort(column.key) : undefined"
             :class="[
-              'sticky-header-cell py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
+              'sticky-header-cell relative py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
               getAdaptivePaddingClass(),
               { 'cursor-pointer hover:bg-gray-100 dark:hover:bg-dark-700': column.sortable },
               getStickyColumnClass(column, index),
               column.class
             ]"
+            :style="columnWidths[column.key] ? { width: `${columnWidths[column.key]}px`, minWidth: `${columnWidths[column.key]}px` } : undefined"
             @click="column.sortable && handleSort(column.key)"
           >
+            <span v-if="resizableColumns" class="absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize" @click.stop @mousedown.prevent="startColumnResize($event, column.key)" />
             <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(column)]">
               <slot
                 :name="`header-${column.key}`"
@@ -240,6 +242,7 @@
                 getStickyColumnClass(column, colIndex),
                 column.class
               ]"
+              :style="columnWidths[column.key] ? { width: `${columnWidths[column.key]}px`, minWidth: `${columnWidths[column.key]}px` } : undefined"
             >
               <slot :name="`cell-${column.key}`"
                     :row="item.row"
@@ -469,6 +472,8 @@ interface Props {
   selectable?: boolean
   /** Selected row keys. Keys outside the current data page are preserved. */
   selectedKeys?: Array<string | number>
+  /** Enable desktop column resizing. */
+  resizableColumns?: boolean
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
 }
@@ -482,11 +487,29 @@ const props = withDefaults(defineProps<Props>(), {
   serverSideSort: false,
   selectable: false,
   selectedKeys: () => []
+  ,resizableColumns: false
 })
 
 const sortKey = ref<string>('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 const actionsExpanded = ref(false)
+const columnWidths = ref<Record<string, number>>({})
+let resizing: { key: string; startX: number; startWidth: number } | null = null
+const startColumnResize = (event: MouseEvent, key: string) => {
+  const th = (event.currentTarget as HTMLElement).parentElement
+  if (!th) return
+  resizing = { key, startX: event.clientX, startWidth: th.getBoundingClientRect().width }
+  window.addEventListener('mousemove', onColumnResize)
+  window.addEventListener('mouseup', stopColumnResize, { once: true })
+}
+const onColumnResize = (event: MouseEvent) => {
+  if (!resizing) return
+  columnWidths.value[resizing.key] = Math.max(72, Math.round(resizing.startWidth + event.clientX - resizing.startX))
+}
+const stopColumnResize = () => {
+  resizing = null
+  window.removeEventListener('mousemove', onColumnResize)
+}
 
 type PersistedSortState = {
   key: string

@@ -195,6 +195,7 @@
         <DataTable
           ref="dataTableRef"
           :columns="cols"
+          :resizable-columns="true"
           :data="accounts"
           :loading="loading"
           row-key="id"
