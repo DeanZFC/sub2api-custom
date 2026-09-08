@@ -405,7 +405,10 @@ type CreateAccountInput struct {
 	Credentials        map[string]any
 	Extra              map[string]any
 	ProxyID            *int64
+	ProxyConcurrencyLimitEnabled *bool
+	ProxyPoolIDs       []int64
 	Concurrency        int
+	RateLimit429RetryCount *int
 	Priority           int
 	RateMultiplier     *float64 // 账号计费倍率（>=0，允许 0）
 	LoadFactor         *int
@@ -436,7 +439,10 @@ type UpdateAccountInput struct {
 	Credentials           map[string]any
 	Extra                 map[string]any
 	ProxyID               *int64
+	ProxyConcurrencyLimitEnabled *bool
+	ProxyPoolIDs          *[]int64
 	Concurrency           *int     // 使用指针区分"未提供"和"设置为0"
+	RateLimit429RetryCount *int
 	Priority              *int     // 使用指针区分"未提供"和"设置为0"
 	RateMultiplier        *float64 // 账号计费倍率（>=0，允许 0）
 	LoadFactor            *int
@@ -455,6 +461,7 @@ type BulkUpdateAccountsInput struct {
 	Filters        *BulkUpdateAccountFilters
 	Name           string
 	ProxyID        *int64
+	RateLimit429RetryCount *int
 	Concurrency    *int
 	Priority       *int
 	RateMultiplier *float64 // 账号计费倍率（>=0，允许 0）

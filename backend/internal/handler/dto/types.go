@@ -223,6 +223,9 @@ type Account struct {
 	ProxyID                 *int64                         `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64                         `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName *string                        `json:"proxy_fallback_origin_name,omitempty"`
+	ProxyConcurrencyLimitEnabled bool                      `json:"proxy_concurrency_limit_enabled"`
+	ProxyPoolIDs                 []int64                   `json:"proxy_pool_ids,omitempty"`
+	ProxyPool                    []AccountProxyCapacity    `json:"proxy_pool,omitempty"`
 	Concurrency             int                            `json:"concurrency"`
 	LoadFactor              *int                           `json:"load_factor,omitempty"`
 	Priority                int                            `json:"priority"`
@@ -333,6 +336,13 @@ type Account struct {
 // by the account table and runtime indicators, but intentionally omits the
 // repeated account_groups and groups object graphs. Fetch /admin/accounts/:id
 // for the complete Account DTO when editing or inspecting an account.
+type AccountProxyCapacity struct {
+	ProxyID int64 `json:"proxy_id"`
+	ProxyName string `json:"proxy_name"`
+	CurrentConcurrency int `json:"current_concurrency"`
+	MaxConcurrency int `json:"max_concurrency"`
+}
+
 type AccountListItem struct {
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`
@@ -348,6 +358,9 @@ type AccountListItem struct {
 	ProxyID                 *int64     `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName *string    `json:"proxy_fallback_origin_name,omitempty"`
+	ProxyConcurrencyLimitEnabled bool `json:"proxy_concurrency_limit_enabled"`
+	ProxyPoolIDs []int64 `json:"proxy_pool_ids,omitempty"`
+	ProxyPool []AccountProxyCapacity `json:"proxy_pool,omitempty"`
 	Concurrency             int        `json:"concurrency"`
 	LoadFactor              *int       `json:"load_factor,omitempty"`
 	Priority                int        `json:"priority"`

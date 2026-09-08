@@ -1192,6 +1192,9 @@ export interface Account {
     }
   } & Record<string, unknown>)
   proxy_id: number | null
+  proxy_concurrency_limit_enabled?: boolean
+  proxy_pool_ids?: number[]
+  proxy_pool?: Array<{ proxy_id: number; proxy_name: string; current_concurrency: number; max_concurrency: number }>
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null
   concurrency: number
@@ -1324,6 +1327,10 @@ export interface UsageProgress {
   window_stats?: WindowStats | null // 窗口期统计（从窗口开始到当前的使用量）
   used_requests?: number
   limit_requests?: number
+  overdraft_active?: boolean
+  overdraft_stats?: WindowStats | null
+  overdraft_started_at?: string | null
+  overdraft_recover_at?: string | null
 }
 
 // Antigravity 单个模型的配额信息
@@ -1380,6 +1387,7 @@ export interface AccountUsageInfo {
   updated_at: string | null
   five_hour: UsageProgress | null
   seven_day: UsageProgress | null
+  codex_quota_overdraft?: CodexQuotaOverdraftProbeState | null
   seven_day_sonnet: UsageProgress | null
   seven_day_fable?: UsageProgress | null
   thirty_day?: UsageProgress | null
@@ -1426,6 +1434,20 @@ export interface AccountUsageInfo {
   error_code?: string
 
   error?: string            // usage 获取失败时的错误信息
+}
+
+export interface CodexQuotaOverdraftProbeState {
+  status?: string
+  attempts?: number
+  limit?: number
+  quota_window?: string
+  tested_at?: string | null
+  model?: string
+  reason_code?: string
+  active?: boolean
+  started_at?: string | null
+  recover_at?: string | null
+  stats?: WindowStats | null
 }
 
 // OpenAI Codex usage snapshot (from response headers)
@@ -1478,6 +1500,8 @@ export interface CreateAccountRequest {
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
+  proxy_concurrency_limit_enabled?: boolean
+  proxy_pool_ids?: number[]
   concurrency?: number
   load_factor?: number | null
   priority?: number
@@ -1616,6 +1640,8 @@ export interface CodexSessionImportRequest {
   notes?: string | null
   group_ids?: number[]
   proxy_id?: number | null
+  proxy_concurrency_limit_enabled?: boolean
+  proxy_pool_ids?: number[]
   concurrency?: number
   priority?: number
   rate_multiplier?: number
