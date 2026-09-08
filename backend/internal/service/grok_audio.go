@@ -20,12 +20,6 @@ import (
 // The timeout only covers dialing; an established session is not interrupted.
 const DefaultGrokRealtimeDialTimeout = 12 * time.Second
 
-// GrokRealtimeDialTimeout 返回实时连接的单次握手超时。
-// 账号级透明 429 重试已关闭，不再额外叠加等待时间。
-func GrokRealtimeDialTimeout(account *Account) time.Duration {
-	return account429RetryTotalTimeout(DefaultGrokRealtimeDialTimeout, account)
-}
-
 // supportedGrokVoiceHTTPEndpoints are xAI Voice HTTP paths we forward as-is.
 var supportedGrokVoiceHTTPEndpoints = map[string]struct{}{
 	"tts":           {},
@@ -99,7 +93,7 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 		proxyURL = account.Proxy.URL()
 	}
 	started := time.Now()
-	resp, err := doAccountHTTPUpstream(s.httpUpstream, req, proxyURL, account)
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(started).Milliseconds())
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
@@ -188,12 +182,7 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	dialer := s.getOpenAIWSPassthroughDialer()
-	conn, status, _, _, err := dialAccount429Retry(ctx, account, func(attemptCtx context.Context) (openAIWSClientConn, int, http.Header, error) {
-		dialCtx, cancelDial := context.WithTimeout(attemptCtx, DefaultGrokRealtimeDialTimeout)
-		defer cancelDial()
-		return dialer.Dial(dialCtx, u.String(), headers, proxyURL)
-	})
+	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, u.String(), headers, proxyURL)
 	if err != nil {
 		return nil, &GrokRealtimeDialError{StatusCode: status, Err: err}
 	}
