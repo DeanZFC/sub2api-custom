@@ -105,6 +105,7 @@ func bufferCodexRetrySSE(ctx context.Context, original io.ReadCloser, settings C
 		return body, nil, nil
 	}
 	inspect := func(frame openAICompatSSEFrame) (*openAICompatSSEFrame, bool) {
+		frame.EventType = effectiveOpenAISSEEventType([]byte(frame.Data), frame.EventType)
 		if (frame.EventType == "error" || frame.EventType == "response.failed") && settings.matches([]byte(frame.Data), "") {
 			return &frame, true
 		}
