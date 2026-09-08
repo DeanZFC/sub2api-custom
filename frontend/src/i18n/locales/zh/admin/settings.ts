@@ -520,6 +520,11 @@ export default {
         codexHardeningTitle: 'Codex 设置',
         codexRetry: {
           title: '错误自动重试',
+          resilienceHint: '建议：10 次、1000 毫秒、120 秒窗口，并开启下方两项。窗口从本轮第一次请求开始计算，包含上游处理和等待时间，超过后不再发起重试；最后一次上游错误保持原文。',
+          backoff: '逐步延长重试间隔',
+          backoffHint: '从至少 1 秒开始，逐步增加到约 10 秒并加入少量随机延迟。上游要求等待更久时遵守 Retry-After。',
+          buffer: '成功后再发送完整响应',
+          bufferHint: '暂存本轮文字和工具调用，成功后再发送；匹配的失败在服务端重试。会增加等待时间。最多缓冲 4 MiB，WebSocket 最多 8192 帧，并受时间窗口限制；达到上限后恢复流式输出，已输出后不再重放。',
           maxRetries: '最大重试次数',
           interval: '重试间隔（毫秒）',
           window: '重试时间窗口（秒）',
