@@ -223,3 +223,89 @@ func TestCodexPreOutputRetryCancellation(t *testing.T) {
 	require.True(t, errors.Is(err, context.Canceled))
 	require.Equal(t, 1, calls)
 }
+
+func TestCodexBufferedRetryAfterPartialOutput(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, prefix := range []string{
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"discarded-text\"}\n\n",
+			"data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"discarded-tool\",\"call_id\":\"discarded-call\",\"name\":\"run\",\"arguments\":\"{}\"}}\n\n",
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/prefix=%s", passthrough, prefix), func(t *testing.T) {
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{
+					codexRetryTestResponse(200, prefix+"data: "+codexRetryTestFailure+"\n\n"),
+					codexRetryTestResponse(200, codexRetryTestSuccess),
+				}}
+				svc := newOpenAIImageGenerationControlTestService(upstream)
+				svc.settingService = codexRetryTestSettings(t)
+				settings := svc.settingService.GetCodexPreOutputRetrySettingsCached(context.Background())
+				settings.BufferUntilComplete = true
+				require.NoError(t, svc.settingService.SetCodexPreOutputRetrySettings(context.Background(), settings))
+				c, recorder := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.144.1")
+				account := newOpenAIImageGenerationControlTestAccount()
+				account.Extra = map[string]any{"openai_passthrough": passthrough, "pool_mode_retry_count": 0}
+				result, err := svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"gpt-5.5","stream":true,"input":"hello"}`))
+				require.NoError(t, err)
+				require.Len(t, upstream.requests, 2)
+				require.Equal(t, upstream.bodies[0], upstream.bodies[1])
+				require.NotContains(t, recorder.Body.String(), "discarded-")
+				require.NotContains(t, recorder.Body.String(), "failed-attempt")
+				require.NotContains(t, recorder.Body.String(), "overloaded")
+				require.Equal(t, 1, strings.Count(recorder.Body.String(), `"delta":"hello"`))
+				require.Equal(t, 5, result.Usage.OutputTokens)
+			})
+		}
+	}
+}
+
+func TestCodexBufferedRetryExhaustionKeepsOnlyLastError(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprint(passthrough), func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{}
+			for range 3 {
+				upstream.responses = append(upstream.responses, codexRetryTestResponse(200,
+					"data: {\"type\":\"response.output_text.delta\",\"delta\":\"discarded-text\"}\n\n"+"data: "+codexRetryTestFailure+"\n\n"))
+			}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.settingService = codexRetryTestSettings(t)
+			settings := svc.settingService.GetCodexPreOutputRetrySettingsCached(context.Background())
+			settings.BufferUntilComplete = true
+			require.NoError(t, svc.settingService.SetCodexPreOutputRetrySettings(context.Background(), settings))
+			c, recorder := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.144.1")
+			account := newOpenAIImageGenerationControlTestAccount()
+			account.Extra = map[string]any{"openai_passthrough": passthrough, "pool_mode_retry_count": 0}
+			_, err := svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"gpt-5.5","stream":true,"input":"hello"}`))
+			var failure *UpstreamFailoverError
+			require.ErrorAs(t, err, &failure)
+			require.Len(t, upstream.requests, 3)
+			require.Equal(t, codexRetryTestFailure, string(failure.ResponseBody))
+			WriteCodexRetryExhaustedResponse(c, failure, false)
+			require.Contains(t, recorder.Body.String(), codexRetryTestFailure)
+			require.NotContains(t, recorder.Body.String(), "discarded-text")
+			require.Equal(t, 1, strings.Count(recorder.Body.String(), "data:"))
+		})
+	}
+}
+
+func TestCodexRetryBackoffAndRetryAfter(t *testing.T) {
+	settings := DefaultCodexPreOutputRetrySettings()
+	settings.Enabled, settings.ExponentialBackoff, settings.RetryIntervalMs = true, true, 100
+	now := time.Now().UTC().Truncate(time.Second)
+	for retries, base := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second, 10 * time.Second} {
+		delay := settings.retryDelay(retries, nil, now)
+		require.GreaterOrEqual(t, delay, base)
+		require.LessOrEqual(t, delay, base+base/5)
+	}
+	require.Equal(t, 90*time.Second, settings.retryDelay(0, http.Header{"Retry-After": {"90"}}, now))
+	require.Equal(t, 90*time.Second, codexRetryAfter(now.Add(90*time.Second).Format(http.TimeFormat), now))
+	require.Equal(t, 301*time.Second, codexRetryAfter("18446744073709551615", now))
+	for _, raw := range []string{"", "invalid", "-1", now.Add(-time.Second).Format(http.TimeFormat)} {
+		require.Zero(t, codexRetryAfter(raw, now))
+	}
+	settings.ExponentialBackoff = false
+	require.Equal(t, 100*time.Millisecond, settings.retryDelay(3, nil, now))
+	require.False(t, settings.canRetryAfter(0, now, 90*time.Second))
+	require.False(t, settings.canRetryAfter(0, now.Add(-time.Minute), 0))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, waitCodexRetry(ctx, time.Hour), context.Canceled)
+}
