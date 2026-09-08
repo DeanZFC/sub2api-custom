@@ -12,6 +12,7 @@
       <button type="button" class="btn btn-secondary btn-sm" :title="t('common.retry')" @click="load"><Icon name="refresh" size="sm" /></button>
     </div>
     <template v-else>
+      <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.gatewayForwarding.codexRetry.resilienceHint') }}</p>
       <fieldset :disabled="saving || !form.enabled" class="grid min-w-0 gap-4 sm:grid-cols-3 disabled:opacity-60">
         <div>
           <label for="codex-retry-count" class="input-label">{{ t('admin.settings.gatewayForwarding.codexRetry.maxRetries') }}</label>
@@ -24,6 +25,20 @@
         <div>
           <label for="codex-retry-window" class="input-label">{{ t('admin.settings.gatewayForwarding.codexRetry.window') }}</label>
           <input id="codex-retry-window" v-model.number="form.max_retry_window_seconds" type="number" min="1" max="300" step="1" class="input w-full" />
+        </div>
+        <div class="flex items-center justify-between gap-4 sm:col-span-3">
+          <div>
+            <label for="codex-retry-backoff" class="input-label">{{ t('admin.settings.gatewayForwarding.codexRetry.backoff') }}</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.gatewayForwarding.codexRetry.backoffHint') }}</p>
+          </div>
+          <input id="codex-retry-backoff" v-model="form.exponential_backoff" type="checkbox" class="h-4 w-4 shrink-0" />
+        </div>
+        <div class="flex items-center justify-between gap-4 sm:col-span-3">
+          <div>
+            <label for="codex-retry-buffer" class="input-label">{{ t('admin.settings.gatewayForwarding.codexRetry.buffer') }}</label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.gatewayForwarding.codexRetry.bufferHint') }}</p>
+          </div>
+          <input id="codex-retry-buffer" v-model="form.buffer_until_complete" type="checkbox" class="h-4 w-4 shrink-0" />
         </div>
         <div class="min-w-0 sm:col-span-3">
           <label for="codex-retry-keywords" class="input-label">{{ t('admin.settings.gatewayForwarding.codexRetry.keywords') }}</label>
@@ -57,6 +72,7 @@ const loaded = ref(false)
 const saving = ref(false)
 const keywordText = ref('')
 const form = reactive<CodexPreOutputRetrySettings>({
+  exponential_backoff: false, buffer_until_complete: false,
   enabled: false, max_retries: 3, retry_interval_ms: 1000, max_retry_window_seconds: 30, keywords: [],
 })
 const keywords = computed(() => keywordText.value.split('\n').map(value => value.trim()).filter(Boolean))
@@ -73,7 +89,7 @@ const validationError = computed(() => {
 })
 
 function apply(settings: CodexPreOutputRetrySettings) {
-  Object.assign(form, settings)
+  Object.assign(form, { exponential_backoff: false, buffer_until_complete: false }, settings)
   keywordText.value = settings.keywords.join('\n')
 }
 
