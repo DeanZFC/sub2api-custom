@@ -1328,6 +1328,8 @@ export interface PanelRateLimitSettings {
 }
 
 export interface CodexPreOutputRetrySettings {
+  exponential_backoff?: boolean;
+  buffer_until_complete?: boolean;
   enabled: boolean;
   max_retries: number;
   retry_interval_ms: number;
