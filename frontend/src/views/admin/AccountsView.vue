@@ -715,6 +715,7 @@ const usageManualRefreshToken = ref(0)
 const recentRequestsByAccountId = ref<Record<string, OpsRequestDetail[]>>({})
 const recentRequestsLoadingByAccountId = ref<Record<string, boolean>>({})
 let recentRequestsReqSeq = 0
+let recentRequestsRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 const desktopViewportQuery = '(min-width: 768px)'
 const isDesktopViewport = ref(
@@ -2634,6 +2635,12 @@ onMounted(async () => {
   }
 
   load()
+  // Recent request indicators refresh independently of the account-list auto refresh.
+  recentRequestsRefreshTimer = setInterval(() => {
+    if (!document.hidden && !loading.value && !isAnyModalOpen.value) {
+      refreshRecentRequests().catch(error => console.error('Failed to refresh recent requests:', error))
+    }
+  }, 10000)
   loadUpstreamBillingProbeGlobalState()
   const [proxiesResult, groupsResult] = await Promise.allSettled([
     adminAPI.proxies.getAll(),
@@ -2662,6 +2669,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (recentRequestsRefreshTimer !== null) {
+    clearInterval(recentRequestsRefreshTimer)
+    recentRequestsRefreshTimer = null
+  }
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

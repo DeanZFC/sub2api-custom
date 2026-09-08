@@ -9,7 +9,7 @@
       </div>
       <div class="flex h-6 items-center gap-1">
       <template v-for="(request, index) in requests" :key="`${request.request_id}-${index}`">
-        <HelpTooltip v-if="request.kind === 'error'" :content="errorTooltip(request)" width-class="w-80">
+        <HelpTooltip v-if="request.kind === 'error'" class="!ml-0" :content="errorTooltip(request)" width-class="w-80">
           <template #trigger>
             <span class="block h-6 w-1.5 cursor-help rounded-full bg-red-500 shadow-sm shadow-red-200 dark:bg-red-400 dark:shadow-none" />
           </template>
