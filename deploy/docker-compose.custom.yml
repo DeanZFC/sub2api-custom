@@ -14,7 +14,6 @@ services:
         COMMIT: ${BUILD_COMMIT:-local}
         BUILD_TYPE: source
     environment:
-      - GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED=${GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED:-true}
       - SUB2API_UPDATER_SOCKET=${SUB2API_UPDATER_SOCKET:-/run/sub2api-updater/sub2api-custom.sock}
       - SUB2API_UPDATER_TOKEN=${SUB2API_UPDATER_TOKEN:-}
     volumes:
