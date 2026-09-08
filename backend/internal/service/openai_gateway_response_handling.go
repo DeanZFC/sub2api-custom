@@ -57,6 +57,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	if account != nil && account.Platform == PlatformOpenAI {
 		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffort)
 	}
+	if err := s.prepareCodexBufferedResponse(ctx, resp, c, account, startTime, firstOutputTimeout); err != nil {
+		return nil, err
+	}
+	if buffered, ok := resp.Body.(*codexRetryBufferedBody); ok {
+		defer func() { _ = buffered.Close() }()
+		if buffered.semanticOutputSeen {
+			firstOutputTimeout = 0
+		}
+	}
 	guardFirstOutput := firstOutputTimeout > 0
 	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI
 	var attemptResponseHeaders http.Header
