@@ -2,10 +2,6 @@
 # Use together with docker-compose.local.yml for a new generic deployment.
 # Container names are intentionally inherited from the Compose project so that
 # multiple instances can share one host without collisions.
-# The legacy docker-compose.overdraft.yml and docker-compose.coexist.yml remain
-# available for existing deployments that still use the old project/container
-# names.
-
 services:
   sub2api:
     image: ${SUB2API_IMAGE:-sub2api-custom:local}
@@ -18,7 +14,6 @@ services:
         COMMIT: ${BUILD_COMMIT:-local}
         BUILD_TYPE: source
     environment:
-      - GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED=${GATEWAY_CODEX_QUOTA_OVERDRAFT_ENABLED:-true}
       - GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED=${GATEWAY_OPENAI_ACCOUNT_UNIQUE_FINGERPRINT_ENABLED:-true}
       - SUB2API_UPDATER_SOCKET=${SUB2API_UPDATER_SOCKET:-/run/sub2api-updater/sub2api-custom.sock}
       - SUB2API_UPDATER_TOKEN=${SUB2API_UPDATER_TOKEN:-}
