@@ -1278,36 +1278,13 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 }
 
 func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, account *Account, reason string) {
-	cooldown, enabled := s.get429FallbackCooldown(ctx, account)
-	if !enabled {
-		slog.Info("rate_limit_429_fallback_ignored", "account_id", account.ID, "platform", account.Platform, "reason", reason)
-		return
-	}
-
-	resetAt := time.Now().Add(cooldown)
-	slog.Warn("rate_limit_429_fallback_used", "account_id", account.ID, "platform", account.Platform, "reason", reason, "using_default", cooldown.String())
-	s.notifyAccountSchedulingBlocked(account, resetAt, "429_fallback")
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
-		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
-	}
+	// Do not synthesize a cooldown when the upstream response has no reset time.
+	// Official rate-limit handling remains responsible for explicit reset signals.
+	slog.Info("rate_limit_429_fallback_ignored", "account_id", account.ID, "platform", account.Platform, "reason", reason)
 }
 
 func (s *RateLimitService) get429FallbackCooldown(ctx context.Context, account *Account) (time.Duration, bool) {
-	if s.settingService != nil {
-		settings, err := s.settingService.GetRateLimit429CooldownSettings(ctx)
-		if err == nil && settings != nil {
-			if !settings.Enabled {
-				return 0, false
-			}
-			seconds := clampRateLimit429CooldownSeconds(settings.CooldownSeconds)
-			return time.Duration(seconds) * time.Second, true
-		}
-		slog.Warn("rate_limit_429_settings_read_failed", "account_id", account.ID, "error", err)
-	}
-
-	seconds := defaultRateLimit429CooldownSeconds
-	seconds = clampRateLimit429CooldownSeconds(seconds)
-	return time.Duration(seconds) * time.Second, true
+	return 0, false
 }
 
 func clampRateLimit429CooldownSeconds(seconds int) int {
@@ -2314,7 +2291,7 @@ func (s *RateLimitService) HandleOpenAICodexSparkRateLimit(ctx context.Context, 
 	if resetAt == nil || !resetAt.After(now) {
 		cooldown, ok := s.get429FallbackCooldown(ctx, account)
 		if !ok || cooldown <= 0 {
-			cooldown = time.Duration(defaultRateLimit429CooldownSeconds) * time.Second
+			return false
 		}
 		reset := now.Add(cooldown)
 		resetAt = &reset
