@@ -2641,7 +2641,7 @@ onMounted(async () => {
     if (!document.hidden && !loading.value && !isAnyModalOpen.value) {
       refreshRecentRequests().catch(error => console.error('Failed to refresh recent requests:', error))
     }
-  }, 10000)
+  }, 3000)
   loadUpstreamBillingProbeGlobalState()
   const [proxiesResult, groupsResult] = await Promise.allSettled([
     adminAPI.proxies.getAll(),
