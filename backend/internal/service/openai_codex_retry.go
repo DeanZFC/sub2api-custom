@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -192,7 +194,8 @@ func (s *OpenAIGatewayService) withCodexPreOutputRetry(ctx context.Context, c *g
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
-		if !settings.canRetry(retries, started) {
+		delay := settings.retryDelay(retries, retryErr.ResponseHeaders, time.Now())
+		if !settings.canRetryAfter(retries, started, delay) {
 			return result, err
 		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -201,19 +204,58 @@ func (s *OpenAIGatewayService) withCodexPreOutputRetry(ctx context.Context, c *g
 			UpstreamStatusCode: retryErr.StatusCode, UpstreamRequestID: retryErr.ResponseHeaders.Get("x-request-id"),
 			Kind: "retry", Message: retryErr.ClientMessage,
 		})
-		if err := settings.wait(ctx); err != nil {
+		if err := waitCodexRetry(ctx, delay); err != nil {
 			return result, err
+		}
+		// A delayed timer must not start another attempt outside the window.
+		if !settings.canRetryAfter(retries, started, 0) {
+			return result, retryErr
 		}
 	}
 }
 
 func (v CodexPreOutputRetrySettings) canRetry(retries int, started time.Time) bool {
+	return v.canRetryAfter(retries, started, time.Duration(v.RetryIntervalMs)*time.Millisecond)
+}
+
+func (v CodexPreOutputRetrySettings) canRetryAfter(retries int, started time.Time, delay time.Duration) bool {
 	return v.Enabled && retries < v.MaxRetries &&
-		time.Since(started)+time.Duration(v.RetryIntervalMs)*time.Millisecond < time.Duration(v.MaxRetryWindowSeconds)*time.Second
+		time.Since(started)+delay < time.Duration(v.MaxRetryWindowSeconds)*time.Second
+}
+
+func (v CodexPreOutputRetrySettings) retryDelay(retries int, headers http.Header, now time.Time) time.Duration {
+	delay := time.Duration(v.RetryIntervalMs) * time.Millisecond
+	if v.ExponentialBackoff {
+		// A 100 ms base otherwise spends all retries during the same overload.
+		delay = max(delay, time.Second)
+		for attempt := 0; attempt < retries && delay < 10*time.Second; attempt++ {
+			delay *= 2
+		}
+		delay = min(delay, 10*time.Second)
+		// Positive jitter never shortens the base delay or Retry-After.
+		delay += time.Duration(rand.Int64N(int64(delay/5) + 1))
+	}
+	return max(delay, codexRetryAfter(headers.Get("Retry-After"), now))
+}
+
+func codexRetryAfter(raw string, now time.Time) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if seconds, err := strconv.ParseUint(raw, 10, 64); err == nil {
+		// Longer waits cannot fit in the maximum configurable 300 s window.
+		return time.Duration(min(seconds, uint64(301))) * time.Second
+	}
+	if date, err := http.ParseTime(raw); err == nil && date.After(now) {
+		return min(date.Sub(now), 301*time.Second)
+	}
+	return 0
 }
 
 func (v CodexPreOutputRetrySettings) wait(ctx context.Context) error {
-	timer := time.NewTimer(time.Duration(v.RetryIntervalMs) * time.Millisecond)
+	return waitCodexRetry(ctx, time.Duration(v.RetryIntervalMs)*time.Millisecond)
+}
+
+func waitCodexRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
