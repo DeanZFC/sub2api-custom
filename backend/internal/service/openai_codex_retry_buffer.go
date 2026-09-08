@@ -185,6 +185,9 @@ func (s *OpenAIGatewayService) prepareCodexBufferedResponse(ctx context.Context,
 }
 
 func (s *OpenAIGatewayService) prepareCodexBufferedResponseForTransport(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, firstOutputTimeout time.Duration, httpClient bool) error {
+	if c == nil || resp == nil || resp.Body == nil {
+		return nil
+	}
 	raw, _ := c.Get(codexRetrySettingsContextKey)
 	settings, ok := raw.(CodexPreOutputRetrySettings)
 	if !ok || !settings.Enabled || !settings.BufferUntilComplete || account == nil || account.Platform != PlatformOpenAI {
