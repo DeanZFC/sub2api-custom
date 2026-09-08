@@ -298,6 +298,13 @@ export default {
 
   // Usage
   usage: {
+    overdraftActive: 'Quota overdraft active',
+    overdraftProbeFailed: 'Quota probe failed',
+    overdraftProbeInconclusive: 'Quota probe inconclusive',
+    overdraftProbePending: 'Quota probe pending',
+    overdraftRecoverAt: 'Quota recovery: {time}',
+    overdraftRecovered: 'Quota recovered',
+    overdraftTestedAt: 'Tested: {time}',
     title: 'Usage Records',
     description: 'View and analyze your API usage history',
     costDetails: 'Cost Breakdown',
