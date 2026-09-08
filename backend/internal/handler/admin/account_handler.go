@@ -376,11 +376,11 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		if counts, err := h.concurrencyService.GetAccountConcurrencyBatch(ctx, []int64{account.ID}); err == nil {
 			item.CurrentConcurrency = counts[account.ID]
 		}
-		if item.Account != nil && item.Account.ProxyConcurrencyLimitEnabled {
-			for i := range item.Account.ProxyPool {
-				current, err := h.concurrencyService.GetAccountProxyConcurrency(ctx, account.ID, item.Account.ProxyPool[i].ProxyID)
+		if item.Account != nil && item.ProxyConcurrencyLimitEnabled {
+			for i := range item.ProxyPool {
+				current, err := h.concurrencyService.GetAccountProxyConcurrency(ctx, account.ID, item.ProxyPool[i].ProxyID)
 				if err == nil {
-					item.Account.ProxyPool[i].CurrentConcurrency = current
+					item.ProxyPool[i].CurrentConcurrency = current
 				}
 			}
 		}
@@ -812,10 +812,10 @@ func (h *AccountHandler) List(c *gin.Context) {
 			SchedulerScore:     schedulerScores[acc.ID],
 			SchedulerScores:    schedulerGroupScores[acc.ID],
 		}
-		if item.Account != nil && item.Account.ProxyConcurrencyLimitEnabled && h.concurrencyService != nil {
-			for j := range item.Account.ProxyPool {
-				if current, err := h.concurrencyService.GetAccountProxyConcurrency(c.Request.Context(), acc.ID, item.Account.ProxyPool[j].ProxyID); err == nil {
-					item.Account.ProxyPool[j].CurrentConcurrency = current
+		if item.Account != nil && item.ProxyConcurrencyLimitEnabled && h.concurrencyService != nil {
+			for j := range item.ProxyPool {
+				if current, err := h.concurrencyService.GetAccountProxyConcurrency(c.Request.Context(), acc.ID, item.ProxyPool[j].ProxyID); err == nil {
+					item.ProxyPool[j].CurrentConcurrency = current
 				}
 			}
 		}
