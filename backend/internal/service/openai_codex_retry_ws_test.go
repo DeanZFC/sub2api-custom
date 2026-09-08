@@ -440,3 +440,128 @@ func TestCodexBufferedWSLimitStopsReplay(t *testing.T) {
 	}
 	require.Len(t, script.writes, 1)
 }
+
+func TestCodexBufferedRetryHTTPBridge(t *testing.T) {
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		codexRetryTestResponse(200, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"discarded-text\"}\n\n"+"data: "+codexRetryTestFailure+"\n\n"),
+		codexRetryTestResponse(200, codexRetryTestSuccess),
+	}}
+	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.settingService = codexRetryTestSettings(t)
+	settings := svc.settingService.GetCodexPreOutputRetrySettingsCached(context.Background())
+	settings.BufferUntilComplete = true
+	require.NoError(t, svc.settingService.SetCodexPreOutputRetrySettings(context.Background(), settings))
+	c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.144.1")
+	var received [][]byte
+	payload := []byte(`{"type":"response.create","model":"gpt-5.5","input":"hello"}`)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(c.Request.Context(), c, newOpenAIImageGenerationControlTestAccount(), "test-token", payload, len(payload), "gpt-5.5", "", "", "", "", 2, func(message []byte) error {
+		received = append(received, append([]byte(nil), message...))
+		return nil
+	})
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 2)
+	require.NotEmpty(t, received)
+	for _, message := range received {
+		require.NotContains(t, string(message), "overloaded")
+		require.NotContains(t, string(message), "discarded-text")
+	}
+	require.NotNil(t, result.FirstTokenMs)
+	require.GreaterOrEqual(t, *result.FirstTokenMs, 100)
+}
+
+
+func TestCodexBufferedRetryWSIngress(t *testing.T) {
+	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough} {
+		t.Run(mode, func(t *testing.T) {
+			svc, account, upstream := codexRetryWSIngressTestService(t, mode)
+			settings := svc.settingService.GetCodexPreOutputRetrySettingsCached(context.Background())
+			settings.BufferUntilComplete = true
+			require.NoError(t, svc.settingService.SetCodexPreOutputRetrySettings(context.Background(), settings))
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			results := make(chan *OpenAIForwardResult, 2)
+			server, serverErr := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(*gin.Context) *OpenAIWSIngressHooks {
+				return &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, err error) {
+					if err == nil && result != nil {
+						results <- result
+					}
+				}}
+			})
+			defer server.Close()
+			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			require.NoError(t, err)
+			defer client.CloseNow()
+			readWrite := func() []byte {
+				select {
+				case payload := <-upstream.writes:
+					return payload
+				case <-ctx.Done():
+					t.Fatal("upstream request did not arrive")
+					return nil
+				}
+			}
+			for turn := 1; turn <= 2; turn++ {
+				previous := ""
+				if turn > 1 {
+					previous = `,"previous_response_id":"resp_success_1"`
+				}
+				request := []byte(`{"type":"response.create","model":"gpt-5.5","store":true,"input":"hello"` + previous + `}`)
+				require.NoError(t, client.Write(ctx, coderws.MessageText, request))
+				first := readWrite()
+				upstream.Send(`{"type":"response.created","response":{"id":"failed-attempt"}}`)
+				upstream.Send(`{"type":"response.output_text.delta","delta":"discarded-text"}`)
+				upstream.Send(`{"type":"response.function_call_arguments.delta","delta":"discarded-tool"}`)
+				upstream.Send(`{"type":"error","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded."}}`)
+				upstream.Send(codexRetryTestFailure)
+				require.Equal(t, first, readWrite())
+				if turn > 1 {
+					require.Equal(t, "resp_success_1", gjson.GetBytes(first, "previous_response_id").String())
+				}
+				upstream.Send(fmt.Sprintf(`{"type":"response.created","response":{"id":"resp_success_%d"}}`, turn))
+				upstream.Send(fmt.Sprintf(`{"type":"response.output_text.delta","response_id":"resp_success_%d","delta":"hello"}`, turn))
+				upstream.Send(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_success_%d","usage":{"input_tokens":10,"output_tokens":5}}}`, turn))
+				for _, eventType := range []string{"response.created", "response.output_text.delta", "response.completed"} {
+					_, message, err := client.Read(ctx)
+					require.NoError(t, err)
+					require.Equal(t, eventType, gjson.GetBytes(message, "type").String())
+					require.NotContains(t, string(message), "failed-attempt")
+				}
+				select {
+				case result := <-results:
+					require.Equal(t, fmt.Sprintf("resp_success_%d", turn), result.RequestID)
+					require.Equal(t, 5, result.Usage.OutputTokens)
+					require.NotNil(t, result.FirstTokenMs)
+					require.GreaterOrEqual(t, *result.FirstTokenMs, 100)
+				case <-ctx.Done():
+					t.Fatal("turn result did not arrive")
+				}
+			}
+			_ = client.CloseNow()
+			cancel()
+			select {
+			case <-serverErr:
+			case <-time.After(3 * time.Second):
+				t.Fatal("ingress did not stop")
+			}
+		})
+	}
+}
+
+
+func TestCodexBufferedWSBareErrorAndCloseKeepsOriginalError(t *testing.T) {
+	settings := codexRetryTestSettings(t).GetCodexPreOutputRetrySettingsCached(context.Background())
+	settings.BufferUntilComplete = true
+	upstreamError := `{"type":"error","error":{"code":"server_is_overloaded","message":"Original overload"}}`
+	script := &codexRetryFrameScript{scripts: [][]string{{
+		`{"type":"response.output_text.delta","delta":"discarded-text"}`,
+		upstreamError,
+	}}}
+	conn := &codexRetryWSFrameConn{inner: script, settings: func(context.Context) CodexPreOutputRetrySettings { return settings }}
+	require.NoError(t, conn.WriteFrame(context.Background(), coderws.MessageText, []byte(`{"type":"response.create"}`)))
+	_, payload, err := conn.ReadFrame(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, upstreamError, string(payload))
+	require.True(t, codexRetryWSExhausted(conn))
+	_, _, err = conn.ReadFrame(context.Background())
+	require.ErrorIs(t, err, io.EOF)
+}
