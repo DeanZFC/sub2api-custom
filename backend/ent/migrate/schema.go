@@ -272,6 +272,19 @@ var (
 			},
 		},
 	}
+	// AccountProxiesColumns holds the columns for the "account_proxies" table.
+	AccountProxiesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "account_id", Type: field.TypeInt64},
+		{Name: "proxy_id", Type: field.TypeInt64},
+		{Name: "position", Type: field.TypeInt, Default: 0},
+	}
+	// AccountProxiesTable holds the schema information for the "account_proxies" table.
+	AccountProxiesTable = &schema.Table{
+		Name:       "account_proxies",
+		Columns:    AccountProxiesColumns,
+		PrimaryKey: []*schema.Column{AccountProxiesColumns[0]},
+	}
 	// AnnouncementsColumns holds the columns for the "announcements" table.
 	AnnouncementsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2187,6 +2200,7 @@ var (
 		APIKeysTable,
 		AccountsTable,
 		AccountGroupsTable,
+		AccountProxiesTable,
 		AnnouncementsTable,
 		AnnouncementReadsTable,
 		AuthIdentitiesTable,
