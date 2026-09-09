@@ -21,11 +21,13 @@ import (
 )
 
 type Account struct {
-	ID                      int64
-	Name                    string
-	Notes                   *string
-	Platform                string
-	Type                    string
+	ID       int64
+	Name     string
+	Notes    *string
+	Platform string
+	Type     string
+	// AccountScope isolates user-provided shared accounts from system scheduling.
+	AccountScope            string
 	Credentials             map[string]any
 	Extra                   map[string]any
 	ProxyID                 *int64

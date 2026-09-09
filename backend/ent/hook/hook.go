@@ -357,6 +357,42 @@ func (f SettingFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, err
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SettingMutation", m)
 }
 
+// The SharedAccountListingFunc type is an adapter to allow the use of ordinary
+// function as SharedAccountListing mutator.
+type SharedAccountListingFunc func(context.Context, *ent.SharedAccountListingMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SharedAccountListingFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SharedAccountListingMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SharedAccountListingMutation", m)
+}
+
+// The SharedAccountUsageLedgerFunc type is an adapter to allow the use of ordinary
+// function as SharedAccountUsageLedger mutator.
+type SharedAccountUsageLedgerFunc func(context.Context, *ent.SharedAccountUsageLedgerMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SharedAccountUsageLedgerFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SharedAccountUsageLedgerMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SharedAccountUsageLedgerMutation", m)
+}
+
+// The SharedAccountWalletFunc type is an adapter to allow the use of ordinary
+// function as SharedAccountWallet mutator.
+type SharedAccountWalletFunc func(context.Context, *ent.SharedAccountWalletMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SharedAccountWalletFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SharedAccountWalletMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SharedAccountWalletMutation", m)
+}
+
 // The SubscriptionPlanFunc type is an adapter to allow the use of ordinary
 // function as SubscriptionPlan mutator.
 type SubscriptionPlanFunc func(context.Context, *ent.SubscriptionPlanMutation) (ent.Value, error)

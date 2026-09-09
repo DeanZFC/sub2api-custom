@@ -88,6 +88,30 @@ func (s *SettingService) IsAffiliateEnabled(ctx context.Context) bool {
 	return value == "true"
 }
 
+// GetSharedPoolFeeRatePercent returns the commission used for new settlements.
+func (s *SettingService) GetSharedPoolFeeRatePercent(ctx context.Context) float64 {
+	const fallback = 10.0
+	if s == nil || s.settingRepo == nil {
+		return fallback
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeySharedPoolFeeRate)
+	if err != nil {
+		return fallback
+	}
+	rate, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || rate < 0 || rate > 100 {
+		return fallback
+	}
+	return rate
+}
+func (s *SettingService) IsSharedPoolEnabled(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil {
+		return false
+	}
+	v, err := s.settingRepo.GetValue(ctx, SettingKeySharedPoolEnabled)
+	return err == nil && v == "true"
+}
+
 // IsAffiliateAdminRechargeEnabled reports whether admin balance
 // deposits should participate in the affiliate rebate program.
 func (s *SettingService) IsAffiliateAdminRechargeEnabled(ctx context.Context) bool {

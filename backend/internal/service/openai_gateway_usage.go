@@ -229,6 +229,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	pricingAt := openAIUsagePricingAt(input)
 	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, pricingAt)
 	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
+	if account.AccountScope == "shared" {
+		multiplier *= account.BillingRateMultiplier()
+		imageMultiplier *= account.BillingRateMultiplier()
+		videoMultiplier *= account.BillingRateMultiplier()
+	}
 
 	var cost *CostBreakdown
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
@@ -542,17 +547,24 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	billingErr := func() error {
+		var sharedFee *float64
+		if s.settingService != nil {
+			v := s.settingService.GetSharedPoolFeeRatePercent(ctx)
+			sharedFee = &v
+		}
 		_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
-			Cost:                  cost,
-			User:                  user,
-			APIKey:                apiKey,
-			Account:               account,
-			Subscription:          subscription,
-			RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
-			IsSubscriptionBill:    isSubscriptionBilling,
-			AccountRateMultiplier: accountRateMultiplier,
-			APIKeyService:         input.APIKeyService,
-			Platform:              quotaPlatform,
+			Cost:                        cost,
+			User:                        user,
+			APIKey:                      apiKey,
+			Account:                     account,
+			Subscription:                subscription,
+			RequestPayloadHash:          resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
+			IsSubscriptionBill:          isSubscriptionBilling,
+			AccountRateMultiplier:       accountRateMultiplier,
+			APIKeyService:               input.APIKeyService,
+			Platform:                    quotaPlatform,
+			SharedAccountFeeRatePercent: sharedFee,
+			SharedAccountFreezeHours:    48,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

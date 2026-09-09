@@ -143,6 +143,18 @@ func OpenAIErrorWriter(c *gin.Context, status int, message string) {
 func RequireGroupAssignment(settingService *service.SettingService, writeError GatewayErrorWriter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
+		if ok && apiKey.Group != nil && apiKey.Group.IsSharedPool {
+			if settingService == nil || !settingService.IsSharedPoolEnabled(c.Request.Context()) {
+				writeError(c, http.StatusForbidden, "Shared account pool is disabled")
+				c.Abort()
+				return
+			}
+			if apiKey.Group.IsSubscriptionType() {
+				writeError(c, http.StatusForbidden, "Shared account pools support balance billing only")
+				c.Abort()
+				return
+			}
+		}
 		if !ok || apiKey.GroupID != nil {
 			c.Next()
 			return

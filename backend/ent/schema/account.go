@@ -70,6 +70,7 @@ func (Account) Fields() []ent.Field {
 		field.String("type").
 			MaxLen(20).
 			NotEmpty(),
+		field.String("account_scope").MaxLen(20).Default("system").Comment("system or shared; controls scheduler isolation"),
 
 		// credentials: 认证凭证，以 JSONB 格式存储
 		// 结构取决于 type 字段：

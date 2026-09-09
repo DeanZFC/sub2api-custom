@@ -2,8 +2,11 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -208,8 +211,63 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		}
 		result.QuotaState = quotaState
 	}
+	if cmd.SharedAccountFeeRatePercent != nil {
+		if err := settleSharedAccountUsage(ctx, tx, cmd); err != nil {
+			return err
+		}
+	}
 
 	return nil
+}
+
+// Settlement follows the executed request, even if its listing is paused/deleted
+// before asynchronous billing runs. Missing ownership aborts the debit transaction.
+func settleSharedAccountUsage(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {
+	fee := *cmd.SharedAccountFeeRatePercent
+	if math.IsNaN(fee) || math.IsInf(fee, 0) || fee < 0 || fee > 100 {
+		return errors.New("shared account fee rate must be between 0 and 100")
+	}
+	freeze := cmd.SharedAccountFreezeHours
+	if freeze <= 0 {
+		freeze = 48
+	}
+	if freeze > 8760 {
+		return errors.New("shared account freeze period exceeds one year")
+	}
+	var listingID, ownerID int64
+	err := tx.QueryRowContext(ctx, `SELECT l.id,l.owner_user_id FROM shared_account_listings l
+ JOIN accounts a ON a.id=l.account_id AND a.account_scope='shared' WHERE l.account_id=$1`, cmd.AccountID).Scan(&listingID, &ownerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrSharedListingNotFound
+	}
+	if err != nil {
+		return err
+	}
+	// Align with the billing dedup namespace (request_id, api_key_id). Hashing also
+	// keeps consumer-supplied identifiers out of the public recent-call feed.
+	requestKey := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%d:%s", cmd.APIKeyID, cmd.RequestID))))
+	var count int
+	err = tx.QueryRowContext(ctx, `WITH amount AS (
+ SELECT $5::numeric(20,8) AS gross,ROUND($5::numeric*$6::numeric/100,8) AS fee
+ ), inserted AS (
+ INSERT INTO shared_account_usage_ledger(request_id,listing_id,owner_user_id,consumer_user_id,gross_cost,fee_rate_percent,platform_fee,owner_amount,frozen_until)
+ SELECT $1,$2,$3,$4,gross,$6::numeric,fee,gross-fee,NOW()+($7::integer*INTERVAL '1 hour') FROM amount
+ ON CONFLICT(request_id) DO NOTHING RETURNING owner_user_id,owner_amount,id,listing_id
+ ), wallet AS (
+ INSERT INTO shared_account_wallets(user_id,pending_amount,total_earned) SELECT owner_user_id,owner_amount,owner_amount FROM inserted
+ ON CONFLICT(user_id) DO UPDATE SET pending_amount=shared_account_wallets.pending_amount+EXCLUDED.pending_amount,total_earned=shared_account_wallets.total_earned+EXCLUDED.total_earned,updated_at=NOW()
+ ), journal AS (
+ INSERT INTO shared_account_wallet_ledger(user_id,listing_id,usage_ledger_id,action,amount,idempotency_key)
+ SELECT owner_user_id,listing_id,id,'earn',owner_amount,'earn:'||id::text FROM inserted
+ ), updated AS (
+ UPDATE shared_account_listings l SET total_call_count=l.total_call_count+1,last_called_at=NOW(),updated_at=NOW()
+ FROM inserted i WHERE l.id=i.listing_id RETURNING l.id
+ ), calls AS (
+ INSERT INTO shared_account_call_stats(listing_id,request_id,model,result_status,charged_amount)
+ SELECT listing_id,$1,$8,'success',$5::numeric FROM inserted
+ ON CONFLICT(request_id) DO NOTHING
+ ) SELECT COUNT(*) FROM updated`, requestKey, listingID, ownerID, cmd.UserID, cmd.BalanceCost, fee, freeze, cmd.Model).Scan(&count)
+	return err
 }
 
 func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64) error {

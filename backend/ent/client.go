@@ -44,6 +44,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountlisting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountusageledger"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountwallet"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
@@ -121,6 +124,12 @@ type Client struct {
 	SecuritySecret *SecuritySecretClient
 	// Setting is the client for interacting with the Setting builders.
 	Setting *SettingClient
+	// SharedAccountListing is the client for interacting with the SharedAccountListing builders.
+	SharedAccountListing *SharedAccountListingClient
+	// SharedAccountUsageLedger is the client for interacting with the SharedAccountUsageLedger builders.
+	SharedAccountUsageLedger *SharedAccountUsageLedgerClient
+	// SharedAccountWallet is the client for interacting with the SharedAccountWallet builders.
+	SharedAccountWallet *SharedAccountWalletClient
 	// SubscriptionPlan is the client for interacting with the SubscriptionPlan builders.
 	SubscriptionPlan *SubscriptionPlanClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
@@ -181,6 +190,9 @@ func (c *Client) init() {
 	c.RedeemCode = NewRedeemCodeClient(c.config)
 	c.SecuritySecret = NewSecuritySecretClient(c.config)
 	c.Setting = NewSettingClient(c.config)
+	c.SharedAccountListing = NewSharedAccountListingClient(c.config)
+	c.SharedAccountUsageLedger = NewSharedAccountUsageLedgerClient(c.config)
+	c.SharedAccountWallet = NewSharedAccountWalletClient(c.config)
 	c.SubscriptionPlan = NewSubscriptionPlanClient(c.config)
 	c.TLSFingerprintProfile = NewTLSFingerprintProfileClient(c.config)
 	c.UsageCleanupTask = NewUsageCleanupTaskClient(c.config)
@@ -312,6 +324,9 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
+		SharedAccountListing:          NewSharedAccountListingClient(cfg),
+		SharedAccountUsageLedger:      NewSharedAccountUsageLedgerClient(cfg),
+		SharedAccountWallet:           NewSharedAccountWalletClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
 		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
@@ -370,6 +385,9 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
+		SharedAccountListing:          NewSharedAccountListingClient(cfg),
+		SharedAccountUsageLedger:      NewSharedAccountUsageLedgerClient(cfg),
+		SharedAccountWallet:           NewSharedAccountWalletClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
 		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
@@ -416,7 +434,8 @@ func (c *Client) Use(hooks ...Hook) {
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
 		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
+		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SharedAccountListing,
+		c.SharedAccountUsageLedger, c.SharedAccountWallet, c.SubscriptionPlan,
 		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
 		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
@@ -436,7 +455,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
 		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
+		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SharedAccountListing,
+		c.SharedAccountUsageLedger, c.SharedAccountWallet, c.SubscriptionPlan,
 		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
 		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
@@ -506,6 +526,12 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.SecuritySecret.mutate(ctx, m)
 	case *SettingMutation:
 		return c.Setting.mutate(ctx, m)
+	case *SharedAccountListingMutation:
+		return c.SharedAccountListing.mutate(ctx, m)
+	case *SharedAccountUsageLedgerMutation:
+		return c.SharedAccountUsageLedger.mutate(ctx, m)
+	case *SharedAccountWalletMutation:
+		return c.SharedAccountWallet.mutate(ctx, m)
 	case *SubscriptionPlanMutation:
 		return c.SubscriptionPlan.mutate(ctx, m)
 	case *TLSFingerprintProfileMutation:
@@ -5117,6 +5143,407 @@ func (c *SettingClient) mutate(ctx context.Context, m *SettingMutation) (Value, 
 	}
 }
 
+// SharedAccountListingClient is a client for the SharedAccountListing schema.
+type SharedAccountListingClient struct {
+	config
+}
+
+// NewSharedAccountListingClient returns a client for the SharedAccountListing from the given config.
+func NewSharedAccountListingClient(c config) *SharedAccountListingClient {
+	return &SharedAccountListingClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `sharedaccountlisting.Hooks(f(g(h())))`.
+func (c *SharedAccountListingClient) Use(hooks ...Hook) {
+	c.hooks.SharedAccountListing = append(c.hooks.SharedAccountListing, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `sharedaccountlisting.Intercept(f(g(h())))`.
+func (c *SharedAccountListingClient) Intercept(interceptors ...Interceptor) {
+	c.inters.SharedAccountListing = append(c.inters.SharedAccountListing, interceptors...)
+}
+
+// Create returns a builder for creating a SharedAccountListing entity.
+func (c *SharedAccountListingClient) Create() *SharedAccountListingCreate {
+	mutation := newSharedAccountListingMutation(c.config, OpCreate)
+	return &SharedAccountListingCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of SharedAccountListing entities.
+func (c *SharedAccountListingClient) CreateBulk(builders ...*SharedAccountListingCreate) *SharedAccountListingCreateBulk {
+	return &SharedAccountListingCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *SharedAccountListingClient) MapCreateBulk(slice any, setFunc func(*SharedAccountListingCreate, int)) *SharedAccountListingCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &SharedAccountListingCreateBulk{err: fmt.Errorf("calling to SharedAccountListingClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*SharedAccountListingCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &SharedAccountListingCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for SharedAccountListing.
+func (c *SharedAccountListingClient) Update() *SharedAccountListingUpdate {
+	mutation := newSharedAccountListingMutation(c.config, OpUpdate)
+	return &SharedAccountListingUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *SharedAccountListingClient) UpdateOne(_m *SharedAccountListing) *SharedAccountListingUpdateOne {
+	mutation := newSharedAccountListingMutation(c.config, OpUpdateOne, withSharedAccountListing(_m))
+	return &SharedAccountListingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *SharedAccountListingClient) UpdateOneID(id int64) *SharedAccountListingUpdateOne {
+	mutation := newSharedAccountListingMutation(c.config, OpUpdateOne, withSharedAccountListingID(id))
+	return &SharedAccountListingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for SharedAccountListing.
+func (c *SharedAccountListingClient) Delete() *SharedAccountListingDelete {
+	mutation := newSharedAccountListingMutation(c.config, OpDelete)
+	return &SharedAccountListingDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *SharedAccountListingClient) DeleteOne(_m *SharedAccountListing) *SharedAccountListingDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *SharedAccountListingClient) DeleteOneID(id int64) *SharedAccountListingDeleteOne {
+	builder := c.Delete().Where(sharedaccountlisting.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &SharedAccountListingDeleteOne{builder}
+}
+
+// Query returns a query builder for SharedAccountListing.
+func (c *SharedAccountListingClient) Query() *SharedAccountListingQuery {
+	return &SharedAccountListingQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeSharedAccountListing},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a SharedAccountListing entity by its id.
+func (c *SharedAccountListingClient) Get(ctx context.Context, id int64) (*SharedAccountListing, error) {
+	return c.Query().Where(sharedaccountlisting.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *SharedAccountListingClient) GetX(ctx context.Context, id int64) *SharedAccountListing {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *SharedAccountListingClient) Hooks() []Hook {
+	hooks := c.hooks.SharedAccountListing
+	return append(hooks[:len(hooks):len(hooks)], sharedaccountlisting.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *SharedAccountListingClient) Interceptors() []Interceptor {
+	inters := c.inters.SharedAccountListing
+	return append(inters[:len(inters):len(inters)], sharedaccountlisting.Interceptors[:]...)
+}
+
+func (c *SharedAccountListingClient) mutate(ctx context.Context, m *SharedAccountListingMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&SharedAccountListingCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&SharedAccountListingUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&SharedAccountListingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&SharedAccountListingDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown SharedAccountListing mutation op: %q", m.Op())
+	}
+}
+
+// SharedAccountUsageLedgerClient is a client for the SharedAccountUsageLedger schema.
+type SharedAccountUsageLedgerClient struct {
+	config
+}
+
+// NewSharedAccountUsageLedgerClient returns a client for the SharedAccountUsageLedger from the given config.
+func NewSharedAccountUsageLedgerClient(c config) *SharedAccountUsageLedgerClient {
+	return &SharedAccountUsageLedgerClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `sharedaccountusageledger.Hooks(f(g(h())))`.
+func (c *SharedAccountUsageLedgerClient) Use(hooks ...Hook) {
+	c.hooks.SharedAccountUsageLedger = append(c.hooks.SharedAccountUsageLedger, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `sharedaccountusageledger.Intercept(f(g(h())))`.
+func (c *SharedAccountUsageLedgerClient) Intercept(interceptors ...Interceptor) {
+	c.inters.SharedAccountUsageLedger = append(c.inters.SharedAccountUsageLedger, interceptors...)
+}
+
+// Create returns a builder for creating a SharedAccountUsageLedger entity.
+func (c *SharedAccountUsageLedgerClient) Create() *SharedAccountUsageLedgerCreate {
+	mutation := newSharedAccountUsageLedgerMutation(c.config, OpCreate)
+	return &SharedAccountUsageLedgerCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of SharedAccountUsageLedger entities.
+func (c *SharedAccountUsageLedgerClient) CreateBulk(builders ...*SharedAccountUsageLedgerCreate) *SharedAccountUsageLedgerCreateBulk {
+	return &SharedAccountUsageLedgerCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *SharedAccountUsageLedgerClient) MapCreateBulk(slice any, setFunc func(*SharedAccountUsageLedgerCreate, int)) *SharedAccountUsageLedgerCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &SharedAccountUsageLedgerCreateBulk{err: fmt.Errorf("calling to SharedAccountUsageLedgerClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*SharedAccountUsageLedgerCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &SharedAccountUsageLedgerCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for SharedAccountUsageLedger.
+func (c *SharedAccountUsageLedgerClient) Update() *SharedAccountUsageLedgerUpdate {
+	mutation := newSharedAccountUsageLedgerMutation(c.config, OpUpdate)
+	return &SharedAccountUsageLedgerUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *SharedAccountUsageLedgerClient) UpdateOne(_m *SharedAccountUsageLedger) *SharedAccountUsageLedgerUpdateOne {
+	mutation := newSharedAccountUsageLedgerMutation(c.config, OpUpdateOne, withSharedAccountUsageLedger(_m))
+	return &SharedAccountUsageLedgerUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *SharedAccountUsageLedgerClient) UpdateOneID(id int64) *SharedAccountUsageLedgerUpdateOne {
+	mutation := newSharedAccountUsageLedgerMutation(c.config, OpUpdateOne, withSharedAccountUsageLedgerID(id))
+	return &SharedAccountUsageLedgerUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for SharedAccountUsageLedger.
+func (c *SharedAccountUsageLedgerClient) Delete() *SharedAccountUsageLedgerDelete {
+	mutation := newSharedAccountUsageLedgerMutation(c.config, OpDelete)
+	return &SharedAccountUsageLedgerDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *SharedAccountUsageLedgerClient) DeleteOne(_m *SharedAccountUsageLedger) *SharedAccountUsageLedgerDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *SharedAccountUsageLedgerClient) DeleteOneID(id int64) *SharedAccountUsageLedgerDeleteOne {
+	builder := c.Delete().Where(sharedaccountusageledger.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &SharedAccountUsageLedgerDeleteOne{builder}
+}
+
+// Query returns a query builder for SharedAccountUsageLedger.
+func (c *SharedAccountUsageLedgerClient) Query() *SharedAccountUsageLedgerQuery {
+	return &SharedAccountUsageLedgerQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeSharedAccountUsageLedger},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a SharedAccountUsageLedger entity by its id.
+func (c *SharedAccountUsageLedgerClient) Get(ctx context.Context, id int64) (*SharedAccountUsageLedger, error) {
+	return c.Query().Where(sharedaccountusageledger.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *SharedAccountUsageLedgerClient) GetX(ctx context.Context, id int64) *SharedAccountUsageLedger {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *SharedAccountUsageLedgerClient) Hooks() []Hook {
+	return c.hooks.SharedAccountUsageLedger
+}
+
+// Interceptors returns the client interceptors.
+func (c *SharedAccountUsageLedgerClient) Interceptors() []Interceptor {
+	return c.inters.SharedAccountUsageLedger
+}
+
+func (c *SharedAccountUsageLedgerClient) mutate(ctx context.Context, m *SharedAccountUsageLedgerMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&SharedAccountUsageLedgerCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&SharedAccountUsageLedgerUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&SharedAccountUsageLedgerUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&SharedAccountUsageLedgerDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown SharedAccountUsageLedger mutation op: %q", m.Op())
+	}
+}
+
+// SharedAccountWalletClient is a client for the SharedAccountWallet schema.
+type SharedAccountWalletClient struct {
+	config
+}
+
+// NewSharedAccountWalletClient returns a client for the SharedAccountWallet from the given config.
+func NewSharedAccountWalletClient(c config) *SharedAccountWalletClient {
+	return &SharedAccountWalletClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `sharedaccountwallet.Hooks(f(g(h())))`.
+func (c *SharedAccountWalletClient) Use(hooks ...Hook) {
+	c.hooks.SharedAccountWallet = append(c.hooks.SharedAccountWallet, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `sharedaccountwallet.Intercept(f(g(h())))`.
+func (c *SharedAccountWalletClient) Intercept(interceptors ...Interceptor) {
+	c.inters.SharedAccountWallet = append(c.inters.SharedAccountWallet, interceptors...)
+}
+
+// Create returns a builder for creating a SharedAccountWallet entity.
+func (c *SharedAccountWalletClient) Create() *SharedAccountWalletCreate {
+	mutation := newSharedAccountWalletMutation(c.config, OpCreate)
+	return &SharedAccountWalletCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of SharedAccountWallet entities.
+func (c *SharedAccountWalletClient) CreateBulk(builders ...*SharedAccountWalletCreate) *SharedAccountWalletCreateBulk {
+	return &SharedAccountWalletCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *SharedAccountWalletClient) MapCreateBulk(slice any, setFunc func(*SharedAccountWalletCreate, int)) *SharedAccountWalletCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &SharedAccountWalletCreateBulk{err: fmt.Errorf("calling to SharedAccountWalletClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*SharedAccountWalletCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &SharedAccountWalletCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for SharedAccountWallet.
+func (c *SharedAccountWalletClient) Update() *SharedAccountWalletUpdate {
+	mutation := newSharedAccountWalletMutation(c.config, OpUpdate)
+	return &SharedAccountWalletUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *SharedAccountWalletClient) UpdateOne(_m *SharedAccountWallet) *SharedAccountWalletUpdateOne {
+	mutation := newSharedAccountWalletMutation(c.config, OpUpdateOne, withSharedAccountWallet(_m))
+	return &SharedAccountWalletUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *SharedAccountWalletClient) UpdateOneID(id int64) *SharedAccountWalletUpdateOne {
+	mutation := newSharedAccountWalletMutation(c.config, OpUpdateOne, withSharedAccountWalletID(id))
+	return &SharedAccountWalletUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for SharedAccountWallet.
+func (c *SharedAccountWalletClient) Delete() *SharedAccountWalletDelete {
+	mutation := newSharedAccountWalletMutation(c.config, OpDelete)
+	return &SharedAccountWalletDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *SharedAccountWalletClient) DeleteOne(_m *SharedAccountWallet) *SharedAccountWalletDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *SharedAccountWalletClient) DeleteOneID(id int64) *SharedAccountWalletDeleteOne {
+	builder := c.Delete().Where(sharedaccountwallet.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &SharedAccountWalletDeleteOne{builder}
+}
+
+// Query returns a query builder for SharedAccountWallet.
+func (c *SharedAccountWalletClient) Query() *SharedAccountWalletQuery {
+	return &SharedAccountWalletQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeSharedAccountWallet},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a SharedAccountWallet entity by its id.
+func (c *SharedAccountWalletClient) Get(ctx context.Context, id int64) (*SharedAccountWallet, error) {
+	return c.Query().Where(sharedaccountwallet.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *SharedAccountWalletClient) GetX(ctx context.Context, id int64) *SharedAccountWallet {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *SharedAccountWalletClient) Hooks() []Hook {
+	return c.hooks.SharedAccountWallet
+}
+
+// Interceptors returns the client interceptors.
+func (c *SharedAccountWalletClient) Interceptors() []Interceptor {
+	return c.inters.SharedAccountWallet
+}
+
+func (c *SharedAccountWalletClient) mutate(ctx context.Context, m *SharedAccountWalletMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&SharedAccountWalletCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&SharedAccountWalletUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&SharedAccountWalletUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&SharedAccountWalletDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown SharedAccountWallet mutation op: %q", m.Op())
+	}
+}
+
 // SubscriptionPlanClient is a client for the SubscriptionPlan schema.
 type SubscriptionPlanClient struct {
 	config
@@ -6879,10 +7306,11 @@ type (
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SharedAccountListing, SharedAccountUsageLedger, SharedAccountWallet,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6891,10 +7319,11 @@ type (
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SharedAccountListing, SharedAccountUsageLedger, SharedAccountWallet,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

@@ -735,6 +735,8 @@ export interface SystemSettings {
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: boolean;
+  shared_pool_fee_rate_percent?: number;
+  shared_pool_enabled: boolean;
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
@@ -1037,6 +1039,8 @@ export interface UpdateSettingsRequest {
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled?: boolean;
+  shared_pool_fee_rate_percent?: number;
+  shared_pool_enabled?: boolean;
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;

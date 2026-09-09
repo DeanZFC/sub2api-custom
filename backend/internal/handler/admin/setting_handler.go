@@ -389,7 +389,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PluginManagementEnabled: settings.PluginManagementEnabled,
 		ModelPlazaDescription:   settings.ModelPlazaDescription,
 
-		AffiliateEnabled: settings.AffiliateEnabled,
+		AffiliateEnabled:         settings.AffiliateEnabled,
+		SharedPoolEnabled:        settings.SharedPoolEnabled,
+		SharedPoolFeeRatePercent: settings.SharedPoolFeeRatePercent,
 
 		AccountSchedulingThresholds: settings.AccountSchedulingThresholds,
 		AllowUserViewErrorRequests:  settings.AllowUserViewErrorRequests,

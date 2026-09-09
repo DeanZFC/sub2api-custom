@@ -7332,6 +7332,12 @@
               <Toggle v-model="form.affiliate_enabled" />
             </div>
 
+            <div class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700">
+              <div><label class="text-sm font-medium text-gray-700 dark:text-gray-300">共享账号池</label><p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">允许用户上传账号并加入共享池</p></div>
+              <Toggle v-model="form.shared_pool_enabled" />
+            </div>
+            <div><label class="input-label">共享池平台抽成比例 (%)</label><input v-model.number="form.shared_pool_fee_rate_percent" type="number" min="0" max="100" step="0.01" class="input w-full" /></div>
+
             <div v-if="form.affiliate_enabled" class="space-y-6">
               <div class="flex items-center justify-between">
                 <div>
@@ -9820,6 +9826,8 @@ const form = reactive<SettingsForm>({
   plugin_management_enabled: false,
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
+  shared_pool_enabled: false,
+  shared_pool_fee_rate_percent: 10,
   // Allow user view error requests
   allow_user_view_error_requests: false,
 });
@@ -11483,6 +11491,8 @@ async function saveSettings() {
       plugin_management_enabled: form.plugin_management_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
+      shared_pool_enabled: form.shared_pool_enabled,
+      shared_pool_fee_rate_percent: Number(form.shared_pool_fee_rate_percent) || 0,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
     };
 

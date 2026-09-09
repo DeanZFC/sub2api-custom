@@ -59,6 +59,7 @@ type APIKeyAuthUserSnapshot struct {
 
 // APIKeyAuthGroupSnapshot 分组快照
 type APIKeyAuthGroupSnapshot struct {
+	IsSharedPool                    bool                          `json:"is_shared_pool"`
 	ID                              int64                         `json:"id"`
 	Name                            string                        `json:"name"`
 	Description                     string                        `json:"description,omitempty"`

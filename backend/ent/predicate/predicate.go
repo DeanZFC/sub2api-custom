@@ -93,6 +93,15 @@ type SecuritySecret func(*sql.Selector)
 // Setting is the predicate function for setting builders.
 type Setting func(*sql.Selector)
 
+// SharedAccountListing is the predicate function for sharedaccountlisting builders.
+type SharedAccountListing func(*sql.Selector)
+
+// SharedAccountUsageLedger is the predicate function for sharedaccountusageledger builders.
+type SharedAccountUsageLedger func(*sql.Selector)
+
+// SharedAccountWallet is the predicate function for sharedaccountwallet builders.
+type SharedAccountWallet func(*sql.Selector)
+
 // SubscriptionPlan is the predicate function for subscriptionplan builders.
 type SubscriptionPlan func(*sql.Selector)
 

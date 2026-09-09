@@ -42,6 +42,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountlisting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountusageledger"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountwallet"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
@@ -93,6 +96,9 @@ const (
 	TypeRedeemCode                    = "RedeemCode"
 	TypeSecuritySecret                = "SecuritySecret"
 	TypeSetting                       = "Setting"
+	TypeSharedAccountListing          = "SharedAccountListing"
+	TypeSharedAccountUsageLedger      = "SharedAccountUsageLedger"
+	TypeSharedAccountWallet           = "SharedAccountWallet"
 	TypeSubscriptionPlan              = "SubscriptionPlan"
 	TypeTLSFingerprintProfile         = "TLSFingerprintProfile"
 	TypeUsageCleanupTask              = "UsageCleanupTask"
@@ -2411,6 +2417,7 @@ type AccountMutation struct {
 	notes                       *string
 	platform                    *string
 	_type                       *string
+	account_scope               *string
 	credentials                 *map[string]interface{}
 	extra                       *map[string]interface{}
 	proxy_fallback_origin_id    *int64
@@ -2831,6 +2838,42 @@ func (m *AccountMutation) OldType(ctx context.Context) (v string, err error) {
 // ResetType resets all changes to the "type" field.
 func (m *AccountMutation) ResetType() {
 	m._type = nil
+}
+
+// SetAccountScope sets the "account_scope" field.
+func (m *AccountMutation) SetAccountScope(s string) {
+	m.account_scope = &s
+}
+
+// AccountScope returns the value of the "account_scope" field in the mutation.
+func (m *AccountMutation) AccountScope() (r string, exists bool) {
+	v := m.account_scope
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAccountScope returns the old "account_scope" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldAccountScope(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAccountScope is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAccountScope requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAccountScope: %w", err)
+	}
+	return oldValue.AccountScope, nil
+}
+
+// ResetAccountScope resets all changes to the "account_scope" field.
+func (m *AccountMutation) ResetAccountScope() {
+	m.account_scope = nil
 }
 
 // SetCredentials sets the "credentials" field.
@@ -4257,7 +4300,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 32)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4278,6 +4321,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m._type != nil {
 		fields = append(fields, account.FieldType)
+	}
+	if m.account_scope != nil {
+		fields = append(fields, account.FieldAccountScope)
 	}
 	if m.credentials != nil {
 		fields = append(fields, account.FieldCredentials)
@@ -4373,6 +4419,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Platform()
 	case account.FieldType:
 		return m.GetType()
+	case account.FieldAccountScope:
+		return m.AccountScope()
 	case account.FieldCredentials:
 		return m.Credentials()
 	case account.FieldExtra:
@@ -4444,6 +4492,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldPlatform(ctx)
 	case account.FieldType:
 		return m.OldType(ctx)
+	case account.FieldAccountScope:
+		return m.OldAccountScope(ctx)
 	case account.FieldCredentials:
 		return m.OldCredentials(ctx)
 	case account.FieldExtra:
@@ -4549,6 +4599,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetType(v)
+		return nil
+	case account.FieldAccountScope:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAccountScope(v)
 		return nil
 	case account.FieldCredentials:
 		v, ok := value.(map[string]interface{})
@@ -4955,6 +5012,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldType:
 		m.ResetType()
+		return nil
+	case account.FieldAccountScope:
+		m.ResetAccountScope()
 		return nil
 	case account.FieldCredentials:
 		m.ResetCredentials()
@@ -22319,6 +22379,7 @@ type GroupMutation struct {
 	peak_end                                *string
 	peak_rate_multiplier                    *float64
 	addpeak_rate_multiplier                 *float64
+	is_shared_pool                          *bool
 	is_exclusive                            *bool
 	status                                  *string
 	duplicate_operation_id                  *string
@@ -22954,6 +23015,42 @@ func (m *GroupMutation) AddedPeakRateMultiplier() (r float64, exists bool) {
 func (m *GroupMutation) ResetPeakRateMultiplier() {
 	m.peak_rate_multiplier = nil
 	m.addpeak_rate_multiplier = nil
+}
+
+// SetIsSharedPool sets the "is_shared_pool" field.
+func (m *GroupMutation) SetIsSharedPool(b bool) {
+	m.is_shared_pool = &b
+}
+
+// IsSharedPool returns the value of the "is_shared_pool" field in the mutation.
+func (m *GroupMutation) IsSharedPool() (r bool, exists bool) {
+	v := m.is_shared_pool
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldIsSharedPool returns the old "is_shared_pool" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldIsSharedPool(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldIsSharedPool is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldIsSharedPool requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldIsSharedPool: %w", err)
+	}
+	return oldValue.IsSharedPool, nil
+}
+
+// ResetIsSharedPool resets all changes to the "is_shared_pool" field.
+func (m *GroupMutation) ResetIsSharedPool() {
+	m.is_shared_pool = nil
 }
 
 // SetIsExclusive sets the "is_exclusive" field.
@@ -26262,7 +26359,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 67)
+	fields := make([]string, 0, 68)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26292,6 +26389,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.peak_rate_multiplier != nil {
 		fields = append(fields, group.FieldPeakRateMultiplier)
+	}
+	if m.is_shared_pool != nil {
+		fields = append(fields, group.FieldIsSharedPool)
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
@@ -26492,6 +26592,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.PeakEnd()
 	case group.FieldPeakRateMultiplier:
 		return m.PeakRateMultiplier()
+	case group.FieldIsSharedPool:
+		return m.IsSharedPool()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
 	case group.FieldStatus:
@@ -26635,6 +26737,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPeakEnd(ctx)
 	case group.FieldPeakRateMultiplier:
 		return m.OldPeakRateMultiplier(ctx)
+	case group.FieldIsSharedPool:
+		return m.OldIsSharedPool(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
 	case group.FieldStatus:
@@ -26827,6 +26931,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPeakRateMultiplier(v)
+		return nil
+	case group.FieldIsSharedPool:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetIsSharedPool(v)
 		return nil
 	case group.FieldIsExclusive:
 		v, ok := value.(bool)
@@ -27779,6 +27890,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldPeakRateMultiplier:
 		m.ResetPeakRateMultiplier()
+		return nil
+	case group.FieldIsSharedPool:
+		m.ResetIsSharedPool()
 		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()
@@ -37768,6 +37882,8 @@ type ProxyMutation struct {
 	created_at             *time.Time
 	updated_at             *time.Time
 	deleted_at             *time.Time
+	owner_user_id          *int64
+	addowner_user_id       *int64
 	name                   *string
 	protocol               *string
 	host                   *string
@@ -38011,6 +38127,76 @@ func (m *ProxyMutation) DeletedAtCleared() bool {
 func (m *ProxyMutation) ResetDeletedAt() {
 	m.deleted_at = nil
 	delete(m.clearedFields, proxy.FieldDeletedAt)
+}
+
+// SetOwnerUserID sets the "owner_user_id" field.
+func (m *ProxyMutation) SetOwnerUserID(i int64) {
+	m.owner_user_id = &i
+	m.addowner_user_id = nil
+}
+
+// OwnerUserID returns the value of the "owner_user_id" field in the mutation.
+func (m *ProxyMutation) OwnerUserID() (r int64, exists bool) {
+	v := m.owner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOwnerUserID returns the old "owner_user_id" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldOwnerUserID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOwnerUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOwnerUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOwnerUserID: %w", err)
+	}
+	return oldValue.OwnerUserID, nil
+}
+
+// AddOwnerUserID adds i to the "owner_user_id" field.
+func (m *ProxyMutation) AddOwnerUserID(i int64) {
+	if m.addowner_user_id != nil {
+		*m.addowner_user_id += i
+	} else {
+		m.addowner_user_id = &i
+	}
+}
+
+// AddedOwnerUserID returns the value that was added to the "owner_user_id" field in this mutation.
+func (m *ProxyMutation) AddedOwnerUserID() (r int64, exists bool) {
+	v := m.addowner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearOwnerUserID clears the value of the "owner_user_id" field.
+func (m *ProxyMutation) ClearOwnerUserID() {
+	m.owner_user_id = nil
+	m.addowner_user_id = nil
+	m.clearedFields[proxy.FieldOwnerUserID] = struct{}{}
+}
+
+// OwnerUserIDCleared returns if the "owner_user_id" field was cleared in this mutation.
+func (m *ProxyMutation) OwnerUserIDCleared() bool {
+	_, ok := m.clearedFields[proxy.FieldOwnerUserID]
+	return ok
+}
+
+// ResetOwnerUserID resets all changes to the "owner_user_id" field.
+func (m *ProxyMutation) ResetOwnerUserID() {
+	m.owner_user_id = nil
+	m.addowner_user_id = nil
+	delete(m.clearedFields, proxy.FieldOwnerUserID)
 }
 
 // SetName sets the "name" field.
@@ -38670,7 +38856,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -38679,6 +38865,9 @@ func (m *ProxyMutation) Fields() []string {
 	}
 	if m.deleted_at != nil {
 		fields = append(fields, proxy.FieldDeletedAt)
+	}
+	if m.owner_user_id != nil {
+		fields = append(fields, proxy.FieldOwnerUserID)
 	}
 	if m.name != nil {
 		fields = append(fields, proxy.FieldName)
@@ -38727,6 +38916,8 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.UpdatedAt()
 	case proxy.FieldDeletedAt:
 		return m.DeletedAt()
+	case proxy.FieldOwnerUserID:
+		return m.OwnerUserID()
 	case proxy.FieldName:
 		return m.Name()
 	case proxy.FieldProtocol:
@@ -38764,6 +38955,8 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldUpdatedAt(ctx)
 	case proxy.FieldDeletedAt:
 		return m.OldDeletedAt(ctx)
+	case proxy.FieldOwnerUserID:
+		return m.OldOwnerUserID(ctx)
 	case proxy.FieldName:
 		return m.OldName(ctx)
 	case proxy.FieldProtocol:
@@ -38815,6 +39008,13 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetDeletedAt(v)
+		return nil
+	case proxy.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOwnerUserID(v)
 		return nil
 	case proxy.FieldName:
 		v, ok := value.(string)
@@ -38901,6 +39101,9 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *ProxyMutation) AddedFields() []string {
 	var fields []string
+	if m.addowner_user_id != nil {
+		fields = append(fields, proxy.FieldOwnerUserID)
+	}
 	if m.addport != nil {
 		fields = append(fields, proxy.FieldPort)
 	}
@@ -38915,6 +39118,8 @@ func (m *ProxyMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *ProxyMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case proxy.FieldOwnerUserID:
+		return m.AddedOwnerUserID()
 	case proxy.FieldPort:
 		return m.AddedPort()
 	case proxy.FieldExpiryWarnDays:
@@ -38928,6 +39133,13 @@ func (m *ProxyMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *ProxyMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case proxy.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOwnerUserID(v)
+		return nil
 	case proxy.FieldPort:
 		v, ok := value.(int)
 		if !ok {
@@ -38952,6 +39164,9 @@ func (m *ProxyMutation) ClearedFields() []string {
 	var fields []string
 	if m.FieldCleared(proxy.FieldDeletedAt) {
 		fields = append(fields, proxy.FieldDeletedAt)
+	}
+	if m.FieldCleared(proxy.FieldOwnerUserID) {
+		fields = append(fields, proxy.FieldOwnerUserID)
 	}
 	if m.FieldCleared(proxy.FieldUsername) {
 		fields = append(fields, proxy.FieldUsername)
@@ -38982,6 +39197,9 @@ func (m *ProxyMutation) ClearField(name string) error {
 	case proxy.FieldDeletedAt:
 		m.ClearDeletedAt()
 		return nil
+	case proxy.FieldOwnerUserID:
+		m.ClearOwnerUserID()
+		return nil
 	case proxy.FieldUsername:
 		m.ClearUsername()
 		return nil
@@ -39010,6 +39228,9 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldDeletedAt:
 		m.ResetDeletedAt()
+		return nil
+	case proxy.FieldOwnerUserID:
+		m.ResetOwnerUserID()
 		return nil
 	case proxy.FieldName:
 		m.ResetName()
@@ -41242,6 +41463,3663 @@ func (m *SettingMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *SettingMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown Setting edge %s", name)
+}
+
+// SharedAccountListingMutation represents an operation that mutates the SharedAccountListing nodes in the graph.
+type SharedAccountListingMutation struct {
+	config
+	op                        Op
+	typ                       string
+	id                        *int64
+	created_at                *time.Time
+	updated_at                *time.Time
+	deleted_at                *time.Time
+	owner_user_id             *int64
+	addowner_user_id          *int64
+	account_id                *int64
+	addaccount_id             *int64
+	platform                  *string
+	display_name              *string
+	status                    *string
+	proxy_config_encrypted    *string
+	concurrency_limit         *int
+	addconcurrency_limit      *int
+	concurrency_multiplier    *float64
+	addconcurrency_multiplier *float64
+	sell_rate                 *float64
+	addsell_rate              *float64
+	fee_rate_override         *float64
+	addfee_rate_override      *float64
+	total_call_count          *int64
+	addtotal_call_count       *int64
+	last_called_at            *time.Time
+	clearedFields             map[string]struct{}
+	done                      bool
+	oldValue                  func(context.Context) (*SharedAccountListing, error)
+	predicates                []predicate.SharedAccountListing
+}
+
+var _ ent.Mutation = (*SharedAccountListingMutation)(nil)
+
+// sharedaccountlistingOption allows management of the mutation configuration using functional options.
+type sharedaccountlistingOption func(*SharedAccountListingMutation)
+
+// newSharedAccountListingMutation creates new mutation for the SharedAccountListing entity.
+func newSharedAccountListingMutation(c config, op Op, opts ...sharedaccountlistingOption) *SharedAccountListingMutation {
+	m := &SharedAccountListingMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeSharedAccountListing,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withSharedAccountListingID sets the ID field of the mutation.
+func withSharedAccountListingID(id int64) sharedaccountlistingOption {
+	return func(m *SharedAccountListingMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *SharedAccountListing
+		)
+		m.oldValue = func(ctx context.Context) (*SharedAccountListing, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().SharedAccountListing.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withSharedAccountListing sets the old SharedAccountListing of the mutation.
+func withSharedAccountListing(node *SharedAccountListing) sharedaccountlistingOption {
+	return func(m *SharedAccountListingMutation) {
+		m.oldValue = func(context.Context) (*SharedAccountListing, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m SharedAccountListingMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m SharedAccountListingMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *SharedAccountListingMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *SharedAccountListingMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().SharedAccountListing.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *SharedAccountListingMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *SharedAccountListingMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *SharedAccountListingMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *SharedAccountListingMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *SharedAccountListingMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *SharedAccountListingMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *SharedAccountListingMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *SharedAccountListingMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *SharedAccountListingMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[sharedaccountlisting.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *SharedAccountListingMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[sharedaccountlisting.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *SharedAccountListingMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, sharedaccountlisting.FieldDeletedAt)
+}
+
+// SetOwnerUserID sets the "owner_user_id" field.
+func (m *SharedAccountListingMutation) SetOwnerUserID(i int64) {
+	m.owner_user_id = &i
+	m.addowner_user_id = nil
+}
+
+// OwnerUserID returns the value of the "owner_user_id" field in the mutation.
+func (m *SharedAccountListingMutation) OwnerUserID() (r int64, exists bool) {
+	v := m.owner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOwnerUserID returns the old "owner_user_id" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldOwnerUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOwnerUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOwnerUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOwnerUserID: %w", err)
+	}
+	return oldValue.OwnerUserID, nil
+}
+
+// AddOwnerUserID adds i to the "owner_user_id" field.
+func (m *SharedAccountListingMutation) AddOwnerUserID(i int64) {
+	if m.addowner_user_id != nil {
+		*m.addowner_user_id += i
+	} else {
+		m.addowner_user_id = &i
+	}
+}
+
+// AddedOwnerUserID returns the value that was added to the "owner_user_id" field in this mutation.
+func (m *SharedAccountListingMutation) AddedOwnerUserID() (r int64, exists bool) {
+	v := m.addowner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetOwnerUserID resets all changes to the "owner_user_id" field.
+func (m *SharedAccountListingMutation) ResetOwnerUserID() {
+	m.owner_user_id = nil
+	m.addowner_user_id = nil
+}
+
+// SetAccountID sets the "account_id" field.
+func (m *SharedAccountListingMutation) SetAccountID(i int64) {
+	m.account_id = &i
+	m.addaccount_id = nil
+}
+
+// AccountID returns the value of the "account_id" field in the mutation.
+func (m *SharedAccountListingMutation) AccountID() (r int64, exists bool) {
+	v := m.account_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAccountID returns the old "account_id" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldAccountID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAccountID: %w", err)
+	}
+	return oldValue.AccountID, nil
+}
+
+// AddAccountID adds i to the "account_id" field.
+func (m *SharedAccountListingMutation) AddAccountID(i int64) {
+	if m.addaccount_id != nil {
+		*m.addaccount_id += i
+	} else {
+		m.addaccount_id = &i
+	}
+}
+
+// AddedAccountID returns the value that was added to the "account_id" field in this mutation.
+func (m *SharedAccountListingMutation) AddedAccountID() (r int64, exists bool) {
+	v := m.addaccount_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetAccountID resets all changes to the "account_id" field.
+func (m *SharedAccountListingMutation) ResetAccountID() {
+	m.account_id = nil
+	m.addaccount_id = nil
+}
+
+// SetPlatform sets the "platform" field.
+func (m *SharedAccountListingMutation) SetPlatform(s string) {
+	m.platform = &s
+}
+
+// Platform returns the value of the "platform" field in the mutation.
+func (m *SharedAccountListingMutation) Platform() (r string, exists bool) {
+	v := m.platform
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlatform returns the old "platform" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldPlatform(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlatform is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlatform requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlatform: %w", err)
+	}
+	return oldValue.Platform, nil
+}
+
+// ResetPlatform resets all changes to the "platform" field.
+func (m *SharedAccountListingMutation) ResetPlatform() {
+	m.platform = nil
+}
+
+// SetDisplayName sets the "display_name" field.
+func (m *SharedAccountListingMutation) SetDisplayName(s string) {
+	m.display_name = &s
+}
+
+// DisplayName returns the value of the "display_name" field in the mutation.
+func (m *SharedAccountListingMutation) DisplayName() (r string, exists bool) {
+	v := m.display_name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDisplayName returns the old "display_name" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldDisplayName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDisplayName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDisplayName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDisplayName: %w", err)
+	}
+	return oldValue.DisplayName, nil
+}
+
+// ResetDisplayName resets all changes to the "display_name" field.
+func (m *SharedAccountListingMutation) ResetDisplayName() {
+	m.display_name = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *SharedAccountListingMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *SharedAccountListingMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *SharedAccountListingMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetProxyConfigEncrypted sets the "proxy_config_encrypted" field.
+func (m *SharedAccountListingMutation) SetProxyConfigEncrypted(s string) {
+	m.proxy_config_encrypted = &s
+}
+
+// ProxyConfigEncrypted returns the value of the "proxy_config_encrypted" field in the mutation.
+func (m *SharedAccountListingMutation) ProxyConfigEncrypted() (r string, exists bool) {
+	v := m.proxy_config_encrypted
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProxyConfigEncrypted returns the old "proxy_config_encrypted" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldProxyConfigEncrypted(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProxyConfigEncrypted is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProxyConfigEncrypted requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProxyConfigEncrypted: %w", err)
+	}
+	return oldValue.ProxyConfigEncrypted, nil
+}
+
+// ClearProxyConfigEncrypted clears the value of the "proxy_config_encrypted" field.
+func (m *SharedAccountListingMutation) ClearProxyConfigEncrypted() {
+	m.proxy_config_encrypted = nil
+	m.clearedFields[sharedaccountlisting.FieldProxyConfigEncrypted] = struct{}{}
+}
+
+// ProxyConfigEncryptedCleared returns if the "proxy_config_encrypted" field was cleared in this mutation.
+func (m *SharedAccountListingMutation) ProxyConfigEncryptedCleared() bool {
+	_, ok := m.clearedFields[sharedaccountlisting.FieldProxyConfigEncrypted]
+	return ok
+}
+
+// ResetProxyConfigEncrypted resets all changes to the "proxy_config_encrypted" field.
+func (m *SharedAccountListingMutation) ResetProxyConfigEncrypted() {
+	m.proxy_config_encrypted = nil
+	delete(m.clearedFields, sharedaccountlisting.FieldProxyConfigEncrypted)
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (m *SharedAccountListingMutation) SetConcurrencyLimit(i int) {
+	m.concurrency_limit = &i
+	m.addconcurrency_limit = nil
+}
+
+// ConcurrencyLimit returns the value of the "concurrency_limit" field in the mutation.
+func (m *SharedAccountListingMutation) ConcurrencyLimit() (r int, exists bool) {
+	v := m.concurrency_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConcurrencyLimit returns the old "concurrency_limit" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldConcurrencyLimit(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConcurrencyLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConcurrencyLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConcurrencyLimit: %w", err)
+	}
+	return oldValue.ConcurrencyLimit, nil
+}
+
+// AddConcurrencyLimit adds i to the "concurrency_limit" field.
+func (m *SharedAccountListingMutation) AddConcurrencyLimit(i int) {
+	if m.addconcurrency_limit != nil {
+		*m.addconcurrency_limit += i
+	} else {
+		m.addconcurrency_limit = &i
+	}
+}
+
+// AddedConcurrencyLimit returns the value that was added to the "concurrency_limit" field in this mutation.
+func (m *SharedAccountListingMutation) AddedConcurrencyLimit() (r int, exists bool) {
+	v := m.addconcurrency_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetConcurrencyLimit resets all changes to the "concurrency_limit" field.
+func (m *SharedAccountListingMutation) ResetConcurrencyLimit() {
+	m.concurrency_limit = nil
+	m.addconcurrency_limit = nil
+}
+
+// SetConcurrencyMultiplier sets the "concurrency_multiplier" field.
+func (m *SharedAccountListingMutation) SetConcurrencyMultiplier(f float64) {
+	m.concurrency_multiplier = &f
+	m.addconcurrency_multiplier = nil
+}
+
+// ConcurrencyMultiplier returns the value of the "concurrency_multiplier" field in the mutation.
+func (m *SharedAccountListingMutation) ConcurrencyMultiplier() (r float64, exists bool) {
+	v := m.concurrency_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConcurrencyMultiplier returns the old "concurrency_multiplier" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldConcurrencyMultiplier(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConcurrencyMultiplier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConcurrencyMultiplier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConcurrencyMultiplier: %w", err)
+	}
+	return oldValue.ConcurrencyMultiplier, nil
+}
+
+// AddConcurrencyMultiplier adds f to the "concurrency_multiplier" field.
+func (m *SharedAccountListingMutation) AddConcurrencyMultiplier(f float64) {
+	if m.addconcurrency_multiplier != nil {
+		*m.addconcurrency_multiplier += f
+	} else {
+		m.addconcurrency_multiplier = &f
+	}
+}
+
+// AddedConcurrencyMultiplier returns the value that was added to the "concurrency_multiplier" field in this mutation.
+func (m *SharedAccountListingMutation) AddedConcurrencyMultiplier() (r float64, exists bool) {
+	v := m.addconcurrency_multiplier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetConcurrencyMultiplier resets all changes to the "concurrency_multiplier" field.
+func (m *SharedAccountListingMutation) ResetConcurrencyMultiplier() {
+	m.concurrency_multiplier = nil
+	m.addconcurrency_multiplier = nil
+}
+
+// SetSellRate sets the "sell_rate" field.
+func (m *SharedAccountListingMutation) SetSellRate(f float64) {
+	m.sell_rate = &f
+	m.addsell_rate = nil
+}
+
+// SellRate returns the value of the "sell_rate" field in the mutation.
+func (m *SharedAccountListingMutation) SellRate() (r float64, exists bool) {
+	v := m.sell_rate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSellRate returns the old "sell_rate" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldSellRate(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSellRate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSellRate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSellRate: %w", err)
+	}
+	return oldValue.SellRate, nil
+}
+
+// AddSellRate adds f to the "sell_rate" field.
+func (m *SharedAccountListingMutation) AddSellRate(f float64) {
+	if m.addsell_rate != nil {
+		*m.addsell_rate += f
+	} else {
+		m.addsell_rate = &f
+	}
+}
+
+// AddedSellRate returns the value that was added to the "sell_rate" field in this mutation.
+func (m *SharedAccountListingMutation) AddedSellRate() (r float64, exists bool) {
+	v := m.addsell_rate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSellRate resets all changes to the "sell_rate" field.
+func (m *SharedAccountListingMutation) ResetSellRate() {
+	m.sell_rate = nil
+	m.addsell_rate = nil
+}
+
+// SetFeeRateOverride sets the "fee_rate_override" field.
+func (m *SharedAccountListingMutation) SetFeeRateOverride(f float64) {
+	m.fee_rate_override = &f
+	m.addfee_rate_override = nil
+}
+
+// FeeRateOverride returns the value of the "fee_rate_override" field in the mutation.
+func (m *SharedAccountListingMutation) FeeRateOverride() (r float64, exists bool) {
+	v := m.fee_rate_override
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFeeRateOverride returns the old "fee_rate_override" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldFeeRateOverride(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFeeRateOverride is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFeeRateOverride requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFeeRateOverride: %w", err)
+	}
+	return oldValue.FeeRateOverride, nil
+}
+
+// AddFeeRateOverride adds f to the "fee_rate_override" field.
+func (m *SharedAccountListingMutation) AddFeeRateOverride(f float64) {
+	if m.addfee_rate_override != nil {
+		*m.addfee_rate_override += f
+	} else {
+		m.addfee_rate_override = &f
+	}
+}
+
+// AddedFeeRateOverride returns the value that was added to the "fee_rate_override" field in this mutation.
+func (m *SharedAccountListingMutation) AddedFeeRateOverride() (r float64, exists bool) {
+	v := m.addfee_rate_override
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearFeeRateOverride clears the value of the "fee_rate_override" field.
+func (m *SharedAccountListingMutation) ClearFeeRateOverride() {
+	m.fee_rate_override = nil
+	m.addfee_rate_override = nil
+	m.clearedFields[sharedaccountlisting.FieldFeeRateOverride] = struct{}{}
+}
+
+// FeeRateOverrideCleared returns if the "fee_rate_override" field was cleared in this mutation.
+func (m *SharedAccountListingMutation) FeeRateOverrideCleared() bool {
+	_, ok := m.clearedFields[sharedaccountlisting.FieldFeeRateOverride]
+	return ok
+}
+
+// ResetFeeRateOverride resets all changes to the "fee_rate_override" field.
+func (m *SharedAccountListingMutation) ResetFeeRateOverride() {
+	m.fee_rate_override = nil
+	m.addfee_rate_override = nil
+	delete(m.clearedFields, sharedaccountlisting.FieldFeeRateOverride)
+}
+
+// SetTotalCallCount sets the "total_call_count" field.
+func (m *SharedAccountListingMutation) SetTotalCallCount(i int64) {
+	m.total_call_count = &i
+	m.addtotal_call_count = nil
+}
+
+// TotalCallCount returns the value of the "total_call_count" field in the mutation.
+func (m *SharedAccountListingMutation) TotalCallCount() (r int64, exists bool) {
+	v := m.total_call_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTotalCallCount returns the old "total_call_count" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldTotalCallCount(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTotalCallCount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTotalCallCount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTotalCallCount: %w", err)
+	}
+	return oldValue.TotalCallCount, nil
+}
+
+// AddTotalCallCount adds i to the "total_call_count" field.
+func (m *SharedAccountListingMutation) AddTotalCallCount(i int64) {
+	if m.addtotal_call_count != nil {
+		*m.addtotal_call_count += i
+	} else {
+		m.addtotal_call_count = &i
+	}
+}
+
+// AddedTotalCallCount returns the value that was added to the "total_call_count" field in this mutation.
+func (m *SharedAccountListingMutation) AddedTotalCallCount() (r int64, exists bool) {
+	v := m.addtotal_call_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTotalCallCount resets all changes to the "total_call_count" field.
+func (m *SharedAccountListingMutation) ResetTotalCallCount() {
+	m.total_call_count = nil
+	m.addtotal_call_count = nil
+}
+
+// SetLastCalledAt sets the "last_called_at" field.
+func (m *SharedAccountListingMutation) SetLastCalledAt(t time.Time) {
+	m.last_called_at = &t
+}
+
+// LastCalledAt returns the value of the "last_called_at" field in the mutation.
+func (m *SharedAccountListingMutation) LastCalledAt() (r time.Time, exists bool) {
+	v := m.last_called_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastCalledAt returns the old "last_called_at" field's value of the SharedAccountListing entity.
+// If the SharedAccountListing object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountListingMutation) OldLastCalledAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastCalledAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastCalledAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastCalledAt: %w", err)
+	}
+	return oldValue.LastCalledAt, nil
+}
+
+// ClearLastCalledAt clears the value of the "last_called_at" field.
+func (m *SharedAccountListingMutation) ClearLastCalledAt() {
+	m.last_called_at = nil
+	m.clearedFields[sharedaccountlisting.FieldLastCalledAt] = struct{}{}
+}
+
+// LastCalledAtCleared returns if the "last_called_at" field was cleared in this mutation.
+func (m *SharedAccountListingMutation) LastCalledAtCleared() bool {
+	_, ok := m.clearedFields[sharedaccountlisting.FieldLastCalledAt]
+	return ok
+}
+
+// ResetLastCalledAt resets all changes to the "last_called_at" field.
+func (m *SharedAccountListingMutation) ResetLastCalledAt() {
+	m.last_called_at = nil
+	delete(m.clearedFields, sharedaccountlisting.FieldLastCalledAt)
+}
+
+// Where appends a list predicates to the SharedAccountListingMutation builder.
+func (m *SharedAccountListingMutation) Where(ps ...predicate.SharedAccountListing) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the SharedAccountListingMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *SharedAccountListingMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.SharedAccountListing, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *SharedAccountListingMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *SharedAccountListingMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (SharedAccountListing).
+func (m *SharedAccountListingMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *SharedAccountListingMutation) Fields() []string {
+	fields := make([]string, 0, 15)
+	if m.created_at != nil {
+		fields = append(fields, sharedaccountlisting.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, sharedaccountlisting.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, sharedaccountlisting.FieldDeletedAt)
+	}
+	if m.owner_user_id != nil {
+		fields = append(fields, sharedaccountlisting.FieldOwnerUserID)
+	}
+	if m.account_id != nil {
+		fields = append(fields, sharedaccountlisting.FieldAccountID)
+	}
+	if m.platform != nil {
+		fields = append(fields, sharedaccountlisting.FieldPlatform)
+	}
+	if m.display_name != nil {
+		fields = append(fields, sharedaccountlisting.FieldDisplayName)
+	}
+	if m.status != nil {
+		fields = append(fields, sharedaccountlisting.FieldStatus)
+	}
+	if m.proxy_config_encrypted != nil {
+		fields = append(fields, sharedaccountlisting.FieldProxyConfigEncrypted)
+	}
+	if m.concurrency_limit != nil {
+		fields = append(fields, sharedaccountlisting.FieldConcurrencyLimit)
+	}
+	if m.concurrency_multiplier != nil {
+		fields = append(fields, sharedaccountlisting.FieldConcurrencyMultiplier)
+	}
+	if m.sell_rate != nil {
+		fields = append(fields, sharedaccountlisting.FieldSellRate)
+	}
+	if m.fee_rate_override != nil {
+		fields = append(fields, sharedaccountlisting.FieldFeeRateOverride)
+	}
+	if m.total_call_count != nil {
+		fields = append(fields, sharedaccountlisting.FieldTotalCallCount)
+	}
+	if m.last_called_at != nil {
+		fields = append(fields, sharedaccountlisting.FieldLastCalledAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *SharedAccountListingMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case sharedaccountlisting.FieldCreatedAt:
+		return m.CreatedAt()
+	case sharedaccountlisting.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case sharedaccountlisting.FieldDeletedAt:
+		return m.DeletedAt()
+	case sharedaccountlisting.FieldOwnerUserID:
+		return m.OwnerUserID()
+	case sharedaccountlisting.FieldAccountID:
+		return m.AccountID()
+	case sharedaccountlisting.FieldPlatform:
+		return m.Platform()
+	case sharedaccountlisting.FieldDisplayName:
+		return m.DisplayName()
+	case sharedaccountlisting.FieldStatus:
+		return m.Status()
+	case sharedaccountlisting.FieldProxyConfigEncrypted:
+		return m.ProxyConfigEncrypted()
+	case sharedaccountlisting.FieldConcurrencyLimit:
+		return m.ConcurrencyLimit()
+	case sharedaccountlisting.FieldConcurrencyMultiplier:
+		return m.ConcurrencyMultiplier()
+	case sharedaccountlisting.FieldSellRate:
+		return m.SellRate()
+	case sharedaccountlisting.FieldFeeRateOverride:
+		return m.FeeRateOverride()
+	case sharedaccountlisting.FieldTotalCallCount:
+		return m.TotalCallCount()
+	case sharedaccountlisting.FieldLastCalledAt:
+		return m.LastCalledAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *SharedAccountListingMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case sharedaccountlisting.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case sharedaccountlisting.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case sharedaccountlisting.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	case sharedaccountlisting.FieldOwnerUserID:
+		return m.OldOwnerUserID(ctx)
+	case sharedaccountlisting.FieldAccountID:
+		return m.OldAccountID(ctx)
+	case sharedaccountlisting.FieldPlatform:
+		return m.OldPlatform(ctx)
+	case sharedaccountlisting.FieldDisplayName:
+		return m.OldDisplayName(ctx)
+	case sharedaccountlisting.FieldStatus:
+		return m.OldStatus(ctx)
+	case sharedaccountlisting.FieldProxyConfigEncrypted:
+		return m.OldProxyConfigEncrypted(ctx)
+	case sharedaccountlisting.FieldConcurrencyLimit:
+		return m.OldConcurrencyLimit(ctx)
+	case sharedaccountlisting.FieldConcurrencyMultiplier:
+		return m.OldConcurrencyMultiplier(ctx)
+	case sharedaccountlisting.FieldSellRate:
+		return m.OldSellRate(ctx)
+	case sharedaccountlisting.FieldFeeRateOverride:
+		return m.OldFeeRateOverride(ctx)
+	case sharedaccountlisting.FieldTotalCallCount:
+		return m.OldTotalCallCount(ctx)
+	case sharedaccountlisting.FieldLastCalledAt:
+		return m.OldLastCalledAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown SharedAccountListing field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *SharedAccountListingMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case sharedaccountlisting.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case sharedaccountlisting.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case sharedaccountlisting.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
+	case sharedaccountlisting.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOwnerUserID(v)
+		return nil
+	case sharedaccountlisting.FieldAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAccountID(v)
+		return nil
+	case sharedaccountlisting.FieldPlatform:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlatform(v)
+		return nil
+	case sharedaccountlisting.FieldDisplayName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDisplayName(v)
+		return nil
+	case sharedaccountlisting.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case sharedaccountlisting.FieldProxyConfigEncrypted:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProxyConfigEncrypted(v)
+		return nil
+	case sharedaccountlisting.FieldConcurrencyLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConcurrencyLimit(v)
+		return nil
+	case sharedaccountlisting.FieldConcurrencyMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConcurrencyMultiplier(v)
+		return nil
+	case sharedaccountlisting.FieldSellRate:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSellRate(v)
+		return nil
+	case sharedaccountlisting.FieldFeeRateOverride:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFeeRateOverride(v)
+		return nil
+	case sharedaccountlisting.FieldTotalCallCount:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTotalCallCount(v)
+		return nil
+	case sharedaccountlisting.FieldLastCalledAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastCalledAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountListing field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *SharedAccountListingMutation) AddedFields() []string {
+	var fields []string
+	if m.addowner_user_id != nil {
+		fields = append(fields, sharedaccountlisting.FieldOwnerUserID)
+	}
+	if m.addaccount_id != nil {
+		fields = append(fields, sharedaccountlisting.FieldAccountID)
+	}
+	if m.addconcurrency_limit != nil {
+		fields = append(fields, sharedaccountlisting.FieldConcurrencyLimit)
+	}
+	if m.addconcurrency_multiplier != nil {
+		fields = append(fields, sharedaccountlisting.FieldConcurrencyMultiplier)
+	}
+	if m.addsell_rate != nil {
+		fields = append(fields, sharedaccountlisting.FieldSellRate)
+	}
+	if m.addfee_rate_override != nil {
+		fields = append(fields, sharedaccountlisting.FieldFeeRateOverride)
+	}
+	if m.addtotal_call_count != nil {
+		fields = append(fields, sharedaccountlisting.FieldTotalCallCount)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *SharedAccountListingMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case sharedaccountlisting.FieldOwnerUserID:
+		return m.AddedOwnerUserID()
+	case sharedaccountlisting.FieldAccountID:
+		return m.AddedAccountID()
+	case sharedaccountlisting.FieldConcurrencyLimit:
+		return m.AddedConcurrencyLimit()
+	case sharedaccountlisting.FieldConcurrencyMultiplier:
+		return m.AddedConcurrencyMultiplier()
+	case sharedaccountlisting.FieldSellRate:
+		return m.AddedSellRate()
+	case sharedaccountlisting.FieldFeeRateOverride:
+		return m.AddedFeeRateOverride()
+	case sharedaccountlisting.FieldTotalCallCount:
+		return m.AddedTotalCallCount()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *SharedAccountListingMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case sharedaccountlisting.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOwnerUserID(v)
+		return nil
+	case sharedaccountlisting.FieldAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAccountID(v)
+		return nil
+	case sharedaccountlisting.FieldConcurrencyLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddConcurrencyLimit(v)
+		return nil
+	case sharedaccountlisting.FieldConcurrencyMultiplier:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddConcurrencyMultiplier(v)
+		return nil
+	case sharedaccountlisting.FieldSellRate:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSellRate(v)
+		return nil
+	case sharedaccountlisting.FieldFeeRateOverride:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFeeRateOverride(v)
+		return nil
+	case sharedaccountlisting.FieldTotalCallCount:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTotalCallCount(v)
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountListing numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *SharedAccountListingMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(sharedaccountlisting.FieldDeletedAt) {
+		fields = append(fields, sharedaccountlisting.FieldDeletedAt)
+	}
+	if m.FieldCleared(sharedaccountlisting.FieldProxyConfigEncrypted) {
+		fields = append(fields, sharedaccountlisting.FieldProxyConfigEncrypted)
+	}
+	if m.FieldCleared(sharedaccountlisting.FieldFeeRateOverride) {
+		fields = append(fields, sharedaccountlisting.FieldFeeRateOverride)
+	}
+	if m.FieldCleared(sharedaccountlisting.FieldLastCalledAt) {
+		fields = append(fields, sharedaccountlisting.FieldLastCalledAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *SharedAccountListingMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *SharedAccountListingMutation) ClearField(name string) error {
+	switch name {
+	case sharedaccountlisting.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	case sharedaccountlisting.FieldProxyConfigEncrypted:
+		m.ClearProxyConfigEncrypted()
+		return nil
+	case sharedaccountlisting.FieldFeeRateOverride:
+		m.ClearFeeRateOverride()
+		return nil
+	case sharedaccountlisting.FieldLastCalledAt:
+		m.ClearLastCalledAt()
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountListing nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *SharedAccountListingMutation) ResetField(name string) error {
+	switch name {
+	case sharedaccountlisting.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case sharedaccountlisting.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case sharedaccountlisting.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	case sharedaccountlisting.FieldOwnerUserID:
+		m.ResetOwnerUserID()
+		return nil
+	case sharedaccountlisting.FieldAccountID:
+		m.ResetAccountID()
+		return nil
+	case sharedaccountlisting.FieldPlatform:
+		m.ResetPlatform()
+		return nil
+	case sharedaccountlisting.FieldDisplayName:
+		m.ResetDisplayName()
+		return nil
+	case sharedaccountlisting.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case sharedaccountlisting.FieldProxyConfigEncrypted:
+		m.ResetProxyConfigEncrypted()
+		return nil
+	case sharedaccountlisting.FieldConcurrencyLimit:
+		m.ResetConcurrencyLimit()
+		return nil
+	case sharedaccountlisting.FieldConcurrencyMultiplier:
+		m.ResetConcurrencyMultiplier()
+		return nil
+	case sharedaccountlisting.FieldSellRate:
+		m.ResetSellRate()
+		return nil
+	case sharedaccountlisting.FieldFeeRateOverride:
+		m.ResetFeeRateOverride()
+		return nil
+	case sharedaccountlisting.FieldTotalCallCount:
+		m.ResetTotalCallCount()
+		return nil
+	case sharedaccountlisting.FieldLastCalledAt:
+		m.ResetLastCalledAt()
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountListing field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *SharedAccountListingMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *SharedAccountListingMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *SharedAccountListingMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *SharedAccountListingMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *SharedAccountListingMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *SharedAccountListingMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *SharedAccountListingMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown SharedAccountListing unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *SharedAccountListingMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown SharedAccountListing edge %s", name)
+}
+
+// SharedAccountUsageLedgerMutation represents an operation that mutates the SharedAccountUsageLedger nodes in the graph.
+type SharedAccountUsageLedgerMutation struct {
+	config
+	op                  Op
+	typ                 string
+	id                  *int64
+	created_at          *time.Time
+	updated_at          *time.Time
+	request_id          *string
+	usage_log_id        *int64
+	addusage_log_id     *int64
+	listing_id          *int64
+	addlisting_id       *int64
+	owner_user_id       *int64
+	addowner_user_id    *int64
+	consumer_user_id    *int64
+	addconsumer_user_id *int64
+	gross_cost          *float64
+	addgross_cost       *float64
+	fee_rate_percent    *float64
+	addfee_rate_percent *float64
+	platform_fee        *float64
+	addplatform_fee     *float64
+	owner_amount        *float64
+	addowner_amount     *float64
+	action              *string
+	frozen_until        *time.Time
+	released_at         *time.Time
+	clearedFields       map[string]struct{}
+	done                bool
+	oldValue            func(context.Context) (*SharedAccountUsageLedger, error)
+	predicates          []predicate.SharedAccountUsageLedger
+}
+
+var _ ent.Mutation = (*SharedAccountUsageLedgerMutation)(nil)
+
+// sharedaccountusageledgerOption allows management of the mutation configuration using functional options.
+type sharedaccountusageledgerOption func(*SharedAccountUsageLedgerMutation)
+
+// newSharedAccountUsageLedgerMutation creates new mutation for the SharedAccountUsageLedger entity.
+func newSharedAccountUsageLedgerMutation(c config, op Op, opts ...sharedaccountusageledgerOption) *SharedAccountUsageLedgerMutation {
+	m := &SharedAccountUsageLedgerMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeSharedAccountUsageLedger,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withSharedAccountUsageLedgerID sets the ID field of the mutation.
+func withSharedAccountUsageLedgerID(id int64) sharedaccountusageledgerOption {
+	return func(m *SharedAccountUsageLedgerMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *SharedAccountUsageLedger
+		)
+		m.oldValue = func(ctx context.Context) (*SharedAccountUsageLedger, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().SharedAccountUsageLedger.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withSharedAccountUsageLedger sets the old SharedAccountUsageLedger of the mutation.
+func withSharedAccountUsageLedger(node *SharedAccountUsageLedger) sharedaccountusageledgerOption {
+	return func(m *SharedAccountUsageLedgerMutation) {
+		m.oldValue = func(context.Context) (*SharedAccountUsageLedger, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m SharedAccountUsageLedgerMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m SharedAccountUsageLedgerMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *SharedAccountUsageLedgerMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *SharedAccountUsageLedgerMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().SharedAccountUsageLedger.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *SharedAccountUsageLedgerMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *SharedAccountUsageLedgerMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *SharedAccountUsageLedgerMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *SharedAccountUsageLedgerMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetRequestID sets the "request_id" field.
+func (m *SharedAccountUsageLedgerMutation) SetRequestID(s string) {
+	m.request_id = &s
+}
+
+// RequestID returns the value of the "request_id" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) RequestID() (r string, exists bool) {
+	v := m.request_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestID returns the old "request_id" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldRequestID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestID: %w", err)
+	}
+	return oldValue.RequestID, nil
+}
+
+// ResetRequestID resets all changes to the "request_id" field.
+func (m *SharedAccountUsageLedgerMutation) ResetRequestID() {
+	m.request_id = nil
+}
+
+// SetUsageLogID sets the "usage_log_id" field.
+func (m *SharedAccountUsageLedgerMutation) SetUsageLogID(i int64) {
+	m.usage_log_id = &i
+	m.addusage_log_id = nil
+}
+
+// UsageLogID returns the value of the "usage_log_id" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) UsageLogID() (r int64, exists bool) {
+	v := m.usage_log_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsageLogID returns the old "usage_log_id" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldUsageLogID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsageLogID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsageLogID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsageLogID: %w", err)
+	}
+	return oldValue.UsageLogID, nil
+}
+
+// AddUsageLogID adds i to the "usage_log_id" field.
+func (m *SharedAccountUsageLedgerMutation) AddUsageLogID(i int64) {
+	if m.addusage_log_id != nil {
+		*m.addusage_log_id += i
+	} else {
+		m.addusage_log_id = &i
+	}
+}
+
+// AddedUsageLogID returns the value that was added to the "usage_log_id" field in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedUsageLogID() (r int64, exists bool) {
+	v := m.addusage_log_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearUsageLogID clears the value of the "usage_log_id" field.
+func (m *SharedAccountUsageLedgerMutation) ClearUsageLogID() {
+	m.usage_log_id = nil
+	m.addusage_log_id = nil
+	m.clearedFields[sharedaccountusageledger.FieldUsageLogID] = struct{}{}
+}
+
+// UsageLogIDCleared returns if the "usage_log_id" field was cleared in this mutation.
+func (m *SharedAccountUsageLedgerMutation) UsageLogIDCleared() bool {
+	_, ok := m.clearedFields[sharedaccountusageledger.FieldUsageLogID]
+	return ok
+}
+
+// ResetUsageLogID resets all changes to the "usage_log_id" field.
+func (m *SharedAccountUsageLedgerMutation) ResetUsageLogID() {
+	m.usage_log_id = nil
+	m.addusage_log_id = nil
+	delete(m.clearedFields, sharedaccountusageledger.FieldUsageLogID)
+}
+
+// SetListingID sets the "listing_id" field.
+func (m *SharedAccountUsageLedgerMutation) SetListingID(i int64) {
+	m.listing_id = &i
+	m.addlisting_id = nil
+}
+
+// ListingID returns the value of the "listing_id" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) ListingID() (r int64, exists bool) {
+	v := m.listing_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldListingID returns the old "listing_id" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldListingID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldListingID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldListingID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldListingID: %w", err)
+	}
+	return oldValue.ListingID, nil
+}
+
+// AddListingID adds i to the "listing_id" field.
+func (m *SharedAccountUsageLedgerMutation) AddListingID(i int64) {
+	if m.addlisting_id != nil {
+		*m.addlisting_id += i
+	} else {
+		m.addlisting_id = &i
+	}
+}
+
+// AddedListingID returns the value that was added to the "listing_id" field in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedListingID() (r int64, exists bool) {
+	v := m.addlisting_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetListingID resets all changes to the "listing_id" field.
+func (m *SharedAccountUsageLedgerMutation) ResetListingID() {
+	m.listing_id = nil
+	m.addlisting_id = nil
+}
+
+// SetOwnerUserID sets the "owner_user_id" field.
+func (m *SharedAccountUsageLedgerMutation) SetOwnerUserID(i int64) {
+	m.owner_user_id = &i
+	m.addowner_user_id = nil
+}
+
+// OwnerUserID returns the value of the "owner_user_id" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) OwnerUserID() (r int64, exists bool) {
+	v := m.owner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOwnerUserID returns the old "owner_user_id" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldOwnerUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOwnerUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOwnerUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOwnerUserID: %w", err)
+	}
+	return oldValue.OwnerUserID, nil
+}
+
+// AddOwnerUserID adds i to the "owner_user_id" field.
+func (m *SharedAccountUsageLedgerMutation) AddOwnerUserID(i int64) {
+	if m.addowner_user_id != nil {
+		*m.addowner_user_id += i
+	} else {
+		m.addowner_user_id = &i
+	}
+}
+
+// AddedOwnerUserID returns the value that was added to the "owner_user_id" field in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedOwnerUserID() (r int64, exists bool) {
+	v := m.addowner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetOwnerUserID resets all changes to the "owner_user_id" field.
+func (m *SharedAccountUsageLedgerMutation) ResetOwnerUserID() {
+	m.owner_user_id = nil
+	m.addowner_user_id = nil
+}
+
+// SetConsumerUserID sets the "consumer_user_id" field.
+func (m *SharedAccountUsageLedgerMutation) SetConsumerUserID(i int64) {
+	m.consumer_user_id = &i
+	m.addconsumer_user_id = nil
+}
+
+// ConsumerUserID returns the value of the "consumer_user_id" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) ConsumerUserID() (r int64, exists bool) {
+	v := m.consumer_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConsumerUserID returns the old "consumer_user_id" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldConsumerUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConsumerUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConsumerUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConsumerUserID: %w", err)
+	}
+	return oldValue.ConsumerUserID, nil
+}
+
+// AddConsumerUserID adds i to the "consumer_user_id" field.
+func (m *SharedAccountUsageLedgerMutation) AddConsumerUserID(i int64) {
+	if m.addconsumer_user_id != nil {
+		*m.addconsumer_user_id += i
+	} else {
+		m.addconsumer_user_id = &i
+	}
+}
+
+// AddedConsumerUserID returns the value that was added to the "consumer_user_id" field in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedConsumerUserID() (r int64, exists bool) {
+	v := m.addconsumer_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetConsumerUserID resets all changes to the "consumer_user_id" field.
+func (m *SharedAccountUsageLedgerMutation) ResetConsumerUserID() {
+	m.consumer_user_id = nil
+	m.addconsumer_user_id = nil
+}
+
+// SetGrossCost sets the "gross_cost" field.
+func (m *SharedAccountUsageLedgerMutation) SetGrossCost(f float64) {
+	m.gross_cost = &f
+	m.addgross_cost = nil
+}
+
+// GrossCost returns the value of the "gross_cost" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) GrossCost() (r float64, exists bool) {
+	v := m.gross_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGrossCost returns the old "gross_cost" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldGrossCost(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGrossCost is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGrossCost requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGrossCost: %w", err)
+	}
+	return oldValue.GrossCost, nil
+}
+
+// AddGrossCost adds f to the "gross_cost" field.
+func (m *SharedAccountUsageLedgerMutation) AddGrossCost(f float64) {
+	if m.addgross_cost != nil {
+		*m.addgross_cost += f
+	} else {
+		m.addgross_cost = &f
+	}
+}
+
+// AddedGrossCost returns the value that was added to the "gross_cost" field in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedGrossCost() (r float64, exists bool) {
+	v := m.addgross_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetGrossCost resets all changes to the "gross_cost" field.
+func (m *SharedAccountUsageLedgerMutation) ResetGrossCost() {
+	m.gross_cost = nil
+	m.addgross_cost = nil
+}
+
+// SetFeeRatePercent sets the "fee_rate_percent" field.
+func (m *SharedAccountUsageLedgerMutation) SetFeeRatePercent(f float64) {
+	m.fee_rate_percent = &f
+	m.addfee_rate_percent = nil
+}
+
+// FeeRatePercent returns the value of the "fee_rate_percent" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) FeeRatePercent() (r float64, exists bool) {
+	v := m.fee_rate_percent
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFeeRatePercent returns the old "fee_rate_percent" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldFeeRatePercent(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFeeRatePercent is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFeeRatePercent requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFeeRatePercent: %w", err)
+	}
+	return oldValue.FeeRatePercent, nil
+}
+
+// AddFeeRatePercent adds f to the "fee_rate_percent" field.
+func (m *SharedAccountUsageLedgerMutation) AddFeeRatePercent(f float64) {
+	if m.addfee_rate_percent != nil {
+		*m.addfee_rate_percent += f
+	} else {
+		m.addfee_rate_percent = &f
+	}
+}
+
+// AddedFeeRatePercent returns the value that was added to the "fee_rate_percent" field in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedFeeRatePercent() (r float64, exists bool) {
+	v := m.addfee_rate_percent
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetFeeRatePercent resets all changes to the "fee_rate_percent" field.
+func (m *SharedAccountUsageLedgerMutation) ResetFeeRatePercent() {
+	m.fee_rate_percent = nil
+	m.addfee_rate_percent = nil
+}
+
+// SetPlatformFee sets the "platform_fee" field.
+func (m *SharedAccountUsageLedgerMutation) SetPlatformFee(f float64) {
+	m.platform_fee = &f
+	m.addplatform_fee = nil
+}
+
+// PlatformFee returns the value of the "platform_fee" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) PlatformFee() (r float64, exists bool) {
+	v := m.platform_fee
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlatformFee returns the old "platform_fee" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldPlatformFee(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlatformFee is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlatformFee requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlatformFee: %w", err)
+	}
+	return oldValue.PlatformFee, nil
+}
+
+// AddPlatformFee adds f to the "platform_fee" field.
+func (m *SharedAccountUsageLedgerMutation) AddPlatformFee(f float64) {
+	if m.addplatform_fee != nil {
+		*m.addplatform_fee += f
+	} else {
+		m.addplatform_fee = &f
+	}
+}
+
+// AddedPlatformFee returns the value that was added to the "platform_fee" field in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedPlatformFee() (r float64, exists bool) {
+	v := m.addplatform_fee
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPlatformFee resets all changes to the "platform_fee" field.
+func (m *SharedAccountUsageLedgerMutation) ResetPlatformFee() {
+	m.platform_fee = nil
+	m.addplatform_fee = nil
+}
+
+// SetOwnerAmount sets the "owner_amount" field.
+func (m *SharedAccountUsageLedgerMutation) SetOwnerAmount(f float64) {
+	m.owner_amount = &f
+	m.addowner_amount = nil
+}
+
+// OwnerAmount returns the value of the "owner_amount" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) OwnerAmount() (r float64, exists bool) {
+	v := m.owner_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOwnerAmount returns the old "owner_amount" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldOwnerAmount(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOwnerAmount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOwnerAmount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOwnerAmount: %w", err)
+	}
+	return oldValue.OwnerAmount, nil
+}
+
+// AddOwnerAmount adds f to the "owner_amount" field.
+func (m *SharedAccountUsageLedgerMutation) AddOwnerAmount(f float64) {
+	if m.addowner_amount != nil {
+		*m.addowner_amount += f
+	} else {
+		m.addowner_amount = &f
+	}
+}
+
+// AddedOwnerAmount returns the value that was added to the "owner_amount" field in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedOwnerAmount() (r float64, exists bool) {
+	v := m.addowner_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetOwnerAmount resets all changes to the "owner_amount" field.
+func (m *SharedAccountUsageLedgerMutation) ResetOwnerAmount() {
+	m.owner_amount = nil
+	m.addowner_amount = nil
+}
+
+// SetAction sets the "action" field.
+func (m *SharedAccountUsageLedgerMutation) SetAction(s string) {
+	m.action = &s
+}
+
+// Action returns the value of the "action" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) Action() (r string, exists bool) {
+	v := m.action
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAction returns the old "action" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldAction(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAction is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAction requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAction: %w", err)
+	}
+	return oldValue.Action, nil
+}
+
+// ResetAction resets all changes to the "action" field.
+func (m *SharedAccountUsageLedgerMutation) ResetAction() {
+	m.action = nil
+}
+
+// SetFrozenUntil sets the "frozen_until" field.
+func (m *SharedAccountUsageLedgerMutation) SetFrozenUntil(t time.Time) {
+	m.frozen_until = &t
+}
+
+// FrozenUntil returns the value of the "frozen_until" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) FrozenUntil() (r time.Time, exists bool) {
+	v := m.frozen_until
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFrozenUntil returns the old "frozen_until" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldFrozenUntil(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFrozenUntil is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFrozenUntil requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFrozenUntil: %w", err)
+	}
+	return oldValue.FrozenUntil, nil
+}
+
+// ClearFrozenUntil clears the value of the "frozen_until" field.
+func (m *SharedAccountUsageLedgerMutation) ClearFrozenUntil() {
+	m.frozen_until = nil
+	m.clearedFields[sharedaccountusageledger.FieldFrozenUntil] = struct{}{}
+}
+
+// FrozenUntilCleared returns if the "frozen_until" field was cleared in this mutation.
+func (m *SharedAccountUsageLedgerMutation) FrozenUntilCleared() bool {
+	_, ok := m.clearedFields[sharedaccountusageledger.FieldFrozenUntil]
+	return ok
+}
+
+// ResetFrozenUntil resets all changes to the "frozen_until" field.
+func (m *SharedAccountUsageLedgerMutation) ResetFrozenUntil() {
+	m.frozen_until = nil
+	delete(m.clearedFields, sharedaccountusageledger.FieldFrozenUntil)
+}
+
+// SetReleasedAt sets the "released_at" field.
+func (m *SharedAccountUsageLedgerMutation) SetReleasedAt(t time.Time) {
+	m.released_at = &t
+}
+
+// ReleasedAt returns the value of the "released_at" field in the mutation.
+func (m *SharedAccountUsageLedgerMutation) ReleasedAt() (r time.Time, exists bool) {
+	v := m.released_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReleasedAt returns the old "released_at" field's value of the SharedAccountUsageLedger entity.
+// If the SharedAccountUsageLedger object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountUsageLedgerMutation) OldReleasedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReleasedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReleasedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReleasedAt: %w", err)
+	}
+	return oldValue.ReleasedAt, nil
+}
+
+// ClearReleasedAt clears the value of the "released_at" field.
+func (m *SharedAccountUsageLedgerMutation) ClearReleasedAt() {
+	m.released_at = nil
+	m.clearedFields[sharedaccountusageledger.FieldReleasedAt] = struct{}{}
+}
+
+// ReleasedAtCleared returns if the "released_at" field was cleared in this mutation.
+func (m *SharedAccountUsageLedgerMutation) ReleasedAtCleared() bool {
+	_, ok := m.clearedFields[sharedaccountusageledger.FieldReleasedAt]
+	return ok
+}
+
+// ResetReleasedAt resets all changes to the "released_at" field.
+func (m *SharedAccountUsageLedgerMutation) ResetReleasedAt() {
+	m.released_at = nil
+	delete(m.clearedFields, sharedaccountusageledger.FieldReleasedAt)
+}
+
+// Where appends a list predicates to the SharedAccountUsageLedgerMutation builder.
+func (m *SharedAccountUsageLedgerMutation) Where(ps ...predicate.SharedAccountUsageLedger) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the SharedAccountUsageLedgerMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *SharedAccountUsageLedgerMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.SharedAccountUsageLedger, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *SharedAccountUsageLedgerMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *SharedAccountUsageLedgerMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (SharedAccountUsageLedger).
+func (m *SharedAccountUsageLedgerMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *SharedAccountUsageLedgerMutation) Fields() []string {
+	fields := make([]string, 0, 14)
+	if m.created_at != nil {
+		fields = append(fields, sharedaccountusageledger.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, sharedaccountusageledger.FieldUpdatedAt)
+	}
+	if m.request_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldRequestID)
+	}
+	if m.usage_log_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldUsageLogID)
+	}
+	if m.listing_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldListingID)
+	}
+	if m.owner_user_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldOwnerUserID)
+	}
+	if m.consumer_user_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldConsumerUserID)
+	}
+	if m.gross_cost != nil {
+		fields = append(fields, sharedaccountusageledger.FieldGrossCost)
+	}
+	if m.fee_rate_percent != nil {
+		fields = append(fields, sharedaccountusageledger.FieldFeeRatePercent)
+	}
+	if m.platform_fee != nil {
+		fields = append(fields, sharedaccountusageledger.FieldPlatformFee)
+	}
+	if m.owner_amount != nil {
+		fields = append(fields, sharedaccountusageledger.FieldOwnerAmount)
+	}
+	if m.action != nil {
+		fields = append(fields, sharedaccountusageledger.FieldAction)
+	}
+	if m.frozen_until != nil {
+		fields = append(fields, sharedaccountusageledger.FieldFrozenUntil)
+	}
+	if m.released_at != nil {
+		fields = append(fields, sharedaccountusageledger.FieldReleasedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *SharedAccountUsageLedgerMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case sharedaccountusageledger.FieldCreatedAt:
+		return m.CreatedAt()
+	case sharedaccountusageledger.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case sharedaccountusageledger.FieldRequestID:
+		return m.RequestID()
+	case sharedaccountusageledger.FieldUsageLogID:
+		return m.UsageLogID()
+	case sharedaccountusageledger.FieldListingID:
+		return m.ListingID()
+	case sharedaccountusageledger.FieldOwnerUserID:
+		return m.OwnerUserID()
+	case sharedaccountusageledger.FieldConsumerUserID:
+		return m.ConsumerUserID()
+	case sharedaccountusageledger.FieldGrossCost:
+		return m.GrossCost()
+	case sharedaccountusageledger.FieldFeeRatePercent:
+		return m.FeeRatePercent()
+	case sharedaccountusageledger.FieldPlatformFee:
+		return m.PlatformFee()
+	case sharedaccountusageledger.FieldOwnerAmount:
+		return m.OwnerAmount()
+	case sharedaccountusageledger.FieldAction:
+		return m.Action()
+	case sharedaccountusageledger.FieldFrozenUntil:
+		return m.FrozenUntil()
+	case sharedaccountusageledger.FieldReleasedAt:
+		return m.ReleasedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *SharedAccountUsageLedgerMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case sharedaccountusageledger.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case sharedaccountusageledger.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case sharedaccountusageledger.FieldRequestID:
+		return m.OldRequestID(ctx)
+	case sharedaccountusageledger.FieldUsageLogID:
+		return m.OldUsageLogID(ctx)
+	case sharedaccountusageledger.FieldListingID:
+		return m.OldListingID(ctx)
+	case sharedaccountusageledger.FieldOwnerUserID:
+		return m.OldOwnerUserID(ctx)
+	case sharedaccountusageledger.FieldConsumerUserID:
+		return m.OldConsumerUserID(ctx)
+	case sharedaccountusageledger.FieldGrossCost:
+		return m.OldGrossCost(ctx)
+	case sharedaccountusageledger.FieldFeeRatePercent:
+		return m.OldFeeRatePercent(ctx)
+	case sharedaccountusageledger.FieldPlatformFee:
+		return m.OldPlatformFee(ctx)
+	case sharedaccountusageledger.FieldOwnerAmount:
+		return m.OldOwnerAmount(ctx)
+	case sharedaccountusageledger.FieldAction:
+		return m.OldAction(ctx)
+	case sharedaccountusageledger.FieldFrozenUntil:
+		return m.OldFrozenUntil(ctx)
+	case sharedaccountusageledger.FieldReleasedAt:
+		return m.OldReleasedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown SharedAccountUsageLedger field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *SharedAccountUsageLedgerMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case sharedaccountusageledger.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case sharedaccountusageledger.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case sharedaccountusageledger.FieldRequestID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestID(v)
+		return nil
+	case sharedaccountusageledger.FieldUsageLogID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsageLogID(v)
+		return nil
+	case sharedaccountusageledger.FieldListingID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetListingID(v)
+		return nil
+	case sharedaccountusageledger.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOwnerUserID(v)
+		return nil
+	case sharedaccountusageledger.FieldConsumerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConsumerUserID(v)
+		return nil
+	case sharedaccountusageledger.FieldGrossCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGrossCost(v)
+		return nil
+	case sharedaccountusageledger.FieldFeeRatePercent:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFeeRatePercent(v)
+		return nil
+	case sharedaccountusageledger.FieldPlatformFee:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlatformFee(v)
+		return nil
+	case sharedaccountusageledger.FieldOwnerAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOwnerAmount(v)
+		return nil
+	case sharedaccountusageledger.FieldAction:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAction(v)
+		return nil
+	case sharedaccountusageledger.FieldFrozenUntil:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFrozenUntil(v)
+		return nil
+	case sharedaccountusageledger.FieldReleasedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReleasedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountUsageLedger field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedFields() []string {
+	var fields []string
+	if m.addusage_log_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldUsageLogID)
+	}
+	if m.addlisting_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldListingID)
+	}
+	if m.addowner_user_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldOwnerUserID)
+	}
+	if m.addconsumer_user_id != nil {
+		fields = append(fields, sharedaccountusageledger.FieldConsumerUserID)
+	}
+	if m.addgross_cost != nil {
+		fields = append(fields, sharedaccountusageledger.FieldGrossCost)
+	}
+	if m.addfee_rate_percent != nil {
+		fields = append(fields, sharedaccountusageledger.FieldFeeRatePercent)
+	}
+	if m.addplatform_fee != nil {
+		fields = append(fields, sharedaccountusageledger.FieldPlatformFee)
+	}
+	if m.addowner_amount != nil {
+		fields = append(fields, sharedaccountusageledger.FieldOwnerAmount)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *SharedAccountUsageLedgerMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case sharedaccountusageledger.FieldUsageLogID:
+		return m.AddedUsageLogID()
+	case sharedaccountusageledger.FieldListingID:
+		return m.AddedListingID()
+	case sharedaccountusageledger.FieldOwnerUserID:
+		return m.AddedOwnerUserID()
+	case sharedaccountusageledger.FieldConsumerUserID:
+		return m.AddedConsumerUserID()
+	case sharedaccountusageledger.FieldGrossCost:
+		return m.AddedGrossCost()
+	case sharedaccountusageledger.FieldFeeRatePercent:
+		return m.AddedFeeRatePercent()
+	case sharedaccountusageledger.FieldPlatformFee:
+		return m.AddedPlatformFee()
+	case sharedaccountusageledger.FieldOwnerAmount:
+		return m.AddedOwnerAmount()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *SharedAccountUsageLedgerMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case sharedaccountusageledger.FieldUsageLogID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUsageLogID(v)
+		return nil
+	case sharedaccountusageledger.FieldListingID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddListingID(v)
+		return nil
+	case sharedaccountusageledger.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOwnerUserID(v)
+		return nil
+	case sharedaccountusageledger.FieldConsumerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddConsumerUserID(v)
+		return nil
+	case sharedaccountusageledger.FieldGrossCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddGrossCost(v)
+		return nil
+	case sharedaccountusageledger.FieldFeeRatePercent:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFeeRatePercent(v)
+		return nil
+	case sharedaccountusageledger.FieldPlatformFee:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPlatformFee(v)
+		return nil
+	case sharedaccountusageledger.FieldOwnerAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOwnerAmount(v)
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountUsageLedger numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *SharedAccountUsageLedgerMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(sharedaccountusageledger.FieldUsageLogID) {
+		fields = append(fields, sharedaccountusageledger.FieldUsageLogID)
+	}
+	if m.FieldCleared(sharedaccountusageledger.FieldFrozenUntil) {
+		fields = append(fields, sharedaccountusageledger.FieldFrozenUntil)
+	}
+	if m.FieldCleared(sharedaccountusageledger.FieldReleasedAt) {
+		fields = append(fields, sharedaccountusageledger.FieldReleasedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *SharedAccountUsageLedgerMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *SharedAccountUsageLedgerMutation) ClearField(name string) error {
+	switch name {
+	case sharedaccountusageledger.FieldUsageLogID:
+		m.ClearUsageLogID()
+		return nil
+	case sharedaccountusageledger.FieldFrozenUntil:
+		m.ClearFrozenUntil()
+		return nil
+	case sharedaccountusageledger.FieldReleasedAt:
+		m.ClearReleasedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountUsageLedger nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *SharedAccountUsageLedgerMutation) ResetField(name string) error {
+	switch name {
+	case sharedaccountusageledger.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case sharedaccountusageledger.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case sharedaccountusageledger.FieldRequestID:
+		m.ResetRequestID()
+		return nil
+	case sharedaccountusageledger.FieldUsageLogID:
+		m.ResetUsageLogID()
+		return nil
+	case sharedaccountusageledger.FieldListingID:
+		m.ResetListingID()
+		return nil
+	case sharedaccountusageledger.FieldOwnerUserID:
+		m.ResetOwnerUserID()
+		return nil
+	case sharedaccountusageledger.FieldConsumerUserID:
+		m.ResetConsumerUserID()
+		return nil
+	case sharedaccountusageledger.FieldGrossCost:
+		m.ResetGrossCost()
+		return nil
+	case sharedaccountusageledger.FieldFeeRatePercent:
+		m.ResetFeeRatePercent()
+		return nil
+	case sharedaccountusageledger.FieldPlatformFee:
+		m.ResetPlatformFee()
+		return nil
+	case sharedaccountusageledger.FieldOwnerAmount:
+		m.ResetOwnerAmount()
+		return nil
+	case sharedaccountusageledger.FieldAction:
+		m.ResetAction()
+		return nil
+	case sharedaccountusageledger.FieldFrozenUntil:
+		m.ResetFrozenUntil()
+		return nil
+	case sharedaccountusageledger.FieldReleasedAt:
+		m.ResetReleasedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountUsageLedger field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *SharedAccountUsageLedgerMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *SharedAccountUsageLedgerMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *SharedAccountUsageLedgerMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *SharedAccountUsageLedgerMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *SharedAccountUsageLedgerMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *SharedAccountUsageLedgerMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown SharedAccountUsageLedger unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *SharedAccountUsageLedgerMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown SharedAccountUsageLedger edge %s", name)
+}
+
+// SharedAccountWalletMutation represents an operation that mutates the SharedAccountWallet nodes in the graph.
+type SharedAccountWalletMutation struct {
+	config
+	op                   Op
+	typ                  string
+	id                   *int64
+	created_at           *time.Time
+	updated_at           *time.Time
+	user_id              *int64
+	adduser_id           *int64
+	pending_amount       *float64
+	addpending_amount    *float64
+	available_amount     *float64
+	addavailable_amount  *float64
+	frozen_amount        *float64
+	addfrozen_amount     *float64
+	total_earned         *float64
+	addtotal_earned      *float64
+	total_transferred    *float64
+	addtotal_transferred *float64
+	clearedFields        map[string]struct{}
+	done                 bool
+	oldValue             func(context.Context) (*SharedAccountWallet, error)
+	predicates           []predicate.SharedAccountWallet
+}
+
+var _ ent.Mutation = (*SharedAccountWalletMutation)(nil)
+
+// sharedaccountwalletOption allows management of the mutation configuration using functional options.
+type sharedaccountwalletOption func(*SharedAccountWalletMutation)
+
+// newSharedAccountWalletMutation creates new mutation for the SharedAccountWallet entity.
+func newSharedAccountWalletMutation(c config, op Op, opts ...sharedaccountwalletOption) *SharedAccountWalletMutation {
+	m := &SharedAccountWalletMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeSharedAccountWallet,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withSharedAccountWalletID sets the ID field of the mutation.
+func withSharedAccountWalletID(id int64) sharedaccountwalletOption {
+	return func(m *SharedAccountWalletMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *SharedAccountWallet
+		)
+		m.oldValue = func(ctx context.Context) (*SharedAccountWallet, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().SharedAccountWallet.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withSharedAccountWallet sets the old SharedAccountWallet of the mutation.
+func withSharedAccountWallet(node *SharedAccountWallet) sharedaccountwalletOption {
+	return func(m *SharedAccountWalletMutation) {
+		m.oldValue = func(context.Context) (*SharedAccountWallet, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m SharedAccountWalletMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m SharedAccountWalletMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *SharedAccountWalletMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *SharedAccountWalletMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().SharedAccountWallet.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *SharedAccountWalletMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *SharedAccountWalletMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the SharedAccountWallet entity.
+// If the SharedAccountWallet object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountWalletMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *SharedAccountWalletMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *SharedAccountWalletMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *SharedAccountWalletMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the SharedAccountWallet entity.
+// If the SharedAccountWallet object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountWalletMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *SharedAccountWalletMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetUserID sets the "user_id" field.
+func (m *SharedAccountWalletMutation) SetUserID(i int64) {
+	m.user_id = &i
+	m.adduser_id = nil
+}
+
+// UserID returns the value of the "user_id" field in the mutation.
+func (m *SharedAccountWalletMutation) UserID() (r int64, exists bool) {
+	v := m.user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserID returns the old "user_id" field's value of the SharedAccountWallet entity.
+// If the SharedAccountWallet object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountWalletMutation) OldUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserID: %w", err)
+	}
+	return oldValue.UserID, nil
+}
+
+// AddUserID adds i to the "user_id" field.
+func (m *SharedAccountWalletMutation) AddUserID(i int64) {
+	if m.adduser_id != nil {
+		*m.adduser_id += i
+	} else {
+		m.adduser_id = &i
+	}
+}
+
+// AddedUserID returns the value that was added to the "user_id" field in this mutation.
+func (m *SharedAccountWalletMutation) AddedUserID() (r int64, exists bool) {
+	v := m.adduser_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetUserID resets all changes to the "user_id" field.
+func (m *SharedAccountWalletMutation) ResetUserID() {
+	m.user_id = nil
+	m.adduser_id = nil
+}
+
+// SetPendingAmount sets the "pending_amount" field.
+func (m *SharedAccountWalletMutation) SetPendingAmount(f float64) {
+	m.pending_amount = &f
+	m.addpending_amount = nil
+}
+
+// PendingAmount returns the value of the "pending_amount" field in the mutation.
+func (m *SharedAccountWalletMutation) PendingAmount() (r float64, exists bool) {
+	v := m.pending_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPendingAmount returns the old "pending_amount" field's value of the SharedAccountWallet entity.
+// If the SharedAccountWallet object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountWalletMutation) OldPendingAmount(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPendingAmount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPendingAmount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPendingAmount: %w", err)
+	}
+	return oldValue.PendingAmount, nil
+}
+
+// AddPendingAmount adds f to the "pending_amount" field.
+func (m *SharedAccountWalletMutation) AddPendingAmount(f float64) {
+	if m.addpending_amount != nil {
+		*m.addpending_amount += f
+	} else {
+		m.addpending_amount = &f
+	}
+}
+
+// AddedPendingAmount returns the value that was added to the "pending_amount" field in this mutation.
+func (m *SharedAccountWalletMutation) AddedPendingAmount() (r float64, exists bool) {
+	v := m.addpending_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPendingAmount resets all changes to the "pending_amount" field.
+func (m *SharedAccountWalletMutation) ResetPendingAmount() {
+	m.pending_amount = nil
+	m.addpending_amount = nil
+}
+
+// SetAvailableAmount sets the "available_amount" field.
+func (m *SharedAccountWalletMutation) SetAvailableAmount(f float64) {
+	m.available_amount = &f
+	m.addavailable_amount = nil
+}
+
+// AvailableAmount returns the value of the "available_amount" field in the mutation.
+func (m *SharedAccountWalletMutation) AvailableAmount() (r float64, exists bool) {
+	v := m.available_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAvailableAmount returns the old "available_amount" field's value of the SharedAccountWallet entity.
+// If the SharedAccountWallet object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountWalletMutation) OldAvailableAmount(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAvailableAmount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAvailableAmount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAvailableAmount: %w", err)
+	}
+	return oldValue.AvailableAmount, nil
+}
+
+// AddAvailableAmount adds f to the "available_amount" field.
+func (m *SharedAccountWalletMutation) AddAvailableAmount(f float64) {
+	if m.addavailable_amount != nil {
+		*m.addavailable_amount += f
+	} else {
+		m.addavailable_amount = &f
+	}
+}
+
+// AddedAvailableAmount returns the value that was added to the "available_amount" field in this mutation.
+func (m *SharedAccountWalletMutation) AddedAvailableAmount() (r float64, exists bool) {
+	v := m.addavailable_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetAvailableAmount resets all changes to the "available_amount" field.
+func (m *SharedAccountWalletMutation) ResetAvailableAmount() {
+	m.available_amount = nil
+	m.addavailable_amount = nil
+}
+
+// SetFrozenAmount sets the "frozen_amount" field.
+func (m *SharedAccountWalletMutation) SetFrozenAmount(f float64) {
+	m.frozen_amount = &f
+	m.addfrozen_amount = nil
+}
+
+// FrozenAmount returns the value of the "frozen_amount" field in the mutation.
+func (m *SharedAccountWalletMutation) FrozenAmount() (r float64, exists bool) {
+	v := m.frozen_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFrozenAmount returns the old "frozen_amount" field's value of the SharedAccountWallet entity.
+// If the SharedAccountWallet object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountWalletMutation) OldFrozenAmount(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFrozenAmount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFrozenAmount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFrozenAmount: %w", err)
+	}
+	return oldValue.FrozenAmount, nil
+}
+
+// AddFrozenAmount adds f to the "frozen_amount" field.
+func (m *SharedAccountWalletMutation) AddFrozenAmount(f float64) {
+	if m.addfrozen_amount != nil {
+		*m.addfrozen_amount += f
+	} else {
+		m.addfrozen_amount = &f
+	}
+}
+
+// AddedFrozenAmount returns the value that was added to the "frozen_amount" field in this mutation.
+func (m *SharedAccountWalletMutation) AddedFrozenAmount() (r float64, exists bool) {
+	v := m.addfrozen_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetFrozenAmount resets all changes to the "frozen_amount" field.
+func (m *SharedAccountWalletMutation) ResetFrozenAmount() {
+	m.frozen_amount = nil
+	m.addfrozen_amount = nil
+}
+
+// SetTotalEarned sets the "total_earned" field.
+func (m *SharedAccountWalletMutation) SetTotalEarned(f float64) {
+	m.total_earned = &f
+	m.addtotal_earned = nil
+}
+
+// TotalEarned returns the value of the "total_earned" field in the mutation.
+func (m *SharedAccountWalletMutation) TotalEarned() (r float64, exists bool) {
+	v := m.total_earned
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTotalEarned returns the old "total_earned" field's value of the SharedAccountWallet entity.
+// If the SharedAccountWallet object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountWalletMutation) OldTotalEarned(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTotalEarned is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTotalEarned requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTotalEarned: %w", err)
+	}
+	return oldValue.TotalEarned, nil
+}
+
+// AddTotalEarned adds f to the "total_earned" field.
+func (m *SharedAccountWalletMutation) AddTotalEarned(f float64) {
+	if m.addtotal_earned != nil {
+		*m.addtotal_earned += f
+	} else {
+		m.addtotal_earned = &f
+	}
+}
+
+// AddedTotalEarned returns the value that was added to the "total_earned" field in this mutation.
+func (m *SharedAccountWalletMutation) AddedTotalEarned() (r float64, exists bool) {
+	v := m.addtotal_earned
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTotalEarned resets all changes to the "total_earned" field.
+func (m *SharedAccountWalletMutation) ResetTotalEarned() {
+	m.total_earned = nil
+	m.addtotal_earned = nil
+}
+
+// SetTotalTransferred sets the "total_transferred" field.
+func (m *SharedAccountWalletMutation) SetTotalTransferred(f float64) {
+	m.total_transferred = &f
+	m.addtotal_transferred = nil
+}
+
+// TotalTransferred returns the value of the "total_transferred" field in the mutation.
+func (m *SharedAccountWalletMutation) TotalTransferred() (r float64, exists bool) {
+	v := m.total_transferred
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTotalTransferred returns the old "total_transferred" field's value of the SharedAccountWallet entity.
+// If the SharedAccountWallet object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SharedAccountWalletMutation) OldTotalTransferred(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTotalTransferred is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTotalTransferred requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTotalTransferred: %w", err)
+	}
+	return oldValue.TotalTransferred, nil
+}
+
+// AddTotalTransferred adds f to the "total_transferred" field.
+func (m *SharedAccountWalletMutation) AddTotalTransferred(f float64) {
+	if m.addtotal_transferred != nil {
+		*m.addtotal_transferred += f
+	} else {
+		m.addtotal_transferred = &f
+	}
+}
+
+// AddedTotalTransferred returns the value that was added to the "total_transferred" field in this mutation.
+func (m *SharedAccountWalletMutation) AddedTotalTransferred() (r float64, exists bool) {
+	v := m.addtotal_transferred
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTotalTransferred resets all changes to the "total_transferred" field.
+func (m *SharedAccountWalletMutation) ResetTotalTransferred() {
+	m.total_transferred = nil
+	m.addtotal_transferred = nil
+}
+
+// Where appends a list predicates to the SharedAccountWalletMutation builder.
+func (m *SharedAccountWalletMutation) Where(ps ...predicate.SharedAccountWallet) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the SharedAccountWalletMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *SharedAccountWalletMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.SharedAccountWallet, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *SharedAccountWalletMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *SharedAccountWalletMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (SharedAccountWallet).
+func (m *SharedAccountWalletMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *SharedAccountWalletMutation) Fields() []string {
+	fields := make([]string, 0, 8)
+	if m.created_at != nil {
+		fields = append(fields, sharedaccountwallet.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, sharedaccountwallet.FieldUpdatedAt)
+	}
+	if m.user_id != nil {
+		fields = append(fields, sharedaccountwallet.FieldUserID)
+	}
+	if m.pending_amount != nil {
+		fields = append(fields, sharedaccountwallet.FieldPendingAmount)
+	}
+	if m.available_amount != nil {
+		fields = append(fields, sharedaccountwallet.FieldAvailableAmount)
+	}
+	if m.frozen_amount != nil {
+		fields = append(fields, sharedaccountwallet.FieldFrozenAmount)
+	}
+	if m.total_earned != nil {
+		fields = append(fields, sharedaccountwallet.FieldTotalEarned)
+	}
+	if m.total_transferred != nil {
+		fields = append(fields, sharedaccountwallet.FieldTotalTransferred)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *SharedAccountWalletMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case sharedaccountwallet.FieldCreatedAt:
+		return m.CreatedAt()
+	case sharedaccountwallet.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case sharedaccountwallet.FieldUserID:
+		return m.UserID()
+	case sharedaccountwallet.FieldPendingAmount:
+		return m.PendingAmount()
+	case sharedaccountwallet.FieldAvailableAmount:
+		return m.AvailableAmount()
+	case sharedaccountwallet.FieldFrozenAmount:
+		return m.FrozenAmount()
+	case sharedaccountwallet.FieldTotalEarned:
+		return m.TotalEarned()
+	case sharedaccountwallet.FieldTotalTransferred:
+		return m.TotalTransferred()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *SharedAccountWalletMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case sharedaccountwallet.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case sharedaccountwallet.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case sharedaccountwallet.FieldUserID:
+		return m.OldUserID(ctx)
+	case sharedaccountwallet.FieldPendingAmount:
+		return m.OldPendingAmount(ctx)
+	case sharedaccountwallet.FieldAvailableAmount:
+		return m.OldAvailableAmount(ctx)
+	case sharedaccountwallet.FieldFrozenAmount:
+		return m.OldFrozenAmount(ctx)
+	case sharedaccountwallet.FieldTotalEarned:
+		return m.OldTotalEarned(ctx)
+	case sharedaccountwallet.FieldTotalTransferred:
+		return m.OldTotalTransferred(ctx)
+	}
+	return nil, fmt.Errorf("unknown SharedAccountWallet field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *SharedAccountWalletMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case sharedaccountwallet.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case sharedaccountwallet.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case sharedaccountwallet.FieldUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserID(v)
+		return nil
+	case sharedaccountwallet.FieldPendingAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPendingAmount(v)
+		return nil
+	case sharedaccountwallet.FieldAvailableAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAvailableAmount(v)
+		return nil
+	case sharedaccountwallet.FieldFrozenAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFrozenAmount(v)
+		return nil
+	case sharedaccountwallet.FieldTotalEarned:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTotalEarned(v)
+		return nil
+	case sharedaccountwallet.FieldTotalTransferred:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTotalTransferred(v)
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountWallet field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *SharedAccountWalletMutation) AddedFields() []string {
+	var fields []string
+	if m.adduser_id != nil {
+		fields = append(fields, sharedaccountwallet.FieldUserID)
+	}
+	if m.addpending_amount != nil {
+		fields = append(fields, sharedaccountwallet.FieldPendingAmount)
+	}
+	if m.addavailable_amount != nil {
+		fields = append(fields, sharedaccountwallet.FieldAvailableAmount)
+	}
+	if m.addfrozen_amount != nil {
+		fields = append(fields, sharedaccountwallet.FieldFrozenAmount)
+	}
+	if m.addtotal_earned != nil {
+		fields = append(fields, sharedaccountwallet.FieldTotalEarned)
+	}
+	if m.addtotal_transferred != nil {
+		fields = append(fields, sharedaccountwallet.FieldTotalTransferred)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *SharedAccountWalletMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case sharedaccountwallet.FieldUserID:
+		return m.AddedUserID()
+	case sharedaccountwallet.FieldPendingAmount:
+		return m.AddedPendingAmount()
+	case sharedaccountwallet.FieldAvailableAmount:
+		return m.AddedAvailableAmount()
+	case sharedaccountwallet.FieldFrozenAmount:
+		return m.AddedFrozenAmount()
+	case sharedaccountwallet.FieldTotalEarned:
+		return m.AddedTotalEarned()
+	case sharedaccountwallet.FieldTotalTransferred:
+		return m.AddedTotalTransferred()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *SharedAccountWalletMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case sharedaccountwallet.FieldUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUserID(v)
+		return nil
+	case sharedaccountwallet.FieldPendingAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPendingAmount(v)
+		return nil
+	case sharedaccountwallet.FieldAvailableAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAvailableAmount(v)
+		return nil
+	case sharedaccountwallet.FieldFrozenAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFrozenAmount(v)
+		return nil
+	case sharedaccountwallet.FieldTotalEarned:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTotalEarned(v)
+		return nil
+	case sharedaccountwallet.FieldTotalTransferred:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTotalTransferred(v)
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountWallet numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *SharedAccountWalletMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *SharedAccountWalletMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *SharedAccountWalletMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown SharedAccountWallet nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *SharedAccountWalletMutation) ResetField(name string) error {
+	switch name {
+	case sharedaccountwallet.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case sharedaccountwallet.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case sharedaccountwallet.FieldUserID:
+		m.ResetUserID()
+		return nil
+	case sharedaccountwallet.FieldPendingAmount:
+		m.ResetPendingAmount()
+		return nil
+	case sharedaccountwallet.FieldAvailableAmount:
+		m.ResetAvailableAmount()
+		return nil
+	case sharedaccountwallet.FieldFrozenAmount:
+		m.ResetFrozenAmount()
+		return nil
+	case sharedaccountwallet.FieldTotalEarned:
+		m.ResetTotalEarned()
+		return nil
+	case sharedaccountwallet.FieldTotalTransferred:
+		m.ResetTotalTransferred()
+		return nil
+	}
+	return fmt.Errorf("unknown SharedAccountWallet field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *SharedAccountWalletMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *SharedAccountWalletMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *SharedAccountWalletMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *SharedAccountWalletMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *SharedAccountWalletMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *SharedAccountWalletMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *SharedAccountWalletMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown SharedAccountWallet unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *SharedAccountWalletMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown SharedAccountWallet edge %s", name)
 }
 
 // SubscriptionPlanMutation represents an operation that mutates the SubscriptionPlan nodes in the graph.

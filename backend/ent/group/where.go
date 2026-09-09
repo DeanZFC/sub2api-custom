@@ -105,6 +105,11 @@ func PeakRateMultiplier(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldPeakRateMultiplier, v))
 }
 
+// IsSharedPool applies equality check predicate on the "is_shared_pool" field. It's identical to IsSharedPoolEQ.
+func IsSharedPool(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldIsSharedPool, v))
+}
+
 // IsExclusive applies equality check predicate on the "is_exclusive" field. It's identical to IsExclusiveEQ.
 func IsExclusive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))
@@ -838,6 +843,16 @@ func PeakRateMultiplierLT(v float64) predicate.Group {
 // PeakRateMultiplierLTE applies the LTE predicate on the "peak_rate_multiplier" field.
 func PeakRateMultiplierLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldPeakRateMultiplier, v))
+}
+
+// IsSharedPoolEQ applies the EQ predicate on the "is_shared_pool" field.
+func IsSharedPoolEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldIsSharedPool, v))
+}
+
+// IsSharedPoolNEQ applies the NEQ predicate on the "is_shared_pool" field.
+func IsSharedPoolNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldIsSharedPool, v))
 }
 
 // IsExclusiveEQ applies the EQ predicate on the "is_exclusive" field.

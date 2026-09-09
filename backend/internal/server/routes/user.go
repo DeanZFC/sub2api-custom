@@ -28,6 +28,13 @@ func RegisterUserRoutes(
 		// 用户接口
 		user := authenticated.Group("/user")
 		{
+			user.GET("/shared-pool/cards", h.SharedAccountPool.ListCards)
+			user.GET("/shared-pool/my-cards", h.SharedAccountPool.MyCards)
+			user.POST("/shared-pool/listings", h.SharedAccountPool.Upload)
+			user.POST("/shared-pool/listings/:id/:action", h.SharedAccountPool.SetStatus)
+			user.DELETE("/shared-pool/listings/:id", h.SharedAccountPool.Delete)
+			user.GET("/shared-pool/wallet", h.SharedAccountPool.Wallet)
+			user.POST("/shared-pool/wallet/transfer", h.SharedAccountPool.Transfer)
 			user.GET("/profile", h.User.GetProfile)
 			user.PUT("/password", h.User.ChangePassword)
 			user.PUT("", h.User.UpdateProfile)

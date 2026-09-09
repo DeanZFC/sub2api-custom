@@ -99,6 +99,20 @@ func (_c *AccountCreate) SetType(v string) *AccountCreate {
 	return _c
 }
 
+// SetAccountScope sets the "account_scope" field.
+func (_c *AccountCreate) SetAccountScope(v string) *AccountCreate {
+	_c.mutation.SetAccountScope(v)
+	return _c
+}
+
+// SetNillableAccountScope sets the "account_scope" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableAccountScope(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetAccountScope(*v)
+	}
+	return _c
+}
+
 // SetCredentials sets the "credentials" field.
 func (_c *AccountCreate) SetCredentials(v map[string]interface{}) *AccountCreate {
 	_c.mutation.SetCredentials(v)
@@ -539,6 +553,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.AccountScope(); !ok {
+		v := account.DefaultAccountScope
+		_c.mutation.SetAccountScope(v)
+	}
 	if _, ok := _c.mutation.Credentials(); !ok {
 		if account.DefaultCredentials == nil {
 			return fmt.Errorf("ent: uninitialized account.DefaultCredentials (forgotten import ent/runtime?)")
@@ -614,6 +632,14 @@ func (_c *AccountCreate) check() error {
 	if v, ok := _c.mutation.GetType(); ok {
 		if err := account.TypeValidator(v); err != nil {
 			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "Account.type": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.AccountScope(); !ok {
+		return &ValidationError{Name: "account_scope", err: errors.New(`ent: missing required field "Account.account_scope"`)}
+	}
+	if v, ok := _c.mutation.AccountScope(); ok {
+		if err := account.AccountScopeValidator(v); err != nil {
+			return &ValidationError{Name: "account_scope", err: fmt.Errorf(`ent: validator failed for field "Account.account_scope": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.Credentials(); !ok {
@@ -712,6 +738,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.GetType(); ok {
 		_spec.SetField(account.FieldType, field.TypeString, value)
 		_node.Type = value
+	}
+	if value, ok := _c.mutation.AccountScope(); ok {
+		_spec.SetField(account.FieldAccountScope, field.TypeString, value)
+		_node.AccountScope = value
 	}
 	if value, ok := _c.mutation.Credentials(); ok {
 		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)
@@ -1020,6 +1050,18 @@ func (u *AccountUpsert) SetType(v string) *AccountUpsert {
 // UpdateType sets the "type" field to the value that was provided on create.
 func (u *AccountUpsert) UpdateType() *AccountUpsert {
 	u.SetExcluded(account.FieldType)
+	return u
+}
+
+// SetAccountScope sets the "account_scope" field.
+func (u *AccountUpsert) SetAccountScope(v string) *AccountUpsert {
+	u.Set(account.FieldAccountScope, v)
+	return u
+}
+
+// UpdateAccountScope sets the "account_scope" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateAccountScope() *AccountUpsert {
+	u.SetExcluded(account.FieldAccountScope)
 	return u
 }
 
@@ -1571,6 +1613,20 @@ func (u *AccountUpsertOne) SetType(v string) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateType() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateType()
+	})
+}
+
+// SetAccountScope sets the "account_scope" field.
+func (u *AccountUpsertOne) SetAccountScope(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetAccountScope(v)
+	})
+}
+
+// UpdateAccountScope sets the "account_scope" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateAccountScope() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateAccountScope()
 	})
 }
 
@@ -2356,6 +2412,20 @@ func (u *AccountUpsertBulk) SetType(v string) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateType() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateType()
+	})
+}
+
+// SetAccountScope sets the "account_scope" field.
+func (u *AccountUpsertBulk) SetAccountScope(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetAccountScope(v)
+	})
+}
+
+// UpdateAccountScope sets the "account_scope" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateAccountScope() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateAccountScope()
 	})
 }
 

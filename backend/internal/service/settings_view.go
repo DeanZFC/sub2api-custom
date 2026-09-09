@@ -171,6 +171,8 @@ type SystemSettings struct {
 	CyberSessionBlockEnabled     bool
 	CyberSessionBlockTTLSeconds  int
 	AffiliateEnabled             bool
+	SharedPoolFeeRatePercent     float64
+	SharedPoolEnabled            bool
 	AffiliateRebateRate          float64
 	AffiliateRebateFreezeHours   int
 	AffiliateRebateDurationDays  int
@@ -399,7 +401,9 @@ type PublicSettings struct {
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`
 
 	// Affiliate (邀请返利) feature toggle
-	AffiliateEnabled bool `json:"affiliate_enabled"`
+	AffiliateEnabled         bool    `json:"affiliate_enabled"`
+	SharedPoolFeeRatePercent float64 `json:"shared_pool_fee_rate_percent"`
+	SharedPoolEnabled        bool    `json:"shared_pool_enabled"`
 
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`

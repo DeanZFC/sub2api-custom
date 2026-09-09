@@ -119,6 +119,20 @@ func (_u *AccountUpdate) SetNillableType(v *string) *AccountUpdate {
 	return _u
 }
 
+// SetAccountScope sets the "account_scope" field.
+func (_u *AccountUpdate) SetAccountScope(v string) *AccountUpdate {
+	_u.mutation.SetAccountScope(v)
+	return _u
+}
+
+// SetNillableAccountScope sets the "account_scope" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableAccountScope(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetAccountScope(*v)
+	}
+	return _u
+}
+
 // SetCredentials sets the "credentials" field.
 func (_u *AccountUpdate) SetCredentials(v map[string]interface{}) *AccountUpdate {
 	_u.mutation.SetCredentials(v)
@@ -772,6 +786,11 @@ func (_u *AccountUpdate) check() error {
 			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "Account.type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.AccountScope(); ok {
+		if err := account.AccountScopeValidator(v); err != nil {
+			return &ValidationError{Name: "account_scope", err: fmt.Errorf(`ent: validator failed for field "Account.account_scope": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := account.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Account.status": %w`, err)}
@@ -825,6 +844,9 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.GetType(); ok {
 		_spec.SetField(account.FieldType, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AccountScope(); ok {
+		_spec.SetField(account.FieldAccountScope, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Credentials(); ok {
 		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)
@@ -1255,6 +1277,20 @@ func (_u *AccountUpdateOne) SetType(v string) *AccountUpdateOne {
 func (_u *AccountUpdateOne) SetNillableType(v *string) *AccountUpdateOne {
 	if v != nil {
 		_u.SetType(*v)
+	}
+	return _u
+}
+
+// SetAccountScope sets the "account_scope" field.
+func (_u *AccountUpdateOne) SetAccountScope(v string) *AccountUpdateOne {
+	_u.mutation.SetAccountScope(v)
+	return _u
+}
+
+// SetNillableAccountScope sets the "account_scope" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableAccountScope(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetAccountScope(*v)
 	}
 	return _u
 }
@@ -1925,6 +1961,11 @@ func (_u *AccountUpdateOne) check() error {
 			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "Account.type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.AccountScope(); ok {
+		if err := account.AccountScopeValidator(v); err != nil {
+			return &ValidationError{Name: "account_scope", err: fmt.Errorf(`ent: validator failed for field "Account.account_scope": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := account.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Account.status": %w`, err)}
@@ -1995,6 +2036,9 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.GetType(); ok {
 		_spec.SetField(account.FieldType, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AccountScope(); ok {
+		_spec.SetField(account.FieldAccountScope, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Credentials(); ok {
 		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)

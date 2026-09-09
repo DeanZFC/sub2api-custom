@@ -38,6 +38,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountlisting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountusageledger"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountwallet"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
@@ -889,6 +892,87 @@ func (f TraverseSetting) Traverse(ctx context.Context, q ent.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *ent.SettingQuery", q)
 }
 
+// The SharedAccountListingFunc type is an adapter to allow the use of ordinary function as a Querier.
+type SharedAccountListingFunc func(context.Context, *ent.SharedAccountListingQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f SharedAccountListingFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.SharedAccountListingQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.SharedAccountListingQuery", q)
+}
+
+// The TraverseSharedAccountListing type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseSharedAccountListing func(context.Context, *ent.SharedAccountListingQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseSharedAccountListing) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseSharedAccountListing) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.SharedAccountListingQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.SharedAccountListingQuery", q)
+}
+
+// The SharedAccountUsageLedgerFunc type is an adapter to allow the use of ordinary function as a Querier.
+type SharedAccountUsageLedgerFunc func(context.Context, *ent.SharedAccountUsageLedgerQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f SharedAccountUsageLedgerFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.SharedAccountUsageLedgerQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.SharedAccountUsageLedgerQuery", q)
+}
+
+// The TraverseSharedAccountUsageLedger type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseSharedAccountUsageLedger func(context.Context, *ent.SharedAccountUsageLedgerQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseSharedAccountUsageLedger) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseSharedAccountUsageLedger) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.SharedAccountUsageLedgerQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.SharedAccountUsageLedgerQuery", q)
+}
+
+// The SharedAccountWalletFunc type is an adapter to allow the use of ordinary function as a Querier.
+type SharedAccountWalletFunc func(context.Context, *ent.SharedAccountWalletQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f SharedAccountWalletFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.SharedAccountWalletQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.SharedAccountWalletQuery", q)
+}
+
+// The TraverseSharedAccountWallet type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseSharedAccountWallet func(context.Context, *ent.SharedAccountWalletQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseSharedAccountWallet) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseSharedAccountWallet) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.SharedAccountWalletQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.SharedAccountWalletQuery", q)
+}
+
 // The SubscriptionPlanFunc type is an adapter to allow the use of ordinary function as a Querier.
 type SubscriptionPlanFunc func(context.Context, *ent.SubscriptionPlanQuery) (ent.Value, error)
 
@@ -1220,6 +1304,12 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.SecuritySecretQuery, predicate.SecuritySecret, securitysecret.OrderOption]{typ: ent.TypeSecuritySecret, tq: q}, nil
 	case *ent.SettingQuery:
 		return &query[*ent.SettingQuery, predicate.Setting, setting.OrderOption]{typ: ent.TypeSetting, tq: q}, nil
+	case *ent.SharedAccountListingQuery:
+		return &query[*ent.SharedAccountListingQuery, predicate.SharedAccountListing, sharedaccountlisting.OrderOption]{typ: ent.TypeSharedAccountListing, tq: q}, nil
+	case *ent.SharedAccountUsageLedgerQuery:
+		return &query[*ent.SharedAccountUsageLedgerQuery, predicate.SharedAccountUsageLedger, sharedaccountusageledger.OrderOption]{typ: ent.TypeSharedAccountUsageLedger, tq: q}, nil
+	case *ent.SharedAccountWalletQuery:
+		return &query[*ent.SharedAccountWalletQuery, predicate.SharedAccountWallet, sharedaccountwallet.OrderOption]{typ: ent.TypeSharedAccountWallet, tq: q}, nil
 	case *ent.SubscriptionPlanQuery:
 		return &query[*ent.SubscriptionPlanQuery, predicate.SubscriptionPlan, subscriptionplan.OrderOption]{typ: ent.TypeSubscriptionPlan, tq: q}, nil
 	case *ent.TLSFingerprintProfileQuery:

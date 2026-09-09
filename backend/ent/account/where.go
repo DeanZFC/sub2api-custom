@@ -90,6 +90,11 @@ func Type(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldType, v))
 }
 
+// AccountScope applies equality check predicate on the "account_scope" field. It's identical to AccountScopeEQ.
+func AccountScope(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldAccountScope, v))
+}
+
 // ProxyID applies equality check predicate on the "proxy_id" field. It's identical to ProxyIDEQ.
 func ProxyID(v int64) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldProxyID, v))
@@ -593,6 +598,71 @@ func TypeEqualFold(v string) predicate.Account {
 // TypeContainsFold applies the ContainsFold predicate on the "type" field.
 func TypeContainsFold(v string) predicate.Account {
 	return predicate.Account(sql.FieldContainsFold(FieldType, v))
+}
+
+// AccountScopeEQ applies the EQ predicate on the "account_scope" field.
+func AccountScopeEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldAccountScope, v))
+}
+
+// AccountScopeNEQ applies the NEQ predicate on the "account_scope" field.
+func AccountScopeNEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldAccountScope, v))
+}
+
+// AccountScopeIn applies the In predicate on the "account_scope" field.
+func AccountScopeIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldAccountScope, vs...))
+}
+
+// AccountScopeNotIn applies the NotIn predicate on the "account_scope" field.
+func AccountScopeNotIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldAccountScope, vs...))
+}
+
+// AccountScopeGT applies the GT predicate on the "account_scope" field.
+func AccountScopeGT(v string) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldAccountScope, v))
+}
+
+// AccountScopeGTE applies the GTE predicate on the "account_scope" field.
+func AccountScopeGTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldAccountScope, v))
+}
+
+// AccountScopeLT applies the LT predicate on the "account_scope" field.
+func AccountScopeLT(v string) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldAccountScope, v))
+}
+
+// AccountScopeLTE applies the LTE predicate on the "account_scope" field.
+func AccountScopeLTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldAccountScope, v))
+}
+
+// AccountScopeContains applies the Contains predicate on the "account_scope" field.
+func AccountScopeContains(v string) predicate.Account {
+	return predicate.Account(sql.FieldContains(FieldAccountScope, v))
+}
+
+// AccountScopeHasPrefix applies the HasPrefix predicate on the "account_scope" field.
+func AccountScopeHasPrefix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasPrefix(FieldAccountScope, v))
+}
+
+// AccountScopeHasSuffix applies the HasSuffix predicate on the "account_scope" field.
+func AccountScopeHasSuffix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasSuffix(FieldAccountScope, v))
+}
+
+// AccountScopeEqualFold applies the EqualFold predicate on the "account_scope" field.
+func AccountScopeEqualFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldEqualFold(FieldAccountScope, v))
+}
+
+// AccountScopeContainsFold applies the ContainsFold predicate on the "account_scope" field.
+func AccountScopeContainsFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldContainsFold(FieldAccountScope, v))
 }
 
 // ProxyIDEQ applies the EQ predicate on the "proxy_id" field.

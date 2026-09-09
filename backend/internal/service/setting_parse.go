@@ -126,6 +126,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyDefaultConcurrency:                        strconv.Itoa(s.cfg.Default.UserConcurrency),
 		SettingKeyDefaultBalance:                            strconv.FormatFloat(s.cfg.Default.UserBalance, 'f', 8, 64),
 		SettingKeyAffiliateRebateRate:                       strconv.FormatFloat(AffiliateRebateRateDefault, 'f', 8, 64),
+		SettingKeySharedPoolFeeRate:                         "10",
+		SettingKeySharedPoolEnabled:                         "true",
 		SettingKeyAffiliateRebateFreezeHours:                strconv.Itoa(AffiliateRebateFreezeHoursDefault),
 		SettingKeyAffiliateRebateDurationDays:               strconv.Itoa(AffiliateRebateDurationDaysDefault),
 		SettingKeyAffiliateRebatePerInviteeCap:              strconv.FormatFloat(AffiliateRebatePerInviteeCapDefault, 'f', 2, 64),
@@ -828,6 +830,16 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Affiliate (邀请返利) feature (default: disabled; strict true)
 	result.AffiliateEnabled = settings[SettingKeyAffiliateEnabled] == "true"
+	result.SharedPoolFeeRatePercent = 10
+	if v, err := strconv.ParseFloat(settings[SettingKeySharedPoolFeeRate], 64); err == nil && v >= 0 && v <= 100 {
+		result.SharedPoolFeeRatePercent = v
+	}
+	rawSharedPoolEnabled := settings[SettingKeySharedPoolEnabled]
+	if rawSharedPoolEnabled == "" {
+		result.SharedPoolEnabled = true
+	} else {
+		result.SharedPoolEnabled = rawSharedPoolEnabled == "true"
+	}
 
 	// 风控中心功能（默认关闭，严格 true 才启用）
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"

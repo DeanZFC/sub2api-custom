@@ -41,6 +41,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountlisting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountusageledger"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountwallet"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
@@ -140,6 +143,9 @@ func checkColumn(t, c string) error {
 			redeemcode.Table:                    redeemcode.ValidColumn,
 			securitysecret.Table:                securitysecret.ValidColumn,
 			setting.Table:                       setting.ValidColumn,
+			sharedaccountlisting.Table:          sharedaccountlisting.ValidColumn,
+			sharedaccountusageledger.Table:      sharedaccountusageledger.ValidColumn,
+			sharedaccountwallet.Table:           sharedaccountwallet.ValidColumn,
 			subscriptionplan.Table:              subscriptionplan.ValidColumn,
 			tlsfingerprintprofile.Table:         tlsfingerprintprofile.ValidColumn,
 			usagecleanuptask.Table:              usagecleanuptask.ValidColumn,

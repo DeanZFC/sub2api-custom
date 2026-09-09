@@ -30,6 +30,8 @@ const (
 	FieldPlatform = "platform"
 	// FieldType holds the string denoting the type field in the database.
 	FieldType = "type"
+	// FieldAccountScope holds the string denoting the account_scope field in the database.
+	FieldAccountScope = "account_scope"
 	// FieldCredentials holds the string denoting the credentials field in the database.
 	FieldCredentials = "credentials"
 	// FieldExtra holds the string denoting the extra field in the database.
@@ -138,6 +140,7 @@ var Columns = []string{
 	FieldNotes,
 	FieldPlatform,
 	FieldType,
+	FieldAccountScope,
 	FieldCredentials,
 	FieldExtra,
 	FieldProxyID,
@@ -200,6 +203,10 @@ var (
 	PlatformValidator func(string) error
 	// TypeValidator is a validator for the "type" field. It is called by the builders before save.
 	TypeValidator func(string) error
+	// DefaultAccountScope holds the default value on creation for the "account_scope" field.
+	DefaultAccountScope string
+	// AccountScopeValidator is a validator for the "account_scope" field. It is called by the builders before save.
+	AccountScopeValidator func(string) error
 	// DefaultCredentials holds the default value on creation for the "credentials" field.
 	DefaultCredentials func() map[string]interface{}
 	// DefaultExtra holds the default value on creation for the "extra" field.
@@ -289,6 +296,11 @@ func ByPlatform(opts ...sql.OrderTermOption) OrderOption {
 // ByType orders the results by the type field.
 func ByType(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldType, opts...).ToFunc()
+}
+
+// ByAccountScope orders the results by the account_scope field.
+func ByAccountScope(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAccountScope, opts...).ToFunc()
 }
 
 // ByProxyID orders the results by the proxy_id field.

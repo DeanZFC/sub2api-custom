@@ -65,6 +65,20 @@ func (_c *ProxyCreate) SetNillableDeletedAt(v *time.Time) *ProxyCreate {
 	return _c
 }
 
+// SetOwnerUserID sets the "owner_user_id" field.
+func (_c *ProxyCreate) SetOwnerUserID(v int64) *ProxyCreate {
+	_c.mutation.SetOwnerUserID(v)
+	return _c
+}
+
+// SetNillableOwnerUserID sets the "owner_user_id" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableOwnerUserID(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetOwnerUserID(*v)
+	}
+	return _c
+}
+
 // SetName sets the "name" field.
 func (_c *ProxyCreate) SetName(v string) *ProxyCreate {
 	_c.mutation.SetName(v)
@@ -391,6 +405,10 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 		_spec.SetField(proxy.FieldDeletedAt, field.TypeTime, value)
 		_node.DeletedAt = &value
 	}
+	if value, ok := _c.mutation.OwnerUserID(); ok {
+		_spec.SetField(proxy.FieldOwnerUserID, field.TypeInt64, value)
+		_node.OwnerUserID = &value
+	}
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)
 		_node.Name = value
@@ -559,6 +577,30 @@ func (u *ProxyUpsert) UpdateDeletedAt() *ProxyUpsert {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (u *ProxyUpsert) ClearDeletedAt() *ProxyUpsert {
 	u.SetNull(proxy.FieldDeletedAt)
+	return u
+}
+
+// SetOwnerUserID sets the "owner_user_id" field.
+func (u *ProxyUpsert) SetOwnerUserID(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldOwnerUserID, v)
+	return u
+}
+
+// UpdateOwnerUserID sets the "owner_user_id" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateOwnerUserID() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldOwnerUserID)
+	return u
+}
+
+// AddOwnerUserID adds v to the "owner_user_id" field.
+func (u *ProxyUpsert) AddOwnerUserID(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldOwnerUserID, v)
+	return u
+}
+
+// ClearOwnerUserID clears the value of the "owner_user_id" field.
+func (u *ProxyUpsert) ClearOwnerUserID() *ProxyUpsert {
+	u.SetNull(proxy.FieldOwnerUserID)
 	return u
 }
 
@@ -807,6 +849,34 @@ func (u *ProxyUpsertOne) UpdateDeletedAt() *ProxyUpsertOne {
 func (u *ProxyUpsertOne) ClearDeletedAt() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetOwnerUserID sets the "owner_user_id" field.
+func (u *ProxyUpsertOne) SetOwnerUserID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetOwnerUserID(v)
+	})
+}
+
+// AddOwnerUserID adds v to the "owner_user_id" field.
+func (u *ProxyUpsertOne) AddOwnerUserID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddOwnerUserID(v)
+	})
+}
+
+// UpdateOwnerUserID sets the "owner_user_id" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateOwnerUserID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateOwnerUserID()
+	})
+}
+
+// ClearOwnerUserID clears the value of the "owner_user_id" field.
+func (u *ProxyUpsertOne) ClearOwnerUserID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearOwnerUserID()
 	})
 }
 
@@ -1249,6 +1319,34 @@ func (u *ProxyUpsertBulk) UpdateDeletedAt() *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) ClearDeletedAt() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetOwnerUserID sets the "owner_user_id" field.
+func (u *ProxyUpsertBulk) SetOwnerUserID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetOwnerUserID(v)
+	})
+}
+
+// AddOwnerUserID adds v to the "owner_user_id" field.
+func (u *ProxyUpsertBulk) AddOwnerUserID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddOwnerUserID(v)
+	})
+}
+
+// UpdateOwnerUserID sets the "owner_user_id" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateOwnerUserID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateOwnerUserID()
+	})
+}
+
+// ClearOwnerUserID clears the value of the "owner_user_id" field.
+func (u *ProxyUpsertBulk) ClearOwnerUserID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearOwnerUserID()
 	})
 }
 

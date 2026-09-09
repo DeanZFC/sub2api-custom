@@ -162,6 +162,20 @@ func (_c *GroupCreate) SetNillablePeakRateMultiplier(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetIsSharedPool sets the "is_shared_pool" field.
+func (_c *GroupCreate) SetIsSharedPool(v bool) *GroupCreate {
+	_c.mutation.SetIsSharedPool(v)
+	return _c
+}
+
+// SetNillableIsSharedPool sets the "is_shared_pool" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableIsSharedPool(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetIsSharedPool(*v)
+	}
+	return _c
+}
+
 // SetIsExclusive sets the "is_exclusive" field.
 func (_c *GroupCreate) SetIsExclusive(v bool) *GroupCreate {
 	_c.mutation.SetIsExclusive(v)
@@ -1096,6 +1110,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultPeakRateMultiplier
 		_c.mutation.SetPeakRateMultiplier(v)
 	}
+	if _, ok := _c.mutation.IsSharedPool(); !ok {
+		v := group.DefaultIsSharedPool
+		_c.mutation.SetIsSharedPool(v)
+	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		v := group.DefaultIsExclusive
 		_c.mutation.SetIsExclusive(v)
@@ -1287,6 +1305,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.PeakRateMultiplier(); !ok {
 		return &ValidationError{Name: "peak_rate_multiplier", err: errors.New(`ent: missing required field "Group.peak_rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.IsSharedPool(); !ok {
+		return &ValidationError{Name: "is_shared_pool", err: errors.New(`ent: missing required field "Group.is_shared_pool"`)}
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
@@ -1520,6 +1541,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.PeakRateMultiplier(); ok {
 		_spec.SetField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
 		_node.PeakRateMultiplier = value
+	}
+	if value, ok := _c.mutation.IsSharedPool(); ok {
+		_spec.SetField(group.FieldIsSharedPool, field.TypeBool, value)
+		_node.IsSharedPool = value
 	}
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
@@ -3009,6 +3034,9 @@ func (u *GroupUpsertOne) UpdateNewValues() *GroupUpsertOne {
 		if _, exists := u.create.mutation.CreatedAt(); exists {
 			s.SetIgnore(group.FieldCreatedAt)
 		}
+		if _, exists := u.create.mutation.IsSharedPool(); exists {
+			s.SetIgnore(group.FieldIsSharedPool)
+		}
 		if _, exists := u.create.mutation.DuplicateOperationID(); exists {
 			s.SetIgnore(group.FieldDuplicateOperationID)
 		}
@@ -4474,6 +4502,9 @@ func (u *GroupUpsertBulk) UpdateNewValues() *GroupUpsertBulk {
 		for _, b := range u.create.builders {
 			if _, exists := b.mutation.CreatedAt(); exists {
 				s.SetIgnore(group.FieldCreatedAt)
+			}
+			if _, exists := b.mutation.IsSharedPool(); exists {
+				s.SetIgnore(group.FieldIsSharedPool)
 			}
 			if _, exists := b.mutation.DuplicateOperationID(); exists {
 				s.SetIgnore(group.FieldDuplicateOperationID)

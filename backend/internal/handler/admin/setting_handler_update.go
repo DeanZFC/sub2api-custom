@@ -353,7 +353,9 @@ type UpdateSettingsRequest struct {
 	PluginManagementEnabled *bool `json:"plugin_management_enabled"`
 
 	// Affiliate (邀请返利) feature switch
-	AffiliateEnabled *bool `json:"affiliate_enabled"`
+	AffiliateEnabled         *bool    `json:"affiliate_enabled"`
+	SharedPoolFeeRatePercent *float64 `json:"shared_pool_fee_rate_percent"`
+	SharedPoolEnabled        *bool    `json:"shared_pool_enabled"`
 
 	// 风控中心功能开关
 	RiskControlEnabled *bool `json:"risk_control_enabled"`
@@ -1967,6 +1969,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AffiliateEnabled
 		}(),
+		SharedPoolFeeRatePercent: func() float64 {
+			if req.SharedPoolFeeRatePercent != nil {
+				return *req.SharedPoolFeeRatePercent
+			}
+			return previousSettings.SharedPoolFeeRatePercent
+		}(),
+		SharedPoolEnabled: func() bool {
+			if req.SharedPoolEnabled != nil {
+				return *req.SharedPoolEnabled
+			}
+			return previousSettings.SharedPoolEnabled
+		}(),
 		RiskControlEnabled: func() bool {
 			if req.RiskControlEnabled != nil {
 				return *req.RiskControlEnabled
@@ -2386,7 +2400,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelPlazaDescription:   updatedSettings.ModelPlazaDescription,
 		PluginManagementEnabled: updatedSettings.PluginManagementEnabled,
 
-		AffiliateEnabled: updatedSettings.AffiliateEnabled,
+		AffiliateEnabled:         updatedSettings.AffiliateEnabled,
+		SharedPoolFeeRatePercent: updatedSettings.SharedPoolFeeRatePercent,
+		SharedPoolEnabled:        updatedSettings.SharedPoolEnabled,
 
 		RiskControlEnabled:          updatedSettings.RiskControlEnabled,
 		CyberSessionBlockEnabled:    updatedSettings.CyberSessionBlockEnabled,

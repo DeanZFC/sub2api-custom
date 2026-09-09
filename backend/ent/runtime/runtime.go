@@ -35,6 +35,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/schema"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountlisting"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountusageledger"
+	"github.com/Wei-Shaw/sub2api/ent/sharedaccountwallet"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
@@ -218,42 +221,48 @@ func init() {
 			return nil
 		}
 	}()
+	// accountDescAccountScope is the schema descriptor for account_scope field.
+	accountDescAccountScope := accountFields[4].Descriptor()
+	// account.DefaultAccountScope holds the default value on creation for the account_scope field.
+	account.DefaultAccountScope = accountDescAccountScope.Default.(string)
+	// account.AccountScopeValidator is a validator for the "account_scope" field. It is called by the builders before save.
+	account.AccountScopeValidator = accountDescAccountScope.Validators[0].(func(string) error)
 	// accountDescCredentials is the schema descriptor for credentials field.
-	accountDescCredentials := accountFields[4].Descriptor()
+	accountDescCredentials := accountFields[5].Descriptor()
 	// account.DefaultCredentials holds the default value on creation for the credentials field.
 	account.DefaultCredentials = accountDescCredentials.Default.(func() map[string]interface{})
 	// accountDescExtra is the schema descriptor for extra field.
-	accountDescExtra := accountFields[5].Descriptor()
+	accountDescExtra := accountFields[6].Descriptor()
 	// account.DefaultExtra holds the default value on creation for the extra field.
 	account.DefaultExtra = accountDescExtra.Default.(func() map[string]interface{})
 	// accountDescConcurrency is the schema descriptor for concurrency field.
-	accountDescConcurrency := accountFields[8].Descriptor()
+	accountDescConcurrency := accountFields[9].Descriptor()
 	// account.DefaultConcurrency holds the default value on creation for the concurrency field.
 	account.DefaultConcurrency = accountDescConcurrency.Default.(int)
 	// accountDescPriority is the schema descriptor for priority field.
-	accountDescPriority := accountFields[10].Descriptor()
+	accountDescPriority := accountFields[11].Descriptor()
 	// account.DefaultPriority holds the default value on creation for the priority field.
 	account.DefaultPriority = accountDescPriority.Default.(int)
 	// accountDescRateMultiplier is the schema descriptor for rate_multiplier field.
-	accountDescRateMultiplier := accountFields[11].Descriptor()
+	accountDescRateMultiplier := accountFields[12].Descriptor()
 	// account.DefaultRateMultiplier holds the default value on creation for the rate_multiplier field.
 	account.DefaultRateMultiplier = accountDescRateMultiplier.Default.(float64)
 	// accountDescStatus is the schema descriptor for status field.
-	accountDescStatus := accountFields[12].Descriptor()
+	accountDescStatus := accountFields[13].Descriptor()
 	// account.DefaultStatus holds the default value on creation for the status field.
 	account.DefaultStatus = accountDescStatus.Default.(string)
 	// account.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	account.StatusValidator = accountDescStatus.Validators[0].(func(string) error)
 	// accountDescAutoPauseOnExpired is the schema descriptor for auto_pause_on_expired field.
-	accountDescAutoPauseOnExpired := accountFields[16].Descriptor()
+	accountDescAutoPauseOnExpired := accountFields[17].Descriptor()
 	// account.DefaultAutoPauseOnExpired holds the default value on creation for the auto_pause_on_expired field.
 	account.DefaultAutoPauseOnExpired = accountDescAutoPauseOnExpired.Default.(bool)
 	// accountDescSchedulable is the schema descriptor for schedulable field.
-	accountDescSchedulable := accountFields[17].Descriptor()
+	accountDescSchedulable := accountFields[18].Descriptor()
 	// account.DefaultSchedulable holds the default value on creation for the schedulable field.
 	account.DefaultSchedulable = accountDescSchedulable.Default.(bool)
 	// accountDescSessionWindowStatus is the schema descriptor for session_window_status field.
-	accountDescSessionWindowStatus := accountFields[25].Descriptor()
+	accountDescSessionWindowStatus := accountFields[26].Descriptor()
 	// account.SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
 	account.SessionWindowStatusValidator = accountDescSessionWindowStatus.Validators[0].(func(string) error)
 	accountgroupFields := schema.AccountGroup{}.Fields()
@@ -1047,184 +1056,188 @@ func init() {
 	groupDescPeakRateMultiplier := groupFields[6].Descriptor()
 	// group.DefaultPeakRateMultiplier holds the default value on creation for the peak_rate_multiplier field.
 	group.DefaultPeakRateMultiplier = groupDescPeakRateMultiplier.Default.(float64)
+	// groupDescIsSharedPool is the schema descriptor for is_shared_pool field.
+	groupDescIsSharedPool := groupFields[7].Descriptor()
+	// group.DefaultIsSharedPool holds the default value on creation for the is_shared_pool field.
+	group.DefaultIsSharedPool = groupDescIsSharedPool.Default.(bool)
 	// groupDescIsExclusive is the schema descriptor for is_exclusive field.
-	groupDescIsExclusive := groupFields[7].Descriptor()
+	groupDescIsExclusive := groupFields[8].Descriptor()
 	// group.DefaultIsExclusive holds the default value on creation for the is_exclusive field.
 	group.DefaultIsExclusive = groupDescIsExclusive.Default.(bool)
 	// groupDescStatus is the schema descriptor for status field.
-	groupDescStatus := groupFields[8].Descriptor()
+	groupDescStatus := groupFields[9].Descriptor()
 	// group.DefaultStatus holds the default value on creation for the status field.
 	group.DefaultStatus = groupDescStatus.Default.(string)
 	// group.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	group.StatusValidator = groupDescStatus.Validators[0].(func(string) error)
 	// groupDescDuplicateOperationID is the schema descriptor for duplicate_operation_id field.
-	groupDescDuplicateOperationID := groupFields[9].Descriptor()
+	groupDescDuplicateOperationID := groupFields[10].Descriptor()
 	// group.DuplicateOperationIDValidator is a validator for the "duplicate_operation_id" field. It is called by the builders before save.
 	group.DuplicateOperationIDValidator = groupDescDuplicateOperationID.Validators[0].(func(string) error)
 	// groupDescPlatform is the schema descriptor for platform field.
-	groupDescPlatform := groupFields[10].Descriptor()
+	groupDescPlatform := groupFields[11].Descriptor()
 	// group.DefaultPlatform holds the default value on creation for the platform field.
 	group.DefaultPlatform = groupDescPlatform.Default.(string)
 	// group.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	group.PlatformValidator = groupDescPlatform.Validators[0].(func(string) error)
 	// groupDescSubscriptionType is the schema descriptor for subscription_type field.
-	groupDescSubscriptionType := groupFields[11].Descriptor()
+	groupDescSubscriptionType := groupFields[12].Descriptor()
 	// group.DefaultSubscriptionType holds the default value on creation for the subscription_type field.
 	group.DefaultSubscriptionType = groupDescSubscriptionType.Default.(string)
 	// group.SubscriptionTypeValidator is a validator for the "subscription_type" field. It is called by the builders before save.
 	group.SubscriptionTypeValidator = groupDescSubscriptionType.Validators[0].(func(string) error)
 	// groupDescDefaultValidityDays is the schema descriptor for default_validity_days field.
-	groupDescDefaultValidityDays := groupFields[15].Descriptor()
+	groupDescDefaultValidityDays := groupFields[16].Descriptor()
 	// group.DefaultDefaultValidityDays holds the default value on creation for the default_validity_days field.
 	group.DefaultDefaultValidityDays = groupDescDefaultValidityDays.Default.(int)
 	// groupDescAllowImageGeneration is the schema descriptor for allow_image_generation field.
-	groupDescAllowImageGeneration := groupFields[16].Descriptor()
+	groupDescAllowImageGeneration := groupFields[17].Descriptor()
 	// group.DefaultAllowImageGeneration holds the default value on creation for the allow_image_generation field.
 	group.DefaultAllowImageGeneration = groupDescAllowImageGeneration.Default.(bool)
 	// groupDescAllowBatchImageGeneration is the schema descriptor for allow_batch_image_generation field.
-	groupDescAllowBatchImageGeneration := groupFields[17].Descriptor()
+	groupDescAllowBatchImageGeneration := groupFields[18].Descriptor()
 	// group.DefaultAllowBatchImageGeneration holds the default value on creation for the allow_batch_image_generation field.
 	group.DefaultAllowBatchImageGeneration = groupDescAllowBatchImageGeneration.Default.(bool)
 	// groupDescImageRateIndependent is the schema descriptor for image_rate_independent field.
-	groupDescImageRateIndependent := groupFields[18].Descriptor()
+	groupDescImageRateIndependent := groupFields[19].Descriptor()
 	// group.DefaultImageRateIndependent holds the default value on creation for the image_rate_independent field.
 	group.DefaultImageRateIndependent = groupDescImageRateIndependent.Default.(bool)
 	// groupDescImageRateMultiplier is the schema descriptor for image_rate_multiplier field.
-	groupDescImageRateMultiplier := groupFields[19].Descriptor()
+	groupDescImageRateMultiplier := groupFields[20].Descriptor()
 	// group.DefaultImageRateMultiplier holds the default value on creation for the image_rate_multiplier field.
 	group.DefaultImageRateMultiplier = groupDescImageRateMultiplier.Default.(float64)
 	// groupDescBatchImageDiscountMultiplier is the schema descriptor for batch_image_discount_multiplier field.
-	groupDescBatchImageDiscountMultiplier := groupFields[23].Descriptor()
+	groupDescBatchImageDiscountMultiplier := groupFields[24].Descriptor()
 	// group.DefaultBatchImageDiscountMultiplier holds the default value on creation for the batch_image_discount_multiplier field.
 	group.DefaultBatchImageDiscountMultiplier = groupDescBatchImageDiscountMultiplier.Default.(float64)
 	// groupDescBatchImageHoldMultiplier is the schema descriptor for batch_image_hold_multiplier field.
-	groupDescBatchImageHoldMultiplier := groupFields[24].Descriptor()
+	groupDescBatchImageHoldMultiplier := groupFields[25].Descriptor()
 	// group.DefaultBatchImageHoldMultiplier holds the default value on creation for the batch_image_hold_multiplier field.
 	group.DefaultBatchImageHoldMultiplier = groupDescBatchImageHoldMultiplier.Default.(float64)
 	// groupDescVideoRateIndependent is the schema descriptor for video_rate_independent field.
-	groupDescVideoRateIndependent := groupFields[25].Descriptor()
+	groupDescVideoRateIndependent := groupFields[26].Descriptor()
 	// group.DefaultVideoRateIndependent holds the default value on creation for the video_rate_independent field.
 	group.DefaultVideoRateIndependent = groupDescVideoRateIndependent.Default.(bool)
 	// groupDescVideoRateMultiplier is the schema descriptor for video_rate_multiplier field.
-	groupDescVideoRateMultiplier := groupFields[26].Descriptor()
+	groupDescVideoRateMultiplier := groupFields[27].Descriptor()
 	// group.DefaultVideoRateMultiplier holds the default value on creation for the video_rate_multiplier field.
 	group.DefaultVideoRateMultiplier = groupDescVideoRateMultiplier.Default.(float64)
 	// groupDescSearchPricePer1k is the schema descriptor for search_price_per_1k field.
-	groupDescSearchPricePer1k := groupFields[32].Descriptor()
+	groupDescSearchPricePer1k := groupFields[33].Descriptor()
 	// group.SearchPricePer1kValidator is a validator for the "search_price_per_1k" field. It is called by the builders before save.
 	group.SearchPricePer1kValidator = groupDescSearchPricePer1k.Validators[0].(func(float64) error)
 	// groupDescAudioRealtimePricePerMin is the schema descriptor for audio_realtime_price_per_min field.
-	groupDescAudioRealtimePricePerMin := groupFields[33].Descriptor()
+	groupDescAudioRealtimePricePerMin := groupFields[34].Descriptor()
 	// group.AudioRealtimePricePerMinValidator is a validator for the "audio_realtime_price_per_min" field. It is called by the builders before save.
 	group.AudioRealtimePricePerMinValidator = groupDescAudioRealtimePricePerMin.Validators[0].(func(float64) error)
 	// groupDescAudioTtsPricePerMillionChars is the schema descriptor for audio_tts_price_per_million_chars field.
-	groupDescAudioTtsPricePerMillionChars := groupFields[34].Descriptor()
+	groupDescAudioTtsPricePerMillionChars := groupFields[35].Descriptor()
 	// group.AudioTtsPricePerMillionCharsValidator is a validator for the "audio_tts_price_per_million_chars" field. It is called by the builders before save.
 	group.AudioTtsPricePerMillionCharsValidator = groupDescAudioTtsPricePerMillionChars.Validators[0].(func(float64) error)
 	// groupDescAudioSttPricePerHour is the schema descriptor for audio_stt_price_per_hour field.
-	groupDescAudioSttPricePerHour := groupFields[35].Descriptor()
+	groupDescAudioSttPricePerHour := groupFields[36].Descriptor()
 	// group.AudioSttPricePerHourValidator is a validator for the "audio_stt_price_per_hour" field. It is called by the builders before save.
 	group.AudioSttPricePerHourValidator = groupDescAudioSttPricePerHour.Validators[0].(func(float64) error)
 	// groupDescLongContextPricingEnabled is the schema descriptor for long_context_pricing_enabled field.
-	groupDescLongContextPricingEnabled := groupFields[36].Descriptor()
+	groupDescLongContextPricingEnabled := groupFields[37].Descriptor()
 	// group.DefaultLongContextPricingEnabled holds the default value on creation for the long_context_pricing_enabled field.
 	group.DefaultLongContextPricingEnabled = groupDescLongContextPricingEnabled.Default.(bool)
 	// groupDescClaudeCodeOnly is the schema descriptor for claude_code_only field.
-	groupDescClaudeCodeOnly := groupFields[38].Descriptor()
+	groupDescClaudeCodeOnly := groupFields[39].Descriptor()
 	// group.DefaultClaudeCodeOnly holds the default value on creation for the claude_code_only field.
 	group.DefaultClaudeCodeOnly = groupDescClaudeCodeOnly.Default.(bool)
 	// groupDescModelRoutingEnabled is the schema descriptor for model_routing_enabled field.
-	groupDescModelRoutingEnabled := groupFields[42].Descriptor()
+	groupDescModelRoutingEnabled := groupFields[43].Descriptor()
 	// group.DefaultModelRoutingEnabled holds the default value on creation for the model_routing_enabled field.
 	group.DefaultModelRoutingEnabled = groupDescModelRoutingEnabled.Default.(bool)
 	// groupDescMcpXMLInject is the schema descriptor for mcp_xml_inject field.
-	groupDescMcpXMLInject := groupFields[43].Descriptor()
+	groupDescMcpXMLInject := groupFields[44].Descriptor()
 	// group.DefaultMcpXMLInject holds the default value on creation for the mcp_xml_inject field.
 	group.DefaultMcpXMLInject = groupDescMcpXMLInject.Default.(bool)
 	// groupDescSupportedModelScopes is the schema descriptor for supported_model_scopes field.
-	groupDescSupportedModelScopes := groupFields[44].Descriptor()
+	groupDescSupportedModelScopes := groupFields[45].Descriptor()
 	// group.DefaultSupportedModelScopes holds the default value on creation for the supported_model_scopes field.
 	group.DefaultSupportedModelScopes = groupDescSupportedModelScopes.Default.([]string)
 	// groupDescSortOrder is the schema descriptor for sort_order field.
-	groupDescSortOrder := groupFields[45].Descriptor()
+	groupDescSortOrder := groupFields[46].Descriptor()
 	// group.DefaultSortOrder holds the default value on creation for the sort_order field.
 	group.DefaultSortOrder = groupDescSortOrder.Default.(int)
 	// groupDescAllowMessagesDispatch is the schema descriptor for allow_messages_dispatch field.
-	groupDescAllowMessagesDispatch := groupFields[46].Descriptor()
+	groupDescAllowMessagesDispatch := groupFields[47].Descriptor()
 	// group.DefaultAllowMessagesDispatch holds the default value on creation for the allow_messages_dispatch field.
 	group.DefaultAllowMessagesDispatch = groupDescAllowMessagesDispatch.Default.(bool)
 	// groupDescAllowLive is the schema descriptor for allow_live field.
-	groupDescAllowLive := groupFields[47].Descriptor()
+	groupDescAllowLive := groupFields[48].Descriptor()
 	// group.DefaultAllowLive holds the default value on creation for the allow_live field.
 	group.DefaultAllowLive = groupDescAllowLive.Default.(bool)
 	// groupDescForceOpenaiFast is the schema descriptor for force_openai_fast field.
-	groupDescForceOpenaiFast := groupFields[48].Descriptor()
+	groupDescForceOpenaiFast := groupFields[49].Descriptor()
 	// group.DefaultForceOpenaiFast holds the default value on creation for the force_openai_fast field.
 	group.DefaultForceOpenaiFast = groupDescForceOpenaiFast.Default.(bool)
 	// groupDescFreeOpenaiFast is the schema descriptor for free_openai_fast field.
-	groupDescFreeOpenaiFast := groupFields[49].Descriptor()
+	groupDescFreeOpenaiFast := groupFields[50].Descriptor()
 	// group.DefaultFreeOpenaiFast holds the default value on creation for the free_openai_fast field.
 	group.DefaultFreeOpenaiFast = groupDescFreeOpenaiFast.Default.(bool)
 	// groupDescRequireOauthOnly is the schema descriptor for require_oauth_only field.
-	groupDescRequireOauthOnly := groupFields[50].Descriptor()
+	groupDescRequireOauthOnly := groupFields[51].Descriptor()
 	// group.DefaultRequireOauthOnly holds the default value on creation for the require_oauth_only field.
 	group.DefaultRequireOauthOnly = groupDescRequireOauthOnly.Default.(bool)
 	// groupDescRequirePrivacySet is the schema descriptor for require_privacy_set field.
-	groupDescRequirePrivacySet := groupFields[51].Descriptor()
+	groupDescRequirePrivacySet := groupFields[52].Descriptor()
 	// group.DefaultRequirePrivacySet holds the default value on creation for the require_privacy_set field.
 	group.DefaultRequirePrivacySet = groupDescRequirePrivacySet.Default.(bool)
 	// groupDescDefaultMappedModel is the schema descriptor for default_mapped_model field.
-	groupDescDefaultMappedModel := groupFields[52].Descriptor()
+	groupDescDefaultMappedModel := groupFields[53].Descriptor()
 	// group.DefaultDefaultMappedModel holds the default value on creation for the default_mapped_model field.
 	group.DefaultDefaultMappedModel = groupDescDefaultMappedModel.Default.(string)
 	// group.DefaultMappedModelValidator is a validator for the "default_mapped_model" field. It is called by the builders before save.
 	group.DefaultMappedModelValidator = groupDescDefaultMappedModel.Validators[0].(func(string) error)
 	// groupDescMessagesDispatchModelConfig is the schema descriptor for messages_dispatch_model_config field.
-	groupDescMessagesDispatchModelConfig := groupFields[53].Descriptor()
+	groupDescMessagesDispatchModelConfig := groupFields[54].Descriptor()
 	// group.DefaultMessagesDispatchModelConfig holds the default value on creation for the messages_dispatch_model_config field.
 	group.DefaultMessagesDispatchModelConfig = groupDescMessagesDispatchModelConfig.Default.(domain.OpenAIMessagesDispatchModelConfig)
 	// groupDescModelAllowlist is the schema descriptor for model_allowlist field.
-	groupDescModelAllowlist := groupFields[54].Descriptor()
+	groupDescModelAllowlist := groupFields[55].Descriptor()
 	// group.DefaultModelAllowlist holds the default value on creation for the model_allowlist field.
 	group.DefaultModelAllowlist = groupDescModelAllowlist.Default.(domain.GroupModelAllowlist)
 	// groupDescCodexModelsManifestConfig is the schema descriptor for codex_models_manifest_config field.
-	groupDescCodexModelsManifestConfig := groupFields[55].Descriptor()
+	groupDescCodexModelsManifestConfig := groupFields[56].Descriptor()
 	// group.DefaultCodexModelsManifestConfig holds the default value on creation for the codex_models_manifest_config field.
 	group.DefaultCodexModelsManifestConfig = groupDescCodexModelsManifestConfig.Default.(domain.GroupCodexModelsManifestConfig)
 	// groupDescRpmLimit is the schema descriptor for rpm_limit field.
-	groupDescRpmLimit := groupFields[56].Descriptor()
+	groupDescRpmLimit := groupFields[57].Descriptor()
 	// group.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
 	group.DefaultRpmLimit = groupDescRpmLimit.Default.(int)
 	// groupDescUserConcurrencyLimit is the schema descriptor for user_concurrency_limit field.
-	groupDescUserConcurrencyLimit := groupFields[57].Descriptor()
+	groupDescUserConcurrencyLimit := groupFields[58].Descriptor()
 	// group.DefaultUserConcurrencyLimit holds the default value on creation for the user_concurrency_limit field.
 	group.DefaultUserConcurrencyLimit = groupDescUserConcurrencyLimit.Default.(int)
 	// groupDescMaxReasoningEffort is the schema descriptor for max_reasoning_effort field.
-	groupDescMaxReasoningEffort := groupFields[58].Descriptor()
+	groupDescMaxReasoningEffort := groupFields[59].Descriptor()
 	// group.DefaultMaxReasoningEffort holds the default value on creation for the max_reasoning_effort field.
 	group.DefaultMaxReasoningEffort = groupDescMaxReasoningEffort.Default.(string)
 	// group.MaxReasoningEffortValidator is a validator for the "max_reasoning_effort" field. It is called by the builders before save.
 	group.MaxReasoningEffortValidator = groupDescMaxReasoningEffort.Validators[0].(func(string) error)
 	// groupDescMaxReasoningEffortOverLimit is the schema descriptor for max_reasoning_effort_over_limit field.
-	groupDescMaxReasoningEffortOverLimit := groupFields[59].Descriptor()
+	groupDescMaxReasoningEffortOverLimit := groupFields[60].Descriptor()
 	// group.DefaultMaxReasoningEffortOverLimit holds the default value on creation for the max_reasoning_effort_over_limit field.
 	group.DefaultMaxReasoningEffortOverLimit = groupDescMaxReasoningEffortOverLimit.Default.(string)
 	// group.MaxReasoningEffortOverLimitValidator is a validator for the "max_reasoning_effort_over_limit" field. It is called by the builders before save.
 	group.MaxReasoningEffortOverLimitValidator = groupDescMaxReasoningEffortOverLimit.Validators[0].(func(string) error)
 	// groupDescReasoningEffortMappings is the schema descriptor for reasoning_effort_mappings field.
-	groupDescReasoningEffortMappings := groupFields[60].Descriptor()
+	groupDescReasoningEffortMappings := groupFields[61].Descriptor()
 	// group.DefaultReasoningEffortMappings holds the default value on creation for the reasoning_effort_mappings field.
 	group.DefaultReasoningEffortMappings = groupDescReasoningEffortMappings.Default.([]domain.ReasoningEffortMapping)
 	// groupDescProfitControlEnabled is the schema descriptor for profit_control_enabled field.
-	groupDescProfitControlEnabled := groupFields[61].Descriptor()
+	groupDescProfitControlEnabled := groupFields[62].Descriptor()
 	// group.DefaultProfitControlEnabled holds the default value on creation for the profit_control_enabled field.
 	group.DefaultProfitControlEnabled = groupDescProfitControlEnabled.Default.(bool)
 	// groupDescProfitMinMargin is the schema descriptor for profit_min_margin field.
-	groupDescProfitMinMargin := groupFields[62].Descriptor()
+	groupDescProfitMinMargin := groupFields[63].Descriptor()
 	// group.DefaultProfitMinMargin holds the default value on creation for the profit_min_margin field.
 	group.DefaultProfitMinMargin = groupDescProfitMinMargin.Default.(float64)
 	// groupDescProfitSafetyBuffer is the schema descriptor for profit_safety_buffer field.
-	groupDescProfitSafetyBuffer := groupFields[63].Descriptor()
+	groupDescProfitSafetyBuffer := groupFields[64].Descriptor()
 	// group.DefaultProfitSafetyBuffer holds the default value on creation for the profit_safety_buffer field.
 	group.DefaultProfitSafetyBuffer = groupDescProfitSafetyBuffer.Default.(float64)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
@@ -1644,7 +1657,7 @@ func init() {
 	// proxy.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	proxy.UpdateDefaultUpdatedAt = proxyDescUpdatedAt.UpdateDefault.(func() time.Time)
 	// proxyDescName is the schema descriptor for name field.
-	proxyDescName := proxyFields[0].Descriptor()
+	proxyDescName := proxyFields[1].Descriptor()
 	// proxy.NameValidator is a validator for the "name" field. It is called by the builders before save.
 	proxy.NameValidator = func() func(string) error {
 		validators := proxyDescName.Validators
@@ -1662,7 +1675,7 @@ func init() {
 		}
 	}()
 	// proxyDescProtocol is the schema descriptor for protocol field.
-	proxyDescProtocol := proxyFields[1].Descriptor()
+	proxyDescProtocol := proxyFields[2].Descriptor()
 	// proxy.ProtocolValidator is a validator for the "protocol" field. It is called by the builders before save.
 	proxy.ProtocolValidator = func() func(string) error {
 		validators := proxyDescProtocol.Validators
@@ -1680,7 +1693,7 @@ func init() {
 		}
 	}()
 	// proxyDescHost is the schema descriptor for host field.
-	proxyDescHost := proxyFields[2].Descriptor()
+	proxyDescHost := proxyFields[3].Descriptor()
 	// proxy.HostValidator is a validator for the "host" field. It is called by the builders before save.
 	proxy.HostValidator = func() func(string) error {
 		validators := proxyDescHost.Validators
@@ -1698,27 +1711,27 @@ func init() {
 		}
 	}()
 	// proxyDescUsername is the schema descriptor for username field.
-	proxyDescUsername := proxyFields[4].Descriptor()
+	proxyDescUsername := proxyFields[5].Descriptor()
 	// proxy.UsernameValidator is a validator for the "username" field. It is called by the builders before save.
 	proxy.UsernameValidator = proxyDescUsername.Validators[0].(func(string) error)
 	// proxyDescPassword is the schema descriptor for password field.
-	proxyDescPassword := proxyFields[5].Descriptor()
+	proxyDescPassword := proxyFields[6].Descriptor()
 	// proxy.PasswordValidator is a validator for the "password" field. It is called by the builders before save.
 	proxy.PasswordValidator = proxyDescPassword.Validators[0].(func(string) error)
 	// proxyDescStatus is the schema descriptor for status field.
-	proxyDescStatus := proxyFields[6].Descriptor()
+	proxyDescStatus := proxyFields[7].Descriptor()
 	// proxy.DefaultStatus holds the default value on creation for the status field.
 	proxy.DefaultStatus = proxyDescStatus.Default.(string)
 	// proxy.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	proxy.StatusValidator = proxyDescStatus.Validators[0].(func(string) error)
 	// proxyDescFallbackMode is the schema descriptor for fallback_mode field.
-	proxyDescFallbackMode := proxyFields[8].Descriptor()
+	proxyDescFallbackMode := proxyFields[9].Descriptor()
 	// proxy.DefaultFallbackMode holds the default value on creation for the fallback_mode field.
 	proxy.DefaultFallbackMode = proxyDescFallbackMode.Default.(string)
 	// proxy.FallbackModeValidator is a validator for the "fallback_mode" field. It is called by the builders before save.
 	proxy.FallbackModeValidator = proxyDescFallbackMode.Validators[0].(func(string) error)
 	// proxyDescExpiryWarnDays is the schema descriptor for expiry_warn_days field.
-	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
+	proxyDescExpiryWarnDays := proxyFields[11].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
@@ -1828,6 +1841,143 @@ func init() {
 	setting.DefaultUpdatedAt = settingDescUpdatedAt.Default.(func() time.Time)
 	// setting.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	setting.UpdateDefaultUpdatedAt = settingDescUpdatedAt.UpdateDefault.(func() time.Time)
+	sharedaccountlistingMixin := schema.SharedAccountListing{}.Mixin()
+	sharedaccountlistingMixinHooks1 := sharedaccountlistingMixin[1].Hooks()
+	sharedaccountlisting.Hooks[0] = sharedaccountlistingMixinHooks1[0]
+	sharedaccountlistingMixinInters1 := sharedaccountlistingMixin[1].Interceptors()
+	sharedaccountlisting.Interceptors[0] = sharedaccountlistingMixinInters1[0]
+	sharedaccountlistingMixinFields0 := sharedaccountlistingMixin[0].Fields()
+	_ = sharedaccountlistingMixinFields0
+	sharedaccountlistingFields := schema.SharedAccountListing{}.Fields()
+	_ = sharedaccountlistingFields
+	// sharedaccountlistingDescCreatedAt is the schema descriptor for created_at field.
+	sharedaccountlistingDescCreatedAt := sharedaccountlistingMixinFields0[0].Descriptor()
+	// sharedaccountlisting.DefaultCreatedAt holds the default value on creation for the created_at field.
+	sharedaccountlisting.DefaultCreatedAt = sharedaccountlistingDescCreatedAt.Default.(func() time.Time)
+	// sharedaccountlistingDescUpdatedAt is the schema descriptor for updated_at field.
+	sharedaccountlistingDescUpdatedAt := sharedaccountlistingMixinFields0[1].Descriptor()
+	// sharedaccountlisting.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	sharedaccountlisting.DefaultUpdatedAt = sharedaccountlistingDescUpdatedAt.Default.(func() time.Time)
+	// sharedaccountlisting.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	sharedaccountlisting.UpdateDefaultUpdatedAt = sharedaccountlistingDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// sharedaccountlistingDescPlatform is the schema descriptor for platform field.
+	sharedaccountlistingDescPlatform := sharedaccountlistingFields[2].Descriptor()
+	// sharedaccountlisting.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	sharedaccountlisting.PlatformValidator = func() func(string) error {
+		validators := sharedaccountlistingDescPlatform.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(platform string) error {
+			for _, fn := range fns {
+				if err := fn(platform); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// sharedaccountlistingDescDisplayName is the schema descriptor for display_name field.
+	sharedaccountlistingDescDisplayName := sharedaccountlistingFields[3].Descriptor()
+	// sharedaccountlisting.DisplayNameValidator is a validator for the "display_name" field. It is called by the builders before save.
+	sharedaccountlisting.DisplayNameValidator = func() func(string) error {
+		validators := sharedaccountlistingDescDisplayName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(display_name string) error {
+			for _, fn := range fns {
+				if err := fn(display_name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// sharedaccountlistingDescStatus is the schema descriptor for status field.
+	sharedaccountlistingDescStatus := sharedaccountlistingFields[4].Descriptor()
+	// sharedaccountlisting.DefaultStatus holds the default value on creation for the status field.
+	sharedaccountlisting.DefaultStatus = sharedaccountlistingDescStatus.Default.(string)
+	// sharedaccountlisting.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	sharedaccountlisting.StatusValidator = sharedaccountlistingDescStatus.Validators[0].(func(string) error)
+	// sharedaccountlistingDescConcurrencyLimit is the schema descriptor for concurrency_limit field.
+	sharedaccountlistingDescConcurrencyLimit := sharedaccountlistingFields[6].Descriptor()
+	// sharedaccountlisting.DefaultConcurrencyLimit holds the default value on creation for the concurrency_limit field.
+	sharedaccountlisting.DefaultConcurrencyLimit = sharedaccountlistingDescConcurrencyLimit.Default.(int)
+	// sharedaccountlistingDescConcurrencyMultiplier is the schema descriptor for concurrency_multiplier field.
+	sharedaccountlistingDescConcurrencyMultiplier := sharedaccountlistingFields[7].Descriptor()
+	// sharedaccountlisting.DefaultConcurrencyMultiplier holds the default value on creation for the concurrency_multiplier field.
+	sharedaccountlisting.DefaultConcurrencyMultiplier = sharedaccountlistingDescConcurrencyMultiplier.Default.(float64)
+	// sharedaccountlistingDescSellRate is the schema descriptor for sell_rate field.
+	sharedaccountlistingDescSellRate := sharedaccountlistingFields[8].Descriptor()
+	// sharedaccountlisting.DefaultSellRate holds the default value on creation for the sell_rate field.
+	sharedaccountlisting.DefaultSellRate = sharedaccountlistingDescSellRate.Default.(float64)
+	// sharedaccountlistingDescTotalCallCount is the schema descriptor for total_call_count field.
+	sharedaccountlistingDescTotalCallCount := sharedaccountlistingFields[10].Descriptor()
+	// sharedaccountlisting.DefaultTotalCallCount holds the default value on creation for the total_call_count field.
+	sharedaccountlisting.DefaultTotalCallCount = sharedaccountlistingDescTotalCallCount.Default.(int64)
+	sharedaccountusageledgerMixin := schema.SharedAccountUsageLedger{}.Mixin()
+	sharedaccountusageledgerMixinFields0 := sharedaccountusageledgerMixin[0].Fields()
+	_ = sharedaccountusageledgerMixinFields0
+	sharedaccountusageledgerFields := schema.SharedAccountUsageLedger{}.Fields()
+	_ = sharedaccountusageledgerFields
+	// sharedaccountusageledgerDescCreatedAt is the schema descriptor for created_at field.
+	sharedaccountusageledgerDescCreatedAt := sharedaccountusageledgerMixinFields0[0].Descriptor()
+	// sharedaccountusageledger.DefaultCreatedAt holds the default value on creation for the created_at field.
+	sharedaccountusageledger.DefaultCreatedAt = sharedaccountusageledgerDescCreatedAt.Default.(func() time.Time)
+	// sharedaccountusageledgerDescUpdatedAt is the schema descriptor for updated_at field.
+	sharedaccountusageledgerDescUpdatedAt := sharedaccountusageledgerMixinFields0[1].Descriptor()
+	// sharedaccountusageledger.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	sharedaccountusageledger.DefaultUpdatedAt = sharedaccountusageledgerDescUpdatedAt.Default.(func() time.Time)
+	// sharedaccountusageledger.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	sharedaccountusageledger.UpdateDefaultUpdatedAt = sharedaccountusageledgerDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// sharedaccountusageledgerDescRequestID is the schema descriptor for request_id field.
+	sharedaccountusageledgerDescRequestID := sharedaccountusageledgerFields[0].Descriptor()
+	// sharedaccountusageledger.RequestIDValidator is a validator for the "request_id" field. It is called by the builders before save.
+	sharedaccountusageledger.RequestIDValidator = sharedaccountusageledgerDescRequestID.Validators[0].(func(string) error)
+	// sharedaccountusageledgerDescAction is the schema descriptor for action field.
+	sharedaccountusageledgerDescAction := sharedaccountusageledgerFields[9].Descriptor()
+	// sharedaccountusageledger.DefaultAction holds the default value on creation for the action field.
+	sharedaccountusageledger.DefaultAction = sharedaccountusageledgerDescAction.Default.(string)
+	// sharedaccountusageledger.ActionValidator is a validator for the "action" field. It is called by the builders before save.
+	sharedaccountusageledger.ActionValidator = sharedaccountusageledgerDescAction.Validators[0].(func(string) error)
+	sharedaccountwalletMixin := schema.SharedAccountWallet{}.Mixin()
+	sharedaccountwalletMixinFields0 := sharedaccountwalletMixin[0].Fields()
+	_ = sharedaccountwalletMixinFields0
+	sharedaccountwalletFields := schema.SharedAccountWallet{}.Fields()
+	_ = sharedaccountwalletFields
+	// sharedaccountwalletDescCreatedAt is the schema descriptor for created_at field.
+	sharedaccountwalletDescCreatedAt := sharedaccountwalletMixinFields0[0].Descriptor()
+	// sharedaccountwallet.DefaultCreatedAt holds the default value on creation for the created_at field.
+	sharedaccountwallet.DefaultCreatedAt = sharedaccountwalletDescCreatedAt.Default.(func() time.Time)
+	// sharedaccountwalletDescUpdatedAt is the schema descriptor for updated_at field.
+	sharedaccountwalletDescUpdatedAt := sharedaccountwalletMixinFields0[1].Descriptor()
+	// sharedaccountwallet.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	sharedaccountwallet.DefaultUpdatedAt = sharedaccountwalletDescUpdatedAt.Default.(func() time.Time)
+	// sharedaccountwallet.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	sharedaccountwallet.UpdateDefaultUpdatedAt = sharedaccountwalletDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// sharedaccountwalletDescPendingAmount is the schema descriptor for pending_amount field.
+	sharedaccountwalletDescPendingAmount := sharedaccountwalletFields[1].Descriptor()
+	// sharedaccountwallet.DefaultPendingAmount holds the default value on creation for the pending_amount field.
+	sharedaccountwallet.DefaultPendingAmount = sharedaccountwalletDescPendingAmount.Default.(float64)
+	// sharedaccountwalletDescAvailableAmount is the schema descriptor for available_amount field.
+	sharedaccountwalletDescAvailableAmount := sharedaccountwalletFields[2].Descriptor()
+	// sharedaccountwallet.DefaultAvailableAmount holds the default value on creation for the available_amount field.
+	sharedaccountwallet.DefaultAvailableAmount = sharedaccountwalletDescAvailableAmount.Default.(float64)
+	// sharedaccountwalletDescFrozenAmount is the schema descriptor for frozen_amount field.
+	sharedaccountwalletDescFrozenAmount := sharedaccountwalletFields[3].Descriptor()
+	// sharedaccountwallet.DefaultFrozenAmount holds the default value on creation for the frozen_amount field.
+	sharedaccountwallet.DefaultFrozenAmount = sharedaccountwalletDescFrozenAmount.Default.(float64)
+	// sharedaccountwalletDescTotalEarned is the schema descriptor for total_earned field.
+	sharedaccountwalletDescTotalEarned := sharedaccountwalletFields[4].Descriptor()
+	// sharedaccountwallet.DefaultTotalEarned holds the default value on creation for the total_earned field.
+	sharedaccountwallet.DefaultTotalEarned = sharedaccountwalletDescTotalEarned.Default.(float64)
+	// sharedaccountwalletDescTotalTransferred is the schema descriptor for total_transferred field.
+	sharedaccountwalletDescTotalTransferred := sharedaccountwalletFields[5].Descriptor()
+	// sharedaccountwallet.DefaultTotalTransferred holds the default value on creation for the total_transferred field.
+	sharedaccountwallet.DefaultTotalTransferred = sharedaccountwalletDescTotalTransferred.Default.(float64)
 	subscriptionplanFields := schema.SubscriptionPlan{}.Fields()
 	_ = subscriptionplanFields
 	// subscriptionplanDescName is the schema descriptor for name field.

@@ -31,6 +31,7 @@ func (Proxy) Mixin() []ent.Mixin {
 
 func (Proxy) Fields() []ent.Field {
 	return []ent.Field{
+		field.Int64("owner_user_id").Optional().Nillable().Comment("Owner of a shared proxy; NULL for system proxies."),
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),

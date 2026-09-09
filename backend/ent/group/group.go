@@ -36,6 +36,8 @@ const (
 	FieldPeakEnd = "peak_end"
 	// FieldPeakRateMultiplier holds the string denoting the peak_rate_multiplier field in the database.
 	FieldPeakRateMultiplier = "peak_rate_multiplier"
+	// FieldIsSharedPool holds the string denoting the is_shared_pool field in the database.
+	FieldIsSharedPool = "is_shared_pool"
 	// FieldIsExclusive holds the string denoting the is_exclusive field in the database.
 	FieldIsExclusive = "is_exclusive"
 	// FieldStatus holds the string denoting the status field in the database.
@@ -244,6 +246,7 @@ var Columns = []string{
 	FieldPeakStart,
 	FieldPeakEnd,
 	FieldPeakRateMultiplier,
+	FieldIsSharedPool,
 	FieldIsExclusive,
 	FieldStatus,
 	FieldDuplicateOperationID,
@@ -352,6 +355,8 @@ var (
 	PeakEndValidator func(string) error
 	// DefaultPeakRateMultiplier holds the default value on creation for the "peak_rate_multiplier" field.
 	DefaultPeakRateMultiplier float64
+	// DefaultIsSharedPool holds the default value on creation for the "is_shared_pool" field.
+	DefaultIsSharedPool bool
 	// DefaultIsExclusive holds the default value on creation for the "is_exclusive" field.
 	DefaultIsExclusive bool
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -506,6 +511,11 @@ func ByPeakEnd(opts ...sql.OrderTermOption) OrderOption {
 // ByPeakRateMultiplier orders the results by the peak_rate_multiplier field.
 func ByPeakRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPeakRateMultiplier, opts...).ToFunc()
+}
+
+// ByIsSharedPool orders the results by the is_shared_pool field.
+func ByIsSharedPool(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldIsSharedPool, opts...).ToFunc()
 }
 
 // ByIsExclusive orders the results by the is_exclusive field.

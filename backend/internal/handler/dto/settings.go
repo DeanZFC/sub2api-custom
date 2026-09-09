@@ -331,7 +331,9 @@ type SystemSettings struct {
 	CyberSessionBlockTTLSeconds int  `json:"cyber_session_block_ttl_seconds"`
 
 	// Affiliate (邀请返利) feature switch
-	AffiliateEnabled bool `json:"affiliate_enabled"`
+	AffiliateEnabled         bool    `json:"affiliate_enabled"`
+	SharedPoolFeeRatePercent float64 `json:"shared_pool_fee_rate_percent"`
+	SharedPoolEnabled        bool    `json:"shared_pool_enabled"`
 
 	// OpenAI fast/flex policy
 	OpenAIFastPolicySettings *OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
@@ -426,7 +428,9 @@ type PublicSettings struct {
 	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`
 
-	AffiliateEnabled bool `json:"affiliate_enabled"`
+	AffiliateEnabled         bool    `json:"affiliate_enabled"`
+	SharedPoolFeeRatePercent float64 `json:"shared_pool_fee_rate_percent"`
+	SharedPoolEnabled        bool    `json:"shared_pool_enabled"`
 
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 

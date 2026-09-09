@@ -440,6 +440,11 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// Affiliate (邀请返利) feature switch
 	updates[SettingKeyAffiliateEnabled] = strconv.FormatBool(settings.AffiliateEnabled)
+	if settings.SharedPoolFeeRatePercent < 0 || settings.SharedPoolFeeRatePercent > 100 {
+		return nil, fmt.Errorf("shared pool fee rate must be between 0 and 100")
+	}
+	updates[SettingKeySharedPoolFeeRate] = strconv.FormatFloat(settings.SharedPoolFeeRatePercent, 'f', 4, 64)
+	updates[SettingKeySharedPoolEnabled] = strconv.FormatBool(settings.SharedPoolEnabled)
 
 	// 风控中心功能开关
 	updates[SettingKeyRiskControlEnabled] = strconv.FormatBool(settings.RiskControlEnabled)
