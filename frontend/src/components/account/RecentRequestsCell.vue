@@ -9,16 +9,13 @@
       </div>
       <div class="flex h-6 items-center gap-1">
       <template v-for="(request, index) in requests" :key="`${request.request_id}-${index}`">
-        <HelpTooltip v-if="request.kind === 'error'" class="!ml-0" :content="errorTooltip(request)" width-class="w-80">
+        <HelpTooltip class="!ml-0" :content="requestTooltip(request)" width-class="w-80">
           <template #trigger>
-            <span class="block h-6 w-1.5 cursor-help rounded-full bg-red-500 shadow-sm shadow-red-200 dark:bg-red-400 dark:shadow-none" />
+            <span :class="request.kind === 'error'
+              ? 'block h-6 w-1.5 cursor-help rounded-full bg-red-500 shadow-sm shadow-red-200 dark:bg-red-400 dark:shadow-none'
+              : 'block h-6 w-1.5 cursor-help rounded-full bg-emerald-500 shadow-sm shadow-emerald-200 dark:bg-emerald-400 dark:shadow-none'" />
           </template>
         </HelpTooltip>
-        <span
-          v-else
-          class="block h-6 w-1.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-200 dark:bg-emerald-400 dark:shadow-none"
-          :title="successTooltip(request)"
-        />
       </template>
       </div>
     </div>
@@ -44,12 +41,18 @@ const formatTime = (value: string) => {
   return new Intl.DateTimeFormat(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(timestamp)
 }
 
-const successTooltip = (request: OpsRequestDetail) =>
-  `${formatTime(request.created_at)} · ${request.status_code || 200}`
-
-const errorTooltip = (request: OpsRequestDetail) => {
-  const status = request.status_code || 500
+const requestTooltip = (request: OpsRequestDetail) => {
+  const status = request.status_code || (request.kind === 'error' ? 500 : 200)
+  const latency = request.duration_ms == null ? '-' : `${request.duration_ms} ms`
   const reason = request.message?.trim() || t('admin.accounts.recentRequests.unknownError')
-  return `${t('admin.accounts.recentRequests.errorPrefix', { status })}\n${reason}${request.phase ? `\n${request.phase}` : ''}`
+  const lines = [
+    `${formatTime(request.created_at)} · ${status}`,
+    `用户: ${request.user_id ?? '-'}`,
+    `分组: ${request.group_id ?? '-'}`,
+    `延迟: ${latency}`,
+  ]
+  if (request.kind === 'error') lines.push(`${t('admin.accounts.recentRequests.errorPrefix', { status })}: ${reason}`)
+  if (request.phase) lines.push(request.phase)
+  return lines.join('\n')
 }
 </script>
