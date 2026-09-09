@@ -3203,6 +3203,21 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	if err != nil {
 		return nil, err
 	}
+	proxyPoolByAccount := make(map[int64][]int64)
+	var rows *sql.Rows
+	var qerr error
+	if r.sql != nil {
+		rows, qerr = r.sql.QueryContext(ctx, `SELECT account_id, proxy_id FROM account_proxies WHERE account_id = ANY($1) ORDER BY account_id, position`, pq.Array(accountIDs))
+	}
+	if qerr == nil && rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var aid, pid int64
+			if rows.Scan(&aid, &pid) == nil {
+				proxyPoolByAccount[aid] = append(proxyPoolByAccount[aid], pid)
+			}
+		}
+	}
 
 	outAccounts := make([]service.Account, 0, len(accounts))
 	for _, acc := range accounts {
@@ -3210,6 +3225,7 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		if out == nil {
 			continue
 		}
+		out.ProxyIDs = proxyPoolByAccount[acc.ID]
 		if acc.ProxyID != nil {
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {
 				out.Proxy = proxy
