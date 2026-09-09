@@ -11,6 +11,8 @@ import (
 	mathrand "math/rand"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -19,6 +21,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 )
+
+var proxyPoolCursors sync.Map // account id -> *uint64
 
 // SelectAccount 选择账号（粘性会话+优先级）
 func (s *GatewayService) SelectAccount(ctx context.Context, groupID *int64, sessionHash string) (*Account, error) {
@@ -1597,6 +1601,14 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	}
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gateway account %d not found during hydration", account.ID)
+	}
+	if len(hydrated.ProxyIDs) > 1 {
+		cursor, _ := proxyPoolCursors.LoadOrStore(hydrated.ID, new(uint64))
+		p := cursor.(*uint64)
+		idx := atomic.AddUint64(p, 1) - 1
+		selected := hydrated.ProxyIDs[idx%uint64(len(hydrated.ProxyIDs))]
+		hydrated.ProxyID = &selected
+		hydrated.Proxy = nil
 	}
 	return hydrated, nil
 }
