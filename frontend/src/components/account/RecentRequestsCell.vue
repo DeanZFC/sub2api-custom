@@ -8,7 +8,7 @@
         {{ formatTime(requests[0].created_at) }}
       </div>
       <div class="flex h-6 items-center gap-1">
-      <template v-for="(request, index) in requests" :key="`${request.request_id}-${index}`">
+      <template v-for="request in requests" :key="request.request_id">
         <HelpTooltip class="!ml-0" :content="requestTooltip(request)" width-class="w-80">
           <template #trigger>
             <span :class="request.kind === 'error'
