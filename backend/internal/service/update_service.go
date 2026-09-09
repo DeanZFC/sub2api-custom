@@ -177,7 +177,7 @@ type GitHubAsset struct {
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
 	// Try cache first
-	if !force {
+	if !force && githubRepo != "DeanZFC/sub2api-custom" {
 		if cached, err := s.getFromCache(ctx); err == nil && cached != nil {
 			cached.SourceUpdateEnabled = s.sourceUpdateReady(ctx)
 			return cached, nil
@@ -189,7 +189,7 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 	// to publish a release tag for every build.
 	var info *UpdateInfo
 	var err error
-	if s.sourceUpdateReady(ctx) {
+	if s.sourceUpdateReady(ctx) || githubRepo == "DeanZFC/sub2api-custom" {
 		info, err = s.fetchLatestSourceVersion(ctx)
 	} else {
 		info, err = s.fetchLatestRelease(ctx)
