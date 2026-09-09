@@ -642,6 +642,17 @@ func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int
 	return result == 1, nil
 }
 
+func accountProxySlotKey(accountID, proxyID int64) string {
+	return fmt.Sprintf("%s%d:proxy:%d", accountSlotKeyPrefix, accountID, proxyID)
+}
+func (c *concurrencyCache) AcquireAccountProxySlot(ctx context.Context, accountID, proxyID int64, maxConcurrency int, requestID string) (bool, error) {
+	result, _, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, []string{accountProxySlotKey(accountID, proxyID), accountProxySlotKey(accountID, proxyID)}, maxConcurrency, c.slotTTLSeconds, requestID)
+	return result == 1, err
+}
+func (c *concurrencyCache) ReleaseAccountProxySlot(ctx context.Context, accountID, proxyID int64, requestID string) error {
+	return c.rdb.ZRem(ctx, accountProxySlotKey(accountID, proxyID), requestID).Err()
+}
+
 func (c *concurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
 	key := accountSlotKey(accountID)
 	if err := c.rdb.ZRem(ctx, key, requestID).Err(); err != nil {
