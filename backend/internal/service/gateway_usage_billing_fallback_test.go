@@ -97,7 +97,7 @@ func TestResolveAPIKeyFallbackChannelUsageFields_ClearsPrimaryFieldsWhenLookupFa
 		listAllFn: func(context.Context) ([]Channel, error) {
 			return nil, errors.New("channel cache unavailable")
 		},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	got := resolveAPIKeyFallbackChannelUsageFields(
 		context.Background(), channelService, apiKey, primaryFields, "gpt-5.1", "primary-alias",

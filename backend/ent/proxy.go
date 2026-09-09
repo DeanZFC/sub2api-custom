@@ -55,6 +55,8 @@ type Proxy struct {
 
 // ProxyEdges holds the relations/edges for other nodes in the graph.
 type ProxyEdges struct {
+	// PoolAccounts holds the value of the pool_accounts edge.
+	PoolAccounts []*Account `json:"pool_accounts,omitempty"`
 	// Accounts holds the value of the accounts edge.
 	Accounts []*Account `json:"accounts,omitempty"`
 	// PrimaryProxies holds the value of the primary_proxies edge.
@@ -63,13 +65,22 @@ type ProxyEdges struct {
 	BackupProxy *Proxy `json:"backup_proxy,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [3]bool
+	loadedTypes [4]bool
+}
+
+// PoolAccountsOrErr returns the PoolAccounts value or an error if the edge
+// was not loaded in eager-loading.
+func (e ProxyEdges) PoolAccountsOrErr() ([]*Account, error) {
+	if e.loadedTypes[0] {
+		return e.PoolAccounts, nil
+	}
+	return nil, &NotLoadedError{edge: "pool_accounts"}
 }
 
 // AccountsOrErr returns the Accounts value or an error if the edge
 // was not loaded in eager-loading.
 func (e ProxyEdges) AccountsOrErr() ([]*Account, error) {
-	if e.loadedTypes[0] {
+	if e.loadedTypes[1] {
 		return e.Accounts, nil
 	}
 	return nil, &NotLoadedError{edge: "accounts"}
@@ -78,7 +89,7 @@ func (e ProxyEdges) AccountsOrErr() ([]*Account, error) {
 // PrimaryProxiesOrErr returns the PrimaryProxies value or an error if the edge
 // was not loaded in eager-loading.
 func (e ProxyEdges) PrimaryProxiesOrErr() ([]*Proxy, error) {
-	if e.loadedTypes[1] {
+	if e.loadedTypes[2] {
 		return e.PrimaryProxies, nil
 	}
 	return nil, &NotLoadedError{edge: "primary_proxies"}
@@ -89,7 +100,7 @@ func (e ProxyEdges) PrimaryProxiesOrErr() ([]*Proxy, error) {
 func (e ProxyEdges) BackupProxyOrErr() (*Proxy, error) {
 	if e.BackupProxy != nil {
 		return e.BackupProxy, nil
-	} else if e.loadedTypes[2] {
+	} else if e.loadedTypes[3] {
 		return nil, &NotFoundError{label: proxy.Label}
 	}
 	return nil, &NotLoadedError{edge: "backup_proxy"}
@@ -234,6 +245,11 @@ func (_m *Proxy) assignValues(columns []string, values []any) error {
 // This includes values selected through modifiers, order, etc.
 func (_m *Proxy) Value(name string) (ent.Value, error) {
 	return _m.selectValues.Get(name)
+}
+
+// QueryPoolAccounts queries the "pool_accounts" edge of the Proxy entity.
+func (_m *Proxy) QueryPoolAccounts() *AccountQuery {
+	return NewProxyClient(_m.config).QueryPoolAccounts(_m)
 }
 
 // QueryAccounts queries the "accounts" edge of the Proxy entity.

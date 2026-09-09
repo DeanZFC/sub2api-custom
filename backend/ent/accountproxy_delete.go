@@ -7,7 +7,6 @@ import (
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
-	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/accountproxy"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 )
@@ -40,7 +39,7 @@ func (_d *AccountProxyDelete) ExecX(ctx context.Context) int {
 }
 
 func (_d *AccountProxyDelete) sqlExec(ctx context.Context) (int, error) {
-	_spec := sqlgraph.NewDeleteSpec(accountproxy.Table, sqlgraph.NewFieldSpec(accountproxy.FieldID, field.TypeInt64))
+	_spec := sqlgraph.NewDeleteSpec(accountproxy.Table, nil)
 	if ps := _d.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {

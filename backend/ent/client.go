@@ -904,6 +904,22 @@ func (c *AccountClient) QueryProxy(_m *Account) *ProxyQuery {
 	return query
 }
 
+// QueryProxies queries the proxies edge of a Account.
+func (c *AccountClient) QueryProxies(_m *Account) *ProxyQuery {
+	query := (&ProxyClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, id),
+			sqlgraph.To(proxy.Table, proxy.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, false, account.ProxiesTable, account.ProxiesPrimaryKey...),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryParent queries the parent edge of a Account.
 func (c *AccountClient) QueryParent(_m *Account) *AccountQuery {
 	query := (&AccountClient{config: c.config}).Query()
@@ -961,6 +977,22 @@ func (c *AccountClient) QueryAccountGroups(_m *Account) *AccountGroupQuery {
 			sqlgraph.From(account.Table, account.FieldID, id),
 			sqlgraph.To(accountgroup.Table, accountgroup.AccountColumn),
 			sqlgraph.Edge(sqlgraph.O2M, true, account.AccountGroupsTable, account.AccountGroupsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryAccountProxies queries the account_proxies edge of a Account.
+func (c *AccountClient) QueryAccountProxies(_m *Account) *AccountProxyQuery {
+	query := (&AccountProxyClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, id),
+			sqlgraph.To(accountproxy.Table, accountproxy.AccountColumn),
+			sqlgraph.Edge(sqlgraph.O2M, true, account.AccountProxiesTable, account.AccountProxiesColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -1167,13 +1199,9 @@ func (c *AccountProxyClient) Update() *AccountProxyUpdate {
 
 // UpdateOne returns an update builder for the given entity.
 func (c *AccountProxyClient) UpdateOne(_m *AccountProxy) *AccountProxyUpdateOne {
-	mutation := newAccountProxyMutation(c.config, OpUpdateOne, withAccountProxy(_m))
-	return &AccountProxyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *AccountProxyClient) UpdateOneID(id int64) *AccountProxyUpdateOne {
-	mutation := newAccountProxyMutation(c.config, OpUpdateOne, withAccountProxyID(id))
+	mutation := newAccountProxyMutation(c.config, OpUpdateOne)
+	mutation.account = &_m.AccountID
+	mutation.proxy = &_m.ProxyID
 	return &AccountProxyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
 }
 
@@ -1181,19 +1209,6 @@ func (c *AccountProxyClient) UpdateOneID(id int64) *AccountProxyUpdateOne {
 func (c *AccountProxyClient) Delete() *AccountProxyDelete {
 	mutation := newAccountProxyMutation(c.config, OpDelete)
 	return &AccountProxyDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *AccountProxyClient) DeleteOne(_m *AccountProxy) *AccountProxyDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *AccountProxyClient) DeleteOneID(id int64) *AccountProxyDeleteOne {
-	builder := c.Delete().Where(accountproxy.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &AccountProxyDeleteOne{builder}
 }
 
 // Query returns a query builder for AccountProxy.
@@ -1205,18 +1220,18 @@ func (c *AccountProxyClient) Query() *AccountProxyQuery {
 	}
 }
 
-// Get returns a AccountProxy entity by its id.
-func (c *AccountProxyClient) Get(ctx context.Context, id int64) (*AccountProxy, error) {
-	return c.Query().Where(accountproxy.ID(id)).Only(ctx)
+// QueryAccount queries the account edge of a AccountProxy.
+func (c *AccountProxyClient) QueryAccount(_m *AccountProxy) *AccountQuery {
+	return c.Query().
+		Where(accountproxy.AccountID(_m.AccountID), accountproxy.ProxyID(_m.ProxyID)).
+		QueryAccount()
 }
 
-// GetX is like Get, but panics if an error occurs.
-func (c *AccountProxyClient) GetX(ctx context.Context, id int64) *AccountProxy {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
+// QueryProxy queries the proxy edge of a AccountProxy.
+func (c *AccountProxyClient) QueryProxy(_m *AccountProxy) *ProxyQuery {
+	return c.Query().
+		Where(accountproxy.AccountID(_m.AccountID), accountproxy.ProxyID(_m.ProxyID)).
+		QueryProxy()
 }
 
 // Hooks returns the client hooks.
@@ -4776,6 +4791,22 @@ func (c *ProxyClient) GetX(ctx context.Context, id int64) *Proxy {
 		panic(err)
 	}
 	return obj
+}
+
+// QueryPoolAccounts queries the pool_accounts edge of a Proxy.
+func (c *ProxyClient) QueryPoolAccounts(_m *Proxy) *AccountQuery {
+	query := (&AccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(proxy.Table, proxy.FieldID, id),
+			sqlgraph.To(account.Table, account.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, true, proxy.PoolAccountsTable, proxy.PoolAccountsPrimaryKey...),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
 }
 
 // QueryAccounts queries the accounts edge of a Proxy.

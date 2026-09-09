@@ -11,8 +11,6 @@ import (
 	mathrand "math/rand"
 	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -21,8 +19,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 )
-
-var proxyPoolCursors sync.Map // account id -> *uint64
 
 // SelectAccount 选择账号（粘性会话+优先级）
 func (s *GatewayService) SelectAccount(ctx context.Context, groupID *int64, sessionHash string) (*Account, error) {
@@ -207,7 +203,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 				return nil, err
 			}
 
-			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency, account.ProxyIDs...)
+			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency, &account)
 			if err == nil && result.Acquired {
 				// 获取槽位后检查会话限制（使用 sessionHash 作为会话标识符）
 				if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -399,7 +395,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 						rpmPass := gatePass && s.isAccountSchedulableForRPM(ctx, stickyAccount, true)
 
 						if rpmPass { // 粘性会话窗口费用+RPM 检查
-							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, stickyAccount.Concurrency, stickyAccount.ProxyIDs...)
+							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, stickyAccount.Concurrency, &stickyAccount)
 							if err == nil && result.Acquired {
 								// 会话数量限制检查
 								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
@@ -471,7 +467,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 			for _, acc := range routingCandidates {
 				routingLoads = append(routingLoads, AccountWithConcurrency{
 					ID:             acc.ID,
-					MaxConcurrency: acc.EffectiveLoadFactor(),
+					MaxConcurrency: acc.TotalLoadFactor(),
 				})
 			}
 			routingLoadMap, _ := s.concurrencyService.GetAccountsLoadBatch(ctx, routingLoads)
@@ -513,7 +509,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
-					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency, item.account.ProxyIDs...)
+					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency, &item.account)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
@@ -599,7 +595,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 				)
 
 				if !clearSticky && platformOK && profitOK && modelSupported && channelOK && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable {
-					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, account.ProxyIDs...)
+					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, &account)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -742,7 +738,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 	for _, acc := range candidates {
 		accountLoads = append(accountLoads, AccountWithConcurrency{
 			ID:             acc.ID,
-			MaxConcurrency: acc.EffectiveLoadFactor(),
+			MaxConcurrency: acc.TotalLoadFactor(),
 		})
 	}
 
@@ -784,7 +780,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 				break
 			}
 
-			result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency, selected.account.ProxyIDs...)
+			result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency, &selected.account)
 			if err == nil && result.Acquired {
 				// 会话数量限制检查
 				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
@@ -831,7 +827,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
 
 	for _, acc := range ordered {
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency, acc.ProxyIDs...)
+		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency, &acc)
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
 			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
@@ -1211,11 +1207,17 @@ func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool
 	return false
 }
 
-func (s *GatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, proxyIDs ...int64) (*AcquireResult, error) {
+func (s *GatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, accounts ...**Account) (*AcquireResult, error) {
 	if s.concurrencyService == nil {
+		if len(accounts) > 0 && accounts[0] != nil && *accounts[0] != nil && len((*accounts[0]).ProxyIDs) > 1 {
+			return nil, fmt.Errorf("proxy pool concurrency unavailable")
+		}
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency, proxyIDs...)
+	if len(accounts) > 0 {
+		return s.concurrencyService.AcquireAccountRoute(ctx, accounts[0], maxConcurrency)
+	}
+	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 }
 
 type usageLogWindowStatsBatchProvider interface {
@@ -1602,20 +1604,22 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gateway account %d not found during hydration", account.ID)
 	}
-	if len(hydrated.ProxyIDs) > 1 {
-		cursor, _ := proxyPoolCursors.LoadOrStore(hydrated.ID, new(uint64))
-		p := cursor.(*uint64)
-		idx := atomic.AddUint64(p, 1) - 1
-		selected := hydrated.ProxyIDs[idx%uint64(len(hydrated.ProxyIDs))]
-		hydrated.ProxyID = &selected
-		hydrated.Proxy = nil
+
+	if account.SelectedProxyID > 0 {
+		return hydrated.WithProxyRoute(account.SelectedProxyID)
 	}
 	return hydrated, nil
 }
 
 func (s *GatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
+	if err == nil && acquired {
+		err = validateProxyReservation(account, hydrated)
+	}
 	if err != nil {
+		if acquired && release != nil {
+			release()
+		}
 		return nil, err
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{

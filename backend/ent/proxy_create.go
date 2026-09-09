@@ -201,6 +201,21 @@ func (_c *ProxyCreate) SetNillableExpiryWarnDays(v *int) *ProxyCreate {
 	return _c
 }
 
+// AddPoolAccountIDs adds the "pool_accounts" edge to the Account entity by IDs.
+func (_c *ProxyCreate) AddPoolAccountIDs(ids ...int64) *ProxyCreate {
+	_c.mutation.AddPoolAccountIDs(ids...)
+	return _c
+}
+
+// AddPoolAccounts adds the "pool_accounts" edges to the Account entity.
+func (_c *ProxyCreate) AddPoolAccounts(v ...*Account) *ProxyCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddPoolAccountIDs(ids...)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *ProxyCreate) AddAccountIDs(ids ...int64) *ProxyCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -448,6 +463,22 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExpiryWarnDays(); ok {
 		_spec.SetField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
 		_node.ExpiryWarnDays = value
+	}
+	if nodes := _c.mutation.PoolAccountsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2M,
+			Inverse: true,
+			Table:   proxy.PoolAccountsTable,
+			Columns: proxy.PoolAccountsPrimaryKey,
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
 	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{

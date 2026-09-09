@@ -310,11 +310,13 @@ func (h *GatewayHandler) acquireWebSearchAccountSlot(
 		selected.WaitPlan.Timeout,
 		false,
 		&streamStarted,
+		&account,
 	)
 	releaseWait()
 	if err != nil {
 		return nil, false, err
 	}
+	selected.Account = account
 	return slotRelease, true, nil
 }
 

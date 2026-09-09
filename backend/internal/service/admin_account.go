@@ -306,6 +306,7 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 		Credentials:           credentials,
 		Extra:                 extra,
 		ProxyID:               cloneAccountValuePointer(proxyID),
+		ProxyIDs:              append([]int64(nil), source.ProxyIDs...),
 		Concurrency:           source.Concurrency,
 		Priority:              source.Priority,
 		RateMultiplier:        cloneAccountValuePointer(source.RateMultiplier),
@@ -424,6 +425,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Credentials: input.Credentials,
 		Extra:       accountExtra,
 		ProxyID:     input.ProxyID,
+		ProxyIDs:    multiProxyIDs(input.ProxyIDs),
 		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
 		Priority:    input.Priority,
 		Status:      StatusActive,
@@ -471,6 +473,17 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if input.ProxyIDs != nil {
+		ids, err := s.validateAccountProxyIDs(ctx, input.ProxyIDs)
+		if err != nil {
+			return nil, err
+		}
+		input.ProxyIDs = ids
+		input.ProxyID = nil
+		if len(ids) > 0 {
+			input.ProxyID = &ids[0]
+		}
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -526,13 +539,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
-	}
-	if pool, ok := s.accountRepo.(interface {
-		ReplaceProxyPool(context.Context, int64, []int64) error
-	}); ok && len(input.ProxyIDs) > 0 {
-		if err := pool.ReplaceProxyPool(ctx, account.ID, input.ProxyIDs); err != nil {
-			return nil, err
-		}
 	}
 
 	// 绑定分组
@@ -746,6 +752,22 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	// 影子代理恒继承母账号(由 propagateProxyToShadows 同步),不接受独立编辑——外审 B/P1;
 	// 否则要等母账号下次改 proxy 才被覆盖,期间影子会出现"有时继承、有时独立"的漂移。
+	if input.ProxyIDs != nil && !account.IsCredentialShadow() {
+		ids, err := s.validateAccountProxyIDs(ctx, *input.ProxyIDs)
+		if err != nil {
+			return nil, err
+		}
+		account.ProxyIDs = multiProxyIDs(ids)
+		account.ProxyPoolChanged = true
+		primary := int64(0)
+		if len(ids) > 0 {
+			primary = ids[0]
+		}
+		input.ProxyID = &primary
+	} else if input.ProxyID != nil && !account.IsCredentialShadow() {
+		account.ProxyIDs = nil
+		account.ProxyPoolChanged = true
+	}
 	if input.ProxyID != nil && !account.IsCredentialShadow() {
 		// 0 表示清除代理（前端发送 0 而不是 null 来表达清除意图）
 		if *input.ProxyID == 0 {
@@ -832,13 +854,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			if err := s.checkMixedChannelRisk(ctx, account.ID, account.Platform, *input.GroupIDs); err != nil {
 				return nil, err
 			}
-		}
-	}
-	if pool, ok := s.accountRepo.(interface {
-		ReplaceProxyPool(context.Context, int64, []int64) error
-	}); ok && input.ProxyIDs != nil {
-		if err := pool.ReplaceProxyPool(ctx, account.ID, *input.ProxyIDs); err != nil {
-			return nil, err
 		}
 	}
 
@@ -933,6 +948,19 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	if input.ProxyIDs != nil {
+		ids, err := s.validateAccountProxyIDs(ctx, *input.ProxyIDs)
+		if err != nil {
+			return nil, err
+		}
+		input.ProxyIDs = &ids
+		first := int64(0)
+		if len(ids) > 0 {
+			first = ids[0]
+		}
+		input.ProxyID = &first
+	}
+
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
@@ -1087,6 +1115,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
+		ProxyIDs:                   input.ProxyIDs,
 		Credentials:                input.Credentials,
 		Extra:                      input.Extra,
 		ProbeEnabled:               input.ProbeEnabled,
@@ -1420,6 +1449,7 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 		ParentAccountID: &parentID,
 		QuotaDimension:  QuotaDimensionSpark,
 		ProxyID:         parent.ProxyID,
+		ProxyIDs:        append([]int64(nil), parent.ProxyIDs...),
 		Priority:        priority,
 		Concurrency:     concurrency,
 		Schedulable:     true,
@@ -1472,7 +1502,19 @@ func propagateAccountProxyToShadows(ctx context.Context, repo AccountRepository,
 	if err != nil {
 		return fmt.Errorf("list spark shadows for proxy propagation: %w", err)
 	}
+	var pool []int64
+	if len(shadows) > 0 {
+		parent, err := repo.GetByID(ctx, parentID)
+		if err != nil {
+			return err
+		}
+		if parent != nil {
+			pool = parent.ProxyIDs
+		}
+	}
 	for _, shadow := range shadows {
+		shadow.ProxyIDs = append([]int64(nil), pool...)
+		shadow.ProxyPoolChanged = true
 		shadow.ProxyID = proxyID
 		if err := repo.Update(ctx, shadow); err != nil {
 			return fmt.Errorf("update spark shadow %d proxy: %w", shadow.ID, err)

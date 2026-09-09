@@ -5,24 +5,63 @@ package ent
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
+	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountproxy"
+	"github.com/Wei-Shaw/sub2api/ent/proxy"
 )
 
 // AccountProxy is the model entity for the AccountProxy schema.
 type AccountProxy struct {
 	config `json:"-"`
-	// ID of the ent.
-	ID int64 `json:"id,omitempty"`
 	// AccountID holds the value of the "account_id" field.
 	AccountID int64 `json:"account_id,omitempty"`
 	// ProxyID holds the value of the "proxy_id" field.
 	ProxyID int64 `json:"proxy_id,omitempty"`
 	// Position holds the value of the "position" field.
-	Position     int `json:"position,omitempty"`
+	Position int `json:"position,omitempty"`
+	// CreatedAt holds the value of the "created_at" field.
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	// Edges holds the relations/edges for other nodes in the graph.
+	// The values are being populated by the AccountProxyQuery when eager-loading is set.
+	Edges        AccountProxyEdges `json:"edges"`
 	selectValues sql.SelectValues
+}
+
+// AccountProxyEdges holds the relations/edges for other nodes in the graph.
+type AccountProxyEdges struct {
+	// Account holds the value of the account edge.
+	Account *Account `json:"account,omitempty"`
+	// Proxy holds the value of the proxy edge.
+	Proxy *Proxy `json:"proxy,omitempty"`
+	// loadedTypes holds the information for reporting if a
+	// type was loaded (or requested) in eager-loading or not.
+	loadedTypes [2]bool
+}
+
+// AccountOrErr returns the Account value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e AccountProxyEdges) AccountOrErr() (*Account, error) {
+	if e.Account != nil {
+		return e.Account, nil
+	} else if e.loadedTypes[0] {
+		return nil, &NotFoundError{label: account.Label}
+	}
+	return nil, &NotLoadedError{edge: "account"}
+}
+
+// ProxyOrErr returns the Proxy value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e AccountProxyEdges) ProxyOrErr() (*Proxy, error) {
+	if e.Proxy != nil {
+		return e.Proxy, nil
+	} else if e.loadedTypes[1] {
+		return nil, &NotFoundError{label: proxy.Label}
+	}
+	return nil, &NotLoadedError{edge: "proxy"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -30,8 +69,10 @@ func (*AccountProxy) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case accountproxy.FieldID, accountproxy.FieldAccountID, accountproxy.FieldProxyID, accountproxy.FieldPosition:
+		case accountproxy.FieldAccountID, accountproxy.FieldProxyID, accountproxy.FieldPosition:
 			values[i] = new(sql.NullInt64)
+		case accountproxy.FieldCreatedAt:
+			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
 		}
@@ -47,12 +88,6 @@ func (_m *AccountProxy) assignValues(columns []string, values []any) error {
 	}
 	for i := range columns {
 		switch columns[i] {
-		case accountproxy.FieldID:
-			value, ok := values[i].(*sql.NullInt64)
-			if !ok {
-				return fmt.Errorf("unexpected type %T for field id", value)
-			}
-			_m.ID = int64(value.Int64)
 		case accountproxy.FieldAccountID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field account_id", values[i])
@@ -71,6 +106,12 @@ func (_m *AccountProxy) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.Position = int(value.Int64)
 			}
+		case accountproxy.FieldCreatedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field created_at", values[i])
+			} else if value.Valid {
+				_m.CreatedAt = value.Time
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -82,6 +123,16 @@ func (_m *AccountProxy) assignValues(columns []string, values []any) error {
 // This includes values selected through modifiers, order, etc.
 func (_m *AccountProxy) Value(name string) (ent.Value, error) {
 	return _m.selectValues.Get(name)
+}
+
+// QueryAccount queries the "account" edge of the AccountProxy entity.
+func (_m *AccountProxy) QueryAccount() *AccountQuery {
+	return NewAccountProxyClient(_m.config).QueryAccount(_m)
+}
+
+// QueryProxy queries the "proxy" edge of the AccountProxy entity.
+func (_m *AccountProxy) QueryProxy() *ProxyQuery {
+	return NewAccountProxyClient(_m.config).QueryProxy(_m)
 }
 
 // Update returns a builder for updating this AccountProxy.
@@ -106,7 +157,6 @@ func (_m *AccountProxy) Unwrap() *AccountProxy {
 func (_m *AccountProxy) String() string {
 	var builder strings.Builder
 	builder.WriteString("AccountProxy(")
-	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("account_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.AccountID))
 	builder.WriteString(", ")
@@ -115,6 +165,9 @@ func (_m *AccountProxy) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("position=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Position))
+	builder.WriteString(", ")
+	builder.WriteString("created_at=")
+	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))
 	builder.WriteByte(')')
 	return builder.String()
 }

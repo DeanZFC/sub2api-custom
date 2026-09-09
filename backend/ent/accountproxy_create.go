@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountproxy"
+	"github.com/Wei-Shaw/sub2api/ent/proxy"
 )
 
 // AccountProxyCreate is the builder for creating a AccountProxy entity.
@@ -45,6 +48,30 @@ func (_c *AccountProxyCreate) SetNillablePosition(v *int) *AccountProxyCreate {
 		_c.SetPosition(*v)
 	}
 	return _c
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (_c *AccountProxyCreate) SetCreatedAt(v time.Time) *AccountProxyCreate {
+	_c.mutation.SetCreatedAt(v)
+	return _c
+}
+
+// SetNillableCreatedAt sets the "created_at" field if the given value is not nil.
+func (_c *AccountProxyCreate) SetNillableCreatedAt(v *time.Time) *AccountProxyCreate {
+	if v != nil {
+		_c.SetCreatedAt(*v)
+	}
+	return _c
+}
+
+// SetAccount sets the "account" edge to the Account entity.
+func (_c *AccountProxyCreate) SetAccount(v *Account) *AccountProxyCreate {
+	return _c.SetAccountID(v.ID)
+}
+
+// SetProxy sets the "proxy" edge to the Proxy entity.
+func (_c *AccountProxyCreate) SetProxy(v *Proxy) *AccountProxyCreate {
+	return _c.SetProxyID(v.ID)
 }
 
 // Mutation returns the AccountProxyMutation object of the builder.
@@ -86,6 +113,10 @@ func (_c *AccountProxyCreate) defaults() {
 		v := accountproxy.DefaultPosition
 		_c.mutation.SetPosition(v)
 	}
+	if _, ok := _c.mutation.CreatedAt(); !ok {
+		v := accountproxy.DefaultCreatedAt()
+		_c.mutation.SetCreatedAt(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -98,6 +129,15 @@ func (_c *AccountProxyCreate) check() error {
 	}
 	if _, ok := _c.mutation.Position(); !ok {
 		return &ValidationError{Name: "position", err: errors.New(`ent: missing required field "AccountProxy.position"`)}
+	}
+	if _, ok := _c.mutation.CreatedAt(); !ok {
+		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "AccountProxy.created_at"`)}
+	}
+	if len(_c.mutation.AccountIDs()) == 0 {
+		return &ValidationError{Name: "account", err: errors.New(`ent: missing required edge "AccountProxy.account"`)}
+	}
+	if len(_c.mutation.ProxyIDs()) == 0 {
+		return &ValidationError{Name: "proxy", err: errors.New(`ent: missing required edge "AccountProxy.proxy"`)}
 	}
 	return nil
 }
@@ -113,30 +153,56 @@ func (_c *AccountProxyCreate) sqlSave(ctx context.Context) (*AccountProxy, error
 		}
 		return nil, err
 	}
-	id := _spec.ID.Value.(int64)
-	_node.ID = int64(id)
-	_c.mutation.id = &_node.ID
-	_c.mutation.done = true
 	return _node, nil
 }
 
 func (_c *AccountProxyCreate) createSpec() (*AccountProxy, *sqlgraph.CreateSpec) {
 	var (
 		_node = &AccountProxy{config: _c.config}
-		_spec = sqlgraph.NewCreateSpec(accountproxy.Table, sqlgraph.NewFieldSpec(accountproxy.FieldID, field.TypeInt64))
+		_spec = sqlgraph.NewCreateSpec(accountproxy.Table, nil)
 	)
 	_spec.OnConflict = _c.conflict
-	if value, ok := _c.mutation.AccountID(); ok {
-		_spec.SetField(accountproxy.FieldAccountID, field.TypeInt64, value)
-		_node.AccountID = value
-	}
-	if value, ok := _c.mutation.ProxyID(); ok {
-		_spec.SetField(accountproxy.FieldProxyID, field.TypeInt64, value)
-		_node.ProxyID = value
-	}
 	if value, ok := _c.mutation.Position(); ok {
 		_spec.SetField(accountproxy.FieldPosition, field.TypeInt, value)
 		_node.Position = value
+	}
+	if value, ok := _c.mutation.CreatedAt(); ok {
+		_spec.SetField(accountproxy.FieldCreatedAt, field.TypeTime, value)
+		_node.CreatedAt = value
+	}
+	if nodes := _c.mutation.AccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.AccountTable,
+			Columns: []string{accountproxy.AccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.AccountID = nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.ProxyIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.ProxyTable,
+			Columns: []string{accountproxy.ProxyColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.ProxyID = nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
 	}
 	return _node, _spec
 }
@@ -202,12 +268,6 @@ func (u *AccountProxyUpsert) UpdateAccountID() *AccountProxyUpsert {
 	return u
 }
 
-// AddAccountID adds v to the "account_id" field.
-func (u *AccountProxyUpsert) AddAccountID(v int64) *AccountProxyUpsert {
-	u.Add(accountproxy.FieldAccountID, v)
-	return u
-}
-
 // SetProxyID sets the "proxy_id" field.
 func (u *AccountProxyUpsert) SetProxyID(v int64) *AccountProxyUpsert {
 	u.Set(accountproxy.FieldProxyID, v)
@@ -217,12 +277,6 @@ func (u *AccountProxyUpsert) SetProxyID(v int64) *AccountProxyUpsert {
 // UpdateProxyID sets the "proxy_id" field to the value that was provided on create.
 func (u *AccountProxyUpsert) UpdateProxyID() *AccountProxyUpsert {
 	u.SetExcluded(accountproxy.FieldProxyID)
-	return u
-}
-
-// AddProxyID adds v to the "proxy_id" field.
-func (u *AccountProxyUpsert) AddProxyID(v int64) *AccountProxyUpsert {
-	u.Add(accountproxy.FieldProxyID, v)
 	return u
 }
 
@@ -254,6 +308,11 @@ func (u *AccountProxyUpsert) AddPosition(v int) *AccountProxyUpsert {
 //		Exec(ctx)
 func (u *AccountProxyUpsertOne) UpdateNewValues() *AccountProxyUpsertOne {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWithNewValues())
+	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
+		if _, exists := u.create.mutation.CreatedAt(); exists {
+			s.SetIgnore(accountproxy.FieldCreatedAt)
+		}
+	}))
 	return u
 }
 
@@ -291,13 +350,6 @@ func (u *AccountProxyUpsertOne) SetAccountID(v int64) *AccountProxyUpsertOne {
 	})
 }
 
-// AddAccountID adds v to the "account_id" field.
-func (u *AccountProxyUpsertOne) AddAccountID(v int64) *AccountProxyUpsertOne {
-	return u.Update(func(s *AccountProxyUpsert) {
-		s.AddAccountID(v)
-	})
-}
-
 // UpdateAccountID sets the "account_id" field to the value that was provided on create.
 func (u *AccountProxyUpsertOne) UpdateAccountID() *AccountProxyUpsertOne {
 	return u.Update(func(s *AccountProxyUpsert) {
@@ -309,13 +361,6 @@ func (u *AccountProxyUpsertOne) UpdateAccountID() *AccountProxyUpsertOne {
 func (u *AccountProxyUpsertOne) SetProxyID(v int64) *AccountProxyUpsertOne {
 	return u.Update(func(s *AccountProxyUpsert) {
 		s.SetProxyID(v)
-	})
-}
-
-// AddProxyID adds v to the "proxy_id" field.
-func (u *AccountProxyUpsertOne) AddProxyID(v int64) *AccountProxyUpsertOne {
-	return u.Update(func(s *AccountProxyUpsert) {
-		s.AddProxyID(v)
 	})
 }
 
@@ -360,24 +405,6 @@ func (u *AccountProxyUpsertOne) ExecX(ctx context.Context) {
 	if err := u.create.Exec(ctx); err != nil {
 		panic(err)
 	}
-}
-
-// Exec executes the UPSERT query and returns the inserted/updated ID.
-func (u *AccountProxyUpsertOne) ID(ctx context.Context) (id int64, err error) {
-	node, err := u.create.Save(ctx)
-	if err != nil {
-		return id, err
-	}
-	return node.ID, nil
-}
-
-// IDX is like ID, but panics if an error occurs.
-func (u *AccountProxyUpsertOne) IDX(ctx context.Context) int64 {
-	id, err := u.ID(ctx)
-	if err != nil {
-		panic(err)
-	}
-	return id
 }
 
 // AccountProxyCreateBulk is the builder for creating many AccountProxy entities in bulk.
@@ -425,11 +452,6 @@ func (_c *AccountProxyCreateBulk) Save(ctx context.Context) ([]*AccountProxy, er
 				}
 				if err != nil {
 					return nil, err
-				}
-				mutation.id = &nodes[i].ID
-				if specs[i].ID.Value != nil {
-					id := specs[i].ID.Value.(int64)
-					nodes[i].ID = int64(id)
 				}
 				mutation.done = true
 				return nodes[i], nil
@@ -521,6 +543,13 @@ type AccountProxyUpsertBulk struct {
 //		Exec(ctx)
 func (u *AccountProxyUpsertBulk) UpdateNewValues() *AccountProxyUpsertBulk {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWithNewValues())
+	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
+		for _, b := range u.create.builders {
+			if _, exists := b.mutation.CreatedAt(); exists {
+				s.SetIgnore(accountproxy.FieldCreatedAt)
+			}
+		}
+	}))
 	return u
 }
 
@@ -558,13 +587,6 @@ func (u *AccountProxyUpsertBulk) SetAccountID(v int64) *AccountProxyUpsertBulk {
 	})
 }
 
-// AddAccountID adds v to the "account_id" field.
-func (u *AccountProxyUpsertBulk) AddAccountID(v int64) *AccountProxyUpsertBulk {
-	return u.Update(func(s *AccountProxyUpsert) {
-		s.AddAccountID(v)
-	})
-}
-
 // UpdateAccountID sets the "account_id" field to the value that was provided on create.
 func (u *AccountProxyUpsertBulk) UpdateAccountID() *AccountProxyUpsertBulk {
 	return u.Update(func(s *AccountProxyUpsert) {
@@ -576,13 +598,6 @@ func (u *AccountProxyUpsertBulk) UpdateAccountID() *AccountProxyUpsertBulk {
 func (u *AccountProxyUpsertBulk) SetProxyID(v int64) *AccountProxyUpsertBulk {
 	return u.Update(func(s *AccountProxyUpsert) {
 		s.SetProxyID(v)
-	})
-}
-
-// AddProxyID adds v to the "proxy_id" field.
-func (u *AccountProxyUpsertBulk) AddProxyID(v int64) *AccountProxyUpsertBulk {
-	return u.Update(func(s *AccountProxyUpsert) {
-		s.AddProxyID(v)
 	})
 }
 

@@ -51,19 +51,6 @@ type accountRepository struct {
 	schedulerCache service.SchedulerCache
 }
 
-// ReplaceProxyPool persists the ordered proxy set for an account.
-func (r *accountRepository) ReplaceProxyPool(ctx context.Context, accountID int64, proxyIDs []int64) error {
-	if _, err := r.sql.ExecContext(ctx, `DELETE FROM account_proxies WHERE account_id = $1`, accountID); err != nil {
-		return err
-	}
-	for i, proxyID := range proxyIDs {
-		if _, err := r.sql.ExecContext(ctx, `INSERT INTO account_proxies (account_id, proxy_id, position) VALUES ($1,$2,$3) ON CONFLICT (account_id, proxy_id) DO UPDATE SET position=EXCLUDED.position`, accountID, proxyID, i); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 var schedulerNeutralExtraKeyPrefixes = []string{
 	"codex_primary_",
 	"codex_secondary_",
@@ -136,6 +123,9 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
+	if account != nil && len(account.ProxyIDs) > 1 {
+		return r.CreateWithAccountGroups(ctx, account, nil)
+	}
 	if err := createAccountRecord(ctx, r.client, account); err != nil {
 		return err
 	}
@@ -218,6 +208,11 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
+	if len(account.ProxyIDs) > 1 {
+		if err := replaceAccountProxyPool(ctx, client, account.ID, account.ProxyIDs); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -341,6 +336,18 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		return nil, err
 	}
 
+	proxyPools, err := r.loadAccountProxyPools(ctx, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	poolIDs := []int64{}
+	for _, ids := range proxyPools {
+		poolIDs = append(poolIDs, ids...)
+	}
+	poolProxies, err := r.loadProxies(ctx, poolIDs)
+	if err != nil {
+		return nil, err
+	}
 	outByID := make(map[int64]*service.Account, len(entAccounts))
 	for _, entAcc := range entAccounts {
 		out := accountEntityToService(entAcc)
@@ -348,6 +355,12 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 			continue
 		}
 
+		out.ProxyIDs = proxyPools[entAcc.ID]
+		for _, id := range out.ProxyIDs {
+			if p := poolProxies[id]; p != nil {
+				out.Proxies = append(out.Proxies, p)
+			}
+		}
 		// Prefer the preloaded proxy edge when available.
 		if entAcc.Edges.Proxy != nil {
 			out.Proxy = proxyEntityToService(entAcc.Edges.Proxy)
@@ -512,6 +525,11 @@ func (r *accountRepository) updateAccount(
 	)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	if account.ProxyPoolChanged {
+		if err := replaceAccountProxyPool(ctx, client, account.ID, account.ProxyIDs); err != nil {
+			return err
+		}
 	}
 	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		return err
@@ -3058,6 +3076,17 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if err != nil {
 		return 0, err
 	}
+	if updates.ProxyID != nil {
+		if _, err := exec.ExecContext(ctx, `DELETE FROM account_proxies WHERE account_id IN (SELECT id FROM accounts WHERE id = ANY($1) AND parent_account_id IS NULL AND deleted_at IS NULL)`, pq.Array(ids)); err != nil {
+			return 0, err
+		}
+	}
+	if updates.ProxyIDs != nil && len(*updates.ProxyIDs) > 1 {
+		if _, err := exec.ExecContext(ctx, `INSERT INTO account_proxies(account_id,proxy_id,position) SELECT a.id,p.id,p.pos-1 FROM accounts a CROSS JOIN unnest($2::bigint[]) WITH ORDINALITY AS p(id,pos) WHERE a.id=ANY($1) AND a.parent_account_id IS NULL AND a.deleted_at IS NULL`, pq.Array(ids), pq.Array(*updates.ProxyIDs)); err != nil {
+			return 0, err
+		}
+	}
+
 	if updates.ProbeEnabled != nil {
 		expectedRows := int64(0)
 		seenIDs := make(map[int64]struct{}, len(ids))
@@ -3084,7 +3113,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if rows > 0 && contextTx == nil {
-		shouldSync := false
+		shouldSync := updates.ProxyID != nil
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}
@@ -3195,6 +3224,13 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		}
 	}
 
+	proxyPoolByAccount, err := r.loadAccountProxyPools(ctx, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, ids := range proxyPoolByAccount {
+		proxyIDs = append(proxyIDs, ids...)
+	}
 	proxyMap, err := r.loadProxies(ctx, proxyIDs)
 	if err != nil {
 		return nil, err
@@ -3202,21 +3238,6 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
 	if err != nil {
 		return nil, err
-	}
-	proxyPoolByAccount := make(map[int64][]int64)
-	var rows *sql.Rows
-	var qerr error
-	if r.sql != nil {
-		rows, qerr = r.sql.QueryContext(ctx, `SELECT account_id, proxy_id FROM account_proxies WHERE account_id = ANY($1) ORDER BY account_id, position`, pq.Array(accountIDs))
-	}
-	if qerr == nil && rows != nil {
-		defer rows.Close()
-		for rows.Next() {
-			var aid, pid int64
-			if rows.Scan(&aid, &pid) == nil {
-				proxyPoolByAccount[aid] = append(proxyPoolByAccount[aid], pid)
-			}
-		}
 	}
 
 	outAccounts := make([]service.Account, 0, len(accounts))
@@ -3226,6 +3247,11 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 			continue
 		}
 		out.ProxyIDs = proxyPoolByAccount[acc.ID]
+		for _, id := range out.ProxyIDs {
+			if p := proxyMap[id]; p != nil {
+				out.Proxies = append(out.Proxies, p)
+			}
+		}
 		if acc.ProxyID != nil {
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {
 				out.Proxy = proxy

@@ -218,6 +218,7 @@ func (Account) Edges() []ent.Edge {
 		edge.To("proxy", Proxy.Type).
 			Field("proxy_id").
 			Unique(),
+		edge.To("proxies", Proxy.Type).Through("account_proxies", AccountProxy.Type),
 		// children/parent: linked spark shadow relationship.
 		// parent_account_id is nullable, and the active one-shadow-per-parent rule
 		// is enforced by the partial unique index in migration 154a.

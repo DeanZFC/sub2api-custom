@@ -1194,8 +1194,7 @@ export interface Account {
     }
   } & Record<string, unknown>)
   proxy_id: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
+  proxy_ids?: number[]
   proxy_pool?: Array<{ proxy_id: number; proxy_name: string; current_concurrency: number; max_concurrency: number }>
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null
@@ -1483,8 +1482,7 @@ export interface CreateAccountRequest {
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
+  proxy_ids?: number[]
   concurrency?: number
   load_factor?: number | null
   priority?: number
@@ -1632,8 +1630,7 @@ export interface CodexSessionImportRequest {
   notes?: string | null
   group_ids?: number[]
   proxy_id?: number | null
-  proxy_concurrency_limit_enabled?: boolean
-  proxy_pool_ids?: number[]
+  proxy_ids?: number[]
   concurrency?: number
   priority?: number
   rate_multiplier?: number
@@ -1648,6 +1645,7 @@ export interface CodexSessionImportRequest {
 }
 
 export interface OpenAICodexPATCreateRequest {
+  proxy_ids?: number[]
   access_token: string
   name?: string
   notes?: string | null

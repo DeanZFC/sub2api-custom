@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col gap-0.5">
     <!-- 并发槽位 -->
-    <template v-if="account.proxy_concurrency_limit_enabled && account.proxy_pool?.length">
+    <template v-if="(account.proxy_ids?.length ?? 0) > 1 && account.proxy_pool?.length">
       <CapacityBadge v-for="proxy in account.proxy_pool" :key="proxy.proxy_id"
         :color-class="proxyConcurrencyClass(proxy.current_concurrency, proxy.max_concurrency)"
         :current="proxy.current_concurrency" :max="proxy.max_concurrency" :suffix="proxy.proxy_name">

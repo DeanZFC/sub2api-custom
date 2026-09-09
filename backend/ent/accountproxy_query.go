@@ -11,19 +11,22 @@ import (
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
-	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountproxy"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/proxy"
 )
 
 // AccountProxyQuery is the builder for querying AccountProxy entities.
 type AccountProxyQuery struct {
 	config
-	ctx        *QueryContext
-	order      []accountproxy.OrderOption
-	inters     []Interceptor
-	predicates []predicate.AccountProxy
-	modifiers  []func(*sql.Selector)
+	ctx         *QueryContext
+	order       []accountproxy.OrderOption
+	inters      []Interceptor
+	predicates  []predicate.AccountProxy
+	withAccount *AccountQuery
+	withProxy   *ProxyQuery
+	modifiers   []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -60,6 +63,50 @@ func (_q *AccountProxyQuery) Order(o ...accountproxy.OrderOption) *AccountProxyQ
 	return _q
 }
 
+// QueryAccount chains the current query on the "account" edge.
+func (_q *AccountProxyQuery) QueryAccount() *AccountQuery {
+	query := (&AccountClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(accountproxy.Table, accountproxy.AccountColumn, selector),
+			sqlgraph.To(account.Table, account.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, accountproxy.AccountTable, accountproxy.AccountColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryProxy chains the current query on the "proxy" edge.
+func (_q *AccountProxyQuery) QueryProxy() *ProxyQuery {
+	query := (&ProxyClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(accountproxy.Table, accountproxy.ProxyColumn, selector),
+			sqlgraph.To(proxy.Table, proxy.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, accountproxy.ProxyTable, accountproxy.ProxyColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
 // First returns the first AccountProxy entity from the query.
 // Returns a *NotFoundError when no AccountProxy was found.
 func (_q *AccountProxyQuery) First(ctx context.Context) (*AccountProxy, error) {
@@ -80,29 +127,6 @@ func (_q *AccountProxyQuery) FirstX(ctx context.Context) *AccountProxy {
 		panic(err)
 	}
 	return node
-}
-
-// FirstID returns the first AccountProxy ID from the query.
-// Returns a *NotFoundError when no AccountProxy ID was found.
-func (_q *AccountProxyQuery) FirstID(ctx context.Context) (id int64, err error) {
-	var ids []int64
-	if ids, err = _q.Limit(1).IDs(setContextOp(ctx, _q.ctx, ent.OpQueryFirstID)); err != nil {
-		return
-	}
-	if len(ids) == 0 {
-		err = &NotFoundError{accountproxy.Label}
-		return
-	}
-	return ids[0], nil
-}
-
-// FirstIDX is like FirstID, but panics if an error occurs.
-func (_q *AccountProxyQuery) FirstIDX(ctx context.Context) int64 {
-	id, err := _q.FirstID(ctx)
-	if err != nil && !IsNotFound(err) {
-		panic(err)
-	}
-	return id
 }
 
 // Only returns a single AccountProxy entity found by the query, ensuring it only returns one.
@@ -132,34 +156,6 @@ func (_q *AccountProxyQuery) OnlyX(ctx context.Context) *AccountProxy {
 	return node
 }
 
-// OnlyID is like Only, but returns the only AccountProxy ID in the query.
-// Returns a *NotSingularError when more than one AccountProxy ID is found.
-// Returns a *NotFoundError when no entities are found.
-func (_q *AccountProxyQuery) OnlyID(ctx context.Context) (id int64, err error) {
-	var ids []int64
-	if ids, err = _q.Limit(2).IDs(setContextOp(ctx, _q.ctx, ent.OpQueryOnlyID)); err != nil {
-		return
-	}
-	switch len(ids) {
-	case 1:
-		id = ids[0]
-	case 0:
-		err = &NotFoundError{accountproxy.Label}
-	default:
-		err = &NotSingularError{accountproxy.Label}
-	}
-	return
-}
-
-// OnlyIDX is like OnlyID, but panics if an error occurs.
-func (_q *AccountProxyQuery) OnlyIDX(ctx context.Context) int64 {
-	id, err := _q.OnlyID(ctx)
-	if err != nil {
-		panic(err)
-	}
-	return id
-}
-
 // All executes the query and returns a list of AccountProxies.
 func (_q *AccountProxyQuery) All(ctx context.Context) ([]*AccountProxy, error) {
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryAll)
@@ -177,27 +173,6 @@ func (_q *AccountProxyQuery) AllX(ctx context.Context) []*AccountProxy {
 		panic(err)
 	}
 	return nodes
-}
-
-// IDs executes the query and returns a list of AccountProxy IDs.
-func (_q *AccountProxyQuery) IDs(ctx context.Context) (ids []int64, err error) {
-	if _q.ctx.Unique == nil && _q.path != nil {
-		_q.Unique(true)
-	}
-	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryIDs)
-	if err = _q.Select(accountproxy.FieldID).Scan(ctx, &ids); err != nil {
-		return nil, err
-	}
-	return ids, nil
-}
-
-// IDsX is like IDs, but panics if an error occurs.
-func (_q *AccountProxyQuery) IDsX(ctx context.Context) []int64 {
-	ids, err := _q.IDs(ctx)
-	if err != nil {
-		panic(err)
-	}
-	return ids
 }
 
 // Count returns the count of the given query.
@@ -221,7 +196,7 @@ func (_q *AccountProxyQuery) CountX(ctx context.Context) int {
 // Exist returns true if the query has elements in the graph.
 func (_q *AccountProxyQuery) Exist(ctx context.Context) (bool, error) {
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryExist)
-	switch _, err := _q.FirstID(ctx); {
+	switch _, err := _q.First(ctx); {
 	case IsNotFound(err):
 		return false, nil
 	case err != nil:
@@ -247,15 +222,39 @@ func (_q *AccountProxyQuery) Clone() *AccountProxyQuery {
 		return nil
 	}
 	return &AccountProxyQuery{
-		config:     _q.config,
-		ctx:        _q.ctx.Clone(),
-		order:      append([]accountproxy.OrderOption{}, _q.order...),
-		inters:     append([]Interceptor{}, _q.inters...),
-		predicates: append([]predicate.AccountProxy{}, _q.predicates...),
+		config:      _q.config,
+		ctx:         _q.ctx.Clone(),
+		order:       append([]accountproxy.OrderOption{}, _q.order...),
+		inters:      append([]Interceptor{}, _q.inters...),
+		predicates:  append([]predicate.AccountProxy{}, _q.predicates...),
+		withAccount: _q.withAccount.Clone(),
+		withProxy:   _q.withProxy.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
 	}
+}
+
+// WithAccount tells the query-builder to eager-load the nodes that are connected to
+// the "account" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *AccountProxyQuery) WithAccount(opts ...func(*AccountQuery)) *AccountProxyQuery {
+	query := (&AccountClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withAccount = query
+	return _q
+}
+
+// WithProxy tells the query-builder to eager-load the nodes that are connected to
+// the "proxy" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *AccountProxyQuery) WithProxy(opts ...func(*ProxyQuery)) *AccountProxyQuery {
+	query := (&ProxyClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withProxy = query
+	return _q
 }
 
 // GroupBy is used to group vertices by one or more fields/columns.
@@ -334,8 +333,12 @@ func (_q *AccountProxyQuery) prepareQuery(ctx context.Context) error {
 
 func (_q *AccountProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*AccountProxy, error) {
 	var (
-		nodes = []*AccountProxy{}
-		_spec = _q.querySpec()
+		nodes       = []*AccountProxy{}
+		_spec       = _q.querySpec()
+		loadedTypes = [2]bool{
+			_q.withAccount != nil,
+			_q.withProxy != nil,
+		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
 		return (*AccountProxy).scanValues(nil, columns)
@@ -343,6 +346,7 @@ func (_q *AccountProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]
 	_spec.Assign = func(columns []string, values []any) error {
 		node := &AccountProxy{config: _q.config}
 		nodes = append(nodes, node)
+		node.Edges.loadedTypes = loadedTypes
 		return node.assignValues(columns, values)
 	}
 	if len(_q.modifiers) > 0 {
@@ -357,7 +361,78 @@ func (_q *AccountProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
+	if query := _q.withAccount; query != nil {
+		if err := _q.loadAccount(ctx, query, nodes, nil,
+			func(n *AccountProxy, e *Account) { n.Edges.Account = e }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withProxy; query != nil {
+		if err := _q.loadProxy(ctx, query, nodes, nil,
+			func(n *AccountProxy, e *Proxy) { n.Edges.Proxy = e }); err != nil {
+			return nil, err
+		}
+	}
 	return nodes, nil
+}
+
+func (_q *AccountProxyQuery) loadAccount(ctx context.Context, query *AccountQuery, nodes []*AccountProxy, init func(*AccountProxy), assign func(*AccountProxy, *Account)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*AccountProxy)
+	for i := range nodes {
+		fk := nodes[i].AccountID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(account.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "account_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
+func (_q *AccountProxyQuery) loadProxy(ctx context.Context, query *ProxyQuery, nodes []*AccountProxy, init func(*AccountProxy), assign func(*AccountProxy, *Proxy)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*AccountProxy)
+	for i := range nodes {
+		fk := nodes[i].ProxyID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(proxy.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "proxy_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
 }
 
 func (_q *AccountProxyQuery) sqlCount(ctx context.Context) (int, error) {
@@ -365,15 +440,13 @@ func (_q *AccountProxyQuery) sqlCount(ctx context.Context) (int, error) {
 	if len(_q.modifiers) > 0 {
 		_spec.Modifiers = _q.modifiers
 	}
-	_spec.Node.Columns = _q.ctx.Fields
-	if len(_q.ctx.Fields) > 0 {
-		_spec.Unique = _q.ctx.Unique != nil && *_q.ctx.Unique
-	}
+	_spec.Unique = false
+	_spec.Node.Columns = nil
 	return sqlgraph.CountNodes(ctx, _q.driver, _spec)
 }
 
 func (_q *AccountProxyQuery) querySpec() *sqlgraph.QuerySpec {
-	_spec := sqlgraph.NewQuerySpec(accountproxy.Table, accountproxy.Columns, sqlgraph.NewFieldSpec(accountproxy.FieldID, field.TypeInt64))
+	_spec := sqlgraph.NewQuerySpec(accountproxy.Table, accountproxy.Columns, nil)
 	_spec.From = _q.sql
 	if unique := _q.ctx.Unique; unique != nil {
 		_spec.Unique = *unique
@@ -382,11 +455,14 @@ func (_q *AccountProxyQuery) querySpec() *sqlgraph.QuerySpec {
 	}
 	if fields := _q.ctx.Fields; len(fields) > 0 {
 		_spec.Node.Columns = make([]string, 0, len(fields))
-		_spec.Node.Columns = append(_spec.Node.Columns, accountproxy.FieldID)
 		for i := range fields {
-			if fields[i] != accountproxy.FieldID {
-				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
-			}
+			_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
+		}
+		if _q.withAccount != nil {
+			_spec.Node.AddColumnOnce(accountproxy.FieldAccountID)
+		}
+		if _q.withProxy != nil {
+			_spec.Node.AddColumnOnce(accountproxy.FieldProxyID)
 		}
 	}
 	if ps := _q.predicates; len(ps) > 0 {

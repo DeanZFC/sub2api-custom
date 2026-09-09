@@ -537,6 +537,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				selection.WaitPlan.Timeout,
 				stream,
 				&streamStarted,
+				&account,
 			)
 			if err != nil {
 				reqLog.Warn("gemini.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))

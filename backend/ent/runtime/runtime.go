@@ -282,6 +282,10 @@ func init() {
 	accountproxyDescPosition := accountproxyFields[2].Descriptor()
 	// accountproxy.DefaultPosition holds the default value on creation for the position field.
 	accountproxy.DefaultPosition = accountproxyDescPosition.Default.(int)
+	// accountproxyDescCreatedAt is the schema descriptor for created_at field.
+	accountproxyDescCreatedAt := accountproxyFields[3].Descriptor()
+	// accountproxy.DefaultCreatedAt holds the default value on creation for the created_at field.
+	accountproxy.DefaultCreatedAt = accountproxyDescCreatedAt.Default.(func() time.Time)
 	announcementFields := schema.Announcement{}.Fields()
 	_ = announcementFields
 	// announcementDescTitle is the schema descriptor for title field.

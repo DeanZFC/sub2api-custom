@@ -3,54 +3,12 @@
 package accountproxy
 
 import (
+	"time"
+
 	"entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 )
-
-// ID filters vertices based on their ID field.
-func ID(id int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldEQ(FieldID, id))
-}
-
-// IDEQ applies the EQ predicate on the ID field.
-func IDEQ(id int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldEQ(FieldID, id))
-}
-
-// IDNEQ applies the NEQ predicate on the ID field.
-func IDNEQ(id int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldNEQ(FieldID, id))
-}
-
-// IDIn applies the In predicate on the ID field.
-func IDIn(ids ...int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldIn(FieldID, ids...))
-}
-
-// IDNotIn applies the NotIn predicate on the ID field.
-func IDNotIn(ids ...int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldNotIn(FieldID, ids...))
-}
-
-// IDGT applies the GT predicate on the ID field.
-func IDGT(id int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldGT(FieldID, id))
-}
-
-// IDGTE applies the GTE predicate on the ID field.
-func IDGTE(id int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldGTE(FieldID, id))
-}
-
-// IDLT applies the LT predicate on the ID field.
-func IDLT(id int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldLT(FieldID, id))
-}
-
-// IDLTE applies the LTE predicate on the ID field.
-func IDLTE(id int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldLTE(FieldID, id))
-}
 
 // AccountID applies equality check predicate on the "account_id" field. It's identical to AccountIDEQ.
 func AccountID(v int64) predicate.AccountProxy {
@@ -65,6 +23,11 @@ func ProxyID(v int64) predicate.AccountProxy {
 // Position applies equality check predicate on the "position" field. It's identical to PositionEQ.
 func Position(v int) predicate.AccountProxy {
 	return predicate.AccountProxy(sql.FieldEQ(FieldPosition, v))
+}
+
+// CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
+func CreatedAt(v time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldEQ(FieldCreatedAt, v))
 }
 
 // AccountIDEQ applies the EQ predicate on the "account_id" field.
@@ -87,26 +50,6 @@ func AccountIDNotIn(vs ...int64) predicate.AccountProxy {
 	return predicate.AccountProxy(sql.FieldNotIn(FieldAccountID, vs...))
 }
 
-// AccountIDGT applies the GT predicate on the "account_id" field.
-func AccountIDGT(v int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldGT(FieldAccountID, v))
-}
-
-// AccountIDGTE applies the GTE predicate on the "account_id" field.
-func AccountIDGTE(v int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldGTE(FieldAccountID, v))
-}
-
-// AccountIDLT applies the LT predicate on the "account_id" field.
-func AccountIDLT(v int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldLT(FieldAccountID, v))
-}
-
-// AccountIDLTE applies the LTE predicate on the "account_id" field.
-func AccountIDLTE(v int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldLTE(FieldAccountID, v))
-}
-
 // ProxyIDEQ applies the EQ predicate on the "proxy_id" field.
 func ProxyIDEQ(v int64) predicate.AccountProxy {
 	return predicate.AccountProxy(sql.FieldEQ(FieldProxyID, v))
@@ -125,26 +68,6 @@ func ProxyIDIn(vs ...int64) predicate.AccountProxy {
 // ProxyIDNotIn applies the NotIn predicate on the "proxy_id" field.
 func ProxyIDNotIn(vs ...int64) predicate.AccountProxy {
 	return predicate.AccountProxy(sql.FieldNotIn(FieldProxyID, vs...))
-}
-
-// ProxyIDGT applies the GT predicate on the "proxy_id" field.
-func ProxyIDGT(v int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldGT(FieldProxyID, v))
-}
-
-// ProxyIDGTE applies the GTE predicate on the "proxy_id" field.
-func ProxyIDGTE(v int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldGTE(FieldProxyID, v))
-}
-
-// ProxyIDLT applies the LT predicate on the "proxy_id" field.
-func ProxyIDLT(v int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldLT(FieldProxyID, v))
-}
-
-// ProxyIDLTE applies the LTE predicate on the "proxy_id" field.
-func ProxyIDLTE(v int64) predicate.AccountProxy {
-	return predicate.AccountProxy(sql.FieldLTE(FieldProxyID, v))
 }
 
 // PositionEQ applies the EQ predicate on the "position" field.
@@ -185,6 +108,92 @@ func PositionLT(v int) predicate.AccountProxy {
 // PositionLTE applies the LTE predicate on the "position" field.
 func PositionLTE(v int) predicate.AccountProxy {
 	return predicate.AccountProxy(sql.FieldLTE(FieldPosition, v))
+}
+
+// CreatedAtEQ applies the EQ predicate on the "created_at" field.
+func CreatedAtEQ(v time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldEQ(FieldCreatedAt, v))
+}
+
+// CreatedAtNEQ applies the NEQ predicate on the "created_at" field.
+func CreatedAtNEQ(v time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldNEQ(FieldCreatedAt, v))
+}
+
+// CreatedAtIn applies the In predicate on the "created_at" field.
+func CreatedAtIn(vs ...time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldIn(FieldCreatedAt, vs...))
+}
+
+// CreatedAtNotIn applies the NotIn predicate on the "created_at" field.
+func CreatedAtNotIn(vs ...time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldNotIn(FieldCreatedAt, vs...))
+}
+
+// CreatedAtGT applies the GT predicate on the "created_at" field.
+func CreatedAtGT(v time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldGT(FieldCreatedAt, v))
+}
+
+// CreatedAtGTE applies the GTE predicate on the "created_at" field.
+func CreatedAtGTE(v time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldGTE(FieldCreatedAt, v))
+}
+
+// CreatedAtLT applies the LT predicate on the "created_at" field.
+func CreatedAtLT(v time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldLT(FieldCreatedAt, v))
+}
+
+// CreatedAtLTE applies the LTE predicate on the "created_at" field.
+func CreatedAtLTE(v time.Time) predicate.AccountProxy {
+	return predicate.AccountProxy(sql.FieldLTE(FieldCreatedAt, v))
+}
+
+// HasAccount applies the HasEdge predicate on the "account" edge.
+func HasAccount() predicate.AccountProxy {
+	return predicate.AccountProxy(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, AccountColumn),
+			sqlgraph.Edge(sqlgraph.M2O, false, AccountTable, AccountColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasAccountWith applies the HasEdge predicate on the "account" edge with a given conditions (other predicates).
+func HasAccountWith(preds ...predicate.Account) predicate.AccountProxy {
+	return predicate.AccountProxy(func(s *sql.Selector) {
+		step := newAccountStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasProxy applies the HasEdge predicate on the "proxy" edge.
+func HasProxy() predicate.AccountProxy {
+	return predicate.AccountProxy(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, ProxyColumn),
+			sqlgraph.Edge(sqlgraph.M2O, false, ProxyTable, ProxyColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasProxyWith applies the HasEdge predicate on the "proxy" edge with a given conditions (other predicates).
+func HasProxyWith(preds ...predicate.Proxy) predicate.AccountProxy {
+	return predicate.AccountProxy(func(s *sql.Selector) {
+		step := newProxyStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
 }
 
 // And groups predicates with the AND operator between them.

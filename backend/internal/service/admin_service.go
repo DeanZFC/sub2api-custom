@@ -453,6 +453,7 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
+	ProxyIDs       *[]int64
 	AccountIDs     []int64
 	Filters        *BulkUpdateAccountFilters
 	Name           string

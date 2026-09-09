@@ -10,8 +10,10 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountproxy"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/proxy"
 )
 
 // AccountProxyUpdate is the builder for updating AccountProxy entities.
@@ -29,7 +31,6 @@ func (_u *AccountProxyUpdate) Where(ps ...predicate.AccountProxy) *AccountProxyU
 
 // SetAccountID sets the "account_id" field.
 func (_u *AccountProxyUpdate) SetAccountID(v int64) *AccountProxyUpdate {
-	_u.mutation.ResetAccountID()
 	_u.mutation.SetAccountID(v)
 	return _u
 }
@@ -42,15 +43,8 @@ func (_u *AccountProxyUpdate) SetNillableAccountID(v *int64) *AccountProxyUpdate
 	return _u
 }
 
-// AddAccountID adds value to the "account_id" field.
-func (_u *AccountProxyUpdate) AddAccountID(v int64) *AccountProxyUpdate {
-	_u.mutation.AddAccountID(v)
-	return _u
-}
-
 // SetProxyID sets the "proxy_id" field.
 func (_u *AccountProxyUpdate) SetProxyID(v int64) *AccountProxyUpdate {
-	_u.mutation.ResetProxyID()
 	_u.mutation.SetProxyID(v)
 	return _u
 }
@@ -60,12 +54,6 @@ func (_u *AccountProxyUpdate) SetNillableProxyID(v *int64) *AccountProxyUpdate {
 	if v != nil {
 		_u.SetProxyID(*v)
 	}
-	return _u
-}
-
-// AddProxyID adds value to the "proxy_id" field.
-func (_u *AccountProxyUpdate) AddProxyID(v int64) *AccountProxyUpdate {
-	_u.mutation.AddProxyID(v)
 	return _u
 }
 
@@ -90,9 +78,31 @@ func (_u *AccountProxyUpdate) AddPosition(v int) *AccountProxyUpdate {
 	return _u
 }
 
+// SetAccount sets the "account" edge to the Account entity.
+func (_u *AccountProxyUpdate) SetAccount(v *Account) *AccountProxyUpdate {
+	return _u.SetAccountID(v.ID)
+}
+
+// SetProxy sets the "proxy" edge to the Proxy entity.
+func (_u *AccountProxyUpdate) SetProxy(v *Proxy) *AccountProxyUpdate {
+	return _u.SetProxyID(v.ID)
+}
+
 // Mutation returns the AccountProxyMutation object of the builder.
 func (_u *AccountProxyUpdate) Mutation() *AccountProxyMutation {
 	return _u.mutation
+}
+
+// ClearAccount clears the "account" edge to the Account entity.
+func (_u *AccountProxyUpdate) ClearAccount() *AccountProxyUpdate {
+	_u.mutation.ClearAccount()
+	return _u
+}
+
+// ClearProxy clears the "proxy" edge to the Proxy entity.
+func (_u *AccountProxyUpdate) ClearProxy() *AccountProxyUpdate {
+	_u.mutation.ClearProxy()
+	return _u
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -122,8 +132,22 @@ func (_u *AccountProxyUpdate) ExecX(ctx context.Context) {
 	}
 }
 
+// check runs all checks and user-defined validators on the builder.
+func (_u *AccountProxyUpdate) check() error {
+	if _u.mutation.AccountCleared() && len(_u.mutation.AccountIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "AccountProxy.account"`)
+	}
+	if _u.mutation.ProxyCleared() && len(_u.mutation.ProxyIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "AccountProxy.proxy"`)
+	}
+	return nil
+}
+
 func (_u *AccountProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
-	_spec := sqlgraph.NewUpdateSpec(accountproxy.Table, accountproxy.Columns, sqlgraph.NewFieldSpec(accountproxy.FieldID, field.TypeInt64))
+	if err := _u.check(); err != nil {
+		return _node, err
+	}
+	_spec := sqlgraph.NewUpdateSpec(accountproxy.Table, accountproxy.Columns, sqlgraph.NewFieldSpec(accountproxy.FieldAccountID, field.TypeInt64), sqlgraph.NewFieldSpec(accountproxy.FieldProxyID, field.TypeInt64))
 	if ps := _u.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
@@ -131,23 +155,69 @@ func (_u *AccountProxyUpdate) sqlSave(ctx context.Context) (_node int, err error
 			}
 		}
 	}
-	if value, ok := _u.mutation.AccountID(); ok {
-		_spec.SetField(accountproxy.FieldAccountID, field.TypeInt64, value)
-	}
-	if value, ok := _u.mutation.AddedAccountID(); ok {
-		_spec.AddField(accountproxy.FieldAccountID, field.TypeInt64, value)
-	}
-	if value, ok := _u.mutation.ProxyID(); ok {
-		_spec.SetField(accountproxy.FieldProxyID, field.TypeInt64, value)
-	}
-	if value, ok := _u.mutation.AddedProxyID(); ok {
-		_spec.AddField(accountproxy.FieldProxyID, field.TypeInt64, value)
-	}
 	if value, ok := _u.mutation.Position(); ok {
 		_spec.SetField(accountproxy.FieldPosition, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.AddedPosition(); ok {
 		_spec.AddField(accountproxy.FieldPosition, field.TypeInt, value)
+	}
+	if _u.mutation.AccountCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.AccountTable,
+			Columns: []string{accountproxy.AccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.AccountTable,
+			Columns: []string{accountproxy.AccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ProxyCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.ProxyTable,
+			Columns: []string{accountproxy.ProxyColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProxyIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.ProxyTable,
+			Columns: []string{accountproxy.ProxyColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
@@ -171,7 +241,6 @@ type AccountProxyUpdateOne struct {
 
 // SetAccountID sets the "account_id" field.
 func (_u *AccountProxyUpdateOne) SetAccountID(v int64) *AccountProxyUpdateOne {
-	_u.mutation.ResetAccountID()
 	_u.mutation.SetAccountID(v)
 	return _u
 }
@@ -184,15 +253,8 @@ func (_u *AccountProxyUpdateOne) SetNillableAccountID(v *int64) *AccountProxyUpd
 	return _u
 }
 
-// AddAccountID adds value to the "account_id" field.
-func (_u *AccountProxyUpdateOne) AddAccountID(v int64) *AccountProxyUpdateOne {
-	_u.mutation.AddAccountID(v)
-	return _u
-}
-
 // SetProxyID sets the "proxy_id" field.
 func (_u *AccountProxyUpdateOne) SetProxyID(v int64) *AccountProxyUpdateOne {
-	_u.mutation.ResetProxyID()
 	_u.mutation.SetProxyID(v)
 	return _u
 }
@@ -202,12 +264,6 @@ func (_u *AccountProxyUpdateOne) SetNillableProxyID(v *int64) *AccountProxyUpdat
 	if v != nil {
 		_u.SetProxyID(*v)
 	}
-	return _u
-}
-
-// AddProxyID adds value to the "proxy_id" field.
-func (_u *AccountProxyUpdateOne) AddProxyID(v int64) *AccountProxyUpdateOne {
-	_u.mutation.AddProxyID(v)
 	return _u
 }
 
@@ -232,9 +288,31 @@ func (_u *AccountProxyUpdateOne) AddPosition(v int) *AccountProxyUpdateOne {
 	return _u
 }
 
+// SetAccount sets the "account" edge to the Account entity.
+func (_u *AccountProxyUpdateOne) SetAccount(v *Account) *AccountProxyUpdateOne {
+	return _u.SetAccountID(v.ID)
+}
+
+// SetProxy sets the "proxy" edge to the Proxy entity.
+func (_u *AccountProxyUpdateOne) SetProxy(v *Proxy) *AccountProxyUpdateOne {
+	return _u.SetProxyID(v.ID)
+}
+
 // Mutation returns the AccountProxyMutation object of the builder.
 func (_u *AccountProxyUpdateOne) Mutation() *AccountProxyMutation {
 	return _u.mutation
+}
+
+// ClearAccount clears the "account" edge to the Account entity.
+func (_u *AccountProxyUpdateOne) ClearAccount() *AccountProxyUpdateOne {
+	_u.mutation.ClearAccount()
+	return _u
+}
+
+// ClearProxy clears the "proxy" edge to the Proxy entity.
+func (_u *AccountProxyUpdateOne) ClearProxy() *AccountProxyUpdateOne {
+	_u.mutation.ClearProxy()
+	return _u
 }
 
 // Where appends a list predicates to the AccountProxyUpdate builder.
@@ -277,23 +355,39 @@ func (_u *AccountProxyUpdateOne) ExecX(ctx context.Context) {
 	}
 }
 
-func (_u *AccountProxyUpdateOne) sqlSave(ctx context.Context) (_node *AccountProxy, err error) {
-	_spec := sqlgraph.NewUpdateSpec(accountproxy.Table, accountproxy.Columns, sqlgraph.NewFieldSpec(accountproxy.FieldID, field.TypeInt64))
-	id, ok := _u.mutation.ID()
-	if !ok {
-		return nil, &ValidationError{Name: "id", err: errors.New(`ent: missing "AccountProxy.id" for update`)}
+// check runs all checks and user-defined validators on the builder.
+func (_u *AccountProxyUpdateOne) check() error {
+	if _u.mutation.AccountCleared() && len(_u.mutation.AccountIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "AccountProxy.account"`)
 	}
-	_spec.Node.ID.Value = id
+	if _u.mutation.ProxyCleared() && len(_u.mutation.ProxyIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "AccountProxy.proxy"`)
+	}
+	return nil
+}
+
+func (_u *AccountProxyUpdateOne) sqlSave(ctx context.Context) (_node *AccountProxy, err error) {
+	if err := _u.check(); err != nil {
+		return _node, err
+	}
+	_spec := sqlgraph.NewUpdateSpec(accountproxy.Table, accountproxy.Columns, sqlgraph.NewFieldSpec(accountproxy.FieldAccountID, field.TypeInt64), sqlgraph.NewFieldSpec(accountproxy.FieldProxyID, field.TypeInt64))
+	if id, ok := _u.mutation.AccountID(); !ok {
+		return nil, &ValidationError{Name: "account_id", err: errors.New(`ent: missing "AccountProxy.account_id" for update`)}
+	} else {
+		_spec.Node.CompositeID[0].Value = id
+	}
+	if id, ok := _u.mutation.ProxyID(); !ok {
+		return nil, &ValidationError{Name: "proxy_id", err: errors.New(`ent: missing "AccountProxy.proxy_id" for update`)}
+	} else {
+		_spec.Node.CompositeID[1].Value = id
+	}
 	if fields := _u.fields; len(fields) > 0 {
-		_spec.Node.Columns = make([]string, 0, len(fields))
-		_spec.Node.Columns = append(_spec.Node.Columns, accountproxy.FieldID)
-		for _, f := range fields {
+		_spec.Node.Columns = make([]string, len(fields))
+		for i, f := range fields {
 			if !accountproxy.ValidColumn(f) {
 				return nil, &ValidationError{Name: f, err: fmt.Errorf("ent: invalid field %q for query", f)}
 			}
-			if f != accountproxy.FieldID {
-				_spec.Node.Columns = append(_spec.Node.Columns, f)
-			}
+			_spec.Node.Columns[i] = f
 		}
 	}
 	if ps := _u.mutation.predicates; len(ps) > 0 {
@@ -303,23 +397,69 @@ func (_u *AccountProxyUpdateOne) sqlSave(ctx context.Context) (_node *AccountPro
 			}
 		}
 	}
-	if value, ok := _u.mutation.AccountID(); ok {
-		_spec.SetField(accountproxy.FieldAccountID, field.TypeInt64, value)
-	}
-	if value, ok := _u.mutation.AddedAccountID(); ok {
-		_spec.AddField(accountproxy.FieldAccountID, field.TypeInt64, value)
-	}
-	if value, ok := _u.mutation.ProxyID(); ok {
-		_spec.SetField(accountproxy.FieldProxyID, field.TypeInt64, value)
-	}
-	if value, ok := _u.mutation.AddedProxyID(); ok {
-		_spec.AddField(accountproxy.FieldProxyID, field.TypeInt64, value)
-	}
 	if value, ok := _u.mutation.Position(); ok {
 		_spec.SetField(accountproxy.FieldPosition, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.AddedPosition(); ok {
 		_spec.AddField(accountproxy.FieldPosition, field.TypeInt, value)
+	}
+	if _u.mutation.AccountCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.AccountTable,
+			Columns: []string{accountproxy.AccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AccountIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.AccountTable,
+			Columns: []string{accountproxy.AccountColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ProxyCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.ProxyTable,
+			Columns: []string{accountproxy.ProxyColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProxyIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: false,
+			Table:   accountproxy.ProxyTable,
+			Columns: []string{accountproxy.ProxyColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	_node = &AccountProxy{config: _u.config}
 	_spec.Assign = _node.assignValues

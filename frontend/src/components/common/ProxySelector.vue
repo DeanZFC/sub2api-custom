@@ -212,13 +212,15 @@ const testingProxyIds = reactive(new Set<number>())
 const batchTesting = ref(false)
 
 const selectedProxy = computed(() => {
-  if (props.multiple) return null
-  if (props.modelValue === null) return null
-  return props.proxies.find((p) => p.id === props.modelValue) || null
+  const id = Array.isArray(props.modelValue) ? props.modelValue[0] : props.modelValue
+  if (id == null) return null
+  return props.proxies.find((p) => p.id === id) || null
 })
 
 const selectedLabel = computed(() => {
-  if (props.multiple) return Array.isArray(props.modelValue) && props.modelValue.length ? t('admin.accounts.proxyPoolCount', { count: props.modelValue.length }) : t('admin.accounts.noProxy')
+  if (props.multiple && Array.isArray(props.modelValue) && props.modelValue.length > 1) {
+    return t('admin.accounts.proxyPoolCount', { count: props.modelValue.length })
+  }
   if (!selectedProxy.value) {
     return t('admin.accounts.noProxy')
   }
@@ -252,14 +254,21 @@ const selectOption = (value: number | null) => {
   if (props.multiple) {
     const current = Array.isArray(props.modelValue) ? [...props.modelValue] : []
     if (value === null) current.splice(0)
-    else { const i = current.indexOf(value); i >= 0 ? current.splice(i, 1) : current.push(value) }
+    else {
+      const i = current.indexOf(value)
+      if (i >= 0) current.splice(i, 1)
+      else current.push(value)
+    }
     emit('update:modelValue', current)
-  } else { emit('update:modelValue', value); isOpen.value = false }
+  } else {
+    emit('update:modelValue', value)
+    isOpen.value = false
+  }
   searchQuery.value = ''
 }
 
 const isSelected = (value: number | null) => props.multiple
-  ? value !== null && Array.isArray(props.modelValue) && props.modelValue.includes(value)
+  ? Array.isArray(props.modelValue) && (value === null ? props.modelValue.length === 0 : props.modelValue.includes(value))
   : props.modelValue === value
 
 const handleTestProxy = async (proxy: Proxy) => {

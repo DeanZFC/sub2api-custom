@@ -161,6 +161,7 @@ type BulkUpdateAccountsRequest struct {
 	AccountIDs              []int64                   `json:"account_ids"`
 	Filters                 *BulkUpdateAccountFilters `json:"filters"`
 	Name                    string                    `json:"name"`
+	ProxyIDs                *[]int64                  `json:"proxy_ids"`
 	ProxyID                 *int64                    `json:"proxy_id"`
 	Concurrency             *int                      `json:"concurrency"`
 	Priority                *int                      `json:"priority"`
@@ -196,6 +197,7 @@ type AccountWithConcurrency struct {
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
+	ProxyPool          []service.ProxyPoolUsage     `json:"proxy_pool,omitempty"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
@@ -210,6 +212,7 @@ type AccountWithConcurrency struct {
 type AccountListItemWithConcurrency struct {
 	*dto.AccountListItem
 	CurrentConcurrency int                          `json:"current_concurrency"`
+	ProxyPool          []service.ProxyPoolUsage     `json:"proxy_pool,omitempty"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
@@ -376,6 +379,11 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
+	if h.concurrencyService != nil {
+		if pools, err := h.concurrencyService.GetProxyPoolUsage(ctx, []service.Account{*account}); err == nil {
+			item.ProxyPool = pools[account.ID]
+		}
+	}
 	if account.IsAnthropicOAuthOrSetupToken() {
 		if h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
 			startTime := account.GetCurrentWindowStartTime()
@@ -827,6 +835,13 @@ func (h *AccountHandler) List(c *gin.Context) {
 		result[i] = item
 	}
 
+	if h.concurrencyService != nil {
+		if pools, err := h.concurrencyService.GetProxyPoolUsage(c.Request.Context(), accounts); err == nil {
+			for i := range result {
+				result[i].ProxyPool = pools[result[i].ID]
+			}
+		}
+	}
 	h.enrichShadowParents(c.Request.Context(), result)
 
 	if lite {
@@ -836,6 +851,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 			compact[i] = AccountListItemWithConcurrency{
 				AccountListItem:    dto.AccountListItemFromAccount(item.Account),
 				CurrentConcurrency: item.CurrentConcurrency,
+				ProxyPool:          item.ProxyPool,
 				SchedulerScore:     item.SchedulerScore,
 				SchedulerScores:    item.SchedulerScores,
 				CurrentWindowCost:  item.CurrentWindowCost,
@@ -2111,6 +2127,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Credentials:           item.Credentials,
 				Extra:                 item.Extra,
 				ProxyID:               item.ProxyID,
+				ProxyIDs:              item.ProxyIDs,
 				Concurrency:           item.Concurrency,
 				Priority:              item.Priority,
 				RateMultiplier:        item.RateMultiplier,
@@ -2303,7 +2320,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	hasUpdates := req.Name != "" ||
-		req.ProxyID != nil ||
+		req.ProxyID != nil || req.ProxyIDs != nil ||
 		req.Concurrency != nil ||
 		req.Priority != nil ||
 		req.RateMultiplier != nil ||
@@ -2325,6 +2342,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
 		Name:                  req.Name,
 		ProxyID:               req.ProxyID,
+		ProxyIDs:              req.ProxyIDs,
 		Concurrency:           req.Concurrency,
 		Priority:              req.Priority,
 		RateMultiplier:        req.RateMultiplier,

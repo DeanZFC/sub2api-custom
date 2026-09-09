@@ -56,8 +56,8 @@ type ConcurrencyCache interface {
 }
 
 type accountProxyConcurrencyCache interface {
-	AcquireAccountProxySlot(context.Context, int64, int64, int, string) (bool, error)
-	ReleaseAccountProxySlot(context.Context, int64, int64, string) error
+	AcquireAccountProxyPoolSlot(context.Context, int64, []int64, int, string, ...int64) (int64, error)
+	ReleaseAccountProxyPoolSlot(context.Context, int64, int64, string) error
 }
 
 type APIKeyConcurrencyCache interface {
@@ -313,6 +313,7 @@ func (s *ConcurrencyService) SetAccountLoadBatchCacheTTL(ttl time.Duration) {
 
 // AcquireResult represents the result of acquiring a concurrency slot
 type AcquireResult struct {
+	ProxyID     int64 // Set only for a multi-proxy request; chosen atomically with its slot.
 	Acquired    bool
 	ReleaseFunc func() // Must be called when done (typically via defer)
 }
@@ -345,6 +346,9 @@ type UserLoadInfo struct {
 // If the account is at max concurrency, it waits until a slot is available or timeout.
 // Returns a release function that MUST be called when the request completes.
 func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, proxyIDs ...int64) (*AcquireResult, error) {
+	if len(proxyIDs) > 1 {
+		return s.acquireAccountProxyPoolSlot(ctx, accountID, maxConcurrency, proxyIDs)
+	}
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
 		return &AcquireResult{
@@ -356,21 +360,7 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 	// Generate unique request ID for this slot
 	requestID := generateRequestID()
 
-	var acquired bool
-	var err error
-	proxyID := int64(0)
-	if len(proxyIDs) > 0 {
-		proxyID = proxyIDs[0]
-	}
-	if proxyID > 0 && len(proxyIDs) > 1 {
-		if pc, ok := s.cache.(accountProxyConcurrencyCache); ok {
-			acquired, err = pc.AcquireAccountProxySlot(ctx, accountID, proxyID, maxConcurrency, requestID)
-		} else {
-			acquired, err = s.cache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
-		}
-	} else {
-		acquired, err = s.cache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
-	}
+	acquired, err := s.cache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -381,16 +371,7 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 			ReleaseFunc: func() {
 				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				var err error
-				if proxyID > 0 && len(proxyIDs) > 1 {
-					if pc, ok := s.cache.(accountProxyConcurrencyCache); ok {
-						err = pc.ReleaseAccountProxySlot(bgCtx, accountID, proxyID, requestID)
-					} else {
-						err = s.cache.ReleaseAccountSlot(bgCtx, accountID, requestID)
-					}
-				} else {
-					err = s.cache.ReleaseAccountSlot(bgCtx, accountID, requestID)
-				}
+				err := s.cache.ReleaseAccountSlot(bgCtx, accountID, requestID)
 				if err != nil {
 					logger.LegacyPrintf("service.concurrency", "Warning: failed to release account slot for %d (req=%s): %v", accountID, requestID, err)
 				}

@@ -32,6 +32,9 @@ type Account struct {
 	Extra                   map[string]any
 	ProxyID                 *int64
 	ProxyIDs                []int64 // ordered proxy pool; empty means legacy single proxy
+	Proxies                 []*Proxy
+	ProxyPoolChanged        bool  `json:"-"` // explicit admin edit; persist atomically with the account
+	SelectedProxyID         int64 `json:"-"` // request-local route, never persisted in a scheduler snapshot
 	ProxyFallbackOriginID   *int64
 	ProxyFallbackOriginName *string // 仅展示用
 	Concurrency             int

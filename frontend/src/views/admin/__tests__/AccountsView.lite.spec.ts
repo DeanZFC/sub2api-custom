@@ -238,8 +238,7 @@ describe('admin AccountsView lite account list', () => {
     const poolRow = {
       ...listRow,
       current_concurrency: 3,
-      proxy_concurrency_limit_enabled: true,
-      proxy_pool_ids: [91, 92],
+      proxy_ids: [91, 92],
       proxy_pool: [
         { proxy_id: 91, proxy_name: 'proxy-a', current_concurrency: 1, max_concurrency: 2 },
         { proxy_id: 92, proxy_name: 'proxy-b', current_concurrency: 2, max_concurrency: 2 }

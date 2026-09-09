@@ -220,6 +220,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				selection.WaitPlan.Timeout,
 				reqStream,
 				&streamStarted,
+				&account,
 			)
 			if err != nil {
 				reqLog.Warn("gateway.cc.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))

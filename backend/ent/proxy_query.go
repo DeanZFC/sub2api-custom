@@ -25,6 +25,7 @@ type ProxyQuery struct {
 	order              []proxy.OrderOption
 	inters             []Interceptor
 	predicates         []predicate.Proxy
+	withPoolAccounts   *AccountQuery
 	withAccounts       *AccountQuery
 	withPrimaryProxies *ProxyQuery
 	withBackupProxy    *ProxyQuery
@@ -63,6 +64,28 @@ func (_q *ProxyQuery) Unique(unique bool) *ProxyQuery {
 func (_q *ProxyQuery) Order(o ...proxy.OrderOption) *ProxyQuery {
 	_q.order = append(_q.order, o...)
 	return _q
+}
+
+// QueryPoolAccounts chains the current query on the "pool_accounts" edge.
+func (_q *ProxyQuery) QueryPoolAccounts() *AccountQuery {
+	query := (&AccountClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(proxy.Table, proxy.FieldID, selector),
+			sqlgraph.To(account.Table, account.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, true, proxy.PoolAccountsTable, proxy.PoolAccountsPrimaryKey...),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
 }
 
 // QueryAccounts chains the current query on the "accounts" edge.
@@ -323,6 +346,7 @@ func (_q *ProxyQuery) Clone() *ProxyQuery {
 		order:              append([]proxy.OrderOption{}, _q.order...),
 		inters:             append([]Interceptor{}, _q.inters...),
 		predicates:         append([]predicate.Proxy{}, _q.predicates...),
+		withPoolAccounts:   _q.withPoolAccounts.Clone(),
 		withAccounts:       _q.withAccounts.Clone(),
 		withPrimaryProxies: _q.withPrimaryProxies.Clone(),
 		withBackupProxy:    _q.withBackupProxy.Clone(),
@@ -330,6 +354,17 @@ func (_q *ProxyQuery) Clone() *ProxyQuery {
 		sql:  _q.sql.Clone(),
 		path: _q.path,
 	}
+}
+
+// WithPoolAccounts tells the query-builder to eager-load the nodes that are connected to
+// the "pool_accounts" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *ProxyQuery) WithPoolAccounts(opts ...func(*AccountQuery)) *ProxyQuery {
+	query := (&AccountClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withPoolAccounts = query
+	return _q
 }
 
 // WithAccounts tells the query-builder to eager-load the nodes that are connected to
@@ -443,7 +478,8 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	var (
 		nodes       = []*Proxy{}
 		_spec       = _q.querySpec()
-		loadedTypes = [3]bool{
+		loadedTypes = [4]bool{
+			_q.withPoolAccounts != nil,
 			_q.withAccounts != nil,
 			_q.withPrimaryProxies != nil,
 			_q.withBackupProxy != nil,
@@ -470,6 +506,13 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
+	if query := _q.withPoolAccounts; query != nil {
+		if err := _q.loadPoolAccounts(ctx, query, nodes,
+			func(n *Proxy) { n.Edges.PoolAccounts = []*Account{} },
+			func(n *Proxy, e *Account) { n.Edges.PoolAccounts = append(n.Edges.PoolAccounts, e) }); err != nil {
+			return nil, err
+		}
+	}
 	if query := _q.withAccounts; query != nil {
 		if err := _q.loadAccounts(ctx, query, nodes,
 			func(n *Proxy) { n.Edges.Accounts = []*Account{} },
@@ -493,6 +536,67 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	return nodes, nil
 }
 
+func (_q *ProxyQuery) loadPoolAccounts(ctx context.Context, query *AccountQuery, nodes []*Proxy, init func(*Proxy), assign func(*Proxy, *Account)) error {
+	edgeIDs := make([]driver.Value, len(nodes))
+	byID := make(map[int64]*Proxy)
+	nids := make(map[int64]map[*Proxy]struct{})
+	for i, node := range nodes {
+		edgeIDs[i] = node.ID
+		byID[node.ID] = node
+		if init != nil {
+			init(node)
+		}
+	}
+	query.Where(func(s *sql.Selector) {
+		joinT := sql.Table(proxy.PoolAccountsTable)
+		s.Join(joinT).On(s.C(account.FieldID), joinT.C(proxy.PoolAccountsPrimaryKey[0]))
+		s.Where(sql.InValues(joinT.C(proxy.PoolAccountsPrimaryKey[1]), edgeIDs...))
+		columns := s.SelectedColumns()
+		s.Select(joinT.C(proxy.PoolAccountsPrimaryKey[1]))
+		s.AppendSelect(columns...)
+		s.SetDistinct(false)
+	})
+	if err := query.prepareQuery(ctx); err != nil {
+		return err
+	}
+	qr := QuerierFunc(func(ctx context.Context, q Query) (Value, error) {
+		return query.sqlAll(ctx, func(_ context.Context, spec *sqlgraph.QuerySpec) {
+			assign := spec.Assign
+			values := spec.ScanValues
+			spec.ScanValues = func(columns []string) ([]any, error) {
+				values, err := values(columns[1:])
+				if err != nil {
+					return nil, err
+				}
+				return append([]any{new(sql.NullInt64)}, values...), nil
+			}
+			spec.Assign = func(columns []string, values []any) error {
+				outValue := values[0].(*sql.NullInt64).Int64
+				inValue := values[1].(*sql.NullInt64).Int64
+				if nids[inValue] == nil {
+					nids[inValue] = map[*Proxy]struct{}{byID[outValue]: {}}
+					return assign(columns[1:], values[1:])
+				}
+				nids[inValue][byID[outValue]] = struct{}{}
+				return nil
+			}
+		})
+	})
+	neighbors, err := withInterceptors[[]*Account](ctx, query, qr, query.inters)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected "pool_accounts" node returned %v`, n.ID)
+		}
+		for kn := range nodes {
+			assign(kn, n)
+		}
+	}
+	return nil
+}
 func (_q *ProxyQuery) loadAccounts(ctx context.Context, query *AccountQuery, nodes []*Proxy, init func(*Proxy), assign func(*Proxy, *Account)) error {
 	fks := make([]driver.Value, 0, len(nodes))
 	nodeids := make(map[int64]*Proxy)

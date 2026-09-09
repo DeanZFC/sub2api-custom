@@ -220,6 +220,7 @@ type Account struct {
 	CredentialsStatus       map[string]bool                `json:"credentials_status,omitempty"`
 	Extra                   map[string]any                 `json:"extra"`
 	OllamaCloudUsage        *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
+	ProxyIDs                []int64                        `json:"proxy_ids,omitempty"`
 	ProxyID                 *int64                         `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64                         `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName *string                        `json:"proxy_fallback_origin_name,omitempty"`
@@ -345,6 +346,7 @@ type AccountListItem struct {
 	Extra             map[string]any                 `json:"extra,omitempty"`
 	OllamaCloudUsage  *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 
+	ProxyIDs                []int64    `json:"proxy_ids,omitempty"`
 	ProxyID                 *int64     `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName *string    `json:"proxy_fallback_origin_name,omitempty"`
