@@ -2929,6 +2929,7 @@
 
       <div>
         <div class="mb-1 flex items-center gap-2">
+          <label class="input-label mb-0">{{ form.proxy_concurrency_limit_enabled ? t('admin.accounts.proxyPool') : t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
@@ -4629,6 +4630,8 @@ const form = reactive({
   type: 'oauth' as AccountType, // Will be 'oauth', 'setup-token', or 'apikey'
   credentials: {} as Record<string, unknown>,
   proxy_id: null as number | null,
+  proxy_concurrency_limit_enabled: false,
+  proxy_pool_ids: [] as number[],
   concurrency: 10,
   load_factor: null as number | null,
   priority: 1,
@@ -4637,16 +4640,18 @@ const form = reactive({
   expires_at: null as number | null
 })
 
-const toggleProxyPoolMode = () => {
-}
 
 // OAuth 验证只能使用一个出口；多代理模式使用池中第一个代理认证，
 // 账号保存后实际请求仍按整个代理池调度。
 const authProxyID = computed(() =>
+  form.proxy_concurrency_limit_enabled
+    ? (form.proxy_pool_ids[0] ?? null)
     : form.proxy_id
 )
 
 const proxyPoolPayload = () => ({
+  proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
+  proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : []
 })
 
 // Helper to check if current type needs OAuth flow
@@ -5219,6 +5224,8 @@ const resetForm = () => {
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
+  form.proxy_concurrency_limit_enabled = false
+  form.proxy_pool_ids = []
   form.concurrency = 10
   form.load_factor = null
   form.priority = 1
@@ -5911,6 +5918,9 @@ const createAccountAndFinish = async (
     type,
     credentials,
     extra: finalExtra,
+    proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
+    proxy_concurrency_limit_enabled: form.proxy_concurrency_limit_enabled,
+    proxy_pool_ids: form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : [],
     concurrency: form.concurrency,
     load_factor: form.load_factor ?? undefined,
     priority: form.priority,
@@ -5978,6 +5988,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           type: 'oauth',
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
+          proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
@@ -6043,6 +6054,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       sso_tokens: ssoTokens,
       name: form.name || undefined,
       notes: form.notes || undefined,
+      proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
       group_ids: form.group_ids,
       credentials,
       concurrency: form.concurrency,
@@ -6154,6 +6166,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           type: 'oauth',
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
+          proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
@@ -6253,6 +6266,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         type: 'oauth',
         credentials,
         extra: withUpstreamRequestIdHeader(extra),
+        proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
         concurrency: form.concurrency,
         load_factor: form.load_factor ?? undefined,
         priority: form.priority,
@@ -6357,6 +6371,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       content: trimmed,
       name: form.name,
       notes: form.notes || null,
+      proxy_id: form.proxy_concurrency_limit_enabled ? 0 : form.proxy_id,
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
@@ -6435,6 +6450,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       access_token: trimmed,
       name: form.name,
       notes: form.notes || null,
+      proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
@@ -6533,6 +6549,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             type: 'oauth',
             credentials,
             extra: withUpstreamRequestIdHeader(extra),
+            proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
             concurrency: form.concurrency,
             load_factor: form.load_factor ?? undefined,
             priority: form.priority,
@@ -6631,6 +6648,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           type: 'oauth',
           credentials,
           extra: withUpstreamRequestIdHeader({}),
+          proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
@@ -7017,6 +7035,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           type: addMethod.value, // Use addMethod as type: 'oauth' or 'setup-token'
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
+          proxy_id: form.proxy_concurrency_limit_enabled ? null : form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,

@@ -1588,6 +1588,7 @@
 
       <div v-if="!isSparkShadow">
         <div class="mb-1 flex items-center gap-2">
+          <label class="input-label mb-0">{{ form.proxy_concurrency_limit_enabled ? t('admin.accounts.proxyPool') : t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
@@ -3781,6 +3782,8 @@ const form = reactive({
   name: '',
   notes: '',
   proxy_id: null as number | null,
+  proxy_concurrency_limit_enabled: false,
+  proxy_pool_ids: [] as number[],
   concurrency: 1,
   load_factor: null as number | null,
   priority: 1,
@@ -3790,8 +3793,6 @@ const form = reactive({
   expires_at: null as number | null
 })
 
-const toggleProxyPoolMode = () => {
-}
 
 const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
   upstreamBillingRateSyncEnabled.value = enabled
@@ -3892,6 +3893,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
+  form.proxy_concurrency_limit_enabled = newAccount.proxy_concurrency_limit_enabled === true
+  form.proxy_pool_ids = [...(newAccount.proxy_pool_ids || [])]
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -4907,8 +4910,10 @@ const handleSubmit = async () => {
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0
     }
+    if (form.proxy_concurrency_limit_enabled) {
       updatePayload.proxy_id = 0
     }
+    updatePayload.proxy_pool_ids = form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : []
     if (form.expires_at === null) {
       updatePayload.expires_at = 0
     }
