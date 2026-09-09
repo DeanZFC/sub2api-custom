@@ -1,9 +1,9 @@
 <template>
   <div class="min-w-[116px]">
-    <div v-if="loading" class="flex h-7 items-center gap-1" aria-label="Loading recent requests">
+    <div v-if="!requests.length && loading" class="flex h-7 items-center gap-1" aria-label="Loading recent requests">
       <span v-for="index in 10" :key="index" class="h-6 w-1.5 animate-pulse rounded-full bg-gray-200 dark:bg-dark-600" />
     </div>
-    <div v-else-if="requests.length" :aria-label="t('admin.accounts.recentRequests.summary', { count: requests.length })">
+    <div v-else-if="requests.length" :class="['transition-opacity duration-200', loading ? 'opacity-60' : 'opacity-100']" :aria-label="t('admin.accounts.recentRequests.summary', { count: requests.length })">
       <div class="mb-1 text-[11px] font-medium tabular-nums text-gray-500 dark:text-gray-400">
         {{ formatTime(requests[0].created_at) }}
       </div>
