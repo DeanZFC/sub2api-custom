@@ -1171,13 +1171,16 @@ const refreshRecentRequests = async () => {
   const rows = accounts.value
   const requestSeq = ++recentRequestsReqSeq
   if (!isColumnVisible('recent_requests') || rows.length === 0) {
-    recentRequestsByAccountId.value = {}
+    // Keep the last successful snapshot during background refreshes.
     recentRequestsLoadingByAccountId.value = {}
     return
   }
 
   const visibleIDs = new Set(rows.map(row => String(row.id)))
-  recentRequestsLoadingByAccountId.value = Object.fromEntries(rows.map(row => [String(row.id), true]))
+  const initialLoad = Object.keys(recentRequestsByAccountId.value).length === 0
+  if (initialLoad) {
+    recentRequestsLoadingByAccountId.value = Object.fromEntries(rows.map(row => [String(row.id), true]))
+  }
   const results = await Promise.allSettled(rows.map(async row => {
     const response = await adminAPI.ops.listRequestDetails({
       account_id: row.id,
@@ -1191,13 +1194,14 @@ const refreshRecentRequests = async () => {
   }))
 
   if (requestSeq !== recentRequestsReqSeq) return
-  const next: Record<string, OpsRequestDetail[]> = {}
+  const next: Record<string, OpsRequestDetail[]> = { ...recentRequestsByAccountId.value }
   results.forEach(result => {
     if (result.status === 'fulfilled') next[result.value[0]] = result.value[1]
   })
-  recentRequestsByAccountId.value = Object.fromEntries(
-    Object.entries(next).filter(([key]) => visibleIDs.has(key))
-  )
+  const filtered = Object.fromEntries(Object.entries(next).filter(([key]) => visibleIDs.has(key)))
+  // Vue preserves unchanged child subtrees when the array reference is stable.
+  const changed = JSON.stringify(filtered) !== JSON.stringify(recentRequestsByAccountId.value)
+  if (changed) recentRequestsByAccountId.value = filtered
   recentRequestsLoadingByAccountId.value = {}
 }
 
