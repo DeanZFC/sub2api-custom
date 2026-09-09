@@ -1591,7 +1591,7 @@
           <label class="input-label mb-0">{{ form.proxy_concurrency_limit_enabled ? t('admin.accounts.proxyPool') : t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_pool_ids" :proxies="proxies" multiple />
       </div>
 
       <UpstreamRequestIdHeaderField

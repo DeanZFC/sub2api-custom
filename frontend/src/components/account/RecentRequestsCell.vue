@@ -9,12 +9,21 @@
       </div>
       <div class="flex h-6 items-center gap-1">
       <template v-for="request in requests" :key="request.request_id">
-        <HelpTooltip class="!ml-0" :content="requestTooltip(request)" width-class="w-80">
+        <HelpTooltip class="!ml-0" trigger="both" width-class="w-80">
           <template #trigger>
             <span :class="request.kind === 'error'
               ? 'block h-6 w-1.5 cursor-help rounded-full bg-red-500 shadow-sm shadow-red-200 dark:bg-red-400 dark:shadow-none'
               : 'block h-6 w-1.5 cursor-help rounded-full bg-emerald-500 shadow-sm shadow-emerald-200 dark:bg-emerald-400 dark:shadow-none'" />
           </template>
+          <div class="space-y-1 text-left">
+            <div class="font-semibold">{{ request.kind === 'error' ? '错误请求' : '成功请求' }}</div>
+            <div>时间：{{ formatTime(request.created_at) }}</div>
+            <div>用户：{{ request.user_id ?? '-' }}</div>
+            <div>分组：{{ request.group_id ?? '-' }}</div>
+            <div>延迟：{{ request.duration_ms == null ? '-' : `${request.duration_ms} ms` }}</div>
+            <div>状态：{{ request.status_code || (request.kind === 'error' ? 500 : 200) }}</div>
+            <div v-if="request.kind === 'error'" class="whitespace-pre-wrap text-red-200">原因：{{ request.message || '未知错误' }}</div>
+          </div>
         </HelpTooltip>
       </template>
       </div>
@@ -28,12 +37,12 @@ import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { OpsRequestDetail } from '@/api/admin/ops'
 
+const { t } = useI18n()
+
 defineProps<{
   requests: OpsRequestDetail[]
   loading?: boolean
 }>()
-
-const { t } = useI18n()
 
 const formatTime = (value: string) => {
   const timestamp = Date.parse(value)
@@ -41,18 +50,4 @@ const formatTime = (value: string) => {
   return new Intl.DateTimeFormat(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(timestamp)
 }
 
-const requestTooltip = (request: OpsRequestDetail) => {
-  const status = request.status_code || (request.kind === 'error' ? 500 : 200)
-  const latency = request.duration_ms == null ? '-' : `${request.duration_ms} ms`
-  const reason = request.message?.trim() || t('admin.accounts.recentRequests.unknownError')
-  const lines = [
-    `${formatTime(request.created_at)} · ${status}`,
-    `用户: ${request.user_id ?? '-'}`,
-    `分组: ${request.group_id ?? '-'}`,
-    `延迟: ${latency}`,
-  ]
-  if (request.kind === 'error') lines.push(`${t('admin.accounts.recentRequests.errorPrefix', { status })}: ${reason}`)
-  if (request.phase) lines.push(request.phase)
-  return lines.join('\n')
-}
 </script>
