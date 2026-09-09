@@ -1588,21 +1588,9 @@
 
       <div v-if="!isSparkShadow">
         <div class="mb-1 flex items-center gap-2">
-          <label class="input-label mb-0">{{ form.proxy_concurrency_limit_enabled ? t('admin.accounts.proxyPool') : t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <div class="mb-2 flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-700">
-          <div>
-            <span class="text-sm text-gray-700 dark:text-gray-200">{{ t('admin.accounts.proxyConcurrencyLimitEnabled') }}</span>
-            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.proxyConcurrencyLimitEnabledHint') }}</p>
-          </div>
-          <button type="button" role="switch" :aria-checked="form.proxy_concurrency_limit_enabled" @click="toggleProxyPoolMode"
-            :class="['relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors', form.proxy_concurrency_limit_enabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']">
-            <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition', form.proxy_concurrency_limit_enabled ? 'translate-x-5' : 'translate-x-0']" />
-          </button>
-        </div>
-        <ProxySelector v-if="form.proxy_concurrency_limit_enabled" v-model="form.proxy_pool_ids" :proxies="proxies" multiple />
-        <ProxySelector v-else v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
       <UpstreamRequestIdHeaderField
@@ -3793,8 +3781,6 @@ const form = reactive({
   name: '',
   notes: '',
   proxy_id: null as number | null,
-  proxy_concurrency_limit_enabled: false,
-  proxy_pool_ids: [] as number[],
   concurrency: 1,
   load_factor: null as number | null,
   priority: 1,
@@ -3805,8 +3791,6 @@ const form = reactive({
 })
 
 const toggleProxyPoolMode = () => {
-  form.proxy_concurrency_limit_enabled = !form.proxy_concurrency_limit_enabled
-  if (form.proxy_concurrency_limit_enabled) form.proxy_id = null
 }
 
 const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
@@ -3908,8 +3892,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
-  form.proxy_concurrency_limit_enabled = newAccount.proxy_concurrency_limit_enabled === true
-  form.proxy_pool_ids = [...(newAccount.proxy_pool_ids || [])]
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -4925,10 +4907,8 @@ const handleSubmit = async () => {
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0
     }
-    if (form.proxy_concurrency_limit_enabled) {
       updatePayload.proxy_id = 0
     }
-    updatePayload.proxy_pool_ids = form.proxy_concurrency_limit_enabled ? form.proxy_pool_ids : []
     if (form.expires_at === null) {
       updatePayload.expires_at = 0
     }
