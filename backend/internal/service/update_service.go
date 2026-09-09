@@ -184,8 +184,16 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 		}
 	}
 
-	// Fetch from GitHub
-	info, err := s.fetchLatestRelease(ctx)
+	// Custom deployments update from the tracked source branch. This must take
+	// precedence over GitHub Releases because custom versions are not required
+	// to publish a release tag for every build.
+	var info *UpdateInfo
+	var err error
+	if s.sourceUpdateReady(ctx) {
+		info, err = s.fetchLatestSourceVersion(ctx)
+	} else {
+		info, err = s.fetchLatestRelease(ctx)
+	}
 	if err != nil {
 		// Return cached on error
 		if cached, cacheErr := s.getFromCache(ctx); cacheErr == nil && cached != nil {
