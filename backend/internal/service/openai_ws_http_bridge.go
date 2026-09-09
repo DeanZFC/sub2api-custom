@@ -406,29 +406,6 @@ func buildOpenAIWSHTTPBridgeFailedEvent(responseID, model string, source []byte,
 }
 
 func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
-	ctx context.Context, c *gin.Context, account *Account, token string,
-	payload []byte, payloadBytes int, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity string,
-	turn int, writeClientMessage func([]byte) error,
-) (*OpenAIForwardResult, error) {
-	result, err := s.withCodexPreOutputRetry(ctx, c, account, func() (*OpenAIForwardResult, error) {
-		return s.proxyOpenAIWSHTTPBridgeAttempt(ctx, c, account, token, payload, payloadBytes, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity, turn, writeClientMessage)
-	})
-	var failure *UpstreamFailoverError
-	if !errors.As(err, &failure) || failure.Reason != CodexPreOutputRetryReason {
-		return result, err
-	}
-	clientError, eventErr := codexRetryFailureEvent(failure)
-	if eventErr != nil {
-		return result, eventErr
-	}
-	if writeErr := writeClientMessage(clientError); writeErr != nil {
-		return result, wrapOpenAIWSIngressTurnError("write_client", writeErr, false)
-	}
-	markOpenAIWSClientVisibleFailure(c, gjson.GetBytes(clientError, "type").String(), clientError)
-	return result, wrapOpenAIWSIngressTurnError("upstream_error", errors.New(failure.ClientMessage), true)
-}
-
-func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeAttempt(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
@@ -614,17 +591,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeAttempt(
 			upstreamMsg = http.StatusText(resp.StatusCode)
 		}
 		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
-		if retryErr := s.newCodexPreOutputRetryError(c, account, resp.StatusCode, resp.Header, respBody, upstreamMsg); retryErr != nil {
-			return nil, retryErr
-		}
 		if account.Platform == PlatformGrok {
 			shouldFailover = s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody)
 			s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, resolveGrokWSUpstreamModel(account, body, originalModel)), account, resp.StatusCode, resp.Header, respBody)
 			if shouldFailover && (turn == 1 || resp.StatusCode == http.StatusTooManyRequests) {
-				return nil, finalizeAccount429Failover(
-					resp,
-					newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMsg, false),
-				)
+				return nil, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMsg, false)
 			}
 		} else if shouldFailover && (turn == 1 || resp.StatusCode == http.StatusTooManyRequests) {
 			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, respBody)
@@ -837,11 +808,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeAttempt(
 				errMessage = "upstream error event"
 			}
 			statusCode := openAIStreamFailureStatus(upstreamMessage, errMessage)
-			if !wroteDownstream {
-				if retryErr := s.newCodexPreOutputRetrySSEError(c, account, resp, []byte(trimmedData), eventType, errMessage); retryErr != nil {
-					return nil, retryErr
-				}
-			}
 			shouldFailover := openAIStreamFailedEventShouldFailover(upstreamMessage, errMessage)
 			if eventType == "error" {
 				errCodeRaw, errTypeRaw, _ := parseOpenAIWSErrorEventFields(upstreamMessage)

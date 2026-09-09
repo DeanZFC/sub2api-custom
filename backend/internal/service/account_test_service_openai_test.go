@@ -173,53 +173,6 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.Contains(t, recorder.Body.String(), "test_complete")
 }
 
-func TestAccountTestService_OpenAIOAuthOverdraftTestInjectsAndObservesSnapshot(t *testing.T) {
-	ctx, _ := newTestContext()
-
-	resp := newJSONResponse(http.StatusOK, "")
-	resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
-	resp.Header.Set("x-codex-secondary-used-percent", "100")
-	resp.Header.Set("x-codex-secondary-reset-after-seconds", "18000")
-	resp.Header.Set("x-codex-secondary-window-minutes", "300")
-
-	repo := &openAIAccountTestRepo{}
-	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	coordinator := &accountTestOverdraftCoordinatorStub{}
-	svc := &AccountTestService{
-		accountRepo:         repo,
-		httpUpstream:        upstream,
-		cfg:                 &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}},
-		codexQuotaOverdraft: coordinator,
-	}
-	account := &Account{
-		ID:          96,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		Credentials: map[string]any{"access_token": "test-token"},
-		Extra: map[string]any{
-			CodexQuotaOverdraftEnabledExtraKey: true,
-			"codex_5h_used_percent":            95,
-			"codex_5h_reset_at":                time.Now().Add(5 * time.Hour).Format(time.RFC3339),
-		},
-	}
-
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
-	require.NoError(t, err)
-	require.Len(t, upstream.requests, 1)
-	body, err := io.ReadAll(upstream.requests[0].Body)
-	require.NoError(t, err)
-	require.Equal(t, "message", gjson.GetBytes(body, "input.0.type").String())
-	require.Equal(t, "custom_tool_call", gjson.GetBytes(body, "input.1.type").String())
-	require.Equal(t, "custom_tool_call_output", gjson.GetBytes(body, "input.2.type").String())
-	require.Equal(t, gjson.GetBytes(body, "input.1.call_id").String(), gjson.GetBytes(body, "input.2.call_id").String())
-	require.Zero(t, coordinator.observeCalls)
-	require.Equal(t, 1, coordinator.businessCalls)
-	require.Same(t, account, coordinator.observedAccount)
-	require.Equal(t, "gpt-5.4", coordinator.observedModel)
-	require.Equal(t, 100.0, account.Extra["codex_5h_used_percent"])
-}
-
 func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
@@ -294,13 +247,7 @@ func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *t
 		},
 	}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	coordinator := &accountTestOverdraftCoordinatorStub{}
-	svc := &AccountTestService{
-		accountRepo:         repo,
-		httpUpstream:        upstream,
-		cfg:                 &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}},
-		codexQuotaOverdraft: coordinator,
-	}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
 
 	err := svc.TestAccountConnection(ctx, shadow.ID, "gpt-5.3-codex-spark", "", "")
 	require.NoError(t, err)
@@ -311,9 +258,6 @@ func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *t
 	body, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.3-codex-spark", gjson.GetBytes(body, "model").String())
-	require.False(t, gjson.GetBytes(body, "input.1").Exists())
-	require.Zero(t, coordinator.observeCalls)
-	require.Zero(t, coordinator.handleCalls)
 	require.Contains(t, recorder.Body.String(), `"success":true`)
 }
 
@@ -465,14 +409,12 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
 	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
 	account := &Account{
-		ID:                     88,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Status:                 StatusError,
-		Concurrency:            1,
-		RateLimit429RetryCount: retryCountPointer(0),
-		Credentials:            map[string]any{"access_token": "test-token"},
-		Extra:                  map[string]any{CodexQuotaOverdraftEnabledExtraKey: true},
+		ID:          88,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusError,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -487,76 +429,6 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
 	require.NotNil(t, account.RateLimitResetAt)
 }
 
-func TestAccountTestService_OpenAIQuota429UsesOverdraftCoordinatorWithoutRateLimitWrite(t *testing.T) {
-	ctx, _ := newTestContext()
-
-	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":1777283883}}`)
-	resp.Header.Set("x-codex-secondary-used-percent", "100")
-	resp.Header.Set("x-codex-secondary-reset-after-seconds", "18000")
-	resp.Header.Set("x-codex-secondary-window-minutes", "300")
-
-	repo := &openAIAccountTestRepo{}
-	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	coordinator := &accountTestOverdraftCoordinatorStub{handleResult: true}
-	svc := &AccountTestService{
-		accountRepo:         repo,
-		httpUpstream:        upstream,
-		cfg:                 &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}},
-		codexQuotaOverdraft: coordinator,
-	}
-	account := &Account{
-		ID:                     97,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Status:                 StatusActive,
-		Concurrency:            1,
-		RateLimit429RetryCount: retryCountPointer(0),
-		Credentials:            map[string]any{"access_token": "test-token"},
-		Extra:                  map[string]any{CodexQuotaOverdraftEnabledExtraKey: true},
-	}
-
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
-	require.Error(t, err)
-	require.Equal(t, 1, coordinator.handleCalls)
-	require.Same(t, account, coordinator.handledAccount)
-	require.Equal(t, "gpt-5.4", coordinator.handledModel)
-	require.Zero(t, repo.rateLimitedID)
-	require.Nil(t, repo.rateLimitedAt)
-	require.Nil(t, account.RateLimitResetAt)
-}
-
-func TestAccountTestService_OpenAI429FallsBackWhenOverdraftDoesNotHandle(t *testing.T) {
-	ctx, _ := newTestContext()
-
-	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"rate_limit_exceeded","message":"too many requests","resets_in_seconds":60}}`)
-	repo := &openAIAccountTestRepo{}
-	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	coordinator := &accountTestOverdraftCoordinatorStub{}
-	svc := &AccountTestService{
-		accountRepo:         repo,
-		httpUpstream:        upstream,
-		cfg:                 &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}},
-		codexQuotaOverdraft: coordinator,
-	}
-	account := &Account{
-		ID:                     98,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Status:                 StatusActive,
-		Concurrency:            1,
-		RateLimit429RetryCount: retryCountPointer(0),
-		Credentials:            map[string]any{"access_token": "test-token"},
-		Extra:                  map[string]any{CodexQuotaOverdraftEnabledExtraKey: true},
-	}
-
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
-	require.Error(t, err)
-	require.Equal(t, 1, coordinator.handleCalls)
-	require.Equal(t, account.ID, repo.rateLimitedID)
-	require.NotNil(t, repo.rateLimitedAt)
-	require.NotNil(t, account.RateLimitResetAt)
-}
-
 func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
@@ -567,14 +439,13 @@ func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleErro
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
 	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
 	account := &Account{
-		ID:                     77,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Status:                 StatusError,
-		ErrorMessage:           "Access forbidden (403): account may be suspended or lack permissions",
-		Concurrency:            1,
-		RateLimit429RetryCount: retryCountPointer(0),
-		Credentials:            map[string]any{"access_token": "test-token"},
+		ID:           77,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		Status:       StatusError,
+		ErrorMessage: "Access forbidden (403): account may be suspended or lack permissions",
+		Concurrency:  1,
+		Credentials:  map[string]any{"access_token": "test-token"},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -598,13 +469,12 @@ func TestAccountTestService_OpenAI429SyncsObservedPlanType(t *testing.T) {
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
 	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
 	account := &Account{
-		ID:                     81,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Status:                 StatusActive,
-		Concurrency:            1,
-		RateLimit429RetryCount: retryCountPointer(0),
-		Credentials:            map[string]any{"access_token": "test-token", "plan_type": "plus"},
+		ID:          81,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token", "plan_type": "plus"},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -626,13 +496,12 @@ func TestAccountTestService_OpenAI429ActiveAccountDoesNotClearError(t *testing.T
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
 	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
 	account := &Account{
-		ID:                     78,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Status:                 StatusActive,
-		Concurrency:            1,
-		RateLimit429RetryCount: retryCountPointer(0),
-		Credentials:            map[string]any{"access_token": "test-token"},
+		ID:          78,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -654,14 +523,13 @@ func TestAccountTestService_OpenAI429WithoutResetSignalDoesNotMutateRuntimeState
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
 	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
 	account := &Account{
-		ID:                     79,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Status:                 StatusError,
-		ErrorMessage:           "stale 403",
-		Concurrency:            1,
-		RateLimit429RetryCount: retryCountPointer(0),
-		Credentials:            map[string]any{"access_token": "test-token"},
+		ID:           79,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		Status:       StatusError,
+		ErrorMessage: "stale 403",
+		Concurrency:  1,
+		Credentials:  map[string]any{"access_token": "test-token"},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
@@ -709,9 +577,8 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testin
 	resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
 	svc := &AccountTestService{
-		httpUpstream:        upstream,
-		cfg:                 &config.Config{Gateway: config.GatewayConfig{CodexQuotaOverdraftEnabled: true}, Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
-		codexQuotaOverdraft: &accountTestOverdraftCoordinatorStub{},
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 	}
 	account := &Account{
 		ID:          95,
@@ -731,10 +598,6 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testin
 	req := upstream.requests[0]
 	require.Equal(t, "https://compat-upstream.example/v1/responses", req.URL.String())
 	requireOpenAICodexProbeHeaders(t, req.Header)
-	body, err := io.ReadAll(req.Body)
-	require.NoError(t, err)
-	require.Equal(t, "message", gjson.GetBytes(body, "input.0.type").String())
-	require.False(t, gjson.GetBytes(body, "input.1").Exists())
 }
 
 func TestAccountTestService_OpenAIAPIKeyResponsesUnsupportedUsesChatCompletionsPath(t *testing.T) {

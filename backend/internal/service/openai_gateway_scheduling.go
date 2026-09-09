@@ -527,9 +527,6 @@ func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) 
 	if account == nil || !account.IsOpenAI() {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
-	if codexQuotaOverdraftBypassesSchedulingThreshold(ctx, account) {
-		return false, openAIQuotaAutoPauseDecision{}
-	}
 	// 自动用卡有独立阈值：达到消费阈值时必须先退出调度；仅达到普通暂停阈值时，
 	// 只有新鲜状态明确存在可用卡才继续放行到消费阈值。
 	if config := ResolveOpenAIAutoResetCreditConfig(account); config.Enabled {
@@ -1156,7 +1153,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if err != nil {
 			return nil, err
 		}
-		result, err := s.tryAcquireAccountSlotForAccount(ctx, account)
+		result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 		if err == nil && result != nil && result.Acquired {
 			return s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 		}
@@ -1223,7 +1220,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					} else if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else {
-						result, err := s.tryAcquireAccountSlotForAccount(ctx, account)
+						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 						if err == nil && result != nil && result.Acquired {
 							selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 							if selectErr != nil {
@@ -1306,7 +1303,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
-		accountLoads = append(accountLoads, BuildAccountWithConcurrency(acc))
+		accountLoads = append(accountLoads, AccountWithConcurrency{
+			ID:             acc.ID,
+			MaxConcurrency: acc.EffectiveLoadFactor(),
+		})
 	}
 
 	tryAcquireFromLoadMap := func(loadMap map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
@@ -1385,7 +1385,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			result, err := s.tryAcquireAccountSlotForAccount(ctx, fresh)
+			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1424,7 +1424,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			result, err := s.tryAcquireAccountSlotForAccount(ctx, fresh)
+			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1490,15 +1490,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
 	platform = NormalizeOpenAICompatiblePlatform(platform)
-	if accounts, handled, err := s.listCodexQuotaOverdraftSchedulableAccounts(ctx, groupID, platform); handled {
-		return accounts, err
-	}
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)
 		if err != nil {
 			return accounts, err
 		}
-		accounts = normalizeCodexQuotaOverdraftAccountsForScheduling(ctx, accounts)
 		accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
 		if platform == PlatformGrok {
 			accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
@@ -1517,7 +1513,6 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
-	accounts = normalizeCodexQuotaOverdraftAccountsForScheduling(ctx, accounts)
 	accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
@@ -1525,28 +1520,11 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	return accounts, nil
 }
 
-func (s *OpenAIGatewayService) tryAcquireAccountSlotForAccount(ctx context.Context, account *Account, concurrencyOverride ...int) (*AcquireResult, error) {
-	if account == nil {
-		return nil, fmt.Errorf("account is nil")
-	}
-	maxConcurrency := account.Concurrency
-	if len(concurrencyOverride) > 0 {
-		maxConcurrency = concurrencyOverride[0]
-	}
+func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
 	if s.concurrencyService == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
-	if account.ProxyConcurrencyLimitEnabled() {
-		result, proxyID, err := s.concurrencyService.AcquireAccountProxySlot(ctx, account.ID, account.ProxyPoolIDs, maxConcurrency)
-		if result != nil && result.Acquired && proxyID > 0 {
-			if proxy := findProxyByID(account.ProxyPool, proxyID); proxy != nil {
-				account.Proxy = proxy
-				account.ProxyID = &proxyID
-			}
-		}
-		return result, err
-	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, account.ID, maxConcurrency)
+	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 }
 
 func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
@@ -1574,7 +1552,6 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 		}
 		fresh = current
 	}
-	fresh = normalizeCodexQuotaOverdraftAccountForScheduling(ctx, fresh)
 
 	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, fresh, platform, requestedModel, requireCompact, requiredCapability) {
 		return nil
@@ -1647,7 +1624,6 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if err != nil || latest == nil {
 		return nil
 	}
-	latest = normalizeCodexQuotaOverdraftAccountForScheduling(ctx, latest)
 	if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
 		return nil
 	}
@@ -1692,7 +1668,6 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	if err != nil || account == nil {
 		return account, err
 	}
-	account = normalizeCodexQuotaOverdraftAccountForScheduling(ctx, account)
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}
@@ -1733,9 +1708,6 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 	if s == nil || s.rateLimitService == nil || account == nil {
 		return false
 	}
-	if codexQuotaOverdraftBypassesSchedulingThreshold(ctx, account) {
-		return false
-	}
 	return s.rateLimitService.ApplyAccountSchedulingThreshold(ctx, account)
 }
 
@@ -1757,25 +1729,6 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
 		return nil, err
-	}
-	if account != nil && account.ProxyConcurrencyLimitEnabled() && account.ProxyID != nil {
-		if proxy := findProxyByID(hydrated.ProxyPool, *account.ProxyID); proxy != nil {
-			hydrated.Proxy = proxy
-			hydrated.ProxyID = account.ProxyID
-		} else if proxy := findProxyByID(account.ProxyPool, *account.ProxyID); proxy != nil {
-			hydrated.Proxy = proxy
-			hydrated.ProxyID = account.ProxyID
-		} else if s.accountRepo != nil {
-			// A pre-upgrade scheduler cache may contain pool IDs but no eager-loaded
-			// proxy objects. Recover the selected exit once from the source of truth.
-			if latest, loadErr := s.accountRepo.GetByID(ctx, account.ID); loadErr == nil && latest != nil {
-				hydrated.ProxyPool = latest.ProxyPool
-				if proxy := findProxyByID(latest.ProxyPool, *account.ProxyID); proxy != nil {
-					hydrated.Proxy = proxy
-					hydrated.ProxyID = account.ProxyID
-				}
-			}
-		}
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 		Account:     hydrated,

@@ -56,7 +56,6 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 	"codex_secondary_",
 	"codex_5h_",
 	"codex_7d_",
-	"codex_quota_overdraft_",
 	"codex_reset_credit_",
 	"passive_usage_",
 	"upstream_billing_probe",
@@ -146,7 +145,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetCredentials(normalizeJSONMap(account.Credentials)).
 		SetExtra(normalizeJSONMap(account.Extra)).
 		SetConcurrency(account.Concurrency).
-		SetRateLimit429RetryCount(account.GetRateLimit429RetryCount()).
 		SetPriority(account.Priority).
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
@@ -314,20 +312,9 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 
 	accountIDs := make([]int64, 0, len(entAccounts))
 	entByID := make(map[int64]*dbent.Account, len(entAccounts))
-	proxyIDs := make([]int64, 0, len(entAccounts))
 	for _, acc := range entAccounts {
 		entByID[acc.ID] = acc
 		accountIDs = append(accountIDs, acc.ID)
-		if acc.ProxyID != nil {
-			proxyIDs = append(proxyIDs, *acc.ProxyID)
-		}
-		if acc.Extra != nil {
-			proxyIDs = append(proxyIDs, service.NormalizeProxyPoolIDs(acc.Extra[service.ProxyPoolIDsExtraKey])...)
-		}
-	}
-	proxyMap, err := r.loadProxies(ctx, proxyIDs)
-	if err != nil {
-		return nil, err
 	}
 
 	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
@@ -345,17 +332,6 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		// Prefer the preloaded proxy edge when available.
 		if entAcc.Edges.Proxy != nil {
 			out.Proxy = proxyEntityToService(entAcc.Edges.Proxy)
-		} else if entAcc.ProxyID != nil {
-			out.Proxy = proxyMap[*entAcc.ProxyID]
-		}
-		out.SyncProxyPoolConfig()
-		configuredProxyIDs := out.ProxyPoolIDs
-		out.ProxyPoolIDs = nil
-		for _, proxyID := range configuredProxyIDs {
-			if proxy, ok := proxyMap[proxyID]; ok && proxy != nil {
-				out.ProxyPoolIDs = append(out.ProxyPoolIDs, proxyID)
-				out.ProxyPool = append(out.ProxyPool, proxy)
-			}
 		}
 
 		if groups, ok := groupsByAccount[entAcc.ID]; ok {
@@ -563,7 +539,6 @@ func (r *accountRepository) updateLockedAccount(
 		SetCredentials(normalizeJSONMap(account.Credentials)).
 		SetExtra(extra).
 		SetConcurrency(account.Concurrency).
-		SetRateLimit429RetryCount(account.GetRateLimit429RetryCount()).
 		SetPriority(account.Priority).
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
@@ -1915,7 +1890,7 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 }
 
 func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Account, error) {
-	accounts, err := r.schedulableAccountsQuery(ctx, time.Now()).All(ctx)
+	accounts, err := r.schedulableAccountsQuery(time.Now()).All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1923,12 +1898,11 @@ func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Acco
 }
 
 func (r *accountRepository) ListSchedulableAccountLoads(ctx context.Context) ([]service.AccountWithConcurrency, error) {
-	accounts, err := r.schedulableAccountsQuery(ctx, time.Now()).
+	accounts, err := r.schedulableAccountsQuery(time.Now()).
 		Select(
 			dbaccount.FieldID,
 			dbaccount.FieldConcurrency,
 			dbaccount.FieldLoadFactor,
-			dbaccount.FieldExtra,
 		).
 		All(ctx)
 	if err != nil {
@@ -1941,19 +1915,21 @@ func (r *accountRepository) ListSchedulableAccountLoads(ctx context.Context) ([]
 			ID:          account.ID,
 			Concurrency: account.Concurrency,
 			LoadFactor:  account.LoadFactor,
-			Extra:       account.Extra,
 		}
-		loads = append(loads, service.BuildAccountWithConcurrency(&projection))
+		loads = append(loads, service.AccountWithConcurrency{
+			ID:             account.ID,
+			MaxConcurrency: projection.EffectiveLoadFactor(),
+		})
 	}
 	return loads, nil
 }
 
-func (r *accountRepository) schedulableAccountsQuery(ctx context.Context, now time.Time) *dbent.AccountQuery {
+func (r *accountRepository) schedulableAccountsQuery(now time.Time) *dbent.AccountQuery {
 	return r.client.Account.Query().
 		Where(
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
-			tempUnschedulablePredicate(ctx),
+			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -2059,7 +2035,7 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
-			tempUnschedulablePredicate(ctx),
+			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -2093,7 +2069,7 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
-			tempUnschedulablePredicate(ctx),
+			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -2114,7 +2090,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
-			tempUnschedulablePredicate(ctx),
+			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -2138,7 +2114,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
-			tempUnschedulablePredicate(ctx),
+			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -2849,11 +2825,6 @@ func isSchedulerNeutralExtraKey(key string) bool {
 	if key == "" {
 		return false
 	}
-	// Unlike runtime quota/probe fields, this account-level policy changes
-	// scheduling eligibility and must refresh the scheduler snapshot immediately.
-	if key == service.CodexQuotaOverdraftEnabledExtraKey {
-		return false
-	}
 	if _, ok := schedulerNeutralExtraKeys[key]; ok {
 		return true
 	}
@@ -2912,11 +2883,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if updates.Concurrency != nil {
 		setClauses = append(setClauses, "concurrency = $"+itoa(idx))
 		args = append(args, *updates.Concurrency)
-		idx++
-	}
-	if updates.RateLimit429RetryCount != nil {
-		setClauses = append(setClauses, "rate_limit_429_retry_count = $"+itoa(idx))
-		args = append(args, *updates.RateLimit429RetryCount)
 		idx++
 	}
 	if updates.Priority != nil {
@@ -3129,7 +3095,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		if !opts.ignoreTransientState {
 			now := time.Now()
 			preds = append(preds,
-				tempUnschedulablePredicate(ctx),
+				tempUnschedulablePredicate(),
 				notExpiredPredicate(now),
 				dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 				dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -3190,9 +3156,6 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		if acc.ProxyFallbackOriginID != nil {
 			proxyIDs = append(proxyIDs, *acc.ProxyFallbackOriginID)
 		}
-		if acc.Extra != nil {
-			proxyIDs = append(proxyIDs, service.NormalizeProxyPoolIDs(acc.Extra[service.ProxyPoolIDsExtraKey])...)
-		}
 	}
 
 	proxyMap, err := r.loadProxies(ctx, proxyIDs)
@@ -3213,15 +3176,6 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		if acc.ProxyID != nil {
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {
 				out.Proxy = proxy
-			}
-		}
-		out.SyncProxyPoolConfig()
-		configuredProxyIDs := out.ProxyPoolIDs
-		out.ProxyPoolIDs = nil
-		for _, proxyID := range configuredProxyIDs {
-			if proxy, ok := proxyMap[proxyID]; ok && proxy != nil {
-				out.ProxyPoolIDs = append(out.ProxyPoolIDs, proxyID)
-				out.ProxyPool = append(out.ProxyPool, proxy)
 			}
 		}
 		out.ProxyFallbackOriginID = acc.ProxyFallbackOriginID
@@ -3246,15 +3200,13 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	return outAccounts, nil
 }
 
-func tempUnschedulablePredicate(ctx context.Context) dbpredicate.Account {
+func tempUnschedulablePredicate() dbpredicate.Account {
 	return dbpredicate.Account(func(s *entsql.Selector) {
 		col := s.C("temp_unschedulable_until")
-		predicates := []*entsql.Predicate{
+		s.Where(entsql.Or(
 			entsql.IsNull(col),
 			entsql.LTE(col, entsql.Expr("NOW()")),
-		}
-		predicates = extendCodexQuotaOverdraftTempUnschedulablePredicates(ctx, s, predicates)
-		s.Where(entsql.Or(predicates...))
+		))
 	})
 }
 
@@ -3440,9 +3392,8 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 	}
 
 	rateMultiplier := m.RateMultiplier
-	rateLimit429RetryCount := m.RateLimit429RetryCount
 
-	out := &service.Account{
+	return &service.Account{
 		ID:                      m.ID,
 		Name:                    m.Name,
 		Notes:                   m.Notes,
@@ -3453,7 +3404,6 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		ProxyID:                 m.ProxyID,
 		ProxyFallbackOriginID:   m.ProxyFallbackOriginID,
 		Concurrency:             m.Concurrency,
-		RateLimit429RetryCount:  &rateLimit429RetryCount,
 		Priority:                m.Priority,
 		RateMultiplier:          &rateMultiplier,
 		LoadFactor:              m.LoadFactor,
@@ -3476,8 +3426,6 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		ParentAccountID:         m.ParentAccountID,
 		QuotaDimension:          string(m.QuotaDimension),
 	}
-	out.SyncProxyPoolConfig()
-	return out
 }
 
 func normalizeJSONMap(in map[string]any) map[string]any {

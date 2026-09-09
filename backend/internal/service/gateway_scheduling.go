@@ -198,12 +198,12 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 
 		for {
-			account, err := s.selectAccountForModelWithExclusionsInGroup(ctx, groupID, sessionHash, requestedModel, localExcluded)
+			account, err := s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded)
 			if err != nil {
 				return nil, err
 			}
 
-			result, err := s.tryAcquireAccountSlotForAccount(ctx, account)
+			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 			if err == nil && result.Acquired {
 				// 获取槽位后检查会话限制（使用 sessionHash 作为会话标识符）
 				if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -395,7 +395,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 						rpmPass := gatePass && s.isAccountSchedulableForRPM(ctx, stickyAccount, true)
 
 						if rpmPass { // 粘性会话窗口费用+RPM 检查
-							result, err := s.tryAcquireAccountSlotForAccount(ctx, stickyAccount)
+							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, stickyAccount.Concurrency)
 							if err == nil && result.Acquired {
 								// 会话数量限制检查
 								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
@@ -465,7 +465,10 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 			// 2. 批量获取负载信息
 			routingLoads := make([]AccountWithConcurrency, 0, len(routingCandidates))
 			for _, acc := range routingCandidates {
-				routingLoads = append(routingLoads, BuildAccountWithConcurrency(acc))
+				routingLoads = append(routingLoads, AccountWithConcurrency{
+					ID:             acc.ID,
+					MaxConcurrency: acc.EffectiveLoadFactor(),
+				})
 			}
 			routingLoadMap, _ := s.concurrencyService.GetAccountsLoadBatch(ctx, routingLoads)
 
@@ -506,7 +509,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
-					result, err := s.tryAcquireAccountSlotForAccount(ctx, item.account)
+					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
@@ -592,7 +595,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 				)
 
 				if !clearSticky && platformOK && profitOK && modelSupported && channelOK && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable {
-					result, err := s.tryAcquireAccountSlotForAccount(ctx, account)
+					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -733,7 +736,10 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
-		accountLoads = append(accountLoads, BuildAccountWithConcurrency(acc))
+		accountLoads = append(accountLoads, AccountWithConcurrency{
+			ID:             acc.ID,
+			MaxConcurrency: acc.EffectiveLoadFactor(),
+		})
 	}
 
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
@@ -774,7 +780,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 				break
 			}
 
-			result, err := s.tryAcquireAccountSlotForAccount(ctx, selected.account)
+			result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency)
 			if err == nil && result.Acquired {
 				// 会话数量限制检查
 				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
@@ -821,7 +827,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
 
 	for _, acc := range ordered {
-		result, err := s.tryAcquireAccountSlotForAccount(ctx, acc)
+		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
 			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
@@ -1201,33 +1207,11 @@ func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool
 	return false
 }
 
-func (s *GatewayService) tryAcquireAccountSlotForAccount(ctx context.Context, account *Account) (*AcquireResult, error) {
-	if account == nil {
-		return nil, fmt.Errorf("account is nil")
-	}
+func (s *GatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
 	if s.concurrencyService == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
-	if account.ProxyConcurrencyLimitEnabled() {
-		result, proxyID, err := s.concurrencyService.AcquireAccountProxySlot(ctx, account.ID, account.ProxyPoolIDs, account.Concurrency)
-		if result != nil && result.Acquired && proxyID > 0 {
-			if proxy := findProxyByID(account.ProxyPool, proxyID); proxy != nil {
-				account.Proxy = proxy
-				account.ProxyID = &proxyID
-			}
-		}
-		return result, err
-	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, account.ID, account.Concurrency)
-}
-
-func findProxyByID(proxies []*Proxy, id int64) *Proxy {
-	for _, proxy := range proxies {
-		if proxy != nil && proxy.ID == id {
-			return proxy
-		}
-	}
-	return nil
+	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 }
 
 type usageLogWindowStatsBatchProvider interface {
@@ -1621,25 +1605,6 @@ func (s *GatewayService) newSelectionResult(ctx context.Context, account *Accoun
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
 		return nil, err
-	}
-	if account != nil && account.ProxyConcurrencyLimitEnabled() && account.ProxyID != nil {
-		if proxy := findProxyByID(hydrated.ProxyPool, *account.ProxyID); proxy != nil {
-			hydrated.Proxy = proxy
-			hydrated.ProxyID = account.ProxyID
-		} else if proxy := findProxyByID(account.ProxyPool, *account.ProxyID); proxy != nil {
-			hydrated.Proxy = proxy
-			hydrated.ProxyID = account.ProxyID
-		} else if s.accountRepo != nil {
-			// A pre-upgrade scheduler cache may contain pool IDs but no eager-loaded
-			// proxy objects. Recover the selected exit once from the source of truth.
-			if latest, loadErr := s.accountRepo.GetByID(ctx, account.ID); loadErr == nil && latest != nil {
-				hydrated.ProxyPool = latest.ProxyPool
-				if proxy := findProxyByID(latest.ProxyPool, *account.ProxyID); proxy != nil {
-					hydrated.Proxy = proxy
-					hydrated.ProxyID = account.ProxyID
-				}
-			}
-		}
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 		Account:     hydrated,

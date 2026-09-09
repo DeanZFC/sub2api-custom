@@ -61,26 +61,6 @@ func TestOpenAIWSConnPool_AcquireCleanupInterval(t *testing.T) {
 	require.Less(t, openAIWSAcquireCleanupInterval, openAIWSBackgroundSweepTicker)
 }
 
-func TestOpenAIWSConnPool_DialConnUsesPerAttemptTimeout(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 1
-	pool := newOpenAIWSConnPool(cfg)
-	probe := &openAIWSDeadlineProbeDialer{}
-	pool.setClientDialerForTest(probe)
-
-	account := &Account{ID: 43, RateLimit429RetryCount: retryCountPointer(0)}
-	conn, err := pool.dialConn(context.Background(), openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   "wss://example.com/v1/responses",
-	})
-
-	require.NoError(t, err)
-	require.NotNil(t, conn)
-	require.True(t, probe.hasDeadline)
-	require.Positive(t, probe.remaining)
-	require.LessOrEqual(t, probe.remaining, time.Second)
-}
-
 func TestNormalizeOpenAIWSRoutingAffinityPrefersCanonicalAndSortsVariants(t *testing.T) {
 	headers := http.Header{
 		"X-CODEX-ROUTING-HINT": []string{" variant-uppercase "},
@@ -640,77 +620,6 @@ func TestOpenAIWSConnPool_AcquireReusesOnlyMatchingBetaFeatures(t *testing.T) {
 	require.Equal(t, plainConnID, plainLease.ConnID())
 	plainLease.Release()
 
-	require.Equal(t, 2, dialer.DialCount())
-}
-
-func TestOpenAIWSConnPool_SeparatesProxyPoolsAndCapacity(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
-	cfg.Gateway.OpenAIWS.DynamicMaxConnsByAccountConcurrencyEnabled = true
-	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
-	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
-
-	pool := newOpenAIWSConnPool(cfg)
-	dialer := &openAIWSCountingDialer{}
-	pool.setClientDialerForTest(dialer)
-	account := &Account{ID: 7001, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 2}
-	proxyA := int64(11)
-	proxyB := int64(22)
-
-	acquire := func(proxyID int64, proxyURL string) *openAIWSConnLease {
-		lease, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
-			Account:  account,
-			WSURL:    "wss://example.com/v1/responses",
-			ProxyID:  proxyID,
-			ProxyURL: proxyURL,
-		})
-		require.NoError(t, err)
-		return lease
-	}
-
-	leases := []*openAIWSConnLease{
-		acquire(proxyA, "http://proxy-a:8080"),
-		acquire(proxyA, "http://proxy-a:8080"),
-		acquire(proxyB, "http://proxy-b:8080"),
-		acquire(proxyB, "http://proxy-b:8080"),
-	}
-	require.Equal(t, 4, dialer.DialCount(), "每个代理池都应按账号并发上限独立建连")
-	inflight, waiters, conns := pool.AccountPoolLoad(account.ID)
-	require.Equal(t, 4, inflight)
-	require.Zero(t, waiters)
-	require.Equal(t, 4, conns)
-
-	for _, lease := range leases {
-		lease.Release()
-	}
-	// 同一账号的代理池都必须被清理，不能只清掉 legacy account pool。
-	pool.ClearAccount(account.ID)
-	inflight, waiters, conns = pool.AccountPoolLoad(account.ID)
-	require.Zero(t, inflight)
-	require.Zero(t, waiters)
-	require.Zero(t, conns)
-}
-
-func TestOpenAIWSConnPool_DoesNotReuseConnectionAcrossProxyKeys(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
-	p := newOpenAIWSConnPool(cfg)
-	dialer := &openAIWSCountingDialer{}
-	p.setClientDialerForTest(dialer)
-	account := &Account{ID: 7002, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-
-	a, err := p.Acquire(context.Background(), openAIWSAcquireRequest{
-		Account: account, WSURL: "wss://example.com/v1/responses", ProxyID: 1, ProxyURL: "http://proxy-a:8080",
-	})
-	require.NoError(t, err)
-	aID := a.ConnID()
-	a.Release()
-	b, err := p.Acquire(context.Background(), openAIWSAcquireRequest{
-		Account: account, WSURL: "wss://example.com/v1/responses", ProxyID: 2, ProxyURL: "http://proxy-b:8080",
-	})
-	require.NoError(t, err)
-	require.NotEqual(t, aID, b.ConnID())
-	b.Release()
 	require.Equal(t, 2, dialer.DialCount())
 }
 

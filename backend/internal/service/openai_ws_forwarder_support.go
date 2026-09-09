@@ -477,7 +477,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		return nil, nil
 	}
 
-	result, acquireErr := s.tryAcquireAccountSlotForAccount(ctx, account)
+	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result.Acquired {
 		logOpenAIWSBindResponseAccountWarn(
 			derefGroupID(groupID),
@@ -596,7 +596,6 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
-		latest = normalizeCodexQuotaOverdraftAccountForScheduling(ctx, latest)
 		if shouldClearStickySession(latest, requestedModel) || !latest.IsOpenAI() || !latest.IsSchedulable() {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
@@ -715,12 +714,8 @@ func openAIWSSemantic429Headers(account *Account, model string, headers http.Hea
 	return nil
 }
 
-func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Account, headers http.Header, responseBody []byte, message string, retryExhausted ...bool) *UpstreamFailoverError {
-	account429RetryExhausted := false
-	if len(retryExhausted) > 0 {
-		account429RetryExhausted = retryExhausted[0]
-	}
-	failoverErr := s.newOpenAIAccountFailoverError(
+func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Account, headers http.Header, responseBody []byte, message string) *UpstreamFailoverError {
+	return s.newOpenAIAccountFailoverError(
 		account,
 		http.StatusTooManyRequests,
 		headers,
@@ -729,8 +724,6 @@ func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Accoun
 		false,
 		false,
 	)
-	failoverErr.Account429RetryExhausted = account429RetryExhausted
-	return failoverErr
 }
 
 func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (string, bool) {

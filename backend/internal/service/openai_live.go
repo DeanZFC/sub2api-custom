@@ -419,16 +419,12 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 		return nil, errors.New("live upstream response is too large")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// createUpstreamLiveCall consumes the response body before handing the
-		// error to the Live failover loop. Re-wrap the body so the internal
-		// account-level 429 exhaustion marker survives this reconstruction.
-		resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(responseBody)))
 		logLiveUpstreamFailure(ctx, account.ID, resp.StatusCode, resp.Header, responseBody)
-		return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{
+		return nil, &UpstreamFailoverError{
 			StatusCode:      resp.StatusCode,
 			ResponseBody:    responseBody,
 			ResponseHeaders: resp.Header.Clone(),
-		})
+		}
 	}
 	callID, err := liveCallIDFromLocation(resp.Header.Get("Location"))
 	if err != nil {
@@ -556,12 +552,7 @@ func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *Liv
 		return nil, err
 	}
 	target := strings.TrimRight(chatGPTLiveSidebandBaseURL, "/") + "/" + url.PathEscape(record.CallID)
-	dialer := s.getOpenAIWSPassthroughDialer()
-	conn, status, _, _, err := dialAccount429Retry(ctx, account, func(dialCtx context.Context) (openAIWSClientConn, int, http.Header, error) {
-		attemptCtx, cancelDial := context.WithTimeout(dialCtx, s.openAIWSDialTimeout())
-		defer cancelDial()
-		return dialer.Dial(attemptCtx, target, headers, resolveAccountProxyURL(account))
-	})
+	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, target, headers, resolveAccountProxyURL(account))
 	if err != nil {
 		return nil, fmt.Errorf("dial live sideband (status %d): %w", status, err)
 	}

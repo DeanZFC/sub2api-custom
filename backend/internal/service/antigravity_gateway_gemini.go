@@ -187,7 +187,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		contentType := resp.Header.Get("Content-Type")
 		// 尽早关闭原始响应体，释放连接；后续逻辑仍可能需要读取 body，因此用内存副本重新包装。
 		_ = resp.Body.Close()
-		resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody)))
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 		// 模型兜底：模型不存在且开启 fallback 时，自动用 fallback 模型重试一次
 		if s.settingService != nil && s.settingService.IsModelFallbackEnabled(ctx) &&
@@ -200,7 +200,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				if err == nil {
 					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
 					if err == nil {
-						fallbackResp, err := doAccountHTTPUpstream(s.httpUpstream, fallbackReq, proxyURL, account)
+						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
@@ -286,7 +286,11 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 							Detail:             s.getUpstreamErrorDetail(retryOpsBody),
 						})
 						respBody = retryRespBody
-						resp = rebuildAntigravityRetryResponse(retryResp, retryRespBody)
+						resp = &http.Response{
+							StatusCode: retryResp.StatusCode,
+							Header:     retryResp.Header.Clone(),
+							Body:       io.NopCloser(bytes.NewReader(retryRespBody)),
+						}
 						contentType = resp.Header.Get("Content-Type")
 					}
 				} else {
@@ -361,7 +365,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true})
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true}
 		}
 
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
@@ -377,7 +381,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps})
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps}
 		}
 		if contentType == "" {
 			contentType = "application/json"

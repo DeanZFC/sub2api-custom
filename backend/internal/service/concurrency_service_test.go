@@ -45,36 +45,6 @@ type stubConcurrencyCacheForTest struct {
 	releasedAPIKeyRequestIDs []string
 }
 
-// userGroupConcurrencyCacheForTest adds the optional grouped-slot capability
-// without changing the baseline cache stub used by older tests.
-type userGroupConcurrencyCacheForTest struct {
-	stubConcurrencyCacheForTest
-	groupAcquireResult bool
-	groupAcquireErr    error
-	groupReleaseErr    error
-	groupAcquireCalls  int
-	groupReleaseCalls  int
-	groupUserIDs       []int64
-	groupIDs           []int64
-	groupRequestIDs    []string
-}
-
-func (c *userGroupConcurrencyCacheForTest) AcquireUserGroupSlot(_ context.Context, userID, groupID int64, _, _ int, requestID string) (bool, error) {
-	c.groupAcquireCalls++
-	c.groupUserIDs = append(c.groupUserIDs, userID)
-	c.groupIDs = append(c.groupIDs, groupID)
-	c.groupRequestIDs = append(c.groupRequestIDs, requestID)
-	return c.groupAcquireResult, c.groupAcquireErr
-}
-
-func (c *userGroupConcurrencyCacheForTest) ReleaseUserGroupSlot(_ context.Context, userID, groupID int64, requestID string) error {
-	c.groupReleaseCalls++
-	c.groupUserIDs = append(c.groupUserIDs, userID)
-	c.groupIDs = append(c.groupIDs, groupID)
-	c.groupRequestIDs = append(c.groupRequestIDs, requestID)
-	return c.groupReleaseErr
-}
-
 type ingressLeaseCacheForTest struct {
 	stubConcurrencyCacheForTest
 	acquireIngressResult bool
@@ -299,49 +269,6 @@ func TestAcquireUserSlot_UnlimitedConcurrency(t *testing.T) {
 	require.True(t, result.Acquired)
 }
 
-func TestAcquireUserGroupSlot_FallsBackWhenGroupLimitDisabled(t *testing.T) {
-	cache := &userGroupConcurrencyCacheForTest{
-		stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: true},
-	}
-	svc := NewConcurrencyService(cache)
-
-	result, err := svc.AcquireUserGroupSlot(context.Background(), 100, 0, 3, 0)
-	require.NoError(t, err)
-	require.True(t, result.Acquired)
-	require.Equal(t, 0, cache.groupAcquireCalls, "disabled group limit must use the legacy user-slot path")
-	result.ReleaseFunc()
-}
-
-func TestAcquireUserGroupSlot_UsesOptionalCacheAndReleasesBothDimensions(t *testing.T) {
-	cache := &userGroupConcurrencyCacheForTest{
-		stubConcurrencyCacheForTest: stubConcurrencyCacheForTest{acquireResult: false},
-		groupAcquireResult:          true,
-	}
-	svc := NewConcurrencyService(cache)
-
-	result, err := svc.AcquireUserGroupSlot(context.Background(), 101, 202, 5, 3)
-	require.NoError(t, err)
-	require.True(t, result.Acquired)
-	require.Equal(t, 1, cache.groupAcquireCalls)
-	require.Equal(t, []int64{101}, cache.groupUserIDs)
-	require.Equal(t, []int64{202}, cache.groupIDs)
-	require.NotEmpty(t, cache.groupRequestIDs[0], "request id should be generated")
-
-	result.ReleaseFunc()
-	require.Equal(t, 1, cache.groupReleaseCalls)
-	require.Equal(t, cache.groupRequestIDs[0], cache.groupRequestIDs[1])
-}
-
-func TestAcquireUserGroupSlot_FallsBackToLegacyCacheImplementation(t *testing.T) {
-	cache := &stubConcurrencyCacheForTest{acquireResult: true}
-	svc := NewConcurrencyService(cache)
-
-	result, err := svc.AcquireUserGroupSlot(context.Background(), 100, 202, 5, 3)
-	require.NoError(t, err)
-	require.True(t, result.Acquired)
-	require.NotPanics(t, result.ReleaseFunc, "older cache implementations remain supported")
-}
-
 func TestTrackAPIKeySlot_ReleaseDecrements(t *testing.T) {
 	cache := &stubConcurrencyCacheForTest{}
 	svc := NewConcurrencyService(cache)
@@ -548,22 +475,6 @@ func TestGetAccountsLoadBatch_NilCache(t *testing.T) {
 	result, err := svc.GetAccountsLoadBatch(context.Background(), nil)
 	require.NoError(t, err)
 	require.Empty(t, result)
-}
-
-func TestBuildAccountWithConcurrencyIncludesProxyPool(t *testing.T) {
-	account := &Account{
-		ID:          42,
-		Concurrency: 10,
-		Extra: map[string]any{
-			ProxyConcurrencyLimitEnabledExtraKey: true,
-			ProxyPoolIDsExtraKey:                 []any{float64(7), float64(9)},
-		},
-	}
-	load := BuildAccountWithConcurrency(account)
-	require.Equal(t, int64(42), load.ID)
-	require.Equal(t, 10, load.MaxConcurrency)
-	require.True(t, load.ProxyConcurrencyLimitEnabled)
-	require.Equal(t, []int64{7, 9}, load.ProxyPoolIDs)
 }
 
 func TestGetAccountsLoadBatch_UsesShortTTLCache(t *testing.T) {

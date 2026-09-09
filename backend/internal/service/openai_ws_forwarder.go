@@ -430,16 +430,12 @@ func (s *OpenAIGatewayService) openAIWSDialTimeout() time.Duration {
 	return 10 * time.Second
 }
 
-func (s *OpenAIGatewayService) openAIWSAcquireTimeout(account *Account) time.Duration {
+func (s *OpenAIGatewayService) openAIWSAcquireTimeout() time.Duration {
 	// Acquire 覆盖“连接复用命中/排队/新建连接”三个阶段。
-	// 账号级透明 429 重试已关闭，超时只基于单次握手预算。
+	// 这里不再叠加 write_timeout，避免高并发排队时把 TTFT 长尾拉到分钟级。
 	dial := s.openAIWSDialTimeout()
 	if dial <= 0 {
 		dial = 10 * time.Second
 	}
-	total := account429RetryTotalTimeout(dial, account)
-	if total >= maxAccount429RetryTotalTime-2*time.Second {
-		return maxAccount429RetryTotalTime
-	}
-	return total + 2*time.Second
+	return dial + 2*time.Second
 }

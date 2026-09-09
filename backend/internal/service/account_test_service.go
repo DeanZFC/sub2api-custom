@@ -152,7 +152,6 @@ type AccountTestService struct {
 	modelMetadataRegistryAt   time.Time
 	pluginManager             *PluginManager
 	openaiGatewayService      *OpenAIGatewayService
-	codexQuotaOverdraft       codexQuotaOverdraftAccountTestCoordinator
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
@@ -489,7 +488,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := doAccountHTTPUpstreamWithTLS(s.httpUpstream, req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -561,7 +560,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := doAccountHTTPUpstreamWithTLS(s.httpUpstream, req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -647,7 +646,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := doAccountHTTPUpstreamWithTLS(s.httpUpstream, req, proxyURL, account, nil)
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, nil)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -778,7 +777,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	payloadBytes, _ := json.Marshal(payload)
-	ctx, payloadBytes, overdraftInjected := s.prepareCodexQuotaOverdraftTestRequest(ctx, account, payloadBytes)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
 	// restart this probe after registering a replacement task.
@@ -863,9 +861,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
-			if !s.handleCodexQuotaOverdraftTest429(ctx, account, resp.Header, body, upstreamTestModelID) {
-				s.reconcileOpenAI429State(ctx, account, resp.Header, body)
-			}
+			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
 		// 401 Unauthorized: 标记账号为永久错误
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
@@ -874,12 +870,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
+
 	// Process SSE stream
-	if err := s.processOpenAIStream(c, resp.Body); err != nil {
-		return err
-	}
-	s.observeCodexQuotaOverdraftTestResult(account, upstreamTestModelID, overdraftInjected)
-	return nil
+	return s.processOpenAIStream(c, resp.Body)
 }
 
 // testGrokAccountConnection routes Grok admin connectivity tests by explicit mode first,
@@ -1160,7 +1153,7 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 	}
 	s.applyGrokTestRequestHeaders(req, account, authToken, "application/json, text/event-stream")
 
-	resp, err := doAccountHTTPUpstream(s.httpUpstream, req, s.grokTestProxyURL(account), account)
+	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API request failed: %s", err.Error()))
 	}
@@ -1248,7 +1241,7 @@ func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context
 			s.applyGrokTestRequestHeaders(req, account, authToken, "application/json")
 			req.ContentLength = int64(len(payloadBytes))
 		}
-		resp, doErr = doAccountHTTPUpstream(s.httpUpstream, req, s.grokTestProxyURL(account), account)
+		resp, doErr = s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
 		if doErr == nil {
 			break
 		}
@@ -1339,7 +1332,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 	}
 	s.applyGrokTestRequestHeaders(req, account, authToken, "application/json")
 
-	resp, err := doAccountHTTPUpstream(s.httpUpstream, req, s.grokTestProxyURL(account), account)
+	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video request failed: %s", err.Error()))
 	}
@@ -1380,7 +1373,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 			return s.sendErrorAndEnd(c, "Failed to create Grok video status request")
 		}
 		s.applyGrokTestRequestHeaders(statusReq, account, authToken, "application/json")
-		statusResp, err := doAccountHTTPUpstream(s.httpUpstream, statusReq, s.grokTestProxyURL(account), account)
+		statusResp, err := s.httpUpstream.Do(statusReq, s.grokTestProxyURL(account), account.ID, account.Concurrency)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video status failed: %s", err.Error()))
 		}
@@ -1437,7 +1430,7 @@ func (s *AccountTestService) emitGrokVideoResult(c *gin.Context, ctx context.Con
 		return s.sendErrorAndEnd(c, "Failed to create Grok video content request")
 	}
 	s.applyGrokTestRequestHeaders(req, account, authToken, "video/*, application/octet-stream, */*")
-	resp, err := doAccountHTTPUpstream(s.httpUpstream, req, s.grokTestProxyURL(account), account)
+	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video content download failed: %s", err.Error()))
 	}
@@ -1509,7 +1502,7 @@ User query:
 	}
 	s.applyGrokTestRequestHeaders(req, account, authToken, "application/json")
 
-	resp, err := doAccountHTTPUpstream(s.httpUpstream, req, s.grokTestProxyURL(account), account)
+	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("standalone web_search probe failed: %s", err.Error()))
 	}
@@ -1590,7 +1583,7 @@ func (s *AccountTestService) testGrokTTS(c *gin.Context, ctx context.Context, ac
 			return s.sendErrorAndEnd(c, "Failed to create Grok TTS request")
 		}
 		s.applyGrokTestRequestHeaders(req, account, authToken, "audio/*, application/json, */*")
-		resp, err := doAccountHTTPUpstream(s.httpUpstream, req, s.grokTestProxyURL(account), account)
+		resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok TTS failed: %s", err.Error()))
 		}
@@ -1681,7 +1674,7 @@ func (s *AccountTestService) testGrokSTT(c *gin.Context, ctx context.Context, ac
 	}
 	account.ApplyHeaderOverrides(req.Header)
 
-	resp, err := doAccountHTTPUpstream(s.httpUpstream, req, s.grokTestProxyURL(account), account)
+	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok STT failed: %s", err.Error()))
 	}
@@ -1759,21 +1752,10 @@ func (s *AccountTestService) testGrokRealtime(c *gin.Context, ctx context.Contex
 		dialer = newDefaultOpenAIWSClientDialer()
 	}
 
-	// 429 只可能在握手阶段被安全重放。每次拨号仍有独立超时，外层总
-	// budget 则覆盖账号配置的额外重试和 Retry-After 退避，避免单次测试
-	// 因重试把请求上下文提前截断。
-	dialBudget := account429RetryTotalTimeout(grokRealtimeProbeTimeout, account)
-	if dialBudget <= 0 {
-		dialBudget = grokRealtimeProbeTimeout
-	}
-	dialCtx, cancel := context.WithTimeout(ctx, dialBudget)
+	dialCtx, cancel := context.WithTimeout(ctx, grokRealtimeProbeTimeout)
 	defer cancel()
 
-	conn, status, _, _, dialErr := dialAccount429Retry(dialCtx, account, func(attemptCtx context.Context) (openAIWSClientConn, int, http.Header, error) {
-		attemptDialCtx, cancelAttempt := context.WithTimeout(attemptCtx, grokRealtimeProbeTimeout)
-		defer cancelAttempt()
-		return dialer.Dial(attemptDialCtx, wsURL, headers, s.grokTestProxyURL(account))
-	})
+	conn, status, _, dialErr := dialer.Dial(dialCtx, wsURL, headers, s.grokTestProxyURL(account))
 	if dialErr != nil {
 		detail := dialErr.Error()
 		var hs *openAIWSHandshakeError
@@ -2058,7 +2040,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := doAccountHTTPUpstreamWithTLS(s.httpUpstream, req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) request failed: %s", err.Error()))
 	}
@@ -2339,7 +2321,7 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := doAccountHTTPUpstreamWithTLS(s.httpUpstream, req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -2968,7 +2950,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := doAccountHTTPUpstreamWithTLS(s.httpUpstream, req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}

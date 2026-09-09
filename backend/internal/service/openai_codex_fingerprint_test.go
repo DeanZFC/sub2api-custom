@@ -174,15 +174,17 @@ func TestResolveCodexFingerprintIDsFromRequest_ExplicitOff(t *testing.T) {
 }
 
 func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledIsStablePerAccount(t *testing.T) {
+	headers := http.Header{"User-Agent": []string{"codex_cli_rs/0.146.0"}, "Session-Id": []string{"session-a"}}
 	account := &Account{ID: 901, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	first := resolveCodexFingerprintIDsFromRequest(account, nil, true)
-	second := resolveCodexFingerprintIDsFromRequest(account, nil, true)
-	other := resolveCodexFingerprintIDsFromRequest(&Account{ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, nil, true)
+	first := resolveCodexFingerprintIDsFromRequest(account, headers, true)
+	second := resolveCodexFingerprintIDsFromRequest(account, headers, true)
+	other := resolveCodexFingerprintIDsFromRequest(&Account{ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, headers, true)
 
 	require.NotNil(t, first)
 	require.NotNil(t, second)
 	require.NotNil(t, other)
-	assert.Equal(t, codexFingerprintDevice, first.mode)
+	assert.Equal(t, codexFingerprintSingleMachineMultiWindow, first.mode)
+	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil, true), "non-Codex callers must not receive a synthetic window")
 	assert.Equal(t, first.installationID, second.installationID)
 	assert.NotEqual(t, first.installationID, other.installationID)
 	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil, false))
@@ -195,13 +197,14 @@ func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledIsStablePerAccount(
 }
 
 func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledUsesPersistedSeed(t *testing.T) {
+	headers := http.Header{"User-Agent": []string{"codex_cli_rs/0.146.0"}}
 	account := &Account{
 		ID:       903,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Extra:    map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
 	}
-	ids := resolveCodexFingerprintIDsFromRequest(account, nil, true)
+	ids := resolveCodexFingerprintIDsFromRequest(account, headers, true)
 	require.NotNil(t, ids)
 	assert.Equal(t, resolveConvergedInstallationID(account, testCodexFingerprintSeed), ids.installationID)
 }

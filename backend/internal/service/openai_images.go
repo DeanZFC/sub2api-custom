@@ -647,7 +647,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
-		resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody)))
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
@@ -666,12 +666,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			shouldDisable := s.handleFailoverSideEffects(upstreamCtx, resp, account, respBody, upstreamModel)
 			retryableOnSameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
 			if account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests {
-				return nil, finalizeAccount429Failover(resp, s.newOpenAIAccountFailoverError(account, resp.StatusCode, resp.Header, respBody, upstreamMsg, shouldDisable, retryableOnSameAccount))
+				return nil, s.newOpenAIAccountFailoverError(account, resp.StatusCode, resp.Header, respBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
 			}
 			if isOpenAIHTTPUpstreamAccessStateError(resp.StatusCode, upstreamMsg, respBody) {
-				return nil, finalizeAccount429Failover(resp, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMsg, retryableOnSameAccount))
+				return nil, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMsg, retryableOnSameAccount)
 			}
-			return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: retryableOnSameAccount})
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: retryableOnSameAccount}
 		}
 		return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
 	}

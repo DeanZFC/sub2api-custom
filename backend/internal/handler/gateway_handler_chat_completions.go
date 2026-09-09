@@ -213,9 +213,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts")
 				return
 			}
-			accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeoutForAccount(
+			accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
 				c,
-				account,
+				account.ID,
 				selection.WaitPlan.MaxConcurrency,
 				selection.WaitPlan.Timeout,
 				reqStream,

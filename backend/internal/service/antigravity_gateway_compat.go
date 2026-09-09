@@ -444,11 +444,11 @@ func (s *AntigravityGatewayService) handleAntigravityCompatHTTPError(
 			return antigravityCredentialRejectedError(resp, body)
 		}
 		appendOpsUpstreamError(c, event)
-		return finalizeAccount429Failover(resp, &UpstreamFailoverError{
+		return &UpstreamFailoverError{
 			StatusCode:      resp.StatusCode,
 			ResponseBody:    body,
 			ResponseHeaders: resp.Header.Clone(),
-		})
+		}
 	}
 	return s.writeMappedAntigravityCompatError(c, account, resp.StatusCode, resp.Header.Get("x-request-id"), body)
 }

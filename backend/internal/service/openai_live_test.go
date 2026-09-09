@@ -166,13 +166,11 @@ func TestCreateUpstreamLiveCallReturns429WithoutRetryMarker(t *testing.T) {
 		cfg:          &config.Config{},
 		httpUpstream: upstream,
 	}
-	retryCount := 1
 	account := &Account{
-		ID:                     8,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Concurrency:            1,
-		RateLimit429RetryCount: &retryCount,
+		ID:          8,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token":       "test-access-token",
 			"chatgpt_account_id": "acct_test",
@@ -185,7 +183,7 @@ func TestCreateUpstreamLiveCallReturns429WithoutRetryMarker(t *testing.T) {
 	}, `{"v":1}`)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.False(t, failoverErr.Account429RetryExhausted)
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
 	require.Equal(t, 1, upstream.calls, "账号级透明 429 重试已关闭")
 }
 

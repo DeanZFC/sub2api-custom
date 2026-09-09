@@ -43,9 +43,7 @@ type openAIWSDialError struct {
 	StatusCode      int
 	ResponseHeaders http.Header
 	ResponseBody    []byte
-	// Deprecated: account-level transparent 429 retries are disabled.
-	Account429RetryExhausted bool
-	Err                      error
+	Err             error
 }
 
 func (e *openAIWSDialError) Error() string {
@@ -1958,11 +1956,9 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
-	conn, status, handshakeHeaders, account429RetryExhausted, err := dialAccount429Retry(ctx, req.Account, func(attemptCtx context.Context) (openAIWSClientConn, int, http.Header, error) {
-		dialCtx, cancelDial := context.WithTimeout(attemptCtx, p.dialTimeout())
-		defer cancelDial()
-		return p.clientDialer.Dial(dialCtx, req.WSURL, headers, req.ProxyURL)
-	})
+	dialCtx, cancelDial := context.WithTimeout(ctx, p.dialTimeout())
+	defer cancelDial()
+	conn, status, handshakeHeaders, err := p.clientDialer.Dial(dialCtx, req.WSURL, headers, req.ProxyURL)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -1970,19 +1966,17 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			responseBody = append([]byte(nil), handshakeErr.Body...)
 		}
 		return nil, &openAIWSDialError{
-			StatusCode:               status,
-			ResponseHeaders:          cloneHeader(handshakeHeaders),
-			ResponseBody:             responseBody,
-			Account429RetryExhausted: account429RetryExhausted,
-			Err:                      err,
+			StatusCode:      status,
+			ResponseHeaders: cloneHeader(handshakeHeaders),
+			ResponseBody:    responseBody,
+			Err:             err,
 		}
 	}
 	if conn == nil {
 		return nil, &openAIWSDialError{
-			StatusCode:               status,
-			ResponseHeaders:          cloneHeader(handshakeHeaders),
-			Account429RetryExhausted: account429RetryExhausted,
-			Err:                      errors.New("openai ws dialer returned nil connection"),
+			StatusCode:      status,
+			ResponseHeaders: cloneHeader(handshakeHeaders),
+			Err:             errors.New("openai ws dialer returned nil connection"),
 		}
 	}
 	id := p.nextConnID(req.Account.ID)

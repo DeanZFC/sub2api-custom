@@ -683,11 +683,11 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		Detail:             upstreamDetail,
 	})
 	if shouldDisable {
-		return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{
+		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
 			RetryableOnSameAccount: false,
-		})
+		}
 	}
 
 	MarkResponseCommitted(c)
@@ -882,11 +882,11 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		Detail:             upstreamDetail,
 	})
 	if shouldDisable {
-		return nil, finalizeAccount429Failover(resp, &UpstreamFailoverError{
+		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
 			RetryableOnSameAccount: false,
-		})
+		}
 	}
 
 	MarkResponseCommitted(c)

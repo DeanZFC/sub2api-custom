@@ -475,11 +475,10 @@ func TestResolveLiveSubscriptionIDDoesNotCarryPrimarySubscriptionToStandardFallb
 
 func TestDialLiveSidebandReturns429WithoutSameAccountRetry(t *testing.T) {
 	account := &Account{
-		ID:                     11,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeOAuth,
-		Concurrency:            2,
-		RateLimit429RetryCount: retryCountPointer(2),
+		ID:          11,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 2,
 		Credentials: map[string]any{
 			"access_token":       "test-access-token",
 			"chatgpt_account_id": "acct_test",

@@ -564,7 +564,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		)
 		return nil, true, nil
 	}
-	result, acquireErr := s.service.tryAcquireAccountSlotForAccount(ctx, account)
+	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result != nil && result.Acquired {
 		if !req.PreserveStickyBinding {
 			_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
@@ -1175,11 +1175,12 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		if candidate.account == nil {
 			continue
 		}
-		if candidate.loadKnown && candidate.loadInfo.LoadRate >= 100 {
+		if candidate.loadKnown && candidate.account.Concurrency > 0 &&
+			candidate.loadInfo.CurrentConcurrency >= candidate.account.Concurrency {
 			continue
 		}
 
-		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account, candidate.account.Concurrency, budget)
+		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account.ID, candidate.account.Concurrency, budget)
 		if !attempted {
 			break
 		}
@@ -1191,12 +1192,6 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		}
 
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
-		if fresh != nil && candidate.account.ProxyConcurrencyLimitEnabled() && candidate.account.ProxyID != nil {
-			if proxy := findProxyByID(fresh.ProxyPool, *candidate.account.ProxyID); proxy != nil {
-				fresh.Proxy = proxy
-				fresh.ProxyID = candidate.account.ProxyID
-			}
-		}
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			release(result)
 			continue
@@ -1206,12 +1201,6 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			break
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
-		if fresh != nil && candidate.account.ProxyConcurrencyLimitEnabled() && candidate.account.ProxyID != nil {
-			if proxy := findProxyByID(fresh.ProxyPool, *candidate.account.ProxyID); proxy != nil {
-				fresh.Proxy = proxy
-				fresh.ProxyID = candidate.account.ProxyID
-			}
-		}
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			release(result)
 			continue
@@ -1224,7 +1213,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 
 		if fresh.Concurrency != candidate.account.Concurrency {
 			release(result)
-			result, attempted, acquireErr = s.tryAcquireOpenAIAccountSlot(ctx, fresh, fresh.Concurrency, budget)
+			result, attempted, acquireErr = s.tryAcquireOpenAIAccountSlot(ctx, fresh.ID, fresh.Concurrency, budget)
 			if !attempted {
 				continue
 			}
@@ -1249,17 +1238,14 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 
 func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAIAccountSlot(
 	ctx context.Context,
-	account *Account,
+	accountID int64,
 	maxConcurrency int,
 	budget *openAISelectionProbeBudget,
 ) (*AcquireResult, bool, error) {
-	if account == nil {
+	if s.service.concurrencyService != nil && maxConcurrency > 0 && !budget.recordAcquire(accountID) {
 		return nil, false, nil
 	}
-	if s.service.concurrencyService != nil && maxConcurrency > 0 && !budget.recordAcquire(account.ID) {
-		return nil, false, nil
-	}
-	result, err := s.service.tryAcquireAccountSlotForAccount(ctx, account, maxConcurrency)
+	result, err := s.service.tryAcquireAccountSlot(ctx, accountID, maxConcurrency)
 	return result, true, err
 }
 
@@ -1324,7 +1310,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 			isGrokModelQuotaBlocked(account.ID, upstreamModel, now) {
 			continue
 		}
-		result, acquireErr := s.service.tryAcquireAccountSlotForAccount(ctx, account)
+		result, acquireErr := s.service.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 		if acquireErr != nil {
 			return nil, acquireErr
 		}
@@ -1446,7 +1432,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	filtered := make([]*Account, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
 	for i := range accounts {
-		account := normalizeCodexQuotaOverdraftAccountForScheduling(ctx, &accounts[i])
+		account := &accounts[i]
 		if req.ExcludedIDs != nil {
 			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
 				filterStats.exclude("excluded")
@@ -1481,7 +1467,10 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			continue
 		}
 		filtered = append(filtered, account)
-		loadReq = append(loadReq, BuildAccountWithConcurrency(account))
+		loadReq = append(loadReq, AccountWithConcurrency{
+			ID:             account.ID,
+			MaxConcurrency: account.EffectiveLoadFactor(),
+		})
 	}
 	if len(filtered) == 0 {
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, filterStats.summary(""))
@@ -1658,7 +1647,10 @@ func buildOpenAIAccountLoadRequest(accounts []*Account) []AccountWithConcurrency
 		if account == nil {
 			continue
 		}
-		loadReq = append(loadReq, BuildAccountWithConcurrency(account))
+		loadReq = append(loadReq, AccountWithConcurrency{
+			ID:             account.ID,
+			MaxConcurrency: account.EffectiveLoadFactor(),
+		})
 	}
 	return loadReq
 }
@@ -2490,33 +2482,22 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == requiredTransport
 }
 
-func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Account, model string, success bool, firstTokenMs *int, extras ...any) bool {
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
 	if account == nil {
 		return false
 	}
 	accountID := account.ID
 	healthTripped := false
-	requestCtx := context.Background()
-	var observedErr error
-	for _, extra := range extras {
-		switch value := extra.(type) {
-		case context.Context:
-			requestCtx = value
-		case error:
-			observedErr = value
-		}
-	}
 	if s != nil && s.rateLimitService != nil {
 		if success {
 			s.rateLimitService.ObserveOpenAIAPIKeyHealthSuccess(context.Background(), account)
-		} else if observedErr != nil {
-			healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(context.Background(), account, observedErr)
+		} else if len(observedErr) > 0 && observedErr[0] != nil {
+			healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(context.Background(), account, observedErr[0])
 		}
 	}
 	if success {
 		s.openaiOAuth429RetryStartedAt.Delete(accountID)
 		s.clearOpenAIAccountModelTransientState(accountID, normalizeOpenAIAccountModelTransientModel(model))
-		s.observeCodexQuotaOverdraftScheduleSuccess(accountID, model, []context.Context{requestCtx})
 	}
 	scheduler := s.getOpenAIAccountScheduler(context.Background())
 	if scheduler == nil {

@@ -582,8 +582,6 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// 面板 API 限流配置
 		adminSettings.GET("/panel-rate-limit", h.Admin.Setting.GetPanelRateLimitSettings)
 		adminSettings.PUT("/panel-rate-limit", h.Admin.Setting.UpdatePanelRateLimitSettings)
-		adminSettings.GET("/codex-pre-output-retry", h.Admin.Setting.GetCodexPreOutputRetrySettings)
-		adminSettings.PUT("/codex-pre-output-retry", h.Admin.Setting.UpdateCodexPreOutputRetrySettings)
 		// 流超时处理配置
 		adminSettings.GET("/stream-timeout", h.Admin.Setting.GetStreamTimeoutSettings)
 		adminSettings.PUT("/stream-timeout", h.Admin.Setting.UpdateStreamTimeoutSettings)

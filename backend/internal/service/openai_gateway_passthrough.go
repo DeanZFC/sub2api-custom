@@ -386,10 +386,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// passthrough error handling sees the same response after recovery fails.
 			probeBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
-			if retryErr := s.newCodexPreOutputRetryError(c, account, resp.StatusCode, resp.Header, probeBody, extractUpstreamErrorMessage(probeBody)); retryErr != nil {
-				return nil, retryErr
-			}
-			resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(probeBody)))
+			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, probeBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
@@ -585,7 +582,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	body []byte,
 	token string,
 ) (*http.Request, error) {
-	body = s.prepareCodexQuotaOverdraftBody(ctx, account, isOpenAIResponsesCompactPath(c), body)
 	targetURL := openaiPlatformAPIURL
 	switch account.Type {
 	case AccountTypeOAuth:
@@ -913,7 +909,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	return finalizeAccount429Failover(resp, s.newOpenAIAccountFailoverError(
+	return s.newOpenAIAccountFailoverError(
 		account,
 		resp.StatusCode,
 		resp.Header,
@@ -921,7 +917,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		upstreamMsg,
 		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
-	))
+	)
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
@@ -1841,23 +1837,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
 	}
-	retrySettings, _ := c.Get(codexRetrySettingsContextKey)
-	_, stageRetryHeaders := retrySettings.(CodexPreOutputRetrySettings)
-	applyAttemptHeaders := func() {
-		if !c.Writer.Written() {
-			writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-		}
-	}
-	if !stageRetryHeaders {
-		applyAttemptHeaders()
-	}
+	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	// SSE headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
-	if v := resp.Header.Get("x-request-id"); v != "" && !stageRetryHeaders {
+	if v := resp.Header.Get("x-request-id"); v != "" {
 		c.Header("x-request-id", v)
 	}
 
@@ -1942,7 +1929,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	}
 	defer flushPendingOutput()
 	writePendingLines := func() bool {
-		applyAttemptHeaders()
 		for _, pending := range pendingLines {
 			if _, err := fmt.Fprintln(w, pending); err != nil {
 				clientDisconnected = true
@@ -2101,9 +2087,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					}
 				}
 				if !outputStarted {
-					if retryErr := s.newCodexPreOutputRetrySSEError(c, account, resp, dataBytes, eventType, failedMessage); retryErr != nil {
-						return resultWithUsage(), retryErr
-					}
 					shouldFailover := false
 					if !cyberHit {
 						if eventType == "error" {
@@ -2196,7 +2179,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			// 建立 happens-before —— 之后 ResponseWriter 由本循环独占。
 			if !clientOutputStarted {
 				stopKeepalive()
-				applyAttemptHeaders()
 			}
 			if !clientOutputStarted && len(pendingLines) > 0 {
 				if !writePendingLines() {

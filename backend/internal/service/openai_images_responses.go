@@ -984,7 +984,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		modelForCooldown = strings.TrimSpace(requestedModel[0])
 	}
 	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, modelForCooldown)
-	failoverErr := finalizeAccount429Failover(resp, s.newOpenAIAccountFailoverError(
+	failoverErr := s.newOpenAIAccountFailoverError(
 		account,
 		resp.StatusCode,
 		resp.Header,
@@ -992,7 +992,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		upstreamMsg,
 		shouldDisable,
 		false,
-	))
+	)
 	shouldFailover := shouldDisable || (account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests && failoverErr.RetryableOnSameAccount)
 	kind := "http_error"
 	if shouldFailover {
@@ -1853,7 +1853,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			}
 			return s.forwardOpenAIImagesOAuth(markAgentIdentityTaskRecoveryTried(ctx), c, account, parsed, channelMappedModel)
 		}
-		resp.Body = preserveAccount429RetryMarker(resp, io.NopCloser(bytes.NewReader(respBody)))
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
@@ -1870,7 +1870,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				Message:            upstreamMsg,
 			})
 			shouldDisable := s.handleFailoverSideEffects(upstreamCtx, resp, account, respBody, requestModel)
-			return nil, finalizeAccount429Failover(resp, s.newOpenAIAccountFailoverError(
+			return nil, s.newOpenAIAccountFailoverError(
 				account,
 				resp.StatusCode,
 				resp.Header,
@@ -1878,7 +1878,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				upstreamMsg,
 				shouldDisable,
 				!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
-			))
+			)
 		}
 		return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, requestModel)
 	}

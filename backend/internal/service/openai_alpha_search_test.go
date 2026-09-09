@@ -341,13 +341,11 @@ func TestForwardAlphaSearchSetupToken429CarriesSameAccountRetryWindow(t *testing
 		Body: io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"rate limited"}}`)),
 	}}
 	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-	zero429Retries := 0
 	account := &Account{
-		ID:                     81,
-		Platform:               PlatformOpenAI,
-		Type:                   AccountTypeSetupToken,
-		Concurrency:            1,
-		RateLimit429RetryCount: &zero429Retries,
+		ID:          81,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-account",
