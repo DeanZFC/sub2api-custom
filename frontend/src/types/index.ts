@@ -1433,20 +1433,6 @@ export interface AccountUsageInfo {
   error?: string            // usage 获取失败时的错误信息
 }
 
-export interface CodexQuotaOverdraftProbeState {
-  status?: string
-  attempts?: number
-  limit?: number
-  quota_window?: string
-  tested_at?: string | null
-  model?: string
-  reason_code?: string
-  active?: boolean
-  started_at?: string | null
-  recover_at?: string | null
-  stats?: WindowStats | null
-}
-
 // OpenAI Codex usage snapshot (from response headers)
 export interface CodexUsageSnapshot {
   // Legacy fields (kept for backwards compatibility)
