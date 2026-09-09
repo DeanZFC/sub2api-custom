@@ -3245,39 +3245,6 @@
         </div>
       </div>
 
-      <!-- Codex 额度透支（仅 OpenAI OAuth） -->
-      <div
-        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexQuotaOverdraft') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.codexQuotaOverdraftDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            data-testid="create-codex-quota-overdraft-toggle"
-            role="switch"
-            :aria-checked="codexQuotaOverdraftEnabled"
-            @click="codexQuotaOverdraftEnabled = !codexQuotaOverdraftEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              codexQuotaOverdraftEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                codexQuotaOverdraftEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
       <!-- OpenAI Compact 能力配置 -->
       <div
         v-if="form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
@@ -4343,7 +4310,6 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
-const codexQuotaOverdraftEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'account_device' | 'single_machine_multi_window' | 'device' | 'session' | 'full'
 const codexFingerprintMode = ref<CodexFingerprintMode>('single_machine_multi_window')
 const codexFingerprintModeOptions = computed(() => [
@@ -5284,7 +5250,6 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
-  codexQuotaOverdraftEnabled.value = false
   codexFingerprintMode.value = 'off'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5384,11 +5349,6 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.codex_cli_only_allow_app_server = true
   } else {
     delete extra.codex_cli_only_allow_app_server
-  }
-  if (accountCategory.value === 'oauth-based') {
-    extra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
-  } else {
-    delete extra.codex_quota_overdraft_enabled
   }
   // 收敛是显式 opt-in：off 即默认值，不落键；account_device/device/session/full 必须显式写入，
   // 否则管理员的选择会被当成默认而丢失（#5610）。
@@ -7015,7 +6975,6 @@ const handleCookieAuth = async (sessionKey: string) => {
 
         // 账号级透支开关只对 OpenAI OAuth 生效；Setup Token 保持官方行为且不写入此键。
         if (form.platform === 'openai' && addMethod.value === 'oauth') {
-          extra.codex_quota_overdraft_enabled = codexQuotaOverdraftEnabled.value
         }
 
         const accountName = keys.length > 1 ? `${form.name} #${i + 1}` : form.name

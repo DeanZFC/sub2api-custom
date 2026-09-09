@@ -188,7 +188,6 @@ export default {
         rateLimited: 'Rate Limited',
         overloaded: 'Overloaded',
         tempUnschedulable: 'Temp Unschedulable',
-        codexQuotaPaused: 'Quota Paused',
         quotaExceeded: 'Quota Exceeded',
         unschedulable: 'Unschedulable',
         rateLimitedUntil: 'Rate limited and removed from scheduling. Auto resumes at {time}',
@@ -654,8 +653,6 @@ export default {
         codexFingerprintDevice: 'Device only',
         codexFingerprintSession: 'Device + Session',
         codexFingerprintFull: 'Full convergence',
-        codexQuotaOverdraft: 'Codex quota overdraft',
-        codexQuotaOverdraftDesc: 'Only applies to OpenAI OAuth. When enabled, this account may continue past the 5h/7d quota after the configured probe confirms upstream availability. Disable to use the official scheduling and quota handling for this account.',
         codexFingerprintSingleMachineMultiWindow: 'Enable single machine, multiple windows',
         codexImageTool: 'Codex image bridge policy',
         codexImageToolDesc:

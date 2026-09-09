@@ -398,7 +398,6 @@ export default {
         rateLimited: '限流中',
         overloaded: '过载中',
         tempUnschedulable: '临时不可调度',
-        codexQuotaPaused: '额度暂停',
         quotaExceeded: '配额超限',
         unschedulable: '不可调度',
         rateLimitedUntil: '限流中，当前不参与调度，预计 {time} 自动恢复',
@@ -734,8 +733,6 @@ export default {
         codexFingerprintDevice: '仅设备',
         codexFingerprintSession: '设备+会话',
         codexFingerprintFull: '完全收敛',
-        codexQuotaOverdraft: 'Codex 额度透支',
-        codexQuotaOverdraftDesc: '仅对 OpenAI OAuth 生效。开启后，额度探测确认上游仍可用时，本账号可继续使用 5 小时/7 天额度；关闭后完全采用官方调度和额度处理。',
         codexFingerprintSingleMachineMultiWindow: '启用单机多窗口',
         codexImageTool: 'Codex 图片桥接策略',
         codexImageToolDesc:
