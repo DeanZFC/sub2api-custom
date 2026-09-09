@@ -17,7 +17,7 @@ const message = ref('')
 const showUpload = ref(false)
 const uploading = ref(false)
 const uploadError = ref('')
-const upload = ref({ name: '', platform: 'openai', type: 'apikey', credentials: '{}', proxy_url: '', concurrency: 3, concurrency_multiplier: 1, sell_rate: 1 })
+const upload = ref({ name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, concurrency_multiplier: 1, sell_rate: 1 })
 let transferKey: string | null = null
 let generation = 0
 
@@ -67,12 +67,15 @@ async function transfer() {
 }
 async function submitUpload() {
   uploadError.value = ''
-  let credentials: Record<string, unknown>
-  try { credentials = JSON.parse(upload.value.credentials) } catch { uploadError.value = '凭证必须是有效 JSON'; return }
+  const credential = upload.value.credential.trim()
+  if (!credential) { uploadError.value = upload.value.type === 'apikey' ? '请输入 API Key' : '请输入访问令牌'; return }
+  const credentials = upload.value.type === 'apikey'
+    ? { api_key: credential }
+    : { access_token: credential }
   uploading.value = true
   try {
     await createSharedListing({ ...upload.value, credentials })
-    showUpload.value = false; upload.value = { name: '', platform: 'openai', type: 'apikey', credentials: '{}', proxy_url: '', concurrency: 3, concurrency_multiplier: 1, sell_rate: 1 }
+    showUpload.value = false; upload.value = { name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, concurrency_multiplier: 1, sell_rate: 1 }
     mode.value = 'mine'; await loadCards()
   } catch (e) { uploadError.value = errorText(e) } finally { uploading.value = false }
 }
@@ -106,14 +109,14 @@ onMounted(() => { void loadCards(); void loadWallet() })
       <section v-if="showUpload" class="card p-6">
         <div class="flex items-center justify-between"><h2 class="font-semibold text-gray-900 dark:text-white">上传共享账号</h2><button class="text-gray-400" @click="showUpload = false">关闭</button></div>
         <form class="mt-4 grid gap-4 md:grid-cols-2" @submit.prevent="submitUpload">
-          <label class="text-sm">展示名称<input v-model="upload.name" required class="input mt-1 w-full" maxlength="100" /></label>
-          <label class="text-sm">平台<select v-model="upload.platform" class="input mt-1 w-full"><option>openai</option><option value="anthropic">Claude</option><option>gemini</option><option>antigravity</option><option>grok</option></select></label>
-          <label class="text-sm">认证类型<input v-model="upload.type" required class="input mt-1 w-full" /></label>
-          <label class="text-sm">代理 URL（可选）<input v-model="upload.proxy_url" placeholder="socks5h://user:pass@host:port" class="input mt-1 w-full" autocomplete="off" /></label>
-          <label class="text-sm">并发上限<input v-model.number="upload.concurrency" type="number" min="1" max="1000" class="input mt-1 w-full" /></label>
-          <label class="text-sm md:col-span-2">凭证 JSON（仅写入后端，不会展示）<textarea v-model="upload.credentials" required rows="4" class="input mt-1 w-full font-mono" /></label>
-          <label class="text-sm">并发倍率<input v-model.number="upload.concurrency_multiplier" type="number" min="0.1" max="5" step="0.1" class="input mt-1 w-full" /></label>
-          <label class="text-sm">售价倍率<input v-model.number="upload.sell_rate" type="number" min="0" max="100" step="0.01" class="input mt-1 w-full" /></label>
+          <label class="text-sm">账号名称<input v-model="upload.name" required class="input mt-1 w-full" maxlength="100" placeholder="例如：我的 OpenAI 账号" /></label>
+          <label class="text-sm">平台<select v-model="upload.platform" required class="input mt-1 w-full"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option></select></label>
+          <label class="text-sm">账号类型<select v-model="upload.type" required class="input mt-1 w-full"><option value="apikey">API Key</option><option value="oauth">OAuth</option><option value="setup-token">Setup Token</option></select></label>
+          <label class="text-sm">{{ upload.type === 'apikey' ? 'API Key' : '访问令牌' }}<input v-model="upload.credential" required type="password" class="input mt-1 w-full font-mono" autocomplete="off" :placeholder="upload.type === 'apikey' ? 'sk-...' : '粘贴访问令牌'" /></label>
+          <label class="text-sm md:col-span-2">代理地址（可选）<input v-model="upload.proxy_url" placeholder="http://用户名:密码@主机:端口 或 socks5://主机:端口" class="input mt-1 w-full font-mono" autocomplete="off" /></label>
+          <label class="text-sm">并发上限<input v-model.number="upload.concurrency" required type="number" min="1" max="1000" class="input mt-1 w-full" /></label>
+          <label class="text-sm">并发倍率<input v-model.number="upload.concurrency_multiplier" required type="number" min="0.1" max="5" step="0.1" class="input mt-1 w-full" /></label>
+          <label class="text-sm">售价倍率<input v-model.number="upload.sell_rate" required type="number" min="0" max="100" step="0.01" class="input mt-1 w-full" /></label>
           <p v-if="uploadError" class="text-sm text-red-500 md:col-span-2">{{ uploadError }}</p><button class="btn btn-primary md:col-span-2" :disabled="uploading">{{ uploading ? '上传中…' : '立即上线' }}</button>
         </form>
       </section>
