@@ -527,6 +527,13 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
+	if pool, ok := s.accountRepo.(interface {
+		ReplaceProxyPool(context.Context, int64, []int64) error
+	}); ok && len(input.ProxyIDs) > 0 {
+		if err := pool.ReplaceProxyPool(ctx, account.ID, input.ProxyIDs); err != nil {
+			return nil, err
+		}
+	}
 
 	// 绑定分组
 	if len(groupIDs) > 0 {
@@ -825,6 +832,13 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			if err := s.checkMixedChannelRisk(ctx, account.ID, account.Platform, *input.GroupIDs); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if pool, ok := s.accountRepo.(interface {
+		ReplaceProxyPool(context.Context, int64, []int64) error
+	}); ok && input.ProxyIDs != nil {
+		if err := pool.ReplaceProxyPool(ctx, account.ID, *input.ProxyIDs); err != nil {
+			return nil, err
 		}
 	}
 

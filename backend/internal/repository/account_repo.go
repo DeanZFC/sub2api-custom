@@ -51,6 +51,19 @@ type accountRepository struct {
 	schedulerCache service.SchedulerCache
 }
 
+// ReplaceProxyPool persists the ordered proxy set for an account.
+func (r *accountRepository) ReplaceProxyPool(ctx context.Context, accountID int64, proxyIDs []int64) error {
+	if _, err := r.sql.ExecContext(ctx, `DELETE FROM account_proxies WHERE account_id = $1`, accountID); err != nil {
+		return err
+	}
+	for i, proxyID := range proxyIDs {
+		if _, err := r.sql.ExecContext(ctx, `INSERT INTO account_proxies (account_id, proxy_id, position) VALUES ($1,$2,$3) ON CONFLICT (account_id, proxy_id) DO UPDATE SET position=EXCLUDED.position`, accountID, proxyID, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 var schedulerNeutralExtraKeyPrefixes = []string{
 	"codex_primary_",
 	"codex_secondary_",
