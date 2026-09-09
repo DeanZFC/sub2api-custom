@@ -5495,7 +5495,6 @@ const handleSubmit = async () => {
         }
       }
 
-      // 额度透支是账号级显式开关；指纹收敛模式仍按下方逻辑独立处理。
       if (props.account.type === 'oauth') {
         if (codexFingerprintMode.value !== 'off') {
           newExtra.codex_fingerprint_mode = codexFingerprintMode.value

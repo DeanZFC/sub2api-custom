@@ -309,13 +309,6 @@ export default {
 
   // Usage
   usage: {
-    overdraftActive: '额度透支中',
-    overdraftProbeFailed: '额度探测失败',
-    overdraftProbeInconclusive: '额度探测结果不确定',
-    overdraftProbePending: '额度探测中',
-    overdraftRecoverAt: '预计恢复：{time}',
-    overdraftRecovered: '额度已恢复',
-    overdraftTestedAt: '探测时间：{time}',
     title: '使用记录',
     description: '查看和分析您的 API 使用历史',
     costDetails: '费用明细',

@@ -183,14 +183,11 @@ async function submitApiKeyAccount(
   return wrapper
 }
 
-async function openCodexImportStep(toggleClicks = 0, enableCodexQuotaOverdraft = false) {
+async function openCodexImportStep(toggleClicks = 0) {
   const wrapper = mountModal()
   await selectButtonByText(wrapper, 'OpenAI')
   for (let click = 0; click < toggleClicks; click += 1) {
     await wrapper.get('[data-testid="openai-long-context-billing-toggle"]').trigger('click')
-  }
-  if (enableCodexQuotaOverdraft) {
-    await wrapper.get('[data-testid="create-codex-quota-overdraft-toggle"]').trigger('click')
   }
   await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
   await wrapper.get('form#create-account-form').trigger('submit.prevent')
@@ -308,25 +305,14 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.rate_limit_429_retry_count).toBeUndefined()
   })
 
-  it('defaults Codex quota overdraft to off for new OAuth accounts', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    const toggle = wrapper.get('[data-testid="create-codex-quota-overdraft-toggle"]')
-    expect(toggle.attributes('aria-checked')).toBe('false')
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+  it('does not expose or submit the removed quota extension for OAuth imports', async () => {
+    const wrapper = await openCodexImportStep()
+    expect(wrapper.find('[data-testid="create-codex-quota-overdraft-toggle"]').exists()).toBe(false)
     await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
     await flushPromises()
 
-    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.codex_quota_overdraft_enabled).toBe(false)
-  })
-
-  it('submits true when Codex quota overdraft is explicitly enabled', async () => {
-    const wrapper = await openCodexImportStep(0, true)
-    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
-    await flushPromises()
-
-    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.codex_quota_overdraft_enabled).toBe(true)
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra ?? {}).not.toHaveProperty('codex_quota_overdraft_enabled')
   })
 
   it('omits the upstream request id header from extra when left empty', async () => {

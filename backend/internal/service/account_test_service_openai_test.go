@@ -73,42 +73,6 @@ type openAIAccountTestRepo struct {
 	setErrorMsg        string
 }
 
-type accountTestOverdraftCoordinatorStub struct {
-	observeCalls    int
-	businessCalls   int
-	observedAccount *Account
-	observedModel   string
-	handleCalls     int
-	handledAccount  *Account
-	handledModel    string
-	handleResult    bool
-}
-
-func (s *accountTestOverdraftCoordinatorStub) ObserveAccount(account *Account, preferredModel string) {
-	s.observeCalls++
-	s.observedAccount = account
-	s.observedModel = preferredModel
-}
-
-func (s *accountTestOverdraftCoordinatorStub) ObserveBusinessSuccess(account *Account, preferredModel string) {
-	s.businessCalls++
-	s.observedAccount = account
-	s.observedModel = preferredModel
-}
-
-func (s *accountTestOverdraftCoordinatorStub) HandleQuota429(
-	_ context.Context,
-	account *Account,
-	_ http.Header,
-	_ []byte,
-	preferredModel string,
-) bool {
-	s.handleCalls++
-	s.handledAccount = account
-	s.handledModel = preferredModel
-	return s.handleResult
-}
-
 func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
 	return nil

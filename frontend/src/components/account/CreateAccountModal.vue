@@ -6973,10 +6973,6 @@ const handleCookieAuth = async (sessionKey: string) => {
           extra.custom_base_url = customBaseUrl.value.trim()
         }
 
-        // 账号级透支开关只对 OpenAI OAuth 生效；Setup Token 保持官方行为且不写入此键。
-        if (form.platform === 'openai' && addMethod.value === 'oauth') {
-        }
-
         const accountName = keys.length > 1 ? `${form.name} #${i + 1}` : form.name
 
         const credentials: Record<string, unknown> = { ...tokenInfo }

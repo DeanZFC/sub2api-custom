@@ -992,9 +992,6 @@ type GatewayConfig struct {
 	// CodexImageGenerationBridgeEnabled: 是否为 Codex `/v1/responses` 自动注入 image_generation 工具和桥接指令。
 	// 默认关闭，避免纯文本 Codex 请求被意外改写；显式携带 image_generation 工具的请求仍按分组能力转发。
 	CodexImageGenerationBridgeEnabled bool `mapstructure:"codex_image_generation_bridge_enabled"`
-	// CodexQuotaOverdraftEnabled: 是否启用 OpenAI OAuth Codex 5h/7d 额度透支。
-	// 包括请求注入、五次真实复核、调度门控和透支期用量统计；默认关闭。
-	CodexQuotaOverdraftEnabled bool `mapstructure:"codex_quota_overdraft_enabled"`
 	// OpenAIAccountUniqueFingerprintEnabled: 是否为每个 OpenAI OAuth 账号固定唯一的
 	// Codex 设备指纹。默认开启；显式设置账号 extra.codex_fingerprint_mode=off 可对单个账号关闭。
 	OpenAIAccountUniqueFingerprintEnabled bool `mapstructure:"openai_account_unique_fingerprint_enabled"`
@@ -2380,7 +2377,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.disable_codex_identity_enforcement", false)
 	viper.SetDefault("gateway.disable_codex_originator_normalization", false)
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
-	viper.SetDefault("gateway.codex_quota_overdraft_enabled", false)
 	viper.SetDefault("gateway.openai_account_unique_fingerprint_enabled", true)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.4")

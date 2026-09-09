@@ -152,10 +152,6 @@ type UsageProgress struct {
 	WindowStats      *WindowStats `json:"window_stats,omitempty"` // 窗口期统计（从窗口开始到当前的使用量）
 	UsedRequests     int64        `json:"used_requests,omitempty"`
 	LimitRequests    int64        `json:"limit_requests,omitempty"`
-	OverdraftActive  bool         `json:"overdraft_active,omitempty"`
-	OverdraftStats   *WindowStats `json:"overdraft_stats,omitempty"`
-	OverdraftStarted *time.Time   `json:"overdraft_started_at,omitempty"`
-	OverdraftRecover *time.Time   `json:"overdraft_recover_at,omitempty"`
 }
 
 // AntigravityModelQuota Antigravity 单个模型的配额信息

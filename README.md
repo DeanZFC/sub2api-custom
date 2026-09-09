@@ -23,16 +23,11 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 - Adds an optional per-user concurrency cap to every group. Usage is counted independently by user and group, while existing user-level and account-level concurrency controls remain in effect.
 - Lets each API key select a same-platform fallback group. Every request fully tries the primary group first and uses the fallback only when the primary group has no available account; when fallback is selected, its pricing multiplier, peak multiplier, subscription deduction, and usage attribution apply to that request.
-- Provides an OpenAI account-level overdraft switch and a `CPA fingerprint egress` mode. The fingerprint mode keeps the device identity stable and unique per account without forcing all sessions and threads to share one identity.
-- Pre-arms ordinary OAuth text traffic with the overdraft payload at 95% usage and uses successful business traffic as direct evidence after usage reaches 100%.
-- Marks an injected request's explicit quota 429 as terminal for that cycle; when business evidence is unavailable, runs at most one independent probe per quota cycle.
-- Keeps an account schedulable after a successful probe and tracks overdraft requests, tokens, cost, and recovery for both windows independently.
-- Exposes `pending`, `passed`, `failed`, `inconclusive`, and `recovered` states in the admin UI and PostgreSQL.
-- Treats transient 429s, timeouts, network failures, and 5xx responses as inconclusive without automatic background retries.
-- Uses an atomic PostgreSQL claim for multi-instance deployments and atomically commits terminal failure, account pause, and scheduler notification without a schema migration.
-- Supports an immediate configuration rollback to the upstream scheduling behavior.
+- Provides single-machine, multi-window Codex fingerprints with stable per-account device identities and separate sessions.
+- Shows the latest account requests with independent refresh and resizable account table columns.
+- Supports source updates from the custom branch through the host updater.
 
-See the **[Chinese deployment and operations guide](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)** for source builds, migration, verification, upgrades, rollback, Nginx, and troubleshooting. Maintainers should also read [CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md](CODEX_QUOTA_OVERDRAFT_CUSTOMIZATION.md).
+See the [deployment guide](deploy/README.md) for source builds and the host updater.
 
 Quick start (Linux Docker, installs the host updater automatically):
 
@@ -44,7 +39,7 @@ sudo bash /tmp/install-custom-docker.sh
 
 For manual Compose deployments, run `deploy/install-source-updater.sh` after the stack is running so the admin page can update this source build later.
 
-This fork remains licensed under [GNU LGPL-3.0](LICENSE) and preserves upstream attribution. Some optional quota behaviors may conflict with upstream provider terms and may incur real usage or account restrictions. Operators are responsible for compliance and risk.
+This fork remains licensed under [GNU LGPL-3.0](LICENSE) and preserves upstream attribution.
 
 The remaining feature, deployment, sponsor, and license text is inherited from the upstream Sub2API documentation. Upstream sponsorship does not imply sponsorship or endorsement of this fork.
 

@@ -23,21 +23,15 @@
 
 - 支持分组内每用户并发限制：可为每个分组单独配置并发上限，按“用户 + 分组”独立计数，并与原有用户级、账号级并发控制同时生效。
 - 支持 API Key 主分组与同平台兜底分组：每次请求一定先完整尝试主分组，仅在主分组明确无可用账号时进入兜底分组；命中兜底后，本次请求按兜底分组的倍率、高峰倍率、渠道定价和订阅额度扣费，用量记录也归属兜底分组。
-- OpenAI 账号支持独立的透支功能开关和 `CPA 指纹出口`：关闭账号开关后不会执行透支逻辑；CPA 模式为每个账号提供唯一、稳定的设备身份，同时不强制所有会话和线程共用同一身份。
-- Codex 5h / 7d 用量达到 95% 后，为普通 OAuth 文本业务请求注入透支请求形态；达到 100% 后直接使用真实业务结果确认透支状态。
-- 注入业务请求成功即记为 `passed`；返回明确额度 429 即记为 `failed` 并切号冷却。缺少业务证据时，同一额度周期最多补充 1 次独立探测。
-- 确认成功后继续参与账号调度，并分别统计 5h / 7d 透支期请求数、Token 和金额。
-- 管理页面显示“透支探测中”“透支中”“已确认限额”“探测无法确认”和“额度已恢复”。
-- 网络、超时、5xx 和普通瞬时 429 不会被误判为额度耗尽；401/403、账号禁用和其他风控仍使用原有策略。
-- 多实例通过 PostgreSQL 原子领取（atomic claim）去重；状态保存在现有 `accounts.extra`，无需新增数据表。
-- 可通过一个配置开关立即关闭，恢复上游 Sub2API 的调度和请求行为。
+- 支持 Codex 单机多窗口指纹：按账号保持设备身份稳定，并保留各下游会话边界。
+- 账号表格支持最近请求独立刷新和列宽拖动。
 - 管理后台从本项目的 `sub2api-custom` 分支检查更新，不再使用官方 Sub2API 的版本结果。
 
 ## 快速部署
 
 完整步骤、现有服务器迁移、Nginx、验证、升级和故障排查请阅读：
 
-**[sub2api-custom 部署与运维指南](CODEX_OVERDRAFT_DEPLOYMENT_CN.md)**
+**[sub2api-custom 部署与运维指南](deploy/README.md)**
 
 最短部署流程（Linux Docker，会自动安装宿主机更新器）：
 
@@ -63,38 +57,16 @@ sudo bash /tmp/install-custom-docker.sh \
   --project sub2api-custom-28080
 ```
 
-源码中的 `deploy/config.example.yaml` 只是模板。运行配置通常位于 `deploy/data/config.yaml`。透支开关为：
-
-```yaml
-gateway:
-  codex_quota_overdraft_enabled: true
-```
-
-公开的 `docker-compose.custom.yml` 已通过环境变量默认开启全局能力；具体账号仍需在账号新增/编辑页打开账号开关。
-
 源码镜像会把根目录的 `FORK_VERSION` 写入版本信息。安装宿主机更新器后，管理后台可直接拉取本项目
 源码、备份数据库、重建应用容器并进行健康检查；更新成功后还会原子替换宿主机更新器自身，后续版本可继续使用同一个按钮。
 完整安装和故障排查见部署指南的“后台页面自动更新”。
 
-## 如何确认透支成功
-
-账号额度达到 100% 后检查日志：
-
-```bash
-docker logs --since 30m sub2api-custom 2>&1 | \
-  grep -E 'codex_quota_overdraft_(probe|state|pause|stale_rate_limit)'
-```
-
-出现 `codex_quota_overdraft_business_passed` 或 `codex_quota_overdraft_probe_passed`，页面显示“透支中”，并且后续真实业务请求成功，即可确认透支功能完整生效。注入业务请求返回明确额度 429 时会出现 `codex_quota_overdraft_business_exhausted`，状态、账号暂停和调度通知会原子提交。网络错误、5xx、超时和普通瞬时 429 不会判定透支结束；独立探测为 `inconclusive` 后同周期不自动重试。OpenAI OAuth 常规文本“测试账号连接”也使用同一请求形态和状态机；API Key、Shadow、图片和 Compact 测试除外。额度未达到 95% 时没有透支注入，未达到 100% 时没有探测日志，均属正常现象。
-
 ## 来源、许可证与风险
 
 - 上游项目：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)
-- 透支逻辑参考：[Mxucc/cpa-account-config-manager](https://github.com/Mxucc/cpa-account-config-manager)
 - 许可证：[GNU LGPL-3.0](LICENSE)，保留上游版权和许可证声明。
-- 本功能不保证上游一定允许超额调用，探测和后续请求可能产生真实用量，也可能触发账号限制。请自行核对上游服务条款并承担使用风险。
 
-下面的功能、部署和赞助信息继承自上游 Sub2API 文档。上游赞助关系不代表这些组织赞助或认可本 Fork；需要透支功能时，请以上方本 Fork 部署指南为准。
+下面的功能、部署和赞助信息继承自上游 Sub2API 文档。上游赞助关系不代表这些组织赞助或认可本 Fork；本 Fork 的部署方式请以上方指南为准。
 
 ## ⚠️ 重要提醒
 
