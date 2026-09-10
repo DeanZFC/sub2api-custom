@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import {
   getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, createSharedListing, setSharedListingStatus, deleteSharedListing,
   type SharedCard, type SharedWallet
@@ -124,8 +125,7 @@ onMounted(() => { void loadCards(); void loadWallet() })
         <div class="flex gap-2"><button class="btn btn-primary" @click="showUpload = true">上传账号</button><button class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button></div>
       </header>
       <p class="text-sm text-gray-500">使用共享账号：在 API 密钥页面选择 shared- 对应平台分组。共享消费从平台余额扣除；共享收益即时到账，可随时转入平台余额。</p>
-      <section v-if="showUpload" class="card p-6">
-        <div class="flex items-center justify-between"><h2 class="font-semibold text-gray-900 dark:text-white">上传共享账号</h2><button class="text-gray-400" @click="showUpload = false">关闭</button></div>
+      <BaseDialog :show="showUpload" title="上传共享账号" width="wide" @close="showUpload = false">
         <form class="mt-4 grid gap-4 md:grid-cols-2" @submit.prevent="submitUpload">
           <label class="text-sm">账号名称<input v-model="upload.name" required class="input mt-1 w-full" maxlength="100" placeholder="例如：我的 OpenAI 账号" /></label>
           <div class="md:col-span-2">
@@ -156,7 +156,7 @@ onMounted(() => { void loadCards(); void loadWallet() })
           <label class="text-sm">售价倍率<input v-model.number="upload.sell_rate" required type="number" min="0" max="100" step="0.01" class="input mt-1 w-full" /></label>
           <p v-if="uploadError" class="text-sm text-red-500 md:col-span-2">{{ uploadError }}</p><button class="btn btn-primary md:col-span-2" :disabled="uploading">{{ uploading ? '上传中…' : '立即上线' }}</button>
         </form>
-      </section>
+      </BaseDialog>
       <section class="card p-6" aria-label="共享收益">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <h2 class="font-semibold text-gray-900 dark:text-white">我的共享收益</h2>
