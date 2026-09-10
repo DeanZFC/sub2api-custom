@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import {
   getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, createSharedListing, setSharedListingStatus, deleteSharedListing,
   type SharedCard, type SharedWallet
@@ -18,6 +19,23 @@ const showUpload = ref(false)
 const uploading = ref(false)
 const uploadError = ref('')
 const upload = ref({ name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, concurrency_multiplier: 1, sell_rate: 1 })
+const authMethod = ref<'oauth' | 'setup-token'>('oauth')
+const platforms = [
+  { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Gemini' }, { value: 'antigravity', label: 'Antigravity' },
+  { value: 'grok', label: 'Grok' }, { value: 'kimi', label: 'Kimi' },
+  { value: 'zhipu', label: 'Zhipu GLM' }, { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'minimax', label: 'MiniMax' }
+]
+const accountTypes = computed(() => upload.value.platform === 'anthropic'
+  ? [{ value: 'oauth', label: 'Claude Code', hint: 'OAuth / Setup Token' }, { value: 'apikey', label: 'Claude Console', hint: 'API Key' }]
+  : upload.value.platform === 'openai'
+    ? [{ value: 'oauth', label: 'OAuth', hint: 'ChatGPT OAuth' }, { value: 'apikey', label: 'API Key', hint: 'Responses API' }]
+    : [{ value: 'oauth', label: 'OAuth', hint: 'OAuth 认证' }, { value: 'apikey', label: 'API Key', hint: 'API Key' }])
+watch(() => upload.value.platform, () => {
+  if (!accountTypes.value.some(item => item.value === upload.value.type)) upload.value.type = accountTypes.value[0].value
+})
+watch(authMethod, value => { if (upload.value.platform === 'anthropic' && upload.value.type === 'oauth') upload.value.type = value })
 let transferKey: string | null = null
 let generation = 0
 
@@ -110,8 +128,27 @@ onMounted(() => { void loadCards(); void loadWallet() })
         <div class="flex items-center justify-between"><h2 class="font-semibold text-gray-900 dark:text-white">上传共享账号</h2><button class="text-gray-400" @click="showUpload = false">关闭</button></div>
         <form class="mt-4 grid gap-4 md:grid-cols-2" @submit.prevent="submitUpload">
           <label class="text-sm">账号名称<input v-model="upload.name" required class="input mt-1 w-full" maxlength="100" placeholder="例如：我的 OpenAI 账号" /></label>
-          <label class="text-sm">平台<select v-model="upload.platform" required class="input mt-1 w-full"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option></select></label>
-          <label class="text-sm">账号类型<select v-model="upload.type" required class="input mt-1 w-full"><option value="apikey">API Key</option><option value="oauth">OAuth</option><option value="setup-token">Setup Token</option></select></label>
+          <div class="md:col-span-2">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">平台</label>
+            <div class="mt-2 grid grid-cols-3 gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700 sm:grid-cols-5">
+              <button v-for="platform in platforms" :key="platform.value" type="button" class="flex items-center justify-center gap-2 rounded-md px-2 py-2.5 text-sm font-medium transition-all" :class="upload.platform === platform.value ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400' : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'" @click="upload.platform = platform.value">
+                <PlatformIcon :platform="platform.value as any" size="sm" />{{ platform.label }}
+              </button>
+            </div>
+            <div v-if="upload.platform === 'anthropic' && upload.type !== 'apikey'" class="mt-3 flex gap-5 text-sm text-gray-600 dark:text-gray-300">
+              <label class="inline-flex items-center gap-2"><input v-model="authMethod" type="radio" value="oauth" /> OAuth</label>
+              <label class="inline-flex items-center gap-2"><input v-model="authMethod" type="radio" value="setup-token" /> Setup Token（长期有效）</label>
+            </div>
+          </div>
+          <div class="md:col-span-2">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">账号类型</label>
+            <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button v-for="type in accountTypes" :key="type.value" type="button" class="flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all" :class="upload.type === type.value ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-gray-200 hover:border-primary-300 dark:border-dark-600 dark:hover:border-primary-700'" @click="upload.type = type.value">
+                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" :class="upload.type === type.value ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'"><span v-if="type.value === 'oauth'">✦</span><span v-else>🔑</span></span>
+                <span><span class="block text-sm font-medium text-gray-900 dark:text-white">{{ type.label }}</span><span class="text-xs text-gray-500 dark:text-gray-400">{{ type.hint }}</span></span>
+              </button>
+            </div>
+          </div>
           <label class="text-sm">{{ upload.type === 'apikey' ? 'API Key' : '访问令牌' }}<input v-model="upload.credential" required type="password" class="input mt-1 w-full font-mono" autocomplete="off" :placeholder="upload.type === 'apikey' ? 'sk-...' : '粘贴访问令牌'" /></label>
           <label class="text-sm md:col-span-2">代理地址（可选）<input v-model="upload.proxy_url" placeholder="http://用户名:密码@主机:端口 或 socks5://主机:端口" class="input mt-1 w-full font-mono" autocomplete="off" /></label>
           <label class="text-sm">并发上限<input v-model.number="upload.concurrency" required type="number" min="1" max="1000" class="input mt-1 w-full" /></label>
