@@ -22,6 +22,7 @@ const uploadError = ref('')
 const uploadStep = ref<1 | 2>(1)
 const upload = ref({ name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, sell_rate: 1 })
 const authMethod = ref<'oauth' | 'setup-token'>('oauth')
+const authorizationMethod = ref('manual')
 const platforms = [
   { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Gemini' }, { value: 'antigravity', label: 'Antigravity' },
@@ -166,8 +167,24 @@ onMounted(() => { void loadCards(); void loadWallet() })
             </div>
           </div>
           <div v-if="uploadStep === 2" class="md:col-span-2">
-            <label class="text-sm">{{ upload.type === 'apikey' ? 'API Key' : '访问令牌' }}<input v-model="upload.credential" required type="password" class="input mt-1 w-full font-mono" autocomplete="off" :placeholder="upload.type === 'apikey' ? 'sk-...' : '粘贴访问令牌'" /></label>
-            <p class="mt-1 text-xs text-gray-500">凭证仅用于创建共享账号，保存后不会展示。</p>
+            <div class="rounded-lg border border-blue-200 bg-blue-50 p-5 dark:border-blue-700 dark:bg-blue-900/30">
+              <div class="flex items-start gap-4">
+                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-2xl text-white">↗</div>
+                <div class="min-w-0 flex-1"><h3 class="text-lg font-semibold text-blue-900 dark:text-blue-200">{{ upload.platform === 'openai' ? 'OpenAI 账户授权' : '账号授权' }}</h3><p class="mt-1 text-sm text-blue-700 dark:text-blue-300">Authorization Method</p></div>
+              </div>
+              <div class="mt-4 flex flex-wrap gap-x-5 gap-y-3 text-sm text-blue-900 dark:text-blue-200">
+                <label v-for="method in (upload.platform === 'openai' ? ['manual','refresh_token','mobile_refresh_token','codex_session','agent_identity','codex_pat'] : ['manual'])" :key="method" class="inline-flex cursor-pointer items-center gap-2"><input v-model="authorizationMethod" type="radio" :value="method" class="text-blue-600" /><span>{{ ({ manual: '手动授权', refresh_token: '手动输入 RT', mobile_refresh_token: '手动输入 Mobile RT', codex_session: 'Codex OAuth auth.json / AT 导入', agent_identity: 'Agent Identity auth.json', codex_pat: 'Codex Personal Access Token' } as Record<string, string>)[method] }}</span></label>
+              </div>
+              <div class="mt-5 rounded-lg border border-blue-300 bg-white p-4 dark:border-blue-600 dark:bg-dark-800/70">
+                <p class="mb-3 text-sm font-medium text-blue-800 dark:text-blue-200">{{ authorizationMethod === 'manual' ? '请输入访问凭证完成授权' : '请输入对应凭证完成授权' }}</p>
+                <input v-model="upload.credential" required type="password" class="input w-full font-mono" autocomplete="off" :placeholder="upload.type === 'apikey' ? 'sk-...' : '粘贴访问令牌'" />
+                <p class="mt-2 text-xs text-blue-600 dark:text-blue-300">凭证仅用于创建共享账号，保存后不会展示。</p>
+              </div>
+              <div v-if="upload.platform === 'openai' && authorizationMethod === 'manual'" class="mt-4 space-y-4">
+                <div class="rounded-lg border border-blue-300 bg-white p-4 dark:border-blue-600 dark:bg-dark-800/70"><p class="mb-3 text-base font-semibold text-blue-900 dark:text-blue-200">1&nbsp;&nbsp;点击下方按钮生成授权链接</p><button type="button" class="btn btn-primary" disabled>生成授权链接</button></div>
+                <div class="rounded-lg border border-blue-300 bg-white p-4 dark:border-blue-600 dark:bg-dark-800/70"><p class="text-base font-semibold text-blue-900 dark:text-blue-200">2&nbsp;&nbsp;在浏览器中打开链接并完成授权</p><p class="mt-2 text-sm text-blue-700 dark:text-blue-300">请在新标签页中打开授权链接，登录您的 OpenAI 账户并授权。</p></div>
+              </div>
+            </div>
           </div>
           <label v-if="uploadStep === 2" class="text-sm md:col-span-2">代理地址（可选）<input v-model="upload.proxy_url" placeholder="http://用户名:密码@主机:端口 或 socks5://主机:端口" class="input mt-1 w-full font-mono" autocomplete="off" /></label>
           <label v-if="uploadStep === 2" class="text-sm">并发上限<input v-model.number="upload.concurrency" required type="number" min="1" max="1000" class="input mt-1 w-full" /></label>
