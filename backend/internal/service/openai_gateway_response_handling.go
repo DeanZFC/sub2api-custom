@@ -569,6 +569,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					}
 				}
 				if !outputStarted {
+					if !cyberHit {
+						if retryFailure := configuredOpenAIStreamRetryFailure(ctx, dataBytes, failedMessage, usage); retryFailure != nil {
+							s.recordOpenAIStreamUpstreamError(c, account, false, upstreamRequestID, "retry", dataBytes, failedMessage)
+							streamEarlyErr = retryFailure
+							return
+						}
+					}
 					shouldFailover := false
 					if !cyberHit {
 						if eventType == "error" {
@@ -579,7 +586,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					}
 					if shouldFailover {
 						sawFailedEvent = true
-						streamEarlyErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
+						failure := s.newOpenAIStreamFailoverErrorWithModel(c, account, false, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
+						failure.ConfiguredRetryUnsafe = failure.ConfiguredRetryUnsafe || openAIUsageHasTokens(usage)
+						streamEarlyErr = failure
 						return
 					}
 					if !cyberHit && !sawBareError {
@@ -1693,7 +1702,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr
 		}
-		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
+		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, s.parseSSEUsageFromBody(bodyText), mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
 		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)

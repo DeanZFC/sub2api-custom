@@ -861,6 +861,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false,
 	// cch_signing=false, claude_oauth_system_prompt_injection=true)
+	retrySettings := parseUpstreamErrorRetrySettings(settings[SettingKeyUpstreamErrorRetry])
+	result.UpstreamErrorRetry = &retrySettings
 	result.OpenAITTFTMode = normalizeOpenAITTFTMode(settings[SettingKeyOpenAITTFTMode])
 	if v, ok := settings[SettingKeyEnableFingerprintUnification]; ok && v != "" {
 		result.EnableFingerprintUnification = v == "true"

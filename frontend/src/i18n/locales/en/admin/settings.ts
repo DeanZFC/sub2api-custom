@@ -462,6 +462,16 @@ export default {
         saved: 'Ollama Cloud usage refresh settings saved',
         saveFailed: 'Failed to save Ollama Cloud usage refresh settings'
       },
+      upstreamErrorRetry: {
+        title: 'Upstream error auto retry',
+        description: 'Retry matching upstream errors inside the gateway to reduce client reconnections.',
+        maxRetries: 'Additional retries (1–10)',
+        delay: 'Retry interval (milliseconds, 100–10000)',
+        errors: 'Error rules (one per line)',
+        matchHint: 'Mix HTTP status codes, error codes and error messages. Status codes match exactly; text uses case-insensitive substring matching. Any matching line triggers a retry. For example, servers are currently overloaded matches the full overload message. No wildcards or regular expressions are needed. Up to 100 lines.',
+        scopeHint: 'Retry only before body content or tool calls are sent. All attempts within one request share the retry limit. Built-in error handling continues after exhaustion. HTTP 429 keeps the official rate-limit policy and is unaffected. Saving takes effect without a restart.',
+        invalid: 'Check retry settings: 1–10 retries, a 100–10000 ms interval and up to 100 error rules (at least one when enabled). Status codes must be 400–599, excluding 429.',
+      },
       gatewayForwarding: {
         title: 'Request Forwarding',
         description: 'Control how requests are forwarded to upstream OAuth accounts',

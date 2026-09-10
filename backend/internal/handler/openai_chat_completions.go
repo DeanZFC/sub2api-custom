@@ -338,6 +338,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						return
 					}
 					// Pool mode: retry on the same account
+					if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(c.Request.Context(), failoverErr); claimed {
+						if retryErr != nil {
+							return
+						}
+						continue
+					}
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
 						if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {

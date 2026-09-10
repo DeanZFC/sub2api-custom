@@ -243,6 +243,8 @@ type UpdateSettingsRequest struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
+	UpstreamErrorRetry *service.UpstreamErrorRetrySettings `json:"upstream_error_retry"`
+
 	OpenAITTFTMode                         *string `json:"openai_ttft_mode"`
 	EnableFingerprintUnification           *bool   `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough              *bool   `json:"enable_metadata_passthrough"`
@@ -1687,6 +1689,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableFingerprintUnification
 		}(),
+		UpstreamErrorRetry: func() *service.UpstreamErrorRetrySettings {
+			if req.UpstreamErrorRetry != nil {
+				return req.UpstreamErrorRetry
+			}
+			return previousSettings.UpstreamErrorRetry
+		}(),
 		OpenAITTFTMode: func() string {
 			if req.OpenAITTFTMode != nil {
 				return *req.OpenAITTFTMode
@@ -2302,6 +2310,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AllowUngroupedKeyScheduling:                            updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                                     updatedSettings.BackendModeEnabled,
 		EnableFingerprintUnification:                           updatedSettings.EnableFingerprintUnification,
+		UpstreamErrorRetry:                                     updatedSettings.UpstreamErrorRetry,
 		EnableMetadataPassthrough:                              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                                       updatedSettings.EnableCCHSigning,
 		EnableClaudeOAuthSystemPromptInjection:                 updatedSettings.EnableClaudeOAuthSystemPromptInjection,

@@ -455,6 +455,16 @@ export default {
         saved: 'Ollama Cloud 用量刷新设置已保存',
         saveFailed: '保存 Ollama Cloud 用量刷新设置失败'
       },
+      upstreamErrorRetry: {
+        title: '上游错误自动重试',
+        description: '命中配置的上游错误时，由网关自动重试，减少客户端重连。',
+        maxRetries: '额外重试次数（1–10）',
+        delay: '重试间隔（毫秒，100–10000）',
+        errors: '错误匹配规则（一行一个）',
+        matchHint: '支持混填 HTTP 状态码、错误码和错误提示。状态码精确匹配；文字按包含关系模糊匹配，不区分大小写，任一行命中即重试。例如填写 servers are currently overloaded 即可匹配完整过载提示。无需填写通配符或正则表达式，最多 100 行。',
+        scopeHint: '仅在尚未输出正文或工具调用前重试，同一请求共享次数上限。重试耗尽后继续原有错误处理；429 限流沿用官方策略，不受此设置影响。保存后生效。',
+        invalid: '请检查重试配置：次数 1–10，间隔 100–10000 毫秒；启用时至少填一行错误规则，最多 100 行。状态码仅支持 400–599（不含 429）。',
+      },
       gatewayForwarding: {
         title: '请求转发行为',
         description: '控制请求转发到上游 OAuth 账号时的行为',

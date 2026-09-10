@@ -3,6 +3,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -10,6 +11,32 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestUpstreamErrorRetrySettingsRoundTripAndPartialUpdate(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	value := service.UpstreamErrorRetrySettings{Enabled: true, MaxRetries: 4, DelayMS: 500, Errors: "503\n currently overloaded "}
+	rec := doUpdateSettings(t, h, map[string]any{"upstream_error_retry": value}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var stored service.UpstreamErrorRetrySettings
+	require.NoError(t, json.Unmarshal([]byte(repo.values[service.SettingKeyUpstreamErrorRetry]), &stored))
+	require.Equal(t, "503\ncurrently overloaded", stored.Errors)
+	require.True(t, stored.Enabled)
+	var envelope struct {
+		Data struct {
+			Retry service.UpstreamErrorRetrySettings `json:"upstream_error_retry"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	require.Equal(t, stored, envelope.Data.Retry)
+	raw := repo.values[service.SettingKeyUpstreamErrorRetry]
+	rec = doUpdateSettings(t, h, map[string]any{"site_name": "Changed"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, raw, repo.values[service.SettingKeyUpstreamErrorRetry])
+	value.MaxRetries = 999
+	rec = doUpdateSettings(t, h, map[string]any{"upstream_error_retry": value}, nil)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Equal(t, raw, repo.values[service.SettingKeyUpstreamErrorRetry])
+}
 
 // Saving settings is a whole-document PUT. A client that sends only the field it
 // cares about must not reset everything else: a payload as small as

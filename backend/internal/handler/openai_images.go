@@ -307,6 +307,12 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 						)
 						return
 					}
+					if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(c.Request.Context(), failoverErr); claimed {
+						if retryErr != nil {
+							return
+						}
+						continue
+					}
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
 						if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {

@@ -4439,6 +4439,41 @@
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+          <div class="card" data-testid="upstream-error-retry-settings">
+            <div class="flex items-center justify-between gap-6 border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <div>
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                  {{ t('admin.settings.upstreamErrorRetry.title') }}
+                </h2>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.upstreamErrorRetry.description') }}
+                </p>
+              </div>
+              <Toggle v-model="form.upstream_error_retry.enabled" data-testid="upstream-error-retry-toggle" />
+            </div>
+            <div class="space-y-4 p-6">
+              <div class="grid gap-4 sm:grid-cols-2">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.upstreamErrorRetry.maxRetries') }}
+                  <input v-model.number="form.upstream_error_retry.max_retries" type="number" min="1" max="10" step="1"
+                    class="input mt-2" data-testid="upstream-error-retry-max" />
+                </label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.upstreamErrorRetry.delay') }}
+                  <input v-model.number="form.upstream_error_retry.delay_ms" type="number" min="100" max="10000" step="100"
+                    class="input mt-2" data-testid="upstream-error-retry-delay" />
+                </label>
+              </div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.settings.upstreamErrorRetry.errors') }}
+                <textarea v-model="form.upstream_error_retry.errors" rows="5" maxlength="32768"
+                  class="input mt-2 font-mono text-sm" data-testid="upstream-error-retry-errors"
+                  :placeholder="'503\nserver_is_overloaded\nservers are currently overloaded'" />
+              </label>
+              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.upstreamErrorRetry.matchHint') }}</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.upstreamErrorRetry.scopeHint') }}</p>
+            </div>
+          </div>
           <!-- Claude Code Settings -->
           <div class="card">
             <div
@@ -9779,6 +9814,7 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_weight_previous_response: "",
   openai_advanced_scheduler_weight_session_sticky: "",
   // Gateway forwarding behavior
+  upstream_error_retry: { enabled: false, max_retries: 3, delay_ms: 1000, errors: "" },
   openai_ttft_mode: "semantic",
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
@@ -11030,6 +11066,16 @@ function findDuplicateDefaultSubscription(
 async function saveSettings() {
   saving.value = true;
   try {
+    const retry = form.upstream_error_retry;
+    const errorLines = retry.errors.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (!Number.isInteger(retry.max_retries) || retry.max_retries < 1 || retry.max_retries > 10 ||
+        !Number.isInteger(retry.delay_ms) || retry.delay_ms < 100 || retry.delay_ms > 10000 ||
+        (retry.enabled && errorLines.length === 0) || errorLines.length > 100 ||
+        errorLines.some((line) => /^\d+$/.test(line) && (Number(line) < 400 || Number(line) > 599 || Number(line) === 429))) {
+      appStore.showError(t("admin.settings.upstreamErrorRetry.invalid"));
+      activeTab.value = "gateway";
+      return;
+    }
     const normalizedTableDefaultPageSize = Math.floor(
       Number(form.table_default_page_size),
     );
@@ -11359,6 +11405,7 @@ async function saveSettings() {
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
+      upstream_error_retry: { ...form.upstream_error_retry },
       openai_ttft_mode:
         form.openai_ttft_mode === "visible" ? "visible" : "semantic",
       enable_fingerprint_unification: form.enable_fingerprint_unification,

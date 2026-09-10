@@ -577,6 +577,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		// 账号槽位/等待计数需要在超时或断开时安全回收
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
+		writerSizeBeforeForward := c.Writer.Size()
 		// 5) forward (根据平台分流)
 		var result *service.ForwardResult
 		requestCtx := c.Request.Context()
@@ -605,6 +606,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
+				if c.Writer.Size() != writerSizeBeforeForward {
+					failoverErr.ConfiguredRetryUnsafe = true
+				}
 				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 				switch failoverAction {
 				case FailoverContinue:

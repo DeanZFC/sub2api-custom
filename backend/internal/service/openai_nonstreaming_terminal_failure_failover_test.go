@@ -254,5 +254,5 @@ func TestNonStreamingTerminalFailureFailover_NilAccountProposesNothing(t *testin
 
 	require.Nil(t, svc.nonStreamingTerminalFailureFailover(
 		c, newNonStreamingSSEResponse(), nil, false, "response.failed", payload,
-		"Selected model is at capacity. Please try a different model."))
+		"Selected model is at capacity. Please try a different model.", nil))
 }

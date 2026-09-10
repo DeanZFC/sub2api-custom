@@ -2,6 +2,7 @@ package admin
 
 import (
 	"log/slog"
+	"reflect"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -451,6 +452,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.EnableFingerprintUnification != after.EnableFingerprintUnification {
 		changed = append(changed, "enable_fingerprint_unification")
+	}
+	if !reflect.DeepEqual(before.UpstreamErrorRetry, after.UpstreamErrorRetry) {
+		changed = append(changed, "upstream_error_retry")
 	}
 	if before.OpenAITTFTMode != after.OpenAITTFTMode {
 		changed = append(changed, "openai_ttft_mode")

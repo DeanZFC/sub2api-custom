@@ -224,6 +224,12 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 					)
 					return
 				}
+				if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(c.Request.Context(), failoverErr); claimed {
+					if retryErr != nil {
+						return
+					}
+					continue
+				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
