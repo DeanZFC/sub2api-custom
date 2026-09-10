@@ -20,7 +20,7 @@ const showUpload = ref(false)
 const uploading = ref(false)
 const uploadError = ref('')
 const uploadStep = ref<1 | 2>(1)
-const upload = ref({ name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, concurrency_multiplier: 1, sell_rate: 1 })
+const upload = ref({ name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, sell_rate: 1 })
 const authMethod = ref<'oauth' | 'setup-token'>('oauth')
 const platforms = [
   { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' },
@@ -95,7 +95,7 @@ async function submitUpload() {
   uploading.value = true
   try {
     await createSharedListing({ ...upload.value, credentials })
-    showUpload.value = false; uploadStep.value = 1; upload.value = { name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, concurrency_multiplier: 1, sell_rate: 1 }
+    showUpload.value = false; uploadStep.value = 1; upload.value = { name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, sell_rate: 1 }
     mode.value = 'mine'; await loadCards()
   } catch (e) { uploadError.value = errorText(e) } finally { uploading.value = false }
 }
@@ -171,8 +171,7 @@ onMounted(() => { void loadCards(); void loadWallet() })
           </div>
           <label v-if="uploadStep === 2" class="text-sm md:col-span-2">代理地址（可选）<input v-model="upload.proxy_url" placeholder="http://用户名:密码@主机:端口 或 socks5://主机:端口" class="input mt-1 w-full font-mono" autocomplete="off" /></label>
           <label v-if="uploadStep === 2" class="text-sm">并发上限<input v-model.number="upload.concurrency" required type="number" min="1" max="1000" class="input mt-1 w-full" /></label>
-          <label v-if="uploadStep === 2" class="text-sm">并发倍率<input v-model.number="upload.concurrency_multiplier" required type="number" min="0.1" max="5" step="0.1" class="input mt-1 w-full" /></label>
-          <label v-if="uploadStep === 2" class="text-sm">售价倍率<input v-model.number="upload.sell_rate" required type="number" min="0" max="100" step="0.01" class="input mt-1 w-full" /></label>
+          <label v-if="uploadStep === 2" class="text-sm">倍率<input v-model.number="upload.sell_rate" required type="number" min="0" max="100" step="0.01" class="input mt-1 w-full" /></label>
           <p v-if="uploadError" class="text-sm text-red-500 md:col-span-2">{{ uploadError }}</p>
           <div class="flex justify-end gap-2 md:col-span-2"><button v-if="uploadStep === 2" type="button" class="btn btn-secondary" @click="uploadStep = 1">上一步</button><button class="btn btn-primary" :disabled="uploading">{{ uploading ? '上传中…' : uploadStep === 1 ? '下一步' : '立即上线' }}</button></div>
         </form>
@@ -208,7 +207,7 @@ onMounted(() => { void loadCards(); void loadWallet() })
             <span class="shrink-0 rounded-full px-3 py-1 text-xs font-medium" :class="card.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'">{{ labels[card.status] || card.status }}</span>
           </div>
           <div class="mt-6"><p class="text-xs text-gray-500">累计调用</p><p class="mt-1 break-all text-5xl font-black tracking-tight text-primary-600">{{ card.total_call_count.toLocaleString() }}</p></div>
-          <div class="mt-4 flex flex-wrap gap-3 text-xs text-gray-500"><span>并发上限 {{ card.concurrency_limit }}</span><span>并发倍率 {{ card.concurrency_multiplier }}x</span><span>售价倍率 {{ card.sell_rate }}x</span></div>
+          <div class="mt-4 flex flex-wrap gap-3 text-xs text-gray-500"><span>并发上限 {{ card.concurrency_limit }}</span><span>倍率 {{ card.sell_rate }}x</span></div>
           <p class="mt-3 text-xs text-gray-400">最近调用：{{ timeText(card.last_called_at) }}</p>
           <div v-if="mode === 'mine'" class="mt-3 flex gap-2"><button class="btn btn-secondary btn-sm" @click="toggle(card)">{{ card.status === 'paused' ? '恢复' : '暂停' }}</button><button class="btn btn-secondary btn-sm text-red-500" @click="remove(card)">删除</button></div>
           <div class="mt-6 border-t border-gray-200 pt-4 dark:border-dark-700">
