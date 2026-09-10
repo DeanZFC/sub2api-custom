@@ -1,13 +1,13 @@
 <template>
   <div class="min-w-[116px]">
-    <div v-if="!requests.length && loading" class="flex h-7 items-center gap-1" aria-label="Loading recent requests">
+    <div v-if="!requests.length && loading" class="flex h-7 items-center justify-end gap-1" aria-label="Loading recent requests">
       <span v-for="index in 10" :key="index" class="h-6 w-1.5 animate-pulse rounded-full bg-gray-200 dark:bg-dark-600" />
     </div>
     <div v-else-if="timeline.length" :class="['transition-opacity duration-200', loading ? 'opacity-60' : 'opacity-100']" :aria-label="t('admin.accounts.recentRequests.summary', { count: timeline.length })">
-      <div class="mb-1 text-[11px] font-medium tabular-nums text-gray-500 dark:text-gray-400">
+      <div class="mb-1 text-right text-[11px] font-medium tabular-nums text-gray-500 dark:text-gray-400">
         {{ formatTime(latestCreatedAt) }}
       </div>
-      <div class="flex h-6 items-center gap-1">
+      <div class="flex h-6 items-center justify-end gap-1">
       <template v-for="request in timeline" :key="request.request_id">
         <HelpTooltip class="!ml-0" trigger="both" width-class="w-80">
           <template #trigger>
@@ -45,9 +45,9 @@ const props = defineProps<{
   loading?: boolean
 }>()
 
-const timeline = computed(() =>
-  [...props.requests].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
-)
+// API returns created_at_desc (newest first). Reverse so the sparkline reads
+// oldest on the left and newest on the right, matching a timeline.
+const timeline = computed(() => [...props.requests].reverse())
 
 const latestCreatedAt = computed(() => timeline.value[timeline.value.length - 1]?.created_at ?? '')
 
