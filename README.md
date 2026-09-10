@@ -23,7 +23,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 - Adds an optional per-user concurrency cap to every group. Usage is counted independently by user and group, while existing user-level and account-level concurrency controls remain in effect.
 - Lets each API key select a same-platform fallback group. Every request fully tries the primary group first and uses the fallback only when the primary group has no available account; when fallback is selected, its pricing multiplier, peak multiplier, subscription deduction, and usage attribution apply to that request.
-- Provides single-machine, multi-window Codex fingerprints with stable per-account device identities and separate sessions.
+- Provides single-machine, multi-window Codex fingerprints with stable per-account device identities, a small pool of conversation windows, and overflow rendered as subagents.
 - Shows the latest account requests with independent refresh and resizable account table columns.
 - Supports source updates from the custom branch through the host updater.
 

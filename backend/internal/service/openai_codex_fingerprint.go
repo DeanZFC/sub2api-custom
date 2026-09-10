@@ -8,6 +8,8 @@ import (
 	"maps"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -27,8 +29,41 @@ const codexFingerprintIDsContextKey = "codex_fingerprint_ids"
 // 必须无条件覆写（含 nil）：failover 从收敛账号切到 off 账号时，上一账号的
 // IDs 不得残留并被误应用到新账号的出站头（typed-nil 由应用侧 nil 守卫吸收）。
 func stageCodexFingerprintIDs(c *gin.Context, ids *codexFingerprintIDs) {
-	if c != nil {
-		c.Set(codexFingerprintIDsContextKey, ids)
+	if c == nil {
+		return
+	}
+	if prev, ok := c.Get(codexFingerprintIDsContextKey); ok {
+		if prevIDs, ok := prev.(*codexFingerprintIDs); ok {
+			releaseCodexFingerprintLease(prevIDs)
+		}
+	}
+	holdCodexFingerprintLease(ids)
+	c.Set(codexFingerprintIDsContextKey, ids)
+}
+
+func holdCodexFingerprintLease(ids *codexFingerprintIDs) {
+	if ids == nil || ids.mode != codexFingerprintSingleMachineMultiWindow || ids.accountID <= 0 || ids.lease != nil {
+		return
+	}
+	ids.lease = singleMachineInFlight.acquire(ids.accountID, ids.rootIndex)
+}
+
+func releaseCodexFingerprintLease(ids *codexFingerprintIDs) {
+	if ids == nil {
+		return
+	}
+	ids.lease.release()
+	ids.lease = nil
+}
+
+func releaseStagedCodexFingerprintLease(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	if prev, ok := c.Get(codexFingerprintIDsContextKey); ok {
+		if ids, ok := prev.(*codexFingerprintIDs); ok {
+			releaseCodexFingerprintLease(ids)
+		}
 	}
 }
 
@@ -104,8 +139,8 @@ const (
 	// 上游看到 1 台设备 + 1 会话 + 1 线程，最激进。
 	codexFingerprintFull codexFingerprintMode = "full"
 	// codexFingerprintSingleMachineMultiWindow keeps one stable device per
-	// account while deriving a stable, separate Codex window for each client
-	// session. This is the user-facing replacement for the legacy modes.
+	// account, maps downstream sessions onto a small pool of Codex windows,
+	// and renders overflow occupancy as spawned sub-agents of those windows.
 	codexFingerprintSingleMachineMultiWindow codexFingerprintMode = "single_machine_multi_window"
 )
 
@@ -274,12 +309,30 @@ func deriveStableUUIDv4(seed string) string {
 	b := h[:16]
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 1
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		binary.BigEndian.Uint32(b[0:4]),
-		binary.BigEndian.Uint16(b[4:6]),
-		binary.BigEndian.Uint16(b[6:8]),
-		binary.BigEndian.Uint16(b[8:10]),
-		b[10:16])
+	return uuid.UUID(b).String()
+}
+
+// deriveStableUUIDv7 从种子和毫秒时间戳确定性派生 UUIDv7。
+// 真 Codex 的 thread / session ID 是 UUIDv7；时间戳必须由调用方提供且保持稳定，
+// 不能用 time.Now()，否则重启后身份会漂。
+func deriveStableUUIDv7(seed string, unixMs int64) string {
+	h := sha256.Sum256([]byte(seed))
+	if unixMs < 0 {
+		unixMs = 0
+	}
+	ts := uint64(unixMs) & 0xffffffffffff
+	var b [16]byte
+	b[0] = byte(ts >> 40)
+	b[1] = byte(ts >> 32)
+	b[2] = byte(ts >> 24)
+	b[3] = byte(ts >> 16)
+	b[4] = byte(ts >> 8)
+	b[5] = byte(ts)
+	b[6] = (h[6] & 0x0f) | 0x70 // version 7
+	b[7] = h[7]
+	b[8] = (h[8] & 0x3f) | 0x80 // variant 1
+	copy(b[9:], h[9:16])
+	return uuid.UUID(b).String()
 }
 
 // resolveConvergedInstallationID 返回账号级恒定的 installation_id。
@@ -315,14 +368,145 @@ func resolveConvergedThreadID(seed, clientSessionID string) string {
 	return deriveStableUUIDv4("sub2api:codex-thread-id:v2:" + seed + ":" + clientSessionID)
 }
 
-func resolveSingleMachineMultiWindowSessionID(seed, clientSessionID string) string {
+const (
+	// 单机多窗口把下游会话收敛到少量根对话，避免一台机器出现无界 Codex 进程数。
+	singleMachineRootWindowCount   = 3
+	singleMachineChildSlotsPerRoot = 3
+	// 2025-01-01 UTC。根/子线程的 UUIDv7 时间戳从账号种子稳定散开，看起来像
+	// 这台机器上陆续开过的对话，而不是每次请求现造。
+	singleMachineUUIDEpochMs int64 = 1735689600000
+	singleMachineUUIDSpanMs  int64 = 400 * 24 * 60 * 60 * 1000
+	singleMachineThreadGapMs int64 = 47 * 60 * 1000
+)
+
+// 不要使用 review / guardian：网关会把这两种 kind 当成 Codex 官方 review 子智能体
+// 去做父线程粘性调度。
+var singleMachineSubagentKinds = [...]string{"explore", "worker", "implementer"}
+
+type singleMachineWindowIdentity struct {
+	rootIndex      int
+	sessionID      string
+	threadID       string
+	parentThreadID string
+	subagentKind   string
+	windowID       string
+}
+
+type singleMachineInFlightKey struct {
+	accountID int64
+	rootIndex int
+}
+
+type singleMachineLease struct {
+	registry *singleMachineInFlightRegistry
+	key      singleMachineInFlightKey
+	released atomic.Uint32
+}
+
+type singleMachineInFlightRegistry struct {
+	mu     sync.Mutex
+	counts map[singleMachineInFlightKey]int
+}
+
+var singleMachineInFlight = &singleMachineInFlightRegistry{
+	counts: make(map[singleMachineInFlightKey]int),
+}
+
+func (r *singleMachineInFlightRegistry) peek(accountID int64, rootIndex int) int {
+	if r == nil || accountID <= 0 {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.counts[singleMachineInFlightKey{accountID: accountID, rootIndex: rootIndex}]
+}
+
+func (r *singleMachineInFlightRegistry) acquire(accountID int64, rootIndex int) *singleMachineLease {
+	if r == nil || accountID <= 0 {
+		return nil
+	}
+	key := singleMachineInFlightKey{accountID: accountID, rootIndex: rootIndex}
+	r.mu.Lock()
+	r.counts[key]++
+	r.mu.Unlock()
+	return &singleMachineLease{registry: r, key: key}
+}
+
+func (l *singleMachineLease) release() {
+	if l == nil || l.registry == nil || !l.released.CompareAndSwap(0, 1) {
+		return
+	}
+	l.registry.mu.Lock()
+	defer l.registry.mu.Unlock()
+	n := l.registry.counts[l.key] - 1
+	if n <= 0 {
+		delete(l.registry.counts, l.key)
+		return
+	}
+	l.registry.counts[l.key] = n
+}
+
+func singleMachineThreadTimestampMs(seed string, rootIndex, childSlot int) int64 {
+	h := sha256.Sum256([]byte("sub2api:codex-single-machine-ts:v1:" + seed))
+	base := singleMachineUUIDEpochMs + int64(binary.BigEndian.Uint64(h[:8])%uint64(singleMachineUUIDSpanMs))
+	slot := rootIndex*(singleMachineChildSlotsPerRoot+1) + childSlot
+	return base + int64(slot)*singleMachineThreadGapMs
+}
+
+func deriveSingleMachineThreadID(seed string, rootIndex, childSlot int) string {
 	if seed == "" {
 		return ""
 	}
-	if strings.TrimSpace(clientSessionID) == "" {
-		return resolveConvergedSessionID(seed)
+	name := fmt.Sprintf("sub2api:codex-single-machine-thread:v1:%s:%d:%d", seed, rootIndex, childSlot)
+	return deriveStableUUIDv7(name, singleMachineThreadTimestampMs(seed, rootIndex, childSlot))
+}
+
+func singleMachineRootIndex(seed, clientSessionID string) int {
+	clientSessionID = strings.TrimSpace(clientSessionID)
+	if seed == "" || clientSessionID == "" {
+		return 0
 	}
-	return deriveStableUUIDv4("sub2api:codex-single-machine-session:v1:" + seed + ":" + strings.TrimSpace(clientSessionID))
+	h := sha256.Sum256([]byte("sub2api:codex-single-machine-slot:v1:" + seed + ":" + clientSessionID))
+	return int(binary.BigEndian.Uint64(h[0:8]) % uint64(singleMachineRootWindowCount))
+}
+
+func singleMachineOccupancyHash(seed, clientSessionID string) uint64 {
+	clientSessionID = strings.TrimSpace(clientSessionID)
+	if seed == "" || clientSessionID == "" {
+		return 0
+	}
+	h := sha256.Sum256([]byte("sub2api:codex-single-machine-slot:v1:" + seed + ":" + clientSessionID))
+	return binary.BigEndian.Uint64(h[8:16])
+}
+
+// resolveSingleMachineMultiWindowIdentity 把下游 session 映射到少量根窗口。
+// 默认都是根对话；只有该窗口已经有进行中的请求时，溢出并发才降级成子智能体。
+// 空 session 固定落在根窗口 0，且不会变成子智能体。
+func resolveSingleMachineMultiWindowIdentity(seed, clientSessionID string, windowBusy bool) singleMachineWindowIdentity {
+	if seed == "" {
+		return singleMachineWindowIdentity{}
+	}
+	rootIndex := singleMachineRootIndex(seed, clientSessionID)
+	rootThreadID := deriveSingleMachineThreadID(seed, rootIndex, 0)
+	if rootThreadID == "" {
+		return singleMachineWindowIdentity{}
+	}
+	ident := singleMachineWindowIdentity{
+		rootIndex: rootIndex,
+		sessionID: rootThreadID,
+		threadID:  rootThreadID,
+		windowID:  rootThreadID + ":0",
+	}
+	if !windowBusy || strings.TrimSpace(clientSessionID) == "" {
+		return ident
+	}
+	childSlot := int(singleMachineOccupancyHash(seed, clientSessionID)%uint64(singleMachineChildSlotsPerRoot)) + 1
+	childThreadID := deriveSingleMachineThreadID(seed, rootIndex, childSlot)
+	ident.threadID = childThreadID
+	ident.parentThreadID = rootThreadID
+	ident.subagentKind = singleMachineSubagentKinds[(rootIndex+childSlot-1)%len(singleMachineSubagentKinds)]
+	ident.windowID = childThreadID + ":0"
+	return ident
 }
 
 func isCodexFingerprintClient(h http.Header) bool {
@@ -352,7 +536,12 @@ type codexFingerprintIDs struct {
 	threadID                      string
 	turnID                        string
 	windowID                      string
+	parentThreadID                string
+	subagentKind                  string
+	rootIndex                     int
+	lease                         *singleMachineLease
 	turnStartedAtUnixMs           int64
+	originalClientSessionID       string
 	originalBodySessionID         string
 	originalBodySessionIDCaptured bool
 }
@@ -403,6 +592,7 @@ func resolveCodexFingerprintIDsWithSeed(account *Account, clientSessionID string
 		if ids.threadID == "" {
 			ids.threadID = ids.sessionID
 		}
+		ids.originalClientSessionID = strings.TrimSpace(clientSessionID)
 		ids.turnID = uuid.Must(uuid.NewV7()).String()
 		ids.windowID = ids.threadID + ":0"
 		return ids
@@ -410,18 +600,26 @@ func resolveCodexFingerprintIDsWithSeed(account *Account, clientSessionID string
 	case codexFingerprintFull:
 		ids.sessionID = resolveConvergedSessionID(seed)
 		ids.threadID = ids.sessionID
+		ids.originalClientSessionID = strings.TrimSpace(clientSessionID)
 		ids.turnID = uuid.Must(uuid.NewV7()).String()
 		ids.windowID = ids.threadID + ":0"
 		return ids
 
 	case codexFingerprintSingleMachineMultiWindow:
-		ids.sessionID = resolveSingleMachineMultiWindowSessionID(seed, clientSessionID)
-		ids.threadID = resolveConvergedThreadID(seed, ids.sessionID)
-		if ids.threadID == "" {
-			ids.threadID = ids.sessionID
+		rootIndex := singleMachineRootIndex(seed, clientSessionID)
+		windowBusy := account.ID > 0 && singleMachineInFlight.peek(account.ID, rootIndex) > 0
+		ident := resolveSingleMachineMultiWindowIdentity(seed, clientSessionID, windowBusy)
+		if ident.threadID == "" {
+			return nil
 		}
+		ids.sessionID = ident.sessionID
+		ids.threadID = ident.threadID
+		ids.parentThreadID = ident.parentThreadID
+		ids.subagentKind = ident.subagentKind
+		ids.rootIndex = ident.rootIndex
+		ids.originalClientSessionID = strings.TrimSpace(clientSessionID)
 		ids.turnID = uuid.Must(uuid.NewV7()).String()
-		ids.windowID = ids.threadID + ":0"
+		ids.windowID = ident.windowID
 		return ids
 	}
 
@@ -487,49 +685,92 @@ func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs) {
 	// session / full / single-machine 模式：改写所有相关头
 	h.Set("x-codex-window-id", ids.windowID)
 	h.Set("x-client-request-id", ids.threadID)
-	// 连字符形式始终改写；旧模式继续保留下划线头以兼容历史客户端。
 	h.Set("session-id", ids.sessionID)
-	if ids.mode != codexFingerprintSingleMachineMultiWindow {
-		h.Set("session_id", ids.sessionID)
-	}
-	// Current Codex clients no longer send the legacy underscore session header.
-	// Keep the canonical hyphenated header only for the new unified mode; legacy
-	// modes retain their historical wire shape for backwards compatibility.
-	if ids.mode == codexFingerprintSingleMachineMultiWindow {
-		h.Del("session_id")
-	}
+	h.Set("session_id", ids.sessionID)
+	h.Set("conversation_id", ids.sessionID)
 	h.Set("thread-id", ids.threadID)
+	if ids.mode == codexFingerprintSingleMachineMultiWindow {
+		h.Del("thread_id")
+		if ids.parentThreadID != "" {
+			h.Set(codexParentThreadIDHeader, ids.parentThreadID)
+			h.Set(openAISubagentHeader, ids.subagentKind)
+		} else {
+			h.Del(codexParentThreadIDHeader)
+			h.Del(openAISubagentHeader)
+		}
+	}
 
-	rewriteCodexTurnMetadataFields(h, map[string]any{
-		"installation_id":         ids.installationID,
-		"session_id":              ids.sessionID,
-		"thread_id":               ids.threadID,
-		"turn_id":                 ids.turnID,
-		"window_id":               ids.windowID,
-		"turn_started_at_unix_ms": ids.turnStartedAtUnixMs,
-	})
+	fields, deleteKeys := codexFingerprintTurnMetadataFields(ids)
+	applyCodexTurnMetadataHeader(h, fields, deleteKeys, ids.mode == codexFingerprintSingleMachineMultiWindow)
 }
 
 // rewriteCodexTurnMetadataFields 解析 x-codex-turn-metadata 头中的 JSON，
 // 替换指定字段后回写。合法对象保留未指定字段（如 sandbox、thread_source）；
 // 非法/非对象值重建为最小合法 metadata，避免 flat 与 embedded identity 分裂。
 func rewriteCodexTurnMetadataFields(h http.Header, fields map[string]any) {
-	raw := strings.TrimSpace(h.Get("x-codex-turn-metadata"))
-	if raw == "" {
-		return
+	applyCodexTurnMetadataHeader(h, fields, nil, false)
+}
+
+func codexFingerprintTurnMetadataFields(ids *codexFingerprintIDs) (map[string]any, []string) {
+	if ids == nil {
+		return nil, nil
+	}
+	if ids.mode == codexFingerprintAccountDevice || ids.mode == codexFingerprintDevice {
+		return map[string]any{"installation_id": ids.installationID}, nil
+	}
+	fields := map[string]any{
+		"installation_id":         ids.installationID,
+		"session_id":              ids.sessionID,
+		"thread_id":               ids.threadID,
+		"turn_id":                 ids.turnID,
+		"window_id":               ids.windowID,
+		"turn_started_at_unix_ms": ids.turnStartedAtUnixMs,
+	}
+	if ids.mode != codexFingerprintSingleMachineMultiWindow {
+		return fields, nil
+	}
+	if ids.parentThreadID != "" {
+		fields["parent_thread_id"] = ids.parentThreadID
+		fields["subagent_kind"] = ids.subagentKind
+		return fields, nil
+	}
+	return fields, []string{"parent_thread_id", "subagent_kind"}
+}
+
+func mergeCodexTurnMetadataJSON(raw string, fields map[string]any, deleteKeys []string, createIfMissing bool) (string, bool) {
+	if strings.TrimSpace(raw) == "" && !createIfMissing {
+		return raw, false
 	}
 	var metadata map[string]any
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
+	if trimmed := strings.TrimSpace(raw); trimmed != "" {
+		if err := json.Unmarshal([]byte(trimmed), &metadata); err != nil || metadata == nil {
+			metadata = make(map[string]any, len(fields))
+		}
+	} else {
 		metadata = make(map[string]any, len(fields))
 	}
 	for k, v := range fields {
 		metadata[k] = v
 	}
+	for _, key := range deleteKeys {
+		delete(metadata, key)
+	}
 	rebuilt, err := json.Marshal(metadata)
 	if err != nil {
+		return raw, false
+	}
+	return string(rebuilt), true
+}
+
+func applyCodexTurnMetadataHeader(h http.Header, fields map[string]any, deleteKeys []string, createIfMissing bool) {
+	if h == nil {
 		return
 	}
-	h.Set("x-codex-turn-metadata", string(rebuilt))
+	next, ok := mergeCodexTurnMetadataJSON(h.Get("x-codex-turn-metadata"), fields, deleteKeys, createIfMissing)
+	if !ok {
+		return
+	}
+	h.Set("x-codex-turn-metadata", next)
 }
 
 // applyCodexFingerprintClientMetadata 按预计算的收敛 ID 改写请求体中的 client_metadata。
@@ -572,26 +813,19 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 	}
 
 	if ids.mode == codexFingerprintAccountDevice || ids.mode == codexFingerprintDevice {
-		rewriteClientMetadataEmbeddedTurnMetadata(existing, map[string]any{
-			"installation_id": ids.installationID,
-		})
+		fields, deleteKeys := codexFingerprintTurnMetadataFields(ids)
+		applyClientMetadataEmbeddedTurnMetadata(existing, fields, deleteKeys, false)
 		return modified
 	}
 
-	// session / full 模式
+	// session / full / single-machine 模式
 	existing["session_id"] = ids.sessionID
 	existing["thread_id"] = ids.threadID
 	existing["turn_id"] = ids.turnID
 	existing["x-codex-window-id"] = ids.windowID
 
-	rewriteClientMetadataEmbeddedTurnMetadata(existing, map[string]any{
-		"installation_id":         ids.installationID,
-		"session_id":              ids.sessionID,
-		"thread_id":               ids.threadID,
-		"turn_id":                 ids.turnID,
-		"window_id":               ids.windowID,
-		"turn_started_at_unix_ms": ids.turnStartedAtUnixMs,
-	})
+	fields, deleteKeys := codexFingerprintTurnMetadataFields(ids)
+	applyClientMetadataEmbeddedTurnMetadata(existing, fields, deleteKeys, ids.mode == codexFingerprintSingleMachineMultiWindow)
 	return true
 }
 
@@ -630,7 +864,10 @@ func shouldRewriteCodexFingerprintPromptCacheKey(ids *codexFingerprintIDs, promp
 	if ids.mode != codexFingerprintSession && ids.mode != codexFingerprintFull && ids.mode != codexFingerprintSingleMachineMultiWindow {
 		return false
 	}
-	return promptCacheKey == ids.originalBodySessionID
+	if promptCacheKey == ids.originalBodySessionID {
+		return true
+	}
+	return ids.originalClientSessionID != "" && promptCacheKey == ids.originalClientSessionID
 }
 
 func applyCodexFingerprintPromptCacheKey(reqBody map[string]any, ids *codexFingerprintIDs) bool {
@@ -707,18 +944,17 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 // x-codex-turn-metadata JSON 字符串里的指定字段。非法/非对象值会重建，
 // 避免 flat client_metadata 与 embedded metadata 暴露两套身份。
 func rewriteClientMetadataEmbeddedTurnMetadata(clientMetadata map[string]any, fields map[string]any) {
-	raw, ok := clientMetadata["x-codex-turn-metadata"].(string)
-	if !ok || raw == "" {
+	applyClientMetadataEmbeddedTurnMetadata(clientMetadata, fields, nil, false)
+}
+
+func applyClientMetadataEmbeddedTurnMetadata(clientMetadata map[string]any, fields map[string]any, deleteKeys []string, createIfMissing bool) {
+	if clientMetadata == nil {
 		return
 	}
-	var metadata map[string]any
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
-		metadata = make(map[string]any, len(fields))
+	raw, _ := clientMetadata["x-codex-turn-metadata"].(string)
+	next, ok := mergeCodexTurnMetadataJSON(raw, fields, deleteKeys, createIfMissing)
+	if !ok {
+		return
 	}
-	for k, v := range fields {
-		metadata[k] = v
-	}
-	if rebuilt, err := json.Marshal(metadata); err == nil {
-		clientMetadata["x-codex-turn-metadata"] = string(rebuilt)
-	}
+	clientMetadata["x-codex-turn-metadata"] = next
 }

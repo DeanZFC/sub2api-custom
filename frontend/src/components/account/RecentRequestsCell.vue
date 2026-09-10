@@ -3,12 +3,12 @@
     <div v-if="!requests.length && loading" class="flex h-7 items-center gap-1" aria-label="Loading recent requests">
       <span v-for="index in 10" :key="index" class="h-6 w-1.5 animate-pulse rounded-full bg-gray-200 dark:bg-dark-600" />
     </div>
-    <div v-else-if="requests.length" :class="['transition-opacity duration-200', loading ? 'opacity-60' : 'opacity-100']" :aria-label="t('admin.accounts.recentRequests.summary', { count: requests.length })">
+    <div v-else-if="timeline.length" :class="['transition-opacity duration-200', loading ? 'opacity-60' : 'opacity-100']" :aria-label="t('admin.accounts.recentRequests.summary', { count: timeline.length })">
       <div class="mb-1 text-[11px] font-medium tabular-nums text-gray-500 dark:text-gray-400">
-        {{ formatTime(requests[0].created_at) }}
+        {{ formatTime(latestCreatedAt) }}
       </div>
       <div class="flex h-6 items-center gap-1">
-      <template v-for="request in requests" :key="request.request_id">
+      <template v-for="request in timeline" :key="request.request_id">
         <HelpTooltip class="!ml-0" trigger="both" width-class="w-80">
           <template #trigger>
             <span :class="request.kind === 'error'
@@ -33,16 +33,23 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { OpsRequestDetail } from '@/api/admin/ops'
 
 const { t } = useI18n()
 
-defineProps<{
+const props = defineProps<{
   requests: OpsRequestDetail[]
   loading?: boolean
 }>()
+
+const timeline = computed(() =>
+  [...props.requests].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+)
+
+const latestCreatedAt = computed(() => timeline.value[timeline.value.length - 1]?.created_at ?? '')
 
 const formatTime = (value: string) => {
   const timestamp = Date.parse(value)
