@@ -527,7 +527,8 @@ func isCodexFingerprintClient(h http.Header) bool {
 // codexFingerprintIDs 收敛后的完整 ID 集合。
 // 由 resolveCodexFingerprintIDs 一次性生成，同一个实例在头改写和体改写之间共享，
 // 确保所有载体中的 turn_id 等随机字段一致。体改写时还会补记原始
-// client_metadata.session_id，用于识别 root prompt_cache_key 的默认值。
+// client_metadata.session_id：session/full 用它识别默认 prompt_cache_key；
+// single_machine_multi_window 只收敛身份窗口，不改写缓存键。
 type codexFingerprintIDs struct {
 	accountID                     int64
 	mode                          codexFingerprintMode
@@ -857,11 +858,16 @@ func captureCodexFingerprintOriginalBodySessionIDRaw(ids *codexFingerprintIDs, v
 	}
 }
 
+// shouldRewriteCodexFingerprintPromptCacheKey 仅在 session/full 把默认
+// prompt_cache_key（等于原始 body/header session）收敛到账号级 session。
+// single_machine_multi_window 必须保留下游会话自己的 cache key：身份窗口可以
+// 只有 3 个，但官方 prompt cache 大约 15 RPM/key，把无关对话压到 3 把 key 上
+// 会溢到新机器并打穿缓存率。
 func shouldRewriteCodexFingerprintPromptCacheKey(ids *codexFingerprintIDs, promptCacheKey string) bool {
 	if ids == nil || !ids.originalBodySessionIDCaptured || ids.originalBodySessionID == "" || ids.sessionID == "" {
 		return false
 	}
-	if ids.mode != codexFingerprintSession && ids.mode != codexFingerprintFull && ids.mode != codexFingerprintSingleMachineMultiWindow {
+	if ids.mode != codexFingerprintSession && ids.mode != codexFingerprintFull {
 		return false
 	}
 	if promptCacheKey == ids.originalBodySessionID {
@@ -889,8 +895,9 @@ func applyCodexFingerprintPromptCacheKey(reqBody map[string]any, ids *codexFinge
 // 供透传路径使用——透传是热路径，禁止对可能高达数十 MB 的 body 做全量
 // Unmarshal（见 forwardOpenAIPassthrough 的轻量提取注释）。实现为：gjson 提取
 // client_metadata 小对象单独解码，经共享核心改写后 sjson 一次性拼回，body
-// 其余字节原样保留；root prompt_cache_key 仅在可证明是 body session 默认值时
-// 做标量改写。语义与 applyCodexFingerprintClientMetadata 逐点一致（含
+// 其余字节原样保留；session/full 的默认 prompt_cache_key 仅在可证明是
+// body/header session 默认值时做标量改写。single_machine 不改缓存键。
+// 语义与 applyCodexFingerprintClientMetadata 逐点一致（含
 // "非对象值整体替换为收敛集合"的行为）。
 func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintIDs) ([]byte, bool, error) {
 	if len(body) == 0 || ids == nil {

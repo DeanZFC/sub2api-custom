@@ -314,6 +314,50 @@ func TestSingleMachineMultiWindow_ConversationIDFollowsRootSession(t *testing.T)
 	assert.Equal(t, ids.sessionID, h.Get("session-id"))
 }
 
+func TestSingleMachineMultiWindow_PreservesPerConversationPromptCacheKey(t *testing.T) {
+	account := newTestOAuthAccount(7, map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSingleMachineMultiWindow)})
+	hIn := http.Header{}
+	hIn.Set("User-Agent", "codex_cli_rs/0.146.0")
+	hIn.Set("session-id", "session-a")
+	ids := resolveCodexFingerprintIDsFromRequest(account, hIn)
+	require.NotNil(t, ids)
+	require.NotEqual(t, "session-a", ids.sessionID)
+
+	body := []byte(`{"model":"gpt-5.6-sol","prompt_cache_key":"session-a","client_metadata":{"session_id":"session-a","trace":"keep"},"input":[]}`)
+	mapBody, rawBody := applyMapAndRawFingerprintBodiesForTest(t, body, ids)
+	require.Equal(t, "session-a", mapBody["prompt_cache_key"])
+	require.Equal(t, "session-a", rawBody["prompt_cache_key"])
+
+	mapCM, _ := mapBody["client_metadata"].(map[string]any)
+	rawCM, _ := rawBody["client_metadata"].(map[string]any)
+	require.Equal(t, ids.sessionID, mapCM["session_id"])
+	require.Equal(t, ids.sessionID, rawCM["session_id"])
+	require.Equal(t, "keep", rawCM["trace"])
+}
+
+func TestSingleMachineMultiWindow_KeepsDistinctPromptCacheKeysAcrossWindows(t *testing.T) {
+	account := newTestOAuthAccount(7, map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSingleMachineMultiWindow)})
+	cacheKeys := map[string]struct{}{}
+	sessions := map[string]struct{}{}
+	for i := 0; i < 12; i++ {
+		clientSession := fmt.Sprintf("downstream-%d", i)
+		hIn := http.Header{}
+		hIn.Set("User-Agent", "codex_cli_rs/0.146.0")
+		hIn.Set("session-id", clientSession)
+		ids := resolveCodexFingerprintIDsFromRequest(account, hIn)
+		require.NotNil(t, ids)
+		sessions[ids.sessionID] = struct{}{}
+
+		body := []byte(`{"prompt_cache_key":"` + clientSession + `","client_metadata":{"session_id":"` + clientSession + `"}}`)
+		mapBody, rawBody := applyMapAndRawFingerprintBodiesForTest(t, body, ids)
+		require.Equal(t, clientSession, mapBody["prompt_cache_key"])
+		require.Equal(t, clientSession, rawBody["prompt_cache_key"])
+		cacheKeys[mapBody["prompt_cache_key"].(string)] = struct{}{}
+	}
+	assert.Len(t, cacheKeys, 12)
+	assert.LessOrEqual(t, len(sessions), singleMachineRootWindowCount)
+}
+
 func TestSingleMachineMultiWindow_NonCodexDoesNotCreateWindowIdentity(t *testing.T) {
 	account := newTestOAuthAccount(8, map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSingleMachineMultiWindow)})
 	h := http.Header{"User-Agent": []string{"opencode/1.0"}, "session-id": []string{"session-a"}}
@@ -873,6 +917,9 @@ func TestApplyCodexFingerprintPromptCacheKey_Negatives(t *testing.T) {
 	deviceAccount := newTestOAuthAccount(4311, map[string]any{codexFingerprintModeExtraKey: "device"})
 	deviceIDs := resolveCodexFingerprintIDs(deviceAccount, "header-session", codexFingerprintDevice)
 	require.NotNil(t, deviceIDs)
+	singleAccount := newTestOAuthAccount(4312, map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSingleMachineMultiWindow)})
+	singleIDs := resolveCodexFingerprintIDs(singleAccount, "header-session", codexFingerprintSingleMachineMultiWindow)
+	require.NotNil(t, singleIDs)
 
 	tests := []struct {
 		name          string
@@ -934,6 +981,13 @@ func TestApplyCodexFingerprintPromptCacheKey_Negatives(t *testing.T) {
 			name:         "device mode preserves key",
 			body:         []byte(`{"prompt_cache_key":"body-session","client_metadata":{"session_id":"body-session"}}`),
 			ids:          deviceIDs,
+			wantExists:   true,
+			wantCacheKey: "body-session",
+		},
+		{
+			name:         "single-machine preserves downstream cache key",
+			body:         []byte(`{"prompt_cache_key":"body-session","client_metadata":{"session_id":"body-session"}}`),
+			ids:          singleIDs,
 			wantExists:   true,
 			wantCacheKey: "body-session",
 		},
