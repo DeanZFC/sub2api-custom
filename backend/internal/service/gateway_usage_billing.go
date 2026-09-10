@@ -1005,7 +1005,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 	requestID := usageLog.RequestID
 	var sharedFee *float64
-	sharedFreeze := 48
+	sharedFreeze := 0
 	if s.settingService != nil {
 		v := s.settingService.GetSharedPoolFeeRatePercent(ctx)
 		sharedFee = &v

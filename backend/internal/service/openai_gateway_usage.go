@@ -564,7 +564,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			APIKeyService:               input.APIKeyService,
 			Platform:                    quotaPlatform,
 			SharedAccountFeeRatePercent: sharedFee,
-			SharedAccountFreezeHours:    48,
+			SharedAccountFreezeHours:    0,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

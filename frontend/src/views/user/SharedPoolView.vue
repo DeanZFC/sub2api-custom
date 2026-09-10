@@ -123,7 +123,7 @@ onMounted(() => { void loadCards(); void loadWallet() })
         </div>
         <div class="flex gap-2"><button class="btn btn-primary" @click="showUpload = true">上传账号</button><button class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button></div>
       </header>
-      <p class="text-sm text-gray-500">使用共享账号：在 API 密钥页面选择 shared- 对应平台分组。共享消费从平台余额扣除；共享收益结算 48 小时后可手动转入余额。</p>
+      <p class="text-sm text-gray-500">使用共享账号：在 API 密钥页面选择 shared- 对应平台分组。共享消费从平台余额扣除；共享收益即时到账，可随时转入平台余额。</p>
       <section v-if="showUpload" class="card p-6">
         <div class="flex items-center justify-between"><h2 class="font-semibold text-gray-900 dark:text-white">上传共享账号</h2><button class="text-gray-400" @click="showUpload = false">关闭</button></div>
         <form class="mt-4 grid gap-4 md:grid-cols-2" @submit.prevent="submitUpload">

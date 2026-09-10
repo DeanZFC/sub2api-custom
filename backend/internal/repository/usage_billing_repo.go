@@ -228,8 +228,8 @@ func settleSharedAccountUsage(ctx context.Context, tx *sql.Tx, cmd *service.Usag
 		return errors.New("shared account fee rate must be between 0 and 100")
 	}
 	freeze := cmd.SharedAccountFreezeHours
-	if freeze <= 0 {
-		freeze = 48
+	if freeze < 0 {
+		freeze = 0
 	}
 	if freeze > 8760 {
 		return errors.New("shared account freeze period exceeds one year")
@@ -251,11 +251,12 @@ func settleSharedAccountUsage(ctx context.Context, tx *sql.Tx, cmd *service.Usag
  SELECT $5::numeric(20,8) AS gross,ROUND($5::numeric*$6::numeric/100,8) AS fee
  ), inserted AS (
  INSERT INTO shared_account_usage_ledger(request_id,listing_id,owner_user_id,consumer_user_id,gross_cost,fee_rate_percent,platform_fee,owner_amount,frozen_until)
- SELECT $1,$2,$3,$4,gross,$6::numeric,fee,gross-fee,NOW()+($7::integer*INTERVAL '1 hour') FROM amount
+ SELECT $1,$2,$3,$4,gross,$6::numeric,fee,gross-fee,CASE WHEN $7::integer=0 THEN NULL ELSE NOW()+($7::integer*INTERVAL '1 hour') END FROM amount
  ON CONFLICT(request_id) DO NOTHING RETURNING owner_user_id,owner_amount,id,listing_id
  ), wallet AS (
- INSERT INTO shared_account_wallets(user_id,pending_amount,total_earned) SELECT owner_user_id,owner_amount,owner_amount FROM inserted
- ON CONFLICT(user_id) DO UPDATE SET pending_amount=shared_account_wallets.pending_amount+EXCLUDED.pending_amount,total_earned=shared_account_wallets.total_earned+EXCLUDED.total_earned,updated_at=NOW()
+ INSERT INTO shared_account_wallets(user_id,pending_amount,available_amount,total_earned)
+ SELECT owner_user_id,CASE WHEN $7::integer=0 THEN 0 ELSE owner_amount END,CASE WHEN $7::integer=0 THEN owner_amount ELSE 0 END,owner_amount FROM inserted
+ ON CONFLICT(user_id) DO UPDATE SET pending_amount=shared_account_wallets.pending_amount+EXCLUDED.pending_amount,available_amount=shared_account_wallets.available_amount+EXCLUDED.available_amount,total_earned=shared_account_wallets.total_earned+EXCLUDED.total_earned,updated_at=NOW()
  ), journal AS (
  INSERT INTO shared_account_wallet_ledger(user_id,listing_id,usage_ledger_id,action,amount,idempotency_key)
  SELECT owner_user_id,listing_id,id,'earn',owner_amount,'earn:'||id::text FROM inserted
