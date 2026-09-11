@@ -9,6 +9,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestExtractCompatConversationKey_PrefersStableBodyIdentifiers(t *testing.T) {
+	body := []byte(`{"conversation_id":"conversation-42","session_id":"session-42","client_metadata":{"session_id":"metadata-42"}}`)
+	require.Equal(t, "conversation-42", extractCompatConversationKey(body))
+
+	body = []byte(`{"client_metadata":{"session_id":"metadata-42"}}`)
+	require.Equal(t, "metadata-42", extractCompatConversationKey(body))
+}
+
+func TestExtractCompatConversationKey_RejectsUnsafeOrRotatingValues(t *testing.T) {
+	require.Empty(t, extractCompatConversationKey([]byte(`{"request_id":"rotates-every-turn"}`)))
+	require.Empty(t, extractCompatConversationKey([]byte(`{"session_id":"bad\nvalue"}`)))
+	require.Empty(t, extractCompatConversationKey([]byte(`{"session_id":"`+strings.Repeat("x", 256)+`"}`)))
+}
+
+func TestDeriveCompatPromptCacheKeyForBody_UsesStableConversationKey(t *testing.T) {
+	base := &apicompat.ChatCompletionsRequest{Model: "gpt-5.4", Messages: []apicompat.ChatMessage{{Role: "user", Content: mustRawJSON(t, `"hello"`)}}}
+	first := deriveCompatPromptCacheKeyForBody(base, "gpt-5.4", []byte(`{"conversation_id":"conv-1","messages":[{"role":"user","content":"hello"}]}`))
+	second := deriveCompatPromptCacheKeyForBody(base, "gpt-5.4", []byte(`{"conversation_id":"conv-1","messages":[{"role":"user","content":"different later turn"}]}`))
+	other := deriveCompatPromptCacheKeyForBody(base, "gpt-5.4", []byte(`{"conversation_id":"conv-2","messages":[{"role":"user","content":"hello"}]}`))
+	require.Equal(t, first, second)
+	require.NotEqual(t, first, other)
+	require.True(t, strings.HasPrefix(first, compatPromptCacheKeyPrefix+"session_"))
+}
+
 func mustRawJSON(t *testing.T, s string) json.RawMessage {
 	t.Helper()
 	return json.RawMessage(s)

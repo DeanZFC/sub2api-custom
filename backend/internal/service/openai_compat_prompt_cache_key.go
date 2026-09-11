@@ -11,6 +11,39 @@ import (
 
 const compatPromptCacheKeyPrefix = "compat_cc_"
 
+// extractCompatConversationKey reads stable conversation identifiers that some
+// OpenAI-compatible clients put in the JSON body instead of a header. These
+// fields are checked only by the Chat Completions compatibility path; arbitrary
+// metadata and rotating request IDs must never become cache keys.
+func extractCompatConversationKey(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	root := parseRawJSONView(body)
+	for _, path := range []string{
+		"conversation_id",
+		"session_id",
+		"client_metadata.session_id",
+	} {
+		value := strings.TrimSpace(root.Get(path).String())
+		if value != "" && len(value) <= 255 && !strings.ContainsAny(value, "\r\n\x00") {
+			return value
+		}
+	}
+	return ""
+}
+
+// deriveCompatPromptCacheKeyForBody keeps one stable key for a downstream
+// conversation when the client supplies that identity in the body. The content
+// based derivation remains the fallback for clients that provide no stable
+// conversation signal and is intentionally stable across later turns.
+func deriveCompatPromptCacheKeyForBody(req *apicompat.ChatCompletionsRequest, mappedModel string, body []byte) string {
+	if conversationKey := extractCompatConversationKey(body); conversationKey != "" {
+		return compatPromptCacheKeyPrefix + "session_" + hashSensitiveValueForLog(conversationKey)
+	}
+	return deriveCompatPromptCacheKey(req, mappedModel)
+}
+
 func shouldAutoInjectPromptCacheKeyForCompat(model string) bool {
 	trimmed := strings.TrimSpace(strings.ToLower(model))
 	canonical := canonicalizeOpenAIModelAliasSpelling(trimmed)
