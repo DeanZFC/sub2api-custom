@@ -88,6 +88,7 @@ func (r *opsRepository) ListRequestDetails(ctx context.Context, filter *service.
 WITH combined AS (
   SELECT
     'success'::TEXT AS kind,
+    ul.id AS log_id,
     ul.created_at AS created_at,
     ul.request_id AS request_id,
     COALESCE(NULLIF(g.platform, ''), NULLIF(a.platform, ''), '') AS platform,
@@ -102,7 +103,10 @@ WITH combined AS (
     ul.api_key_id AS api_key_id,
     ul.account_id AS account_id,
     ul.group_id AS group_id,
-    ul.stream AS stream
+    ul.stream AS stream,
+    ul.first_token_ms AS first_token_ms,
+    ul.request_type AS request_type,
+    ul.openai_ws_mode AS openai_ws_mode
   FROM usage_logs ul
   LEFT JOIN groups g ON g.id = ul.group_id
   LEFT JOIN accounts a ON a.id = ul.account_id
@@ -112,6 +116,7 @@ WITH combined AS (
 
   SELECT
     'error'::TEXT AS kind,
+    o.id AS log_id,
     o.created_at AS created_at,
     COALESCE(NULLIF(o.request_id,''), NULLIF(o.client_request_id,''), '') AS request_id,
     COALESCE(NULLIF(o.platform, ''), NULLIF(g.platform, ''), NULLIF(a.platform, ''), '') AS platform,
@@ -126,7 +131,10 @@ WITH combined AS (
     o.api_key_id AS api_key_id,
     o.account_id AS account_id,
     o.group_id AS group_id,
-    o.stream AS stream
+    o.stream AS stream,
+    o.time_to_first_token_ms AS first_token_ms,
+    o.request_type AS request_type,
+    FALSE AS openai_ws_mode
   FROM ops_error_logs o
   LEFT JOIN groups g ON g.id = o.group_id
   LEFT JOIN accounts a ON a.id = o.account_id
@@ -145,42 +153,46 @@ WITH combined AS (
 		}
 	}
 
-	sort := "ORDER BY created_at DESC"
+	sort := "ORDER BY created_at DESC, log_id DESC, kind"
+	resultSort := "ORDER BY p.created_at DESC, p.log_id DESC, p.kind"
 	if filter != nil {
 		switch strings.TrimSpace(strings.ToLower(filter.Sort)) {
 		case "", "created_at_desc":
 			// default
 		case "duration_desc":
-			sort = "ORDER BY duration_ms DESC NULLS LAST, created_at DESC"
+			sort = "ORDER BY duration_ms DESC NULLS LAST, created_at DESC, log_id DESC, kind"
+			resultSort = "ORDER BY p.duration_ms DESC NULLS LAST, p.created_at DESC, p.log_id DESC, p.kind"
 		default:
 			return nil, 0, fmt.Errorf("invalid sort")
 		}
 	}
 
+	// Enrich only the selected page, keeping user/name lookups and usage details
+	// out of the count query and the full request history scan.
 	listQuery := fmt.Sprintf(`
 %s
 SELECT
-  kind,
-  created_at,
-  request_id,
-  platform,
-  model,
-  duration_ms,
-  status_code,
-  error_id,
-  phase,
-  severity,
-  message,
-  user_id,
-  api_key_id,
-  account_id,
-  group_id,
-  stream
-FROM combined
+  p.kind, p.created_at, p.request_id, p.platform, p.model,
+  p.duration_ms, p.status_code, p.error_id, p.phase, p.severity, p.message,
+  p.user_id, p.api_key_id, p.account_id, p.group_id, p.stream,
+  u.email, g.name, a.name, k.name,
+  p.first_token_ms, p.request_type, p.openai_ws_mode, ul.upstream_model,
+  ul.input_tokens, ul.output_tokens, ul.cache_read_tokens, ul.cache_creation_tokens,
+  ul.image_input_tokens, ul.image_output_tokens, ul.actual_cost,
+  COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1) AS account_cost
+FROM (
+  SELECT * FROM combined
+  %s
+  %s
+  LIMIT $%d OFFSET $%d
+) p
+LEFT JOIN users u ON u.id = p.user_id
+LEFT JOIN groups g ON g.id = p.group_id
+LEFT JOIN accounts a ON a.id = p.account_id
+LEFT JOIN api_keys k ON k.id = p.api_key_id
+LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.created_at = p.created_at
 %s
-%s
-LIMIT $%d OFFSET $%d
-`, cte, where, sort, len(args)+1, len(args)+2)
+`, cte, where, sort, len(args)+1, len(args)+2, resultSort)
 
 	listArgs := append(append([]any{}, args...), pageSize, offset)
 	rows, err := r.db.QueryContext(ctx, listQuery, listArgs...)
@@ -202,6 +214,12 @@ LIMIT $%d OFFSET $%d
 		}
 		i := v.Int64
 		return &i
+	}
+	toFloat64Ptr := func(v sql.NullFloat64) *float64 {
+		if !v.Valid {
+			return nil
+		}
+		return &v.Float64
 	}
 
 	out := make([]*service.OpsRequestDetail, 0, pageSize)
@@ -227,6 +245,15 @@ LIMIT $%d OFFSET $%d
 			groupID   sql.NullInt64
 
 			stream bool
+
+			userEmail, groupName, accountName, apiKeyName sql.NullString
+			firstTokenMs, requestType                     sql.NullInt64
+			openaiWSMode                                  sql.NullBool
+			upstreamModel                                 sql.NullString
+			inputTokens, outputTokens                     sql.NullInt64
+			cacheReadTokens, cacheCreationTokens          sql.NullInt64
+			imageInputTokens, imageOutputTokens           sql.NullInt64
+			actualCost, accountCost                       sql.NullFloat64
 		)
 
 		if err := rows.Scan(
@@ -246,6 +273,10 @@ LIMIT $%d OFFSET $%d
 			&accountID,
 			&groupID,
 			&stream,
+			&userEmail, &groupName, &accountName, &apiKeyName,
+			&firstTokenMs, &requestType, &openaiWSMode, &upstreamModel,
+			&inputTokens, &outputTokens, &cacheReadTokens, &cacheCreationTokens,
+			&imageInputTokens, &imageOutputTokens, &actualCost, &accountCost,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -269,8 +300,28 @@ LIMIT $%d OFFSET $%d
 			AccountID: toInt64Ptr(accountID),
 			GroupID:   toInt64Ptr(groupID),
 
+			UserEmail:           userEmail.String,
+			GroupName:           groupName.String,
+			AccountName:         accountName.String,
+			APIKeyName:          apiKeyName.String,
+			FirstTokenMs:        toIntPtr(firstTokenMs),
+			UpstreamModel:       upstreamModel.String,
+			InputTokens:         toIntPtr(inputTokens),
+			OutputTokens:        toIntPtr(outputTokens),
+			CacheReadTokens:     toIntPtr(cacheReadTokens),
+			CacheCreationTokens: toIntPtr(cacheCreationTokens),
+			ImageInputTokens:    toIntPtr(imageInputTokens),
+			ImageOutputTokens:   toIntPtr(imageOutputTokens),
+			ActualCost:          toFloat64Ptr(actualCost),
+			AccountCost:         toFloat64Ptr(accountCost),
+
 			Stream: stream,
 		}
+		resolvedType := service.RequestTypeFromInt16(int16(requestType.Int64))
+		if resolvedType == service.RequestTypeUnknown {
+			resolvedType = service.RequestTypeFromLegacy(stream, openaiWSMode.Bool)
+		}
+		item.RequestType = resolvedType.String()
 
 		if item.Platform == "" {
 			item.Platform = "unknown"

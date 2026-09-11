@@ -292,10 +292,30 @@ func TestChannelMonitorV2UsageSuccessExcludesCyberBillingRows(t *testing.T) {
 	for _, query := range []string{channelMonitorV2UsageMetricsSQL, channelMonitorV2UserMetricsSQL} {
 		require.Contains(t, query, "COALESCE(ul.request_type, 0) NOT IN (4, 6)")
 		require.Contains(t, query, "ul.actual_cost > 0")
+		require.Contains(t, query, "cache_eligible_input_tokens")
+		require.Contains(t, query, "ul.stream = TRUE OR ul.openai_ws_mode = TRUE")
 	}
 	require.Contains(t, channelMonitorV2PlatformSQL, "g.platform = 'composite'")
 	require.Contains(t, channelMonitorV2PlatformSQL, "a.platform")
 	require.Contains(t, channelMonitorV2HistogramSQL, "ul.actual_cost > 0")
+}
+
+func TestChannelMonitorV2SyncTrafficDoesNotBecomeCacheMisses(t *testing.T) {
+	acc := newMetricAccumulator()
+	acc.addFact(channelMonitorV2Fact{Success: 1, Input: 100, Output: 20})
+	m := acc.metric(1, true)
+	require.Equal(t, int64(1), m.RequestCount)
+	require.Equal(t, int64(100), m.InputTokens)
+	require.Zero(t, m.CacheEligibleInputTokens)
+	require.Zero(t, m.CacheRateDenominator)
+	require.Zero(t, m.CacheRate)
+
+	acc.addFact(channelMonitorV2Fact{Success: 1, Input: 100, CacheEligibleInput: 100, CacheRead: 80})
+	m = acc.metric(1, true)
+	require.Equal(t, int64(200), m.InputTokens)
+	require.Equal(t, int64(100), m.CacheEligibleInputTokens)
+	require.Equal(t, int64(180), m.CacheRateDenominator)
+	require.InDelta(t, 80.0/180.0, m.CacheRate, 0.0001)
 }
 
 func TestChannelMonitorV2RatesUseCoveredWindow(t *testing.T) {

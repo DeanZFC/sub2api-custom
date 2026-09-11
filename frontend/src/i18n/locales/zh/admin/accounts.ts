@@ -127,6 +127,15 @@ export default {
         hint: '显示格式为“分组名 / 基础分 / 粘性加分”。基础分按当前筛选条件限定的候选账号计算，包含优先级、负载、排队、错误率、首包延迟、重置窗口、额度余量、计费倍率等因子；粘性加分只在开启粘性加权时用于 previous_response_id 或 session_hash。分数越大越优先。'
       },
       recentRequests: {
+        success: '成功请求',
+        error: '错误请求',
+        user: '用户',
+        group: '分组',
+        account: '账号',
+        apiKey: 'API 密钥',
+        requestId: '请求 ID',
+        reason: '错误原因',
+        viewDetails: '查看请求详情：{time}',
         summary: '最近 {count} 次请求',
         empty: '暂无请求',
         unknownError: '未知错误',

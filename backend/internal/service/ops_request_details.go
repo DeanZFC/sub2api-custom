@@ -37,6 +37,25 @@ type OpsRequestDetail struct {
 	AccountID *int64 `json:"account_id,omitempty"`
 	GroupID   *int64 `json:"group_id,omitempty"`
 
+	UserEmail   string `json:"user_email,omitempty"`
+	GroupName   string `json:"group_name,omitempty"`
+	AccountName string `json:"account_name,omitempty"`
+	APIKeyName  string `json:"api_key_name,omitempty"`
+
+	RequestType   string `json:"request_type,omitempty"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	FirstTokenMs  *int   `json:"first_token_ms,omitempty"`
+
+	// Missing usage (e.g. failed requests) is omitted, distinct from measured zero.
+	InputTokens         *int     `json:"input_tokens,omitempty"`
+	OutputTokens        *int     `json:"output_tokens,omitempty"`
+	CacheReadTokens     *int     `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens *int     `json:"cache_creation_tokens,omitempty"`
+	ImageInputTokens    *int     `json:"image_input_tokens,omitempty"`
+	ImageOutputTokens   *int     `json:"image_output_tokens,omitempty"`
+	ActualCost          *float64 `json:"actual_cost,omitempty"`
+	AccountCost         *float64 `json:"account_cost,omitempty"`
+
 	Stream bool `json:"stream"`
 }
 

@@ -129,6 +129,22 @@ export interface OpsRequestDetail {
   account_id?: number | null
   group_id?: number | null
 
+  user_email?: string
+  group_name?: string
+  account_name?: string
+  api_key_name?: string
+  request_type?: string
+  upstream_model?: string
+  first_token_ms?: number | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  cache_read_tokens?: number | null
+  cache_creation_tokens?: number | null
+  image_input_tokens?: number | null
+  image_output_tokens?: number | null
+  actual_cost?: number | null
+  account_cost?: number | null
+
   stream?: boolean
 }
 

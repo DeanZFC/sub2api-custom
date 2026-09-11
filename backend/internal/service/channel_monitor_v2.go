@@ -89,21 +89,24 @@ type ChannelMonitorV2Filter struct {
 }
 
 type ChannelMonitorV2Metric struct {
-	SuccessRequests          int64                   `json:"success_requests"`
-	ErrorRequests            int64                   `json:"error_requests"`
-	RequestCount             int64                   `json:"request_count"`
-	InputTokens              int64                   `json:"input_tokens"`
-	OutputTokens             int64                   `json:"output_tokens"`
-	CacheCreationTokens      int64                   `json:"cache_creation_tokens"`
-	CacheReadTokens          int64                   `json:"cache_read_tokens"`
-	TokenCount               int64                   `json:"token_count"`
-	RPM                      float64                 `json:"rpm"`
-	TPM                      float64                 `json:"tpm"`
-	ErrorRate                float64                 `json:"error_rate"`
-	SuccessRate              float64                 `json:"success_rate"`
-	CacheRate                float64                 `json:"cache_rate"`
-	CacheRateNumerator       int64                   `json:"cache_rate_numerator"`
-	CacheRateDenominator     int64                   `json:"cache_rate_denominator"`
+	SuccessRequests      int64   `json:"success_requests"`
+	ErrorRequests        int64   `json:"error_requests"`
+	RequestCount         int64   `json:"request_count"`
+	InputTokens          int64   `json:"input_tokens"`
+	OutputTokens         int64   `json:"output_tokens"`
+	CacheCreationTokens  int64   `json:"cache_creation_tokens"`
+	CacheReadTokens      int64   `json:"cache_read_tokens"`
+	TokenCount           int64   `json:"token_count"`
+	RPM                  float64 `json:"rpm"`
+	TPM                  float64 `json:"tpm"`
+	ErrorRate            float64 `json:"error_rate"`
+	SuccessRate          float64 `json:"success_rate"`
+	CacheRate            float64 `json:"cache_rate"`
+	CacheRateNumerator   int64   `json:"cache_rate_numerator"`
+	CacheRateDenominator int64   `json:"cache_rate_denominator"`
+	// CacheEligibleInputTokens excludes request types that do not expose
+	// provider cache telemetry (for example synchronous requests).
+	CacheEligibleInputTokens int64                   `json:"cache_eligible_input_tokens,omitempty"`
 	TTFT                     ChannelMonitorV2Latency `json:"ttft"`
 	Duration                 ChannelMonitorV2Latency `json:"duration"`
 	UpstreamAffectedRequests *int64                  `json:"upstream_affected_requests,omitempty"`
@@ -648,6 +651,7 @@ func redactChannelMonitorV2Metric(m *ChannelMonitorV2Metric, hideThroughput bool
 	m.TokenCount = 0
 	m.CacheRateNumerator = 0
 	m.CacheRateDenominator = 0
+	m.CacheEligibleInputTokens = 0
 	// Latency sample_count is also a volume signal.
 	m.TTFT.SampleCount = 0
 	m.Duration.SampleCount = 0

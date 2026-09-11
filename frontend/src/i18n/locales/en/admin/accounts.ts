@@ -232,6 +232,15 @@ export default {
         hint: 'Displayed as "group / base score / sticky bonus". The base score is computed within the current filtered candidate set and includes priority, load, queue depth, error rate, first-token latency, reset window, quota headroom, billing rate, and related factors. The sticky bonus applies only when sticky weighting is enabled for previous_response_id or session_hash. Higher scores are preferred.'
       },
       recentRequests: {
+        success: 'Successful request',
+        error: 'Failed request',
+        user: 'User',
+        group: 'Group',
+        account: 'Account',
+        apiKey: 'API key',
+        requestId: 'Request ID',
+        reason: 'Error reason',
+        viewDetails: 'View request details: {time}',
         summary: '{count} recent requests',
         empty: 'No requests',
         unknownError: 'Unknown error',
