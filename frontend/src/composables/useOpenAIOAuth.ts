@@ -27,7 +27,7 @@ export interface OpenAITokenInfo {
 
 export type OpenAIOAuthPlatform = 'openai'
 
-export function useOpenAIOAuth() {
+export function useOpenAIOAuth(api: { accounts: Pick<typeof adminAPI.accounts, 'generateAuthUrl' | 'exchangeCode' | 'refreshOpenAIToken'> } = adminAPI) {
   const appStore = useAppStore()
   const { t } = useI18n()
   const endpointPrefix = '/admin/openai'
@@ -68,7 +68,7 @@ export function useOpenAIOAuth() {
         payload.redirect_uri = redirectUri
       }
 
-      const response = await adminAPI.accounts.generateAuthUrl(
+      const response = await api.accounts.generateAuthUrl(
         `${endpointPrefix}/generate-auth-url`,
         payload
       )
@@ -115,7 +115,7 @@ export function useOpenAIOAuth() {
         payload.proxy_id = proxyId
       }
 
-      const tokenInfo = await adminAPI.accounts.exchangeCode(`${endpointPrefix}/exchange-code`, payload)
+      const tokenInfo = await api.accounts.exchangeCode(`${endpointPrefix}/exchange-code`, payload)
       return tokenInfo as OpenAITokenInfo
     } catch (err: any) {
       error.value = extractI18nErrorMessage(
@@ -148,7 +148,7 @@ export function useOpenAIOAuth() {
 
     try {
       // Use dedicated refresh-token endpoint
-      const tokenInfo = await adminAPI.accounts.refreshOpenAIToken(
+      const tokenInfo = await api.accounts.refreshOpenAIToken(
         refreshToken.trim(),
         proxyId,
         `${endpointPrefix}/refresh-token`,

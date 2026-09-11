@@ -32,7 +32,7 @@ export interface TokenInfo {
   [key: string]: unknown
 }
 
-export function useAccountOAuth() {
+export function useAccountOAuth(api: { accounts: Pick<typeof adminAPI.accounts, 'generateAuthUrl' | 'exchangeCode'> } = adminAPI) {
   const appStore = useAppStore()
 
   // State
@@ -70,7 +70,7 @@ export function useAccountOAuth() {
           ? '/admin/accounts/generate-auth-url'
           : '/admin/accounts/generate-setup-token-url'
 
-      const response = await adminAPI.accounts.generateAuthUrl(endpoint, proxyConfig)
+      const response = await api.accounts.generateAuthUrl(endpoint, proxyConfig)
       authUrl.value = response.auth_url
       sessionId.value = response.session_id
       return true
@@ -103,7 +103,7 @@ export function useAccountOAuth() {
           ? '/admin/accounts/exchange-code'
           : '/admin/accounts/exchange-setup-token-code'
 
-      const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
+      const tokenInfo = await api.accounts.exchangeCode(endpoint, {
         session_id: sessionId.value,
         code: authCode.value.trim(),
         ...proxyConfig
@@ -140,7 +140,7 @@ export function useAccountOAuth() {
           ? '/admin/accounts/cookie-auth'
           : '/admin/accounts/setup-token-cookie-auth'
 
-      const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
+      const tokenInfo = await api.accounts.exchangeCode(endpoint, {
         session_id: '',
         code: sessionKeyValue.trim(),
         ...proxyConfig

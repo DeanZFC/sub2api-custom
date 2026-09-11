@@ -16,8 +16,6 @@ const walletError = ref('')
 const transferring = ref(false)
 const message = ref('')
 const showCreateAccount = ref(false)
-const accountModalProxies = ref<any[]>([])
-const accountModalGroups = ref<any[]>([])
 let transferKey: string | null = null
 let generation = 0
 
@@ -92,7 +90,14 @@ onMounted(() => { void loadCards(); void loadWallet() })
         <div class="flex gap-2"><button class="btn btn-primary" @click="showCreateAccount = true">上传账号</button><button class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button></div>
       </header>
       <p class="text-sm text-gray-500">使用共享账号：在 API 密钥页面选择 shared- 对应平台分组。共享消费从平台余额扣除；共享收益即时到账，可随时转入平台余额。</p>
-      <CreateAccountModal :show="showCreateAccount" :proxies="accountModalProxies" :groups="accountModalGroups" @close="showCreateAccount = false" @created="showCreateAccount = false; loadCards()" />
+      <CreateAccountModal
+        :show="showCreateAccount"
+        :shared-pool="true"
+        :proxies="[]"
+        :groups="[]"
+        @close="showCreateAccount = false"
+        @created="loadCards"
+      />
 
       <section class="card p-6" aria-label="共享收益">
         <div class="flex flex-wrap items-center justify-between gap-4">

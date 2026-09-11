@@ -57,6 +57,8 @@ export interface SharedUploadInput {
   name: string; platform: string; type: string; credentials: Record<string, unknown>
   concurrency?: number; concurrency_multiplier?: number; sell_rate?: number
   proxy_url?: string
+  extra?: Record<string, unknown>
+  expires_at?: string
 }
 export async function createSharedListing(input: SharedUploadInput) {
   const { data } = await apiClient.post<{ id: number; status: string; account_id: number }>('/user/shared-pool/listings', input)

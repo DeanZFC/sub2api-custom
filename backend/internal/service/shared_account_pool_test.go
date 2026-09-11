@@ -147,3 +147,35 @@ func TestSharedUploadTagsProxyWithOwner(t *testing.T) {
 	require.NotNil(t, proxies.created.OwnerUserID)
 	require.Equal(t, int64(42), *proxies.created.OwnerUserID)
 }
+
+func TestSharedUploadPreservesAuthorizationTypesAndFiltersAdminExtra(t *testing.T) {
+	for _, input := range []SharedAccountUploadInput{
+		{Name: "agent", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": OpenAIAuthModeAgentIdentity, "agent_runtime_id": "runtime", "agent_private_key": "key"}},
+		{Name: "pat", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": OpenAIAuthModePersonalAccessToken, "access_token": "at-test"}},
+		{Name: "bedrock", Platform: PlatformAnthropic, Type: AccountTypeBedrock, Credentials: map[string]any{"auth_mode": "sigv4", "aws_access_key_id": "key", "aws_secret_access_key": "secret", "aws_region": "us-east-1"}},
+		{Name: "vertex", Platform: PlatformGemini, Type: AccountTypeServiceAccount, Credentials: map[string]any{"service_account_json": "{}", "project_id": "project", "location": "global"}},
+	} {
+		t.Run(input.Name, func(t *testing.T) {
+			accounts := &sharedUploadAccounts{}
+			listings := &sharedUploadListings{}
+			svc := NewSharedAccountUploadService(accounts, listings, nil, nil)
+			input.Concurrency = 4
+			input.SellRate = 1.6
+			input.Extra = map[string]any{"email": "test@example.com", "openai_passthrough": true, "quota_limit": 100}
+			expiry := time.Now().Add(time.Hour)
+			input.ExpiresAt = &expiry
+			listing, err := svc.Upload(context.Background(), 42, input)
+			require.NoError(t, err)
+			require.Equal(t, "active", listing.Status)
+			require.Equal(t, int64(42), listing.OwnerUserID)
+			require.Equal(t, "shared", accounts.created.AccountScope)
+			require.Equal(t, input.Type, accounts.created.Type)
+			require.Equal(t, input.Credentials, accounts.created.Credentials)
+			require.Equal(t, 4, accounts.created.Concurrency)
+			require.Equal(t, 1.6, accounts.created.BillingRateMultiplier())
+			require.Equal(t, &expiry, accounts.created.ExpiresAt)
+			require.True(t, accounts.created.AutoPauseOnExpired)
+			require.Equal(t, map[string]any{"email": "test@example.com"}, accounts.created.Extra)
+		})
+	}
+}

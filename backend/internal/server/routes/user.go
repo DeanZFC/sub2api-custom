@@ -31,6 +31,8 @@ func RegisterUserRoutes(
 			user.GET("/shared-pool/cards", h.SharedAccountPool.ListCards)
 			user.GET("/shared-pool/my-cards", h.SharedAccountPool.MyCards)
 			user.POST("/shared-pool/listings", h.SharedAccountPool.Upload)
+			user.POST("/shared-pool/oauth/:platform/:action", panelRateLimiter.Heavy(), h.SharedAccountPool.Authorize)
+			user.GET("/shared-pool/oauth/:platform/capabilities", h.SharedAccountPool.OAuthCapabilities)
 			user.POST("/shared-pool/listings/:id/:action", h.SharedAccountPool.SetStatus)
 			user.DELETE("/shared-pool/listings/:id", h.SharedAccountPool.Delete)
 			user.GET("/shared-pool/wallet", h.SharedAccountPool.Wallet)

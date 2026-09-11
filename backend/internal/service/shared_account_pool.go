@@ -61,6 +61,8 @@ type SharedAccountListing struct {
 type SharedAccountUploadInput struct {
 	Name, Platform, Type            string
 	Credentials                     map[string]any
+	Extra                           map[string]any
+	ExpiresAt                       *time.Time
 	Concurrency                     int
 	ConcurrencyMultiplier, SellRate float64
 	ProxyURL                        string
@@ -126,18 +128,14 @@ func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, 
 		return nil, infraerrors.BadRequest("INVALID_SHARED_PLATFORM", "unsupported shared account platform")
 	}
 	switch in.Type {
-	case AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken:
+	case AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken, AccountTypeBedrock, AccountTypeServiceAccount:
 	default:
 		return nil, infraerrors.BadRequest("INVALID_SHARED_ACCOUNT_TYPE", "unsupported shared account type")
 	}
-	credentialKey := "api_key"
-	if in.Type != AccountTypeAPIKey {
-		credentialKey = "access_token"
+	if err := validateSharedCredentials(in); err != nil {
+		return nil, err
 	}
-	credential, _ := in.Credentials[credentialKey].(string)
-	if strings.TrimSpace(credential) == "" {
-		return nil, infraerrors.BadRequest("INVALID_SHARED_CREDENTIALS", credentialKey+" is required")
-	}
+
 	if in.Concurrency <= 0 {
 		in.Concurrency = 1
 	}
@@ -153,38 +151,17 @@ func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, 
 	if math.IsNaN(in.ConcurrencyMultiplier) || math.IsInf(in.ConcurrencyMultiplier, 0) || math.IsNaN(in.SellRate) || math.IsInf(in.SellRate, 0) {
 		return nil, errors.New("invalid sharing rates")
 	}
-	if strings.TrimSpace(in.ProxyURL) != "" {
-		_, parsed, err := proxyurl.Parse(in.ProxyURL)
-		if err != nil {
-			return nil, err
-		}
-		host := strings.ToLower(parsed.Hostname())
-		if host == "localhost" || strings.HasSuffix(host, ".local") || host == "metadata.google.internal" {
-			return nil, errors.New("proxy host is not allowed")
-		}
-		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()) {
-			return nil, errors.New("proxy host is not allowed")
-		}
-		if s.proxies == nil {
-			return nil, errors.New("proxy support is unavailable")
-		}
-		port, err := strconv.Atoi(parsed.Port())
-		if err != nil || port <= 0 || port > 65535 {
-			return nil, errors.New("proxy URL must include a valid port")
-		}
-		p := &Proxy{OwnerUserID: &ownerID, Name: in.Name + " proxy", Protocol: parsed.Scheme, Host: parsed.Hostname(), Port: port, Status: StatusActive, FallbackMode: FallbackModeNone}
-		if parsed.User != nil {
-			p.Username = parsed.User.Username()
-			p.Password, _ = parsed.User.Password()
-		}
-		if err := s.proxies.Create(ctx, p); err != nil {
-			return nil, fmt.Errorf("create shared proxy: %w", err)
-		}
-		proxyID = &p.ID
+	proxy, err := s.CreateProxy(ctx, ownerID, in.ProxyURL)
+	if err != nil {
+		return nil, err
 	}
+	if proxy != nil {
+		proxyID = &proxy.ID
+	}
+
 	// Keep the account out of scheduling until its owner listing is durably created.
 	// Publication is automatic; this staging step is not an approval queue.
-	account := &Account{Name: in.Name, Platform: in.Platform, Type: in.Type, Credentials: SanitizeStoredCredentials(in.Platform, in.Credentials), Extra: map[string]any{}, Concurrency: max(1, int(math.Floor(float64(in.Concurrency)*in.ConcurrencyMultiplier))), RateMultiplier: &in.SellRate, Priority: 50, Status: StatusActive, Schedulable: false, AccountScope: "shared", ProxyID: proxyID}
+	account := &Account{Name: in.Name, Platform: in.Platform, Type: in.Type, Credentials: SanitizeStoredCredentials(in.Platform, in.Credentials), Extra: sharedAccountExtra(in.Extra), ExpiresAt: in.ExpiresAt, AutoPauseOnExpired: true, Concurrency: max(1, int(math.Floor(float64(in.Concurrency)*in.ConcurrencyMultiplier))), RateMultiplier: &in.SellRate, Priority: 50, Status: StatusActive, Schedulable: false, AccountScope: "shared", ProxyID: proxyID}
 	if err := s.accounts.Create(ctx, account); err != nil {
 		cleanupProxy()
 		return nil, fmt.Errorf("create shared account: %w", err)
@@ -234,4 +211,93 @@ func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, 
 		}()
 	}
 	return listing, nil
+}
+
+// CreateProxy validates the URL for both authorization and final account creation.
+// Authorization callers must delete this temporary proxy after the operation.
+func (s *SharedAccountUploadService) CreateProxy(ctx context.Context, ownerID int64, rawURL string) (*Proxy, error) {
+	if strings.TrimSpace(rawURL) != "" {
+		_, parsed, err := proxyurl.Parse(rawURL)
+		if err != nil {
+			return nil, err
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if host == "localhost" || strings.HasSuffix(host, ".local") || host == "metadata.google.internal" {
+			return nil, errors.New("proxy host is not allowed")
+		}
+		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()) {
+			return nil, errors.New("proxy host is not allowed")
+		}
+		if s.proxies == nil {
+			return nil, errors.New("proxy support is unavailable")
+		}
+		port, err := strconv.Atoi(parsed.Port())
+		if err != nil || port <= 0 || port > 65535 {
+			return nil, errors.New("proxy URL must include a valid port")
+		}
+		p := &Proxy{OwnerUserID: &ownerID, Name: "shared authorization proxy", Protocol: parsed.Scheme, Host: parsed.Hostname(), Port: port, Status: StatusActive, FallbackMode: FallbackModeNone}
+		if parsed.User != nil {
+			p.Username = parsed.User.Username()
+			p.Password, _ = parsed.User.Password()
+		}
+		if err := s.proxies.Create(ctx, p); err != nil {
+			return nil, fmt.Errorf("create shared proxy: %w", err)
+		}
+		return p, nil
+	}
+	return nil, nil
+}
+
+func (s *SharedAccountUploadService) DeleteAuthProxy(ctx context.Context, proxy *Proxy) {
+	if proxy != nil && s.proxies != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = s.proxies.Delete(cleanupCtx, proxy.ID)
+	}
+}
+
+func sharedAccountExtra(extra map[string]any) map[string]any {
+	result := map[string]any{}
+	for _, key := range []string{"account_mode", "api_protocol", "email", "name", "privacy_mode", "subscription_tier", "project_id"} {
+		if value, ok := extra[key]; ok {
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func validateSharedCredentials(in SharedAccountUploadInput) error {
+	account := &Account{Platform: in.Platform, Type: in.Type, Credentials: in.Credentials}
+	keys := []string{"access_token"}
+	switch in.Type {
+	case AccountTypeAPIKey:
+		keys = []string{"api_key"}
+	case AccountTypeBedrock:
+		if in.Platform != PlatformAnthropic {
+			return infraerrors.BadRequest("INVALID_SHARED_ACCOUNT_TYPE", "Bedrock requires Anthropic")
+		}
+		keys = []string{"aws_access_key_id", "aws_secret_access_key", "aws_region"}
+		if account.GetCredential("auth_mode") == "apikey" {
+			keys = []string{"api_key", "aws_region"}
+		}
+	case AccountTypeServiceAccount:
+		if in.Platform != PlatformAnthropic && in.Platform != PlatformGemini {
+			return infraerrors.BadRequest("INVALID_SHARED_ACCOUNT_TYPE", "Vertex requires Anthropic or Gemini")
+		}
+		keys = []string{"service_account_json"}
+	case AccountTypeSetupToken:
+		if in.Platform != PlatformAnthropic {
+			return infraerrors.BadRequest("INVALID_SHARED_ACCOUNT_TYPE", "Setup Token requires Anthropic")
+		}
+	case AccountTypeOAuth:
+		if in.Platform == PlatformOpenAI && account.IsOpenAIAgentIdentity() {
+			keys = []string{"agent_runtime_id", "agent_private_key"}
+		}
+	}
+	for _, key := range keys {
+		if strings.TrimSpace(account.GetCredential(key)) == "" {
+			return infraerrors.BadRequest("INVALID_SHARED_CREDENTIALS", key+" is required")
+		}
+	}
+	return nil
 }

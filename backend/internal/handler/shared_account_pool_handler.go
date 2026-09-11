@@ -2,6 +2,8 @@ package handler
 
 import (
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -10,14 +12,21 @@ import (
 )
 
 type SharedAccountPoolHandler struct {
-	repo     service.SharedAccountPoolRepository
-	wallet   *service.SharedWalletService
-	uploader *service.SharedAccountUploadService
-	settings *service.SettingService
+	repo             service.SharedAccountPoolRepository
+	wallet           *service.SharedWalletService
+	uploader         *service.SharedAccountUploadService
+	settings         *service.SettingService
+	oauth            *service.OAuthService
+	openaiOAuth      *service.OpenAIOAuthService
+	geminiOAuth      *service.GeminiOAuthService
+	antigravityOAuth *service.AntigravityOAuthService
+	grokOAuth        *service.GrokOAuthService
+	sessionMu        sync.Mutex
+	sessions         map[string]sharedOAuthSession
 }
 
-func NewSharedAccountPoolHandler(repo service.SharedAccountPoolRepository, wallet *service.SharedWalletService, uploader *service.SharedAccountUploadService, settings *service.SettingService) *SharedAccountPoolHandler {
-	return &SharedAccountPoolHandler{repo: repo, wallet: wallet, uploader: uploader, settings: settings}
+func NewSharedAccountPoolHandler(repo service.SharedAccountPoolRepository, wallet *service.SharedWalletService, uploader *service.SharedAccountUploadService, settings *service.SettingService, oauth *service.OAuthService, openaiOAuth *service.OpenAIOAuthService, geminiOAuth *service.GeminiOAuthService, antigravityOAuth *service.AntigravityOAuthService, grokOAuth *service.GrokOAuthService) *SharedAccountPoolHandler {
+	return &SharedAccountPoolHandler{repo: repo, wallet: wallet, uploader: uploader, settings: settings, oauth: oauth, openaiOAuth: openaiOAuth, geminiOAuth: geminiOAuth, antigravityOAuth: antigravityOAuth, grokOAuth: grokOAuth, sessions: make(map[string]sharedOAuthSession)}
 }
 
 type sharedUploadRequest struct {
@@ -25,6 +34,8 @@ type sharedUploadRequest struct {
 	Platform              string         `json:"platform" binding:"required"`
 	Type                  string         `json:"type" binding:"required"`
 	Credentials           map[string]any `json:"credentials" binding:"required"`
+	Extra                 map[string]any `json:"extra"`
+	ExpiresAt             *time.Time     `json:"expires_at"`
 	Concurrency           int            `json:"concurrency"`
 	ConcurrencyMultiplier float64        `json:"concurrency_multiplier"`
 	SellRate              float64        `json:"sell_rate"`
@@ -46,7 +57,7 @@ func (h *SharedAccountPoolHandler) Upload(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	item, err := h.uploader.Upload(c.Request.Context(), subject.UserID, service.SharedAccountUploadInput{Name: req.Name, Platform: req.Platform, Type: req.Type, Credentials: req.Credentials, Concurrency: req.Concurrency, ConcurrencyMultiplier: req.ConcurrencyMultiplier, SellRate: req.SellRate, ProxyURL: req.ProxyURL})
+	item, err := h.uploader.Upload(c.Request.Context(), subject.UserID, service.SharedAccountUploadInput{Name: req.Name, Platform: req.Platform, Type: req.Type, Credentials: req.Credentials, Extra: req.Extra, ExpiresAt: req.ExpiresAt, Concurrency: req.Concurrency, ConcurrencyMultiplier: req.ConcurrencyMultiplier, SellRate: req.SellRate, ProxyURL: req.ProxyURL})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

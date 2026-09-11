@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -187,4 +188,33 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.Len(t, logs, 1)
 	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
+}
+
+func TestSharedPoolAuthorizationAuditOmitsCredentials(t *testing.T) {
+	for _, path := range []string{"/api/v1/user/shared-pool/oauth/:platform/:action", "/api/v1/user/shared-pool/listings"} {
+		t.Run(path, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			repository := &auditCaptureRepository{}
+			auditService := service.NewAuditLogService(repository, nil)
+			auditService.Start()
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(ContextKeyUser), AuthSubject{UserID: 42})
+				c.Set(string(ContextKeyUserRole), "user")
+			})
+			router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+			router.POST(path, func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+			request := httptest.NewRequest(http.MethodPost, strings.ReplaceAll(strings.ReplaceAll(path, ":platform", "openai"), ":action", "parse-session"), bytes.NewBufferString(`{"content":"embedded-auth-canary","proxy_url":"http://user:proxy-canary@example.com:8080","credentials":{"access_token":"token-canary"}}`))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			auditService.Stop()
+			repository.mu.Lock()
+			logs := append([]*service.AuditLog(nil), repository.logs...)
+			repository.mu.Unlock()
+			require.Len(t, logs, 1)
+			require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
+		})
+	}
 }
