@@ -72,6 +72,7 @@ var ProviderSet = wire.NewSet(
 	NewCompositeModelRouteRepository,
 	NewAccountRepository,
 	NewSharedAccountPoolRepository,
+	NewSharedAPIKeyRepository,
 	NewSharedWalletRepository,
 	NewAdminAccountRepository,
 	NewScheduledTestPlanRepository,   // 定时测试计划仓储

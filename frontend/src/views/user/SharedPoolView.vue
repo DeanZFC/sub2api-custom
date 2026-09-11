@@ -4,7 +4,8 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import CreateAccountModal from '@/components/account/CreateAccountModal.vue'
 import {
   getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, setSharedListingStatus, deleteSharedListing,
-  type SharedCard, type SharedWallet
+  listSharedAPIKeys, createSharedAPIKey, deleteSharedAPIKey,
+  type SharedCard, type SharedWallet, type SharedAPIKey
 } from '@/api/sharedPool'
 
 const cards = ref<SharedCard[]>([])
@@ -16,6 +17,8 @@ const walletError = ref('')
 const transferring = ref(false)
 const message = ref('')
 const showCreateAccount = ref(false)
+const sharedKeys = ref<SharedAPIKey[]>([])
+const keyName = ref(''); const keyPlatform = ref('openai'); const keyListings = ref<number[]>([]); const keyMessage = ref('')
 let transferKey: string | null = null
 let generation = 0
 
@@ -77,6 +80,10 @@ const labels: Record<string, string> = {
 }
 const timeText = (value?: string) => value ? new Date(value).toLocaleString() : '暂无调用'
 onMounted(() => { void loadCards(); void loadWallet() })
+async function loadKeys(){ try { sharedKeys.value = await listSharedAPIKeys() } catch {} }
+async function createKey(){ keyMessage.value=''; try { const k=await createSharedAPIKey({name:keyName.value,platform:keyPlatform.value,listing_ids:keyListings.value}); keyMessage.value=`新 Key：${k.key}（仅显示一次）`; keyName.value=''; await loadKeys() } catch(e){ keyMessage.value=errorText(e) } }
+async function removeKey(id:number){ if(!window.confirm('确定删除此共享 API Key 吗？')) return; await deleteSharedAPIKey(id); await loadKeys() }
+onMounted(() => { void loadKeys() })
 </script>
 
 <template>
@@ -90,6 +97,13 @@ onMounted(() => { void loadCards(); void loadWallet() })
         <div class="flex gap-2"><button class="btn btn-primary" @click="showCreateAccount = true">上传账号</button><button class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button></div>
       </header>
       <p class="text-sm text-gray-500">使用共享账号：在 API 密钥页面选择 shared- 对应平台分组。共享消费从平台余额扣除；共享收益即时到账，可随时转入平台余额。</p>
+      <section class="card p-6" aria-label="共享 API Key">
+        <h2 class="font-semibold text-gray-900 dark:text-white">共享 API Key</h2>
+        <p class="mt-1 text-xs text-gray-500">共享 Key 独立于普通 API Key，可绑定多个账号并按顺序故障切换。</p>
+        <div class="mt-4 flex flex-wrap gap-2"><input v-model="keyName" class="input" placeholder="Key 名称" /><select v-model="keyPlatform" class="input"><option>openai</option><option>anthropic</option><option>gemini</option><option>grok</option></select><select v-model="keyListings" class="input min-w-48" multiple><option v-for="card in cards.filter(c => c.status === 'active')" :key="card.id" :value="card.id">{{ card.display_name }}</option></select><button class="btn btn-primary" :disabled="!keyName || !keyListings.length" @click="createKey">创建</button></div>
+        <p v-if="keyMessage" class="mt-2 text-sm text-emerald-600">{{ keyMessage }}</p>
+        <div v-if="!sharedKeys.length" class="mt-4 text-xs text-gray-400">暂无共享 Key</div><ul v-else class="mt-4 space-y-2"><li v-for="key in sharedKeys" :key="key.id" class="flex items-center justify-between rounded bg-gray-50 px-3 py-2 text-sm dark:bg-dark-800"><span>{{ key.name }} · {{ key.platform }} · {{ key.key_preview }}</span><button class="text-red-500" @click="removeKey(key.id)">删除</button></li></ul>
+      </section>
       <CreateAccountModal
         :show="showCreateAccount"
         :shared-pool="true"

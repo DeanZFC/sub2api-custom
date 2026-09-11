@@ -195,6 +195,7 @@ func ProvideHandlers(
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
 	sharedAccountPoolHandler *SharedAccountPoolHandler,
+	sharedAPIKeyHandler *SharedAPIKeyHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
@@ -222,6 +223,7 @@ func ProvideHandlers(
 		AsyncImage:        asyncImageHandler,
 		BatchImage:        batchImageHandler,
 		SharedAccountPool: sharedAccountPoolHandler,
+		SharedAPIKey:      sharedAPIKeyHandler,
 	}
 }
 

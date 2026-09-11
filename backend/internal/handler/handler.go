@@ -67,6 +67,7 @@ type Handlers struct {
 	AvailableChannel  *AvailableChannelHandler
 	ModelPlaza        *ModelPlazaHandler
 	SharedAccountPool *SharedAccountPoolHandler
+	SharedAPIKey      *SharedAPIKeyHandler
 	AsyncImage        *AsyncImageHandler
 	BatchImage        *BatchImageHandler
 }

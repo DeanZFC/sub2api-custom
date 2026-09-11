@@ -18,8 +18,12 @@ import (
 const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
-func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
-	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
+func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, shared ...*service.SharedAPIKeyService) APIKeyAuthMiddleware {
+	var sharedService *service.SharedAPIKeyService
+	if len(shared) > 0 {
+		sharedService = shared[0]
+	}
+	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg, sharedService))
 }
 
 // apiKeyAuthWithSubscription API Key认证中间件（支持订阅验证）
@@ -31,7 +35,7 @@ func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionS
 // /v1/usage、/v1/sub2api/billing 端点与异步生图任务查询只需鉴权，不需要计费执行。
 // usage 允许过期/配额耗尽的 Key 查询自身用量，billing 用于读取当前 Key 的倍率配置，
 // 异步生图查询允许已耗尽额度的 Key 拉取自身任务结果。
-func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) gin.HandlerFunc {
+func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, sharedService *service.SharedAPIKeyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
 		if rejectInvalidAuthAbuse(c, apiKeyService) {
@@ -97,7 +101,24 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		// ── 2. 验证 Key 存在 ─────────────────────────────────────────
 
-		apiKey, err := apiKeyService.GetByKey(c.Request.Context(), apiKeyString)
+		var apiKey *service.APIKey
+		var err error
+		if sharedService != nil {
+			if sk, e := sharedService.GetByKey(c.Request.Context(), apiKeyString); e == nil {
+				if sk.Status != service.StatusAPIKeyActive || sk.User == nil || sk.Group == nil {
+					AbortWithError(c, http.StatusUnauthorized, "API_KEY_DISABLED", "API key is disabled")
+					return
+				}
+				gid := sk.Group.ID
+				apiKey = &service.APIKey{ID: -sk.ID, UserID: sk.UserID, Key: apiKeyString, Name: sk.Name, GroupID: &gid, Status: service.StatusAPIKeyActive, User: sk.User, Group: sk.Group}
+				c.Request = c.Request.WithContext(service.WithSharedListingOrder(c.Request.Context(), sk.ListingAccountIDs))
+			} else if !errors.Is(e, service.ErrSharedAPIKeyNotFound) {
+				err = e
+			}
+		}
+		if apiKey == nil && err == nil {
+			apiKey, err = apiKeyService.GetByKey(c.Request.Context(), apiKeyString)
+		}
 		if err != nil {
 			if errors.Is(err, service.ErrAPIKeyNotFound) {
 				recordInvalidAuthFailure(c, apiKeyService)
