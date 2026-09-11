@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import PlatformIcon from '@/components/common/PlatformIcon.vue'
-import BaseDialog from '@/components/common/BaseDialog.vue'
+import CreateAccountModal from '@/components/account/CreateAccountModal.vue'
 import {
-  getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, createSharedListing, setSharedListingStatus, deleteSharedListing,
+  getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, setSharedListingStatus, deleteSharedListing,
   type SharedCard, type SharedWallet
 } from '@/api/sharedPool'
 
@@ -16,29 +15,9 @@ const error = ref('')
 const walletError = ref('')
 const transferring = ref(false)
 const message = ref('')
-const showUpload = ref(false)
-const uploading = ref(false)
-const uploadError = ref('')
-const uploadStep = ref<1 | 2>(1)
-const upload = ref({ name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, sell_rate: 1 })
-const authMethod = ref<'oauth' | 'setup-token'>('oauth')
-const authorizationMethod = ref('manual')
-const platforms = [
-  { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' }, { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' }, { value: 'kimi', label: 'Kimi' },
-  { value: 'zhipu', label: 'Zhipu GLM' }, { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'minimax', label: 'MiniMax' }
-]
-const accountTypes = computed(() => upload.value.platform === 'anthropic'
-  ? [{ value: 'oauth', label: 'Claude Code', hint: 'OAuth / Setup Token' }, { value: 'apikey', label: 'Claude Console', hint: 'API Key' }]
-  : upload.value.platform === 'openai'
-    ? [{ value: 'oauth', label: 'OAuth', hint: 'ChatGPT OAuth' }, { value: 'apikey', label: 'API Key', hint: 'Responses API' }]
-    : [{ value: 'oauth', label: 'OAuth', hint: 'OAuth 认证' }, { value: 'apikey', label: 'API Key', hint: 'API Key' }])
-watch(() => upload.value.platform, () => {
-  if (!accountTypes.value.some(item => item.value === upload.value.type)) upload.value.type = accountTypes.value[0].value
-})
-watch(authMethod, value => { if (upload.value.platform === 'anthropic' && upload.value.type === 'oauth') upload.value.type = value })
+const showCreateAccount = ref(false)
+const accountModalProxies = ref<any[]>([])
+const accountModalGroups = ref<any[]>([])
 let transferKey: string | null = null
 let generation = 0
 
@@ -86,30 +65,6 @@ async function transfer() {
     walletError.value = errorText(e)
   } finally { transferring.value = false }
 }
-async function submitUpload() {
-  uploadError.value = ''
-  const credential = upload.value.credential.trim()
-  if (!credential) { uploadError.value = upload.value.type === 'apikey' ? '请输入 API Key' : '请输入访问令牌'; return }
-  const credentials = upload.value.type === 'apikey'
-    ? { api_key: credential }
-    : { access_token: credential }
-  uploading.value = true
-  try {
-    await createSharedListing({ ...upload.value, credentials })
-    showUpload.value = false; uploadStep.value = 1; upload.value = { name: '', platform: 'openai', type: 'apikey', credential: '', proxy_url: '', concurrency: 3, sell_rate: 1 }
-    mode.value = 'mine'; await loadCards()
-  } catch (e) { uploadError.value = errorText(e) } finally { uploading.value = false }
-}
-function nextUploadStep() {
-  uploadError.value = ''
-  if (!upload.value.name.trim()) { uploadError.value = '请输入账号名称'; return }
-  uploadStep.value = 2
-}
-function closeUpload() {
-  showUpload.value = false
-  uploadStep.value = 1
-  uploadError.value = ''
-}
 async function toggle(card: SharedCard) {
   try { await setSharedListingStatus(card.id, card.status === 'paused' ? 'resume' : 'pause'); await loadCards() }
   catch (e) { error.value = errorText(e) }
@@ -134,65 +89,11 @@ onMounted(() => { void loadCards(); void loadWallet() })
           <h1 class="text-2xl font-bold text-gray-900 dark:text-white">共享账号池</h1>
           <p class="mt-1 text-sm text-gray-500">上传后自动上线，无需管理员审核。查看可用账号、调用记录与共享收益。</p>
         </div>
-        <div class="flex gap-2"><button class="btn btn-primary" @click="uploadStep = 1; showUpload = true">上传账号</button><button class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button></div>
+        <div class="flex gap-2"><button class="btn btn-primary" @click="showCreateAccount = true">上传账号</button><button class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button></div>
       </header>
       <p class="text-sm text-gray-500">使用共享账号：在 API 密钥页面选择 shared- 对应平台分组。共享消费从平台余额扣除；共享收益即时到账，可随时转入平台余额。</p>
-      <BaseDialog :show="showUpload" title="添加账号" width="wide" @close="closeUpload">
-        <div class="mb-6 flex items-center justify-center gap-4 text-sm font-medium text-gray-500 dark:text-gray-400">
-          <span class="flex items-center gap-2" :class="uploadStep === 1 ? 'text-primary-600' : 'text-gray-400'"><b class="flex h-8 w-8 items-center justify-center rounded-full" :class="uploadStep === 1 ? 'bg-primary-500 text-white' : 'bg-gray-200 dark:bg-dark-600'">1</b>授权方式</span>
-          <span class="h-px w-12 bg-gray-300 dark:bg-dark-600" />
-          <span class="flex items-center gap-2" :class="uploadStep === 2 ? 'text-primary-600' : 'text-gray-400'"><b class="flex h-8 w-8 items-center justify-center rounded-full" :class="uploadStep === 2 ? 'bg-primary-500 text-white' : 'bg-gray-200 dark:bg-dark-600'">2</b>{{ upload.platform === 'openai' ? 'OpenAI 账户授权' : '账号授权' }}</span>
-        </div>
-        <form class="grid gap-4 md:grid-cols-2" @submit.prevent="uploadStep === 1 ? nextUploadStep() : submitUpload()">
-          <label v-if="uploadStep === 1" class="text-sm md:col-span-2">账号名称<input v-model="upload.name" required class="input mt-1 w-full" maxlength="100" placeholder="请输入账号名称" /></label>
-          <div v-if="uploadStep === 1" class="md:col-span-2">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">平台</label>
-            <div class="mt-2 grid grid-cols-3 gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700 sm:grid-cols-5">
-              <button v-for="platform in platforms" :key="platform.value" type="button" class="flex items-center justify-center gap-2 rounded-md px-2 py-2.5 text-sm font-medium transition-all" :class="upload.platform === platform.value ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400' : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'" @click="upload.platform = platform.value">
-                <PlatformIcon :platform="platform.value as any" size="sm" />{{ platform.label }}
-              </button>
-            </div>
-          </div>
-          <div v-if="uploadStep === 1" class="md:col-span-2">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">账号类型</label>
-            <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <button v-for="type in accountTypes" :key="type.value" type="button" class="flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all" :class="upload.type === type.value ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-gray-200 hover:border-primary-300 dark:border-dark-600 dark:hover:border-primary-700'" @click="upload.type = type.value">
-                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" :class="upload.type === type.value ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'"><span v-if="type.value === 'oauth'">✦</span><span v-else>🔑</span></span>
-                <span><span class="block text-sm font-medium text-gray-900 dark:text-white">{{ type.label }}</span><span class="text-xs text-gray-500 dark:text-gray-400">{{ type.hint }}</span></span>
-              </button>
-            </div>
-            <div v-if="upload.platform === 'anthropic' && upload.type !== 'apikey'" class="mt-3 flex gap-5 text-sm text-gray-600 dark:text-gray-300">
-              <label class="inline-flex items-center gap-2"><input v-model="authMethod" type="radio" value="oauth" /> OAuth</label>
-              <label class="inline-flex items-center gap-2"><input v-model="authMethod" type="radio" value="setup-token" /> Setup Token（长期有效）</label>
-            </div>
-          </div>
-          <div v-if="uploadStep === 2" class="md:col-span-2">
-            <div class="rounded-lg border border-blue-200 bg-blue-50 p-5 dark:border-blue-700 dark:bg-blue-900/30">
-              <div class="flex items-start gap-4">
-                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-2xl text-white">↗</div>
-                <div class="min-w-0 flex-1"><h3 class="text-lg font-semibold text-blue-900 dark:text-blue-200">{{ upload.platform === 'openai' ? 'OpenAI 账户授权' : '账号授权' }}</h3><p class="mt-1 text-sm text-blue-700 dark:text-blue-300">Authorization Method</p></div>
-              </div>
-              <div class="mt-4 flex flex-wrap gap-x-5 gap-y-3 text-sm text-blue-900 dark:text-blue-200">
-                <label v-for="method in (upload.platform === 'openai' ? ['manual','refresh_token','mobile_refresh_token','codex_session','agent_identity','codex_pat'] : ['manual'])" :key="method" class="inline-flex cursor-pointer items-center gap-2"><input v-model="authorizationMethod" type="radio" :value="method" class="text-blue-600" /><span>{{ ({ manual: '手动授权', refresh_token: '手动输入 RT', mobile_refresh_token: '手动输入 Mobile RT', codex_session: 'Codex OAuth auth.json / AT 导入', agent_identity: 'Agent Identity auth.json', codex_pat: 'Codex Personal Access Token' } as Record<string, string>)[method] }}</span></label>
-              </div>
-              <div class="mt-5 rounded-lg border border-blue-300 bg-white p-4 dark:border-blue-600 dark:bg-dark-800/70">
-                <p class="mb-3 text-sm font-medium text-blue-800 dark:text-blue-200">{{ authorizationMethod === 'manual' ? '请输入访问凭证完成授权' : '请输入对应凭证完成授权' }}</p>
-                <input v-model="upload.credential" required type="password" class="input w-full font-mono" autocomplete="off" :placeholder="upload.type === 'apikey' ? 'sk-...' : '粘贴访问令牌'" />
-                <p class="mt-2 text-xs text-blue-600 dark:text-blue-300">凭证仅用于创建共享账号，保存后不会展示。</p>
-              </div>
-              <div v-if="upload.platform === 'openai' && authorizationMethod === 'manual'" class="mt-4 space-y-4">
-                <div class="rounded-lg border border-blue-300 bg-white p-4 dark:border-blue-600 dark:bg-dark-800/70"><p class="mb-3 text-base font-semibold text-blue-900 dark:text-blue-200">1&nbsp;&nbsp;点击下方按钮生成授权链接</p><button type="button" class="btn btn-primary" disabled>生成授权链接</button></div>
-                <div class="rounded-lg border border-blue-300 bg-white p-4 dark:border-blue-600 dark:bg-dark-800/70"><p class="text-base font-semibold text-blue-900 dark:text-blue-200">2&nbsp;&nbsp;在浏览器中打开链接并完成授权</p><p class="mt-2 text-sm text-blue-700 dark:text-blue-300">请在新标签页中打开授权链接，登录您的 OpenAI 账户并授权。</p></div>
-              </div>
-            </div>
-          </div>
-          <label v-if="uploadStep === 2" class="text-sm md:col-span-2">代理地址（可选）<input v-model="upload.proxy_url" placeholder="http://用户名:密码@主机:端口 或 socks5://主机:端口" class="input mt-1 w-full font-mono" autocomplete="off" /></label>
-          <label v-if="uploadStep === 2" class="text-sm">并发上限<input v-model.number="upload.concurrency" required type="number" min="1" max="1000" class="input mt-1 w-full" /></label>
-          <label v-if="uploadStep === 2" class="text-sm">倍率<input v-model.number="upload.sell_rate" required type="number" min="0" max="100" step="0.01" class="input mt-1 w-full" /></label>
-          <p v-if="uploadError" class="text-sm text-red-500 md:col-span-2">{{ uploadError }}</p>
-          <div class="flex justify-end gap-2 md:col-span-2"><button v-if="uploadStep === 2" type="button" class="btn btn-secondary" @click="uploadStep = 1">上一步</button><button class="btn btn-primary" :disabled="uploading">{{ uploading ? '上传中…' : uploadStep === 1 ? '下一步' : '立即上线' }}</button></div>
-        </form>
-      </BaseDialog>
+      <CreateAccountModal :show="showCreateAccount" :proxies="accountModalProxies" :groups="accountModalGroups" @close="showCreateAccount = false" @created="showCreateAccount = false; loadCards()" />
+
       <section class="card p-6" aria-label="共享收益">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <h2 class="font-semibold text-gray-900 dark:text-white">我的共享收益</h2>

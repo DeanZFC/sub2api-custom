@@ -7,7 +7,7 @@ const api = vi.hoisted(() => ({
   getSharedWallet: vi.fn(), transferSharedEarnings: vi.fn()
 }))
 vi.mock('@/api/sharedPool', () => api)
-const render = () => mount(SharedPoolView, { global: { stubs: { AppLayout: { template: '<main><slot /></main>' } } } })
+const render = () => mount(SharedPoolView, { global: { stubs: { AppLayout: { template: '<main><slot /></main>' }, CreateAccountModal: true } } })
 const card = {
   id: 1, platform: 'openai', display_name: 'Shared account', status: 'active',
   concurrency_limit: 3, concurrency_multiplier: 1, sell_rate: 1,
