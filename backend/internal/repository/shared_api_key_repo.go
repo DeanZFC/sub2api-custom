@@ -54,7 +54,7 @@ func (r *sharedAPIKeyRepository) Create(ctx context.Context, k *service.SharedAP
 		return err
 	}
 	for i, id := range k.ListingIDs {
-		res, e := tx.ExecContext(ctx, `INSERT INTO shared_api_key_listings(api_key_id,listing_id,position) SELECT $1,$2,$3 WHERE EXISTS (SELECT 1 FROM shared_account_listings WHERE id=$2 AND owner_user_id=$4 AND platform=$5 AND status='active' AND deleted_at IS NULL)`, k.ID, id, i, k.UserID, k.Platform)
+		res, e := tx.ExecContext(ctx, `INSERT INTO shared_api_key_listings(api_key_id,listing_id,position) SELECT $1,$2,$3 WHERE EXISTS (SELECT 1 FROM shared_account_listings l JOIN accounts a ON a.id=l.account_id WHERE l.id=$2 AND l.platform=$4 AND l.status='active' AND l.deleted_at IS NULL AND a.status='active' AND a.schedulable=TRUE AND a.deleted_at IS NULL AND a.account_scope='shared')`, k.ID, id, i, k.Platform)
 		if e != nil {
 			err = e
 			return err
@@ -125,7 +125,7 @@ func (r *sharedAPIKeyRepository) Update(ctx context.Context, k *service.SharedAP
 		return err
 	}
 	for i, id := range k.ListingIDs {
-		res, e := tx.ExecContext(ctx, `INSERT INTO shared_api_key_listings(api_key_id,listing_id,position) SELECT $1,$2,$3 WHERE EXISTS (SELECT 1 FROM shared_account_listings WHERE id=$2 AND owner_user_id=$4 AND platform=$5 AND status='active' AND deleted_at IS NULL)`, k.ID, id, i, k.UserID, k.Platform)
+		res, e := tx.ExecContext(ctx, `INSERT INTO shared_api_key_listings(api_key_id,listing_id,position) SELECT $1,$2,$3 WHERE EXISTS (SELECT 1 FROM shared_account_listings l JOIN accounts a ON a.id=l.account_id WHERE l.id=$2 AND l.platform=$4 AND l.status='active' AND l.deleted_at IS NULL AND a.status='active' AND a.schedulable=TRUE AND a.deleted_at IS NULL AND a.account_scope='shared')`, k.ID, id, i, k.Platform)
 		if e != nil {
 			return e
 		}
