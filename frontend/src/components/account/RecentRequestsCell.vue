@@ -47,7 +47,7 @@
             <Icon name="x" size="sm" />
           </button>
         </div>
-        <div class="min-h-0 overflow-y-auto overscroll-contain p-4">
+        <div class="min-h-0 overflow-y-auto overscroll-contain p-3">
           <RecentRequestDetails :request="activeRequest" />
         </div>
       </div>

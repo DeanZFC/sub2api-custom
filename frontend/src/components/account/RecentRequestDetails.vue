@@ -38,7 +38,11 @@ const cacheHitRate = computed(() => {
 </script>
 
 <template>
-  <div class="space-y-3 text-xs leading-5">
+  <div class="space-y-2 text-xs leading-5">
+    <div v-if="request.kind === 'error'" class="rounded-md border border-red-400/20 bg-red-400/10 px-2.5 py-2 text-red-200">
+      <div class="mb-0.5 font-medium">{{ t('admin.accounts.recentRequests.reason') }}</div>
+      <p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{{ request.message || t('admin.accounts.recentRequests.unknownError') }}</p>
+    </div>
     <dl class="request-details-grid">
       <dt>{{ t('usage.time') }}</dt>
       <dd class="tabular-nums">{{ formatDateTime(request.created_at) }}</dd>
@@ -47,16 +51,8 @@ const cacheHitRate = computed(() => {
         <span class="text-sky-300">{{ request.user_email || '—' }}</span>
         <span v-if="request.user_id != null" class="ml-1 text-gray-400">#{{ request.user_id }}</span>
       </dd>
-      <dt>{{ t('admin.accounts.recentRequests.group') }}</dt>
-      <dd data-testid="recent-request-group">
-        <span v-if="request.group_name" class="inline-block rounded bg-indigo-400/20 px-2 py-0.5 font-medium text-indigo-200">{{ request.group_name }}</span>
-        <span v-else>—<span v-if="request.group_id != null" class="ml-1 text-gray-400">#{{ request.group_id }}</span></span>
-      </dd>
       <template v-if="request.account_name">
         <dt>{{ t('admin.accounts.recentRequests.account') }}</dt><dd>{{ request.account_name }}</dd>
-      </template>
-      <template v-if="request.api_key_name">
-        <dt>{{ t('admin.accounts.recentRequests.apiKey') }}</dt><dd>{{ request.api_key_name }}</dd>
       </template>
       <dt>{{ t('usage.model') }}</dt>
       <dd>
@@ -67,7 +63,7 @@ const cacheHitRate = computed(() => {
       <dd><span class="inline-block rounded bg-blue-400/20 px-2 py-0.5 font-medium text-blue-200">{{ requestTypeLabel }}</span></dd>
     </dl>
 
-    <dl class="request-details-grid border-t border-white/10 pt-3 tabular-nums">
+    <dl class="request-details-grid border-t border-white/10 pt-2 tabular-nums">
       <dt>{{ t('usage.tokens') }}</dt>
       <dd class="flex flex-wrap gap-x-4 gap-y-1" data-testid="recent-request-tokens">
         <span class="inline-flex items-center gap-1" :title="t('usage.in')"><Icon name="arrowDown" size="sm" class="text-emerald-400" />{{ number(request.input_tokens) }}</span>
@@ -84,17 +80,13 @@ const cacheHitRate = computed(() => {
       </template>
     </dl>
 
-    <dl class="request-details-grid border-t border-white/10 pt-3 tabular-nums">
+    <dl class="request-details-grid border-t border-white/10 pt-2 tabular-nums">
       <dt>{{ t('usage.userBilled') }}</dt><dd class="text-emerald-300">{{ money(request.actual_cost) }}</dd>
       <dt>{{ t('usage.accountBilled') }}</dt><dd class="text-orange-300">{{ money(request.account_cost) }}</dd>
       <dt>{{ t('usage.latencyFirstToken') }}</dt><dd>{{ duration(request.first_token_ms) }}</dd>
       <dt>{{ t('usage.latencyDuration') }}</dt><dd>{{ duration(request.duration_ms) }}</dd>
     </dl>
-    <div v-if="request.kind === 'error'" class="rounded-lg bg-red-400/10 p-2.5 text-red-200">
-      <div class="mb-1 font-medium">{{ t('admin.accounts.recentRequests.reason') }}</div>
-      <p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{{ request.message || t('admin.accounts.recentRequests.unknownError') }}</p>
-    </div>
-    <div v-if="request.request_id" class="border-t border-white/10 pt-2 text-gray-400">
+    <div v-if="request.request_id" class="border-t border-white/10 pt-1.5 text-gray-400">
       <span>{{ t('admin.accounts.recentRequests.requestId') }}</span>
       <div class="break-all font-mono text-[11px]">{{ request.request_id }}</div>
     </div>
@@ -104,8 +96,8 @@ const cacheHitRate = computed(() => {
 <style scoped>
 .request-details-grid {
   display: grid;
-  grid-template-columns: 5.5rem minmax(0, 1fr);
-  gap: 0.375rem 0.75rem;
+  grid-template-columns: 4.75rem minmax(0, 1fr);
+  gap: 0.25rem 0.625rem;
 }
 .request-details-grid dt { color: #9ca3af; }
 .request-details-grid dd { min-width: 0; overflow-wrap: anywhere; }

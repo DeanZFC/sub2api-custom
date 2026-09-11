@@ -18,21 +18,26 @@ import (
 type helperConcurrencyCacheStub struct {
 	mu sync.Mutex
 
-	accountSeq []bool
-	userSeq    []bool
+	accountSeq   []bool
+	userSeq      []bool
+	userGroupSeq []bool
 
-	accountAcquireCalls int
-	userAcquireCalls    int
-	accountReleaseCalls int
-	userReleaseCalls    int
-	waitAllowed         bool
-	waitIncrementCalls  int
-	waitDecrementCalls  int
-	waitMaxWait         int
-	waitIncrementHook   func()
-	apiKeyTrackCalls    int
-	apiKeyReleaseCalls  int
-	apiKeyTrackIDs      []int64
+	accountAcquireCalls   int
+	userAcquireCalls      int
+	accountReleaseCalls   int
+	userReleaseCalls      int
+	userGroupAcquireCalls int
+	userGroupReleaseCalls int
+	lastUserGroupID       int64
+	lastUserGroupMax      int
+	waitAllowed           bool
+	waitIncrementCalls    int
+	waitDecrementCalls    int
+	waitMaxWait           int
+	waitIncrementHook     func()
+	apiKeyTrackCalls      int
+	apiKeyReleaseCalls    int
+	apiKeyTrackIDs        []int64
 }
 
 func (s *helperConcurrencyCacheStub) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -94,6 +99,27 @@ func (s *helperConcurrencyCacheStub) ReleaseUserSlot(ctx context.Context, userID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.userReleaseCalls++
+	return nil
+}
+
+func (s *helperConcurrencyCacheStub) AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, userMax, groupMax int, requestID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.userGroupAcquireCalls++
+	s.lastUserGroupID = groupID
+	s.lastUserGroupMax = groupMax
+	if len(s.userGroupSeq) == 0 {
+		return false, nil
+	}
+	v := s.userGroupSeq[0]
+	s.userGroupSeq = s.userGroupSeq[1:]
+	return v, nil
+}
+
+func (s *helperConcurrencyCacheStub) ReleaseUserGroupSlot(ctx context.Context, userID, groupID int64, requestID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.userGroupReleaseCalls++
 	return nil
 }
 
@@ -295,6 +321,28 @@ func TestAcquireUserSlotWithWait_ImmediateAcquireSkipsWaitQueue(t *testing.T) {
 	require.Equal(t, 0, cache.waitIncrementCalls)
 	require.Equal(t, 0, cache.waitDecrementCalls)
 	require.Equal(t, 1, cache.userReleaseCalls)
+}
+
+func TestAcquireUserSlotWithWait_UsesAPIKeyGroupConcurrency(t *testing.T) {
+	cache := &helperConcurrencyCacheStub{userGroupSeq: []bool{true}}
+	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, 5*time.Millisecond)
+	c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		ID:    77,
+		Group: &service.Group{ID: 42, UserConcurrencyLimit: 2},
+	})
+	streamStarted := false
+
+	release, err := helper.AcquireUserSlotWithWait(c, 202, 5, false, &streamStarted)
+	require.NoError(t, err)
+	require.NotNil(t, release)
+	release()
+
+	require.Equal(t, 1, cache.userGroupAcquireCalls)
+	require.Equal(t, int64(42), cache.lastUserGroupID)
+	require.Equal(t, 2, cache.lastUserGroupMax)
+	require.Equal(t, 1, cache.userGroupReleaseCalls)
+	require.Equal(t, 0, cache.userAcquireCalls)
 }
 
 func TestAcquireUserSlotWithWait_TracksAPIKeySlot(t *testing.T) {

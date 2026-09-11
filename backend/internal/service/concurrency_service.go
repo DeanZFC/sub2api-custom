@@ -60,6 +60,14 @@ type accountProxyConcurrencyCache interface {
 	ReleaseAccountProxyPoolSlot(context.Context, int64, int64, string) error
 }
 
+// UserGroupConcurrencyCache is an optional cache extension that atomically
+// reserves both the user's global slot and the user's slot in one group.
+// Keeping this separate preserves compatibility with lightweight test doubles.
+type UserGroupConcurrencyCache interface {
+	AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, userMax, groupMax int, requestID string) (bool, error)
+	ReleaseUserGroupSlot(ctx context.Context, userID, groupID int64, requestID string) error
+}
+
 type APIKeyConcurrencyCache interface {
 	TrackAPIKeySlot(ctx context.Context, apiKeyID int64, requestID string) error
 	ReleaseAPIKeySlot(ctx context.Context, apiKeyID int64, requestID string) error
@@ -421,6 +429,40 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 	return &AcquireResult{
 		Acquired:    false,
 		ReleaseFunc: nil,
+	}, nil
+}
+
+// AcquireUserGroupSlot atomically enforces the user's global limit and the
+// per-user limit for one group. A non-positive group ID or limit disables only
+// the group dimension and retains the existing user limit behavior.
+func (s *ConcurrencyService) AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, userMax, groupMax int) (*AcquireResult, error) {
+	if groupID <= 0 || groupMax <= 0 {
+		return s.AcquireUserSlot(ctx, userID, userMax)
+	}
+	if s == nil || s.cache == nil {
+		return nil, errors.New("concurrency cache is unavailable")
+	}
+	cache, ok := s.cache.(UserGroupConcurrencyCache)
+	if !ok {
+		return s.AcquireUserSlot(ctx, userID, userMax)
+	}
+	requestID := generateRequestID()
+	acquired, err := cache.AcquireUserGroupSlot(ctx, userID, groupID, userMax, groupMax, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return &AcquireResult{Acquired: false}, nil
+	}
+	return &AcquireResult{
+		Acquired: true,
+		ReleaseFunc: func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := cache.ReleaseUserGroupSlot(bgCtx, userID, groupID, requestID); err != nil {
+				logger.LegacyPrintf("service.concurrency", "Warning: failed to release user group slot for user=%d group=%d (req=%s): %v", userID, groupID, requestID, err)
+			}
+		},
 	}, nil
 }
 

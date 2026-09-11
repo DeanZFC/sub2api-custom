@@ -43,7 +43,6 @@ describe('RecentRequestsCell', () => {
     await triggers()[1].trigger('mouseenter')
     expect(dialog()?.textContent).toContain('customer@example.com')
     expect(dialog()?.textContent).toContain('#53')
-    expect(dialog()?.textContent).toContain('GPT-Luna')
     expect(dialog()?.textContent).toContain('Sub2api-3-福利')
     expect(dialog()?.textContent).toContain('gpt-5.6-terra')
     expect(dialog()?.textContent).toContain('WS v2')
@@ -92,8 +91,10 @@ describe('RecentRequestsCell', () => {
     await triggers()[0].trigger('click')
     expect(dialog()?.textContent).toContain('502')
     expect(dialog()?.textContent).toContain('customer@example.com')
-    expect(dialog()?.textContent).toContain('GPT-Luna')
     expect(dialog()?.textContent).toContain(failure.message)
+    expect(dialog()?.textContent?.indexOf('admin.accounts.recentRequests.reason')).toBeLessThan(
+      dialog()?.textContent?.indexOf('usage.time') ?? Number.MAX_SAFE_INTEGER,
+    )
     expect(dialog()?.querySelector('script')).toBeNull()
     expect(dialog()?.querySelector('[data-testid="recent-request-tokens"]')?.textContent).toBe('——')
     expect(dialog()?.querySelector('[data-testid="recent-request-cache-rate"]')?.textContent).toBe('—')
@@ -113,6 +114,6 @@ describe('RecentRequestsCell', () => {
     expect(wrapper.find('.animate-pulse').exists()).toBe(false)
     await triggers()[0].trigger('click')
     expect(dialog()?.querySelector('[data-testid="recent-request-user"]')?.textContent).toContain('#53')
-    expect(dialog()?.querySelector('[data-testid="recent-request-group"]')?.textContent).toContain('#10')
+    expect(dialog()?.querySelector('[data-testid="recent-request-group"]')).toBeNull()
   })
 })

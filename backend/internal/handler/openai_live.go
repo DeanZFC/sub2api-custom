@@ -97,11 +97,13 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		return
 	}
 
-	_, groupMax := apiKeyUserConcurrencyLimit(apiKey)
-	userRelease, acquired, err := h.concurrencyHelper.TryAcquireUserSlot(
+	groupID, groupMax := apiKeyUserConcurrencyLimit(apiKey)
+	userRelease, acquired, err := h.concurrencyHelper.TryAcquireUserSlotForGroup(
 		c.Request.Context(),
 		subject.UserID,
 		subject.Concurrency,
+		groupID,
+		groupMax,
 	)
 	if err != nil {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Live concurrency unavailable")
