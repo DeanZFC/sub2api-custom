@@ -46,6 +46,9 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
 
+		// 共享账号池审核与运营控制（独立于普通账号管理）
+		registerSharedAccountPoolRoutes(admin, h)
+
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 
@@ -130,6 +133,17 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerSharedAccountPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	pool := admin.Group("/shared-pool")
+	{
+		pool.GET("/listings", h.Admin.SharedAccountPool.AdminListCards)
+		pool.GET("/users", h.Admin.SharedAccountPool.AdminListUsers)
+		pool.PUT("/listings/:id/status", h.Admin.SharedAccountPool.AdminSetStatus)
+		pool.PUT("/listings/:id/listed", h.Admin.SharedAccountPool.AdminSetListed)
+		pool.PUT("/users/:user_id/publish-permission", h.Admin.SharedAccountPool.AdminSetUserPublishPermission)
 	}
 }
 

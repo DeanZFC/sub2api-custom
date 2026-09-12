@@ -172,6 +172,131 @@ func (h *SharedAccountPoolHandler) ListCards(c *gin.Context) {
 	response.Success(c, gin.H{"items": items, "limit": limit, "recent_limit": recent})
 }
 
+// AdminListCards returns the complete moderation view, including unpublished
+// and paused listings. The /admin route is protected by AdminAuthMiddleware.
+func (h *SharedAccountPoolHandler) AdminListCards(c *gin.Context) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return
+	}
+	limit, recent := 100, 5
+	if v, err := strconv.Atoi(c.DefaultQuery("limit", "100")); err == nil {
+		limit = v
+	}
+	if v, err := strconv.Atoi(c.DefaultQuery("recent_limit", "5")); err == nil {
+		recent = v
+	}
+	var owner *int64
+	if raw := c.Query("owner_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "invalid owner_id")
+			return
+		}
+		owner = &id
+	}
+	items, err := adminRepo.ListAdminCards(c.Request.Context(), c.Query("platform"), c.Query("status"), c.Query("search"), owner, limit, recent)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	h.attachConcurrency(c.Request.Context(), items)
+	response.Success(c, gin.H{"items": items, "limit": limit, "recent_limit": recent})
+}
+
+func (h *SharedAccountPoolHandler) AdminListUsers(c *gin.Context) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	items, err := adminRepo.ListAdminUsers(c.Request.Context(), c.Query("search"), limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": items, "limit": limit})
+}
+
+func (h *SharedAccountPoolHandler) AdminSetStatus(c *gin.Context) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid listing id")
+		return
+	}
+	var req struct {
+		Status string `json:"status" binding:"required,oneof=active paused suspended invalid"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := adminRepo.SetListingAdminStatus(c.Request.Context(), id, req.Status); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"id": id, "status": req.Status})
+}
+
+func (h *SharedAccountPoolHandler) AdminSetListed(c *gin.Context) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid listing id")
+		return
+	}
+	var req struct {
+		Listed *bool `json:"listed"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Listed == nil {
+		response.BadRequest(c, "listed is required")
+		return
+	}
+	if err := adminRepo.SetListingAdminListed(c.Request.Context(), id, *req.Listed); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"id": id, "listed": *req.Listed})
+}
+
+func (h *SharedAccountPoolHandler) AdminSetUserPublishPermission(c *gin.Context) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return
+	}
+	uid, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || uid <= 0 {
+		response.BadRequest(c, "invalid user id")
+		return
+	}
+	var req struct {
+		Enabled      *bool      `json:"enabled"`
+		Reason       string     `json:"reason"`
+		BlockedUntil *time.Time `json:"blocked_until"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		response.BadRequest(c, "enabled is required")
+		return
+	}
+	if err := adminRepo.SetUserSharedPublishPermission(c.Request.Context(), uid, *req.Enabled, req.Reason, req.BlockedUntil); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"user_id": uid, "enabled": *req.Enabled, "reason": req.Reason, "blocked_until": req.BlockedUntil})
+}
+
 func (h *SharedAccountPoolHandler) attachConcurrency(ctx context.Context, items []service.SharedAccountCard) {
 	if h == nil || h.concurrency == nil || len(items) == 0 {
 		return

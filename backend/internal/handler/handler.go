@@ -43,6 +43,10 @@ type AdminHandlers struct {
 	Affiliate              *admin.AffiliateHandler
 	Compliance             *admin.ComplianceHandler
 	AuditLog               *admin.AuditLogHandler
+	// SharedAccountPool exposes the moderation endpoints under /admin. The
+	// implementation is shared with the user pool handler but all routes are
+	// protected by the admin middleware.
+	SharedAccountPool *SharedAccountPoolHandler
 }
 
 // Handlers contains all HTTP handlers

@@ -529,6 +529,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/shared-pool',
+    name: 'AdminSharedPool',
+    component: () => import('@/views/admin/SharedPoolAdminView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Shared Pool Management',
+      titleKey: 'nav.sharedPoolAdmin'
+    }
+  },
+  {
     path: '/admin/plugins',
     name: 'AdminPlugins',
     component: () => import('@/views/admin/PluginsView.vue'),

@@ -171,6 +171,7 @@ export default {
     usage: '使用记录',
     redeem: '兑换',
     sharedPool: '共享账号池',
+    sharedPoolAdmin: '共享账号池管理',
     affiliate: '邀请返利',
     affiliateManagement: '邀请返利',
     affiliateInviteRecords: '邀请记录',

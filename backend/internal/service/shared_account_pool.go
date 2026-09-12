@@ -60,6 +60,28 @@ type SharedAccountPoolRepository interface {
 	DeleteListing(ctx context.Context, ownerID, listingID int64) error
 }
 
+// SharedAccountPoolAdminRepository is the optional moderation contract. It is
+// separate from the user-facing repository interface so lightweight service
+// fakes do not need to implement admin-only methods.
+type SharedAccountPoolAdminRepository interface {
+	ListAdminCards(ctx context.Context, platform, status, search string, ownerID *int64, limit, recentLimit int) ([]SharedAccountCard, error)
+	ListAdminUsers(ctx context.Context, search string, limit int) ([]SharedPoolUserSummary, error)
+	SetListingAdminStatus(ctx context.Context, listingID int64, status string) error
+	SetListingAdminListed(ctx context.Context, listingID int64, listed bool) error
+	SetUserSharedPublishPermission(ctx context.Context, userID int64, enabled bool, reason string, until *time.Time) error
+	IsUserSharedPublishAllowed(ctx context.Context, userID int64) (bool, error)
+}
+
+type SharedPoolUserSummary struct {
+	UserID             int64      `json:"user_id"`
+	Username           string     `json:"username,omitempty"`
+	Email              string     `json:"email,omitempty"`
+	SharedAccountCount int        `json:"shared_account_count"`
+	PublishEnabled     bool       `json:"publish_enabled"`
+	BlockedUntil       *time.Time `json:"blocked_until,omitempty"`
+	BlockReason        string     `json:"block_reason,omitempty"`
+}
+
 type SharedAccountListing struct {
 	ID, OwnerUserID, AccountID      int64
 	Platform, DisplayName, Status   string
@@ -122,6 +144,15 @@ func (s *SharedAccountUploadService) SetHealthChecker(checker SharedAccountHealt
 }
 
 func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, in SharedAccountUploadInput) (*SharedAccountListing, error) {
+	if adminRepo, ok := s.listings.(SharedAccountPoolAdminRepository); ok {
+		allowed, err := adminRepo.IsUserSharedPublishAllowed(ctx, ownerID)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, infraerrors.Forbidden("SHARED_PUBLISH_DISABLED", "shared account publishing is disabled for this user")
+		}
+	}
 	var proxyID *int64
 	cleanupProxy := func() {
 		if proxyID != nil && s.proxies != nil {

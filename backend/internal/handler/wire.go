@@ -200,6 +200,7 @@ func ProvideHandlers(
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
 ) *Handlers {
+	adminHandlers.SharedAccountPool = sharedAccountPoolHandler
 	return &Handlers{
 		Auth:              authHandler,
 		User:              userHandler,

@@ -171,6 +171,7 @@ export default {
     usage: 'Usage',
     redeem: 'Redeem',
     sharedPool: 'Shared Account Pool',
+    sharedPoolAdmin: 'Shared Pool Management',
     affiliate: 'Affiliate Rebates',
     affiliateManagement: 'Affiliate Rebates',
     affiliateInviteRecords: 'Invite Records',

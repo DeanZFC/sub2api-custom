@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -75,6 +76,11 @@ func (r *sharedAccountPoolRepository) listCards(ctx context.Context, ownerID *in
 		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.Type, &c.DisplayName, &c.UploaderName, &c.Status, &c.Listed, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &models, &calls); err != nil {
 			return nil, err
 		}
+		// Uploader identity is an admin/owner-only field. Public pool cards must
+		// never disclose the account owner's name or email.
+		if ownerID == nil {
+			c.UploaderName = ""
+		}
 		if err := json.Unmarshal(calls, &c.RecentCalls); err != nil {
 			return nil, fmt.Errorf("decode shared account calls: %w", err)
 		}
@@ -96,10 +102,107 @@ func (r *sharedAccountPoolRepository) listCards(ctx context.Context, ownerID *in
 }
 
 func (r *sharedAccountPoolRepository) ListPublicCards(ctx context.Context, platform string, limit, recentLimit int) ([]service.SharedAccountCard, error) {
-	return r.listCards(ctx, nil, platform, limit, recentLimit)
+	items, err := r.listCards(ctx, nil, platform, limit, recentLimit)
+	for i := range items {
+		items[i].UploaderName = ""
+	}
+	return items, err
 }
 func (r *sharedAccountPoolRepository) GetOwnerCards(ctx context.Context, ownerID int64, limit, recentLimit int) ([]service.SharedAccountCard, error) {
 	return r.listCards(ctx, &ownerID, "", limit, recentLimit)
+}
+
+// ListAdminCards is the moderation view. It deliberately keeps the account
+// scope predicate from sharedCardSelect while allowing paused, invalid and
+// unlisted rows to be inspected by administrators.
+func (r *sharedAccountPoolRepository) ListAdminCards(ctx context.Context, platform, status, search string, ownerID *int64, limit, recentLimit int) ([]service.SharedAccountCard, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if recentLimit <= 0 || recentLimit > 20 {
+		recentLimit = 5
+	}
+	where, args := "", []any{limit, recentLimit}
+	if strings.TrimSpace(platform) != "" {
+		where += fmt.Sprintf(" AND l.platform = $%d", len(args)+1)
+		args = append(args, strings.ToLower(strings.TrimSpace(platform)))
+	}
+	if strings.TrimSpace(status) != "" {
+		where += fmt.Sprintf(" AND l.status = $%d", len(args)+1)
+		args = append(args, strings.TrimSpace(status))
+	}
+	if strings.TrimSpace(search) != "" {
+		where += fmt.Sprintf(" AND (l.display_name ILIKE $%d OR l.uploader_name ILIKE $%d OR CAST(l.account_id AS TEXT) ILIKE $%d)", len(args)+1, len(args)+1, len(args)+1)
+		args = append(args, "%"+strings.TrimSpace(search)+"%")
+	}
+	if ownerID != nil && *ownerID > 0 {
+		where += fmt.Sprintf(" AND l.owner_user_id = $%d", len(args)+1)
+		args = append(args, *ownerID)
+	}
+	return r.listCardsWithWhere(ctx, where, args, limit, recentLimit)
+}
+
+func (r *sharedAccountPoolRepository) ListAdminUsers(ctx context.Context, search string, limit int) ([]service.SharedPoolUserSummary, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	query := `SELECT u.id, COALESCE(NULLIF(u.username,''),''), u.email,
+ COALESCE(COUNT(l.id),0), COALESCE(u.shared_publish_enabled,TRUE), u.shared_publish_blocked_until, COALESCE(u.shared_publish_block_reason,'')
+ FROM users u LEFT JOIN shared_account_listings l ON l.owner_user_id=u.id AND l.deleted_at IS NULL AND l.status <> 'deleted'
+ WHERE u.deleted_at IS NULL`
+	args := []any{}
+	if strings.TrimSpace(search) != "" {
+		query += " AND (u.email ILIKE $1 OR u.username ILIKE $1)"
+		args = append(args, "%"+strings.TrimSpace(search)+"%")
+	}
+	query += fmt.Sprintf(" GROUP BY u.id ORDER BY COUNT(l.id) DESC,u.id DESC LIMIT $%d", len(args)+1)
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]service.SharedPoolUserSummary, 0)
+	for rows.Next() {
+		var item service.SharedPoolUserSummary
+		if err := rows.Scan(&item.UserID, &item.Username, &item.Email, &item.SharedAccountCount, &item.PublishEnabled, &item.BlockedUntil, &item.BlockReason); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *sharedAccountPoolRepository) listCardsWithWhere(ctx context.Context, where string, args []any, limit, recentLimit int) ([]service.SharedAccountCard, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(sharedCardSelect, where), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]service.SharedAccountCard, 0)
+	for rows.Next() {
+		var c service.SharedAccountCard
+		var calls, models []byte
+		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.Type, &c.DisplayName, &c.UploaderName, &c.Status, &c.Listed, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &models, &calls); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(calls, &c.RecentCalls); err != nil {
+			return nil, fmt.Errorf("decode shared account calls: %w", err)
+		}
+		var mapped []string
+		if len(models) > 0 {
+			if err := json.Unmarshal(models, &mapped); err != nil {
+				return nil, fmt.Errorf("decode shared account models: %w", err)
+			}
+		}
+		for _, model := range mapped {
+			if model != "" && !strings.Contains(model, "*") {
+				c.AvailableModels = append(c.AvailableModels, model)
+			}
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func (r *sharedAccountPoolRepository) GetOwnerListingByAccountID(ctx context.Context, ownerID, accountID int64) (*service.SharedAccountListing, error) {
@@ -216,6 +319,89 @@ func (r *sharedAccountPoolRepository) SetListingListed(ctx context.Context, owne
 		return service.ErrSharedListingNotFound
 	}
 	return nil
+}
+
+func (r *sharedAccountPoolRepository) SetListingAdminStatus(ctx context.Context, listingID int64, status string) error {
+	if listingID <= 0 || (status != "active" && status != "paused" && status != "suspended" && status != "invalid") {
+		return errors.New("invalid shared listing status")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var accountID int64
+	var listed bool
+	if err = tx.QueryRowContext(ctx, `UPDATE shared_account_listings SET status=$2,updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING account_id,COALESCE(listed,TRUE)`, listingID, status).Scan(&accountID, &listed); errors.Is(err, sql.ErrNoRows) {
+		return service.ErrSharedListingNotFound
+	} else if err != nil {
+		return err
+	}
+	// Suspended/invalid rows must leave scheduling immediately. Resuming an
+	// active row restores persistent schedulability only for shared accounts.
+	sched := status == "active" && listed
+	if _, err = tx.ExecContext(ctx, `UPDATE accounts SET schedulable=$2, status=CASE WHEN $2 THEN 'active' ELSE status END, updated_at=NOW() WHERE id=$1 AND account_scope='shared'`, accountID, sched); err != nil {
+		return err
+	}
+	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *sharedAccountPoolRepository) SetListingAdminListed(ctx context.Context, listingID int64, listed bool) error {
+	if listingID <= 0 {
+		return service.ErrSharedListingNotFound
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var accountID int64
+	var status string
+	if err = tx.QueryRowContext(ctx, `UPDATE shared_account_listings SET listed=$2,updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING account_id,status`, listingID, listed).Scan(&accountID, &status); errors.Is(err, sql.ErrNoRows) {
+		return service.ErrSharedListingNotFound
+	} else if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE accounts SET schedulable=($2 AND $3='active' AND status='active'),updated_at=NOW() WHERE id=$1 AND account_scope='shared'`, accountID, listed, status); err != nil {
+		return err
+	}
+	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *sharedAccountPoolRepository) SetUserSharedPublishPermission(ctx context.Context, userID int64, enabled bool, reason string, until *time.Time) error {
+	if userID <= 0 {
+		return service.ErrUserNotFound
+	}
+	res, err := r.db.ExecContext(ctx, `UPDATE users SET shared_publish_enabled=$2, shared_publish_block_reason=$3, shared_publish_blocked_until=$4, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, userID, enabled, strings.TrimSpace(reason), until)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return service.ErrUserNotFound
+	}
+	return nil
+}
+
+func (r *sharedAccountPoolRepository) IsUserSharedPublishAllowed(ctx context.Context, userID int64) (bool, error) {
+	if userID <= 0 {
+		return false, service.ErrUserNotFound
+	}
+	var enabled bool
+	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(shared_publish_enabled, TRUE) AND (shared_publish_blocked_until IS NULL OR shared_publish_blocked_until <= NOW()) FROM users WHERE id=$1 AND deleted_at IS NULL`, userID).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, service.ErrUserNotFound
+	}
+	return enabled, err
 }
 
 func (r *sharedAccountPoolRepository) DeleteListing(ctx context.Context, ownerID, listingID int64) error {
