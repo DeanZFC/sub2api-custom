@@ -421,6 +421,32 @@ func (r *sharedAccountPoolRepository) SetListingAdminListed(ctx context.Context,
 	return tx.Commit()
 }
 
+// DeleteListingAdmin removes a shared listing from the pool while preserving
+// the underlying account and historical usage records for audit/billing.
+func (r *sharedAccountPoolRepository) DeleteListingAdmin(ctx context.Context, listingID int64) error {
+	if listingID <= 0 {
+		return service.ErrSharedListingNotFound
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var accountID int64
+	if err = tx.QueryRowContext(ctx, `UPDATE shared_account_listings SET status='deleted',deleted_at=NOW(),updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL AND EXISTS (SELECT 1 FROM accounts a WHERE a.id=shared_account_listings.account_id AND a.account_scope='shared') RETURNING account_id`, listingID).Scan(&accountID); errors.Is(err, sql.ErrNoRows) {
+		return service.ErrSharedListingNotFound
+	} else if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE accounts SET schedulable=FALSE,updated_at=NOW() WHERE id=$1 AND account_scope='shared'`, accountID); err != nil {
+		return err
+	}
+	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (r *sharedAccountPoolRepository) SetUserSharedPublishPermission(ctx context.Context, userID int64, enabled bool, reason string, until *time.Time) error {
 	if userID <= 0 {
 		return service.ErrUserNotFound

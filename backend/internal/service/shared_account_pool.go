@@ -69,6 +69,7 @@ type SharedAccountPoolAdminRepository interface {
 	ListAdminUsers(ctx context.Context, search string, limit int) ([]SharedPoolUserSummary, error)
 	SetListingAdminStatus(ctx context.Context, listingID int64, status string) error
 	SetListingAdminListed(ctx context.Context, listingID int64, listed bool) error
+	DeleteListingAdmin(ctx context.Context, listingID int64) error
 	SetUserSharedPublishPermission(ctx context.Context, userID int64, enabled bool, reason string, until *time.Time) error
 	IsUserSharedPublishAllowed(ctx context.Context, userID int64) (bool, error)
 	CountOwnerListings(ctx context.Context, ownerID int64) (active int, recent int, err error)

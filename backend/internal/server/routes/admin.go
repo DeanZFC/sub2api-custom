@@ -143,6 +143,7 @@ func registerSharedAccountPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		pool.GET("/users", h.Admin.SharedAccountPool.AdminListUsers)
 		pool.PUT("/listings/:id/status", h.Admin.SharedAccountPool.AdminSetStatus)
 		pool.PUT("/listings/:id/listed", h.Admin.SharedAccountPool.AdminSetListed)
+		pool.DELETE("/listings/:id", h.Admin.SharedAccountPool.AdminDelete)
 		pool.PUT("/users/:user_id/publish-permission", h.Admin.SharedAccountPool.AdminSetUserPublishPermission)
 	}
 }

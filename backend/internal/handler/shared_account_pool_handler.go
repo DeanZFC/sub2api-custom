@@ -282,6 +282,24 @@ func (h *SharedAccountPoolHandler) AdminSetListed(c *gin.Context) {
 	response.Success(c, gin.H{"id": id, "listed": *req.Listed})
 }
 
+func (h *SharedAccountPoolHandler) AdminDelete(c *gin.Context) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid listing id")
+		return
+	}
+	if err := adminRepo.DeleteListingAdmin(c.Request.Context(), id); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"id": id, "deleted": true})
+}
+
 func (h *SharedAccountPoolHandler) AdminSetUserPublishPermission(c *gin.Context) {
 	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
 	if !ok {

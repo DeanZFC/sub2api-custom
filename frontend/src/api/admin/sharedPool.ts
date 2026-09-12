@@ -47,6 +47,9 @@ export async function setSharedAccountListed(id: number, listed: boolean) {
   const { data } = await apiClient.put<AdminSharedAccount>(`/admin/shared-pool/listings/${id}/listed`, { listed })
   return data
 }
+export async function deleteSharedAccount(id: number) {
+  await apiClient.delete(`/admin/shared-pool/listings/${id}`)
+}
 
 export async function listSharedUsers(params: Record<string, unknown> = {}) {
   const { data } = await apiClient.get<{ items: AdminSharedUser[]; total?: number }>('/admin/shared-pool/users', { params })

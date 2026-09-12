@@ -17,7 +17,7 @@
           <template #cell-uploader="{ row }"><div>{{ row.uploader_name || row.uploader_email || `用户 #${row.uploader_id || '-'}` }}</div></template>
           <template #cell-status="{ row }"><span class="badge" :class="row.status !== 'active' || row.listed === false ? 'badge-warning' : 'badge-success'">{{ row.status === 'suspended' ? '已禁用' : row.status === 'invalid' ? '无效' : row.listed === false ? '已下架' : '运行中' }}</span></template>
           <template #cell-metrics="{ row }"><div>{{ row.total_call_count ?? 0 }} 次调用</div><div class="text-xs text-gray-500">{{ averageLatency(row) ? `${averageLatency(row)}ms` : '—' }}</div></template>
-          <template #cell-actions="{ row }"><div class="flex gap-2"><button class="btn btn-secondary btn-sm" @click="toggleAccount(row)">{{ row.status === 'suspended' ? '恢复' : '禁用' }}</button><button class="btn btn-secondary btn-sm" @click="toggleListed(row)">{{ row.listed === false ? '上架' : '下架' }}</button></div></template>
+          <template #cell-actions="{ row }"><div class="flex gap-2"><button class="btn btn-secondary btn-sm" @click="toggleAccount(row)">{{ row.status === 'suspended' ? '恢复' : '禁用' }}</button><button class="btn btn-secondary btn-sm" @click="toggleListed(row)">{{ row.listed === false ? '上架' : '下架' }}</button><button class="btn btn-secondary btn-sm text-red-600" @click="deleteAccount(row)">删除</button></div></template>
         </DataTable>
         <DataTable v-else :columns="userColumns" :data="users" :loading="loadingUsers">
           <template #cell-user="{ row }"><div class="font-medium">{{ row.username || row.email || `用户 #${row.user_id}` }}</div><div class="text-xs text-gray-500">{{ row.shared_account_count ?? 0 }} 个共享账号</div></template>
@@ -36,7 +36,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { listSharedAccounts, listSharedUsers, setSharedAccountListed, setSharedAccountStatus, setSharedUserPublishPermission, type AdminSharedAccount, type AdminSharedUser } from '@/api/admin/sharedPool'
+import { listSharedAccounts, listSharedUsers, setSharedAccountListed, setSharedAccountStatus, deleteSharedAccount, setSharedUserPublishPermission, type AdminSharedAccount, type AdminSharedUser } from '@/api/admin/sharedPool'
 
 const tabs = [{ key: 'accounts', label: '共享账号' }, { key: 'users', label: '发布权限' }]
 const tabKey = ref('accounts'); const search = ref(''); const status = ref(''); const loading = ref(false); const loadingUsers = ref(false)
@@ -55,6 +55,11 @@ async function toggleAccount(row: AdminSharedAccount) {
   await loadAccounts()
 }
 async function toggleListed(row: AdminSharedAccount) { await setSharedAccountListed(row.id, row.listed === false); await loadAccounts() }
+async function deleteAccount(row: AdminSharedAccount) {
+  if (!window.confirm('确定删除这个共享账号吗？删除后将立即从共享池下线，历史使用记录会保留。')) return
+  await deleteSharedAccount(row.id)
+  await loadAccounts()
+}
 async function toggleUser(row: AdminSharedUser) {
   const enabled = !row.publish_enabled
   const reason = !enabled ? (window.prompt('请输入禁止发布原因（可选）', row.block_reason || '') || undefined) : undefined
