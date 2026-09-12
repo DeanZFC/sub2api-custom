@@ -10,6 +10,8 @@ export interface SharedCall {
 }
 export interface SharedCard {
   id: number
+  /** Underlying accounts.id used by the account test endpoint. */
+  account_id?: number
   platform: string
   display_name: string
   status: string

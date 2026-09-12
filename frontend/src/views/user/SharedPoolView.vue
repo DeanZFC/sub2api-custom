@@ -75,7 +75,11 @@ async function transfer() {
   } finally { transferring.value = false }
 }
 async function toggle(card: SharedCard) {
-  try { await setSharedListingStatus(card.id, card.status === 'paused' ? 'resume' : 'pause'); await loadCards() }
+  // Any state other than active (including an account that was marked invalid
+  // by a health check) must use the resume action.  Sending pause for an
+  // invalid card leaves the listing unavailable and makes the switch appear
+  // to do nothing.
+  try { await setSharedListingStatus(card.id, card.status === 'active' ? 'pause' : 'resume'); await loadCards() }
   catch (e) { error.value = errorText(e) }
 }
 async function remove(card: SharedCard) {
@@ -91,7 +95,18 @@ onMounted(() => { void loadCards(); void loadWallet() })
 async function loadKeys(){ try { sharedKeys.value = await listSharedAPIKeys() } catch {} }
 function openKeyModal() { editingKeyId.value = null; keyMessage.value = ''; keyName.value = ''; keyListings.value = []; showKeyModal.value = true }
 function openEdit(card: SharedCard) { editingCard.value = card; showCreateAccount.value = true }
-function openTest(card: SharedCard) { testingCard.value = { id: card.id, name: card.display_name, type: 'shared', platform: card.platform, status: card.status } }
+function openTest(card: SharedCard) {
+  // The admin test endpoint addresses the underlying account.  Newer card
+  // responses include account_id; retain the listing-id fallback for older
+  // servers so the UI remains backwards compatible.
+  testingCard.value = {
+    id: card.account_id || card.id,
+    name: card.display_name,
+    type: 'shared',
+    platform: card.platform,
+    status: card.status
+  }
+}
 function openEditKey(key: SharedAPIKey) { editingKeyId.value = key.id; keyMessage.value = ''; keyName.value = key.name; keyPlatform.value = key.platform; keyListings.value = [...key.listing_ids]; showKeyModal.value = true }
 function closeKeyModal() { if (!creatingKey.value) showKeyModal.value = false }
 function toggleListing(id: number) { keyListings.value = keyListings.value.includes(id) ? keyListings.value.filter(value => value !== id) : [...keyListings.value, id] }
