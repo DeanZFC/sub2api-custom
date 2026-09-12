@@ -105,6 +105,13 @@ func (r *sharedAccountPoolRepository) ListPublicCards(ctx context.Context, platf
 	items, err := r.listCards(ctx, nil, platform, limit, recentLimit)
 	for i := range items {
 		items[i].UploaderName = ""
+		// Request IDs are internal correlation tokens and charged amounts expose
+		// settlement details. Keep only the operational fields needed by the
+		// public pool card; owner/admin views use the unsanitized repository path.
+		for j := range items[i].RecentCalls {
+			items[i].RecentCalls[j].RequestID = ""
+			items[i].RecentCalls[j].ChargedAmount = 0
+		}
 	}
 	return items, err
 }
@@ -409,6 +416,14 @@ func (r *sharedAccountPoolRepository) IsUserSharedPublishAllowed(ctx context.Con
 		return false, service.ErrUserNotFound
 	}
 	return enabled, err
+}
+
+func (r *sharedAccountPoolRepository) CountOwnerListings(ctx context.Context, ownerID int64) (active int, recent int, err error) {
+	if ownerID <= 0 {
+		return 0, 0, service.ErrUserNotFound
+	}
+	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FILTER (WHERE status <> 'deleted'), COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 hour') FROM shared_account_listings WHERE owner_user_id=$1 AND deleted_at IS NULL`, ownerID).Scan(&active, &recent)
+	return
 }
 
 func (r *sharedAccountPoolRepository) DeleteListing(ctx context.Context, ownerID, listingID int64) error {

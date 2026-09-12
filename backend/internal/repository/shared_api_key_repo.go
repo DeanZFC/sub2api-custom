@@ -13,6 +13,14 @@ type sharedAPIKeyRepository struct{ db *sql.DB }
 func NewSharedAPIKeyRepository(db *sql.DB) service.SharedAPIKeyRepository {
 	return &sharedAPIKeyRepository{db: db}
 }
+
+func (r *sharedAPIKeyRepository) CountByUser(ctx context.Context, userID int64) (active int, recent int, err error) {
+	if userID <= 0 {
+		return 0, 0, service.ErrSharedAPIKeyNotFound
+	}
+	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FILTER (WHERE status='active'), COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 hour') FROM shared_api_keys WHERE user_id=$1 AND deleted_at IS NULL`, userID).Scan(&active, &recent)
+	return
+}
 func previewKey(k string) string {
 	if len(k) <= 10 {
 		return k

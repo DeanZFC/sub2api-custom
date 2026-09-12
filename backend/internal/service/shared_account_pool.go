@@ -41,11 +41,11 @@ type SharedAccountCard struct {
 }
 
 type SharedAccountRecentCall struct {
-	RequestID     string    `json:"request_id"`
+	RequestID     string    `json:"request_id,omitempty"`
 	Model         string    `json:"model,omitempty"`
 	ResultStatus  string    `json:"result_status"`
 	DurationMS    int64     `json:"duration_ms,omitempty"`
-	ChargedAmount float64   `json:"charged_amount"`
+	ChargedAmount float64   `json:"charged_amount,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -70,6 +70,12 @@ type SharedAccountPoolAdminRepository interface {
 	SetListingAdminListed(ctx context.Context, listingID int64, listed bool) error
 	SetUserSharedPublishPermission(ctx context.Context, userID int64, enabled bool, reason string, until *time.Time) error
 	IsUserSharedPublishAllowed(ctx context.Context, userID int64) (bool, error)
+	CountOwnerListings(ctx context.Context, ownerID int64) (active int, recent int, err error)
+}
+
+type SharedAccountPublishPolicy interface {
+	IsUserSharedPublishAllowed(ctx context.Context, userID int64) (bool, error)
+	CountOwnerListings(ctx context.Context, ownerID int64) (active int, recent int, err error)
 }
 
 type SharedPoolUserSummary struct {
@@ -144,13 +150,23 @@ func (s *SharedAccountUploadService) SetHealthChecker(checker SharedAccountHealt
 }
 
 func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, in SharedAccountUploadInput) (*SharedAccountListing, error) {
-	if adminRepo, ok := s.listings.(SharedAccountPoolAdminRepository); ok {
+	if adminRepo, ok := s.listings.(SharedAccountPublishPolicy); ok {
 		allowed, err := adminRepo.IsUserSharedPublishAllowed(ctx, ownerID)
 		if err != nil {
 			return nil, err
 		}
 		if !allowed {
 			return nil, infraerrors.Forbidden("SHARED_PUBLISH_DISABLED", "shared account publishing is disabled for this user")
+		}
+		active, recent, err := adminRepo.CountOwnerListings(ctx, ownerID)
+		if err != nil {
+			return nil, err
+		}
+		if active >= 50 {
+			return nil, infraerrors.BadRequest("SHARED_ACCOUNT_LIMIT", "shared account limit reached")
+		}
+		if recent >= 10 {
+			return nil, infraerrors.BadRequest("SHARED_UPLOAD_RATE_LIMIT", "too many shared account uploads; try again later")
 		}
 	}
 	var proxyID *int64

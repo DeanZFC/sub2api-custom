@@ -423,7 +423,7 @@ async function createKey(){
   } catch (e) { keyMessage.value = errorText(e) }
   finally { creatingKey.value = false }
 }
-async function removeKey(id:number){ if(!window.confirm('确定删除此共享 API Key 吗？')) return; await deleteSharedAPIKey(id); await loadKeys() }
+async function removeKey(id:number){ if(!window.confirm('确定撤销此共享 API Key 吗？撤销后立即失效且无法恢复。')) return; await deleteSharedAPIKey(id); await loadKeys() }
 async function toggleKey(key: SharedAPIKey) {
   await updateSharedAPIKey(key.id, {
     name: key.name,
@@ -530,7 +530,7 @@ onMounted(() => { void loadKeys() })
                 </button>
                 <button class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" @click="removeKey(row.id)">
                   <Icon name="trash" size="sm" />
-                  <span class="text-xs">删除</span>
+                  <span class="text-xs">撤销</span>
                 </button>
               </div>
             </template>

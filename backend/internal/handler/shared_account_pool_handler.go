@@ -31,6 +31,17 @@ type SharedAccountPoolHandler struct {
 	sessions         map[string]sharedOAuthSession
 }
 
+const (
+	maxSharedAccountBodyBytes = 2 << 20
+	maxSharedTestBodyBytes    = 8 << 20
+)
+
+func limitSharedRequestBody(c *gin.Context, maxBytes int64) {
+	if c != nil && c.Request != nil && c.Request.Body != nil {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+	}
+}
+
 func NewSharedAccountPoolHandler(repo service.SharedAccountPoolRepository, wallet *service.SharedWalletService, uploader *service.SharedAccountUploadService, settings *service.SettingService, oauth *service.OAuthService, openaiOAuth *service.OpenAIOAuthService, geminiOAuth *service.GeminiOAuthService, antigravityOAuth *service.AntigravityOAuthService, grokOAuth *service.GrokOAuthService, concurrency *service.ConcurrencyService) *SharedAccountPoolHandler {
 	return &SharedAccountPoolHandler{repo: repo, wallet: wallet, uploader: uploader, settings: settings, oauth: oauth, openaiOAuth: openaiOAuth, geminiOAuth: geminiOAuth, antigravityOAuth: antigravityOAuth, grokOAuth: grokOAuth, concurrency: concurrency, sessions: make(map[string]sharedOAuthSession)}
 }
@@ -49,6 +60,7 @@ type sharedUploadRequest struct {
 }
 
 func (h *SharedAccountPoolHandler) Upload(c *gin.Context) {
+	limitSharedRequestBody(c, maxSharedAccountBodyBytes)
 	if h.settings != nil && !h.settings.IsSharedPoolEnabled(c.Request.Context()) {
 		response.NotFound(c, "Shared account pool is disabled")
 		return
@@ -366,6 +378,7 @@ type sharedAccountUpdateRequest struct {
 }
 
 func (h *SharedAccountPoolHandler) UpdateAccount(c *gin.Context) {
+	limitSharedRequestBody(c, maxSharedAccountBodyBytes)
 	ownerID, accountID, ok := h.parseOwnedAccountID(c)
 	if !ok {
 		return
@@ -400,6 +413,7 @@ type sharedApplyOAuthRequest struct {
 }
 
 func (h *SharedAccountPoolHandler) ApplyOAuthCredentials(c *gin.Context) {
+	limitSharedRequestBody(c, maxSharedAccountBodyBytes)
 	ownerID, accountID, ok := h.parseOwnedAccountID(c)
 	if !ok {
 		return
@@ -479,6 +493,7 @@ type sharedTestAccountRequest struct {
 }
 
 func (h *SharedAccountPoolHandler) TestAccount(c *gin.Context) {
+	limitSharedRequestBody(c, maxSharedTestBodyBytes)
 	ownerID, accountID, ok := h.parseOwnedAccountID(c)
 	if !ok {
 		return
@@ -505,6 +520,7 @@ func (h *SharedAccountPoolHandler) SyncUpstreamModels(c *gin.Context) {
 }
 
 func (h *SharedAccountPoolHandler) SyncUpstreamModelsPreview(c *gin.Context) {
+	limitSharedRequestBody(c, maxSharedAccountBodyBytes)
 	if _, ok := middleware.GetAuthSubjectFromContext(c); !ok {
 		response.Unauthorized(c, "User not authenticated")
 		return

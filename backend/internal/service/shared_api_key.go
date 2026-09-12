@@ -46,6 +46,10 @@ type SharedAPIKeyRepository interface {
 	Delete(ctx context.Context, userID, id int64) error
 }
 
+type SharedAPIKeyAbuseRepository interface {
+	CountByUser(ctx context.Context, userID int64) (active int, recent int, err error)
+}
+
 var ErrSharedAPIKeyNotFound = errors.New("shared api key not found")
 
 type SharedAPIKeyService struct {
@@ -121,6 +125,18 @@ func normalizeSharedListings(listings []int64) ([]int64, error) {
 func (s *SharedAPIKeyService) Create(ctx context.Context, userID int64, name, platform, selection, priority string, listings []int64) (*SharedAPIKey, error) {
 	if userID <= 0 || strings.TrimSpace(name) == "" || strings.TrimSpace(platform) == "" {
 		return nil, errors.New("name and platform are required")
+	}
+	if abuse, ok := s.repo.(SharedAPIKeyAbuseRepository); ok {
+		active, recent, err := abuse.CountByUser(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if active >= 20 {
+			return nil, errors.New("shared API key limit reached")
+		}
+		if recent >= 10 {
+			return nil, errors.New("too many shared API key creations; try again later")
+		}
 	}
 	selection, priority, err := normalizeSharedKeyModes(selection, priority)
 	if err != nil {
