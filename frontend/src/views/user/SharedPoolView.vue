@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CreateAccountModal from '@/components/account/CreateAccountModal.vue'
+import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import {
   getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, setSharedListingStatus, deleteSharedListing,
   listSharedAPIKeys, createSharedAPIKey, updateSharedAPIKey, deleteSharedAPIKey,
@@ -17,6 +18,7 @@ const walletError = ref('')
 const transferring = ref(false)
 const message = ref('')
 const showCreateAccount = ref(false)
+const testingCard = ref<any>(null)
 const sharedKeys = ref<SharedAPIKey[]>([])
 const keyName = ref(''); const keyPlatform = ref('openai'); const keyListings = ref<number[]>([]); const keyMessage = ref('')
 const showKeyModal = ref(false)
@@ -87,6 +89,7 @@ const timeText = (value?: string) => value ? new Date(value).toLocaleString() : 
 onMounted(() => { void loadCards(); void loadWallet() })
 async function loadKeys(){ try { sharedKeys.value = await listSharedAPIKeys() } catch {} }
 function openKeyModal() { editingKeyId.value = null; keyMessage.value = ''; keyName.value = ''; keyListings.value = []; showKeyModal.value = true }
+function openTest(card: SharedCard) { testingCard.value = { id: card.id, name: card.display_name, type: 'shared', platform: card.platform, status: card.status } }
 function openEditKey(key: SharedAPIKey) { editingKeyId.value = key.id; keyMessage.value = ''; keyName.value = key.name; keyPlatform.value = key.platform; keyListings.value = [...key.listing_ids]; showKeyModal.value = true }
 function closeKeyModal() { if (!creatingKey.value) showKeyModal.value = false }
 function toggleListing(id: number) { keyListings.value = keyListings.value.includes(id) ? keyListings.value.filter(value => value !== id) : [...keyListings.value, id] }
@@ -158,7 +161,7 @@ onMounted(() => { void loadKeys() })
           <div class="mt-6"><p class="text-xs text-gray-500">累计调用</p><p class="mt-1 break-all text-5xl font-black tracking-tight text-primary-600">{{ card.total_call_count.toLocaleString() }}</p></div>
           <div class="mt-4 flex flex-wrap gap-3 text-xs text-gray-500"><span>并发上限 {{ card.concurrency_limit }}</span><span>倍率 {{ card.sell_rate }}x</span></div>
           <p class="mt-3 text-xs text-gray-400">最近调用：{{ timeText(card.last_called_at) }}</p>
-          <div v-if="mode === 'mine'" class="mt-3 flex items-center justify-center gap-3"><button role="switch" :aria-checked="card.status === 'active'" class="relative h-6 w-11 rounded-full transition-colors" :class="card.status === 'active' ? 'bg-primary-600' : 'bg-gray-300'" @click="toggle(card)"><span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform" :class="card.status === 'active' ? 'translate-x-6' : 'translate-x-1'" /></button><button class="btn btn-secondary btn-sm" @click="showCreateAccount = true">编辑</button><button class="btn btn-secondary btn-sm text-red-500" @click="remove(card)">删除</button></div>
+          <div v-if="mode === 'mine'" class="mt-3 flex items-center justify-center gap-3"><button class="btn btn-secondary btn-sm" @click="openTest(card)">测试连接</button><button role="switch" :aria-checked="card.status === 'active'" class="relative h-6 w-11 rounded-full transition-colors" :class="card.status === 'active' ? 'bg-primary-600' : 'bg-gray-300'" @click="toggle(card)"><span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform" :class="card.status === 'active' ? 'translate-x-6' : 'translate-x-1'" /></button><button class="btn btn-secondary btn-sm" @click="showCreateAccount = true">编辑</button><button class="btn btn-secondary btn-sm text-red-500" @click="remove(card)">删除</button></div>
           <div class="mt-6 border-t border-gray-200 pt-4 dark:border-dark-700">
             <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-gray-900 dark:text-white">最近请求</h3><span class="text-xs text-gray-400">{{ card.recent_calls.length }} 条</span></div>
             <div v-if="!card.recent_calls.length" class="text-xs text-gray-400">暂无请求记录</div>
@@ -172,6 +175,7 @@ onMounted(() => { void loadKeys() })
         </article>
       </div>
     </div>
+    <AccountTestModal :show="!!testingCard" :account="testingCard" @close="testingCard = null" />
     <Teleport to="body"><div v-if="showKeyModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" :aria-label="editingKeyId ? '编辑共享 API Key' : '创建共享 API Key'" @click.self="closeKeyModal"><div class="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl dark:bg-dark-900"><div class="flex items-center justify-between"><h2 class="text-lg font-semibold">{{ editingKeyId ? '编辑共享 API Key' : '创建共享 API Key' }}</h2><button class="text-gray-400" @click="closeKeyModal">×</button></div><div class="mt-5 space-y-4"><input v-model="keyName" class="input w-full" placeholder="Key 名称" maxlength="100" /><select v-model="keyPlatform" class="input w-full" @change="keyListings = []"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="grok">Grok</option></select><div><p class="mb-2 text-sm font-medium">选择共享账号（拖拽调整顺序）</p><div class="max-h-52 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-dark-700"><button v-for="card in availableKeyCards" :key="card.id" type="button" class="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm" :class="keyListings.includes(card.id) ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 dark:hover:bg-dark-800'" @click="toggleListing(card.id)"><span>{{ card.display_name }}</span><span>{{ keyListings.includes(card.id) ? '已选择' : '选择' }}</span></button><p v-if="!availableKeyCards.length" class="p-4 text-center text-xs text-gray-400">当前平台暂无可用共享账号</p></div></div><ol class="space-y-2"><li v-for="(id, index) in keyListings" :key="id" draggable="true" class="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-dark-800" @dragstart="dragListing($event, index)" @dragover.prevent @drop="dropListing($event, index)"><span>{{ index + 1 }}. {{ cards.find(card => card.id === id)?.display_name || `账号 ${id}` }}</span><span class="flex gap-1"><button type="button" class="px-2" :disabled="index === 0" @click="moveListing(index, -1)">↑</button><button type="button" class="px-2" :disabled="index === keyListings.length - 1" @click="moveListing(index, 1)">↓</button><button type="button" class="px-2 text-red-500" @click="toggleListing(id)">×</button></span></li></ol></div><div class="mt-6 flex justify-end gap-2"><button class="btn btn-secondary" @click="closeKeyModal">取消</button><button class="btn btn-primary" :disabled="creatingKey || !keyName.trim() || !keyListings.length" @click="createKey">{{ creatingKey ? '创建中…' : '创建 Key' }}</button></div></div></div></Teleport>
   </AppLayout>
 </template>
