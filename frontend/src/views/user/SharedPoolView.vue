@@ -149,6 +149,7 @@ onMounted(() => { void loadKeys() })
         :proxies="[]"
         :groups="[]"
         :initial-account="editingCard ? { name: editingCard.display_name, platform: editingCard.platform } : undefined"
+        :readonly-platform="!!editingCard"
         @close="showCreateAccount = false; editingCard = null"
         @created="loadCards"
       />

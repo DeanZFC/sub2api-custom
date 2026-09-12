@@ -71,7 +71,7 @@
       <!-- Platform Selection - Segmented Control Style -->
       <div>
         <label class="input-label">{{ t('admin.accounts.platform') }}</label>
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-tour="account-form-platform">
+        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700"  :class="props.readonlyPlatform ? 'pointer-events-none opacity-60' : ''" data-tour="account-form-platform">
           <button
             type="button"
             @click="form.platform = 'anthropic'"
@@ -163,7 +163,7 @@
           </button>
         </div>
         <!-- CN providers row: Kimi / Zhipu GLM / DeepSeek -->
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
+        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" :class="props.readonlyPlatform ? 'pointer-events-none opacity-60' : ''">
           <button
             type="button"
             @click="selectCNPlatform('kimi')"
@@ -4016,6 +4016,7 @@ interface Props {
   show: boolean
   sharedPool?: boolean
   initialAccount?: { name?: string; platform?: string }
+  readonlyPlatform?: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
 }
