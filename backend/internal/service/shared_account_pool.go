@@ -201,15 +201,12 @@ func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, 
 		_ = s.accounts.Delete(ctx, account.ID)
 		return nil, fmt.Errorf("create shared listing: %w", err)
 	}
-	if s.health != nil {
-		accountID, platform := account.ID, account.Platform
-		go func() {
-			defer func() { _ = recover() }()
-			if err := s.health.Check(context.Background(), accountID, platform); err != nil {
-				_ = s.accounts.SetError(context.Background(), accountID, "shared account health check failed: "+err.Error())
-			}
-		}()
-	}
+	// Keep newly uploaded shared accounts immediately usable, matching the
+	// account-management create flow.  A background probe cannot reliably
+	// determine whether credentials are usable here (it has no request model
+	// or caller context) and previously marked otherwise valid accounts as
+	// `error`/unschedulable right after publication.  Owners can use the
+	// explicit "测试连接" action to validate an account and inspect errors.
 	return listing, nil
 }
 

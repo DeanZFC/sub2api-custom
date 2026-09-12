@@ -137,7 +137,12 @@ func (r *sharedAccountPoolRepository) SetListingStatus(ctx context.Context, owne
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET schedulable=$2,updated_at=NOW() WHERE id=$1 AND account_scope='shared'`, accountID, status == "active")
+	// Resuming a shared listing is an explicit owner action.  Clear a prior
+	// runtime error as part of that action so an account that was temporarily
+	// marked unavailable can return to the same active state as a newly created
+	// account.  A real credential failure will be marked unavailable again by
+	// the gateway on the next request.
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET schedulable=$2, status=CASE WHEN $2 THEN 'active' ELSE status END, updated_at=NOW() WHERE id=$1 AND account_scope='shared'`, accountID, status == "active")
 	if err != nil {
 		return err
 	}

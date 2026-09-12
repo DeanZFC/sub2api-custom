@@ -106,7 +106,7 @@ func (h *sharedHealthCheckerStub) Check(_ context.Context, id int64, _ string) e
 	return errors.New("bad credentials")
 }
 
-func TestSharedAccountUploadStartsAutomaticHealthCheck(t *testing.T) {
+func TestSharedAccountUploadDoesNotRunBackgroundHealthCheck(t *testing.T) {
 	accounts := &sharedUploadAccounts{}
 	listings := &sharedUploadListings{}
 	health := &sharedHealthCheckerStub{checked: make(chan int64, 1)}
@@ -116,11 +116,10 @@ func TestSharedAccountUploadStartsAutomaticHealthCheck(t *testing.T) {
 	require.NoError(t, err)
 	select {
 	case id := <-health.checked:
-		require.Equal(t, int64(7), id)
-		require.Eventually(t, func() bool { return accounts.setErrorID == 7 }, time.Second, time.Millisecond*10)
-		require.Contains(t, accounts.setErrorMsg, "health check failed")
-	case <-time.After(time.Second):
-		t.Fatal("shared account health check was not started")
+		t.Fatalf("unexpected background health check for account %d", id)
+	case <-time.After(50 * time.Millisecond):
+		// Upload remains active and schedulable; validation is explicit via the
+		// account-management compatible test-connection action.
 	}
 }
 
