@@ -39,6 +39,7 @@ describe('SharedPoolView', () => {
   })
   it('renders call counts, available models and collapsed recent requests', async () => {
     const wrapper = render(); await flushPromises()
+    expect(wrapper.find('a[href="/usage"]').text()).toBe('使用记录')
     const article = wrapper.find('article')
     expect(article.text()).toContain((12000).toLocaleString())
     expect(article.text()).toContain('API Key')

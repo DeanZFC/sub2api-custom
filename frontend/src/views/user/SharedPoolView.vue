@@ -454,6 +454,7 @@ onMounted(() => { void loadKeys() })
         <button class="btn" :class="mode === 'pool' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('pool')">共享池</button>
         <button class="btn" :class="mode === 'mine' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('mine')">我的账号</button>
         <button class="btn" :class="mode === 'keys' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('keys')">共享 API Key</button>
+        <a class="btn btn-secondary" href="/usage">使用记录</a>
       </div>
 
       <section v-if="mode === 'keys'" aria-label="共享 API Key">
