@@ -20,13 +20,12 @@ func NewSharedAccountPoolRepository(_ *dbent.Client, db *sql.DB) service.SharedA
 // A lateral aggregate fetches recent requests in the same query as the page.
 // This avoids nested database reads while holding the page connection open.
 const sharedCardSelect = `
-SELECT l.id, l.account_id, l.platform, l.display_name, l.uploader_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.concurrency_limit,
+SELECT l.id, l.account_id, l.platform, l.display_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.concurrency_limit,
        l.concurrency_multiplier::double precision, l.sell_rate::double precision,
        l.total_call_count, l.last_called_at, recent.calls
 FROM (
-		 SELECT l.*, a.status AS account_status, a.schedulable AS account_schedulable, COALESCE(NULLIF(u.username, ''), u.email) AS uploader_name FROM shared_account_listings l
+		 SELECT l.* , a.status AS account_status, a.schedulable AS account_schedulable FROM shared_account_listings l
 		 JOIN accounts a ON a.id = l.account_id
-		 LEFT JOIN users u ON u.id = l.owner_user_id
 	 WHERE l.deleted_at IS NULL AND a.deleted_at IS NULL AND a.account_scope = 'shared'
  %s
  ORDER BY l.total_call_count DESC, l.id DESC LIMIT $1
@@ -70,7 +69,7 @@ func (r *sharedAccountPoolRepository) listCards(ctx context.Context, ownerID *in
 	for rows.Next() {
 		var c service.SharedAccountCard
 		var calls []byte
-		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.DisplayName, &c.UploaderName, &c.Status, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
+		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.DisplayName, &c.Status, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(calls, &c.RecentCalls); err != nil {
