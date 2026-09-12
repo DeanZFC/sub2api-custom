@@ -109,7 +109,7 @@ onMounted(() => { void loadKeys() })
         </div>
         <div class="flex gap-2"><button v-if="mode !== 'keys'" class="btn btn-primary" @click="showCreateAccount = true">上传账号</button><button v-if="mode !== 'keys'" class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button></div>
       </header>
-      <p class="text-sm text-gray-500">使用共享账号：在 API 密钥页面选择 shared- 对应平台分组。共享消费从平台余额扣除；共享收益即时到账，可随时转入平台余额。</p>
+      <p class="text-sm text-gray-500">共享账号上传后立即生效，用户可通过共享 API Key 按顺序调用；收益实时结算，可随时转入平台余额。</p>
       <div class="flex flex-wrap gap-2" aria-label="共享池模块">
         <button class="btn" :class="mode === 'pool' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('pool')">共享池</button>
         <button class="btn" :class="mode === 'mine' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('mine')">我的账号</button>
@@ -130,7 +130,7 @@ onMounted(() => { void loadKeys() })
         @created="loadCards"
       />
 
-      <section class="card p-6" aria-label="共享收益">
+      <section v-if="mode !== 'keys'" class="card p-6" aria-label="共享收益">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <h2 class="font-semibold text-gray-900 dark:text-white">我的共享收益</h2>
           <button class="btn btn-primary" :disabled="transferring || !wallet || Number(wallet.available) <= 0" @click="transfer">
@@ -139,7 +139,6 @@ onMounted(() => { void loadKeys() })
         </div>
         <div v-if="wallet" class="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <div><p class="text-xs text-gray-500">可提取</p><p class="mt-1 text-2xl font-bold text-emerald-600">{{ wallet.available }}</p></div>
-          <div><p class="text-xs text-gray-500">待解冻</p><p class="mt-1 text-xl text-gray-900 dark:text-white">{{ wallet.pending }}</p></div>
           <div><p class="text-xs text-gray-500">累计收益</p><p class="mt-1 text-xl text-gray-900 dark:text-white">{{ wallet.total_earned }}</p></div>
           <div><p class="text-xs text-gray-500">已转入余额</p><p class="mt-1 text-xl text-gray-900 dark:text-white">{{ wallet.total_transferred }}</p></div>
         </div>
@@ -151,15 +150,15 @@ onMounted(() => { void loadKeys() })
       <div v-else-if="mode !== 'keys' && error" role="alert" class="card p-6 text-red-500">{{ error }} <button class="underline" @click="loadCards">重试</button></div>
       <div v-else-if="mode !== 'keys' && !cards.length" class="card p-10 text-center text-gray-500">{{ mode === 'mine' ? '你还没有共享账号' : '暂无可用共享账号' }}</div>
       <div v-else-if="mode !== 'keys'" class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-        <article v-for="card in cards" :key="card.id" class="card min-w-0 overflow-hidden p-6">
-          <div class="flex items-start justify-between gap-3">
+        <article v-for="card in cards" :key="card.id" class="card min-w-0 overflow-hidden p-6 text-center">
+          <div class="flex flex-col items-center gap-2">
             <div class="min-w-0"><h2 class="break-words text-lg font-semibold text-gray-900 dark:text-white">{{ card.display_name }}</h2><p class="mt-1 text-sm text-gray-500">{{ card.platform }}</p></div>
             <span class="shrink-0 rounded-full px-3 py-1 text-xs font-medium" :class="card.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'">{{ labels[card.status] || card.status }}</span>
           </div>
           <div class="mt-6"><p class="text-xs text-gray-500">累计调用</p><p class="mt-1 break-all text-5xl font-black tracking-tight text-primary-600">{{ card.total_call_count.toLocaleString() }}</p></div>
           <div class="mt-4 flex flex-wrap gap-3 text-xs text-gray-500"><span>并发上限 {{ card.concurrency_limit }}</span><span>倍率 {{ card.sell_rate }}x</span></div>
           <p class="mt-3 text-xs text-gray-400">最近调用：{{ timeText(card.last_called_at) }}</p>
-          <div v-if="mode === 'mine'" class="mt-3 flex gap-2"><button class="btn btn-secondary btn-sm" @click="toggle(card)">{{ card.status === 'paused' ? '恢复' : '暂停' }}</button><button class="btn btn-secondary btn-sm text-red-500" @click="remove(card)">删除</button></div>
+          <div v-if="mode === 'mine'" class="mt-3 flex items-center justify-center gap-3"><button role="switch" :aria-checked="card.status === 'active'" class="relative h-6 w-11 rounded-full transition-colors" :class="card.status === 'active' ? 'bg-primary-600' : 'bg-gray-300'" @click="toggle(card)"><span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform" :class="card.status === 'active' ? 'translate-x-6' : 'translate-x-1'" /></button><button class="btn btn-secondary btn-sm" @click="showCreateAccount = true">编辑</button><button class="btn btn-secondary btn-sm text-red-500" @click="remove(card)">删除</button></div>
           <div class="mt-6 border-t border-gray-200 pt-4 dark:border-dark-700">
             <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-gray-900 dark:text-white">最近请求</h3><span class="text-xs text-gray-400">{{ card.recent_calls.length }} 条</span></div>
             <div v-if="!card.recent_calls.length" class="text-xs text-gray-400">暂无请求记录</div>

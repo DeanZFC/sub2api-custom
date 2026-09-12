@@ -1377,7 +1377,7 @@
         </div>
 
         <!-- Model Restriction Section (Antigravity 已在上层条件排除) -->
-        <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
           <div
@@ -3040,7 +3040,7 @@
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
-        v-if="!sharedPool && (form.platform === 'openai' && form.type === 'oauth')"
+        v-if="form.platform === 'openai' && form.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
