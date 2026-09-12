@@ -40,6 +40,7 @@ func RegisterUserRoutes(
 			user.POST("/shared-pool/accounts/:id/models/sync-upstream", panelRateLimiter.Heavy(), h.SharedAccountPool.SyncUpstreamModels)
 			user.POST("/shared-pool/models/sync-upstream-preview", panelRateLimiter.Heavy(), h.SharedAccountPool.SyncUpstreamModelsPreview)
 			user.GET("/shared-pool/api-keys", h.SharedAPIKey.List)
+			user.GET("/shared-pool/api-keys/:id/secret", h.SharedAPIKey.Secret)
 			user.POST("/shared-pool/api-keys", h.SharedAPIKey.Create)
 			user.PUT("/shared-pool/api-keys/:id", h.SharedAPIKey.Update)
 			user.POST("/shared-pool/api-keys/:id/rotate", panelRateLimiter.Heavy(), h.SharedAPIKey.Rotate)

@@ -23,7 +23,7 @@ import { getPublicSettings } from '@/api/auth'
 import type { Account, AccountPlatform, AccountType, GroupPlatform, PublicSettings } from '@/types'
 import {
   getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, setSharedListingStatus, setSharedListingListed, deleteSharedListing,
-  getSharedAccount, listSharedAPIKeys, createSharedAPIKey, updateSharedAPIKey, rotateSharedAPIKey, deleteSharedAPIKey,
+  getSharedAccount, listSharedAPIKeys, getSharedAPIKeySecret, createSharedAPIKey, updateSharedAPIKey, rotateSharedAPIKey, deleteSharedAPIKey,
   type SharedCard, type SharedWallet, type SharedAPIKey, type SharedKeySelectionMode, type SharedKeyPriorityMode
 } from '@/api/sharedPool'
 
@@ -51,6 +51,7 @@ const keySelection = ref<SharedKeySelectionMode>('manual')
 const keyPriority = ref<SharedKeyPriorityMode>('order')
 const keyListings = ref<number[]>([])
 const keyMessage = ref('')
+const fullKeyCache = new Map<number, string>()
 
 const showKeyModal = ref(false)
 const creatingKey = ref(false)
@@ -322,20 +323,37 @@ function moveListing(index: number, delta: number) { const next = index + delta;
 function dragListing(event: DragEvent, index: number) { event.dataTransfer?.setData('text/plain', String(index)) }
 function dropListing(event: DragEvent, target: number) { const source = Number(event.dataTransfer?.getData('text/plain')); if (!Number.isInteger(source) || source === target) return; const ids = [...keyListings.value]; const [id] = ids.splice(source, 1); ids.splice(target, 0, id); keyListings.value = ids }
 function keyValue(key: SharedAPIKey) {
-  return key.key || key.key_preview
+  return fullKeyCache.get(key.id) || key.key || ''
+}
+async function ensureFullKey(key: SharedAPIKey) {
+  const cached = fullKeyCache.get(key.id)
+  if (cached) return cached
+  if (key.key) {
+    fullKeyCache.set(key.id, key.key)
+    return key.key
+  }
+  const value = await getSharedAPIKeySecret(key.id)
+  if (!value) throw new Error('无法读取完整 Key')
+  fullKeyCache.set(key.id, value)
+  return value
 }
 function keyPlatformOf(key: SharedAPIKey): GroupPlatform {
   return (key.platform || 'anthropic') as GroupPlatform
 }
-function openUseKey(key: SharedAPIKey) {
-  usingKey.value = key
-  showUseKeyModal.value = true
+async function openUseKey(key: SharedAPIKey) {
+  try {
+    usingKey.value = { ...key, key: await ensureFullKey(key) }
+    showUseKeyModal.value = true
+  } catch (e) { keyMessage.value = errorText(e) }
 }
 function closeUseKey() {
   showUseKeyModal.value = false
   usingKey.value = null
 }
-function importToCcswitch(key: SharedAPIKey) {
+async function importToCcswitch(key: SharedAPIKey) {
+  try {
+    key = { ...key, key: await ensureFullKey(key) }
+  } catch (e) { keyMessage.value = errorText(e); return }
   if (keyPlatformOf(key) === 'antigravity') {
     pendingCcsKey.value = key
     showCcsClientSelect.value = true
@@ -393,8 +411,8 @@ function closeCcsClientSelect() {
   pendingCcsKey.value = null
 }
 async function copyKeyValue(key: SharedAPIKey) {
-  const value = keyValue(key)
-  if (!value) return
+  let value = ''
+  try { value = await ensureFullKey(key) } catch (e) { keyMessage.value = errorText(e); return }
   try { await navigator.clipboard.writeText(value) } catch {
     keyMessage.value = '复制失败，请检查浏览器剪贴板权限'
     return
@@ -432,11 +450,12 @@ async function rotateKey(key: SharedAPIKey) {
   keyMessage.value = ''
   try {
     await rotateSharedAPIKey(key.id)
+    fullKeyCache.delete(key.id)
     await loadKeys()
   } catch (e) { keyMessage.value = errorText(e) }
   finally { rotateBusyId.value = null }
 }
-async function removeKey(id:number){ if(!window.confirm('确定撤销此共享 API Key 吗？撤销后立即失效且无法恢复。')) return; await deleteSharedAPIKey(id); await loadKeys() }
+async function removeKey(id:number){ if(!window.confirm('确定撤销此共享 API Key 吗？撤销后立即失效且无法恢复。')) return; await deleteSharedAPIKey(id); fullKeyCache.delete(id); await loadKeys() }
 async function toggleKey(key: SharedAPIKey) {
   await updateSharedAPIKey(key.id, {
     name: key.name,
@@ -498,7 +517,7 @@ onMounted(() => { void loadKeys() })
             </template>
             <template #cell-key="{ row }">
               <div class="flex items-center gap-2">
-                <code class="code break-all text-xs">{{ keyValue(row) }}</code>
+                <code class="code break-all text-xs">{{ row.key_preview }}</code>
                 <button class="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700" :title="copiedKeyId === row.id ? '已复制' : '复制'" @click="copyKeyValue(row)">
                   <Icon v-if="copiedKeyId === row.id" name="check" size="sm" />
                   <Icon v-else name="clipboard" size="sm" />

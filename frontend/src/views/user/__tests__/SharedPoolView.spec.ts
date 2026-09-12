@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({
   getSharedPoolCards: vi.fn(), getMySharedCards: vi.fn(),
   getSharedWallet: vi.fn(), transferSharedEarnings: vi.fn(),
   getSharedAccount: vi.fn(),
-  listSharedAPIKeys: vi.fn(), setSharedListingStatus: vi.fn(), setSharedListingListed: vi.fn(), deleteSharedListing: vi.fn(),
+  listSharedAPIKeys: vi.fn(), getSharedAPIKeySecret: vi.fn(), setSharedListingStatus: vi.fn(), setSharedListingListed: vi.fn(), deleteSharedListing: vi.fn(),
   createSharedAPIKey: vi.fn(), updateSharedAPIKey: vi.fn(), deleteSharedAPIKey: vi.fn()
 }))
 vi.mock('@/api/sharedPool', () => api)

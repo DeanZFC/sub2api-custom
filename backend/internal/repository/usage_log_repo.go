@@ -79,7 +79,9 @@ func appendSharedOnlyWhereCondition(conditions []string, args []any, sharedOnly 
 	if alias != "" {
 		column = alias + ".api_key_id"
 	}
-	conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM shared_api_keys sak WHERE sak.legacy_api_key_id = %s AND sak.user_id = $%d AND sak.deleted_at IS NULL)", column, len(args)+1))
+	// Keep soft-deleted keys in scope so historical shared-pool usage remains
+	// visible after a key is revoked or removed.
+	conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM shared_api_keys sak WHERE sak.legacy_api_key_id = %s AND sak.user_id = $%d)", column, len(args)+1))
 	return conditions, append(args, userID)
 }
 

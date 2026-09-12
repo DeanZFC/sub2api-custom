@@ -43,12 +43,13 @@ func (r *sharedAPIKeyRepoStub) RotateKey(_ context.Context, _ int64, _ int64, ke
 	return &SharedAPIKey{ID: 1, UserID: 7, Key: key, KeyPreview: previewSharedAPIKey(key)}, nil
 }
 
-func TestSharedAPIKeyListIncludesOwnerCredentials(t *testing.T) {
-	repo := &sharedAPIKeyRepoStub{items: []SharedAPIKey{{ID: 1, UserID: 7, Key: "sk-shared-secret"}}}
+func TestSharedAPIKeyListRedactsOwnerCredentials(t *testing.T) {
+	repo := &sharedAPIKeyRepoStub{items: []SharedAPIKey{{ID: 1, UserID: 7, Key: "sk-shared-secret", KeyPreview: "sk-sha…cret"}}}
 	items, err := NewSharedAPIKeyService(repo).List(context.Background(), 7)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
-	require.Equal(t, "sk-shared-secret", items[0].Key)
+	require.Empty(t, items[0].Key)
+	require.Equal(t, "sk-sha…cret", items[0].KeyPreview)
 }
 
 func TestSharedAPIKeyRotateGeneratesFreshCredential(t *testing.T) {

@@ -40,6 +40,27 @@ func (h *SharedAPIKeyHandler) List(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"items": v})
 }
+
+// Secret returns the complete key only to its owner. List responses remain
+// preview-only while copy/use/import actions can fetch the credential on demand.
+func (h *SharedAPIKeyHandler) Secret(c *gin.Context) {
+	uid, ok := userID(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+	key, err := h.svc.GetByID(c, uid, id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"key": key.Key})
+}
 func (h *SharedAPIKeyHandler) Create(c *gin.Context) {
 	uid, ok := userID(c)
 	if !ok {
@@ -98,9 +119,9 @@ func (h *SharedAPIKeyHandler) Delete(c *gin.Context) {
 	response.Success(c, gin.H{"deleted": true})
 }
 
-// Rotate replaces a shared API key and returns the new credential. Owner-scoped
-// lists intentionally include the complete key so it remains copyable and can
-// be imported into CCS at any time; public pool responses never expose keys.
+// Rotate replaces a shared API key and returns the new credential to the owner.
+// Owner-scoped lists expose only previews; the secret endpoint is used for
+// explicit copy/use/import actions.
 func (h *SharedAPIKeyHandler) Rotate(c *gin.Context) {
 	uid, ok := userID(c)
 	if !ok {

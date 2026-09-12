@@ -209,11 +209,16 @@ func previewSharedAPIKey(key string) string {
 	return key[:6] + "…" + key[len(key)-4:]
 }
 func (s *SharedAPIKeyService) List(ctx context.Context, userID int64) ([]SharedAPIKey, error) {
-	// The shared-pool UI intentionally supports copying/importing an existing
-	// key at any time, so owner-scoped list responses include the full key.
-	// Repository filtering still guarantees that users can only see their own
-	// credentials; public pool responses never include API keys.
-	return s.repo.ListByUser(ctx, userID)
+	items, err := s.repo.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	// Lists expose only a preview. The owner can retrieve the complete value
+	// through the ownership-checked secret endpoint when copying or using it.
+	for i := range items {
+		items[i].Key = ""
+	}
+	return items, nil
 }
 func (s *SharedAPIKeyService) GetByID(ctx context.Context, userID, id int64) (*SharedAPIKey, error) {
 	return s.repo.GetByID(ctx, userID, id)

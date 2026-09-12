@@ -132,6 +132,7 @@ export type SharedKeyPriorityMode = 'order' | 'rate' | 'availability'
 export interface SharedAPIKey {
   id: number
   name: string
+  /** Present only for create/rotate responses or an explicitly fetched secret. */
   key?: string
   key_preview: string
   platform: string
@@ -150,6 +151,7 @@ export interface SharedAPIKeyInput {
   status?: string
 }
 export async function listSharedAPIKeys(){ const {data}=await apiClient.get<{items:SharedAPIKey[]}>('/user/shared-pool/api-keys'); return data.items }
+export async function getSharedAPIKeySecret(id:number){ const {data}=await apiClient.get<{key:string}>(`/user/shared-pool/api-keys/${id}/secret`); return data.key }
 export async function createSharedAPIKey(input: SharedAPIKeyInput){ const {data}=await apiClient.post<SharedAPIKey & {key:string}>('/user/shared-pool/api-keys',input); return data }
 export async function updateSharedAPIKey(id:number,input: SharedAPIKeyInput){ await apiClient.put(`/user/shared-pool/api-keys/${id}`,input) }
 /** Rotate a shared key. The plaintext key is returned once in the response. */
