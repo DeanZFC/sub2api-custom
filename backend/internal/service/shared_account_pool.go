@@ -285,6 +285,15 @@ func (s *SharedAccountUploadService) CreateProxy(ctx context.Context, ownerID in
 		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()) {
 			return nil, errors.New("proxy host is not allowed")
 		}
+		// Validate DNS answers at creation time as well as literal IPs. Without
+		// this check a user could register a hostname that resolves to an
+		// internal address (including cloud metadata) and make the server use it
+		// as an outbound proxy. The resolver check complements the transport
+		// layer's normal connection validation and rejects DNS rebinding targets
+		// before credentials are ever sent.
+		if blocked, _ := isPrivateOrLoopbackHost(ctx, host); blocked {
+			return nil, errors.New("proxy host is not allowed")
+		}
 		if s.proxies == nil {
 			return nil, errors.New("proxy support is unavailable")
 		}
@@ -392,6 +401,11 @@ func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, a
 	if err != nil {
 		return nil, err
 	}
+	oldProxyID := int64(0)
+	newProxyID := int64(0)
+	if account.ProxyID != nil {
+		oldProxyID = *account.ProxyID
+	}
 	if in.Name != nil {
 		name := strings.TrimSpace(*in.Name)
 		if name == "" || len([]rune(name)) > 100 {
@@ -453,13 +467,26 @@ func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, a
 		}
 		if proxy != nil {
 			account.ProxyID = &proxy.ID
+			newProxyID = proxy.ID
 		}
 	}
 	if err := s.accounts.Update(ctx, account); err != nil {
+		if newProxyID > 0 && s.proxies != nil {
+			_ = s.proxies.Delete(ctx, newProxyID)
+		}
 		return nil, fmt.Errorf("update shared account: %w", err)
 	}
 	if err := s.listings.UpdateListingMeta(ctx, ownerID, listing.ID, listing.DisplayName, listing.ConcurrencyLimit, listing.SellRate); err != nil {
+		if newProxyID > 0 && s.proxies != nil {
+			_ = s.proxies.Delete(ctx, newProxyID)
+		}
 		return nil, fmt.Errorf("update shared listing: %w", err)
+	}
+	// A proxy replacement detaches the previous proxy from the account. Remove
+	// the old credential-bearing row once the new account/listing state is
+	// durable, preventing stale proxy secrets from accumulating.
+	if oldProxyID > 0 && account.ProxyID != nil && *account.ProxyID != oldProxyID && s.proxies != nil {
+		_ = s.proxies.Delete(ctx, oldProxyID)
 	}
 	return s.GetOwned(ctx, ownerID, accountID)
 }

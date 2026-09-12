@@ -42,6 +42,7 @@ func RegisterUserRoutes(
 			user.GET("/shared-pool/api-keys", h.SharedAPIKey.List)
 			user.POST("/shared-pool/api-keys", h.SharedAPIKey.Create)
 			user.PUT("/shared-pool/api-keys/:id", h.SharedAPIKey.Update)
+			user.POST("/shared-pool/api-keys/:id/rotate", panelRateLimiter.Heavy(), h.SharedAPIKey.Rotate)
 			user.DELETE("/shared-pool/api-keys/:id", h.SharedAPIKey.Delete)
 			user.POST("/shared-pool/oauth/:platform/:action", panelRateLimiter.Heavy(), h.SharedAccountPool.Authorize)
 			user.GET("/shared-pool/oauth/:platform/capabilities", h.SharedAccountPool.OAuthCapabilities)

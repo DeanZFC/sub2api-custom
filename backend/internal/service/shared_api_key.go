@@ -35,6 +35,14 @@ type SharedAPIKey struct {
 	User              *User     `json:"-"`
 	Group             *Group    `json:"-"`
 	ListingAccountIDs []int64   `json:"-"`
+	previousKey       string
+}
+
+// SetPreviousKeyForRotation is restricted to repository rotation plumbing.
+func (k *SharedAPIKey) SetPreviousKeyForRotation(previous string) {
+	if k != nil {
+		k.previousKey = previous
+	}
 }
 
 type SharedAPIKeyRepository interface {
@@ -44,6 +52,9 @@ type SharedAPIKeyRepository interface {
 	GetByKey(ctx context.Context, raw string) (*SharedAPIKey, error)
 	Update(ctx context.Context, key *SharedAPIKey) error
 	Delete(ctx context.Context, userID, id int64) error
+	// RotateKey atomically replaces the shared key and its legacy api_keys
+	// compatibility row. The returned value contains the newly generated key.
+	RotateKey(ctx context.Context, userID, id int64, newKey string) (*SharedAPIKey, error)
 }
 
 type SharedAPIKeyAbuseRepository interface {
@@ -53,9 +64,14 @@ type SharedAPIKeyAbuseRepository interface {
 var ErrSharedAPIKeyNotFound = errors.New("shared api key not found")
 
 type SharedAPIKeyService struct {
-	repo   SharedAPIKeyRepository
-	users  UserRepository
-	groups GroupRepository
+	repo      SharedAPIKeyRepository
+	users     UserRepository
+	groups    GroupRepository
+	authCache SharedAPIKeyAuthCacheInvalidator
+}
+
+type SharedAPIKeyAuthCacheInvalidator interface {
+	InvalidateAuthCacheByKey(ctx context.Context, key string)
 }
 
 func NewSharedAPIKeyService(repo SharedAPIKeyRepository, deps ...any) *SharedAPIKeyService {
@@ -66,6 +82,8 @@ func NewSharedAPIKeyService(repo SharedAPIKeyRepository, deps ...any) *SharedAPI
 			s.users = v
 		case GroupRepository:
 			s.groups = v
+		case SharedAPIKeyAuthCacheInvalidator:
+			s.authCache = v
 		}
 	}
 	return s
@@ -160,9 +178,21 @@ func (s *SharedAPIKeyService) Create(ctx context.Context, userID int64, name, pl
 	if err := s.repo.Create(ctx, v); err != nil {
 		return nil, err
 	}
+	v.KeyPreview = previewSharedAPIKey(v.Key)
 	return v, nil
 }
+
+func previewSharedAPIKey(key string) string {
+	if len(key) <= 10 {
+		return key
+	}
+	return key[:6] + "…" + key[len(key)-4:]
+}
 func (s *SharedAPIKeyService) List(ctx context.Context, userID int64) ([]SharedAPIKey, error) {
+	// The shared-pool UI intentionally supports copying/importing an existing
+	// key at any time, so owner-scoped list responses include the full key.
+	// Repository filtering still guarantees that users can only see their own
+	// credentials; public pool responses never include API keys.
 	return s.repo.ListByUser(ctx, userID)
 }
 func (s *SharedAPIKeyService) GetByID(ctx context.Context, userID, id int64) (*SharedAPIKey, error) {
@@ -225,7 +255,37 @@ func (s *SharedAPIKeyService) Update(ctx context.Context, userID, id int64, name
 	return s.repo.Update(ctx, k)
 }
 func (s *SharedAPIKeyService) Delete(ctx context.Context, userID, id int64) error {
-	return s.repo.Delete(ctx, userID, id)
+	key, err := s.repo.GetByID(ctx, userID, id)
+	if err != nil {
+		return err
+	}
+	if err = s.repo.Delete(ctx, userID, id); err != nil {
+		return err
+	}
+	if s.authCache != nil && key != nil && key.Key != "" {
+		s.authCache.InvalidateAuthCacheByKey(ctx, key.Key)
+	}
+	return nil
+}
+
+// Rotate generates a fresh credential and invalidates the previous one in a
+// single database transaction. The new key is returned to the owner.
+func (s *SharedAPIKeyService) Rotate(ctx context.Context, userID, id int64) (*SharedAPIKey, error) {
+	if userID <= 0 || id <= 0 {
+		return nil, ErrSharedAPIKeyNotFound
+	}
+	newKey, err := generateSharedAPIKey()
+	if err != nil {
+		return nil, err
+	}
+	v, err := s.repo.RotateKey(ctx, userID, id, newKey)
+	if err == nil && s.authCache != nil {
+		if v.previousKey != "" {
+			s.authCache.InvalidateAuthCacheByKey(ctx, v.previousKey)
+		}
+		s.authCache.InvalidateAuthCacheByKey(ctx, newKey)
+	}
+	return v, err
 }
 
 type sharedListingOrderKey struct{}

@@ -203,4 +203,64 @@ func (r *sharedAPIKeyRepository) Delete(ctx context.Context, userID, id int64) e
 	return tx.Commit()
 }
 
+// RotateKey replaces both the shared-pool credential and its compatibility
+// api_keys row in one transaction. Ownership and the non-deleted constraint
+// are checked while locking the shared row, so another user cannot rotate it
+// and the old value cannot remain usable after a successful response.
+func (r *sharedAPIKeyRepository) RotateKey(ctx context.Context, userID, id int64, newKey string) (*service.SharedAPIKey, error) {
+	newKey = strings.TrimSpace(newKey)
+	if userID <= 0 || id <= 0 || newKey == "" {
+		return nil, service.ErrSharedAPIKeyNotFound
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var legacyID sql.NullInt64
+	var oldKey string
+	err = tx.QueryRowContext(ctx, `SELECT key,legacy_api_key_id FROM shared_api_keys WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR UPDATE`, id, userID).Scan(&oldKey, &legacyID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, service.ErrSharedAPIKeyNotFound
+		}
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE shared_api_keys SET key=$1,updated_at=NOW() WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL`, newKey, id, userID); err != nil {
+		return nil, err
+	}
+	if legacyID.Valid {
+		res, e := tx.ExecContext(ctx, `UPDATE api_keys SET key=$1,updated_at=NOW() WHERE id=$2 AND user_id=$3`, newKey, legacyID.Int64, userID)
+		if e != nil {
+			return nil, e
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return nil, service.ErrSharedAPIKeyNotFound
+		}
+	} else {
+		// Repair a legacy row missing its bridge (possible after an old manual
+		// cleanup) while preserving the atomic rotation guarantee.
+		if err = tx.QueryRowContext(ctx, `INSERT INTO api_keys(user_id,key,name,status) SELECT user_id,$1,'[shared] ' || name,CASE WHEN status='active' THEN 'active' ELSE 'disabled' END FROM shared_api_keys WHERE id=$2 RETURNING id`, newKey, id).Scan(&legacyID); err != nil {
+			return nil, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE shared_api_keys SET legacy_api_key_id=$1,updated_at=NOW() WHERE id=$2`, legacyID.Int64, id); err != nil {
+			return nil, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	// Reload through the normal ownership-filtered query to include listing
+	// bindings and timestamps. It will expose the new key to this one response.
+	k, err := r.GetByID(ctx, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	k.Key = newKey
+	k.KeyPreview = previewKey(newKey)
+	k.SetPreviousKeyForRotation(oldKey)
+	return k, nil
+}
+
 var _ = time.Time{}

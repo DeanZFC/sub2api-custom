@@ -17,14 +17,13 @@ import RecentRequestsCell from '@/components/account/RecentRequestsCell.vue'
 import type { OpsRequestDetail } from '@/api/admin/ops'
 import UseKeyModal from '@/components/keys/UseKeyModal.vue'
 import UsageView from '@/views/user/UsageView.vue'
-import { maskApiKey } from '@/utils/maskApiKey'
 import { buildCcSwitchImportDeeplink, type CcSwitchClientType } from '@/utils/ccswitchImport'
 import { getModelsByPlatform } from '@/composables/useModelWhitelist'
 import { getPublicSettings } from '@/api/auth'
 import type { Account, AccountPlatform, AccountType, GroupPlatform, PublicSettings } from '@/types'
 import {
   getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, setSharedListingStatus, setSharedListingListed, deleteSharedListing,
-  getSharedAccount, listSharedAPIKeys, createSharedAPIKey, updateSharedAPIKey, deleteSharedAPIKey,
+  getSharedAccount, listSharedAPIKeys, createSharedAPIKey, updateSharedAPIKey, rotateSharedAPIKey, deleteSharedAPIKey,
   type SharedCard, type SharedWallet, type SharedAPIKey, type SharedKeySelectionMode, type SharedKeyPriorityMode
 } from '@/api/sharedPool'
 
@@ -56,6 +55,7 @@ const keyMessage = ref('')
 const showKeyModal = ref(false)
 const creatingKey = ref(false)
 const editingKeyId = ref<number | null>(null)
+const rotateBusyId = ref<number | null>(null)
 const platformFilter = ref('')
 const batchBusy = ref(false)
 const availableKeyCards = computed(() => {
@@ -395,7 +395,10 @@ function closeCcsClientSelect() {
 async function copyKeyValue(key: SharedAPIKey) {
   const value = keyValue(key)
   if (!value) return
-  await navigator.clipboard.writeText(value)
+  try { await navigator.clipboard.writeText(value) } catch {
+    keyMessage.value = '复制失败，请检查浏览器剪贴板权限'
+    return
+  }
   copiedKeyId.value = key.id
   setTimeout(() => { if (copiedKeyId.value === key.id) copiedKeyId.value = null }, 1500)
 }
@@ -422,6 +425,16 @@ async function createKey(){
     await loadKeys()
   } catch (e) { keyMessage.value = errorText(e) }
   finally { creatingKey.value = false }
+}
+async function rotateKey(key: SharedAPIKey) {
+  if (rotateBusyId.value || !window.confirm('轮换后旧 Key 会立即失效，确定继续吗？')) return
+  rotateBusyId.value = key.id
+  keyMessage.value = ''
+  try {
+    await rotateSharedAPIKey(key.id)
+    await loadKeys()
+  } catch (e) { keyMessage.value = errorText(e) }
+  finally { rotateBusyId.value = null }
 }
 async function removeKey(id:number){ if(!window.confirm('确定撤销此共享 API Key 吗？撤销后立即失效且无法恢复。')) return; await deleteSharedAPIKey(id); await loadKeys() }
 async function toggleKey(key: SharedAPIKey) {
@@ -485,7 +498,7 @@ onMounted(() => { void loadKeys() })
             </template>
             <template #cell-key="{ row }">
               <div class="flex items-center gap-2">
-                <code class="code text-xs">{{ maskApiKey(keyValue(row)) }}</code>
+                <code class="code break-all text-xs">{{ keyValue(row) }}</code>
                 <button class="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700" :title="copiedKeyId === row.id ? '已复制' : '复制'" @click="copyKeyValue(row)">
                   <Icon v-if="copiedKeyId === row.id" name="check" size="sm" />
                   <Icon v-else name="clipboard" size="sm" />
@@ -527,6 +540,10 @@ onMounted(() => { void loadKeys() })
                 <button class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500" :class="row.status === 'active' ? 'hover:bg-yellow-50 hover:text-yellow-600' : 'hover:bg-green-50 hover:text-green-600'" @click="toggleKey(row)">
                   <Icon :name="row.status === 'active' ? 'ban' : 'checkCircle'" size="sm" />
                   <span class="text-xs">{{ row.status === 'active' ? '禁用' : '启用' }}</span>
+                </button>
+                <button class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20" :disabled="rotateBusyId === row.id" @click="rotateKey(row)">
+                  <Icon name="refresh" size="sm" />
+                  <span class="text-xs">{{ rotateBusyId === row.id ? '轮换中' : '轮换' }}</span>
                 </button>
                 <button class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" @click="removeKey(row.id)">
                   <Icon name="trash" size="sm" />

@@ -97,3 +97,24 @@ func (h *SharedAPIKeyHandler) Delete(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"deleted": true})
 }
+
+// Rotate replaces a shared API key and returns the new credential once. Lists
+// intentionally expose only key_preview to reduce credential leakage.
+func (h *SharedAPIKeyHandler) Rotate(c *gin.Context) {
+	uid, ok := userID(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	id, e := strconv.ParseInt(c.Param("id"), 10, 64)
+	if e != nil {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+	v, e := h.svc.Rotate(c, uid, id)
+	if e != nil {
+		response.ErrorFrom(c, e)
+		return
+	}
+	response.Success(c, v)
+}
