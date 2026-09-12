@@ -300,6 +300,9 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
+		if usageLog.DurationMs != nil {
+			cmd.DurationMS = *usageLog.DurationMs
+		}
 		cmd.BillingType = usageLog.BillingType
 		cmd.InputTokens = usageLog.InputTokens
 		cmd.OutputTokens = usageLog.OutputTokens

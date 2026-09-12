@@ -264,10 +264,10 @@ func settleSharedAccountUsage(ctx context.Context, tx *sql.Tx, cmd *service.Usag
  UPDATE shared_account_listings l SET total_call_count=l.total_call_count+1,last_called_at=NOW(),updated_at=NOW()
  FROM inserted i WHERE l.id=i.listing_id RETURNING l.id
  ), calls AS (
- INSERT INTO shared_account_call_stats(listing_id,request_id,model,result_status,charged_amount)
- SELECT listing_id,$1,$8,'success',$5::numeric FROM inserted
+ INSERT INTO shared_account_call_stats(listing_id,request_id,model,result_status,duration_ms,charged_amount)
+ SELECT listing_id,$1,$8,'success',NULLIF($9::integer,0),$5::numeric FROM inserted
  ON CONFLICT(request_id) DO NOTHING
- ) SELECT COUNT(*) FROM updated`, requestKey, listingID, ownerID, cmd.UserID, cmd.BalanceCost, fee, freeze, cmd.Model).Scan(&count)
+ ) SELECT COUNT(*) FROM updated`, requestKey, listingID, ownerID, cmd.UserID, cmd.BalanceCost, fee, freeze, cmd.Model, cmd.DurationMS).Scan(&count)
 	return err
 }
 
