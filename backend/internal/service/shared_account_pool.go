@@ -26,6 +26,7 @@ type SharedAccountCard struct {
 	AccountID             int64                     `json:"account_id,omitempty"`
 	Platform              string                    `json:"platform"`
 	DisplayName           string                    `json:"display_name"`
+	UploaderName          string                    `json:"uploader_name,omitempty"`
 	Status                string                    `json:"status"`
 	ConcurrencyLimit      int                       `json:"concurrency_limit"`
 	ConcurrencyMultiplier float64                   `json:"concurrency_multiplier"`

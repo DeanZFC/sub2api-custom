@@ -93,6 +93,7 @@ const labels: Record<string, string> = {
   active: '运行中', paused: '已暂停', testing: '检测中', invalid: '不可用', suspended: '已停用'
 }
 const timeText = (value?: string) => value ? new Date(value).toLocaleString() : '暂无调用'
+const avgLatency = (card: SharedCard) => { const xs = card.recent_calls.map(call => Number(call.duration_ms || 0)).filter(value => value > 0); return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0 }
 onMounted(() => { void loadCards(); void loadWallet() })
 async function loadKeys(){ try { sharedKeys.value = await listSharedAPIKeys() } catch {} }
 function openKeyModal() { editingKeyId.value = null; keyMessage.value = ''; keyName.value = ''; keyListings.value = []; showKeyModal.value = true }
@@ -184,12 +185,14 @@ onMounted(() => { void loadKeys() })
       <div v-else-if="mode === 'pool'" class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         <article v-for="card in cards" :key="card.id" class="card min-w-0 overflow-hidden p-6">
           <div class="flex flex-col items-center gap-2">
-            <div class="min-w-0"><h2 class="break-words text-xl font-semibold text-gray-900 dark:text-white">{{ card.display_name }}</h2><p class="mt-1 text-base text-gray-500">{{ card.platform }}</p></div>
+            <div class="min-w-0"><h2 class="break-words text-xl font-semibold text-gray-900 dark:text-white">{{ card.display_name }}</h2><p class="mt-1 text-base text-gray-500">{{ card.platform }}<span v-if="card.uploader_name"> · 上传者：{{ card.uploader_name }}</span></p></div>
             <span class="shrink-0 rounded-full px-3 py-1 text-xs font-medium" :class="card.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'">{{ labels[card.status] || card.status }}</span>
           </div>
           <div class="mt-6"><p class="text-sm text-gray-500">累计调用</p><p class="mt-1 break-all text-5xl font-bold tracking-tight text-primary-600">{{ card.total_call_count.toLocaleString() }}</p></div>
           <div class="mt-4 flex flex-wrap justify-center gap-3 text-xs text-gray-500"><span>并发上限 {{ card.concurrency_limit }}</span><span>倍率 {{ card.sell_rate }}x</span></div>
+          <div class="mt-3 flex justify-center gap-6 text-xs text-gray-500"><span>平均延迟 <strong class="text-gray-700 dark:text-gray-200">{{ avgLatency(card) ? `${avgLatency(card)}ms` : '暂无' }}</strong></span><span>容量 <strong class="text-gray-700 dark:text-gray-200">0 / {{ card.concurrency_limit }}</strong></span></div>
           <p class="mt-3 text-xs text-gray-400">最近调用：{{ timeText(card.last_called_at) }}</p>
+          <div v-if="card.recent_calls.length" class="mt-3 flex items-end justify-center gap-1" title="最近请求状态"><span v-for="call in card.recent_calls.slice(0, 10).reverse()" :key="call.request_id" class="h-6 w-1.5 rounded-full" :class="call.result_status === 'success' ? 'bg-emerald-500' : 'bg-red-400'" /></div>
           <div class="mt-6 border-t border-gray-200 pt-4 text-left dark:border-dark-700">
             <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-gray-900 dark:text-white">最近请求</h3><span class="text-xs text-gray-400">{{ card.recent_calls.length }} 条</span></div>
             <div v-if="!card.recent_calls.length" class="text-xs text-gray-400">暂无请求记录</div>

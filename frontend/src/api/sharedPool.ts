@@ -12,6 +12,7 @@ export interface SharedCard {
   id: number
   /** Underlying accounts.id used by the account test endpoint. */
   account_id?: number
+  uploader_name?: string
   platform: string
   display_name: string
   status: string
