@@ -273,7 +273,7 @@ func applySharedKeySchedule(ctx context.Context, accounts []Account) []Account {
 }
 
 func applySharedListingIDs(accounts []Account, ids []int64) []Account {
-	if len(ids) == 0 || len(accounts) < 2 {
+	if len(ids) == 0 {
 		return accounts
 	}
 	byID := make(map[int64]Account, len(accounts))
@@ -281,15 +281,8 @@ func applySharedListingIDs(accounts []Account, ids []int64) []Account {
 		byID[a.ID] = a
 	}
 	out := make([]Account, 0, len(accounts))
-	seen := make(map[int64]bool, len(accounts))
 	for _, id := range ids {
 		if a, ok := byID[id]; ok {
-			out = append(out, a)
-			seen[id] = true
-		}
-	}
-	for _, a := range accounts {
-		if !seen[a.ID] {
 			out = append(out, a)
 		}
 	}

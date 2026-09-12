@@ -39,7 +39,8 @@ func TestApplySharedKeyScheduleManualOrderKeepsConfiguredSequence(t *testing.T) 
 	accounts := []Account{{ID: 3}, {ID: 1}, {ID: 2}, {ID: 9}}
 	ctx := WithSharedListingOrder(context.Background(), []int64{2, 1})
 	got := applySharedKeySchedule(ctx, accounts)
-	require.Equal(t, []int64{2, 1, 3, 9}, []int64{got[0].ID, got[1].ID, got[2].ID, got[3].ID})
+	require.Equal(t, []int64{2, 1}, []int64{got[0].ID, got[1].ID})
+	require.Len(t, got, 2, "accounts outside the shared key selection must not be scheduled")
 }
 
 func TestNormalizeSharedKeyModesPlatformDefaultsRate(t *testing.T) {

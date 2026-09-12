@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -117,7 +118,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				apiKey = &service.APIKey{ID: apiKeyID, UserID: sk.UserID, Key: apiKeyString, Name: sk.Name, GroupID: &gid, Status: service.StatusAPIKeyActive, User: sk.User, Group: sk.Group}
 				c.Request = c.Request.WithContext(service.WithSharedKeySchedule(c.Request.Context(), service.SharedKeySchedule{Priority: sk.PriorityMode, AccountIDs: sk.ListingAccountIDs}))
 			} else if !errors.Is(e, service.ErrSharedAPIKeyNotFound) {
-				err = e
+				// A shared-pool lookup is an optional authentication path. Do not
+				// let a missing table or transient shared DB outage reject normal
+				// API keys; fall through to the canonical key service.
+				slog.Warn("shared_api_key_lookup_failed", "error", e)
 			}
 		}
 		if apiKey == nil && err == nil {
