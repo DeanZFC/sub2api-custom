@@ -725,7 +725,6 @@ onMounted(() => { void loadKeys() })
                 <p class="mt-0.5 truncate text-xs text-gray-500">
                   {{ card.platform }}
                   <span v-if="card.type"> · {{ typeText(card) }}</span>
-                  <span v-if="card.uploader_name"> · {{ card.uploader_name }}</span>
                 </p>
               </div>
             </div>

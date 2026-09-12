@@ -104,6 +104,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		var apiKey *service.APIKey
 		var err error
+		sharedLookupFailed := false
 		if sharedService != nil {
 			if sk, e := sharedService.GetByKey(c.Request.Context(), apiKeyString); e == nil {
 				if sk.Status != service.StatusAPIKeyActive || sk.User == nil || sk.Group == nil {
@@ -122,6 +123,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				// let a missing table or transient shared DB outage reject normal
 				// API keys; fall through to the canonical key service.
 				slog.Warn("shared_api_key_lookup_failed", "error", e)
+				sharedLookupFailed = true
 			}
 		}
 		if apiKey == nil && err == nil {
@@ -140,6 +142,13 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				return
 			}
 			AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
+			return
+		}
+		// Shared keys have a mirrored legacy api_keys row for compatibility. If
+		// the shared-pool store is temporarily unavailable, never route that
+		// mirror through ordinary system-account scheduling.
+		if sharedLookupFailed && apiKey != nil && strings.HasPrefix(strings.TrimSpace(apiKey.Name), "[shared]") {
+			AbortWithError(c, http.StatusServiceUnavailable, "SHARED_POOL_UNAVAILABLE", "Shared account pool is temporarily unavailable")
 			return
 		}
 

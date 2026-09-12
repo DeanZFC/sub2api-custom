@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"regexp"
 	"testing"
 	"time"
 
@@ -43,5 +44,19 @@ func TestSharedOwnerCardsIncludePausedAccountsAndEnforceOwner(t *testing.T) {
 	require.NotNil(t, cards[0].RecentCalls)
 	_, err = repo.GetOwnerCards(context.Background(), 0, 200, 10)
 	require.Error(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSetListingListedSynchronizesSchedulableAndOutbox(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	r := &sharedAccountPoolRepository{db: db}
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("UPDATE shared_account_listings SET listed=$3,updated_at=NOW()")).WithArgs(int64(8), int64(42), false).WillReturnRows(sqlmock.NewRows([]string{"account_id", "status"}).AddRow(int64(7), "active"))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE accounts SET schedulable=$2,updated_at=NOW()")).WithArgs(int64(7), false).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	require.NoError(t, r.SetListingListed(context.Background(), 42, 8, false))
 	require.NoError(t, mock.ExpectationsWereMet())
 }

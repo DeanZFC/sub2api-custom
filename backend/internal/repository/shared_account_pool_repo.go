@@ -307,18 +307,25 @@ func (r *sharedAccountPoolRepository) SetListingListed(ctx context.Context, owne
 	if ownerID <= 0 || listingID <= 0 {
 		return service.ErrUserNotFound
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE shared_account_listings SET listed=$3, updated_at=NOW() WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND status <> 'deleted'`, listingID, ownerID, listed)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if count != 1 {
+	defer tx.Rollback()
+	var accountID int64
+	var status string
+	if err = tx.QueryRowContext(ctx, `UPDATE shared_account_listings SET listed=$3,updated_at=NOW() WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND status <> 'deleted' RETURNING account_id,status`, listingID, ownerID, listed).Scan(&accountID, &status); errors.Is(err, sql.ErrNoRows) {
 		return service.ErrSharedListingNotFound
+	} else if err != nil {
+		return err
 	}
-	return nil
+	if _, err = tx.ExecContext(ctx, `UPDATE accounts SET schedulable=$2,updated_at=NOW() WHERE id=$1 AND account_scope='shared'`, accountID, listed && status == "active"); err != nil {
+		return err
+	}
+	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *sharedAccountPoolRepository) SetListingAdminStatus(ctx context.Context, listingID int64, status string) error {
