@@ -73,5 +73,5 @@ export async function deleteSharedListing(id: number) { await apiClient.delete(`
 export interface SharedAPIKey { id:number; name:string; key_preview:string; platform:string; status:string; listing_ids:number[]; created_at:string }
 export async function listSharedAPIKeys(){ const {data}=await apiClient.get<{items:SharedAPIKey[]}>('/user/shared-pool/api-keys'); return data.items }
 export async function createSharedAPIKey(input:{name:string;platform:string;listing_ids:number[]}){ const {data}=await apiClient.post<SharedAPIKey & {key:string}>('/user/shared-pool/api-keys',input); return data }
-export async function updateSharedAPIKey(id:number,input:{name:string;status?:string;listing_ids:number[]}){ await apiClient.put(`/user/shared-pool/api-keys/${id}`,input) }
+export async function updateSharedAPIKey(id:number,input:{name:string;platform?:string;status?:string;listing_ids:number[]}){ await apiClient.put(`/user/shared-pool/api-keys/${id}`,input) }
 export async function deleteSharedAPIKey(id:number){ await apiClient.delete(`/user/shared-pool/api-keys/${id}`) }

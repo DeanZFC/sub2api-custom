@@ -110,7 +110,11 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 					return
 				}
 				gid := sk.Group.ID
-				apiKey = &service.APIKey{ID: -sk.ID, UserID: sk.UserID, Key: apiKeyString, Name: sk.Name, GroupID: &gid, Status: service.StatusAPIKeyActive, User: sk.User, Group: sk.Group}
+				apiKeyID := sk.LegacyAPIKeyID
+				if apiKeyID <= 0 {
+					apiKeyID = -sk.ID
+				}
+				apiKey = &service.APIKey{ID: apiKeyID, UserID: sk.UserID, Key: apiKeyString, Name: sk.Name, GroupID: &gid, Status: service.StatusAPIKeyActive, User: sk.User, Group: sk.Group}
 				c.Request = c.Request.WithContext(service.WithSharedListingOrder(c.Request.Context(), sk.ListingAccountIDs))
 			} else if !errors.Is(e, service.ErrSharedAPIKeyNotFound) {
 				err = e
