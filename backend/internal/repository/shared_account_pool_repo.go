@@ -130,7 +130,7 @@ func (r *sharedAccountPoolRepository) SetListingStatus(ctx context.Context, owne
 	}
 	defer tx.Rollback()
 	var accountID int64
-	err = tx.QueryRowContext(ctx, `UPDATE shared_account_listings SET status=$3,updated_at=NOW() WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND status IN ('active','paused') RETURNING account_id`, listingID, ownerID, status).Scan(&accountID)
+	err = tx.QueryRowContext(ctx, `UPDATE shared_account_listings SET status=$3,updated_at=NOW() WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL RETURNING account_id`, listingID, ownerID, status).Scan(&accountID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrSharedListingNotFound
 	}

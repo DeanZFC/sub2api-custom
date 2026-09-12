@@ -155,10 +155,10 @@ onMounted(() => { void loadKeys() })
       <div v-else-if="mode !== 'keys'" class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         <article v-for="card in cards" :key="card.id" class="card min-w-0 overflow-hidden p-6">
           <div class="flex flex-col items-center gap-2">
-            <div class="min-w-0"><h2 class="break-words text-lg font-semibold text-gray-900 dark:text-white">{{ card.display_name }}</h2><p class="mt-1 text-sm text-gray-500">{{ card.platform }}</p></div>
+            <div class="min-w-0"><h2 class="break-words text-xl font-semibold text-gray-900 dark:text-white">{{ card.display_name }}</h2><p class="mt-1 text-base text-gray-500">{{ card.platform }}</p></div>
             <span class="shrink-0 rounded-full px-3 py-1 text-xs font-medium" :class="card.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'">{{ labels[card.status] || card.status }}</span>
           </div>
-          <div class="mt-6"><p class="text-xs text-gray-500">累计调用</p><p class="mt-1 break-all text-4xl font-bold tracking-tight text-primary-600">{{ card.total_call_count.toLocaleString() }}</p></div>
+          <div class="mt-6"><p class="text-sm text-gray-500">累计调用</p><p class="mt-1 break-all text-5xl font-bold tracking-tight text-primary-600">{{ card.total_call_count.toLocaleString() }}</p></div>
           <div class="mt-4 flex flex-wrap justify-center gap-3 text-xs text-gray-500"><span>并发上限 {{ card.concurrency_limit }}</span><span>倍率 {{ card.sell_rate }}x</span></div>
           <p class="mt-3 text-xs text-gray-400">最近调用：{{ timeText(card.last_called_at) }}</p>
           <div v-if="mode === 'mine'" class="mt-3 flex items-center justify-center gap-3"><button class="btn btn-secondary btn-sm" @click="openTest(card)">测试连接</button><button role="switch" :aria-checked="card.status === 'active'" class="relative h-6 w-11 rounded-full transition-colors" :class="card.status === 'active' ? 'bg-primary-600' : 'bg-gray-300'" @click="toggle(card)"><span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform" :class="card.status === 'active' ? 'translate-x-6' : 'translate-x-1'" /></button><button class="btn btn-secondary btn-sm" @click="showCreateAccount = true">编辑</button><button class="btn btn-secondary btn-sm text-red-500" @click="remove(card)">删除</button></div>
