@@ -35,6 +35,8 @@ func RegisterUserRoutes(
 			user.PUT("/shared-pool/accounts/:id", h.SharedAccountPool.UpdateAccount)
 			user.POST("/shared-pool/accounts/:id/apply-oauth-credentials", h.SharedAccountPool.ApplyOAuthCredentials)
 			user.POST("/shared-pool/accounts/:id/clear-error", h.SharedAccountPool.ClearError)
+			user.POST("/shared-pool/accounts/:id/models/sync-upstream", panelRateLimiter.Heavy(), h.SharedAccountPool.SyncUpstreamModels)
+			user.POST("/shared-pool/models/sync-upstream-preview", panelRateLimiter.Heavy(), h.SharedAccountPool.SyncUpstreamModelsPreview)
 			user.GET("/shared-pool/api-keys", h.SharedAPIKey.List)
 			user.POST("/shared-pool/api-keys", h.SharedAPIKey.Create)
 			user.PUT("/shared-pool/api-keys/:id", h.SharedAPIKey.Update)

@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"errors"
+	"log/slog"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -252,6 +255,68 @@ func (h *SharedAccountPoolHandler) ClearError(c *gin.Context) {
 	}
 	_, listing, _ := h.uploader.GetOwnedDetail(c.Request.Context(), ownerID, accountID)
 	h.writeOwnedAccount(c, account, listing)
+}
+
+func (h *SharedAccountPoolHandler) writeUpstreamCatalog(c *gin.Context, catalog *service.UpstreamModelCatalog, err error) {
+	if err != nil {
+		var syncErr *service.UpstreamModelSyncError
+		if errors.As(err, &syncErr) {
+			switch syncErr.Kind {
+			case service.UpstreamModelSyncErrorConfiguration, service.UpstreamModelSyncErrorUnsupported:
+				response.BadRequest(c, syncErr.SafeMessage())
+			case service.UpstreamModelSyncErrorInternal:
+				response.InternalError(c, syncErr.SafeMessage())
+			default:
+				slog.Warn("shared_sync_upstream_models_failed", "kind", syncErr.Kind)
+				response.Error(c, http.StatusBadGateway, syncErr.SafeMessage())
+			}
+			return
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, catalog)
+}
+
+func (h *SharedAccountPoolHandler) SyncUpstreamModels(c *gin.Context) {
+	ownerID, accountID, ok := h.parseOwnedAccountID(c)
+	if !ok {
+		return
+	}
+	catalog, err := h.uploader.SyncOwnedUpstreamModels(c.Request.Context(), ownerID, accountID)
+	h.writeUpstreamCatalog(c, catalog, err)
+}
+
+func (h *SharedAccountPoolHandler) SyncUpstreamModelsPreview(c *gin.Context) {
+	if _, ok := middleware.GetAuthSubjectFromContext(c); !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	var req struct {
+		Platform     string            `json:"platform" binding:"required"`
+		Type         string            `json:"type" binding:"required"`
+		BaseURL      string            `json:"base_url"`
+		APIKey       string            `json:"api_key" binding:"required"`
+		ModelMapping map[string]string `json:"model_mapping"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	modelMapping := make(map[string]any, len(req.ModelMapping))
+	for sourceModel, upstreamModel := range req.ModelMapping {
+		modelMapping[sourceModel] = upstreamModel
+	}
+	catalog, err := h.uploader.SyncUpstreamModelsPreview(c.Request.Context(), &service.Account{
+		Platform: req.Platform,
+		Type:     req.Type,
+		Credentials: map[string]any{
+			"api_key":       req.APIKey,
+			"base_url":      req.BaseURL,
+			"model_mapping": modelMapping,
+		},
+	})
+	h.writeUpstreamCatalog(c, catalog, err)
 }
 
 func (h *SharedAccountPoolHandler) MyCards(c *gin.Context) {

@@ -168,6 +168,8 @@ const props = defineProps<{
     base_url?: string
     api_key: string
   }
+  syncUpstream?: (accountId: number) => Promise<{ models: string[]; warnings?: Array<{ code: string; message: string }> }>
+  syncUpstreamPreview?: (params: SyncUpstreamPreviewParams) => Promise<{ models: string[]; warnings?: Array<{ code: string; message: string }> }>
 }>()
 
 const emit = defineEmits<{
@@ -301,9 +303,9 @@ const syncUpstreamModels = async () => {
   try {
     let result
     if (props.accountId) {
-      result = await accountsAPI.syncUpstreamModels(props.accountId)
+      result = await (props.syncUpstream ?? accountsAPI.syncUpstreamModels)(props.accountId)
     } else if (props.syncCredentials) {
-      result = await accountsAPI.syncUpstreamModelsPreview(props.syncCredentials as SyncUpstreamPreviewParams)
+      result = await (props.syncUpstreamPreview ?? accountsAPI.syncUpstreamModelsPreview)(props.syncCredentials as SyncUpstreamPreviewParams)
     } else {
       return
     }

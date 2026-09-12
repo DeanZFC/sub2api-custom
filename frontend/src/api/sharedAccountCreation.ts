@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import { applySharedOAuthCredentials, clearSharedAccountError, createSharedListing, getSharedAccount, updateSharedAccount } from './sharedPool'
+import { applySharedOAuthCredentials, clearSharedAccountError, createSharedListing, getSharedAccount, syncSharedUpstreamModels, syncSharedUpstreamModelsPreview, updateSharedAccount } from './sharedPool'
 import type { adminAPI } from './admin'
 import type { CreateAccountRequest, CodexSessionImportResult } from '@/types'
 import { getGrokSSOImportTimeout, type GrokSSOToOAuthResponse } from './admin/grok'
@@ -26,7 +26,7 @@ const credentialKeys = new Set([
   'project_id', 'oauth_type', 'tier_id', 'sub', 'team_id', 'subscription_tier',
   'entitlement_status', 'service_account_json', 'client_email', 'location',
   'aws_region', 'aws_access_key_id', 'aws_secret_access_key', 'aws_session_token',
-  'account_mode', 'api_protocol', 'api_base_urls'
+  'account_mode', 'api_protocol', 'api_base_urls', 'model_mapping'
 ])
 
 export function createSharedAccountAPI(proxyURL: () => string) {
@@ -85,6 +85,8 @@ export function createSharedAccountAPI(proxyURL: () => string) {
     update,
     applyOAuthCredentials: applySharedOAuthCredentials,
     clearError: clearSharedAccountError,
+    syncUpstreamModels: syncSharedUpstreamModels as AdminAPI['accounts']['syncUpstreamModels'],
+    syncUpstreamModelsPreview: syncSharedUpstreamModelsPreview as AdminAPI['accounts']['syncUpstreamModelsPreview'],
     generateAuthUrl: (async (endpoint, payload) => {
       const { platform, action } = authEndpoint(endpoint)
       return post(platform, action, payload)

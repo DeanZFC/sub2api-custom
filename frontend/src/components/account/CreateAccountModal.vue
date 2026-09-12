@@ -1176,7 +1176,7 @@
 
       <!-- Antigravity model restriction (applies to OAuth + Upstream) -->
       <!-- Antigravity 只支持模型映射模式，不支持白名单模式 -->
-      <div v-if="!sharedPool && (form.platform === 'antigravity')" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="form.platform === 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
         <!-- Mapping Mode Only (no toggle for Antigravity) -->
@@ -1450,6 +1450,8 @@
                 v-model="allowedModels"
                 :platform="form.platform"
                 :sync-credentials="syncPreviewCredentials"
+                :sync-upstream="syncUpstreamModelsFn"
+                :sync-upstream-preview="syncUpstreamPreviewFn"
                 @upstream-synced="upstreamModelsPreviewed = true"
               />
               <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -1900,7 +1902,7 @@
         </div>
 
         <!-- Model Restriction Section for Bedrock -->
-        <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
           <!-- Mode Toggle -->
@@ -1937,6 +1939,8 @@
               v-model="allowedModels"
               platform="anthropic"
               :sync-credentials="syncPreviewCredentials"
+              :sync-upstream="syncUpstreamModelsFn"
+              :sync-upstream-preview="syncUpstreamPreviewFn"
               @upstream-synced="upstreamModelsPreviewed = true"
             />
             <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -2229,7 +2233,7 @@
 
       <!-- OpenAI OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
-        v-if="!sharedPool && ((form.platform === 'openai' || form.platform === 'grok') && isOAuthFlow)"
+        v-if="(form.platform === 'openai' || form.platform === 'grok') && isOAuthFlow"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -2278,6 +2282,8 @@
               v-model="allowedModels"
               :platform="form.platform"
               :sync-credentials="syncPreviewCredentials"
+              :sync-upstream="syncUpstreamModelsFn"
+              :sync-upstream-preview="syncUpstreamPreviewFn"
               @upstream-synced="upstreamModelsPreviewed = true"
             />
             <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -4030,8 +4036,10 @@ interface Props {
 const props = defineProps<Props>()
 const sharedProxyURL = ref('')
 const accountAPI = props.sharedPool ? createSharedAccountAPI(() => sharedProxyURL.value) : adminAPI
-// The shared form has no model restriction field or admin model lookup.
 const loadAntigravityMappings = () => props.sharedPool ? Promise.resolve([]) : fetchAntigravityDefaultMappings()
+const syncUpstreamModelsFn = (id: number) => accountAPI.accounts.syncUpstreamModels(id)
+const syncUpstreamPreviewFn = (params: Parameters<typeof accountAPI.accounts.syncUpstreamModelsPreview>[0]) =>
+  accountAPI.accounts.syncUpstreamModelsPreview(params)
 const emit = defineEmits<{
   close: []
   created: []
@@ -5214,9 +5222,9 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       Object.values(modelMapping).some((target) =>
         typeof target === 'string' && target.trim() !== '' && !target.includes('*')
       )
-    if (!props.sharedPool && (upstreamModelsPreviewed.value || hasConcreteMappedTarget)) {
+    if (upstreamModelsPreviewed.value || hasConcreteMappedTarget) {
       try {
-        const result = await adminAPI.accounts.syncUpstreamModels(account.id)
+        const result = await accountAPI.accounts.syncUpstreamModels(account.id)
         const warnings = result.warnings ?? []
         if (warnings.some(warning => warning.code === 'upstream_model_metadata_incomplete')) {
           appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataIncomplete'))

@@ -151,6 +151,7 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/user/shared-pool/listings":                             {},
 	"PUT /api/v1/user/shared-pool/accounts/:id":                          {},
 	"POST /api/v1/user/shared-pool/accounts/:id/apply-oauth-credentials": {},
+	"POST /api/v1/user/shared-pool/models/sync-upstream-preview":         {},
 	"POST /api/v1/auth/passkey/login/finish":                             {},
 	"POST /api/v1/user/passkeys/register/finish":                         {},
 	"POST /api/v1/admin/accounts/import/codex-session":                   {},

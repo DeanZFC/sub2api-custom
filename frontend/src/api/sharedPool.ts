@@ -95,6 +95,26 @@ export async function clearSharedAccountError(accountId: number) {
   return data
 }
 
+export interface SharedUpstreamModelCatalog {
+  models: string[]
+  metadata?: Record<string, unknown>
+  warnings?: Array<{ code: string; message: string }>
+}
+export async function syncSharedUpstreamModels(accountId: number) {
+  const { data } = await apiClient.post<SharedUpstreamModelCatalog>(`/user/shared-pool/accounts/${accountId}/models/sync-upstream`)
+  return data
+}
+export async function syncSharedUpstreamModelsPreview(params: {
+  platform: string
+  type: string
+  base_url?: string
+  api_key: string
+  model_mapping?: Record<string, string>
+}) {
+  const { data } = await apiClient.post<SharedUpstreamModelCatalog>('/user/shared-pool/models/sync-upstream-preview', params)
+  return data
+}
+
 export type SharedKeySelectionMode = 'manual' | 'platform'
 export type SharedKeyPriorityMode = 'order' | 'rate' | 'availability'
 export interface SharedAPIKey {

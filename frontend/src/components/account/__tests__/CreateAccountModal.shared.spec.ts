@@ -62,7 +62,7 @@ describe('shared account creation with real authorization UI', () => {
     for (const platform of ['OpenAI', 'Anthropic', 'Gemini', 'Antigravity', 'Grok']) {
       await button(wrapper, platform).trigger('click')
       await flushPromises()
-      for (const label of ['notes', 'priority', 'expiresAt', 'modelRestriction', 'poolMode', 'loadFactor', 'autoPauseOnExpired']) {
+      for (const label of ['notes', 'priority', 'expiresAt', 'poolMode', 'loadFactor', 'autoPauseOnExpired']) {
         expect(wrapper.find('form').text()).not.toContain('admin.accounts.' + label)
       }
       expect(wrapper.find('#shared-account-rate').exists()).toBe(true)
@@ -84,7 +84,7 @@ describe('shared account creation with real authorization UI', () => {
     await next(wrapper)
     expect(listingPayload()).toMatchObject({ name: '共享测试', platform: 'openai', type: 'apikey', credentials: { api_key: 'sk-key' }, concurrency: 4, sell_rate: 1.6, proxy_url: 'socks5://user:pass@proxy.example.com:1080' })
     expect(listingPayload()).not.toHaveProperty('concurrency_multiplier')
-    expect(listingPayload().credentials).not.toHaveProperty('model_mapping')
+    expect(listingPayload().credentials.api_key).toBe('sk-key')
     expect(wrapper.emitted('created')).toHaveLength(1)
     expectOnlyUserAPI()
     wrapper.unmount()

@@ -97,10 +97,12 @@ type SharedAccountUploadService struct {
 	groups   GroupRepository
 	proxies  ProxyRepository
 	health   SharedAccountHealthChecker
+	tester   *AccountTestService
 }
 
 func ProvideSharedAccountUploadService(accounts AccountRepository, listings SharedAccountPoolRepository, groups GroupRepository, proxies ProxyRepository, tester *AccountTestService) *SharedAccountUploadService {
 	s := NewSharedAccountUploadService(accounts, listings, groups, proxies)
+	s.tester = tester
 	if tester != nil {
 		s.SetHealthChecker(&accountTestHealthChecker{tester: tester})
 	}
@@ -300,6 +302,27 @@ func (s *SharedAccountUploadService) GetOwned(ctx context.Context, ownerID, acco
 
 func (s *SharedAccountUploadService) GetOwnedDetail(ctx context.Context, ownerID, accountID int64) (*Account, *SharedAccountListing, error) {
 	return s.ownedAccount(ctx, ownerID, accountID)
+}
+
+func (s *SharedAccountUploadService) SyncOwnedUpstreamModels(ctx context.Context, ownerID, accountID int64) (*UpstreamModelCatalog, error) {
+	if s == nil || s.tester == nil {
+		return nil, infraerrors.InternalServer("ACCOUNT_TEST_UNAVAILABLE", "account test service is not configured")
+	}
+	account, err := s.GetOwned(ctx, ownerID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	return s.tester.SyncUpstreamModelCatalog(ctx, account)
+}
+
+func (s *SharedAccountUploadService) SyncUpstreamModelsPreview(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	if s == nil || s.tester == nil {
+		return nil, infraerrors.InternalServer("ACCOUNT_TEST_UNAVAILABLE", "account test service is not configured")
+	}
+	if account == nil {
+		return nil, infraerrors.BadRequest("INVALID_REQUEST", "account is required")
+	}
+	return s.tester.SyncUpstreamModelCatalog(ctx, account)
 }
 
 func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, accountID int64, in SharedAccountUpdateInput) (*Account, error) {
