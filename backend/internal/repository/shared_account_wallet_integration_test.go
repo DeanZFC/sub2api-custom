@@ -41,12 +41,12 @@ func TestSharedWalletPostgresConcurrentTransfer(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 	_, err = db.Exec(`CREATE TABLE users(id BIGINT PRIMARY KEY,balance NUMERIC(20,8) NOT NULL DEFAULT 0,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
- CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT,status TEXT,schedulable BOOLEAN,proxy_id BIGINT,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW());
+ CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT,type TEXT,status TEXT,schedulable BOOLEAN,proxy_id BIGINT,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW());
  CREATE TABLE groups(id BIGSERIAL PRIMARY KEY,platform TEXT,deleted_at TIMESTAMPTZ);
  CREATE TABLE proxies(id BIGSERIAL PRIMARY KEY,owner_user_id BIGINT,deleted_at TIMESTAMPTZ);
  CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT);
  CREATE UNIQUE INDEX ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL;
- INSERT INTO users(id,balance) VALUES(42,5),(43,100); INSERT INTO accounts(id,platform,status,schedulable) VALUES(1,'openai','active',true);`)
+ INSERT INTO users(id,balance) VALUES(42,5),(43,100); INSERT INTO accounts(id,platform,type,status,schedulable) VALUES(1,'openai','oauth','active',true);`)
 	require.NoError(t, err)
 	migration, err := migrations.FS.ReadFile("238_shared_account_pool.sql")
 	require.NoError(t, err)

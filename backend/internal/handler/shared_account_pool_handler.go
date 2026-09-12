@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -138,6 +139,119 @@ func (h *SharedAccountPoolHandler) ListCards(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"items": items, "limit": limit, "recent_limit": recent})
+}
+
+func (h *SharedAccountPoolHandler) parseOwnedAccountID(c *gin.Context) (int64, int64, bool) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return 0, 0, false
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid account id")
+		return 0, 0, false
+	}
+	return subject.UserID, id, true
+}
+
+func (h *SharedAccountPoolHandler) writeOwnedAccount(c *gin.Context, account *service.Account, listing *service.SharedAccountListing) {
+	out := dto.AccountFromServiceShallow(account)
+	if out != nil && listing != nil {
+		out.SharedTotalCallCount = listing.TotalCallCount
+		out.SharedListingStatus = listing.Status
+	}
+	response.Success(c, out)
+}
+
+func (h *SharedAccountPoolHandler) GetAccount(c *gin.Context) {
+	ownerID, accountID, ok := h.parseOwnedAccountID(c)
+	if !ok {
+		return
+	}
+	account, listing, err := h.uploader.GetOwnedDetail(c.Request.Context(), ownerID, accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	h.writeOwnedAccount(c, account, listing)
+}
+
+type sharedAccountUpdateRequest struct {
+	Name           *string         `json:"name"`
+	Credentials    *map[string]any `json:"credentials"`
+	Extra          *map[string]any `json:"extra"`
+	Concurrency    *int            `json:"concurrency"`
+	RateMultiplier *float64        `json:"rate_multiplier"`
+	ExpiresAt      *int64          `json:"expires_at"`
+	ProxyURL       string          `json:"proxy_url"`
+}
+
+func (h *SharedAccountPoolHandler) UpdateAccount(c *gin.Context) {
+	ownerID, accountID, ok := h.parseOwnedAccountID(c)
+	if !ok {
+		return
+	}
+	var req sharedAccountUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	in := service.SharedAccountUpdateInput{Name: req.Name, Credentials: req.Credentials, Extra: req.Extra, Concurrency: req.Concurrency, SellRate: req.RateMultiplier, ProxyURL: req.ProxyURL}
+	if req.ExpiresAt != nil {
+		if *req.ExpiresAt <= 0 {
+			in.ClearExpiry = true
+		} else {
+			t := time.Unix(*req.ExpiresAt, 0).UTC()
+			in.ExpiresAt = &t
+		}
+	}
+	account, err := h.uploader.UpdateOwned(c.Request.Context(), ownerID, accountID, in)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	_, listing, _ := h.uploader.GetOwnedDetail(c.Request.Context(), ownerID, accountID)
+	h.writeOwnedAccount(c, account, listing)
+}
+
+type sharedApplyOAuthRequest struct {
+	Type        string         `json:"type" binding:"required"`
+	Credentials map[string]any `json:"credentials" binding:"required"`
+	Extra       map[string]any `json:"extra"`
+}
+
+func (h *SharedAccountPoolHandler) ApplyOAuthCredentials(c *gin.Context) {
+	ownerID, accountID, ok := h.parseOwnedAccountID(c)
+	if !ok {
+		return
+	}
+	var req sharedApplyOAuthRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	account, err := h.uploader.ApplyOwnedOAuthCredentials(c.Request.Context(), ownerID, accountID, req.Type, req.Credentials, req.Extra)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	_, listing, _ := h.uploader.GetOwnedDetail(c.Request.Context(), ownerID, accountID)
+	h.writeOwnedAccount(c, account, listing)
+}
+
+func (h *SharedAccountPoolHandler) ClearError(c *gin.Context) {
+	ownerID, accountID, ok := h.parseOwnedAccountID(c)
+	if !ok {
+		return
+	}
+	account, err := h.uploader.ClearOwnedError(c.Request.Context(), ownerID, accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	_, listing, _ := h.uploader.GetOwnedDetail(c.Request.Context(), ownerID, accountID)
+	h.writeOwnedAccount(c, account, listing)
 }
 
 func (h *SharedAccountPoolHandler) MyCards(c *gin.Context) {

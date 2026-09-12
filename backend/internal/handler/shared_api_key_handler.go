@@ -15,10 +15,12 @@ func NewSharedAPIKeyHandler(svc *service.SharedAPIKeyService) *SharedAPIKeyHandl
 }
 
 type sharedAPIKeyRequest struct {
-	Name       string  `json:"name"`
-	Platform   string  `json:"platform"`
-	ListingIDs []int64 `json:"listing_ids"`
-	Status     string  `json:"status"`
+	Name          string  `json:"name"`
+	Platform      string  `json:"platform"`
+	SelectionMode string  `json:"selection_mode"`
+	PriorityMode  string  `json:"priority_mode"`
+	ListingIDs    []int64 `json:"listing_ids"`
+	Status        string  `json:"status"`
 }
 
 func userID(c *gin.Context) (int64, bool) {
@@ -49,7 +51,7 @@ func (h *SharedAPIKeyHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "Invalid request")
 		return
 	}
-	v, e := h.svc.Create(c, uid, req.Name, req.Platform, req.ListingIDs)
+	v, e := h.svc.Create(c, uid, req.Name, req.Platform, req.SelectionMode, req.PriorityMode, req.ListingIDs)
 	if e != nil {
 		response.ErrorFrom(c, e)
 		return
@@ -72,7 +74,7 @@ func (h *SharedAPIKeyHandler) Update(c *gin.Context) {
 		response.BadRequest(c, "Invalid request")
 		return
 	}
-	if e = h.svc.Update(c, uid, id, req.Name, req.Status, req.ListingIDs); e != nil {
+	if e = h.svc.Update(c, uid, id, req.Name, req.Status, req.Platform, req.SelectionMode, req.PriorityMode, req.ListingIDs); e != nil {
 		response.ErrorFrom(c, e)
 		return
 	}

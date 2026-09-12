@@ -39,6 +39,17 @@ func (r *sharedUploadAccounts) Create(_ context.Context, a *Account) error {
 	r.created = a
 	return nil
 }
+func (r *sharedUploadAccounts) GetByID(_ context.Context, id int64) (*Account, error) {
+	if r.created == nil || r.created.ID != id {
+		return nil, ErrSharedListingNotFound
+	}
+	copy := *r.created
+	return &copy, nil
+}
+func (r *sharedUploadAccounts) Update(_ context.Context, a *Account) error {
+	r.created = a
+	return nil
+}
 
 type sharedUploadListings struct {
 	SharedAccountPoolRepository
@@ -48,6 +59,22 @@ type sharedUploadListings struct {
 func (r *sharedUploadListings) CreateListing(_ context.Context, l *SharedAccountListing) error {
 	l.ID = 8
 	r.created = l
+	return nil
+}
+func (r *sharedUploadListings) GetOwnerListingByAccountID(_ context.Context, ownerID, accountID int64) (*SharedAccountListing, error) {
+	if r.created == nil || r.created.OwnerUserID != ownerID || r.created.AccountID != accountID {
+		return nil, ErrSharedListingNotFound
+	}
+	copy := *r.created
+	return &copy, nil
+}
+func (r *sharedUploadListings) UpdateListingMeta(_ context.Context, ownerID, listingID int64, displayName string, concurrency int, sellRate float64) error {
+	if r.created == nil || r.created.OwnerUserID != ownerID || r.created.ID != listingID {
+		return ErrSharedListingNotFound
+	}
+	r.created.DisplayName = displayName
+	r.created.ConcurrencyLimit = concurrency
+	r.created.SellRate = sellRate
 	return nil
 }
 func TestSharedAccountUploadPublishesWithoutApproval(t *testing.T) {
@@ -63,6 +90,32 @@ func TestSharedAccountUploadPublishesWithoutApproval(t *testing.T) {
 	require.False(t, accounts.created.Schedulable, "repository must publish only after the listing exists")
 	require.Equal(t, 6, accounts.created.Concurrency)
 	require.Equal(t, 1.5, accounts.created.BillingRateMultiplier())
+}
+
+func TestSharedAccountUpdateRejectsSellRateIncreaseWhileActiveAndUsed(t *testing.T) {
+	rate := 0.5
+	accounts := &sharedUploadAccounts{created: &Account{ID: 7, Name: "cheap", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, AccountScope: "shared", Credentials: map[string]any{"api_key": "test"}, RateMultiplier: &rate, Status: StatusActive}}
+	listings := &sharedUploadListings{created: &SharedAccountListing{ID: 8, OwnerUserID: 42, AccountID: 7, Platform: PlatformOpenAI, DisplayName: "cheap", Status: "active", ConcurrencyLimit: 1, ConcurrencyMultiplier: 1, SellRate: 0.5, TotalCallCount: 12}}
+	svc := NewSharedAccountUploadService(accounts, listings, nil, nil)
+	higher := 5.0
+	_, err := svc.UpdateOwned(context.Background(), 42, 7, SharedAccountUpdateInput{SellRate: &higher})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "SHARED_SELL_RATE_LOCKED")
+	lower := 0.2
+	updated, err := svc.UpdateOwned(context.Background(), 42, 7, SharedAccountUpdateInput{SellRate: &lower})
+	require.NoError(t, err)
+	require.InDelta(t, 0.2, updated.BillingRateMultiplier(), 1e-6)
+}
+
+func TestSharedAccountUpdateAllowsSellRateIncreaseAfterPause(t *testing.T) {
+	rate := 0.5
+	accounts := &sharedUploadAccounts{created: &Account{ID: 7, Name: "cheap", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, AccountScope: "shared", Credentials: map[string]any{"api_key": "test"}, RateMultiplier: &rate, Status: StatusActive}}
+	listings := &sharedUploadListings{created: &SharedAccountListing{ID: 8, OwnerUserID: 42, AccountID: 7, Platform: PlatformOpenAI, DisplayName: "cheap", Status: "paused", ConcurrencyLimit: 1, ConcurrencyMultiplier: 1, SellRate: 0.5, TotalCallCount: 12}}
+	svc := NewSharedAccountUploadService(accounts, listings, nil, nil)
+	higher := 1.2
+	updated, err := svc.UpdateOwned(context.Background(), 42, 7, SharedAccountUpdateInput{SellRate: &higher})
+	require.NoError(t, err)
+	require.InDelta(t, 1.2, updated.BillingRateMultiplier(), 1e-6)
 }
 
 func TestSharedSellRateAffectsActualDebitAndKeepsSystemPricing(t *testing.T) {

@@ -15,7 +15,7 @@
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
       </div>
-      <div>
+      <div v-if="!sharedPool">
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
         <textarea
           v-model="form.notes"
@@ -173,7 +173,7 @@
         </div>
 
         <!-- Model Restriction Section (不适用于 Antigravity) -->
-        <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="!sharedPool && account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
           <div
@@ -1373,7 +1373,7 @@
       </div>
 
       <!-- Temp Unschedulable Rules -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
+      <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
         <div class="mb-3 flex items-center justify-between">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.tempUnschedulable.title') }}</label>
@@ -1586,7 +1586,15 @@
         </div>
       </div>
 
-      <div v-if="!isSparkShadow">
+      <div v-if="sharedPool" class="space-y-4" data-testid="shared-account-settings">
+        <div>
+          <label for="shared-account-proxy" class="input-label">{{ t('admin.accounts.proxy') }}</label>
+          <input id="shared-account-proxy" v-model="sharedProxyURL" type="text" class="input"
+            placeholder="http://user:pass@host:port 或 socks5://user:pass@host:port" autocomplete="off" />
+        </div>
+      </div>
+
+      <div v-else-if="!isSparkShadow">
         <div class="mb-1 flex items-center gap-2">
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
@@ -1596,25 +1604,26 @@
       </div>
 
       <UpstreamRequestIdHeaderField
+        v-if="!sharedPool"
         v-model="upstreamRequestIdHeader"
         :platform="account.platform"
         :type="account.type"
       />
 
-      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-4" :class="sharedPool ? '' : 'lg:grid-cols-4'">
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
             @input="form.concurrency = Math.max(1, form.concurrency || 1)" />
         </div>
-        <div>
+        <div v-if="!sharedPool">
           <label class="input-label">{{ t('admin.accounts.loadFactor') }}</label>
           <input v-model.number="form.load_factor" type="number" min="1"
             class="input" :placeholder="String(form.concurrency || 1)"
             @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
-        <div>
+        <div v-if="!sharedPool">
           <label class="input-label">{{ t('admin.accounts.priority') }}</label>
           <input
             v-model.number="form.priority"
@@ -1631,12 +1640,16 @@
             v-model.number="form.rate_multiplier"
             type="number"
             min="0"
+            :max="sharedRateLocked ? Number(account?.rate_multiplier ?? 1) : 100"
             step="0.001"
             class="input disabled:cursor-not-allowed disabled:opacity-60"
             data-testid="account-rate-multiplier"
             :disabled="upstreamBillingRateSyncEnabled"
           />
-          <p class="input-hint">
+          <p v-if="sharedPool" class="input-hint">
+            {{ sharedRateHint }}
+          </p>
+          <p v-else class="input-hint">
             {{
               t(
                 upstreamBillingRateSyncEnabled
@@ -1646,7 +1659,7 @@
             }}
           </p>
           <div
-            v-if="account?.type === 'apikey'"
+            v-if="!sharedPool && account?.type === 'apikey'"
             class="mt-3 flex items-center justify-between gap-3"
           >
             <div class="min-w-0">
@@ -2006,7 +2019,7 @@
 
       <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
       <div
-        v-if="account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
+        v-if="!sharedPool && account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2057,7 +2070,7 @@
       </div>
       <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
       <div
-        v-else-if="account?.type === 'apikey' || account?.type === 'bedrock'"
+        v-else-if="!sharedPool && (account?.type === 'apikey' || account?.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2457,7 +2470,7 @@
 
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
       <div
-        v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        v-if="!sharedPool && account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2835,7 +2848,7 @@
         </div>
       </div>
 
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div>
           <label class="input-label">{{ t('common.status') }}</label>
           <Select v-model="form.status" :options="statusOptions" />
@@ -2902,6 +2915,7 @@
 
       <!-- Group Selection - 仅标准模式显示 -->
       <GroupSelector
+        v-if="!sharedPool"
         v-model="form.group_ids"
         :groups="selectableGroups"
         :platform="account?.platform"
@@ -2968,6 +2982,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
 import { adminAPI } from '@/api/admin'
+import { createSharedAccountAPI } from '@/api/sharedAccountCreation'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import type {
   Account,
@@ -3054,9 +3069,21 @@ interface Props {
   account: Account | null
   proxies: Proxy[]
   groups: AdminGroup[]
+  sharedPool?: boolean
 }
 
 const props = defineProps<Props>()
+const sharedProxyURL = ref('')
+const sharedRateLocked = computed(() => {
+  if (!props.sharedPool) return false
+  const used = Number(props.account?.shared_total_call_count || 0) > 0
+  return used && (props.account?.shared_listing_status || 'active') === 'active'
+})
+const sharedRateHint = computed(() => {
+  if (sharedRateLocked.value) return '使用中不能提高倍率。请先在「我的账号」里暂停，改完后再恢复上线。'
+  if (Number(props.account?.shared_total_call_count || 0) > 0) return '账号已暂停，可以改高倍率。改完后恢复才会重新被调度。'
+  return '有人调用后，使用中不能直接改高，需先暂停。'
+})
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
@@ -3320,7 +3347,7 @@ const modeFromGrokMediaExtra = (extra: Record<string, unknown> | undefined): Gro
 }
 
 const loadGrokMediaEligibility = async (accountID: number): Promise<GrokMediaEligibilityState | null> => {
-  if (!isGrokOAuthAccount.value || typeof adminAPI.accounts.getGrokMediaEligibility !== 'function') {
+  if (props.sharedPool || !isGrokOAuthAccount.value || typeof adminAPI.accounts.getGrokMediaEligibility !== 'function') {
     return null
   }
   const requestVersion = ++grokMediaEligibilityRequestVersion
@@ -4267,6 +4294,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 }
 
 async function loadTLSProfiles() {
+  if (props.sharedPool) {
+    tlsFingerprintProfiles.value = []
+    return
+  }
   try {
     const profiles = await adminAPI.tlsFingerprintProfiles.list()
     tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name }))
@@ -4700,7 +4731,7 @@ function toPositiveNumber(value: unknown) {
   return Math.trunc(num)
 }
 
-const needsMixedChannelCheck = () => props.account?.platform === 'antigravity' || props.account?.platform === 'anthropic'
+const needsMixedChannelCheck = () => !props.sharedPool && (props.account?.platform === 'antigravity' || props.account?.platform === 'anthropic')
 
 const buildMixedChannelDetails = (resp?: CheckMixedChannelResponse) => {
   const details = resp?.details
@@ -4829,7 +4860,8 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
-    let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
+    const accountAPI = props.sharedPool ? createSharedAccountAPI(() => sharedProxyURL.value) : adminAPI
+    let updatedAccount = await accountAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
     emit('updated', updatedAccount)
@@ -4855,8 +4887,12 @@ const handleSubmit = async () => {
   if (!props.account) return
   const accountID = props.account.id
 
-  if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
+  if (!props.sharedPool && form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
+    return
+  }
+  if (props.sharedPool && sharedRateLocked.value && Number(form.rate_multiplier) > Number(props.account?.rate_multiplier ?? 0) + 1e-6) {
+    appStore.showError('使用中不能提高倍率。请先暂停账号，改完后再恢复上线。')
     return
   }
 	if (autoResetCreditEnabled.value) {

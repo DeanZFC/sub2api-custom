@@ -164,5 +164,31 @@ describe('shared account creation with real authorization UI', () => {
     expectOnlyUserAPI()
     wrapper.unmount()
   })
+  it.each([
+    { platform: 'openai', type: 'apikey', selected: 'admin.accounts.types.responsesApi', selectedClass: 'border-purple-500' },
+    { platform: 'grok', type: 'apikey', selected: 'admin.accounts.types.responsesApi', selectedClass: 'border-purple-500', platformButton: 'Grok' },
+    { platform: 'anthropic', type: 'bedrock', selected: 'admin.accounts.bedrockLabel', selectedClass: 'border-amber-500', platformButton: 'Anthropic' }
+  ])('echoes $platform $type when editing a shared listing', async ({ platform, type, selected, selectedClass, platformButton }) => {
+    const wrapper = mount(CreateAccountModal, {
+      props: {
+        show: false,
+        sharedPool: true,
+        readonlyPlatform: true,
+        proxies: [],
+        groups: [],
+        initialAccount: { name: '已有账号', platform, type, concurrency: 4, rate_multiplier: 1.6 }
+      },
+      global: { mocks: { $t: (key: string) => key }, stubs: { BaseDialog: Dialog, ConfirmDialog: true, Select: true, Icon: true, PlatformIcon: true, HelpTooltip: true } }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect((wrapper.get('[data-tour="account-form-name"]').element as HTMLInputElement).value).toBe('已有账号')
+    if (platformButton) expect(wrapper.text()).toContain(platformButton)
+    const selectedButton = wrapper.find('[data-tour="account-form-type"]').findAll('button').find(button => button.text().includes(selected))
+    expect(selectedButton?.classes().join(' ')).toContain(selectedClass)
+    expect((wrapper.get('#shared-account-concurrency').element as HTMLInputElement).value).toBe('4')
+    expect((wrapper.get('#shared-account-rate').element as HTMLInputElement).value).toBe('1.6')
+    wrapper.unmount()
+  })
 
 })

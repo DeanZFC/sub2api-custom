@@ -1210,6 +1210,8 @@ export interface Account {
   scheduler_scores?: AccountSchedulerGroupScore[] | null
   priority: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  shared_total_call_count?: number
+  shared_listing_status?: string
   status: 'active' | 'inactive' | 'error'
   error_message: string | null
   last_used_at: string | null

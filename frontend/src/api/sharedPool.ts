@@ -14,6 +14,8 @@ export interface SharedCard {
   account_id?: number
   uploader_name?: string
   platform: string
+  /** Underlying account type: oauth, apikey, setup-token, bedrock, service_account. */
+  type?: string
   display_name: string
   status: string
   concurrency_limit: number
@@ -73,8 +75,48 @@ export async function setSharedListingStatus(id: number, action: 'pause' | 'resu
 }
 export async function deleteSharedListing(id: number) { await apiClient.delete(`/user/shared-pool/listings/${id}`) }
 
-export interface SharedAPIKey { id:number; name:string; key_preview:string; platform:string; status:string; listing_ids:number[]; created_at:string }
+export async function getSharedAccount(accountId: number) {
+  const { data } = await apiClient.get<import('@/types').Account>(`/user/shared-pool/accounts/${accountId}`)
+  return data
+}
+export async function updateSharedAccount(accountId: number, input: Record<string, unknown>) {
+  const { data } = await apiClient.put<import('@/types').Account>(`/user/shared-pool/accounts/${accountId}`, input)
+  return data
+}
+export async function applySharedOAuthCredentials(
+  accountId: number,
+  input: { type: 'oauth' | 'setup-token'; credentials: Record<string, unknown>; extra?: Record<string, unknown> }
+) {
+  const { data } = await apiClient.post<import('@/types').Account>(`/user/shared-pool/accounts/${accountId}/apply-oauth-credentials`, input)
+  return data
+}
+export async function clearSharedAccountError(accountId: number) {
+  const { data } = await apiClient.post<import('@/types').Account>(`/user/shared-pool/accounts/${accountId}/clear-error`)
+  return data
+}
+
+export type SharedKeySelectionMode = 'manual' | 'platform'
+export type SharedKeyPriorityMode = 'order' | 'rate' | 'availability'
+export interface SharedAPIKey {
+  id: number
+  name: string
+  key_preview: string
+  platform: string
+  status: string
+  selection_mode?: SharedKeySelectionMode
+  priority_mode?: SharedKeyPriorityMode
+  listing_ids: number[]
+  created_at: string
+}
+export interface SharedAPIKeyInput {
+  name: string
+  platform: string
+  selection_mode?: SharedKeySelectionMode
+  priority_mode?: SharedKeyPriorityMode
+  listing_ids: number[]
+  status?: string
+}
 export async function listSharedAPIKeys(){ const {data}=await apiClient.get<{items:SharedAPIKey[]}>('/user/shared-pool/api-keys'); return data.items }
-export async function createSharedAPIKey(input:{name:string;platform:string;listing_ids:number[]}){ const {data}=await apiClient.post<SharedAPIKey & {key:string}>('/user/shared-pool/api-keys',input); return data }
-export async function updateSharedAPIKey(id:number,input:{name:string;platform?:string;status?:string;listing_ids:number[]}){ await apiClient.put(`/user/shared-pool/api-keys/${id}`,input) }
+export async function createSharedAPIKey(input: SharedAPIKeyInput){ const {data}=await apiClient.post<SharedAPIKey & {key:string}>('/user/shared-pool/api-keys',input); return data }
+export async function updateSharedAPIKey(id:number,input: SharedAPIKeyInput){ await apiClient.put(`/user/shared-pool/api-keys/${id}`,input) }
 export async function deleteSharedAPIKey(id:number){ await apiClient.delete(`/user/shared-pool/api-keys/${id}`) }

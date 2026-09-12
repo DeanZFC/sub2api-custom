@@ -20,11 +20,11 @@ func NewSharedAccountPoolRepository(_ *dbent.Client, db *sql.DB) service.SharedA
 // A lateral aggregate fetches recent requests in the same query as the page.
 // This avoids nested database reads while holding the page connection open.
 const sharedCardSelect = `
-SELECT l.id, l.account_id, l.platform, l.display_name, l.uploader_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.concurrency_limit,
+SELECT l.id, l.account_id, l.platform, l.account_type, l.display_name, l.uploader_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.concurrency_limit,
        l.concurrency_multiplier::double precision, l.sell_rate::double precision,
        l.total_call_count, l.last_called_at, recent.calls
 FROM (
-		 SELECT l.* , a.status AS account_status, a.schedulable AS account_schedulable, COALESCE(NULLIF(u.username, ''), u.email) AS uploader_name FROM shared_account_listings l
+		 SELECT l.* , a.status AS account_status, a.schedulable AS account_schedulable, a.type AS account_type, COALESCE(NULLIF(u.username, ''), u.email) AS uploader_name FROM shared_account_listings l
 		 JOIN accounts a ON a.id = l.account_id
 		 LEFT JOIN users u ON u.id = l.owner_user_id
 	 WHERE l.deleted_at IS NULL AND a.deleted_at IS NULL AND a.account_scope = 'shared'
@@ -70,7 +70,7 @@ func (r *sharedAccountPoolRepository) listCards(ctx context.Context, ownerID *in
 	for rows.Next() {
 		var c service.SharedAccountCard
 		var calls []byte
-		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.DisplayName, &c.UploaderName, &c.Status, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
+		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.Type, &c.DisplayName, &c.UploaderName, &c.Status, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(calls, &c.RecentCalls); err != nil {
@@ -86,6 +86,39 @@ func (r *sharedAccountPoolRepository) ListPublicCards(ctx context.Context, platf
 }
 func (r *sharedAccountPoolRepository) GetOwnerCards(ctx context.Context, ownerID int64, limit, recentLimit int) ([]service.SharedAccountCard, error) {
 	return r.listCards(ctx, &ownerID, "", limit, recentLimit)
+}
+
+func (r *sharedAccountPoolRepository) GetOwnerListingByAccountID(ctx context.Context, ownerID, accountID int64) (*service.SharedAccountListing, error) {
+	if ownerID <= 0 || accountID <= 0 {
+		return nil, service.ErrSharedListingNotFound
+	}
+	var listing service.SharedAccountListing
+	err := r.db.QueryRowContext(ctx, `SELECT id, owner_user_id, account_id, platform, display_name, status, concurrency_limit, concurrency_multiplier::double precision, sell_rate::double precision, total_call_count FROM shared_account_listings WHERE account_id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND status <> 'deleted'`, accountID, ownerID).Scan(&listing.ID, &listing.OwnerUserID, &listing.AccountID, &listing.Platform, &listing.DisplayName, &listing.Status, &listing.ConcurrencyLimit, &listing.ConcurrencyMultiplier, &listing.SellRate, &listing.TotalCallCount)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrSharedListingNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &listing, nil
+}
+
+func (r *sharedAccountPoolRepository) UpdateListingMeta(ctx context.Context, ownerID, listingID int64, displayName string, concurrency int, sellRate float64) error {
+	if ownerID <= 0 || listingID <= 0 {
+		return service.ErrSharedListingNotFound
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE shared_account_listings SET display_name=$3, concurrency_limit=$4, sell_rate=$5, updated_at=NOW() WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND status <> 'deleted'`, listingID, ownerID, displayName, concurrency, sellRate)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return service.ErrSharedListingNotFound
+	}
+	return nil
 }
 
 func (r *sharedAccountPoolRepository) CreateListing(ctx context.Context, l *service.SharedAccountListing) error {

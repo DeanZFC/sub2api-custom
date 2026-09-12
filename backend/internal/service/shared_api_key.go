@@ -5,8 +5,17 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"strings"
 	"time"
+)
+
+const (
+	SharedKeySelectionManual      = "manual"
+	SharedKeySelectionPlatform    = "platform"
+	SharedKeyPriorityOrder        = "order"
+	SharedKeyPriorityRate         = "rate"
+	SharedKeyPriorityAvailability = "availability"
 )
 
 type SharedAPIKey struct {
@@ -17,6 +26,8 @@ type SharedAPIKey struct {
 	KeyPreview        string    `json:"key_preview"`
 	Platform          string    `json:"platform"`
 	Status            string    `json:"status"`
+	SelectionMode     string    `json:"selection_mode"`
+	PriorityMode      string    `json:"priority_mode"`
 	ListingIDs        []int64   `json:"listing_ids"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
@@ -63,10 +74,32 @@ func generateSharedAPIKey() (string, error) {
 	}
 	return "sk-shared-" + hex.EncodeToString(b), nil
 }
-func (s *SharedAPIKeyService) Create(ctx context.Context, userID int64, name, platform string, listings []int64) (*SharedAPIKey, error) {
-	if userID <= 0 || strings.TrimSpace(name) == "" || strings.TrimSpace(platform) == "" || len(listings) == 0 {
-		return nil, errors.New("name, platform and at least one listing are required")
+func normalizeSharedKeyModes(selection, priority string) (string, string, error) {
+	selection = strings.ToLower(strings.TrimSpace(selection))
+	priority = strings.ToLower(strings.TrimSpace(priority))
+	if selection == "" {
+		selection = SharedKeySelectionManual
 	}
+	if priority == "" {
+		priority = SharedKeyPriorityOrder
+	}
+	switch selection {
+	case SharedKeySelectionManual, SharedKeySelectionPlatform:
+	default:
+		return "", "", errors.New("invalid selection mode")
+	}
+	switch priority {
+	case SharedKeyPriorityOrder, SharedKeyPriorityRate, SharedKeyPriorityAvailability:
+	default:
+		return "", "", errors.New("invalid priority mode")
+	}
+	if selection == SharedKeySelectionPlatform && priority == SharedKeyPriorityOrder {
+		priority = SharedKeyPriorityRate
+	}
+	return selection, priority, nil
+}
+
+func normalizeSharedListings(listings []int64) ([]int64, error) {
 	if len(listings) > 20 {
 		return nil, errors.New("a shared API key can bind at most 20 accounts")
 	}
@@ -82,14 +115,32 @@ func (s *SharedAPIKeyService) Create(ctx context.Context, userID int64, name, pl
 		seen[id] = struct{}{}
 		unique = append(unique, id)
 	}
-	if len(unique) == 0 {
-		return nil, errors.New("at least one shared account is required")
+	return unique, nil
+}
+
+func (s *SharedAPIKeyService) Create(ctx context.Context, userID int64, name, platform, selection, priority string, listings []int64) (*SharedAPIKey, error) {
+	if userID <= 0 || strings.TrimSpace(name) == "" || strings.TrimSpace(platform) == "" {
+		return nil, errors.New("name and platform are required")
+	}
+	selection, priority, err := normalizeSharedKeyModes(selection, priority)
+	if err != nil {
+		return nil, err
+	}
+	unique, err := normalizeSharedListings(listings)
+	if err != nil {
+		return nil, err
+	}
+	if selection == SharedKeySelectionManual && len(unique) == 0 {
+		return nil, errors.New("name, platform and at least one listing are required")
+	}
+	if selection == SharedKeySelectionPlatform {
+		unique = nil
 	}
 	key, err := generateSharedAPIKey()
 	if err != nil {
 		return nil, err
 	}
-	v := &SharedAPIKey{UserID: userID, Name: strings.TrimSpace(name), Platform: strings.ToLower(strings.TrimSpace(platform)), Key: key, Status: StatusAPIKeyActive, ListingIDs: unique}
+	v := &SharedAPIKey{UserID: userID, Name: strings.TrimSpace(name), Platform: strings.ToLower(strings.TrimSpace(platform)), Key: key, Status: StatusAPIKeyActive, SelectionMode: selection, PriorityMode: priority, ListingIDs: unique}
 	if err := s.repo.Create(ctx, v); err != nil {
 		return nil, err
 	}
@@ -120,33 +171,41 @@ func (s *SharedAPIKeyService) GetByKey(ctx context.Context, key string) (*Shared
 	}
 	return v, nil
 }
-func (s *SharedAPIKeyService) Update(ctx context.Context, userID, id int64, name, status string, listings []int64) error {
-	if name == "" || len(listings) == 0 || len(listings) > 20 {
+func (s *SharedAPIKeyService) Update(ctx context.Context, userID, id int64, name, status, platform, selection, priority string, listings []int64) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("name is required")
+	}
+	selection, priority, err := normalizeSharedKeyModes(selection, priority)
+	if err != nil {
+		return err
+	}
+	unique, err := normalizeSharedListings(listings)
+	if err != nil {
+		return err
+	}
+	if selection == SharedKeySelectionManual && len(unique) == 0 {
 		return errors.New("name and listings are required")
+	}
+	if selection == SharedKeySelectionPlatform {
+		unique = nil
 	}
 	k, err := s.repo.GetByID(ctx, userID, id)
 	if err != nil {
 		return err
 	}
 	k.Name = strings.TrimSpace(name)
+	if strings.TrimSpace(platform) != "" {
+		k.Platform = strings.ToLower(strings.TrimSpace(platform))
+	}
+	k.SelectionMode = selection
+	k.PriorityMode = priority
 	if status != "" && status != StatusAPIKeyActive && status != StatusAPIKeyDisabled {
 		return errors.New("invalid shared API key status")
 	}
 	if status != "" {
 		k.Status = status
 	}
-	seen := make(map[int64]struct{}, len(listings))
-	k.ListingIDs = make([]int64, 0, len(listings))
-	for _, listingID := range listings {
-		if listingID <= 0 {
-			return errors.New("invalid shared listing id")
-		}
-		if _, ok := seen[listingID]; ok {
-			continue
-		}
-		seen[listingID] = struct{}{}
-		k.ListingIDs = append(k.ListingIDs, listingID)
-	}
+	k.ListingIDs = unique
 	return s.repo.Update(ctx, k)
 }
 func (s *SharedAPIKeyService) Delete(ctx context.Context, userID, id int64) error {
@@ -154,11 +213,144 @@ func (s *SharedAPIKeyService) Delete(ctx context.Context, userID, id int64) erro
 }
 
 type sharedListingOrderKey struct{}
+type sharedKeyScheduleKey struct{}
+
+type SharedKeySchedule struct {
+	Priority   string
+	AccountIDs []int64
+}
 
 func WithSharedListingOrder(ctx context.Context, ids []int64) context.Context {
-	return context.WithValue(ctx, sharedListingOrderKey{}, ids)
+	return WithSharedKeySchedule(ctx, SharedKeySchedule{Priority: SharedKeyPriorityOrder, AccountIDs: ids})
 }
+
+func WithSharedKeySchedule(ctx context.Context, schedule SharedKeySchedule) context.Context {
+	ctx = context.WithValue(ctx, sharedKeyScheduleKey{}, schedule)
+	return context.WithValue(ctx, sharedListingOrderKey{}, schedule.AccountIDs)
+}
+
 func SharedListingOrder(ctx context.Context) []int64 {
+	if schedule, ok := ctx.Value(sharedKeyScheduleKey{}).(SharedKeySchedule); ok {
+		return schedule.AccountIDs
+	}
 	v, _ := ctx.Value(sharedListingOrderKey{}).([]int64)
 	return v
+}
+
+func SharedKeyScheduleFrom(ctx context.Context) SharedKeySchedule {
+	if schedule, ok := ctx.Value(sharedKeyScheduleKey{}).(SharedKeySchedule); ok {
+		return schedule
+	}
+	return SharedKeySchedule{Priority: SharedKeyPriorityOrder, AccountIDs: SharedListingOrder(ctx)}
+}
+
+func applySharedKeySchedule(ctx context.Context, accounts []Account) []Account {
+	if len(accounts) == 0 {
+		return accounts
+	}
+	schedule := SharedKeyScheduleFrom(ctx)
+	priority := strings.ToLower(strings.TrimSpace(schedule.Priority))
+	if priority == "" {
+		priority = SharedKeyPriorityOrder
+	}
+	ordered := accounts
+	if len(schedule.AccountIDs) > 0 {
+		ordered = applySharedListingIDs(accounts, schedule.AccountIDs)
+	}
+	switch priority {
+	case SharedKeyPriorityRate:
+		return sortSharedAccountsByRate(ordered, schedule.AccountIDs)
+	case SharedKeyPriorityAvailability:
+		return sortSharedAccountsByAvailability(ordered, schedule.AccountIDs)
+	default:
+		return ordered
+	}
+}
+
+func applySharedListingIDs(accounts []Account, ids []int64) []Account {
+	if len(ids) == 0 || len(accounts) < 2 {
+		return accounts
+	}
+	byID := make(map[int64]Account, len(accounts))
+	for _, a := range accounts {
+		byID[a.ID] = a
+	}
+	out := make([]Account, 0, len(accounts))
+	seen := make(map[int64]bool, len(accounts))
+	for _, id := range ids {
+		if a, ok := byID[id]; ok {
+			out = append(out, a)
+			seen[id] = true
+		}
+	}
+	for _, a := range accounts {
+		if !seen[a.ID] {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func sortSharedAccountsByRate(accounts []Account, preferred []int64) []Account {
+	return sortSharedAccounts(accounts, preferred, func(a, b Account) bool {
+		ar, br := a.BillingRateMultiplier(), b.BillingRateMultiplier()
+		if ar != br {
+			return ar < br
+		}
+		return a.ID < b.ID
+	})
+}
+
+func sortSharedAccountsByAvailability(accounts []Account, preferred []int64) []Account {
+	now := time.Now()
+	return sortSharedAccounts(accounts, preferred, func(a, b Account) bool {
+		ab, bb := sharedAccountBusy(a, now), sharedAccountBusy(b, now)
+		if ab != bb {
+			return !ab
+		}
+		if a.LastUsedAt == nil && b.LastUsedAt != nil {
+			return true
+		}
+		if a.LastUsedAt != nil && b.LastUsedAt == nil {
+			return false
+		}
+		if a.LastUsedAt != nil && b.LastUsedAt != nil && !a.LastUsedAt.Equal(*b.LastUsedAt) {
+			return a.LastUsedAt.Before(*b.LastUsedAt)
+		}
+		return a.ID < b.ID
+	})
+}
+
+func sortSharedAccounts(accounts []Account, preferred []int64, less func(Account, Account) bool) []Account {
+	if len(accounts) < 2 {
+		return accounts
+	}
+	preferredSet := make(map[int64]bool, len(preferred))
+	for _, id := range preferred {
+		preferredSet[id] = true
+	}
+	out := append([]Account(nil), accounts...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if len(preferredSet) > 0 {
+			ip, jp := preferredSet[out[i].ID], preferredSet[out[j].ID]
+			if ip != jp {
+				return ip
+			}
+		}
+		return less(out[i], out[j])
+	})
+	return out
+}
+
+func sharedAccountBusy(a Account, now time.Time) bool {
+	if a.TempUnschedulableUntil != nil && a.TempUnschedulableUntil.After(now) {
+		return true
+	}
+	if a.RateLimitResetAt != nil && a.RateLimitResetAt.After(now) {
+		return true
+	}
+	if a.OverloadUntil != nil && a.OverloadUntil.After(now) {
+		return true
+	}
+	return false
 }

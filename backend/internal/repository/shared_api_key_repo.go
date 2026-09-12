@@ -20,8 +20,14 @@ func previewKey(k string) string {
 	return k[:6] + "…" + k[len(k)-4:]
 }
 func scanSharedKey(row interface{ Scan(...any) error }, k *service.SharedAPIKey) error {
-	if err := row.Scan(&k.ID, &k.UserID, &k.Name, &k.Key, &k.Platform, &k.Status, &k.CreatedAt, &k.UpdatedAt, &k.LegacyAPIKeyID); err != nil {
+	if err := row.Scan(&k.ID, &k.UserID, &k.Name, &k.Key, &k.Platform, &k.Status, &k.CreatedAt, &k.UpdatedAt, &k.LegacyAPIKeyID, &k.SelectionMode, &k.PriorityMode); err != nil {
 		return err
+	}
+	if k.SelectionMode == "" {
+		k.SelectionMode = service.SharedKeySelectionManual
+	}
+	if k.PriorityMode == "" {
+		k.PriorityMode = service.SharedKeyPriorityOrder
 	}
 	k.KeyPreview = previewKey(k.Key)
 	k.Key = ""
@@ -53,7 +59,13 @@ func (r *sharedAPIKeyRepository) Create(ctx context.Context, k *service.SharedAP
 	if err = tx.QueryRowContext(ctx, `INSERT INTO api_keys(user_id,key,name,status) VALUES($1,$2,$3,'active') RETURNING id`, k.UserID, k.Key, "[shared] "+k.Name).Scan(&k.LegacyAPIKeyID); err != nil {
 		return err
 	}
-	if err = tx.QueryRowContext(ctx, `INSERT INTO shared_api_keys(user_id,name,key,platform,status,legacy_api_key_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,created_at,updated_at`, k.UserID, k.Name, k.Key, k.Platform, k.Status, k.LegacyAPIKeyID).Scan(&k.ID, &k.CreatedAt, &k.UpdatedAt); err != nil {
+	if k.SelectionMode == "" {
+		k.SelectionMode = service.SharedKeySelectionManual
+	}
+	if k.PriorityMode == "" {
+		k.PriorityMode = service.SharedKeyPriorityOrder
+	}
+	if err = tx.QueryRowContext(ctx, `INSERT INTO shared_api_keys(user_id,name,key,platform,status,legacy_api_key_id,selection_mode,priority_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,created_at,updated_at`, k.UserID, k.Name, k.Key, k.Platform, k.Status, k.LegacyAPIKeyID, k.SelectionMode, k.PriorityMode).Scan(&k.ID, &k.CreatedAt, &k.UpdatedAt); err != nil {
 		return err
 	}
 	for i, id := range k.ListingIDs {
@@ -69,7 +81,7 @@ func (r *sharedAPIKeyRepository) Create(ctx context.Context, k *service.SharedAP
 	return tx.Commit()
 }
 func (r *sharedAPIKeyRepository) ListByUser(ctx context.Context, userID int64) ([]service.SharedAPIKey, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,user_id,name,key,platform,status,created_at,updated_at,legacy_api_key_id FROM shared_api_keys WHERE user_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC`, userID)
+	rows, err := r.db.QueryContext(ctx, `SELECT id,user_id,name,key,platform,status,created_at,updated_at,legacy_api_key_id,COALESCE(selection_mode,'manual'),COALESCE(priority_mode,'order') FROM shared_api_keys WHERE user_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +102,7 @@ func (r *sharedAPIKeyRepository) ListByUser(ctx context.Context, userID int64) (
 	return out, rows.Err()
 }
 func (r *sharedAPIKeyRepository) GetByID(ctx context.Context, userID, id int64) (*service.SharedAPIKey, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id,user_id,name,key,platform,status,created_at,updated_at,legacy_api_key_id FROM shared_api_keys WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL`, id, userID)
+	row := r.db.QueryRowContext(ctx, `SELECT id,user_id,name,key,platform,status,created_at,updated_at,legacy_api_key_id,COALESCE(selection_mode,'manual'),COALESCE(priority_mode,'order') FROM shared_api_keys WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL`, id, userID)
 	k := &service.SharedAPIKey{}
 	if err := scanSharedKey(row, k); err != nil {
 		if err == sql.ErrNoRows {
@@ -103,7 +115,7 @@ func (r *sharedAPIKeyRepository) GetByID(ctx context.Context, userID, id int64) 
 	return k, err
 }
 func (r *sharedAPIKeyRepository) GetByKey(ctx context.Context, raw string) (*service.SharedAPIKey, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT k.id,k.user_id,k.name,k.key,k.platform,k.status,k.created_at,k.updated_at,k.legacy_api_key_id FROM shared_api_keys k WHERE k.key=$1 AND k.deleted_at IS NULL`, strings.TrimSpace(raw))
+	row := r.db.QueryRowContext(ctx, `SELECT k.id,k.user_id,k.name,k.key,k.platform,k.status,k.created_at,k.updated_at,k.legacy_api_key_id,COALESCE(k.selection_mode,'manual'),COALESCE(k.priority_mode,'order') FROM shared_api_keys k WHERE k.key=$1 AND k.deleted_at IS NULL`, strings.TrimSpace(raw))
 	k := &service.SharedAPIKey{}
 	if err := scanSharedKey(row, k); err != nil {
 		if err == sql.ErrNoRows {
@@ -121,7 +133,7 @@ func (r *sharedAPIKeyRepository) Update(ctx context.Context, k *service.SharedAP
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `UPDATE shared_api_keys SET name=$1,status=$2,updated_at=NOW() WHERE id=$3 AND user_id=$4 AND deleted_at IS NULL`, k.Name, k.Status, k.ID, k.UserID); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE shared_api_keys SET name=$1,status=$2,platform=$3,selection_mode=$4,priority_mode=$5,updated_at=NOW() WHERE id=$6 AND user_id=$7 AND deleted_at IS NULL`, k.Name, k.Status, k.Platform, k.SelectionMode, k.PriorityMode, k.ID, k.UserID); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM shared_api_key_listings WHERE api_key_id=$1`, k.ID); err != nil {

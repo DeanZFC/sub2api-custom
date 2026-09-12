@@ -1,7 +1,7 @@
 <template>
   <BaseDialog
     :show="show"
-    :title="t('admin.accounts.createAccount')"
+    :title="sharedPool && initialAccount ? t('admin.accounts.editAccount') : t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
   >
@@ -3835,7 +3835,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
@@ -4015,7 +4015,13 @@ const apiKeyValuePlaceholder = computed(() => {
 interface Props {
   show: boolean
   sharedPool?: boolean
-  initialAccount?: { name?: string; platform?: string }
+  initialAccount?: {
+    name?: string
+    platform?: string
+    type?: string
+    concurrency?: number
+    rate_multiplier?: number
+  }
   readonlyPlatform?: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
@@ -4684,14 +4690,59 @@ const canExchangeCode = computed(() => {
   return authCode.trim() && oauth.sessionId.value && !oauth.loading.value
 })
 
+function applySharedAccountType(type: string, platform: AccountPlatform) {
+  switch (type) {
+    case 'apikey':
+    case 'upstream':
+      if (platform === 'antigravity') {
+        antigravityAccountType.value = 'upstream'
+        accountCategory.value = 'oauth-based'
+      } else {
+        accountCategory.value = 'apikey'
+      }
+      break
+    case 'bedrock':
+      accountCategory.value = 'bedrock'
+      break
+    case 'service_account':
+      accountCategory.value = 'service_account'
+      break
+    case 'setup-token':
+      accountCategory.value = 'oauth-based'
+      addMethod.value = 'setup-token'
+      break
+    default:
+      accountCategory.value = 'oauth-based'
+      addMethod.value = 'oauth'
+      if (platform === 'antigravity') antigravityAccountType.value = 'oauth'
+      break
+  }
+}
+
+function applySharedInitialAccount(initial: NonNullable<Props['initialAccount']>) {
+  if (initial.name) form.name = initial.name
+  if (initial.platform) form.platform = initial.platform as AccountPlatform
+  if (initial.type) applySharedAccountType(initial.type, form.platform)
+  if (typeof initial.concurrency === 'number' && initial.concurrency > 0) {
+    form.concurrency = initial.concurrency
+  }
+  if (typeof initial.rate_multiplier === 'number' && initial.rate_multiplier >= 0) {
+    form.rate_multiplier = initial.rate_multiplier
+  }
+}
+
 // Watchers
 watch(
   () => props.show,
   (newVal) => {
     if (newVal) {
       if (props.sharedPool && props.initialAccount) {
-        if (props.initialAccount.name) form.name = props.initialAccount.name
-        if (props.initialAccount.platform) form.platform = props.initialAccount.platform as AccountPlatform
+        applySharedInitialAccount(props.initialAccount)
+        // Platform watchers (Grok/Antigravity) reset category and concurrency
+        // synchronously; re-apply after they settle so edit echo keeps the
+        // stored account type.
+        const initial = props.initialAccount
+        void nextTick(() => applySharedInitialAccount(initial))
       }
       // Load TLS fingerprint profiles
       if (!props.sharedPool) adminAPI.tlsFingerprintProfiles.list()

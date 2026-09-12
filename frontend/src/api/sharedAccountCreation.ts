@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import { createSharedListing } from './sharedPool'
+import { applySharedOAuthCredentials, clearSharedAccountError, createSharedListing, getSharedAccount, updateSharedAccount } from './sharedPool'
 import type { adminAPI } from './admin'
 import type { CreateAccountRequest, CodexSessionImportResult } from '@/types'
 import { getGrokSSOImportTimeout, type GrokSSOToOAuthResponse } from './admin/grok'
@@ -26,7 +26,7 @@ const credentialKeys = new Set([
   'project_id', 'oauth_type', 'tier_id', 'sub', 'team_id', 'subscription_tier',
   'entitlement_status', 'service_account_json', 'client_email', 'location',
   'aws_region', 'aws_access_key_id', 'aws_secret_access_key', 'aws_session_token',
-  'account_mode', 'api_protocol', 'api_base_urls', 'model_mapping'
+  'account_mode', 'api_protocol', 'api_base_urls'
 ])
 
 export function createSharedAccountAPI(proxyURL: () => string) {
@@ -62,8 +62,29 @@ export function createSharedAccountAPI(proxyURL: () => string) {
     const apiError = error as { response?: { data?: { message?: string; detail?: string } }; message?: string }
     return apiError.response?.data?.message || apiError.response?.data?.detail || apiError.message || '创建失败'
   }
+  async function update(id: number, payload: Record<string, unknown>) {
+    const credentials = payload.credentials && typeof payload.credentials === 'object'
+      ? Object.fromEntries(Object.entries(payload.credentials as Record<string, unknown>).filter(([key]) => credentialKeys.has(key)))
+      : undefined
+    const extra = payload.extra && typeof payload.extra === 'object'
+      ? Object.fromEntries(Object.entries(payload.extra as Record<string, unknown>).filter(([key]) => ['email', 'name', 'privacy_mode', 'subscription_tier', 'project_id', 'codex_fingerprint_mode', 'openai_passthrough_enabled', 'openai_flatten_namespaces'].includes(key)))
+      : undefined
+    return updateSharedAccount(id, {
+      name: payload.name,
+      credentials,
+      extra,
+      concurrency: payload.concurrency,
+      rate_multiplier: payload.rate_multiplier,
+      expires_at: payload.expires_at,
+      proxy_url: proxyURL().trim()
+    })
+  }
   const accounts = {
     create,
+    getById: getSharedAccount,
+    update,
+    applyOAuthCredentials: applySharedOAuthCredentials,
+    clearError: clearSharedAccountError,
     generateAuthUrl: (async (endpoint, payload) => {
       const { platform, action } = authEndpoint(endpoint)
       return post(platform, action, payload)

@@ -25,6 +25,7 @@ type SharedAccountCard struct {
 	ID                    int64                     `json:"id"`
 	AccountID             int64                     `json:"account_id,omitempty"`
 	Platform              string                    `json:"platform"`
+	Type                  string                    `json:"type,omitempty"`
 	DisplayName           string                    `json:"display_name"`
 	UploaderName          string                    `json:"uploader_name,omitempty"`
 	Status                string                    `json:"status"`
@@ -48,7 +49,9 @@ type SharedAccountRecentCall struct {
 type SharedAccountPoolRepository interface {
 	ListPublicCards(ctx context.Context, platform string, limit, recentLimit int) ([]SharedAccountCard, error)
 	GetOwnerCards(ctx context.Context, ownerID int64, limit, recentLimit int) ([]SharedAccountCard, error)
+	GetOwnerListingByAccountID(ctx context.Context, ownerID, accountID int64) (*SharedAccountListing, error)
 	CreateListing(ctx context.Context, listing *SharedAccountListing) error
+	UpdateListingMeta(ctx context.Context, ownerID, listingID int64, displayName string, concurrency int, sellRate float64) error
 	SetListingStatus(ctx context.Context, ownerID, listingID int64, status string) error
 	DeleteListing(ctx context.Context, ownerID, listingID int64) error
 }
@@ -58,6 +61,7 @@ type SharedAccountListing struct {
 	Platform, DisplayName, Status   string
 	ConcurrencyLimit                int
 	ConcurrencyMultiplier, SellRate float64
+	TotalCallCount                  int64
 }
 
 type SharedAccountUploadInput struct {
@@ -253,6 +257,183 @@ func (s *SharedAccountUploadService) DeleteAuthProxy(ctx context.Context, proxy 
 		defer cancel()
 		_ = s.proxies.Delete(cleanupCtx, proxy.ID)
 	}
+}
+
+type SharedAccountUpdateInput struct {
+	Name         *string
+	Credentials  *map[string]any
+	Extra        *map[string]any
+	Concurrency  *int
+	SellRate     *float64
+	ExpiresAt    *time.Time
+	ClearExpiry  bool
+	ProxyURL     string
+	Type         string
+	ReplaceCreds bool
+}
+
+func (s *SharedAccountUploadService) ownedAccount(ctx context.Context, ownerID, accountID int64) (*Account, *SharedAccountListing, error) {
+	if s == nil || s.accounts == nil || s.listings == nil || ownerID <= 0 || accountID <= 0 {
+		return nil, nil, ErrSharedListingNotFound
+	}
+	listing, err := s.listings.GetOwnerListingByAccountID(ctx, ownerID, accountID)
+	if err != nil {
+		return nil, nil, err
+	}
+	account, err := s.accounts.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if account == nil || account.AccountScope != "shared" {
+		return nil, nil, ErrSharedListingNotFound
+	}
+	account.Concurrency = listing.ConcurrencyLimit
+	account.RateMultiplier = &listing.SellRate
+	account.Name = listing.DisplayName
+	return account, listing, nil
+}
+
+func (s *SharedAccountUploadService) GetOwned(ctx context.Context, ownerID, accountID int64) (*Account, error) {
+	account, _, err := s.ownedAccount(ctx, ownerID, accountID)
+	return account, err
+}
+
+func (s *SharedAccountUploadService) GetOwnedDetail(ctx context.Context, ownerID, accountID int64) (*Account, *SharedAccountListing, error) {
+	return s.ownedAccount(ctx, ownerID, accountID)
+}
+
+func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, accountID int64, in SharedAccountUpdateInput) (*Account, error) {
+	account, listing, err := s.ownedAccount(ctx, ownerID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if in.Name != nil {
+		name := strings.TrimSpace(*in.Name)
+		if name == "" || len([]rune(name)) > 100 {
+			return nil, errors.New("name is required")
+		}
+		account.Name = name
+		listing.DisplayName = name
+	}
+	if in.Concurrency != nil {
+		if *in.Concurrency <= 0 {
+			return nil, errors.New("concurrency must be >= 1")
+		}
+		if *in.Concurrency > 1000 {
+			return nil, errors.New("concurrency must be <= 1000")
+		}
+		listing.ConcurrencyLimit = *in.Concurrency
+		mult := listing.ConcurrencyMultiplier
+		if mult <= 0 {
+			mult = 1
+		}
+		account.Concurrency = max(1, int(math.Floor(float64(*in.Concurrency)*mult)))
+	}
+	if in.SellRate != nil {
+		if *in.SellRate < 0 || *in.SellRate > 100 || math.IsNaN(*in.SellRate) || math.IsInf(*in.SellRate, 0) {
+			return nil, errors.New("invalid sharing rates")
+		}
+		if listing.Status == "active" && listing.TotalCallCount > 0 && *in.SellRate > listing.SellRate+1e-6 {
+			return nil, infraerrors.BadRequest("SHARED_SELL_RATE_LOCKED", "使用中不能提高倍率。请先暂停账号，改完后再恢复上线。")
+		}
+		listing.SellRate = *in.SellRate
+		account.RateMultiplier = in.SellRate
+	}
+	if in.Credentials != nil {
+		merged := MergePreservingSensitiveCreds(account.Credentials, *in.Credentials)
+		account.Credentials = SanitizeStoredCredentials(account.Platform, merged)
+		if err := validateSharedCredentials(SharedAccountUploadInput{Platform: account.Platform, Type: account.Type, Credentials: account.Credentials}); err != nil {
+			return nil, err
+		}
+	}
+	if in.Extra != nil {
+		extra := map[string]any{}
+		for key, value := range account.Extra {
+			extra[key] = value
+		}
+		for key, value := range sharedAccountExtra(*in.Extra) {
+			extra[key] = value
+		}
+		account.Extra = extra
+	}
+	if in.ClearExpiry {
+		account.ExpiresAt = nil
+	} else if in.ExpiresAt != nil {
+		account.ExpiresAt = in.ExpiresAt
+	}
+	if strings.TrimSpace(in.ProxyURL) != "" {
+		proxy, err := s.CreateProxy(ctx, ownerID, in.ProxyURL)
+		if err != nil {
+			return nil, err
+		}
+		if proxy != nil {
+			account.ProxyID = &proxy.ID
+		}
+	}
+	if err := s.accounts.Update(ctx, account); err != nil {
+		return nil, fmt.Errorf("update shared account: %w", err)
+	}
+	if err := s.listings.UpdateListingMeta(ctx, ownerID, listing.ID, listing.DisplayName, listing.ConcurrencyLimit, listing.SellRate); err != nil {
+		return nil, fmt.Errorf("update shared listing: %w", err)
+	}
+	return s.GetOwned(ctx, ownerID, accountID)
+}
+
+func (s *SharedAccountUploadService) ApplyOwnedOAuthCredentials(ctx context.Context, ownerID, accountID int64, accountType string, credentials, extra map[string]any) (*Account, error) {
+	account, listing, err := s.ownedAccount(ctx, ownerID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if !account.IsOAuth() {
+		return nil, infraerrors.BadRequest("NOT_OAUTH", "cannot apply oauth credentials to non-OAuth account")
+	}
+	if accountType == AccountTypeSetupToken {
+		account.Type = AccountTypeSetupToken
+	} else if accountType != "" {
+		account.Type = AccountTypeOAuth
+	}
+	account.Credentials = SanitizeStoredCredentials(account.Platform, credentials)
+	if err := validateSharedCredentials(SharedAccountUploadInput{Platform: account.Platform, Type: account.Type, Credentials: account.Credentials}); err != nil {
+		return nil, err
+	}
+	if extra != nil {
+		merged := map[string]any{}
+		for key, value := range account.Extra {
+			merged[key] = value
+		}
+		for key, value := range sharedAccountExtra(extra) {
+			merged[key] = value
+		}
+		account.Extra = merged
+	}
+	account.Status = StatusActive
+	account.ErrorMessage = ""
+	if listing.Status == "active" {
+		account.Schedulable = true
+	}
+	if err := s.accounts.Update(ctx, account); err != nil {
+		return nil, fmt.Errorf("update shared account: %w", err)
+	}
+	if err := s.accounts.ClearError(ctx, account.ID); err != nil {
+		return nil, err
+	}
+	return s.GetOwned(ctx, ownerID, accountID)
+}
+
+func (s *SharedAccountUploadService) ClearOwnedError(ctx context.Context, ownerID, accountID int64) (*Account, error) {
+	account, listing, err := s.ownedAccount(ctx, ownerID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.accounts.ClearError(ctx, account.ID); err != nil {
+		return nil, err
+	}
+	if listing.Status == "active" {
+		if err := s.accounts.SetSchedulable(ctx, account.ID, true); err != nil {
+			return nil, err
+		}
+	}
+	return s.GetOwned(ctx, ownerID, accountID)
 }
 
 func sharedAccountExtra(extra map[string]any) map[string]any {

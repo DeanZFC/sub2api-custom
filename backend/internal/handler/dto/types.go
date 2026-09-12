@@ -228,6 +228,8 @@ type Account struct {
 	LoadFactor              *int                           `json:"load_factor,omitempty"`
 	Priority                int                            `json:"priority"`
 	RateMultiplier          float64                        `json:"rate_multiplier"`
+	SharedTotalCallCount    int64                          `json:"shared_total_call_count,omitempty"`
+	SharedListingStatus     string                         `json:"shared_listing_status,omitempty"`
 	Status                  string                         `json:"status"`
 	ErrorMessage            string                         `json:"error_message"`
 	LastUsedAt              *time.Time                     `json:"last_used_at"`
