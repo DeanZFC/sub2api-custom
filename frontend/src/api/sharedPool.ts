@@ -100,6 +100,7 @@ export type SharedKeyPriorityMode = 'order' | 'rate' | 'availability'
 export interface SharedAPIKey {
   id: number
   name: string
+  key?: string
   key_preview: string
   platform: string
   status: string

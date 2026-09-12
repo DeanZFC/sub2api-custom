@@ -12,8 +12,12 @@ import type { Column } from '@/components/common/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
+import UseKeyModal from '@/components/keys/UseKeyModal.vue'
+import { maskApiKey } from '@/utils/maskApiKey'
+import { buildCcSwitchImportDeeplink, type CcSwitchClientType } from '@/utils/ccswitchImport'
 import { getModelsByPlatform } from '@/composables/useModelWhitelist'
-import type { Account, AccountPlatform, AccountType } from '@/types'
+import { getPublicSettings } from '@/api/auth'
+import type { Account, AccountPlatform, AccountType, GroupPlatform, PublicSettings } from '@/types'
 import {
   getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, setSharedListingStatus, deleteSharedListing,
   getSharedAccount, listSharedAPIKeys, createSharedAPIKey, updateSharedAPIKey, deleteSharedAPIKey,
@@ -43,7 +47,7 @@ const keySelection = ref<SharedKeySelectionMode>('manual')
 const keyPriority = ref<SharedKeyPriorityMode>('order')
 const keyListings = ref<number[]>([])
 const keyMessage = ref('')
-const createdKey = ref('')
+
 const showKeyModal = ref(false)
 const creatingKey = ref(false)
 const editingKeyId = ref<number | null>(null)
@@ -181,7 +185,11 @@ const avgLatency = (card: SharedCard) => {
   const xs = card.recent_calls.map(call => Number(call.duration_ms || 0)).filter(value => value > 0)
   return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0
 }
-onMounted(() => { void loadCards(); void loadWallet() })
+async function loadPublicSettings() {
+  try { publicSettings.value = await getPublicSettings() }
+  catch { /* keep defaults */ }
+}
+onMounted(() => { void loadCards(); void loadWallet(); void loadPublicSettings() })
 async function loadKeys(){ try { sharedKeys.value = await listSharedAPIKeys() } catch {} }
 function openCreate() { showCreateAccount.value = true }
 async function loadOwnedAccount(card: SharedCard) {
@@ -230,6 +238,11 @@ const keyColumns: Column[] = [
   { key: 'actions', label: '操作', sortable: false }
 ]
 const copiedKeyId = ref<number | null>(null)
+const publicSettings = ref<PublicSettings | null>(null)
+const showUseKeyModal = ref(false)
+const usingKey = ref<SharedAPIKey | null>(null)
+const showCcsClientSelect = ref(false)
+const pendingCcsKey = ref<SharedAPIKey | null>(null)
 const canSaveKey = computed(() => !!keyName.value.trim() && (keySelection.value === 'platform' || keyListings.value.length > 0))
 watch(keySelection, (mode) => {
   if (mode === 'platform') {
@@ -272,9 +285,81 @@ function toggleListing(id: number) { keyListings.value = keyListings.value.inclu
 function moveListing(index: number, delta: number) { const next = index + delta; if (next < 0 || next >= keyListings.value.length) return; const ids = [...keyListings.value]; [ids[index], ids[next]] = [ids[next], ids[index]]; keyListings.value = ids }
 function dragListing(event: DragEvent, index: number) { event.dataTransfer?.setData('text/plain', String(index)) }
 function dropListing(event: DragEvent, target: number) { const source = Number(event.dataTransfer?.getData('text/plain')); if (!Number.isInteger(source) || source === target) return; const ids = [...keyListings.value]; const [id] = ids.splice(source, 1); ids.splice(target, 0, id); keyListings.value = ids }
-async function copyCreatedKey(){ if (!createdKey.value) return; await navigator.clipboard.writeText(createdKey.value); keyMessage.value = 'Key 已复制到剪贴板，请妥善保存。' }
-async function copyKeyPreview(key: SharedAPIKey) {
-  await navigator.clipboard.writeText(key.key_preview)
+function keyValue(key: SharedAPIKey) {
+  return key.key || key.key_preview
+}
+function keyPlatformOf(key: SharedAPIKey): GroupPlatform {
+  return (key.platform || 'anthropic') as GroupPlatform
+}
+function openUseKey(key: SharedAPIKey) {
+  usingKey.value = key
+  showUseKeyModal.value = true
+}
+function closeUseKey() {
+  showUseKeyModal.value = false
+  usingKey.value = null
+}
+function importToCcswitch(key: SharedAPIKey) {
+  if (keyPlatformOf(key) === 'antigravity') {
+    pendingCcsKey.value = key
+    showCcsClientSelect.value = true
+    return
+  }
+  executeCcsImport(key, keyPlatformOf(key) === 'gemini' ? 'gemini' : 'claude')
+}
+function executeCcsImport(key: SharedAPIKey, clientType: CcSwitchClientType) {
+  const apiKey = keyValue(key)
+  if (!apiKey) {
+    keyMessage.value = '无法读取完整 Key，请刷新后重试'
+    return
+  }
+  const baseUrl = publicSettings.value?.api_base_url || window.location.origin
+  const usageScript = `({
+    request: {
+      url: "{{baseUrl}}/v1/usage",
+      method: "GET",
+      headers: { "Authorization": "Bearer {{apiKey}}" }
+    },
+    extractor: function(response) {
+      const remaining = response?.remaining ?? response?.quota?.remaining ?? response?.balance;
+      const unit = response?.unit ?? response?.quota?.unit ?? "USD";
+      return {
+        isValid: response?.is_active ?? response?.isValid ?? true,
+        remaining,
+        unit
+      };
+    }
+  })`
+  const deeplink = buildCcSwitchImportDeeplink({
+    baseUrl,
+    platform: keyPlatformOf(key),
+    clientType,
+    providerName: (publicSettings.value?.site_name || 'sub2api').trim() || 'sub2api',
+    apiKey,
+    usageScript
+  })
+  try {
+    window.open(deeplink, '_self')
+    setTimeout(() => {
+      if (document.hasFocus()) keyMessage.value = '未检测到 CCS，请确认已安装 CC Switch'
+    }, 100)
+  } catch {
+    keyMessage.value = '未检测到 CCS，请确认已安装 CC Switch'
+  }
+}
+function handleCcsClientSelect(clientType: CcSwitchClientType) {
+  if (pendingCcsKey.value) executeCcsImport(pendingCcsKey.value, clientType)
+  showCcsClientSelect.value = false
+  pendingCcsKey.value = null
+}
+function closeCcsClientSelect() {
+  showCcsClientSelect.value = false
+  pendingCcsKey.value = null
+}
+async function copyKeyValue(key: SharedAPIKey) {
+  const value = keyValue(key)
+  if (!value) return
+  await navigator.clipboard.writeText(value)
   copiedKeyId.value = key.id
   setTimeout(() => { if (copiedKeyId.value === key.id) copiedKeyId.value = null }, 1500)
 }
@@ -294,13 +379,10 @@ async function createKey(){
   try {
     if (editingKeyId.value) {
       await updateSharedAPIKey(editingKeyId.value, keyPayload())
-      showKeyModal.value = false
     } else {
-      const created = await createSharedAPIKey(keyPayload())
-      createdKey.value = created.key
-      keyMessage.value = '新 Key 已创建，请复制并保存（之后不会再次显示完整 Key）。'
-      showKeyModal.value = false
+      await createSharedAPIKey(keyPayload())
     }
+    showKeyModal.value = false
     await loadKeys()
   } catch (e) { keyMessage.value = errorText(e) }
   finally { creatingKey.value = false }
@@ -356,13 +438,7 @@ onMounted(() => { void loadKeys() })
             </button>
           </div>
         </div>
-        <div v-if="keyMessage" class="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
-          <div>{{ keyMessage }}</div>
-          <div v-if="createdKey" class="mt-2 flex items-center gap-2">
-            <code class="min-w-0 flex-1 truncate rounded bg-white/70 px-2 py-1 font-mono text-xs dark:bg-dark-800">{{ createdKey }}</code>
-            <button class="btn btn-secondary btn-sm" @click="copyCreatedKey">复制 Key</button>
-          </div>
-        </div>
+        <div v-if="keyMessage" class="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-300">{{ keyMessage }}</div>
         <div class="card overflow-hidden">
           <DataTable :columns="keyColumns" :data="sharedKeys" row-key="id">
             <template #cell-name="{ value }">
@@ -370,8 +446,8 @@ onMounted(() => { void loadKeys() })
             </template>
             <template #cell-key="{ row }">
               <div class="flex items-center gap-2">
-                <code class="font-mono text-xs text-gray-600 dark:text-gray-300">{{ row.key_preview }}</code>
-                <button class="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700" :title="copiedKeyId === row.id ? '已复制' : '复制预览'" @click="copyKeyPreview(row)">
+                <code class="code text-xs">{{ maskApiKey(keyValue(row)) }}</code>
+                <button class="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700" :title="copiedKeyId === row.id ? '已复制' : '复制'" @click="copyKeyValue(row)">
                   <Icon v-if="copiedKeyId === row.id" name="check" size="sm" />
                   <Icon v-else name="clipboard" size="sm" />
                 </button>
@@ -397,6 +473,14 @@ onMounted(() => { void loadKeys() })
             </template>
             <template #cell-actions="{ row }">
               <div class="flex items-center gap-1">
+                <button class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400" @click="openUseKey(row)">
+                  <Icon name="terminal" size="sm" />
+                  <span class="text-xs">使用密钥</span>
+                </button>
+                <button v-if="!publicSettings?.hide_ccs_import_button" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400" @click="importToCcswitch(row)">
+                  <Icon name="upload" size="sm" />
+                  <span class="text-xs">导入 CCS</span>
+                </button>
                 <button class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700" @click="openEditKey(row)">
                   <Icon name="edit" size="sm" />
                   <span class="text-xs">编辑</span>
@@ -442,6 +526,32 @@ onMounted(() => { void loadKeys() })
         @close="showReAuth = false; reAuthAccount = null"
         @reauthorized="loadCards"
       />
+      <UseKeyModal
+        :show="showUseKeyModal"
+        :api-key="usingKey ? keyValue(usingKey) : ''"
+        :base-url="publicSettings?.api_base_url || ''"
+        :platform="usingKey ? keyPlatformOf(usingKey) : null"
+        :allow-messages-dispatch="false"
+        @close="closeUseKey"
+      />
+      <BaseDialog :show="showCcsClientSelect" title="选择客户端" width="narrow" @close="closeCcsClientSelect">
+        <p class="text-sm text-gray-600 dark:text-gray-400">请选择要导入到 CCS 的客户端</p>
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <button type="button" class="flex flex-col items-center gap-2 rounded-xl border-2 border-gray-200 p-4 transition-all hover:border-primary-500 hover:bg-primary-50 dark:border-dark-600 dark:hover:bg-primary-900/20" @click="handleCcsClientSelect('claude')">
+            <Icon name="terminal" size="xl" class="text-gray-600 dark:text-gray-400" />
+            <span class="font-medium text-gray-900 dark:text-white">Claude Code</span>
+          </button>
+          <button type="button" class="flex flex-col items-center gap-2 rounded-xl border-2 border-gray-200 p-4 transition-all hover:border-primary-500 hover:bg-primary-50 dark:border-dark-600 dark:hover:bg-primary-900/20" @click="handleCcsClientSelect('gemini')">
+            <Icon name="sparkles" size="xl" class="text-gray-600 dark:text-gray-400" />
+            <span class="font-medium text-gray-900 dark:text-white">Gemini CLI</span>
+          </button>
+        </div>
+        <template #footer>
+          <div class="flex justify-end">
+            <button class="btn btn-secondary" type="button" @click="closeCcsClientSelect">取消</button>
+          </div>
+        </template>
+      </BaseDialog>
 
       <section v-if="mode !== 'keys'" class="card p-5 sm:p-6" aria-label="共享收益">
         <div class="flex flex-wrap items-center justify-between gap-4">

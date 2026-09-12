@@ -30,7 +30,6 @@ func scanSharedKey(row interface{ Scan(...any) error }, k *service.SharedAPIKey)
 		k.PriorityMode = service.SharedKeyPriorityOrder
 	}
 	k.KeyPreview = previewKey(k.Key)
-	k.Key = ""
 	return nil
 }
 func (r *sharedAPIKeyRepository) loadListings(ctx context.Context, id int64) ([]int64, []int64, error) {

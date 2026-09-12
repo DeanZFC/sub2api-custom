@@ -10,9 +10,10 @@ const api = vi.hoisted(() => ({
   createSharedAPIKey: vi.fn(), updateSharedAPIKey: vi.fn(), deleteSharedAPIKey: vi.fn()
 }))
 vi.mock('@/api/sharedPool', () => api)
+vi.mock('@/api/auth', () => ({ getPublicSettings: vi.fn().mockResolvedValue({ hide_ccs_import_button: false, api_base_url: 'https://example.com', site_name: 'test' }) }))
 const render = () => mount(SharedPoolView, { global: { stubs: {
   AppLayout: { template: '<main><slot /></main>' },
-  CreateAccountModal: true, EditAccountModal: true, ReAuthAccountModal: true, AccountTestModal: true,
+  CreateAccountModal: true, EditAccountModal: true, ReAuthAccountModal: true, AccountTestModal: true, UseKeyModal: true,
   PlatformIcon: true, PlatformTypeBadge: true, Icon: true,
   DataTable: { props: ['columns', 'data'], template: '<div><slot name="empty" /><slot /></div>' },
   BaseDialog: { props: ['show', 'title'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
