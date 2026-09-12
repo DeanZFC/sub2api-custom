@@ -32,6 +32,8 @@ type SharedAccountCard struct {
 	ConcurrencyLimit      int                       `json:"concurrency_limit"`
 	ConcurrencyMultiplier float64                   `json:"concurrency_multiplier"`
 	SellRate              float64                   `json:"sell_rate"`
+	Listed                bool                      `json:"listed"`
+	CurrentConcurrency    int                       `json:"current_concurrency"`
 	TotalCallCount        int64                     `json:"total_call_count"`
 	LastCalledAt          *time.Time                `json:"last_called_at,omitempty"`
 	RecentCalls           []SharedAccountRecentCall `json:"recent_calls"`
@@ -53,6 +55,7 @@ type SharedAccountPoolRepository interface {
 	CreateListing(ctx context.Context, listing *SharedAccountListing) error
 	UpdateListingMeta(ctx context.Context, ownerID, listingID int64, displayName string, concurrency int, sellRate float64) error
 	SetListingStatus(ctx context.Context, ownerID, listingID int64, status string) error
+	SetListingListed(ctx context.Context, ownerID, listingID int64, listed bool) error
 	DeleteListing(ctx context.Context, ownerID, listingID int64) error
 }
 
@@ -62,6 +65,7 @@ type SharedAccountListing struct {
 	ConcurrencyLimit                int
 	ConcurrencyMultiplier, SellRate float64
 	TotalCallCount                  int64
+	Listed                          bool
 }
 
 type SharedAccountUploadInput struct {
@@ -203,7 +207,7 @@ func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, 
 			return nil, fmt.Errorf("bind shared group: %w", err)
 		}
 	}
-	listing := &SharedAccountListing{OwnerUserID: ownerID, AccountID: account.ID, Platform: in.Platform, DisplayName: in.Name, Status: "active", ConcurrencyLimit: in.Concurrency, ConcurrencyMultiplier: in.ConcurrencyMultiplier, SellRate: in.SellRate}
+	listing := &SharedAccountListing{OwnerUserID: ownerID, AccountID: account.ID, Platform: in.Platform, DisplayName: in.Name, Status: "active", ConcurrencyLimit: in.Concurrency, ConcurrencyMultiplier: in.ConcurrencyMultiplier, SellRate: in.SellRate, Listed: true}
 	if err := s.listings.CreateListing(ctx, listing); err != nil {
 		cleanupProxy()
 		_ = s.accounts.Delete(ctx, account.ID)
@@ -302,6 +306,16 @@ func (s *SharedAccountUploadService) GetOwned(ctx context.Context, ownerID, acco
 
 func (s *SharedAccountUploadService) GetOwnedDetail(ctx context.Context, ownerID, accountID int64) (*Account, *SharedAccountListing, error) {
 	return s.ownedAccount(ctx, ownerID, accountID)
+}
+
+func (s *SharedAccountUploadService) TestOwnedAccount(c *gin.Context, ownerID, accountID int64, modelID, prompt, mode string, opts AccountTestOptions) error {
+	if s == nil || s.tester == nil {
+		return infraerrors.InternalServer("ACCOUNT_TEST_UNAVAILABLE", "account test service is not configured")
+	}
+	if _, err := s.GetOwned(c.Request.Context(), ownerID, accountID); err != nil {
+		return err
+	}
+	return s.tester.TestAccountConnection(c, accountID, modelID, prompt, mode, opts)
 }
 
 func (s *SharedAccountUploadService) SyncOwnedUpstreamModels(ctx context.Context, ownerID, accountID int64) (*UpstreamModelCatalog, error) {

@@ -375,6 +375,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { buildApiUrl } from '@/api/client'
 import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
+import { getSharedAccountModels } from '@/api/sharedPool'
 import type { Account, ClaudeModel } from '@/types'
 
 const { t } = useI18n()
@@ -393,6 +394,7 @@ interface PreviewMedia {
 const props = defineProps<{
   show: boolean
   account: Account | null
+  sharedPool?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -766,7 +768,13 @@ const loadAvailableModels = async () => {
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = await adminAPI.accounts.getAvailableModels(props.account.id)
+    const models = props.sharedPool
+      ? (await getSharedAccountModels(props.account.id)).map((model) => ({
+          id: model.id,
+          display_name: model.display_name || model.id,
+          type: model.type || 'model'
+        }))
+      : await adminAPI.accounts.getAvailableModels(props.account.id)
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
       ? sortTestModels(models)
       : models
@@ -878,16 +886,19 @@ const startTest = async () => {
     }
 
     // Use the configured API base; EventSource does not support POST.
-    const url = buildApiUrl(`/admin/accounts/${props.account.id}/test`)
+    const url = buildApiUrl(props.sharedPool
+      ? `/user/shared-pool/accounts/${props.account.id}/test`
+      : `/admin/accounts/${props.account.id}/test`)
 
     // Use fetch with streaming for SSE since EventSource doesn't support POST
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+      'Content-Type': 'application/json'
+    }
+    if (!props.sharedPool) headers[ADMIN_UI_REQUEST_HEADER] = '1'
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
-        'Content-Type': 'application/json',
-        [ADMIN_UI_REQUEST_HEADER]: '1'
-      },
+      headers,
       body: JSON.stringify(requestBody),
       signal: abortController.signal
     })

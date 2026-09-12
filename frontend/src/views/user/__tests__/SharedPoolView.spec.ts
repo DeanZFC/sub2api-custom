@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({
   getSharedPoolCards: vi.fn(), getMySharedCards: vi.fn(),
   getSharedWallet: vi.fn(), transferSharedEarnings: vi.fn(),
   getSharedAccount: vi.fn(),
-  listSharedAPIKeys: vi.fn(), setSharedListingStatus: vi.fn(), deleteSharedListing: vi.fn(),
+  listSharedAPIKeys: vi.fn(), setSharedListingStatus: vi.fn(), setSharedListingListed: vi.fn(), deleteSharedListing: vi.fn(),
   createSharedAPIKey: vi.fn(), updateSharedAPIKey: vi.fn(), deleteSharedAPIKey: vi.fn()
 }))
 vi.mock('@/api/sharedPool', () => api)
@@ -14,7 +14,7 @@ vi.mock('@/api/auth', () => ({ getPublicSettings: vi.fn().mockResolvedValue({ hi
 const render = () => mount(SharedPoolView, { global: { stubs: {
   AppLayout: { template: '<main><slot /></main>' },
   CreateAccountModal: true, EditAccountModal: true, ReAuthAccountModal: true, AccountTestModal: true, UseKeyModal: true,
-  PlatformIcon: true, PlatformTypeBadge: true, Icon: true,
+  PlatformIcon: true, PlatformTypeBadge: true, Icon: true, CapacityBadge: true, RecentRequestsCell: true,
   DataTable: { props: ['columns', 'data'], template: '<div><slot name="empty" /><slot /></div>' },
   BaseDialog: { props: ['show', 'title'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
   EmptyState: true
@@ -44,9 +44,7 @@ describe('SharedPoolView', () => {
     expect(article.text()).toContain('API Key')
     expect(article.text()).toContain('gpt-5.2')
     expect(article.text()).toContain('1.5x')
-    expect(article.text()).not.toContain('model-a')
-    await wrapper.findAll('button').find(b => b.text().includes('最近请求'))!.trigger('click')
-    expect(wrapper.find('article').text()).toContain('model-a')
+    expect(article.text()).toContain('最近请求')
     await wrapper.findAll('button').find(b => b.text() === '我的账号')!.trigger('click')
     await flushPromises()
     expect(api.getMySharedCards).toHaveBeenCalledOnce()

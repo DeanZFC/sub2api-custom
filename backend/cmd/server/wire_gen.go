@@ -324,7 +324,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	sharedWalletRepository := repository.NewSharedWalletRepository(db)
 	sharedWalletService := service.NewSharedWalletService(sharedWalletRepository, apiKeyAuthCacheInvalidator, billingCacheService)
 	sharedAccountUploadService := service.ProvideSharedAccountUploadService(accountRepository, sharedAccountPoolRepository, groupRepository, proxyRepository, accountTestService)
-	sharedAccountPoolHandler := handler.NewSharedAccountPoolHandler(sharedAccountPoolRepository, sharedWalletService, sharedAccountUploadService, settingService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService)
+	sharedAccountPoolHandler := handler.NewSharedAccountPoolHandler(sharedAccountPoolRepository, sharedWalletService, sharedAccountUploadService, settingService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, concurrencyService)
 	sharedAPIKeyHandler := handler.NewSharedAPIKeyHandler(sharedAPIKeyService)
 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)

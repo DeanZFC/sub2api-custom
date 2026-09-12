@@ -21,6 +21,8 @@ export interface SharedCard {
   concurrency_limit: number
   concurrency_multiplier: number
   sell_rate: number
+  listed?: boolean
+  current_concurrency?: number
   total_call_count: number
   last_called_at?: string
   recent_calls: SharedCall[]
@@ -73,7 +75,16 @@ export async function setSharedListingStatus(id: number, action: 'pause' | 'resu
   const { data } = await apiClient.post<{ id: number; status: string }>(`/user/shared-pool/listings/${id}/${action}`)
   return data
 }
+export async function setSharedListingListed(id: number, listed: boolean) {
+  const { data } = await apiClient.put<{ id: number; listed: boolean }>(`/user/shared-pool/listings/${id}/listed`, { listed })
+  return data
+}
 export async function deleteSharedListing(id: number) { await apiClient.delete(`/user/shared-pool/listings/${id}`) }
+
+export async function getSharedAccountModels(accountId: number) {
+  const { data } = await apiClient.get<Array<{ id: string; display_name?: string; type?: string }>>(`/user/shared-pool/accounts/${accountId}/models`)
+  return data
+}
 
 export async function getSharedAccount(accountId: number) {
   const { data } = await apiClient.get<import('@/types').Account>(`/user/shared-pool/accounts/${accountId}`)

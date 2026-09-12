@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -25,12 +26,13 @@ type SharedAccountPoolHandler struct {
 	geminiOAuth      *service.GeminiOAuthService
 	antigravityOAuth *service.AntigravityOAuthService
 	grokOAuth        *service.GrokOAuthService
+	concurrency      *service.ConcurrencyService
 	sessionMu        sync.Mutex
 	sessions         map[string]sharedOAuthSession
 }
 
-func NewSharedAccountPoolHandler(repo service.SharedAccountPoolRepository, wallet *service.SharedWalletService, uploader *service.SharedAccountUploadService, settings *service.SettingService, oauth *service.OAuthService, openaiOAuth *service.OpenAIOAuthService, geminiOAuth *service.GeminiOAuthService, antigravityOAuth *service.AntigravityOAuthService, grokOAuth *service.GrokOAuthService) *SharedAccountPoolHandler {
-	return &SharedAccountPoolHandler{repo: repo, wallet: wallet, uploader: uploader, settings: settings, oauth: oauth, openaiOAuth: openaiOAuth, geminiOAuth: geminiOAuth, antigravityOAuth: antigravityOAuth, grokOAuth: grokOAuth, sessions: make(map[string]sharedOAuthSession)}
+func NewSharedAccountPoolHandler(repo service.SharedAccountPoolRepository, wallet *service.SharedWalletService, uploader *service.SharedAccountUploadService, settings *service.SettingService, oauth *service.OAuthService, openaiOAuth *service.OpenAIOAuthService, geminiOAuth *service.GeminiOAuthService, antigravityOAuth *service.AntigravityOAuthService, grokOAuth *service.GrokOAuthService, concurrency *service.ConcurrencyService) *SharedAccountPoolHandler {
+	return &SharedAccountPoolHandler{repo: repo, wallet: wallet, uploader: uploader, settings: settings, oauth: oauth, openaiOAuth: openaiOAuth, geminiOAuth: geminiOAuth, antigravityOAuth: antigravityOAuth, grokOAuth: grokOAuth, concurrency: concurrency, sessions: make(map[string]sharedOAuthSession)}
 }
 
 type sharedUploadRequest struct {
@@ -99,6 +101,31 @@ func (h *SharedAccountPoolHandler) SetStatus(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"id": id, "status": status})
 }
+
+func (h *SharedAccountPoolHandler) SetListed(c *gin.Context) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid listing id")
+		return
+	}
+	var req struct {
+		Listed *bool `json:"listed"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Listed == nil {
+		response.BadRequest(c, "listed is required")
+		return
+	}
+	if err = h.repo.SetListingListed(c.Request.Context(), subject.UserID, id, *req.Listed); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"id": id, "listed": *req.Listed})
+}
 func (h *SharedAccountPoolHandler) Delete(c *gin.Context) {
 	subject, ok := middleware.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -141,7 +168,30 @@ func (h *SharedAccountPoolHandler) ListCards(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	h.attachConcurrency(c.Request.Context(), items)
 	response.Success(c, gin.H{"items": items, "limit": limit, "recent_limit": recent})
+}
+
+func (h *SharedAccountPoolHandler) attachConcurrency(ctx context.Context, items []service.SharedAccountCard) {
+	if h == nil || h.concurrency == nil || len(items) == 0 {
+		return
+	}
+	ids := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item.AccountID > 0 {
+			ids = append(ids, item.AccountID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	counts, err := h.concurrency.GetAccountConcurrencyBatch(ctx, ids)
+	if err != nil {
+		return
+	}
+	for i := range items {
+		items[i].CurrentConcurrency = counts[items[i].AccountID]
+	}
 }
 
 func (h *SharedAccountPoolHandler) parseOwnedAccountID(c *gin.Context) (int64, int64, bool) {
@@ -278,6 +328,48 @@ func (h *SharedAccountPoolHandler) writeUpstreamCatalog(c *gin.Context, catalog 
 	response.Success(c, catalog)
 }
 
+func (h *SharedAccountPoolHandler) GetAvailableModels(c *gin.Context) {
+	ownerID, accountID, ok := h.parseOwnedAccountID(c)
+	if !ok {
+		return
+	}
+	account, err := h.uploader.GetOwned(c.Request.Context(), ownerID, accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if ids := service.ConfiguredTestModelIDs(account); len(ids) > 0 {
+		response.Success(c, service.TestPickerModels(ids))
+		return
+	}
+	response.Success(c, service.TestPickerModels(nil))
+}
+
+type sharedTestAccountRequest struct {
+	ModelID      string `json:"model_id"`
+	Prompt       string `json:"prompt"`
+	Mode         string `json:"mode"`
+	ImageDataURL string `json:"image_data_url"`
+	AudioDataURL string `json:"audio_data_url"`
+}
+
+func (h *SharedAccountPoolHandler) TestAccount(c *gin.Context) {
+	ownerID, accountID, ok := h.parseOwnedAccountID(c)
+	if !ok {
+		return
+	}
+	account, err := h.uploader.GetOwned(c.Request.Context(), ownerID, accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	var req sharedTestAccountRequest
+	_ = c.ShouldBindJSON(&req)
+	if err := h.uploader.TestOwnedAccount(c, ownerID, account.ID, req.ModelID, req.Prompt, req.Mode, service.AccountTestOptions{ImageDataURL: req.ImageDataURL, AudioDataURL: req.AudioDataURL}); err != nil {
+		return
+	}
+}
+
 func (h *SharedAccountPoolHandler) SyncUpstreamModels(c *gin.Context) {
 	ownerID, accountID, ok := h.parseOwnedAccountID(c)
 	if !ok {
@@ -330,6 +422,7 @@ func (h *SharedAccountPoolHandler) MyCards(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	h.attachConcurrency(c.Request.Context(), items)
 	response.Success(c, gin.H{"items": items})
 }
 

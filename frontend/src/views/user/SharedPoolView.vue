@@ -12,6 +12,9 @@ import type { Column } from '@/components/common/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CapacityBadge from '@/components/account/CapacityBadge.vue'
+import RecentRequestsCell from '@/components/account/RecentRequestsCell.vue'
+import type { OpsRequestDetail } from '@/api/admin/ops'
 import UseKeyModal from '@/components/keys/UseKeyModal.vue'
 import { maskApiKey } from '@/utils/maskApiKey'
 import { buildCcSwitchImportDeeplink, type CcSwitchClientType } from '@/utils/ccswitchImport'
@@ -19,12 +22,13 @@ import { getModelsByPlatform } from '@/composables/useModelWhitelist'
 import { getPublicSettings } from '@/api/auth'
 import type { Account, AccountPlatform, AccountType, GroupPlatform, PublicSettings } from '@/types'
 import {
-  getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, setSharedListingStatus, deleteSharedListing,
+  getSharedPoolCards, getMySharedCards, getSharedWallet, transferSharedEarnings, setSharedListingStatus, setSharedListingListed, deleteSharedListing,
   getSharedAccount, listSharedAPIKeys, createSharedAPIKey, updateSharedAPIKey, deleteSharedAPIKey,
   type SharedCard, type SharedWallet, type SharedAPIKey, type SharedKeySelectionMode, type SharedKeyPriorityMode
 } from '@/api/sharedPool'
 
 const cards = ref<SharedCard[]>([])
+const myCards = ref<SharedCard[]>([])
 const wallet = ref<SharedWallet | null>(null)
 const mode = ref<'pool' | 'mine' | 'keys'>('pool')
 const loading = ref(true)
@@ -52,9 +56,14 @@ const showKeyModal = ref(false)
 const creatingKey = ref(false)
 const editingKeyId = ref<number | null>(null)
 const platformFilter = ref('')
-const expandedCalls = ref<Set<number>>(new Set())
 const batchBusy = ref(false)
-const availableKeyCards = computed(() => cards.value.filter(card => card.status === 'active' && card.platform.toLowerCase() === keyPlatform.value.toLowerCase()))
+const availableKeyCards = computed(() => {
+  const byId = new Map<number, SharedCard>()
+  for (const card of [...myCards.value, ...cards.value]) {
+    if (card.status === 'active' && card.platform.toLowerCase() === keyPlatform.value.toLowerCase()) byId.set(card.id, card)
+  }
+  return [...byId.values()]
+})
 const platforms = computed(() => [...new Set(cards.value.map(card => card.platform))])
 const visibleCards = computed(() => platformFilter.value ? cards.value.filter(card => card.platform === platformFilter.value) : cards.value)
 let transferKey: string | null = null
@@ -80,6 +89,11 @@ function errorText(error: unknown) {
 function typeText(card: SharedCard) {
   return typeLabels[card.type || ''] || card.type || '未知类型'
 }
+function capacityClass(current: number, max: number) {
+  if (max > 0 && current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  if (current > 0) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+  return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+}
 function statusClass(status: string) {
   switch (status) {
     case 'active': return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
@@ -93,11 +107,17 @@ function modelsFor(card: SharedCard) {
   return getModelsByPlatform(card.platform)
 }
 function iconPlatform(value: string): any { return value }
-function toggleCalls(id: number) {
-  const next = new Set(expandedCalls.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  expandedCalls.value = next
+function recentRequestsOf(card: SharedCard): OpsRequestDetail[] {
+  return (card.recent_calls || []).map((call) => ({
+    kind: call.result_status === 'success' ? 'success' : 'error',
+    created_at: call.created_at,
+    request_id: call.request_id,
+    model: call.model,
+    duration_ms: call.duration_ms,
+    actual_cost: call.charged_amount,
+    status_code: call.result_status === 'success' ? 200 : null,
+    message: call.result_status === 'success' ? undefined : call.result_status
+  }))
 }
 async function loadCards() {
   const current = ++generation
@@ -109,6 +129,7 @@ async function loadCards() {
       : await getSharedPoolCards({ limit: 100, recent_limit: 8 })
     if (current === generation) {
       cards.value = items
+      if (mode.value === 'mine') myCards.value = items
       if (platformFilter.value && !items.some(card => card.platform === platformFilter.value)) platformFilter.value = ''
     }
   } catch (e) {
@@ -126,8 +147,12 @@ function changeMode(next: 'pool' | 'mine' | 'keys') {
   mode.value = next
   platformFilter.value = ''
   selectedCards.value = []
-  if (next === 'keys') { void loadCards(); void loadKeys() }
+  if (next === 'keys') { void loadCards(); void loadKeys(); void loadMyCards() }
   else void loadCards()
+}
+async function loadMyCards() {
+  try { myCards.value = await getMySharedCards() }
+  catch { /* keep last known */ }
 }
 async function transfer() {
   if (transferring.value) return
@@ -143,6 +168,13 @@ async function transfer() {
   } catch (e) {
     walletError.value = errorText(e)
   } finally { transferring.value = false }
+}
+async function toggleListed(card: SharedCard) {
+  try {
+    await setSharedListingListed(card.id, !(card.listed !== false))
+    await loadCards()
+    if (mode.value !== 'mine') await loadMyCards()
+  } catch (e) { error.value = errorText(e) }
 }
 async function toggle(card: SharedCard) {
   // Any state other than active (including an account that was marked invalid
@@ -269,6 +301,7 @@ function openKeyModal() {
   keyPriority.value = 'order'
   keyListings.value = []
   showKeyModal.value = true
+  void loadMyCards()
 }
 function openEditKey(key: SharedAPIKey) {
   editingKeyId.value = key.id
@@ -607,7 +640,9 @@ onMounted(() => { void loadKeys() })
               <th class="px-5 py-3">平台 / 类型</th>
               <th class="px-5 py-3">最近请求</th>
               <th class="px-5 py-3">状态</th>
+              <th class="px-5 py-3">容量</th>
               <th class="px-5 py-3">调度</th>
+              <th class="px-5 py-3">公共池</th>
               <th class="px-5 py-3">倍率</th>
               <th class="px-5 py-3">最近调用</th>
               <th class="px-5 py-3">操作</th>
@@ -628,17 +663,26 @@ onMounted(() => { void loadKeys() })
                 <PlatformTypeBadge :platform="(card.platform || 'openai') as AccountPlatform" :type="(card.type || 'oauth') as AccountType" />
               </td>
               <td class="px-5 py-4">
-                <div v-if="card.recent_calls.length" class="flex h-6 items-center justify-end gap-1">
-                  <span v-for="call in card.recent_calls.slice(0, 10).reverse()" :key="call.request_id" class="h-6 w-1.5 rounded-full" :class="call.result_status === 'success' ? 'bg-emerald-500' : 'bg-red-400'" />
-                </div>
-                <span v-else class="text-sm text-gray-400">暂无</span>
+                <RecentRequestsCell :requests="recentRequestsOf(card)" />
               </td>
               <td class="px-5 py-4">
                 <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(card.status)">{{ labels[card.status] || card.status }}</span>
               </td>
               <td class="px-5 py-4">
+                <CapacityBadge :color-class="capacityClass(card.current_concurrency || 0, card.concurrency_limit)" :current="card.current_concurrency || 0" :max="card.concurrency_limit">
+                  <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75A2.25 2.25 0 0115.75 13.5H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                  </svg>
+                </CapacityBadge>
+              </td>
+              <td class="px-5 py-4">
                 <button role="switch" :aria-checked="card.status === 'active'" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent" :class="card.status === 'active' ? 'bg-primary-500' : 'bg-gray-200 dark:bg-dark-600'" @click="toggle(card)">
                   <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow" :class="card.status === 'active' ? 'translate-x-4' : 'translate-x-0'" />
+                </button>
+              </td>
+              <td class="px-5 py-4">
+                <button role="switch" :aria-checked="card.listed !== false" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent" :class="card.listed !== false ? 'bg-primary-500' : 'bg-gray-200 dark:bg-dark-600'" @click="toggleListed(card)">
+                  <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow" :class="card.listed !== false ? 'translate-x-4' : 'translate-x-0'" />
                 </button>
               </td>
               <td class="px-5 py-4 font-mono text-sm text-gray-700 dark:text-gray-300">{{ card.sell_rate }}x</td>
@@ -692,8 +736,14 @@ onMounted(() => { void loadKeys() })
               <dd class="mt-1 text-lg font-semibold tabular-nums tracking-tight text-gray-900 dark:text-white">{{ avgLatency(card) ? `${avgLatency(card)}ms` : '—' }}</dd>
             </div>
             <div class="rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-dark-800">
-              <dt class="text-[11px] text-gray-400">并发上限</dt>
-              <dd class="mt-1 text-sm font-medium tabular-nums text-gray-800 dark:text-gray-100">{{ card.concurrency_limit }}</dd>
+              <dt class="text-[11px] text-gray-400">容量</dt>
+              <dd class="mt-1">
+                <CapacityBadge :color-class="capacityClass(card.current_concurrency || 0, card.concurrency_limit)" :current="card.current_concurrency || 0" :max="card.concurrency_limit">
+                  <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75A2.25 2.25 0 0115.75 13.5H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                  </svg>
+                </CapacityBadge>
+              </dd>
             </div>
             <div class="rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-dark-800">
               <dt class="text-[11px] text-gray-400">售价倍率</dt>
@@ -711,33 +761,9 @@ onMounted(() => { void loadKeys() })
             </div>
           </div>
 
-          <div class="mt-4 flex items-center justify-between gap-3 text-[11px] text-gray-400">
-            <span>最近调用 {{ timeText(card.last_called_at) }}</span>
-            <div v-if="card.recent_calls.length" class="flex items-end gap-0.5" title="最近请求状态">
-              <span v-for="call in card.recent_calls.slice(0, 10).reverse()" :key="call.request_id" class="h-3.5 w-1 rounded-full" :class="call.result_status === 'success' ? 'bg-emerald-500' : 'bg-red-400'" />
-            </div>
-          </div>
-
-          <div class="mt-3 border-t border-gray-100 pt-3 dark:border-dark-700">
-            <button class="flex w-full items-center justify-between text-left text-xs font-medium text-gray-600 dark:text-gray-300" @click="toggleCalls(card.id)">
-              <span>最近请求</span>
-              <span class="text-[11px] font-normal text-gray-400">{{ card.recent_calls.length }} 条 {{ expandedCalls.has(card.id) ? '收起' : '展开' }}</span>
-            </button>
-            <div v-if="expandedCalls.has(card.id)" class="mt-2">
-              <div v-if="!card.recent_calls.length" class="text-xs text-gray-400">暂无请求记录</div>
-              <ol v-else class="space-y-1.5">
-                <li v-for="call in card.recent_calls" :key="call.request_id" class="rounded-lg bg-gray-50 px-2.5 py-2 text-xs dark:bg-dark-800">
-                  <div class="flex justify-between gap-2">
-                    <span class="truncate text-gray-700 dark:text-gray-300">{{ call.model || '未记录模型' }}</span>
-                    <span class="shrink-0" :class="call.result_status === 'success' ? 'text-emerald-600' : 'text-red-500'">{{ call.result_status === 'success' ? '成功' : call.result_status }}</span>
-                  </div>
-                  <div class="mt-1 flex justify-between gap-2 text-[11px] text-gray-400">
-                    <time :datetime="call.created_at">{{ timeText(call.created_at) }}</time>
-                    <span class="shrink-0 tabular-nums">{{ call.duration_ms ?? 0 }}ms</span>
-                  </div>
-                </li>
-              </ol>
-            </div>
+          <div class="mt-4 border-t border-gray-100 pt-3 dark:border-dark-700">
+            <p class="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">最近请求</p>
+            <RecentRequestsCell :requests="recentRequestsOf(card)" />
           </div>
         </article>
       </div>
@@ -751,7 +777,7 @@ onMounted(() => { void loadKeys() })
         </div>
       </div>
     </Teleport>
-    <AccountTestModal :show="!!testingCard" :account="testingCard" @close="testingCard = null" />
+    <AccountTestModal :show="!!testingCard" :account="testingCard" :shared-pool="true" @close="testingCard = null" />
     <BaseDialog :show="showKeyModal" :title="editingKeyId ? '编辑共享 API Key' : '创建共享 API Key'" width="normal" @close="closeKeyModal">
       <form class="space-y-5" @submit.prevent="createKey">
         <div>

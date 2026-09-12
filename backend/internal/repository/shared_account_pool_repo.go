@@ -20,7 +20,7 @@ func NewSharedAccountPoolRepository(_ *dbent.Client, db *sql.DB) service.SharedA
 // A lateral aggregate fetches recent requests in the same query as the page.
 // This avoids nested database reads while holding the page connection open.
 const sharedCardSelect = `
-SELECT l.id, l.account_id, l.platform, l.account_type, l.display_name, l.uploader_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.concurrency_limit,
+SELECT l.id, l.account_id, l.platform, l.account_type, l.display_name, l.uploader_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.listed, l.concurrency_limit,
        l.concurrency_multiplier::double precision, l.sell_rate::double precision,
        l.total_call_count, l.last_called_at, recent.calls
 FROM (
@@ -49,7 +49,7 @@ func (r *sharedAccountPoolRepository) listCards(ctx context.Context, ownerID *in
 	if recentLimit <= 0 || recentLimit > 20 {
 		recentLimit = 5
 	}
-	where, args := " AND l.status = 'active' AND a.status = 'active' AND a.schedulable = TRUE", []any{limit, recentLimit}
+	where, args := " AND l.status = 'active' AND COALESCE(l.listed, TRUE) = TRUE AND a.status = 'active' AND a.schedulable = TRUE", []any{limit, recentLimit}
 	if ownerID != nil {
 		if *ownerID <= 0 {
 			return nil, service.ErrUserNotFound
@@ -70,7 +70,7 @@ func (r *sharedAccountPoolRepository) listCards(ctx context.Context, ownerID *in
 	for rows.Next() {
 		var c service.SharedAccountCard
 		var calls []byte
-		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.Type, &c.DisplayName, &c.UploaderName, &c.Status, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
+		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.Type, &c.DisplayName, &c.UploaderName, &c.Status, &c.Listed, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(calls, &c.RecentCalls); err != nil {
@@ -185,6 +185,25 @@ func (r *sharedAccountPoolRepository) SetListingStatus(ctx context.Context, owne
 	}
 	return tx.Commit()
 }
+
+func (r *sharedAccountPoolRepository) SetListingListed(ctx context.Context, ownerID, listingID int64, listed bool) error {
+	if ownerID <= 0 || listingID <= 0 {
+		return service.ErrUserNotFound
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE shared_account_listings SET listed=$3, updated_at=NOW() WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND status <> 'deleted'`, listingID, ownerID, listed)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return service.ErrSharedListingNotFound
+	}
+	return nil
+}
+
 func (r *sharedAccountPoolRepository) DeleteListing(ctx context.Context, ownerID, listingID int64) error {
 	if ownerID <= 0 || listingID <= 0 {
 		return service.ErrUserNotFound
