@@ -36,6 +36,7 @@ type SharedAccountCard struct {
 	CurrentConcurrency    int                       `json:"current_concurrency"`
 	TotalCallCount        int64                     `json:"total_call_count"`
 	LastCalledAt          *time.Time                `json:"last_called_at,omitempty"`
+	AvailableModels       []string                  `json:"available_models,omitempty"`
 	RecentCalls           []SharedAccountRecentCall `json:"recent_calls"`
 }
 

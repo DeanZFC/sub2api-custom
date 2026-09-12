@@ -244,6 +244,11 @@ func SharedKeyScheduleFrom(ctx context.Context) SharedKeySchedule {
 	return SharedKeySchedule{Priority: SharedKeyPriorityOrder, AccountIDs: SharedListingOrder(ctx)}
 }
 
+func IsSharedPoolSchedule(ctx context.Context) bool {
+	_, ok := ctx.Value(sharedKeyScheduleKey{}).(SharedKeySchedule)
+	return ok
+}
+
 func applySharedKeySchedule(ctx context.Context, accounts []Account) []Account {
 	if len(accounts) == 0 {
 		return accounts

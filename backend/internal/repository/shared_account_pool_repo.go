@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -22,9 +23,10 @@ func NewSharedAccountPoolRepository(_ *dbent.Client, db *sql.DB) service.SharedA
 const sharedCardSelect = `
 SELECT l.id, l.account_id, l.platform, l.account_type, l.display_name, l.uploader_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.listed, l.concurrency_limit,
        l.concurrency_multiplier::double precision, l.sell_rate::double precision,
-       l.total_call_count, l.last_called_at, recent.calls
+       l.total_call_count, l.last_called_at, l.available_models, recent.calls
 FROM (
-		 SELECT l.* , a.status AS account_status, a.schedulable AS account_schedulable, a.type AS account_type, COALESCE(NULLIF(u.username, ''), u.email) AS uploader_name FROM shared_account_listings l
+		 SELECT l.* , a.status AS account_status, a.schedulable AS account_schedulable, a.type AS account_type, COALESCE(NULLIF(u.username, ''), u.email) AS uploader_name,
+		        COALESCE((SELECT jsonb_agg(k ORDER BY k) FROM jsonb_object_keys(COALESCE(a.credentials->'model_mapping', '{}'::jsonb)) AS k), '[]'::jsonb) AS available_models FROM shared_account_listings l
 		 JOIN accounts a ON a.id = l.account_id
 		 LEFT JOIN users u ON u.id = l.owner_user_id
 	 WHERE l.deleted_at IS NULL AND a.deleted_at IS NULL AND a.account_scope = 'shared'
@@ -69,12 +71,24 @@ func (r *sharedAccountPoolRepository) listCards(ctx context.Context, ownerID *in
 	out := make([]service.SharedAccountCard, 0)
 	for rows.Next() {
 		var c service.SharedAccountCard
-		var calls []byte
-		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.Type, &c.DisplayName, &c.UploaderName, &c.Status, &c.Listed, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
+		var calls, models []byte
+		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.Type, &c.DisplayName, &c.UploaderName, &c.Status, &c.Listed, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &models, &calls); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(calls, &c.RecentCalls); err != nil {
 			return nil, fmt.Errorf("decode shared account calls: %w", err)
+		}
+		var mapped []string
+		if len(models) > 0 {
+			if err := json.Unmarshal(models, &mapped); err != nil {
+				return nil, fmt.Errorf("decode shared account models: %w", err)
+			}
+		}
+		for _, model := range mapped {
+			if model == "" || strings.Contains(model, "*") {
+				continue
+			}
+			c.AvailableModels = append(c.AvailableModels, model)
 		}
 		out = append(out, c)
 	}

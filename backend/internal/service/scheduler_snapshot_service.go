@@ -210,7 +210,7 @@ func (s *SchedulerSnapshotService) Stop() {
 func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	mode := s.resolveMode(platform, hasForcePlatform)
-	bucket := s.bucketFor(groupID, platform, mode)
+	bucket := s.bucketFor(ctx, groupID, platform, mode)
 	var writeToken SchedulerBucketWriteToken
 	canPublish := false
 	if err := ctx.Err(); err != nil {
@@ -1475,9 +1475,6 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 		return nil, ErrSchedulerCacheNotReady
 	}
 	groupID := bucket.GroupID
-	if s.isRunModeSimple() {
-		groupID = 0
-	}
 
 	if useMixed {
 		platforms := []string{bucket.Platform, PlatformAntigravity}
@@ -1536,19 +1533,19 @@ func (s *SchedulerSnapshotService) loadAccountsForRebuild(
 	return accounts, nil
 }
 
-func (s *SchedulerSnapshotService) bucketFor(groupID *int64, platform string, mode string) SchedulerBucket {
+func (s *SchedulerSnapshotService) bucketFor(ctx context.Context, groupID *int64, platform string, mode string) SchedulerBucket {
 	return SchedulerBucket{
-		GroupID:  s.normalizeGroupID(groupID),
+		GroupID:  s.normalizeGroupID(ctx, groupID),
 		Platform: platform,
 		Mode:     mode,
 	}
 }
 
-func (s *SchedulerSnapshotService) normalizeGroupID(groupID *int64) int64 {
-	if s.isRunModeSimple() {
+func (s *SchedulerSnapshotService) normalizeGroupID(ctx context.Context, groupID *int64) int64 {
+	if groupID == nil || *groupID <= 0 {
 		return 0
 	}
-	if groupID == nil || *groupID <= 0 {
+	if s.isRunModeSimple() && !IsSharedPoolSchedule(ctx) {
 		return 0
 	}
 	return *groupID

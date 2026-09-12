@@ -104,6 +104,7 @@ function statusClass(status: string) {
   }
 }
 function modelsFor(card: SharedCard) {
+  if (card.available_models?.length) return card.available_models
   return getModelsByPlatform(card.platform)
 }
 function iconPlatform(value: string): any { return value }

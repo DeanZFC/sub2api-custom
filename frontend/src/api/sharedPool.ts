@@ -25,6 +25,7 @@ export interface SharedCard {
   current_concurrency?: number
   total_call_count: number
   last_called_at?: string
+  available_models?: string[]
   recent_calls: SharedCall[]
 }
 export interface SharedWallet {
