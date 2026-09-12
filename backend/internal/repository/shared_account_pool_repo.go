@@ -20,7 +20,7 @@ func NewSharedAccountPoolRepository(_ *dbent.Client, db *sql.DB) service.SharedA
 // A lateral aggregate fetches recent requests in the same query as the page.
 // This avoids nested database reads while holding the page connection open.
 const sharedCardSelect = `
-SELECT l.id, l.platform, l.display_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.concurrency_limit,
+SELECT l.id, l.account_id, l.platform, l.display_name, CASE WHEN l.status = 'active' AND (l.account_status <> 'active' OR NOT l.account_schedulable) THEN 'invalid' ELSE l.status END, l.concurrency_limit,
        l.concurrency_multiplier::double precision, l.sell_rate::double precision,
        l.total_call_count, l.last_called_at, recent.calls
 FROM (
@@ -69,7 +69,7 @@ func (r *sharedAccountPoolRepository) listCards(ctx context.Context, ownerID *in
 	for rows.Next() {
 		var c service.SharedAccountCard
 		var calls []byte
-		if err := rows.Scan(&c.ID, &c.Platform, &c.DisplayName, &c.Status, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
+		if err := rows.Scan(&c.ID, &c.AccountID, &c.Platform, &c.DisplayName, &c.Status, &c.ConcurrencyLimit, &c.ConcurrencyMultiplier, &c.SellRate, &c.TotalCallCount, &c.LastCalledAt, &calls); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(calls, &c.RecentCalls); err != nil {

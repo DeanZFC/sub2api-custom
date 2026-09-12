@@ -23,6 +23,7 @@ var ErrSharedListingNotFound = infraerrors.NotFound("SHARED_LISTING_NOT_FOUND", 
 // Credentials, proxy secrets and consumer identities must never be added here.
 type SharedAccountCard struct {
 	ID                    int64                     `json:"id"`
+	AccountID             int64                     `json:"account_id,omitempty"`
 	Platform              string                    `json:"platform"`
 	DisplayName           string                    `json:"display_name"`
 	Status                string                    `json:"status"`
