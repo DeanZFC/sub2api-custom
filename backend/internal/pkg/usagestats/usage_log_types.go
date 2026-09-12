@@ -269,12 +269,15 @@ type PlatformDashboardStats struct {
 
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
-	UserID    int64
-	APIKeyID  int64
-	AccountID int64
-	GroupID   int64
-	RequestID string
-	Model     string
+	UserID   int64
+	APIKeyID int64
+	// SharedOnly restricts usage to logs billed through shared API keys.
+	// It is used by the shared-pool usage view and is always combined with UserID.
+	SharedOnly bool
+	AccountID  int64
+	GroupID    int64
+	RequestID  string
+	Model      string
 	// ModelFilterSource controls how Model is matched. Empty preserves raw usage_logs.model semantics.
 	ModelFilterSource     string
 	RequestType           *int16

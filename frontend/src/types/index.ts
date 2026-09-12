@@ -2160,6 +2160,7 @@ export interface UsageQueryParams {
   page?: number
   page_size?: number
   api_key_id?: number
+  shared_only?: boolean
   user_id?: number
   account_id?: number
   group_id?: number

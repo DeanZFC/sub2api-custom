@@ -68,6 +68,29 @@ func appendUsageLogBillingModeWhereCondition(conditions []string, args []any, bi
 	return appendUsageLogBillingModeWhereConditionWithAlias(conditions, args, billingMode, "")
 }
 
+// appendSharedOnlyWhereCondition limits usage_logs to rows billed through a
+// non-deleted shared API key owned by the scoped user. The user_id predicate is
+// still applied separately, so this cannot expose another user's records.
+func appendSharedOnlyWhereCondition(conditions []string, args []any, sharedOnly bool, userID int64, alias string) ([]string, []any) {
+	if !sharedOnly || userID <= 0 {
+		return conditions, args
+	}
+	column := "api_key_id"
+	if alias != "" {
+		column = alias + ".api_key_id"
+	}
+	conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM shared_api_keys sak WHERE sak.legacy_api_key_id = %s AND sak.user_id = $%d AND sak.deleted_at IS NULL)", column, len(args)+1))
+	return conditions, append(args, userID)
+}
+
+func appendSharedOnlyQueryFilter(query string, args []any, sharedOnly bool, userID int64, alias string) (string, []any) {
+	conditions, args := appendSharedOnlyWhereCondition(nil, args, sharedOnly, userID, alias)
+	if len(conditions) == 0 {
+		return query, args
+	}
+	return query + " AND " + conditions[0], args
+}
+
 func appendUsageLogBillingModeWhereConditionWithAlias(conditions []string, args []any, billingMode string, alias string) ([]string, []any) {
 	mode := strings.TrimSpace(billingMode)
 	if mode == "" {

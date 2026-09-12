@@ -15,7 +15,7 @@ const render = () => mount(SharedPoolView, { global: { stubs: {
   AppLayout: { template: '<main><slot /></main>' },
   CreateAccountModal: true, EditAccountModal: true, ReAuthAccountModal: true, AccountTestModal: true, UseKeyModal: true,
   PlatformIcon: true, PlatformTypeBadge: true, Icon: true, CapacityBadge: true, RecentRequestsCell: true,
-  UsageView: { props: ['embedded'], template: '<div data-testid="shared-usage-view" />' },
+  UsageView: { props: ['embedded', 'sharedOnly'], template: '<div data-testid="shared-usage-view" />' },
   DataTable: { props: ['columns', 'data'], template: '<div><slot name="empty" /><slot /></div>' },
   BaseDialog: { props: ['show', 'title'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
   EmptyState: true

@@ -43,6 +43,18 @@ func TestSafeDateFormat(t *testing.T) {
 	}
 }
 
+func TestAppendSharedOnlyWhereCondition(t *testing.T) {
+	conditions, args := appendSharedOnlyWhereCondition(nil, nil, true, 42, "")
+	require.Len(t, conditions, 1)
+	require.Contains(t, conditions[0], "shared_api_keys")
+	require.Contains(t, conditions[0], "legacy_api_key_id = api_key_id")
+	require.Equal(t, []any{int64(42)}, args)
+
+	conditions, args = appendSharedOnlyWhereCondition(nil, nil, false, 42, "")
+	require.Empty(t, conditions)
+	require.Empty(t, args)
+}
+
 func TestBuildUsageLogBatchInsertQuery_UsesConflictDoNothing(t *testing.T) {
 	log := &service.UsageLog{
 		UserID:       1,

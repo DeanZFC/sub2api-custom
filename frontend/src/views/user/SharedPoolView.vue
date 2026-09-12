@@ -472,7 +472,7 @@ onMounted(() => { void loadKeys() })
         <button class="btn" :class="mode === 'usage' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('usage')">使用记录</button>
       </div>
 
-      <UsageView v-if="mode === 'usage'" :embedded="true" />
+      <UsageView v-if="mode === 'usage'" :embedded="true" :shared-only="true" />
 
       <section v-if="mode === 'keys'" aria-label="共享 API Key">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
