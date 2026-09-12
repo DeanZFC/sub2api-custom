@@ -4015,6 +4015,7 @@ const apiKeyValuePlaceholder = computed(() => {
 interface Props {
   show: boolean
   sharedPool?: boolean
+  initialAccount?: { name?: string; platform?: string }
   proxies: Proxy[]
   groups: AdminGroup[]
 }
