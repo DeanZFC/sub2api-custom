@@ -952,7 +952,9 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 }
 
 func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string) *dbent.AccountQuery {
-	q := r.client.Account.Query()
+	// Shared-pool accounts are managed from the user shared-pool page and must
+	// stay isolated from the administrator's normal account list.
+	q := r.client.Account.Query().Where(dbaccount.AccountScopeEQ("system"))
 
 	if platform != "" {
 		q = q.Where(dbaccount.PlatformEQ(platform))

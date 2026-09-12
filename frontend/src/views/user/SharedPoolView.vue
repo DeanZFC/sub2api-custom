@@ -176,7 +176,7 @@ onMounted(() => { void loadKeys() })
       <div v-else-if="mode !== 'keys'" class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         <article v-for="card in cards" :key="card.id" class="card min-w-0 overflow-hidden p-6">
           <div class="flex flex-col items-center gap-2">
-            <div class="min-w-0"><h2 class="break-words text-xl font-semibold text-gray-900 dark:text-white">{{ card.display_name }}</h2><p class="mt-1 text-base text-gray-500">{{ card.platform }}</p></div>
+            <div class="min-w-0"><h2 class="break-words text-xl font-semibold text-gray-900 dark:text-white">{{ card.display_name }}</h2><p class="mt-1 text-base text-gray-500">{{ card.platform }}<span v-if="card.uploader_name"> · 上传者：{{ card.uploader_name }}</span></p></div>
             <span class="shrink-0 rounded-full px-3 py-1 text-xs font-medium" :class="card.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'">{{ labels[card.status] || card.status }}</span>
           </div>
           <div class="mt-6"><p class="text-sm text-gray-500">累计调用</p><p class="mt-1 break-all text-5xl font-bold tracking-tight text-primary-600">{{ card.total_call_count.toLocaleString() }}</p></div>
