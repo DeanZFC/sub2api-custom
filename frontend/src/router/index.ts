@@ -266,7 +266,7 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/shared-pool', name: 'SharedPool', component: () => import('@/views/user/SharedPoolView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: false, title: 'Shared Account Pool' }
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'Shared Account Pool', titleKey: 'nav.sharedPool' }
   },
   {
     path: '/available-channels',
