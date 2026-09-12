@@ -16,6 +16,7 @@ import CapacityBadge from '@/components/account/CapacityBadge.vue'
 import RecentRequestsCell from '@/components/account/RecentRequestsCell.vue'
 import type { OpsRequestDetail } from '@/api/admin/ops'
 import UseKeyModal from '@/components/keys/UseKeyModal.vue'
+import UsageView from '@/views/user/UsageView.vue'
 import { maskApiKey } from '@/utils/maskApiKey'
 import { buildCcSwitchImportDeeplink, type CcSwitchClientType } from '@/utils/ccswitchImport'
 import { getModelsByPlatform } from '@/composables/useModelWhitelist'
@@ -30,7 +31,7 @@ import {
 const cards = ref<SharedCard[]>([])
 const myCards = ref<SharedCard[]>([])
 const wallet = ref<SharedWallet | null>(null)
-const mode = ref<'pool' | 'mine' | 'keys'>('pool')
+const mode = ref<'pool' | 'mine' | 'keys' | 'usage'>('pool')
 const loading = ref(true)
 const error = ref('')
 const walletError = ref('')
@@ -144,11 +145,12 @@ async function loadWallet() {
   try { wallet.value = await getSharedWallet() }
   catch (e) { walletError.value = errorText(e) }
 }
-function changeMode(next: 'pool' | 'mine' | 'keys') {
+function changeMode(next: 'pool' | 'mine' | 'keys' | 'usage') {
   mode.value = next
   platformFilter.value = ''
   selectedCards.value = []
   if (next === 'keys') { void loadCards(); void loadKeys(); void loadMyCards() }
+  else if (next === 'usage') return
   else void loadCards()
 }
 async function loadMyCards() {
@@ -445,8 +447,8 @@ onMounted(() => { void loadKeys() })
           <p class="mt-1 max-w-2xl text-sm leading-6 text-gray-500">上传后立即上线。用户可通过共享 API Key 按顺序调用，收益实时结算，可随时转入平台余额。</p>
         </div>
         <div class="flex gap-2">
-          <button v-if="mode !== 'keys'" class="btn btn-primary" @click="openCreate">上传账号</button>
-          <button v-if="mode !== 'keys'" class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button>
+          <button v-if="mode === 'pool' || mode === 'mine'" class="btn btn-primary" @click="openCreate">上传账号</button>
+          <button v-if="mode === 'pool' || mode === 'mine'" class="btn btn-secondary" :disabled="loading" @click="loadCards">刷新账号</button>
         </div>
       </header>
 
@@ -454,8 +456,10 @@ onMounted(() => { void loadKeys() })
         <button class="btn" :class="mode === 'pool' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('pool')">共享池</button>
         <button class="btn" :class="mode === 'mine' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('mine')">我的账号</button>
         <button class="btn" :class="mode === 'keys' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('keys')">共享 API Key</button>
-        <a class="btn btn-secondary" href="/usage">使用记录</a>
+        <button class="btn" :class="mode === 'usage' ? 'btn-primary' : 'btn-secondary'" @click="changeMode('usage')">使用记录</button>
       </div>
+
+      <UsageView v-if="mode === 'usage'" :embedded="true" />
 
       <section v-if="mode === 'keys'" aria-label="共享 API Key">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -588,7 +592,7 @@ onMounted(() => { void loadKeys() })
         </template>
       </BaseDialog>
 
-      <section v-if="mode !== 'keys'" class="card p-5 sm:p-6" aria-label="共享收益">
+      <section v-if="mode === 'pool' || mode === 'mine'" class="card p-5 sm:p-6" aria-label="共享收益">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <h2 class="text-sm font-semibold text-gray-900 dark:text-white">我的共享收益</h2>
           <button class="btn btn-primary" :disabled="transferring || !wallet || Number(wallet.available) <= 0" @click="transfer">
@@ -621,9 +625,9 @@ onMounted(() => { void loadKeys() })
         </button>
       </div>
 
-      <div v-if="mode !== 'keys' && loading" class="py-16 text-center text-sm text-gray-500" role="status">加载中…</div>
-      <div v-else-if="mode !== 'keys' && error" role="alert" class="card p-6 text-red-500">{{ error }} <button class="underline" @click="loadCards">重试</button></div>
-      <div v-else-if="mode !== 'keys' && !cards.length" class="card p-10 text-center text-sm text-gray-500">{{ mode === 'mine' ? '你还没有共享账号' : '暂无可用共享账号' }}</div>
+      <div v-if="(mode === 'pool' || mode === 'mine') && loading" class="py-16 text-center text-sm text-gray-500" role="status">加载中…</div>
+      <div v-else-if="(mode === 'pool' || mode === 'mine') && error" role="alert" class="card p-6 text-red-500">{{ error }} <button class="underline" @click="loadCards">重试</button></div>
+      <div v-else-if="(mode === 'pool' || mode === 'mine') && !cards.length" class="card p-10 text-center text-sm text-gray-500">{{ mode === 'mine' ? '你还没有共享账号' : '暂无可用共享账号' }}</div>
       <div v-else-if="mode === 'mine'" class="card overflow-x-auto">
         <div v-if="selectedCards.length" class="flex flex-wrap items-center gap-3 rounded-t-2xl bg-primary-50 px-5 py-3 text-sm text-primary-700 dark:bg-primary-900/20 dark:text-primary-300">
           <span>已选择 {{ selectedCards.length }} 个</span>

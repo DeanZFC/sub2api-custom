@@ -1,5 +1,5 @@
 <template>
-  <AppLayout>
+  <component :is="embedded ? 'div' : AppLayout">
     <div class="space-y-6">
       <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
@@ -214,7 +214,7 @@
         @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
     </div>
-  </AppLayout>
+  </component>
 
 </template>
 
@@ -255,6 +255,7 @@ import type { Column } from '@/components/common/types'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 
 const { t } = useI18n()
+withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 const appStore = useAppStore()
 
 type DistributionMetric = 'tokens' | 'actual_cost'

@@ -15,6 +15,7 @@ const render = () => mount(SharedPoolView, { global: { stubs: {
   AppLayout: { template: '<main><slot /></main>' },
   CreateAccountModal: true, EditAccountModal: true, ReAuthAccountModal: true, AccountTestModal: true, UseKeyModal: true,
   PlatformIcon: true, PlatformTypeBadge: true, Icon: true, CapacityBadge: true, RecentRequestsCell: true,
+  UsageView: { props: ['embedded'], template: '<div data-testid="shared-usage-view" />' },
   DataTable: { props: ['columns', 'data'], template: '<div><slot name="empty" /><slot /></div>' },
   BaseDialog: { props: ['show', 'title'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
   EmptyState: true
@@ -39,7 +40,7 @@ describe('SharedPoolView', () => {
   })
   it('renders call counts, available models and collapsed recent requests', async () => {
     const wrapper = render(); await flushPromises()
-    expect(wrapper.find('a[href="/usage"]').text()).toBe('使用记录')
+    expect(wrapper.findAll('button').some(button => button.text() === '使用记录')).toBe(true)
     const article = wrapper.find('article')
     expect(article.text()).toContain((12000).toLocaleString())
     expect(article.text()).toContain('API Key')
@@ -50,6 +51,13 @@ describe('SharedPoolView', () => {
     await flushPromises()
     expect(api.getMySharedCards).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('已暂停')
+  })
+
+  it('switches to usage records inside the shared pool page', async () => {
+    const wrapper = render(); await flushPromises()
+    const usageButton = wrapper.findAll('button').find(button => button.text() === '使用记录')
+    await usageButton?.trigger('click')
+    expect(wrapper.find('[data-testid="shared-usage-view"]').exists()).toBe(true)
   })
   it('opens the account edit modal with the owned account', async () => {
     const wrapper = render(); await flushPromises()
