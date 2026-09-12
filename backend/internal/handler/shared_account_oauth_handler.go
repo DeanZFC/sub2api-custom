@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -118,7 +119,7 @@ func (h *SharedAccountPoolHandler) Authorize(c *gin.Context) {
 				response.BadRequest(c, "Invalid oauth_type")
 				return
 			}
-			r, e := h.geminiOAuth.GenerateAuthURL(ctx, proxyID, sharedGeminiRedirectURI(c), req.ProjectID, req.OAuthType, req.TierID)
+			r, e := h.geminiOAuth.GenerateAuthURL(ctx, proxyID, h.sharedGeminiRedirectURI(c), req.ProjectID, req.OAuthType, req.TierID)
 			err = e
 			if err == nil {
 				result, sessionID = r, r.SessionID
@@ -262,10 +263,16 @@ func (h *SharedAccountPoolHandler) ownsOAuthSession(ownerID int64, platform, id 
 func validSharedGeminiOAuthType(value string) bool {
 	return value == "code_assist" || value == "google_one" || value == "ai_studio"
 }
-func sharedGeminiRedirectURI(c *gin.Context) string {
-	origin := strings.TrimSpace(c.GetHeader("Origin"))
-	if origin != "" {
-		return strings.TrimRight(origin, "/") + "/auth/callback"
+func (h *SharedAccountPoolHandler) sharedGeminiRedirectURI(c *gin.Context) string {
+	// Prefer the configured public URL. Trusting an arbitrary Origin header here
+	// lets a caller make the OAuth provider redirect back to an attacker domain.
+	if h != nil && h.settings != nil {
+		if configured := strings.TrimSpace(h.settings.GetFrontendURL(c.Request.Context())); configured != "" {
+			if parsed, err := url.Parse(configured); err == nil && parsed.User == nil &&
+				(parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" {
+				return strings.TrimRight(configured, "/") + "/auth/callback"
+			}
+		}
 	}
 	scheme := "http"
 	if c.Request.TLS != nil {

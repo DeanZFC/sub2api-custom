@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -76,6 +77,15 @@ type SharedAccountPoolAdminRepository interface {
 type SharedAccountPublishPolicy interface {
 	IsUserSharedPublishAllowed(ctx context.Context, userID int64) (bool, error)
 	CountOwnerListings(ctx context.Context, ownerID int64) (active int, recent int, err error)
+}
+
+// SharedAccountPublishLock serializes the quota check and the complete
+// publication transaction for one owner. A plain count followed by an
+// insert is racy when two upload requests arrive concurrently; repository
+// implementations use a database advisory lock so this also works across
+// multiple application instances.
+type SharedAccountPublishLock interface {
+	WithOwnerPublishLock(ctx context.Context, ownerID int64, fn func() error) error
 }
 
 type SharedPoolUserSummary struct {
@@ -150,6 +160,19 @@ func (s *SharedAccountUploadService) SetHealthChecker(checker SharedAccountHealt
 }
 
 func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, in SharedAccountUploadInput) (*SharedAccountListing, error) {
+	if lock, ok := s.listings.(SharedAccountPublishLock); ok {
+		var listing *SharedAccountListing
+		err := lock.WithOwnerPublishLock(ctx, ownerID, func() error {
+			var err error
+			listing, err = s.uploadUnlocked(ctx, ownerID, in)
+			return err
+		})
+		return listing, err
+	}
+	return s.uploadUnlocked(ctx, ownerID, in)
+}
+
+func (s *SharedAccountUploadService) uploadUnlocked(ctx context.Context, ownerID int64, in SharedAccountUploadInput) (*SharedAccountListing, error) {
 	if adminRepo, ok := s.listings.(SharedAccountPublishPolicy); ok {
 		allowed, err := adminRepo.IsUserSharedPublishAllowed(ctx, ownerID)
 		if err != nil {
@@ -193,6 +216,9 @@ func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, 
 		return nil, infraerrors.BadRequest("INVALID_SHARED_ACCOUNT_TYPE", "unsupported shared account type")
 	}
 	if err := validateSharedCredentials(in); err != nil {
+		return nil, err
+	}
+	if err := validateSharedUpstreamEndpoints(ctx, in.Credentials); err != nil {
 		return nil, err
 	}
 
@@ -291,7 +317,14 @@ func (s *SharedAccountUploadService) CreateProxy(ctx context.Context, ownerID in
 		// as an outbound proxy. The resolver check complements the transport
 		// layer's normal connection validation and rejects DNS rebinding targets
 		// before credentials are ever sent.
-		if blocked, _ := isPrivateOrLoopbackHost(ctx, host); blocked {
+		blocked, resolveErr := isPrivateOrLoopbackHost(ctx, host)
+		if resolveErr != nil {
+			// A failed DNS lookup is fail-closed.  Accepting an unresolved name
+			// would allow it to resolve to a private address later (or after a
+			// DNS rebinding) when the proxy is actually used.
+			return nil, errors.New("proxy host could not be resolved")
+		}
+		if blocked {
 			return nil, errors.New("proxy host is not allowed")
 		}
 		if s.proxies == nil {
@@ -369,7 +402,11 @@ func (s *SharedAccountUploadService) TestOwnedAccount(c *gin.Context, ownerID, a
 	if s == nil || s.tester == nil {
 		return infraerrors.InternalServer("ACCOUNT_TEST_UNAVAILABLE", "account test service is not configured")
 	}
-	if _, err := s.GetOwned(c.Request.Context(), ownerID, accountID); err != nil {
+	account, err := s.GetOwned(c.Request.Context(), ownerID, accountID)
+	if err != nil {
+		return err
+	}
+	if err := validateSharedUpstreamEndpoints(c.Request.Context(), account.Credentials); err != nil {
 		return err
 	}
 	return s.tester.TestAccountConnection(c, accountID, modelID, prompt, mode, opts)
@@ -383,6 +420,9 @@ func (s *SharedAccountUploadService) SyncOwnedUpstreamModels(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	if err := validateSharedUpstreamEndpoints(ctx, account.Credentials); err != nil {
+		return nil, err
+	}
 	return s.tester.SyncUpstreamModelCatalog(ctx, account)
 }
 
@@ -392,6 +432,9 @@ func (s *SharedAccountUploadService) SyncUpstreamModelsPreview(ctx context.Conte
 	}
 	if account == nil {
 		return nil, infraerrors.BadRequest("INVALID_REQUEST", "account is required")
+	}
+	if err := validateSharedUpstreamEndpoints(ctx, account.Credentials); err != nil {
+		return nil, err
 	}
 	return s.tester.SyncUpstreamModelCatalog(ctx, account)
 }
@@ -442,6 +485,9 @@ func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, a
 		merged := MergePreservingSensitiveCreds(account.Credentials, *in.Credentials)
 		account.Credentials = SanitizeStoredCredentials(account.Platform, merged)
 		if err := validateSharedCredentials(SharedAccountUploadInput{Platform: account.Platform, Type: account.Type, Credentials: account.Credentials}); err != nil {
+			return nil, err
+		}
+		if err := validateSharedUpstreamEndpoints(ctx, account.Credentials); err != nil {
 			return nil, err
 		}
 	}
@@ -506,6 +552,9 @@ func (s *SharedAccountUploadService) ApplyOwnedOAuthCredentials(ctx context.Cont
 	}
 	account.Credentials = SanitizeStoredCredentials(account.Platform, credentials)
 	if err := validateSharedCredentials(SharedAccountUploadInput{Platform: account.Platform, Type: account.Type, Credentials: account.Credentials}); err != nil {
+		return nil, err
+	}
+	if err := validateSharedUpstreamEndpoints(ctx, account.Credentials); err != nil {
 		return nil, err
 	}
 	if extra != nil {
@@ -589,6 +638,56 @@ func validateSharedCredentials(in SharedAccountUploadInput) error {
 	for _, key := range keys {
 		if strings.TrimSpace(account.GetCredential(key)) == "" {
 			return infraerrors.BadRequest("INVALID_SHARED_CREDENTIALS", key+" is required")
+		}
+	}
+	return nil
+}
+
+// validateSharedUpstreamEndpoints prevents a regular user from turning a
+// shared account into a server-side request forgery primitive through a
+// custom base_url. The global URL allowlist is intentionally optional for
+// existing system accounts, but user-published accounts are always required
+// to target a publicly resolvable HTTP(S) host.
+func validateSharedUpstreamEndpoints(ctx context.Context, credentials map[string]any) error {
+	if len(credentials) == 0 {
+		return nil
+	}
+	values := make([]string, 0, 1)
+	if raw, ok := credentials["base_url"]; ok {
+		value, valid := raw.(string)
+		if !valid {
+			return infraerrors.BadRequest("INVALID_SHARED_BASE_URL", "base_url must be a string")
+		}
+		values = append(values, value)
+	}
+	if raw, ok := credentials["api_base_urls"]; ok {
+		m, valid := raw.(map[string]any)
+		if !valid {
+			return infraerrors.BadRequest("INVALID_SHARED_BASE_URL", "api_base_urls must be an object")
+		}
+		for _, value := range m {
+			text, valid := value.(string)
+			if !valid {
+				return infraerrors.BadRequest("INVALID_SHARED_BASE_URL", "api_base_urls values must be strings")
+			}
+			values = append(values, text)
+		}
+	}
+	for _, raw := range values {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			return infraerrors.BadRequest("INVALID_SHARED_BASE_URL", "base URL cannot be empty")
+		}
+		u, err := url.Parse(trimmed)
+		if err != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			return infraerrors.BadRequest("INVALID_SHARED_BASE_URL", "base URL must be an HTTP(S) URL")
+		}
+		blocked, resolveErr := isPrivateOrLoopbackHost(ctx, strings.ToLower(u.Hostname()))
+		if resolveErr != nil {
+			return infraerrors.BadRequest("INVALID_SHARED_BASE_URL", "base URL host could not be resolved")
+		}
+		if blocked {
+			return infraerrors.BadRequest("INVALID_SHARED_BASE_URL", "base URL host is not allowed")
 		}
 	}
 	return nil

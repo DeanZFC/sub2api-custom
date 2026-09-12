@@ -12,6 +12,16 @@ type sharedAPIKeyRepoStub struct {
 	rotKey string
 }
 
+type sharedAPIKeyCreateLockRepo struct {
+	sharedAPIKeyRepoStub
+	locks int
+}
+
+func (r *sharedAPIKeyCreateLockRepo) WithUserCreateLock(_ context.Context, _ int64, fn func() error) error {
+	r.locks++
+	return fn()
+}
+
 func (r *sharedAPIKeyRepoStub) Create(context.Context, *SharedAPIKey) error { return nil }
 func (r *sharedAPIKeyRepoStub) ListByUser(context.Context, int64) ([]SharedAPIKey, error) {
 	return r.items, nil
@@ -48,4 +58,12 @@ func TestSharedAPIKeyRotateGeneratesFreshCredential(t *testing.T) {
 	require.Equal(t, repo.rotKey, item.Key)
 	require.True(t, len(item.Key) > len("sk-shared-"))
 	require.NotEqual(t, "", item.KeyPreview)
+}
+
+func TestSharedAPIKeyCreateSerializesQuotaAndCreation(t *testing.T) {
+	repo := &sharedAPIKeyCreateLockRepo{}
+	item, err := NewSharedAPIKeyService(repo).Create(context.Background(), 7, "shared", PlatformOpenAI, "manual", "order", nil)
+	require.Error(t, err, "manual mode still requires at least one listing")
+	require.Nil(t, item)
+	require.Equal(t, 1, repo.locks)
 }

@@ -14,6 +14,32 @@ func NewSharedAPIKeyRepository(db *sql.DB) service.SharedAPIKeyRepository {
 	return &sharedAPIKeyRepository{db: db}
 }
 
+// WithUserCreateLock keeps the shared-key quota check and insert serialized
+// for one user across all application instances. Session advisory locks need
+// a pinned connection; releasing/closing it also guarantees cleanup after a
+// cancelled request or a database error.
+func (r *sharedAPIKeyRepository) WithUserCreateLock(ctx context.Context, userID int64, fn func() error) error {
+	if r == nil || r.db == nil || userID <= 0 {
+		return service.ErrSharedAPIKeyNotFound
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	const lockSQL = `SELECT pg_advisory_lock(hashtextextended('sub2api:shared-key-create:' || $1::text, 0))`
+	if _, err = conn.ExecContext(ctx, lockSQL, userID); err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtextextended('sub2api:shared-key-create:' || $1::text, 0))`, userID)
+	}()
+	if fn == nil {
+		return nil
+	}
+	return fn()
+}
+
 func (r *sharedAPIKeyRepository) CountByUser(ctx context.Context, userID int64) (active int, recent int, err error) {
 	if userID <= 0 {
 		return 0, 0, service.ErrSharedAPIKeyNotFound

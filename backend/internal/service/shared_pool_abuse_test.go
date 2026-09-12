@@ -12,8 +12,29 @@ type sharedUploadLimitListings struct {
 	active, recent int
 }
 
+type sharedUploadLockListings struct {
+	sharedUploadLimitListings
+	locks int
+}
+
+func (r *sharedUploadLockListings) WithOwnerPublishLock(_ context.Context, _ int64, fn func() error) error {
+	r.locks++
+	return fn()
+}
+
 func (r *sharedUploadLimitListings) IsUserSharedPublishAllowed(context.Context, int64) (bool, error) {
 	return true, nil
+}
+
+func TestSharedAccountUploadSerializesQuotaAndCreation(t *testing.T) {
+	listings := &sharedUploadLockListings{}
+	svc := NewSharedAccountUploadService(&sharedUploadAccounts{}, listings, nil, nil)
+	_, err := svc.Upload(context.Background(), 42, SharedAccountUploadInput{
+		Name: "locked", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "test"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, listings.locks)
 }
 func (r *sharedUploadLimitListings) CountOwnerListings(context.Context, int64) (int, int, error) {
 	return r.active, r.recent, nil

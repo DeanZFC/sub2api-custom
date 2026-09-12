@@ -98,8 +98,9 @@ func (h *SharedAPIKeyHandler) Delete(c *gin.Context) {
 	response.Success(c, gin.H{"deleted": true})
 }
 
-// Rotate replaces a shared API key and returns the new credential once. Lists
-// intentionally expose only key_preview to reduce credential leakage.
+// Rotate replaces a shared API key and returns the new credential. Owner-scoped
+// lists intentionally include the complete key so it remains copyable and can
+// be imported into CCS at any time; public pool responses never expose keys.
 func (h *SharedAPIKeyHandler) Rotate(c *gin.Context) {
 	uid, ok := userID(c)
 	if !ok {

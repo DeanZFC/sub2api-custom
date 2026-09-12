@@ -64,3 +64,28 @@ func Parse(raw string) (trimmed string, parsed *url.URL, err error) {
 
 	return trimmed, parsed, nil
 }
+
+// Redact returns a log-safe representation of a proxy URL.  Proxy credentials
+// are deliberately removed entirely (including the username); masking only
+// the password still leaks an account identifier and makes accidental
+// credential reconstruction easier.  Invalid input is represented by a fixed
+// marker so parser errors cannot echo user supplied secrets into logs.
+func Redact(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return "<configured-proxy>"
+	}
+	u.User = nil
+	// Proxy URLs should be origins; strip path/query/fragment defensively so
+	// even malformed legacy values cannot smuggle tokens into log output.
+	u.Path = ""
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.ForceQuery = false
+	return u.String()
+}

@@ -200,6 +200,21 @@ func TestSharedUploadTagsProxyWithOwner(t *testing.T) {
 	require.Equal(t, int64(42), *proxies.created.OwnerUserID)
 }
 
+func TestSharedUploadRejectsUnresolvableProxyHost(t *testing.T) {
+	svc := NewSharedAccountUploadService(nil, nil, nil, &sharedProxyRepoStub{})
+	_, err := svc.CreateProxy(context.Background(), 42, "http://user:pass:secret@proxy.invalid:8080")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "could not be resolved")
+}
+
+func TestSharedUpstreamEndpointsRejectPrivateHosts(t *testing.T) {
+	err := validateSharedUpstreamEndpoints(context.Background(), map[string]any{"base_url": "http://127.0.0.1:8080/v1"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "INVALID_SHARED_BASE_URL")
+	err = validateSharedUpstreamEndpoints(context.Background(), map[string]any{"api_base_urls": map[string]any{"responses": "http://[::1]:8080/v1"}})
+	require.Error(t, err)
+}
+
 func TestSharedUploadPreservesAuthorizationTypesAndFiltersAdminExtra(t *testing.T) {
 	for _, input := range []SharedAccountUploadInput{
 		{Name: "agent", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": OpenAIAuthModeAgentIdentity, "agent_runtime_id": "runtime", "agent_private_key": "key"}},

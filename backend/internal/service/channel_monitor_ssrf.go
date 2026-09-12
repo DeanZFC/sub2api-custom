@@ -70,7 +70,10 @@ func isPrivateIP(ip net.IP) bool {
 	if ip == nil {
 		return true
 	}
-	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
+	// Multicast and interface-local destinations are never valid outbound
+	// proxy endpoints.  In addition to avoiding surprising routing, rejecting
+	// them closes an SSRF escape that is not covered by RFC1918 checks.
+	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
 		return true
 	}
 	for _, n := range monitorBlockedCIDRs {

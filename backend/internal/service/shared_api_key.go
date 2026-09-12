@@ -61,6 +61,13 @@ type SharedAPIKeyAbuseRepository interface {
 	CountByUser(ctx context.Context, userID int64) (active int, recent int, err error)
 }
 
+// SharedAPIKeyCreateLock serializes the per-user quota check with key
+// creation. Without it, concurrent requests can all observe the same count
+// and exceed the active/hourly limits.
+type SharedAPIKeyCreateLock interface {
+	WithUserCreateLock(ctx context.Context, userID int64, fn func() error) error
+}
+
 var ErrSharedAPIKeyNotFound = errors.New("shared api key not found")
 
 type SharedAPIKeyService struct {
@@ -141,6 +148,19 @@ func normalizeSharedListings(listings []int64) ([]int64, error) {
 }
 
 func (s *SharedAPIKeyService) Create(ctx context.Context, userID int64, name, platform, selection, priority string, listings []int64) (*SharedAPIKey, error) {
+	if lock, ok := s.repo.(SharedAPIKeyCreateLock); ok {
+		var result *SharedAPIKey
+		err := lock.WithUserCreateLock(ctx, userID, func() error {
+			var err error
+			result, err = s.createUnlocked(ctx, userID, name, platform, selection, priority, listings)
+			return err
+		})
+		return result, err
+	}
+	return s.createUnlocked(ctx, userID, name, platform, selection, priority, listings)
+}
+
+func (s *SharedAPIKeyService) createUnlocked(ctx context.Context, userID int64, name, platform, selection, priority string, listings []int64) (*SharedAPIKey, error) {
 	if userID <= 0 || strings.TrimSpace(name) == "" || strings.TrimSpace(platform) == "" {
 		return nil, errors.New("name and platform are required")
 	}

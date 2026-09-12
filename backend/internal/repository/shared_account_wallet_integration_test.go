@@ -109,6 +109,12 @@ func TestSharedWalletPostgresConcurrentTransfer(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
 	require.Equal(t, "paused", cards[0].Status)
+	// Owner resume must not override an administrator suspension. Only the
+	// administrator can restore a suspended listing.
+	require.NoError(t, pool.SetListingStatus(context.Background(), 42, 1, "active"))
+	require.NoError(t, pool.SetListingAdminStatus(context.Background(), 1, "suspended"))
+	require.ErrorIs(t, pool.SetListingStatus(context.Background(), 42, 1, "active"), service.ErrSharedListingNotFound)
+	require.NoError(t, pool.SetListingAdminStatus(context.Background(), 1, "active"))
 	// A gateway health failure marks the underlying account unavailable; owner cards expose invalid.
 	require.NoError(t, pool.SetListingStatus(context.Background(), 42, 1, "active"))
 	_, err = db.Exec(`UPDATE accounts SET status='error',schedulable=FALSE WHERE id=1`)

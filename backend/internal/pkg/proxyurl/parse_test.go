@@ -213,3 +213,27 @@ func TestParse_无Scheme裸地址(t *testing.T) {
 		t.Fatal("无 scheme 的裸地址应返回错误")
 	}
 }
+
+func TestRedact_RemovesProxyCredentials(t *testing.T) {
+	got := Redact("http://alice:super-secret@proxy.example.com:8080")
+	if got != "http://proxy.example.com:8080" {
+		t.Fatalf("Redact() = %q", got)
+	}
+	if strings.Contains(got, "alice") || strings.Contains(got, "super-secret") {
+		t.Fatalf("redacted URL still contains credentials: %q", got)
+	}
+}
+
+func TestRedact_RemovesQueryAndPath(t *testing.T) {
+	got := Redact("http://proxy.example.com:8080/route?token=secret#fragment")
+	if got != "http://proxy.example.com:8080" {
+		t.Fatalf("Redact() = %q", got)
+	}
+}
+
+func TestRedact_InvalidInputDoesNotEchoSecret(t *testing.T) {
+	got := Redact("http://alice:super-secret@[bad")
+	if got != "<configured-proxy>" {
+		t.Fatalf("Redact() = %q", got)
+	}
+}

@@ -71,7 +71,7 @@ func TestSharedOAuthSessionOwnershipAndProxy(t *testing.T) {
 	oauth := service.NewOpenAIOAuthService(proxies, client)
 	defer oauth.Stop()
 	h := &SharedAccountPoolHandler{openaiOAuth: oauth, uploader: service.NewSharedAccountUploadService(nil, nil, nil, proxies)}
-	result := sharedAuthRequest(h, 42, "/oauth/openai/generate-auth-url", map[string]any{"proxy_id": 999, "proxy_url": "socks5://user:pass@proxy.example.com:1080"})
+	result := sharedAuthRequest(h, 42, "/oauth/openai/generate-auth-url", map[string]any{"proxy_id": 999, "proxy_url": "socks5://user:pass@example.com:1080"})
 	require.Equal(t, 200, result.Code, result.Body.String())
 	var response struct {
 		Data struct {
@@ -99,7 +99,7 @@ func TestSharedOAuthSessionOwnershipAndProxy(t *testing.T) {
 	result = sharedAuthRequest(h, 42, "/oauth/openai/exchange-code", payload)
 	require.Equal(t, 200, result.Code, result.Body.String())
 	require.Equal(t, 1, client.exchanges)
-	require.Equal(t, "socks5h://user:pass@proxy.example.com:1080", client.proxyURL)
+	require.Equal(t, "socks5h://user:pass@example.com:1080", client.proxyURL)
 	require.Contains(t, result.Body.String(), "test-access")
 	result = sharedAuthRequest(h, 42, "/oauth/openai/exchange-code", payload)
 	require.Equal(t, 400, result.Code)

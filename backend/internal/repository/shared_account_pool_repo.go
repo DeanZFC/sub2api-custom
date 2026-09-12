@@ -19,6 +19,35 @@ func NewSharedAccountPoolRepository(_ *dbent.Client, db *sql.DB) service.SharedA
 	return &sharedAccountPoolRepository{db: db}
 }
 
+// WithOwnerPublishLock holds a transaction-independent PostgreSQL advisory
+// lock while an upload performs its quota check and creates its account and
+// listing. The lock must live on one physical connection, hence db.Conn
+// rather than a short-lived transaction. This closes the check-then-insert
+// race when several API instances receive uploads for the same owner.
+func (r *sharedAccountPoolRepository) WithOwnerPublishLock(ctx context.Context, ownerID int64, fn func() error) error {
+	if r == nil || r.db == nil || ownerID <= 0 {
+		return service.ErrUserNotFound
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	const lockSQL = `SELECT pg_advisory_lock(hashtextextended('sub2api:shared-publish:' || $1::text, 0))`
+	if _, err = conn.ExecContext(ctx, lockSQL, ownerID); err != nil {
+		return err
+	}
+	defer func() {
+		// Unlock is best effort. Closing the connection also releases a session
+		// advisory lock if a driver/network failure prevents this statement.
+		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtextextended('sub2api:shared-publish:' || $1::text, 0))`, ownerID)
+	}()
+	if fn == nil {
+		return nil
+	}
+	return fn()
+}
+
 // A lateral aggregate fetches recent requests in the same query as the page.
 // This avoids nested database reads while holding the page connection open.
 const sharedCardSelect = `
@@ -288,7 +317,11 @@ func (r *sharedAccountPoolRepository) SetListingStatus(ctx context.Context, owne
 	}
 	defer tx.Rollback()
 	var accountID int64
-	err = tx.QueryRowContext(ctx, `UPDATE shared_account_listings SET status=$3,updated_at=NOW() WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL RETURNING account_id`, listingID, ownerID, status).Scan(&accountID)
+	// Owners may only toggle their own listing between active and paused.  An
+	// administrator's suspended/invalid decision must be sticky until an admin
+	// explicitly restores it; otherwise a user could immediately call resume
+	// and bypass moderation.
+	err = tx.QueryRowContext(ctx, `UPDATE shared_account_listings SET status=$3,updated_at=NOW() WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND status IN ('active','paused') RETURNING account_id`, listingID, ownerID, status).Scan(&accountID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrSharedListingNotFound
 	}
