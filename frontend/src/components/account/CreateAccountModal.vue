@@ -4688,6 +4688,10 @@ watch(
   () => props.show,
   (newVal) => {
     if (newVal) {
+      if (props.sharedPool && props.initialAccount) {
+        if (props.initialAccount.name) form.name = props.initialAccount.name
+        if (props.initialAccount.platform) form.platform = props.initialAccount.platform as AccountPlatform
+      }
       // Load TLS fingerprint profiles
       if (!props.sharedPool) adminAPI.tlsFingerprintProfiles.list()
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })

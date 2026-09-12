@@ -22,6 +22,7 @@ const testingCard = ref<any>(null)
 const editingCard = ref<SharedCard | null>(null)
 const sharedKeys = ref<SharedAPIKey[]>([])
 const keyName = ref(''); const keyPlatform = ref('openai'); const keyListings = ref<number[]>([]); const keyMessage = ref('')
+const createdKey = ref('')
 const showKeyModal = ref(false)
 const creatingKey = ref(false)
 const editingKeyId = ref<number | null>(null)
@@ -113,7 +114,8 @@ function toggleListing(id: number) { keyListings.value = keyListings.value.inclu
 function moveListing(index: number, delta: number) { const next = index + delta; if (next < 0 || next >= keyListings.value.length) return; const ids = [...keyListings.value]; [ids[index], ids[next]] = [ids[next], ids[index]]; keyListings.value = ids }
 function dragListing(event: DragEvent, index: number) { event.dataTransfer?.setData('text/plain', String(index)) }
 function dropListing(event: DragEvent, target: number) { const source = Number(event.dataTransfer?.getData('text/plain')); if (!Number.isInteger(source) || source === target) return; const ids = [...keyListings.value]; const [id] = ids.splice(source, 1); ids.splice(target, 0, id); keyListings.value = ids }
-async function createKey(){ if (!keyName.value.trim() || !keyListings.value.length || creatingKey.value) return; creatingKey.value = true; keyMessage.value=''; try { if (editingKeyId.value) { await updateSharedAPIKey(editingKeyId.value, {name:keyName.value.trim(),platform:keyPlatform.value,listing_ids:keyListings.value}); showKeyModal.value = false } else { const k=await createSharedAPIKey({name:keyName.value.trim(),platform:keyPlatform.value,listing_ids:keyListings.value}); keyMessage.value=`新 Key：${k.key}（仅显示一次，请立即复制保存）`; keyName.value=''; keyListings.value=[]; showKeyModal.value = false } await loadKeys() } catch(e){ keyMessage.value=errorText(e) } finally { creatingKey.value = false } }
+async function copyCreatedKey(){ if (!createdKey.value) return; await navigator.clipboard.writeText(createdKey.value); keyMessage.value = 'Key 已复制到剪贴板，请妥善保存。' }
+async function createKey(){ if (!keyName.value.trim() || !keyListings.value.length || creatingKey.value) return; creatingKey.value = true; keyMessage.value=''; try { if (editingKeyId.value) { await updateSharedAPIKey(editingKeyId.value, {name:keyName.value.trim(),platform:keyPlatform.value,listing_ids:keyListings.value}); showKeyModal.value = false } else { const k=await createSharedAPIKey({name:keyName.value.trim(),platform:keyPlatform.value,listing_ids:keyListings.value}); createdKey.value = k.key; keyMessage.value='新 Key 已创建，请复制并保存（之后不会再次显示完整 Key）。'; keyName.value=''; keyListings.value=[]; showKeyModal.value = false } await loadKeys() } catch(e){ keyMessage.value=errorText(e) } finally { creatingKey.value = false } }
 async function removeKey(id:number){ if(!window.confirm('确定删除此共享 API Key 吗？')) return; await deleteSharedAPIKey(id); await loadKeys() }
 async function toggleKey(key: SharedAPIKey) { await updateSharedAPIKey(key.id, { name: key.name, status: key.status === 'active' ? 'disabled' : 'active', listing_ids: key.listing_ids }); await loadKeys() }
 onMounted(() => { void loadKeys() })
@@ -137,7 +139,7 @@ onMounted(() => { void loadKeys() })
       </div>
       <section v-if="mode === 'keys'" class="card p-6" aria-label="共享 API Key">
         <div class="flex flex-wrap items-center justify-between gap-4"><div><h2 class="font-semibold text-gray-900 dark:text-white">共享 API Key</h2><p class="mt-1 text-xs text-gray-500">独立于普通 API Key，可绑定多个账号并按顺序故障切换。</p></div><button class="btn btn-primary" @click="openKeyModal">创建共享 Key</button></div>
-        <p v-if="keyMessage" class="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{{ keyMessage }}</p>
+        <div v-if="keyMessage" class="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700"><div>{{ keyMessage }}</div><div v-if="createdKey" class="mt-2 flex items-center gap-2"><code class="min-w-0 flex-1 truncate rounded bg-white/70 px-2 py-1 font-mono text-xs">{{ createdKey }}</code><button class="btn btn-secondary btn-sm" @click="copyCreatedKey">复制 Key</button></div></div>
         <div v-if="!sharedKeys.length" class="mt-6 text-center text-sm text-gray-400">暂无共享 Key</div>
         <ul v-else class="mt-6 space-y-3"><li v-for="key in sharedKeys" :key="key.id" class="rounded-lg border border-gray-200 p-4 dark:border-dark-700"><div class="flex flex-wrap items-center justify-between gap-3"><div><p class="font-medium text-gray-900 dark:text-white">{{ key.name }}</p><p class="mt-1 text-xs text-gray-500">{{ key.platform }} · {{ key.key_preview }} · {{ key.listing_ids.length }} 个账号</p></div><div class="flex gap-2"><button class="btn btn-secondary btn-sm" @click="openEditKey(key)">编辑顺序</button><button class="btn btn-secondary btn-sm" @click="toggleKey(key)">{{ key.status === 'active' ? '禁用' : '启用' }}</button><button class="btn btn-secondary btn-sm text-red-500" @click="removeKey(key.id)">删除</button></div></div></li></ul>
       </section>
