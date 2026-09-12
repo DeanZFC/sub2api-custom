@@ -26,7 +26,7 @@ const credentialKeys = new Set([
   'project_id', 'oauth_type', 'tier_id', 'sub', 'team_id', 'subscription_tier',
   'entitlement_status', 'service_account_json', 'client_email', 'location',
   'aws_region', 'aws_access_key_id', 'aws_secret_access_key', 'aws_session_token',
-  'account_mode', 'api_protocol', 'api_base_urls'
+  'account_mode', 'api_protocol', 'api_base_urls', 'model_mapping'
 ])
 
 export function createSharedAccountAPI(proxyURL: () => string) {
@@ -50,7 +50,7 @@ export function createSharedAccountAPI(proxyURL: () => string) {
       platform: payload.platform,
       type: payload.type,
       credentials: Object.fromEntries(Object.entries(payload.credentials).filter(([key]) => credentialKeys.has(key))),
-      extra: payload.extra ? Object.fromEntries(Object.entries(payload.extra).filter(([key]) => ['email', 'name', 'privacy_mode', 'subscription_tier', 'project_id'].includes(key))) : undefined,
+      extra: payload.extra ? Object.fromEntries(Object.entries(payload.extra).filter(([key]) => ['email', 'name', 'privacy_mode', 'subscription_tier', 'project_id', 'codex_fingerprint_mode', 'openai_passthrough_enabled', 'openai_flatten_namespaces'].includes(key))) : undefined,
       expires_at: expiresAt,
       concurrency: payload.concurrency,
       sell_rate: payload.rate_multiplier ?? 1,
