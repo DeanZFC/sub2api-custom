@@ -116,4 +116,12 @@ describe('RecentRequestsCell', () => {
     expect(dialog()?.querySelector('[data-testid="recent-request-user"]')?.textContent).toContain('#53')
     expect(dialog()?.querySelector('[data-testid="recent-request-group"]')).toBeNull()
   })
+
+  it('can render request indicators without opening a floating details panel', async () => {
+    await wrapper.setProps({ interactive: false })
+    await triggers()[1].trigger('mouseenter')
+    await triggers()[1].trigger('click')
+    expect(dialog()).toBeNull()
+    expect(wrapper.find('[aria-haspopup="dialog"]').exists()).toBe(false)
+  })
 })

@@ -6,29 +6,37 @@
     <div v-else-if="timeline.length" :aria-label="t('admin.accounts.recentRequests.summary', { count: timeline.length })">
       <div class="mb-1 text-right text-[11px] font-medium tabular-nums text-gray-500 dark:text-gray-400">{{ formatTime(latestCreatedAt) }}</div>
       <div class="flex h-6 items-center justify-end gap-1">
-        <button
-          v-for="request in timeline"
-          :key="requestKey(request)"
-          type="button"
-          class="block h-6 w-1.5 shrink-0 rounded-full shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
-          :class="request.kind === 'error' ? 'bg-red-500 shadow-red-200 dark:bg-red-400 dark:shadow-none' : 'bg-emerald-500 shadow-emerald-200 dark:bg-emerald-400 dark:shadow-none'"
-          :aria-label="t('admin.accounts.recentRequests.viewDetails', { time: formatTime(request.created_at) })"
-          :aria-expanded="activeKey === requestKey(request)"
-          aria-haspopup="dialog"
-          data-testid="recent-request-trigger"
-          @mouseenter="showRequest(request, $event)"
-          @mouseleave="scheduleClose"
-          @focus="showRequest(request, $event)"
-          @blur="scheduleClose"
-          @click.stop="togglePinned(request, $event)"
-        />
+        <template v-for="request in timeline" :key="requestKey(request)">
+          <button
+            v-if="interactive"
+            type="button"
+            class="block h-6 w-1.5 shrink-0 rounded-full shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
+            :class="request.kind === 'error' ? 'bg-red-500 shadow-red-200 dark:bg-red-400 dark:shadow-none' : 'bg-emerald-500 shadow-emerald-200 dark:bg-emerald-400 dark:shadow-none'"
+            :aria-label="t('admin.accounts.recentRequests.viewDetails', { time: formatTime(request.created_at) })"
+            :aria-expanded="activeKey === requestKey(request)"
+            aria-haspopup="dialog"
+            data-testid="recent-request-trigger"
+            @mouseenter="showRequest(request, $event)"
+            @mouseleave="scheduleClose"
+            @focus="showRequest(request, $event)"
+            @blur="scheduleClose"
+            @click.stop="togglePinned(request, $event)"
+          />
+          <span
+            v-else
+            class="block h-6 w-1.5 shrink-0 rounded-full"
+            :class="request.kind === 'error' ? 'bg-red-500 dark:bg-red-400' : 'bg-emerald-500 dark:bg-emerald-400'"
+            :aria-label="t('admin.accounts.recentRequests.viewDetails', { time: formatTime(request.created_at) })"
+            data-testid="recent-request-trigger"
+          />
+        </template>
       </div>
     </div>
     <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{ t('admin.accounts.recentRequests.empty') }}</span>
 
     <Teleport to="body">
       <div
-        v-if="activeRequest"
+        v-if="interactive && activeRequest"
         ref="panel"
         role="dialog"
         :aria-label="activeRequest.kind === 'error' ? t('admin.accounts.recentRequests.error') : t('admin.accounts.recentRequests.success')"
@@ -65,7 +73,9 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatDateTime } from '@/utils/format'
 
 const { t } = useI18n()
-const props = defineProps<{ requests: OpsRequestDetail[]; loading?: boolean }>()
+const props = withDefaults(defineProps<{ requests: OpsRequestDetail[]; loading?: boolean; interactive?: boolean }>(), {
+  interactive: true,
+})
 
 // The API sends newest first; keep newest at the right of the timeline.
 const timeline = computed(() => [...props.requests].reverse())
@@ -98,7 +108,7 @@ function updatePosition() {
 }
 
 function showRequest(request: OpsRequestDetail, event: Event) {
-  if (pinned) return
+  if (!props.interactive || pinned) return
   cancelClose()
   anchor = event.currentTarget as HTMLElement
   activeRequest.value = request
@@ -106,6 +116,7 @@ function showRequest(request: OpsRequestDetail, event: Event) {
 }
 
 function togglePinned(request: OpsRequestDetail, event: Event) {
+  if (!props.interactive) return
   if (pinned && activeKey.value === requestKey(request)) {
     close()
     return

@@ -664,7 +664,7 @@ onMounted(() => { void loadKeys() })
                 <PlatformTypeBadge :platform="(card.platform || 'openai') as AccountPlatform" :type="(card.type || 'oauth') as AccountType" />
               </td>
               <td class="px-5 py-4">
-                <RecentRequestsCell :requests="recentRequestsOf(card)" />
+                <RecentRequestsCell :requests="recentRequestsOf(card)" :interactive="false" />
               </td>
               <td class="px-5 py-4">
                 <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(card.status)">{{ labels[card.status] || card.status }}</span>
@@ -764,7 +764,7 @@ onMounted(() => { void loadKeys() })
 
           <div class="mt-4 border-t border-gray-100 pt-3 dark:border-dark-700">
             <p class="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">最近请求</p>
-            <RecentRequestsCell :requests="recentRequestsOf(card)" />
+            <RecentRequestsCell :requests="recentRequestsOf(card)" :interactive="false" />
           </div>
         </article>
       </div>
