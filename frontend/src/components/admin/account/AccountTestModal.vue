@@ -769,10 +769,11 @@ const loadAvailableModels = async () => {
   selectedModelId.value = '' // Reset selection before loading
   try {
     const models = props.sharedPool
-      ? (await getSharedAccountModels(props.account.id)).map((model) => ({
+      ? (await getSharedAccountModels(props.account.id)).map((model): ClaudeModel => ({
           id: model.id,
           display_name: model.display_name || model.id,
-          type: model.type || 'model'
+          type: model.type || 'model',
+          created_at: ''
         }))
       : await adminAPI.accounts.getAvailableModels(props.account.id)
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
