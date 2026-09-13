@@ -109,6 +109,13 @@ function modelsFor(card: SharedCard) {
   if (card.available_models?.length) return card.available_models
   return getModelsByPlatform(card.platform)
 }
+const MODEL_PREVIEW_LIMIT = 8
+function modelPreviewFor(card: SharedCard) {
+  return modelsFor(card).slice(0, MODEL_PREVIEW_LIMIT)
+}
+function hiddenModelCount(card: SharedCard) {
+  return Math.max(0, modelsFor(card).length - MODEL_PREVIEW_LIMIT)
+}
 function iconPlatform(value: string): any { return value }
 function recentRequestsOf(card: SharedCard): OpsRequestDetail[] {
   return (card.recent_calls || []).map((call) => ({
@@ -792,13 +799,19 @@ onMounted(() => { void loadKeys() })
             </div>
           </dl>
 
-          <div class="mt-4">
+          <div class="group relative mt-4">
             <div class="mb-1.5 flex items-center justify-between">
               <p class="text-[11px] font-medium uppercase tracking-wide text-gray-400">可用模型</p>
               <span class="text-[11px] tabular-nums text-gray-400">{{ modelsFor(card).length }}</span>
             </div>
             <div class="flex flex-wrap gap-1">
-              <span v-for="model in modelsFor(card)" :key="model" class="max-w-full truncate rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-gray-600 dark:bg-dark-700 dark:text-gray-300" :title="model">{{ model }}</span>
+              <span v-for="model in modelPreviewFor(card)" :key="model" class="max-w-[10rem] truncate rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-gray-600 dark:bg-dark-700 dark:text-gray-300" :title="model">{{ model }}</span>
+              <span v-if="hiddenModelCount(card) > 0" class="cursor-help rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-gray-500 dark:bg-dark-700 dark:text-gray-400" :aria-label="`还有 ${hiddenModelCount(card)} 个模型，悬浮查看全部`">+{{ hiddenModelCount(card) }}</span>
+            </div>
+            <div v-if="hiddenModelCount(card) > 0" role="tooltip" class="pointer-events-none absolute left-0 top-full z-30 mt-2 max-h-56 w-max max-w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 opacity-0 shadow-xl transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 dark:border-dark-600 dark:bg-dark-800">
+              <div class="flex flex-wrap gap-1">
+                <span v-for="model in modelsFor(card)" :key="`tooltip-${model}`" class="max-w-[12rem] truncate rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-gray-600 dark:bg-dark-700 dark:text-gray-300" :title="model">{{ model }}</span>
+              </div>
             </div>
           </div>
 

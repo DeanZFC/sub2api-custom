@@ -53,6 +53,21 @@ describe('SharedPoolView', () => {
     expect(wrapper.text()).toContain('已暂停')
   })
 
+  it('collapses long model lists and exposes the full list in a hover tooltip', async () => {
+    const availableModels = Array.from({ length: 12 }, (_, index) => `model-${index + 1}`)
+    api.getSharedPoolCards.mockResolvedValueOnce([{ ...card, available_models: availableModels }])
+    const wrapper = render(); await flushPromises()
+
+    const modelSection = wrapper.find('.group.relative')
+    expect(modelSection.findAll('div.flex.flex-wrap').at(0)!.findAll('span')).toHaveLength(9)
+    expect(modelSection.text()).toContain('+4')
+
+    const tooltip = modelSection.find('[role="tooltip"]')
+    expect(tooltip.exists()).toBe(true)
+    expect(tooltip.findAll('span')).toHaveLength(12)
+    expect(tooltip.text()).toContain('model-12')
+  })
+
   it('switches to usage records inside the shared pool page', async () => {
     const wrapper = render(); await flushPromises()
     const usageButton = wrapper.findAll('button').find(button => button.text() === '使用记录')
