@@ -456,6 +456,12 @@ func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group 
 	if user == nil || group == nil {
 		return false
 	}
+	// Shared-pool groups are reserved for shared API keys. Normal API keys
+	// must never be able to bind them, even when a caller submits a group ID
+	// directly instead of using the filtered UI options.
+	if group.IsSharedPool {
+		return false
+	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		if s.userSubRepo == nil {
@@ -1113,6 +1119,9 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 
 // canUserBindGroupInternal 内部方法，检查用户是否可以绑定分组（使用预加载的订阅数据）
 func (s *APIKeyService) canUserBindGroupInternal(user *User, group *Group, subscribedGroupIDs map[int64]bool) bool {
+	if user == nil || group == nil || group.IsSharedPool {
+		return false
+	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		return subscribedGroupIDs[group.ID]

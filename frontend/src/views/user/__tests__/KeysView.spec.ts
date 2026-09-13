@@ -478,6 +478,21 @@ describe('user KeysView', () => {
     )
   })
 
+  it('hides shared-pool groups from normal API-key group selectors and filters', async () => {
+    getAvailableGroups.mockResolvedValueOnce([
+      createGroup(42, 'OpenAI'),
+      { ...createGroup(99, 'Shared OpenAI'), is_shared_pool: true },
+    ])
+    const wrapper = await mountView()
+
+    const vm = wrapper.vm as any
+    expect(vm.groupOptions.map((option: { value: number }) => option.value)).toEqual([42])
+    expect(vm.fallbackGroupOptions.map((option: { value: number | null }) => option.value)).toEqual([null, 42])
+
+    const filterOptions = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as Array<{ value: number | string }>
+    expect(filterOptions.map((option) => option.value)).toEqual(['', 0, 42])
+  })
+
   it('shows the fallback group in the group cell and switches it independently', async () => {
     const primary = createGroup(10, 'Primary OpenAI')
     const fallback = createGroup(11, 'Fallback OpenAI')
