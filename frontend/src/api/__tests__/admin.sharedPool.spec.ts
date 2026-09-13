@@ -1,19 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
-vi.mock('../client', () => ({ apiClient: { get: mocks.get, put: mocks.put } }))
-const { get, put } = mocks
+const mocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), delete: vi.fn() }))
+vi.mock('../client', () => ({ apiClient: { get: mocks.get, put: mocks.put, delete: mocks.delete } }))
+const { get, put, delete: del } = mocks
 
 import {
   listSharedAccounts,
   setSharedAccountStatus,
   setSharedAccountListed,
+  deleteSharedAccount,
   listSharedUsers,
   setSharedUserPublishPermission
 } from '../admin/sharedPool'
 
 describe('admin shared pool API', () => {
-  beforeEach(() => { get.mockReset(); put.mockReset() })
+  beforeEach(() => { get.mockReset(); put.mockReset(); del.mockReset() })
 
   it('uses isolated listing endpoints for account controls', async () => {
     get.mockResolvedValue({ data: { items: [] } })
@@ -24,6 +25,12 @@ describe('admin shared pool API', () => {
     expect(get).toHaveBeenCalledWith('/admin/shared-pool/listings', { params: { status: 'suspended' } })
     expect(put).toHaveBeenNthCalledWith(1, '/admin/shared-pool/listings/4/status', { status: 'suspended' })
     expect(put).toHaveBeenNthCalledWith(2, '/admin/shared-pool/listings/4/listed', { listed: false })
+  })
+
+  it('deletes only through the isolated shared-pool admin endpoint', async () => {
+    del.mockResolvedValue({ data: {} })
+    await deleteSharedAccount(12)
+    expect(del).toHaveBeenCalledWith('/admin/shared-pool/listings/12')
   })
 
   it('updates a users shared publishing permission independently', async () => {
@@ -37,5 +44,15 @@ describe('admin shared pool API', () => {
       reason: '多次失败',
       blocked_until: '2026-09-20T00:00:00Z'
     })
+  })
+
+  it('passes publish permission filters and pagination to the admin users endpoint', async () => {
+    get.mockResolvedValue({ data: { items: [], total: 42, page: 2, page_size: 20 } })
+    const result = await listSharedUsers({ search: 'alice', publish_enabled: 'false', page: 2, page_size: 20 })
+    expect(get).toHaveBeenCalledWith('/admin/shared-pool/users', {
+      params: { search: 'alice', publish_enabled: 'false', page: 2, page_size: 20 }
+    })
+    expect(result.total).toBe(42)
+    expect(result.page).toBe(2)
   })
 })

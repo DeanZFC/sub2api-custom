@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -223,13 +224,29 @@ func (h *SharedAccountPoolHandler) AdminListUsers(c *gin.Context) {
 		response.InternalError(c, "shared pool admin controls unavailable")
 		return
 	}
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	items, err := adminRepo.ListAdminUsers(c.Request.Context(), c.Query("search"), limit)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", c.DefaultQuery("limit", "20")))
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 500 {
+		pageSize = 20
+	}
+	var publishEnabled *bool
+	if raw := strings.TrimSpace(c.Query("publish_enabled")); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "invalid publish_enabled")
+			return
+		}
+		publishEnabled = &v
+	}
+	items, total, err := adminRepo.ListAdminUsers(c.Request.Context(), c.Query("search"), publishEnabled, page, pageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"items": items, "limit": limit})
+	response.Success(c, gin.H{"items": items, "total": total, "page": page, "page_size": pageSize})
 }
 
 func (h *SharedAccountPoolHandler) AdminSetStatus(c *gin.Context) {

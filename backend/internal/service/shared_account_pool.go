@@ -66,7 +66,7 @@ type SharedAccountPoolRepository interface {
 // fakes do not need to implement admin-only methods.
 type SharedAccountPoolAdminRepository interface {
 	ListAdminCards(ctx context.Context, platform, status, search string, ownerID *int64, limit, recentLimit int) ([]SharedAccountCard, error)
-	ListAdminUsers(ctx context.Context, search string, limit int) ([]SharedPoolUserSummary, error)
+	ListAdminUsers(ctx context.Context, search string, publishEnabled *bool, page, pageSize int) ([]SharedPoolUserSummary, int, error)
 	SetListingAdminStatus(ctx context.Context, listingID int64, status string) error
 	SetListingAdminListed(ctx context.Context, listingID int64, listed bool) error
 	DeleteListingAdmin(ctx context.Context, listingID int64) error

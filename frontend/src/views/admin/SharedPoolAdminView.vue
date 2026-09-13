@@ -3,9 +3,10 @@
     <TablePageLayout>
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
-          <div class="flex-1 sm:max-w-72"><input v-model="search" class="input" placeholder="搜索账号或上传用户" @keyup.enter="loadAccounts" /></div>
-          <Select v-model="status" class="w-36" :options="[{ value: '', label: '全部状态' }, { value: 'active', label: '运行中' }, { value: 'paused', label: '已暂停' }, { value: 'suspended', label: '已禁用' }, { value: 'invalid', label: '不可用' }]" @change="loadAccounts" />
-          <div class="ml-auto flex gap-2"><button class="btn btn-secondary" :disabled="loading" @click="loadAccounts"><Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" /></button></div>
+          <div class="flex-1 sm:max-w-72"><input v-model="search" class="input" :placeholder="tabKey === 'accounts' ? '搜索账号或上传用户' : '搜索用户'" @keyup.enter="handleSearchSubmit" /></div>
+          <Select v-if="tabKey === 'accounts'" v-model="status" class="w-36" :options="[{ value: '', label: '全部状态' }, { value: 'active', label: '运行中' }, { value: 'paused', label: '已暂停' }, { value: 'suspended', label: '已禁用' }, { value: 'invalid', label: '不可用' }]" @change="loadAccounts" />
+          <Select v-else v-model="publishFilter" class="w-36" :options="[{ value: '', label: '全部权限' }, { value: 'true', label: '允许发布' }, { value: 'false', label: '已禁止' }]" @change="handleUserFilterChange" />
+          <div class="ml-auto flex gap-2"><button class="btn btn-secondary" :disabled="loading || loadingUsers" @click="tabKey === 'accounts' ? loadAccounts() : loadUsers()"><Icon name="refresh" size="md" :class="loading || loadingUsers ? 'animate-spin' : ''" /></button></div>
         </div>
       </template>
       <template #table>
@@ -25,6 +26,16 @@
           <template #cell-actions="{ row }"><button class="btn btn-secondary btn-sm" @click="toggleUser(row)">{{ row.publish_enabled ? '禁止发布' : '恢复发布' }}</button></template>
         </DataTable>
       </template>
+      <template #pagination>
+        <Pagination
+          v-if="tabKey === 'users' && userPagination.total > 0"
+          :page="userPagination.page"
+          :total="userPagination.total"
+          :page-size="userPagination.pageSize"
+          @update:page="handleUserPageChange"
+          @update:pageSize="handleUserPageSizeChange"
+        />
+      </template>
     </TablePageLayout>
   </AppLayout>
 </template>
@@ -34,13 +45,15 @@ import { onMounted, ref, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { listSharedAccounts, listSharedUsers, setSharedAccountListed, setSharedAccountStatus, deleteSharedAccount, setSharedUserPublishPermission, type AdminSharedAccount, type AdminSharedUser } from '@/api/admin/sharedPool'
 
 const tabs = [{ key: 'accounts', label: '共享账号' }, { key: 'users', label: '发布权限' }]
-const tabKey = ref('accounts'); const search = ref(''); const status = ref(''); const loading = ref(false); const loadingUsers = ref(false)
+const tabKey = ref('accounts'); const search = ref(''); const status = ref(''); const publishFilter = ref(''); const loading = ref(false); const loadingUsers = ref(false)
 const accounts = ref<AdminSharedAccount[]>([]); const users = ref<AdminSharedUser[]>([])
+const userPagination = ref({ page: 1, pageSize: 20, total: 0 })
 function averageLatency(row: AdminSharedAccount) {
   const values = (row.recent_calls || []).map(call => Number(call.duration_ms || 0)).filter(value => value > 0)
   return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0
@@ -48,7 +61,25 @@ function averageLatency(row: AdminSharedAccount) {
 const accountColumns = [{ key: 'name', label: '账号' }, { key: 'uploader', label: '上传用户' }, { key: 'status', label: '状态' }, { key: 'metrics', label: '使用情况' }, { key: 'actions', label: '操作' }]
 const userColumns = [{ key: 'user', label: '用户' }, { key: 'permission', label: '发布权限' }, { key: 'actions', label: '操作' }]
 async function loadAccounts() { loading.value = true; try { const result = await listSharedAccounts({ search: search.value || undefined, status: status.value || undefined }); accounts.value = result.items || [] } finally { loading.value = false } }
-async function loadUsers() { loadingUsers.value = true; try { const result = await listSharedUsers({ search: search.value || undefined }); users.value = result.items || [] } finally { loadingUsers.value = false } }
+async function loadUsers() {
+  loadingUsers.value = true
+  try {
+    const result = await listSharedUsers({
+      search: search.value || undefined,
+      page: userPagination.value.page,
+      page_size: userPagination.value.pageSize,
+      publish_enabled: publishFilter.value || undefined
+    })
+    users.value = result.items || []
+    userPagination.value.total = result.total || 0
+    if (result.page) userPagination.value.page = result.page
+    if (result.page_size) userPagination.value.pageSize = result.page_size
+  } finally { loadingUsers.value = false }
+}
+function handleUserFilterChange() { userPagination.value.page = 1; loadUsers() }
+function handleSearchSubmit() { if (tabKey.value === 'users') { userPagination.value.page = 1; loadUsers() } else loadAccounts() }
+function handleUserPageChange(page: number) { userPagination.value.page = page; loadUsers() }
+function handleUserPageSizeChange(pageSize: number) { userPagination.value.pageSize = pageSize; userPagination.value.page = 1; loadUsers() }
 async function toggleAccount(row: AdminSharedAccount) {
   const suspending = row.status !== 'suspended'
   await setSharedAccountStatus(row.id, suspending ? 'suspended' : 'active')

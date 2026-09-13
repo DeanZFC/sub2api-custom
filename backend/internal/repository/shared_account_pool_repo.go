@@ -178,35 +178,47 @@ func (r *sharedAccountPoolRepository) ListAdminCards(ctx context.Context, platfo
 	return r.listCardsWithWhere(ctx, where, args, limit, recentLimit)
 }
 
-func (r *sharedAccountPoolRepository) ListAdminUsers(ctx context.Context, search string, limit int) ([]service.SharedPoolUserSummary, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 100
+func (r *sharedAccountPoolRepository) ListAdminUsers(ctx context.Context, search string, publishEnabled *bool, page, pageSize int) ([]service.SharedPoolUserSummary, int, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 500 {
+		pageSize = 100
+	}
+	where := ` WHERE u.deleted_at IS NULL`
+	args := []any{}
+	if strings.TrimSpace(search) != "" {
+		where += " AND (u.email ILIKE $1 OR u.username ILIKE $1)"
+		args = append(args, "%"+strings.TrimSpace(search)+"%")
+	}
+	if publishEnabled != nil {
+		where += fmt.Sprintf(" AND COALESCE(u.shared_publish_enabled,TRUE) = $%d", len(args)+1)
+		args = append(args, *publishEnabled)
+	}
+	var total int
+	countQuery := "SELECT COUNT(*) FROM users u" + where
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
 	}
 	query := `SELECT u.id, COALESCE(NULLIF(u.username,''),''), u.email,
  COALESCE(COUNT(l.id),0), COALESCE(u.shared_publish_enabled,TRUE), u.shared_publish_blocked_until, COALESCE(u.shared_publish_block_reason,'')
- FROM users u LEFT JOIN shared_account_listings l ON l.owner_user_id=u.id AND l.deleted_at IS NULL AND l.status <> 'deleted'
- WHERE u.deleted_at IS NULL`
-	args := []any{}
-	if strings.TrimSpace(search) != "" {
-		query += " AND (u.email ILIKE $1 OR u.username ILIKE $1)"
-		args = append(args, "%"+strings.TrimSpace(search)+"%")
-	}
-	query += fmt.Sprintf(" GROUP BY u.id ORDER BY COUNT(l.id) DESC,u.id DESC LIMIT $%d", len(args)+1)
-	args = append(args, limit)
+	 FROM users u LEFT JOIN shared_account_listings l ON l.owner_user_id=u.id AND l.deleted_at IS NULL AND l.status <> 'deleted'` + where
+	query += fmt.Sprintf(" GROUP BY u.id ORDER BY COUNT(l.id) DESC,u.id DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
+	args = append(args, pageSize, (page-1)*pageSize)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	out := make([]service.SharedPoolUserSummary, 0)
 	for rows.Next() {
 		var item service.SharedPoolUserSummary
 		if err := rows.Scan(&item.UserID, &item.Username, &item.Email, &item.SharedAccountCount, &item.PublishEnabled, &item.BlockedUntil, &item.BlockReason); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 func (r *sharedAccountPoolRepository) listCardsWithWhere(ctx context.Context, where string, args []any, limit, recentLimit int) ([]service.SharedAccountCard, error) {

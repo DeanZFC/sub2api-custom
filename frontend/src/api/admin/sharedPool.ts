@@ -51,8 +51,15 @@ export async function deleteSharedAccount(id: number) {
   await apiClient.delete(`/admin/shared-pool/listings/${id}`)
 }
 
+export interface AdminSharedUsersPage {
+  items: AdminSharedUser[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export async function listSharedUsers(params: Record<string, unknown> = {}) {
-  const { data } = await apiClient.get<{ items: AdminSharedUser[]; total?: number }>('/admin/shared-pool/users', { params })
+  const { data } = await apiClient.get<AdminSharedUsersPage>('/admin/shared-pool/users', { params })
   return data
 }
 
