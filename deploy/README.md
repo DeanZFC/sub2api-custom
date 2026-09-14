@@ -20,8 +20,6 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 | `install-custom-docker.sh` | One-command custom Docker deployment plus host updater installation |
 | `install-source-updater.sh` | Installs the restricted systemd updater for an existing Compose instance |
 | `Dockerfile.updater` | Reproducible builder image for the host updater binary |
-| `docker-compose.overdraft.yml` | Legacy source-build overlay kept for existing deployments |
-| `docker-compose.coexist.yml` | Legacy isolation overlay for existing deployments using the old container names |
 | `docker-deploy.sh` | Legacy upstream preparation script |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
