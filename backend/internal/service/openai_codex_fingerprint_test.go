@@ -100,6 +100,32 @@ func TestGetCodexFingerprintMode(t *testing.T) {
 	}
 }
 
+func TestResolveCodexMacTLSProfile(t *testing.T) {
+	tests := []struct {
+		name    string
+		account *Account
+		want    string
+	}{
+		{name: "nil", account: nil},
+		{name: "default single machine", account: newTestOAuthAccount(901, nil), want: "Mac Codex (macOS arm64)"},
+		{name: "explicit single machine", account: newTestOAuthAccount(902, map[string]any{codexFingerprintModeExtraKey: "single_machine_multi_window"}), want: "Mac Codex (macOS arm64)"},
+		{name: "explicit off", account: newTestOAuthAccount(903, map[string]any{codexFingerprintModeExtraKey: "off"})},
+		{name: "explicit session", account: newTestOAuthAccount(904, map[string]any{codexFingerprintModeExtraKey: "session"})},
+		{name: "anthropic", account: &Account{ID: 905, Platform: PlatformAnthropic, Type: AccountTypeOAuth}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := resolveCodexMacTLSProfile(tt.account)
+			if tt.want == "" {
+				assert.Nil(t, profile)
+				return
+			}
+			require.NotNil(t, profile)
+			assert.Equal(t, tt.want, profile.Name)
+		})
+	}
+}
+
 func TestResolveCodexFingerprintIDsFromRequest_AccountDeviceModeUsesStableAccountSeed(t *testing.T) {
 	account := newTestOAuthAccount(904, map[string]any{codexFingerprintModeExtraKey: "account_device"})
 	first := resolveCodexFingerprintIDsFromRequest(account, nil)

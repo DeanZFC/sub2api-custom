@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -143,6 +144,25 @@ const (
 	// and renders overflow occupancy as spawned sub-agents of those windows.
 	codexFingerprintSingleMachineMultiWindow codexFingerprintMode = "single_machine_multi_window"
 )
+
+// resolveCodexMacTLSProfile returns the stable network fingerprint used by
+// Codex single-machine multi-window accounts. The application identity remains
+// account-scoped in resolveCodexFingerprintIDs; this profile only controls the
+// TLS ClientHello shape seen by the upstream.
+//
+// The effective Codex mode is used here so existing accounts with no explicit
+// mode follow the same single-machine default as the request identity path.
+// Explicit off/device/session/full modes keep their existing TLS behavior.
+func resolveCodexMacTLSProfile(account *Account) *tlsfingerprint.Profile {
+	if account == nil || !account.IsOpenAIOAuth() {
+		return nil
+	}
+	mode, _ := resolveCodexFingerprintMode(account, true)
+	if mode != codexFingerprintSingleMachineMultiWindow {
+		return nil
+	}
+	return tlsfingerprint.NewMacCodexProfile()
+}
 
 const (
 	codexFingerprintModeExtraKey = "codex_fingerprint_mode"

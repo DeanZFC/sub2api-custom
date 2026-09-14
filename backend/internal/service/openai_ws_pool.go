@@ -1958,6 +1958,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	dialCtx, cancelDial := context.WithTimeout(ctx, p.dialTimeout())
 	defer cancelDial()
+	dialCtx = withOpenAIWSTLSProfile(dialCtx, resolveCodexMacTLSProfile(req.Account))
 	conn, status, handshakeHeaders, err := p.clientDialer.Dial(dialCtx, req.WSURL, headers, req.ProxyURL)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError

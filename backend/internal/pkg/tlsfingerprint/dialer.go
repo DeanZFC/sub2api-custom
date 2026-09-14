@@ -1,16 +1,20 @@
 // Package tlsfingerprint provides TLS fingerprint simulation for HTTP clients.
-// It uses the utls library to create TLS connections that mimic Node.js/Claude Code clients.
+// It uses the utls library for captured Node.js/Claude Code profiles and an
+// adapted macOS-style profile for Codex connections.
 package tlsfingerprint
 
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
 
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/proxy"
@@ -34,22 +38,41 @@ type Profile struct {
 
 // Dialer creates TLS connections with custom fingerprints.
 type Dialer struct {
-	profile    *Profile
-	baseDialer func(ctx context.Context, network, addr string) (net.Conn, error)
+	profile      *Profile
+	baseDialer   func(ctx context.Context, network, addr string) (net.Conn, error)
+	sessionCache utls.ClientSessionCache
 }
 
 // HTTPProxyDialer creates TLS connections through HTTP/HTTPS proxies with custom fingerprints.
 // It handles the CONNECT tunnel establishment before performing TLS handshake.
 type HTTPProxyDialer struct {
-	profile  *Profile
-	proxyURL *url.URL
+	profile      *Profile
+	proxyURL     *url.URL
+	sessionCache utls.ClientSessionCache
 }
 
 // SOCKS5ProxyDialer creates TLS connections through SOCKS5 proxies with custom fingerprints.
 // It uses golang.org/x/net/proxy to establish the SOCKS5 tunnel.
 type SOCKS5ProxyDialer struct {
-	profile  *Profile
-	proxyURL *url.URL
+	profile      *Profile
+	proxyURL     *url.URL
+	sessionCache utls.ClientSessionCache
+}
+
+var tlsSessionCaches sync.Map // map[string]utls.ClientSessionCache
+
+func sessionCacheFor(profile *Profile, scope string) utls.ClientSessionCache {
+	name := "default"
+	if profile != nil && profile.Name != "" {
+		name = profile.Name
+	}
+	key := name + "|" + scope
+	if cached, ok := tlsSessionCaches.Load(key); ok {
+		return cached.(utls.ClientSessionCache)
+	}
+	candidate := utls.NewLRUClientSessionCache(32)
+	actual, _ := tlsSessionCaches.LoadOrStore(key, candidate)
+	return actual.(utls.ClientSessionCache)
 }
 
 // Default TLS fingerprint values captured from Claude Code (Node.js 24.x)
@@ -123,19 +146,27 @@ func NewDialer(profile *Profile, baseDialer func(ctx context.Context, network, a
 	if baseDialer == nil {
 		baseDialer = (&net.Dialer{}).DialContext
 	}
-	return &Dialer{profile: profile, baseDialer: baseDialer}
+	return &Dialer{profile: profile, baseDialer: baseDialer, sessionCache: sessionCacheFor(profile, "direct")}
 }
 
 // NewHTTPProxyDialer creates a new TLS fingerprint dialer that works through HTTP/HTTPS proxies.
 // It establishes a CONNECT tunnel before performing TLS handshake with custom fingerprint.
 func NewHTTPProxyDialer(profile *Profile, proxyURL *url.URL) *HTTPProxyDialer {
-	return &HTTPProxyDialer{profile: profile, proxyURL: proxyURL}
+	scope := "proxy"
+	if proxyURL != nil {
+		scope = proxyURL.String()
+	}
+	return &HTTPProxyDialer{profile: profile, proxyURL: proxyURL, sessionCache: sessionCacheFor(profile, scope)}
 }
 
 // NewSOCKS5ProxyDialer creates a new TLS fingerprint dialer that works through SOCKS5 proxies.
 // It establishes a SOCKS5 tunnel before performing TLS handshake with custom fingerprint.
 func NewSOCKS5ProxyDialer(profile *Profile, proxyURL *url.URL) *SOCKS5ProxyDialer {
-	return &SOCKS5ProxyDialer{profile: profile, proxyURL: proxyURL}
+	scope := "proxy"
+	if proxyURL != nil {
+		scope = proxyURL.String()
+	}
+	return &SOCKS5ProxyDialer{profile: profile, proxyURL: proxyURL, sessionCache: sessionCacheFor(profile, scope)}
 }
 
 // DialTLSContext establishes a TLS connection through SOCKS5 proxy with the configured fingerprint.
@@ -176,7 +207,7 @@ func (d *SOCKS5ProxyDialer) DialTLSContext(ctx context.Context, network, addr st
 	slog.Debug("tls_fingerprint_socks5_tunnel_established")
 
 	// Step 3: Perform TLS handshake on the tunnel with utls fingerprint
-	return performTLSHandshake(ctx, conn, d.profile, addr)
+	return performTLSHandshake(ctx, conn, d.profile, addr, d.sessionCache)
 }
 
 // DialTLSContext establishes a TLS connection through HTTP proxy with the configured fingerprint.
@@ -204,6 +235,20 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 		return nil, fmt.Errorf("connect to proxy: %w", err)
 	}
 	slog.Debug("tls_fingerprint_http_proxy_connected", "proxy_addr", proxyAddr)
+
+	// An HTTPS proxy has its own TLS hop. Keep that outer handshake standard;
+	// the Mac Codex fingerprint belongs to the tunneled upstream connection.
+	if strings.EqualFold(d.proxyURL.Scheme, "https") {
+		proxyTLS := tls.Client(conn, &tls.Config{
+			ServerName: d.proxyURL.Hostname(),
+			MinVersion: tls.VersionTLS12,
+		})
+		if err := proxyTLS.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("TLS handshake with HTTPS proxy: %w", err)
+		}
+		conn = proxyTLS
+	}
 
 	// Step 2: Send CONNECT request to establish tunnel
 	req := &http.Request{
@@ -247,7 +292,7 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 	slog.Debug("tls_fingerprint_http_proxy_tunnel_established")
 
 	// Step 4: Perform TLS handshake on the tunnel with utls fingerprint
-	return performTLSHandshake(ctx, conn, d.profile, addr)
+	return performTLSHandshake(ctx, conn, d.profile, addr, d.sessionCache)
 }
 
 // DialTLSContext establishes a TLS connection with the configured fingerprint.
@@ -263,20 +308,25 @@ func (d *Dialer) DialTLSContext(ctx context.Context, network, addr string) (net.
 	slog.Debug("tls_fingerprint_tcp_connected", "addr", addr)
 
 	// Perform TLS handshake with utls fingerprint
-	return performTLSHandshake(ctx, conn, d.profile, addr)
+	return performTLSHandshake(ctx, conn, d.profile, addr, d.sessionCache)
 }
 
 // performTLSHandshake performs the uTLS handshake on an established connection.
 // It builds a ClientHello spec from the profile, applies it, and completes the handshake.
 // On failure, conn is closed and an error is returned.
-func performTLSHandshake(ctx context.Context, conn net.Conn, profile *Profile, addr string) (net.Conn, error) {
+func performTLSHandshake(ctx context.Context, conn net.Conn, profile *Profile, addr string, sessionCache utls.ClientSessionCache) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
 	}
 
 	spec := buildClientHelloSpecFromProfile(profile)
-	tlsConn := utls.UClient(conn, &utls.Config{ServerName: host}, utls.HelloCustom)
+	tlsConn := utls.UClient(conn, &utls.Config{
+		ServerName:                         host,
+		ClientSessionCache:                 sessionCache,
+		OmitEmptyPsk:                       true,
+		PreferSkipResumptionOnNilExtension: true,
+	}, utls.HelloCustom)
 
 	if err := tlsConn.ApplyPreset(spec); err != nil {
 		_ = conn.Close()
@@ -428,6 +478,8 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 			extensions = append(extensions, &utls.SignatureAlgorithmsCertExtension{SupportedSignatureAlgorithms: signatureAlgorithms})
 		case 51: // key_share
 			extensions = append(extensions, &utls.KeyShareExtension{KeyShares: keyShares})
+		case 41: // pre_shared_key (must be the final extension when present)
+			extensions = append(extensions, &utls.UtlsPreSharedKeyExtension{})
 		case 0xfe0d: // encrypted_client_hello (ECH, 65037)
 			// Send GREASE ECH with random payload — mimics Node.js behavior when no real ECHConfig is available.
 			// An empty GenericExtension causes "error decoding message" from servers that validate ECH format.
