@@ -250,6 +250,47 @@ func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
 	require.Nil(t, byName["token-absent"].OfficialPricing)
 }
 
+func TestListPlazaGroups_DeepSeekOfficialPricingKeepsProDistinct(t *testing.T) {
+	pricingSvc := newStubPricingServiceFromMap(map[string]*LiteLLMModelPricing{
+		"deepseek-flash": {
+			Mode:                    "chat",
+			InputCostPerToken:       1.5e-7,
+			OutputCostPerToken:      6e-7,
+			CacheReadInputTokenCost: 3e-9,
+		},
+		"deepseek-v4-pro": {
+			Mode:                    "chat",
+			InputCostPerToken:       6.6e-7,
+			OutputCostPerToken:      1.98e-6,
+			CacheReadInputTokenCost: 2.2e-8,
+		},
+	})
+	channels := []Channel{
+		{
+			ID: 1, Name: "deepseek", Status: StatusActive, GroupIDs: []int64{10},
+			ModelPricing: []ChannelModelPricing{{
+				Platform: PlatformDeepseek, Models: []string{"deepseek-flash", "deepseek-v4-pro"},
+				BillingMode: BillingModeToken,
+			}},
+		},
+	}
+	groups := []Group{{ID: 10, Name: "deepseek-group", Platform: PlatformDeepseek, RateMultiplier: 1}}
+	svc := newPlazaService(channels, groups, pricingSvc)
+	svc.billingService = NewBillingService(&config.Config{}, pricingSvc)
+	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	byName := map[string]PlazaModel{}
+	for _, model := range out[0].Models {
+		byName[model.Name] = model
+	}
+	require.InDelta(t, 1.5e-7, *byName["deepseek-flash"].OfficialPricing.InputPrice, 1e-15)
+	require.InDelta(t, 6.6e-7, *byName["deepseek-v4-pro"].OfficialPricing.InputPrice, 1e-15)
+	require.InDelta(t, 1.98e-6, *byName["deepseek-v4-pro"].OfficialPricing.OutputPrice, 1e-15)
+}
+
 func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 	// 图片计费模型:档位价按实收口径合成(分组图片价 > 渠道档位价 > 渠道默认按次价),
 	// 分组独立倍率字段透传;未配图片价的分组保持渠道定价原样。

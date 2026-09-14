@@ -54,7 +54,7 @@
       <!-- Remove button (always visible, stop propagation) -->
       <button
         type="button"
-        @click.stop="emit('remove')"
+        @click.stop="removeEntry"
         class="flex-shrink-0 rounded p-1 text-gray-400 hover:text-red-500"
       >
         <Icon name="trash" size="sm" />
@@ -87,7 +87,7 @@
             </label>
             <Select
               :modelValue="entry.billing_mode"
-              @update:modelValue="emit('update', {
+              @update:modelValue="emitEntryUpdate({
                 ...entry,
                 billing_mode: $event as BillingMode,
                 intervals: [],
@@ -189,7 +189,7 @@
           <TimePricingSection
             v-if="enableTimePricing"
             :model-value="entry.time_pricing"
-            @update:model-value="emit('update', { ...entry, time_pricing: $event })"
+            @update:model-value="emitEntryUpdate({ ...entry, time_pricing: $event })"
           />
         </div>
 
@@ -267,7 +267,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -319,8 +319,50 @@ const maxReasoningEffortMultiplierPlaceholder = computed(() =>
     : t('admin.channels.form.multiplierPlaceholder')
 )
 
+// A pricing lookup is best-effort convenience only. Every local edit bumps this
+// generation so an older response can never overwrite a newer user choice.
+let pricingLookupGeneration = 0
+
+function emitEntryUpdate(entry: PricingFormEntry) {
+  pricingLookupGeneration += 1
+  emit('update', entry)
+}
+
+function removeEntry() {
+  pricingLookupGeneration += 1
+  emit('remove')
+}
+
+onBeforeUnmount(() => {
+  pricingLookupGeneration += 1
+})
+
+function hasMeaningfulValue(value: unknown): boolean {
+  return value !== null && value !== undefined && !(typeof value === 'string' && value.trim() === '')
+}
+
+function hasManualPricing(entry: PricingFormEntry): boolean {
+  const scalarFields: Array<keyof PricingFormEntry> = [
+    'input_price',
+    'output_price',
+    'cache_write_price',
+    'cache_write_1h_price',
+    'cache_read_price',
+    'fast_multiplier',
+    'flex_multiplier',
+    'max_reasoning_effort_multiplier',
+    'image_input_price',
+    'image_output_price',
+    'per_request_price',
+  ]
+
+  if (scalarFields.some(field => hasMeaningfulValue(entry[field]))) return true
+  if (entry.intervals?.length) return true
+  return Boolean(entry.time_pricing?.periods?.length)
+}
+
 function emitField(field: keyof PricingFormEntry, value: string) {
-  emit('update', { ...props.entry, [field]: value === '' ? null : value })
+  emitEntryUpdate({ ...props.entry, [field]: value === '' ? null : value })
 }
 
 function addInterval() {
@@ -334,7 +376,7 @@ function addInterval() {
     cache_write_multiplier: null, cache_read_multiplier: null,
     sort_order: intervals.length
   })
-  emit('update', { ...props.entry, intervals })
+  emitEntryUpdate({ ...props.entry, intervals })
 }
 
 function addMediaTier() {
@@ -351,41 +393,59 @@ function addMediaTier() {
     cache_write_multiplier: null, cache_read_multiplier: null,
     sort_order: intervals.length
   })
-  emit('update', { ...props.entry, intervals })
+  emitEntryUpdate({ ...props.entry, intervals })
 }
 
 function updateInterval(idx: number, updated: IntervalFormEntry) {
   const intervals = [...(props.entry.intervals || [])]
   intervals[idx] = updated
-  emit('update', { ...props.entry, intervals })
+  emitEntryUpdate({ ...props.entry, intervals })
 }
 
 function removeInterval(idx: number) {
   const intervals = [...(props.entry.intervals || [])]
   intervals.splice(idx, 1)
-  emit('update', { ...props.entry, intervals })
+  emitEntryUpdate({ ...props.entry, intervals })
 }
 
 async function onModelsUpdate(newModels: string[]) {
   const oldModels = props.entry.models
+  const lookupGeneration = ++pricingLookupGeneration
   emit('update', { ...props.entry, models: newModels })
 
-  // 只在新增模型且当前无价格时自动填充
+  // Automatic lookup is intentionally limited to a blank token entry with one
+  // model. A multi-model entry is one shared price rule, so applying the first
+  // model's price would silently make models such as DeepSeek Pro/Flash equal.
   const addedModels = newModels.filter(m => !oldModels.includes(m))
   if (addedModels.length === 0) return
 
-  // 检查是否所有价格字段都为空
-  const e = props.entry
-  const hasPrice = e.input_price != null || e.output_price != null ||
-                   e.cache_write_price != null || e.cache_write_1h_price != null || e.cache_read_price != null
-  if (hasPrice) return
+  if (props.entry.billing_mode !== 'token' || newModels.length !== 1) return
 
-  // 查询第一个新增模型的默认价格
+  // Any manually configured price, tier, multiplier, or time rule opts out.
+  const e = props.entry
+  if (hasManualPricing(e)) return
+
+  const model = addedModels[0]
+  if (!model?.trim()) return
+
   try {
-    const result = await channelsAPI.getModelDefaultPricing(addedModels[0])
+    const result = await channelsAPI.getModelDefaultPricing(model)
+
+    // The parent owns the entry and may have replaced it while the request was
+    // in flight. Re-check both the generation and current values before
+    // applying the response, so manual edits and model changes always win.
+    const current = props.entry
+    if (lookupGeneration !== pricingLookupGeneration ||
+        current.billing_mode !== 'token' ||
+        current.models.length !== 1 ||
+        current.models[0] !== model ||
+        hasManualPricing(current)) {
+      return
+    }
+
     if (result.found) {
       emit('update', {
-        ...props.entry,
+        ...current,
         models: newModels,
         input_price: perTokenToMTok(result.input_price ?? null),
         output_price: perTokenToMTok(result.output_price ?? null),

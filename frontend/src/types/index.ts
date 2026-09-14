@@ -2449,6 +2449,84 @@ export interface UpdateScheduledTestPlanRequest {
   auto_recover?: boolean
 }
 
+/** Generalized configurable health-test definitions and execution history. */
+export interface TestType {
+  id: number
+  name: string
+  key: string
+  description?: string | null
+  output_kind: 'html' | 'number' | 'text' | string
+  prompt: string
+  enabled: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface TestPlan {
+  id: number
+  name?: string
+  test_definition_id?: number | null
+  group_id?: number | null
+  account_id?: number | null
+  test_definition?: TestType | null
+  model_id?: string
+  cron_expression?: string
+  enabled: boolean
+  max_results?: number
+  last_run_at?: string | null
+  next_run_at?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface TestResult {
+  plan_name?: string
+  test_name?: string
+  group_name?: string
+  account_id?: number | null
+  id: number
+  plan_id?: number
+  test_definition_id?: number
+  test_definition?: TestType | null
+  plan?: TestPlan | null
+  group_id?: number | null
+  model_id?: string
+  status: string
+  output_kind: 'html' | 'number' | 'text' | string
+  output_html?: string | null
+  output_numeric?: number | null
+  response_text?: string | null
+  error_message?: string | null
+  latency_ms?: number | null
+  started_at?: string
+  finished_at?: string
+  created_at?: string
+}
+
+export interface CreateTestTypeRequest {
+  name: string
+  key: string
+  description?: string
+  output_kind: string
+  prompt: string
+  enabled?: boolean
+}
+
+export interface UpdateTestTypeRequest extends Partial<CreateTestTypeRequest> {}
+
+export interface CreateTestPlanRequest {
+  name?: string
+  test_definition_id: number
+  group_id?: number | null
+  account_id?: number | null
+  model_id: string
+  cron_expression?: string
+  enabled?: boolean
+  max_results?: number
+}
+
+export type UpdateTestPlanRequest = Partial<CreateTestPlanRequest>
+
 // Payment types
 export type { SubscriptionPlan, PaymentOrder, CheckoutInfoResponse } from './payment'
 

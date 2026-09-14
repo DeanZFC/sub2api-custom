@@ -169,6 +169,8 @@ export default {
     apiKeys: 'API Keys',
     batchImage: 'Batch Images',
     usage: 'Usage',
+    testResults: 'Test Results',
+    tests: 'Test Management',
     redeem: 'Redeem',
     sharedPool: 'Shared Account Pool',
     sharedPoolAdmin: 'Shared Pool Management',
@@ -217,6 +219,11 @@ export default {
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
+  },
+
+  tests: {
+    preview: 'Preview HTML', closePreview: 'Close preview', rawOutput: 'Original response', noOutput: 'No output returned', loadFailed: 'Unable to load or save test data',
+    title: 'Test Results', description: 'View automated test results for your visible groups', empty: 'No test results yet', htmlResult: 'HTML test result'
   },
 
   // Auth

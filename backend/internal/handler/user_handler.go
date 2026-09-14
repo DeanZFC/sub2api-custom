@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +24,32 @@ type UserHandler struct {
 	emailCache            service.EmailCache
 	affiliateService      *service.AffiliateService
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository
+	scheduledTestSvc      *service.ScheduledTestService
+}
+
+func (h *UserHandler) SetScheduledTestService(svc *service.ScheduledTestService) {
+	h.scheduledTestSvc = svc
+}
+func (h *UserHandler) ListTestResults(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "authentication required")
+		return
+	}
+	if h.scheduledTestSvc == nil {
+		response.InternalError(c, "test results unavailable")
+		return
+	}
+	limit := 50
+	if n, err := strconv.Atoi(c.Query("limit")); err == nil && n > 0 && n < 201 {
+		limit = n
+	}
+	rows, err := h.scheduledTestSvc.ListVisibleResults(c.Request.Context(), subject.UserID, limit)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, rows)
 }
 
 // NewUserHandler creates a new UserHandler

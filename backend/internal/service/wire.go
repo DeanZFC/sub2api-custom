@@ -622,8 +622,11 @@ func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Co
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
 	resultRepo ScheduledTestResultRepository,
+	definitionRepo ScheduledTestDefinitionRepository,
 ) *ScheduledTestService {
-	return NewScheduledTestService(planRepo, resultRepo)
+	svc := NewScheduledTestService(planRepo, resultRepo)
+	svc.SetDefinitionRepository(definitionRepo)
+	return svc
 }
 
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
@@ -631,10 +634,12 @@ func ProvideScheduledTestRunnerService(
 	planRepo ScheduledTestPlanRepository,
 	scheduledSvc *ScheduledTestService,
 	accountTestSvc *AccountTestService,
+	accountRepo AccountRepository,
 	rateLimitSvc *RateLimitService,
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
-	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
+	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, accountRepo, rateLimitSvc, cfg)
+	scheduledSvc.SetRunFunc(svc.RunPlanNow)
 	svc.Start()
 	return svc
 }

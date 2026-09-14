@@ -1,4 +1,9 @@
 export default {
+    tests: {
+      groupHint: 'Each schedulable account in this group is tested separately.', cronHint: 'Five Cron fields: minute hour day month weekday. Example: 0 * * * * runs hourly. Uses the server time zone; CRON_TZ=Asia/Shanghai can set it explicitly.',
+      nextRun: 'Next run', runStarted: 'Test started. Results will refresh automatically.', resultsHint: 'Results refresh every 5 seconds while this dialog is open.',
+      title: 'Test Management', description: 'Configure test types, groups, models, and schedules', types: 'Test Types', plans: 'Test Plans', name: 'Name', key: 'Key', type: 'Type', target: 'Target', group: 'Group', account: 'Account', selectType: 'Select a test type', selectGroup: 'Select a group', selectAccount: 'Select an account', model: 'Model', schedule: 'Schedule', cron: 'Cron expression', manual: 'Manual', run: 'Run now', results: 'Results', kind: 'Output type', number: 'Number', text: 'Text', descriptionLabel: 'Description', prompt: 'Prompt', maxResults: 'Max results', htmlResult: 'HTML test result'
+    },
     scheduledTests: {
       title: 'Scheduled Tests',
       addPlan: 'Add Plan',

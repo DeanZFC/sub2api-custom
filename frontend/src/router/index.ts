@@ -241,6 +241,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/test-results',
+    name: 'TestResults',
+    component: () => import('@/views/user/TestResultsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'Test Results', titleKey: 'tests.title', descriptionKey: 'tests.description' }
+  },
+  {
     path: '/redeem',
     name: 'Redeem',
     component: () => import('@/views/user/RedeemView.vue'),
@@ -429,6 +435,12 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'admin.ops.title',
       descriptionKey: 'admin.ops.description'
     }
+  },
+  {
+    path: '/admin/tests',
+    name: 'AdminTests',
+    component: () => import('@/views/admin/TestManagementView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Test Management', titleKey: 'admin.tests.title', descriptionKey: 'admin.tests.description' }
   },
   {
     path: '/admin/audit-logs',

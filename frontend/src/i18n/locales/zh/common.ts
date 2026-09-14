@@ -169,6 +169,8 @@ export default {
     apiKeys: 'API 密钥',
     batchImage: '批量生图',
     usage: '使用记录',
+    testResults: '测试结果',
+    tests: '测试管理',
     redeem: '兑换',
     sharedPool: '共享账号池',
     sharedPoolAdmin: '共享账号池管理',
@@ -217,6 +219,11 @@ export default {
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
+  },
+
+  tests: {
+    preview: '预览 HTML', closePreview: '关闭预览', rawOutput: '查看原始输出', noOutput: '未返回内容', loadFailed: '测试数据加载或保存失败',
+    title: '测试结果', description: '查看可见分组的自动化测试结果', empty: '暂无测试结果', htmlResult: 'HTML 测试结果'
   },
 
   // Auth
