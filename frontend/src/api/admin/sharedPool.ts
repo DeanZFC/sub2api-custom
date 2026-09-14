@@ -51,6 +51,21 @@ export async function deleteSharedAccount(id: number) {
   await apiClient.delete(`/admin/shared-pool/listings/${id}`)
 }
 
+export async function getSharedAccount(id: number) {
+  const { data } = await apiClient.get<import('@/types').Account>(`/admin/shared-pool/listings/${id}/account`)
+  return data
+}
+
+export async function getSharedAccountModels(id: number) {
+  const { data } = await apiClient.get<Array<{ id: string; display_name?: string; type?: string }>>(`/admin/shared-pool/listings/${id}/models`)
+  return data
+}
+
+export async function updateSharedAccount(id: number, input: Record<string, unknown>) {
+  const { data } = await apiClient.put<import('@/types').Account>(`/admin/shared-pool/listings/${id}/account`, input)
+  return data
+}
+
 export interface AdminSharedUsersPage {
   items: AdminSharedUser[]
   total: number
@@ -69,5 +84,69 @@ export async function setSharedUserPublishPermission(id: number, enabled: boolea
     reason,
     blocked_until: blockedUntil || undefined
   })
+  return data
+}
+
+export interface AdminSharedRevenueSummary {
+  user_id: number
+  username?: string
+  email?: string
+  listing_count: number
+  request_count: number
+  gross_amount: string
+  platform_fee: string
+  owner_amount: string
+  pending: string
+  available: string
+  frozen: string
+  total_earned: string
+  total_transferred: string
+  last_request_at?: string
+}
+
+export interface AdminSharedRevenueRecord {
+  id: number
+  listing_id: number
+  listing_name: string
+  platform: string
+  owner_user_id: number
+  owner_name?: string
+  owner_email?: string
+  consumer_user_id: number
+  consumer_name?: string
+  consumer_email?: string
+  request_id: string
+  model?: string
+  result_status?: string
+  duration_ms?: number
+  gross_cost: string
+  platform_fee: string
+  owner_amount: string
+  frozen_until?: string
+  released_at?: string
+  created_at: string
+}
+
+export interface AdminSharedRevenuePage {
+  items: AdminSharedRevenueSummary[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface AdminSharedRevenueRecordsPage {
+  items: AdminSharedRevenueRecord[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export async function listSharedRevenue(params: Record<string, unknown> = {}) {
+  const { data } = await apiClient.get<AdminSharedRevenuePage>('/admin/shared-pool/revenue', { params })
+  return data
+}
+
+export async function listSharedRevenueRecords(params: Record<string, unknown> = {}) {
+  const { data } = await apiClient.get<AdminSharedRevenueRecordsPage>('/admin/shared-pool/revenue/records', { params })
   return data
 }

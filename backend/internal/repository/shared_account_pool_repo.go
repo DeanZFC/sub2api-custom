@@ -15,6 +15,21 @@ import (
 
 type sharedAccountPoolRepository struct{ db *sql.DB }
 
+func (r *sharedAccountPoolRepository) GetAdminListing(ctx context.Context, listingID int64) (*service.SharedAccountListing, error) {
+	if r == nil || r.db == nil || listingID <= 0 {
+		return nil, service.ErrSharedListingNotFound
+	}
+	var listing service.SharedAccountListing
+	err := r.db.QueryRowContext(ctx, `SELECT id, owner_user_id, account_id, platform, display_name, status, concurrency_limit, concurrency_multiplier::double precision, sell_rate::double precision, total_call_count FROM shared_account_listings WHERE id=$1 AND deleted_at IS NULL AND status <> 'deleted'`, listingID).Scan(&listing.ID, &listing.OwnerUserID, &listing.AccountID, &listing.Platform, &listing.DisplayName, &listing.Status, &listing.ConcurrencyLimit, &listing.ConcurrencyMultiplier, &listing.SellRate, &listing.TotalCallCount)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrSharedListingNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &listing, nil
+}
+
 func NewSharedAccountPoolRepository(_ *dbent.Client, db *sql.DB) service.SharedAccountPoolRepository {
 	return &sharedAccountPoolRepository{db: db}
 }
@@ -219,6 +234,145 @@ func (r *sharedAccountPoolRepository) ListAdminUsers(ctx context.Context, search
 		out = append(out, item)
 	}
 	return out, total, rows.Err()
+}
+
+// ListAdminRevenue returns one aggregate row per publisher. Revenue and
+// listing counts are pre-aggregated independently to avoid multiplying sums
+// when a user owns several listings and has several requests.
+func (r *sharedAccountPoolRepository) ListAdminRevenue(ctx context.Context, query service.SharedPoolRevenueQuery) ([]service.SharedPoolRevenueSummary, int, error) {
+	page, pageSize := normalizeSharedRevenuePage(query.Page, query.PageSize)
+	where, args := sharedRevenueOwnerWhere(query)
+	countSQL := `WITH owners AS (
+ SELECT u.id FROM users u
+ LEFT JOIN (SELECT owner_user_id, COUNT(*) AS n FROM shared_account_listings WHERE deleted_at IS NULL AND status <> 'deleted' GROUP BY owner_user_id) lc ON lc.owner_user_id=u.id
+ LEFT JOIN (SELECT owner_user_id, COUNT(*) AS n FROM shared_account_usage_ledger WHERE action='earn' GROUP BY owner_user_id) rc ON rc.owner_user_id=u.id
+ WHERE u.deleted_at IS NULL AND (COALESCE(lc.n,0)>0 OR COALESCE(rc.n,0)>0)` + where + `)
+ SELECT COUNT(*) FROM owners`
+	var total int
+	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	querySQL := `SELECT u.id, COALESCE(NULLIF(u.username,''),''), u.email,
+ COALESCE(lc.listing_count,0), COALESCE(rev.request_count,0),
+ COALESCE(rev.gross_amount,0)::text, COALESCE(rev.platform_fee,0)::text, COALESCE(rev.owner_amount,0)::text,
+ COALESCE(w.pending_amount,0)::text, COALESCE(w.available_amount,0)::text, COALESCE(w.frozen_amount,0)::text,
+ COALESCE(w.total_earned,0)::text, COALESCE(w.total_transferred,0)::text, rev.last_request_at
+ FROM users u
+ LEFT JOIN (SELECT owner_user_id, COUNT(*) AS listing_count FROM shared_account_listings WHERE deleted_at IS NULL AND status <> 'deleted' GROUP BY owner_user_id) lc ON lc.owner_user_id=u.id
+ LEFT JOIN (SELECT owner_user_id, COUNT(*) AS request_count, SUM(gross_cost) AS gross_amount, SUM(platform_fee) AS platform_fee, SUM(owner_amount) AS owner_amount, MAX(created_at) AS last_request_at
+            FROM shared_account_usage_ledger WHERE action='earn' GROUP BY owner_user_id) rev ON rev.owner_user_id=u.id
+ LEFT JOIN shared_account_wallets w ON w.user_id=u.id
+ WHERE u.deleted_at IS NULL AND (COALESCE(lc.listing_count,0)>0 OR COALESCE(rev.request_count,0)>0)` + where
+	orderArgs := append([]any{}, args...)
+	querySQL += fmt.Sprintf(" ORDER BY COALESCE(rev.owner_amount,0) DESC, u.id DESC LIMIT $%d OFFSET $%d", len(orderArgs)+1, len(orderArgs)+2)
+	orderArgs = append(orderArgs, pageSize, (page-1)*pageSize)
+	rows, err := r.db.QueryContext(ctx, querySQL, orderArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]service.SharedPoolRevenueSummary, 0)
+	for rows.Next() {
+		var item service.SharedPoolRevenueSummary
+		if err := rows.Scan(&item.UserID, &item.Username, &item.Email, &item.ListingCount, &item.RequestCount, &item.GrossAmount, &item.PlatformFee, &item.OwnerAmount, &item.Pending, &item.Available, &item.Frozen, &item.TotalEarned, &item.TotalTransferred, &item.LastRequestAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
+	}
+	return out, total, rows.Err()
+}
+
+// ListAdminRevenueRecords returns settled request records, including records
+// whose listing has since been paused, suspended or deleted. It is restricted
+// to the shared ledger and never joins or returns account credentials.
+func (r *sharedAccountPoolRepository) ListAdminRevenueRecords(ctx context.Context, query service.SharedPoolRevenueQuery) ([]service.SharedPoolRevenueRecord, int, error) {
+	page, pageSize := normalizeSharedRevenuePage(query.Page, query.PageSize)
+	where, args := sharedRevenueRecordWhere(query)
+	countSQL := `SELECT COUNT(*) FROM shared_account_usage_ledger e JOIN shared_account_listings l ON l.id=e.listing_id JOIN users o ON o.id=e.owner_user_id JOIN users c ON c.id=e.consumer_user_id LEFT JOIN shared_account_call_stats cs ON cs.listing_id=e.listing_id AND cs.request_id=e.request_id WHERE e.action='earn'` + where
+	var total int
+	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	querySQL := `SELECT e.id,e.listing_id,l.display_name,l.platform,e.owner_user_id,COALESCE(NULLIF(o.username,''),''),o.email,e.consumer_user_id,COALESCE(NULLIF(c.username,''),''),c.email,e.request_id,COALESCE(cs.model,''),COALESCE(cs.result_status,''),COALESCE(cs.duration_ms,0),e.gross_cost::text,e.platform_fee::text,e.owner_amount::text,e.frozen_until,e.released_at,e.created_at
+ FROM shared_account_usage_ledger e
+ JOIN shared_account_listings l ON l.id=e.listing_id
+ JOIN users o ON o.id=e.owner_user_id
+ JOIN users c ON c.id=e.consumer_user_id
+ LEFT JOIN shared_account_call_stats cs ON cs.listing_id=e.listing_id AND cs.request_id=e.request_id
+ WHERE e.action='earn'` + where
+	orderArgs := append([]any{}, args...)
+	querySQL += fmt.Sprintf(" ORDER BY e.created_at DESC,e.id DESC LIMIT $%d OFFSET $%d", len(orderArgs)+1, len(orderArgs)+2)
+	orderArgs = append(orderArgs, pageSize, (page-1)*pageSize)
+	rows, err := r.db.QueryContext(ctx, querySQL, orderArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]service.SharedPoolRevenueRecord, 0)
+	for rows.Next() {
+		var item service.SharedPoolRevenueRecord
+		if err := rows.Scan(&item.ID, &item.ListingID, &item.ListingName, &item.Platform, &item.OwnerUserID, &item.OwnerName, &item.OwnerEmail, &item.ConsumerUserID, &item.ConsumerName, &item.ConsumerEmail, &item.RequestID, &item.Model, &item.ResultStatus, &item.DurationMS, &item.GrossCost, &item.PlatformFee, &item.OwnerAmount, &item.FrozenUntil, &item.ReleasedAt, &item.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
+	}
+	return out, total, rows.Err()
+}
+
+func normalizeSharedRevenuePage(page, pageSize int) (int, int) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 500 {
+		pageSize = 50
+	}
+	return page, pageSize
+}
+
+func sharedRevenueOwnerWhere(query service.SharedPoolRevenueQuery) (string, []any) {
+	where, args := "", []any{}
+	if query.OwnerID != nil {
+		where += fmt.Sprintf(" AND u.id=$%d", len(args)+1)
+		args = append(args, *query.OwnerID)
+	}
+	if strings.TrimSpace(query.Search) != "" {
+		where += fmt.Sprintf(" AND (u.email ILIKE $%d OR u.username ILIKE $%d)", len(args)+1, len(args)+1)
+		args = append(args, "%"+strings.TrimSpace(query.Search)+"%")
+	}
+	return where, args
+}
+
+func sharedRevenueRecordWhere(query service.SharedPoolRevenueQuery) (string, []any) {
+	where, args := "", []any{}
+	if query.OwnerID != nil {
+		where += fmt.Sprintf(" AND e.owner_user_id=$%d", len(args)+1)
+		args = append(args, *query.OwnerID)
+	}
+	if query.ListingID != nil {
+		where += fmt.Sprintf(" AND e.listing_id=$%d", len(args)+1)
+		args = append(args, *query.ListingID)
+	}
+	if query.ConsumerID != nil {
+		where += fmt.Sprintf(" AND e.consumer_user_id=$%d", len(args)+1)
+		args = append(args, *query.ConsumerID)
+	}
+	if strings.TrimSpace(query.Search) != "" {
+		where += fmt.Sprintf(" AND (o.email ILIKE $%d OR o.username ILIKE $%d OR c.email ILIKE $%d OR c.username ILIKE $%d OR l.display_name ILIKE $%d)", len(args)+1, len(args)+1, len(args)+1, len(args)+1, len(args)+1)
+		args = append(args, "%"+strings.TrimSpace(query.Search)+"%")
+	}
+	if strings.TrimSpace(query.Model) != "" {
+		where += fmt.Sprintf(" AND cs.model=$%d", len(args)+1)
+		args = append(args, strings.TrimSpace(query.Model))
+	}
+	if query.StartTime != nil {
+		where += fmt.Sprintf(" AND e.created_at >= $%d", len(args)+1)
+		args = append(args, *query.StartTime)
+	}
+	if query.EndTime != nil {
+		where += fmt.Sprintf(" AND e.created_at < $%d", len(args)+1)
+		args = append(args, *query.EndTime)
+	}
+	return where, args
 }
 
 func (r *sharedAccountPoolRepository) listCardsWithWhere(ctx context.Context, where string, args []any, limit, recentLimit int) ([]service.SharedAccountCard, error) {

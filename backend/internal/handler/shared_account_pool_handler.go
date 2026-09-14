@@ -249,6 +249,111 @@ func (h *SharedAccountPoolHandler) AdminListUsers(c *gin.Context) {
 	response.Success(c, gin.H{"items": items, "total": total, "page": page, "page_size": pageSize})
 }
 
+// AdminListRevenue returns aggregate earnings for every shared-pool publisher.
+// This endpoint is mounted below /admin and therefore inherits admin auth and
+// audit middleware. It deliberately reads the independent shared ledger rather
+// than normal usage logs, so ordinary account usage can never leak into this UI.
+func (h *SharedAccountPoolHandler) AdminListRevenue(c *gin.Context) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return
+	}
+	query, valid := parseAdminRevenueQuery(c, false)
+	if !valid {
+		return
+	}
+	items, total, err := adminRepo.ListAdminRevenue(c.Request.Context(), query)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": items, "total": total, "page": query.Page, "page_size": query.PageSize})
+}
+
+// AdminListRevenueRecords returns all settled shared-pool requests with
+// pagination and optional owner/listing/consumer/model/date filters.
+func (h *SharedAccountPoolHandler) AdminListRevenueRecords(c *gin.Context) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return
+	}
+	query, valid := parseAdminRevenueQuery(c, true)
+	if !valid {
+		return
+	}
+	items, total, err := adminRepo.ListAdminRevenueRecords(c.Request.Context(), query)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": items, "total": total, "page": query.Page, "page_size": query.PageSize})
+}
+
+func parseAdminRevenueQuery(c *gin.Context, records bool) (service.SharedPoolRevenueQuery, bool) {
+	query := service.SharedPoolRevenueQuery{Page: 1, PageSize: 50, Search: strings.TrimSpace(c.Query("search")), Model: strings.TrimSpace(c.Query("model"))}
+	if v, err := strconv.Atoi(c.DefaultQuery("page", "1")); err == nil && v > 0 {
+		query.Page = v
+	} else if c.Query("page") != "" {
+		response.BadRequest(c, "invalid page")
+		return query, false
+	}
+	if v, err := strconv.Atoi(c.DefaultQuery("page_size", "50")); err == nil && v > 0 && v <= 500 {
+		query.PageSize = v
+	} else if c.Query("page_size") != "" {
+		response.BadRequest(c, "invalid page_size")
+		return query, false
+	}
+	parseID := func(name string) (*int64, bool) {
+		raw := strings.TrimSpace(c.Query(name))
+		if raw == "" {
+			return nil, true
+		}
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "invalid "+name)
+			return nil, false
+		}
+		return &id, true
+	}
+	var ok bool
+	if query.OwnerID, ok = parseID("owner_id"); !ok {
+		return query, false
+	}
+	if records {
+		if query.ListingID, ok = parseID("listing_id"); !ok {
+			return query, false
+		}
+		if query.ConsumerID, ok = parseID("consumer_id"); !ok {
+			return query, false
+		}
+		parseTime := func(name string) (*time.Time, bool) {
+			raw := strings.TrimSpace(c.Query(name))
+			if raw == "" {
+				return nil, true
+			}
+			value, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				response.BadRequest(c, "invalid "+name+", use RFC3339")
+				return nil, false
+			}
+			return &value, true
+		}
+		if query.StartTime, ok = parseTime("start_time"); !ok {
+			return query, false
+		}
+		if query.EndTime, ok = parseTime("end_time"); !ok {
+			return query, false
+		}
+		if query.StartTime != nil && query.EndTime != nil && !query.StartTime.Before(*query.EndTime) {
+			response.BadRequest(c, "start_time must be before end_time")
+			return query, false
+		}
+	}
+	return query, true
+}
+
 func (h *SharedAccountPoolHandler) AdminSetStatus(c *gin.Context) {
 	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
 	if !ok {
@@ -272,6 +377,87 @@ func (h *SharedAccountPoolHandler) AdminSetStatus(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"id": id, "status": req.Status})
+}
+
+func (h *SharedAccountPoolHandler) adminListing(c *gin.Context) (*service.SharedAccountListing, bool) {
+	adminRepo, ok := h.repo.(service.SharedAccountPoolAdminRepository)
+	if !ok {
+		response.InternalError(c, "shared pool admin controls unavailable")
+		return nil, false
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid listing id")
+		return nil, false
+	}
+	listing, err := adminRepo.GetAdminListing(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return nil, false
+	}
+	return listing, true
+}
+
+// AdminGetAccount returns the underlying account for the administrator editor.
+func (h *SharedAccountPoolHandler) AdminGetAccount(c *gin.Context) {
+	listing, ok := h.adminListing(c)
+	if !ok {
+		return
+	}
+	account, err := h.uploader.GetOwned(c.Request.Context(), listing.OwnerUserID, listing.AccountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	h.writeOwnedAccount(c, account, listing)
+}
+
+// AdminUpdateAccount updates account credentials through the normal admin API
+// and synchronizes shared listing metadata (name, concurrency and sell rate).
+func (h *SharedAccountPoolHandler) AdminUpdateAccount(c *gin.Context) {
+	limitSharedRequestBody(c, maxSharedAccountBodyBytes)
+	listing, ok := h.adminListing(c)
+	if !ok {
+		return
+	}
+	var req sharedAccountUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	in := service.SharedAccountUpdateInput{Name: req.Name, Credentials: req.Credentials, Extra: req.Extra, Concurrency: req.Concurrency, SellRate: req.RateMultiplier, ProxyURL: req.ProxyURL}
+	if req.ExpiresAt != nil {
+		if *req.ExpiresAt <= 0 {
+			in.ClearExpiry = true
+		} else {
+			t := time.Unix(*req.ExpiresAt, 0).UTC()
+			in.ExpiresAt = &t
+		}
+	}
+	account, err := h.uploader.UpdateOwned(c.Request.Context(), listing.OwnerUserID, listing.AccountID, in)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	_, updatedListing, _ := h.uploader.GetOwnedDetail(c.Request.Context(), listing.OwnerUserID, listing.AccountID)
+	h.writeOwnedAccount(c, account, updatedListing)
+}
+
+func (h *SharedAccountPoolHandler) AdminGetAvailableModels(c *gin.Context) {
+	listing, ok := h.adminListing(c)
+	if !ok {
+		return
+	}
+	account, err := h.uploader.GetOwned(c.Request.Context(), listing.OwnerUserID, listing.AccountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if ids := service.ConfiguredTestModelIDs(account); len(ids) > 0 {
+		response.Success(c, service.TestPickerModels(ids))
+		return
+	}
+	response.Success(c, service.TestPickerModels(nil))
 }
 
 func (h *SharedAccountPoolHandler) AdminSetListed(c *gin.Context) {
@@ -525,6 +711,21 @@ type sharedTestAccountRequest struct {
 	Mode         string `json:"mode"`
 	ImageDataURL string `json:"image_data_url"`
 	AudioDataURL string `json:"audio_data_url"`
+}
+
+// AdminTestAccount mirrors the normal account test stream while resolving the
+// shared listing through administrator permissions.
+func (h *SharedAccountPoolHandler) AdminTestAccount(c *gin.Context) {
+	limitSharedRequestBody(c, maxSharedTestBodyBytes)
+	listing, ok := h.adminListing(c)
+	if !ok {
+		return
+	}
+	var req sharedTestAccountRequest
+	_ = c.ShouldBindJSON(&req)
+	if err := h.uploader.TestOwnedAccount(c, listing.OwnerUserID, listing.AccountID, req.ModelID, req.Prompt, req.Mode, service.AccountTestOptions{ImageDataURL: req.ImageDataURL, AudioDataURL: req.AudioDataURL}); err != nil {
+		return
+	}
 }
 
 func (h *SharedAccountPoolHandler) TestAccount(c *gin.Context) {

@@ -376,6 +376,7 @@ import { buildApiUrl } from '@/api/client'
 import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
 import { getSharedAccountModels } from '@/api/sharedPool'
+import { getSharedAccountModels as getAdminSharedAccountModels } from '@/api/admin/sharedPool'
 import type { Account, ClaudeModel } from '@/types'
 
 const { t } = useI18n()
@@ -395,6 +396,8 @@ const props = defineProps<{
   show: boolean
   account: Account | null
   sharedPool?: boolean
+  sharedPoolAdmin?: boolean
+  sharedListingId?: number
 }>()
 
 const emit = defineEmits<{
@@ -768,7 +771,14 @@ const loadAvailableModels = async () => {
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = props.sharedPool
+    const models = props.sharedPoolAdmin
+      ? (await getAdminSharedAccountModels(props.sharedListingId || props.account.id)).map((model): ClaudeModel => ({
+          id: model.id,
+          display_name: model.display_name || model.id,
+          type: model.type || 'model',
+          created_at: ''
+        }))
+      : props.sharedPool
       ? (await getSharedAccountModels(props.account.id)).map((model): ClaudeModel => ({
           id: model.id,
           display_name: model.display_name || model.id,
@@ -887,8 +897,10 @@ const startTest = async () => {
     }
 
     // Use the configured API base; EventSource does not support POST.
-    const url = buildApiUrl(props.sharedPool
-      ? `/user/shared-pool/accounts/${props.account.id}/test`
+    const url = buildApiUrl(props.sharedPoolAdmin
+      ? `/admin/shared-pool/listings/${props.sharedListingId || props.account.id}/test`
+      : props.sharedPool
+        ? `/user/shared-pool/accounts/${props.account.id}/test`
       : `/admin/accounts/${props.account.id}/test`)
 
     // Use fetch with streaming for SSE since EventSource doesn't support POST
@@ -896,7 +908,7 @@ const startTest = async () => {
       Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
       'Content-Type': 'application/json'
     }
-    if (!props.sharedPool) headers[ADMIN_UI_REQUEST_HEADER] = '1'
+    if (!props.sharedPool || props.sharedPoolAdmin) headers[ADMIN_UI_REQUEST_HEADER] = '1'
     const response = await fetch(url, {
       method: 'POST',
       headers,

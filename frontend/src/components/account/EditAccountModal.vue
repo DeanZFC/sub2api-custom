@@ -3058,6 +3058,7 @@ import {
   type OpenAIWSMode,
   resolveOpenAIWSModeFromExtra
 } from '@/utils/openaiWsMode'
+import { updateSharedAccount as updateAdminSharedAccount } from '@/api/admin/sharedPool'
 import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
@@ -3072,11 +3073,22 @@ interface Props {
   proxies: Proxy[]
   groups: AdminGroup[]
   sharedPool?: boolean
+  /** Administrator editing a shared listing; uses the admin listing endpoint. */
+  sharedPoolAdmin?: boolean
+  sharedListingId?: number
 }
 
 const props = defineProps<Props>()
 const sharedProxyURL = ref('')
-const accountAPI = props.sharedPool ? createSharedAccountAPI(() => sharedProxyURL.value) : adminAPI
+const accountAPI = props.sharedPool && !props.sharedPoolAdmin ? createSharedAccountAPI(() => sharedProxyURL.value) : {
+  ...adminAPI,
+  accounts: {
+    ...adminAPI.accounts,
+    update: (id: number, payload: Record<string, unknown>) => props.sharedPoolAdmin && props.sharedListingId
+      ? updateAdminSharedAccount(props.sharedListingId, payload)
+      : adminAPI.accounts.update(id, payload)
+  }
+}
 const syncUpstreamModelsFn = (id: number) => accountAPI.accounts.syncUpstreamModels(id)
 const sharedRateLocked = computed(() => {
   if (!props.sharedPool) return false

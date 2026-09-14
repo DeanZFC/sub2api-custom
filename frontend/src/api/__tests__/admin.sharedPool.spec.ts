@@ -10,7 +10,9 @@ import {
   setSharedAccountListed,
   deleteSharedAccount,
   listSharedUsers,
-  setSharedUserPublishPermission
+  setSharedUserPublishPermission,
+  listSharedRevenue,
+  listSharedRevenueRecords
 } from '../admin/sharedPool'
 
 describe('admin shared pool API', () => {
@@ -54,5 +56,13 @@ describe('admin shared pool API', () => {
     })
     expect(result.total).toBe(42)
     expect(result.page).toBe(2)
+  })
+
+  it('keeps admin earnings and request records on dedicated shared-pool endpoints', async () => {
+    get.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20 } })
+    await listSharedRevenue({ search: 'alice', page: 1, page_size: 20 })
+    await listSharedRevenueRecords({ owner_id: 9, model: 'gpt-5.4', page: 2, page_size: 10 })
+    expect(get).toHaveBeenNthCalledWith(1, '/admin/shared-pool/revenue', { params: { search: 'alice', page: 1, page_size: 20 } })
+    expect(get).toHaveBeenNthCalledWith(2, '/admin/shared-pool/revenue/records', { params: { owner_id: 9, model: 'gpt-5.4', page: 2, page_size: 10 } })
   })
 })

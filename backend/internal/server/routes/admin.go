@@ -140,7 +140,13 @@ func registerSharedAccountPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers
 	pool := admin.Group("/shared-pool")
 	{
 		pool.GET("/listings", h.Admin.SharedAccountPool.AdminListCards)
+		pool.GET("/listings/:id/account", h.Admin.SharedAccountPool.AdminGetAccount)
+		pool.GET("/listings/:id/models", h.Admin.SharedAccountPool.AdminGetAvailableModels)
+		pool.PUT("/listings/:id/account", h.Admin.SharedAccountPool.AdminUpdateAccount)
+		pool.POST("/listings/:id/test", h.Admin.SharedAccountPool.AdminTestAccount)
 		pool.GET("/users", h.Admin.SharedAccountPool.AdminListUsers)
+		pool.GET("/revenue", h.Admin.SharedAccountPool.AdminListRevenue)
+		pool.GET("/revenue/records", h.Admin.SharedAccountPool.AdminListRevenueRecords)
 		pool.PUT("/listings/:id/status", h.Admin.SharedAccountPool.AdminSetStatus)
 		pool.PUT("/listings/:id/listed", h.Admin.SharedAccountPool.AdminSetListed)
 		pool.DELETE("/listings/:id", h.Admin.SharedAccountPool.AdminDelete)

@@ -667,6 +667,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", len(args)+1))
 		args = append(args, filters.APIKeyID)
 	}
+	conditions, args = appendSharedOnlyWhereCondition(conditions, args, filters.SharedOnly, filters.UserID, "")
 	if filters.AccountID > 0 {
 		conditions = append(conditions, fmt.Sprintf("account_id = $%d", len(args)+1))
 		args = append(args, filters.AccountID)

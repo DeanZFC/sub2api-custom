@@ -82,6 +82,8 @@ export interface CreateUsageCleanupTaskRequest {
 
 export interface AdminUsageQueryParams extends UsageQueryParams {
   user_id?: number
+  /** Restrict records to usage billed through shared API keys (admin-wide). */
+  shared_only?: boolean
   exact_total?: boolean
   billing_mode?: string
   upstream_model_mismatch?: boolean

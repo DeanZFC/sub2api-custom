@@ -53,6 +53,12 @@ func TestAppendSharedOnlyWhereCondition(t *testing.T) {
 	conditions, args = appendSharedOnlyWhereCondition(nil, nil, false, 42, "")
 	require.Empty(t, conditions)
 	require.Empty(t, args)
+
+	conditions, args = appendSharedOnlyWhereCondition(nil, nil, true, 0, "")
+	require.Len(t, conditions, 1)
+	require.Contains(t, conditions[0], "EXISTS")
+	require.NotContains(t, conditions[0], "sak.user_id")
+	require.Empty(t, args)
 }
 
 func TestBuildUsageLogBatchInsertQuery_UsesConflictDoNothing(t *testing.T) {

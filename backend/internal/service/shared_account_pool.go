@@ -65,8 +65,13 @@ type SharedAccountPoolRepository interface {
 // separate from the user-facing repository interface so lightweight service
 // fakes do not need to implement admin-only methods.
 type SharedAccountPoolAdminRepository interface {
+	// GetAdminListing resolves a listing without requiring the owner's identity.
+	// It is used by administrator-only account editing/testing endpoints.
+	GetAdminListing(ctx context.Context, listingID int64) (*SharedAccountListing, error)
 	ListAdminCards(ctx context.Context, platform, status, search string, ownerID *int64, limit, recentLimit int) ([]SharedAccountCard, error)
 	ListAdminUsers(ctx context.Context, search string, publishEnabled *bool, page, pageSize int) ([]SharedPoolUserSummary, int, error)
+	ListAdminRevenue(ctx context.Context, query SharedPoolRevenueQuery) ([]SharedPoolRevenueSummary, int, error)
+	ListAdminRevenueRecords(ctx context.Context, query SharedPoolRevenueQuery) ([]SharedPoolRevenueRecord, int, error)
 	SetListingAdminStatus(ctx context.Context, listingID int64, status string) error
 	SetListingAdminListed(ctx context.Context, listingID int64, listed bool) error
 	DeleteListingAdmin(ctx context.Context, listingID int64) error
