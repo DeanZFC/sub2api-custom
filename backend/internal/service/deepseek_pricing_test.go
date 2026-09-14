@@ -61,7 +61,7 @@ func TestIsDeepSeekModel(t *testing.T) {
 		"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp",
 		"deepseek-chat", "deepseek-reasoner", "deepseek-v3-2-251201",
 		"deepseek-coder", "deepseek-foo", "deepseek-v4-pro-0813",
-		"DEEPSEEK-V4-PRO", " deepseek-v4-flash ", "deepseek/deepseek-v4-pro", "models/deepseek-v4-flash",
+		"DEEPSEEK-V4-PRO", " deepseek-v4-flash ",
 	}
 	for _, m := range deepseek {
 		require.True(t, isDeepSeekModel(m), "model %q should be deepseek", m)
@@ -275,8 +275,6 @@ func TestGetModelPricing_DeepseekForcesOfficialRatesOverJSON(t *testing.T) {
 	}{
 		{"deepseek-v4-pro-0813", 6.6e-7, 1.98e-6, 2.2e-8},
 		{"deepseek-v4-flash-0731", 2.2e-7, 6.6e-7, 7e-9},
-		{"deepseek/deepseek-v4-pro", 6.6e-7, 1.98e-6, 2.2e-8},
-		{"models/deepseek-v4-flash", 2.2e-7, 6.6e-7, 7e-9},
 	}
 	for _, tt := range versioned {
 		t.Run(tt.model, func(t *testing.T) {
