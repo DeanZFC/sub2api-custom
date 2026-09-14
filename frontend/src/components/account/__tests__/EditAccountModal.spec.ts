@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, updateAdminSharedAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
+  updateAdminSharedAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
@@ -42,6 +43,10 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
+}))
+
+vi.mock('@/api/admin/sharedPool', () => ({
+  updateSharedAccount: updateAdminSharedAccountMock
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -443,6 +448,71 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
       'gpt-5.2': 'gpt-5.2'
     })
+  })
+
+  it('passes the admin shared proxy input to the listing endpoint', async () => {
+    const account = buildAccount()
+    updateAdminSharedAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mount(EditAccountModal, {
+      props: {
+        show: true,
+        account,
+        sharedPool: true,
+        sharedPoolAdmin: true,
+        sharedListingId: 77,
+        proxies: [],
+        groups: []
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+          Select: SelectStub,
+          Icon: true,
+          ProxySelector: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub
+        }
+      }
+    })
+
+    await wrapper.get('#shared-account-proxy').setValue(' socks5://user:pass@proxy.example.com:1080 ')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAdminSharedAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAdminSharedAccountMock.mock.calls[0]?.[0]).toBe(77)
+    expect(updateAdminSharedAccountMock.mock.calls[0]?.[1]?.proxy_url).toBe('socks5://user:pass@proxy.example.com:1080')
+    wrapper.unmount()
+  })
+
+  it('clears the transient shared proxy input when switching accounts', async () => {
+    const first = buildAccount()
+    const second = { ...buildAccount(), id: 2, name: 'Second account' }
+    const wrapper = mount(EditAccountModal, {
+      props: {
+        show: true,
+        account: first,
+        sharedPool: true,
+        sharedPoolAdmin: true,
+        sharedListingId: 77,
+        proxies: [],
+        groups: []
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+          Select: SelectStub,
+          Icon: true,
+          ProxySelector: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub
+        }
+      }
+    })
+
+    await wrapper.get('#shared-account-proxy').setValue('http://proxy.example.com:8080')
+    await wrapper.setProps({ account: second })
+    expect(wrapper.get<HTMLInputElement>('#shared-account-proxy').element.value).toBe('')
+    wrapper.unmount()
   })
 
   it('preserves adaptive Kimi Responses endpoint on submit', async () => {

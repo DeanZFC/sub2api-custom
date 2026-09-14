@@ -362,16 +362,23 @@ func (s *SharedAccountUploadService) DeleteAuthProxy(ctx context.Context, proxy 
 }
 
 type SharedAccountUpdateInput struct {
-	Name         *string
-	Credentials  *map[string]any
-	Extra        *map[string]any
-	Concurrency  *int
-	SellRate     *float64
-	ExpiresAt    *time.Time
-	ClearExpiry  bool
-	ProxyURL     string
-	Type         string
-	ReplaceCreds bool
+	Name               *string
+	Notes              *string
+	Credentials        *map[string]any
+	Extra              *map[string]any
+	Concurrency        *int
+	Priority           *int
+	LoadFactor         *int
+	Status             *string
+	AutoPauseOnExpired *bool
+	SellRate           *float64
+	BypassSellRateLock bool
+	AllowAllExtra      bool
+	ExpiresAt          *time.Time
+	ClearExpiry        bool
+	ProxyURL           string
+	Type               string
+	ReplaceCreds       bool
 }
 
 func (s *SharedAccountUploadService) ownedAccount(ctx context.Context, ownerID, accountID int64) (*Account, *SharedAccountListing, error) {
@@ -463,6 +470,43 @@ func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, a
 		account.Name = name
 		listing.DisplayName = name
 	}
+	if in.Notes != nil {
+		notes := strings.TrimSpace(*in.Notes)
+		if len([]rune(notes)) > 500 {
+			return nil, errors.New("notes must be <= 500 characters")
+		}
+		account.Notes = &notes
+	}
+	if in.Priority != nil {
+		if *in.Priority < 1 || *in.Priority > 10000 {
+			return nil, errors.New("priority must be between 1 and 10000")
+		}
+		account.Priority = *in.Priority
+	}
+	if in.LoadFactor != nil {
+		if *in.LoadFactor <= 0 {
+			account.LoadFactor = nil
+		} else if *in.LoadFactor > 10000 {
+			return nil, errors.New("load factor must be <= 10000")
+		} else {
+			value := *in.LoadFactor
+			account.LoadFactor = &value
+		}
+	}
+	if in.Status != nil {
+		status := strings.ToLower(strings.TrimSpace(*in.Status))
+		if status == "inactive" {
+			status = StatusDisabled
+		}
+		if status != StatusActive && status != StatusDisabled && status != StatusError {
+			return nil, errors.New("invalid account status")
+		}
+		account.Status = status
+		account.Schedulable = status == StatusActive
+	}
+	if in.AutoPauseOnExpired != nil {
+		account.AutoPauseOnExpired = *in.AutoPauseOnExpired
+	}
 	if in.Concurrency != nil {
 		if *in.Concurrency <= 0 {
 			return nil, errors.New("concurrency must be >= 1")
@@ -481,7 +525,7 @@ func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, a
 		if *in.SellRate < 0 || *in.SellRate > 100 || math.IsNaN(*in.SellRate) || math.IsInf(*in.SellRate, 0) {
 			return nil, errors.New("invalid sharing rates")
 		}
-		if listing.Status == "active" && listing.TotalCallCount > 0 && *in.SellRate > listing.SellRate+1e-6 {
+		if !in.BypassSellRateLock && listing.Status == "active" && listing.TotalCallCount > 0 && *in.SellRate > listing.SellRate+1e-6 {
 			return nil, infraerrors.BadRequest("SHARED_SELL_RATE_LOCKED", "使用中不能提高倍率。请先暂停账号，改完后再恢复上线。")
 		}
 		listing.SellRate = *in.SellRate
@@ -502,7 +546,11 @@ func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, a
 		for key, value := range account.Extra {
 			extra[key] = value
 		}
-		for key, value := range sharedAccountExtra(*in.Extra) {
+		incomingExtra := sharedAccountExtra(*in.Extra)
+		if in.AllowAllExtra {
+			incomingExtra = *in.Extra
+		}
+		for key, value := range incomingExtra {
 			extra[key] = value
 		}
 		account.Extra = extra

@@ -15,7 +15,7 @@
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
       </div>
-      <div v-if="!sharedPool">
+      <div v-if="(!sharedPool || sharedPoolAdmin)">
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
         <textarea
           v-model="form.notes"
@@ -119,7 +119,7 @@
           <p class="input-hint">{{ t(`admin.accounts.cnProviders.apiProtocol.${cnProtocolDescKey}Desc`) }}</p>
         </div>
         <!-- Zhipu 团队版 Coding Plan：组织/项目 ID（可选，填写后用量查询走团队版端点） -->
-        <div v-if="!sharedPool && account.platform === 'zhipu' && editAccountMode === 'coding'">
+        <div v-if="(!sharedPool || sharedPoolAdmin) && account.platform === 'zhipu' && editAccountMode === 'coding'">
           <div class="flex items-center">
             <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.title') }}</label>
             <HelpTooltip trigger="click" width-class="w-80">
@@ -359,7 +359,7 @@
         </div>
 
         <!-- Pool Mode Section -->
-        <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="(!sharedPool || sharedPoolAdmin)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
@@ -423,7 +423,7 @@
         </div>
 
         <!-- Custom Error Codes Section -->
-        <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="(!sharedPool || sharedPoolAdmin)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.customErrorCodes') }}</label>
@@ -524,7 +524,7 @@
 
       <!-- Grok OAuth client-tool prompt cache opt-in -->
       <div
-        v-if="!sharedPool && account.platform === 'grok' && account.type === 'oauth'"
+        v-if="(!sharedPool || sharedPoolAdmin) && account.platform === 'grok' && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -544,7 +544,7 @@
 
       <!-- Grok OAuth media generation eligibility override -->
       <div
-        v-if="!sharedPool && isGrokOAuthAccount"
+        v-if="(!sharedPool || sharedPoolAdmin) && isGrokOAuthAccount"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
         data-testid="grok-media-eligibility-card"
       >
@@ -595,7 +595,7 @@
 
       <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
       <div
-        v-if="!sharedPool && account.platform === 'grok' && account.type === 'oauth'"
+        v-if="(!sharedPool || sharedPoolAdmin) && account.platform === 'grok' && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -635,7 +635,7 @@
       </div>
 
       <!-- Header Override Section (eligible API-key platforms + grok OAuth) -->
-      <div v-if="!sharedPool && headerOverrideCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="(!sharedPool || sharedPoolAdmin) && headerOverrideCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
@@ -1110,7 +1110,7 @@
         </div>
 
         <!-- Shared: Force Global -->
-        <div v-if="!sharedPool">
+        <div v-if="(!sharedPool || sharedPoolAdmin)">
           <label class="flex items-center gap-2 cursor-pointer">
             <input
               v-model="editBedrockForceGlobal"
@@ -1192,7 +1192,7 @@
         </div>
 
         <!-- Pool Mode Section for Bedrock -->
-        <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="(!sharedPool || sharedPoolAdmin)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
@@ -1257,7 +1257,7 @@
       </div>
 
       <div
-        v-if="!sharedPool && account.platform === 'antigravity' && account.type === 'oauth'"
+        v-if="(!sharedPool || sharedPoolAdmin) && account.platform === 'antigravity' && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <label class="input-label">{{ t('admin.accounts.antigravityProjectIdLabel') }}</label>
@@ -1373,7 +1373,7 @@
       </div>
 
       <!-- Temp Unschedulable Rules -->
-      <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
+      <div v-if="(!sharedPool || sharedPoolAdmin)" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
         <div class="mb-3 flex items-center justify-between">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.tempUnschedulable.title') }}</label>
@@ -1556,7 +1556,7 @@
 
       <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
       <div
-        v-if="!sharedPool && (account?.platform === 'anthropic' || account?.platform === 'antigravity')"
+        v-if="(!sharedPool || sharedPoolAdmin) && (account?.platform === 'anthropic' || account?.platform === 'antigravity')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -1591,6 +1591,9 @@
           <label for="shared-account-proxy" class="input-label">{{ t('admin.accounts.proxy') }}</label>
           <input id="shared-account-proxy" v-model="sharedProxyURL" type="text" class="input"
             placeholder="http://user:pass@host:port 或 socks5://user:pass@host:port" autocomplete="off" />
+          <p class="input-hint">
+            {{ account.proxy_id ? '已配置代理，留空保持不变；填写后将替换当前代理。' : '可选；支持 http、https、socks5 代理格式。' }}
+          </p>
         </div>
       </div>
 
@@ -1604,7 +1607,7 @@
       </div>
 
       <UpstreamRequestIdHeaderField
-        v-if="!sharedPool"
+        v-if="(!sharedPool || sharedPoolAdmin)"
         v-model="upstreamRequestIdHeader"
         :platform="account.platform"
         :type="account.type"
@@ -1616,14 +1619,14 @@
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
             @input="form.concurrency = Math.max(1, form.concurrency || 1)" />
         </div>
-        <div v-if="!sharedPool">
+        <div v-if="(!sharedPool || sharedPoolAdmin)">
           <label class="input-label">{{ t('admin.accounts.loadFactor') }}</label>
           <input v-model.number="form.load_factor" type="number" min="1"
             class="input" :placeholder="String(form.concurrency || 1)"
             @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
-        <div v-if="!sharedPool">
+        <div v-if="(!sharedPool || sharedPoolAdmin)">
           <label class="input-label">{{ t('admin.accounts.priority') }}</label>
           <input
             v-model.number="form.priority"
@@ -1659,7 +1662,7 @@
             }}
           </p>
           <div
-            v-if="!sharedPool && account?.type === 'apikey'"
+            v-if="(!sharedPool || sharedPoolAdmin) && account?.type === 'apikey'"
             class="mt-3 flex items-center justify-between gap-3"
           >
             <div class="min-w-0">
@@ -1679,7 +1682,7 @@
           </div>
         </div>
       </div>
-      <template v-if="!sharedPool">
+      <template v-if="(!sharedPool || sharedPoolAdmin)">
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
@@ -2020,7 +2023,7 @@
 
       <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
       <div
-        v-if="!sharedPool && account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
+        v-if="(!sharedPool || sharedPoolAdmin) && account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2071,7 +2074,7 @@
       </div>
       <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
       <div
-        v-else-if="!sharedPool && (account?.type === 'apikey' || account?.type === 'bedrock')"
+        v-else-if="(!sharedPool || sharedPoolAdmin) && (account?.type === 'apikey' || account?.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2471,7 +2474,7 @@
 
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
       <div
-        v-if="!sharedPool && account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        v-if="(!sharedPool || sharedPoolAdmin) && account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2850,7 +2853,7 @@
       </div>
       </template>
 
-      <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="(!sharedPool || sharedPoolAdmin)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div>
           <label class="input-label">{{ t('common.status') }}</label>
           <Select v-model="form.status" :options="statusOptions" />
@@ -2917,7 +2920,7 @@
 
       <!-- Group Selection - 仅标准模式显示 -->
       <GroupSelector
-        v-if="!sharedPool"
+        v-if="(!sharedPool || sharedPoolAdmin)"
         v-model="form.group_ids"
         :groups="selectableGroups"
         :platform="account?.platform"
@@ -3085,7 +3088,13 @@ const accountAPI = props.sharedPool && !props.sharedPoolAdmin ? createSharedAcco
   accounts: {
     ...adminAPI.accounts,
     update: (id: number, payload: Record<string, unknown>) => props.sharedPoolAdmin && props.sharedListingId
-      ? updateAdminSharedAccount(props.sharedListingId, payload)
+      // The admin endpoint bypasses createSharedAccountAPI, so carry the
+      // transient shared proxy input explicitly. An empty value means keep
+      // the existing proxy on the server.
+      ? updateAdminSharedAccount(props.sharedListingId, {
+          ...payload,
+          proxy_url: sharedProxyURL.value.trim()
+        })
       : adminAPI.accounts.update(id, payload)
   }
 }
@@ -3888,6 +3897,12 @@ const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>
 const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
+  }
+  // Proxy credentials are intentionally never returned by the API. Reset the
+  // transient input whenever an account is opened so a value entered for one
+  // account cannot leak into the next update.
+  if (props.sharedPool) {
+    sharedProxyURL.value = ''
   }
   // 进入回填窗口：抑制 CN 模式/协议 watcher 联动重置 base_url（见 syncingForm 注释）。
   syncingForm.value = true

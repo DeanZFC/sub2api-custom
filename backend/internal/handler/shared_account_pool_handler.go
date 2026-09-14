@@ -425,7 +425,7 @@ func (h *SharedAccountPoolHandler) AdminUpdateAccount(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	in := service.SharedAccountUpdateInput{Name: req.Name, Credentials: req.Credentials, Extra: req.Extra, Concurrency: req.Concurrency, SellRate: req.RateMultiplier, ProxyURL: req.ProxyURL}
+	in := service.SharedAccountUpdateInput{Name: req.Name, Notes: req.Notes, Credentials: req.Credentials, Extra: req.Extra, Concurrency: req.Concurrency, Priority: req.Priority, LoadFactor: req.LoadFactor, Status: req.Status, AutoPauseOnExpired: req.AutoPauseOnExpired, SellRate: req.RateMultiplier, BypassSellRateLock: true, AllowAllExtra: true, ProxyURL: req.ProxyURL}
 	if req.ExpiresAt != nil {
 		if *req.ExpiresAt <= 0 {
 			in.ClearExpiry = true
@@ -589,13 +589,18 @@ func (h *SharedAccountPoolHandler) GetAccount(c *gin.Context) {
 }
 
 type sharedAccountUpdateRequest struct {
-	Name           *string         `json:"name"`
-	Credentials    *map[string]any `json:"credentials"`
-	Extra          *map[string]any `json:"extra"`
-	Concurrency    *int            `json:"concurrency"`
-	RateMultiplier *float64        `json:"rate_multiplier"`
-	ExpiresAt      *int64          `json:"expires_at"`
-	ProxyURL       string          `json:"proxy_url"`
+	Name               *string         `json:"name"`
+	Notes              *string         `json:"notes"`
+	Credentials        *map[string]any `json:"credentials"`
+	Extra              *map[string]any `json:"extra"`
+	Concurrency        *int            `json:"concurrency"`
+	Priority           *int            `json:"priority"`
+	LoadFactor         *int            `json:"load_factor"`
+	Status             *string         `json:"status"`
+	AutoPauseOnExpired *bool           `json:"auto_pause_on_expired"`
+	RateMultiplier     *float64        `json:"rate_multiplier"`
+	ExpiresAt          *int64          `json:"expires_at"`
+	ProxyURL           string          `json:"proxy_url"`
 }
 
 func (h *SharedAccountPoolHandler) UpdateAccount(c *gin.Context) {
