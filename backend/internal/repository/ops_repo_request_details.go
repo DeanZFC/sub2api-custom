@@ -94,6 +94,7 @@ WITH combined AS (
     COALESCE(NULLIF(g.platform, ''), NULLIF(a.platform, ''), '') AS platform,
     ul.model AS model,
     ul.duration_ms AS duration_ms,
+    ul.first_token_ms AS first_token_ms,
     NULL::INT AS status_code,
     NULL::BIGINT AS error_id,
     NULL::TEXT AS phase,
@@ -122,6 +123,7 @@ WITH combined AS (
     COALESCE(NULLIF(o.platform, ''), NULLIF(g.platform, ''), NULLIF(a.platform, ''), '') AS platform,
     o.model AS model,
     o.duration_ms AS duration_ms,
+    o.time_to_first_token_ms AS first_token_ms,
     o.status_code AS status_code,
     o.id AS error_id,
     o.error_phase AS phase,
@@ -162,6 +164,9 @@ WITH combined AS (
 		case "duration_desc":
 			sort = "ORDER BY duration_ms DESC NULLS LAST, created_at DESC, log_id DESC, kind"
 			resultSort = "ORDER BY p.duration_ms DESC NULLS LAST, p.created_at DESC, p.log_id DESC, p.kind"
+		case "ttft_desc":
+			sort = "ORDER BY first_token_ms DESC NULLS LAST, created_at DESC, log_id DESC, kind"
+			resultSort = "ORDER BY p.first_token_ms DESC NULLS LAST, p.created_at DESC, p.log_id DESC, p.kind"
 		default:
 			return nil, 0, fmt.Errorf("invalid sort")
 		}
@@ -172,7 +177,7 @@ WITH combined AS (
 	listQuery := fmt.Sprintf(`
 %s
 SELECT
-  p.kind, p.created_at, p.request_id, p.platform, p.model,
+	  p.kind, p.created_at, p.request_id, p.platform, p.model,
   p.duration_ms, p.status_code, p.error_id, p.phase, p.severity, p.message,
   p.user_id, p.api_key_id, p.account_id, p.group_id, p.stream,
   u.email, g.name, a.name, k.name,
@@ -189,8 +194,8 @@ FROM (
 LEFT JOIN users u ON u.id = p.user_id
 LEFT JOIN groups g ON g.id = p.group_id
 LEFT JOIN accounts a ON a.id = p.account_id
-LEFT JOIN api_keys k ON k.id = p.api_key_id
-LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.created_at = p.created_at
+	LEFT JOIN api_keys k ON k.id = p.api_key_id
+	LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.created_at = p.created_at
 %s
 `, cte, where, sort, len(args)+1, len(args)+2, resultSort)
 
@@ -231,9 +236,10 @@ LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.create
 			platform  sql.NullString
 			model     sql.NullString
 
-			durationMs sql.NullInt64
-			statusCode sql.NullInt64
-			errorID    sql.NullInt64
+			durationMs   sql.NullInt64
+			firstTokenMs sql.NullInt64
+			statusCode   sql.NullInt64
+			errorID      sql.NullInt64
 
 			phase    sql.NullString
 			severity sql.NullString
@@ -247,7 +253,7 @@ LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.create
 			stream bool
 
 			userEmail, groupName, accountName, apiKeyName sql.NullString
-			firstTokenMs, requestType                     sql.NullInt64
+			requestType                                   sql.NullInt64
 			openaiWSMode                                  sql.NullBool
 			upstreamModel                                 sql.NullString
 			inputTokens, outputTokens                     sql.NullInt64
@@ -263,6 +269,7 @@ LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.create
 			&platform,
 			&model,
 			&durationMs,
+			&firstTokenMs,
 			&statusCode,
 			&errorID,
 			&phase,
@@ -274,7 +281,7 @@ LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.create
 			&groupID,
 			&stream,
 			&userEmail, &groupName, &accountName, &apiKeyName,
-			&firstTokenMs, &requestType, &openaiWSMode, &upstreamModel,
+			&requestType, &openaiWSMode, &upstreamModel,
 			&inputTokens, &outputTokens, &cacheReadTokens, &cacheCreationTokens,
 			&imageInputTokens, &imageOutputTokens, &actualCost, &accountCost,
 		); err != nil {
@@ -288,12 +295,13 @@ LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.create
 			Platform:  strings.TrimSpace(platform.String),
 			Model:     strings.TrimSpace(model.String),
 
-			DurationMs: toIntPtr(durationMs),
-			StatusCode: toIntPtr(statusCode),
-			ErrorID:    toInt64Ptr(errorID),
-			Phase:      phase.String,
-			Severity:   severity.String,
-			Message:    message.String,
+			DurationMs:   toIntPtr(durationMs),
+			FirstTokenMs: toIntPtr(firstTokenMs),
+			StatusCode:   toIntPtr(statusCode),
+			ErrorID:      toInt64Ptr(errorID),
+			Phase:        phase.String,
+			Severity:     severity.String,
+			Message:      message.String,
 
 			UserID:    toInt64Ptr(userID),
 			APIKeyID:  toInt64Ptr(apiKeyID),
@@ -304,7 +312,6 @@ LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.create
 			GroupName:           groupName.String,
 			AccountName:         accountName.String,
 			APIKeyName:          apiKeyName.String,
-			FirstTokenMs:        toIntPtr(firstTokenMs),
 			UpstreamModel:       upstreamModel.String,
 			InputTokens:         toIntPtr(inputTokens),
 			OutputTokens:        toIntPtr(outputTokens),
