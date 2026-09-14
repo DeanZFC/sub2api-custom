@@ -282,7 +282,10 @@ const (
 // 避免计费中断；新名字由 fallback warn 日志（每模型每进程一条）暴露，
 // 运营者据此更新价卡。
 func isDeepSeekModel(model string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "deepseek-")
+	// 渠道/模型广场经常使用 provider/model 形式（如
+	// "deepseek/deepseek-v4-pro"），识别时只看最后一段模型名，避免
+	// 远程价卡的峰值价绕过官方低谷价强制覆盖。
+	return strings.HasPrefix(lastSegment(strings.ToLower(strings.TrimSpace(model))), "deepseek-")
 }
 
 // deepseekPeakMultiplierAt 返回指定时刻的 DeepSeek 官方峰谷定价因子。
