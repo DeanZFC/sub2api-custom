@@ -122,26 +122,32 @@ var auditSensitiveReads = map[string]string{
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
 var auditActionOverrides = map[string]string{
-	"POST /api/v1/auth/login":                                 service.AuditActionLogin,
-	"POST /api/v1/auth/login/2fa":                             service.AuditActionLogin2FA,
-	"POST /api/v1/auth/passkey/login/finish":                  service.AuditActionLogin,
-	"POST /api/v1/auth/register":                              service.AuditActionRegister,
-	"POST /api/v1/auth/refresh":                               service.AuditActionTokenRefresh,
-	"POST /api/v1/user/totp/step-up":                          service.AuditActionStepUpVerify,
-	"POST /api/v1/admin/audit-logs/clear":                     service.AuditActionAuditLogClear,
-	"POST /api/v1/admin/accounts/data":                        "admin.accounts.import",
-	"POST /api/v1/admin/backups":                              "admin.backups.create",
-	"POST /api/v1/admin/backups/:id/restore":                  "admin.backups.restore",
-	"DELETE /api/v1/admin/backups/:id":                        "admin.backups.delete",
-	"PUT /api/v1/admin/backups/s3-config":                     "admin.backups.s3_config.update",
-	"POST /api/v1/admin/settings/admin-api-key/regenerate":    "admin.admin_api_key.regenerate",
-	"DELETE /api/v1/admin/settings/admin-api-key":             "admin.admin_api_key.delete",
-	"PUT /api/v1/admin/prompt-audit/config":                   "admin.prompt_audit.config.update",
-	"POST /api/v1/admin/prompt-audit/endpoints/probe":         "admin.prompt_audit.endpoint.probe",
-	"DELETE /api/v1/admin/prompt-audit/events/:id":            "admin.prompt_audit.event.delete",
-	"POST /api/v1/admin/prompt-audit/events/batch-delete":     "admin.prompt_audit.events.batch_delete",
-	"POST /api/v1/admin/prompt-audit/events/delete-preview":   "admin.prompt_audit.events.delete_preview",
-	"POST /api/v1/admin/prompt-audit/events/delete-by-filter": "admin.prompt_audit.events.filter_delete",
+	"POST /api/v1/auth/login":                                         service.AuditActionLogin,
+	"POST /api/v1/auth/login/2fa":                                     service.AuditActionLogin2FA,
+	"POST /api/v1/auth/passkey/login/finish":                          service.AuditActionLogin,
+	"POST /api/v1/auth/register":                                      service.AuditActionRegister,
+	"POST /api/v1/auth/refresh":                                       service.AuditActionTokenRefresh,
+	"POST /api/v1/user/totp/step-up":                                  service.AuditActionStepUpVerify,
+	"POST /api/v1/admin/audit-logs/clear":                             service.AuditActionAuditLogClear,
+	"POST /api/v1/admin/accounts/data":                                "admin.accounts.import",
+	"POST /api/v1/admin/backups":                                      "admin.backups.create",
+	"POST /api/v1/admin/backups/:id/restore":                          "admin.backups.restore",
+	"DELETE /api/v1/admin/backups/:id":                                "admin.backups.delete",
+	"PUT /api/v1/admin/backups/s3-config":                             "admin.backups.s3_config.update",
+	"POST /api/v1/admin/settings/admin-api-key/regenerate":            "admin.admin_api_key.regenerate",
+	"DELETE /api/v1/admin/settings/admin-api-key":                     "admin.admin_api_key.delete",
+	"PUT /api/v1/admin/prompt-audit/config":                           "admin.prompt_audit.config.update",
+	"POST /api/v1/admin/prompt-audit/endpoints/probe":                 "admin.prompt_audit.endpoint.probe",
+	"DELETE /api/v1/admin/prompt-audit/events/:id":                    "admin.prompt_audit.event.delete",
+	"POST /api/v1/admin/prompt-audit/events/batch-delete":             "admin.prompt_audit.events.batch_delete",
+	"POST /api/v1/admin/prompt-audit/events/delete-preview":           "admin.prompt_audit.events.delete_preview",
+	"POST /api/v1/admin/prompt-audit/events/delete-by-filter":         "admin.prompt_audit.events.filter_delete",
+	"PUT /api/v1/admin/shared-pool/listings/:id/account":              "admin.shared_pool.account.update",
+	"POST /api/v1/admin/shared-pool/listings/:id/test":                "admin.shared_pool.account.test",
+	"PUT /api/v1/admin/shared-pool/listings/:id/status":               "admin.shared_pool.listing.status",
+	"PUT /api/v1/admin/shared-pool/listings/:id/listed":               "admin.shared_pool.listing.visibility",
+	"DELETE /api/v1/admin/shared-pool/listings/:id":                   "admin.shared_pool.listing.delete",
+	"PUT /api/v1/admin/shared-pool/users/:user_id/publish-permission": "admin.shared_pool.user.publish_permission",
 }
 
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
@@ -162,6 +168,10 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/prompt-audit/events/batch-delete":                {},
 	"POST /api/v1/admin/prompt-audit/events/delete-preview":              {},
 	"POST /api/v1/admin/prompt-audit/events/delete-by-filter":            {},
+	// Shared-pool administrator editing/testing can carry credentials or
+	// multimodal payloads; keep those bodies out of the audit log entirely.
+	"PUT /api/v1/admin/shared-pool/listings/:id/account": {},
+	"POST /api/v1/admin/shared-pool/listings/:id/test":   {},
 }
 
 // NewAuditLogMiddleware 创建审计中间件。
