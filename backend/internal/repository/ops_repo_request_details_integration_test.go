@@ -26,6 +26,7 @@ func TestOpsRequestDetails_UsageAndIdentity(t *testing.T) {
 	start := time.Now().UTC().Add(-time.Minute)
 	end := start.Add(time.Hour)
 	firstToken, duration := 3060, 38660
+	errorFirstToken := int64(800)
 	multiplier, statsCost := 1.5, 0.2
 	usage := &service.UsageLog{
 		UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, GroupID: &group.ID,
@@ -49,7 +50,8 @@ func TestOpsRequestDetails_UsageAndIdentity(t *testing.T) {
 		RequestID: usage.RequestID, UserID: &user.ID, GroupID: &group.ID, AccountID: &account.ID,
 		APIKeyID: &key.ID, Stream: true, Model: "gpt-test", ErrorPhase: "upstream",
 		ErrorType: "upstream_error", Severity: "error", StatusCode: 502, ErrorMessage: "upstream failed",
-		CreatedAt: start.Add(2 * time.Second),
+		TimeToFirstTokenMs: &errorFirstToken,
+		CreatedAt:          start.Add(2 * time.Second),
 	})
 	require.NoError(t, err)
 	filter := &service.OpsRequestDetailFilter{StartTime: &start, EndTime: &end, AccountID: &account.ID, PageSize: 10}
@@ -66,6 +68,9 @@ func TestOpsRequestDetails_UsageAndIdentity(t *testing.T) {
 	}
 	require.Equal(t, service.OpsRequestKindError, failed.Kind)
 	require.Equal(t, "stream", failed.RequestType)
+	require.EqualValues(t, errorFirstToken, *failed.FirstTokenMs)
+	require.Equal(t, 502, *failed.StatusCode)
+	require.Equal(t, "upstream failed", failed.Message)
 	require.Nil(t, failed.InputTokens)
 	require.Nil(t, failed.CacheReadTokens)
 	require.Nil(t, failed.ActualCost)
@@ -94,6 +99,23 @@ func TestOpsRequestDetails_UsageAndIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, service.OpsRequestKindError, items[0].Kind)
+
+	// TTFT sorting must use the same unambiguous latency field as the recent
+	// request projection, without disturbing identity or usage enrichment.
+	filter.Sort = "ttft_desc"
+	filter.Page = 1
+	items, total, err = repo.ListRequestDetails(ctx, filter)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.Len(t, items, 1)
+	require.Equal(t, service.OpsRequestKindSuccess, items[0].Kind)
+	require.Equal(t, firstToken, *items[0].FirstTokenMs)
+	filter.Page = 2
+	items, _, err = repo.ListRequestDetails(ctx, filter)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, service.OpsRequestKindError, items[0].Kind)
+	require.EqualValues(t, errorFirstToken, *items[0].FirstTokenMs)
 }
 
 func TestOpsRequestDetails_MissingIdentity(t *testing.T) {

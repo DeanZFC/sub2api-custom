@@ -1,6 +1,6 @@
 <template>
   <div class="min-w-[116px]">
-    <div v-if="!requests.length && loading" class="flex h-7 items-center justify-end gap-1" :aria-label="t('common.loading')">
+    <div v-if="!requests.length && loading && !loadError" class="flex h-7 items-center justify-end gap-1" :aria-label="t('common.loading')">
       <span v-for="index in 10" :key="index" class="h-6 w-1.5 animate-pulse rounded-full bg-gray-200 dark:bg-dark-600" />
     </div>
     <div v-else-if="timeline.length" :aria-label="t('admin.accounts.recentRequests.summary', { count: timeline.length })">
@@ -32,6 +32,7 @@
         </template>
       </div>
     </div>
+    <span v-else-if="loadError" class="text-sm text-gray-400 dark:text-dark-500">{{ t('admin.accounts.recentRequests.loadFailed') }}</span>
     <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{ t('admin.accounts.recentRequests.empty') }}</span>
 
     <Teleport to="body">
@@ -73,7 +74,8 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatDateTime } from '@/utils/format'
 
 const { t } = useI18n()
-const props = withDefaults(defineProps<{ requests: OpsRequestDetail[]; loading?: boolean; interactive?: boolean }>(), {
+const props = withDefaults(defineProps<{ requests: OpsRequestDetail[]; loading?: boolean; loadError?: boolean; interactive?: boolean }>(), {
+  loadError: false,
   interactive: true,
 })
 

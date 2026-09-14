@@ -262,6 +262,7 @@ export default {
         viewDetails: 'View request details: {time}',
         summary: '{count} recent requests',
         empty: 'No requests',
+        loadFailed: 'Load failed',
         unknownError: 'Unknown error',
         errorPrefix: 'HTTP {status}'
       },

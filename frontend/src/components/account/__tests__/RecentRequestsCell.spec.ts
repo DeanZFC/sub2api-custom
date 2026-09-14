@@ -109,12 +109,21 @@ describe('RecentRequestsCell', () => {
   })
 
   it('keeps request indicators during refresh and handles missing names', async () => {
-    await wrapper.setProps({ requests: [{ ...failure, user_email: undefined, group_name: undefined }], loading: true })
+    await wrapper.setProps({ requests: [{ ...failure, user_email: undefined, group_name: undefined }], loading: true, loadError: true })
     expect(triggers()).toHaveLength(1)
     expect(wrapper.find('.animate-pulse').exists()).toBe(false)
     await triggers()[0].trigger('click')
     expect(dialog()?.querySelector('[data-testid="recent-request-user"]')?.textContent).toContain('#53')
     expect(dialog()?.querySelector('[data-testid="recent-request-group"]')).toBeNull()
+  })
+
+  it('shows load failure before the loading skeleton, then preserves the normal empty state after recovery', async () => {
+    await wrapper.setProps({ requests: [], loading: true, loadError: true })
+    expect(wrapper.text()).toContain('admin.accounts.recentRequests.loadFailed')
+    expect(wrapper.find('.animate-pulse').exists()).toBe(false)
+    await wrapper.setProps({ loading: false, loadError: false })
+    expect(wrapper.text()).toContain('admin.accounts.recentRequests.empty')
+    expect(wrapper.text()).not.toContain('admin.accounts.recentRequests.loadFailed')
   })
 
   it('can render request indicators without opening a floating details panel', async () => {

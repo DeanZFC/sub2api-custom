@@ -138,6 +138,7 @@ export default {
         viewDetails: '查看请求详情：{time}',
         summary: '最近 {count} 次请求',
         empty: '暂无请求',
+        loadFailed: '加载失败',
         unknownError: '未知错误',
         errorPrefix: 'HTTP {status}'
       },

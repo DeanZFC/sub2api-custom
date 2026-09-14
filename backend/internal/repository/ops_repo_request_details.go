@@ -105,7 +105,6 @@ WITH combined AS (
     ul.account_id AS account_id,
     ul.group_id AS group_id,
     ul.stream AS stream,
-    ul.first_token_ms AS first_token_ms,
     ul.request_type AS request_type,
     ul.openai_ws_mode AS openai_ws_mode
   FROM usage_logs ul
@@ -134,7 +133,6 @@ WITH combined AS (
     o.account_id AS account_id,
     o.group_id AS group_id,
     o.stream AS stream,
-    o.time_to_first_token_ms AS first_token_ms,
     o.request_type AS request_type,
     FALSE AS openai_ws_mode
   FROM ops_error_logs o
@@ -177,11 +175,11 @@ WITH combined AS (
 	listQuery := fmt.Sprintf(`
 %s
 SELECT
-	  p.kind, p.created_at, p.request_id, p.platform, p.model,
-  p.duration_ms, p.status_code, p.error_id, p.phase, p.severity, p.message,
+  p.kind, p.created_at, p.request_id, p.platform, p.model,
+  p.duration_ms, p.first_token_ms, p.status_code, p.error_id, p.phase, p.severity, p.message,
   p.user_id, p.api_key_id, p.account_id, p.group_id, p.stream,
   u.email, g.name, a.name, k.name,
-  p.first_token_ms, p.request_type, p.openai_ws_mode, ul.upstream_model,
+  p.request_type, p.openai_ws_mode, ul.upstream_model,
   ul.input_tokens, ul.output_tokens, ul.cache_read_tokens, ul.cache_creation_tokens,
   ul.image_input_tokens, ul.image_output_tokens, ul.actual_cost,
   COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1) AS account_cost
@@ -194,8 +192,8 @@ FROM (
 LEFT JOIN users u ON u.id = p.user_id
 LEFT JOIN groups g ON g.id = p.group_id
 LEFT JOIN accounts a ON a.id = p.account_id
-	LEFT JOIN api_keys k ON k.id = p.api_key_id
-	LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.created_at = p.created_at
+LEFT JOIN api_keys k ON k.id = p.api_key_id
+LEFT JOIN usage_logs ul ON p.kind = 'success' AND ul.id = p.log_id AND ul.created_at = p.created_at
 %s
 `, cte, where, sort, len(args)+1, len(args)+2, resultSort)
 
