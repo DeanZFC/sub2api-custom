@@ -6,7 +6,7 @@
           <div class="flex-1 sm:max-w-72"><input v-model="search" class="input" :placeholder="tabKey === 'accounts' ? '搜索账号或上传用户' : tabKey === 'users' ? '搜索用户' : '搜索用户、账号或模型'" @keyup.enter="handleSearchSubmit" /></div>
           <Select v-if="tabKey === 'accounts'" v-model="status" class="w-36" :options="[{ value: '', label: '全部状态' }, { value: 'active', label: '运行中' }, { value: 'paused', label: '已暂停' }, { value: 'suspended', label: '已禁用' }, { value: 'invalid', label: '不可用' }]" @change="loadAccounts" />
           <Select v-else-if="tabKey === 'users'" v-model="publishFilter" class="w-36" :options="[{ value: '', label: '全部权限' }, { value: 'true', label: '允许发布' }, { value: 'false', label: '已禁止' }]" @change="handleUserFilterChange" />
-          <div class="ml-auto flex gap-2"><button class="btn btn-secondary" :disabled="loading || loadingUsers || loadingRevenue || loadingRecords" @click="refreshCurrent"><Icon name="refresh" size="md" :class="loading || loadingUsers || loadingRevenue || loadingRecords ? 'animate-spin' : ''" /></button></div>
+          <div class="ml-auto flex gap-2"><RouterLink v-if="tabKey === 'records'" class="btn btn-secondary" to="/admin/usage?shared_only=true">查看全部共享请求</RouterLink><button class="btn btn-secondary" :disabled="loading || loadingUsers || loadingRevenue || loadingRecords" @click="refreshCurrent"><Icon name="refresh" size="md" :class="loading || loadingUsers || loadingRevenue || loadingRecords ? 'animate-spin' : ''" /></button></div>
         </div>
       </template>
       <template #table>
