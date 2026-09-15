@@ -8,7 +8,7 @@
 
       <section v-if="allResults.length" class="card space-y-4 p-4">
         <div class="flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-dark-700">
-          <button v-for="tab in testTabs" :key="tab.key" class="shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors" :class="activeType === tab.key ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'" @click="activeType = tab.key">{{ tab.name }} <span class="ml-1 text-xs opacity-70">{{ tab.count }}</span></button>
+          <button v-for="tab in testTabs" :key="tab.key" class="shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors" :class="activeType === tab.key ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'" @click="activeType = tab.key">{{ tab.name }}</button>
         </div>
         <div class="grid gap-3 md:grid-cols-2">
           <label class="input-label">{{ t('tests.groupFilter') }}<select v-model="groupFilter" class="input mt-1 w-full"><option value="">{{ t('tests.allGroups') }}</option><option v-for="group in availableGroups" :key="group.key" :value="group.key">{{ group.name }}</option></select></label>
@@ -77,14 +77,12 @@ const groupName = (result: TestResult) => result.group_name || (result.group_id 
 const targetName = (result: TestResult) => result.account_id != null ? `${t('tests.account')} #${result.account_id}` : result.group_id != null ? groupName(result) : `#${result.id}`
 
 const testTabs = computed(() => {
-  const counts = new Map<string, { name: string; count: number }>()
+  const names = new Map<string, string>()
   for (const result of allResults.value) {
     const name = testName(result)
-    const item = counts.get(name)
-    if (item) item.count += 1
-    else counts.set(name, { name, count: 1 })
+    if (!names.has(name)) names.set(name, name)
   }
-  return Array.from(counts, ([key, item]) => ({ key, ...item }))
+  return Array.from(names, ([key, name]) => ({ key, name }))
 })
 const typeResults = computed(() => activeType.value ? allResults.value.filter(result => testName(result) === activeType.value) : allResults.value)
 watch(testTabs, tabs => {

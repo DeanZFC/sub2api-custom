@@ -35,4 +35,35 @@ describe('test result reasoning effort', () => {
     expect(history[2].text()).not.toContain('tests.reasoningEffort')
     wrapper.unmount()
   })
+
+  it('keeps test tabs as names only and hides account details for group-only results', async () => {
+    const groupResult = {
+      id: 10,
+      plan_id: 20,
+      test_name: 'Pelican',
+      group_id: 8,
+      group_name: 'Group Eight',
+      account_id: null,
+      model_id: 'gpt-6-astra',
+      output_kind: 'text',
+      status: 'success',
+      created_at: '2026-09-15T12:00:00Z',
+    }
+    api.list.mockResolvedValue([
+      groupResult,
+      { ...groupResult, id: 11, plan_id: 21, test_name: 'Number Check', created_at: '2026-09-15T11:00:00Z' },
+    ])
+    const wrapper = mount(TestResultsView, { global: {
+      plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: {} } })],
+      stubs: { AppLayout: { template: '<main><slot /></main>' }, Icon: true, TestResultOutput: true, BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><slot /></section>' } },
+    } })
+    await flushPromises()
+
+    const tabButtons = wrapper.findAll('button').filter(button => button.classes('shrink-0'))
+    expect(tabButtons.map(button => button.text())).toEqual(['Pelican', 'Number Check'])
+    expect(tabButtons.every(button => !button.text().match(/\d/))).toBe(true)
+    expect(wrapper.findAll('article')[0].text()).toContain('Group Eight')
+    expect(wrapper.findAll('article')[0].text()).not.toContain('Account #')
+    wrapper.unmount()
+  })
 })

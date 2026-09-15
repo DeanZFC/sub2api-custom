@@ -98,7 +98,7 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 
 	repo := &scheduledTestResultRepository{db: db}
 	now := time.Now()
-	mock.ExpectQuery(`(?s)SELECT r\.id,r\.plan_id.*r\.model_id,r\.reasoning_effort,r\.group_id.*FROM scheduled_test_results r`).
+	mock.ExpectQuery(`(?s)SELECT r\.id,r\.plan_id.*CASE WHEN p\.account_id IS NOT NULL THEN r\.account_id ELSE NULL END.*r\.model_id,r\.reasoning_effort,r\.group_id.*FROM scheduled_test_results r`).
 		WithArgs(int64(5), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "plan_name", "test_name", "group_name", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",

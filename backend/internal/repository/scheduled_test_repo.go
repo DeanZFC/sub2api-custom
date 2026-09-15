@@ -289,7 +289,7 @@ func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID 
 	// Group plans carry p.group_id directly. Legacy account plans carry the
 	// tested account and resolve its account_groups bindings. An ungrouped
 	// account plan is private until it is attached to an entitled group.
-	rows, err := r.db.QueryContext(ctx, `SELECT r.id,r.plan_id,p.name,COALESCE(d.name, ''),COALESCE(g.name, ''),r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,r.account_id,r.model_id,r.reasoning_effort,r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at
+	rows, err := r.db.QueryContext(ctx, `SELECT r.id,r.plan_id,p.name,COALESCE(d.name, ''),COALESCE(g.name, ''),r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,CASE WHEN p.account_id IS NOT NULL THEN r.account_id ELSE NULL END,r.model_id,r.reasoning_effort,r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at
 FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
 LEFT JOIN scheduled_test_definitions d ON d.id=p.test_definition_id
 LEFT JOIN groups g ON g.id=r.group_id
