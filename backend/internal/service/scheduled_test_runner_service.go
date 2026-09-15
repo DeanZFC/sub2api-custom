@@ -130,7 +130,7 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	// Delay 10s so execution lands at ~:10 of each minute instead of :00.
 	time.Sleep(10 * time.Second)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), scheduledTestExecutionTimeout)
 	defer cancel()
 
 	now := time.Now()
@@ -264,13 +264,14 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 	var pending *ScheduledTestResult
 	if s.scheduledSvc != nil {
 		pending = &ScheduledTestResult{
-			Status:     "running",
-			OutputKind: outputKind,
-			AccountID:  &accountID,
-			ModelID:    plan.ModelID,
-			GroupID:    plan.GroupID,
-			StartedAt:  started,
-			FinishedAt: started,
+			Status:          "running",
+			OutputKind:      outputKind,
+			AccountID:       &accountID,
+			ModelID:         plan.ModelID,
+			ReasoningEffort: plan.ReasoningEffort,
+			GroupID:         plan.GroupID,
+			StartedAt:       started,
+			FinishedAt:      started,
 		}
 		persistCtx, cancel := scheduledTestPersistenceContext()
 		created, createErr := s.scheduledSvc.StartResult(persistCtx, plan.ID, pending)
@@ -310,6 +311,7 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 		result.StartedAt = pending.StartedAt
 	}
 	result.ModelID = plan.ModelID
+	result.ReasoningEffort = plan.ReasoningEffort
 	result.GroupID = plan.GroupID
 	result.OutputKind = outputKind
 	s.applyOutputContract(result, outputKind)
@@ -343,7 +345,7 @@ func (s *ScheduledTestRunnerService) savePlanFailure(ctx context.Context, plan *
 	if cause != nil {
 		errorMessage = cause.Error()
 	}
-	result := &ScheduledTestResult{Status: "running", OutputKind: outputKind, GroupID: plan.GroupID, ModelID: plan.ModelID, StartedAt: now, FinishedAt: now}
+	result := &ScheduledTestResult{Status: "running", OutputKind: outputKind, GroupID: plan.GroupID, ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, StartedAt: now, FinishedAt: now}
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	defer cancel()
 	created, err := s.scheduledSvc.StartResult(persistCtx, plan.ID, result)

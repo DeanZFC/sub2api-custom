@@ -60,13 +60,16 @@ describe('configurable test management', () => {
 
   it('refreshes retained results after asynchronous execution without a page reload', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.listPlans.mockResolvedValue([{ ...plan, reasoning_effort: 'ultra' }])
     const wrapper = makeWrapper(); await flushPromises()
     await wrapper.findAll('button').find(b => b.text() === 'admin.tests.run')!.trigger('click')
     await flushPromises()
     expect(api.runPlan).toHaveBeenCalledWith(10)
-    api.listResults.mockResolvedValue([{ id: 101, plan_id: 10, model_id: 'test-model', status: 'success', output_kind: 'number', output_numeric: 29, response_text: '最终答案：29' }])
+    expect(wrapper.get('[data-dialog]').text()).toContain('admin.tests.reasoningEffort: ultra')
+    api.listResults.mockResolvedValue([{ id: 101, plan_id: 10, model_id: 'test-model', reasoning_effort: 'ultra', status: 'success', output_kind: 'number', output_numeric: 29, response_text: '最终答案：29' }])
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect(wrapper.get('[data-dialog]').text()).toContain('29')
+    expect(wrapper.get('[data-dialog]').text()).toContain('admin.tests.reasoningEffort: ultra')
     expect(api.listResults).toHaveBeenLastCalledWith(10, 50)
     wrapper.unmount()
     const count = api.listResults.mock.calls.length

@@ -12,6 +12,11 @@ import (
 
 var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
+// Scheduled tests may generate large HTML/SVG responses (for example the
+// pelican animation). Keep their background context independent from the
+// short-lived admin HTTP request and allow enough time for streamed output.
+const scheduledTestExecutionTimeout = 15 * time.Minute
+
 var scheduledTestDefinitionKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,99}$`)
 
 // ValidateDefinitionInput keeps definitions predictable while leaving room for
@@ -149,7 +154,7 @@ func (s *ScheduledTestService) RunNow(ctx context.Context, id int64) error {
 	}
 	// The HTTP request context is cancelled as soon as the 202 response is
 	// returned; background execution must therefore use its own bounded context.
-	bg, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	bg, cancel := context.WithTimeout(context.Background(), scheduledTestExecutionTimeout)
 	go func() { defer cancel(); s.runFunc(bg, p) }()
 	return nil
 }

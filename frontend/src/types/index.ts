@@ -2493,6 +2493,8 @@ export interface TestResult {
   plan?: TestPlan | null
   group_id?: number | null
   model_id?: string
+  /** Reasoning level used for this test execution, when explicitly selected. */
+  reasoning_effort?: string | null
   status: string
   output_kind: 'html' | 'number' | 'text' | string
   output_html?: string | null

@@ -22,7 +22,7 @@
         <section v-for="group in groupedLatest" :key="group.key" class="space-y-2">
           <h3 class="flex items-center gap-2 border-b border-gray-200 pb-2 text-base font-semibold text-gray-900 dark:border-dark-700 dark:text-white"><span class="h-2 w-2 rounded-full bg-primary-500" />{{ group.name }}<span class="text-xs font-normal text-gray-500">{{ group.results.length }}</span></h3>
           <article v-for="result in group.results" :key="result.id" class="card cursor-pointer p-4 transition-shadow hover:shadow-md" role="button" tabindex="0" @click="openHistory(result)" @keydown.enter="openHistory(result)">
-            <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="font-medium text-gray-900 dark:text-white">{{ targetName(result) }}</h4><span :class="statusClass(result)">{{ result.status }}</span></div><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ result.model_id || '-' }} · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.created_at || result.finished_at) }}</p></div><span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ t('tests.viewHistory') }} ({{ historyFor(result).length }})</span></div>
+            <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="font-medium text-gray-900 dark:text-white">{{ targetName(result) }}</h4><span :class="statusClass(result)">{{ result.status }}</span></div><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.created_at || result.finished_at) }}</p></div><span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ t('tests.viewHistory') }} ({{ historyFor(result).length }})</span></div>
             <div v-if="result.error_message" class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div>
             <div class="mt-3" @click.stop>
               <TestResultOutput :result="result" />
@@ -33,7 +33,7 @@
     </div>
 
     <BaseDialog :show="!!historyTarget" :title="historyTarget ? `${targetName(historyTarget)} · ${testName(historyTarget)}` : ''" width="extra-wide" @close="historyTarget = null">
-      <div v-if="historyTarget" class="space-y-4"><p class="text-xs text-gray-500">{{ t('tests.historyHint') }}</p><article v-for="result in historyFor(historyTarget)" :key="result.id" class="rounded-xl border border-gray-200 p-4 dark:border-dark-700"><div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ result.model_id || '-' }} · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.created_at || result.finished_at) }}</span><span :class="statusClass(result)">{{ result.status }}</span></div><div v-if="result.error_message" class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div><TestResultOutput class="mt-3" :result="result" /></article></div>
+      <div v-if="historyTarget" class="space-y-4"><p class="text-xs text-gray-500">{{ t('tests.historyHint') }}</p><article v-for="result in historyFor(historyTarget)" :key="result.id" class="rounded-xl border border-gray-200 p-4 dark:border-dark-700"><div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.created_at || result.finished_at) }}</span><span :class="statusClass(result)">{{ result.status }}</span></div><div v-if="result.error_message" class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div><TestResultOutput class="mt-3" :result="result" /></article></div>
     </BaseDialog>
   </AppLayout>
 </template>
@@ -84,9 +84,12 @@ const testTabs = computed(() => {
     if (item) item.count += 1
     else counts.set(name, { name, count: 1 })
   }
-  return [{ key: '', name: t('tests.allTypes'), count: allResults.value.length }, ...Array.from(counts, ([key, item]) => ({ key, ...item }))]
+  return Array.from(counts, ([key, item]) => ({ key, ...item }))
 })
 const typeResults = computed(() => activeType.value ? allResults.value.filter(result => testName(result) === activeType.value) : allResults.value)
+watch(testTabs, tabs => {
+  if (!tabs.some(tab => tab.key === activeType.value)) activeType.value = tabs[0]?.key || ''
+}, { immediate: true })
 const availableGroups = computed(() => {
   const seen = new Map<string, string>()
   for (const result of typeResults.value) seen.set(groupKey(result), groupName(result))

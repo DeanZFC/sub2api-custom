@@ -13,7 +13,7 @@
         <div class="mb-4 flex items-center justify-between"><h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.types') }}</h3><button class="btn btn-primary btn-sm" @click="openType()"><Icon name="plus" size="sm" /> {{ t('common.create') }}</button></div>
         <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <article v-for="type in types" :key="type.id" class="rounded-xl border border-gray-200 p-3 dark:border-dark-700">
-            <div class="flex items-start justify-between gap-2"><div><strong class="text-sm text-gray-900 dark:text-white">{{ type.name }}</strong><span class="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ type.output_kind }}</span></div><div class="flex gap-2"><button class="text-xs text-primary-600" @click="openType(type)">{{ t('common.edit') }}</button><button class="text-xs text-red-600" @click="removeType(type)">{{ t('common.delete') }}</button></div></div>
+            <div class="flex items-start justify-between gap-2"><div><strong class="text-sm text-gray-900 dark:text-white">{{ type.name }}</strong><span class="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ type.output_kind }}</span></div><div class="flex gap-2"><button class="text-xs text-primary-600" :disabled="saving" @click="copyType(type)">{{ t('common.copy') }}</button><button class="text-xs text-primary-600" @click="openType(type)">{{ t('common.edit') }}</button><button class="text-xs text-red-600" @click="removeType(type)">{{ t('common.delete') }}</button></div></div>
             <p class="mt-1 text-xs text-gray-500">{{ type.key }}</p><p class="mt-2 line-clamp-2 text-xs text-gray-600 dark:text-gray-300">{{ type.description || type.prompt }}</p>
           </article>
           <p v-if="!types.length" class="text-sm text-gray-500">{{ t('common.noData') }}</p>
@@ -23,7 +23,7 @@
       <section class="card p-4">
         <div class="mb-4 flex items-center justify-between"><h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.plans') }}</h3><button class="btn btn-primary btn-sm" @click="openPlan()"><Icon name="plus" size="sm" /> {{ t('common.create') }}</button></div>
         <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-700"><th class="px-2 py-2">{{ t('admin.tests.name') }}</th><th class="px-2 py-2">{{ t('admin.tests.type') }}</th><th class="px-2 py-2">{{ t('admin.tests.target') }}</th><th class="px-2 py-2">{{ t('admin.tests.model') }}</th><th class="px-2 py-2">{{ t('admin.tests.schedule') }}</th><th class="px-2 py-2">{{ t('common.status') }}</th><th class="px-2 py-2 text-right">{{ t('common.actions') }}</th></tr></thead><tbody>
-          <tr v-for="plan in plans" :key="plan.id" class="border-b border-gray-100 dark:border-dark-800"><td class="px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}</td><td class="px-2 py-3">{{ typeName(plan) }}</td><td class="px-2 py-3">{{ targetName(plan) }}</td><td class="px-2 py-3 font-mono text-xs">{{ plan.model_id || '-' }}<span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td><td class="px-2 py-3 font-mono text-xs">{{ plan.cron_expression || '-' }}<div class="mt-1 font-sans text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td><td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span></td><td class="px-2 py-3"><div class="flex justify-end gap-1"><button class="btn btn-secondary btn-sm" :disabled="runningPlans.has(plan.id)" @click="run(plan)">{{ t('admin.tests.run') }}</button><button class="btn btn-secondary btn-sm" @click="showResults(plan)">{{ t('admin.tests.results') }}</button><button class="btn btn-secondary btn-sm" @click="openPlan(plan)">{{ t('common.edit') }}</button><button class="btn btn-secondary btn-sm text-red-600" @click="removePlan(plan)">{{ t('common.delete') }}</button></div></td></tr>
+          <tr v-for="plan in plans" :key="plan.id" class="border-b border-gray-100 dark:border-dark-800"><td class="px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}</td><td class="px-2 py-3">{{ typeName(plan) }}</td><td class="px-2 py-3">{{ targetName(plan) }}</td><td class="px-2 py-3 font-mono text-xs">{{ plan.model_id || '-' }}<span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td><td class="px-2 py-3 font-mono text-xs">{{ plan.cron_expression || '-' }}<div class="mt-1 font-sans text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td><td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span></td><td class="px-2 py-3"><div class="flex justify-end gap-1"><button class="btn btn-secondary btn-sm" :disabled="runningPlans.has(plan.id)" @click="run(plan)">{{ t('admin.tests.run') }}</button><button class="btn btn-secondary btn-sm" @click="showResults(plan)">{{ t('admin.tests.results') }}</button><button class="btn btn-secondary btn-sm" :disabled="saving" @click="copyPlan(plan)">{{ t('common.copy') }}</button><button class="btn btn-secondary btn-sm" @click="openPlan(plan)">{{ t('common.edit') }}</button><button class="btn btn-secondary btn-sm text-red-600" @click="removePlan(plan)">{{ t('common.delete') }}</button></div></td></tr>
           <tr v-if="!plans.length"><td colspan="7" class="px-2 py-8 text-center text-sm text-gray-500">{{ t('common.noData') }}</td></tr>
         </tbody></table></div>
       </section>
@@ -43,7 +43,7 @@
         <article v-for="result in results" :key="result.id" class="rounded-xl border border-gray-200 p-3 dark:border-dark-700">
           <div v-if="result.error_message" class="mb-2 rounded bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div>
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-            <span>{{ result.test_name || typeName(resultPlan) }} · {{ result.model_id }} · {{ t('admin.tests.account') }} {{ result.account_id || '-' }}</span>
+            <span>{{ result.test_name || typeName(resultPlan) }} · {{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('admin.tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ t('admin.tests.account') }} {{ result.account_id || '-' }}</span>
             <span class="flex items-center gap-2">
               <span>{{ result.status }} · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.started_at) }}</span>
               <button
@@ -144,6 +144,35 @@ const loadAllActiveAccounts = async (): Promise<AccountListItem[]> => {
 
 const openType = (type?: TestType) => { editingType.value = type ? { id: type.id, name: type.name, key: type.key, output_kind: type.output_kind, prompt: type.prompt, description: type.description || '', enabled: type.enabled } : { name: '', key: '', output_kind: 'html', prompt: '', description: '', enabled: true } }
 const saveType = async () => { if (!editingType.value) return; saving.value = true; try { const { id, ...body } = editingType.value; if (id) await adminAPI.tests.updateType(id, body); else await adminAPI.tests.createType(body); editingType.value = null; await load() } catch (error) { reportError(error) } finally { saving.value = false } }
+const copyType = async (type: TestType) => {
+  if (saving.value) return
+  saving.value = true
+  try {
+    const usedKeys = new Set(types.value.map(item => item.key))
+    // Definition keys are limited to 100 characters by the API. Preserve the
+    // copy suffix even when an existing definition already uses the full limit.
+    const baseKey = `${type.key.slice(0, 95)}-copy`
+    let key = baseKey
+    let suffix = 2
+    while (usedKeys.has(key)) {
+      const suffixText = `-${suffix++}`
+      key = `${baseKey.slice(0, 100 - suffixText.length)}${suffixText}`
+    }
+    await adminAPI.tests.createType({
+      name: `${type.name}（Copy）`,
+      key,
+      description: type.description || '',
+      output_kind: type.output_kind,
+      prompt: type.prompt,
+      enabled: type.enabled,
+    })
+    await load()
+  } catch (error) {
+    reportError(error)
+  } finally {
+    saving.value = false
+  }
+}
 const removeType = async (type: TestType) => { if (!window.confirm(`${t('common.delete')} ${type.name}?`)) return; try { await adminAPI.tests.deleteType(type.id); await load() } catch (error) { reportError(error) } }
 
 const openPlan = (plan?: TestPlan) => {
@@ -155,6 +184,28 @@ const openPlan = (plan?: TestPlan) => {
   }
 }
 const savePlan = async () => { if (!editingPlan.value) return; saving.value = true; try { const { id, ...body } = editingPlan.value; const payload = { ...body, group_id: body.group_id || null, account_id: body.account_id || null }; if (id) await adminAPI.tests.updatePlan(id, payload); else await adminAPI.tests.createPlan(payload); editingPlan.value = null; await load() } catch (error) { reportError(error) } finally { saving.value = false } }
+const copyPlan = async (plan: TestPlan) => {
+  if (saving.value) return
+  saving.value = true
+  try {
+    await adminAPI.tests.createPlan({
+      name: `${plan.name || `#${plan.id}`}（Copy）`,
+      test_definition_id: plan.test_definition_id || plan.test_definition?.id || 0,
+      group_id: plan.group_id ?? null,
+      account_id: plan.account_id ?? null,
+      model_id: plan.model_id || '',
+      reasoning_effort: plan.reasoning_effort ?? null,
+      cron_expression: plan.cron_expression || '*/30 * * * *',
+      enabled: plan.enabled,
+      max_results: plan.max_results || 50,
+    })
+    await load()
+  } catch (error) {
+    reportError(error)
+  } finally {
+    saving.value = false
+  }
+}
 const removePlan = async (plan: TestPlan) => { if (!window.confirm(`${t('common.delete')} ${plan.name || `#${plan.id}`}?`)) return; try { await adminAPI.tests.deletePlan(plan.id); await load() } catch (error) { reportError(error) } }
 const run = async (plan: TestPlan) => {
   if (runningPlans.value.has(plan.id)) return
@@ -168,6 +219,7 @@ const run = async (plan: TestPlan) => {
     group_id: plan.group_id ?? null,
     account_id: plan.account_id ?? null,
     model_id: plan.model_id,
+    reasoning_effort: plan.reasoning_effort ?? null,
     status: 'running',
     output_kind: types.value.find(type => type.id === plan.test_definition_id)?.output_kind || 'text',
     response_text: null,

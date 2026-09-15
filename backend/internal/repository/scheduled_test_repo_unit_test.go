@@ -48,8 +48,8 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT r\.id, r\.plan_id.*FROM scheduled_test_results r`).
 		WithArgs(int64(10), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "group_name", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", "公开组", "success", "答案：29", "number", "", 29.0, 7, "model", 3, "", 42, createdAt, createdAt, createdAt))
+			"id", "plan_id", "plan_name", "test_name", "group_name", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", "公开组", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -57,6 +57,56 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 	require.Equal(t, "nightly candy", results[0].PlanName)
 	require.Equal(t, "糖果数字测试", results[0].TestName)
 	require.Equal(t, "公开组", results[0].GroupName)
+	require.Equal(t, "high", results[0].ReasoningEffort)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestScheduledTestResultRepositoryPersistsReasoningEffort(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := &scheduledTestResultRepository{db: db}
+	now := time.Now()
+	accountID, groupID := int64(7), int64(3)
+	input := &service.ScheduledTestResult{
+		PlanID: 10, Status: "running", OutputKind: "text", AccountID: &accountID,
+		GroupID: &groupID, ModelID: "gpt-6-astra", ReasoningEffort: "ultra", StartedAt: now, FinishedAt: now,
+	}
+	mock.ExpectQuery(`(?s)INSERT INTO scheduled_test_results .*reasoning_effort.*RETURNING .*reasoning_effort`).
+		WithArgs(int64(10), "running", "", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", int64(0), now, now).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "plan_id", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
+		}).AddRow(1, 10, "running", "", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", 0, now, now, now))
+	created, err := repo.Create(context.Background(), input)
+	require.NoError(t, err)
+	require.Equal(t, "ultra", created.ReasoningEffort)
+
+	created.Status = "success"
+	created.ResponseText = "done"
+	mock.ExpectExec(`(?s)UPDATE scheduled_test_results .*reasoning_effort = \$9`).
+		WithArgs(int64(1), "success", "done", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", int64(0), now, now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, repo.Update(context.Background(), created))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := &scheduledTestResultRepository{db: db}
+	now := time.Now()
+	mock.ExpectQuery(`(?s)SELECT r\.id,r\.plan_id.*r\.model_id,r\.reasoning_effort,r\.group_id.*FROM scheduled_test_results r`).
+		WithArgs(int64(5), 20).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "plan_id", "plan_name", "test_name", "group_name", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", "公开组", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now))
+	results, err := repo.ListVisible(context.Background(), 5, 20)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, "medium", results[0].ReasoningEffort)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

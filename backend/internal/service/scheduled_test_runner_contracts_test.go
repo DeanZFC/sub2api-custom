@@ -43,6 +43,7 @@ func (r *runnerPlanRepoStub) UpdateAfterRun(ctx context.Context, _ int64, _, _ t
 type runnerResultRepoStub struct {
 	created         []*ScheduledTestResult
 	createdStatuses []string
+	createdEfforts  []string
 	updatedIDs      []int64
 }
 
@@ -56,6 +57,7 @@ func (r *runnerResultRepoStub) Create(ctx context.Context, result *ScheduledTest
 	}
 	r.created = append(r.created, &copy)
 	r.createdStatuses = append(r.createdStatuses, copy.Status)
+	r.createdEfforts = append(r.createdEfforts, copy.ReasoningEffort)
 	return &copy, nil
 }
 func (r *runnerResultRepoStub) Update(ctx context.Context, result *ScheduledTestResult) error {
@@ -183,7 +185,7 @@ func TestScheduledTestRunnerPersistsFailureAndAdvancesAfterCancellation(t *testi
 		scheduledSvc: scheduled,
 	}
 	accountID := int64(17)
-	plan := &ScheduledTestPlan{ID: 9, AccountID: &accountID, ModelID: "model", CronExpression: "*/5 * * * *", MaxResults: 3}
+	plan := &ScheduledTestPlan{ID: 9, AccountID: &accountID, ModelID: "model", ReasoningEffort: "high", CronExpression: "*/5 * * * *", MaxResults: 3}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -203,6 +205,9 @@ func TestScheduledTestRunnerPersistsFailureAndAdvancesAfterCancellation(t *testi
 	if got := resultRepo.created[0]; got.Status != "failed" || got.ErrorMessage == "" {
 		t.Fatalf("cancellation result = %#v, want failed result with error", got)
 	}
+	if got := resultRepo.created[0].ReasoningEffort; got != "high" || resultRepo.createdEfforts[0] != "high" {
+		t.Fatalf("cancellation reasoning effort = %q, initially %q, want high", got, resultRepo.createdEfforts[0])
+	}
 }
 
 func TestScheduledTestRunnerSavesOneResultPerGroupAccount(t *testing.T) {
@@ -216,7 +221,7 @@ func TestScheduledTestRunnerSavesOneResultPerGroupAccount(t *testing.T) {
 		accountRepo:    scheduledTestAccountRepoStub{accounts: []Account{{ID: 21}, {ID: 22}}},
 		accountTestSvc: nil, // each account records an independent failure result
 	}
-	plan := &ScheduledTestPlan{ID: 10, GroupID: &groupID, ModelID: "model", CronExpression: "*/5 * * * *", MaxResults: 5}
+	plan := &ScheduledTestPlan{ID: 10, GroupID: &groupID, ModelID: "model", ReasoningEffort: "ultra", CronExpression: "*/5 * * * *", MaxResults: 5}
 	runner.runOnePlan(context.Background(), plan)
 	if planRepo.updated != 1 {
 		t.Fatalf("UpdateAfterRun count = %d, want 1", planRepo.updated)
@@ -235,9 +240,31 @@ func TestScheduledTestRunnerSavesOneResultPerGroupAccount(t *testing.T) {
 		if result.AccountID == nil {
 			t.Fatalf("group result has no account id: %#v", result)
 		}
+		if result.ReasoningEffort != "ultra" {
+			t.Fatalf("group result reasoning effort = %q, want ultra", result.ReasoningEffort)
+		}
 		seen[*result.AccountID] = true
 	}
 	if !seen[21] || !seen[22] {
 		t.Fatalf("group account results = %v, want accounts 21 and 22", seen)
+	}
+	for _, effort := range resultRepo.createdEfforts {
+		if effort != "ultra" {
+			t.Fatalf("running group result reasoning effort = %q, want ultra", effort)
+		}
+	}
+}
+
+func TestScheduledTestRunnerPlanFailureSnapshotsReasoningEffort(t *testing.T) {
+	resultRepo := &runnerResultRepoStub{}
+	runner := &ScheduledTestRunnerService{scheduledSvc: NewScheduledTestService(nil, resultRepo)}
+	plan := &ScheduledTestPlan{ID: 11, ModelID: "gpt-6-astra", ReasoningEffort: "xhigh", MaxResults: 5}
+	runner.savePlanFailure(context.Background(), plan, "text", errors.New("no available accounts"))
+	plan.ReasoningEffort = "low"
+	if len(resultRepo.created) != 1 {
+		t.Fatalf("saved result count = %d, want 1", len(resultRepo.created))
+	}
+	if got := resultRepo.created[0]; got.ReasoningEffort != "xhigh" || got.Status != "failed" {
+		t.Fatalf("plan failure result = %#v, want failed result with xhigh effort", got)
 	}
 }

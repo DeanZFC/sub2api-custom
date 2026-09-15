@@ -27,24 +27,25 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
-	ID            int64     `json:"id"`
-	PlanID        int64     `json:"plan_id"`
-	PlanName      string    `json:"plan_name"`
-	TestName      string    `json:"test_name"`
-	GroupName     string    `json:"group_name"`
-	Status        string    `json:"status"`
-	ResponseText  string    `json:"response_text"`
-	OutputKind    string    `json:"output_kind"`
-	OutputHTML    string    `json:"output_html,omitempty"`
-	OutputNumeric *float64  `json:"output_numeric,omitempty"`
-	AccountID     *int64    `json:"account_id,omitempty"`
-	ModelID       string    `json:"model_id"`
-	GroupID       *int64    `json:"group_id,omitempty"`
-	ErrorMessage  string    `json:"error_message"`
-	LatencyMs     int64     `json:"latency_ms"`
-	StartedAt     time.Time `json:"started_at"`
-	FinishedAt    time.Time `json:"finished_at"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID              int64     `json:"id"`
+	PlanID          int64     `json:"plan_id"`
+	PlanName        string    `json:"plan_name"`
+	TestName        string    `json:"test_name"`
+	GroupName       string    `json:"group_name"`
+	Status          string    `json:"status"`
+	ResponseText    string    `json:"response_text"`
+	OutputKind      string    `json:"output_kind"`
+	OutputHTML      string    `json:"output_html,omitempty"`
+	OutputNumeric   *float64  `json:"output_numeric,omitempty"`
+	AccountID       *int64    `json:"account_id,omitempty"`
+	ModelID         string    `json:"model_id"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
+	GroupID         *int64    `json:"group_id,omitempty"`
+	ErrorMessage    string    `json:"error_message"`
+	LatencyMs       int64     `json:"latency_ms"`
+	StartedAt       time.Time `json:"started_at"`
+	FinishedAt      time.Time `json:"finished_at"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type ScheduledTestDefinition struct {
