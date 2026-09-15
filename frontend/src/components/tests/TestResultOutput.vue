@@ -46,7 +46,7 @@ const onPreviewMessage = (event: MessageEvent<unknown>) => {
   if (!Number.isFinite(reported) || reported <= 0) return
   // Keep a sensible lower bound and cap pathological output sizes. Very tall
   // responses remain scrollable inside the iframe instead of growing forever.
-  htmlFrameHeight.value = Math.min(2000, Math.max(320, Math.ceil(reported)))
+  htmlFrameHeight.value = Math.min(6000, Math.max(320, Math.ceil(reported)))
 }
 const onHTMLLoad = () => {
   // Reset while a new result is loading; the embedded script will immediately

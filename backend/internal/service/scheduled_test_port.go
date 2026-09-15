@@ -88,6 +88,7 @@ type ScheduledTestResultRepository interface {
 	GetByID(ctx context.Context, id int64) (*ScheduledTestResult, error)
 	Create(ctx context.Context, result *ScheduledTestResult) (*ScheduledTestResult, error)
 	Update(ctx context.Context, result *ScheduledTestResult) error
+	RestartFailed(ctx context.Context, result *ScheduledTestResult) error
 	ListByPlanID(ctx context.Context, planID int64, limit int) ([]*ScheduledTestResult, error)
 	ListVisible(ctx context.Context, userID int64, limit int) ([]*ScheduledTestResult, error)
 	Delete(ctx context.Context, id int64) error

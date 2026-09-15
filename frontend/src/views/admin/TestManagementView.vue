@@ -362,11 +362,18 @@ const removeResult = async (result: TestResult) => {
 }
 const retryResult = async (result: TestResult) => {
   if (!result.id || !result.account_id || retryingResultId.value !== null) return
+  const planID = resultPlan.value?.id
   retryingResultId.value = result.id
   try {
-    await adminAPI.tests.retryResult(result.id)
+    const updated = await adminAPI.tests.retryResult(result.id)
+    // The retry endpoint updates the existing execution row and returns that
+    // row in its new running state. Replace it in place so the administrator
+    // sees the cleared output/error immediately without adding another card.
+    if (resultPlan.value?.id === planID && (updated.plan_id == null || updated.plan_id === planID)) {
+      const index = results.value.findIndex(item => item.id === result.id)
+      if (index >= 0 && updated.id === result.id) results.value.splice(index, 1, updated)
+    }
     app.showSuccess(t('admin.tests.retryStarted'))
-    await refreshResults()
   } catch (error) {
     reportError(error)
   } finally {

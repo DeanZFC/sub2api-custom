@@ -6,7 +6,7 @@ import TestManagementView from '../TestManagementView.vue'
 const api = vi.hoisted(() => ({
   listTypes: vi.fn(), listPlans: vi.fn(), createType: vi.fn(), updateType: vi.fn(), deleteType: vi.fn(),
   createPlan: vi.fn(), updatePlan: vi.fn(), deletePlan: vi.fn(), runPlan: vi.fn(), listResults: vi.fn(),
-  getGroups: vi.fn(), getAccounts: vi.fn(), success: vi.fn(), error: vi.fn()
+  retryResult: vi.fn(), getGroups: vi.fn(), getAccounts: vi.fn(), success: vi.fn(), error: vi.fn()
 }))
 vi.mock('@/api/admin', () => ({ adminAPI: { tests: api, groups: { getAll: api.getGroups }, accounts: { list: api.getAccounts } } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.success, showError: api.error }) }))
@@ -25,6 +25,7 @@ beforeEach(() => {
   api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Account Three', group_ids: [8] }, { id: 4, name: 'Other Group Account', group_ids: [9] }], pages: 1, total: 2 })
   api.listResults.mockResolvedValue([])
   api.runPlan.mockResolvedValue(undefined)
+  api.retryResult.mockResolvedValue(undefined)
 })
 afterEach(() => vi.useRealTimers())
 
@@ -75,5 +76,45 @@ describe('configurable test management', () => {
     const count = api.listResults.mock.calls.length
     await vi.advanceTimersByTimeAsync(5000)
     expect(api.listResults).toHaveBeenCalledTimes(count)
+  })
+
+  it('replaces a failed result in place when retrying the same account', async () => {
+    const failed = {
+      id: 101,
+      plan_id: 10,
+      account_id: 3,
+      model_id: 'test-model',
+      status: 'failed',
+      output_kind: 'number',
+      error_message: 'upstream failed',
+      response_text: 'old output',
+    }
+    const running = {
+      ...failed,
+      status: 'running',
+      error_message: null,
+      response_text: null,
+      output_numeric: null,
+      latency_ms: null,
+    }
+    api.listResults.mockResolvedValue([failed])
+    api.retryResult.mockResolvedValue(running)
+
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'admin.tests.results')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-dialog] article')).toHaveLength(1)
+    expect(wrapper.get('[data-dialog]').text()).toContain('upstream failed')
+
+    await wrapper.find('[data-dialog] article').findAll('button').find(b => b.text() === 'admin.tests.retry')!.trigger('click')
+    await flushPromises()
+
+    expect(api.retryResult).toHaveBeenCalledWith(101)
+    const cards = wrapper.findAll('[data-dialog] article')
+    expect(cards).toHaveLength(1)
+    expect(cards[0].text()).toContain('running')
+    expect(cards[0].text()).not.toContain('upstream failed')
+    expect(cards[0].text()).not.toContain('old output')
+    wrapper.unmount()
   })
 })

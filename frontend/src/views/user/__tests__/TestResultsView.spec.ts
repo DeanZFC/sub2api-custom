@@ -66,4 +66,31 @@ describe('test result reasoning effort', () => {
     expect(wrapper.findAll('article')[0].text()).not.toContain('Account #')
     wrapper.unmount()
   })
+
+  it('shows an older result retried successfully as the latest by its new execution time', async () => {
+    const result = { plan_id: 10, test_name: 'Pelican', group_id: 8, group_name: 'Group Eight', account_id: 3, model_id: 'gpt-6-astra', output_kind: 'text', status: 'success' }
+    const retryStartedAt = '2026-09-15T13:00:00Z'
+    const previousStartedAt = '2026-09-15T12:00:00Z'
+    api.list.mockResolvedValue([
+      { ...result, id: 2, created_at: previousStartedAt, started_at: previousStartedAt, finished_at: '2026-09-15T12:05:00Z' },
+      { ...result, id: 1, created_at: '2026-09-15T10:00:00Z', started_at: retryStartedAt, finished_at: '2026-09-15T13:05:00Z' },
+    ])
+    const wrapper = mount(TestResultsView, { global: {
+      plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: {} } })],
+      stubs: { AppLayout: { template: '<main><slot /></main>' }, Icon: true, TestResultOutput: { props: ['result'], template: '<div data-output :data-result-id="result.id" />' }, BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><slot /></section>' } },
+    } })
+    await flushPromises()
+
+    expect(wrapper.findAll('article')).toHaveLength(1)
+    expect(wrapper.get('article [data-output]').attributes('data-result-id')).toBe('1')
+    expect(wrapper.get('article').text()).toContain(new Date(retryStartedAt).toLocaleString())
+    expect(wrapper.get('article').text()).not.toContain(new Date('2026-09-15T10:00:00Z').toLocaleString())
+
+    await wrapper.get('article').trigger('click')
+    const history = wrapper.get('[data-dialog]').findAll('article')
+    expect(history.map(card => card.get('[data-output]').attributes('data-result-id'))).toEqual(['1', '2'])
+    expect(history[0].text()).toContain(new Date(retryStartedAt).toLocaleString())
+    expect(history[1].text()).toContain(new Date(previousStartedAt).toLocaleString())
+    wrapper.unmount()
+  })
 })

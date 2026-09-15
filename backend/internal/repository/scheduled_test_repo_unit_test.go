@@ -45,7 +45,7 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 
 	repo := &scheduledTestResultRepository{db: db}
 	createdAt := time.Now()
-	mock.ExpectQuery(`(?s)SELECT r\.id, r\.plan_id.*FROM scheduled_test_results r`).
+	mock.ExpectQuery(`(?s)SELECT r\.id, r\.plan_id.*FROM scheduled_test_results r.*ORDER BY r\.started_at DESC, r\.id DESC`).
 		WithArgs(int64(10), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "plan_name", "test_name", "group_name", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
@@ -98,7 +98,7 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 
 	repo := &scheduledTestResultRepository{db: db}
 	now := time.Now()
-	mock.ExpectQuery(`(?s)WITH visible_results AS .*CASE WHEN .*IN \('account', 'all_accounts'\).*visible_account_id.*result_target_key.*FROM scheduled_test_results r.*SELECT vr\.id,vr\.plan_id.*FROM visible_results vr.*successful\.status IN \('success', 'passed'\)`).
+	mock.ExpectQuery(`(?s)WITH visible_results AS .*CASE WHEN .*IN \('account', 'all_accounts'\).*visible_account_id.*result_target_key.*FROM scheduled_test_results r.*SELECT vr\.id,vr\.plan_id.*FROM visible_results vr.*successful\.status IN \('success', 'passed'\).*ORDER BY vr\.started_at DESC, vr\.id DESC`).
 		WithArgs(int64(5), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "plan_name", "test_name", "group_name", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",

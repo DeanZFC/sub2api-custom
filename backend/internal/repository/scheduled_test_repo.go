@@ -268,6 +268,43 @@ func (r *scheduledTestResultRepository) Update(ctx context.Context, result *serv
 	return nil
 }
 
+// RestartFailed atomically reuses an existing failed result row for a manual
+// account retry. The compare-and-swap predicate prevents a stale retry request
+// from overwriting a result that has already been retried or completed. The
+// row identity and ownership columns are intentionally left unchanged.
+func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, result *service.ScheduledTestResult) error {
+	if result == nil || result.ID <= 0 {
+		return fmt.Errorf("test result id is required")
+	}
+	if result.PlanID <= 0 {
+		return fmt.Errorf("test result plan id is required")
+	}
+	if result.AccountID == nil || *result.AccountID <= 0 {
+		return fmt.Errorf("test result account id is required")
+	}
+
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE scheduled_test_results
+		SET status = 'running', response_text = '', output_kind = $2, output_html = '',
+		    output_numeric = NULL, model_id = $3, reasoning_effort = $4, group_id = $5,
+		    error_message = '', latency_ms = 0, started_at = $6, finished_at = $7
+		WHERE id = $1 AND plan_id = $8 AND account_id = $9 AND status = 'failed'
+	`, result.ID, result.OutputKind, result.ModelID, result.ReasoningEffort, result.GroupID, result.StartedAt, result.FinishedAt, result.PlanID, *result.AccountID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrScheduledTestResultNotFailed
+	}
+	return nil
+}
+
+// Sort and retain results by the latest execution time: a manual retry keeps
+// its original ID/created_at while refreshing started_at.
 func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID int64, limit int) ([]*service.ScheduledTestResult, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(g.name, ''), p.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at
@@ -276,7 +313,7 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 		LEFT JOIN scheduled_test_definitions d ON d.id = p.test_definition_id
 		LEFT JOIN groups g ON g.id = r.group_id
 		WHERE plan_id = $1
-		ORDER BY r.created_at DESC, r.id DESC
+		ORDER BY r.started_at DESC, r.id DESC
 		LIMIT $2
 	`, planID, limit)
 	if err != nil {
@@ -359,7 +396,7 @@ WHERE vr.status IN ('success', 'passed')
          AND successful.result_target_key = vr.result_target_key
          AND successful.status IN ('success', 'passed')
    )
-ORDER BY vr.created_at DESC, vr.id DESC LIMIT $2`, userID, limit)
+ORDER BY vr.started_at DESC, vr.id DESC LIMIT $2`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +432,7 @@ func (r *scheduledTestResultRepository) PruneOldResults(ctx context.Context, pla
 		DELETE FROM scheduled_test_results
 		WHERE id IN (
 			SELECT id FROM (
-				SELECT id, ROW_NUMBER() OVER (PARTITION BY plan_id ORDER BY created_at DESC, id DESC) AS rn
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY plan_id ORDER BY started_at DESC, id DESC) AS rn
 				FROM scheduled_test_results
 				WHERE plan_id = $1 AND status <> 'running'
 			) ranked

@@ -51,6 +51,10 @@ func (r *runnerResultRepoStub) GetByID(context.Context, int64) (*ScheduledTestRe
 	return nil, errors.New("not implemented")
 }
 
+func (r *runnerResultRepoStub) RestartFailed(context.Context, *ScheduledTestResult) error {
+	return errors.New("unexpected retry during normal plan run")
+}
+
 func (r *runnerResultRepoStub) Create(ctx context.Context, result *ScheduledTestResult) (*ScheduledTestResult, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -120,6 +124,7 @@ func TestExtractScheduledTestNumberSupportsFinalMarkersAndNumericForms(t *testin
 		{name: "negative decimal", text: "答案 = -0.25", want: -0.25},
 		{name: "scientific", text: "final result: 1.25e-3", want: 0.00125},
 		{name: "standalone", text: "29", want: 29},
+		{name: "chinese markdown answer", text: "最少取出 **29个**。\n\n若还没有满足条件，则不可能同时出现：\n1. A 和 B，因此最多 7\n2. C 和 D，因此最多 9", want: 29},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -128,6 +133,14 @@ func TestExtractScheduledTestNumberSupportsFinalMarkersAndNumericForms(t *testin
 				t.Fatalf("extractScheduledTestNumber(%q) = (%v, %v), want (%v, true)", tc.text, got, ok, tc.want)
 			}
 		})
+	}
+}
+
+func TestExtractScheduledTestNumberDoesNotUseStepNumberWhenAnswerIsFormatted(t *testing.T) {
+	text := "最少取出 **29个**。\n\n若还没有满足条件，则每种至少 1 个。\n1. 第一种情况最多取出 7 个。\n2. 第二种情况最多取出 9 个。"
+	got, ok := extractScheduledTestNumber(text)
+	if !ok || got != 29 {
+		t.Fatalf("extractScheduledTestNumber() = (%v, %v), want (29, true)", got, ok)
 	}
 }
 

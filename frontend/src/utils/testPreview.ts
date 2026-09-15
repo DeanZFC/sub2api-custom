@@ -30,12 +30,19 @@ export function buildTestPreviewHTML(source: string): string {
     const report = () => {
       const body = document.body
       const root = document.documentElement
-      const height = Math.max(body?.scrollHeight || 0, root?.scrollHeight || 0, body?.offsetHeight || 0, root?.offsetHeight || 0)
+      let height = Math.max(body?.scrollHeight || 0, root?.scrollHeight || 0, body?.offsetHeight || 0, root?.offsetHeight || 0)
+      for (const node of document.querySelectorAll('*')) {
+        const rect = node.getBoundingClientRect()
+        if (Number.isFinite(rect.bottom)) height = Math.max(height, rect.bottom + window.scrollY)
+      }
       window.parent.postMessage({ type: 'sub2api-test-preview-size', height }, '*')
     }
     window.addEventListener('load', report)
     if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement)
     report()
+    setTimeout(report, 0)
+    setTimeout(report, 100)
+    setTimeout(report, 500)
   })()`
   document.body.appendChild(resizeScript)
   return '<!doctype html>\n' + document.documentElement.outerHTML

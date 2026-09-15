@@ -5,10 +5,12 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,3 +45,75 @@ func TestScheduledTestResultRepositoryGetByIDMissing(t *testing.T) {
 	require.ErrorIs(t, err, sql.ErrNoRows)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestScheduledTestResultRepositoryRestartFailedUpdatesExistingRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	repo := &scheduledTestResultRepository{db: db}
+	accountID, groupID := int64(12), int64(7)
+	started, finished := time.Now(), time.Now().Add(time.Second)
+	running := &service.ScheduledTestResult{
+		ID: 9, PlanID: 3, AccountID: &accountID, GroupID: &groupID,
+		Status: "running", OutputKind: "html", ModelID: "gpt-6-astra",
+		ReasoningEffort: "high", StartedAt: started, FinishedAt: finished,
+	}
+	mock.ExpectExec(`(?s)UPDATE scheduled_test_results.*SET status = 'running'.*response_text = ''.*output_numeric = NULL.*WHERE id = \$1 AND plan_id = \$8 AND account_id = \$9 AND status = 'failed'`).
+		WithArgs(int64(9), "html", "gpt-6-astra", "high", int64(7), started, finished, int64(3), int64(12)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.RestartFailed(context.Background(), running))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestScheduledTestResultRepositoryRestartFailedCASFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	repo := &scheduledTestResultRepository{db: db}
+	accountID := int64(12)
+	running := &service.ScheduledTestResult{ID: 9, PlanID: 3, AccountID: &accountID, StartedAt: time.Now(), FinishedAt: time.Now()}
+	mock.ExpectExec(`(?s)UPDATE scheduled_test_results.*WHERE id = \$1 AND plan_id = \$8 AND account_id = \$9 AND status = 'failed'`).
+		WithArgs(int64(9), "", "", "", nil, running.StartedAt, running.FinishedAt, int64(3), int64(12)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	require.ErrorIs(t, repo.RestartFailed(context.Background(), running), service.ErrScheduledTestResultNotFailed)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestScheduledTestResultRepositoryRestartFailedValidatesOwnershipIDs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	repo := &scheduledTestResultRepository{db: db}
+	accountID := int64(12)
+	for _, result := range []*service.ScheduledTestResult{
+		nil,
+		{PlanID: 3, AccountID: &accountID},
+		{ID: 9, AccountID: &accountID},
+		{ID: 9, PlanID: 3},
+		{ID: 9, PlanID: 3, AccountID: retryPtrInt64(0)},
+	} {
+		err := repo.RestartFailed(context.Background(), result)
+		require.Error(t, err)
+	}
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestScheduledTestResultRepositoryRestartFailedReturnsDatabaseError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	repo := &scheduledTestResultRepository{db: db}
+	accountID := int64(12)
+	running := &service.ScheduledTestResult{ID: 9, PlanID: 3, AccountID: &accountID, StartedAt: time.Now(), FinishedAt: time.Now()}
+	dbErr := errors.New("database unavailable")
+	mock.ExpectExec(`(?s)UPDATE scheduled_test_results.*WHERE id = \$1 AND plan_id = \$8 AND account_id = \$9 AND status = 'failed'`).
+		WithArgs(int64(9), "", "", "", nil, running.StartedAt, running.FinishedAt, int64(3), int64(12)).
+		WillReturnError(dbErr)
+
+	require.ErrorIs(t, repo.RestartFailed(context.Background(), running), dbErr)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func retryPtrInt64(v int64) *int64 { return &v }

@@ -419,7 +419,7 @@ func (h *ScheduledTestHandler) RetryResult(c *gin.Context) {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			response.NotFound(c, "test result or plan not found")
-		case errors.Is(err, service.ErrScheduledTestAccountRunning):
+		case errors.Is(err, service.ErrScheduledTestAccountRunning), errors.Is(err, service.ErrScheduledTestResultNotFailed):
 			response.Error(c, http.StatusConflict, err.Error())
 		default:
 			response.BadRequest(c, err.Error())

@@ -10,27 +10,25 @@
         <div class="flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-dark-700">
           <button v-for="tab in testTabs" :key="tab.key" class="shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors" :class="activeType === tab.key ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'" @click="activeType = tab.key">{{ tab.name }}</button>
         </div>
-        <div class="flex items-end justify-end">
-          <label class="input-label w-full md:w-72">{{ t('tests.modelFilter') }}<select v-model="modelFilter" class="input mt-1 w-full"><option value="">{{ t('tests.allModels') }}</option><option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option></select></label>
-        </div>
       </section>
 
       <p v-if="!loading && !allResults.length" class="card p-10 text-center text-sm text-gray-500">{{ t('tests.empty') }}</p>
       <p v-else-if="!groupedLatest.length" class="card p-10 text-center text-sm text-gray-500">{{ t('tests.noMatches') }}</p>
       <div v-else class="grid gap-4 lg:grid-cols-[13rem,minmax(0,1fr)] lg:items-start">
         <aside class="card p-2 lg:sticky lg:top-4">
-          <h3 class="px-3 pb-2 pt-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('tests.groupFilter') }}</h3>
+          <h3 class="px-3 pb-2 pt-1 text-base font-semibold text-gray-700 dark:text-gray-200">{{ t('tests.groupFilter') }}</h3>
           <nav class="space-y-1" :aria-label="t('tests.groupFilter')">
-            <button v-for="group in availableGroups" :key="group.key" type="button" class="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors" :class="activeGroup === group.key ? 'bg-primary-50 font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300' : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-dark-800'" @click="activeGroup = group.key">
+            <button v-for="group in availableGroups" :key="group.key" type="button" class="flex w-full items-center rounded-lg px-3 py-2 text-left text-base transition-colors" :class="activeGroup === group.key ? 'bg-primary-50 font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300' : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-dark-800'" @click="activeGroup = group.key">
               <span class="min-w-0 truncate">{{ group.name }}</span>
             </button>
           </nav>
+          <label class="input-label mt-4 block border-t border-gray-100 px-3 pt-3 text-sm dark:border-dark-700">{{ t('tests.modelFilter') }}<select v-model="modelFilter" class="input mt-1 w-full text-sm"><option value="">{{ t('tests.allModels') }}</option><option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option></select></label>
         </aside>
         <main class="min-w-0 space-y-4">
           <div v-for="group in groupedLatest" :key="group.key" class="space-y-2">
             <h3 class="flex items-center gap-2 border-b border-gray-200 pb-2 text-base font-semibold text-gray-900 dark:border-dark-700 dark:text-white"><span class="h-2 w-2 rounded-full bg-primary-500" />{{ group.name }}</h3>
             <article v-for="result in group.results" :key="result.id" class="card cursor-pointer p-3 transition-shadow hover:shadow-md sm:p-4" role="button" tabindex="0" @click="openHistory(result)" @keydown.enter="openHistory(result)">
-              <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="text-lg font-semibold text-gray-900 dark:text-white">{{ targetName(result) }}</h4><span :class="statusClass(result)">{{ result.status }}</span></div><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.created_at || result.finished_at) }}</p></div><span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ t('tests.viewHistory') }} ({{ historyFor(result).length }})</span></div>
+              <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="text-lg font-semibold text-gray-900 dark:text-white">{{ targetName(result) }}</h4><span :class="statusClass(result)">{{ result.status }}</span></div><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.started_at || result.finished_at || result.created_at) }}</p></div><span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ t('tests.viewHistory') }} ({{ historyFor(result).length }})</span></div>
               <div v-if="result.error_message" class="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div>
               <div class="result-output mt-2 max-w-5xl mx-auto" @click.stop>
                 <TestResultOutput :result="result" />
@@ -42,7 +40,7 @@
     </div>
 
     <BaseDialog :show="!!historyTarget" :title="historyTarget ? `${targetName(historyTarget)} · ${testName(historyTarget)}` : ''" width="extra-wide" @close="historyTarget = null">
-      <div v-if="historyTarget" class="space-y-4"><p class="text-xs text-gray-500">{{ t('tests.historyHint') }}</p><article v-for="result in historyFor(historyTarget)" :key="result.id" class="rounded-xl border border-gray-200 p-4 dark:border-dark-700"><div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.created_at || result.finished_at) }}</span><span :class="statusClass(result)">{{ result.status }}</span></div><div v-if="result.error_message" class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div><TestResultOutput class="mt-3" :result="result" /></article></div>
+      <div v-if="historyTarget" class="space-y-4"><p class="text-xs text-gray-500">{{ t('tests.historyHint') }}</p><article v-for="result in historyFor(historyTarget)" :key="result.id" class="rounded-xl border border-gray-200 p-4 dark:border-dark-700"><div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.started_at || result.finished_at || result.created_at) }}</span><span :class="statusClass(result)">{{ result.status }}</span></div><div v-if="result.error_message" class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div><TestResultOutput class="mt-3" :result="result" /></article></div>
     </BaseDialog>
   </AppLayout>
 </template>
@@ -73,8 +71,8 @@ watch(activeType, () => {
 })
 
 const sortResults = (items: TestResult[]) => [...items].sort((a, b) => {
-  const ad = new Date(a.created_at || a.finished_at || a.started_at || 0).getTime()
-  const bd = new Date(b.created_at || b.finished_at || b.started_at || 0).getTime()
+  const ad = new Date(a.started_at || a.finished_at || a.created_at || 0).getTime()
+  const bd = new Date(b.started_at || b.finished_at || b.created_at || 0).getTime()
   return bd - ad || b.id - a.id
 })
 const testName = (result: TestResult) => result.test_name || result.plan_name || result.test_definition?.name || result.plan?.name || t('tests.unknownType')

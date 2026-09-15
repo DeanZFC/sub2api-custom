@@ -25,14 +25,21 @@ var (
 	scheduledTestNumberPattern      = `[-+]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][-+]?\d+)?`
 	scheduledTestNumberRE           = regexp.MustCompile(scheduledTestNumberPattern)
 	scheduledTestStandaloneNumberRE = regexp.MustCompile(`^` + scheduledTestNumberPattern + `$`)
-	scheduledTestExplicitNumberRE   = regexp.MustCompile(`(?i)(?:final\s+(?:answer|result)|answer|result|答案|最终\s*(?:答案|结果)|结论|minimum(?:\s+number)?|最少(?:取出)?|至少)\s*(?:(?:is|are|为|是)\s*)?(?:=|:|：)?\s*(` + scheduledTestNumberPattern + `)`)
-	scheduledTestAnswerLineRE       = regexp.MustCompile(`(?i)(?:final\s+(?:answer|result)|answer|result|答案|最终|结论|minimum|最少|至少)`)
-	scheduledTestHTMLRootRE         = regexp.MustCompile(`(?is)<\s*([a-z][a-z0-9:._-]*)(?:\s|/?>)`)
+	// Keep the marker and number on the same line. Models frequently format
+	// the answer as "最少取出 **29个**"; the markdown emphasis and Chinese unit
+	// must not make the parser fall through to a step number such as "1.".
+	scheduledTestMarkerGap       = "[ \\t*_`~]*"
+	scheduledTestStrongNumberRE  = regexp.MustCompile(`(?i)(?:final\s+(?:answer|result)|answer|result|答案|最终\s*(?:答案|结果)|结论)` + scheduledTestMarkerGap + `(?:(?:is|are|为|是)` + scheduledTestMarkerGap + `)?(?:=|:|：)?` + scheduledTestMarkerGap + `(` + scheduledTestNumberPattern + `)`)
+	scheduledTestMinimumNumberRE = regexp.MustCompile(`(?i)(?:minimum(?:\s+number)?|最少(?:取出)?)` + scheduledTestMarkerGap + `(?:(?:is|are|为|是)` + scheduledTestMarkerGap + `)?(?:=|:|：)?` + scheduledTestMarkerGap + `(` + scheduledTestNumberPattern + `)`)
+	scheduledTestAtLeastNumberRE = regexp.MustCompile(`(?i)至少` + scheduledTestMarkerGap + `(?:(?:is|are|为|是)` + scheduledTestMarkerGap + `)?(?:=|:|：)?` + scheduledTestMarkerGap + `(` + scheduledTestNumberPattern + `)`)
+	scheduledTestAnswerLineRE    = regexp.MustCompile(`(?i)(?:final\s+(?:answer|result)|answer|result|答案|最终|结论|minimum|最少|至少)`)
+	scheduledTestHTMLRootRE      = regexp.MustCompile(`(?is)<\s*([a-z][a-z0-9:._-]*)(?:\s|/?>)`)
 )
 
 const scheduledTestPersistenceTimeout = 15 * time.Second
 
 var ErrScheduledTestAccountRunning = errors.New("this account is already being tested for this plan")
+var ErrScheduledTestResultNotFailed = errors.New("test result is no longer failed; refresh the results before retrying")
 
 // ScheduledTestRunnerService periodically scans due test plans and executes them.
 type ScheduledTestRunnerService struct {
@@ -329,6 +336,7 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	if pending != nil {
 		result.ID = pending.ID
 		result.StartedAt = pending.StartedAt
+		result.CreatedAt = pending.CreatedAt
 	}
 	result.ModelID = plan.ModelID
 	result.ReasoningEffort = plan.ReasoningEffort
@@ -579,14 +587,16 @@ func extractScheduledTestNumber(text string) (float64, bool) {
 		}
 	}
 
-	// Prefer the last explicit answer marker. This handles reasoning such as
-	// "candidate answer: 28 ... final answer: 29" without mistaking the first
-	// table or step number for the result.
-	matches := scheduledTestExplicitNumberRE.FindAllStringSubmatch(trimmed, -1)
-	for i := len(matches) - 1; i >= 0; i-- {
-		if len(matches[i]) > 1 {
-			if n, err := strconv.ParseFloat(matches[i][1], 64); err == nil {
-				return n, true
+	// Prefer an explicit final-answer marker. A later phrase such as
+	// "至少 1 个" often appears in the proof and must not overwrite the
+	// actual answer "最少取出 29 个".
+	for _, markerRE := range []*regexp.Regexp{scheduledTestStrongNumberRE, scheduledTestMinimumNumberRE, scheduledTestAtLeastNumberRE} {
+		matches := markerRE.FindAllStringSubmatch(trimmed, -1)
+		for i := len(matches) - 1; i >= 0; i-- {
+			if len(matches[i]) > 1 {
+				if n, err := strconv.ParseFloat(matches[i][1], 64); err == nil {
+					return n, true
+				}
 			}
 		}
 	}
@@ -616,14 +626,18 @@ func (s *ScheduledTestRunnerService) RunPlanNow(ctx context.Context, plan *Sched
 	s.runOnePlan(ctx, plan)
 }
 
-// RetryAccount queues only the chosen account and returns its persisted running
-// row. It deliberately does not advance the plan's cron schedule. The account
+// RetryAccount reuses the failed row for the chosen account and returns its
+// running snapshot. It does not advance the plan's cron schedule. The account
 // guard is also used by normal plan runs, so the retry can run while other
 // members of the group are still generating without duplicating this account.
-func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *ScheduledTestPlan, accountID int64) (*ScheduledTestResult, error) {
-	if plan == nil || plan.ID <= 0 || accountID <= 0 {
-		return nil, fmt.Errorf("test plan and account are required")
+func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *ScheduledTestPlan, previous *ScheduledTestResult) (*ScheduledTestResult, error) {
+	if plan == nil || plan.ID <= 0 || previous == nil || previous.ID <= 0 || previous.PlanID != plan.ID || previous.AccountID == nil || *previous.AccountID <= 0 {
+		return nil, fmt.Errorf("matching test plan, result and account are required")
 	}
+	if previous.Status != "failed" {
+		return nil, ErrScheduledTestResultNotFailed
+	}
+	accountID := *previous.AccountID
 	if !s.beginAccountRun(plan.ID, accountID) {
 		return nil, ErrScheduledTestAccountRunning
 	}
@@ -662,8 +676,17 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if err != nil {
 		return nil, err
 	}
-	pending, err := s.startAccountResult(ctx, plan, accountID, outputKind)
-	if err != nil {
+	if s.scheduledSvc == nil {
+		return nil, fmt.Errorf("scheduled test service unavailable")
+	}
+	started := time.Now()
+	pending := &ScheduledTestResult{
+		ID: previous.ID, PlanID: plan.ID, CreatedAt: previous.CreatedAt,
+		Status: "running", OutputKind: outputKind, AccountID: &accountID,
+		ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, GroupID: plan.GroupID,
+		StartedAt: started, FinishedAt: started,
+	}
+	if err := s.scheduledSvc.RestartFailedResult(ctx, pending); err != nil {
 		return nil, err
 	}
 	// Return an immutable snapshot to the HTTP handler while the background

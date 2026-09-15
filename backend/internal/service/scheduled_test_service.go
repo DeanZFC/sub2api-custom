@@ -155,7 +155,7 @@ type ScheduledTestService struct {
 	resultRepo     ScheduledTestResultRepository
 	definitionRepo ScheduledTestDefinitionRepository
 	runFunc        func(context.Context, *ScheduledTestPlan)
-	retryFunc      func(context.Context, *ScheduledTestPlan, int64) (*ScheduledTestResult, error)
+	retryFunc      func(context.Context, *ScheduledTestPlan, *ScheduledTestResult) (*ScheduledTestResult, error)
 }
 
 // NewScheduledTestService creates a new ScheduledTestService.
@@ -175,13 +175,12 @@ func (s *ScheduledTestService) SetDefinitionRepository(repo ScheduledTestDefinit
 	s.definitionRepo = repo
 }
 func (s *ScheduledTestService) SetRunFunc(f func(context.Context, *ScheduledTestPlan)) { s.runFunc = f }
-func (s *ScheduledTestService) SetRetryFunc(f func(context.Context, *ScheduledTestPlan, int64) (*ScheduledTestResult, error)) {
+func (s *ScheduledTestService) SetRetryFunc(f func(context.Context, *ScheduledTestPlan, *ScheduledTestResult) (*ScheduledTestResult, error)) {
 	s.retryFunc = f
 }
 
-// RetryResult starts one new execution for the failed result's account. The
-// parent plan is not modified, so retrying one member never reruns a group or
-// changes its next scheduled execution.
+// RetryResult reruns the failed result's account in the same result row.
+// The parent plan and its next scheduled execution are unchanged.
 func (s *ScheduledTestService) RetryResult(ctx context.Context, id int64) (*ScheduledTestResult, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("invalid test result id")
@@ -189,6 +188,9 @@ func (s *ScheduledTestService) RetryResult(ctx context.Context, id int64) (*Sche
 	previous, err := s.resultRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if previous != nil && (previous.Status == "running" || previous.Status == "pending") {
+		return nil, ErrScheduledTestAccountRunning
 	}
 	if previous == nil || previous.Status != "failed" {
 		return nil, fmt.Errorf("only failed test results can be retried")
@@ -203,7 +205,7 @@ func (s *ScheduledTestService) RetryResult(ctx context.Context, id int64) (*Sche
 	if s.retryFunc == nil {
 		return nil, fmt.Errorf("test runner unavailable")
 	}
-	result, err := s.retryFunc(ctx, plan, *previous.AccountID)
+	result, err := s.retryFunc(ctx, plan, previous)
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +214,13 @@ func (s *ScheduledTestService) RetryResult(ctx context.Context, id int64) (*Sche
 	result.GroupName = previous.GroupName
 	result.TargetMode = plan.TargetMode
 	return result, nil
+}
+
+// RestartFailedResult atomically reuses a failed row and clears its old output
+// before the upstream request is queued. A stale retry cannot replace a result
+// that has already started or completed elsewhere.
+func (s *ScheduledTestService) RestartFailedResult(ctx context.Context, result *ScheduledTestResult) error {
+	return s.resultRepo.RestartFailed(ctx, result)
 }
 
 func (s *ScheduledTestService) RunNow(ctx context.Context, id int64) error {
@@ -349,10 +358,39 @@ func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, li
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.resultRepo.ListByPlanID(ctx, planID, limit)
+	results, err := s.resultRepo.ListByPlanID(ctx, planID, limit)
+	if err != nil {
+		return nil, err
+	}
+	normalizeStoredTestResults(results)
+	return results, nil
 }
 func (s *ScheduledTestService) ListVisibleResults(ctx context.Context, userID int64, limit int) ([]*ScheduledTestResult, error) {
-	return s.resultRepo.ListVisible(ctx, userID, limit)
+	results, err := s.resultRepo.ListVisible(ctx, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	normalizeStoredTestResults(results)
+	return results, nil
+}
+
+// normalizeStoredTestResults repairs the displayed numeric value for rows
+// created before the answer parser was tightened. The original response text
+// is retained as the source of truth, so an old row showing the first step
+// number is corrected as soon as it is read without rewriting history.
+func normalizeStoredTestResults(results []*ScheduledTestResult) {
+	for _, result := range results {
+		if result == nil || !strings.EqualFold(strings.TrimSpace(result.OutputKind), "number") || strings.TrimSpace(result.ResponseText) == "" {
+			continue
+		}
+		if numeric, ok := extractScheduledTestNumber(result.ResponseText); ok {
+			result.OutputNumeric = &numeric
+		} else {
+			// If the original text has no unambiguous answer, show that text
+			// rather than retain a number selected by an older parser.
+			result.OutputNumeric = nil
+		}
+	}
 }
 
 // DeleteResult removes one test execution result by its ID.
