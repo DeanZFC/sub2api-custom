@@ -2868,6 +2868,12 @@ func applyAccountTestReasoningEffort(payload map[string]any, effort string) {
 		payload["reasoning_effort"] = effort
 		return
 	}
+	// Codex exposes the richer "ultra" alias, while the public Responses
+	// contract used by several OAuth/API-key upstreams accepts "max" as its
+	// highest value. Keep the UI alias but send the wire-compatible value.
+	if effort == "ultra" {
+		effort = "max"
+	}
 	payload["reasoning"] = map[string]any{"effort": effort}
 }
 

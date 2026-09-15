@@ -47,6 +47,15 @@
             <span class="flex items-center gap-2">
               <span>{{ result.status }} · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.started_at) }}</span>
               <button
+                v-if="result.status === 'failed' && result.account_id"
+                type="button"
+                class="text-primary-600 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="retryingResultId === result.id"
+                @click="retryResult(result)"
+              >
+                {{ retryingResultId === result.id ? t('common.loading') : t('admin.tests.retry') }}
+              </button>
+              <button
                 v-if="result.id > 0"
                 type="button"
                 class="text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -97,6 +106,7 @@ const results = ref<TestResult[]>([])
 // after the request is accepted until the first persisted result arrives.
 const pendingRuns = ref(new Map<number, TestResult>())
 const deletingResultId = ref<number | null>(null)
+const retryingResultId = ref<number | null>(null)
 const editingType = ref<(CreateTestTypeRequest & { id?: number }) | null>(null)
 const editingPlan = ref<(CreateTestPlanRequest & { id?: number }) | null>(null)
 const resultPlan = ref<TestPlan | null>(null)
@@ -348,6 +358,19 @@ const removeResult = async (result: TestResult) => {
     reportError(error)
   } finally {
     deletingResultId.value = null
+  }
+}
+const retryResult = async (result: TestResult) => {
+  if (!result.id || !result.account_id || retryingResultId.value !== null) return
+  retryingResultId.value = result.id
+  try {
+    await adminAPI.tests.retryResult(result.id)
+    app.showSuccess(t('admin.tests.retryStarted'))
+    await refreshResults()
+  } catch (error) {
+    reportError(error)
+  } finally {
+    retryingResultId.value = null
   }
 }
 let resultTimer: ReturnType<typeof setInterval> | undefined

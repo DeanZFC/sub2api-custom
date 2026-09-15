@@ -406,3 +406,25 @@ func (h *ScheduledTestHandler) RunNow(c *gin.Context) {
 	}
 	c.JSON(http.StatusAccepted, gin.H{"message": "test queued"})
 }
+
+// RetryResult POST /admin/test-results/:id/retry
+func (h *ScheduledTestHandler) RetryResult(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid test result id")
+		return
+	}
+	result, err := h.scheduledTestSvc.RetryResult(c.Request.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			response.NotFound(c, "test result or plan not found")
+		case errors.Is(err, service.ErrScheduledTestAccountRunning):
+			response.Error(c, http.StatusConflict, err.Error())
+		default:
+			response.BadRequest(c, err.Error())
+		}
+		return
+	}
+	c.JSON(http.StatusAccepted, result)
+}

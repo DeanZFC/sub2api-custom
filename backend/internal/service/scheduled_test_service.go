@@ -155,6 +155,7 @@ type ScheduledTestService struct {
 	resultRepo     ScheduledTestResultRepository
 	definitionRepo ScheduledTestDefinitionRepository
 	runFunc        func(context.Context, *ScheduledTestPlan)
+	retryFunc      func(context.Context, *ScheduledTestPlan, int64) (*ScheduledTestResult, error)
 }
 
 // NewScheduledTestService creates a new ScheduledTestService.
@@ -174,6 +175,45 @@ func (s *ScheduledTestService) SetDefinitionRepository(repo ScheduledTestDefinit
 	s.definitionRepo = repo
 }
 func (s *ScheduledTestService) SetRunFunc(f func(context.Context, *ScheduledTestPlan)) { s.runFunc = f }
+func (s *ScheduledTestService) SetRetryFunc(f func(context.Context, *ScheduledTestPlan, int64) (*ScheduledTestResult, error)) {
+	s.retryFunc = f
+}
+
+// RetryResult starts one new execution for the failed result's account. The
+// parent plan is not modified, so retrying one member never reruns a group or
+// changes its next scheduled execution.
+func (s *ScheduledTestService) RetryResult(ctx context.Context, id int64) (*ScheduledTestResult, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("invalid test result id")
+	}
+	previous, err := s.resultRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if previous == nil || previous.Status != "failed" {
+		return nil, fmt.Errorf("only failed test results can be retried")
+	}
+	if previous.AccountID == nil || *previous.AccountID <= 0 {
+		return nil, fmt.Errorf("test result has no account to retry; run the plan again")
+	}
+	plan, err := s.GetPlan(ctx, previous.PlanID)
+	if err != nil {
+		return nil, err
+	}
+	if s.retryFunc == nil {
+		return nil, fmt.Errorf("test runner unavailable")
+	}
+	result, err := s.retryFunc(ctx, plan, *previous.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	result.PlanName = plan.Name
+	result.TestName = previous.TestName
+	result.GroupName = previous.GroupName
+	result.TargetMode = plan.TargetMode
+	return result, nil
+}
+
 func (s *ScheduledTestService) RunNow(ctx context.Context, id int64) error {
 	p, e := s.GetPlan(ctx, id)
 	if e != nil {

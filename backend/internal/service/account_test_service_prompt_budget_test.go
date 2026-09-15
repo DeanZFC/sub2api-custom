@@ -35,6 +35,14 @@ func TestCreateOpenAIResponsesTestPayloadUsesLargeBudgetOnlyForConfiguredPrompt(
 	require.Equal(t, scheduledTestCustomPromptMaxOutputTokens, configured["max_output_tokens"])
 }
 
+func TestAccountTestReasoningMapsUltraToResponsesMax(t *testing.T) {
+	payload := createOpenAITestPayload("gpt-5.4", true, "reply")
+	applyAccountTestReasoningEffort(payload, "ultra")
+	reasoning, ok := payload["reasoning"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "max", reasoning["effort"])
+}
+
 func TestAccountTestParseSSEOutputKeepsOnlyModelContent(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"status","text":"connecting"}`,

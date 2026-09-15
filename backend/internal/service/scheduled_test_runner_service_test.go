@@ -48,8 +48,8 @@ func TestCreateOpenAITestPayloadUsesConfiguredPrompt(t *testing.T) {
 func TestApplyAccountTestReasoningEffortUsesNativePayloadShape(t *testing.T) {
 	responses := createOpenAITestPayload("gpt-6-astra", false)
 	applyAccountTestReasoningEffort(responses, " ultra ")
-	if got := responses["reasoning"].(map[string]any)["effort"]; got != "ultra" {
-		t.Fatalf("responses reasoning effort = %v, want ultra", got)
+	if got := responses["reasoning"].(map[string]any)["effort"]; got != "max" {
+		t.Fatalf("responses reasoning effort = %v, want max", got)
 	}
 	chat := createOpenAIChatCompletionsTestPayload("gpt-6-astra", "hi")
 	applyAccountTestReasoningEffort(chat, "high")

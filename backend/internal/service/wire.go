@@ -640,6 +640,7 @@ func ProvideScheduledTestRunnerService(
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, accountRepo, rateLimitSvc, cfg)
 	scheduledSvc.SetRunFunc(svc.RunPlanNow)
+	scheduledSvc.SetRetryFunc(svc.RetryAccount)
 	svc.Start()
 	return svc
 }

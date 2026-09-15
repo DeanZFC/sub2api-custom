@@ -147,6 +147,22 @@ func NewScheduledTestResultRepository(db *sql.DB) service.ScheduledTestResultRep
 	return &scheduledTestResultRepository{db: db}
 }
 
+func (r *scheduledTestResultRepository) GetByID(ctx context.Context, id int64) (*service.ScheduledTestResult, error) {
+	out := &service.ScheduledTestResult{}
+	err := r.db.QueryRowContext(ctx, `
+		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(g.name, ''), p.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at
+		FROM scheduled_test_results r
+		JOIN scheduled_test_plans p ON p.id = r.plan_id
+		LEFT JOIN scheduled_test_definitions d ON d.id = p.test_definition_id
+		LEFT JOIN groups g ON g.id = r.group_id
+		WHERE r.id = $1
+	`, id).Scan(&out.ID, &out.PlanID, &out.PlanName, &out.TestName, &out.GroupName, &out.TargetMode, &out.Status, &out.ResponseText, &out.OutputKind, &out.OutputHTML, &out.OutputNumeric, &out.AccountID, &out.ModelID, &out.ReasoningEffort, &out.GroupID, &out.ErrorMessage, &out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type scheduledTestDefinitionRepository struct{ db *sql.DB }
 
 func NewScheduledTestDefinitionRepository(db *sql.DB) service.ScheduledTestDefinitionRepository {
@@ -289,41 +305,61 @@ func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID 
 	// Group plans carry p.group_id directly. Legacy account plans carry the
 	// tested account and resolve its account_groups bindings. An ungrouped
 	// account plan is private until it is attached to an entitled group.
-	rows, err := r.db.QueryContext(ctx, `SELECT r.id,r.plan_id,p.name,COALESCE(d.name, ''),COALESCE(g.name, ''),p.target_mode,r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,CASE WHEN COALESCE(p.target_mode, '') IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END,r.model_id,r.reasoning_effort,r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at
-FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
-LEFT JOIN scheduled_test_definitions d ON d.id=p.test_definition_id
-LEFT JOIN groups g ON g.id=r.group_id
-WHERE EXISTS (
-    SELECT 1
-    FROM (
-        SELECT uag.group_id
-        FROM user_allowed_groups uag
-        WHERE uag.user_id = $1
-        UNION
-        SELECT g.id
-        FROM groups g
-        WHERE g.status = 'active'
-          AND g.deleted_at IS NULL
-          AND g.is_exclusive = false
-          AND g.is_shared_pool = false
-          AND g.subscription_type <> 'subscription'
-        UNION
-        SELECT us.group_id
-        FROM user_subscriptions us
-        WHERE us.user_id = $1
-          AND us.deleted_at IS NULL
-          AND us.status = 'active'
-          AND us.starts_at <= NOW()
-          AND us.expires_at > NOW()
-    ) entitled
-    WHERE entitled.group_id = r.group_id
-       OR (p.group_id IS NULL AND r.group_id IS NULL AND EXISTS (
-            SELECT 1 FROM account_groups ag
-            WHERE ag.account_id = r.account_id
-              AND ag.group_id = entitled.group_id
-       ))
+	rows, err := r.db.QueryContext(ctx, `WITH visible_results AS (
+    SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(g.name, '') AS group_name,p.target_mode,r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,
+           CASE WHEN COALESCE(p.target_mode, '') IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END AS visible_account_id,
+           r.model_id,r.reasoning_effort,r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,
+           CASE WHEN COALESCE(p.target_mode, '') IN ('account', 'all_accounts')
+                THEN COALESCE(r.account_id::text, '')
+                ELSE 'group'
+           END AS result_target_key
+    FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
+    LEFT JOIN scheduled_test_definitions d ON d.id=p.test_definition_id
+    LEFT JOIN groups g ON g.id=r.group_id
+    WHERE EXISTS (
+        SELECT 1
+        FROM (
+            SELECT uag.group_id
+            FROM user_allowed_groups uag
+            WHERE uag.user_id = $1
+            UNION
+            SELECT g.id
+            FROM groups g
+            WHERE g.status = 'active'
+              AND g.deleted_at IS NULL
+              AND g.is_exclusive = false
+              AND g.is_shared_pool = false
+              AND g.subscription_type <> 'subscription'
+            UNION
+            SELECT us.group_id
+            FROM user_subscriptions us
+            WHERE us.user_id = $1
+              AND us.deleted_at IS NULL
+              AND us.status = 'active'
+              AND us.starts_at <= NOW()
+              AND us.expires_at > NOW()
+        ) entitled
+        WHERE entitled.group_id = r.group_id
+           OR (p.group_id IS NULL AND r.group_id IS NULL AND EXISTS (
+                SELECT 1 FROM account_groups ag
+                WHERE ag.account_id = r.account_id
+                  AND ag.group_id = entitled.group_id
+           ))
+    )
 )
-ORDER BY r.created_at DESC, r.id DESC LIMIT $2`, userID, limit)
+SELECT vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.group_name,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at
+FROM visible_results vr
+-- A transient failure must not replace a previously successful result in the
+-- user view. Keep failures visible only until the target has succeeded once.
+WHERE vr.status IN ('success', 'passed')
+   OR NOT EXISTS (
+       SELECT 1
+       FROM visible_results successful
+       WHERE successful.plan_id = vr.plan_id
+         AND successful.result_target_key = vr.result_target_key
+         AND successful.status IN ('success', 'passed')
+   )
+ORDER BY vr.created_at DESC, vr.id DESC LIMIT $2`, userID, limit)
 	if err != nil {
 		return nil, err
 	}

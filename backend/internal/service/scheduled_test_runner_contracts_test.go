@@ -47,6 +47,10 @@ type runnerResultRepoStub struct {
 	updatedIDs      []int64
 }
 
+func (r *runnerResultRepoStub) GetByID(context.Context, int64) (*ScheduledTestResult, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (r *runnerResultRepoStub) Create(ctx context.Context, result *ScheduledTestResult) (*ScheduledTestResult, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

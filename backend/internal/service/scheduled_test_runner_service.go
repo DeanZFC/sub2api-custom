@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -31,6 +32,8 @@ var (
 
 const scheduledTestPersistenceTimeout = 15 * time.Second
 
+var ErrScheduledTestAccountRunning = errors.New("this account is already being tested for this plan")
+
 // ScheduledTestRunnerService periodically scans due test plans and executes them.
 type ScheduledTestRunnerService struct {
 	planRepo       ScheduledTestPlanRepository
@@ -50,10 +53,12 @@ type ScheduledTestRunnerService struct {
 	// one trigger). workerSem is shared by every plan and every account, so a
 	// group plan cannot multiply the configured concurrency by the number of
 	// concurrently running plans.
-	planRunMu    sync.Mutex
-	runningPlans map[int64]struct{}
-	workerMu     sync.Mutex
-	workerSem    chan struct{}
+	planRunMu       sync.Mutex
+	runningPlans    map[int64]struct{}
+	workerMu        sync.Mutex
+	workerSem       chan struct{}
+	accountRunMu    sync.Mutex
+	runningAccounts map[[2]int64]struct{}
 }
 
 // NewScheduledTestRunnerService creates a new runner.
@@ -257,31 +262,46 @@ func (s *ScheduledTestRunnerService) resolveTargetAccounts(ctx context.Context, 
 }
 
 func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *ScheduledTestPlan, accountID int64, prompt, outputKind string) {
+	if !s.beginAccountRun(plan.ID, accountID) {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d is already running; skipping overlapping run", plan.ID, accountID)
+		return
+	}
+	defer s.endAccountRun(plan.ID, accountID)
+
+	persistCtx, cancel := scheduledTestPersistenceContext()
+	pending, err := s.startAccountResult(persistCtx, plan, accountID, outputKind)
+	cancel()
+	if err != nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d StartResult error: %v", plan.ID, accountID, err)
+	}
+	s.runAccountWithResult(ctx, plan, accountID, prompt, outputKind, pending)
+}
+
+func (s *ScheduledTestRunnerService) startAccountResult(ctx context.Context, plan *ScheduledTestPlan, accountID int64, outputKind string) (*ScheduledTestResult, error) {
+	if s.scheduledSvc == nil {
+		return nil, fmt.Errorf("scheduled test service unavailable")
+	}
 	started := time.Now()
 	// Persist the in-progress row before contacting the upstream. This makes a
 	// long-running test visible immediately and lets completion update the same
 	// row instead of briefly showing no result (or creating duplicate history).
-	var pending *ScheduledTestResult
-	if s.scheduledSvc != nil {
-		pending = &ScheduledTestResult{
-			Status:          "running",
-			OutputKind:      outputKind,
-			AccountID:       &accountID,
-			ModelID:         plan.ModelID,
-			ReasoningEffort: plan.ReasoningEffort,
-			GroupID:         plan.GroupID,
-			StartedAt:       started,
-			FinishedAt:      started,
-		}
-		persistCtx, cancel := scheduledTestPersistenceContext()
-		created, createErr := s.scheduledSvc.StartResult(persistCtx, plan.ID, pending)
-		cancel()
-		if createErr != nil {
-			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d StartResult error: %v", plan.ID, accountID, createErr)
-			pending = nil
-		} else {
-			pending = created
-		}
+	pending := &ScheduledTestResult{
+		Status:          "running",
+		OutputKind:      outputKind,
+		AccountID:       &accountID,
+		ModelID:         plan.ModelID,
+		ReasoningEffort: plan.ReasoningEffort,
+		GroupID:         plan.GroupID,
+		StartedAt:       started,
+		FinishedAt:      started,
+	}
+	return s.scheduledSvc.StartResult(ctx, plan.ID, pending)
+}
+
+func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, plan *ScheduledTestPlan, accountID int64, prompt, outputKind string, pending *ScheduledTestResult) {
+	started := time.Now()
+	if pending != nil {
+		started = pending.StartedAt
 	}
 	var result *ScheduledTestResult
 	var err error
@@ -596,6 +616,69 @@ func (s *ScheduledTestRunnerService) RunPlanNow(ctx context.Context, plan *Sched
 	s.runOnePlan(ctx, plan)
 }
 
+// RetryAccount queues only the chosen account and returns its persisted running
+// row. It deliberately does not advance the plan's cron schedule. The account
+// guard is also used by normal plan runs, so the retry can run while other
+// members of the group are still generating without duplicating this account.
+func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *ScheduledTestPlan, accountID int64) (*ScheduledTestResult, error) {
+	if plan == nil || plan.ID <= 0 || accountID <= 0 {
+		return nil, fmt.Errorf("test plan and account are required")
+	}
+	if !s.beginAccountRun(plan.ID, accountID) {
+		return nil, ErrScheduledTestAccountRunning
+	}
+	queued := false
+	defer func() {
+		if !queued {
+			s.endAccountRun(plan.ID, accountID)
+		}
+	}()
+	if plan.AccountID != nil && *plan.AccountID != accountID {
+		return nil, fmt.Errorf("the plan now targets a different account")
+	}
+	if s.accountRepo == nil {
+		return nil, fmt.Errorf("account repository unavailable")
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("test account unavailable: %w", err)
+	}
+	if account == nil {
+		return nil, fmt.Errorf("test account unavailable")
+	}
+	if plan.GroupID != nil {
+		linked := false
+		for _, groupID := range account.GroupIDs {
+			if groupID == *plan.GroupID {
+				linked = true
+				break
+			}
+		}
+		if !linked {
+			return nil, fmt.Errorf("account %d is no longer assigned to group %d", accountID, *plan.GroupID)
+		}
+	}
+	prompt, outputKind, err := s.resolveDefinition(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	pending, err := s.startAccountResult(ctx, plan, accountID, outputKind)
+	if err != nil {
+		return nil, err
+	}
+	// Return an immutable snapshot to the HTTP handler while the background
+	// worker updates the stored row independently of the request lifecycle.
+	response := *pending
+	bg, cancel := context.WithTimeout(context.Background(), scheduledTestExecutionTimeout)
+	queued = true
+	go func() {
+		defer cancel()
+		defer s.endAccountRun(plan.ID, accountID)
+		s.runAccountWithResult(bg, plan, accountID, prompt, outputKind, pending)
+	}()
+	return &response, nil
+}
+
 func scheduledTestPersistenceContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), scheduledTestPersistenceTimeout)
 }
@@ -617,6 +700,26 @@ func (s *ScheduledTestRunnerService) endPlanRun(planID int64) {
 	s.planRunMu.Lock()
 	defer s.planRunMu.Unlock()
 	delete(s.runningPlans, planID)
+}
+
+func (s *ScheduledTestRunnerService) beginAccountRun(planID, accountID int64) bool {
+	s.accountRunMu.Lock()
+	defer s.accountRunMu.Unlock()
+	if s.runningAccounts == nil {
+		s.runningAccounts = make(map[[2]int64]struct{})
+	}
+	key := [2]int64{planID, accountID}
+	if _, running := s.runningAccounts[key]; running {
+		return false
+	}
+	s.runningAccounts[key] = struct{}{}
+	return true
+}
+
+func (s *ScheduledTestRunnerService) endAccountRun(planID, accountID int64) {
+	s.accountRunMu.Lock()
+	defer s.accountRunMu.Unlock()
+	delete(s.runningAccounts, [2]int64{planID, accountID})
 }
 
 func (s *ScheduledTestRunnerService) acquireWorker(ctx context.Context) bool {
