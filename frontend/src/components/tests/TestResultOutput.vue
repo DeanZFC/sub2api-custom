@@ -2,11 +2,14 @@
   <div>
     <template v-if="result.output_kind === 'html' && result.output_html">
       <iframe
-        class="h-[28rem] w-full rounded-lg border border-gray-200 bg-white dark:border-dark-700"
+        ref="htmlFrame"
+        class="w-full rounded-lg border border-gray-200 bg-white dark:border-dark-700"
+        :style="{ height: `${htmlFrameHeight}px` }"
         sandbox="allow-scripts"
         referrerpolicy="no-referrer"
         :srcdoc="safeHTML"
         :title="t('tests.htmlResult')"
+        @load="onHTMLLoad"
       />
     </template>
     <div v-else-if="result.output_kind === 'number' && result.output_numeric != null" class="rounded-lg bg-gray-50 p-5 text-center text-3xl font-semibold text-gray-900 dark:bg-dark-800 dark:text-white">
@@ -26,13 +29,32 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { TestResult } from '@/types'
 import { buildTestPreviewHTML } from '@/utils/testPreview'
 
 const props = defineProps<{ result: TestResult }>()
 const { t } = useI18n()
+const htmlFrame = ref<HTMLIFrameElement | null>(null)
+const htmlFrameHeight = ref(448)
+const onPreviewMessage = (event: MessageEvent<unknown>) => {
+  if (event.source !== htmlFrame.value?.contentWindow) return
+  const data = event.data
+  if (!data || typeof data !== 'object' || (data as { type?: unknown }).type !== 'sub2api-test-preview-size') return
+  const reported = Number((data as { height?: unknown }).height)
+  if (!Number.isFinite(reported) || reported <= 0) return
+  // Keep a sensible lower bound and cap pathological output sizes. Very tall
+  // responses remain scrollable inside the iframe instead of growing forever.
+  htmlFrameHeight.value = Math.min(2000, Math.max(320, Math.ceil(reported)))
+}
+const onHTMLLoad = () => {
+  // Reset while a new result is loading; the embedded script will immediately
+  // report the precise document height afterwards.
+  htmlFrameHeight.value = 448
+}
+onMounted(() => window.addEventListener('message', onPreviewMessage))
+onBeforeUnmount(() => window.removeEventListener('message', onPreviewMessage))
 // Render HTML results as soon as they arrive. The helper strips unsafe markup
 // while keeping the test animation in an isolated sandboxed iframe.
 const safeHTML = computed(() => buildTestPreviewHTML(props.result.output_html || ''))

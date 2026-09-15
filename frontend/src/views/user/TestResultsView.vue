@@ -10,25 +10,34 @@
         <div class="flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-dark-700">
           <button v-for="tab in testTabs" :key="tab.key" class="shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors" :class="activeType === tab.key ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'" @click="activeType = tab.key">{{ tab.name }}</button>
         </div>
-        <div class="grid gap-3 md:grid-cols-2">
-          <label class="input-label">{{ t('tests.groupFilter') }}<select v-model="groupFilter" class="input mt-1 w-full"><option value="">{{ t('tests.allGroups') }}</option><option v-for="group in availableGroups" :key="group.key" :value="group.key">{{ group.name }}</option></select></label>
-          <label class="input-label">{{ t('tests.modelFilter') }}<select v-model="modelFilter" class="input mt-1 w-full"><option value="">{{ t('tests.allModels') }}</option><option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option></select></label>
+        <div class="flex items-end justify-end">
+          <label class="input-label w-full md:w-72">{{ t('tests.modelFilter') }}<select v-model="modelFilter" class="input mt-1 w-full"><option value="">{{ t('tests.allModels') }}</option><option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option></select></label>
         </div>
       </section>
 
       <p v-if="!loading && !allResults.length" class="card p-10 text-center text-sm text-gray-500">{{ t('tests.empty') }}</p>
       <p v-else-if="!groupedLatest.length" class="card p-10 text-center text-sm text-gray-500">{{ t('tests.noMatches') }}</p>
-      <div v-else class="space-y-6">
-        <section v-for="group in groupedLatest" :key="group.key" class="space-y-2">
-          <h3 class="flex items-center gap-2 border-b border-gray-200 pb-2 text-base font-semibold text-gray-900 dark:border-dark-700 dark:text-white"><span class="h-2 w-2 rounded-full bg-primary-500" />{{ group.name }}<span class="text-xs font-normal text-gray-500">{{ group.results.length }}</span></h3>
-          <article v-for="result in group.results" :key="result.id" class="card cursor-pointer p-4 transition-shadow hover:shadow-md" role="button" tabindex="0" @click="openHistory(result)" @keydown.enter="openHistory(result)">
-            <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="font-medium text-gray-900 dark:text-white">{{ targetName(result) }}</h4><span :class="statusClass(result)">{{ result.status }}</span></div><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.created_at || result.finished_at) }}</p></div><span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ t('tests.viewHistory') }} ({{ historyFor(result).length }})</span></div>
-            <div v-if="result.error_message" class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div>
-            <div class="mt-3" @click.stop>
-              <TestResultOutput :result="result" />
-            </div>
-          </article>
-        </section>
+      <div v-else class="grid gap-4 lg:grid-cols-[13rem,minmax(0,1fr)] lg:items-start">
+        <aside class="card p-2 lg:sticky lg:top-4">
+          <h3 class="px-3 pb-2 pt-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('tests.groupFilter') }}</h3>
+          <nav class="space-y-1" :aria-label="t('tests.groupFilter')">
+            <button v-for="group in availableGroups" :key="group.key" type="button" class="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors" :class="activeGroup === group.key ? 'bg-primary-50 font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300' : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-dark-800'" @click="activeGroup = group.key">
+              <span class="min-w-0 truncate">{{ group.name }}</span>
+            </button>
+          </nav>
+        </aside>
+        <main class="min-w-0 space-y-4">
+          <div v-for="group in groupedLatest" :key="group.key" class="space-y-2">
+            <h3 class="flex items-center gap-2 border-b border-gray-200 pb-2 text-base font-semibold text-gray-900 dark:border-dark-700 dark:text-white"><span class="h-2 w-2 rounded-full bg-primary-500" />{{ group.name }}</h3>
+            <article v-for="result in group.results" :key="result.id" class="card cursor-pointer p-3 transition-shadow hover:shadow-md sm:p-4" role="button" tabindex="0" @click="openHistory(result)" @keydown.enter="openHistory(result)">
+              <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="text-lg font-semibold text-gray-900 dark:text-white">{{ targetName(result) }}</h4><span :class="statusClass(result)">{{ result.status }}</span></div><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template> · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.created_at || result.finished_at) }}</p></div><span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ t('tests.viewHistory') }} ({{ historyFor(result).length }})</span></div>
+              <div v-if="result.error_message" class="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div>
+              <div class="result-output mt-2 max-w-5xl mx-auto" @click.stop>
+                <TestResultOutput :result="result" />
+              </div>
+            </article>
+          </div>
+        </main>
       </div>
     </div>
 
@@ -55,11 +64,11 @@ const app = useAppStore()
 const loading = ref(false)
 const allResults = ref<TestResult[]>([])
 const activeType = ref('')
-const groupFilter = ref('')
+const activeGroup = ref('')
 const modelFilter = ref('')
 const historyTarget = ref<TestResult | null>(null)
 watch(activeType, () => {
-  groupFilter.value = ''
+  activeGroup.value = ''
   modelFilter.value = ''
 })
 
@@ -91,11 +100,17 @@ watch(testTabs, tabs => {
 }, { immediate: true })
 const availableGroups = computed(() => {
   const seen = new Map<string, string>()
-  for (const result of typeResults.value) seen.set(groupKey(result), groupName(result))
+  for (const result of typeResults.value) {
+    const key = groupKey(result)
+    if (!seen.has(key)) seen.set(key, groupName(result))
+  }
   return Array.from(seen, ([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name))
 })
+watch(availableGroups, groups => {
+  if (!groups.some(group => group.key === activeGroup.value)) activeGroup.value = groups[0]?.key || ''
+}, { immediate: true })
 const availableModels = computed(() => Array.from(new Set(typeResults.value.map(result => result.model_id).filter((model): model is string => Boolean(model)))).sort())
-const filteredResults = computed(() => sortResults(typeResults.value.filter(result => (!groupFilter.value || groupKey(result) === groupFilter.value) && (!modelFilter.value || result.model_id === modelFilter.value))))
+const filteredResults = computed(() => sortResults(typeResults.value.filter(result => (!activeGroup.value || groupKey(result) === activeGroup.value) && (!modelFilter.value || result.model_id === modelFilter.value))))
 const latestResults = computed(() => {
   const latest = new Map<string, TestResult>()
   for (const result of filteredResults.value) {

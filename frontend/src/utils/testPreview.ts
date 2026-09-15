@@ -21,5 +21,22 @@ export function buildTestPreviewHTML(source: string): string {
   csp.httpEquiv = 'Content-Security-Policy'
   csp.content = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; base-uri 'none'; form-action 'none'"
   document.head.prepend(csp)
+
+  // The preview is rendered in a sandboxed iframe. Report its rendered height
+  // to the host so tall SVG/HTML responses are not clipped by a fixed iframe
+  // height. The host validates the message source before applying it.
+  const resizeScript = document.createElement('script')
+  resizeScript.textContent = `(() => {
+    const report = () => {
+      const body = document.body
+      const root = document.documentElement
+      const height = Math.max(body?.scrollHeight || 0, root?.scrollHeight || 0, body?.offsetHeight || 0, root?.offsetHeight || 0)
+      window.parent.postMessage({ type: 'sub2api-test-preview-size', height }, '*')
+    }
+    window.addEventListener('load', report)
+    if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement)
+    report()
+  })()`
+  document.body.appendChild(resizeScript)
   return '<!doctype html>\n' + document.documentElement.outerHTML
 }
