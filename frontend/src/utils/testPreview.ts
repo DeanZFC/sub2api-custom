@@ -22,6 +22,13 @@ export function buildTestPreviewHTML(source: string): string {
   csp.content = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; base-uri 'none'; form-action 'none'"
   document.head.prepend(csp)
 
+  // Let the host iframe size itself to the complete document. Some generated
+  // previews include viewport-height or overflow rules that otherwise create
+  // a second scrollbar inside the test result card.
+  const layoutStyle = document.createElement('style')
+  layoutStyle.textContent = 'html, body { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; }'
+  document.head.appendChild(layoutStyle)
+
   // The preview is rendered in a sandboxed iframe. Report its rendered height
   // to the host so tall SVG/HTML responses are not clipped by a fixed iframe
   // height. The host validates the message source before applying it.
