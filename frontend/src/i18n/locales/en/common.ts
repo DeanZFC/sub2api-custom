@@ -169,8 +169,8 @@ export default {
     apiKeys: 'API Keys',
     batchImage: 'Batch Images',
     usage: 'Usage',
-    testResults: 'Test Results',
-    tests: 'Test Management',
+    testResults: 'Channel Tests',
+    tests: 'Channel Test Management',
     redeem: 'Redeem',
     sharedPool: 'Shared Account Pool',
     sharedPoolAdmin: 'Shared Pool Management',
@@ -223,7 +223,7 @@ export default {
 
   tests: {
     preview: 'Preview HTML', closePreview: 'Close preview', rawOutput: 'Original response', noOutput: 'No output returned', running: 'Test is running…', loadFailed: 'Unable to load or save test data',
-    title: 'Test Results', description: 'View automated test results for your visible groups', empty: 'No test results yet', htmlResult: 'HTML test result', allTypes: 'All types', groupFilter: 'Group', modelFilter: 'Model', reasoningEffort: 'Reasoning effort', allGroups: 'All groups', allModels: 'All models', noMatches: 'No results match the selected filters', viewHistory: 'View history', historyHint: 'Historical test results for this group or account', group: 'Group', account: 'Account', ungrouped: 'Ungrouped', unknownType: 'Unknown test'
+    title: 'Channel Tests', description: 'View channel test results for your visible groups', empty: 'No channel test results yet', htmlResult: 'HTML channel test result', allTypes: 'All types', groupFilter: 'Group', modelFilter: 'Model', reasoningEffort: 'Reasoning effort', allGroups: 'All groups', allModels: 'All models', noMatches: 'No results match the selected filters', viewHistory: 'View history', historyHint: 'Historical channel test results for this group or account', group: 'Group', account: 'Account', ungrouped: 'Ungrouped', unknownType: 'Unknown test'
   },
 
   // Auth
