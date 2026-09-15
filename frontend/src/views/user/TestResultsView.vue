@@ -1,6 +1,6 @@
 <template>
-  <AppLayout contained>
-    <div class="flex h-full min-h-0 flex-col gap-4">
+  <AppLayout>
+    <div class="flex flex-col gap-4">
       <header class="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-gray-200 pb-4 dark:border-dark-700">
         <div><h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('tests.title') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('tests.description') }}</p></div>
         <button class="btn btn-secondary" :disabled="loading" @click="load"><Icon name="refresh" size="sm" /> {{ t('common.refresh') }}</button>
@@ -13,17 +13,17 @@
       </section>
 
       <p v-if="!allResults.length" class="card overflow-auto p-10 text-center text-sm text-gray-500">{{ loading ? t('common.loading') : t('tests.empty') }}</p>
-      <div v-else class="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-4 lg:grid-cols-[13rem,minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
-        <aside class="card flex max-h-[30dvh] min-h-0 flex-col p-2 lg:max-h-none">
+      <div v-else class="grid gap-4 lg:grid-cols-[13rem,minmax(0,1fr)]">
+        <aside class="card flex self-start flex-col p-2">
           <h3 class="shrink-0 px-3 pb-2 pt-1 text-base font-semibold text-gray-700 dark:text-gray-200">{{ t('tests.groupFilter') }}</h3>
-          <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain" :aria-label="t('tests.groupFilter')">
+          <nav class="space-y-1" :aria-label="t('tests.groupFilter')">
             <button v-for="group in availableGroups" :key="group.key" type="button" class="flex w-full items-center rounded-lg px-3 py-2 text-left text-base transition-colors" :class="activeGroup === group.key ? 'bg-primary-50 font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300' : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-dark-800'" @click="activeGroup = group.key">
               <span class="min-w-0 truncate">{{ group.name }}</span>
             </button>
           </nav>
           <label class="input-label mt-4 block shrink-0 border-t border-gray-100 px-3 pt-3 text-sm dark:border-dark-700">{{ t('tests.modelFilter') }}<select v-model="modelFilter" class="input mt-1 w-full text-sm"><option value="">{{ t('tests.allModels') }}</option><option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option></select></label>
         </aside>
-        <section ref="resultsPanel" class="min-h-0 min-w-0 space-y-4 overflow-y-auto overscroll-contain pb-2 pr-1" tabindex="0" :aria-label="t('tests.title')">
+        <section ref="resultsPanel" class="min-w-0 space-y-4 pb-2 pr-1" tabindex="0" :aria-label="t('tests.title')">
           <p v-if="!groupedLatest.length" class="card p-10 text-center text-sm text-gray-500">{{ t('tests.noMatches') }}</p>
           <div v-for="group in groupedLatest" :key="group.key" class="space-y-2">
             <h3 class="flex items-center gap-2 border-b border-gray-200 pb-2 text-base font-semibold text-gray-900 dark:border-dark-700 dark:text-white"><span class="h-2 w-2 rounded-full bg-primary-500" />{{ group.name }}</h3>
@@ -108,12 +108,16 @@ watch(testTabs, tabs => {
   if (!tabs.some(tab => tab.key === activeType.value)) activeType.value = tabs[0]?.key || ''
 }, { immediate: true })
 const availableGroups = computed(() => {
-  const seen = new Map<string, string>()
+  const seen = new Map<string, { name: string; order: number }>()
   for (const result of typeResults.value) {
     const key = groupKey(result)
-    if (!seen.has(key)) seen.set(key, groupName(result))
+    if (!seen.has(key)) {
+      const order = typeof result.group_order === 'number' && Number.isFinite(result.group_order) ? result.group_order : Number.MAX_SAFE_INTEGER
+      seen.set(key, { name: groupName(result), order })
+    }
   }
-  return Array.from(seen, ([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name))
+  return Array.from(seen, ([key, value]) => ({ key, name: value.name, order: value.order }))
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
 })
 watch(availableGroups, groups => {
   if (!groups.some(group => group.key === activeGroup.value)) activeGroup.value = groups[0]?.key || ''
@@ -129,14 +133,17 @@ const latestResults = computed(() => {
   return Array.from(latest.values())
 })
 const groupedLatest = computed(() => {
-  const groups = new Map<string, { key: string; name: string; results: TestResult[] }>()
+  const groups = new Map<string, { key: string; name: string; order: number; results: TestResult[] }>()
   for (const result of latestResults.value) {
     const key = groupKey(result)
     const group = groups.get(key)
     if (group) group.results.push(result)
-    else groups.set(key, { key, name: groupName(result), results: [result] })
+    else {
+      const order = typeof result.group_order === 'number' && Number.isFinite(result.group_order) ? result.group_order : Number.MAX_SAFE_INTEGER
+      groups.set(key, { key, name: groupName(result), order, results: [result] })
+    }
   }
-  return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name))
+  return Array.from(groups.values()).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
 })
 const historyFor = (result: TestResult) => filteredResults.value.filter(item => targetKey(item) === targetKey(result) && testName(item) === testName(result))
 const openHistory = (result: TestResult) => { historyTarget.value = result }

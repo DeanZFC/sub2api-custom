@@ -2491,6 +2491,8 @@ export interface TestResult {
   /** Configured test type order for the user-facing tabs. */
   test_order?: number
   group_name?: string
+  /** Configured group order used by the user-facing test result groups. */
+  group_order?: number
   account_id?: number | null
   target_mode?: 'group' | 'all_accounts' | 'account'
   id: number

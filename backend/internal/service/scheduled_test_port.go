@@ -28,12 +28,16 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
-	ID              int64     `json:"id"`
-	PlanID          int64     `json:"plan_id"`
-	PlanName        string    `json:"plan_name"`
-	TestName        string    `json:"test_name"`
-	TestOrder       int       `json:"test_order"`
-	GroupName       string    `json:"group_name"`
+	ID        int64  `json:"id"`
+	PlanID    int64  `json:"plan_id"`
+	PlanName  string `json:"plan_name"`
+	TestName  string `json:"test_name"`
+	TestOrder int    `json:"test_order"`
+	GroupName string `json:"group_name"`
+	// GroupOrder is the administrator-configured display order of the result's
+	// group. It is returned alongside the group name so user-facing result
+	// navigation can follow the same order as the group manager.
+	GroupOrder      int       `json:"group_order"`
 	TargetMode      string    `json:"target_mode,omitempty"`
 	Status          string    `json:"status"`
 	ResponseText    string    `json:"response_text"`

@@ -48,8 +48,8 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT r\.id, r\.plan_id.*FROM scheduled_test_results r.*ORDER BY r\.started_at DESC, r\.id DESC`).
 		WithArgs(int64(10), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", "all_accounts", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt))
+			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "group_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -57,6 +57,7 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 	require.Equal(t, "nightly candy", results[0].PlanName)
 	require.Equal(t, "糖果数字测试", results[0].TestName)
 	require.Equal(t, "公开组", results[0].GroupName)
+	require.Equal(t, 12, results[0].GroupOrder)
 	require.Equal(t, "high", results[0].ReasoningEffort)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -101,8 +102,8 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 	mock.ExpectQuery(`(?s)WITH visible_results AS .*CASE WHEN .*IN \('account', 'all_accounts'\).*visible_account_id.*result_target_key.*FROM scheduled_test_results r.*SELECT vr\.id,vr\.plan_id.*FROM visible_results vr.*WHERE vr\.status IN \('success', 'passed'\)\s+OR \(vr\.status IN \('pending', 'running'\) AND NOT EXISTS.*successful\.status IN \('success', 'passed'\).*ORDER BY vr\.started_at DESC, vr\.id DESC`).
 		WithArgs(int64(5), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now))
+			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "group_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now))
 	results, err := repo.ListVisible(context.Background(), 5, 20)
 	require.NoError(t, err)
 	require.Len(t, results, 1)

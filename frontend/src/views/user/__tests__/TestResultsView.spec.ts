@@ -107,6 +107,11 @@ describe('test result reasoning effort', () => {
     } })
     await flushPromises()
     const panel = wrapper.get<HTMLElement>('section[tabindex="0"]')
+    // Filters and results share the document scroll. The page must not create
+    // a second nested scrolling viewport that traps either filter column.
+    expect(panel.classes()).not.toContain('overflow-y-auto')
+    expect(wrapper.get('aside nav').classes()).not.toContain('overflow-y-auto')
+    expect(wrapper.get('aside').classes()).not.toContain('max-h-[30dvh]')
     expect(panel.findAll('article')).toHaveLength(1)
     expect(wrapper.findAll('aside nav button')[0].classes()).toContain('font-semibold')
     panel.element.scrollTop = 150
@@ -160,6 +165,18 @@ describe('user test result visibility', () => {
 
     const tabs = wrapper.findAll('section.card button')
     expect(tabs.map(tab => tab.text())).toEqual(['Pelican', 'Candy'])
+    wrapper.unmount()
+  })
+
+  it('orders group filters and result sections by the configured group order', async () => {
+    api.list.mockResolvedValue([
+      { ...result, id: 2, group_id: 2, group_name: 'Second', group_order: 20, test_name: 'Check', status: 'success' },
+      { ...result, id: 1, group_id: 1, group_name: 'First', group_order: 10, test_name: 'Check', status: 'success' },
+    ])
+    const wrapper = mountResults()
+    await flushPromises()
+
+    expect(wrapper.findAll('aside nav button').map(button => button.text())).toEqual(['First', 'Second'])
     wrapper.unmount()
   })
 

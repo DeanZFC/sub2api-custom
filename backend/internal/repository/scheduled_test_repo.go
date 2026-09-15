@@ -150,13 +150,13 @@ func NewScheduledTestResultRepository(db *sql.DB) service.ScheduledTestResultRep
 func (r *scheduledTestResultRepository) GetByID(ctx context.Context, id int64) (*service.ScheduledTestResult, error) {
 	out := &service.ScheduledTestResult{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), p.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at
+		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), COALESCE(g.sort_order, 2147483647), p.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at
 		FROM scheduled_test_results r
 		JOIN scheduled_test_plans p ON p.id = r.plan_id
 		LEFT JOIN scheduled_test_definitions d ON d.id = p.test_definition_id
 		LEFT JOIN groups g ON g.id = r.group_id
 		WHERE r.id = $1
-	`, id).Scan(&out.ID, &out.PlanID, &out.PlanName, &out.TestName, &out.TestOrder, &out.GroupName, &out.TargetMode, &out.Status, &out.ResponseText, &out.OutputKind, &out.OutputHTML, &out.OutputNumeric, &out.AccountID, &out.ModelID, &out.ReasoningEffort, &out.GroupID, &out.ErrorMessage, &out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt)
+	`, id).Scan(&out.ID, &out.PlanID, &out.PlanName, &out.TestName, &out.TestOrder, &out.GroupName, &out.GroupOrder, &out.TargetMode, &out.Status, &out.ResponseText, &out.OutputKind, &out.OutputHTML, &out.OutputNumeric, &out.AccountID, &out.ModelID, &out.ReasoningEffort, &out.GroupID, &out.ErrorMessage, &out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +307,7 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 // its original ID/created_at while refreshing started_at.
 func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID int64, limit int) ([]*service.ScheduledTestResult, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), p.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at
+		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), COALESCE(g.sort_order, 2147483647), p.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at
 		FROM scheduled_test_results r
 		JOIN scheduled_test_plans p ON p.id = r.plan_id
 		LEFT JOIN scheduled_test_definitions d ON d.id = p.test_definition_id
@@ -325,7 +325,7 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 	for rows.Next() {
 		r := &service.ScheduledTestResult{}
 		if err := rows.Scan(
-			&r.ID, &r.PlanID, &r.PlanName, &r.TestName, &r.TestOrder, &r.GroupName, &r.TargetMode, &r.Status, &r.ResponseText, &r.OutputKind, &r.OutputHTML, &r.OutputNumeric, &r.AccountID, &r.ModelID, &r.ReasoningEffort, &r.GroupID, &r.ErrorMessage,
+			&r.ID, &r.PlanID, &r.PlanName, &r.TestName, &r.TestOrder, &r.GroupName, &r.GroupOrder, &r.TargetMode, &r.Status, &r.ResponseText, &r.OutputKind, &r.OutputHTML, &r.OutputNumeric, &r.AccountID, &r.ModelID, &r.ReasoningEffort, &r.GroupID, &r.ErrorMessage,
 			&r.LatencyMs, &r.StartedAt, &r.FinishedAt, &r.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -343,7 +343,7 @@ func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID 
 	// tested account and resolve its account_groups bindings. An ungrouped
 	// account plan is private until it is attached to an entitled group.
 	rows, err := r.db.QueryContext(ctx, `WITH visible_results AS (
-    SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,COALESCE(g.name, '') AS group_name,p.target_mode,r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,
+    SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,COALESCE(g.name, '') AS group_name,COALESCE(g.sort_order, 2147483647) AS group_order,p.target_mode,r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,
            CASE WHEN COALESCE(p.target_mode, '') IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END AS visible_account_id,
            r.model_id,r.reasoning_effort,r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,
            CASE WHEN COALESCE(p.target_mode, '') IN ('account', 'all_accounts')
@@ -384,7 +384,7 @@ func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID 
            ))
     )
 )
-SELECT vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at
+SELECT vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.group_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at
 FROM visible_results vr
 -- Never expose failed executions. Show initial progress only until the target
 -- has a successful result, then keep that result visible while tests rerun.
@@ -404,7 +404,7 @@ ORDER BY vr.started_at DESC, vr.id DESC LIMIT $2`, userID, limit)
 	var out []*service.ScheduledTestResult
 	for rows.Next() {
 		v := &service.ScheduledTestResult{}
-		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.GroupOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
