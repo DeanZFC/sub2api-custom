@@ -117,4 +117,39 @@ describe('configurable test management', () => {
     expect(cards[0].text()).not.toContain('old output')
     wrapper.unmount()
   })
+
+  it('switches plans by test type and uses the selected type when creating a plan', async () => {
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count candies', enabled: true, sort_order: 20 },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw a pelican', enabled: true, sort_order: 10 },
+    ])
+    api.listPlans.mockResolvedValue([
+      { ...plan, id: 10, test_definition_id: 2, name: 'Candy plan' },
+      { ...plan, id: 11, test_definition_id: 3, name: 'Pelican plan' },
+    ])
+    const wrapper = makeWrapper(); await flushPromises()
+
+    expect(wrapper.find('[data-testid="plan-tab-3"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('Pelican plan')
+    expect(wrapper.text()).not.toContain('Candy plan')
+
+    await wrapper.get('[data-testid="plan-tab-2"]').trigger('click')
+    expect(wrapper.text()).toContain('Candy plan')
+    expect(wrapper.text()).not.toContain('Pelican plan')
+
+    await wrapper.get('[data-testid="plan-create"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    expect(dialog.find('select').find('option:checked').text()).toBe('Candy')
+    wrapper.unmount()
+  })
+
+  it('persists the configured user-facing type order', async () => {
+    const wrapper = makeWrapper(); await flushPromises()
+    const orderInput = wrapper.find('input[type="number"]')
+    await orderInput.setValue('7')
+    await orderInput.trigger('change')
+    await flushPromises()
+    expect(api.updateType).toHaveBeenCalledWith(2, { sort_order: 7 })
+    wrapper.unmount()
+  })
 })

@@ -2458,6 +2458,8 @@ export interface TestType {
   output_kind: 'html' | 'number' | 'text' | string
   prompt: string
   enabled: boolean
+  /** Controls the order of test type tabs shown to end users. */
+  sort_order?: number
   created_at?: string
   updated_at?: string
 }
@@ -2486,6 +2488,8 @@ export interface TestPlan {
 export interface TestResult {
   plan_name?: string
   test_name?: string
+  /** Configured test type order for the user-facing tabs. */
+  test_order?: number
   group_name?: string
   account_id?: number | null
   target_mode?: 'group' | 'all_accounts' | 'account'
@@ -2517,6 +2521,7 @@ export interface CreateTestTypeRequest {
   output_kind: string
   prompt: string
   enabled?: boolean
+  sort_order?: number
 }
 
 export interface UpdateTestTypeRequest extends Partial<CreateTestTypeRequest> {}

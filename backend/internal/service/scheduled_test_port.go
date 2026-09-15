@@ -32,6 +32,7 @@ type ScheduledTestResult struct {
 	PlanID          int64     `json:"plan_id"`
 	PlanName        string    `json:"plan_name"`
 	TestName        string    `json:"test_name"`
+	TestOrder       int       `json:"test_order"`
 	GroupName       string    `json:"group_name"`
 	TargetMode      string    `json:"target_mode,omitempty"`
 	Status          string    `json:"status"`
@@ -58,6 +59,7 @@ type ScheduledTestDefinition struct {
 	Prompt      string    `json:"prompt"`
 	OutputKind  string    `json:"output_kind"`
 	Enabled     bool      `json:"enabled"`
+	SortOrder   int       `json:"sort_order"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

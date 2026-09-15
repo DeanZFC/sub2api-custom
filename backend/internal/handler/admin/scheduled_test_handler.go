@@ -26,8 +26,9 @@ type testDefinitionRequest struct {
 	Prompt      string  `json:"prompt"`
 	OutputKind  string  `json:"output_kind"`
 	// Kind is accepted as a frontend-friendly alias for output_kind.
-	Kind    string `json:"kind"`
-	Enabled *bool  `json:"enabled"`
+	Kind      string `json:"kind"`
+	Enabled   *bool  `json:"enabled"`
+	SortOrder *int   `json:"sort_order"`
 }
 
 func (h *ScheduledTestHandler) ListDefinitions(c *gin.Context) {
@@ -55,6 +56,13 @@ func (h *ScheduledTestHandler) CreateDefinition(c *gin.Context) {
 		description = *req.Description
 	}
 	d := &service.ScheduledTestDefinition{Key: req.Key, Name: req.Name, Description: description, Prompt: req.Prompt, OutputKind: outputKind, Enabled: true}
+	if req.SortOrder != nil {
+		if *req.SortOrder < 0 {
+			response.BadRequest(c, "sort_order must be non-negative")
+			return
+		}
+		d.SortOrder = *req.SortOrder
+	}
 	if req.Enabled != nil {
 		d.Enabled = *req.Enabled
 	}
@@ -102,6 +110,13 @@ func (h *ScheduledTestHandler) UpdateDefinition(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		d.Enabled = *req.Enabled
+	}
+	if req.SortOrder != nil {
+		if *req.SortOrder < 0 {
+			response.BadRequest(c, "sort_order must be non-negative")
+			return
+		}
+		d.SortOrder = *req.SortOrder
 	}
 	out, e := h.scheduledTestSvc.UpdateDefinition(c.Request.Context(), d)
 	if e != nil {

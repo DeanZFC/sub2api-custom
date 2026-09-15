@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,6 +19,15 @@ func (r scheduledTestReadResultsStub) ListByPlanID(context.Context, int64, int) 
 
 func (r scheduledTestReadResultsStub) ListVisible(context.Context, int64, int) ([]*ScheduledTestResult, error) {
 	return r.rows, nil
+}
+
+func TestScheduledTestResultJSONPreservesZeroSortOrder(t *testing.T) {
+	data, err := json.Marshal(ScheduledTestResult{TestOrder: 0})
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &fields))
+	require.Contains(t, fields, "test_order", "zero is the first display position, not an absent order")
+	require.JSONEq(t, "0", string(fields["test_order"]))
 }
 
 func TestScheduledTestListRepairsLegacyNumericDisplayFromResponse(t *testing.T) {

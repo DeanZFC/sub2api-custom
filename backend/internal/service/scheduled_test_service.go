@@ -31,6 +31,9 @@ func ValidateScheduledTestDefinitionInput(d *ScheduledTestDefinition) error {
 	d.Description = strings.TrimSpace(d.Description)
 	d.Prompt = strings.TrimSpace(d.Prompt)
 	d.OutputKind = strings.ToLower(strings.TrimSpace(d.OutputKind))
+	if d.SortOrder < 0 {
+		return fmt.Errorf("sort_order must be non-negative")
+	}
 	if d.Key == "" || !scheduledTestDefinitionKeyPattern.MatchString(d.Key) {
 		return fmt.Errorf("key must contain only lowercase letters, numbers, '.', '_' or '-' and be at most 100 characters")
 	}
