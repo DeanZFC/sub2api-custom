@@ -71,10 +71,11 @@ const sortResults = (items: TestResult[]) => [...items].sort((a, b) => {
 const testName = (result: TestResult) => result.test_name || result.plan_name || result.test_definition?.name || result.plan?.name || t('tests.unknownType')
 // Group plans produce one result per tested account. Keep the latest result for
 // each account inside its group, while still collapsing group-only results.
-const targetKey = (result: TestResult) => result.account_id != null ? `account:${result.account_id}:group:${result.group_id ?? ''}` : result.group_id != null ? `group:${result.group_id}` : `plan:${result.plan_id ?? result.id}`
+const exposesAccount = (result: TestResult) => result.target_mode !== 'group' && result.account_id != null
+const targetKey = (result: TestResult) => exposesAccount(result) ? `account:${result.account_id}:group:${result.group_id ?? ''}` : result.group_id != null ? `group:${result.group_id}` : `plan:${result.plan_id ?? result.id}`
 const groupKey = (result: TestResult) => result.group_id != null ? `group:${result.group_id}` : result.group_name ? `name:${result.group_name}` : result.account_id != null ? `account:${result.account_id}` : 'ungrouped'
 const groupName = (result: TestResult) => result.group_name || (result.group_id != null ? `${t('tests.group')} #${result.group_id}` : t('tests.ungrouped'))
-const targetName = (result: TestResult) => result.account_id != null ? `${t('tests.account')} #${result.account_id}` : result.group_id != null ? groupName(result) : `#${result.id}`
+const targetName = (result: TestResult) => exposesAccount(result) ? `${t('tests.account')} #${result.account_id}` : result.group_id != null ? groupName(result) : `#${result.id}`
 
 const testTabs = computed(() => {
   const names = new Map<string, string>()

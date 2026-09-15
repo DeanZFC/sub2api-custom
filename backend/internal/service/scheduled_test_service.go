@@ -60,6 +60,36 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	if (plan.AccountID == nil || *plan.AccountID <= 0) && (plan.GroupID == nil || *plan.GroupID <= 0) {
 		return fmt.Errorf("group_id or account_id is required")
 	}
+	plan.TargetMode = strings.ToLower(strings.TrimSpace(plan.TargetMode))
+	if plan.TargetMode == "" {
+		if plan.AccountID != nil && *plan.AccountID > 0 {
+			plan.TargetMode = "account"
+		} else {
+			plan.TargetMode = "all_accounts"
+		}
+	}
+	switch plan.TargetMode {
+	case "group":
+		if plan.GroupID == nil || *plan.GroupID <= 0 {
+			return fmt.Errorf("group target requires group_id")
+		}
+		if plan.AccountID != nil && *plan.AccountID > 0 {
+			return fmt.Errorf("group target cannot include account_id")
+		}
+	case "all_accounts":
+		if plan.GroupID == nil || *plan.GroupID <= 0 {
+			return fmt.Errorf("all_accounts target requires group_id")
+		}
+		if plan.AccountID != nil && *plan.AccountID > 0 {
+			return fmt.Errorf("all_accounts target cannot include account_id")
+		}
+	case "account":
+		if plan.AccountID == nil || *plan.AccountID <= 0 {
+			return fmt.Errorf("account target requires account_id")
+		}
+	default:
+		return fmt.Errorf("target_mode must be group, all_accounts, or account")
+	}
 	if plan.GroupID != nil && *plan.GroupID > 0 && plan.TestDefinitionID == nil {
 		return fmt.Errorf("group targets require a test_definition_id")
 	}

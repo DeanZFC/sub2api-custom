@@ -13,6 +13,7 @@ type ScheduledTestPlan struct {
 	GroupID          *int64     `json:"group_id,omitempty"`
 	TestDefinitionID *int64     `json:"test_definition_id,omitempty"`
 	TestType         string     `json:"test_type"`
+	TargetMode       string     `json:"target_mode"`
 	ModelID          string     `json:"model_id"`
 	ReasoningEffort  string     `json:"reasoning_effort,omitempty"`
 	CronExpression   string     `json:"cron_expression"`
@@ -32,6 +33,7 @@ type ScheduledTestResult struct {
 	PlanName        string    `json:"plan_name"`
 	TestName        string    `json:"test_name"`
 	GroupName       string    `json:"group_name"`
+	TargetMode      string    `json:"target_mode,omitempty"`
 	Status          string    `json:"status"`
 	ResponseText    string    `json:"response_text"`
 	OutputKind      string    `json:"output_kind"`

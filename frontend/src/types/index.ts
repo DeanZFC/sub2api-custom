@@ -2468,6 +2468,8 @@ export interface TestPlan {
   test_definition_id?: number | null
   group_id?: number | null
   account_id?: number | null
+  /** Execution target selected by the administrator. */
+  target_mode?: 'group' | 'all_accounts' | 'account'
   test_definition?: TestType | null
   model_id?: string
   /** Optional effort forwarded to the selected model (Codex-style). */
@@ -2486,6 +2488,7 @@ export interface TestResult {
   test_name?: string
   group_name?: string
   account_id?: number | null
+  target_mode?: 'group' | 'all_accounts' | 'account'
   id: number
   plan_id?: number
   test_definition_id?: number
@@ -2523,6 +2526,7 @@ export interface CreateTestPlanRequest {
   test_definition_id: number
   group_id?: number | null
   account_id?: number | null
+  target_mode?: 'group' | 'all_accounts' | 'account'
   model_id: string
   reasoning_effort?: string | null
   cron_expression?: string

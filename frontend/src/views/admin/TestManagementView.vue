@@ -31,7 +31,7 @@
 
     <BaseDialog :show="!!editingType" :title="editingType?.id ? t('common.edit') : t('common.create')" width="wide" @close="editingType = null"><div v-if="editingType" class="space-y-3"><label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingType.name" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.key') }}<input v-model.trim="editingType.key" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.kind') }}<input v-model.trim="editingType.output_kind" list="test-output-kinds" class="input mt-1 w-full" /><datalist id="test-output-kinds"><option value="html">HTML / SVG</option><option value="number">{{ t('admin.tests.number') }}</option><option value="text">{{ t('admin.tests.text') }}</option></datalist></label><label class="input-label">{{ t('admin.tests.descriptionLabel') }}<input v-model.trim="editingType.description" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.prompt') }}<textarea v-model="editingType.prompt" rows="6" class="input mt-1 w-full" /></label><label class="flex items-center gap-2 text-sm"><input v-model="editingType.enabled" type="checkbox" /> {{ t('common.enabled') }}</label></div><template #footer><button class="btn btn-secondary" @click="editingType = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="saving || !canSaveType" @click="saveType">{{ t('common.save') }}</button></template></BaseDialog>
 
-    <BaseDialog :show="!!editingPlan" :title="editingPlan?.id ? t('common.edit') : t('common.create')" width="wide" @close="editingPlan = null"><div v-if="editingPlan" class="grid gap-3 sm:grid-cols-2"><label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingPlan.name" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.type') }}<select v-model.number="editingPlan.test_definition_id" class="input mt-1 w-full"><option :value="0" disabled>{{ t('admin.tests.selectType') }}</option><option v-for="type in types" :key="type.id" :value="type.id" :disabled="!type.enabled">{{ type.name }}</option></select></label><label class="input-label">{{ t('admin.tests.group') }}<select v-model.number="editingPlan.group_id" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.selectGroup') }}</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} (#{{ group.id }})</option></select></label><label class="input-label">{{ t('admin.tests.accountOptional') }}<select v-model.number="editingPlan.account_id" class="input mt-1 w-full" :disabled="!editingPlan.group_id"><option :value="null">{{ editingPlan.group_id ? t('admin.tests.allAccountsInGroup') : t('admin.tests.selectGroupFirst') }}</option><option v-for="account in filteredAccounts" :key="account.id" :value="account.id">#{{ account.id }}</option></select></label><p class="text-xs text-gray-500 sm:col-span-2">{{ editingPlan.account_id ? t('admin.tests.accountHint') : t('admin.tests.groupHint') }}</p><label class="input-label">{{ t('admin.tests.model') }}<input v-model.trim="editingPlan.model_id" class="input mt-1 w-full" placeholder="gpt-4o-mini" /></label><label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label><label class="input-label sm:col-span-2">{{ t('admin.tests.cron') }}<input v-model.trim="editingPlan.cron_expression" class="input mt-1 w-full" placeholder="*/30 * * * *" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.cronHint') }}</span></label><label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label><label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label></div><template #footer><button class="btn btn-secondary" @click="editingPlan = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="saving || !canSavePlan" @click="savePlan">{{ t('common.save') }}</button></template></BaseDialog>
+    <BaseDialog :show="!!editingPlan" :title="editingPlan?.id ? t('common.edit') : t('common.create')" width="wide" @close="editingPlan = null"><div v-if="editingPlan" class="grid gap-3 sm:grid-cols-2"><label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingPlan.name" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.type') }}<select v-model.number="editingPlan.test_definition_id" class="input mt-1 w-full"><option :value="0" disabled>{{ t('admin.tests.selectType') }}</option><option v-for="type in types" :key="type.id" :value="type.id" :disabled="!type.enabled">{{ type.name }}</option></select></label><label class="input-label">{{ t('admin.tests.group') }}<select v-model.number="editingPlan.group_id" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.selectGroup') }}</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} (#{{ group.id }})</option></select></label><label class="input-label">{{ t('admin.tests.accountOptional') }}<select v-model="accountSelection" class="input mt-1 w-full" :disabled="!editingPlan.group_id"><option :value="null">{{ editingPlan.group_id ? t('admin.tests.groupTest') : t('admin.tests.selectGroupFirst') }}</option><option value="all" :disabled="!editingPlan.group_id">{{ t('admin.tests.allAccountsInGroup') }}</option><option v-for="account in filteredAccounts" :key="account.id" :value="account.id">{{ account.name || t('admin.tests.account') }} (#{{ account.id }})</option></select></label><p class="text-xs text-gray-500 sm:col-span-2">{{ targetModeHint }}</p><label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_id || modelOptionsLoading" :placeholder="editingPlan.group_id ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /></label><label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label><label class="input-label sm:col-span-2">{{ t('admin.tests.cron') }}<input v-model.trim="editingPlan.cron_expression" class="input mt-1 w-full" placeholder="*/30 * * * *" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.cronHint') }}</span></label><label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label><label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label></div><template #footer><button class="btn btn-secondary" @click="editingPlan = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="saving || !canSavePlan" @click="savePlan">{{ t('common.save') }}</button></template></BaseDialog>
 
     <BaseDialog :show="!!resultPlan" :title="`${t('admin.tests.results')} · ${resultPlan?.name || ''}`" width="wide" @close="resultPlan = null">
       <div v-if="resultPlan" class="space-y-3">
@@ -75,6 +75,7 @@ import TestResultOutput from '@/components/tests/TestResultOutput.vue'
 import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
@@ -88,6 +89,8 @@ const types = ref<TestType[]>([])
 const plans = ref<TestPlan[]>([])
 const groups = ref<AdminGroup[]>([])
 const accounts = ref<AccountListItem[]>([])
+const modelOptions = ref<SelectOption[]>([])
+const modelOptionsLoading = ref(false)
 const results = ref<TestResult[]>([])
 // A manual run is asynchronous. Keep a local placeholder visible immediately
 // after the request is accepted until the first persisted result arrives.
@@ -96,6 +99,7 @@ const deletingResultId = ref<number | null>(null)
 const editingType = ref<(CreateTestTypeRequest & { id?: number }) | null>(null)
 const editingPlan = ref<(CreateTestPlanRequest & { id?: number }) | null>(null)
 const resultPlan = ref<TestPlan | null>(null)
+type AccountSelection = number | 'all' | null
 
 const canSaveType = computed(() => Boolean(editingType.value?.name && editingType.value?.key && editingType.value?.prompt && editingType.value?.output_kind))
 const canSavePlan = computed(() => {
@@ -108,11 +112,62 @@ const filteredAccounts = computed(() => {
   if (!groupID) return []
   return accounts.value.filter(account => account.group_ids?.includes(Number(groupID)))
 })
+const accountSelection = computed<AccountSelection>({
+  get: () => {
+    const plan = editingPlan.value
+    if (!plan || plan.target_mode === 'group') return null
+    if (plan.target_mode === 'all_accounts' || !plan.account_id) return 'all'
+    return plan.account_id
+  },
+  set: value => {
+    const plan = editingPlan.value
+    if (!plan) return
+    if (value === null) {
+      plan.target_mode = 'group'
+      plan.account_id = null
+    } else if (value === 'all') {
+      plan.target_mode = 'all_accounts'
+      plan.account_id = null
+    } else {
+      plan.target_mode = 'account'
+      plan.account_id = Number(value)
+    }
+  },
+})
+const targetModeHint = computed(() => {
+  const mode = editingPlan.value?.target_mode
+  if (mode === 'group') return t('admin.tests.groupHint')
+  if (mode === 'all_accounts') return t('admin.tests.allAccountsHint')
+  return t('admin.tests.accountHint')
+})
 const reasoningEffortOptions = computed(() => {
   const plan = editingPlan.value
   if (!plan?.model_id) return []
   return reasoningEffortsForTestModel(plan.model_id, accounts.value, plan.group_id, plan.account_id)
 })
+const loadModelOptions = async (groupID: number | null) => {
+  if (!groupID) {
+    modelOptions.value = []
+    return
+  }
+  const group = groups.value.find(item => item.id === groupID)
+  if (!group) return
+  modelOptionsLoading.value = true
+  try {
+    const models = await adminAPI.groups.getModelAllowlistCandidates(groupID, group.platform)
+    const unique = Array.from(new Set(models.map(model => String(model).trim()).filter(Boolean)))
+    // Keep an existing plan's model selectable even if the upstream catalog
+    // has since changed or the model was removed from the current allowlist.
+    const current = editingPlan.value?.model_id?.trim()
+    if (current && !unique.includes(current)) unique.unshift(current)
+    modelOptions.value = unique.map(value => ({ value, label: value }))
+  } catch (error) {
+    modelOptions.value = editingPlan.value?.model_id ? [{ value: editingPlan.value.model_id, label: editingPlan.value.model_id }] : []
+    reportError(error)
+  } finally {
+    modelOptionsLoading.value = false
+  }
+}
 const load = async () => {
   loading.value = true
   try {
@@ -178,10 +233,12 @@ const removeType = async (type: TestType) => { if (!window.confirm(`${t('common.
 const openPlan = (plan?: TestPlan) => {
   if (plan) {
     const account = plan.account_id ? accounts.value.find(item => item.id === plan.account_id) : undefined
-    editingPlan.value = { id: plan.id, name: plan.name, test_definition_id: plan.test_definition_id || 0, group_id: plan.group_id ?? account?.group_ids?.[0] ?? null, account_id: plan.account_id ?? null, model_id: plan.model_id || '', reasoning_effort: plan.reasoning_effort ?? null, cron_expression: plan.cron_expression || '', enabled: plan.enabled, max_results: plan.max_results || 50 }
+    const targetMode = plan.target_mode || (plan.account_id ? 'account' : 'all_accounts')
+    editingPlan.value = { id: plan.id, name: plan.name, test_definition_id: plan.test_definition_id || 0, group_id: plan.group_id ?? account?.group_ids?.[0] ?? null, account_id: plan.account_id ?? null, target_mode: targetMode, model_id: plan.model_id || '', reasoning_effort: plan.reasoning_effort ?? null, cron_expression: plan.cron_expression || '', enabled: plan.enabled, max_results: plan.max_results || 50 }
   } else {
-    editingPlan.value = { name: '', test_definition_id: types.value.find(type => type.enabled)?.id || 0, group_id: null, account_id: null, model_id: '', reasoning_effort: null, cron_expression: '*/30 * * * *', enabled: true, max_results: 50 }
+    editingPlan.value = { name: '', test_definition_id: types.value.find(type => type.enabled)?.id || 0, group_id: null, account_id: null, target_mode: 'group', model_id: '', reasoning_effort: null, cron_expression: '*/30 * * * *', enabled: true, max_results: 50 }
   }
+  void loadModelOptions(editingPlan.value.group_id ?? null)
 }
 const savePlan = async () => { if (!editingPlan.value) return; saving.value = true; try { const { id, ...body } = editingPlan.value; const payload = { ...body, group_id: body.group_id || null, account_id: body.account_id || null }; if (id) await adminAPI.tests.updatePlan(id, payload); else await adminAPI.tests.createPlan(payload); editingPlan.value = null; await load() } catch (error) { reportError(error) } finally { saving.value = false } }
 const copyPlan = async (plan: TestPlan) => {
@@ -193,6 +250,7 @@ const copyPlan = async (plan: TestPlan) => {
       test_definition_id: plan.test_definition_id || plan.test_definition?.id || 0,
       group_id: plan.group_id ?? null,
       account_id: plan.account_id ?? null,
+      target_mode: plan.target_mode,
       model_id: plan.model_id || '',
       reasoning_effort: plan.reasoning_effort ?? null,
       cron_expression: plan.cron_expression || '*/30 * * * *',
@@ -289,6 +347,22 @@ watch(
     }
   },
   { deep: true },
+)
+watch(
+  () => editingPlan.value?.group_id,
+  (groupID, previous) => {
+    if (groupID !== previous) {
+      // Opening an existing plan initializes the watcher from undefined;
+      // preserve its current model until the catalog has loaded. Clear only
+      // when the administrator actively switches to another group.
+      if (previous !== undefined && editingPlan.value) {
+        editingPlan.value.model_id = ''
+        const selected = editingPlan.value.account_id
+        if (selected && !filteredAccounts.value.some(account => account.id === selected)) accountSelection.value = null
+      }
+      void loadModelOptions(groupID ?? null)
+    }
+  },
 )
 watch(resultPlan, plan => {
   clearInterval(resultTimer)

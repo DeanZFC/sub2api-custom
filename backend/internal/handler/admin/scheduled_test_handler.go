@@ -137,6 +137,7 @@ type createScheduledTestPlanRequest struct {
 	TestTypeID      *int64 `json:"test_type_id"`
 	TypeID          *int64 `json:"type_id"`
 	TestType        string `json:"test_type"`
+	TargetMode      string `json:"target_mode"`
 	ModelID         string `json:"model_id"`
 	ReasoningEffort string `json:"reasoning_effort"`
 	CronExpression  string `json:"cron_expression" binding:"required"`
@@ -155,6 +156,7 @@ type updateScheduledTestPlanRequest struct {
 	TestDefinitionID json.RawMessage `json:"test_definition_id"`
 	TestTypeID       *int64          `json:"test_type_id"`
 	TypeID           *int64          `json:"type_id"`
+	TargetMode       string          `json:"target_mode"`
 	ModelID          string          `json:"model_id"`
 	ReasoningEffort  json.RawMessage `json:"reasoning_effort"`
 	CronExpression   string          `json:"cron_expression"`
@@ -219,6 +221,7 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 		GroupID:          req.GroupID,
 		TestDefinitionID: req.TestDefinitionID,
 		TestType:         req.TestType,
+		TargetMode:       req.TargetMode,
 		ModelID:          req.ModelID,
 		ReasoningEffort:  req.ReasoningEffort,
 		CronExpression:   req.CronExpression,
@@ -269,6 +272,9 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 
 	if req.ModelID != "" {
 		existing.ModelID = req.ModelID
+	}
+	if req.TargetMode != "" {
+		existing.TargetMode = req.TargetMode
 	}
 	if len(req.ReasoningEffort) > 0 {
 		if bytes.Equal(bytes.TrimSpace(req.ReasoningEffort), []byte("null")) {

@@ -25,13 +25,13 @@ func TestScheduledTestPlanRepositoryCreatePersistsName(t *testing.T) {
 		WithArgs(accountID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery(`(?s)INSERT INTO scheduled_test_plans \(name, account_id`).
-		WithArgs("nightly candy", accountID, nil, nil, "candy", "model", "", "*/5 * * * *", true, 20, false, nextRun).
+		WithArgs("nightly candy", accountID, nil, nil, "candy", "account", "model", "", "*/5 * * * *", true, 20, false, nextRun).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "account_id", "group_id", "test_definition_id", "test_type", "model_id", "reasoning_effort", "cron_expression", "enabled", "max_results", "auto_recover", "last_run_at", "next_run_at", "created_at", "updated_at",
-		}).AddRow(10, "nightly candy", accountID, nil, nil, "candy", "model", "", "*/5 * * * *", true, 20, false, nil, nextRun, createdAt, createdAt))
+			"id", "name", "account_id", "group_id", "test_definition_id", "test_type", "target_mode", "model_id", "reasoning_effort", "cron_expression", "enabled", "max_results", "auto_recover", "last_run_at", "next_run_at", "created_at", "updated_at",
+		}).AddRow(10, "nightly candy", accountID, nil, nil, "candy", "account", "model", "", "*/5 * * * *", true, 20, false, nil, nextRun, createdAt, createdAt))
 
 	got, err := repo.Create(context.Background(), &service.ScheduledTestPlan{
-		Name: "nightly candy", AccountID: &accountID, TestType: "candy", ModelID: "model", CronExpression: "*/5 * * * *", Enabled: true, MaxResults: 20, NextRunAt: &nextRun,
+		Name: "nightly candy", AccountID: &accountID, TargetMode: "account", TestType: "candy", ModelID: "model", CronExpression: "*/5 * * * *", Enabled: true, MaxResults: 20, NextRunAt: &nextRun,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "nightly candy", got.Name)
@@ -48,8 +48,8 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT r\.id, r\.plan_id.*FROM scheduled_test_results r`).
 		WithArgs(int64(10), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "group_name", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", "公开组", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt))
+			"id", "plan_id", "plan_name", "test_name", "group_name", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", "公开组", "all_accounts", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -98,11 +98,11 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 
 	repo := &scheduledTestResultRepository{db: db}
 	now := time.Now()
-	mock.ExpectQuery(`(?s)SELECT r\.id,r\.plan_id.*CASE WHEN p\.account_id IS NOT NULL THEN r\.account_id ELSE NULL END.*r\.model_id,r\.reasoning_effort,r\.group_id.*FROM scheduled_test_results r`).
+	mock.ExpectQuery(`(?s)SELECT r\.id,r\.plan_id.*p\.target_mode.*CASE WHEN .*r\.account_id ELSE NULL END.*r\.model_id,r\.reasoning_effort,r\.group_id.*FROM scheduled_test_results r`).
 		WithArgs(int64(5), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "group_name", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", "公开组", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now))
+			"id", "plan_id", "plan_name", "test_name", "group_name", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", "公开组", "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now))
 	results, err := repo.ListVisible(context.Background(), 5, 20)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
