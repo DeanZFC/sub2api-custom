@@ -60,6 +60,9 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	if len([]rune(plan.Name)) > 200 {
 		return fmt.Errorf("name must be at most 200 characters")
 	}
+	if plan.SortOrder < 0 {
+		return fmt.Errorf("sort_order must be non-negative")
+	}
 	if (plan.AccountID == nil || *plan.AccountID <= 0) && (plan.GroupID == nil || *plan.GroupID <= 0) {
 		return fmt.Errorf("group_id or account_id is required")
 	}

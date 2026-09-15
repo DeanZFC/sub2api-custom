@@ -94,6 +94,33 @@ const groupKey = (result: TestResult) => result.group_id != null ? `group:${resu
 const groupName = (result: TestResult) => result.group_name || (result.group_id != null ? `${t('tests.group')} #${result.group_id}` : t('tests.ungrouped'))
 const targetName = (result: TestResult) => exposesAccount(result) ? `${t('tests.account')} #${result.account_id}` : result.group_id != null ? groupName(result) : `#${result.id}`
 
+// The administrator controls the order through each test rule/plan's
+// `sort_order` (returned on results as `plan_order`).
+// A group can have several rules, so derive its position from the first group
+// encountered after sorting all rules by that configured order. This keeps the
+// user-facing result page independent from the global groups.sort_order field.
+const groupDisplayOrder = computed(() => {
+  const order = new Map<string, number>()
+  const ordered = [...allResults.value].sort((a, b) => {
+    const aPlanOrder = typeof a.plan_order === 'number' && Number.isFinite(a.plan_order) ? a.plan_order : Number.MAX_SAFE_INTEGER
+    const bPlanOrder = typeof b.plan_order === 'number' && Number.isFinite(b.plan_order) ? b.plan_order : Number.MAX_SAFE_INTEGER
+    const byPlanOrder = aPlanOrder - bPlanOrder
+    if (byPlanOrder !== 0) return byPlanOrder
+    const byName = testName(a).localeCompare(testName(b))
+    if (byName !== 0) return byName
+    const byGroupName = groupName(a).localeCompare(groupName(b))
+    if (byGroupName !== 0) return byGroupName
+    const ad = new Date(a.started_at || a.finished_at || a.created_at || 0).getTime()
+    const bd = new Date(b.started_at || b.finished_at || b.created_at || 0).getTime()
+    return bd - ad || b.id - a.id
+  })
+  for (const result of ordered) {
+    const key = groupKey(result)
+    if (!order.has(key)) order.set(key, order.size)
+  }
+  return order
+})
+
 const testTabs = computed(() => {
   const names = new Map<string, { name: string; order: number }>()
   for (const result of allResults.value) {
@@ -112,7 +139,7 @@ const availableGroups = computed(() => {
   for (const result of typeResults.value) {
     const key = groupKey(result)
     if (!seen.has(key)) {
-      const order = typeof result.group_order === 'number' && Number.isFinite(result.group_order) ? result.group_order : Number.MAX_SAFE_INTEGER
+      const order = groupDisplayOrder.value.get(key) ?? Number.MAX_SAFE_INTEGER
       seen.set(key, { name: groupName(result), order })
     }
   }
@@ -139,7 +166,7 @@ const groupedLatest = computed(() => {
     const group = groups.get(key)
     if (group) group.results.push(result)
     else {
-      const order = typeof result.group_order === 'number' && Number.isFinite(result.group_order) ? result.group_order : Number.MAX_SAFE_INTEGER
+      const order = groupDisplayOrder.value.get(key) ?? Number.MAX_SAFE_INTEGER
       groups.set(key, { key, name: groupName(result), order, results: [result] })
     }
   }

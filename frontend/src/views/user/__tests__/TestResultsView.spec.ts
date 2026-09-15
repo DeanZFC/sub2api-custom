@@ -168,10 +168,10 @@ describe('user test result visibility', () => {
     wrapper.unmount()
   })
 
-  it('orders group filters and result sections by the configured group order', async () => {
+  it('orders group filters and result sections by the configured test rule order', async () => {
     api.list.mockResolvedValue([
-      { ...result, id: 2, group_id: 2, group_name: 'Second', group_order: 20, test_name: 'Check', status: 'success' },
-      { ...result, id: 1, group_id: 1, group_name: 'First', group_order: 10, test_name: 'Check', status: 'success' },
+      { ...result, id: 2, group_id: 2, group_name: 'Second', plan_order: 20, test_name: 'Check', status: 'success' },
+      { ...result, id: 1, group_id: 1, group_name: 'First', plan_order: 10, test_name: 'Check', status: 'success' },
     ])
     const wrapper = mountResults()
     await flushPromises()

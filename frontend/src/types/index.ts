@@ -2467,6 +2467,8 @@ export interface TestType {
 export interface TestPlan {
   id: number
   name?: string
+  /** Controls the order of this rule's group in user-facing test results. */
+  sort_order?: number
   test_definition_id?: number | null
   group_id?: number | null
   account_id?: number | null
@@ -2490,9 +2492,9 @@ export interface TestResult {
   test_name?: string
   /** Configured test type order for the user-facing tabs. */
   test_order?: number
+  /** Configured test rule/plan order used to derive group display order. */
+  plan_order?: number
   group_name?: string
-  /** Configured group order used by the user-facing test result groups. */
-  group_order?: number
   account_id?: number | null
   target_mode?: 'group' | 'all_accounts' | 'account'
   id: number
@@ -2530,6 +2532,7 @@ export interface UpdateTestTypeRequest extends Partial<CreateTestTypeRequest> {}
 
 export interface CreateTestPlanRequest {
   name?: string
+  sort_order?: number
   test_definition_id: number
   group_id?: number | null
   account_id?: number | null

@@ -145,6 +145,7 @@ func NewScheduledTestHandler(scheduledTestSvc *service.ScheduledTestService) *Sc
 
 type createScheduledTestPlanRequest struct {
 	Name             string `json:"name"`
+	SortOrder        *int   `json:"sort_order"`
 	AccountID        *int64 `json:"account_id"`
 	GroupID          *int64 `json:"group_id"`
 	TestDefinitionID *int64 `json:"test_definition_id"`
@@ -167,6 +168,7 @@ type updateScheduledTestPlanRequest struct {
 	// account target to a group target (or vice versa).
 	AccountID        json.RawMessage `json:"account_id"`
 	Name             *string         `json:"name"`
+	SortOrder        *int            `json:"sort_order"`
 	GroupID          json.RawMessage `json:"group_id"`
 	TestDefinitionID json.RawMessage `json:"test_definition_id"`
 	TestTypeID       *int64          `json:"test_type_id"`
@@ -243,6 +245,13 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 		Enabled:          true,
 		MaxResults:       req.MaxResults,
 	}
+	if req.SortOrder != nil {
+		if *req.SortOrder < 0 {
+			response.BadRequest(c, "sort_order must be non-negative")
+			return
+		}
+		plan.SortOrder = *req.SortOrder
+	}
 	if plan.TestDefinitionID == nil {
 		if req.TestTypeID != nil {
 			plan.TestDefinitionID = req.TestTypeID
@@ -305,6 +314,13 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 	}
 	if req.Name != nil {
 		existing.Name = *req.Name
+	}
+	if req.SortOrder != nil {
+		if *req.SortOrder < 0 {
+			response.BadRequest(c, "sort_order must be non-negative")
+			return
+		}
+		existing.SortOrder = *req.SortOrder
 	}
 	if len(req.AccountID) > 0 {
 		value, parseErr := parseNullableInt64(req.AccountID, "account_id")

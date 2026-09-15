@@ -7,8 +7,13 @@ import (
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
-	ID               int64      `json:"id"`
-	Name             string     `json:"name"`
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	// SortOrder controls the order in which this test rule's group is shown
+	// on the user-facing test-results page. It is intentionally stored on the
+	// rule/plan rather than on groups, because the same group can participate
+	// in multiple test rules with different display positions.
+	SortOrder        int        `json:"sort_order"`
 	AccountID        *int64     `json:"account_id,omitempty"`
 	GroupID          *int64     `json:"group_id,omitempty"`
 	TestDefinitionID *int64     `json:"test_definition_id,omitempty"`
@@ -34,10 +39,10 @@ type ScheduledTestResult struct {
 	TestName  string `json:"test_name"`
 	TestOrder int    `json:"test_order"`
 	GroupName string `json:"group_name"`
-	// GroupOrder is the administrator-configured display order of the result's
-	// group. It is returned alongside the group name so user-facing result
-	// navigation can follow the same order as the group manager.
-	GroupOrder      int       `json:"group_order"`
+	// PlanOrder is the administrator-configured order of the test rule/plan
+	// that produced this result. The user-facing page sorts by this value and
+	// derives its group list from that ordered result stream.
+	PlanOrder       int       `json:"plan_order"`
 	TargetMode      string    `json:"target_mode,omitempty"`
 	Status          string    `json:"status"`
 	ResponseText    string    `json:"response_text"`
