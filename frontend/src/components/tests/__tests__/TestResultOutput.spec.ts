@@ -14,17 +14,13 @@ describe('test result output', () => {
     expect(wrapper.find('iframe').exists()).toBe(false)
   })
 
-  it('mounts an opaque sandbox preview on demand and preserves SVG animation', async () => {
+  it('renders an opaque sandbox result immediately and preserves SVG animation', () => {
     const wrapper = mount(TestResultOutput, { global, props: { result: { id: 2, status: 'success', output_kind: 'html', output_html: '<svg xmlns="http://www.w3.org/2000/svg"><circle r="20"><animate attributeName="r" values="10;20;10" dur="1s" repeatCount="indefinite" /></circle></svg>' } } })
-    expect(wrapper.find('iframe').exists()).toBe(false)
-    await wrapper.get('button').trigger('click')
     const frame = wrapper.get('iframe')
     expect(frame.attributes('sandbox')).toBe('allow-scripts')
     expect(frame.attributes('referrerpolicy')).toBe('no-referrer')
     expect(frame.attributes('srcdoc')).toContain('<animate')
     expect(frame.attributes('srcdoc')).toContain("default-src 'none'")
-    await wrapper.get('button').trigger('click')
-    expect(wrapper.find('iframe').exists()).toBe(false)
   })
 
   it('renders unknown future output kinds as escaped text', () => {

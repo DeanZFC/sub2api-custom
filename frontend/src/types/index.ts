@@ -2470,6 +2470,8 @@ export interface TestPlan {
   account_id?: number | null
   test_definition?: TestType | null
   model_id?: string
+  /** Optional effort forwarded to the selected model (Codex-style). */
+  reasoning_effort?: string | null
   cron_expression?: string
   enabled: boolean
   max_results?: number
@@ -2520,6 +2522,7 @@ export interface CreateTestPlanRequest {
   group_id?: number | null
   account_id?: number | null
   model_id: string
+  reasoning_effort?: string | null
   cron_expression?: string
   enabled?: boolean
   max_results?: number

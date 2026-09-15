@@ -258,6 +258,30 @@ func (s *ScheduledTestRunnerService) resolveTargetAccounts(ctx context.Context, 
 
 func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *ScheduledTestPlan, accountID int64, prompt, outputKind string) {
 	started := time.Now()
+	// Persist the in-progress row before contacting the upstream. This makes a
+	// long-running test visible immediately and lets completion update the same
+	// row instead of briefly showing no result (or creating duplicate history).
+	var pending *ScheduledTestResult
+	if s.scheduledSvc != nil {
+		pending = &ScheduledTestResult{
+			Status:     "running",
+			OutputKind: outputKind,
+			AccountID:  &accountID,
+			ModelID:    plan.ModelID,
+			GroupID:    plan.GroupID,
+			StartedAt:  started,
+			FinishedAt: started,
+		}
+		persistCtx, cancel := scheduledTestPersistenceContext()
+		created, createErr := s.scheduledSvc.StartResult(persistCtx, plan.ID, pending)
+		cancel()
+		if createErr != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d StartResult error: %v", plan.ID, accountID, createErr)
+			pending = nil
+		} else {
+			pending = created
+		}
+	}
 	var result *ScheduledTestResult
 	var err error
 	if !s.acquireWorker(ctx) {
@@ -269,7 +293,7 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 		if s.accountTestSvc == nil {
 			err = fmt.Errorf("account test service unavailable")
 		} else {
-			result, err = s.accountTestSvc.RunTestBackgroundWithPrompt(ctx, accountID, plan.ModelID, prompt)
+			result, err = s.accountTestSvc.RunTestBackgroundWithPromptAndReasoning(ctx, accountID, plan.ModelID, prompt, plan.ReasoningEffort)
 		}
 		s.releaseWorker()
 	}
@@ -280,6 +304,11 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 		result = &ScheduledTestResult{Status: "failed", ErrorMessage: "account test returned no result", StartedAt: started, FinishedAt: time.Now(), LatencyMs: time.Since(started).Milliseconds()}
 	}
 	result.AccountID = &accountID
+	result.PlanID = plan.ID
+	if pending != nil {
+		result.ID = pending.ID
+		result.StartedAt = pending.StartedAt
+	}
 	result.ModelID = plan.ModelID
 	result.GroupID = plan.GroupID
 	result.OutputKind = outputKind
@@ -290,7 +319,11 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d SaveResult skipped: scheduled test service unavailable", plan.ID, accountID)
 		return
 	}
-	if err := s.scheduledSvc.SaveResult(persistCtx, plan.ID, plan.MaxResults, result); err != nil {
+	if pending != nil && pending.ID > 0 {
+		if err := s.scheduledSvc.CompleteResult(persistCtx, plan.MaxResults, result); err != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d CompleteResult error: %v", plan.ID, accountID, err)
+		}
+	} else if err := s.scheduledSvc.SaveResult(persistCtx, plan.ID, plan.MaxResults, result); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d SaveResult error: %v", plan.ID, accountID, err)
 	}
 	if result.Status == "success" && plan.AutoRecover {
@@ -310,10 +343,18 @@ func (s *ScheduledTestRunnerService) savePlanFailure(ctx context.Context, plan *
 	if cause != nil {
 		errorMessage = cause.Error()
 	}
-	result := &ScheduledTestResult{Status: "failed", OutputKind: outputKind, GroupID: plan.GroupID, ModelID: plan.ModelID, ErrorMessage: errorMessage, StartedAt: now, FinishedAt: now}
+	result := &ScheduledTestResult{Status: "running", OutputKind: outputKind, GroupID: plan.GroupID, ModelID: plan.ModelID, StartedAt: now, FinishedAt: now}
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	defer cancel()
-	if err := s.scheduledSvc.SaveResult(persistCtx, plan.ID, plan.MaxResults, result); err != nil {
+	created, err := s.scheduledSvc.StartResult(persistCtx, plan.ID, result)
+	if err == nil && created != nil {
+		created.Status = "failed"
+		created.ErrorMessage = errorMessage
+		created.FinishedAt = time.Now()
+		created.LatencyMs = created.FinishedAt.Sub(created.StartedAt).Milliseconds()
+		err = s.scheduledSvc.CompleteResult(persistCtx, plan.MaxResults, created)
+	}
+	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d failure result error: %v", plan.ID, err)
 	}
 }

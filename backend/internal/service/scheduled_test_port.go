@@ -14,6 +14,7 @@ type ScheduledTestPlan struct {
 	TestDefinitionID *int64     `json:"test_definition_id,omitempty"`
 	TestType         string     `json:"test_type"`
 	ModelID          string     `json:"model_id"`
+	ReasoningEffort  string     `json:"reasoning_effort,omitempty"`
 	CronExpression   string     `json:"cron_expression"`
 	Enabled          bool       `json:"enabled"`
 	MaxResults       int        `json:"max_results"`
@@ -82,7 +83,9 @@ type ScheduledTestDefinitionRepository interface {
 // ScheduledTestResultRepository defines the data access interface for test results.
 type ScheduledTestResultRepository interface {
 	Create(ctx context.Context, result *ScheduledTestResult) (*ScheduledTestResult, error)
+	Update(ctx context.Context, result *ScheduledTestResult) error
 	ListByPlanID(ctx context.Context, planID int64, limit int) ([]*ScheduledTestResult, error)
 	ListVisible(ctx context.Context, userID int64, limit int) ([]*ScheduledTestResult, error)
+	Delete(ctx context.Context, id int64) error
 	PruneOldResults(ctx context.Context, planID int64, keepCount int) error
 }

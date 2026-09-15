@@ -41,7 +41,9 @@ func (r *runnerPlanRepoStub) UpdateAfterRun(ctx context.Context, _ int64, _, _ t
 }
 
 type runnerResultRepoStub struct {
-	created []*ScheduledTestResult
+	created         []*ScheduledTestResult
+	createdStatuses []string
+	updatedIDs      []int64
 }
 
 func (r *runnerResultRepoStub) Create(ctx context.Context, result *ScheduledTestResult) (*ScheduledTestResult, error) {
@@ -49,8 +51,25 @@ func (r *runnerResultRepoStub) Create(ctx context.Context, result *ScheduledTest
 		return nil, ctx.Err()
 	}
 	copy := *result
+	if copy.ID <= 0 {
+		copy.ID = int64(len(r.created) + 1)
+	}
 	r.created = append(r.created, &copy)
+	r.createdStatuses = append(r.createdStatuses, copy.Status)
 	return &copy, nil
+}
+func (r *runnerResultRepoStub) Update(ctx context.Context, result *ScheduledTestResult) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	r.updatedIDs = append(r.updatedIDs, result.ID)
+	for _, existing := range r.created {
+		if existing.ID == result.ID {
+			*existing = *result
+			return nil
+		}
+	}
+	return nil
 }
 func (r *runnerResultRepoStub) ListByPlanID(context.Context, int64, int) ([]*ScheduledTestResult, error) {
 	return nil, nil
@@ -58,6 +77,7 @@ func (r *runnerResultRepoStub) ListByPlanID(context.Context, int64, int) ([]*Sch
 func (r *runnerResultRepoStub) ListVisible(context.Context, int64, int) ([]*ScheduledTestResult, error) {
 	return nil, nil
 }
+func (r *runnerResultRepoStub) Delete(context.Context, int64) error { return nil }
 func (r *runnerResultRepoStub) PruneOldResults(ctx context.Context, _ int64, _ int) error {
 	return ctx.Err()
 }
@@ -174,6 +194,12 @@ func TestScheduledTestRunnerPersistsFailureAndAdvancesAfterCancellation(t *testi
 	if len(resultRepo.created) != 1 {
 		t.Fatalf("saved result count = %d, want 1", len(resultRepo.created))
 	}
+	if len(resultRepo.createdStatuses) != 1 || resultRepo.createdStatuses[0] != "running" {
+		t.Fatalf("created result statuses = %v, want [running]", resultRepo.createdStatuses)
+	}
+	if len(resultRepo.updatedIDs) != 1 || resultRepo.updatedIDs[0] != resultRepo.created[0].ID {
+		t.Fatalf("updated result ids = %v, want the created result id %d", resultRepo.updatedIDs, resultRepo.created[0].ID)
+	}
 	if got := resultRepo.created[0]; got.Status != "failed" || got.ErrorMessage == "" {
 		t.Fatalf("cancellation result = %#v, want failed result with error", got)
 	}
@@ -197,6 +223,12 @@ func TestScheduledTestRunnerSavesOneResultPerGroupAccount(t *testing.T) {
 	}
 	if len(resultRepo.created) != 2 {
 		t.Fatalf("saved group result count = %d, want 2", len(resultRepo.created))
+	}
+	if len(resultRepo.createdStatuses) != 2 || resultRepo.createdStatuses[0] != "running" || resultRepo.createdStatuses[1] != "running" {
+		t.Fatalf("created group result statuses = %v, want [running running]", resultRepo.createdStatuses)
+	}
+	if len(resultRepo.updatedIDs) != 2 {
+		t.Fatalf("updated group result ids = %v, want 2 updates", resultRepo.updatedIDs)
 	}
 	seen := map[int64]bool{}
 	for _, result := range resultRepo.created {

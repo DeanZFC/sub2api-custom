@@ -45,6 +45,28 @@ func TestCreateOpenAITestPayloadUsesConfiguredPrompt(t *testing.T) {
 	}
 }
 
+func TestApplyAccountTestReasoningEffortUsesNativePayloadShape(t *testing.T) {
+	responses := createOpenAITestPayload("gpt-6-astra", false)
+	applyAccountTestReasoningEffort(responses, " ultra ")
+	if got := responses["reasoning"].(map[string]any)["effort"]; got != "ultra" {
+		t.Fatalf("responses reasoning effort = %v, want ultra", got)
+	}
+	chat := createOpenAIChatCompletionsTestPayload("gpt-6-astra", "hi")
+	applyAccountTestReasoningEffort(chat, "high")
+	if got := chat["reasoning_effort"]; got != "high" {
+		t.Fatalf("chat reasoning effort = %v, want high", got)
+	}
+}
+
+func TestScheduledTestReasoningEffortsFollowModelCapabilities(t *testing.T) {
+	if got := ScheduledTestReasoningEfforts("gpt-6-astra"); len(got) == 0 || got[len(got)-1] != "ultra" {
+		t.Fatalf("gpt-6-astra reasoning efforts = %v", got)
+	}
+	if got := ScheduledTestReasoningEfforts("gpt-4o"); len(got) != 0 {
+		t.Fatalf("gpt-4o should not advertise reasoning efforts: %v", got)
+	}
+}
+
 func TestAntigravityTestRequestsUseConfiguredPrompt(t *testing.T) {
 	service := &AntigravityGatewayService{}
 	claudeBody, err := service.buildClaudeTestRequest("project", "claude-sonnet-4-6", "draw a pelican")
@@ -133,9 +155,10 @@ func TestScheduledTestRunnerApplyOutputContract(t *testing.T) {
 	}
 }
 
-func TestValidateScheduledTestPlanRequiresExactlyOneTarget(t *testing.T) {
+func TestValidateScheduledTestPlanRequiresGroupAndAllowsOptionalAccount(t *testing.T) {
 	accountID := int64(1)
 	groupID := int64(2)
+	definitionID := int64(3)
 	base := &ScheduledTestPlan{ModelID: "model", CronExpression: "*/5 * * * *"}
 
 	if err := validateScheduledTestPlan(base); err == nil {
@@ -143,8 +166,9 @@ func TestValidateScheduledTestPlanRequiresExactlyOneTarget(t *testing.T) {
 	}
 	base.AccountID = &accountID
 	base.GroupID = &groupID
-	if err := validateScheduledTestPlan(base); err == nil {
-		t.Fatal("expected two targets to be rejected")
+	base.TestDefinitionID = &definitionID
+	if err := validateScheduledTestPlan(base); err != nil {
+		t.Fatalf("group plus account target rejected: %v", err)
 	}
 	base.GroupID = nil
 	if err := validateScheduledTestPlan(base); err != nil {
@@ -152,6 +176,7 @@ func TestValidateScheduledTestPlanRequiresExactlyOneTarget(t *testing.T) {
 	}
 	base.AccountID = nil
 	base.GroupID = &groupID
+	base.TestDefinitionID = nil
 	if err := validateScheduledTestPlan(base); err == nil {
 		t.Fatal("expected group target without test definition to be rejected")
 	}

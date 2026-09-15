@@ -72,6 +72,20 @@ type AccountTestOptions struct {
 	AudioDataURL string
 }
 
+type accountTestReasoningEffortContextKey struct{}
+
+func withAccountTestReasoningEffort(ctx context.Context, effort string) context.Context {
+	return context.WithValue(ctx, accountTestReasoningEffortContextKey{}, strings.ToLower(strings.TrimSpace(effort)))
+}
+
+func accountTestReasoningEffort(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	effort, _ := ctx.Value(accountTestReasoningEffortContextKey{}).(string)
+	return strings.TrimSpace(effort)
+}
+
 func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
 	if len(opts) == 0 {
 		return AccountTestOptions{}
@@ -876,6 +890,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt)
+	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -2118,6 +2133,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	c.Writer.Flush()
 
 	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
+	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
@@ -2792,6 +2808,21 @@ func createOpenAITestPayload(modelID string, isOAuth bool, customPrompt ...strin
 	return payload
 }
 
+// applyAccountTestReasoningEffort uses the native Responses shape for OpenAI
+// probes and the legacy top-level field for Chat Completions-compatible
+// upstreams. Empty keeps the provider's default behavior for old plans.
+func applyAccountTestReasoningEffort(payload map[string]any, effort string) {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if payload == nil || effort == "" || effort == "none" {
+		return
+	}
+	if _, isChatCompletions := payload["messages"]; isChatCompletions {
+		payload["reasoning_effort"] = effort
+		return
+	}
+	payload["reasoning"] = map[string]any{"effort": effort}
+}
+
 func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
@@ -3401,11 +3432,17 @@ func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID in
 // RunTestBackgroundWithPrompt executes a configurable test prompt while
 // retaining the legacy account-test behavior when prompt is empty.
 func (s *AccountTestService) RunTestBackgroundWithPrompt(ctx context.Context, accountID int64, modelID, prompt string) (*ScheduledTestResult, error) {
+	return s.RunTestBackgroundWithPromptAndReasoning(ctx, accountID, modelID, prompt, "")
+}
+
+// RunTestBackgroundWithPromptAndReasoning is the scheduled-test entrypoint
+// that forwards an explicitly selected Codex-style reasoning effort.
+func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context.Context, accountID int64, modelID, prompt, reasoningEffort string) (*ScheduledTestResult, error) {
 	startedAt := time.Now()
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
-	ginCtx.Request = (&http.Request{}).WithContext(ctx)
+	ginCtx.Request = (&http.Request{}).WithContext(withAccountTestReasoningEffort(ctx, reasoningEffort))
 
 	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, prompt, AccountTestModeDefault)
 

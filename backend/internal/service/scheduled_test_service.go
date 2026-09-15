@@ -52,8 +52,8 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	if len([]rune(plan.Name)) > 200 {
 		return fmt.Errorf("name must be at most 200 characters")
 	}
-	if (plan.AccountID == nil || *plan.AccountID <= 0) == (plan.GroupID == nil || *plan.GroupID <= 0) {
-		return fmt.Errorf("exactly one of account_id or group_id must be provided")
+	if (plan.AccountID == nil || *plan.AccountID <= 0) && (plan.GroupID == nil || *plan.GroupID <= 0) {
+		return fmt.Errorf("group_id or account_id is required")
 	}
 	if plan.GroupID != nil && *plan.GroupID > 0 && plan.TestDefinitionID == nil {
 		return fmt.Errorf("group targets require a test_definition_id")
@@ -61,6 +61,12 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	plan.ModelID = strings.TrimSpace(plan.ModelID)
 	if plan.ModelID == "" {
 		return fmt.Errorf("model_id is required")
+	}
+	plan.ReasoningEffort = strings.ToLower(strings.TrimSpace(plan.ReasoningEffort))
+	if plan.ReasoningEffort != "" {
+		if !scheduledTestReasoningEffortAllowed(plan.ModelID, plan.ReasoningEffort) {
+			return fmt.Errorf("reasoning_effort %q is not supported by model %q", plan.ReasoningEffort, plan.ModelID)
+		}
 	}
 	plan.CronExpression = strings.TrimSpace(plan.CronExpression)
 	if plan.CronExpression == "" {
@@ -70,6 +76,42 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 		return fmt.Errorf("max_results cannot be negative")
 	}
 	return nil
+}
+
+// ScheduledTestReasoningEfforts returns the reasoning levels that may be sent
+// for a model. Known Codex models use the same catalog as the Codex models
+// endpoint; unknown/custom upstream models retain the complete standard set so
+// the upstream metadata can decide their exact capabilities.
+func ScheduledTestReasoningEfforts(modelID string) []string {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return nil
+	}
+	descriptor := newConfiguredCodexModelDescriptor(modelID)
+	levels := make([]string, 0, len(descriptor.SupportedReasoningLevels))
+	for _, level := range descriptor.SupportedReasoningLevels {
+		if effort := strings.ToLower(strings.TrimSpace(level.Effort)); effort != "" && effort != "none" {
+			levels = append(levels, effort)
+		}
+	}
+	// The generic descriptor intentionally advertises only `none`; custom
+	// models can still expose reasoning through their upstream catalog.
+	if len(levels) == 0 && descriptor.SupportedReasoningLevels != nil && len(descriptor.SupportedReasoningLevels) == 1 && descriptor.SupportedReasoningLevels[0].Effort == "none" {
+		known := strings.ToLower(modelID)
+		if !strings.HasPrefix(known, "gpt-") && !strings.HasPrefix(known, "claude-") && !strings.HasPrefix(known, "grok-") && !strings.Contains(known, "deepseek") {
+			return []string{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+		}
+	}
+	return levels
+}
+
+func scheduledTestReasoningEffortAllowed(modelID, effort string) bool {
+	for _, supported := range ScheduledTestReasoningEfforts(modelID) {
+		if supported == effort {
+			return true
+		}
+	}
+	return false
 }
 
 // ScheduledTestService provides CRUD operations for scheduled test plans and results.
@@ -238,6 +280,14 @@ func (s *ScheduledTestService) ListVisibleResults(ctx context.Context, userID in
 	return s.resultRepo.ListVisible(ctx, userID, limit)
 }
 
+// DeleteResult removes one test execution result by its ID.
+func (s *ScheduledTestService) DeleteResult(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid test result id")
+	}
+	return s.resultRepo.Delete(ctx, id)
+}
+
 // SaveResult inserts a result and prunes old entries beyond maxResults.
 func (s *ScheduledTestService) SaveResult(ctx context.Context, planID int64, maxResults int, result *ScheduledTestResult) error {
 	if result == nil {
@@ -251,6 +301,41 @@ func (s *ScheduledTestService) SaveResult(ctx context.Context, planID int64, max
 		return err
 	}
 	return s.resultRepo.PruneOldResults(ctx, planID, maxResults)
+}
+
+// StartResult persists a running result before any upstream work begins. The
+// caller can then update the same row when the test finishes, allowing clients
+// to render an in-progress execution immediately.
+func (s *ScheduledTestService) StartResult(ctx context.Context, planID int64, result *ScheduledTestResult) (*ScheduledTestResult, error) {
+	if result == nil {
+		return nil, fmt.Errorf("test result is required")
+	}
+	result.PlanID = planID
+	if strings.TrimSpace(result.Status) == "" {
+		result.Status = "running"
+	}
+	if result.StartedAt.IsZero() {
+		result.StartedAt = time.Now()
+	}
+	if result.FinishedAt.IsZero() {
+		result.FinishedAt = result.StartedAt
+	}
+	return s.resultRepo.Create(ctx, result)
+}
+
+// CompleteResult updates a previously-created running result and prunes old
+// rows after the final state is visible.
+func (s *ScheduledTestService) CompleteResult(ctx context.Context, maxResults int, result *ScheduledTestResult) error {
+	if result == nil || result.ID <= 0 {
+		return fmt.Errorf("test result id is required")
+	}
+	if err := s.resultRepo.Update(ctx, result); err != nil {
+		return err
+	}
+	if maxResults <= 0 {
+		maxResults = 50
+	}
+	return s.resultRepo.PruneOldResults(ctx, result.PlanID, maxResults)
 }
 
 func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {

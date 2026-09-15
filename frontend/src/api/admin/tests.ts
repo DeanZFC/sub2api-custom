@@ -50,5 +50,10 @@ export async function listResults(planId: number, limit = 50): Promise<TestResul
   return data ?? []
 }
 
-export const testsAPI = { listTypes, createType, updateType, deleteType, listPlans, createPlan, updatePlan, deletePlan, runPlan, listResults }
+/** Delete one persisted test execution result. */
+export async function deleteResult(id: number): Promise<void> {
+  await apiClient.delete(`/admin/test-results/${id}`)
+}
+
+export const testsAPI = { listTypes, createType, updateType, deleteType, listPlans, createPlan, updatePlan, deletePlan, runPlan, listResults, deleteResult }
 export default testsAPI

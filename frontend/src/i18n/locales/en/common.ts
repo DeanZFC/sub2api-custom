@@ -222,8 +222,8 @@ export default {
   },
 
   tests: {
-    preview: 'Preview HTML', closePreview: 'Close preview', rawOutput: 'Original response', noOutput: 'No output returned', loadFailed: 'Unable to load or save test data',
-    title: 'Test Results', description: 'View automated test results for your visible groups', empty: 'No test results yet', htmlResult: 'HTML test result'
+    preview: 'Preview HTML', closePreview: 'Close preview', rawOutput: 'Original response', noOutput: 'No output returned', running: 'Test is running…', loadFailed: 'Unable to load or save test data',
+    title: 'Test Results', description: 'View automated test results for your visible groups', empty: 'No test results yet', htmlResult: 'HTML test result', allTypes: 'All types', groupFilter: 'Group', modelFilter: 'Model', allGroups: 'All groups', allModels: 'All models', noMatches: 'No results match the selected filters', viewHistory: 'View history', historyHint: 'Historical test results for this group or account', group: 'Group', account: 'Account', ungrouped: 'Ungrouped', unknownType: 'Unknown test'
   },
 
   // Auth

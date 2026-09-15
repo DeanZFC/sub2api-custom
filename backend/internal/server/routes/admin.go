@@ -759,6 +759,8 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.DELETE("/test-plans/:id", h.Admin.ScheduledTest.Delete)
 	admin.GET("/test-plans/:id/results", h.Admin.ScheduledTest.ListResults)
 	admin.POST("/test-plans/:id/run", h.Admin.ScheduledTest.RunNow)
+	admin.DELETE("/test-results/:id", h.Admin.ScheduledTest.DeleteResult)
+	admin.DELETE("/scheduled-test-results/:id", h.Admin.ScheduledTest.DeleteResult)
 	// Nested under accounts
 	admin.GET("/accounts/:id/scheduled-test-plans", h.Admin.ScheduledTest.ListByAccount)
 }

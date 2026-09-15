@@ -222,8 +222,8 @@ export default {
   },
 
   tests: {
-    preview: '预览 HTML', closePreview: '关闭预览', rawOutput: '查看原始输出', noOutput: '未返回内容', loadFailed: '测试数据加载或保存失败',
-    title: '测试结果', description: '查看可见分组的自动化测试结果', empty: '暂无测试结果', htmlResult: 'HTML 测试结果'
+    preview: '预览 HTML', closePreview: '关闭预览', rawOutput: '查看原始输出', noOutput: '未返回内容', running: '测试进行中…', loadFailed: '测试数据加载或保存失败',
+    title: '测试结果', description: '查看可见分组的自动化测试结果', empty: '暂无测试结果', htmlResult: 'HTML 测试结果', allTypes: '全部类型', groupFilter: '分组', modelFilter: '模型', allGroups: '全部分组', allModels: '全部模型', noMatches: '没有符合筛选条件的结果', viewHistory: '查看历史', historyHint: '以下为该分组或账号的历史测试结果', group: '分组', account: '账号', ungrouped: '未分组', unknownType: '未知测试'
   },
 
   // Auth

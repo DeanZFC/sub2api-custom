@@ -22,7 +22,7 @@ beforeEach(() => {
   api.listTypes.mockResolvedValue([{ id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count candies', enabled: true }])
   api.listPlans.mockResolvedValue([plan])
   api.getGroups.mockResolvedValue([{ id: 8, name: 'Group Eight' }])
-  api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Account Three' }], pages: 1, total: 1 })
+  api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Account Three', group_ids: [8] }, { id: 4, name: 'Other Group Account', group_ids: [9] }], pages: 1, total: 2 })
   api.listResults.mockResolvedValue([])
   api.runPlan.mockResolvedValue(undefined)
 })
@@ -44,18 +44,17 @@ describe('configurable test management', () => {
     wrapper.unmount()
   })
 
-  it('switches a group plan to one account with an explicit null group', async () => {
+  it('selects an account within a group while preserving the group target', async () => {
     const wrapper = makeWrapper(); await flushPromises()
     const row = wrapper.findAll('tbody tr')[0]
     await row.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
     const dialog = wrapper.get('[data-dialog]')
-    const targetSelect = dialog.findAll('select').find(s => s.find('option[value="account"]').exists())!
-    await targetSelect.setValue('account')
     const accountSelect = dialog.findAll('select').find(s => s.find('option[value="3"]').exists())!
+    expect(accountSelect.find('option[value="4"]').exists()).toBe(false)
     await accountSelect.setValue('3')
     await dialog.findAll('button').find(b => b.text() === 'common.save')!.trigger('click')
     await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ group_id: null, account_id: 3, model_id: 'test-model', cron_expression: '0 * * * *' }))
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ group_id: 8, account_id: 3, model_id: 'test-model', cron_expression: '0 * * * *' }))
     wrapper.unmount()
   })
 

@@ -2,7 +2,9 @@ package admin
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -132,14 +134,15 @@ type createScheduledTestPlanRequest struct {
 	GroupID          *int64 `json:"group_id"`
 	TestDefinitionID *int64 `json:"test_definition_id"`
 	// test_type_id/type_id are aliases used by older generalized-test clients.
-	TestTypeID     *int64 `json:"test_type_id"`
-	TypeID         *int64 `json:"type_id"`
-	TestType       string `json:"test_type"`
-	ModelID        string `json:"model_id"`
-	CronExpression string `json:"cron_expression" binding:"required"`
-	Enabled        *bool  `json:"enabled"`
-	MaxResults     int    `json:"max_results"`
-	AutoRecover    *bool  `json:"auto_recover"`
+	TestTypeID      *int64 `json:"test_type_id"`
+	TypeID          *int64 `json:"type_id"`
+	TestType        string `json:"test_type"`
+	ModelID         string `json:"model_id"`
+	ReasoningEffort string `json:"reasoning_effort"`
+	CronExpression  string `json:"cron_expression" binding:"required"`
+	Enabled         *bool  `json:"enabled"`
+	MaxResults      int    `json:"max_results"`
+	AutoRecover     *bool  `json:"auto_recover"`
 }
 
 type updateScheduledTestPlanRequest struct {
@@ -153,6 +156,7 @@ type updateScheduledTestPlanRequest struct {
 	TestTypeID       *int64          `json:"test_type_id"`
 	TypeID           *int64          `json:"type_id"`
 	ModelID          string          `json:"model_id"`
+	ReasoningEffort  json.RawMessage `json:"reasoning_effort"`
 	CronExpression   string          `json:"cron_expression"`
 	Enabled          *bool           `json:"enabled"`
 	MaxResults       int             `json:"max_results"`
@@ -216,6 +220,7 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 		TestDefinitionID: req.TestDefinitionID,
 		TestType:         req.TestType,
 		ModelID:          req.ModelID,
+		ReasoningEffort:  req.ReasoningEffort,
 		CronExpression:   req.CronExpression,
 		Enabled:          true,
 		MaxResults:       req.MaxResults,
@@ -264,6 +269,18 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 
 	if req.ModelID != "" {
 		existing.ModelID = req.ModelID
+	}
+	if len(req.ReasoningEffort) > 0 {
+		if bytes.Equal(bytes.TrimSpace(req.ReasoningEffort), []byte("null")) {
+			existing.ReasoningEffort = ""
+		} else {
+			var effort string
+			if err := json.Unmarshal(req.ReasoningEffort, &effort); err != nil {
+				response.BadRequest(c, "reasoning_effort must be a string or null")
+				return
+			}
+			existing.ReasoningEffort = effort
+		}
 	}
 	if req.Name != nil {
 		existing.Name = *req.Name
@@ -351,6 +368,24 @@ func (h *ScheduledTestHandler) ListResults(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, results)
+}
+
+// DeleteResult DELETE /admin/test-results/:id
+func (h *ScheduledTestHandler) DeleteResult(c *gin.Context) {
+	resultID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || resultID <= 0 {
+		response.BadRequest(c, "invalid test result id")
+		return
+	}
+	if err := h.scheduledTestSvc.DeleteResult(c.Request.Context(), resultID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.NotFound(c, "test result not found")
+			return
+		}
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
 func (h *ScheduledTestHandler) RunNow(c *gin.Context) {
