@@ -23,7 +23,7 @@
       <section class="card p-4">
         <div class="mb-4 flex items-center justify-between"><h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.plans') }}</h3><button class="btn btn-primary btn-sm" @click="openPlan()"><Icon name="plus" size="sm" /> {{ t('common.create') }}</button></div>
         <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-700"><th class="px-2 py-2">{{ t('admin.tests.name') }}</th><th class="px-2 py-2">{{ t('admin.tests.type') }}</th><th class="px-2 py-2">{{ t('admin.tests.target') }}</th><th class="px-2 py-2">{{ t('admin.tests.model') }}</th><th class="px-2 py-2">{{ t('admin.tests.schedule') }}</th><th class="px-2 py-2">{{ t('common.status') }}</th><th class="px-2 py-2 text-right">{{ t('common.actions') }}</th></tr></thead><tbody>
-          <tr v-for="plan in plans" :key="plan.id" class="border-b border-gray-100 dark:border-dark-800"><td class="px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}</td><td class="px-2 py-3">{{ typeName(plan) }}</td><td class="px-2 py-3">{{ targetName(plan) }}</td><td class="px-2 py-3 font-mono text-xs">{{ plan.model_id || '-' }}<span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td><td class="px-2 py-3 font-mono text-xs">{{ plan.cron_expression || '-' }}<div class="mt-1 font-sans text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td><td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span></td><td class="px-2 py-3"><div class="flex justify-end gap-1"><button class="btn btn-secondary btn-sm" :disabled="runningPlans.has(plan.id)" @click="run(plan)">{{ t('admin.tests.run') }}</button><button class="btn btn-secondary btn-sm" @click="showResults(plan)">{{ t('admin.tests.results') }}</button><button class="btn btn-secondary btn-sm" :disabled="saving" @click="copyPlan(plan)">{{ t('common.copy') }}</button><button class="btn btn-secondary btn-sm" @click="openPlan(plan)">{{ t('common.edit') }}</button><button class="btn btn-secondary btn-sm text-red-600" @click="removePlan(plan)">{{ t('common.delete') }}</button></div></td></tr>
+          <tr v-for="plan in plans" :key="plan.id" class="border-b border-gray-100 dark:border-dark-800"><td class="px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}</td><td class="px-2 py-3">{{ typeName(plan) }}</td><td class="px-2 py-3">{{ targetName(plan) }}</td><td class="px-2 py-3 font-mono text-xs">{{ plan.model_id || '-' }}<span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td><td class="px-2 py-3 font-mono text-xs">{{ plan.cron_expression || '-' }}<div class="mt-1 font-sans text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td><td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span></td><td class="px-2 py-3"><div class="flex justify-end gap-1"><button class="btn btn-secondary btn-sm" :disabled="runningPlans.has(plan.id)" @click="run(plan)">{{ t('admin.tests.run') }}</button><button class="btn btn-secondary btn-sm" @click="showResults(plan)">{{ t('admin.tests.results') }}</button><button class="btn btn-secondary btn-sm" :disabled="togglingPlanId === plan.id" @click="togglePlanStatus(plan)">{{ togglingPlanId === plan.id ? t('common.loading') : plan.enabled ? t('admin.tests.disablePlan') : t('admin.tests.enablePlan') }}</button><button class="btn btn-secondary btn-sm" :disabled="saving" @click="copyPlan(plan)">{{ t('common.copy') }}</button><button class="btn btn-secondary btn-sm" @click="openPlan(plan)">{{ t('common.edit') }}</button><button class="btn btn-secondary btn-sm text-red-600" @click="removePlan(plan)">{{ t('common.delete') }}</button></div></td></tr>
           <tr v-if="!plans.length"><td colspan="7" class="px-2 py-8 text-center text-sm text-gray-500">{{ t('common.noData') }}</td></tr>
         </tbody></table></div>
       </section>
@@ -82,6 +82,7 @@ const { t } = useI18n()
 const app = useAppStore()
 const resultsLoading = ref(false)
 const runningPlans = ref(new Set<number>())
+const togglingPlanId = ref<number | null>(null)
 const reportError = (error: unknown) => app.showError(extractApiErrorMessage(error, t('tests.loadFailed')))
 const loading = ref(false)
 const saving = ref(false)
@@ -265,6 +266,18 @@ const copyPlan = async (plan: TestPlan) => {
   }
 }
 const removePlan = async (plan: TestPlan) => { if (!window.confirm(`${t('common.delete')} ${plan.name || `#${plan.id}`}?`)) return; try { await adminAPI.tests.deletePlan(plan.id); await load() } catch (error) { reportError(error) } }
+const togglePlanStatus = async (plan: TestPlan) => {
+  if (togglingPlanId.value === plan.id) return
+  togglingPlanId.value = plan.id
+  try {
+    await adminAPI.tests.updatePlan(plan.id, { enabled: !plan.enabled })
+    plan.enabled = !plan.enabled
+  } catch (error) {
+    reportError(error)
+  } finally {
+    togglingPlanId.value = null
+  }
+}
 const run = async (plan: TestPlan) => {
   if (runningPlans.value.has(plan.id)) return
   runningPlans.value.add(plan.id)

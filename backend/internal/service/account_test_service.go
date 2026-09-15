@@ -601,7 +601,11 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -955,7 +959,46 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	// Some ChatGPT/Codex-compatible upstreams reject max_output_tokens even
+	// though it is valid for the public Responses API. Configurable tests add
+	// this budget automatically, so retry once without it just like the normal
+	// gateway compatibility path does.
+	if resp.StatusCode == http.StatusBadRequest && payload["max_output_tokens"] != nil {
+		probeBody, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr == nil && isUnsupportedMaxOutputTokensError(probeBody) {
+			delete(payload, "max_output_tokens")
+			retryBody, marshalErr := json.Marshal(payload)
+			if marshalErr == nil {
+				retryReq, requestErr := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(retryBody))
+				if requestErr == nil {
+					retryReq = retryReq.WithContext(WithHTTPUpstreamProfile(retryReq.Context(), HTTPUpstreamProfileOpenAI))
+					for key, values := range req.Header {
+						for _, value := range values {
+							retryReq.Header.Add(key, value)
+						}
+					}
+					retryReq.Host = req.Host
+					resp, err = s.doOpenAIAccountTestUpstream(retryReq, proxyURL, account, true)
+					if err != nil {
+						return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+					}
+				} else {
+					resp.Body = io.NopCloser(bytes.NewReader(probeBody))
+				}
+			} else {
+				resp.Body = io.NopCloser(bytes.NewReader(probeBody))
+			}
+		} else {
+			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
+		}
+	}
 
 	if isOAuth && s.accountRepo != nil {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
@@ -2806,6 +2849,11 @@ func createOpenAITestPayload(modelID string, isOAuth bool, customPrompt ...strin
 	}
 
 	return payload
+}
+
+func isUnsupportedMaxOutputTokensError(body []byte) bool {
+	message := strings.ToLower(string(body))
+	return strings.Contains(message, "unsupported parameter") && strings.Contains(message, "max_output_tokens")
 }
 
 // applyAccountTestReasoningEffort uses the native Responses shape for OpenAI
