@@ -26,7 +26,7 @@ export function buildTestPreviewHTML(source: string): string {
   // previews include viewport-height or overflow rules that otherwise create
   // a second scrollbar inside the test result card.
   const layoutStyle = document.createElement('style')
-  layoutStyle.textContent = 'html, body { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; }'
+  layoutStyle.textContent = 'html, body { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; } svg { max-height: none !important; overflow: visible !important; }'
   document.head.appendChild(layoutStyle)
 
   // The preview is rendered in a sandboxed iframe. Report its rendered height
@@ -37,19 +37,33 @@ export function buildTestPreviewHTML(source: string): string {
     const report = () => {
       const body = document.body
       const root = document.documentElement
-      let height = Math.max(body?.scrollHeight || 0, root?.scrollHeight || 0, body?.offsetHeight || 0, root?.offsetHeight || 0)
+      let height = Math.max(body?.scrollHeight || 0, root?.scrollHeight || 0, body?.offsetHeight || 0, root?.offsetHeight || 0, body?.clientHeight || 0, root?.clientHeight || 0)
       for (const node of document.querySelectorAll('*')) {
         const rect = node.getBoundingClientRect()
         if (Number.isFinite(rect.bottom)) height = Math.max(height, rect.bottom + window.scrollY)
+        if (node instanceof SVGGraphicsElement) {
+          try {
+            const box = node.getBBox()
+            if (Number.isFinite(box.bottom)) height = Math.max(height, rect.top + box.bottom + window.scrollY)
+          } catch (_) {}
+        }
       }
       window.parent.postMessage({ type: 'sub2api-test-preview-size', height }, '*')
     }
     window.addEventListener('load', report)
-    if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement)
+    if (window.ResizeObserver) {
+      const observer = new ResizeObserver(report)
+      observer.observe(document.documentElement)
+      if (document.body) observer.observe(document.body)
+    }
+    if (window.MutationObserver) new MutationObserver(report).observe(document.documentElement, { childList: true, subtree: true, attributes: true })
     report()
     setTimeout(report, 0)
     setTimeout(report, 100)
-    setTimeout(report, 500)
+    setTimeout(report, 300)
+    setTimeout(report, 700)
+    setTimeout(report, 1200)
+    setTimeout(report, 2000)
   })()`
   document.body.appendChild(resizeScript)
   return '<!doctype html>\n' + document.documentElement.outerHTML

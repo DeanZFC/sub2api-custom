@@ -370,7 +370,13 @@ func createTestPayload(modelID string, customPrompt ...string) (map[string]any, 
 // mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
 // opts is optional media (image/audio data URLs for real generation / STT).
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
-	ctx := c.Request.Context()
+	// Every account-test entrypoint (interactive and scheduled) uses the same
+	// upstream transport as production traffic. Keep deliberate probes out of
+	// adaptive-concurrency/health accounting even when an admin invokes this
+	// method directly instead of through RunTestBackground.
+	testCtx := WithAccountProtectionOutcomeExcluded(c.Request.Context())
+	c.Request = c.Request.WithContext(testCtx)
+	ctx := testCtx
 	testOpts := firstAccountTestOptions(opts)
 
 	// Get account
@@ -3496,7 +3502,12 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
-	ginCtx.Request = (&http.Request{}).WithContext(withAccountTestReasoningEffort(ctx, reasoningEffort))
+	testCtx := withAccountTestReasoningEffort(ctx, reasoningEffort)
+	// Connectivity/scheduled tests share the production transport, but their
+	// deliberate probes must not lower adaptive concurrency or inflate health
+	// failure rates for an otherwise healthy account.
+	testCtx = WithAccountProtectionOutcomeExcluded(testCtx)
+	ginCtx.Request = (&http.Request{}).WithContext(testCtx)
 
 	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, prompt, AccountTestModeDefault)
 

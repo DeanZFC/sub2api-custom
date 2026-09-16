@@ -48,7 +48,9 @@ const onPreviewMessage = (event: MessageEvent<unknown>) => {
   // Keep a sensible lower bound while allowing the page itself to provide the
   // only scroll container. The result must remain fully readable when a test
   // returns a tall HTML/SVG document.
-  htmlFrameHeight.value = Math.max(320, Math.ceil(reported))
+  // Do not shrink after a short first measurement; late-loading fonts,
+  // animation layout, and responsive SVGs can report their full height later.
+  htmlFrameHeight.value = Math.max(htmlFrameHeight.value, 320, Math.ceil(reported))
 }
 const onHTMLLoad = () => {
   // Reset while a new result is loading; the embedded script will immediately

@@ -1739,6 +1739,38 @@
           </div>
         </div>
       </div>
+      <div
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && (!sharedPool || sharedPoolAdmin)"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="account-protection-policy"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.protectionPolicy') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.protectionPolicyDesc') }}</p>
+          </div>
+          <Toggle v-model="protectionEnabled" :aria-label="t('admin.accounts.openai.protectionEnabled')" />
+        </div>
+        <div v-if="protectionEnabled" class="mt-3 grid gap-3 sm:grid-cols-2">
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="protectionAdaptiveEnabled" type="checkbox" class="checkbox" />
+            <span>{{ t('admin.accounts.openai.protectionAdaptive') }}</span>
+          </label>
+          <template v-if="protectionAdaptiveEnabled">
+            <label class="input-label">
+              {{ t('admin.accounts.openai.protectionMinConcurrency') }}
+              <input v-model.number="protectionAdaptiveMin" type="number" min="1" :max="form.concurrency || 1" class="input mt-1" />
+            </label>
+            <label class="flex items-center gap-2 text-sm sm:items-end sm:pb-2">
+              <input v-model="protectionAdaptiveAutomatic" type="checkbox" class="checkbox" />
+              <span>{{ t('admin.accounts.openai.protectionAutomatic') }}</span>
+            </label>
+          </template>
+        </div>
+        <p v-if="protectionEnabled && protectionAdaptiveEnabled" class="input-hint mt-2">
+          {{ t('admin.accounts.openai.protectionAdaptiveDesc') }}
+        </p>
+      </div>
       <template v-if="(!sharedPool || sharedPoolAdmin)">
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
@@ -3582,6 +3614,10 @@ const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'account_device' | 'single_machine_multi_window' | 'device' | 'session' | 'full'
 const codexFingerprintMode = ref<CodexFingerprintMode>('single_machine_multi_window')
+const protectionEnabled = ref(false)
+const protectionAdaptiveEnabled = ref(false)
+const protectionAdaptiveAutomatic = ref(false)
+const protectionAdaptiveMin = ref(1)
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
@@ -4071,15 +4107,19 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
-  openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
-  codexCLIOnlyEnabled.value = false
-  codexCLIOnlyAppServerEnabled.value = false
-  codexFingerprintMode.value = 'off'
-  codexImageToolMode.value = 'inherit'
+	openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+	codexCLIOnlyEnabled.value = false
+	codexCLIOnlyAppServerEnabled.value = false
+	codexFingerprintMode.value = 'off'
+	protectionEnabled.value = false
+	protectionAdaptiveEnabled.value = false
+	protectionAdaptiveAutomatic.value = false
+	protectionAdaptiveMin.value = 1
+	codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
-  if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
+	if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
     openaiFlattenNamespacesEnabled.value =
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
@@ -4125,8 +4165,16 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
       codexCLIOnlyAppServerEnabled.value =
         extra?.codex_cli_only_allow_app_server === true
+      const protectionPolicy = extra?.account_protection_policy as Record<string, unknown> | undefined
+      protectionEnabled.value = protectionPolicy?.enabled === true
+      protectionAdaptiveEnabled.value = protectionPolicy?.adaptive_concurrency === true
+      protectionAdaptiveAutomatic.value = protectionPolicy?.adaptive_mode === 'automatic'
+      protectionAdaptiveMin.value =
+        typeof protectionPolicy?.adaptive_min_concurrency === 'number' && protectionPolicy.adaptive_min_concurrency > 0
+          ? protectionPolicy.adaptive_min_concurrency
+          : 1
     }
-    if (newAccount.type === 'oauth') {
+		if (newAccount.type === 'oauth') {
       const fpMode = extra?.codex_fingerprint_mode as string | undefined
       // 缺省/非法值按 off 呈现，与后端 GetCodexFingerprintMode 的 opt-in 语义一致（#5610）
       codexFingerprintMode.value = (['off', 'account_device', 'single_machine_multi_window', 'device', 'session', 'full'].includes(fpMode || '')
@@ -5675,6 +5723,23 @@ const handleSubmit = async () => {
           newExtra.codex_fingerprint_mode = codexFingerprintMode.value
         } else {
           delete newExtra.codex_fingerprint_mode
+        }
+      }
+
+      if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
+        if (protectionEnabled.value) {
+          newExtra.account_protection_policy = {
+            enabled: true,
+            mode: 'observe',
+            adaptive_concurrency: protectionAdaptiveEnabled.value,
+            adaptive_mode: protectionAdaptiveAutomatic.value ? 'automatic' : 'observe',
+            adaptive_min_concurrency: Math.max(1, Math.min(Number(form.concurrency) || 1, Number(protectionAdaptiveMin.value) || 1)),
+            failure_threshold: 3,
+            failure_window_seconds: 60,
+            recovery_seconds: 60,
+          }
+        } else {
+          delete newExtra.account_protection_policy
         }
       }
 

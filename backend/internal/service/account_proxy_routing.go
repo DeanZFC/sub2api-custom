@@ -80,6 +80,10 @@ func (s *ConcurrencyService) AcquireAccountRoute(ctx context.Context, account **
 		return nil, fmt.Errorf("missing account for proxy routing")
 	}
 	a := *account
+	// Adaptive protection is resolved here, before either the fixed-account or
+	// proxy-pool admission path. This keeps one request on one slot source and
+	// preserves the administrator's saved concurrency as the hard ceiling.
+	limit = EffectiveAccountConcurrency(a, limit)
 	var result *AcquireResult
 	var err error
 	if len(a.ProxyIDs) > 1 {

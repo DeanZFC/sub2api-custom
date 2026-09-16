@@ -1262,9 +1262,12 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAIAccountSlot(
 	if s.service.concurrencyService != nil && maxConcurrency > 0 && !budget.recordAcquire(accountID) {
 		return nil, false, nil
 	}
-	if len(accounts) > 0 && len(accounts[0].ProxyIDs) > 1 {
+	if len(accounts) > 0 {
 		if s.service.concurrencyService == nil {
-			return nil, true, fmt.Errorf("proxy pool concurrency unavailable")
+			if len(accounts[0].ProxyIDs) > 1 {
+				return nil, true, fmt.Errorf("proxy pool concurrency unavailable")
+			}
+			return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, true, nil
 		}
 		result, err := s.service.concurrencyService.AcquireAccountRoute(ctx, &accounts[0], maxConcurrency)
 		return result, true, err
