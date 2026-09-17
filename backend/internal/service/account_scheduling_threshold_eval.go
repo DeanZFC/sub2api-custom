@@ -178,7 +178,7 @@ func lookupAccountSchedulingThreshold(thresholds map[string]int, platform string
 }
 
 func openAIThresholdCandidates(account *Account, now time.Time) []*accountSchedulingThresholdCandidate {
-	if account == nil {
+	if account == nil || account.IsPrismEnabled() {
 		return nil
 	}
 	if !openAICodexSnapshotIdentityTrusted(account) {

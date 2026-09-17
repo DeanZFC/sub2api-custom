@@ -413,6 +413,9 @@ func (s *OpenAIQuotaService) prepareUpstreamCall(ctx context.Context, accountID 
 	if account == nil {
 		return "", "", "", false, infraerrors.New(http.StatusNotFound, "OPENAI_QUOTA_ACCOUNT_NOT_FOUND", "account not found")
 	}
+	if account.IsPrismEnabled() {
+		return "", "", "", false, infraerrors.BadRequest("PRISM_QUOTA_NOT_SUPPORTED", "Codex quota operations are not supported for Prism accounts")
+	}
 	if account.Platform != PlatformOpenAI {
 		return "", "", "", false, infraerrors.New(http.StatusBadRequest, "OPENAI_QUOTA_INVALID_PLATFORM", "account is not an OpenAI account")
 	}

@@ -380,21 +380,34 @@ func (s *ScheduledTestService) ListVisibleResults(ctx context.Context, userID in
 	return results, nil
 }
 
-// normalizeStoredTestResults repairs the displayed numeric value for rows
-// created before the answer parser was tightened. The original response text
-// is retained as the source of truth, so an old row showing the first step
-// number is corrected as soon as it is read without rewriting history.
+// normalizeStoredTestResults repairs derived output from older parsers when
+// results are read. Keep the response and status unchanged so historical
+// records remain available for diagnosis without rewriting persisted data.
 func normalizeStoredTestResults(results []*ScheduledTestResult) {
 	for _, result := range results {
-		if result == nil || !strings.EqualFold(strings.TrimSpace(result.OutputKind), "number") || strings.TrimSpace(result.ResponseText) == "" {
+		if result == nil {
 			continue
 		}
-		if numeric, ok := extractScheduledTestNumber(result.ResponseText); ok {
-			result.OutputNumeric = &numeric
-		} else {
-			// If the original text has no unambiguous answer, show that text
-			// rather than retain a number selected by an older parser.
-			result.OutputNumeric = nil
+		switch strings.ToLower(strings.TrimSpace(result.OutputKind)) {
+		case "html":
+			// Prefer the original response; older output_html values may have
+			// lost the doctype or retained JSON string escapes from tool output.
+			if html := extractScheduledTestHTML(result.ResponseText); html != "" {
+				result.OutputHTML = html
+			} else if html := extractScheduledTestHTML(result.OutputHTML); html != "" {
+				result.OutputHTML = html
+			}
+		case "number":
+			if strings.TrimSpace(result.ResponseText) == "" {
+				continue
+			}
+			if numeric, ok := extractScheduledTestNumber(result.ResponseText); ok {
+				result.OutputNumeric = &numeric
+			} else {
+				// If the original text has no unambiguous answer, show that text
+				// rather than retain a number selected by an older parser.
+				result.OutputNumeric = nil
+			}
 		}
 	}
 }

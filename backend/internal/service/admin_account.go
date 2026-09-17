@@ -98,6 +98,8 @@ func cloneAccountJSONMap(value map[string]any) (map[string]any, error) {
 }
 
 var duplicateAccountDiscardedExtraKeys = map[string]struct{}{
+	// Copies must explicitly configure their own Prism session and routing.
+	PrismExtraKey: {},
 	// A retry identity belongs to the operation that created one copy, not to later copies.
 	duplicateAccountOperationIDExtraKey: {},
 	// External sync identity belongs to one local account only.
@@ -272,6 +274,8 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err != nil {
 		return nil, fmt.Errorf("clone account credentials: %w", err)
 	}
+	delete(credentials, PrismCookieCredentialKey)
+	delete(credentials, PrismCookieConfiguredCredentialKey)
 	extra, err := duplicateAccountExtra(source.Extra)
 	if err != nil {
 		return nil, fmt.Errorf("clone account extra configuration: %w", err)
@@ -425,7 +429,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Notes:       normalizeAccountNotes(input.Notes),
 		Platform:    input.Platform,
 		Type:        input.Type,
-		Credentials: input.Credentials,
+		Credentials: SanitizeStoredCredentials(input.Platform, input.Credentials),
 		Extra:       accountExtra,
 		ProxyID:     input.ProxyID,
 		ProxyIDs:    multiProxyIDs(input.ProxyIDs),
@@ -471,6 +475,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 			return nil, errors.New("load_factor must be <= 10000")
 		}
 		account.LoadFactor = input.LoadFactor
+	}
+	if err := ValidatePrismAccountConfiguration(account); err != nil {
+		return nil, err
 	}
 	return account, nil
 }
@@ -556,7 +563,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 	// OAuth 账号：创建后异步设置隐私。
 	// 使用 Ensure（幂等）而非 Force：新建账号 Extra 为空时效果相同，但更安全。
-	if account.Type == AccountTypeOAuth {
+	if account.Type == AccountTypeOAuth && !account.IsPrismEnabled() {
 		switch account.Platform {
 		case PlatformOpenAI:
 			go func() {
@@ -587,6 +594,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	if !ProtectionManagedWrite(ctx) && ProtectedProxyModeConflict(account, input.Extra) {
+		return nil, ErrProtectedProxyModeChange
+	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
 		normalizedExtra, err = normalizeOpenAILongContextBillingUpdateExtra(account, input)
@@ -607,6 +617,14 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		if err := ValidateUpstreamRequestIDHeaderExtra(normalizedExtra); err != nil {
 			return nil, err
+		}
+		// Protection state is owned by the dedicated anti-degrade service. A
+		// normal account form often submits a stale, redacted Extra object; keep
+		// the active marker and its transport/admission settings intact. The
+		// dedicated service opts into this internal escape hatch when applying or
+		// reverting a strategy.
+		if !input.AllowProtectionManagedUpdates {
+			normalizedExtra = PreserveAccountProtection(ctx, account, normalizedExtra)
 		}
 	}
 	previousProbeIdentity := upstreamBillingProbeIdentity(account)
@@ -766,6 +784,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if err != nil {
 			return nil, err
 		}
+		if ProtectedProxyPoolConflict(account, ids) {
+			return nil, ErrProtectedProxyModeChange
+		}
 		account.ProxyIDs = multiProxyIDs(ids)
 		account.ProxyPoolChanged = true
 		primary := int64(0)
@@ -866,6 +887,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	if err := ValidatePrismAccountConfiguration(account); err != nil {
+		return nil, err
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -939,6 +963,25 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSessionExtraKey)
 	delete(updates, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
+	// Extra key updates are used by several background jobs and may receive a
+	// stale form payload. Protection transitions have dedicated endpoints; keep
+	// their marker/identity/transport policy out of this generic merge path.
+	if len(updates) > 0 {
+		if account, err := s.accountRepo.GetByID(ctx, id); err != nil {
+			return err
+		} else {
+			for _, key := range ProtectionManagedKeys(account) {
+				delete(updates, key)
+			}
+			_, changesPrism := updates[PrismExtraKey]
+			_, misplacedCookie := updates[PrismCookieCredentialKey]
+			if changesPrism || misplacedCookie {
+				if err := ValidatePrismAccountConfiguration(prismAccountWithMergedUpdates(account, nil, updates)); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
@@ -973,6 +1016,12 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
+	// Bulk edits have no per-account protection transition semantics. Never
+	// allow a generic batch payload to write the anti-degrade marker fields;
+	// use the account-specific protection endpoint instead.
+	for _, key := range []string{AntiDegradeMarkerExtraKey, AntiDegradationExtraKey, ProtectionScopeExtraKey} {
+		delete(input.Extra, key)
+	}
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
 	delete(input.Extra, UpstreamBillingRateSyncEnabledExtraKey)
 	delete(input.Extra, UpstreamBillingProbeExtraKey)
@@ -1014,7 +1063,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || len(input.Extra) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1027,6 +1076,16 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			targetsByID[account.ID] = account
 		}
 	}
+	// Reject incompatible routing before any account or group writes. Repeat the
+	// check under the repository row lock to cover a concurrent protection enable.
+	for _, account := range cachedTargets {
+		if ProtectedProxyModeConflict(account, input.Extra) ||
+			(input.ProxyIDs != nil && ProtectedProxyPoolConflict(account, *input.ProxyIDs)) {
+			return nil, ErrProtectedProxyModeChange
+		}
+	}
+	// The repository preserves identity/TLS fields per protected row. Keep the
+	// batch payload intact so unprotected targets still receive the requested edit.
 	if openAISettings.any() {
 		inheritedCount, err := validateBulkOpenAISettingsTargets(input, openAISettings, targetsByID)
 		if err != nil {
@@ -1123,6 +1182,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// only when platform is known Grok — empty platform still strips password/*).
 	if input.Credentials != nil {
 		input.Credentials = SanitizeStoredCredentials("", input.Credentials)
+	}
+	for _, account := range cachedTargets {
+		if err := ValidatePrismAccountConfiguration(prismAccountWithMergedUpdates(account, input.Credentials, input.Extra)); err != nil {
+			return nil, err
+		}
 	}
 
 	// Prepare bulk updates for columns and JSONB fields.
@@ -1689,6 +1753,9 @@ func (s *adminServiceImpl) ResetAccountQuota(ctx context.Context, id int64) erro
 // EnsureOpenAIPrivacy 检查 OpenAI OAuth 账号是否已设置 privacy_mode，
 // 未设置则调用 disableOpenAITraining 并持久化到 Extra，返回设置的 mode 值。
 func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Account) string {
+	if account.IsPrismEnabled() {
+		return ""
+	}
 	// 影子账号不持凭据，隐私设置由母账号管理，直接跳过。
 	if account.IsCredentialShadow() {
 		return ""
@@ -1726,6 +1793,9 @@ func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Acc
 
 // ForceOpenAIPrivacy 强制重新设置 OpenAI OAuth 账号隐私，无论当前状态。
 func (s *adminServiceImpl) ForceOpenAIPrivacy(ctx context.Context, account *Account) string {
+	if account.IsPrismEnabled() {
+		return ""
+	}
 	// 影子账号不持凭据,隐私由母账号管理,直接跳过(与 EnsureOpenAIPrivacy 一致——外审第4轮)。
 	if account.IsCredentialShadow() {
 		return ""

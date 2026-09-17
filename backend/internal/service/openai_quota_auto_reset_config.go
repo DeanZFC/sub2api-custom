@@ -49,7 +49,7 @@ func ResolveOpenAIAutoResetCreditConfig(account *Account) OpenAIAutoResetCreditC
 }
 
 func isOpenAIAutoResetCreditAccount(account *Account) bool {
-	return account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow()
+	return account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow() && !account.IsPrismEnabled()
 }
 
 // normalizeOpenAIAutoResetCreditExtra 校验管理请求中的配置并剥离服务运行态。

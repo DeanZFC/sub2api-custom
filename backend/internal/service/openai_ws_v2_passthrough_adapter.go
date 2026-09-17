@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -688,6 +689,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
+	mode1OriginalFirst := bytes.Clone(firstClientMessage)
 	if isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
@@ -800,6 +802,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 	}
 
+	if err := checkAccountRequestIntegrity(c, account, mode1OriginalFirst, firstClientMessage); err != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+	}
+
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter 命中时 service_tier 已经从 firstClientMessage 中删除，
 	// 最终出站 tier 应为 nil，而不是用户最初请求的 "priority"。观察到的回包
@@ -873,7 +879,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if dialer == nil {
 		return errors.New("openai ws passthrough dialer is nil")
 	}
-	tlsProfile := resolveCodexMacTLSProfile(account)
+	tlsProfile, profileErr := resolveAccountTLSProfileForOpenAI(account, s.cfg)
+	if profileErr != nil {
+		return profileErr
+	}
 
 	agentTaskRecoveryTried := false
 	var upstreamConn openAIWSClientConn
@@ -990,6 +999,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil, nil
 			}
+			// Keep a per-frame semantic snapshot. The first frame has a snapshot
+			// above, but follow-up response.create frames can carry independent
+			// input/tool/reasoning content and must be checked at their own final
+			// outbound boundary.
+			frameOriginal := bytes.Clone(payload)
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
 			responseCreateAt := time.Time{}
@@ -1131,6 +1145,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
+				if err := checkAccountRequestIntegrity(c, account, frameOriginal, out); err != nil {
+					return out, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+				}
 				responseCreateAtCopy := responseCreateAt
 				acceptedTurnStartedAt.Store(&responseCreateAtCopy)
 				acceptedTurn = true

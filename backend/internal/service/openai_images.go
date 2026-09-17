@@ -568,6 +568,9 @@ func (s *OpenAIGatewayService) ForwardImages(
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account.IsPrismEnabled() {
+		return nil, writePrismError(c, prismUnsupported("images"))
+	}
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}

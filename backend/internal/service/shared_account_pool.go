@@ -179,6 +179,9 @@ func (s *SharedAccountUploadService) Upload(ctx context.Context, ownerID int64, 
 }
 
 func (s *SharedAccountUploadService) uploadUnlocked(ctx context.Context, ownerID int64, in SharedAccountUploadInput) (*SharedAccountListing, error) {
+	if err := ValidatePrismAccountConfiguration(&Account{Platform: in.Platform, Type: in.Type, AccountScope: "shared", Extra: in.Extra}); err != nil {
+		return nil, err
+	}
 	if adminRepo, ok := s.listings.(SharedAccountPublishPolicy); ok {
 		allowed, err := adminRepo.IsUserSharedPublishAllowed(ctx, ownerID)
 		if err != nil {
@@ -457,6 +460,13 @@ func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, a
 	if err != nil {
 		return nil, err
 	}
+	prismCandidate := account
+	if in.Extra != nil {
+		prismCandidate = prismAccountWithMergedUpdates(account, nil, *in.Extra)
+	}
+	if err := ValidatePrismAccountConfiguration(prismCandidate); err != nil {
+		return nil, err
+	}
 	oldProxyID := int64(0)
 	newProxyID := int64(0)
 	if account.ProxyID != nil {
@@ -594,6 +604,9 @@ func (s *SharedAccountUploadService) UpdateOwned(ctx context.Context, ownerID, a
 func (s *SharedAccountUploadService) ApplyOwnedOAuthCredentials(ctx context.Context, ownerID, accountID int64, accountType string, credentials, extra map[string]any) (*Account, error) {
 	account, listing, err := s.ownedAccount(ctx, ownerID, accountID)
 	if err != nil {
+		return nil, err
+	}
+	if err := ValidatePrismAccountConfiguration(prismAccountWithMergedUpdates(account, credentials, extra)); err != nil {
 		return nil, err
 	}
 	if !account.IsOAuth() {

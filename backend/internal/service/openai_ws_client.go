@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -218,7 +220,10 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string, profiles ...*t
 	now := time.Now().UnixNano()
 	cacheKey := normalizedProxy
 	if tlsProfile != nil {
-		cacheKey += "|tls:" + tlsProfile.Name
+		// Equal display names do not imply equal ClientHello parameters. Keep
+		// cached transports aligned with the full profile used by pool selection.
+		encodedProfile, _ := json.Marshal(tlsProfile)
+		cacheKey += fmt.Sprintf("|tls:%x", sha256.Sum256(encodedProfile))
 	}
 
 	d.proxyMu.Lock()

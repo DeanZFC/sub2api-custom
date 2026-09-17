@@ -2489,6 +2489,9 @@ func cloneExcludedAccountIDs(excludedIDs map[int64]struct{}) map[int64]struct{} 
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {
+	if account != nil && account.IsPrismEnabled() {
+		return requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE
+	}
 	if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 		return true
 	}
@@ -3032,7 +3035,7 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 }
 
 func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {
-	if account == nil || len(account.Extra) == 0 || openAIQuotaHeadroomSnapshotStale(account.Extra, now) {
+	if account == nil || account.IsPrismEnabled() || len(account.Extra) == 0 || openAIQuotaHeadroomSnapshotStale(account.Extra, now) {
 		return openAIQuotaHeadroomNeutralFactor
 	}
 	window5h, window7d := openAICanonicalQuotaWindows(account.Extra, now)
@@ -3106,7 +3109,7 @@ func openAICanonicalQuotaWindows(extra map[string]any, now time.Time) (window5h,
 }
 
 func openAISchedulingResetWindowEnd(account *Account, now time.Time) (time.Time, bool) {
-	if account == nil {
+	if account == nil || account.IsPrismEnabled() {
 		return time.Time{}, false
 	}
 	if end, ok := openAICodexWindowResetAt(account.Extra, "5h"); ok && now.Before(end) {

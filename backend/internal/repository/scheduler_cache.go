@@ -1018,8 +1018,24 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
 		"openai_oauth_passthrough",
+		// Prism routing must remain visible before the full account is hydrated.
+		// Its cookie remains exclusively in the full account credentials payload.
+		service.PrismExtraKey,
+		// Account protection is resolved at admission time. Keep this small
+		// policy object and its identity/transport controls in the scheduler
+		// projection so a newly enabled strategy takes effect on the very next
+		// routed request, even when the account is served from the cache.
+		service.AntiDegradeMarkerExtraKey,
+		service.AntiDegradationExtraKey,
+		service.ProtectionScopeExtraKey,
+		service.AccountProtectionPolicyKey,
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
+		"enable_tls_fingerprint",
+		"tls_fingerprint_builtin",
+		"tls_fingerprint_profile_id",
+		"request_integrity_mode",
+		"proxy_mode",
 		"codex_5h_used_percent",
 		"codex_7d_used_percent",
 		"codex_5h_reset_at",
@@ -1039,6 +1055,19 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := extra[key]; ok && value != nil {
+			if key == service.PrismExtraKey {
+				config, ok := value.(map[string]any)
+				if !ok {
+					continue
+				}
+				projected := make(map[string]any, 4)
+				for _, name := range []string{"enabled", "version", "conversation_action_id", "timeout_seconds"} {
+					if field, exists := config[name]; exists {
+						projected[name] = field
+					}
+				}
+				value = projected
+			}
 			if key == service.UpstreamBillingProbeExtraKey {
 				filteredProbe := filterSchedulerUpstreamBillingProbe(value)
 				if filteredProbe == nil {

@@ -468,6 +468,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		normalized = policyApplied
 		ingressSessionOriginalModel = originalModel
+		if account.RequestIntegrityMode() != "off" {
+			if err := checkAccountRequestIntegrity(c, account, trimmed, normalized); err != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+			}
+			stageMode1Request(c, account, trimmed)
+		}
 
 		return openAIWSClientPayload{
 			payloadRaw:               normalized,
@@ -663,6 +669,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					currentBridgePayload.previousResponseID != "",
 					openAIWSRawPayloadHasToolCallOutput(currentBridgePayload.payloadRaw),
 				)
+			}
+			// The bridge can rebuild input history after the ingress parser has
+			// staged the client frame. Validate the actual body passed to the HTTP
+			// upstream so protected accounts cannot lose tools, reasoning, or input
+			// during replay normalization.
+			if err := validateMode1StagedRequest(c, account, bridgePayloadRaw); err != nil {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 			}
 			grokCacheIdentity := ""
 			if account.Platform == PlatformGrok {
@@ -961,6 +974,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
+		}
+		// This is the final pooled-WS send boundary. Retry shaping and account
+		// failover may have changed payload since parsing, so enforce the staged
+		// semantic snapshot immediately before writing it upstream.
+		if err := validateMode1StagedRequest(c, account, payload); err != nil {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 		}
 		turnStart := time.Now()
 		wroteDownstream := false

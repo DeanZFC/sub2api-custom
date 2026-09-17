@@ -141,6 +141,7 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/account-protection.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/
@@ -157,3 +158,5 @@ output/
 .vite/
 # 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
 /plugins/
+
+!docs/prism-upstream-plan.md

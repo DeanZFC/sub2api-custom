@@ -349,6 +349,9 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 	if account == nil {
 		return nil, fmt.Errorf("account is required")
 	}
+	if account.IsPrismEnabled() {
+		return &UsageInfo{Source: "prism", ErrorCode: "not_supported", Error: "Prism quota information is not available"}, nil
+	}
 	accountID := account.ID
 
 	// Dedicated UI load-test accounts must remain fully interactive without ever

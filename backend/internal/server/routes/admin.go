@@ -88,6 +88,9 @@ func RegisterAdminRoutes(
 		// 运维监控（Ops）
 		registerOpsRoutes(admin, h)
 
+		// 账号健康（默认观察器关闭，不影响普通调度）
+		registerAccountHealthRoutes(admin, h)
+
 		// 系统管理
 		registerSystemRoutes(admin, h)
 
@@ -134,6 +137,15 @@ func RegisterAdminRoutes(
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
 	}
+}
+
+func registerAccountHealthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	health := admin.Group("/account-health")
+	health.GET("", h.Admin.AccountHealth.Snapshot)
+	health.GET("/settings", h.Admin.AccountHealth.GetSettings)
+	health.PUT("/settings", h.Admin.AccountHealth.UpdateSettings)
+	health.POST("/:id/isolate", h.Admin.AccountHealth.Isolate)
+	health.POST("/:id/resume", h.Admin.AccountHealth.Resume)
 }
 
 func registerSharedAccountPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
@@ -385,6 +397,9 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/upstream-billing-probe/batch", h.Admin.Account.ProbeUpstreamBillingBatch)
 		accounts.GET("/ollama-cloud-usage/settings", h.Admin.Account.GetOllamaCloudUsageSettings)
 		accounts.PUT("/ollama-cloud-usage/settings", h.Admin.Account.UpdateOllamaCloudUsageSettings)
+		// Account protection strategy registry must be registered before the
+		// parameterized /:id route below.
+		accounts.GET("/anti-degrade/strategies", h.Admin.Account.ListAntiDegradeStrategies)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/:id/duplicate", h.Admin.Account.Duplicate)
@@ -404,6 +419,9 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/ollama-cloud-usage/refresh", h.Admin.Account.RefreshOllamaCloudUsage)
 		accounts.DELETE("/:id", h.Admin.Account.Delete)
 		accounts.POST("/:id/test", h.Admin.Account.Test)
+		accounts.GET("/:id/anti-degrade", h.Admin.Account.PreviewAntiDegrade)
+		accounts.POST("/:id/anti-degrade/apply", h.Admin.Account.ApplyAntiDegrade)
+		accounts.POST("/:id/anti-degrade/revert", h.Admin.Account.RevertAntiDegrade)
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)

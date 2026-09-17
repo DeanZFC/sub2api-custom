@@ -31,6 +31,64 @@ import type {
   GrokMediaEligibilityState
 } from '@/types'
 
+export type AntiDegradeMode =
+	| 'generic'
+  | 'legacy'
+  | 'mode1'
+  | 'mode2'
+  | 'minimal_compat'
+  | 'session_standard'
+  | 'native_baseline'
+  | 'tls_node24'
+  | 'low_concurrency'
+  | 'single_machine_multi_window'
+
+export interface AntiDegradeChange {
+  key: string
+  from?: unknown
+  to?: unknown
+  note?: string
+}
+
+export interface AntiDegradeRuntimeState {
+  strategy: string
+  policy_version?: number
+  identity_mode?: string
+  configured_tls?: string
+  effective_tls?: string
+  tls_reason?: string
+  observed?: boolean
+  concurrency?: number
+}
+
+export interface AntiDegradePreview {
+  account_id: number
+  enabled: boolean
+  eligible: boolean
+  active_mode?: string
+  policy_version?: number
+  identity_ready?: boolean
+  tls_profile?: string
+  issues?: string[]
+  reason?: string
+  changes: AntiDegradeChange[]
+  runtime?: AntiDegradeRuntimeState
+}
+
+export interface AntiDegradeStrategyProfile {
+  id: AntiDegradeMode
+  name: string
+  description: string
+  category?: string
+  identity_mode?: string
+  tls_profile?: string
+  max_concurrency?: number
+  risk?: string
+  apply_supported: boolean
+  requires_openai_oauth?: boolean
+  diagnostic_only?: boolean
+}
+
 /**
  * List all accounts with pagination
  * @param page - Page number (default: 1)
@@ -237,6 +295,44 @@ export async function duplicate(id: number): Promise<Account> {
  */
 export async function update(id: number, updates: UpdateAccountRequest): Promise<Account> {
   const { data } = await apiClient.put<Account>(`/admin/accounts/${id}`, updates)
+  return data
+}
+
+/** List server-supported account protection strategies. */
+export async function listAntiDegradeStrategies(): Promise<AntiDegradeStrategyProfile[]> {
+  const { data } = await apiClient.get<{ strategies: AntiDegradeStrategyProfile[] }>(
+    '/admin/accounts/anti-degrade/strategies'
+  )
+  return data.strategies || []
+}
+
+/** Preview an account protection strategy without changing the account. */
+export async function previewAntiDegrade(
+  id: number,
+  mode?: AntiDegradeMode
+): Promise<AntiDegradePreview> {
+  const { data } = await apiClient.get<AntiDegradePreview>(`/admin/accounts/${id}/anti-degrade`, {
+    params: { mode }
+  })
+  return data
+}
+
+/** Apply an account protection strategy immediately. */
+export async function applyAntiDegrade(
+  id: number,
+  mode?: AntiDegradeMode
+): Promise<Account> {
+  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/anti-degrade/apply`, undefined, {
+    params: { mode }
+  })
+  return data
+}
+
+/** Revert the account protection snapshot immediately. */
+export async function revertAntiDegrade(id: number, confirmDisable = true): Promise<Account> {
+  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/anti-degrade/revert`, {
+    confirm_disable: confirmDisable
+  })
   return data
 }
 
@@ -1079,6 +1175,10 @@ export const accountsAPI = {
   create,
   duplicate,
   update,
+  listAntiDegradeStrategies,
+  previewAntiDegrade,
+  applyAntiDegrade,
+  revertAntiDegrade,
   getGrokMediaEligibility,
   updateGrokMediaEligibility,
   checkMixedChannelRisk,

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,6 +113,65 @@ func TestExtractScheduledTestHTMLHandlesSVGAndQuotedAttributes(t *testing.T) {
 	}
 	if got := extractScheduledTestHTML("```\n<svg />\n```"); got != "<svg />" {
 		t.Fatalf("fenced SVG extraction = %q", got)
+	}
+}
+
+func TestExtractScheduledTestHTMLDecodesEscapedHTML(t *testing.T) {
+	input := `tool output:\n<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head><meta charset=\"UTF-8\"></head>\n<body><h1>OK</h1></body>\n</html>\ntrailing tool output`
+	got := extractScheduledTestHTML(input)
+	want := "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head><meta charset=\"UTF-8\"></head>\n<body><h1>OK</h1></body>\n</html>"
+	if got != want {
+		t.Fatalf("HTML extraction = %q, want %q", got, want)
+	}
+}
+
+func TestExtractScheduledTestHTMLPreservesNormalScriptEscapes(t *testing.T) {
+	for _, input := range []string{
+		`<html><body><script>const value = "quoted"; const path = "a\\n b";</script></body></html>`,
+		`<html><body><script>const values = ['a\nb', 'c\nd', 'e\nf']; const regex = /\n/g;</script></body></html>`,
+		"<!doctype html>\n<html>\n<body><script>" + `const s = "line\n\"quoted\"";` + "</script></body>\n</html>",
+	} {
+		if got := extractScheduledTestHTML(input); got != input {
+			t.Fatalf("normal HTML was changed: got %q, want %q", got, input)
+		}
+	}
+}
+
+func TestExtractScheduledTestHTMLFromJSONCommandTranscript(t *testing.T) {
+	want := "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<body>\n" +
+		`<script>const line = "a\nb"; const path = "C:\\tmp"; const quote = "\""; const re = /\d+\s*/g;</script>` +
+		"\n<svg viewBox=\"0 0 700 390\"><title>鹈鹕动画</title><circle r=\"10\" /></svg>\n</body>\n</html>"
+	var payload strings.Builder
+	encoder := json.NewEncoder(&payload)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(map[string]any{"cmd": "cat > animation.html <<'EOF'\n" + want + "\nEOF\nls -l animation.html", "yield_time_ms": 10000}); err != nil {
+		t.Fatal(err)
+	}
+	input := "我先检查目录。 to=terminal.exec code:\n" + `{"cmd":"printf '\\n-- files --\\n'"}` +
+		"\nto=terminal.exec code:\n" + payload.String() + "已创建动画文件。"
+	result := &ScheduledTestResult{Status: "success", ResponseText: input}
+	(&ScheduledTestRunnerService{}).applyOutputContract(result, "html")
+	if result.OutputHTML != want {
+		t.Fatalf("transcript extraction = %q, want %q", result.OutputHTML, want)
+	}
+	if result.Status != "success" || result.ResponseText != input {
+		t.Fatal("HTML normalization changed the status or original response")
+	}
+}
+
+func TestExtractScheduledTestHTMLEscapedFragments(t *testing.T) {
+	for _, tc := range []struct{ name, input, want string }{
+		{"fenced", "```html\n" + `<html lang=\"en\">\n<body>OK</body>\n</html>` + "\n```", "<html lang=\"en\">\n<body>OK</body>\n</html>"},
+		{"no attributes", `<html>\n<body>OK</body>\n</html>`, "<html>\n<body>OK</body>\n</html>"},
+		{"one line SVG", `<svg viewBox=\"0 0 10 > 10\"><text>\u9e48\u9e55</text></svg>`, `<svg viewBox="0 0 10 > 10"><text>鹈鹕</text></svg>`},
+		{"malformed encoding untouched", `<html lang=\"en\">\n<body>\q</body></html>`, `<html lang=\"en\">\n<body>\q</body></html>`},
+		{"partial document rejected", `<html lang=\"en\">\n<body>partial`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractScheduledTestHTML(tc.input); got != tc.want {
+				t.Fatalf("HTML extraction = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

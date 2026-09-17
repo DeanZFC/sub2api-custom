@@ -199,13 +199,14 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			v := acc.ExpiresAt.Unix()
 			expiresAt = &v
 		}
+		credentials, extra := accountExportWithoutPrismSession(acc)
 		dataAccounts = append(dataAccounts, DataAccount{
 			Name:               acc.Name,
 			Notes:              acc.Notes,
 			Platform:           acc.Platform,
 			Type:               acc.Type,
-			Credentials:        acc.Credentials,
-			Extra:              acc.Extra,
+			Credentials:        credentials,
+			Extra:              extra,
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,
@@ -223,6 +224,43 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	}
 
 	response.Success(c, payload)
+}
+
+// A Prism browser session belongs to one configured account. Generic exports
+// retain the existing OAuth/API-key behavior, but re-importing an export must
+// require explicit Prism credentials and opt-in.
+func accountExportWithoutPrismSession(account service.Account) (map[string]any, map[string]any) {
+	credentials := make(map[string]any, len(account.Credentials))
+	for key, value := range account.Credentials {
+		if key != service.PrismCookieCredentialKey && key != service.PrismCookieConfiguredCredentialKey {
+			credentials[key] = value
+		}
+	}
+	if account.Credentials == nil {
+		credentials = nil
+	}
+	extra := make(map[string]any, len(account.Extra))
+	for key, value := range account.Extra {
+		if key == service.PrismCookieCredentialKey {
+			continue
+		}
+		if key == service.PrismExtraKey {
+			prism := map[string]any{"enabled": false, "version": 1}
+			if current, ok := value.(map[string]any); ok {
+				for _, field := range []string{"version", "conversation_action_id", "timeout_seconds"} {
+					if configured, exists := current[field]; exists {
+						prism[field] = configured
+					}
+				}
+			}
+			value = prism
+		}
+		extra[key] = value
+	}
+	if account.Extra == nil {
+		extra = nil
+	}
+	return credentials, extra
 }
 
 func (h *AccountHandler) ImportData(c *gin.Context) {

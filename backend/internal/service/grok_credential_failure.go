@@ -103,6 +103,9 @@ func (s *OpenAIGatewayService) getRequestCredential(ctx context.Context, c *gin.
 	if account == nil {
 		return "", "", errors.New("account is nil")
 	}
+	if account.IsPrismEnabled() {
+		return "", "", errors.New("Prism requires the independent HTTP text adapter; this protocol is unsupported")
+	}
 	if !account.IsGrokOAuth() {
 		return s.GetAccessToken(ctx, account)
 	}

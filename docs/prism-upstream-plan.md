@@ -1,0 +1,100 @@
+# Prism 账号通道（实验性）
+
+已实现基于 2026-09-17 所提供 HAR 的文本通道，包括账号配置、网关转发、账号连接测试及渠道定时测试。协议与集成测试使用本地模拟响应；尚未用真实 Prism 登录态验证当前网站版本。
+
+## 开启方式
+
+1. 在账号管理编辑一个独立的 OpenAI OAuth / setup-token 账号，开启「Prism 通道（实验性）」。
+2. 填入该账号已登录 Prism 的 Cookie，必须包含 `prism_oai_access_token` 和 `prism_session_token`。这是独立认证，不自动把原 Codex OAuth 凭证当作 Prism 登录态。
+3. 默认超时 180 秒，可配置 30–600 秒。Conversation Action ID 留空使用捕获版本的默认值；网站更新后如需覆盖，填入新版本的 42 位十六进制标识。
+4. 保存后运行该账号的文本测试，默认模型 `gpt-5.6-sol`。通过后再使用本站 API Key 调用。
+
+开关默认关闭，旧账号缺少配置时仍走原有逻辑。关闭仅退出 Prism 分支，不覆盖原代理、并发、指纹、Codex 配置和模型映射。普通编辑不回显 Cookie，留空保留；复制或导出账号不携带 Prism 会话且默认关闭。
+
+配置存于 `extra.prism`，Cookie 单独存于 `credentials.prism_cookie`，沿用账号凭证的存储机制。常规账号接口只返回是否已配置，不返回凭证内容。候选调度缓存只带非敏感配置。账号同步、导入通过相同有效性校验；显式导入开启时也必须提供合法的独立凭证。
+
+```json
+{
+  "extra": {
+    "prism": {
+      "enabled": true,
+      "version": 1,
+      "timeout_seconds": 180,
+      "conversation_action_id": ""
+    }
+  }
+}
+```
+
+共享或影子账号不支持此通道。默认仅公布 HAR 实际请求过的 `gpt-5.6-sol`；可通过原账号模型映射显式配置其他模型，但不代表已验证上游支持。该 HAR 没有证明 Astra 可用、不限量、独立额度或模型质量保证。
+
+## 客户端使用
+
+继续使用本站原地址和 API Key。支持文本形式的 `/v1/responses`、`/v1/chat/completions`，两者都支持 `stream: false` 和 `stream: true`。
+
+Responses 示例（请求发往本站，不是直接发往 Prism）：
+
+```json
+{
+  "model": "gpt-5.6-sol",
+  "instructions": "请用中文回答。",
+  "input": "你好",
+  "reasoning": {"effort": "medium"},
+  "stream": true
+}
+```
+
+Chat Completions 示例：
+
+```json
+{
+  "model": "gpt-5.6-sol",
+  "messages": [{"role": "user", "content": "你好"}],
+  "reasoning_effort": "medium",
+  "stream": false
+}
+```
+
+多轮请求需要每次发送完整文本历史。每次调用都会在 Prism 创建独立项目、会话及沙箱，不复用不同用户的上下文。本次未实现项目清理，生成的项目会保留在上游。
+
+推理强度原样传入 `metadata.reasoning_effort`，缺省为 `medium`。只验证过 HAR 中的 `medium`；其他级别由上游决定是否接受，不将 `ultra` 静默改成另一级别。系统、开发者、用户、助手文本都保持原角色转发，不注入抓包中的私人提示或网页系统提示。
+
+## 支持范围与返回行为
+
+- 已接通项目创建、访问权校验、当前登录身份读取、沙箱、文档同步及资源凭证初始化、Conversation Server Action、提交生成、状态轮询、文本结果解析。
+- 轮询传回最近一次响应中的完整 `turn_state`，不拼造 job ID、服务端文件路径或游标。
+- 原代理和并发设置用于全部上游 HTTP 请求；TLS 继续使用原有账号传输配置。入口在 Codex 认证、请求改写和插件路由之前分流。
+- 保留外围本站鉴权、分组权限、账号调度与并发限制。手动账号测试和现有定时渠道测试复用同一个 Prism 客户端。
+- `stream: true` 等待期间发送心跳，收到完整文本后以标准 SSE 事件返回最终内容。此处不代表上游提供逐 token 增量；首输出延迟是完整文本到达时间。
+- 成功响应只包含标准文本输出和真实存在的 token 用量，不返回上游沙箱令牌、调试数据、项目路径或文件变化。
+- HTTP 重定向被禁止；所有请求目的地固定为 `https://prism.openai.com`。上下游客户端 Cookie、Authorization 不混用。
+- 不自动重试或切回 Codex，尤其提交生成后结果不确定时不会重复提交。取消请求会停止本地轮询和连接；未验证上游取消接口，因此不保证终止已提交的上游任务。
+- 登录态失效、Cloudflare HTML 403、Server Action 变化等返回脱敏的阶段与错误码。登录态自动刷新未实现，需要管理员更新账号 Cookie。
+
+未实现的能力在请求/账号能力层明确拒绝，不静默丢弃：客户端自定义工具及工具结果、图片/音频/文件、`previous_response_id` 或服务端 `conversation` 续接、compact、WebSocket、Anthropic Messages、token-count 接口、结构化 JSON 输出及采样/长度限制等未捕获参数。完整 Codex 编程客户端通常携带工具，因此目前不能将此文本通道视为完整 Codex 替代。
+
+## 用量与计费
+
+捕获样本的终态响应没有 token usage。缺失时：
+
+- 客户端返回 `usage: null`；使用记录按现有存储结构记录 0 token、0 费用，并以 `upstream_endpoint=/api/llm/response_with_tools_start` 区分此通道。这里的 0 表示未取得统计，不是上游确认没有消耗。
+- 不估算 token、不执行模型按次兜底收费，也不伪造缓存命中。
+- 非流式响应的 `X-Sub2api-Usage-Source` 为 `unavailable`；如实际返回合法 usage 则为 `upstream`。流式头为 `pending`，以最终事件的 usage 为准。
+- 如果将来上游返回合法的 input/output/total 及缓存 token，保留真实计数并使用现有计费链路；不声称上游响应确认了未回显的实际模型。
+
+## 文件与验证
+
+- `backend/internal/pkg/prism/client.go`：独立网页协议客户端及有限状态轮询。
+- `backend/internal/service/prism_account_config.go`：开关、凭证校验和默认模型。
+- `backend/internal/service/prism_gateway_adapter.go`：Responses / Chat 请求校验、独立转发、SSE 与安全错误。
+- `backend/internal/service/prism_account_connection.go`：账号与定时测试接入。
+- `frontend/src/components/account/PrismAccountSettings.vue`：账号编辑配置。
+
+离线测试覆盖初始化、身份/地址校验、最新状态回传、两次请求隔离、Cookie 轮换、重定向防护、取消和超时、异常响应、缺失/真实 usage、账号配置保存/复制/脱敏及调度能力。集成测试覆盖网关与账号测试使用相同路径、代理/并发保留、重试隔离、SSE、上下文回放和不支持参数提前拒绝。
+
+标准对外协议参考：
+
+- https://developers.openai.com/api/reference/resources/responses/methods/create
+- https://developers.openai.com/api/docs/guides/streaming-responses
+
+这些文档定义本站响应格式，不证明 Prism 私有端点具备同等能力。没有把 HAR、原始 cURL、私人内容或登录凭证写入代码和测试。

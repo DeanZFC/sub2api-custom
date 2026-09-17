@@ -14,6 +14,9 @@ func RedactCredentials(in map[string]any) (out map[string]any, status map[string
 	}
 	out = make(map[string]any, len(in))
 	for k, v := range in {
+		if k == service.PrismCookieConfiguredCredentialKey {
+			continue // Derived response state must never be trusted from storage.
+		}
 		if service.IsSensitiveCredentialKey(k) {
 			if isCredentialValuePresent(v) {
 				if status == nil {

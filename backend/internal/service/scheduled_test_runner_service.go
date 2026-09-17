@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -34,6 +35,9 @@ var (
 	scheduledTestAtLeastNumberRE = regexp.MustCompile(`(?i)至少` + scheduledTestMarkerGap + `(?:(?:is|are|为|是)` + scheduledTestMarkerGap + `)?(?:=|:|：)?` + scheduledTestMarkerGap + `(` + scheduledTestNumberPattern + `)`)
 	scheduledTestAnswerLineRE    = regexp.MustCompile(`(?i)(?:final\s+(?:answer|result)|answer|result|答案|最终|结论|minimum|最少|至少)`)
 	scheduledTestHTMLRootRE      = regexp.MustCompile(`(?is)<\s*([a-z][a-z0-9:._-]*)(?:\s|/?>)`)
+	scheduledTestHTMLDoctypeRE   = regexp.MustCompile(`(?is)<!doctype\s+html\s*>(?:\s|\\[nrt])*$`)
+	scheduledTestHTMLAttrRE      = regexp.MustCompile(`=\s*\\"`)
+	scheduledTestHTMLSpaceRE     = regexp.MustCompile(`^(?:\s|\\[nrt])*\\[nrt](?:\s|\\[nrt])*<`)
 )
 
 const scheduledTestPersistenceTimeout = 15 * time.Second
@@ -438,6 +442,35 @@ func (s *ScheduledTestRunnerService) applyOutputContract(result *ScheduledTestRe
 }
 
 func extractScheduledTestHTML(text string) string {
+	// Some upstreams include tool-call transcripts in their text response. The
+	// document can then be inside a JSON command string. Decode that string
+	// once, without executing the command or unescaping ordinary HTML/scripts.
+	if root := scheduledTestHTMLRootRE.FindStringIndex(text); root != nil {
+		for i := root[0] - 1; i >= 0; i-- {
+			if text[i] != '"' {
+				continue
+			}
+			backslashes := 0
+			for j := i - 1; j >= 0 && text[j] == '\\'; j-- {
+				backslashes++
+			}
+			if backslashes%2 != 0 {
+				continue
+			}
+			var decoded string
+			if err := json.NewDecoder(strings.NewReader(text[i:])).Decode(&decoded); err == nil {
+				if html := extractScheduledTestHTMLDocument(decoded); html != "" {
+					return html
+				}
+			}
+			break
+		}
+	}
+	html := extractScheduledTestHTMLDocument(text)
+	return decodeScheduledTestEscapedHTML(html)
+}
+
+func extractScheduledTestHTMLDocument(text string) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return ""
@@ -461,12 +494,33 @@ func extractScheduledTestHTML(text string) string {
 	// while dropping prose such as "Here is the HTML:" before it.
 	prefix := strings.TrimSpace(trimmed[:start])
 	if prefix != "" {
-		doctypeRE := regexp.MustCompile(`(?is)<!doctype\s+html\s*>\s*$`)
-		if loc := doctypeRE.FindStringIndex(prefix); loc != nil {
+		if loc := scheduledTestHTMLDoctypeRE.FindStringIndex(prefix); loc != nil {
 			start = loc[0]
 		}
 	}
 	return strings.TrimSpace(trimmed[start:end])
+}
+
+// Older results may contain only the escaped document, without its enclosing
+// JSON string. Require escapes in markup itself, not just inside JavaScript,
+// and a valid JSON encoding before decoding exactly one layer. Normal HTML
+// and malformed/mixed encodings are left untouched.
+func decodeScheduledTestEscapedHTML(html string) string {
+	root := scheduledTestHTMLRootRE.FindStringIndex(html)
+	if root == nil {
+		return html
+	}
+	end := scheduledTestTagEnd(html, root[0]+1)
+	if end < 0 || (!scheduledTestHTMLAttrRE.MatchString(html[root[0]:end]) && !scheduledTestHTMLSpaceRE.MatchString(html[end+1:])) {
+		return html
+	}
+	var decoded string
+	if err := json.Unmarshal([]byte(`"`+html+`"`), &decoded); err == nil {
+		if document := extractScheduledTestHTMLDocument(decoded); document != "" {
+			return document
+		}
+	}
+	return html
 }
 
 func unwrapScheduledTestMarkdownFence(text string) string {

@@ -98,7 +98,7 @@ func applyStagedCodexFingerprintClientMetadata(c *gin.Context, account *Account,
 // 初始化账号级指纹快照。快照放在 gin context 中，保证同一轮请求的请求体和
 // 握手头使用同一份 IDs；已有快照则复用，避免 session/full 模式生成两套随机 ID。
 func ensureStagedCodexFingerprintIDs(c *gin.Context, account *Account, enabled bool) *codexFingerprintIDs {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || (!account.IsOpenAIOAuth() && !(account.IsOpenAIOAuthLike() && account.IdentityProtectionEnabled())) {
 		return nil
 	}
 	if ids := stagedCodexFingerprintIDs(c, account); ids != nil {
@@ -154,7 +154,7 @@ const (
 // mode follow the same single-machine default as the request identity path.
 // Explicit off/device/session/full modes keep their existing TLS behavior.
 func resolveCodexMacTLSProfile(account *Account) *tlsfingerprint.Profile {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || (!account.IsOpenAIOAuth() && !(account.IsOpenAIOAuthLike() && account.IdentityProtectionEnabled())) {
 		return nil
 	}
 	mode, _ := resolveCodexFingerprintMode(account, true)
@@ -298,7 +298,7 @@ func (a *Account) GetCodexFingerprintMode() codexFingerprintMode {
 // per-account value always wins; when the global switch is enabled and the
 // account has no mode key, device-level convergence is enabled by default.
 func resolveCodexFingerprintMode(account *Account, _ bool) (codexFingerprintMode, bool) {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || (!account.IsOpenAIOAuth() && !(account.IsOpenAIOAuthLike() && account.IdentityProtectionEnabled())) {
 		return codexFingerprintOff, false
 	}
 	if account.Extra != nil {
@@ -360,6 +360,9 @@ func deriveStableUUIDv7(seed string, unixMs int64) string {
 func resolveConvergedInstallationID(account *Account, seed string) string {
 	if account == nil {
 		return ""
+	}
+	if isMode1ProtectionEnabled(account) && seed != "" {
+		return deriveStableUUIDv4("sub2api:mode1-install-id:v2:" + seed)
 	}
 	if deviceID := account.GetOpenAIDeviceID(); deviceID != "" {
 		return deviceID
@@ -552,6 +555,7 @@ func isCodexFingerprintClient(h http.Header) bool {
 type codexFingerprintIDs struct {
 	accountID                     int64
 	mode                          codexFingerprintMode
+	protectionEnabled             bool
 	installationID                string
 	sessionID                     string
 	threadID                      string
@@ -595,6 +599,7 @@ func resolveCodexFingerprintIDsWithSeed(account *Account, clientSessionID string
 	ids := &codexFingerprintIDs{
 		accountID:           account.ID,
 		mode:                mode,
+		protectionEnabled:   account.IdentityProtectionEnabled(),
 		turnStartedAtUnixMs: time.Now().UnixMilli(),
 	}
 
@@ -830,6 +835,11 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 
 	if ids.installationID != "" {
 		existing["x-codex-installation-id"] = ids.installationID
+		if ids.protectionEnabled {
+			if _, present := existing["installation_id"]; present {
+				existing["installation_id"] = ids.installationID
+			}
+		}
 		modified = true
 	}
 
@@ -844,6 +854,23 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 	existing["thread_id"] = ids.threadID
 	existing["turn_id"] = ids.turnID
 	existing["x-codex-window-id"] = ids.windowID
+	// Protected accounts must not expose the caller's identity through an
+	// alternate spelling beside the converged canonical fields. Only update
+	// aliases already supplied by the client; unprotected accounts retain the
+	// existing fingerprint behavior.
+	if ids.protectionEnabled {
+		for key, value := range map[string]string{
+			"session-id":          ids.sessionID,
+			"thread-id":           ids.threadID,
+			"turn-id":             ids.turnID,
+			"window_id":           ids.windowID,
+			"x-client-request-id": ids.threadID,
+		} {
+			if _, present := existing[key]; present {
+				existing[key] = value
+			}
+		}
+	}
 
 	fields, deleteKeys := codexFingerprintTurnMetadataFields(ids)
 	applyClientMetadataEmbeddedTurnMetadata(existing, fields, deleteKeys, ids.mode == codexFingerprintSingleMachineMultiWindow)
