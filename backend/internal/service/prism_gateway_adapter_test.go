@@ -42,6 +42,8 @@ type prismGatewayUpstream struct {
 	startBody            map[string]any
 	accountAuthToken     string
 	rejectAccountAuth    bool
+	completedStart       bool
+	completedStartError  bool
 }
 
 func (u *prismGatewayUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
@@ -184,6 +186,11 @@ func (u *prismGatewayUpstream) DoWithTLS(r *http.Request, proxy string, accountI
 			u.t.Errorf("full conversation changed: roles=%v texts=%v", roles, texts)
 		}
 		data = map[string]any{"status": "started", "request_id": "synthetic-request", "conversation_id": prismGatewayConversation, "turn_state": map[string]any{"conversation_id": prismGatewayConversation, "workspace_session_id": strings.TrimPrefix(prismGatewayConversation, "cdx1_"), "private": "synthetic-private-turn"}}
+		if u.completedStartError {
+			data = map[string]any{"status": "completed", "request_id": "synthetic-request", "response": map[string]any{"status": "error", "payload": map[string]any{"reason": "unknown", "httpStatus": 400, "message": "synthetic-private-prompt", "rootCause": "synthetic-private-token"}}}
+		} else if u.completedStart {
+			data = map[string]any{"status": "completed", "request_id": "synthetic-request", "response": map[string]any{"status": "success", "payload": map[string]any{"id": "resp_immediate", "conversationId": prismGatewayConversation, "output": []any{map[string]any{"id": "msg_immediate", "type": "message", "role": "assistant", "content": []any{map[string]string{"type": "output_text", "text": prismGatewayAnswer}}}}}}}
+		}
 	case "/api/llm/response_with_tools_status":
 		u.polls++
 		body := decode()

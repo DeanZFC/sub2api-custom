@@ -65,11 +65,14 @@ type Result struct {
 }
 
 // Error is safe to log. It never includes response bodies, URLs, or credentials.
-// Submitted means the generation may have started and must not be retried.
+// Submitted means the start request was sent and must not be retried.
+// Terminal means a matching completed envelope was received, so its outcome is
+// no longer pending even when the result cannot be consumed.
 type Error struct {
 	Stage      string
 	StatusCode int
 	Submitted  bool
+	Terminal   bool
 	Code       string
 	cause      error
 }
@@ -313,8 +316,16 @@ func (c *Client) Generate(ctx context.Context, input Request) (*Result, error) {
 	if err := s.json(ctx, "start", http.MethodPost, "/api/llm/response_with_tools_start", map[string]any{"input": input.Input, "metadata": metadata, "conversationId": conversationID}, false, &turn); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(turn.RequestID) == "" || (turn.ConversationID != "" && turn.ConversationID != conversationID) {
+		return nil, failure("start", "invalid_response", true)
+	}
+	// Prism can finish synchronously, including rejecting a model before a
+	// polling state exists. This is the same result envelope returned by polling.
+	if turn.Status == "completed" {
+		return parseCompletedResult(turn.Response, conversationID)
+	}
 	workspaceSessionID := turnWorkspaceSession(turn.State, conversationID)
-	if turn.Status != "started" || turn.RequestID == "" || turn.ConversationID != conversationID || workspaceSessionID == "" {
+	if turn.Status != "started" || turn.ConversationID != conversationID || workspaceSessionID == "" {
 		return nil, failure("start", "invalid_response", true)
 	}
 	requestID := turn.RequestID
@@ -333,7 +344,7 @@ func (c *Client) Generate(ctx context.Context, input Request) (*Result, error) {
 		if err := s.json(ctx, "poll", http.MethodPost, "/api/llm/response_with_tools_status", map[string]any{"request_id": requestID, "turn_state": turn.State}, false, &next); err != nil {
 			return nil, err
 		}
-		if next.RequestID != requestID {
+		if next.RequestID != requestID || (next.ConversationID != "" && next.ConversationID != conversationID) {
 			return nil, failure("poll", "invalid_response", true)
 		}
 		switch next.Status {
@@ -343,7 +354,7 @@ func (c *Client) Generate(ctx context.Context, input Request) (*Result, error) {
 			}
 			turn = next // Each poll must use the latest opaque state, including all unknown fields.
 		case "completed":
-			return parseResult(next.Response, conversationID)
+			return parseCompletedResult(next.Response, conversationID)
 		default:
 			return nil, failure("poll", "unknown_status", true)
 		}
@@ -538,6 +549,14 @@ func normalizeInput(raw json.RawMessage) (json.RawMessage, bool) {
 	return encoded, err == nil && len(encoded) <= maxBodyBytes
 }
 
+func parseCompletedResult(raw json.RawMessage, conversationID string) (*Result, error) {
+	result, err := parseResult(raw, conversationID)
+	if pe, ok := err.(*Error); ok {
+		pe.Terminal = true
+	}
+	return result, err
+}
+
 func parseResult(raw json.RawMessage, conversationID string) (*Result, error) {
 	var response struct {
 		Status  string `json:"status"`
@@ -554,10 +573,30 @@ func parseResult(raw json.RawMessage, conversationID string) (*Result, error) {
 					Text *string `json:"text"`
 				} `json:"content"`
 			} `json:"output"`
-			Usage json.RawMessage `json:"usage"`
+			Usage      json.RawMessage `json:"usage"`
+			Reason     string          `json:"reason"`
+			HTTPStatus json.RawMessage `json:"httpStatus"`
 		} `json:"payload"`
 	}
-	if json.Unmarshal(raw, &response) != nil || response.Status != "success" || response.Payload.ID == "" || response.Payload.ConversationID != conversationID || len(response.Payload.Output) == 0 {
+	if json.Unmarshal(raw, &response) != nil {
+		return nil, failure("result", "invalid_response", true)
+	}
+	if response.Status == "error" {
+		// The provider's message/rootCause/debug fields may echo credentials or
+		// prompts. Only return fixed categories and a valid numeric HTTP status.
+		code := "upstream_rejected"
+		switch response.Payload.Reason {
+		case "sandbox_reconnecting", "conversation_too_large", "project_edit_access_required":
+			code = response.Payload.Reason
+		}
+		err := failure("result", code, true)
+		var status int
+		if json.Unmarshal(response.Payload.HTTPStatus, &status) == nil && status >= 100 && status <= 599 {
+			err.StatusCode = status
+		}
+		return nil, err
+	}
+	if response.Status != "success" || response.Payload.ID == "" || response.Payload.ConversationID != conversationID || len(response.Payload.Output) == 0 {
 		return nil, failure("result", "invalid_response", true)
 	}
 	var text strings.Builder

@@ -117,6 +117,7 @@ func parsePrismIncoming(body []byte, account *Account, chat bool, defaultModel s
 	}
 	out.request.Model = resolveOpenAIForwardModel(account, out.model, defaultModel)
 	out.request.ReasoningEffort = "medium"
+	var textVerbosity string
 	for key, raw := range fields {
 		if string(raw) == "null" {
 			continue
@@ -166,29 +167,12 @@ func parsePrismIncoming(body []byte, account *Account, chat bool, defaultModel s
 				return nil, prismUnsupported(key)
 			}
 		case "text", "response_format":
-			var v map[string]json.RawMessage
-			if json.Unmarshal(raw, &v) != nil {
-				return nil, prismUnsupported(key)
+			verbosity, err := parsePrismTextOptions(raw, key)
+			if err != nil {
+				return nil, err
 			}
 			if key == "text" {
-				for k := range v {
-					if k != "format" {
-						return nil, prismUnsupported(key)
-					}
-				}
-				if format, ok := v["format"]; ok {
-					v = nil
-					if json.Unmarshal(format, &v) != nil {
-						return nil, prismUnsupported(key)
-					}
-				} else {
-					v = nil
-				}
-			}
-			for k, val := range v {
-				if k != "type" || string(val) != `"text"` {
-					return nil, prismUnsupported(key)
-				}
+				textVerbosity = verbosity
 			}
 		case "stream_options":
 			var v map[string]json.RawMessage
@@ -221,6 +205,9 @@ func parsePrismIncoming(body []byte, account *Account, chat bool, defaultModel s
 		if instructions != "" {
 			messages = append(messages, map[string]any{"role": "system", "content": instructions})
 		}
+	}
+	if preference := prismVerbosityInstruction(textVerbosity); preference != "" {
+		messages = append(messages, map[string]any{"role": "developer", "content": preference})
 	}
 	inputKey := "input"
 	if chat {
@@ -398,6 +385,7 @@ func (s *OpenAIGatewayService) forwardPrism(ctx context.Context, c *gin.Context,
 				status = http.StatusGatewayTimeout
 			}
 			setOpsUpstreamError(c, status, problem["message"].(string), "")
+			MarkOpsStreamFailure(c, problem["type"].(string), problem["code"].(string), problem["message"].(string), status)
 			if chat {
 				_ = wire.data(gin.H{"error": problem})
 				_, _ = fmt.Fprint(c.Writer, "data: [DONE]\n\n")
@@ -405,6 +393,7 @@ func (s *OpenAIGatewayService) forwardPrism(ctx context.Context, c *gin.Context,
 			} else {
 				_ = wire.event("response.failed", gin.H{"response": gin.H{"id": responseID, "object": "response", "created_at": created, "status": "failed", "model": incoming.model, "output": []any{}, "usage": nil, "error": problem}})
 			}
+			MarkResponseCommitted(c)
 			return nil, err
 		}
 		return nil, writePrismError(c, err)
@@ -504,7 +493,10 @@ func prismClientError(err error) gin.H {
 			problem["code"] = "prism_account_token_unavailable"
 			problem["message"] = "Unable to obtain an OpenAI access token for Prism; check or renew the account authorization"
 		}
-		if upstream.Submitted {
+		if upstream.Terminal {
+			problem["code"] = "prism_" + upstream.Code
+		}
+		if upstream.Submitted && !upstream.Terminal {
 			problem["message"] = upstream.Error() + "; generation may have started, and was not resubmitted"
 		}
 	case errors.Is(err, context.DeadlineExceeded):
@@ -527,6 +519,7 @@ func writePrismError(c *gin.Context, err error) error {
 	problem := prismClientError(err)
 	setOpsUpstreamError(c, status, problem["message"].(string), "")
 	c.JSON(status, gin.H{"error": problem})
+	MarkResponseCommitted(c)
 	return err // Never an UpstreamFailoverError: do not resubmit on another account.
 }
 
