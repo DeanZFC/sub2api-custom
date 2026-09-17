@@ -23,6 +23,7 @@ func TestPrismAccountConfigDefaultsAndValidation(t *testing.T) {
 	config, err := (*Account)(nil).PrismConfig()
 	require.NoError(t, err)
 	require.False(t, config.Enabled)
+	require.Equal(t, PrismAuthModeCookie, config.AuthMode)
 	require.Equal(t, 180, config.TimeoutSeconds)
 	require.Empty(t, config.ConversationActionID)
 	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
@@ -39,6 +40,9 @@ func TestPrismAccountConfigDefaultsAndValidation(t *testing.T) {
 		{"object", func(a *Account) { a.Extra[PrismExtraKey] = true }},
 		{"unknown", func(a *Account) { a.Extra[PrismExtraKey].(map[string]any)["cookie"] = prismTestCookie }},
 		{"version", func(a *Account) { a.Extra[PrismExtraKey].(map[string]any)["version"] = 2 }},
+		{"auth mode type", func(a *Account) { a.Extra[PrismExtraKey].(map[string]any)["auth_mode"] = true }},
+		{"auth mode unknown", func(a *Account) { a.Extra[PrismExtraKey].(map[string]any)["auth_mode"] = "automatic" }},
+		{"auth mode empty", func(a *Account) { a.Extra[PrismExtraKey].(map[string]any)["auth_mode"] = "" }},
 		{"short timeout", func(a *Account) { a.Extra[PrismExtraKey].(map[string]any)["timeout_seconds"] = 29 }},
 		{"long timeout", func(a *Account) { a.Extra[PrismExtraKey].(map[string]any)["timeout_seconds"] = 601 }},
 		{"fractional timeout", func(a *Account) { a.Extra[PrismExtraKey].(map[string]any)["timeout_seconds"] = 30.5 }},
@@ -79,6 +83,98 @@ func TestPrismAccountConfigDefaultsAndValidation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, strings.Repeat("a1", 21), config.ConversationActionID)
 	}
+}
+
+func TestPrismAccountAuthValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		accountType string
+		credentials map[string]any
+		valid       bool
+	}{
+		{"OAuth access token", AccountTypeOAuth, map[string]any{"access_token": "test-access.token_123-456"}, true},
+		{"OAuth refresh only", AccountTypeOAuth, map[string]any{"refresh_token": "test-refresh"}, true},
+		{"OAuth access and refresh", AccountTypeOAuth, map[string]any{"access_token": "test-access", "refresh_token": "test-refresh"}, true},
+		{"setup token", AccountTypeSetupToken, map[string]any{"access_token": "test-access"}, true},
+		{"setup refresh only", AccountTypeSetupToken, map[string]any{"refresh_token": "test-refresh"}, false},
+		{"missing credentials", AccountTypeOAuth, nil, false},
+		{"cookie alone", AccountTypeOAuth, map[string]any{PrismCookieCredentialKey: prismTestCookie}, false},
+		{"empty credentials", AccountTypeOAuth, map[string]any{"access_token": "", "refresh_token": " "}, false},
+		{"access wrong type", AccountTypeOAuth, map[string]any{"access_token": true, "refresh_token": "test-refresh"}, false},
+		{"refresh wrong type", AccountTypeOAuth, map[string]any{"access_token": "test-access", "refresh_token": true}, false},
+		{"PAT", AccountTypeOAuth, map[string]any{"access_token": "test-access", "auth_mode": OpenAIAuthModePersonalAccessToken}, false},
+		{"legacy PAT", AccountTypeOAuth, map[string]any{"access_token": "test-access", "openai_auth_mode": "personal_access_token"}, false},
+		{"cookie injection", AccountTypeOAuth, map[string]any{"access_token": "test-access; injected=private"}, false},
+		{"header injection", AccountTypeOAuth, map[string]any{"access_token": "test-access\r\nX-Private: injected"}, false},
+		{"quoted token", AccountTypeOAuth, map[string]any{"access_token": "test-\"access"}, false},
+		{"comma token", AccountTypeOAuth, map[string]any{"access_token": "test-,access"}, false},
+		{"backslash token", AccountTypeOAuth, map[string]any{"access_token": "test-\\access"}, false},
+		{"space token", AccountTypeOAuth, map[string]any{"access_token": "test- access"}, false},
+		{"unicode token", AccountTypeOAuth, map[string]any{"access_token": "test-凭证"}, false},
+		{"oversize token", AccountTypeOAuth, map[string]any{"access_token": strings.Repeat("s", PrismMaxCookieBytes+1)}, false},
+		{"stale manual cookie ignored", AccountTypeOAuth, map[string]any{"access_token": "test-access", PrismCookieCredentialKey: "old\r\ninvalid"}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			account := newPrismTestAccount()
+			account.Type = tc.accountType
+			account.Credentials = tc.credentials
+			account.Extra[PrismExtraKey].(map[string]any)["auth_mode"] = PrismAuthModeAccount
+			require.True(t, account.UsesPrismAccountAuth())
+			err := ValidatePrismAccountConfiguration(account)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.NotContains(t, err.Error(), "test-access")
+				require.NotContains(t, err.Error(), "test-refresh")
+				require.NotContains(t, err.Error(), "private")
+			}
+		})
+	}
+}
+
+func TestPrismAccountAuthRequiresExplicitEnabledMode(t *testing.T) {
+	require.False(t, (*Account)(nil).UsesPrismAccountAuth())
+	account := newPrismTestAccount()
+	require.False(t, account.UsesPrismAccountAuth(), "legacy configurations keep cookie authentication")
+	values := account.Extra[PrismExtraKey].(map[string]any)
+	values["auth_mode"] = PrismAuthModeAccount
+	require.True(t, account.UsesPrismAccountAuth())
+	values["enabled"] = false
+	require.False(t, account.UsesPrismAccountAuth())
+	require.NoError(t, ValidatePrismAccountConfiguration(account), "disabled mode does not need account tokens")
+	values["enabled"] = true
+	values["auth_mode"] = PrismAuthModeCookie
+	require.False(t, account.UsesPrismAccountAuth())
+	require.NoError(t, ValidatePrismAccountConfiguration(account))
+	values["auth_mode"] = "unknown"
+	require.False(t, account.UsesPrismAccountAuth())
+}
+
+func TestPrismAdminCanSwitchToAccountAuthWithoutManualCookie(t *testing.T) {
+	repo := &upstreamBillingProbeAdminRepo{upstreamBillingProbeAccountRepo: &upstreamBillingProbeAccountRepo{}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	account := newPrismTestAccount()
+	created, err := svc.CreateAccount(context.Background(), &CreateAccountInput{
+		Name: "prism", Platform: account.Platform, Type: account.Type,
+		Credentials:          map[string]any{"access_token": "test-account-access"},
+		Extra:                map[string]any{PrismExtraKey: map[string]any{"enabled": true, "auth_mode": PrismAuthModeAccount}},
+		SkipDefaultGroupBind: true,
+	})
+	require.NoError(t, err)
+	require.True(t, created.UsesPrismAccountAuth())
+	require.NotContains(t, created.Credentials, PrismCookieCredentialKey)
+	err = svc.UpdateAccountExtra(context.Background(), created.ID, map[string]any{PrismExtraKey: map[string]any{"enabled": true, "auth_mode": PrismAuthModeCookie}})
+	require.Error(t, err, "manual mode still needs a complete cookie")
+	require.True(t, repo.accounts[created.ID].UsesPrismAccountAuth())
+	_, err = svc.UpdateAccount(context.Background(), created.ID, &UpdateAccountInput{
+		Credentials: map[string]any{PrismCookieCredentialKey: prismTestCookie},
+		Extra:       map[string]any{PrismExtraKey: map[string]any{"enabled": true, "auth_mode": PrismAuthModeCookie}},
+	})
+	require.NoError(t, err)
+	require.False(t, repo.accounts[created.ID].UsesPrismAccountAuth())
+	require.Equal(t, "test-account-access", repo.accounts[created.ID].Credentials["access_token"])
 }
 
 func TestPrismDisabledDoesNotRequireCookieOrEligibleAccount(t *testing.T) {

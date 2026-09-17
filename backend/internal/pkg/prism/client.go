@@ -36,7 +36,12 @@ type Doer interface {
 }
 
 type Options struct {
-	Cookie               string
+	Cookie string
+	// AccessTokenProvider enables account authentication. The token is sent only
+	// as Prism's OpenAI cookie; /auth/session issues the separate Prism session.
+	// A supplied Cookie is ignored in this mode, so identities cannot be mixed.
+	AccessTokenProvider  func(context.Context) (string, error)
+	ExpectedOpenAIUserID string
 	UserAgent            string
 	ConversationActionID string
 	Timeout              time.Duration
@@ -117,7 +122,7 @@ func failure(stage, code string, submitted bool) *Error {
 // Input must contain the complete caller-provided text conversation history.
 func (c *Client) Generate(ctx context.Context, input Request) (*Result, error) {
 	normalizedInput, valid := normalizeInput(input.Input)
-	if !valid || strings.TrimSpace(input.Model) == "" || !actionPattern.MatchString(c.opts.ConversationActionID) || strings.TrimSpace(c.opts.Cookie) == "" {
+	if !valid || strings.TrimSpace(input.Model) == "" || !actionPattern.MatchString(c.opts.ConversationActionID) || (strings.TrimSpace(c.opts.Cookie) == "" && c.opts.AccessTokenProvider == nil) {
 		return nil, failure("input", "invalid_request", false)
 	}
 	input.Input = normalizedInput
@@ -126,7 +131,26 @@ func (c *Client) Generate(ctx context.Context, input Request) (*Result, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	defer cancel()
-	s := &generation{client: c}
+	s := &generation{client: c, jar: c.jar}
+	if c.opts.AccessTokenProvider != nil {
+		token, err := c.opts.AccessTokenProvider(ctx)
+		if ctx.Err() != nil {
+			return nil, &Error{Stage: "auth", Code: "canceled", cause: ctx.Err()}
+		}
+		if err != nil {
+			// Refresh errors may contain provider response bodies. Never wrap them.
+			return nil, failure("auth", "account_token_unavailable", false)
+		}
+		cookie := &http.Cookie{Name: "prism_oai_access_token", Value: token, Path: "/", Secure: true, HttpOnly: true}
+		if token == "" || len(token) > 32*1024 || cookie.Valid() != nil {
+			return nil, failure("auth", "invalid_account_token", false)
+		}
+		// Keep each generated session local to this request, including when a
+		// caller reuses a Client after refreshing or replacing its account token.
+		s.jar, _ = cookiejar.New(nil)
+		origin, _ := url.Parse(Origin)
+		s.jar.SetCookies(origin, []*http.Cookie{cookie})
+	}
 	var session struct {
 		User struct {
 			Anonymous   bool `json:"is_anonymous"`
@@ -145,7 +169,25 @@ func (c *Client) Generate(ctx context.Context, input Request) (*Result, error) {
 	}
 	userID := session.User.AppMetadata.UserID
 	if userID == "" || session.User.Anonymous || (session.Policy.User.OpenAIUserID != "" && session.Policy.User.OpenAIUserID != userID) {
+		if c.opts.AccessTokenProvider != nil {
+			return nil, failure("auth", "account_auth_rejected", false)
+		}
 		return nil, failure("auth", "invalid_identity", false)
+	}
+	if c.opts.AccessTokenProvider != nil {
+		if c.opts.ExpectedOpenAIUserID != "" && c.opts.ExpectedOpenAIUserID != userID {
+			return nil, failure("auth", "account_identity_mismatch", false)
+		}
+		origin, _ := url.Parse(Origin)
+		hasSession := false
+		for _, cookie := range s.jar.Cookies(origin) {
+			if cookie.Name == "prism_session_token" && cookie.Value != "" {
+				hasSession = true
+			}
+		}
+		if !hasSession {
+			return nil, failure("auth", "session_cookie_missing", false)
+		}
 	}
 	projectID, err := newUUID()
 	if err != nil {
@@ -310,6 +352,7 @@ func (c *Client) Generate(ctx context.Context, input Request) (*Result, error) {
 
 type generation struct {
 	client                         *Client
+	jar                            http.CookieJar
 	sandboxToken, sandboxSessionID string
 	submitted                      bool
 }
@@ -366,7 +409,7 @@ func (s *generation) send(ctx context.Context, stage, method, path string, body 
 		req.Header.Set("Accept", "text/x-component")
 		req.Header.Set("Content-Type", "text/plain;charset=UTF-8")
 	}
-	for _, cookie := range s.client.jar.Cookies(req.URL) {
+	for _, cookie := range s.jar.Cookies(req.URL) {
 		req.AddCookie(cookie)
 	}
 	resp, err := s.client.doer.Do(req)
@@ -390,7 +433,7 @@ func (s *generation) send(ctx context.Context, stage, method, path string, body 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, nil, &Error{Stage: stage, StatusCode: resp.StatusCode, Submitted: s.submitted, Code: "http_error"}
 	}
-	s.client.jar.SetCookies(req.URL, resp.Cookies())
+	s.jar.SetCookies(req.URL, resp.Cookies())
 	if sandbox {
 		id := resp.Header.Get("x-session-id")
 		if id != "" {

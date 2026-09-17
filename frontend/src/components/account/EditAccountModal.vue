@@ -1879,6 +1879,7 @@
       <PrismAccountSettings
         v-if="isPrismAccount"
         v-model:enabled="prismEnabled"
+        v-model:auth-mode="prismAuthMode"
         v-model:cookie="prismCookie"
         v-model:timeout-seconds="prismTimeoutSeconds"
         v-model:conversation-action-id="prismConversationActionId"
@@ -3713,11 +3714,12 @@ const customBaseUrl = ref('')
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
 const prismEnabled = ref(false)
+const prismAuthMode = ref<'account' | 'cookie'>('account')
 const prismCookie = ref('')
 const prismCookieConfigured = ref(false)
 const prismTimeoutSeconds = ref(180)
 const prismConversationActionId = ref('')
-const prismInitialConfig = ref({ enabled: false, timeoutSeconds: 180, conversationActionId: '' })
+const prismInitialConfig = ref({ enabled: false, authMode: 'account' as 'account' | 'cookie', timeoutSeconds: 180, conversationActionId: '' })
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -4395,6 +4397,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     ? extra.prism as Record<string, unknown>
     : undefined
   prismEnabled.value = prism?.enabled === true
+  // Existing configurations without an explicit mode keep their saved Cookie flow.
+  prismAuthMode.value = prism ? (prism.auth_mode === 'account' ? 'account' : 'cookie') : 'account'
   // The cookie is write-only: never populate it from returned credentials.
   prismCookie.value = ''
   prismCookieConfigured.value = credentials?.prism_cookie_configured === true
@@ -4402,6 +4406,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   prismConversationActionId.value = typeof prism?.conversation_action_id === 'string' ? prism.conversation_action_id : ''
   prismInitialConfig.value = {
     enabled: prismEnabled.value,
+    authMode: prismAuthMode.value,
     timeoutSeconds: prismTimeoutSeconds.value,
     conversationActionId: prismConversationActionId.value
   }
@@ -5520,7 +5525,7 @@ const handleSubmit = async () => {
   ) as Record<string, unknown> | undefined
 
   if (isPrismAccount.value && prismEnabled.value) {
-    if (!prismCookieConfigured.value && !prismCookie.value.trim()) {
+    if (prismAuthMode.value === 'cookie' && !prismCookieConfigured.value && !prismCookie.value.trim()) {
       appStore.showError(t('admin.accounts.openai.prism.cookieRequired'))
       return
     }
@@ -6077,8 +6082,11 @@ const handleSubmit = async () => {
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
       if (isPrismAccount.value && (
         prismEnabled.value !== prismInitialConfig.value.enabled ||
-        prismTimeoutSeconds.value !== prismInitialConfig.value.timeoutSeconds ||
-        prismConversationActionId.value.trim() !== prismInitialConfig.value.conversationActionId
+        (prismEnabled.value && (
+          prismAuthMode.value !== prismInitialConfig.value.authMode ||
+          prismTimeoutSeconds.value !== prismInitialConfig.value.timeoutSeconds ||
+          prismConversationActionId.value.trim() !== prismInitialConfig.value.conversationActionId
+        ))
       )) {
         const currentPrism = currentExtra.prism && typeof currentExtra.prism === 'object' && !Array.isArray(currentExtra.prism)
           ? currentExtra.prism as Record<string, unknown>
@@ -6086,6 +6094,7 @@ const handleSubmit = async () => {
         const nextPrism: Record<string, unknown> = { ...currentPrism, enabled: prismEnabled.value, version: 1 }
         // Disabling only switches channels; keep the saved Prism configuration.
         if (prismEnabled.value) {
+          nextPrism.auth_mode = prismAuthMode.value
           nextPrism.timeout_seconds = prismTimeoutSeconds.value
           if (prismConversationActionId.value.trim()) {
             nextPrism.conversation_action_id = prismConversationActionId.value.trim().toLowerCase()
@@ -6322,7 +6331,7 @@ const handleSubmit = async () => {
       const credentials = updatePayload.credentials as Record<string, unknown>
       delete credentials.prism_cookie_configured
       delete credentials.prism_cookie
-      if (isPrismAccount.value && prismCookie.value.trim()) {
+      if (isPrismAccount.value && prismAuthMode.value === 'cookie' && prismCookie.value.trim()) {
         credentials.prism_cookie = prismCookie.value.trim()
       }
     }

@@ -101,10 +101,25 @@ describe('EditAccountModal Prism settings', () => {
     expect(payload.credentials).not.toHaveProperty('prism_cookie_configured')
   })
 
-  it.each(['oauth', 'setup-token'] as const)('enables %s with a write-only Cookie and the configured timeout', async (type) => {
+  it.each(['oauth', 'setup-token'] as const)('defaults a new %s Prism channel to account authentication without a Cookie', async (type) => {
     const wrapper = mountModal(buildAccount({ type }))
     await flushPromises()
     await wrapper.get('[data-testid="prism-enabled"]').trigger('click')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="prism-auth-mode"]').element.value).toBe('account')
+    expect(wrapper.find('[data-testid="prism-cookie"]').exists()).toBe(false)
+    await save(wrapper)
+
+    expect(mocks.update).toHaveBeenCalledTimes(1)
+    expect(mocks.update.mock.calls[0][1].extra.prism).toEqual({ enabled: true, version: 1, auth_mode: 'account', timeout_seconds: 180 })
+    expect(mocks.update.mock.calls[0][1].credentials).toMatchObject({ access_token: 'test-access-token' })
+    expect(mocks.update.mock.calls[0][1].credentials).not.toHaveProperty('prism_cookie')
+  })
+
+  it.each(['oauth', 'setup-token'] as const)('enables %s with a write-only manual Cookie and the configured timeout', async (type) => {
+    const wrapper = mountModal(buildAccount({ type }))
+    await flushPromises()
+    await wrapper.get('[data-testid="prism-enabled"]').trigger('click')
+    await wrapper.get('[data-testid="prism-auth-mode"]').setValue('cookie')
     expect(wrapper.get<HTMLInputElement>('[data-testid="prism-timeout"]').element.value).toBe('180')
     expect(wrapper.get('[data-testid="prism-cookie"]').attributes('type')).toBe('password')
     await wrapper.get('[data-testid="prism-cookie"]').setValue(' test-cookie-value ')
@@ -114,7 +129,7 @@ describe('EditAccountModal Prism settings', () => {
 
     expect(mocks.update).toHaveBeenCalledTimes(1)
     const payload = mocks.update.mock.calls[0][1]
-    expect(payload.extra.prism).toEqual({ enabled: true, version: 1, timeout_seconds: 240, conversation_action_id: 'a'.repeat(42) })
+    expect(payload.extra.prism).toEqual({ enabled: true, version: 1, auth_mode: 'cookie', timeout_seconds: 240, conversation_action_id: 'a'.repeat(42) })
     expect(payload.credentials.prism_cookie).toBe('test-cookie-value')
     expect(payload.credentials.access_token).toBe('test-access-token')
   })
@@ -123,6 +138,7 @@ describe('EditAccountModal Prism settings', () => {
     const wrapper = mountModal()
     await flushPromises()
     await wrapper.get('[data-testid="prism-enabled"]').trigger('click')
+    await wrapper.get('[data-testid="prism-auth-mode"]').setValue('cookie')
     await wrapper.get('[data-testid="prism-enabled"]').trigger('click')
     await save(wrapper)
     expect(mocks.update.mock.calls[0][1].extra).not.toHaveProperty('prism')
@@ -133,6 +149,7 @@ describe('EditAccountModal Prism settings', () => {
     const wrapper = mountModal()
     await flushPromises()
     await wrapper.get('[data-testid="prism-enabled"]').trigger('click')
+    await wrapper.get('[data-testid="prism-auth-mode"]').setValue('cookie')
     await wrapper.get('[data-testid="prism-cookie"]').setValue('discarded-test-cookie')
     await wrapper.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
@@ -154,6 +171,7 @@ describe('EditAccountModal Prism settings', () => {
       credentials: { access_token: 'test-access-token', prism_cookie_configured: true, prism_cookie: 'old-server-value' }
     }))
     await flushPromises()
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="prism-auth-mode"]').element.value).toBe('cookie')
     const cookie = wrapper.get<HTMLInputElement>('[data-testid="prism-cookie"]')
     expect(cookie.element.value).toBe('')
     expect(cookie.attributes('placeholder')).toContain('cookieKeepPlaceholder')
@@ -169,13 +187,64 @@ describe('EditAccountModal Prism settings', () => {
   })
 
   it('can re-enable a saved Cookie while using the built-in action', async () => {
-    const wrapper = mountModal(buildAccount({ credentials: { prism_cookie_configured: true } }))
+    const wrapper = mountModal(buildAccount({ extra: { prism: { enabled: false } }, credentials: { prism_cookie_configured: true } }))
     await flushPromises()
     await wrapper.get('[data-testid="prism-enabled"]').trigger('click')
     await save(wrapper)
     const payload = mocks.update.mock.calls[0][1]
-    expect(payload.extra.prism).toEqual({ enabled: true, version: 1, timeout_seconds: 180 })
+    expect(payload.extra.prism).toEqual({ enabled: true, version: 1, auth_mode: 'cookie', timeout_seconds: 180 })
     expect(payload.credentials).not.toHaveProperty('prism_cookie')
+  })
+
+  it('preserves an account-auth configuration on an ordinary edit', async () => {
+    const prism = { enabled: true, auth_mode: 'account', version: 1, timeout_seconds: 300, future_option: 'preserved' }
+    const wrapper = mountModal(buildAccount({ extra: { prism } }))
+    await flushPromises()
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="prism-auth-mode"]').element.value).toBe('account')
+    expect(wrapper.find('[data-testid="prism-cookie"]').exists()).toBe(false)
+    await save(wrapper)
+    expect(mocks.update.mock.calls[0][1].extra.prism).toEqual(prism)
+  })
+
+  it('switches a legacy channel to account authentication without echoing or clearing its saved Cookie', async () => {
+    const prism = { enabled: true, version: 1, timeout_seconds: 300, future_option: 'preserved' }
+    const wrapper = mountModal(buildAccount({
+      extra: { prism },
+      credentials: { access_token: 'test-access-token', prism_cookie_configured: true, prism_cookie: 'old-server-value' }
+    }))
+    await flushPromises()
+    await wrapper.get('[data-testid="prism-cookie"]').setValue('unsaved-cookie')
+    await wrapper.get('[data-testid="prism-auth-mode"]').setValue('account')
+    expect(wrapper.find('[data-testid="prism-cookie"]').exists()).toBe(false)
+    await save(wrapper)
+    const payload = mocks.update.mock.calls[0][1]
+    expect(payload.extra.prism).toEqual({ ...prism, auth_mode: 'account' })
+    expect(payload.credentials).toMatchObject({ access_token: 'test-access-token' })
+    expect(payload.credentials).not.toHaveProperty('prism_cookie')
+    expect(payload.credentials).not.toHaveProperty('prism_cookie_configured')
+  })
+
+  it('allows switching account authentication to a previously saved manual Cookie', async () => {
+    const prism = { enabled: true, auth_mode: 'account', version: 1, timeout_seconds: 300 }
+    const wrapper = mountModal(buildAccount({
+      extra: { prism },
+      credentials: { access_token: 'test-access-token', prism_cookie_configured: true }
+    }))
+    await flushPromises()
+    await wrapper.get('[data-testid="prism-auth-mode"]').setValue('cookie')
+    await save(wrapper)
+    expect(mocks.update.mock.calls[0][1].extra.prism).toEqual({ ...prism, auth_mode: 'cookie' })
+    expect(mocks.update.mock.calls[0][1].credentials).not.toHaveProperty('prism_cookie')
+  })
+
+  it('preserves the stored authentication mode if an edited channel is disabled before saving', async () => {
+    const prism = { enabled: true, auth_mode: 'account', version: 1, timeout_seconds: 300 }
+    const wrapper = mountModal(buildAccount({ extra: { prism } }))
+    await flushPromises()
+    await wrapper.get('[data-testid="prism-auth-mode"]').setValue('cookie')
+    await wrapper.get('[data-testid="prism-enabled"]').trigger('click')
+    await save(wrapper)
+    expect(mocks.update.mock.calls[0][1].extra.prism).toEqual({ ...prism, enabled: false })
   })
 
   it('disables Prism without changing identity, proxy, concurrency, mappings, or other settings', async () => {
@@ -202,10 +271,11 @@ describe('EditAccountModal Prism settings', () => {
     expect(after.credentials.model_mapping).toEqual({ 'request-model': 'mapped-model' })
   })
 
-  it('does not enable without a new or saved Cookie', async () => {
+  it('does not enable manual mode without a new or saved Cookie', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await wrapper.get('[data-testid="prism-enabled"]').trigger('click')
+    await wrapper.get('[data-testid="prism-auth-mode"]').setValue('cookie')
     await save(wrapper)
     expect(mocks.update).not.toHaveBeenCalled()
     expect(mocks.showError).toHaveBeenCalledWith('admin.accounts.openai.prism.cookieRequired')

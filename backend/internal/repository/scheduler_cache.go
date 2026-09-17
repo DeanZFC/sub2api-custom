@@ -1019,7 +1019,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"openai_passthrough",
 		"openai_oauth_passthrough",
 		// Prism routing must remain visible before the full account is hydrated.
-		// Its cookie remains exclusively in the full account credentials payload.
+		// Its authentication remains exclusively in the full credentials payload.
 		service.PrismExtraKey,
 		// Account protection is resolved at admission time. Keep this small
 		// policy object and its identity/transport controls in the scheduler
@@ -1060,8 +1060,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 				if !ok {
 					continue
 				}
-				projected := make(map[string]any, 4)
-				for _, name := range []string{"enabled", "version", "conversation_action_id", "timeout_seconds"} {
+				projected := make(map[string]any, 5)
+				for _, name := range []string{"enabled", "version", "auth_mode", "conversation_action_id", "timeout_seconds"} {
 					if field, exists := config[name]; exists {
 						projected[name] = field
 					}

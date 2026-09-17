@@ -19,13 +19,16 @@ const (
 	PrismDefaultTimeoutSeconds         = 180
 	PrismMaxCookieBytes                = 32 * 1024
 	PrismDefaultModel                  = "gpt-5.6-sol"
+	PrismAuthModeAccount               = "account"
+	PrismAuthModeCookie                = "cookie"
 )
 
 // PrismAccountConfig contains routing configuration only. Authentication remains
-// in credentials.prism_cookie and is never included in scheduler projections.
+// in account credentials and is never included in scheduler projections.
 type PrismAccountConfig struct {
 	Enabled              bool
 	Version              int
+	AuthMode             string
 	ConversationActionID string
 	TimeoutSeconds       int
 }
@@ -41,10 +44,17 @@ func (a *Account) IsPrismEnabled() bool {
 	return enabled
 }
 
+// UsesPrismAccountAuth distinguishes explicitly opted-in account authentication
+// from legacy Prism configurations, which continue using their saved cookies.
+func (a *Account) UsesPrismAccountAuth() bool {
+	config, err := a.PrismConfig()
+	return err == nil && config.Enabled && config.AuthMode == PrismAuthModeAccount
+}
+
 // PrismConfig parses non-secret configuration. An empty action ID delegates to
 // the Prism client's built-in default. This is safe on a scheduler projection.
 func (a *Account) PrismConfig() (PrismAccountConfig, error) {
-	config := PrismAccountConfig{Version: 1, TimeoutSeconds: PrismDefaultTimeoutSeconds}
+	config := PrismAccountConfig{Version: 1, AuthMode: PrismAuthModeCookie, TimeoutSeconds: PrismDefaultTimeoutSeconds}
 	if a == nil {
 		return config, nil
 	}
@@ -58,10 +68,10 @@ func (a *Account) PrismConfig() (PrismAccountConfig, error) {
 	}
 	for key := range values {
 		switch key {
-		case "enabled", "version", "conversation_action_id", "timeout_seconds":
+		case "enabled", "version", "auth_mode", "conversation_action_id", "timeout_seconds":
 		default:
 			// Never echo unknown names/values: a misplaced cookie may be present.
-			return config, invalidPrismConfig("extra.prism contains an unsupported field; store authentication in credentials.prism_cookie")
+			return config, invalidPrismConfig("extra.prism contains an unsupported field; store authentication in account credentials")
 		}
 	}
 	if raw, exists := values["enabled"]; exists {
@@ -75,6 +85,13 @@ func (a *Account) PrismConfig() (PrismAccountConfig, error) {
 		if !valid || version != 1 {
 			return config, invalidPrismConfig("extra.prism.version must be 1")
 		}
+	}
+	if raw, exists := values["auth_mode"]; exists {
+		mode, valid := raw.(string)
+		if !valid || (mode != PrismAuthModeAccount && mode != PrismAuthModeCookie) {
+			return config, invalidPrismConfig("extra.prism.auth_mode must be account or cookie")
+		}
+		config.AuthMode = mode
 	}
 	if raw, exists := values["conversation_action_id"]; exists {
 		actionID, valid := raw.(string)
@@ -143,6 +160,9 @@ func ValidatePrismAccountConfiguration(account *Account) error {
 	if !account.IsOpenAIOAuthLike() || account.IsCredentialShadow() || account.AccountScope == "shared" {
 		return invalidPrismConfig("Prism requires an independent OpenAI OAuth or setup-token account")
 	}
+	if config.AuthMode == PrismAuthModeAccount {
+		return validatePrismAccountAuthCredentials(account)
+	}
 	cookie, ok := account.Credentials[PrismCookieCredentialKey].(string)
 	if !ok || strings.TrimSpace(cookie) == "" {
 		return invalidPrismConfig("credentials.prism_cookie is required when Prism is enabled")
@@ -170,6 +190,40 @@ func ValidatePrismAccountConfiguration(account *Account) error {
 	}
 	if !access || !session {
 		return invalidPrismConfig("credentials.prism_cookie must contain non-empty prism_oai_access_token and prism_session_token cookies")
+	}
+	return nil
+}
+
+func validatePrismAccountAuthCredentials(account *Account) error {
+	if account.IsOpenAIPersonalAccessToken() {
+		return invalidPrismConfig("Prism account authentication requires OpenAI OAuth credentials; Codex personal access tokens are not supported")
+	}
+	access, accessExists := account.Credentials["access_token"]
+	accessToken, accessValid := access.(string)
+	if accessExists && !accessValid {
+		return invalidPrismConfig("credentials.access_token must be a string for Prism account authentication")
+	}
+	refresh, refreshExists := account.Credentials["refresh_token"]
+	refreshToken, refreshValid := refresh.(string)
+	if refreshExists && !refreshValid {
+		return invalidPrismConfig("credentials.refresh_token must be a string for Prism account authentication")
+	}
+	if accessToken == "" && strings.TrimSpace(refreshToken) == "" {
+		return invalidPrismConfig("Prism account authentication requires credentials.access_token or credentials.refresh_token")
+	}
+	if account.Type == AccountTypeSetupToken && accessToken == "" {
+		return invalidPrismConfig("Prism setup-token account authentication requires credentials.access_token")
+	}
+	if len(accessToken) > PrismMaxCookieBytes {
+		return invalidPrismConfig("credentials.access_token exceeds the 32768-byte limit for Prism account authentication")
+	}
+	// Account access tokens become one cookie value. Reject characters that
+	// net/http would otherwise quote or silently strip before transmission.
+	for i := 0; i < len(accessToken); i++ {
+		c := accessToken[i]
+		if c < 0x21 || c > 0x7e || c == '"' || c == ',' || c == ';' || c == '\\' {
+			return invalidPrismConfig("credentials.access_token contains invalid characters for Prism account authentication")
+		}
 	}
 	return nil
 }

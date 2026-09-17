@@ -1,17 +1,19 @@
 # Prism 账号通道（实验性）
 
-已实现基于 2026-09-17 所提供 HAR 的文本通道，包括账号配置、网关转发、账号连接测试及渠道定时测试。协议与集成测试使用本地模拟响应；尚未用真实 Prism 登录态验证当前网站版本。
+已实现基于 2026-09-17 所提供 HAR 的文本通道，包括账号配置、网关转发、账号连接测试及渠道定时测试。已用用户提供的 Prism OpenAI Access Token 单独请求 `GET /auth/session`，确认可取得 Prism 会话，不必预先提供 `prism_session_token`。普通 Codex 客户端签发的 OAuth Token 是否同样被 Prism 接受，尚未用真实账号验证；不能由“同一个 OpenAI 账号”推断不同 OAuth 客户端的 Token 完全互通。完整生成流程的协议与集成验证仍使用本地模拟响应。
 
 ## 开启方式
 
 1. 在账号管理编辑一个独立的 OpenAI OAuth / setup-token 账号，开启「Prism 通道（实验性）」。
-2. 填入该账号已登录 Prism 的 Cookie，必须包含 `prism_oai_access_token` 和 `prism_session_token`。这是独立认证，不自动把原 Codex OAuth 凭证当作 Prism 登录态。
+2. 新开启的账号默认选择「使用账号认证」，使用账号已保存的 OpenAI Access Token 请求 Prism 会话，无需手填 Cookie。OAuth 账号有 Refresh Token 时沿用原 OAuth 客户端配置刷新；setup-token 账号使用已有 Access Token，过期后需要更新该凭证。此模式不支持 Codex Personal Access Token。
 3. 默认超时 180 秒，可配置 30–600 秒。Conversation Action ID 留空使用捕获版本的默认值；网站更新后如需覆盖，填入新版本的 42 位十六进制标识。
 4. 保存后运行该账号的文本测试，默认模型 `gpt-5.6-sol`。通过后再使用本站 API Key 调用。
 
-开关默认关闭，旧账号缺少配置时仍走原有逻辑。关闭仅退出 Prism 分支，不覆盖原代理、并发、指纹、Codex 配置和模型映射。普通编辑不回显 Cookie，留空保留；复制或导出账号不携带 Prism 会话且默认关闭。
+开关默认关闭，旧账号缺少配置时仍走原有逻辑。关闭仅退出 Prism 分支，不覆盖原代理、并发、指纹、Codex 配置和模型映射。已开启 Prism 的旧配置如果没有 `auth_mode`，继续按手动 Cookie 模式运行；可以编辑后显式切换为账号认证。
 
-配置存于 `extra.prism`，Cookie 单独存于 `credentials.prism_cookie`，沿用账号凭证的存储机制。常规账号接口只返回是否已配置，不返回凭证内容。候选调度缓存只带非敏感配置。账号同步、导入通过相同有效性校验；显式导入开启时也必须提供合法的独立凭证。
+也可以选择「手动 Cookie」，填入该账号已登录 Prism 的 Cookie，包含 `prism_oai_access_token` 和 `prism_session_token`。普通编辑不回显 Cookie，留空保留；复制或导出账号不携带 Prism 会话且默认关闭。账号认证失败会显示失败原因，不会自动退回旧 Cookie 或 Codex 通道。
+
+配置存于 `extra.prism`，`auth_mode` 可取 `account` 或 `cookie`。账号认证使用已有 `credentials.access_token` / `credentials.refresh_token`；手动 Cookie 单独存于 `credentials.prism_cookie`。常规账号接口不返回凭证内容，候选调度缓存只带非敏感配置。账号同步、导入通过相同有效性校验：OAuth 账号认证至少需要 Access Token 或 Refresh Token，setup-token 账号认证必须有 Access Token，手动模式则必须提供完整 Cookie。
 
 ```json
 {
@@ -19,6 +21,7 @@
     "prism": {
       "enabled": true,
       "version": 1,
+      "auth_mode": "account",
       "timeout_seconds": 180,
       "conversation_action_id": ""
     }
@@ -69,7 +72,7 @@ Chat Completions 示例：
 - 成功响应只包含标准文本输出和真实存在的 token 用量，不返回上游沙箱令牌、调试数据、项目路径或文件变化。
 - HTTP 重定向被禁止；所有请求目的地固定为 `https://prism.openai.com`。上下游客户端 Cookie、Authorization 不混用。
 - 不自动重试或切回 Codex，尤其提交生成后结果不确定时不会重复提交。取消请求会停止本地轮询和连接；未验证上游取消接口，因此不保证终止已提交的上游任务。
-- 登录态失效、Cloudflare HTML 403、Server Action 变化等返回脱敏的阶段与错误码。登录态自动刷新未实现，需要管理员更新账号 Cookie。
+- 登录态失效、Cloudflare HTML 403、Server Action 变化等返回脱敏的阶段与错误码。账号认证模式从 Access Token 获取 Prism 会话；OAuth Access Token 可按原 Refresh Token 和客户端配置自动刷新。手动模式仍需要管理员更新失效的 Cookie。没有实现或声称绕过网页登录验证、订阅资格或 Cloudflare 挑战。
 
 未实现的能力在请求/账号能力层明确拒绝，不静默丢弃：客户端自定义工具及工具结果、图片/音频/文件、`previous_response_id` 或服务端 `conversation` 续接、compact、WebSocket、Anthropic Messages、token-count 接口、结构化 JSON 输出及采样/长度限制等未捕获参数。完整 Codex 编程客户端通常携带工具，因此目前不能将此文本通道视为完整 Codex 替代。
 

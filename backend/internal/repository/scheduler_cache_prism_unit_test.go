@@ -31,10 +31,28 @@ func TestSchedulerCachePrismConfigProjectionExcludesCookie(t *testing.T) {
 	config, err := projection.PrismConfig()
 	require.NoError(t, err)
 	require.Equal(t, 240, config.TimeoutSeconds)
+	require.Equal(t, service.PrismAuthModeCookie, config.AuthMode)
+	require.False(t, projection.UsesPrismAccountAuth())
+	account.Credentials["access_token"] = "private-account-access"
+	account.Credentials["refresh_token"] = "private-account-refresh"
+	account.Extra[service.PrismExtraKey] = map[string]any{
+		"enabled": true, "version": 1, "auth_mode": service.PrismAuthModeAccount,
+		"access_token": "private-misplaced-token", "cookie": "private-misplaced-cookie",
+	}
+	require.NoError(t, cache.SetAccount(ctx, account))
+	metaBytes, err = cache.rdb.Get(ctx, schedulerAccountMetaKey("9901")).Bytes()
+	require.NoError(t, err)
+	require.NotContains(t, string(metaBytes), "private-")
+	require.NoError(t, json.Unmarshal(metaBytes, &projection))
+	require.True(t, projection.UsesPrismAccountAuth())
+	config, err = projection.PrismConfig()
+	require.NoError(t, err)
+	require.Equal(t, service.PrismAuthModeAccount, config.AuthMode)
 	account.Extra[service.PrismExtraKey] = map[string]any{"enabled": false, "version": 1}
 	require.NoError(t, cache.SetAccount(ctx, account))
 	metaBytes, err = cache.rdb.Get(ctx, schedulerAccountMetaKey("9901")).Bytes()
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(metaBytes, &projection))
 	require.False(t, projection.IsPrismEnabled())
+	require.False(t, projection.UsesPrismAccountAuth())
 }

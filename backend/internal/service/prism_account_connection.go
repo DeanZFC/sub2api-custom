@@ -36,7 +36,11 @@ func (s *AccountTestService) testPrismAccountConnection(c *gin.Context, account 
 	if err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}
-	client, err := newPrismAccountClient(s.httpUpstream, s.cfg, account)
+	var tokenProvider *OpenAITokenProvider
+	if s.openaiGatewayService != nil {
+		tokenProvider = s.openaiGatewayService.openAITokenProvider
+	}
+	client, err := newPrismAccountClient(s.httpUpstream, s.cfg, account, tokenProvider)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Prism account configuration is invalid or incomplete")
 	}

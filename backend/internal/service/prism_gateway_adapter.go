@@ -40,7 +40,7 @@ func (t prismAccountTransport) Do(req *http.Request) (*http.Response, error) {
 	return t.upstream.DoWithTLS(req.WithContext(ctx), proxyURL, t.account.ID, t.account.Concurrency, t.profile)
 }
 
-func newPrismAccountClient(upstream HTTPUpstream, cfg *config.Config, account *Account) (*prism.Client, error) {
+func newPrismAccountClient(upstream HTTPUpstream, cfg *config.Config, account *Account, tokenProvider *OpenAITokenProvider) (*prism.Client, error) {
 	if upstream == nil {
 		return nil, errors.New("Prism transport is unavailable")
 	}
@@ -63,10 +63,28 @@ func newPrismAccountClient(upstream HTTPUpstream, cfg *config.Config, account *A
 		return nil, errors.New("Prism account transport configuration is invalid")
 	}
 	cookie, _ := account.Credentials[PrismCookieCredentialKey].(string)
-	return prism.NewClient(prismAccountTransport{upstream: upstream, account: account, profile: profile}, prism.Options{
-		Cookie: cookie, UserAgent: prismBrowserUserAgent, ConversationActionID: prismConfig.ConversationActionID,
+	opts := prism.Options{
+		UserAgent: prismBrowserUserAgent, ConversationActionID: prismConfig.ConversationActionID,
 		Timeout: time.Duration(prismConfig.TimeoutSeconds) * time.Second,
-	}), nil
+	}
+	if account.UsesPrismAccountAuth() {
+		// The OpenAI access token is only used to bootstrap Prism's session via
+		// GET /auth/session. Prism then sets its own session cookie; the token is
+		// never forwarded as Authorization or mixed with a saved Prism cookie.
+		opts.AccessTokenProvider = func(ctx context.Context) (string, error) {
+			if account.Type == AccountTypeOAuth && tokenProvider != nil {
+				return tokenProvider.GetAccessToken(ctx, account)
+			}
+			if expiresAt := account.GetCredentialAsTime("expires_at"); expiresAt != nil && !time.Now().Before(*expiresAt) {
+				return "", errors.New("OpenAI access token is expired")
+			}
+			return account.GetCredential("access_token"), nil
+		}
+		opts.ExpectedOpenAIUserID = strings.TrimSpace(account.GetCredential("chatgpt_user_id"))
+	} else {
+		opts.Cookie = cookie
+	}
+	return prism.NewClient(prismAccountTransport{upstream: upstream, account: account, profile: profile}, opts), nil
 }
 
 type prismIncomingRequest struct {
@@ -324,7 +342,7 @@ func (s *OpenAIGatewayService) forwardPrism(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return nil, writePrismError(c, err)
 	}
-	client, err := newPrismAccountClient(s.httpUpstream, s.cfg, account)
+	client, err := newPrismAccountClient(s.httpUpstream, s.cfg, account, s.openAITokenProvider)
 	if err != nil {
 		return nil, writePrismError(c, errors.New("Prism account configuration is invalid or incomplete"))
 	}
@@ -478,6 +496,14 @@ func prismClientError(err error) gin.H {
 		}
 	case errors.As(err, &upstream):
 		problem["message"] = upstream.Error()
+		if upstream.Stage == "auth" && (upstream.Code == "account_auth_rejected" || upstream.StatusCode == http.StatusUnauthorized) {
+			problem["code"] = "prism_authentication_failed"
+			problem["message"] = "Prism did not accept this account authentication; sign in to Prism with the account or configure manual Prism Cookie authentication"
+		}
+		if upstream.Stage == "auth" && upstream.Code == "account_token_unavailable" {
+			problem["code"] = "prism_account_token_unavailable"
+			problem["message"] = "Unable to obtain an OpenAI access token for Prism; check or renew the account authorization"
+		}
 		if upstream.Submitted {
 			problem["message"] = upstream.Error() + "; generation may have started, and was not resubmitted"
 		}

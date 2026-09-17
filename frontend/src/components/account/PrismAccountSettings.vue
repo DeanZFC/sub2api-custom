@@ -27,6 +27,20 @@
         <p>{{ t('admin.accounts.openai.prism.usageHint') }}</p>
       </div>
       <div>
+        <label for="prism-auth-mode" class="input-label">{{ t('admin.accounts.openai.prism.authMode') }}</label>
+        <select
+          id="prism-auth-mode"
+          :value="authMode"
+          class="input"
+          data-testid="prism-auth-mode"
+          @change="emit('update:authMode', ($event.target as HTMLSelectElement).value as 'account' | 'cookie')"
+        >
+          <option value="account">{{ t('admin.accounts.openai.prism.authModeAccount') }}</option>
+          <option value="cookie">{{ t('admin.accounts.openai.prism.authModeCookie') }}</option>
+        </select>
+        <p v-if="authMode === 'account'" class="input-hint">{{ t('admin.accounts.openai.prism.authModeAccountHint') }}</p>
+      </div>
+      <div v-if="authMode === 'cookie'">
         <label for="prism-cookie" class="input-label">{{ t('admin.accounts.openai.prism.cookie') }}</label>
         <input
           id="prism-cookie"
@@ -85,6 +99,7 @@ import { useI18n } from 'vue-i18n'
 
 defineProps<{
   enabled: boolean
+  authMode: 'account' | 'cookie'
   cookie: string
   cookieConfigured: boolean
   timeoutSeconds: number
@@ -93,6 +108,7 @@ defineProps<{
 
 const emit = defineEmits<{
   'update:enabled': [value: boolean]
+  'update:authMode': [value: 'account' | 'cookie']
   'update:cookie': [value: string]
   'update:timeoutSeconds': [value: number]
   'update:conversationActionId': [value: string]

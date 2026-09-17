@@ -214,6 +214,10 @@ func (s *OpenAIOAuthService) RefreshToken(ctx context.Context, refreshToken stri
 
 // RefreshTokenWithClientID refreshes an OpenAI OAuth token with optional client_id.
 func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*OpenAITokenInfo, error) {
+	return s.refreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID, true)
+}
+
+func (s *OpenAIOAuthService) refreshTokenWithClientID(ctx context.Context, refreshToken string, proxyURL string, clientID string, enrich bool) (*OpenAITokenInfo, error) {
 	tokenResp, err := s.oauthClient.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
 	if err != nil {
 		return nil, err
@@ -249,7 +253,9 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 		tokenInfo.PlanType = userInfo.PlanType
 	}
 
-	s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	if enrich {
+		s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	}
 
 	return tokenInfo, nil
 }
@@ -347,9 +353,17 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	var proxyURL string
 	if account.ProxyID != nil && s.proxyRepo != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
-		if err == nil && proxy != nil {
+		if err != nil {
+			if account.UsesPrismAccountAuth() {
+				return nil, infraerrors.New(http.StatusBadGateway, "PRISM_PROXY_UNAVAILABLE", "Prism account proxy is unavailable")
+			}
+		} else if proxy != nil {
 			proxyURL = proxy.URL()
+		} else if account.UsesPrismAccountAuth() {
+			return nil, infraerrors.New(http.StatusBadGateway, "PRISM_PROXY_UNAVAILABLE", "Prism account proxy is unavailable")
 		}
+	} else if account.UsesPrismAccountAuth() && account.ProxyID != nil {
+		return nil, infraerrors.New(http.StatusBadGateway, "PRISM_PROXY_UNAVAILABLE", "Prism account proxy is unavailable")
 	}
 
 	accessToken := account.GetCredential("access_token")
@@ -379,14 +393,18 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 				tokenInfo.ExpiresAt = expiresAt.Unix()
 				tokenInfo.ExpiresIn = int64(time.Until(*expiresAt).Seconds())
 			}
-			s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+			if !account.IsPrismEnabled() {
+				s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+			}
 			return tokenInfo, nil
 		}
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_NO_REFRESH_TOKEN", "no refresh token available")
 	}
 
 	clientID := account.GetCredential("client_id")
-	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+	// Keep the credential's original OAuth client and refresh lifecycle, without
+	// running unrelated ChatGPT privacy/subscription probes on a Prism account.
+	return s.refreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID, !account.IsPrismEnabled())
 }
 
 // BuildAccountCredentials builds credentials map from token info

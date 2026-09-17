@@ -40,6 +40,8 @@ type prismGatewayUpstream struct {
 	transportFailure     bool
 	unknownTerminal      bool
 	startBody            map[string]any
+	accountAuthToken     string
+	rejectAccountAuth    bool
 }
 
 func (u *prismGatewayUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
@@ -61,8 +63,23 @@ func (u *prismGatewayUpstream) DoWithTLS(r *http.Request, proxy string, accountI
 	if !HTTPUpstreamRedirectsDisabled(r.Context()) || upstreamErrorRetryFromContext(r.Context()) != nil || !AccountProtectionOutcomeExcluded(r.Context()) {
 		u.t.Error("private protocol transport policy was lost")
 	}
-	if r.Header.Get("Cookie") != prismGatewayCookie || r.Header.Get("User-Agent") != prismBrowserUserAgent || r.Header.Get("Authorization") != "" {
+	if r.Header.Get("User-Agent") != prismBrowserUserAgent || r.Header.Get("Authorization") != "" {
 		u.t.Error("wrong upstream authentication headers")
+	}
+	if u.accountAuthToken != "" {
+		access, err := r.Cookie("prism_oai_access_token")
+		if err != nil || access.Value != u.accountAuthToken {
+			u.t.Error("Prism did not use the account token provider")
+		}
+		if r.URL.Path == "/auth/session" {
+			if len(r.Cookies()) != 1 {
+				u.t.Error("manual credentials mixed with automatic authentication")
+			}
+		} else if session, err := r.Cookie("prism_session_token"); err != nil || session.Value != "synthetic-issued-session" {
+			u.t.Error("automatically issued session was not retained")
+		}
+	} else if r.Header.Get("Cookie") != prismGatewayCookie {
+		u.t.Error("wrong manual upstream authentication cookie")
 	}
 	if r.Header.Get("X-Downstream-Private") != "" {
 		u.t.Error("downstream headers were forwarded")
@@ -94,7 +111,13 @@ func (u *prismGatewayUpstream) DoWithTLS(r *http.Request, proxy string, accountI
 	var raw string
 	switch r.URL.Path {
 	case "/auth/session":
+		if u.accountAuthToken != "" {
+			header.Set("Set-Cookie", "prism_session_token=synthetic-issued-session; Path=/; Secure; HttpOnly")
+		}
 		data = map[string]any{"user": map[string]any{"is_anonymous": false, "app_metadata": map[string]string{"user_id": "synthetic-user"}}, "policy": map[string]any{"user": map[string]string{"openai_user_id": "synthetic-user", "prism_user_id": "different-prism-user"}}}
+		if u.rejectAccountAuth {
+			data = map[string]any{"user": nil}
+		}
 	case "/api/projects":
 		body := decode()
 		u.project, _ = body["project_uuid"].(string)
