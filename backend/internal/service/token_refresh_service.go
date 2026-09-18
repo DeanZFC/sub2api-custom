@@ -1441,9 +1441,6 @@ func isNonRetryableRefreshError(err error) bool {
 // ensureOpenAIPrivacy 检查 OpenAI OAuth 账号是否已设置 privacy_mode，
 // 未设置则调用 disableOpenAITraining 并持久化结果到 Extra。
 func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *Account) {
-	if account != nil && account.IsPrismEnabled() {
-		return
-	}
 	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
 		return
 	}

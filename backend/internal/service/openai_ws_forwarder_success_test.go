@@ -471,7 +471,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersDeviceModePreservesNamespacedC
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "request", "client-request"), headers.Get("x-client-request-id"))
 }
 
-func TestOpenAIGatewayService_BuildOpenAIWSHeaders_DefaultFingerprintIsStablePerAccount(t *testing.T) {
+func TestOpenAIGatewayService_BuildOpenAIWSHeaders_SingleMachineFingerprintIsStablePerAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -480,10 +480,8 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeaders_DefaultFingerprintIsStablePer
 	c.Request.Header.Set("X-Codex-Installation-ID", "client-installation")
 	c.Request.Header.Set("session-id", "client-session")
 
-	account := &Account{ID: 1301, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
-		OpenAIAccountUniqueFingerprintEnabled: true,
-	}}}
+	account := &Account{ID: 1301, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{codexFingerprintModeExtraKey: "single_machine_multi_window"}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{}}}
 
 	first, _, err := svc.buildOpenAIWSHeaders(
 		context.Background(), c, account, "token",

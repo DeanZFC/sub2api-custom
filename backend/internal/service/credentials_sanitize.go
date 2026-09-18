@@ -14,7 +14,6 @@ func SanitizeStoredCredentials(platform string, creds map[string]any) map[string
 	_ = platform
 	for _, key := range []string{
 		"password", "sso_token", "sso", "sso-rw", "clearTextPassword", "cookie",
-		PrismCookieConfiguredCredentialKey,
 	} {
 		delete(creds, key)
 	}

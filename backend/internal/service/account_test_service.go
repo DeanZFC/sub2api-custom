@@ -213,9 +213,6 @@ func (s *AccountTestService) SetOpenAIGatewayService(gateway *OpenAIGatewayServi
 // It only fills picker-only gaps (local display-name fallbacks, OAuth image choices)
 // on its own copy; the shared catalog and its cache stay untouched.
 func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, account *Account) ([]openai.Model, error) {
-	if account.IsPrismEnabled() {
-		return PrismAccountModels(account), nil
-	}
 	if s == nil || s.openaiGatewayService == nil {
 		return nil, errors.New("OpenAI model discovery service is unavailable")
 	}
@@ -373,13 +370,8 @@ func createTestPayload(modelID string, customPrompt ...string) (map[string]any, 
 // mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
 // opts is optional media (image/audio data URLs for real generation / STT).
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
-	// Every account-test entrypoint (interactive and scheduled) uses the same
-	// upstream transport as production traffic. Keep deliberate probes out of
-	// adaptive-concurrency/health accounting even when an admin invokes this
-	// method directly instead of through RunTestBackground.
-	testCtx := WithAccountProtectionOutcomeExcluded(c.Request.Context())
-	c.Request = c.Request.WithContext(testCtx)
-	ctx := testCtx
+	ctx := c.Request.Context()
+	defer releaseStagedCodexFingerprintLease(c)
 	testOpts := firstAccountTestOptions(opts)
 
 	// Get account
@@ -400,10 +392,6 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		s.sendEvent(c, TestEvent{Type: "content", Text: "Synthetic Anthropic OAuth account is healthy and interactive."})
 		s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 		return nil
-	}
-
-	if account.IsPrismEnabled() {
-		return s.testPrismAccountConnection(c, account, modelID, prompt, mode, testOpts)
 	}
 
 	// Route to platform-specific test method
@@ -908,9 +896,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt)
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
-	if err := prepareIntelligentTestProtection(c, account, payload); err != nil {
-		return s.sendErrorAndEnd(c, err.Error())
-	}
+	applyCodexFingerprintTestPayload(c, account, payload)
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -964,9 +950,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	credentialAccount.ApplyHeaderOverrides(req.Header)
-	if err := applyIntelligentTestProtection(c, account, req.Header, payloadBytes); err != nil {
-		return s.sendErrorAndEnd(c, err.Error())
-	}
+	applyStagedCodexFingerprintHeaders(c, account, req.Header)
 
 	// Get proxy URL
 	proxyURL := ""
@@ -1004,9 +988,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 						}
 					}
 					retryReq.Host = req.Host
-					if protectionErr := applyIntelligentTestProtection(c, account, retryReq.Header, retryBody); protectionErr != nil {
-						return s.sendErrorAndEnd(c, protectionErr.Error())
-					}
 					resp, err = s.doOpenAIAccountTestUpstream(retryReq, proxyURL, account, true)
 					if err != nil {
 						return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
@@ -2301,11 +2282,10 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		testModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID, isOAuth))
-	protectedPayload, protectionErr := prepareIntelligentTestProtectionBytes(c, account, payloadBytes)
-	if protectionErr != nil {
-		return s.sendErrorAndEnd(c, protectionErr.Error())
+	payloadBytes, fingerprintErr := applyCodexFingerprintTestPayloadRaw(c, account, payloadBytes)
+	if fingerprintErr != nil {
+		return s.sendErrorAndEnd(c, fingerprintErr.Error())
 	}
-	payloadBytes = protectedPayload
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
@@ -2347,18 +2327,14 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		// 指纹收敛：探测与真实转发走同一个 /responses 端点，身份也必须同构，
 		// 否则探测流量会以「缺 x-codex-installation-id + 非收敛 session」的
 		// 形态暴露在上游眼里。账号关闭收敛（off）时返回 nil，探测保持原样。
-		if stagedCodexFingerprintIDs(c, account) == nil {
-			if fpIDs := resolveCodexFingerprintIDsFromRequest(account, req.Header, s.cfg != nil && s.cfg.Gateway.OpenAIAccountUniqueFingerprintEnabled); fpIDs != nil {
-				applyCodexFingerprintHeaders(req.Header, fpIDs)
-			}
+		if fpIDs := resolveCodexFingerprintIDsFromRequest(account, req.Header); fpIDs != nil && stagedCodexFingerprintIDs(c, account) == nil {
+			applyCodexFingerprintHeaders(req.Header, fpIDs)
 		}
 	}
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
-	if err := applyIntelligentTestProtection(c, account, req.Header, payloadBytes); err != nil {
-		return s.sendErrorAndEnd(c, err.Error())
-	}
+	applyStagedCodexFingerprintHeaders(c, account, req.Header)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -3374,7 +3350,8 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
 	}
-	responsesBody, err = prepareIntelligentTestProtectionBytes(c, account, responsesBody)
+
+	responsesBody, err = applyCodexFingerprintTestPayloadRaw(c, account, responsesBody)
 	if err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}
@@ -3422,9 +3399,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	// 与真实转发一致：账号级自定义 UA 同样作为管理员显式配置传入，否则测试用的身份
 	// 与该账号真实出站的身份不是同一个（issue #3901 的配对不变式由收口保证）。
 	enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
-	if err := applyIntelligentTestProtection(c, account, req.Header, responsesBody); err != nil {
-		return s.sendErrorAndEnd(c, err.Error())
-	}
+	applyStagedCodexFingerprintHeaders(c, account, req.Header)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -3535,12 +3510,7 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
-	testCtx := withAccountTestReasoningEffort(ctx, reasoningEffort)
-	// Connectivity/scheduled tests share the production transport, but their
-	// deliberate probes must not lower adaptive concurrency or inflate health
-	// failure rates for an otherwise healthy account.
-	testCtx = WithAccountProtectionOutcomeExcluded(testCtx)
-	ginCtx.Request = (&http.Request{}).WithContext(testCtx)
+	ginCtx.Request = (&http.Request{}).WithContext(withAccountTestReasoningEffort(ctx, reasoningEffort))
 
 	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, prompt, AccountTestModeDefault)
 

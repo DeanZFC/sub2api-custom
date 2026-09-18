@@ -82,9 +82,10 @@ type openAIWSTransportMetricsDialer interface {
 type openAIWSTLSProfileContextKey struct{}
 
 func withOpenAIWSTLSProfile(ctx context.Context, profile *tlsfingerprint.Profile) context.Context {
-	if ctx == nil || profile == nil {
-		return ctx
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	// A typed nil shadows an earlier account's TLS profile during failover.
 	return context.WithValue(ctx, openAIWSTLSProfileContextKey{}, profile)
 }
 
@@ -220,8 +221,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string, profiles ...*t
 	now := time.Now().UnixNano()
 	cacheKey := normalizedProxy
 	if tlsProfile != nil {
-		// Equal display names do not imply equal ClientHello parameters. Keep
-		// cached transports aligned with the full profile used by pool selection.
+		// Cache by the complete ClientHello profile, not its display name.
 		encodedProfile, _ := json.Marshal(tlsProfile)
 		cacheKey += fmt.Sprintf("|tls:%x", sha256.Sum256(encodedProfile))
 	}

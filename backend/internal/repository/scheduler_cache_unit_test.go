@@ -311,15 +311,6 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIWSFlags(t *testing.T) {
 			"openai_responses_supported":                   false,
 			"codex_fingerprint_mode":                       "session",
 			"codex_fingerprint_seed":                       "11111111-1111-4111-8111-111111111111",
-			service.AntiDegradeMarkerExtraKey:              map[string]any{"enabled": true, "mode": "legacy"},
-			service.AntiDegradationExtraKey:                true,
-			service.ProtectionScopeExtraKey:                "codex",
-			service.AccountProtectionPolicyKey:             map[string]any{"enabled": true, "adaptive_concurrency": true},
-			"enable_tls_fingerprint":                       true,
-			"tls_fingerprint_builtin":                      "nodejs24",
-			"tls_fingerprint_profile_id":                   int64(12),
-			"request_integrity_mode":                       "observe",
-			"proxy_mode":                                   "fixed",
 			"mixed_scheduling":                             true,
 			"unused_large_field":                           "drop-me",
 		},
@@ -334,14 +325,6 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIWSFlags(t *testing.T) {
 	require.Equal(t, false, got.Extra["openai_responses_supported"])
 	require.Equal(t, "session", got.Extra["codex_fingerprint_mode"])
 	require.Equal(t, "11111111-1111-4111-8111-111111111111", got.Extra["codex_fingerprint_seed"])
-	require.NotNil(t, got.Extra[service.AntiDegradeMarkerExtraKey])
-	require.Equal(t, true, got.Extra[service.AntiDegradationExtraKey])
-	require.Equal(t, "codex", got.Extra[service.ProtectionScopeExtraKey])
-	require.NotNil(t, got.Extra[service.AccountProtectionPolicyKey])
-	require.Equal(t, true, got.Extra["enable_tls_fingerprint"])
-	require.Equal(t, "nodejs24", got.Extra["tls_fingerprint_builtin"])
-	require.Equal(t, "observe", got.Extra["request_integrity_mode"])
-	require.Equal(t, "fixed", got.Extra["proxy_mode"])
 	require.Equal(t, true, got.Extra["mixed_scheduling"])
 	require.Nil(t, got.Extra["unused_large_field"])
 }

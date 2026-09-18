@@ -871,9 +871,6 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
-		if a.IsPrismEnabled() {
-			return strings.TrimSpace(requestedModel) == PrismDefaultModel
-		}
 		if a.IsOpenAIOAuth() {
 			return isOpenAIOAuthServableModel(requestedModel)
 		}
@@ -918,9 +915,6 @@ func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string,
 // GetOpenAICompactMode returns the compact routing mode for an OpenAI account.
 // Missing or invalid values fall back to "auto".
 func (a *Account) GetOpenAICompactMode() string {
-	if a.IsPrismEnabled() {
-		return OpenAICompactModeForceOff
-	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return OpenAICompactModeAuto
 	}
@@ -931,9 +925,6 @@ func (a *Account) GetOpenAICompactMode() string {
 // OpenAICompactSupportKnown reports whether compact capability is known for this
 // account and, when known, whether it is supported.
 func (a *Account) OpenAICompactSupportKnown() (supported bool, known bool) {
-	if a.IsPrismEnabled() {
-		return false, true
-	}
 	if a == nil || !a.IsOpenAI() {
 		return false, false
 	}
@@ -1849,9 +1840,6 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if capability == "" {
 		return true
 	}
-	if a.IsPrismEnabled() {
-		return capability == OpenAIEndpointCapabilityChatCompletions || capability == OpenAIEndpointCapabilityResponses
-	}
 	if !a.IsOpenAICompatible() {
 		return false
 	}
@@ -2032,9 +2020,6 @@ func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapabilit
 	if capability == "" {
 		return true
 	}
-	if a.IsPrismEnabled() {
-		return false
-	}
 	if !a.IsOpenAI() {
 		return false
 	}
@@ -2114,9 +2099,6 @@ func (a *Account) IsOveragesEnabled() bool {
 // 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsOpenAIPassthroughEnabled() bool {
-	if a.IsPrismEnabled() {
-		return false
-	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
@@ -2143,9 +2125,6 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 // 1. 按账号类型读取分类型字段
 // 2. 分类型字段缺失时，回退兼容字段
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
-	if a.IsPrismEnabled() {
-		return false
-	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
@@ -2214,9 +2193,6 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 // 3. 兼容 enabled 旧字段（bool）
 // 4. defaultMode（非法时回退 ctx_pool）
 func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) string {
-	if a.IsPrismEnabled() {
-		return OpenAIWSIngressModeOff
-	}
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
 	if a == nil || !a.IsOpenAI() {
 		return OpenAIWSIngressModeOff
@@ -2375,7 +2351,7 @@ func (a *Account) GetWebSearchEmulationMode() string {
 // 字段：accounts.extra.codex_cli_only。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsCodexCLIOnlyEnabled() bool {
-	if a == nil || !a.IsOpenAIOAuth() || a.Extra == nil || a.IsPrismEnabled() {
+	if a == nil || !a.IsOpenAIOAuth() || a.Extra == nil {
 		return false
 	}
 	enabled, ok := a.Extra["codex_cli_only"].(bool)
@@ -2415,17 +2391,6 @@ func (a *Account) IsAnthropicOAuthOrSetupToken() bool {
 // 仅适用于 Anthropic OAuth/SetupToken 类型账号
 // 启用后将模拟 Claude Code (Node.js) 客户端的 TLS 握手特征
 func (a *Account) IsTLSFingerprintEnabled() bool {
-	// Account protection may explicitly select a built-in TLS profile for
-	// OpenAI OAuth/Setup Token accounts. This is opt-in and leaves the legacy
-	// provider-specific setting unchanged for every other account.
-	if a != nil && a.IsOpenAIOAuthLike() && a.IdentityProtectionEnabled() {
-		if isMode1V2ProtectionEnabled(a) {
-			return a.Extra["enable_tls_fingerprint"] == true
-		}
-		if raw, ok := a.Extra["tls_fingerprint_builtin"].(string); ok && strings.TrimSpace(raw) != "" {
-			return true
-		}
-	}
 	// 仅支持 Anthropic OAuth/SetupToken 账号
 	if !a.IsAnthropicOAuthOrSetupToken() {
 		return false

@@ -38,10 +38,6 @@ func supplementUnmappedOpenAIModels(accounts []Account, models []string) []strin
 	for i := range accounts {
 		account := &accounts[i]
 		if account.Platform == PlatformOpenAI && len(account.GetModelMapping()) == 0 {
-			if account.IsPrismEnabled() {
-				models = dedupeAndSortModelIDs(slices.Concat(models, []string{PrismDefaultModel}))
-				continue
-			}
 			return dedupeAndSortModelIDs(slices.Concat(models, openai.DefaultModelIDs()))
 		}
 	}

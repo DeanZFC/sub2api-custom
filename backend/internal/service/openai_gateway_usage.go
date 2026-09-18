@@ -523,9 +523,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.SubscriptionID = &subscription.ID
 	}
 
-	// Unknown Prism usage must not acquire a per-request account-stat cost either.
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil && !(result.UpstreamEndpoint == prismUpstreamEndpoint && result.UsageUnavailable) {
+	if apiKey.GroupID != nil {
 		accountStatsModel := result.UpstreamModel
 		if fallbackBilling && usageLog.ChannelID == nil {
 			// No fallback channel means a primary channel mapping must not drive
@@ -633,9 +632,6 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	longContextBillingGate *bool,
 	pricingAt time.Time,
 ) (*CostBreakdown, error) {
-	if result != nil && result.UpstreamEndpoint == prismUpstreamEndpoint && result.UsageUnavailable {
-		return &CostBreakdown{BillingMode: string(BillingModeToken)}, nil
-	}
 	billingModel := firstUsageBillingModel(billingModels)
 	if result != nil && result.WebSearchCalls > 0 {
 		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取

@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -34,7 +33,6 @@ type TLSFingerprintProfileCache interface {
 type TLSFingerprintProfileService struct {
 	repo  TLSFingerprintProfileRepository
 	cache TLSFingerprintProfileCache
-	cfg   *config.Config
 
 	// 本地 ID→Profile 映射缓存，用于 DoWithTLS 热路径快速查找
 	localCache map[int64]*model.TLSFingerprintProfile
@@ -45,12 +43,10 @@ type TLSFingerprintProfileService struct {
 func NewTLSFingerprintProfileService(
 	repo TLSFingerprintProfileRepository,
 	cache TLSFingerprintProfileCache,
-	cfg *config.Config,
 ) *TLSFingerprintProfileService {
 	svc := &TLSFingerprintProfileService{
 		repo:       repo,
 		cache:      cache,
-		cfg:        cfg,
 		localCache: make(map[int64]*model.TLSFingerprintProfile),
 	}
 
@@ -180,17 +176,6 @@ func (s *TLSFingerprintProfileService) getRandomProfile() *tlsfingerprint.Profil
 //  3. 启用 + 绑定了 profile_id → 从缓存查找对应 profile
 //  4. 启用 + 未绑定或找不到 → 返回空 Profile（使用代码内置默认值）
 func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsfingerprint.Profile {
-	if account != nil && account.IdentityProtectionEnabled() {
-		var cfg *config.Config
-		if s != nil {
-			cfg = s.cfg
-		}
-		profile, err := resolveProtectionTransport(account, cfg)
-		if err != nil {
-			return nil
-		}
-		return profile
-	}
 	if macProfile := resolveCodexMacTLSProfile(account); macProfile != nil {
 		return macProfile
 	}

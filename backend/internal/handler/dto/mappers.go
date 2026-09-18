@@ -240,13 +240,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		return nil
 	}
 	redactedCreds, credsStatus := RedactCredentials(a.Credentials)
-	if a.IsOpenAIOAuthLike() && !a.IsCredentialShadow() {
-		if redactedCreds == nil {
-			redactedCreds = make(map[string]any, 1)
-		}
-		cookie, _ := a.Credentials[service.PrismCookieCredentialKey].(string)
-		redactedCreds[service.PrismCookieConfiguredCredentialKey] = strings.TrimSpace(cookie) != ""
-	}
 	extra := redactAccountManagedExtra(a.Extra)
 	var ollamaCloudUsage *service.OllamaCloudUsageState
 	if state := service.OllamaCloudUsageStateFromAccount(a); state.Eligible {

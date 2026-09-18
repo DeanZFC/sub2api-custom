@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -689,7 +688,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
-	mode1OriginalFirst := bytes.Clone(firstClientMessage)
 	if isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
@@ -793,17 +791,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
-	ensureStagedCodexFingerprintIDs(c, account, s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIAccountUniqueFingerprintEnabled)
+	ensureStagedCodexFingerprintIDs(c, account)
 	if fingerprintIDs := stagedCodexFingerprintIDs(c, account); fingerprintIDs != nil {
 		var fingerprintErr error
 		firstClientMessage, _, fingerprintErr = applyCodexFingerprintClientMetadataRaw(firstClientMessage, fingerprintIDs)
 		if fingerprintErr != nil {
 			return fmt.Errorf("apply codex fingerprint to first ws frame: %w", fingerprintErr)
 		}
-	}
-
-	if err := checkAccountRequestIntegrity(c, account, mode1OriginalFirst, firstClientMessage); err != nil {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 	}
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
@@ -879,10 +873,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if dialer == nil {
 		return errors.New("openai ws passthrough dialer is nil")
 	}
-	tlsProfile, profileErr := resolveAccountTLSProfileForOpenAI(account, s.cfg)
-	if profileErr != nil {
-		return profileErr
-	}
+	tlsProfile := resolveCodexMacTLSProfile(account)
 
 	agentTaskRecoveryTried := false
 	var upstreamConn openAIWSClientConn
@@ -999,11 +990,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil, nil
 			}
-			// Keep a per-frame semantic snapshot. The first frame has a snapshot
-			// above, but follow-up response.create frames can carry independent
-			// input/tool/reasoning content and must be checked at their own final
-			// outbound boundary.
-			frameOriginal := bytes.Clone(payload)
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
 			responseCreateAt := time.Time{}
@@ -1145,9 +1131,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
-				if err := checkAccountRequestIntegrity(c, account, frameOriginal, out); err != nil {
-					return out, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
-				}
 				responseCreateAtCopy := responseCreateAt
 				acceptedTurnStartedAt.Store(&responseCreateAtCopy)
 				acceptedTurn = true

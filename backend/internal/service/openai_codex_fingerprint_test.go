@@ -87,7 +87,7 @@ func TestGetCodexFingerprintMode(t *testing.T) {
 		{"空值默认 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: ""}), codexFingerprintOff},
 		{"非法值默认 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "invalid"}), codexFingerprintOff},
 		{"显式 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "off"}), codexFingerprintOff},
-		{"账号唯一设备", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "account_device"}), codexFingerprintAccountDevice},
+		{"账号唯一设备", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "account_device"}), codexFingerprintDevice},
 		{"device", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "device"}), codexFingerprintDevice},
 		{"session", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "session"}), codexFingerprintSession},
 		{"full", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "full"}), codexFingerprintFull},
@@ -107,7 +107,7 @@ func TestResolveCodexMacTLSProfile(t *testing.T) {
 		want    string
 	}{
 		{name: "nil", account: nil},
-		{name: "default single machine", account: newTestOAuthAccount(901, nil), want: "Mac Codex (macOS arm64)"},
+		{name: "default off", account: newTestOAuthAccount(901, nil)},
 		{name: "explicit single machine", account: newTestOAuthAccount(902, map[string]any{codexFingerprintModeExtraKey: "single_machine_multi_window"}), want: "Mac Codex (macOS arm64)"},
 		{name: "explicit off", account: newTestOAuthAccount(903, map[string]any{codexFingerprintModeExtraKey: "off"})},
 		{name: "explicit session", account: newTestOAuthAccount(904, map[string]any{codexFingerprintModeExtraKey: "session"})},
@@ -128,14 +128,27 @@ func TestResolveCodexMacTLSProfile(t *testing.T) {
 
 func TestResolveCodexFingerprintIDsFromRequest_AccountDeviceModeUsesStableAccountSeed(t *testing.T) {
 	account := newTestOAuthAccount(904, map[string]any{codexFingerprintModeExtraKey: "account_device"})
+	delete(account.Extra, codexFingerprintSeedExtraKey)
 	first := resolveCodexFingerprintIDsFromRequest(account, nil)
 	second := resolveCodexFingerprintIDsFromRequest(account, nil)
 	require.NotNil(t, first)
 	require.NotNil(t, second)
-	assert.Equal(t, codexFingerprintAccountDevice, first.mode)
+	assert.Equal(t, codexFingerprintDevice, first.mode)
 	assert.Equal(t, first.installationID, second.installationID)
 	assert.Equal(t, resolveConvergedInstallationID(account, deriveAccountCodexFingerprintSeed(account)), first.installationID)
 	assert.Empty(t, account.Extra[codexFingerprintSeedExtraKey], "账号唯一设备模式不需要写入系统种子")
+}
+
+func TestSingleMachineEditPreservesDerivedDeviceIdentity(t *testing.T) {
+	account := &Account{ID: 904, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Extra: map[string]any{codexFingerprintModeExtraKey: "single_machine_multi_window"}}
+	headers := http.Header{"User-Agent": []string{"codex_cli_rs/0.146.0"}}
+	before := resolveCodexFingerprintIDsFromRequest(account, headers)
+	require.NotNil(t, before)
+	account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
+	after := resolveCodexFingerprintIDsFromRequest(account, headers)
+	require.NotNil(t, after)
+	require.Equal(t, before.installationID, after.installationID)
 }
 
 // --- resolveConvergedInstallationID ---
@@ -398,38 +411,38 @@ func TestResolveCodexFingerprintIDsFromRequest_ExplicitOff(t *testing.T) {
 	assert.Nil(t, ids, "显式 off 模式应返回 nil")
 }
 
-func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledIsStablePerAccount(t *testing.T) {
+func TestResolveCodexFingerprintIDsFromRequest_SingleMachineIsStablePerAccount(t *testing.T) {
 	headers := http.Header{"User-Agent": []string{"codex_cli_rs/0.146.0"}, "Session-Id": []string{"session-a"}}
-	account := &Account{ID: 901, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	first := resolveCodexFingerprintIDsFromRequest(account, headers, true)
-	second := resolveCodexFingerprintIDsFromRequest(account, headers, true)
-	other := resolveCodexFingerprintIDsFromRequest(&Account{ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, headers, true)
+	account := &Account{ID: 901, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{codexFingerprintModeExtraKey: "single_machine_multi_window"}}
+	first := resolveCodexFingerprintIDsFromRequest(account, headers)
+	second := resolveCodexFingerprintIDsFromRequest(account, headers)
+	other := resolveCodexFingerprintIDsFromRequest(&Account{ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{codexFingerprintModeExtraKey: "single_machine_multi_window"}}, headers)
 
 	require.NotNil(t, first)
 	require.NotNil(t, second)
 	require.NotNil(t, other)
 	assert.Equal(t, codexFingerprintSingleMachineMultiWindow, first.mode)
-	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil, true), "non-Codex callers must not receive a synthetic window")
+	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil), "non-Codex callers must not receive a synthetic window")
 	assert.Equal(t, first.installationID, second.installationID)
 	assert.NotEqual(t, first.installationID, other.installationID)
-	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil, false))
+	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil))
 	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(&Account{
 		ID:       account.ID,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Extra:    map[string]any{codexFingerprintModeExtraKey: "off"},
-	}, nil, true))
+	}, nil))
 }
 
-func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledUsesPersistedSeed(t *testing.T) {
+func TestResolveCodexFingerprintIDsFromRequest_SingleMachineUsesPersistedSeed(t *testing.T) {
 	headers := http.Header{"User-Agent": []string{"codex_cli_rs/0.146.0"}}
 	account := &Account{
 		ID:       903,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
-		Extra:    map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
+		Extra:    map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed, codexFingerprintModeExtraKey: "single_machine_multi_window"},
 	}
-	ids := resolveCodexFingerprintIDsFromRequest(account, headers, true)
+	ids := resolveCodexFingerprintIDsFromRequest(account, headers)
 	require.NotNil(t, ids)
 	assert.Equal(t, resolveConvergedInstallationID(account, testCodexFingerprintSeed), ids.installationID)
 }
@@ -438,7 +451,8 @@ func TestResolveCodexFingerprintIDsFromRequest_DefaultEnabledUsesPersistedSeed(t
 // v0.1.175 之前的客户端原值。
 func TestResolveCodexFingerprintIDsFromRequest_DefaultIsOff(t *testing.T) {
 	account := newTestOAuthAccount(1, nil)
-	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil), "无 extra 应视为 off")
+	headers := http.Header{"User-Agent": []string{"codex_cli_rs/0.146.0"}, "Session-Id": []string{"session-a"}}
+	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, headers), "无 extra 应视为 off，即使是 Codex 请求")
 }
 
 // 管理员显式 opt-in 的账号行为不变。
@@ -1241,4 +1255,30 @@ func TestApplyCodexFingerprintClientMetadataRaw_NonObjectBodyUntouched(t *testin
 		assert.False(t, changed, "非 JSON 对象 body 不应被改写: %s", body)
 		assert.Equal(t, []byte(body), out)
 	}
+}
+
+func TestCodexFingerprintTLSClearedOnFailover(t *testing.T) {
+	account := newTestOAuthAccount(91, map[string]any{codexFingerprintModeExtraKey: "single_machine_multi_window"})
+	ctx := withOpenAIWSTLSProfile(context.Background(), resolveCodexMacTLSProfile(account))
+	require.NotNil(t, openAIWSTLSProfileFromContext(ctx))
+	off := newTestOAuthAccount(92, map[string]any{codexFingerprintModeExtraKey: "off"})
+	ctx = withOpenAIWSTLSProfile(ctx, resolveCodexMacTLSProfile(off))
+	require.Nil(t, openAIWSTLSProfileFromContext(ctx), "off account must not inherit the previous account's TLS identity")
+}
+
+func TestCodexFingerprintWSReuseAfterModeChange(t *testing.T) {
+	account := newTestOAuthAccount(93, map[string]any{codexFingerprintModeExtraKey: "single_machine_multi_window"})
+	headers := http.Header{}
+	headers.Set("User-Agent", "codex_cli_rs/0.98.0")
+	ids := resolveCodexFingerprintIDsFromRequest(account, headers)
+	require.NotNil(t, ids)
+	applyCodexFingerprintHeaders(headers, ids)
+	conn := newOpenAIWSConn("fingerprint-transition", account.ID, nil, nil)
+	conn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(account, headers)
+	require.True(t, conn.matchesHandshakeCompatibility(normalizeOpenAIWSHandshakeCompatibility(account, headers)))
+	// Keep all headers identical: the TLS identity alone must prevent reuse.
+	account.Extra[codexFingerprintModeExtraKey] = "full"
+	require.False(t, conn.matchesHandshakeCompatibility(normalizeOpenAIWSHandshakeCompatibility(account, headers)))
+	account.Extra[codexFingerprintModeExtraKey] = "off"
+	require.False(t, conn.matchesHandshakeCompatibility(normalizeOpenAIWSHandshakeCompatibility(account, headers)))
 }

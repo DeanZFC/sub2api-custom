@@ -1262,12 +1262,9 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAIAccountSlot(
 	if s.service.concurrencyService != nil && maxConcurrency > 0 && !budget.recordAcquire(accountID) {
 		return nil, false, nil
 	}
-	if len(accounts) > 0 {
+	if len(accounts) > 0 && len(accounts[0].ProxyIDs) > 1 {
 		if s.service.concurrencyService == nil {
-			if len(accounts[0].ProxyIDs) > 1 {
-				return nil, true, fmt.Errorf("proxy pool concurrency unavailable")
-			}
-			return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, true, nil
+			return nil, true, fmt.Errorf("proxy pool concurrency unavailable")
 		}
 		result, err := s.service.concurrencyService.AcquireAccountRoute(ctx, &accounts[0], maxConcurrency)
 		return result, true, err
@@ -2489,9 +2486,6 @@ func cloneExcludedAccountIDs(excludedIDs map[int64]struct{}) map[int64]struct{} 
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {
-	if account != nil && account.IsPrismEnabled() {
-		return requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE
-	}
 	if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 		return true
 	}
@@ -3035,7 +3029,7 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 }
 
 func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {
-	if account == nil || account.IsPrismEnabled() || len(account.Extra) == 0 || openAIQuotaHeadroomSnapshotStale(account.Extra, now) {
+	if account == nil || len(account.Extra) == 0 || openAIQuotaHeadroomSnapshotStale(account.Extra, now) {
 		return openAIQuotaHeadroomNeutralFactor
 	}
 	window5h, window7d := openAICanonicalQuotaWindows(account.Extra, now)
@@ -3109,7 +3103,7 @@ func openAICanonicalQuotaWindows(extra map[string]any, now time.Time) (window5h,
 }
 
 func openAISchedulingResetWindowEnd(account *Account, now time.Time) (time.Time, bool) {
-	if account == nil || account.IsPrismEnabled() {
+	if account == nil {
 		return time.Time{}, false
 	}
 	if end, ok := openAICodexWindowResetAt(account.Extra, "5h"); ok && now.Before(end) {

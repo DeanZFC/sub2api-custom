@@ -449,11 +449,6 @@ type UpdateAccountInput struct {
 	ProbeEnabled          *bool
 	RateSyncEnabled       *bool
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
-	// AllowProtectionManagedUpdates is reserved for the dedicated anti-degrade
-	// service. Ordinary account forms must not be able to overwrite the
-	// persisted protection marker, fingerprint or adaptive policy with a stale
-	// Extra payload.
-	AllowProtectionManagedUpdates bool
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.

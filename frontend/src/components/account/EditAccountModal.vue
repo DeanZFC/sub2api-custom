@@ -1739,125 +1739,6 @@
           </div>
         </div>
       </div>
-      <div
-        v-if="antiDegradeAccountEligible"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="account-anti-degrade"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <label class="input-label mb-0">
-              {{ t('admin.accounts.openai.antiDegrade') }}
-              <span
-                v-if="antiDegradeEnabled"
-                data-testid="anti-degrade-status"
-                class="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
-              >{{ t('admin.accounts.openai.antiDegradeEnabled') }}</span>
-            </label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.antiDegradeDesc') }}</p>
-            <p v-if="antiDegradeEnabled && antiDegradeActiveMode" class="mt-1 text-xs font-medium text-primary-700 dark:text-primary-300" data-testid="anti-degrade-current-mode">
-              {{ t('admin.accounts.openai.antiDegradeActiveMode') }}：{{ antiDegradeModeLabel(antiDegradeActiveMode) }}
-            </p>
-          </div>
-          <Toggle
-            :model-value="antiDegradeEnabled"
-            data-testid="anti-degrade-toggle"
-            :aria-label="t('admin.accounts.openai.antiDegrade')"
-            :disabled="antiDegradeBusy || submitting"
-            @update:model-value="handleAntiDegradeToggle"
-          />
-        </div>
-
-        <div class="mt-3 grid gap-3 sm:grid-cols-2">
-          <label class="input-label">
-            {{ t('admin.accounts.openai.antiDegradeMode') }}
-            <select
-              v-model="antiDegradeMode"
-              class="input mt-1"
-              data-testid="anti-degrade-mode"
-              :disabled="antiDegradeBusy || submitting"
-              @change="handleAntiDegradeModeChange"
-            >
-              <option v-for="strategy in antiDegradeStrategiesForDisplay" :key="strategy.id" :value="strategy.id">
-                {{ strategy.name }}
-              </option>
-            </select>
-          </label>
-          <p class="input-hint self-end sm:pb-2">{{ t('admin.accounts.openai.antiDegradeModeHint') }}</p>
-        </div>
-        <p v-if="antiDegradeBusy" class="input-hint mt-2" data-testid="anti-degrade-loading">
-          {{ t('admin.accounts.openai.antiDegradeApplying') }}
-        </p>
-        <p v-if="antiDegradeEnabled" class="input-hint mt-2">
-          {{ t('admin.accounts.openai.antiDegradeActiveHint') }}
-        </p>
-        <div v-if="selectedAntiDegradeStrategy" class="mt-2 rounded border border-gray-200 bg-gray-50 p-3 text-xs dark:border-dark-600 dark:bg-dark-700">
-          <p class="font-medium text-gray-800 dark:text-gray-100">{{ selectedAntiDegradeStrategy.description }}</p>
-          <p class="mt-1 text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.openai.antiDegradeConfiguredTransport') }}：{{ selectedAntiDegradeStrategy.tls_profile || '-' }}
-            · {{ t('admin.accounts.openai.antiDegradeConfiguredIdentity') }}：{{ selectedAntiDegradeStrategy.identity_mode || '-' }}
-          </p>
-          <p v-if="antiDegradePreview?.reason && antiDegradePreview.reason !== 'already enabled'" class="mt-1 text-amber-700 dark:text-amber-300">
-            {{ antiDegradePreview.reason }}
-          </p>
-          <ul v-if="antiDegradePreview?.issues?.length" class="mt-1 list-inside list-disc text-amber-700 dark:text-amber-300">
-            <li v-for="issue in antiDegradePreview.issues" :key="issue">{{ issue }}</li>
-          </ul>
-          <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.antiDegradeRuntimeHint') }}</p>
-        </div>
-        <button
-          v-if="antiDegradeEnabled && (antiDegradeActiveMode !== antiDegradeMode || antiDegradeNeedsUpgrade)"
-          type="button"
-          class="btn btn-primary btn-sm mt-2"
-          data-testid="anti-degrade-apply-strategy"
-          :disabled="antiDegradeBusy || submitting || !selectedAntiDegradeStrategy"
-          @click="applyAntiDegrade"
-        >
-          {{ t('admin.accounts.openai.antiDegradeApplyStrategy') }}
-        </button>
-        <button
-          v-if="antiDegradeEnabled"
-          type="button"
-          class="btn btn-secondary btn-sm mt-2"
-          data-testid="anti-degrade-revert"
-          :disabled="antiDegradeBusy || submitting"
-          @click="requestAntiDegradeRevert"
-        >
-          {{ t('admin.accounts.openai.antiDegradeDisable') }}
-        </button>
-      </div>
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && (!sharedPool || sharedPoolAdmin)"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="account-protection-policy"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.protectionPolicy') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.protectionPolicyDesc') }}</p>
-          </div>
-          <Toggle v-model="protectionEnabled" :aria-label="t('admin.accounts.openai.protectionEnabled')" />
-        </div>
-        <div v-if="protectionEnabled" class="mt-3 grid gap-3 sm:grid-cols-2">
-          <label class="flex items-center gap-2 text-sm">
-            <input v-model="protectionAdaptiveEnabled" type="checkbox" class="checkbox" />
-            <span>{{ t('admin.accounts.openai.protectionAdaptive') }}</span>
-          </label>
-          <template v-if="protectionAdaptiveEnabled">
-            <label class="input-label">
-              {{ t('admin.accounts.openai.protectionMinConcurrency') }}
-              <input v-model.number="protectionAdaptiveMin" type="number" min="1" :max="form.concurrency || 1" class="input mt-1" />
-            </label>
-            <label class="flex items-center gap-2 text-sm sm:items-end sm:pb-2">
-              <input v-model="protectionAdaptiveAutomatic" type="checkbox" class="checkbox" />
-              <span>{{ t('admin.accounts.openai.protectionAutomatic') }}</span>
-            </label>
-          </template>
-        </div>
-        <p v-if="protectionEnabled && protectionAdaptiveEnabled" class="input-hint mt-2">
-          {{ t('admin.accounts.openai.protectionAdaptiveDesc') }}
-        </p>
-      </div>
       <template v-if="(!sharedPool || sharedPoolAdmin)">
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
@@ -1875,16 +1756,6 @@
           {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
         </p>
       </div>
-
-      <PrismAccountSettings
-        v-if="isPrismAccount"
-        v-model:enabled="prismEnabled"
-        v-model:auth-mode="prismAuthMode"
-        v-model:cookie="prismCookie"
-        v-model:timeout-seconds="prismTimeoutSeconds"
-        v-model:conversation-action-id="prismConversationActionId"
-        :cookie-configured="prismCookieConfigured"
-      />
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
@@ -2421,7 +2292,7 @@
         </div>
       </div>
 
-      <!-- CPA 指纹出口（仅 OpenAI OAuth） -->
+      <!-- Codex 指纹收敛（仅 OpenAI OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -3188,17 +3059,6 @@
     @confirm="handleMixedChannelConfirm"
     @cancel="handleMixedChannelCancel"
   />
-
-  <ConfirmDialog
-    :show="antiDegradeRevertConfirm"
-    :title="t('admin.accounts.openai.antiDegradeDisableTitle')"
-    :message="t('admin.accounts.openai.antiDegradeDisableMessage')"
-    :confirm-text="t('admin.accounts.openai.antiDegradeDisableConfirm')"
-    :cancel-text="t('common.cancel')"
-    :danger="true"
-    @confirm="confirmAntiDegradeRevert"
-    @cancel="antiDegradeRevertConfirm = false"
-  />
 </template>
 
 <script setup lang="ts">
@@ -3227,7 +3087,6 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
-import PrismAccountSettings from '@/components/account/PrismAccountSettings.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -3291,8 +3150,6 @@ import {
   resolveOpenAIWSModeFromExtra
 } from '@/utils/openaiWsMode'
 import { updateSharedAccount as updateAdminSharedAccount } from '@/api/admin/sharedPool'
-import type { AntiDegradeMode, AntiDegradePreview, AntiDegradeStrategyProfile } from '@/api/admin/accounts'
-import { extractApiErrorMessage } from '@/utils/apiError'
 import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
@@ -3363,11 +3220,6 @@ const selectableGroups = computed(() => {
 // Spark 影子账号(parent_account_id 非空):代理恒继承母账号,不可独立编辑(外审 B/P1),
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
-const isPrismAccount = computed(() =>
-  !props.sharedPool && !isSparkShadow.value &&
-  props.account?.platform === 'openai' &&
-  (props.account.type === 'oauth' || props.account.type === 'setup-token')
-)
 
 const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
 
@@ -3745,13 +3597,6 @@ const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
-const prismEnabled = ref(false)
-const prismAuthMode = ref<'account' | 'cookie'>('account')
-const prismCookie = ref('')
-const prismCookieConfigured = ref(false)
-const prismTimeoutSeconds = ref(180)
-const prismConversationActionId = ref('')
-const prismInitialConfig = ref({ enabled: false, authMode: 'account' as 'account' | 'cookie', timeoutSeconds: 180, conversationActionId: '' })
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -3767,184 +3612,8 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
-type CodexFingerprintMode = 'off' | 'account_device' | 'single_machine_multi_window' | 'device' | 'session' | 'full'
-const codexFingerprintMode = ref<CodexFingerprintMode>('single_machine_multi_window')
-const protectionEnabled = ref(false)
-const protectionAdaptiveEnabled = ref(false)
-const protectionAdaptiveAutomatic = ref(false)
-const protectionAdaptiveMin = ref(1)
-const antiDegradeEnabled = ref(false)
-const antiDegradeMode = ref<AntiDegradeMode>('legacy')
-const antiDegradeActiveMode = ref<AntiDegradeMode | null>(null)
-const antiDegradeLastManagedMode = ref<AntiDegradeMode | null>(null)
-const antiDegradePreview = ref<AntiDegradePreview | null>(null)
-const antiDegradeBusy = ref(false)
-const antiDegradeStrategies = ref<AntiDegradeStrategyProfile[]>([])
-const antiDegradeRevertConfirm = ref(false)
-const antiDegradeAccountOverride = ref<Account | null>(null)
-const skipNextAntiDegradeAccountSync = ref(false)
-const fallbackAntiDegradeStrategies: AntiDegradeStrategyProfile[] = [
-  {
-    id: 'generic',
-    name: '通用并发保护',
-    description: '保留账号当前身份、代理和传输，只为无限并发设置保护上限。',
-    category: '常用',
-    identity_mode: 'account',
-    tls_profile: 'account',
-    max_concurrency: 16,
-    risk: '低',
-    apply_supported: true
-  },
-  {
-    id: 'legacy',
-    name: '初代兼容',
-    description: '稳定账号设备与会话身份，使用兼容传输策略。',
-    category: '常用',
-    identity_mode: 'session',
-    tls_profile: 'nodejs24',
-    max_concurrency: 16,
-    risk: '中',
-    apply_supported: true
-  },
-  {
-    id: 'mode1',
-    name: '兼容架构',
-    description: '稳定设备身份、独立会话和请求完整性保护。',
-    category: '常用',
-    identity_mode: 'device',
-    tls_profile: 'standard',
-    max_concurrency: 16,
-    risk: '中',
-    apply_supported: true
-  }
-]
-
-const antiDegradeStrategyIds = new Set<AntiDegradeMode>([
-  'generic',
-  'legacy',
-  'mode1',
-  'mode2',
-  'minimal_compat',
-  'session_standard',
-  'native_baseline',
-  'tls_node24',
-  'low_concurrency',
-  'single_machine_multi_window'
-])
-const antiDegradeManagedExtraKeys = [
-  'anti_degrade',
-  'anti_degradation',
-  'protection_scope',
-  'codex_fingerprint_mode',
-  'enable_tls_fingerprint',
-  'tls_fingerprint_builtin',
-  'tls_fingerprint_profile_id'
-] as const
-const antiDegradeAccountEligible = computed(() => {
-  const account = props.account
-  if (!account || (props.sharedPool && !props.sharedPoolAdmin)) return false
-  return true
-})
-const supportsAntiDegradeIdentity = (account: Account | null): boolean => {
-  if (!account || account.parent_account_id != null || (account.proxy_ids?.length ?? 0) > 1 || account.extra?.proxy_mode === 'random') return false
-  return (account.type === 'oauth' || account.type === 'setup-token') &&
-    (account.platform === 'openai' || account.platform === 'anthropic')
-}
-const defaultAntiDegradeModeForAccount = (account: Account | null): AntiDegradeMode =>
-  supportsAntiDegradeIdentity(account) ? 'legacy' : 'generic'
-const antiDegradeStrategiesForDisplay = computed(() => {
-  const strategies = antiDegradeStrategies.value.length > 0
-    ? antiDegradeStrategies.value
-    : fallbackAntiDegradeStrategies
-  return strategies.filter(strategy => {
-    if (!strategy.apply_supported || strategy.id === 'native_baseline') return false
-    if (strategy.id === 'generic') return true
-    if (!supportsAntiDegradeIdentity(props.account)) return false
-    return props.account?.platform === 'openai' || strategy.id === 'legacy'
-  })
-})
-const selectedAntiDegradeStrategy = computed(() =>
-  antiDegradeStrategiesForDisplay.value.find(strategy => strategy.id === antiDegradeMode.value)
-)
-const normalizeAntiDegradeModeForAccount = (mode: unknown, account: Account | null): AntiDegradeMode => {
-  if (mode === 'generic' || !supportsAntiDegradeIdentity(account)) return 'generic'
-  const candidate = typeof mode === 'string' ? mode as AntiDegradeMode : defaultAntiDegradeModeForAccount(account)
-  if (!account || account.platform === 'openai') {
-    return antiDegradeStrategyIds.has(candidate) ? candidate : 'legacy'
-  }
-  return 'legacy'
-}
-const readAntiDegradeMarker = (account: Account | null): Record<string, unknown> => {
-  const extra = account?.extra as Record<string, unknown> | undefined
-  const marker = extra?.anti_degrade
-  return marker && typeof marker === 'object' ? marker as Record<string, unknown> : {}
-}
-const isAntiDegradeEnabled = (account: Account | null): boolean => {
-  const extra = account?.extra as Record<string, unknown> | undefined
-  if (typeof extra?.anti_degradation === 'boolean') return extra.anti_degradation
-  return readAntiDegradeMarker(account).enabled === true
-}
-const antiDegradeNeedsUpgrade = computed(() => {
-  const account = antiDegradeAccountOverride.value?.id === props.account?.id
-    ? antiDegradeAccountOverride.value
-    : props.account
-  return antiDegradeEnabled.value && antiDegradeActiveMode.value === 'mode1' &&
-    antiDegradeMode.value === 'mode1' && readAntiDegradeMarker(account).policy_version === 2
-})
-const syncAntiDegradeState = (account: Account) => {
-  const previousConcurrency = props.account?.id === account.id ? props.account.concurrency : undefined
-  const releasedIdentity = antiDegradeEnabled.value && antiDegradeActiveMode.value !== 'generic' &&
-    readAntiDegradeMarker(account).mode === 'generic'
-  antiDegradeAccountOverride.value = account
-  antiDegradeEnabled.value = isAntiDegradeEnabled(account)
-  const rawMode = readAntiDegradeMarker(account).mode
-  if (typeof rawMode === 'string' && antiDegradeStrategyIds.has(rawMode as AntiDegradeMode)) {
-    const normalizedMode = normalizeAntiDegradeModeForAccount(rawMode, account)
-    antiDegradeActiveMode.value = normalizedMode
-    antiDegradeLastManagedMode.value = normalizedMode
-    antiDegradeMode.value = normalizedMode
-  } else if (!antiDegradeEnabled.value) {
-    antiDegradeActiveMode.value = null
-    antiDegradeMode.value = defaultAntiDegradeModeForAccount(account)
-  }
-  if (previousConcurrency !== undefined && form.concurrency === previousConcurrency) {
-    form.concurrency = account.concurrency
-  }
-  if (releasedIdentity) {
-    // These fields were owned by the previous strategy. Start the newly
-    // editable generic form from the restored native settings.
-    const mode = account.extra?.codex_fingerprint_mode
-    codexFingerprintMode.value = typeof mode === 'string' &&
-      ['off', 'account_device', 'single_machine_multi_window', 'device', 'session', 'full'].includes(mode)
-      ? mode as CodexFingerprintMode
-      : 'single_machine_multi_window'
-    tlsFingerprintEnabled.value = account.extra?.enable_tls_fingerprint === true
-    const profileID = account.extra?.tls_fingerprint_profile_id
-    tlsFingerprintProfileId.value = typeof profileID === 'number' ? profileID : null
-  }
-  // The parent list usually echoes the account emitted below. Skip that one
-  // prop refresh so unsaved edits in this modal are not wiped by an immediate
-  // protection toggle; later list refreshes still hydrate the full form.
-  skipNextAntiDegradeAccountSync.value = true
-  emit('updated', account)
-}
-const preserveAntiDegradeExtra = (target: Record<string, unknown>, accountID: number) => {
-  if (!antiDegradeEnabled.value && antiDegradeAccountOverride.value?.id !== accountID) return
-  const sourceAccount = antiDegradeAccountOverride.value?.id === accountID
-    ? antiDegradeAccountOverride.value
-    : props.account?.id === accountID
-      ? props.account
-      : null
-  const source = sourceAccount?.extra as Record<string, unknown> | undefined
-  if (!source) return
-  const keys = antiDegradeLastManagedMode.value === 'generic'
-    ? antiDegradeManagedExtraKeys.slice(0, 3)
-    : antiDegradeManagedExtraKeys
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = source[key]
-    else delete target[key]
-  }
-}
+type CodexFingerprintMode = 'off' | 'single_machine_multi_window' | 'device' | 'session' | 'full'
+const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
@@ -3978,7 +3647,6 @@ const editWeeklyResetHour = ref<number | null>(null)
 const editResetTimezone = ref<string | null>(null)
 const codexFingerprintModeOptions = computed(() => [
   { value: 'off' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintOff') },
-  { value: 'account_device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintAccountDevice') },
   { value: 'single_machine_multi_window' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintSingleMachineMultiWindow') },
   { value: 'device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintDevice') },
   { value: 'session' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintSession') },
@@ -4425,23 +4093,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
-  const prism = extra?.prism && typeof extra.prism === 'object' && !Array.isArray(extra.prism)
-    ? extra.prism as Record<string, unknown>
-    : undefined
-  prismEnabled.value = prism?.enabled === true
-  // Existing configurations without an explicit mode keep their saved Cookie flow.
-  prismAuthMode.value = prism ? (prism.auth_mode === 'account' ? 'account' : 'cookie') : 'account'
-  // The cookie is write-only: never populate it from returned credentials.
-  prismCookie.value = ''
-  prismCookieConfigured.value = credentials?.prism_cookie_configured === true
-  prismTimeoutSeconds.value = typeof prism?.timeout_seconds === 'number' ? prism.timeout_seconds : 180
-  prismConversationActionId.value = typeof prism?.conversation_action_id === 'string' ? prism.conversation_action_id : ''
-  prismInitialConfig.value = {
-    enabled: prismEnabled.value,
-    authMode: prismAuthMode.value,
-    timeoutSeconds: prismTimeoutSeconds.value,
-    conversationActionId: prismConversationActionId.value
-  }
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
@@ -4451,25 +4102,15 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
-	openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
-	codexCLIOnlyEnabled.value = false
-	codexCLIOnlyAppServerEnabled.value = false
-	codexFingerprintMode.value = 'off'
-	protectionEnabled.value = false
-	protectionAdaptiveEnabled.value = false
-	protectionAdaptiveAutomatic.value = false
-	protectionAdaptiveMin.value = 1
-	antiDegradeEnabled.value = false
-	antiDegradeMode.value = 'legacy'
-	antiDegradeActiveMode.value = null
-	antiDegradeLastManagedMode.value = null
-	antiDegradePreview.value = null
-	antiDegradeRevertConfirm.value = false
-	codexImageToolMode.value = 'inherit'
+  openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+  codexCLIOnlyEnabled.value = false
+  codexCLIOnlyAppServerEnabled.value = false
+  codexFingerprintMode.value = 'off'
+  codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
-	if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
+  if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
     openaiFlattenNamespacesEnabled.value =
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
@@ -4515,41 +4156,19 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
       codexCLIOnlyAppServerEnabled.value =
         extra?.codex_cli_only_allow_app_server === true
-      const protectionPolicy = extra?.account_protection_policy as Record<string, unknown> | undefined
-      protectionEnabled.value = protectionPolicy?.enabled === true
-      protectionAdaptiveEnabled.value = protectionPolicy?.adaptive_concurrency === true
-      protectionAdaptiveAutomatic.value = protectionPolicy?.adaptive_mode === 'automatic'
-      protectionAdaptiveMin.value =
-        typeof protectionPolicy?.adaptive_min_concurrency === 'number' && protectionPolicy.adaptive_min_concurrency > 0
-          ? protectionPolicy.adaptive_min_concurrency
-          : 1
-
     }
-		if (newAccount.type === 'oauth') {
-      const fpMode = extra?.codex_fingerprint_mode as string | undefined
+    if (newAccount.type === 'oauth') {
+      const storedFPMode = extra?.codex_fingerprint_mode as string | undefined
+      const fpMode = storedFPMode === 'account_device' ? 'device' : storedFPMode
       // 缺省/非法值按 off 呈现，与后端 GetCodexFingerprintMode 的 opt-in 语义一致（#5610）
-      codexFingerprintMode.value = (['off', 'account_device', 'single_machine_multi_window', 'device', 'session', 'full'].includes(fpMode || '')
+      codexFingerprintMode.value = (['off', 'single_machine_multi_window', 'device', 'session', 'full'].includes(fpMode || '')
         ? fpMode as CodexFingerprintMode
-        : 'single_machine_multi_window')
+        : 'off')
     }
     const credentials = newAccount.credentials as Record<string, unknown> | undefined
     const compactMappings = credentials?.compact_model_mapping as Record<string, string> | undefined
     if (compactMappings && typeof compactMappings === 'object') {
       openAICompactModelMappings.value = Object.entries(compactMappings).map(([from, to]) => ({ from, to }))
-    }
-  }
-  {
-    // Protection is persisted by the dedicated endpoint and is independent of
-    // the adaptive-concurrency editor. Hydrate all account types so existing
-    // accounts do not require re-importing credentials.
-    antiDegradeEnabled.value = isAntiDegradeEnabled(newAccount)
-    antiDegradeMode.value = defaultAntiDegradeModeForAccount(newAccount)
-    const rawAntiDegradeMode = readAntiDegradeMarker(newAccount).mode
-    if (typeof rawAntiDegradeMode === 'string' && antiDegradeStrategyIds.has(rawAntiDegradeMode as AntiDegradeMode)) {
-      const normalizedMode = normalizeAntiDegradeModeForAccount(rawAntiDegradeMode, newAccount)
-      antiDegradeActiveMode.value = normalizedMode
-      antiDegradeLastManagedMode.value = normalizedMode
-      antiDegradeMode.value = normalizedMode
     }
   }
   if (newAccount.platform === 'anthropic' && newAccount.type === 'apikey') {
@@ -4864,16 +4483,7 @@ watch(
     if (!show || !newAccount) {
       return
     }
-    if (newAccount.id !== previousAccount?.id) {
-      antiDegradeAccountOverride.value = null
-      skipNextAntiDegradeAccountSync.value = false
-    }
-    void ensureAntiDegradeStrategies()
     if (!wasShow || newAccount !== previousAccount) {
-      if (skipNextAntiDegradeAccountSync.value && newAccount.id === previousAccount?.id) {
-        skipNextAntiDegradeAccountSync.value = false
-        return
-      }
       syncFormFromAccount(newAccount)
       loadTLSProfiles()
     }
@@ -5376,113 +4986,9 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 
 // Methods
 const handleClose = () => {
-  prismCookie.value = ''
   antigravityMixedChannelConfirmed.value = false
-  antiDegradeRevertConfirm.value = false
-  skipNextAntiDegradeAccountSync.value = false
   clearMixedChannelDialog()
   emit('close')
-}
-
-const antiDegradeModeLabel = (mode: AntiDegradeMode | null | undefined): string => {
-  if (!mode) return '-'
-  const strategy = antiDegradeStrategiesForDisplay.value.find(item => item.id === mode)
-  const account = antiDegradeAccountOverride.value?.id === props.account?.id
-    ? antiDegradeAccountOverride.value
-    : props.account
-  if (mode === 'mode1' && readAntiDegradeMarker(account).policy_version === 2) {
-    return (strategy?.name || mode).replace(/v3\b/, 'v2')
-  }
-  return strategy?.name || mode
-}
-
-const requestAntiDegradeRevert = () => {
-  if (!antiDegradeBusy.value && !submitting.value) {
-    antiDegradeRevertConfirm.value = true
-  }
-}
-
-const handleAntiDegradeModeChange = async () => {
-  antiDegradePreview.value = null
-  if (!props.account || (antiDegradeEnabled.value && antiDegradeActiveMode.value === antiDegradeMode.value && !antiDegradeNeedsUpgrade.value)) {
-    return
-  }
-  const accountID = props.account.id
-  antiDegradeBusy.value = true
-  try {
-    antiDegradePreview.value = await adminAPI.accounts.previewAntiDegrade(accountID, antiDegradeMode.value)
-  } catch (error: unknown) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.openai.antiDegradeFailed')))
-  } finally {
-    antiDegradeBusy.value = false
-  }
-}
-
-const reloadAntiDegradeState = async (accountID: number) => {
-  try {
-    const refreshed = await adminAPI.accounts.getById(accountID)
-    if (props.account?.id === accountID) {
-      syncAntiDegradeState(refreshed)
-    }
-  } catch {
-    // Keep the original mutation error visible when a follow-up refresh fails.
-  }
-}
-
-const applyAntiDegrade = async () => {
-  if (!props.account || antiDegradeBusy.value || submitting.value) return
-  const accountID = props.account.id
-  antiDegradeBusy.value = true
-  try {
-    const updated = await adminAPI.accounts.applyAntiDegrade(accountID, antiDegradeMode.value)
-    if (props.account?.id !== accountID) return
-    syncAntiDegradeState(updated)
-    appStore.showSuccess(t('admin.accounts.openai.antiDegradeApplied'))
-  } catch (error: unknown) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.openai.antiDegradeFailed')))
-    await reloadAntiDegradeState(accountID)
-  } finally {
-    antiDegradeBusy.value = false
-  }
-}
-
-const confirmAntiDegradeRevert = async () => {
-  antiDegradeRevertConfirm.value = false
-  if (!props.account || antiDegradeBusy.value || submitting.value) return
-  const accountID = props.account.id
-  antiDegradeBusy.value = true
-  try {
-    const updated = await adminAPI.accounts.revertAntiDegrade(accountID, true)
-    if (props.account?.id !== accountID) return
-    syncAntiDegradeState(updated)
-    appStore.showSuccess(t('admin.accounts.openai.antiDegradeReverted'))
-  } catch (error: unknown) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.openai.antiDegradeFailed')))
-    await reloadAntiDegradeState(accountID)
-  } finally {
-    antiDegradeBusy.value = false
-  }
-}
-
-const handleAntiDegradeToggle = async (enabled: boolean) => {
-  // Toggle emits the requested value. Keep the current value until the server
-  // confirms the mutation so a failed request never leaves a false visual state.
-  if (enabled === antiDegradeEnabled.value || antiDegradeBusy.value || submitting.value) return
-  if (!enabled) {
-    requestAntiDegradeRevert()
-    return
-  }
-  await applyAntiDegrade()
-}
-
-async function ensureAntiDegradeStrategies() {
-  if (antiDegradeStrategies.value.length > 0) return
-  try {
-    const strategies = await adminAPI.accounts.listAntiDegradeStrategies()
-    if (strategies.length > 0) antiDegradeStrategies.value = strategies
-  } catch {
-    // Older servers do not expose the registry; the compatibility options stay visible.
-  }
 }
 
 const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Account): Promise<Account> => {
@@ -5550,27 +5056,6 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 const handleSubmit = async () => {
   if (!props.account) return
   const accountID = props.account.id
-  const currentAccountExtra = (
-    antiDegradeAccountOverride.value?.id === accountID
-      ? antiDegradeAccountOverride.value.extra
-      : props.account.extra
-  ) as Record<string, unknown> | undefined
-
-  if (isPrismAccount.value && prismEnabled.value) {
-    if (prismAuthMode.value === 'cookie' && !prismCookieConfigured.value && !prismCookie.value.trim()) {
-      appStore.showError(t('admin.accounts.openai.prism.cookieRequired'))
-      return
-    }
-    if (!Number.isInteger(prismTimeoutSeconds.value) || prismTimeoutSeconds.value < 30 || prismTimeoutSeconds.value > 600) {
-      appStore.showError(t('admin.accounts.openai.prism.timeoutInvalid'))
-      return
-    }
-    const actionId = prismConversationActionId.value.trim()
-    if (actionId && !/^[a-fA-F0-9]{42}$/.test(actionId)) {
-      appStore.showError(t('admin.accounts.openai.prism.actionIdInvalid'))
-      return
-    }
-  }
 
   if (!props.sharedPool && form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
@@ -5934,7 +5419,7 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
 
       const newExtra: Record<string, unknown> = {
-        ...(currentAccountExtra || {})
+        ...((props.account.extra as Record<string, unknown>) || {})
       }
       // Persist both states so a disabled account remains opted out when the
       // backend applies the default-enabled policy to missing values.
@@ -5980,7 +5465,7 @@ const handleSubmit = async () => {
 
     // For antigravity accounts, handle mixed_scheduling and allow_overages in extra
     if (props.account.platform === 'antigravity') {
-      const currentExtra = currentAccountExtra || {}
+      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       if (mixedScheduling.value) {
         newExtra.mixed_scheduling = true
@@ -5997,7 +5482,7 @@ const handleSubmit = async () => {
 
     // For Anthropic OAuth/SetupToken accounts, handle quota control settings in extra
     if (props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')) {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) || currentAccountExtra || {}
+      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
 
       // Window cost limit settings
@@ -6087,7 +5572,7 @@ const handleSubmit = async () => {
 
     // For Anthropic API Key accounts, handle passthrough mode + web search emulation in extra
     if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) || currentAccountExtra || {}
+      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       if (anthropicPassthroughEnabled.value) {
         newExtra.anthropic_passthrough = true
@@ -6109,33 +5594,9 @@ const handleSubmit = async () => {
 
     // For OpenAI OAuth/SetupToken/API Key accounts, handle passthrough mode in extra
     if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey')) {
-      const currentExtra = currentAccountExtra || {}
+      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
-      if (isPrismAccount.value && (
-        prismEnabled.value !== prismInitialConfig.value.enabled ||
-        (prismEnabled.value && (
-          prismAuthMode.value !== prismInitialConfig.value.authMode ||
-          prismTimeoutSeconds.value !== prismInitialConfig.value.timeoutSeconds ||
-          prismConversationActionId.value.trim() !== prismInitialConfig.value.conversationActionId
-        ))
-      )) {
-        const currentPrism = currentExtra.prism && typeof currentExtra.prism === 'object' && !Array.isArray(currentExtra.prism)
-          ? currentExtra.prism as Record<string, unknown>
-          : {}
-        const nextPrism: Record<string, unknown> = { ...currentPrism, enabled: prismEnabled.value, version: 1 }
-        // Disabling only switches channels; keep the saved Prism configuration.
-        if (prismEnabled.value) {
-          nextPrism.auth_mode = prismAuthMode.value
-          nextPrism.timeout_seconds = prismTimeoutSeconds.value
-          if (prismConversationActionId.value.trim()) {
-            nextPrism.conversation_action_id = prismConversationActionId.value.trim().toLowerCase()
-          } else {
-            delete nextPrism.conversation_action_id
-          }
-        }
-        newExtra.prism = nextPrism
-      }
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
         newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -6245,33 +5706,7 @@ const handleSubmit = async () => {
         if (codexFingerprintMode.value !== 'off') {
           newExtra.codex_fingerprint_mode = codexFingerprintMode.value
         } else {
-          delete newExtra.codex_fingerprint_mode
-        }
-      }
-
-      if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        if (antiDegradeEnabled.value) {
-          // The dedicated anti-degrade endpoints own these runtime fields.
-          // Preserve their latest server snapshot when this modal saves other
-          // account fields, otherwise a stale form could silently disable it.
-          preserveAntiDegradeExtra(newExtra, props.account.id)
-        }
-        // Adaptive concurrency is a separate account policy. It remains
-        // editable while identity/transport protection is enabled and is not
-        // owned by the protection transition endpoints.
-        if (protectionEnabled.value) {
-          newExtra.account_protection_policy = {
-            enabled: true,
-            mode: 'observe',
-            adaptive_concurrency: protectionAdaptiveEnabled.value,
-            adaptive_mode: protectionAdaptiveAutomatic.value ? 'automatic' : 'observe',
-            adaptive_min_concurrency: Math.max(1, Math.min(Number(form.concurrency) || 1, Number(protectionAdaptiveMin.value) || 1)),
-            failure_threshold: 3,
-            failure_window_seconds: 60,
-            recovery_seconds: 60,
-          }
-        } else {
-          delete newExtra.account_protection_policy
+          newExtra.codex_fingerprint_mode = 'off'
         }
       }
 
@@ -6281,7 +5716,7 @@ const handleSubmit = async () => {
     // For apikey/bedrock accounts, handle quota_limit in extra
     if (props.account.type === 'apikey' || props.account.type === 'bedrock') {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
-        currentAccountExtra || {}
+        (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       // 上游倍率自动探测对全部 API-key 平台开放（sub2api 上游即可应答），
       // Bedrock 凭证无静态 Key 不参与。
@@ -6340,8 +5775,8 @@ const handleSubmit = async () => {
 
     // 上游ID头名只在改动时写回 extra，避免用弹窗打开时的快照覆盖运行态键。
     const nextUpstreamRequestIdHeader = upstreamRequestIdHeader.value.trim()
-    if (nextUpstreamRequestIdHeader !== readUpstreamRequestIdHeader(currentAccountExtra)) {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) || currentAccountExtra || {}
+    if (nextUpstreamRequestIdHeader !== readUpstreamRequestIdHeader(props.account.extra)) {
+      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       if (nextUpstreamRequestIdHeader) {
         newExtra.upstream_request_id_header = nextUpstreamRequestIdHeader
@@ -6349,23 +5784,6 @@ const handleSubmit = async () => {
         delete newExtra.upstream_request_id_header
       }
       updatePayload.extra = newExtra
-    }
-
-    if (antiDegradeEnabled.value || antiDegradeAccountOverride.value?.id === accountID) {
-      const extra = { ...((updatePayload.extra as Record<string, unknown>) || currentAccountExtra || {}) }
-      preserveAntiDegradeExtra(extra, accountID)
-      updatePayload.extra = extra
-    }
-
-    // Never echo read-only status or any cookie returned by an older server.
-    // Omitting this write-only credential preserves its saved value.
-    if (updatePayload.credentials) {
-      const credentials = updatePayload.credentials as Record<string, unknown>
-      delete credentials.prism_cookie_configured
-      delete credentials.prism_cookie
-      if (isPrismAccount.value && prismAuthMode.value === 'cookie' && prismCookie.value.trim()) {
-        credentials.prism_cookie = prismCookie.value.trim()
-      }
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

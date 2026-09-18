@@ -143,7 +143,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
-	service.PrepareNewAccountProtection(account)
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -567,9 +566,6 @@ func (r *accountRepository) updateLockedAccount(
 		return nil, err
 	}
 	account.Extra = extra
-	if err := preserveLockedAccountProtection(ctx, client, account); err != nil {
-		return nil, err
-	}
 
 	schedulable := account.Schedulable
 	if account.Status == service.StatusError {
@@ -582,7 +578,7 @@ func (r *accountRepository) updateLockedAccount(
 		SetPlatform(account.Platform).
 		SetType(account.Type).
 		SetCredentials(normalizeJSONMap(account.Credentials)).
-		SetExtra(account.Extra).
+		SetExtra(extra).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
 		SetStatus(account.Status).
@@ -2743,7 +2739,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			client = tx.Client()
 		}
 	}
-	extraExpression := preserveProtectionExtraSQL(ctx, "COALESCE(extra, '{}'::jsonb) || $1::jsonb")
+	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
@@ -2997,7 +2993,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	args := make([]any, 0, 8)
 
 	idx := 1
-	concurrencyPlaceholder := ""
 	ollamaProxyIdentityChanged := ""
 	if updates.Name != nil {
 		setClauses = append(setClauses, "name = $"+itoa(idx))
@@ -3018,8 +3013,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if updates.Concurrency != nil {
-		concurrencyPlaceholder = "$" + itoa(idx)
-		setClauses = append(setClauses, "concurrency = "+protectedConcurrencySQL(concurrencyPlaceholder))
+		setClauses = append(setClauses, "concurrency = $"+itoa(idx))
 		args = append(args, *updates.Concurrency)
 		idx++
 	}
@@ -3081,7 +3075,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				" AND "+ollamaCloudBaseURLMatchesSQL(credentialPlaceholder+"::jsonb ->> 'base_url'")+")")
 	}
 
-	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed || concurrencyPlaceholder != "" {
+	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
 			payload, err := json.Marshal(updates.Extra)
@@ -3123,10 +3117,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if updates.EnsureCodexFingerprintSeed {
 			extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 		}
-		extraExpression = preserveProtectionExtraSQL(ctx, extraExpression)
-		if concurrencyPlaceholder != "" {
-			extraExpression = "CASE WHEN " + accountProtectionEnabledSQL + " AND jsonb_typeof(extra -> 'anti_degrade') = 'object' THEN jsonb_set(" + extraExpression + ", '{anti_degrade,max_concurrency}', to_jsonb((" + protectedConcurrencySQL(concurrencyPlaceholder) + ")::integer), true) ELSE " + extraExpression + " END"
-		}
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}
 
@@ -3161,12 +3151,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			defer func() { _ = tx.Rollback() }()
 			ctx = dbent.NewTxContext(ctx, tx)
 			exec = tx.Client()
-		}
-	}
-	_, proxyModeUpdate := updates.Extra["proxy_mode"]
-	if proxyModeUpdate || (updates.ProxyIDs != nil && len(*updates.ProxyIDs) > 1) {
-		if err := validateLockedBulkProxyMode(ctx, exec, ids, updates.Extra, updates.ProxyIDs); err != nil {
-			return 0, err
 		}
 	}
 

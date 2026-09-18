@@ -92,7 +92,7 @@ func (r *OpenAITokenRefresher) CacheKey(account *Account) string {
 
 // CanRefresh 检查是否能处理此账号
 func (r *OpenAITokenRefresher) CanRefresh(account *Account) bool {
-	if account.IsCredentialShadow() || (account.IsPrismEnabled() && !account.UsesPrismAccountAuth()) {
+	if account.IsCredentialShadow() {
 		return false
 	}
 	return account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth
@@ -101,7 +101,7 @@ func (r *OpenAITokenRefresher) CanRefresh(account *Account) bool {
 // NeedsRefresh 检查token是否需要刷新
 // expires_at 缺失且处于限流状态时需要刷新，防止限流期间 token 静默过期
 func (r *OpenAITokenRefresher) NeedsRefresh(account *Account, refreshWindow time.Duration) bool {
-	if account.IsOpenAIPersonalAccessToken() || (account.IsPrismEnabled() && !account.UsesPrismAccountAuth()) {
+	if account.IsOpenAIPersonalAccessToken() {
 		return false
 	}
 	if strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
@@ -109,10 +109,7 @@ func (r *OpenAITokenRefresher) NeedsRefresh(account *Account, refreshWindow time
 	}
 	expiresAt := account.GetCredentialAsTime("expires_at")
 	if expiresAt == nil {
-		return account.IsRateLimited() || account.UsesPrismAccountAuth()
-	}
-	if account.UsesPrismAccountAuth() && strings.TrimSpace(account.GetOpenAIAccessToken()) == "" {
-		return true
+		return account.IsRateLimited()
 	}
 
 	return time.Until(*expiresAt) < refreshWindow

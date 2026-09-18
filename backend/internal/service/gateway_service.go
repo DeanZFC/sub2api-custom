@@ -1435,11 +1435,6 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		}
 
 		mapping := acc.GetModelMapping()
-		if acc.IsPrismEnabled() && len(mapping) == 0 {
-			hasAnyMapping = true
-			modelSet[PrismDefaultModel] = struct{}{}
-			continue
-		}
 		if len(mapping) > 0 {
 			hasAnyMapping = true
 			for model := range mapping {
