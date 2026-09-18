@@ -405,6 +405,73 @@ func TestPassthroughLifecycle_NonCyberFailureKeepsAccountSideEffects(t *testing.
 	}
 }
 
+func TestPassthroughLifecycle_PreOutputBillingFailureFailsOverWithoutLeaking(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+	upstream := newStagedPassthroughConn()
+	upstream.Send(`{"type":"response.failed","response":{"id":"resp_billing","error":{"type":"insufficient_quota","code":"insufficient_balance","message":"provider balance is zero"}}}`)
+	repo := &openAIStream403AccountRepo{}
+	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+	svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+	account := passthroughLifecycleAccount()
+
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
+	defer server.Close()
+	clientConn := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	clientPayload, clientErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.Error(t, clientErr)
+	require.NotContains(t, string(clientPayload), "provider balance")
+	select {
+	case err := <-serverErr:
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.True(t, failoverErr.IsUpstreamBillingExhausted())
+		require.Equal(t, UpstreamBillingExhaustedClientMessage, failoverErr.ClientMessage)
+	case <-time.After(3 * time.Second):
+		t.Fatal("billing passthrough did not return a failover")
+	}
+	require.Equal(t, 1, repo.setErrorCalls)
+}
+
+func TestPassthroughLifecycle_PartialOutputBillingFailureIsSanitizedOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+	upstream := newStagedPassthroughConn()
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_billing_partial","model":"gpt-5.1"}}`)
+	upstream.Send(`{"type":"response.failed","response":{"id":"resp_billing_partial","status":"failed","error":{"type":"insufficient_quota","code":"insufficient_balance","message":"provider balance is zero"}}}`)
+	repo := &openAIStream403AccountRepo{}
+	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+	svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+	account := passthroughLifecycleAccount()
+
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
+	defer server.Close()
+	clientConn := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	created, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "response.created", gjson.GetBytes(created, "type").String())
+	failed, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "response.failed", gjson.GetBytes(failed, "type").String())
+	require.Equal(t, "upstream_account_unavailable", gjson.GetBytes(failed, "response.error.code").String())
+	require.Equal(t, UpstreamBillingExhaustedClientMessage, gjson.GetBytes(failed, "response.error.message").String())
+	require.NotContains(t, string(failed), "provider balance")
+	require.Equal(t, 1, repo.setErrorCalls, "paired terminal handling must not apply billing account state twice")
+
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case <-serverErr:
+	case <-time.After(3 * time.Second):
+		t.Fatal("partial-output billing passthrough did not exit")
+	}
+}
+
 func TestPassthroughLifecycle_CyberSkipsFailureAccountSideEffects(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())

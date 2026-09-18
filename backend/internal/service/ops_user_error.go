@@ -1,6 +1,10 @@
 package service
 
-import "time"
+import (
+	"net/http"
+	"strings"
+	"time"
+)
 
 // UserErrorRequest 是面向终端用户的"错误请求"精简脱敏视图（白名单）。
 // 严禁包含 account / api_key_prefix / upstream_endpoint / user_email 等
@@ -102,15 +106,21 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 	if e.ClientIP != nil {
 		clientIP = *e.ClientIP
 	}
+	message := e.Message
+	statusCode := e.StatusCode
+	if shouldHideUpstreamBillingDetails(e, e.StatusCode, message) {
+		message = UpstreamBillingExhaustedClientMessage
+		statusCode = http.StatusBadGateway
+	}
 	return &UserErrorRequest{
 		ID:              e.ID,
 		CreatedAt:       e.CreatedAt,
 		Model:           model,
 		InboundEndpoint: e.InboundEndpoint,
-		StatusCode:      e.StatusCode,
+		StatusCode:      statusCode,
 		Category:        MapUserErrorCategory(e.Phase, e.Type),
 		Platform:        e.Platform,
-		Message:         e.Message,
+		Message:         message,
 		KeyName:         e.APIKeyName,
 		KeyDeleted:      e.APIKeyDeleted,
 		ClientIP:        clientIP,
@@ -119,6 +129,24 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 		Stream:          e.Stream,
 		UserAgent:       e.UserAgent,
 	}
+}
+
+// shouldHideUpstreamBillingDetails limits redaction to provider-owned errors.
+// Local user balance/quota errors are recorded in the request phase and keep
+// their existing billing_error/rate_limit_error messages.
+func shouldHideUpstreamBillingDetails(e *OpsErrorLog, statusCode int, evidence string) bool {
+	if e == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(e.Phase)) {
+	case "upstream", "account_auth", "network":
+	default:
+		return false
+	}
+	if isUpstreamBillingErrorCode(strings.TrimSpace(evidence)) {
+		return true
+	}
+	return IsUpstreamBillingError(statusCode, []byte(evidence))
 }
 
 // UserErrorRequestDetail 是错误请求详情的脱敏视图(点击单行查看)。
@@ -136,9 +164,23 @@ func ToUserErrorRequestDetail(e *OpsErrorLogDetail) *UserErrorRequestDetail {
 		return nil
 	}
 	base := ToUserErrorRequest(&e.OpsErrorLog)
+	errorBody := e.ErrorBody
+	statusCode := e.StatusCode
+	upstreamStatusCode := e.UpstreamStatusCode
+	if e.UpstreamStatusCode != nil {
+		statusCode = *e.UpstreamStatusCode
+	}
+	if shouldHideUpstreamBillingDetails(&e.OpsErrorLog, e.StatusCode, e.Message) ||
+		shouldHideUpstreamBillingDetails(&e.OpsErrorLog, statusCode, errorBody) ||
+		shouldHideUpstreamBillingDetails(&e.OpsErrorLog, statusCode, e.UpstreamErrorMessage) {
+		errorBody = ""
+		base.Message = UpstreamBillingExhaustedClientMessage
+		base.StatusCode = http.StatusBadGateway
+		upstreamStatusCode = nil
+	}
 	return &UserErrorRequestDetail{
 		UserErrorRequest:   *base,
-		ErrorBody:          e.ErrorBody,
-		UpstreamStatusCode: e.UpstreamStatusCode,
+		ErrorBody:          errorBody,
+		UpstreamStatusCode: upstreamStatusCode,
 	}
 }

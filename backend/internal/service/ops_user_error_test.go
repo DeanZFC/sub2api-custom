@@ -2,9 +2,12 @@ package service
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMapUserErrorCategory(t *testing.T) {
@@ -181,4 +184,134 @@ func TestToUserErrorRequestDetail_Nil(t *testing.T) {
 	if out := ToUserErrorRequestDetail(nil); out != nil {
 		t.Errorf("expected nil for nil input, got %+v", out)
 	}
+}
+
+func TestToUserErrorRequestDetail_HidesUpstreamBillingBody(t *testing.T) {
+	uid := int64(42)
+	upstreamStatus := 400
+	src := &OpsErrorLogDetail{
+		OpsErrorLog: OpsErrorLog{
+			Phase:      "upstream",
+			Type:       "upstream_error",
+			StatusCode: http.StatusBadGateway,
+			Message:    "insufficient_quota",
+			UserID:     &uid,
+		},
+		ErrorBody:          `{"error":{"code":"insufficient_quota","message":"add credits to continue"}}`,
+		UpstreamStatusCode: &upstreamStatus,
+	}
+
+	out := ToUserErrorRequestDetail(src)
+	if out == nil {
+		t.Fatal("expected non-nil detail")
+	}
+	if out.ErrorBody != "" {
+		t.Fatalf("upstream billing body leaked to user: %q", out.ErrorBody)
+	}
+	if out.Message != UpstreamBillingExhaustedClientMessage {
+		t.Fatalf("unexpected user message: %q", out.Message)
+	}
+	if out.StatusCode != http.StatusBadGateway {
+		t.Fatalf("unexpected user status: %d", out.StatusCode)
+	}
+	if out.UpstreamStatusCode != nil {
+		t.Fatalf("upstream billing status leaked to user: %d", *out.UpstreamStatusCode)
+	}
+}
+
+func TestToUserErrorRequest_HidesUpstreamBillingMessageWithoutJSON(t *testing.T) {
+	const quotaMessage = "You exceeded your current quota, please check your plan and billing details."
+	for _, tt := range []struct {
+		name    string
+		phase   string
+		status  int
+		message string
+		hide    bool
+	}{
+		{"upstream explicit code", "upstream", http.StatusBadGateway, "insufficient_quota", true},
+		{"upstream quota prose", "upstream", http.StatusBadGateway, quotaMessage, true},
+		{"local explicit code", "request", http.StatusPaymentRequired, "insufficient_quota", false},
+		{"local quota prose", "request", http.StatusPaymentRequired, quotaMessage, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			src := &OpsErrorLog{Phase: tt.phase, StatusCode: tt.status, Message: tt.message}
+			out := ToUserErrorRequest(src)
+			require.NotNil(t, out)
+			if tt.hide {
+				require.Equal(t, UpstreamBillingExhaustedClientMessage, out.Message)
+				require.Equal(t, http.StatusBadGateway, out.StatusCode)
+			} else {
+				require.Equal(t, tt.message, out.Message)
+				require.Equal(t, tt.status, out.StatusCode)
+			}
+			require.Equal(t, tt.message, src.Message, "admin record must retain the original evidence")
+		})
+	}
+}
+
+func TestToUserErrorRequestDetail_MessageEvidenceAlsoHidesRawFields(t *testing.T) {
+	for _, message := range []string{
+		"insufficient_quota",
+		"You exceeded your current quota, please check your plan and billing details.",
+	} {
+		t.Run(message, func(t *testing.T) {
+			upstreamStatus := http.StatusBadRequest
+			src := &OpsErrorLogDetail{
+				OpsErrorLog:        OpsErrorLog{Phase: "upstream", StatusCode: http.StatusBadGateway, Message: message},
+				ErrorBody:          `{"error":{"message":"unexpected provider response"}}`,
+				UpstreamStatusCode: &upstreamStatus,
+			}
+			out := ToUserErrorRequestDetail(src)
+			require.NotNil(t, out)
+			require.Equal(t, UpstreamBillingExhaustedClientMessage, out.Message)
+			require.Equal(t, http.StatusBadGateway, out.StatusCode)
+			require.Empty(t, out.ErrorBody)
+			require.Nil(t, out.UpstreamStatusCode)
+			require.NotEmpty(t, src.ErrorBody, "admin record must retain the provider body")
+			require.Equal(t, message, src.Message)
+			require.Equal(t, http.StatusBadRequest, *src.UpstreamStatusCode)
+		})
+	}
+}
+
+func TestToUserErrorRequestDetail_RedactsMessageWhenOnlyDetailHasBillingEvidence(t *testing.T) {
+	upstreamStatus := http.StatusBadRequest
+	src := &OpsErrorLogDetail{
+		OpsErrorLog: OpsErrorLog{
+			Phase:      "upstream",
+			Type:       "upstream_error",
+			StatusCode: http.StatusBadGateway,
+			Message:    "add credits to continue for provider account",
+		},
+		ErrorBody:          `{"error":{"code":"insufficient_balance","message":"add credits to continue"}}`,
+		UpstreamStatusCode: &upstreamStatus,
+	}
+
+	out := ToUserErrorRequestDetail(src)
+	require.NotNil(t, out)
+	require.Equal(t, UpstreamBillingExhaustedClientMessage, out.Message)
+	require.Equal(t, http.StatusBadGateway, out.StatusCode)
+	require.Empty(t, out.ErrorBody)
+	require.Nil(t, out.UpstreamStatusCode)
+}
+
+func TestToUserErrorRequestDetail_PreservesLocalBillingError(t *testing.T) {
+	upstreamStatus := http.StatusPaymentRequired
+	src := &OpsErrorLogDetail{
+		OpsErrorLog: OpsErrorLog{
+			Phase:      "request",
+			Type:       "billing_error",
+			StatusCode: http.StatusPaymentRequired,
+			Message:    "insufficient user balance",
+		},
+		ErrorBody:          `{"error":{"code":"insufficient_balance","message":"recharge your balance"}}`,
+		UpstreamStatusCode: &upstreamStatus,
+	}
+
+	out := ToUserErrorRequestDetail(src)
+	require.NotNil(t, out)
+	require.Equal(t, "insufficient user balance", out.Message)
+	require.Equal(t, http.StatusPaymentRequired, out.StatusCode)
+	require.NotEmpty(t, out.ErrorBody)
+	require.NotNil(t, out.UpstreamStatusCode)
 }

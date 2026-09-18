@@ -376,6 +376,8 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	status, code, message := statusCode, "server_error", "All available accounts exhausted"
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message = credentialFailoverClientResponse(lastErr)
+	} else if lastErr != nil && lastErr.IsUpstreamBillingExhausted() {
+		status, code, message = http.StatusBadGateway, "server_error", service.UpstreamBillingExhaustedClientMessage
 	} else if lastErr != nil && lastErr.IsOpenAICapacityShed() && strings.TrimSpace(lastErr.ClientMessage) != "" {
 		status = lastErr.ClientStatusCode
 		if status <= 0 {

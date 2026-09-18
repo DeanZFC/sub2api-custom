@@ -225,6 +225,10 @@ func (s *GatewayService) executeBedrockUpstream(
 
 				respBody, _ := s.readUpstreamErrorBody(resp)
 				_ = resp.Body.Close()
+				if IsUpstreamBillingError(resp.StatusCode, respBody) {
+					resp.Body = io.NopCloser(bytes.NewReader(respBody))
+					break
+				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					ProxyID:            opsUpstreamProxyID(account),
 					ProxyName:          opsUpstreamProxyName(account),
@@ -277,7 +281,15 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 			logger.LegacyPrintf("service.gateway", "[Bedrock] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d Body=%s",
 				account.ID, account.Name, resp.StatusCode, truncateString(string(respBody), 1000))
 
-			s.handleRetryExhaustedSideEffects(ctx, resp, account)
+			billingError := IsUpstreamBillingError(resp.StatusCode, respBody)
+			if billingError {
+				// Billing failures are account-scoped. Apply the normal account
+				// health transition once instead of the OAuth-403 retry-exhausted
+				// side effect below, which would otherwise double-record it.
+				s.handleFailoverSideEffects(ctx, resp, account)
+			} else {
+				s.handleRetryExhaustedSideEffects(ctx, resp, account)
+			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
 				ProxyName:          opsUpstreamProxyName(account),
@@ -288,6 +300,9 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 				Kind:               "retry_exhausted_failover",
 				Message:            extractUpstreamErrorMessage(respBody),
 			})
+			if billingError {
+				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+			}
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
@@ -314,6 +329,9 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 			Kind:               "failover",
 			Message:            extractUpstreamErrorMessage(respBody),
 		})
+		if IsUpstreamBillingError(resp.StatusCode, respBody) {
+			return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+		}
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,

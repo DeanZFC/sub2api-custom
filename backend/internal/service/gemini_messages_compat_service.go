@@ -971,6 +971,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		if IsUpstreamBillingError(resp.StatusCode, respBody) {
+			return nil, s.newGeminiUpstreamBillingFailoverError(ctx, c, account, resp.StatusCode, resp.Header, respBody, resp.Header.Get(requestIDHeader), mappedModel)
+		}
 		// 统一错误策略：自定义错误码 + 临时不可调度
 		if s.rateLimitService != nil {
 			policy := s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel)
@@ -1106,7 +1109,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	if req.Stream {
-		streamRes, err := s.handleStreamingResponse(c, resp, startTime, originalModel)
+		streamRes, err := s.handleStreamingResponse(c, resp, startTime, originalModel, geminiBillingResponseContext{account: account, requestID: requestID, model: mappedModel})
 		if err != nil {
 			return nil, err
 		}
@@ -1114,9 +1117,17 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		firstTokenMs = streamRes.firstTokenMs
 	} else {
 		if useUpstreamStream {
-			collected, usageObj, err := collectGeminiSSE(resp.Body, true)
+			var billingBody []byte
+			collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, func(rawBytes []byte) {
+				if IsUpstreamBillingError(http.StatusOK, rawBytes) {
+					billingBody = append(billingBody[:0], rawBytes...)
+				}
+			})
 			if err != nil {
 				return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
+			}
+			if len(billingBody) > 0 {
+				return nil, s.newGeminiUpstreamBillingFailoverError(ctx, c, account, upstreamBillingStatusCode(http.StatusOK, billingBody), resp.Header, billingBody, requestID, mappedModel)
 			}
 			collectedBytes, _ := json.Marshal(collected)
 			upstreamResponseModelObserverFromContext(c).ObserveGemini(collectedBytes)
@@ -1128,7 +1139,11 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				usage = usageObj
 			}
 		} else {
-			usage, err = s.handleNonStreamingResponse(c, resp, originalModel)
+			usage, err = s.handleNonStreamingResponse(c, resp, originalModel, geminiBillingResponseContext{
+				account:   account,
+				requestID: requestID,
+				model:     mappedModel,
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -1488,6 +1503,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		if IsUpstreamBillingError(resp.StatusCode, respBody) {
+			return nil, s.newGeminiUpstreamBillingFailoverError(ctx, c, account, resp.StatusCode, resp.Header, respBody, requestID, mappedModel)
+		}
 		// Best-effort fallback for OAuth tokens missing AI Studio scopes when calling countTokens.
 		// This avoids Gemini SDKs failing hard during preflight token counting.
 		// Checked before error policy so it always works regardless of custom error codes.
@@ -1618,7 +1636,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	var firstTokenMs *int
 
 	if stream {
-		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, account, requestID)
+		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, account, requestID, mappedModel)
 		if err != nil {
 			return nil, err
 		}
@@ -1627,13 +1645,20 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	} else {
 		if useUpstreamStream {
 			var best geminiResponseSignal
+			var billingBody []byte
 			collected, usageObj, stats, err := collectGeminiSSEObserved(resp.Body, isOAuth, func(rawBytes []byte) {
 				if sig, ok := detectGeminiResponseSignal(rawBytes); ok && sig.Kind > best.Kind {
 					best = sig
 				}
+				if IsUpstreamBillingError(http.StatusOK, rawBytes) {
+					billingBody = append(billingBody[:0], rawBytes...)
+				}
 			})
 			if err != nil {
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
+			}
+			if len(billingBody) > 0 {
+				return nil, s.newGeminiUpstreamBillingFailoverError(ctx, c, account, upstreamBillingStatusCode(http.StatusOK, billingBody), resp.Header, billingBody, requestID, mappedModel)
 			}
 			s.finalizeGeminiSSESignal(c, account, false, requestID, best, stats.dataEvents > 0, stats.fallback)
 			b, _ := json.Marshal(collected)
@@ -1642,7 +1667,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			c.Data(http.StatusOK, "application/json", b)
 			usage = usageObj
 		} else {
-			usageResp, err := s.handleNativeNonStreamingResponse(c, resp, isOAuth, account, requestID)
+			usageResp, err := s.handleNativeNonStreamingResponse(c, resp, isOAuth, account, requestID, mappedModel)
 			if err != nil {
 				return nil, err
 			}
@@ -1730,6 +1755,9 @@ func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCo
 // （池模式账号按 pool_mode_retry_count 先同账号重试）；返回 nil 表示状态码不可 failover，
 // 由调用方决定客户端写出。Skipped 只豁免账号状态标记，不豁免换号，与 OpenAI 网关路径一致。
 func (s *GeminiMessagesCompatService) skippedErrorPolicyFailoverError(c *gin.Context, account *Account, statusCode int, respBody []byte, upstreamRequestID string) *UpstreamFailoverError {
+	if IsUpstreamBillingError(statusCode, respBody) {
+		return s.newGeminiUpstreamBillingFailoverError(context.Background(), c, account, statusCode, nil, respBody, upstreamRequestID, "")
+	}
 	if !s.shouldFailoverGeminiUpstreamError(statusCode) {
 		return nil
 	}
@@ -1752,6 +1780,46 @@ func (s *GeminiMessagesCompatService) skippedErrorPolicyFailoverError(c *gin.Con
 		ResponseBody:           respBody,
 		RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode),
 	}
+}
+
+func (s *GeminiMessagesCompatService) newGeminiUpstreamBillingFailoverError(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	statusCode int,
+	headers http.Header,
+	body []byte,
+	requestID string,
+	requestedModel string,
+) *UpstreamFailoverError {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	setOpsUpstreamError(c, statusCode, message, s.upstreamErrorDetail(body))
+	event := OpsUpstreamErrorEvent{
+		Platform:           PlatformGemini,
+		UpstreamStatusCode: statusCode,
+		UpstreamRequestID:  requestID,
+		Kind:               "billing_failover",
+		Message:            message,
+		Detail:             s.upstreamErrorDetail(body),
+	}
+	if account != nil {
+		event.ProxyID = opsUpstreamProxyID(account)
+		event.ProxyName = opsUpstreamProxyName(account)
+		event.Platform = account.Platform
+		event.AccountID = account.ID
+		event.AccountName = account.Name
+	}
+	appendOpsUpstreamError(c, event)
+	if s.rateLimitService != nil && account != nil {
+		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, headers, body, requestedModel)
+	}
+	return newUpstreamBillingFailoverError(statusCode, headers, body, false)
 }
 
 // geminiCustomCodeSkippedClientMessage 自定义错误码未命中时对客户端隐藏上游细节的固定文案，
@@ -2106,7 +2174,28 @@ type geminiStreamResult struct {
 	firstTokenMs *int
 }
 
-func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context, resp *http.Response, originalModel string) (*ClaudeUsage, error) {
+// geminiBillingResponseContext carries operator-only upstream identity.
+// Optional typed context keeps response helpers usable in isolated tests.
+type geminiBillingResponseContext struct {
+	account   *Account
+	requestID string
+	model     string
+}
+
+func geminiResponseContext(c *gin.Context) context.Context {
+	if c != nil && c.Request != nil {
+		return c.Request.Context()
+	}
+	return context.Background()
+}
+
+func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context, resp *http.Response, originalModel string, options ...geminiBillingResponseContext) (*ClaudeUsage, error) {
+	ctx := geminiResponseContext(c)
+	var details geminiBillingResponseContext
+	if len(options) > 0 {
+		details = options[0]
+	}
+	account, upstreamRequestID, requestedModel := details.account, details.requestID, details.model
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream response")
@@ -2127,6 +2216,9 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 	if err := json.Unmarshal(unwrappedBody, &geminiResp); err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
 	}
+	if IsUpstreamBillingError(http.StatusOK, unwrappedBody) {
+		return nil, s.newGeminiUpstreamBillingFailoverError(ctx, c, account, upstreamBillingStatusCode(http.StatusOK, unwrappedBody), resp.Header, unwrappedBody, upstreamRequestID, requestedModel)
+	}
 
 	claudeResp, usage := convertGeminiToClaudeMessage(geminiResp, originalModel, unwrappedBody, false)
 	c.JSON(http.StatusOK, claudeResp)
@@ -2134,16 +2226,27 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 	return usage, nil
 }
 
-func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string) (*geminiStreamResult, error) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Status(http.StatusOK)
-
+func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string, options ...geminiBillingResponseContext) (*geminiStreamResult, error) {
+	ctx := geminiResponseContext(c)
+	var details geminiBillingResponseContext
+	if len(options) > 0 {
+		details = options[0]
+	}
+	account, upstreamRequestID, requestedModel := details.account, details.requestID, details.model
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		return nil, errors.New("streaming not supported")
+	}
+	streamHeadersWritten := false
+	writeStreamHeaders := func() {
+		if streamHeadersWritten {
+			return
+		}
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+		streamHeadersWritten = true
 	}
 
 	messageID := generateAnthropicMsgID()
@@ -2163,8 +2266,15 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			},
 		},
 	}
-	writeSSE(c.Writer, "message_start", messageStart)
-	flusher.Flush()
+	messageStarted := false
+	startMessage := func() {
+		if !messageStarted {
+			writeStreamHeaders()
+			writeSSE(c.Writer, "message_start", messageStart)
+			flusher.Flush()
+			messageStarted = true
+		}
+	}
 
 	var firstTokenMs *int
 	var usage ClaudeUsage
@@ -2216,6 +2326,25 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		if err := json.Unmarshal(unwrappedBytes, &geminiResp); err != nil {
 			continue
 		}
+		if u := extractGeminiUsage(unwrappedBytes); u != nil {
+			usage = *u
+		}
+		if IsUpstreamBillingError(http.StatusOK, unwrappedBytes) {
+			failoverErr := s.newGeminiUpstreamBillingFailoverError(ctx, c, account, upstreamBillingStatusCode(http.StatusOK, unwrappedBytes), resp.Header, unwrappedBytes, upstreamRequestID, requestedModel)
+			if !c.Writer.Written() {
+				return nil, failoverErr
+			}
+			MarkResponseCommitted(c)
+			writeSSE(c.Writer, "error", map[string]any{
+				"type":  "error",
+				"error": map[string]any{"type": "api_error", "message": UpstreamBillingExhaustedClientMessage},
+			})
+			flusher.Flush()
+			// The in-band error and Ops failure are already recorded. Preserve
+			// partial usage without allowing the handler to replay the request.
+			return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
+		}
+		startMessage()
 
 		if fr := extractGeminiFinishReason(geminiResp); fr != "" {
 			finishReason = fr
@@ -2359,16 +2488,13 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			}
 		}
 
-		if u := extractGeminiUsage(unwrappedBytes); u != nil {
-			usage = *u
-		}
-
 		// Process the final unterminated line at EOF as well.
 		if errors.Is(err, io.EOF) {
 			break
 		}
 	}
 
+	startMessage()
 	if openBlockIndex >= 0 {
 		writeSSE(c.Writer, "content_block_stop", map[string]any{
 			"type":  "content_block_stop",
@@ -2713,7 +2839,12 @@ type UpstreamHTTPResult struct {
 	Body       []byte
 }
 
-func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Context, resp *http.Response, isOAuth bool, account *Account, upstreamRequestID string) (*ClaudeUsage, error) {
+func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Context, resp *http.Response, isOAuth bool, account *Account, upstreamRequestID string, args ...string) (*ClaudeUsage, error) {
+	ctx := geminiResponseContext(c)
+	requestedModel := ""
+	if len(args) > 0 {
+		requestedModel = args[0]
+	}
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2741,6 +2872,9 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	}
 	observer.ObserveGemini(respBody)
 	observeGeminiImageOutputs(c, respBody)
+	if IsUpstreamBillingError(http.StatusOK, respBody) {
+		return nil, s.newGeminiUpstreamBillingFailoverError(ctx, c, account, upstreamBillingStatusCode(http.StatusOK, respBody), resp.Header, respBody, upstreamRequestID, requestedModel)
+	}
 	if sig, ok := detectGeminiResponseSignalInBody(respBody); ok {
 		s.markGeminiResponseSignal(c, account, sig, false, upstreamRequestID)
 	} else if isGeminiEmptyResponseBody(respBody) {
@@ -2761,7 +2895,12 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	return &ClaudeUsage{}, nil
 }
 
-func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool, account *Account, upstreamRequestID string) (*geminiNativeStreamResult, error) {
+func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool, account *Account, upstreamRequestID string, args ...string) (*geminiNativeStreamResult, error) {
+	ctx := geminiResponseContext(c)
+	requestedModel := ""
+	if len(args) > 0 {
+		requestedModel = args[0]
+	}
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Streaming Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2772,20 +2911,10 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ====================================================")
 	}
 
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
-
-	c.Status(resp.StatusCode)
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "text/event-stream; charset=utf-8"
 	}
-	c.Header("Content-Type", contentType)
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
@@ -2801,7 +2930,22 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	var firstTokenMs *int
 	var best geminiResponseSignal
 	sawDataEvent := false
+	downstreamStarted := c.Writer.Written()
+	startDownstream := func() {
+		if !downstreamStarted {
+			if s.responseHeaderFilter != nil {
+				responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+			}
+			c.Header("Cache-Control", "no-cache")
+			c.Header("Connection", "keep-alive")
+			c.Header("X-Accel-Buffering", "no")
+			c.Header("Content-Type", contentType)
+			c.Status(resp.StatusCode)
+			downstreamStarted = true
+		}
+	}
 	fallback := &geminiSSEFallbackBody{}
+	var pendingPrefix strings.Builder
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -2811,8 +2955,16 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
 				// Keepalive / done markers
 				if payload == "" || payload == "[DONE]" {
-					_, _ = io.WriteString(c.Writer, line)
-					flusher.Flush()
+					if !sawDataEvent && !downstreamStarted {
+						if pendingPrefix.Len()+len(line) > 8<<20 {
+							return nil, errors.New("upstream response body too large")
+						}
+						pendingPrefix.WriteString(line)
+					} else {
+						startDownstream()
+						_, _ = io.WriteString(c.Writer, line)
+						flusher.Flush()
+					}
 				} else {
 					var rawToWrite string
 					rawToWrite = payload
@@ -2837,16 +2989,36 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					}
 					observer.ObserveGemini(rawBytes)
 					observeGeminiImageOutputs(c, rawBytes)
+					if IsUpstreamBillingError(http.StatusOK, rawBytes) {
+						failoverErr := s.newGeminiUpstreamBillingFailoverError(ctx, c, account, upstreamBillingStatusCode(http.StatusOK, rawBytes), resp.Header, rawBytes, upstreamRequestID, requestedModel)
+						if !c.Writer.Written() {
+							return nil, failoverErr
+						}
+						MarkResponseCommitted(c)
+						writeSSE(c.Writer, "", map[string]any{
+							"error": map[string]any{"code": http.StatusBadGateway, "status": "UNAVAILABLE", "message": UpstreamBillingExhaustedClientMessage},
+						})
+						flusher.Flush()
+						return &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs}, nil
+					}
 
 					if firstTokenMs == nil {
 						ms := int(time.Since(startTime).Milliseconds())
 						firstTokenMs = &ms
 					}
 
+					if pendingPrefix.Len() > 0 {
+						startDownstream()
+						_, _ = io.WriteString(c.Writer, pendingPrefix.String())
+						pendingPrefix.Reset()
+					}
+
 					if isOAuth {
+						startDownstream()
 						// SSE format requires double newline (\n\n) to separate events
 						_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", rawToWrite)
 					} else {
+						startDownstream()
 						// Pass-through for AI Studio responses.
 						_, _ = io.WriteString(c.Writer, line)
 					}
@@ -2855,9 +3027,16 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 			} else {
 				if !sawDataEvent {
 					fallback.AddLine(trimmed)
+					// Buffer non-SSE fallback bodies until they can be classified.
+					if pendingPrefix.Len()+len(line) > 8<<20 {
+						return nil, errors.New("upstream response body too large")
+					}
+					pendingPrefix.WriteString(line)
+				} else {
+					startDownstream()
+					_, _ = io.WriteString(c.Writer, line)
+					flusher.Flush()
 				}
-				_, _ = io.WriteString(c.Writer, line)
-				flusher.Flush()
 			}
 		}
 
@@ -2869,6 +3048,29 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 		}
 	}
 
+	if !sawDataEvent && pendingPrefix.Len() > 0 {
+		rawBytes := unwrapIfNeeded(isOAuth, []byte(pendingPrefix.String()))
+		if IsUpstreamBillingError(http.StatusOK, rawBytes) {
+			failoverErr := s.newGeminiUpstreamBillingFailoverError(ctx, c, account, upstreamBillingStatusCode(http.StatusOK, rawBytes), resp.Header, rawBytes, upstreamRequestID, requestedModel)
+			if !c.Writer.Written() {
+				return nil, failoverErr
+			}
+			MarkResponseCommitted(c)
+			writeSSE(c.Writer, "", map[string]any{
+				"error": map[string]any{"code": http.StatusBadGateway, "status": "UNAVAILABLE", "message": UpstreamBillingExhaustedClientMessage},
+			})
+			flusher.Flush()
+			return &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs}, nil
+		}
+		startDownstream()
+		_, _ = io.WriteString(c.Writer, pendingPrefix.String())
+		flusher.Flush()
+	}
+
+	// A syntactically empty successful stream still needs the native stream
+	// response headers. Delay this commit until EOF so an earlier billing event
+	// remains eligible for account failover.
+	startDownstream()
 	s.finalizeGeminiSSESignal(c, account, true, upstreamRequestID, best, sawDataEvent, fallback)
 
 	return &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs}, nil

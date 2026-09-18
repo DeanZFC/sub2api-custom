@@ -190,6 +190,27 @@ func TestHandleErrorResponse_Deterministic400WithoutUpstreamMetadata(t *testing.
 	require.False(t, gjson.Get(body, "error.param").Exists(), "上游没给 param 就不要编一个")
 }
 
+func TestHandleErrorResponse_UpstreamBilling400FailsOverAndHidesMessage(t *testing.T) {
+	c, rec := newOpenAIUpstreamErrorTestContext(t)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	body := []byte(`{"error":{"code":"insufficient_quota","message":"You exceeded your current quota; add credits to continue"}}`)
+
+	_, err := svc.handleErrorResponse(
+		context.Background(),
+		newOpenAIUpstreamErrorResponse(http.StatusBadRequest, string(body)),
+		c, newOpenAIUpstreamErrorTestAccount(), nil,
+	)
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.True(t, failoverErr.IsUpstreamBillingExhausted())
+	require.Equal(t, UpstreamBillingExhaustedReason, failoverErr.Reason)
+	require.Equal(t, http.StatusBadGateway, failoverErr.ClientStatusCode)
+	require.Equal(t, UpstreamBillingExhaustedClientMessage, failoverErr.ClientMessage)
+	require.Equal(t, http.StatusOK, rec.Code, "billing failover must not write the upstream body before account selection")
+	require.NotContains(t, rec.Body.String(), "add credits")
+}
+
 // 上游回非 JSON（反代的 HTML 错误页等）时不得 panic，也不得回空 message。
 func TestHandleErrorResponse_Deterministic400WithNonJSONBody(t *testing.T) {
 	c, rec := newOpenAIUpstreamErrorTestContext(t)

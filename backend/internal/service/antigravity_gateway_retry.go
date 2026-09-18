@@ -1207,6 +1207,19 @@ func (s *AntigravityGatewayService) handleUpstreamError(
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return nil
 	}
+	// Billing exhaustion can be encoded as 400/403/429 by the upstream. The
+	// regular status-code branches below do not classify those as account
+	// health failures, so apply the shared account transition before the
+	// caller turns the response into a failover error. Keep 402 on its legacy
+	// branch to avoid duplicate side effects.
+	if statusCode != http.StatusPaymentRequired && IsUpstreamBillingError(statusCode, body) {
+		if s.rateLimitService != nil {
+			if s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, headers, body) {
+				logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d billing_exhausted account=%d", prefix, statusCode, account.ID)
+			}
+		}
+		return nil
+	}
 	// 模型级限流处理（优先）
 	result := s.handleModelRateLimit(&handleModelRateLimitParams{
 		ctx:             ctx,

@@ -414,6 +414,15 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})
+	if IsUpstreamBillingError(resp.StatusCode, body) {
+		// Preserve the provider evidence for Ops while forcing account failover;
+		// this must happen before passthrough rules and before the raw 400 branch.
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		if s.rateLimitService != nil {
+			s.handleFailoverSideEffects(ctx, resp, account, requestedModel...)
+		}
+		return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, body, false)
+	}
 
 	// 处理上游错误，标记账号状态
 	shouldDisable := false
@@ -553,13 +562,19 @@ func (s *GatewayService) handleFailoverSideEffects(ctx context.Context, resp *ht
 // OAuth 403：标记账号异常
 // API Key 未配置错误码：仅返回错误，不标记账号
 func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *http.Response, c *gin.Context, account *Account) (*ForwardResult, error) {
-	MarkResponseCommitted(c)
 	// Capture upstream error body before side-effects consume the stream.
 	respBody, _ := s.readUpstreamErrorBody(resp)
 	_ = resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
-	s.handleRetryExhaustedSideEffects(ctx, resp, account)
+	billingError := IsUpstreamBillingError(resp.StatusCode, respBody)
+	if billingError {
+		if s.rateLimitService != nil {
+			s.handleFailoverSideEffects(ctx, resp, account)
+		}
+	} else {
+		s.handleRetryExhaustedSideEffects(ctx, resp, account)
+	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -596,6 +611,13 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})
+	if billingError {
+		// Keep the downstream response unwritten so the handler can select another
+		// account. If all accounts fail, the typed error supplies the fixed 502.
+		return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+	}
+
+	MarkResponseCommitted(c)
 
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		logger.LegacyPrintf("service.gateway",
@@ -1079,7 +1101,10 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 					if clientDisconnected {
 						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
 					}
-					return nil, err
+					if !c.Writer.Written() {
+						return nil, err
+					}
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, err
 				}
 
 				for _, block := range outputBlocks {
@@ -1394,6 +1419,17 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
 	if err != nil {
 		return nil, err
+	}
+	if billingStatus := upstreamBillingStatusCode(resp.StatusCode, body); billingStatus != 0 {
+		// Some compatible providers return an error envelope with HTTP 200.
+		// Reuse the upstream error path before writing that body as a success.
+		syntheticResp := &http.Response{
+			StatusCode: billingStatus,
+			Header:     resp.Header.Clone(),
+			Body:       io.NopCloser(bytes.NewReader(body)),
+		}
+		_, billingErr := s.handleErrorResponse(ctx, syntheticResp, c, account, mappedModel)
+		return nil, billingErr
 	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {

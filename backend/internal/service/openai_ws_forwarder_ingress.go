@@ -1046,6 +1046,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if eventType == "error" {
 				s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
+				billingStatus := openAIWSBillingStatus(upstreamMessage, errMsgRaw)
 				statusCode := openAIWSRejectedFieldRetryHTTPStatus(upstreamMessage)
 				if !wroteDownstream && statusCode == http.StatusBadRequest && rejectedFieldRetryState != nil {
 					retryBody, retryReason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(
@@ -1070,7 +1071,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						}
 					}
 				}
-				s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
+				if billingStatus == 0 {
+					s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
+				}
 				fallbackReason, _ := classifyOpenAIWSErrorEventFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
 				if fallbackReason == openAIWSFallbackReasonInvalidEncryptedContent {
 					// 记录被上游拒绝的密文摘要；错误照旧透传，下一轮进场时按摘要预剥离。
@@ -1140,13 +1143,36 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						false,
 					)
 				}
-				if !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
+				if !wroteDownstream && billingStatus != 0 {
+					lease.MarkBroken()
+					return nil, newUpstreamBillingFailoverError(
+						billingStatus,
+						lease.HandshakeHeaders(),
+						upstreamMessage,
+						false,
+					)
+				}
+				if !wroteDownstream && billingStatus == 0 && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
 					lease.MarkBroken()
 					return nil, s.newOpenAIWSRateLimitFailoverError(account, lease.HandshakeHeaders(), upstreamMessage, errMsgRaw)
 				}
 			}
+			if eventType == "response.failed" {
+				if billingStatus := openAIWSBillingStatus(upstreamMessage, extractOpenAISSEErrorMessage(upstreamMessage)); billingStatus != 0 {
+					if !wroteDownstream {
+						s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
+						lease.MarkBroken()
+						return nil, newUpstreamBillingFailoverError(
+							billingStatus,
+							lease.HandshakeHeaders(),
+							upstreamMessage,
+							false,
+						)
+					}
+				}
+			}
 			if !wroteDownstream && (eventType == "error" || eventType == "response.failed") {
-				if hit, _, _ := detectOpenAICyberPolicy(upstreamMessage); !hit {
+				if hit, _, _ := detectOpenAICyberPolicy(upstreamMessage); !hit && openAIWSBillingStatus(upstreamMessage, extractOpenAISSEErrorMessage(upstreamMessage)) == 0 {
 					if retryFailure := configuredOpenAIStreamRetryFailure(ctx, upstreamMessage, extractOpenAISSEErrorMessage(upstreamMessage), &usage); retryFailure != nil {
 						lease.MarkBroken()
 						return nil, retryFailure
@@ -1190,6 +1216,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				// sanitizeOpenAICapacityShedErrorCodeForClient 注释里写明的前提。
 				clientMessage := upstreamMessage
 				if eventType == "error" || eventType == "response.failed" {
+					if rewritten, changed := sanitizeOpenAIResponseFailedEventForClient(clientMessage, eventType, wroteDownstream); changed {
+						clientMessage = rewritten
+					}
 					if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
 						clientMessage = rewritten
 					}

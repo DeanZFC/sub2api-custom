@@ -1611,6 +1611,10 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
 		return
 	}
+	if failoverErr != nil && failoverErr.IsUpstreamBillingExhausted() {
+		h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", service.UpstreamBillingExhaustedClientMessage, streamStarted)
+		return
+	}
 	if failoverErr != nil && failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
 		status := failoverErr.ClientStatusCode
 		if status <= 0 {
@@ -3413,6 +3417,11 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
+	if failoverErr.IsUpstreamBillingExhausted() {
+		service.SetOpsUpstreamError(c, statusCode, service.ExtractUpstreamErrorMessage(responseBody), "")
+		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.UpstreamBillingExhaustedClientMessage, streamStarted)
+		return
+	}
 	if statusCode == http.StatusBadRequest && service.IsOpenAICompatibleModelNotFound400(responseBody) && !streamStarted {
 		upstreamMsg := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(responseBody))
 		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
@@ -3830,7 +3839,12 @@ func closeOpenAIWSFailoverExhausted(c *gin.Context, conn *coderws.Conn, failover
 		if reason := strings.TrimSpace(string(failoverErr.Reason)); reason != "" {
 			errorCode = reason
 		}
-		if failoverErr.Stage == service.GatewayFailureStageAccountAuth {
+		if failoverErr.IsUpstreamBillingExhausted() {
+			intendedStatus = http.StatusBadGateway
+			errorType = "upstream_error"
+			message = service.UpstreamBillingExhaustedClientMessage
+			closeStatus = coderws.StatusTryAgainLater
+		} else if failoverErr.Stage == service.GatewayFailureStageAccountAuth {
 			intendedStatus = http.StatusServiceUnavailable
 			errorType = "api_error"
 			message = service.GrokCredentialUnavailableClientMessage

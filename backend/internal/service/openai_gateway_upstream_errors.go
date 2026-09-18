@@ -257,6 +257,13 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 	if hit, _, _ := detectOpenAICyberPolicy(upstreamBody); hit {
 		return false
 	}
+	// Provider billing/quota failures are account-scoped even when the
+	// provider incorrectly reports them as 400/403/429. Rotate the account
+	// before the deterministic client-error branch can expose the provider
+	// message to the caller.
+	if IsUpstreamBillingError(statusCode, upstreamBody) {
+		return true
+	}
 	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
 		return false
 	}
@@ -330,6 +337,15 @@ func newOpenAIUpstreamFailoverError(
 		ResponseHeaders:        responseHeaders.Clone(),
 		RetryableOnSameAccount: retryableOnSameAccount || requestScopedCapacity,
 		RequestScopedTransient: requestScopedCapacity,
+	}
+	if IsUpstreamBillingError(statusCode, responseBody) {
+		failoverErr.Scope = GatewayFailureScopeAccount
+		failoverErr.Reason = UpstreamBillingExhaustedReason
+		failoverErr.NextAccountAction = NextAccountRetry
+		failoverErr.ClientStatusCode = http.StatusBadGateway
+		failoverErr.ClientMessage = UpstreamBillingExhaustedClientMessage
+		failoverErr.RetryableOnSameAccount = false
+		failoverErr.RequestScopedTransient = false
 	}
 	if isOpenAIRequestBodyTooLargeError(statusCode, upstreamMsg, responseBody) {
 		failoverErr.RetryableOnSameAccount = false
@@ -559,6 +575,33 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	if IsUpstreamBillingError(resp.StatusCode, body) {
+		// Keep the provider evidence in Ops logs, but never let a custom
+		// passthrough rule or the deterministic-400 branch expose it.
+		billingDetail := ""
+		if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+			maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+			if maxBytes <= 0 {
+				maxBytes = 2048
+			}
+			billingDetail = truncateString(string(body), maxBytes)
+		}
+		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, billingDetail)
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Kind:               "failover",
+			Message:            upstreamMsg,
+			Detail:             billingDetail,
+		})
+		s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, requestedModel...)
+		return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, body, false)
+	}
 	upstreamDetail := ""
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -807,6 +850,22 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		upstreamMsg = fmt.Sprintf("Upstream error: %d", resp.StatusCode)
 	}
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	if IsUpstreamBillingError(resp.StatusCode, body) {
+		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "")
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Kind:               "failover",
+			Message:            upstreamMsg,
+		})
+		s.handleOpenAIAccountUpstreamError(c.Request.Context(), account, resp.StatusCode, resp.Header, body, requestedModel...)
+		return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, body, false)
+	}
 
 	upstreamDetail := ""
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {

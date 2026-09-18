@@ -776,6 +776,11 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
+	if failoverErr.IsUpstreamBillingExhausted() {
+		service.SetOpsUpstreamError(c, statusCode, service.ExtractUpstreamErrorMessage(responseBody), "")
+		googleError(c, http.StatusBadGateway, service.UpstreamBillingExhaustedClientMessage)
+		return
+	}
 
 	// 先检查透传规则
 	if h.errorPassthroughService != nil && len(responseBody) > 0 {

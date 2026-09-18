@@ -198,6 +198,38 @@ func TestUpstreamErrorRetryHTTPKeepsOriginalResponseWhenNotRetried(t *testing.T)
 	}
 }
 
+func TestUpstreamBillingErrorBypassesConfiguredSameAccountRetry(t *testing.T) {
+	const billingBody = `{"error":{"code":"insufficient_balance","message":"provider credit balance is zero"}}`
+	ctx := upstreamRetryTestContext(t, context.Background(), "403\n502\ncredit balance", 2)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://upstream.test/v1/responses", strings.NewReader(`{"input":"hi"}`))
+	require.NoError(t, err)
+	attempts := 0
+	resp, err := DoWithConfiguredUpstreamRetry(req, func(*http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader(billingBody))}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, attempts)
+	data, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, billingBody, string(data))
+	require.NoError(t, resp.Body.Close())
+
+	streamEvent := []byte(`{"type":"response.failed","response":{"error":{"code":"insufficient_balance","message":"provider credit balance is zero"}}}`)
+	require.Nil(t, configuredOpenAIStreamRetryFailure(ctx, streamEvent, "provider credit balance is zero", nil))
+	failure := newUpstreamBillingFailoverError(http.StatusBadGateway, nil, []byte(billingBody), false)
+	claimed, err := TryConfiguredUpstreamErrorRetry(ctx, failure)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	// Skipped billing errors must not consume the retry budget for unrelated failures.
+	claimed, err = TryConfiguredUpstreamErrorRetry(ctx, &UpstreamFailoverError{
+		StatusCode:   http.StatusBadGateway,
+		ResponseBody: []byte(`{"error":{"message":"server busy"}}`),
+	})
+	require.NoError(t, err)
+	require.True(t, claimed)
+}
+
 func TestUpstreamErrorRetrySharesBudgetAcrossTransportAndFailover(t *testing.T) {
 	ctx := upstreamRetryTestContext(t, context.Background(), "busy", 2)
 	failure := &UpstreamFailoverError{StatusCode: 503, ResponseBody: []byte(`{"error":{"message":"busy"}}`)}

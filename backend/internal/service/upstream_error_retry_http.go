@@ -52,6 +52,9 @@ func DoWithConfiguredUpstreamRetry(req *http.Request, send func(*http.Request) (
 		if readErr != nil || len(body) > upstreamErrorRetryBodyLimit {
 			return resp, nil
 		}
+		if IsUpstreamBillingError(resp.StatusCode, body) {
+			return resp, nil
+		}
 		delay, claimed := state.claim(resp.StatusCode, body)
 		if !claimed {
 			return resp, nil

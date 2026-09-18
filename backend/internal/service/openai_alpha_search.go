@@ -104,6 +104,9 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 				shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, openAIAlphaSearchSchedulingModel(account, requestedModel))
 			}
 			retryableOnSameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
+			if IsUpstreamBillingError(resp.StatusCode, respBody) {
+				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+			}
 			if account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests {
 				return nil, s.newOpenAIAccountFailoverError(account, resp.StatusCode, resp.Header, respBody, upstreamMessage, shouldDisable, retryableOnSameAccount)
 			}
@@ -183,6 +186,9 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 				shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, openAIAlphaSearchSchedulingModel(account, requestedModel))
 			}
 			retryableOnSameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
+			if IsUpstreamBillingError(resp.StatusCode, respBody) {
+				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+			}
 			if account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests {
 				return nil, s.newOpenAIAccountFailoverError(account, resp.StatusCode, resp.Header, respBody, upstreamMessage, shouldDisable, retryableOnSameAccount)
 			}

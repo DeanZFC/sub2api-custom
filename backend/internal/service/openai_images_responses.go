@@ -148,6 +148,10 @@ func openAIImagesUpstreamErrorResponseBody(err *OpenAIImagesUpstreamError) []byt
 	return body
 }
 
+func openAIImagesBillingStatus(err *OpenAIImagesUpstreamError) int {
+	return upstreamBillingStatusCode(http.StatusOK, openAIImagesUpstreamErrorResponseBody(err))
+}
+
 func openAIResponsesImageResultKey(itemID string, result openAIResponsesImageResult) string {
 	if strings.TrimSpace(result.Result) != "" {
 		return strings.TrimSpace(result.OutputFormat) + "|" + strings.TrimSpace(result.Result)
@@ -921,6 +925,26 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
+	if IsUpstreamBillingError(resp.StatusCode, body) {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Kind:               "failover",
+			Message:            upstreamMsg,
+			Detail:             upstreamDetail,
+		})
+		model := ""
+		if len(requestedModel) > 0 {
+			model = requestedModel[0]
+		}
+		s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, model)
+		return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, body, false)
+	}
 
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		logger.LegacyPrintf("service.openai_gateway",
@@ -1355,7 +1379,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 	if len(results) == 0 {
 		if upstreamErr := extractOpenAIImagesUpstreamError(body); upstreamErr != nil {
 			setOpsUpstreamError(c, upstreamErr.clientStatusCode(), upstreamErr.clientMessage(), "")
-			if !IsOpenAIImagesRetryableUpstreamError(upstreamErr) {
+			if openAIImagesBillingStatus(upstreamErr) == 0 && !IsOpenAIImagesRetryableUpstreamError(upstreamErr) {
 				writeOpenAIImagesUpstreamErrorResponse(c, upstreamErr)
 			}
 			return OpenAIUsage{}, 0, nil, upstreamErr
@@ -1566,8 +1590,15 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 		case "error", "response.failed":
 			if upstreamErr := openAIImagesUpstreamErrorFromSSEPayload(dataBytes); upstreamErr != nil {
 				retryable := IsOpenAIImagesRetryableUpstreamError(upstreamErr)
-				if !clientDisconnected && (!retryable || c.Writer.Size() != writerSizeBeforeResponse) {
-					s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, "error", buildOpenAIImagesStreamErrorBodyFromUpstream(upstreamErr))
+				billing := openAIImagesBillingStatus(upstreamErr) != 0
+				if !clientDisconnected && (billing || !retryable || c.Writer.Size() != writerSizeBeforeResponse) {
+					if billing {
+						if OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeResponse {
+							s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, "error", buildOpenAIImagesStreamErrorBody(UpstreamBillingExhaustedClientMessage))
+						}
+					} else {
+						s.tryWriteOpenAIImagesStreamEvent(c, flusher, &clientDisconnected, &lastDownstreamWriteAt, "error", buildOpenAIImagesStreamErrorBodyFromUpstream(upstreamErr))
+					}
 				}
 				setOpsUpstreamError(c, upstreamErr.clientStatusCode(), upstreamErr.clientMessage(), "")
 				processDataErr = upstreamErr
@@ -1881,6 +1912,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
+		if IsUpstreamBillingError(resp.StatusCode, respBody) {
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
+		}
 		if direct && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
 			return s.forwardOpenAIImagesOAuth(withOpenAIImagesForceResponses(ctx), c, account, parsed, channelMappedModel)
 		}
@@ -2114,7 +2149,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 	if !errors.As(err, &upstreamErr) {
 		return err
 	}
-	if isOpenAIImagesMainModelError(upstreamErr.StatusCode, openAIImagesUpstreamErrorResponseBody(upstreamErr)) {
+	if openAIImagesBillingStatus(upstreamErr) == 0 && isOpenAIImagesMainModelError(upstreamErr.StatusCode, openAIImagesUpstreamErrorResponseBody(upstreamErr)) {
 		if !responseWritten {
 			writeOpenAIImagesUpstreamErrorResponse(c, upstreamErr)
 		}
@@ -2152,6 +2187,14 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 	})
 
 	responseBody := openAIImagesUpstreamErrorResponseBody(upstreamErr)
+	if billingStatus := openAIImagesBillingStatus(upstreamErr); billingStatus != 0 {
+		s.handleOpenAIAccountUpstreamError(ctx, account, billingStatus, headers, responseBody, requestedModel)
+		if responseWritten {
+			return err
+		}
+		c.Writer.Header().Del("Content-Type")
+		return newUpstreamBillingFailoverError(billingStatus, headers, responseBody, false)
+	}
 	if upstreamErr.Code == "image_generation_unavailable" {
 		if shouldCoolOpenAIImagesToolForError(upstreamErr) {
 			s.coolOpenAIImagesOAuthTool(ctx, account)

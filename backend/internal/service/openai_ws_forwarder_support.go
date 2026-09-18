@@ -91,6 +91,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	logOpenAIWSModeInfo("prewarm_write_sent account_id=%d conn_id=%s payload_bytes=%d", account.ID, connID, len(prewarmPayloadJSON))
 
 	prewarmResponseID := ""
+	prewarmModel, _ := reqBody["model"].(string)
 	prewarmEventCount := 0
 	prewarmTerminalCount := 0
 	for {
@@ -131,7 +132,16 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 
 		if eventType == "error" {
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
-			prewarmModel, _ := reqBody["model"].(string)
+			if billingStatus := openAIWSBillingStatus(message, errMsgRaw); billingStatus != 0 {
+				s.handleOpenAIAccountUpstreamError(ctx, account, billingStatus, lease.HandshakeHeaders(), message, prewarmModel)
+				lease.MarkBroken()
+				return newUpstreamBillingFailoverError(
+					billingStatus,
+					lease.HandshakeHeaders(),
+					message,
+					false,
+				)
+			}
 			s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, prewarmModel)
 			errMsg := strings.TrimSpace(errMsgRaw)
 			if errMsg == "" {
@@ -155,6 +165,19 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 				return wrapOpenAIWSFallback("prewarm_"+fallbackReason, errors.New(errMsg))
 			}
 			return wrapOpenAIWSFallback("prewarm_error_event", errors.New(errMsg))
+		}
+
+		if eventType == "response.failed" {
+			if billingStatus := openAIWSBillingStatus(message, extractOpenAISSEErrorMessage(message)); billingStatus != 0 {
+				s.handleOpenAIWSFailureAccountSideEffects(ctx, account, prewarmModel, lease.HandshakeHeaders(), message)
+				lease.MarkBroken()
+				return newUpstreamBillingFailoverError(
+					billingStatus,
+					lease.HandshakeHeaders(),
+					message,
+					false,
+				)
+			}
 		}
 
 		if isOpenAIWSTerminalEvent(eventType) {
@@ -308,6 +331,21 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	}
 }
 
+// openAIWSBillingStatus returns an account-billing status for semantic WS
+// errors. WS events are carried inside an HTTP 200 response, so the event
+// itself has no transport status; use 402 to keep billing failures separate
+// from request validation and provider capacity errors.
+func openAIWSBillingStatus(payload []byte, message string) int {
+	if !IsUpstreamBillingError(http.StatusOK, payload) {
+		return 0
+	}
+	status := openAIStreamFailureStatus(payload, message)
+	if status < http.StatusBadRequest || status == http.StatusBadGateway {
+		return http.StatusPaymentRequired
+	}
+	return status
+}
+
 func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) string {
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 	terminalEvent := normalizeOpenAIWSTerminalEvent(eventType)
@@ -321,6 +359,10 @@ func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx contex
 func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) {
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 	if eventType != "error" {
+		return
+	}
+	if status := openAIWSBillingStatus(payload, extractOpenAISSEErrorMessage(payload)); status != 0 {
+		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, payload, canonicalModel)
 		return
 	}
 	status := openAIWSPayloadTransientStatus(payload)
@@ -337,6 +379,10 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 // applying the same transition twice for an error/response.failed pair.
 func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
 	message := extractOpenAISSEErrorMessage(payload)
+	if status := openAIWSBillingStatus(payload, message); status != 0 {
+		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, payload, canonicalModel)
+		return true
+	}
 	status := openAIStreamFailureStatus(payload, message)
 	switch status {
 	case http.StatusUnauthorized, http.StatusTooManyRequests, 529:
@@ -691,6 +737,13 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	if s == nil || s.rateLimitService == nil || account == nil || account.Platform != PlatformOpenAI {
 		return
 	}
+	// `insufficient_quota` is a billing/account exhaustion signal in the
+	// shared classifier, not a transient 429 window. It is handled by the
+	// billing failover path with account-level state; do not also record it as
+	// a rate-limit event with a different status and cooldown policy.
+	if IsUpstreamBillingError(http.StatusOK, responseBody) {
+		return
+	}
 	if !isOpenAIWSRateLimitError(codeRaw, errTypeRaw, msgRaw) {
 		return
 	}
@@ -796,6 +849,8 @@ func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
 	case strings.Contains(errType, "permission"),
 		strings.Contains(code, "forbidden"):
 		return http.StatusForbidden
+	case isUpstreamBillingErrorCode(codeRaw):
+		return http.StatusPaymentRequired
 	case isOpenAIWSRateLimitError(codeRaw, errTypeRaw, ""):
 		return http.StatusTooManyRequests
 	default:

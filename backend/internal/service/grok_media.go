@@ -1253,7 +1253,12 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	body := s.readUpstreamErrorBody(resp)
 	// Reconcile readiness before configurable passthrough branches can return;
 	// otherwise a Grok 429 can remain schedulable.
-	s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
+	billingError := IsUpstreamBillingError(resp.StatusCode, body)
+	accountStatus := resp.StatusCode
+	if billingError {
+		accountStatus = http.StatusPaymentRequired
+	}
+	s.handleGrokAccountUpstreamError(ctx, account, accountStatus, resp.Header, body)
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	if upstreamMsg == "" {
 		upstreamMsg = fmt.Sprintf("xAI upstream returned status %d", resp.StatusCode)
@@ -1268,6 +1273,21 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
+	if billingError {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  requestIDHeader,
+			Kind:               "failover",
+			Message:            upstreamMsg,
+			Detail:             upstreamDetail,
+		})
+		return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, body, false)
+	}
 	if isGrokContentPolicyRejection(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

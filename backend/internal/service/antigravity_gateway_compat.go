@@ -459,7 +459,7 @@ func (s *AntigravityGatewayService) handleAntigravityCompatHTTPError(
 		"",
 		false,
 	)
-	if s.shouldFailoverUpstreamError(resp.StatusCode) {
+	if s.shouldFailoverUpstreamError(resp.StatusCode) || IsUpstreamBillingError(resp.StatusCode, body) {
 		message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractAntigravityErrorMessage(body)))
 		event := OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
@@ -481,6 +481,9 @@ func (s *AntigravityGatewayService) handleAntigravityCompatHTTPError(
 			return antigravityCredentialRejectedError(resp, body)
 		}
 		appendOpsUpstreamError(c, event)
+		if IsUpstreamBillingError(resp.StatusCode, body) {
+			return newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, body, false)
+		}
 		return &UpstreamFailoverError{
 			StatusCode:      resp.StatusCode,
 			ResponseBody:    body,

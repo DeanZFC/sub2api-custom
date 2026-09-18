@@ -159,7 +159,10 @@ func (s *GatewayService) ForwardAsResponses(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+		// Some providers encode account billing exhaustion as a 400 with a
+		// structured quota/balance error. Treat that as account failover even
+		// though ordinary deterministic 400s remain client errors.
+		if s.shouldFailoverUpstreamError(resp.StatusCode) || IsUpstreamBillingError(resp.StatusCode, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
 				ProxyName:          opsUpstreamProxyName(account),
@@ -175,9 +178,13 @@ func (s *GatewayService) ForwardAsResponses(
 			if s.rateLimitService != nil {
 				shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
 			}
+			if IsUpstreamBillingError(resp.StatusCode, respBody) {
+				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+			}
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}

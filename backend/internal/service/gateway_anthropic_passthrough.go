@@ -139,6 +139,10 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 
 				respBody, _ := s.readUpstreamErrorBody(resp)
 				_ = resp.Body.Close()
+				if IsUpstreamBillingError(resp.StatusCode, respBody) {
+					resp.Body = io.NopCloser(bytes.NewReader(respBody))
+					break
+				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					ProxyID:            opsUpstreamProxyID(account),
 					ProxyName:          opsUpstreamProxyName(account),
@@ -184,7 +188,12 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 				account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
 
-			s.handleRetryExhaustedSideEffects(ctx, resp, account)
+			billingError := IsUpstreamBillingError(resp.StatusCode, respBody)
+			if billingError {
+				s.handleFailoverSideEffects(ctx, resp, account, input.RequestModel)
+			} else {
+				s.handleRetryExhaustedSideEffects(ctx, resp, account)
+			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
 				ProxyName:          opsUpstreamProxyName(account),
@@ -203,9 +212,13 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 					return ""
 				}(),
 			})
+			if billingError {
+				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+			}
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
@@ -239,9 +252,13 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				return ""
 			}(),
 		})
+		if IsUpstreamBillingError(resp.StatusCode, respBody) {
+			return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+		}
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,
+			ResponseHeaders:        resp.Header.Clone(),
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
@@ -385,22 +402,28 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 	}
 
-	writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-
-	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
-	if contentType == "" {
-		contentType = "text/event-stream"
-	}
-	c.Header("Content-Type", contentType)
-	if c.Writer.Header().Get("Cache-Control") == "" {
-		c.Header("Cache-Control", "no-cache")
-	}
-	if c.Writer.Header().Get("Connection") == "" {
-		c.Header("Connection", "keep-alive")
-	}
-	c.Header("X-Accel-Buffering", "no")
-	if v := resp.Header.Get("x-request-id"); v != "" {
-		c.Header("x-request-id", v)
+	responseHeadersWritten := false
+	writeResponseHeaders := func() {
+		if responseHeadersWritten {
+			return
+		}
+		responseHeadersWritten = true
+		writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+		if contentType == "" {
+			contentType = "text/event-stream"
+		}
+		c.Header("Content-Type", contentType)
+		if c.Writer.Header().Get("Cache-Control") == "" {
+			c.Header("Cache-Control", "no-cache")
+		}
+		if c.Writer.Header().Get("Connection") == "" {
+			c.Header("Connection", "keep-alive")
+		}
+		c.Header("X-Accel-Buffering", "no")
+		if v := resp.Header.Get("x-request-id"); v != "" {
+			c.Header("x-request-id", v)
+		}
 	}
 
 	w := c.Writer
@@ -493,14 +516,77 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		}
 		keepaliveTimer.Reset(keepaliveInterval)
 	}
-	inPartialEvent := false
+	var eventLines []string
+	var eventData []string
+	eventName := ""
+	flushEvent := func() error {
+		if len(eventLines) == 0 {
+			return nil
+		}
+		data := strings.Join(eventData, "\n")
+		if (strings.EqualFold(eventName, "error") || gjson.Get(data, "type").String() == "error") && IsUpstreamBillingError(http.StatusOK, []byte(data)) {
+			body := []byte(data)
+			statusCode := upstreamBillingStatusCode(http.StatusOK, body)
+			syntheticResp := &http.Response{
+				StatusCode: statusCode,
+				Header:     resp.Header.Clone(),
+				Body:       io.NopCloser(bytes.NewReader(body)),
+			}
+			if s.rateLimitService != nil {
+				s.handleFailoverSideEffects(ctx, syntheticResp, account, model)
+			}
+			detail := ""
+			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+				detail = truncateString(data, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+			}
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				ProxyID:            opsUpstreamProxyID(account),
+				ProxyName:          opsUpstreamProxyName(account),
+				Platform:           account.Platform,
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: statusCode,
+				UpstreamRequestID:  resp.Header.Get("x-request-id"),
+				Passthrough:        true,
+				Kind:               "stream_error",
+				Message:            extractUpstreamErrorMessage(body),
+				Detail:             detail,
+			})
+			if !c.Writer.Written() && !clientDisconnected {
+				return newUpstreamBillingFailoverError(statusCode, resp.Header, body, false)
+			}
+			return errors.New("upstream stream error")
+		}
+		if !clientDisconnected {
+			writeResponseHeaders()
+			var output strings.Builder
+			for _, line := range eventLines {
+				output.Write(reverseToolNamesIfPresent(c, []byte(line)))
+				output.WriteByte('\n')
+			}
+			if _, err := io.WriteString(w, output.String()); err != nil {
+				clientDisconnected = true
+				logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
+			} else if eventLines[len(eventLines)-1] == "" {
+				flusher.Flush()
+				lastDataAt = time.Now()
+				resetKeepaliveTimer()
+			}
+		}
+		eventLines = nil
+		eventData = nil
+		eventName = ""
+		return nil
+	}
 
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				if err := flushEvent(); err != nil {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, err
+				}
 				if !clientDisconnected {
-					// 兜底补刷，确保最后一个未以空行结尾的事件也能及时送达客户端。
 					flusher.Flush()
 				}
 				if !sawTerminalEvent {
@@ -532,7 +618,9 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			}
 
 			line := ev.line
+			eventLines = append(eventLines, line)
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
+				eventData = append(eventData, data)
 				trimmed := strings.TrimSpace(data)
 				observer.ObserveAnthropic([]byte(trimmed))
 				if anthropicStreamEventIsTerminal("", trimmed) {
@@ -545,27 +633,16 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				parseSSEUsagePassthrough(data, usage)
 			} else {
 				trimmed := strings.TrimSpace(line)
-				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {
-					sawTerminalEvent = true
+				if strings.HasPrefix(trimmed, "event:") {
+					eventName = strings.TrimSpace(strings.TrimPrefix(trimmed, "event:"))
+					if anthropicStreamEventIsTerminal(eventName, "") {
+						sawTerminalEvent = true
+					}
 				}
 			}
-
-			if !clientDisconnected {
-				restored := string(reverseToolNamesIfPresent(c, []byte(line)))
-				if _, err := io.WriteString(w, restored); err != nil {
-					clientDisconnected = true
-					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-				} else if _, err := io.WriteString(w, "\n"); err != nil {
-					clientDisconnected = true
-					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-				} else if line == "" {
-					// 按 SSE 事件边界刷出，减少每行 flush 带来的 syscall 开销。
-					flusher.Flush()
-					lastDataAt = time.Now()
-					resetKeepaliveTimer()
-					inPartialEvent = false
-				} else {
-					inPartialEvent = true
+			if line == "" {
+				if err := flushEvent(); err != nil {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, err
 				}
 			}
 
@@ -587,7 +664,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			if clientDisconnected {
 				continue
 			}
-			if inPartialEvent {
+			if len(eventLines) > 0 {
 				resetKeepaliveTimer()
 				continue
 			}
@@ -595,6 +672,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				resetKeepaliveTimer()
 				continue
 			}
+			writeResponseHeaders()
 			if _, err := fmt.Fprint(w, "event: ping\ndata: {\"type\": \"ping\"}\n\n"); err != nil {
 				clientDisconnected = true
 				logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during keepalive ping, continue draining upstream for usage: account=%d", account.ID)
@@ -857,6 +935,34 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
 	if err != nil {
 		return nil, err
+	}
+	if statusCode := upstreamBillingStatusCode(resp.StatusCode, body); statusCode != 0 {
+		syntheticResp := &http.Response{
+			StatusCode: statusCode,
+			Header:     resp.Header.Clone(),
+			Body:       io.NopCloser(bytes.NewReader(body)),
+		}
+		if s.rateLimitService != nil {
+			s.handleFailoverSideEffects(ctx, syntheticResp, account)
+		}
+		detail := ""
+		if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+			detail = truncateString(string(body), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+		}
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: statusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Passthrough:        true,
+			Kind:               "response_error",
+			Message:            extractUpstreamErrorMessage(body),
+			Detail:             detail,
+		})
+		return nil, newUpstreamBillingFailoverError(statusCode, resp.Header, body, false)
 	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {

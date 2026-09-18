@@ -1303,6 +1303,26 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return nil
 				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
+				billingStatus := 0
+				if eventType == "error" || eventType == "response.failed" {
+					billingStatus = openAIWSBillingStatus(payload, errMsgRaw)
+				}
+				if billingStatus != 0 {
+					if !failureAccountSideEffectsApplied {
+						failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, capturedSessionModel, handshakeHeaders, payload)
+					}
+					if wroteDownstream {
+						return nil
+					}
+					if completedTurns.Load() > 0 {
+						return NewOpenAIWSClientCloseError(
+							coderws.StatusTryAgainLater,
+							"upstream service temporarily unavailable; please reconnect",
+							errors.New("later passthrough turn failed because the upstream account is unavailable"),
+						)
+					}
+					return newUpstreamBillingFailoverError(billingStatus, handshakeHeaders, payload, false)
+				}
 				isPreOutputRateLimit := eventType == "error" && !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw)
 				if (eventType == "error" || eventType == "response.failed") && !failureAccountSideEffectsApplied && !isPreOutputRateLimit {
 					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, capturedSessionModel, handshakeHeaders, payload)
@@ -1329,6 +1349,19 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					)
 				}
 				return s.newOpenAIWSRateLimitFailoverError(account, handshakeHeaders, payload, errMsgRaw)
+			},
+			TransformClientPayload: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) []byte {
+				if msgType != coderws.MessageText {
+					return payload
+				}
+				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
+				if eventType != "error" && eventType != "response.failed" {
+					return payload
+				}
+				if sanitized, changed := sanitizeOpenAIResponseFailedEventForClient(payload, eventType, wroteDownstream); changed {
+					return sanitized
+				}
+				return payload
 			},
 			OnTrace: func(event openaiwsv2.RelayTraceEvent) {
 				logOpenAIWSV2Passthrough(

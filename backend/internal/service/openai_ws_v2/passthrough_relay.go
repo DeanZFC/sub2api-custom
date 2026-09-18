@@ -81,6 +81,7 @@ type RelayOptions struct {
 	OnUsageParseFailure             func(eventType string, usageRaw string)
 	OnTurnComplete                  func(turn RelayTurnResult)
 	BeforeWriteClient               func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
+	TransformClientPayload          func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) []byte
 	BeforeClientWrite               func(msgType coderws.MessageType, payload []byte)
 	AfterClientWrite                func(msgType coderws.MessageType, payload []byte, writeErr error)
 	BeforeRelayCancel               func(exit RelayExit)
@@ -304,6 +305,7 @@ func Relay(
 			options.OnUsageParseFailure,
 			options.OnTurnComplete,
 			options.BeforeWriteClient,
+			options.TransformClientPayload,
 			options.BeforeClientWrite,
 			options.AfterClientWrite,
 			func(msgType coderws.MessageType, payload []byte) {
@@ -530,6 +532,7 @@ func runUpstreamToClient(
 	onUsageParseFailure func(eventType string, usageRaw string),
 	onTurnComplete func(turn RelayTurnResult),
 	beforeWriteClient func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error,
+	transformClientPayload func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) []byte,
 	beforeClientWrite func(msgType coderws.MessageType, payload []byte),
 	afterClientWrite func(msgType coderws.MessageType, payload []byte, writeErr error),
 	afterWriteClient func(msgType coderws.MessageType, payload []byte),
@@ -632,6 +635,13 @@ func runUpstreamToClient(
 			}
 			markActivity()
 			continue
+		}
+		wroteDownstreamInTurn := wroteDownstream
+		if state != nil {
+			wroteDownstreamInTurn = state.turnWroteDownstream.Load()
+		}
+		if transformClientPayload != nil {
+			payload = transformClientPayload(msgType, payload, wroteDownstreamInTurn)
 		}
 		if beforeClientWrite != nil {
 			beforeClientWrite(msgType, payload)

@@ -264,7 +264,7 @@ func (s *upstreamErrorRetryState) wait(ctx context.Context, delay time.Duration)
 // no-output/partial-usage guard. It leaves all built-in failover metadata intact.
 // claimed=true with err!=nil means cancellation while waiting, not exhaustion.
 func TryConfiguredUpstreamErrorRetry(ctx context.Context, failure *UpstreamFailoverError) (claimed bool, err error) {
-	if ctx == nil || failure == nil || !failure.ShouldRetryNextAccount() || failure.IsCredentialFailure() || failure.ConfiguredRetryUnsafe || failure.StatusCode == http.StatusTooManyRequests || ctx.Err() != nil {
+	if ctx == nil || failure == nil || !failure.ShouldRetryNextAccount() || failure.IsCredentialFailure() || failure.IsUpstreamBillingExhausted() || failure.ConfiguredRetryUnsafe || failure.StatusCode == http.StatusTooManyRequests || ctx.Err() != nil {
 		return false, nil
 	}
 	s := upstreamErrorRetryFromContext(ctx)
@@ -303,6 +303,9 @@ func upstreamErrorRetryHasUsage(body []byte) bool {
 func configuredOpenAIStreamRetryFailure(ctx context.Context, payload []byte, message string, usage *OpenAIUsage) *UpstreamFailoverError {
 	state := upstreamErrorRetryFromContext(ctx)
 	if state == nil || ctx.Err() != nil || state.clientCtx.Err() != nil || openAIUsageHasTokens(usage) {
+		return nil
+	}
+	if IsUpstreamBillingError(http.StatusOK, payload) {
 		return nil
 	}
 	code := openAIStreamFailedEventErrorCode(payload)

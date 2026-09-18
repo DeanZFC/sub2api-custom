@@ -1870,6 +1870,11 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage(), streamStarted)
 		return
 	}
+	if failoverErr.IsUpstreamBillingExhausted() {
+		service.SetOpsUpstreamError(c, statusCode, service.ExtractUpstreamErrorMessage(responseBody), "")
+		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.UpstreamBillingExhaustedClientMessage, streamStarted)
+		return
+	}
 
 	// 先检查透传规则
 	if h.errorPassthroughService != nil && len(responseBody) > 0 {

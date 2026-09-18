@@ -398,6 +398,22 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	if upstreamMsg != "" {
 		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
 	}
+	// Providers sometimes encode an exhausted account balance/quota as 400,
+	// 403, or 429 instead of 402. Once the shared classifier has confirmed an
+	// account billing condition, stop scheduling this account just as the
+	// existing 402 path does. Local user billing errors never call this method.
+	if statusCode != http.StatusPaymentRequired && IsUpstreamBillingError(statusCode, responseBody) {
+		if account.IsCNProvider() || account.IsOpenCodeZen() {
+			s.handleCNProviderInsufficientBalance(ctx, account, upstreamMsg)
+		} else {
+			msg := fmt.Sprintf("Upstream billing limit (%d): insufficient balance or quota", statusCode)
+			if upstreamMsg != "" {
+				msg += ": " + upstreamMsg
+			}
+			s.handleAuthError(ctx, account, msg)
+		}
+		return true
+	}
 
 	switch statusCode {
 	case 400:

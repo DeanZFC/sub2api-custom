@@ -410,7 +410,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 				}
 			}
 
-			if s.shouldFailoverUpstreamError(resp.StatusCode) {
+			if s.shouldFailoverUpstreamError(resp.StatusCode) || IsUpstreamBillingError(resp.StatusCode, respBody) {
 				upstreamMsg := strings.TrimSpace(extractAntigravityErrorMessage(respBody))
 				upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 				upstreamDetail := s.getUpstreamErrorDetail(respBody)
@@ -426,7 +426,10 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				if IsUpstreamBillingError(resp.StatusCode, respBody) {
+					return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
+				}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 			}
 
 			return nil, s.writeMappedClaudeError(c, account, resp.StatusCode, resp.Header.Get("x-request-id"), respBody)
