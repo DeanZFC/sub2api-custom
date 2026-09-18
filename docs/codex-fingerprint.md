@@ -4,7 +4,7 @@
 
 ## 配置入口
 
-账号管理 → 新建或编辑 OpenAI OAuth 账号 → Codex 指纹收敛。批量编辑也支持。默认关闭；删除了会隐式启用指纹的 `gateway.openai_account_unique_fingerprint_enabled` 全局配置。
+账号管理 → 新建或编辑 OpenAI OAuth 账号 → Codex 指纹收敛。批量编辑也支持。新建账号表单默认选择单机多窗口，可手动关闭；删除了会隐式启用指纹的 `gateway.openai_account_unique_fingerprint_enabled` 全局配置。
 
 | 模式 | 来源 | 行为 |
 | --- | --- | --- |
@@ -37,7 +37,7 @@
 
 只清理 `health:` 前缀的临时隔离，不清理官方 429、过载或其他来源的调度封锁。OAuth 凭据、Codex ticket、代理池和其他业务字段保留。只使用 Prism Cookie 的旧账号失去该通道能力，需要正常 OAuth/API 凭据才能继续使用。
 
-已有显式单机模式继续生效；未配置模式的账号按官方默认关闭，需要时在上述入口选择单机多窗口。
+已有显式单机模式继续生效；存量未配置模式的账号仍按官方默认关闭；通过新建账号表单创建时默认写入单机多窗口。
 
 ## 验证范围
 
