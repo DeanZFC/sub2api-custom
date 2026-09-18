@@ -206,7 +206,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			Platform:           acc.Platform,
 			Type:               acc.Type,
 			Credentials:        credentials,
-			Extra:              extra,
+			Extra:              service.RedactOpenAICodexTicketExtra(extra),
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,
