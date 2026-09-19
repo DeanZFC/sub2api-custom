@@ -47,6 +47,7 @@ func TestOpenAICodexTicketAccountPolicy_GatewayOffStopsHarvestInjectionAndBlocki
 	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader))
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	svc.refreshOpenAICodexTickets(context.Background())
+	svc.openaiCodexTicketScheduler.workers.Wait()
 	require.Empty(t, upstream.requests)
 	require.Empty(t, OpenAICodexTicketStatuses(account, svc.openAICodexTicketConfig(), time.Now()))
 	require.True(t, svc.openAICodexTicketAccountConfig(context.Background(), account).AccountEnabled)
@@ -171,6 +172,7 @@ func TestOpenAICodexTicketProbe_RotatesSharedGatewayPoolForEachAccount(t *testin
 	require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
 	require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
 	svc.probeOnceOpenAICodexTicket(context.Background(), ticketTestAccount(15), "gpt-6-astra")
+	dueTicketJobs(svc)
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	require.Equal(t, []string{"http://proxy-a.example:8080", "socks5h://proxy-b.example:1080", "socks5h://proxy-b.example:1080"}, upstream.proxies)
 	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
@@ -220,9 +222,12 @@ func TestOpenAICodexTicketPlans_HarvestValidateInjectAndReportSameLength(t *test
 			repo := &codexTicketRefreshRepo{accounts: []Account{*account}}
 			svc.accountRepo = repo
 			svc.refreshOpenAICodexTickets(context.Background())
+			svc.openaiCodexTicketScheduler.workers.Wait()
 			require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
 			require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+			dueTicketJobs(svc)
 			svc.refreshOpenAICodexTickets(context.Background())
+			svc.openaiCodexTicketScheduler.workers.Wait()
 			ticket := svc.lookupOpenAICodexTicket(account, "gpt-6-astra")
 			require.NotNil(t, ticket)
 			require.Equal(t, target, ticket.Length)
@@ -233,6 +238,7 @@ func TestOpenAICodexTicketPlans_HarvestValidateInjectAndReportSameLength(t *test
 			require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
 			// A valid Team ticket must suppress new probes just like a Pro ticket.
 			svc.refreshOpenAICodexTickets(context.Background())
+			svc.openaiCodexTicketScheduler.workers.Wait()
 			require.Len(t, upstream.requests, 2)
 			account.Extra = repo.updates
 			status := OpenAICodexTicketStatuses(account, svc.openAICodexTicketConfig(), time.Now())

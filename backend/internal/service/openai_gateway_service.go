@@ -24,7 +24,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -513,11 +512,8 @@ type OpenAIGatewayService struct {
 	openaiCodexTurnStateOrigins sync.Map
 	openaiCodexTurnStateWrites  atomic.Uint64
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，账号套餐对应长度的门票。
-	openaiCodexTickets sync.Map
-	// accountID\x00model -> *atomic.Uint64; independently rotates each account/model
-	// through the gateway's shared proxy pool once per probe.
-	openaiCodexTicketProxyCursor sync.Map
-	openaiCodexTicketFlight      singleflight.Group
+	openaiCodexTickets           sync.Map
+	openaiCodexTicketScheduler   codexTicketScheduler
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
 	openaiCodexTicketDone        chan struct{}

@@ -325,8 +325,15 @@ gateway:
     refresh_before_seconds: 600
     # 只有后台尚未保存代理池时才使用此值；HTTP(S)/SOCKS5(h)，每行一个。
     harvest_proxy_url: ""
+    # 每个账号/模型独立重试，普通未命中在完成后至少等 6 秒，并加少量抖动。
+    # 429 遵守 Retry-After；认证/权限/额度错误冷却，明确不支持的模型暂停 30 分钟。
+    # 配置/认证修改或重新启用账号后可提前恢复。业务并发设置不受影响。
     harvest_probe_interval_seconds: 6
+    # 整次打票（含获取/刷新认证）的总时限。
     harvest_attempt_timeout_seconds: 25
+    harvest_max_concurrent: 8
+    harvest_account_concurrency: 1
+    harvest_proxy_concurrency: 2
     fail_closed: true
     models:
       - gpt-6-astra

@@ -1164,6 +1164,28 @@ export interface OllamaCloudUsageSettings {
   debounce_minutes: number
 }
 
+export interface CodexTurnTicketStatus {
+  model: string
+  length?: number
+  target_length: number
+  ready: boolean
+  remaining_seconds: number
+  blocked: boolean
+  expires_at?: string
+  attempts?: number
+  consecutive_failures?: number
+  in_progress?: boolean
+  last_attempt_at?: string | null
+  next_retry_at?: string | null
+  last_error_code?: string
+  last_error?: string
+  last_http_status?: number
+  last_length?: number
+  last_proxy_index?: number
+  paused?: boolean
+  plan_known?: boolean
+}
+
 export interface Account {
   id: number
   name: string
@@ -1177,15 +1199,7 @@ export interface Account {
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
   ollama_cloud_usage?: OllamaCloudUsageState
-  codex_turn_tickets?: Array<{
-    model: string
-    length?: number
-    target_length: number
-    ready: boolean
-    remaining_seconds: number
-    blocked: boolean
-    expires_at?: string
-  }>
+  codex_turn_tickets?: CodexTurnTicketStatus[]
   /** Resolved gateway and account policy for Codex 292 / 332 tickets. */
   codex_ticket_config?: {
     gateway_enabled: boolean

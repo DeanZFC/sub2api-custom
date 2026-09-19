@@ -52,11 +52,7 @@ func ResolveOpenAICodexTicketAccountConfig(account *Account, fallback config.Ope
 // configured default for other/unknown plans instead of guessing from a ticket.
 func openAICodexTicketTargetLength(account *Account, fallback config.OpenAICodexTicketConfig) int {
 	if account != nil {
-		plan := strings.TrimSpace(account.GetCredential("plan_type"))
-		if plan == "" {
-			plan = account.GetCredential("chatgpt_plan_type")
-		}
-		plan = strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(plan)))
+		plan := normalizedOpenAICodexTicketPlan(account)
 		switch plan {
 		case "team", "chatgptteam", "business", "chatgptbusiness":
 			return 332
@@ -89,4 +85,15 @@ func (s *OpenAIGatewayService) openAICodexTicketHarvestProxies(ctx context.Conte
 		return nil
 	}
 	return proxies
+}
+
+func normalizedOpenAICodexTicketPlan(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	plan := strings.TrimSpace(account.GetCredential("plan_type"))
+	if plan == "" {
+		plan = account.GetCredential("chatgpt_plan_type")
+	}
+	return strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(plan)))
 }

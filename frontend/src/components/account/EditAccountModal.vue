@@ -2314,15 +2314,18 @@
           {{ t('admin.accounts.openai.codexTurnTicketDesc') }}
         </p>
         <div class="mt-3 space-y-1.5">
-          <div v-for="ticket in codexTurnTickets" :key="ticket.model" class="flex items-center justify-between text-sm">
-            <span class="font-medium">{{ ticket.model }}</span>
-            <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">
-              {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
-            </span>
-            <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
-              {{ t('admin.accounts.openai.codexTurnTicketPaused', { length: ticket.target_length }) }}
-            </span>
-            <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing', { length: ticket.target_length }) }}</span>
+          <div v-for="ticket in codexTurnTickets" :key="ticket.model" class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="font-medium">{{ ticket.model }}</span>
+              <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">
+                {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
+              </span>
+              <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
+                {{ t('admin.accounts.openai.codexTurnTicketPaused', { length: ticket.target_length }) }}
+              </span>
+              <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing', { length: ticket.target_length }) }}</span>
+            </div>
+            <CodexTicketDiagnostics :ticket="ticket" />
           </div>
         </div>
       </div>
@@ -3135,6 +3138,7 @@ import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import OllamaCloudUsageSettings from '@/components/account/OllamaCloudUsageSettings.vue'
+import CodexTicketDiagnostics from '@/components/account/CodexTicketDiagnostics.vue'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,

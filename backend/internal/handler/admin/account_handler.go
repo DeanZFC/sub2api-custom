@@ -46,6 +46,10 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 	}
 }
 
+type codexTicketDiagnosticsEnricher interface {
+	EnrichOpenAICodexTicketDiagnostics(*service.Account, []service.OpenAICodexTicketStatus)
+}
+
 // AccountHandler handles admin account management
 type AccountHandler struct {
 	adminService            service.AdminService
@@ -66,6 +70,7 @@ type AccountHandler struct {
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
+	codexTicketGateway      codexTicketDiagnosticsEnricher
 	cfg                     *config.Config
 }
 
@@ -81,6 +86,10 @@ func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUs
 // SetCodexTicketSettings supplies the live policy without mutating shared config.
 func (h *AccountHandler) SetCodexTicketSettings(settings *service.SettingService) {
 	h.codexTicketSettings = settings
+}
+
+func (h *AccountHandler) SetCodexTicketGateway(gateway codexTicketDiagnosticsEnricher) {
+	h.codexTicketGateway = gateway
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -381,6 +390,9 @@ func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *
 	policy := service.ResolveOpenAICodexTicketAccountConfig(account, cfg)
 	out.CodexTicketConfig = &policy
 	out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
+	if h != nil && h.codexTicketGateway != nil {
+		h.codexTicketGateway.EnrichOpenAICodexTicketDiagnostics(account, out.CodexTurnTickets)
+	}
 }
 
 func (h *AccountHandler) isSimpleMode() bool {

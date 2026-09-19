@@ -1619,7 +1619,7 @@ describe('EditAccountModal', () => {
       target_length: 332,
     }
     account.codex_turn_tickets = [
-      { model: 'gpt-6-astra', target_length: 332, ready: false, remaining_seconds: 0, blocked: true },
+      { model: 'gpt-6-astra', target_length: 332, ready: false, remaining_seconds: 0, blocked: true, attempts: 12, last_error_code: 'network' },
     ]
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
@@ -1627,8 +1627,25 @@ describe('EditAccountModal', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="edit-codex-ticket-config"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('admin.accounts.openai.codexTurnTicketPaused')
+    expect(wrapper.find('[data-testid="codex-ticket-diagnostics"]').exists()).toBe(false)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject(account.extra)
+  })
+
+  it('shows per-model ticket diagnostics below the ticket status', async () => {
+    const account = buildOpenAISetupTokenAccount()
+    account.codex_turn_tickets = [{
+      model: 'gpt-6-astra', target_length: 332, ready: false, remaining_seconds: 0, blocked: true,
+      attempts: 12, last_length: 0, last_error_code: 'length_mismatch', plan_known: false,
+      next_retry_at: '2026-09-19T10:00:06Z',
+    }]
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const diagnostics = wrapper.get('[data-testid="codex-ticket-diagnostics"]')
+    expect(diagnostics.text()).toContain('codexTicketDiagnostics.lastError')
+    expect(diagnostics.text()).toContain('codexTicketDiagnostics.length')
+    expect(diagnostics.text()).toContain('codexTicketDiagnostics.nextRetry')
+    expect(diagnostics.text()).toContain('codexTicketDiagnostics.unknownPlan')
   })
 
   it('prefers explicit account booleans over resolved values', async () => {
