@@ -133,6 +133,22 @@ const ModelWhitelistSelectorStub = defineComponent({
   >models</button>`,
 })
 
+const ProxySelectorStub = defineComponent({
+  name: 'ProxySelector',
+  props: {
+    modelValue: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  emits: ['update:modelValue'],
+  template: `
+    <div>
+      <button type="button" data-testid="set-proxies" @click="$emit('update:modelValue', [11, 12])">proxies</button>
+    </div>
+  `,
+})
+
 function mountModal(groups: any[] = []) {
   return mount(CreateAccountModal, {
     props: { show: true, proxies: [], groups },
@@ -144,7 +160,7 @@ function mountModal(groups: any[] = []) {
         Select: true,
         Icon: true,
         PlatformIcon: true,
-        ProxySelector: true,
+        ProxySelector: ProxySelectorStub,
         ProxyAdBanner: true,
         GroupSelector: GroupSelectorStub,
         ModelWhitelistSelector: ModelWhitelistSelectorStub,
@@ -623,6 +639,39 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(flow.props('showAgentIdentityOption')).toBe(true)
     expect(flow.props('showCodexPatOption')).toBe(true)
     expect(flow.props('initialInputMethod')).toBe('manual')
+  })
+
+  it('creates Codex imports with explicit disabled 292 defaults', async () => {
+    const wrapper = await openCodexImportStep()
+    await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
+    await flushPromises()
+
+    expect(createOpenAICodexPATMock).toHaveBeenCalledTimes(1)
+    expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      codex_ticket_enabled: false,
+      codex_ticket_fail_closed: true,
+      codex_ticket_harvest_proxy_ids: [],
+    })
+  })
+
+  it('creates Codex imports with independent multiple harvest proxies and default fail-closed enabled', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-codex-ticket-enabled"]').trigger('click')
+    expect(wrapper.get('[data-testid="create-codex-ticket-fail-closed"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('[data-testid="create-codex-ticket-config"] [data-testid="set-proxies"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
+    await flushPromises()
+
+    const payload = createOpenAICodexPATMock.mock.calls[0]?.[0]
+    expect(payload?.proxy_ids).toEqual([])
+    expect(payload?.extra).toMatchObject({
+      codex_ticket_enabled: true,
+      codex_ticket_fail_closed: true,
+      codex_ticket_harvest_proxy_ids: [11, 12],
+    })
   })
 
   it.each([

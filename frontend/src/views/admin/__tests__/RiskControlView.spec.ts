@@ -13,6 +13,8 @@ const {
   listLogs,
   getGroups,
   getProxies,
+  searchUsers,
+  getUser,
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
@@ -22,6 +24,8 @@ const {
   listLogs: vi.fn(),
   getGroups: vi.fn(),
   getProxies: vi.fn(),
+  searchUsers: vi.fn(),
+  getUser: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
@@ -44,6 +48,8 @@ vi.mock('@/api/admin', () => ({
     proxies: {
       getAll: getProxies,
     },
+    usage: { searchUsers },
+    users: { getById: getUser },
   },
 }))
 
@@ -88,6 +94,7 @@ const baseConfig = (): ContentModerationConfig => ({
   sample_rate: 100,
   all_groups: true,
   group_ids: [],
+  user_whitelist_ids: [],
   record_non_hits: false,
   worker_count: 4,
   queue_size: 32768,
@@ -95,6 +102,7 @@ const baseConfig = (): ContentModerationConfig => ({
   block_message: '内容审计命中风险规则，请调整输入后重试',
   email_on_hit: true,
   auto_ban_enabled: true,
+  cyber_policy_exclude_from_ban_count: false,
   ban_threshold: 10,
   violation_window_hours: 720,
   retry_count: 2,
@@ -197,6 +205,8 @@ describe('admin RiskControlView', () => {
     getStatus.mockReset()
     listLogs.mockReset()
     getGroups.mockReset()
+    searchUsers.mockReset()
+    getUser.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
 
@@ -205,6 +215,8 @@ describe('admin RiskControlView', () => {
     listLogs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
     getGroups.mockResolvedValue([])
     getProxies.mockResolvedValue([])
+    searchUsers.mockResolvedValue([])
+    getUser.mockRejectedValue(new Error('not found'))
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
       ...baseConfig(),
       ...payload,
@@ -249,6 +261,93 @@ describe('admin RiskControlView', () => {
       },
     }))
     expect(showError).not.toHaveBeenCalled()
+  })
+
+  function mountWhitelistView() {
+    return mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+        },
+      },
+    })
+  }
+
+  it('searches and saves a user whitelist from the audit scope settings', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountWhitelistView()
+    try {
+      searchUsers.mockResolvedValue([{ id: 7, email: 'trusted@example.com', deleted: false }])
+      await flushPromises()
+      await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+      await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click')
+      const whitelist = wrapper.get('[data-test="moderation-user-whitelist"]')
+      await whitelist.get('input').setValue('trusted')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      expect(searchUsers).toHaveBeenCalledWith('trusted')
+      const result = whitelist.findAll('button').find(button => button.text().includes('trusted@example.com'))
+      expect(result).toBeDefined()
+      await result!.trigger('click')
+      expect(whitelist.text()).toContain('trusted@example.com')
+      expect(whitelist.text()).toContain('#7')
+
+      await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+      await flushPromises()
+      expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({ user_whitelist_ids: [7] }))
+      expect(showError).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps saved whitelist IDs when a user label cannot be loaded', async () => {
+    getConfig.mockResolvedValue({ ...baseConfig(), user_whitelist_ids: [42] })
+    const wrapper = mountWhitelistView()
+    try {
+      await flushPromises()
+      await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+      await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click')
+      await flushPromises()
+      expect(getUser).toHaveBeenCalledWith(42, true)
+      expect(wrapper.get('[data-test="moderation-user-whitelist"]').text()).toContain('#42')
+      await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+      await flushPromises()
+      expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({ user_whitelist_ids: [42] }))
+      expect(showError).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('clears a saved whitelist by sending an explicit empty array', async () => {
+    getConfig.mockResolvedValue({ ...baseConfig(), user_whitelist_ids: [7] })
+    getUser.mockResolvedValue({ id: 7, email: 'trusted@example.com', deleted_at: null })
+    const wrapper = mountWhitelistView()
+    try {
+      await flushPromises()
+      await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+      await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click')
+      await flushPromises()
+      const whitelist = wrapper.get('[data-test="moderation-user-whitelist"]')
+      expect(whitelist.text()).toContain('trusted@example.com')
+      await whitelist.get('button[aria-label="admin.settings.openaiFastPolicy.removeUser"]').trigger('click')
+      expect(whitelist.text()).toContain('admin.riskControl.userWhitelistEmpty')
+      await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+      await flushPromises()
+      expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({ user_whitelist_ids: [] }))
+      expect(showError).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('submits edited risk control thresholds when saving moderation config', async () => {

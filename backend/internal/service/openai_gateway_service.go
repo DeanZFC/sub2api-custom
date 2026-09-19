@@ -472,6 +472,9 @@ type OpenAIGatewayService struct {
 	balanceNotifyService  *BalanceNotifyService
 	settingService        *SettingService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	// codexTicketProxyRepo resolves account-scoped 292 harvest proxy IDs. It is
+	// kept separate from the business proxy used for normal upstream traffic.
+	codexTicketProxyRepo  ProxyRepository
 	liveAttestation       liveattestation.Provider
 	liveAttestationCipher SecretEncryptor
 
@@ -513,7 +516,10 @@ type OpenAIGatewayService struct {
 	openaiCodexTurnStateOrigins sync.Map
 	openaiCodexTurnStateWrites  atomic.Uint64
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
-	openaiCodexTickets           sync.Map
+	openaiCodexTickets sync.Map
+	// accountID\x00model -> *atomic.Uint64; advances the selected account-scoped
+	// harvest proxy once per ticket cycle without increasing probe attempts.
+	openaiCodexTicketProxyCursor sync.Map
 	openaiCodexTicketFlight      singleflight.Group
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
@@ -545,6 +551,9 @@ func NewOpenAIGatewayService(
 	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	// codexTicketProxyRepo is optional for narrow in-process test constructors;
+	// production wiring always supplies the shared proxy repository.
+	codexTicketProxyRepo ...ProxyRepository,
 ) *OpenAIGatewayService {
 	// enforceCodexIdentityHeaders 是 HTTP / 透传 / WS / 探针 等出站路径共用的纯函数收口点，
 	// 拿不到配置，故在此发布进程级开关快照。配置取反义，零值即「强制统一出口开启」。
@@ -588,6 +597,9 @@ func NewOpenAIGatewayService(
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 		openaiModelTransient:  newOpenAIAccountModelTransientState(openAIModelTransientDefaultMax),
+	}
+	if len(codexTicketProxyRepo) > 0 {
+		svc.codexTicketProxyRepo = codexTicketProxyRepo[0]
 	}
 	if rateLimitService != nil {
 		rateLimitService.SetAccountRuntimeBlocker(svc)

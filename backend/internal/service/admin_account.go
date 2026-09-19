@@ -413,6 +413,11 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
 	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
+	var err error
+	accountExtra, err = normalizeOpenAICodexTicketAccountExtra(input.Platform, accountExtra, true)
+	if err != nil {
+		return nil, err
+	}
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -499,6 +504,23 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	accountExtra, err = normalizeOpenAIAutoResetCreditExtra(input.Platform, input.Type, false, accountExtra)
 	if err != nil {
 		return nil, err
+	}
+	accountExtra, err = normalizeOpenAICodexTicketAccountExtra(input.Platform, accountExtra, true)
+	if err != nil {
+		return nil, err
+	}
+	if input.Platform == PlatformOpenAI {
+		if raw, ok := accountExtra[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
+			ids, normalizeErr := normalizeOpenAICodexTicketHarvestProxyIDs(raw)
+			if normalizeErr != nil {
+				return nil, normalizeErr
+			}
+			validated, validateErr := s.validateOpenAICodexTicketHarvestProxyIDs(ctx, ids)
+			if validateErr != nil {
+				return nil, validateErr
+			}
+			accountExtra[OpenAICodexTicketHarvestProxyIDsExtraKey] = validated
+		}
 	}
 	if err := ValidateUpstreamRequestIDHeaderExtra(accountExtra); err != nil {
 		return nil, err
@@ -605,6 +627,23 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		normalizedExtra, err = normalizeOpenAIAutoResetCreditExtra(account.Platform, effectiveType, account.IsShadow(), normalizedExtra)
 		if err != nil {
 			return nil, err
+		}
+		normalizedExtra, err = normalizeOpenAICodexTicketAccountUpdateExtra(account, normalizedExtra)
+		if err != nil {
+			return nil, err
+		}
+		if account.Platform == PlatformOpenAI {
+			if raw, ok := input.Extra[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
+				ids, normalizeErr := normalizeOpenAICodexTicketHarvestProxyIDs(raw)
+				if normalizeErr != nil {
+					return nil, normalizeErr
+				}
+				validated, validateErr := s.validateOpenAICodexTicketHarvestProxyIDs(ctx, ids)
+				if validateErr != nil {
+					return nil, validateErr
+				}
+				normalizedExtra[OpenAICodexTicketHarvestProxyIDsExtraKey] = validated
+			}
 		}
 		if err := ValidateUpstreamRequestIDHeaderExtra(normalizedExtra); err != nil {
 			return nil, err
@@ -942,6 +981,31 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSessionExtraKey)
 	delete(updates, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
+	if hasOpenAICodexTicketAccountPolicyKeys(updates) {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if account.Platform != PlatformOpenAI {
+			return invalidOpenAICodexTicketExtra(OpenAICodexTicketEnabledExtraKey, "is only valid for OpenAI accounts")
+		}
+		normalized, err := normalizeOpenAICodexTicketAccountExtra(account.Platform, updates, false)
+		if err != nil {
+			return err
+		}
+		if raw, ok := normalized[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
+			ids, err := normalizeOpenAICodexTicketHarvestProxyIDs(raw)
+			if err != nil {
+				return err
+			}
+			validated, err := s.validateOpenAICodexTicketHarvestProxyIDs(ctx, ids)
+			if err != nil {
+				return err
+			}
+			normalized[OpenAICodexTicketHarvestProxyIDsExtraKey] = validated
+		}
+		updates = normalized
+	}
 	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
@@ -983,6 +1047,25 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OllamaCloudUsageSessionExtraKey)
 	delete(input.Extra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(input.Extra, OllamaCloudUsageSnapshotExtraKey)
+	updatesCodexTicketPolicy := hasOpenAICodexTicketAccountPolicyKeys(input.Extra)
+	if updatesCodexTicketPolicy {
+		normalized, err := normalizeOpenAICodexTicketAccountExtra(PlatformOpenAI, input.Extra, false)
+		if err != nil {
+			return nil, err
+		}
+		if raw, ok := normalized[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
+			ids, err := normalizeOpenAICodexTicketHarvestProxyIDs(raw)
+			if err != nil {
+				return nil, err
+			}
+			validated, err := s.validateOpenAICodexTicketHarvestProxyIDs(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			normalized[OpenAICodexTicketHarvestProxyIDsExtraKey] = validated
+		}
+		input.Extra = normalized
+	}
 
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
@@ -1018,7 +1101,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || updatesCodexTicketPolicy {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1029,6 +1112,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+		}
+	}
+	if updatesCodexTicketPolicy {
+		for _, accountID := range input.AccountIDs {
+			account, ok := targetsByID[accountID]
+			if !ok {
+				return nil, ErrAccountNotFound
+			}
+			if account.Platform != PlatformOpenAI {
+				return nil, invalidOpenAICodexTicketExtra(OpenAICodexTicketEnabledExtraKey, "is only valid for OpenAI accounts")
+			}
 		}
 	}
 	if openAISettings.any() {

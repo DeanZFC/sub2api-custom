@@ -145,6 +145,24 @@ const GroupSelectorStub = defineComponent({
   `
 })
 
+const ProxySelectorStub = defineComponent({
+  name: 'ProxySelector',
+  props: {
+    modelValue: {
+      type: Array,
+      default: () => []
+    }
+  },
+  emits: ['update:modelValue'],
+  template: `
+    <div data-testid="proxy-selector-stub">
+      <span data-testid="proxy-selector-value">{{ modelValue.join(',') }}</span>
+      <button type="button" data-testid="set-codex-harvest-proxies" @click="$emit('update:modelValue', [11, 12])">set harvest proxies</button>
+      <button type="button" data-testid="clear-codex-harvest-proxies" @click="$emit('update:modelValue', [])">clear harvest proxies</button>
+    </div>
+  `
+})
+
 function buildAccount() {
   return {
     id: 1,
@@ -320,7 +338,7 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
         BaseDialog: BaseDialogStub,
         Select: SelectStub,
         Icon: true,
-        ProxySelector: true,
+        ProxySelector: ProxySelectorStub,
         GroupSelector: renderGroupSelector ? false : GroupSelectorStub,
         ModelWhitelistSelector: ModelWhitelistSelectorStub
       }
@@ -1563,6 +1581,102 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_oauth_responses_websockets_v2_mode).toBe('http_bridge')
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_oauth_responses_websockets_v2_enabled).toBe(true)
+  })
+
+  it('keeps 292 harvest proxies separate from the account business proxy and persists fail-closed changes', async () => {
+    const account = buildOpenAISetupTokenAccount()
+    account.proxy_id = 5
+    account.proxy_ids = [5]
+    account.extra = {
+      codex_ticket_enabled: true,
+      codex_ticket_fail_closed: false,
+      codex_ticket_harvest_proxy_ids: [9]
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-codex-ticket-fail-closed"]').trigger('click')
+    await wrapper.get('[data-testid="edit-codex-ticket-config"] [data-testid="set-codex-harvest-proxies"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.proxy_ids).toEqual([5])
+    expect(payload?.extra?.codex_ticket_enabled).toBe(true)
+    expect(payload?.extra?.codex_ticket_fail_closed).toBe(true)
+    expect(payload?.extra?.codex_ticket_harvest_proxy_ids).toEqual([11, 12])
+  })
+
+  it('preserves an absent legacy harvest proxy key until the administrator explicitly clears it', async () => {
+    const account = buildOpenAISetupTokenAccount()
+    account.proxy_id = 5
+    account.proxy_ids = [5]
+    account.codex_ticket_config = {
+      enabled: true,
+      fail_closed: true,
+      harvest_proxy_ids: [],
+      legacy_proxy_fallback: true
+    }
+    account.extra = {}
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTicketLegacyProxyFallback')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    let payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.proxy_ids).toEqual([5])
+    expect(payload?.extra).not.toHaveProperty('codex_ticket_harvest_proxy_ids')
+
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    await wrapper.get('[data-testid="edit-codex-ticket-config"] [data-testid="clear-codex-harvest-proxies"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.extra?.codex_ticket_harvest_proxy_ids).toEqual([])
+  })
+
+  it('prefers explicit account 292 booleans over resolved legacy values', async () => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = { codex_ticket_enabled: false, codex_ticket_fail_closed: true }
+    account.codex_ticket_config = {
+      enabled: true,
+      fail_closed: false,
+      harvest_proxy_ids: [],
+      legacy_proxy_fallback: true
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    expect(wrapper.get('[data-testid="edit-codex-ticket-enabled"]').attributes('aria-checked')).toBe('false')
+    await wrapper.get('[data-testid="edit-codex-ticket-enabled"]').trigger('click')
+    expect(wrapper.get('[data-testid="edit-codex-ticket-fail-closed"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      codex_ticket_enabled: true,
+      codex_ticket_fail_closed: true,
+    })
+  })
+
+  it('defaults the first account-level 292 enable to fail-closed without changing active legacy fail-open accounts', async () => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = {}
+    account.codex_ticket_config = {
+      enabled: false,
+      fail_closed: false,
+      harvest_proxy_ids: [],
+      legacy_proxy_fallback: false
+    }
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-codex-ticket-enabled"]').trigger('click')
+    expect(wrapper.get('[data-testid="edit-codex-ticket-fail-closed"]').attributes('aria-checked')).toBe('true')
+
+    await wrapper.setProps({ account: {
+      ...account,
+      id: 9,
+      codex_ticket_config: { ...account.codex_ticket_config, enabled: true },
+    } })
+    expect(wrapper.get('[data-testid="edit-codex-ticket-fail-closed"]').attributes('aria-checked')).toBe('false')
   })
 
   it('allows saving apikey account when backend redacted api_key but credentials_status reports it exists', async () => {

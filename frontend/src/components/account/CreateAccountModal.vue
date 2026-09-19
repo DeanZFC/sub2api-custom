@@ -3146,6 +3146,52 @@
         </div>
       </div>
 
+      <!-- OpenAI Codex 292 账号级策略（仅 OAuth / Setup Token） -->
+      <div
+        v-if="!sharedPool && form.platform === 'openai' && accountCategory === 'oauth-based'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="create-codex-ticket-config"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTicketAccountEnabled') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexTicketAccountEnabledDesc') }}
+            </p>
+          </div>
+          <Toggle
+            v-model="codexTicketEnabled"
+            data-testid="create-codex-ticket-enabled"
+            :aria-label="t('admin.accounts.openai.codexTicketAccountEnabled')"
+          />
+        </div>
+        <div v-if="codexTicketEnabled" class="mt-4 space-y-4 border-l-2 border-gray-200 pl-4 dark:border-dark-600">
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTicketFailClosed') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.openai.codexTicketFailClosedDesc') }}
+              </p>
+            </div>
+            <Toggle
+              v-model="codexTicketFailClosed"
+              data-testid="create-codex-ticket-fail-closed"
+              :aria-label="t('admin.accounts.openai.codexTicketFailClosed')"
+            />
+          </div>
+          <div>
+            <label class="input-label mb-1">{{ t('admin.accounts.openai.codexTicketHarvestProxies') }}</label>
+            <ProxySelector
+              v-model="codexTicketHarvestProxyIds"
+              :proxies="proxies"
+              multiple
+              data-testid="create-codex-ticket-harvest-proxies"
+            />
+            <p class="input-hint">{{ t('admin.accounts.openai.codexTicketHarvestProxiesDesc') }}</p>
+          </div>
+        </div>
+      </div>
+
       <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
       <div
         v-if="!sharedPool && (form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey'))"
@@ -4480,6 +4526,9 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
+const codexTicketEnabled = ref(false)
+const codexTicketFailClosed = ref(true)
+const codexTicketHarvestProxyIds = ref<number[]>([])
 type CodexFingerprintMode = 'off' | 'single_machine_multi_window' | 'device' | 'session' | 'full'
 const codexFingerprintMode = ref<CodexFingerprintMode>('single_machine_multi_window')
 const codexFingerprintModeOptions = computed(() => [
@@ -5464,6 +5513,9 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexTicketEnabled.value = false
+  codexTicketFailClosed.value = true
+  codexTicketHarvestProxyIds.value = []
   codexFingerprintMode.value = 'single_machine_multi_window'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5563,6 +5615,13 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.codex_cli_only_allow_app_server = true
   } else {
     delete extra.codex_cli_only_allow_app_server
+  }
+  if (!props.sharedPool && accountCategory.value === 'oauth-based') {
+    // New accounts always receive explicit defaults so their policy is
+    // independent from the legacy gateway-level setting.
+    extra.codex_ticket_enabled = codexTicketEnabled.value
+    extra.codex_ticket_fail_closed = codexTicketFailClosed.value
+    extra.codex_ticket_harvest_proxy_ids = [...codexTicketHarvestProxyIds.value]
   }
   // 新建账号默认单机多窗口；始终保存表单选择，包括用户手动关闭。
   if (codexFingerprintMode.value !== 'off') {

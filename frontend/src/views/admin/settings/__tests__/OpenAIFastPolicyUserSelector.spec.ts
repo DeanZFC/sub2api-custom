@@ -109,4 +109,29 @@ describe('OpenAIFastPolicyUserSelector', () => {
     await wrapper.get('button[aria-label="Remove user"]').trigger('click')
     expect(wrapper.emitted('update:modelValue')).toEqual([[[]]])
   })
+
+  it('excludes selected users from search results and preserves them when adding another user', async () => {
+    mockGetUserById.mockResolvedValue({ id: 7, email: 'existing@example.com', deleted_at: null })
+    mockSearchUsers.mockResolvedValue([
+      { id: 7, email: 'existing@example.com', deleted: false },
+      { id: 9, email: 'new@example.com', deleted: false },
+    ])
+    const wrapper = mount(OpenAIFastPolicyUserSelector, {
+      props: { modelValue: [7] },
+      global: { stubs: { Icon: true } },
+    })
+    try {
+      await flushPromises()
+      await wrapper.get('input').setValue('example')
+      vi.advanceTimersByTime(300)
+      await flushPromises()
+      const resultButtons = wrapper.findAll('button').filter(button => !button.attributes('aria-label'))
+      expect(resultButtons).toHaveLength(1)
+      expect(resultButtons[0].text()).toContain('new@example.com')
+      await resultButtons[0].trigger('click')
+      expect(wrapper.emitted('update:modelValue')).toEqual([[[7, 9]]])
+    } finally {
+      wrapper.unmount()
+    }
+  })
 })

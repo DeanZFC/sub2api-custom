@@ -24,6 +24,7 @@ export interface ContentModerationConfig {
   sample_rate: number
   all_groups: boolean
   group_ids: number[]
+  user_whitelist_ids: number[]
   record_non_hits: boolean
   thresholds: Record<string, number>
   worker_count: number
@@ -104,6 +105,7 @@ export interface UpdateContentModerationConfig {
   sample_rate?: number
   all_groups?: boolean
   group_ids?: number[]
+  user_whitelist_ids?: number[]
   record_non_hits?: boolean
   thresholds?: Record<string, number>
   worker_count?: number

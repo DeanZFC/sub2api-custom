@@ -151,6 +151,7 @@ type ContentModerationConfig struct {
 	SampleRate           int                          `json:"sample_rate"`
 	AllGroups            bool                         `json:"all_groups"`
 	GroupIDs             []int64                      `json:"group_ids"`
+	UserWhitelistIDs     []int64                      `json:"user_whitelist_ids"`
 	RecordNonHits        bool                         `json:"record_non_hits"`
 	Thresholds           map[string]float64           `json:"thresholds"`
 	WorkerCount          int                          `json:"worker_count"`
@@ -189,6 +190,7 @@ type ContentModerationConfigView struct {
 	SampleRate                     int                             `json:"sample_rate"`
 	AllGroups                      bool                            `json:"all_groups"`
 	GroupIDs                       []int64                         `json:"group_ids"`
+	UserWhitelistIDs               []int64                         `json:"user_whitelist_ids"`
 	RecordNonHits                  bool                            `json:"record_non_hits"`
 	Thresholds                     map[string]float64              `json:"thresholds"`
 	WorkerCount                    int                             `json:"worker_count"`
@@ -281,6 +283,7 @@ type UpdateContentModerationConfigInput struct {
 	SampleRate                     *int                          `json:"sample_rate"`
 	AllGroups                      *bool                         `json:"all_groups"`
 	GroupIDs                       *[]int64                      `json:"group_ids"`
+	UserWhitelistIDs               *[]int64                      `json:"user_whitelist_ids"`
 	RecordNonHits                  *bool                         `json:"record_non_hits"`
 	Thresholds                     *map[string]float64           `json:"thresholds"`
 	WorkerCount                    *int                          `json:"worker_count"`
@@ -693,6 +696,9 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if input.GroupIDs != nil {
 		cfg.GroupIDs = normalizeInt64IDs(*input.GroupIDs)
 	}
+	if input.UserWhitelistIDs != nil {
+		cfg.UserWhitelistIDs = normalizeInt64IDs(*input.UserWhitelistIDs)
+	}
 	if input.RecordNonHits != nil {
 		cfg.RecordNonHits = *input.RecordNonHits
 	}
@@ -843,6 +849,14 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	cfg := runtimeSnapshot.config
+	if cfg.isUserWhitelisted(input.UserID) {
+		slog.Info("content_moderation.skip_user_whitelisted",
+			"user_id", input.UserID,
+			"api_key_id", input.APIKeyID,
+			"endpoint", input.Endpoint,
+			"protocol", input.Protocol)
+		return allow, nil
+	}
 	inGroupScope := cfg.includesGroup(input.GroupID)
 	inModelScope := cfg.includesModel(input.Model)
 	slog.Info("content_moderation.config_loaded",
@@ -1244,6 +1258,11 @@ func (s *ContentModerationService) worker(id int) {
 					slog.Error("content_moderation.worker_panic", "worker_id", id, "recover", r)
 				}
 			}()
+			// The whitelist may have changed while this task was waiting in the
+			// queue. Use the latest snapshot before auditing or applying penalties.
+			if latest := s.runtimeSnapshot.Load(); latest != nil && latest.config.isUserWhitelisted(task.input.UserID) {
+				return
+			}
 			if task.log != nil {
 				s.asyncActive.Add(1)
 				defer s.asyncActive.Add(-1)
@@ -2086,6 +2105,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 		SampleRate:           100,
 		AllGroups:            true,
 		GroupIDs:             []int64{},
+		UserWhitelistIDs:     []int64{},
 		RecordNonHits:        false,
 		Thresholds:           ContentModerationDefaultThresholds(),
 		WorkerCount:          defaultContentModerationWorkerCount,
@@ -2118,6 +2138,7 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 	clone.ProxyID = cloneInt64Ptr(cfg.ProxyID)
 	clone.APIKeys = append([]string(nil), cfg.APIKeys...)
 	clone.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	clone.UserWhitelistIDs = append([]int64{}, cfg.UserWhitelistIDs...)
 	clone.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
 	clone.Thresholds = cloneFloatMap(cfg.Thresholds)
 	clone.ModelFilter = ContentModerationModelFilter{
@@ -2204,10 +2225,24 @@ func (cfg *ContentModerationConfig) normalize() {
 		cfg.NonHitRetentionDays = maxContentModerationNonHitRetentionDays
 	}
 	cfg.GroupIDs = normalizeInt64IDs(cfg.GroupIDs)
+	cfg.UserWhitelistIDs = normalizeInt64IDs(cfg.UserWhitelistIDs)
 	cfg.Thresholds = mergeContentModerationThresholds(ContentModerationDefaultThresholds(), cfg.Thresholds)
 	cfg.BlockedKeywords = normalizeBlockedKeywords(cfg.BlockedKeywords)
 	cfg.KeywordBlockingMode = normalizeKeywordBlockingMode(cfg.KeywordBlockingMode)
 	cfg.ModelFilter = normalizeContentModerationModelFilter(cfg.ModelFilter)
+}
+
+// isUserWhitelisted only uses the authenticated user's ID, never request body fields.
+// Config normalization keeps the list sorted so every request can check it without
+// a database query or rebuilding a lookup map.
+func (cfg *ContentModerationConfig) isUserWhitelisted(userID int64) bool {
+	if cfg == nil || userID <= 0 {
+		return false
+	}
+	index := sort.Search(len(cfg.UserWhitelistIDs), func(i int) bool {
+		return cfg.UserWhitelistIDs[i] >= userID
+	})
+	return index < len(cfg.UserWhitelistIDs) && cfg.UserWhitelistIDs[index] == userID
 }
 
 func (cfg *ContentModerationConfig) includesGroup(groupID *int64) bool {
@@ -2421,6 +2456,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		SampleRate:                     cfg.SampleRate,
 		AllGroups:                      cfg.AllGroups,
 		GroupIDs:                       append([]int64(nil), cfg.GroupIDs...),
+		UserWhitelistIDs:               append([]int64{}, cfg.UserWhitelistIDs...),
 		RecordNonHits:                  cfg.RecordNonHits,
 		Thresholds:                     cloneFloatMap(cfg.Thresholds),
 		WorkerCount:                    cfg.WorkerCount,
@@ -2987,7 +3023,7 @@ type CyberPolicyRecordInput struct {
 
 // RecordCyberPolicyEvent 把一次 cyber_policy 硬阻断写入风控中心日志、计入违规计数、
 // 并给用户发邮件。当前请求已由 gateway 透传给用户；本方法仅做事后记录/通知/计数。
-// 受 risk_control_enabled 总开关和内容审核 group/model scope 约束，
+// 受 risk_control_enabled 总开关、用户白名单和内容审核 group/model scope 约束，
 // 不受内容审核 Enabled/Mode/sample 约束。
 func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, in CyberPolicyRecordInput) {
 	if s == nil || s.repo == nil {
@@ -3002,7 +3038,7 @@ func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, i
 		return
 	}
 	cfg := runtimeSnapshot.config
-	if !cfg.includesGroup(in.GroupID) || !cfg.includesModel(in.Model) {
+	if cfg.isUserWhitelisted(in.UserID) || !cfg.includesGroup(in.GroupID) || !cfg.includesModel(in.Model) {
 		return
 	}
 	var userID *int64

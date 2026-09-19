@@ -1185,6 +1185,13 @@ export interface Account {
     blocked: boolean
     expires_at?: string
   }>
+  /** Resolved Codex 292 account policy returned by the admin account detail endpoint. */
+  codex_ticket_config?: {
+    enabled: boolean
+    fail_closed: boolean
+    harvest_proxy_ids: number[]
+    legacy_proxy_fallback: boolean
+  }
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
@@ -1199,6 +1206,9 @@ export interface Account {
     auto_reset_credit_enabled?: boolean
     auto_reset_credit_5h_threshold?: number
     auto_reset_credit_7d_threshold?: number
+    codex_ticket_enabled?: boolean
+    codex_ticket_fail_closed?: boolean
+    codex_ticket_harvest_proxy_ids?: number[]
     codex_auto_reset_credit_state?: {
       status?: 'checking' | 'available' | 'resetting' | 'success' | 'no_credit' | 'failed'
       trigger_window?: string
@@ -1617,6 +1627,7 @@ export interface AdminDataAccount {
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_key?: string | null
+  codex_ticket_proxy_keys?: string[] | null
   concurrency: number
   priority: number
   rate_multiplier?: number | null

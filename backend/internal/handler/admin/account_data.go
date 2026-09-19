@@ -58,18 +58,19 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
-	Name               string         `json:"name"`
-	Notes              *string        `json:"notes,omitempty"`
-	Platform           string         `json:"platform"`
-	Type               string         `json:"type"`
-	Credentials        map[string]any `json:"credentials"`
-	Extra              map[string]any `json:"extra,omitempty"`
-	ProxyKey           *string        `json:"proxy_key,omitempty"`
-	Concurrency        int            `json:"concurrency"`
-	Priority           int            `json:"priority"`
-	RateMultiplier     *float64       `json:"rate_multiplier,omitempty"`
-	ExpiresAt          *int64         `json:"expires_at,omitempty"`
-	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired,omitempty"`
+	Name                 string         `json:"name"`
+	Notes                *string        `json:"notes,omitempty"`
+	Platform             string         `json:"platform"`
+	Type                 string         `json:"type"`
+	Credentials          map[string]any `json:"credentials"`
+	Extra                map[string]any `json:"extra,omitempty"`
+	ProxyKey             *string        `json:"proxy_key,omitempty"`
+	CodexTicketProxyKeys *[]string      `json:"codex_ticket_proxy_keys,omitempty"`
+	Concurrency          int            `json:"concurrency"`
+	Priority             int            `json:"priority"`
+	RateMultiplier       *float64       `json:"rate_multiplier,omitempty"`
+	ExpiresAt            *int64         `json:"expires_at,omitempty"`
+	AutoPauseOnExpired   *bool          `json:"auto_pause_on_expired,omitempty"`
 }
 
 type DataImportRequest struct {
@@ -188,6 +189,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	dataAccounts := make([]DataAccount, 0, len(accounts))
 	for i := range accounts {
 		acc := accounts[i]
+		extra, ticketProxyKeys := exportCodexTicketProxyExtra(&acc, proxyKeyByID)
 		var proxyKey *string
 		if acc.ProxyID != nil {
 			if key, ok := proxyKeyByID[*acc.ProxyID]; ok {
@@ -200,18 +202,19 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			expiresAt = &v
 		}
 		dataAccounts = append(dataAccounts, DataAccount{
-			Name:               acc.Name,
-			Notes:              acc.Notes,
-			Platform:           acc.Platform,
-			Type:               acc.Type,
-			Credentials:        acc.Credentials,
-			Extra:              service.RedactOpenAICodexTicketExtra(acc.Extra),
-			ProxyKey:           proxyKey,
-			Concurrency:        acc.Concurrency,
-			Priority:           acc.Priority,
-			RateMultiplier:     acc.RateMultiplier,
-			ExpiresAt:          expiresAt,
-			AutoPauseOnExpired: &acc.AutoPauseOnExpired,
+			Name:                 acc.Name,
+			Notes:                acc.Notes,
+			Platform:             acc.Platform,
+			Type:                 acc.Type,
+			Credentials:          acc.Credentials,
+			Extra:                extra,
+			ProxyKey:             proxyKey,
+			CodexTicketProxyKeys: ticketProxyKeys,
+			Concurrency:          acc.Concurrency,
+			Priority:             acc.Priority,
+			RateMultiplier:       acc.RateMultiplier,
+			ExpiresAt:            expiresAt,
+			AutoPauseOnExpired:   &acc.AutoPauseOnExpired,
 		})
 	}
 
@@ -431,6 +434,13 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			}
 		}
 
+		extra, err := importCodexTicketProxyExtra(item.Extra, item.CodexTicketProxyKeys, proxyKeyToID)
+		if err != nil {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: err.Error()})
+			continue
+		}
+		item.Extra = extra
 		enrichCredentialsFromIDToken(&item)
 
 		accountInput := &service.CreateAccountInput{
@@ -574,19 +584,23 @@ func (h *AccountHandler) resolveExportProxies(ctx context.Context, accounts []se
 
 	seen := make(map[int64]struct{})
 	ids := make([]int64, 0)
-	for i := range accounts {
-		if accounts[i].ProxyID == nil {
-			continue
-		}
-		id := *accounts[i].ProxyID
+	appendID := func(id int64) {
 		if id <= 0 {
-			continue
+			return
 		}
 		if _, ok := seen[id]; ok {
-			continue
+			return
 		}
 		seen[id] = struct{}{}
 		ids = append(ids, id)
+	}
+	for i := range accounts {
+		if accounts[i].ProxyID != nil {
+			appendID(*accounts[i].ProxyID)
+		}
+		for _, id := range codexTicketProxyIDsForExport(&accounts[i]) {
+			appendID(id)
+		}
 	}
 	if len(ids) == 0 {
 		return []service.Proxy{}, nil

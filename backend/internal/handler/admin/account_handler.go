@@ -368,13 +368,19 @@ func (h *AccountHandler) accountListResponseFromService(account *service.Account
 }
 
 func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *dto.Account) {
-	if h != nil && h.cfg != nil && out != nil {
-		cfg := h.cfg.Gateway.OpenAICodexTicket
-		if h.codexTicketSettings != nil {
-			cfg.Enabled = h.codexTicketSettings.GetOpenAICodexTicketEnabled(context.Background(), cfg.Enabled)
-		}
-		out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
+	if out == nil || account == nil || !account.IsOpenAIOAuthLike() || account.IsShadow() {
+		return
 	}
+	cfg := config.OpenAICodexTicketConfig{}
+	if h != nil && h.cfg != nil {
+		cfg = h.cfg.Gateway.OpenAICodexTicket
+	}
+	if h != nil && h.codexTicketSettings != nil {
+		cfg.Enabled = h.codexTicketSettings.GetOpenAICodexTicketEnabled(context.Background(), cfg.Enabled)
+	}
+	policy := service.ResolveOpenAICodexTicketAccountConfig(account, cfg)
+	out.CodexTicketConfig = &policy
+	out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
 }
 
 func (h *AccountHandler) isSimpleMode() bool {
