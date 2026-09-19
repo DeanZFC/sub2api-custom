@@ -958,7 +958,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
-	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
+	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "chatgpt_plan_type", "account_scheduling_threshold"}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
@@ -1027,11 +1027,10 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"codex_5h_reset_after_seconds",
 		"codex_7d_reset_after_seconds",
 		"codex_usage_updated_at",
-		// Account-scoped Codex 292 policy must survive scheduler snapshots. These
+		// Account-scoped Codex ticket switches must survive scheduler snapshots. These
 		// are deliberately separate from ProxyIDs, which route business traffic.
 		service.OpenAICodexTicketEnabledExtraKey,
 		service.OpenAICodexTicketFailClosedExtraKey,
-		service.OpenAICodexTicketHarvestProxyIDsExtraKey,
 		"auto_pause_5h_threshold",
 		"auto_pause_7d_threshold",
 		"auto_pause_5h_disabled",

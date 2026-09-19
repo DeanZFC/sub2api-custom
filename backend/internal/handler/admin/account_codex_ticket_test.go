@@ -2,15 +2,16 @@ package admin
 
 import (
 	"encoding/json"
+	"strings"
+	"testing"
+
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
-	"strings"
-	"testing"
 )
 
-func TestAccountResponseCodexTicketAccountPolicyOverridesGateway(t *testing.T) {
+func TestAccountResponseCodexTicketAccountPolicyWithinGateway(t *testing.T) {
 	account := &service.Account{ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{
 		service.OpenAICodexTicketEnabledExtraKey:         true,
 		service.OpenAICodexTicketFailClosedExtraKey:      false,
@@ -18,17 +19,20 @@ func TestAccountResponseCodexTicketAccountPolicyOverridesGateway(t *testing.T) {
 		"codex_turn_ticket:gpt-6-astra":                  map[string]any{"state": "private-ticket-material"},
 	}}
 	h := &AccountHandler{cfg: &config.Config{}}
+	h.cfg.Gateway.OpenAICodexTicket.Enabled = true
 	for _, got := range []*dto.Account{h.accountResponseFromService(account), h.accountListResponseFromService(account)} {
 		require.NotNil(t, got.CodexTicketConfig)
 		require.True(t, got.CodexTicketConfig.Enabled)
 		require.False(t, got.CodexTicketConfig.FailClosed)
-		require.Equal(t, []int64{8, 2}, got.CodexTicketConfig.HarvestProxyIDs)
-		require.False(t, got.CodexTicketConfig.LegacyProxyFallback)
+		require.True(t, got.CodexTicketConfig.GatewayEnabled)
+		require.True(t, got.CodexTicketConfig.AccountEnabled)
+		require.Equal(t, 292, got.CodexTicketConfig.TargetLength)
 		require.NotEmpty(t, got.CodexTurnTickets)
 		payload, err := json.Marshal(got)
 		require.NoError(t, err)
 		require.False(t, strings.Contains(string(payload), "private-ticket-material"))
 		require.NotContains(t, got.Extra, "codex_turn_ticket:gpt-6-astra")
+		require.NotContains(t, got.Extra, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
 		compact := dto.AccountListItemFromAccount(got)
 		require.Equal(t, got.CodexTicketConfig, compact.CodexTicketConfig)
 	}
@@ -60,4 +64,21 @@ func TestAccountResponseCodexTicketsReadsLiveSettingsAfterRestart(t *testing.T) 
 	repo.values[service.SettingKeyOpenAICodexTicketEnabled] = "false"
 	settings.InvalidateOpenAICodexTicketEnabledCache()
 	require.Empty(t, h.accountResponseFromService(account).CodexTurnTickets)
+}
+
+func TestAccountResponseCodexTicketGatewayOffPreservesAccountChoice(t *testing.T) {
+	account := &service.Account{ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "team"},
+		Extra:       map[string]any{service.OpenAICodexTicketEnabledExtraKey: true, service.OpenAICodexTicketFailClosedExtraKey: true},
+	}
+	h := &AccountHandler{cfg: &config.Config{}}
+	for _, got := range []*dto.Account{h.accountResponseFromService(account), h.accountListResponseFromService(account)} {
+		require.NotNil(t, got.CodexTicketConfig)
+		require.False(t, got.CodexTicketConfig.GatewayEnabled)
+		require.False(t, got.CodexTicketConfig.Enabled)
+		require.True(t, got.CodexTicketConfig.AccountEnabled)
+		require.True(t, got.CodexTicketConfig.FailClosed)
+		require.Equal(t, 332, got.CodexTicketConfig.TargetLength)
+		require.Empty(t, got.CodexTurnTickets)
+	}
 }

@@ -2269,9 +2269,9 @@
         </div>
       </div>
 
-      <!-- Codex 292 门票状态（仅 OpenAI OAuth） -->
+      <!-- Codex account ticket policy (OAuth / Setup Token) -->
       <div
-        v-if="!sharedPool && account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && !isSparkShadow"
+        v-if="codexTicketGatewayEnabled && !sharedPool && account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && !isSparkShadow"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
         data-testid="edit-codex-ticket-config"
       >
@@ -2302,23 +2302,6 @@
               :aria-label="t('admin.accounts.openai.codexTicketFailClosed')"
             />
           </div>
-          <div>
-            <label class="input-label mb-1">{{ t('admin.accounts.openai.codexTicketHarvestProxies') }}</label>
-            <ProxySelector
-              v-model="codexTicketHarvestProxyIds"
-              :proxies="proxies"
-              multiple
-              data-testid="edit-codex-ticket-harvest-proxies"
-              @update:model-value="codexTicketHarvestProxyIdsTouched = true"
-            />
-            <p
-              v-if="codexTicketLegacyProxyFallback && !codexTicketHarvestProxyIdsTouched"
-              class="mt-1 text-xs text-amber-600 dark:text-amber-400"
-            >
-              {{ t('admin.accounts.openai.codexTicketLegacyProxyFallback') }}
-            </p>
-            <p class="input-hint">{{ t('admin.accounts.openai.codexTicketHarvestProxiesDesc') }}</p>
-          </div>
         </div>
       </div>
 
@@ -2326,7 +2309,7 @@
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
-        <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicket') }}</label>
+        <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicket', { length: codexTicketTargetLength }) }}</label>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
           {{ t('admin.accounts.openai.codexTurnTicketDesc') }}
         </p>
@@ -2337,9 +2320,9 @@
               {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
             </span>
             <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
-              {{ t('admin.accounts.openai.codexTurnTicketPaused') }}
+              {{ t('admin.accounts.openai.codexTurnTicketPaused', { length: ticket.target_length }) }}
             </span>
-            <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
+            <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing', { length: ticket.target_length }) }}</span>
           </div>
         </div>
       </div>
@@ -3119,6 +3102,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
 import { adminAPI } from '@/api/admin'
+import { useCodexTicketGatewayGate } from '@/composables/useCodexTicketGatewayGate'
 import { createSharedAccountAPI } from '@/api/sharedAccountCreation'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import type {
@@ -3273,15 +3257,11 @@ const selectableGroups = computed(() => {
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
-const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
-
+const codexTicketGatewayEnabled = useCodexTicketGatewayGate(() => props.show && !props.sharedPool)
+const codexTurnTickets = computed(() => codexTicketGatewayEnabled.value ? (props.account?.codex_turn_tickets ?? []) : [])
+const codexTicketTargetLength = computed(() => props.account?.codex_ticket_config?.target_length ?? 292)
 const codexTicketEnabled = ref(false)
 const codexTicketFailClosed = ref(true)
-const codexTicketHarvestProxyIds = ref<number[]>([])
-// Keep legacy accounts' absent proxy_ids key absent unless the administrator
-// explicitly edits the selector (an empty selection is an intentional clear).
-const codexTicketHarvestProxyIdsTouched = ref(false)
-const codexTicketLegacyProxyFallback = ref(false)
 
 function formatCodexTicketRemaining(seconds: number) {
   const total = Math.max(0, Math.floor(seconds || 0))
@@ -4135,21 +4115,13 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedScheduling.value = false
   allowOverages.value = false
 	const extra = newAccount.extra as Record<string, unknown> | undefined
-	const codexTicketConfig = newAccount.codex_ticket_config
-	const storedCodexTicketProxyIds = Array.isArray(extra?.codex_ticket_harvest_proxy_ids)
-	  ? extra.codex_ticket_harvest_proxy_ids.filter((id): id is number => typeof id === 'number' && Number.isFinite(id))
-	  : undefined
-	codexTicketEnabled.value = typeof extra?.codex_ticket_enabled === 'boolean'
-	  ? extra.codex_ticket_enabled
-	  : codexTicketConfig?.enabled === true
-	codexTicketFailClosed.value = typeof extra?.codex_ticket_fail_closed === 'boolean'
-	  ? extra.codex_ticket_fail_closed
-	  : (codexTicketConfig?.enabled === true ? codexTicketConfig.fail_closed !== false : true)
-	codexTicketHarvestProxyIds.value = storedCodexTicketProxyIds
-	  ? [...storedCodexTicketProxyIds]
-	  : (codexTicketConfig?.harvest_proxy_ids ?? []).filter((id) => Number.isFinite(id))
-	codexTicketHarvestProxyIdsTouched.value = storedCodexTicketProxyIds !== undefined
-	codexTicketLegacyProxyFallback.value = storedCodexTicketProxyIds === undefined && codexTicketConfig?.legacy_proxy_fallback === true
+  const codexTicketConfig = newAccount.codex_ticket_config
+  codexTicketEnabled.value = typeof extra?.codex_ticket_enabled === 'boolean'
+    ? extra.codex_ticket_enabled
+    : codexTicketConfig?.account_enabled === true
+  codexTicketFailClosed.value = typeof extra?.codex_ticket_fail_closed === 'boolean'
+    ? extra.codex_ticket_fail_closed
+    : (codexTicketConfig?.account_enabled === true ? codexTicketConfig.fail_closed !== false : true)
 	mixedScheduling.value = extra?.mixed_scheduling === true
 	allowOverages.value = extra?.allow_overages === true
 	upstreamRequestIdHeader.value = readUpstreamRequestIdHeader(extra)
@@ -5785,14 +5757,11 @@ const handleSubmit = async () => {
         }
       }
 
-      if (!props.sharedPool && (props.account.type === 'oauth' || props.account.type === 'setup-token') && !isSparkShadow.value) {
+      if (codexTicketGatewayEnabled.value && !props.sharedPool && (props.account.type === 'oauth' || props.account.type === 'setup-token') && !isSparkShadow.value) {
         newExtra.codex_ticket_enabled = codexTicketEnabled.value
         // Always persist the current boolean so changing fail-open back to the
         // default fail-closed state also clears a legacy false value.
         newExtra.codex_ticket_fail_closed = codexTicketFailClosed.value
-        if (codexTicketHarvestProxyIdsTouched.value || Object.prototype.hasOwnProperty.call(currentExtra, 'codex_ticket_harvest_proxy_ids')) {
-          newExtra.codex_ticket_harvest_proxy_ids = [...codexTicketHarvestProxyIds.value]
-        }
       }
 
       updatePayload.extra = newExtra

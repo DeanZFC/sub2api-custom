@@ -124,10 +124,10 @@
           :key="ticket.model"
           class="flex items-center gap-1 text-[10px] leading-4"
         >
-          <span class="truncate font-medium text-gray-500 dark:text-gray-400" :title="ticket.model">{{ shortCodexTicketModel(ticket.model) }}</span>
+          <span class="truncate font-medium text-gray-500 dark:text-gray-400" :title="`${ticket.model} · ${t('admin.accounts.openai.codexTurnTicket', { length: ticket.target_length })}`">{{ shortCodexTicketModel(ticket.model) }}</span>
           <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">{{ formatCodexTicketRemaining(ticket.remaining_seconds) }}</span>
-          <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.codexTurnTicketPaused') }}</span>
-          <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
+          <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.codexTurnTicketPaused', { length: ticket.target_length }) }}</span>
+          <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing', { length: ticket.target_length }) }}</span>
         </div>
       </div>
       <div v-if="hasOpenAIUsageFallback" class="space-y-1">
@@ -800,7 +800,7 @@ const hasOpenAIUsageFallback = computed(() => {
   return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
 
-const codexTurnTickets = computed(() => props.account.codex_turn_tickets ?? [])
+const codexTurnTickets = computed(() => props.account.codex_ticket_config?.gateway_enabled === false ? [] : (props.account.codex_turn_tickets ?? []))
 
 function shortCodexTicketModel(model: string) {
   if (model === 'gpt-6-astra') return 'astra'

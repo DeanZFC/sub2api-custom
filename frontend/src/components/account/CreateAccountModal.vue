@@ -3146,9 +3146,9 @@
         </div>
       </div>
 
-      <!-- OpenAI Codex 292 账号级策略（仅 OAuth / Setup Token） -->
+      <!-- OpenAI Codex account ticket policy (OAuth / Setup Token) -->
       <div
-        v-if="!sharedPool && form.platform === 'openai' && accountCategory === 'oauth-based'"
+        v-if="codexTicketGatewayEnabled && !sharedPool && form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
         data-testid="create-codex-ticket-config"
       >
@@ -3178,16 +3178,6 @@
               data-testid="create-codex-ticket-fail-closed"
               :aria-label="t('admin.accounts.openai.codexTicketFailClosed')"
             />
-          </div>
-          <div>
-            <label class="input-label mb-1">{{ t('admin.accounts.openai.codexTicketHarvestProxies') }}</label>
-            <ProxySelector
-              v-model="codexTicketHarvestProxyIds"
-              :proxies="proxies"
-              multiple
-              data-testid="create-codex-ticket-harvest-proxies"
-            />
-            <p class="input-hint">{{ t('admin.accounts.openai.codexTicketHarvestProxiesDesc') }}</p>
           </div>
         </div>
       </div>
@@ -3972,6 +3962,7 @@ import {
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
 import { adminAPI } from '@/api/admin'
+import { useCodexTicketGatewayGate } from '@/composables/useCodexTicketGatewayGate'
 import { createSharedAccountAPI } from '@/api/sharedAccountCreation'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import {
@@ -4528,7 +4519,7 @@ const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 const codexTicketEnabled = ref(false)
 const codexTicketFailClosed = ref(true)
-const codexTicketHarvestProxyIds = ref<number[]>([])
+const codexTicketGatewayEnabled = useCodexTicketGatewayGate(() => props.show && !props.sharedPool)
 type CodexFingerprintMode = 'off' | 'single_machine_multi_window' | 'device' | 'session' | 'full'
 const codexFingerprintMode = ref<CodexFingerprintMode>('single_machine_multi_window')
 const codexFingerprintModeOptions = computed(() => [
@@ -5515,7 +5506,6 @@ const resetForm = () => {
   codexCLIOnlyAppServerEnabled.value = false
   codexTicketEnabled.value = false
   codexTicketFailClosed.value = true
-  codexTicketHarvestProxyIds.value = []
   codexFingerprintMode.value = 'single_machine_multi_window'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5616,12 +5606,9 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   } else {
     delete extra.codex_cli_only_allow_app_server
   }
-  if (!props.sharedPool && accountCategory.value === 'oauth-based') {
-    // New accounts always receive explicit defaults so their policy is
-    // independent from the legacy gateway-level setting.
+  if (codexTicketGatewayEnabled.value && !props.sharedPool && accountCategory.value === 'oauth-based') {
     extra.codex_ticket_enabled = codexTicketEnabled.value
     extra.codex_ticket_fail_closed = codexTicketFailClosed.value
-    extra.codex_ticket_harvest_proxy_ids = [...codexTicketHarvestProxyIds.value]
   }
   // 新建账号默认单机多窗口；始终保存表单选择，包括用户手动关闭。
   if (codexFingerprintMode.value !== 'off') {

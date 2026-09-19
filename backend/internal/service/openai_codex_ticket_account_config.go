@@ -2,136 +2,91 @@ package service
 
 import (
 	"context"
-	"time"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 const (
-	OpenAICodexTicketEnabledExtraKey         = "codex_ticket_enabled"
-	OpenAICodexTicketFailClosedExtraKey      = "codex_ticket_fail_closed"
+	OpenAICodexTicketEnabledExtraKey    = "codex_ticket_enabled"
+	OpenAICodexTicketFailClosedExtraKey = "codex_ticket_fail_closed"
+	// Retained only to discard settings from the retired per-account proxy pool.
 	OpenAICodexTicketHarvestProxyIDsExtraKey = "codex_ticket_harvest_proxy_ids"
 )
 
-// OpenAICodexTicketAccountConfig is the effective account policy exposed to
-// administrators. Proxy credentials and captured ticket material are not included.
+// OpenAICodexTicketAccountConfig exposes switches and the expected ticket length,
+// never proxy credentials or captured ticket material. Enabled is the effective
+// policy; AccountEnabled preserves the account choice while the gateway is off.
 type OpenAICodexTicketAccountConfig struct {
-	Enabled             bool    `json:"enabled"`
-	FailClosed          bool    `json:"fail_closed"`
-	HarvestProxyIDs     []int64 `json:"harvest_proxy_ids"`
-	LegacyProxyFallback bool    `json:"legacy_proxy_fallback"`
+	GatewayEnabled bool `json:"gateway_enabled"`
+	AccountEnabled bool `json:"account_enabled"`
+	Enabled        bool `json:"enabled"`
+	FailClosed     bool `json:"fail_closed"`
+	TargetLength   int  `json:"target_length"`
 }
 
-// ResolveOpenAICodexTicketAccountConfig keeps old accounts working until their
-// policy is saved. Explicit account values always take precedence over the old
-// gateway switch. Missing fail_closed defaults to protecting gated models.
 func ResolveOpenAICodexTicketAccountConfig(account *Account, fallback config.OpenAICodexTicketConfig) OpenAICodexTicketAccountConfig {
 	policy := OpenAICodexTicketAccountConfig{
-		Enabled:             fallback.Enabled,
-		FailClosed:          true,
-		HarvestProxyIDs:     []int64{},
-		LegacyProxyFallback: true,
+		GatewayEnabled: fallback.Enabled,
+		FailClosed:     true,
+		TargetLength:   openAICodexTicketTargetLength(account, fallback),
 	}
 	if !isOpenAICodexTicketAccount(account) {
-		policy.Enabled = false
-		policy.LegacyProxyFallback = false
 		return policy
 	}
+	policy.AccountEnabled = true // Preserve untouched pre-account-switch installations.
 	if raw, ok := account.Extra[OpenAICodexTicketEnabledExtraKey]; ok {
-		policy.Enabled, _ = raw.(bool)
+		policy.AccountEnabled, _ = raw.(bool)
 	} else {
-		// Untouched legacy accounts keep their existing gateway policy. New
-		// account policies default to fail-closed as soon as enabled is explicit.
 		policy.FailClosed = fallback.FailClosed
 	}
 	if value, ok := account.Extra[OpenAICodexTicketFailClosedExtraKey].(bool); ok {
 		policy.FailClosed = value
 	}
-	if raw, ok := account.Extra[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
-		policy.LegacyProxyFallback = false
-		policy.HarvestProxyIDs = openAICodexTicketProxyIDs(raw)
-	}
+	policy.Enabled = policy.GatewayEnabled && policy.AccountEnabled
 	return policy
 }
 
-func openAICodexTicketProxyIDs(raw any) []int64 {
-	ids := []int64{}
-	seen := map[int64]bool{}
-	appendID := func(id int64) {
-		if id > 0 && !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
+// Length is an account-plan selection rule, not a claim about model quality.
+// Known personal Pro plans use 292; Team/Business workspaces use 332. Keep the
+// configured default for other/unknown plans instead of guessing from a ticket.
+func openAICodexTicketTargetLength(account *Account, fallback config.OpenAICodexTicketConfig) int {
+	if account != nil {
+		plan := strings.TrimSpace(account.GetCredential("plan_type"))
+		if plan == "" {
+			plan = account.GetCredential("chatgpt_plan_type")
+		}
+		plan = strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(plan)))
+		switch plan {
+		case "team", "chatgptteam", "business", "chatgptbusiness":
+			return 332
+		case "pro", "chatgptpro", "prolite", "chatgptprolite":
+			return 292
+		}
+		if strings.HasPrefix(plan, "selfservebusiness") {
+			return 332
 		}
 	}
-	switch values := raw.(type) {
-	case []int64:
-		for _, id := range values {
-			appendID(id)
-		}
-	case []int:
-		for _, id := range values {
-			appendID(int64(id))
-		}
-	case []any:
-		for _, value := range values {
-			id, ok := toInt64(value)
-			if decimal, isFloat := value.(float64); isFloat && float64(id) != decimal {
-				continue
-			}
-			if ok {
-				appendID(id)
-			}
-		}
+	if fallback.TargetLength > 0 {
+		return fallback.TargetLength
 	}
-	return ids
+	return 292
 }
 
 func (s *OpenAIGatewayService) openAICodexTicketAccountConfig(ctx context.Context, account *Account) OpenAICodexTicketAccountConfig {
 	cfg := s.openAICodexTicketConfig()
-	if account != nil {
-		if _, configured := account.Extra[OpenAICodexTicketEnabledExtraKey]; !configured {
-			cfg.Enabled = s.openAICodexTicketEnabledContext(ctx)
-		}
-	}
+	cfg.Enabled = s.openAICodexTicketEnabledContext(ctx)
 	return ResolveOpenAICodexTicketAccountConfig(account, cfg)
 }
 
-type openAICodexTicketHarvestProxy struct {
-	id  int64
-	url string
-}
-
-func (s *OpenAIGatewayService) openAICodexTicketHarvestProxies(ctx context.Context, policy OpenAICodexTicketAccountConfig) []openAICodexTicketHarvestProxy {
-	if policy.LegacyProxyFallback {
-		proxyURL := s.openAICodexTicketHarvestProxyURLContext(ctx)
-		if proxyURL != "" && ValidateOpenAICodexTicketHarvestProxyURL(proxyURL) == nil {
-			return []openAICodexTicketHarvestProxy{{url: proxyURL}}
-		}
-		return nil
+func (s *OpenAIGatewayService) openAICodexTicketHarvestProxies(ctx context.Context) []string {
+	fallback := s.openAICodexTicketConfig().HarvestProxyURL
+	if s.settingService != nil {
+		return s.settingService.GetOpenAICodexTicketHarvestProxyPool(ctx, fallback)
 	}
-	if len(policy.HarvestProxyIDs) == 0 || s.codexTicketProxyRepo == nil {
-		return nil
-	}
-	proxies, err := s.codexTicketProxyRepo.ListByIDs(ctx, policy.HarvestProxyIDs)
+	proxies, err := ParseOpenAICodexTicketHarvestProxyPool(fallback)
 	if err != nil {
 		return nil
 	}
-	byID := make(map[int64]Proxy, len(proxies))
-	for _, proxy := range proxies {
-		byID[proxy.ID] = proxy
-	}
-	available := make([]openAICodexTicketHarvestProxy, 0, len(proxies))
-	now := time.Now()
-	for _, id := range policy.HarvestProxyIDs {
-		proxy, ok := byID[id]
-		if !ok || !proxy.IsActive() || proxy.IsExpired(now) {
-			continue
-		}
-		proxyURL := proxy.URL()
-		if ValidateOpenAICodexTicketHarvestProxyURL(proxyURL) != nil {
-			continue
-		}
-		available = append(available, openAICodexTicketHarvestProxy{id: id, url: proxyURL})
-	}
-	return available
+	return proxies
 }

@@ -1004,7 +1004,7 @@ type GatewayConfig struct {
 	// OpenAICompactModel: /responses/compact 上游使用的模型。
 	// compact 端点支持模型滞后于普通 /responses 时，可用该配置降级规避上游错误。
 	OpenAICompactModel string `mapstructure:"openai_compact_model"`
-	// OpenAICodexTicket: ChatGPT OAuth 账号按 (账号, 模型) 捕获 292 长度
+	// OpenAICodexTicket: ChatGPT OAuth 账号按 (账号, 模型) 捕获套餐对应长度
 	// x-codex-turn-state，并在住宅 IP 业务请求中注入该头。默认关闭。
 	OpenAICodexTicket OpenAICodexTicketConfig `mapstructure:"openai_codex_ticket"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
@@ -1222,8 +1222,9 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 }
 
 // OpenAICodexTicketConfig 提供 ChatGPT OAuth 门票的周期和模型配置。
-// 账号通过 extra 的 codex_ticket_* 配置开关、缺票策略和专用代理；
-// Enabled/HarvestProxyURL/FailClosed 只兼容未配置账号策略的旧账号。
+// Enabled 是网关总开关，HarvestProxyURL 为每行一个 URL 的共享打票代理池。
+// 账号通过 extra 的 codex_ticket_* 保留启用和缺票策略；Pro 使用 292，Team/Business 使用 332。
+// TargetLength 是其他/未知套餐的默认长度，FailClosed 兼容未配置账号策略的旧账号。
 // 打票代理与业务代理独立，业务出站只替换 x-codex-turn-state 请求头。
 // 门票默认有效 3600 秒，临近过期前 refresh_before_seconds 重新打票。
 type OpenAICodexTicketConfig struct {

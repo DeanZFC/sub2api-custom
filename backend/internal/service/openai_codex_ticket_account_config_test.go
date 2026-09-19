@@ -11,124 +11,93 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolveOpenAICodexTicketAccountConfig_AccountOverridesGatewayPolicy(t *testing.T) {
-	tests := []struct {
-		name            string
-		account         *Account
-		fallback        config.OpenAICodexTicketConfig
-		wantEnabled     bool
-		wantFailClosed  bool
-		wantLegacyProxy bool
-		wantHarvestIDs  []int64
-	}{
-		{
-			name:            "legacy account inherits gateway policy",
-			account:         ticketTestAccount(1),
-			fallback:        config.OpenAICodexTicketConfig{Enabled: true, FailClosed: false},
-			wantEnabled:     true,
-			wantFailClosed:  false,
-			wantLegacyProxy: true,
-		},
-		{
-			name: "explicit enabled overrides disabled gateway and defaults fail closed",
-			account: &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
-				OpenAICodexTicketEnabledExtraKey: true,
-			}},
-			fallback:        config.OpenAICodexTicketConfig{Enabled: false, FailClosed: false},
-			wantEnabled:     true,
-			wantFailClosed:  true,
-			wantLegacyProxy: true,
-		},
-		{
-			name: "explicit disabled overrides enabled gateway",
-			account: &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
-				OpenAICodexTicketEnabledExtraKey: false,
-			}},
-			fallback:        config.OpenAICodexTicketConfig{Enabled: true, FailClosed: true},
-			wantEnabled:     false,
-			wantFailClosed:  true,
-			wantLegacyProxy: true,
-		},
-		{
-			name: "explicit fail open is respected",
-			account: &Account{ID: 4, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
-				OpenAICodexTicketEnabledExtraKey:    true,
-				OpenAICodexTicketFailClosedExtraKey: false,
-			}},
-			fallback:        config.OpenAICodexTicketConfig{Enabled: false, FailClosed: true},
-			wantEnabled:     true,
-			wantFailClosed:  false,
-			wantLegacyProxy: true,
-		},
-		{
-			name: "explicit empty proxy list disables legacy fallback",
-			account: &Account{ID: 5, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
-				OpenAICodexTicketEnabledExtraKey:         true,
-				OpenAICodexTicketHarvestProxyIDsExtraKey: []any{},
-			}},
-			fallback:        config.OpenAICodexTicketConfig{Enabled: true, FailClosed: true},
-			wantEnabled:     true,
-			wantFailClosed:  true,
-			wantLegacyProxy: false,
-			wantHarvestIDs:  []int64{},
-		},
-		{
-			name: "non oauth account never owns tickets",
-			account: &Account{ID: 6, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{
-				OpenAICodexTicketEnabledExtraKey: true,
-			}},
-			fallback:        config.OpenAICodexTicketConfig{Enabled: true, FailClosed: true},
-			wantEnabled:     false,
-			wantFailClosed:  true,
-			wantLegacyProxy: false,
-		},
+func TestResolveOpenAICodexTicketAccountConfig_GatewayIsMasterSwitch(t *testing.T) {
+	for _, global := range []bool{false, true} {
+		for _, enabled := range []bool{false, true} {
+			account := ticketTestAccount(1)
+			account.Extra = map[string]any{OpenAICodexTicketEnabledExtraKey: enabled}
+			policy := ResolveOpenAICodexTicketAccountConfig(account, config.OpenAICodexTicketConfig{Enabled: global})
+			require.Equal(t, global, policy.GatewayEnabled)
+			require.Equal(t, enabled, policy.AccountEnabled)
+			require.Equal(t, global && enabled, policy.Enabled)
+			require.True(t, policy.FailClosed)
+		}
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveOpenAICodexTicketAccountConfig(tt.account, tt.fallback)
-			require.Equal(t, tt.wantEnabled, got.Enabled)
-			require.Equal(t, tt.wantFailClosed, got.FailClosed)
-			require.Equal(t, tt.wantLegacyProxy, got.LegacyProxyFallback)
-			require.Equal(t, append([]int64{}, tt.wantHarvestIDs...), got.HarvestProxyIDs)
-		})
-	}
+	account := ticketTestAccount(1)
+	policy := ResolveOpenAICodexTicketAccountConfig(account, config.OpenAICodexTicketConfig{Enabled: true, FailClosed: false})
+	require.True(t, policy.Enabled, "untouched legacy accounts preserve their gateway policy")
+	require.False(t, policy.FailClosed)
+	account.Type = AccountTypeAPIKey
+	require.False(t, ResolveOpenAICodexTicketAccountConfig(account, config.OpenAICodexTicketConfig{Enabled: true}).Enabled)
 }
 
-func TestOpenAICodexTicketAccountPolicy_AppliesWhenGatewaySwitchIsOff(t *testing.T) {
+func TestOpenAICodexTicketAccountPolicy_GatewayOffStopsHarvestInjectionAndBlocking(t *testing.T) {
+	upstream := &httpUpstreamRecorder{}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
-		Enabled:      false,
-		TargetLength: 292,
-		FailClosed:   false,
-		Models:       []string{"gpt-6-astra"},
-	}, nil)
-	account := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
-		OpenAICodexTicketEnabledExtraKey: true,
-	}}
-
-	// The account policy owns the feature after it is explicitly configured. A
-	// missing ticket therefore blocks the gated model even though the old global
-	// switch is disabled; the default for a newly opted-in account is fail-closed.
-	require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+		Enabled: false, FailClosed: true, HarvestProxyURL: "http://pool.example:8080",
+	}, upstream)
+	account := ticketTestAccount(11)
+	account.Status = StatusActive
+	account.Extra = map[string]any{OpenAICodexTicketEnabledExtraKey: true}
+	svc.accountRepo = &codexTicketRefreshRepo{accounts: []Account{*account}}
 	h := http.Header{}
-	require.ErrorIs(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h), ErrOpenAICodexTicketUnavailable)
-
-	// Models outside the account's ticket model policy continue normally.
-	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-5.5"))
-	require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-5.5", h))
-
-	// Explicitly opting out leaves the client supplied header untouched and
-	// removes the account from ticket gating.
-	account.Extra[OpenAICodexTicketEnabledExtraKey] = false
 	h.Set(openAICodexTurnStateHeader, "client-state")
 	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
 	require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h))
 	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader))
+	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
+	svc.refreshOpenAICodexTickets(context.Background())
+	require.Empty(t, upstream.requests)
+	require.Empty(t, OpenAICodexTicketStatuses(account, svc.openAICodexTicketConfig(), time.Now()))
+	require.True(t, svc.openAICodexTicketAccountConfig(context.Background(), account).AccountEnabled)
+
+	// Re-enabling the gateway restores the account choice without editing it.
+	svc.cfg.Gateway.OpenAICodexTicket.Enabled = true
+	require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-5.5"))
+	account.Extra[OpenAICodexTicketEnabledExtraKey] = false
+	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+}
+
+func TestOpenAICodexTicketAccountPolicy_GatewayHotTogglePreservesCachedTicketAndAccountChoice(t *testing.T) {
+	ctx := context.Background()
+	key := SettingKeyOpenAICodexTicketEnabled
+	repo := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{key: "true"}}}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: false}, nil)
+	svc.settingService = NewSettingService(repo, svc.cfg)
+	account := ticketTestAccount(11)
+	account.Extra = map[string]any{OpenAICodexTicketEnabledExtraKey: true}
+	state := fakeCodexTicketState(292)
+	svc.storeOpenAICodexTicket(ctx, account, &openAICodexTicket{
+		AccountID: account.ID, Model: "gpt-6-astra", State: state, Length: len(state),
+		CapturedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+	})
+	h := http.Header{}
+	require.NoError(t, svc.applyOpenAICodexTicket(ctx, account, "gpt-6-astra", h))
+	require.Equal(t, state, h.Get(openAICodexTurnStateHeader))
+
+	// Runtime settings override both static configuration and an enabled account.
+	svc.cfg.Gateway.OpenAICodexTicket.Enabled = true
+	repo.values[key] = "false"
+	svc.settingService.InvalidateOpenAICodexTicketEnabledCache()
+	h.Set(openAICodexTurnStateHeader, "client-state")
+	require.NoError(t, svc.applyOpenAICodexTicket(ctx, account, "gpt-6-astra", h))
+	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader), "disabled gateway must not inject even a valid cached ticket")
+	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-5.6-sol"), "disabled gateway must not block a missing ticket")
+	policy := svc.openAICodexTicketAccountConfig(ctx, account)
+	require.False(t, policy.Enabled)
+	require.True(t, policy.AccountEnabled)
+
+	repo.values[key] = "true"
+	svc.settingService.InvalidateOpenAICodexTicketEnabledCache()
+	require.NoError(t, svc.applyOpenAICodexTicket(ctx, account, "gpt-6-astra", h))
+	require.Equal(t, state, h.Get(openAICodexTurnStateHeader))
+	require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-5.6-sol"))
 }
 
 func TestOpenAICodexTicketAccountPolicy_ValidTicketAllowsThenExpiryBlocks(t *testing.T) {
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
-		Enabled:      false,
+		Enabled:      true,
 		TargetLength: 292,
 		Models:       []string{"gpt-6-astra"},
 	}, nil)
@@ -181,96 +150,106 @@ func TestOpenAICodexTicketAccountPolicy_FailOpenOverridesGatewayFailClosed(t *te
 	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader))
 }
 
-type codexTicketProxyRepoForAccountPolicy struct {
-	ProxyRepository
-	proxies []Proxy
-}
-
-func (r *codexTicketProxyRepoForAccountPolicy) ListByIDs(_ context.Context, _ []int64) ([]Proxy, error) {
-	return r.proxies, nil
-}
-
-func TestOpenAICodexTicketHarvestProxies_FiltersAndPreservesConfiguredOrder(t *testing.T) {
-	expiredAt := time.Now().Add(-time.Minute)
-	repo := &codexTicketProxyRepoForAccountPolicy{proxies: []Proxy{
-		{ID: 2, Protocol: "http", Host: "second.example", Port: 8080, Status: StatusActive},
-		{ID: 1, Protocol: "socks5h", Host: "first.example", Port: 1080, Status: StatusActive},
-		{ID: 3, Protocol: "http", Host: "inactive.example", Port: 8080, Status: "inactive"},
-		{ID: 4, Protocol: "http", Host: "expired.example", Port: 8080, Status: StatusActive, ExpiresAt: &expiredAt},
-	}}
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
-		Enabled:         false,
-		HarvestProxyURL: "http://legacy.example:8080",
-	}, nil)
-	svc.codexTicketProxyRepo = repo
-	policy := OpenAICodexTicketAccountConfig{
-		HarvestProxyIDs:     []int64{1, 3, 4, 2},
-		LegacyProxyFallback: false,
-	}
-	got := svc.openAICodexTicketHarvestProxies(context.Background(), policy)
-	require.Equal(t, []openAICodexTicketHarvestProxy{
-		{id: 1, url: "socks5h://first.example:1080"},
-		{id: 2, url: "http://second.example:8080"},
-	}, got)
-}
-
-func TestOpenAICodexTicketHarvestProxies_ExplicitIDsDoNotFallBackToGatewayProxy(t *testing.T) {
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
-		Enabled:         true,
-		HarvestProxyURL: "http://legacy.example:8080",
-	}, nil)
-	svc.codexTicketProxyRepo = &codexTicketProxyRepoForAccountPolicy{}
-	got := svc.openAICodexTicketHarvestProxies(context.Background(), OpenAICodexTicketAccountConfig{
-		HarvestProxyIDs:     []int64{99},
-		LegacyProxyFallback: false,
-	})
-	require.Empty(t, got)
-}
-
-func TestOpenAICodexTicketProbe_RotatesAccountHarvestProxiesAfterMiss(t *testing.T) {
-	state := fakeCodexTicketState(292)
-	response := func() *http.Response {
-		h := http.Header{}
-		h.Set(openAICodexTurnStateHeader, state)
-		return &http.Response{StatusCode: http.StatusOK, Header: h, Body: http.NoBody}
-	}
+func TestOpenAICodexTicketProbe_RotatesSharedGatewayPoolForEachAccount(t *testing.T) {
+	h := http.Header{}
+	h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(292))
 	upstream := &codexTicketProxyRecordingUpstream{responses: []*http.Response{
 		{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: http.NoBody},
-		response(),
+		{StatusCode: http.StatusOK, Header: h, Body: http.NoBody},
+		{StatusCode: http.StatusOK, Header: h, Body: http.NoBody},
 	}}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
-		Enabled:                      false,
-		TargetLength:                 292,
-		TTLSeconds:                   3600,
-		HarvestAttemptTimeoutSeconds: 5,
-		HarvestProxyURL:              "http://legacy.example:8080",
-		Models:                       []string{"gpt-6-astra"},
+		Enabled: true, FailClosed: true,
+		HarvestProxyURL: "http://proxy-a.example:8080\nsocks5h://proxy-b.example:1080",
 	}, upstream)
-	svc.codexTicketProxyRepo = &codexTicketProxyRepoForAccountPolicy{proxies: []Proxy{
-		{ID: 10, Protocol: "http", Host: "proxy-a.example", Port: 8080, Status: StatusActive},
-		{ID: 11, Protocol: "http", Host: "proxy-b.example", Port: 8080, Status: StatusActive},
-	}}
-	account := &Account{ID: 14, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
-		"access_token": "token",
-	}, Extra: map[string]any{
-		OpenAICodexTicketEnabledExtraKey:         true,
-		OpenAICodexTicketHarvestProxyIDsExtraKey: []int64{10, 11},
-	}}
-
-	// Direct probe calls model two consecutive refresh attempts. The per-account
-	// cursor rotates through the configured proxy pool and never uses the legacy
-	// gateway proxy.
+	account := ticketTestAccount(14)
+	businessID := int64(123)
+	account.ProxyID = &businessID
+	account.Proxy = &Proxy{ID: businessID, Protocol: "http", Host: "business.example", Port: 8080}
+	account.Extra = map[string]any{OpenAICodexTicketEnabledExtraKey: true, OpenAICodexTicketHarvestProxyIDsExtraKey: []int64{999}}
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
-	require.Equal(t, []string{"http://proxy-a.example:8080"}, upstream.proxies)
 	require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
 	require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+	svc.probeOnceOpenAICodexTicket(context.Background(), ticketTestAccount(15), "gpt-6-astra")
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
-	require.Equal(t, []string{
-		"http://proxy-a.example:8080",
-		"http://proxy-b.example:8080",
-	}, upstream.proxies)
-	require.NotNil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
+	require.Equal(t, []string{"http://proxy-a.example:8080", "socks5h://proxy-b.example:1080", "socks5h://proxy-b.example:1080"}, upstream.proxies)
 	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+	require.Equal(t, businessID, *account.ProxyID)
+}
+
+func TestOpenAICodexTicketTargetLength_FollowsPlan(t *testing.T) {
+	for plan, expected := range map[string]int{
+		"pro": 292, "chatgpt_pro": 292, "Pro Lite": 292,
+		"team": 332, " TEAM ": 332, "chatgpt_team": 332,
+		"business": 332, "self_serve_business_prolite": 332,
+		"self_serve_business_usage_based": 332, "plus": 292, "": 292,
+	} {
+		t.Run(plan, func(t *testing.T) {
+			account := ticketTestAccount(1)
+			account.Credentials["plan_type"] = plan
+			require.Equal(t, expected, openAICodexTicketTargetLength(account, config.OpenAICodexTicketConfig{}))
+		})
+	}
+	account := ticketTestAccount(1)
+	account.Credentials["chatgpt_plan_type"] = "team"
+	require.Equal(t, 332, openAICodexTicketTargetLength(account, config.OpenAICodexTicketConfig{TargetLength: 292}))
+	account.Credentials["plan_type"] = "pro"
+	require.Equal(t, 292, openAICodexTicketTargetLength(account, config.OpenAICodexTicketConfig{TargetLength: 332}))
+}
+
+func TestOpenAICodexTicketPlans_HarvestValidateInjectAndReportSameLength(t *testing.T) {
+	for _, plan := range []string{"pro", "team"} {
+		t.Run(plan, func(t *testing.T) {
+			account := ticketTestAccount(21)
+			account.Status = StatusActive
+			account.Credentials["plan_type"] = plan
+			target, wrong := 292, 332
+			if plan == "team" {
+				target, wrong = wrong, target
+			}
+			response := func(length int) *http.Response {
+				header := http.Header{}
+				header.Set(openAICodexTurnStateHeader, fakeCodexTicketState(length))
+				return &http.Response{StatusCode: 200, Header: header, Body: http.NoBody}
+			}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{response(wrong), response(target)}}
+			svc := ticketTestService(t, config.OpenAICodexTicketConfig{
+				Enabled: true, FailClosed: true, TargetLength: 292,
+				HarvestProxyURL: "http://pool.example:8080", Models: []string{"gpt-6-astra"},
+			}, upstream)
+			repo := &codexTicketRefreshRepo{accounts: []Account{*account}}
+			svc.accountRepo = repo
+			svc.refreshOpenAICodexTickets(context.Background())
+			require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
+			require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+			svc.refreshOpenAICodexTickets(context.Background())
+			ticket := svc.lookupOpenAICodexTicket(account, "gpt-6-astra")
+			require.NotNil(t, ticket)
+			require.Equal(t, target, ticket.Length)
+			require.Equal(t, account.GetChatGPTAccountID(), upstream.requests[1].Header.Get("chatgpt-account-id"))
+			header := http.Header{}
+			require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", header))
+			require.Len(t, header.Get(openAICodexTurnStateHeader), target)
+			require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+			// A valid Team ticket must suppress new probes just like a Pro ticket.
+			svc.refreshOpenAICodexTickets(context.Background())
+			require.Len(t, upstream.requests, 2)
+			account.Extra = repo.updates
+			status := OpenAICodexTicketStatuses(account, svc.openAICodexTicketConfig(), time.Now())
+			require.Len(t, status, 1)
+			require.True(t, status[0].Ready)
+			require.Equal(t, target, status[0].TargetLength)
+			require.Equal(t, target, status[0].Length)
+			// Changing a plan cannot reuse a ticket of the former plan's length.
+			if plan == "team" {
+				account.Credentials["plan_type"] = "pro"
+			} else {
+				account.Credentials["plan_type"] = "team"
+			}
+			require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+			require.ErrorIs(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", http.Header{}), ErrOpenAICodexTicketUnavailable)
+		})
+	}
 }
 
 type codexTicketProxyRecordingUpstream struct {

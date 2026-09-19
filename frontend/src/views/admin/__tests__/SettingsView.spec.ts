@@ -728,22 +728,46 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
-  it("keeps the legacy Codex ticket controls out of gateway settings and save payload", async () => {
+  it("loads and saves the multiline gateway harvest pool with masked rows preserved", async () => {
+    const storedPool = "http://user:***@old.example.com:8080\nsocks5h://user:***@other.example.com:1080";
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       openai_codex_ticket_enabled: true,
-      openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080",
+      openai_codex_ticket_harvest_proxy_url: storedPool,
       openai_codex_ticket_harvest_proxy_configured: true,
     });
     const wrapper = mountView();
     await flushPromises();
-    expect(wrapper.find("#codex-ticket-enabled").exists()).toBe(false);
-    expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
+    await openGatewayTab(wrapper);
+    expect(wrapper.find("#codex-ticket-enabled").exists()).toBe(true);
+    const input = wrapper.get<HTMLTextAreaElement>("#codex-ticket-harvest-proxy");
+    expect(input.element.tagName).toBe("TEXTAREA");
+    expect(input.element.value).toBe(storedPool);
+    const editedPool = storedPool + "\nhttp://new:password@third.example.com:8080";
+    await input.setValue(editedPool);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_enabled");
-    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_url");
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
+      openai_codex_ticket_enabled: true,
+      openai_codex_ticket_harvest_proxy_url: editedPool,
+    });
     expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_configured");
+    wrapper.unmount();
+  });
+
+  it("submits an explicit empty pool when all harvest proxy lines are removed", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ticket_enabled: true,
+      openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080",
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    await wrapper.get("#codex-ticket-harvest-proxy").setValue("");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]?.openai_codex_ticket_harvest_proxy_url).toBe("");
     wrapper.unmount();
   });
 

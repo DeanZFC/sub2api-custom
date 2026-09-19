@@ -220,7 +220,7 @@ type SystemSettings struct {
 	OpenAICodexClientVersionSynced          string `json:"openai_codex_client_version_synced"`
 	OpenAICodexVersionAutoSyncEnabled       bool   `json:"openai_codex_version_auto_sync_enabled"`
 	OpenAICodexTicketEnabled                bool   `json:"openai_codex_ticket_enabled"`
-	OpenAICodexTicketHarvestProxyURL        string `json:"openai_codex_ticket_harvest_proxy_url"`
+	OpenAICodexTicketHarvestProxyURL        string `json:"openai_codex_ticket_harvest_proxy_url"` // One URL per line; passwords are masked.
 	OpenAICodexTicketHarvestProxyConfigured bool   `json:"openai_codex_ticket_harvest_proxy_configured"`
 
 	// codex_cli_only 加固

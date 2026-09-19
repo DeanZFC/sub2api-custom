@@ -566,14 +566,14 @@ export default {
           invalidLimits: "Retries: 1-10; interval: 100-10000 ms; retry window: 1-300 seconds.",
           invalidKeywords: "When enabled, provide 1-50 keywords, at most 256 bytes each.",
         },
-        codexTicketEnabled: "292 ticket harvest",
+        codexTicketEnabled: 'Codex 292 / 332 tickets',
         codexTicketEnabledDesc:
-          "When off, the gateway neither harvests nor injects x-codex-turn-state and forwards traffic as usual. When on, it harvests tickets in the background and overwrites that header on production requests.",
-        codexTicketHarvestProxy: "292 harvest proxy",
+          'Gateway master switch. Enable tickets separately for each account when on. Turning off stops harvesting and missing-ticket blocking for every account and hides account ticket controls and status. Pro uses 292 tickets; Team uses 332 tickets.',
+        codexTicketHarvestProxy: 'Harvest proxy pool',
         codexTicketHarvestProxyDesc:
-          "Used only for minting 292 tickets when the ticket feature is enabled. Changes apply to subsequent probes without a restart. Production traffic still uses each account's residential proxy. Paste a full HTTP or SOCKS5h proxy URL including username and password. The proxy provider must handle IP rotation. Leave blank when saving to keep the stored value.",
-        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
-        codexTicketHarvestProxyConfigured: "Configured (password hidden). Paste a full new proxy URL to replace it.",
+          'Enter one full HTTP, HTTPS, SOCKS5 or SOCKS5h proxy URL per line. Account harvesting rotates through these proxies; business requests keep their own account proxy. Changes apply without a restart. Clearing all lines removes the pool. Harvesting requires an available proxy.',
+        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080\nsocks5h://user:pass{'@'}proxy2.example.com:1080",
+        codexTicketHarvestProxyConfigured: 'Stored passwords are hidden. Keep an existing line to retain it, remove a line to delete that proxy, or enter a full URL to add or replace a proxy.',
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:
           "Only affects OpenAI OAuth accounts with 'Codex official clients only' enabled (global). Beyond User-Agent/Originator, harden the decision with a version range, an engine-fingerprint gate, and black/whitelists.",

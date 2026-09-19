@@ -509,19 +509,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
-	if input.Platform == PlatformOpenAI {
-		if raw, ok := accountExtra[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
-			ids, normalizeErr := normalizeOpenAICodexTicketHarvestProxyIDs(raw)
-			if normalizeErr != nil {
-				return nil, normalizeErr
-			}
-			validated, validateErr := s.validateOpenAICodexTicketHarvestProxyIDs(ctx, ids)
-			if validateErr != nil {
-				return nil, validateErr
-			}
-			accountExtra[OpenAICodexTicketHarvestProxyIDsExtraKey] = validated
-		}
-	}
 	if err := ValidateUpstreamRequestIDHeaderExtra(accountExtra); err != nil {
 		return nil, err
 	}
@@ -631,19 +618,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		normalizedExtra, err = normalizeOpenAICodexTicketAccountUpdateExtra(account, normalizedExtra)
 		if err != nil {
 			return nil, err
-		}
-		if account.Platform == PlatformOpenAI {
-			if raw, ok := input.Extra[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
-				ids, normalizeErr := normalizeOpenAICodexTicketHarvestProxyIDs(raw)
-				if normalizeErr != nil {
-					return nil, normalizeErr
-				}
-				validated, validateErr := s.validateOpenAICodexTicketHarvestProxyIDs(ctx, ids)
-				if validateErr != nil {
-					return nil, validateErr
-				}
-				normalizedExtra[OpenAICodexTicketHarvestProxyIDsExtraKey] = validated
-			}
 		}
 		if err := ValidateUpstreamRequestIDHeaderExtra(normalizedExtra); err != nil {
 			return nil, err
@@ -907,6 +881,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	// Retire account-owned harvest proxies even when only another field was edited.
+	delete(account.Extra, OpenAICodexTicketHarvestProxyIDsExtraKey)
+
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -973,6 +950,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = MergeOpenAICodexTicketExtra(updates, nil)
+	delete(updates, OpenAICodexTicketHarvestProxyIDsExtraKey)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -992,17 +970,6 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 		normalized, err := normalizeOpenAICodexTicketAccountExtra(account.Platform, updates, false)
 		if err != nil {
 			return err
-		}
-		if raw, ok := normalized[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
-			ids, err := normalizeOpenAICodexTicketHarvestProxyIDs(raw)
-			if err != nil {
-				return err
-			}
-			validated, err := s.validateOpenAICodexTicketHarvestProxyIDs(ctx, ids)
-			if err != nil {
-				return err
-			}
-			normalized[OpenAICodexTicketHarvestProxyIDsExtraKey] = validated
 		}
 		updates = normalized
 	}
@@ -1039,6 +1006,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
+	delete(input.Extra, OpenAICodexTicketHarvestProxyIDsExtraKey)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
@@ -1052,17 +1020,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		normalized, err := normalizeOpenAICodexTicketAccountExtra(PlatformOpenAI, input.Extra, false)
 		if err != nil {
 			return nil, err
-		}
-		if raw, ok := normalized[OpenAICodexTicketHarvestProxyIDsExtraKey]; ok {
-			ids, err := normalizeOpenAICodexTicketHarvestProxyIDs(raw)
-			if err != nil {
-				return nil, err
-			}
-			validated, err := s.validateOpenAICodexTicketHarvestProxyIDs(ctx, ids)
-			if err != nil {
-				return nil, err
-			}
-			normalized[OpenAICodexTicketHarvestProxyIDsExtraKey] = validated
 		}
 		input.Extra = normalized
 	}

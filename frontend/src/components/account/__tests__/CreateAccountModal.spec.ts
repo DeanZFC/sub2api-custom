@@ -10,6 +10,7 @@ const {
   importCodexSessionMock,
   createOpenAICodexPATMock,
   authIsSimpleMode,
+  getSettingsMock,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
@@ -18,6 +19,7 @@ const {
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
   authIsSimpleMode: { value: true },
+  getSettingsMock: vi.fn(),
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -48,7 +50,7 @@ vi.mock('@/api/admin', () => ({
     },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
-      getSettings: vi.fn().mockResolvedValue({}),
+      getSettings: getSettingsMock,
     },
     tlsFingerprintProfiles: {
       list: vi.fn().mockResolvedValue([]),
@@ -212,6 +214,7 @@ async function openCodexImportStep(toggleClicks = 0) {
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
+    getSettingsMock.mockReset().mockResolvedValue({ openai_codex_ticket_enabled: true })
     authIsSimpleMode.value = true
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
     probeUpstreamBillingMock.mockReset().mockResolvedValue({})
@@ -641,7 +644,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(flow.props('initialInputMethod')).toBe('manual')
   })
 
-  it('creates Codex imports with explicit disabled 292 defaults', async () => {
+  it('creates Codex imports with explicit disabled ticket defaults', async () => {
     const wrapper = await openCodexImportStep()
     await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
     await flushPromises()
@@ -650,16 +653,15 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra).toMatchObject({
       codex_ticket_enabled: false,
       codex_ticket_fail_closed: true,
-      codex_ticket_harvest_proxy_ids: [],
     })
   })
 
-  it('creates Codex imports with independent multiple harvest proxies and default fail-closed enabled', async () => {
+  it('creates Codex imports with account enable and default fail-closed, without an account harvest pool', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
     await wrapper.get('[data-testid="create-codex-ticket-enabled"]').trigger('click')
     expect(wrapper.get('[data-testid="create-codex-ticket-fail-closed"]').attributes('aria-checked')).toBe('true')
-    await wrapper.get('[data-testid="create-codex-ticket-config"] [data-testid="set-proxies"]').trigger('click')
+    expect(wrapper.find('[data-testid="create-codex-ticket-harvest-proxies"]').exists()).toBe(false)
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
@@ -670,8 +672,20 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.extra).toMatchObject({
       codex_ticket_enabled: true,
       codex_ticket_fail_closed: true,
-      codex_ticket_harvest_proxy_ids: [11, 12],
     })
+  })
+
+  it('hides account ticket options when the gateway is disabled', async () => {
+    getSettingsMock.mockResolvedValue({ openai_codex_ticket_enabled: false })
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="create-codex-ticket-config"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
+    await flushPromises()
+    expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('codex_ticket_enabled')
   })
 
   it.each([

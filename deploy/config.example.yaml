@@ -311,26 +311,19 @@ gateway:
   # Use this to avoid compact failures when newer models are not yet supported by the compact endpoint.
   # 当 compact 端点暂未支持更新模型时，可通过这里降级规避失败。
   openai_compact_model: "gpt-5.5"
-  # ChatGPT OAuth x-codex-turn-state ticket: harvest a 292-length header via a
-  # dedicated HTTP(S)/SOCKS proxy, store it for ttl_seconds (default 3600), then inject
-  # it on residential-IP production requests. Off by default.
-  # ChatGPT OAuth 门票：用独立 HTTP(S)/SOCKS 代理打到 292 长度的 x-codex-turn-state，默认缓存 1 小时，
-  # 再在住宅 IP 业务请求中覆盖该头。默认关闭。
-  # Env: GATEWAY_OPENAI_CODEX_TICKET_ENABLED=true
-  #      GATEWAY_OPENAI_CODEX_TICKET_HARVEST_PROXY_URL=socks5h://user:pass@host:port
-  # 账号管理 → 新增/编辑账号 → Codex 292：配置账号开关、专用打票代理（可多选），
-  # 以及默认开启的「未打上时禁用对应模型」。多代理在各探测周期轮换使用。
-  # Account settings take precedence; business requests keep their existing proxy.
-  # enabled / harvest_proxy_url / fail_closed below only provide compatibility for
-  # legacy accounts that have not saved account-level ticket settings.
-  # Credential shadow accounts retain their existing forwarding policy and are not ticket-gated.
+  # Codex tickets: gateway master switch + account enable/fail-closed switches.
+  # 系统设置 → 网关 → Codex 门票：总开关和共享打票代理池（每行一个完整代理 URL）。
+  # 总开关关闭后所有账号停止打票、注入和缺票拦截，账号配置/状态在界面隐藏。
+  # 账号管理仅设置是否启用、缺票是否禁用模型（默认开启）；业务代理保持独立。
+  # Pro 门票长度 292；Team/Business 332；target_length 仅作为其他/未知套餐默认值。
+  # 下方 harvest_proxy_url 接受单行或 YAML 多行（|）；后台显式清空后不再回退此值。
+  # 旧账号专用打票代理池已停用，需要在网关配置共享池。
   openai_codex_ticket:
     enabled: false
     target_length: 292
     ttl_seconds: 3600
     refresh_before_seconds: 600
-    # 仅为没有选择账号专用打票代理的旧账号保留。显式清空账号代理列表会停止打票，
-    # 不会回退到旧代理或业务代理。旧 settings 中的打票代理优先于此值。
+    # 只有后台尚未保存代理池时才使用此值；HTTP(S)/SOCKS5(h)，每行一个。
     harvest_proxy_url: ""
     harvest_probe_interval_seconds: 6
     harvest_attempt_timeout_seconds: 25

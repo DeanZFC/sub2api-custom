@@ -508,6 +508,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	codexTicketHarvestProxyPool := previousSettings.OpenAICodexTicketHarvestProxyURL
+	if _, sent := sentFields["openai_codex_ticket_harvest_proxy_url"]; sent {
+		codexTicketHarvestProxyPool, err = service.MergeOpenAICodexTicketHarvestProxyPool(req.OpenAICodexTicketHarvestProxyURL, previousSettings.OpenAICodexTicketHarvestProxyURL)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
 	previousAuthSourceDefaults, err := h.settingService.GetAuthSourceDefaultSettings(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -1786,17 +1794,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAICodexTicketEnabled
 		}(),
-		OpenAICodexTicketHarvestProxyURL: func() string {
-			next := strings.TrimSpace(req.OpenAICodexTicketHarvestProxyURL)
-			if service.IsMaskedProxyURL(next) {
-				return previousSettings.OpenAICodexTicketHarvestProxyURL
-			}
-			return next
-		}(),
-		MinCodexVersion:       strings.TrimSpace(req.MinCodexVersion),
-		MaxCodexVersion:       strings.TrimSpace(req.MaxCodexVersion),
-		CodexCLIOnlyBlacklist: strings.TrimSpace(req.CodexCLIOnlyBlacklist),
-		CodexCLIOnlyWhitelist: strings.TrimSpace(req.CodexCLIOnlyWhitelist),
+		OpenAICodexTicketHarvestProxyURL: codexTicketHarvestProxyPool,
+		MinCodexVersion:                  strings.TrimSpace(req.MinCodexVersion),
+		MaxCodexVersion:                  strings.TrimSpace(req.MaxCodexVersion),
+		CodexCLIOnlyBlacklist:            strings.TrimSpace(req.CodexCLIOnlyBlacklist),
+		CodexCLIOnlyWhitelist:            strings.TrimSpace(req.CodexCLIOnlyWhitelist),
 		CodexCLIOnlyAllowAppServerClients: func() bool {
 			if req.CodexCLIOnlyAllowAppServerClients != nil {
 				return *req.CodexCLIOnlyAllowAppServerClients
@@ -2349,7 +2351,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexClientVersionSynced:                         updatedSettings.OpenAICodexClientVersionSynced,
 		OpenAICodexVersionAutoSyncEnabled:                      updatedSettings.OpenAICodexVersionAutoSyncEnabled,
 		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
-		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
+		OpenAICodexTicketHarvestProxyURL:                       service.MaskOpenAICodexTicketHarvestProxyPool(updatedSettings.OpenAICodexTicketHarvestProxyURL),
 		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
 		MinCodexVersion:                                        updatedSettings.MinCodexVersion,
 		MaxCodexVersion:                                        updatedSettings.MaxCodexVersion,

@@ -20,7 +20,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string, params?: { length?: number }) => params?.length ? `${key} ${params.length}` : key
     })
   }
 })
@@ -115,9 +115,9 @@ describe('AccountUsageCell', () => {
           platform: 'openai',
           type,
           codex_turn_tickets: [
-            { model: 'gpt-6-astra', ready: true, remaining_seconds: 2520, blocked: false },
-            { model: 'gpt-5.6-sol', ready: false, remaining_seconds: 0, blocked: true },
-            { model: 'custom-model', ready: false, remaining_seconds: 0, blocked: false },
+            { model: 'gpt-6-astra', target_length: 332, ready: true, remaining_seconds: 2520, blocked: false },
+            { model: 'gpt-5.6-sol', target_length: 332, ready: false, remaining_seconds: 0, blocked: true },
+            { model: 'custom-model', target_length: 332, ready: false, remaining_seconds: 0, blocked: false },
           ],
         }),
       },
@@ -129,13 +129,13 @@ describe('AccountUsageCell', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('42m00s')
-    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketPaused')
-    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketMissing')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketPaused 332')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketMissing 332')
     if (type === 'setup-token') {
       expect(getUsage).not.toHaveBeenCalled()
       expect(wrapper.find('[data-test="quota-reset"]').exists()).toBe(false)
     }
-    await wrapper.setProps({ account: { ...wrapper.props('account'), codex_turn_tickets: [] } })
+    await wrapper.setProps({ account: { ...wrapper.props('account'), codex_ticket_config: { gateway_enabled: false, account_enabled: true, enabled: false, fail_closed: true, target_length: 332 } } })
     expect(wrapper.text()).not.toContain('codexTurnTicket')
     expect(wrapper.text()).not.toContain('42m00s')
     wrapper.unmount()

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
-const { updateAccountMock, updateAdminSharedAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, updateAdminSharedAccountMock, checkMixedChannelRiskMock, authIsSimpleMode, getSettingsMock } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
+  getSettingsMock: vi.fn().mockResolvedValue({ openai_codex_ticket_enabled: true }),
   updateAdminSharedAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   authIsSimpleMode: { value: true }
@@ -33,7 +34,7 @@ vi.mock('@/api/admin', () => ({
     },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
-      getSettings: vi.fn().mockResolvedValue({})
+      getSettings: getSettingsMock
     },
     tlsFingerprintProfiles: {
       list: vi.fn().mockResolvedValue([])
@@ -348,6 +349,7 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 
 describe('EditAccountModal', () => {
   beforeEach(() => {
+    getSettingsMock.mockReset().mockResolvedValue({ openai_codex_ticket_enabled: true })
     authIsSimpleMode.value = true
   })
 
@@ -1583,71 +1585,66 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_oauth_responses_websockets_v2_enabled).toBe(true)
   })
 
-  it('keeps 292 harvest proxies separate from the account business proxy and persists fail-closed changes', async () => {
+  it('edits account ticket switches without changing its business proxy or choosing harvest proxies', async () => {
     const account = buildOpenAISetupTokenAccount()
     account.proxy_id = 5
     account.proxy_ids = [5]
-    account.extra = {
-      codex_ticket_enabled: true,
-      codex_ticket_fail_closed: false,
-      codex_ticket_harvest_proxy_ids: [9]
-    }
+    account.extra = { codex_ticket_enabled: true, codex_ticket_fail_closed: false }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
 
     const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="edit-codex-ticket-harvest-proxies"]').exists()).toBe(false)
     await wrapper.get('[data-testid="edit-codex-ticket-fail-closed"]').trigger('click')
-    await wrapper.get('[data-testid="edit-codex-ticket-config"] [data-testid="set-codex-harvest-proxies"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload?.proxy_ids).toEqual([5])
     expect(payload?.extra?.codex_ticket_enabled).toBe(true)
     expect(payload?.extra?.codex_ticket_fail_closed).toBe(true)
-    expect(payload?.extra?.codex_ticket_harvest_proxy_ids).toEqual([11, 12])
+    expect(payload?.extra).not.toHaveProperty('codex_ticket_harvest_proxy_ids')
   })
 
-  it('preserves an absent legacy harvest proxy key until the administrator explicitly clears it', async () => {
+  it.each(['disabled', 'unavailable'])('hides ticket settings and preserves account switches when gateway settings are %s', async (state) => {
+    if (state === 'disabled') getSettingsMock.mockResolvedValue({ openai_codex_ticket_enabled: false })
+    else getSettingsMock.mockRejectedValue(new Error('settings unavailable'))
     const account = buildOpenAISetupTokenAccount()
-    account.proxy_id = 5
-    account.proxy_ids = [5]
+    account.extra = { codex_ticket_enabled: true, codex_ticket_fail_closed: false }
     account.codex_ticket_config = {
-      enabled: true,
-      fail_closed: true,
-      harvest_proxy_ids: [],
-      legacy_proxy_fallback: true
+      gateway_enabled: false,
+      account_enabled: true,
+      enabled: false,
+      fail_closed: false,
+      target_length: 332,
     }
-    account.extra = {}
+    account.codex_turn_tickets = [
+      { model: 'gpt-6-astra', target_length: 332, ready: false, remaining_seconds: 0, blocked: true },
+    ]
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
-
     const wrapper = mountModal(account)
-    expect(wrapper.text()).toContain('admin.accounts.openai.codexTicketLegacyProxyFallback')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="edit-codex-ticket-config"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.codexTurnTicketPaused')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    let payload = updateAccountMock.mock.calls[0]?.[1]
-    expect(payload?.proxy_ids).toEqual([5])
-    expect(payload?.extra).not.toHaveProperty('codex_ticket_harvest_proxy_ids')
-
-    updateAccountMock.mockReset().mockResolvedValue(account)
-    await wrapper.get('[data-testid="edit-codex-ticket-config"] [data-testid="clear-codex-harvest-proxies"]').trigger('click')
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    payload = updateAccountMock.mock.calls[0]?.[1]
-    expect(payload?.extra?.codex_ticket_harvest_proxy_ids).toEqual([])
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject(account.extra)
   })
 
-  it('prefers explicit account 292 booleans over resolved legacy values', async () => {
+  it('prefers explicit account booleans over resolved values', async () => {
     const account = buildOpenAISetupTokenAccount()
     account.extra = { codex_ticket_enabled: false, codex_ticket_fail_closed: true }
     account.codex_ticket_config = {
+      gateway_enabled: true,
+      account_enabled: true,
       enabled: true,
       fail_closed: false,
-      harvest_proxy_ids: [],
-      legacy_proxy_fallback: true
+      target_length: 332,
     }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
-
+    await flushPromises()
     expect(wrapper.get('[data-testid="edit-codex-ticket-enabled"]').attributes('aria-checked')).toBe('false')
     await wrapper.get('[data-testid="edit-codex-ticket-enabled"]').trigger('click')
     expect(wrapper.get('[data-testid="edit-codex-ticket-fail-closed"]').attributes('aria-checked')).toBe('true')
@@ -1658,23 +1655,25 @@ describe('EditAccountModal', () => {
     })
   })
 
-  it('defaults the first account-level 292 enable to fail-closed without changing active legacy fail-open accounts', async () => {
+  it('defaults first-time enable to fail-closed and preserves a saved fail-open account', async () => {
     const account = buildOpenAISetupTokenAccount()
     account.extra = {}
     account.codex_ticket_config = {
+      gateway_enabled: true,
+      account_enabled: false,
       enabled: false,
       fail_closed: false,
-      harvest_proxy_ids: [],
-      legacy_proxy_fallback: false
+      target_length: 292,
     }
     const wrapper = mountModal(account)
+    await flushPromises()
     await wrapper.get('[data-testid="edit-codex-ticket-enabled"]').trigger('click')
     expect(wrapper.get('[data-testid="edit-codex-ticket-fail-closed"]').attributes('aria-checked')).toBe('true')
 
     await wrapper.setProps({ account: {
       ...account,
       id: 9,
-      codex_ticket_config: { ...account.codex_ticket_config, enabled: true },
+      codex_ticket_config: { ...account.codex_ticket_config, account_enabled: true, enabled: true },
     } })
     expect(wrapper.get('[data-testid="edit-codex-ticket-fail-closed"]').attributes('aria-checked')).toBe('false')
   })
@@ -1839,6 +1838,7 @@ describe('EditAccountModal', () => {
 
 describe('EditAccountModal OpenAI 自动使用重置卡', () => {
   beforeEach(() => {
+    getSettingsMock.mockReset().mockResolvedValue({ openai_codex_ticket_enabled: true })
     authIsSimpleMode.value = true
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })

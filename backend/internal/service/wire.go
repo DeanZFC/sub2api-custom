@@ -26,42 +26,6 @@ func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthCli
 	return svc
 }
 
-// ProvideOpenAIGatewayService supplies the account-scoped ticket proxy
-// repository before the constructor starts the harvester. The concrete Wire
-// provider avoids interpreting the compatibility constructor's variadic tail
-// as a slice dependency.
-func ProvideOpenAIGatewayService(
-	accountRepo AccountRepository,
-	usageLogRepo UsageLogRepository,
-	usageBillingRepo UsageBillingRepository,
-	userRepo UserRepository,
-	userSubRepo UserSubscriptionRepository,
-	userGroupRateRepo UserGroupRateRepository,
-	cache GatewayCache,
-	cfg *config.Config,
-	schedulerSnapshot *SchedulerSnapshotService,
-	concurrencyService *ConcurrencyService,
-	billingService *BillingService,
-	rateLimitService *RateLimitService,
-	billingCacheService *BillingCacheService,
-	httpUpstream HTTPUpstream,
-	deferredService *DeferredService,
-	openAITokenProvider *OpenAITokenProvider,
-	grokTokenProvider *GrokTokenProvider,
-	resolver *ModelPricingResolver,
-	channelService *ChannelService,
-	balanceNotifyService *BalanceNotifyService,
-	settingService *SettingService,
-	userPlatformQuotaRepo UserPlatformQuotaRepository,
-	proxyRepo ProxyRepository,
-) *OpenAIGatewayService {
-	return NewOpenAIGatewayService(accountRepo, usageLogRepo, usageBillingRepo, userRepo,
-		userSubRepo, userGroupRateRepo, cache, cfg, schedulerSnapshot, concurrencyService,
-		billingService, rateLimitService, billingCacheService, httpUpstream, deferredService,
-		openAITokenProvider, grokTokenProvider, resolver, channelService, balanceNotifyService,
-		settingService, userPlatformQuotaRepo, proxyRepo)
-}
-
 // BuildInfo contains build information
 type BuildInfo struct {
 	Version   string
@@ -887,7 +851,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,
-	ProvideOpenAIGatewayService,
+	NewOpenAIGatewayService,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,

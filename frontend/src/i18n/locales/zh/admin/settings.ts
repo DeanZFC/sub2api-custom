@@ -559,14 +559,14 @@ export default {
           invalidLimits: '次数需为 1–10，间隔为 100–10000 毫秒，时间窗口为 1–300 秒。',
           invalidKeywords: '启用时需填写 1–50 个关键词，每个最多 256 字节。',
         },
-        codexTicketEnabled: '292 打票',
+        codexTicketEnabled: 'Codex 292 / 332 打票',
         codexTicketEnabledDesc:
-          '关闭后不打票、不注入 x-codex-turn-state，按原链路转发。开启后后台打票，并在业务请求中覆盖该头。',
-        codexTicketHarvestProxy: '292 打票代理',
+          '网关总开关。开启后可在账号中独立启用打票；关闭后所有账号停止打票和缺票拦截，并隐藏账号打票设置及状态。Pro 使用 292 门票，Team 使用 332 门票。',
+        codexTicketHarvestProxy: '打票代理池',
         codexTicketHarvestProxyDesc:
-          '仅在门票功能开启时用于打票，保存后后续探测会使用新代理，无需重启。日常业务仍走账号自己的住宅代理。填写完整代理 URL（http 或 socks5h，含用户名和密码）。代理服务商需自行负责出口 IP 轮换。留空并保存表示不改已保存的值。',
-        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
-        codexTicketHarvestProxyConfigured: '已配置（密码已隐藏）。要更换请整段粘贴新的代理 URL。',
+          '每行填写一个完整代理 URL，支持 HTTP、HTTPS、SOCKS5 和 SOCKS5h；账号打票按顺序轮换使用，正常业务仍走账号自己的代理。保存后生效，无需重启。清空全部内容并保存会移除代理池，未配置可用代理时不会打票。',
+        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080\nsocks5h://user:pass{'@'}proxy2.example.com:1080",
+        codexTicketHarvestProxyConfigured: '已有代理密码已隐藏。保留原行可继续使用，删除一行可移除该代理，新增或更换代理请填写完整 URL。',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:
           '仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效（全局）。在 User-Agent/Originator 之外，用版本区间、引擎指纹门与黑/白名单巩固判定。',

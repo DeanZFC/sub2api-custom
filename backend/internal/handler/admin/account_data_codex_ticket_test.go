@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAccountDataCodexTicketProxiesRemapAcrossInstances(t *testing.T) {
+func TestAccountDataCodexTicketProxiesAreRetired(t *testing.T) {
 	router, source := setupAccountDataRouter()
 	businessID := int64(11)
 	source.proxies = []service.Proxy{
@@ -44,15 +44,14 @@ func TestAccountDataCodexTicketProxiesRemapAcrossInstances(t *testing.T) {
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &exported))
 			require.Len(t, exported.Data.Accounts, 1)
 			account := exported.Data.Accounts[0]
-			require.NotNil(t, account.CodexTicketProxyKeys)
+			require.NotContains(t, rec.Body.String(), "codex_ticket_proxy_keys")
 			require.NotContains(t, account.Extra, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
 			require.NotContains(t, rec.Body.String(), "private-state")
 			if include {
-				require.Len(t, exported.Data.Proxies, 3, "dedicated proxies must be included alongside the business proxy")
-				require.Equal(t, []string{"socks5|harvest-b.example|1080||", "http|harvest-a.example|8080||"}, *account.CodexTicketProxyKeys)
+				require.Len(t, exported.Data.Proxies, 1, "only business proxies are exported")
+				require.Equal(t, "business.example", exported.Data.Proxies[0].Host)
 			} else {
 				require.Empty(t, exported.Data.Proxies)
-				require.Empty(t, *account.CodexTicketProxyKeys)
 			}
 			targetRouter, target := setupAccountDataRouter()
 			target.proxies = append([]service.Proxy(nil), source.proxies...)
@@ -69,23 +68,27 @@ func TestAccountDataCodexTicketProxiesRemapAcrossInstances(t *testing.T) {
 			require.Len(t, target.createdAccounts, 1, rec.Body.String())
 			created := target.createdAccounts[0]
 			require.Equal(t, true, created.Extra[service.OpenAICodexTicketEnabledExtraKey])
+			require.NotContains(t, created.Extra, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
 			if include {
 				require.Equal(t, int64(111), *created.ProxyID)
-				require.Equal(t, []int64{133, 122}, created.Extra[service.OpenAICodexTicketHarvestProxyIDsExtraKey])
 			} else {
 				require.Nil(t, created.ProxyID)
-				require.Equal(t, []int64{}, created.Extra[service.OpenAICodexTicketHarvestProxyIDsExtraKey])
 			}
 		})
 	}
 	require.Equal(t, []int64{33, 22}, source.accounts[0].Extra[service.OpenAICodexTicketHarvestProxyIDsExtraKey], "export must not mutate source routing")
 }
 
-func TestImportCodexTicketProxiesRejectsUnmappedReferences(t *testing.T) {
-	_, err := importCodexTicketProxyExtra(map[string]any{service.OpenAICodexTicketHarvestProxyIDsExtraKey: []int64{22}}, nil, map[string]int64{})
-	require.Error(t, err)
-	keys := []string{"http|missing.example|8080|user|secret"}
-	_, err = importCodexTicketProxyExtra(nil, &keys, map[string]int64{})
-	require.Error(t, err)
-	require.NotContains(t, err.Error(), "secret")
+func TestImportCodexTicketProxiesIgnoresRetiredConfiguration(t *testing.T) {
+	router, target := setupAccountDataRouter()
+	body := []byte(`{"data":{"accounts":[{"name":"legacy", "platform":"openai", "type":"oauth", "credentials":{"access_token":"test-token"}, "extra":{"codex_ticket_enabled":true,"codex_ticket_harvest_proxy_ids":[404]}, "codex_ticket_proxy_keys":["http|missing.example|8080|user|secret"]}],"proxies":[]}}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, target.createdAccounts, 1, rec.Body.String())
+	require.Equal(t, true, target.createdAccounts[0].Extra[service.OpenAICodexTicketEnabledExtraKey])
+	require.NotContains(t, target.createdAccounts[0].Extra, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
+	require.Empty(t, target.createdProxies)
 }
