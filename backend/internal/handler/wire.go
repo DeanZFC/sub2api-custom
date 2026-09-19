@@ -232,11 +232,27 @@ func ProvideHandlers(
 	}
 }
 
+// ProvideUserHandler keeps the user-facing scheduled test results wired when
+// regenerating the application's dependency graph.
+func ProvideUserHandler(
+	userService *service.UserService,
+	authService *service.AuthService,
+	emailService *service.EmailService,
+	emailCache service.EmailCache,
+	affiliateService *service.AffiliateService,
+	userPlatformQuotaRepo service.UserPlatformQuotaRepository,
+	scheduledTestService *service.ScheduledTestService,
+) *UserHandler {
+	h := NewUserHandler(userService, authService, emailService, emailCache, affiliateService, userPlatformQuotaRepo)
+	h.SetScheduledTestService(scheduledTestService)
+	return h
+}
+
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
 	// Top-level handlers
 	NewAuthHandler,
-	NewUserHandler,
+	ProvideUserHandler,
 	NewAPIKeyHandler,
 	NewUsageHandler,
 	NewRedeemHandler,
@@ -253,6 +269,7 @@ var ProviderSet = wire.NewSet(
 	NewPaymentWebhookHandler,
 	NewAvailableChannelHandler,
 	NewSharedAccountPoolHandler,
+	NewSharedAPIKeyHandler,
 	NewModelPlazaHandler,
 	NewAsyncImageHandler,
 	ProvideBatchImageHandler,
