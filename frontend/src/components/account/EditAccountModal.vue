@@ -2326,6 +2326,7 @@
               <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing', { length: ticket.target_length }) }}</span>
             </div>
             <CodexTicketDiagnostics :ticket="ticket" />
+            <CodexTicketHistory :account-id="account.id" :model="ticket.model" />
           </div>
         </div>
       </div>
@@ -3139,6 +3140,7 @@ import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtoc
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import OllamaCloudUsageSettings from '@/components/account/OllamaCloudUsageSettings.vue'
 import CodexTicketDiagnostics from '@/components/account/CodexTicketDiagnostics.vue'
+import CodexTicketHistory from '@/components/account/CodexTicketHistory.vue'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,

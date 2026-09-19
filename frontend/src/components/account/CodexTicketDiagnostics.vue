@@ -23,15 +23,11 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CodexTurnTicketStatus } from '@/types'
 import { formatDateTime } from '@/utils/format'
+import { codexTicketErrorKey } from '@/utils/codexTicketDiagnostics'
 
 const props = withDefaults(defineProps<{ ticket: CodexTurnTicketStatus; compact?: boolean }>(), { compact: false })
 const { t } = useI18n()
 const key = 'admin.accounts.openai.codexTicketDiagnostics'
-const knownErrors = new Set([
-  'auth', 'forbidden', 'model_unsupported', 'quota', 'rate_limited', 'proxy_auth',
-  'network', 'timeout', 'upstream_5xx', 'invalid_response', 'length_mismatch',
-  'invalid_ticket', 'no_proxy', 'proxy_cooldown', 'canceled',
-])
 
 const activity = computed(() => {
   if (props.ticket.in_progress) return t(`${key}.inProgress`)
@@ -42,7 +38,7 @@ const errorLabel = computed(() => {
   const code = props.ticket.last_error_code
   if (!code) return ''
   // Render fixed messages rather than upstream bodies, which may contain credentials.
-  return t(`${key}.errors.${knownErrors.has(code) ? code : 'unknown'}`)
+  return t(codexTicketErrorKey(code))
 })
 const failure = computed(() => errorLabel.value ? t(`${key}.lastError`, { reason: errorLabel.value }) : '')
 const unknownPlan = computed(() => props.ticket.plan_known === false
@@ -51,6 +47,10 @@ const details = computed(() => {
   const ticket = props.ticket
   const result: string[] = []
   if (ticket.attempts !== undefined) result.push(t(`${key}.attempts`, { count: ticket.attempts }))
+  if (ticket.successes !== undefined) result.push(t(`${key}.successCount`, { count: ticket.successes }))
+  if (ticket.failures !== undefined) result.push(t(`${key}.failureCount`, { count: ticket.failures }))
+  if (ticket.inject_misses !== undefined) result.push(t(`${key}.injectMissCount`, { count: ticket.inject_misses }))
+  if (ticket.last_inject_miss_at) result.push(t(`${key}.lastInjectMiss`, { time: formatDateTime(ticket.last_inject_miss_at) }))
   if (ticket.consecutive_failures) result.push(t(`${key}.failures`, { count: ticket.consecutive_failures }))
   if (ticket.last_length !== undefined && (ticket.attempts || ticket.last_attempt_at || ticket.last_error_code)) {
     result.push(t(`${key}.length`, { actual: ticket.last_length, target: ticket.target_length }))
@@ -73,6 +73,9 @@ const hasWarning = computed(() => !!errorLabel.value || props.ticket.paused || p
 const summary = computed(() => {
   const status = [activity.value, errorLabel.value].filter(Boolean).join(' · ') || unknownPlan.value
   const attempts = props.ticket.attempts ? t(`${key}.attempts`, { count: props.ticket.attempts }) : ''
-  return [status, attempts].filter(Boolean).join(' · ') || details.value[0] || ''
+  const counters = props.ticket.successes !== undefined || props.ticket.failures !== undefined || props.ticket.inject_misses !== undefined
+    ? t(`${key}.compactCounters`, { success: props.ticket.successes ?? 0, failure: props.ticket.failures ?? 0, missed: props.ticket.inject_misses ?? 0 })
+    : attempts
+  return [status, counters].filter(Boolean).join(' · ') || details.value[0] || ''
 })
 </script>

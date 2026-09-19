@@ -1173,6 +1173,10 @@ export interface CodexTurnTicketStatus {
   blocked: boolean
   expires_at?: string
   attempts?: number
+  successes?: number
+  failures?: number
+  inject_misses?: number
+  last_inject_miss_at?: string | null
   consecutive_failures?: number
   in_progress?: boolean
   last_attempt_at?: string | null
@@ -1184,6 +1188,24 @@ export interface CodexTurnTicketStatus {
   last_proxy_index?: number
   paused?: boolean
   plan_known?: boolean
+}
+
+export interface CodexTicketHistoryEvent {
+  id: number
+  at: string
+  model: string
+  outcome: 'success' | 'failure' | 'canceled'
+  error_code: string
+  http_status: number
+  length: number
+  target_length: number
+  proxy_index: number
+  duration_ms: number
+}
+
+export interface CodexTicketHistoryResponse {
+  events: CodexTicketHistoryEvent[]
+  limit: number
 }
 
 export interface Account {

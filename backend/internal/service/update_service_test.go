@@ -134,15 +134,19 @@ func TestUpdateServiceSourceBuildRejectsBinaryUpdate(t *testing.T) {
 	require.ErrorIs(t, err, ErrSourceBuildUpdateRequired)
 }
 
-func TestUpdateServiceReleaseBuildUsesForkRepository(t *testing.T) {
-	client := &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "v0.1.177-overdraft.1"}}
-	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.176-overdraft.1", "release")
+func TestUpdateServiceCustomBuildTracksSourceBranchWithoutRelease(t *testing.T) {
+	client := &updateServiceGitHubClientStub{repositoryFile: []byte("v0.2.7-custom.1\n")}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.2.5-custom.12", "release")
 
 	info, err := svc.CheckUpdate(context.Background(), true)
 
 	require.NoError(t, err)
 	require.True(t, info.HasUpdate)
-	require.Equal(t, githubRepo, client.latestRepo)
+	require.Equal(t, "v0.2.7-custom.1", info.LatestVersion)
+	require.Equal(t, githubRepo, client.fileRepo)
+	require.Equal(t, githubSourceBranch, client.fileRef)
+	require.Equal(t, githubForkVersionFile, client.filePath)
+	require.Empty(t, client.latestRepo)
 }
 
 func TestCompareVersionsSupportsForkPrereleaseRevisions(t *testing.T) {

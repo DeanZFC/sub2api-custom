@@ -4574,6 +4574,12 @@
                   >
                     {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyConfigured") }}
                   </p>
+                  <CodexTicketProxyTest
+                    :proxy-pool="form.openai_codex_ticket_harvest_proxy_url"
+                    :saved-proxy-pool="savedCodexTicketProxyPool"
+                    :saved-proxy-count="savedCodexTicketProxyCount"
+                    :disabled="loading || saving || loadFailed"
+                  />
                 </div>
                 <div>
                   <h3 class="text-base font-semibold text-gray-900 dark:text-white">
@@ -8954,6 +8960,7 @@ import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
+import CodexTicketProxyTest from "@/views/admin/settings/CodexTicketProxyTest.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
   useStepUp,
@@ -9081,6 +9088,8 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(true);
 const loadFailed = ref(false);
 const saving = ref(false);
+const savedCodexTicketProxyPool = ref("");
+const savedCodexTicketProxyCount = ref(0);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
 const smtpPasswordManuallyEdited = ref(false);
@@ -9922,6 +9931,7 @@ const form = reactive<SettingsForm>({
   openai_codex_ticket_enabled: false,
   openai_codex_ticket_harvest_proxy_url: "",
   openai_codex_ticket_harvest_proxy_configured: false,
+  openai_codex_ticket_harvest_proxy_count: 0,
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -10916,6 +10926,8 @@ async function loadSettings() {
   loadFailed.value = false;
   try {
     const settings = await adminAPI.settings.getSettings();
+    savedCodexTicketProxyPool.value = settings.openai_codex_ticket_harvest_proxy_url ?? "";
+    savedCodexTicketProxyCount.value = settings.openai_codex_ticket_harvest_proxy_count ?? 0;
     settings.payment_load_balance_strategy =
       settings.payment_load_balance_strategy || "round-robin";
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
@@ -11700,6 +11712,8 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    savedCodexTicketProxyPool.value = updated.openai_codex_ticket_harvest_proxy_url ?? "";
+    savedCodexTicketProxyCount.value = updated.openai_codex_ticket_harvest_proxy_count ?? 0;
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {

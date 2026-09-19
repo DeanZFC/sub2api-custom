@@ -21,6 +21,10 @@ import (
 // set. Only successful tickets are persisted; retries do not cause database writes.
 type OpenAICodexTicketDiagnostics struct {
 	Attempts            int        `json:"attempts"`
+	Successes           int        `json:"successes"`
+	Failures            int        `json:"failures"`
+	InjectMisses        int        `json:"inject_misses"`
+	LastInjectMissAt    *time.Time `json:"last_inject_miss_at,omitempty"`
 	ConsecutiveFailures int        `json:"consecutive_failures"`
 	InProgress          bool       `json:"in_progress"`
 	LastAttemptAt       *time.Time `json:"last_attempt_at,omitempty"`
@@ -54,6 +58,8 @@ type codexTicketScheduler struct {
 	active        int
 	accountActive map[int64]int
 	authRefreshAt map[int64]time.Time
+	telemetry     map[string]*codexTicketTelemetry
+	nextEventID   uint64
 	workers       sync.WaitGroup
 }
 
@@ -105,6 +111,7 @@ func (s *OpenAIGatewayService) cancelOpenAICodexTicketJobs() {
 		delete(r.jobs, key)
 	}
 	clear(r.authRefreshAt)
+	clear(r.telemetry)
 }
 
 type codexTicketCandidate struct {
@@ -161,6 +168,11 @@ func (s *OpenAIGatewayService) dispatchOpenAICodexTickets(ctx context.Context, a
 				job.cancel()
 			}
 			delete(r.jobs, key)
+		}
+	}
+	for key := range r.telemetry {
+		if !activeKeys[key] {
+			delete(r.telemetry, key)
 		}
 	}
 	activeAccounts := make(map[int64]bool)
@@ -324,6 +336,7 @@ func (r *codexTicketScheduler) acquireProxy(job *codexTicketJob, proxies []strin
 }
 
 func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, account *Account, model, proxy string, job *codexTicketJob, cfg config.OpenAICodexTicketConfig) {
+	started := time.Now()
 	proxyIndex, attempts := job.LastProxyIndex, job.Attempts
 	var result *openAICodexTicketProbeError
 	var state string
@@ -381,6 +394,10 @@ func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, ac
 	}
 	job.InProgress, job.cancel = false, nil
 	job.LastHTTPStatus, job.LastLength = status, len(state)
+	// Removed/disabled jobs must not recreate telemetry after cancellation.
+	if r.jobs[openAICodexTicketKey(account.ID, model)] == job {
+		r.recordProbeEvent(account.ID, model, result, status, len(state), target, proxyIndex, started, now)
+	}
 	if result == nil {
 		job.ConsecutiveFailures = 0
 		job.LastErrorCode, job.LastError = "", ""
@@ -459,6 +476,10 @@ func (s *OpenAIGatewayService) EnrichOpenAICodexTicketDiagnostics(account *Accou
 		r.mu.Lock()
 		if job := r.jobs[openAICodexTicketKey(account.ID, status.Model)]; job != nil {
 			status.OpenAICodexTicketDiagnostics = job.OpenAICodexTicketDiagnostics
+		}
+		if telemetry := r.telemetry[openAICodexTicketKey(account.ID, status.Model)]; telemetry != nil {
+			status.Successes, status.Failures = telemetry.successes, telemetry.failures
+			status.InjectMisses, status.LastInjectMissAt = telemetry.injectMisses, telemetry.lastInjectMissAt
 		}
 		r.mu.Unlock()
 		status.PlanKnown = codexTicketPlanKnown(account)

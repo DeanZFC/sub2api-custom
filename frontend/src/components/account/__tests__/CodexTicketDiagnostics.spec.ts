@@ -40,7 +40,7 @@ describe('CodexTicketDiagnostics', () => {
     expect(wrapper.text()).toContain('下次重试：2026-09-19T10:00:06Z')
     expect(wrapper.text()).toContain('Team 应为 332')
     expect(wrapper.text()).toContain('代理 #2')
-    expect(wrapper.text()).toContain('仅记录本次服务运行，重启后重置')
+    expect(wrapper.text()).toContain('仅记录本次服务运行，重启或停用打票后清空')
     expect(wrapper.html()).not.toContain('secret')
     expect(wrapper.html()).not.toContain('private-token')
   })
@@ -70,5 +70,17 @@ describe('CodexTicketDiagnostics', () => {
     expect(wrapper.text()).toContain('下次续票：2026-09-19T10:00:06Z')
     expect(wrapper.text()).toContain('打票失败，请检查服务日志')
     expect(wrapper.html()).not.toContain('unexpected_secret')
+  })
+
+  it('shows process counters and the last injection miss with a compact list summary', () => {
+    const overrides = { successes: 8, failures: 4, inject_misses: 2, last_inject_miss_at: '2026-09-19T11:00:00Z' }
+    const wrapper = mountDiagnostics(overrides)
+    expect(wrapper.text()).toContain('累计成功：8 次')
+    expect(wrapper.text()).toContain('累计失败：4 次')
+    expect(wrapper.text()).toContain('注入缺失：2 次')
+    expect(wrapper.text()).toContain('最近注入缺失：2026-09-19T11:00:00Z')
+    const compact = mountDiagnostics(overrides, true)
+    expect(compact.text()).toContain('成功 8 / 失败 4 / 缺失 2')
+    expect(compact.attributes('title')).toContain('最近注入缺失：2026-09-19T11:00:00Z')
   })
 })

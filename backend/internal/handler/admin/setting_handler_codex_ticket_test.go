@@ -23,6 +23,7 @@ func TestSettingsCodexTicketProxyWriteReadAndHotReload(t *testing.T) {
 	require.Equal(t, newProxy, h.settingService.GetOpenAICodexTicketHarvestProxyURL(context.Background()))
 	require.NotContains(t, rec.Body.String(), "new-secret")
 	require.Contains(t, rec.Body.String(), `"openai_codex_ticket_harvest_proxy_configured":true`)
+	require.Contains(t, rec.Body.String(), `"openai_codex_ticket_harvest_proxy_count":1`)
 	// Omission and the masked GET value preserve the real secret.
 	for _, body := range []map[string]any{{"site_name": "updated"}, {key: service.MaskProxyURL(newProxy)}} {
 		rec = doUpdateSettings(t, h, body, nil)
@@ -79,6 +80,24 @@ func TestSettingsCodexTicketProxyPoolUpdateReorderAndClear(t *testing.T) {
 	require.Empty(t, repo.values[key])
 	require.Empty(t, h.settingService.GetOpenAICodexTicketHarvestProxyPool(context.Background(), "http://fallback.example:8080"))
 	require.Contains(t, rec.Body.String(), `"openai_codex_ticket_harvest_proxy_configured":false`)
+	require.Contains(t, rec.Body.String(), `"openai_codex_ticket_harvest_proxy_count":0`)
+}
+
+func TestSettingsCodexTicketProxyCountUsesOriginalSecretsAndDeduplicates(t *testing.T) {
+	key := service.SettingKeyOpenAICodexTicketHarvestProxyURL
+	first := "http://user:first-secret@same.example:8080"
+	second := "http://user:second-secret@same.example:8080"
+	require.Equal(t, service.MaskProxyURL(first), service.MaskProxyURL(second))
+	h, _ := newStepUpSwitchTestHandler(t, map[string]string{key: first + "\n" + first + "\n" + second})
+	get := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(get)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+	h.GetSettings(c)
+	require.Equal(t, http.StatusOK, get.Code)
+	require.Contains(t, get.Body.String(), `"openai_codex_ticket_harvest_proxy_count":2`)
+	require.NotContains(t, get.Body.String(), "first-secret")
+	require.NotContains(t, get.Body.String(), "second-secret")
+	require.Equal(t, 0, openAICodexTicketProxyCount("invalid"))
 }
 
 func TestSettingsCodexTicketOmittedProxyKeepsMissingKey(t *testing.T) {

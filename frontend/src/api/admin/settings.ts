@@ -650,6 +650,7 @@ export interface SystemSettings {
   openai_codex_ticket_enabled: boolean;
   openai_codex_ticket_harvest_proxy_url: string;
   openai_codex_ticket_harvest_proxy_configured: boolean;
+  openai_codex_ticket_harvest_proxy_count: number;
   // codex_cli_only 加固
   min_codex_version: string;
   max_codex_version: string;
@@ -1602,7 +1603,25 @@ export async function resetWebSearchUsage(payload: {
   );
 }
 
+export interface CodexTicketProxyTestResult {
+  proxy_index: number;
+  success: boolean;
+  exit_ip?: string;
+  latency_ms: number;
+  error_code?: string;
+}
+
+export async function testCodexTicketProxy(proxyIndex: number, signal?: AbortSignal): Promise<CodexTicketProxyTestResult> {
+  const { data } = await apiClient.post<CodexTicketProxyTestResult>(
+    "/admin/settings/openai-codex-ticket/test-proxy",
+    { proxy_index: proxyIndex },
+    { signal },
+  );
+  return data;
+}
+
 export const settingsAPI = {
+  testCodexTicketProxy,
   getSettings,
   updateSettings,
   testSmtpConnection,

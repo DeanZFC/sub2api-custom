@@ -313,6 +313,7 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicket(ctx context.Context, accou
 		h.Set(openAICodexTurnStateHeader, ticket.State)
 		return nil
 	}
+	s.recordOpenAICodexTicketInjectMiss(account.ID, model)
 	if !policy.FailClosed {
 		return nil
 	}

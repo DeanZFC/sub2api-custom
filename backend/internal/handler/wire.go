@@ -172,6 +172,7 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 	h.SetNotificationEmailService(notificationEmailService)
 	h.SetAliyunCaptchaService(aliyunCaptchaService)
 	h.SetStepUpDeps(totpService, userService)
+	h.SetOpenAICodexTicketProxyTester(service.NewOpenAICodexTicketProxyTester(settingService))
 	return h
 }
 

@@ -222,6 +222,7 @@ type SystemSettings struct {
 	OpenAICodexTicketEnabled                bool   `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL        string `json:"openai_codex_ticket_harvest_proxy_url"` // One URL per line; passwords are masked.
 	OpenAICodexTicketHarvestProxyConfigured bool   `json:"openai_codex_ticket_harvest_proxy_configured"`
+	OpenAICodexTicketHarvestProxyCount      int    `json:"openai_codex_ticket_harvest_proxy_count"` // Count before credential masking, using harvest ordering/deduplication.
 
 	// codex_cli_only 加固
 	MinCodexVersion                      string `json:"min_codex_version"`
