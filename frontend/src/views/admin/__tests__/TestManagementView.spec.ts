@@ -6,9 +6,9 @@ import TestManagementView from '../TestManagementView.vue'
 const api = vi.hoisted(() => ({
   listTypes: vi.fn(), listPlans: vi.fn(), createType: vi.fn(), updateType: vi.fn(), deleteType: vi.fn(),
   createPlan: vi.fn(), updatePlan: vi.fn(), deletePlan: vi.fn(), runPlan: vi.fn(), listResults: vi.fn(),
-  retryResult: vi.fn(), getGroups: vi.fn(), getAccounts: vi.fn(), success: vi.fn(), error: vi.fn()
+  retryResult: vi.fn(), getGroups: vi.fn(), getAccounts: vi.fn(), getModelAllowlistCandidates: vi.fn(), success: vi.fn(), error: vi.fn()
 }))
-vi.mock('@/api/admin', () => ({ adminAPI: { tests: api, groups: { getAll: api.getGroups }, accounts: { list: api.getAccounts } } }))
+vi.mock('@/api/admin', () => ({ adminAPI: { tests: api, groups: { getAll: api.getGroups, getModelAllowlistCandidates: api.getModelAllowlistCandidates }, accounts: { list: api.getAccounts } } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.success, showError: api.error }) }))
 
 const plan = { id: 10, name: 'Candy hourly', test_definition_id: 2, group_id: 8, model_id: 'test-model', cron_expression: '0 * * * *', enabled: true, max_results: 50 }
@@ -22,6 +22,7 @@ beforeEach(() => {
   api.listTypes.mockResolvedValue([{ id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count candies', enabled: true }])
   api.listPlans.mockResolvedValue([plan])
   api.getGroups.mockResolvedValue([{ id: 8, name: 'Group Eight' }])
+  api.getModelAllowlistCandidates.mockResolvedValue(['test-model'])
   api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Account Three', group_ids: [8] }, { id: 4, name: 'Other Group Account', group_ids: [9] }], pages: 1, total: 2 })
   api.listResults.mockResolvedValue([])
   api.runPlan.mockResolvedValue(undefined)
@@ -37,7 +38,7 @@ describe('configurable test management', () => {
     const inputs = dialog.findAll('input')
     await inputs[0].setValue('Pelican')
     await inputs[1].setValue('pelican-custom')
-    await inputs[2].setValue('html')
+    await dialog.get('input[list="test-output-kinds"]').setValue('html')
     await dialog.get('textarea').setValue('Draw a pelican riding a motorcycle in HTML.')
     await dialog.findAll('button').find(b => b.text() === 'common.save')!.trigger('click')
     await flushPromises()
@@ -48,7 +49,7 @@ describe('configurable test management', () => {
   it('selects an account within a group while preserving the group target', async () => {
     const wrapper = makeWrapper(); await flushPromises()
     const row = wrapper.findAll('tbody tr')[0]
-    await row.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    await row.get('button[aria-label="common.edit"]').trigger('click')
     const dialog = wrapper.get('[data-dialog]')
     const accountSelect = dialog.findAll('select').find(s => s.find('option[value="3"]').exists())!
     expect(accountSelect.find('option[value="4"]').exists()).toBe(false)
@@ -63,11 +64,11 @@ describe('configurable test management', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     api.listPlans.mockResolvedValue([{ ...plan, reasoning_effort: 'ultra' }])
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.findAll('button').find(b => b.text() === 'admin.tests.run')!.trigger('click')
+    await wrapper.get('button[aria-label="admin.tests.run"]').trigger('click')
     await flushPromises()
     expect(api.runPlan).toHaveBeenCalledWith(10)
     expect(wrapper.get('[data-dialog]').text()).toContain('admin.tests.reasoningEffort: ultra')
-    api.listResults.mockResolvedValue([{ id: 101, plan_id: 10, model_id: 'test-model', reasoning_effort: 'ultra', status: 'success', output_kind: 'number', output_numeric: 29, response_text: '最终答案：29' }])
+    api.listResults.mockResolvedValue([{ id: 101, plan_id: 10, test_definition_id: 2, model_id: 'test-model', reasoning_effort: 'ultra', status: 'success', output_kind: 'number', output_numeric: 29, response_text: '最终答案：29', started_at: '2099-01-01T00:00:00Z' }])
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect(wrapper.get('[data-dialog]').text()).toContain('29')
     expect(wrapper.get('[data-dialog]').text()).toContain('admin.tests.reasoningEffort: ultra')
@@ -101,7 +102,7 @@ describe('configurable test management', () => {
     api.retryResult.mockResolvedValue(running)
 
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.findAll('button').find(b => b.text() === 'admin.tests.results')!.trigger('click')
+    await wrapper.get('button[aria-label="admin.tests.results"]').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('[data-dialog] article')).toHaveLength(1)
     expect(wrapper.get('[data-dialog]').text()).toContain('upstream failed')
@@ -118,7 +119,7 @@ describe('configurable test management', () => {
     wrapper.unmount()
   })
 
-  it('switches plans by test type and uses the selected type when creating a plan', async () => {
+  it('lists every rule together and saves several check types in one rule', async () => {
     api.listTypes.mockResolvedValue([
       { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count candies', enabled: true, sort_order: 20 },
       { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw a pelican', enabled: true, sort_order: 10 },
@@ -129,17 +130,63 @@ describe('configurable test management', () => {
     ])
     const wrapper = makeWrapper(); await flushPromises()
 
-    expect(wrapper.find('[data-testid="plan-tab-3"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Pelican plan')
-    expect(wrapper.text()).not.toContain('Candy plan')
-
-    await wrapper.get('[data-testid="plan-tab-2"]').trigger('click')
     expect(wrapper.text()).toContain('Candy plan')
-    expect(wrapper.text()).not.toContain('Pelican plan')
-
-    await wrapper.get('[data-testid="plan-create"]').trigger('click')
+    await wrapper.findAll('tbody tr')[0].get('button[aria-label="common.edit"]').trigger('click')
     const dialog = wrapper.get('[data-dialog]')
-    expect(dialog.find('select').find('option:checked').text()).toBe('Candy')
+    expect((dialog.get('[data-testid="plan-type-2"]').element as HTMLInputElement).checked).toBe(true)
+    await dialog.get('[data-testid="plan-type-3"]').setValue(true)
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
+    await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ test_definition_id: 2, test_definition_ids: [2, 3] }))
+    wrapper.unmount()
+  })
+
+  it('keeps all selected types and display order when copying a rule', async () => {
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count candies', enabled: true },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw a pelican', enabled: true },
+    ])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_ids: [2, 3], sort_order: 7, target_mode: 'account', account_id: 3 }])
+    const wrapper = makeWrapper(); await flushPromises()
+    const row = wrapper.get('tbody tr')
+    expect(row.text()).toContain('Candy')
+    expect(row.text()).toContain('Pelican')
+    await row.get('button[aria-label="common.copy"]').trigger('click')
+    await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ name: 'Candy hourly（Copy）', test_definition_id: 2, test_definition_ids: [2, 3], sort_order: 7, target_mode: 'account', account_id: 3 }))
+    wrapper.unmount()
+  })
+
+  it('does not save a rule without any selected check type', async () => {
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('[data-testid="plan-type-2"]').setValue(false)
+    const saveButton = wrapper.get('[data-dialog]').findAll('button').find(button => button.text() === 'common.save')!
+    expect(saveButton.attributes('disabled')).toBeDefined()
+    await saveButton.trigger('click')
+    expect(api.updatePlan).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows a running row for each configured type until its result arrives', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count candies', enabled: true },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw a pelican', enabled: true },
+    ])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_ids: [2, 3] }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('button[aria-label="admin.tests.run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-dialog] article')).toHaveLength(2)
+    api.listResults.mockResolvedValue([{ id: 101, plan_id: 10, test_definition_id: 2, test_name: 'Candy', model_id: 'test-model', status: 'success', output_kind: 'number', output_numeric: 29, started_at: '2099-01-01T00:00:00Z' }])
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    const rows = wrapper.findAll('[data-dialog] article')
+    expect(rows).toHaveLength(2)
+    expect(rows.find(row => row.text().includes('Pelican'))!.text()).toContain('running')
+    expect(rows.find(row => row.text().includes('Candy'))!.text()).not.toContain('running')
     wrapper.unmount()
   })
 

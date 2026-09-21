@@ -98,11 +98,8 @@ type Group struct {
 	Description    string  `json:"description"`
 	Platform       string  `json:"platform"`
 	RateMultiplier float64 `json:"rate_multiplier"`
-	// IsSharedPool marks the internal group backing the shared account pool.
-	// Clients use this marker to keep shared groups out of normal API-key forms.
-	IsSharedPool bool   `json:"is_shared_pool"`
-	IsExclusive  bool   `json:"is_exclusive"`
-	Status       string `json:"status"`
+	IsExclusive    bool    `json:"is_exclusive"`
+	Status         string  `json:"status"`
 
 	SubscriptionType          string   `json:"subscription_type"`
 	DailyLimitUSD             *float64 `json:"daily_limit_usd"`

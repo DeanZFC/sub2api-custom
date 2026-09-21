@@ -4,7 +4,7 @@ import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { AntigravityTokenInfo } from '@/api/admin/antigravity'
 
-export function useAntigravityOAuth(api: Pick<typeof adminAPI, 'antigravity'> = adminAPI) {
+export function useAntigravityOAuth() {
   const appStore = useAppStore()
   const { t } = useI18n()
 
@@ -33,7 +33,7 @@ export function useAntigravityOAuth(api: Pick<typeof adminAPI, 'antigravity'> = 
       const payload: Record<string, unknown> = {}
       if (proxyId) payload.proxy_id = proxyId
 
-      const response = await api.antigravity.generateAuthUrl(payload as any)
+      const response = await adminAPI.antigravity.generateAuthUrl(payload as any)
       authUrl.value = response.auth_url
       sessionId.value = response.session_id
       state.value = response.state
@@ -71,7 +71,7 @@ export function useAntigravityOAuth(api: Pick<typeof adminAPI, 'antigravity'> = 
       }
       if (params.proxyId) payload.proxy_id = params.proxyId
 
-      const tokenInfo = await api.antigravity.exchangeCode(payload as any)
+      const tokenInfo = await adminAPI.antigravity.exchangeCode(payload as any)
       return tokenInfo as AntigravityTokenInfo
     } catch (err: any) {
       error.value =
@@ -96,7 +96,7 @@ export function useAntigravityOAuth(api: Pick<typeof adminAPI, 'antigravity'> = 
     error.value = ''
 
     try {
-      const tokenInfo = await api.antigravity.refreshAntigravityToken(
+      const tokenInfo = await adminAPI.antigravity.refreshAntigravityToken(
         refreshToken.trim(),
         proxyId
       )

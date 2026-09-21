@@ -153,12 +153,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetExtra(normalizeJSONMap(account.Extra)).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
-		SetAccountScope(func() string {
-			if account.AccountScope == "" {
-				return "system"
-			}
-			return account.AccountScope
-		}()).
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(account.Schedulable).
@@ -972,9 +966,7 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 }
 
 func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string) *dbent.AccountQuery {
-	// Shared-pool accounts are managed from the user shared-pool page and must
-	// stay isolated from the administrator's normal account list.
-	q := r.client.Account.Query().Where(dbaccount.AccountScopeEQ("system"))
+	q := r.client.Account.Query()
 
 	if platform != "" {
 		q = q.Where(dbaccount.PlatformEQ(platform))
@@ -1112,7 +1104,7 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 		return []service.Account{}, nil
 	}
 
-	q := r.client.Account.Query().Where(dbaccount.AccountScopeEQ("system"))
+	q := r.client.Account.Query()
 	if platformFilter = strings.TrimSpace(platformFilter); platformFilter != "" {
 		q = q.Where(dbaccount.PlatformEQ(platformFilter))
 	}
@@ -1365,7 +1357,6 @@ func (r *accountRepository) ListByPlatform(ctx context.Context, platform string)
 		Where(
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
-			dbaccount.AccountScopeEQ("system"),
 		).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
 		All(ctx)
@@ -1996,7 +1987,6 @@ func (r *accountRepository) ListSchedulableAccountLoads(ctx context.Context) ([]
 func (r *accountRepository) schedulableAccountsQuery(now time.Time) *dbent.AccountQuery {
 	return r.client.Account.Query().
 		Where(
-			dbaccount.AccountScopeEQ("system"),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
@@ -2053,9 +2043,7 @@ func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Contex
 			COALESCE(a.session_window_status, '') AS session_window_status
 		FROM account_groups ag
 		JOIN accounts a ON a.id = ag.account_id
-		JOIN groups g ON g.id = ag.group_id
-		WHERE a.account_scope = CASE WHEN g.is_shared_pool THEN 'shared' ELSE 'system' END
-			AND ag.group_id = ANY($1)
+		WHERE ag.group_id = ANY($1)
 			AND a.deleted_at IS NULL
 			AND a.status = $2
 			AND a.schedulable = TRUE
@@ -2104,7 +2092,6 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 	now := time.Now()
 	accounts, err := r.client.Account.Query().
 		Where(
-			dbaccount.AccountScopeEQ("system"),
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
@@ -2139,7 +2126,6 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 	now := time.Now()
 	accounts, err := r.client.Account.Query().
 		Where(
-			dbaccount.AccountScopeEQ("system"),
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
@@ -2160,7 +2146,6 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 	now := time.Now()
 	accounts, err := r.client.Account.Query().
 		Where(
-			dbaccount.AccountScopeEQ("system"),
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
@@ -2185,7 +2170,6 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 	now := time.Now()
 	accounts, err := r.client.Account.Query().
 		Where(
-			dbaccount.AccountScopeEQ("system"),
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
@@ -2238,7 +2222,6 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 	}
 
 	preds := []dbpredicate.Account{
-		dbaccount.AccountScopeEQ("system"),
 		dbaccount.StatusEQ(service.StatusActive),
 		dbaccount.SchedulableEQ(true),
 		dbaccount.PlatformIn(platforms...),
@@ -3225,17 +3208,8 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		Where(dbaccountgroup.GroupIDEQ(groupID))
 
 	// 通过 account_groups 中间表查询账号，并按需叠加状态/平台/调度能力过滤。
-	preds := make([]dbpredicate.Account, 0, 7)
+	preds := make([]dbpredicate.Account, 0, 6)
 	preds = append(preds, dbaccount.DeletedAtIsNil())
-	group, groupErr := r.client.Group.Query().Where(dbgroup.IDEQ(groupID)).Only(ctx)
-	if groupErr != nil {
-		return nil, groupErr
-	}
-	if group.IsSharedPool {
-		preds = append(preds, dbaccount.AccountScopeEQ("shared"))
-	} else {
-		preds = append(preds, dbaccount.AccountScopeEQ("system"))
-	}
 	if opts.status != "" {
 		preds = append(preds, dbaccount.StatusEQ(opts.status))
 	}
@@ -3564,7 +3538,6 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		Notes:                   m.Notes,
 		Platform:                m.Platform,
 		Type:                    m.Type,
-		AccountScope:            m.AccountScope,
 		Credentials:             copyJSONMap(m.Credentials),
 		Extra:                   copyJSONMap(m.Extra),
 		ProxyID:                 m.ProxyID,

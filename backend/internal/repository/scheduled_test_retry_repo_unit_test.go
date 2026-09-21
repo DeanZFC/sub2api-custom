@@ -23,8 +23,8 @@ func TestScheduledTestResultRepositoryGetByIDLoadsActualTestedAccount(t *testing
 	mock.ExpectQuery(`(?s)SELECT r.id, r.plan_id, p.name,.*r.account_id,.*WHERE r.id = \$1`).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at",
-		}).AddRow(9, 3, "group test", "Pelican", 0, "Group", 7, "all_accounts", "failed", "", "html", "", nil, 12, "gpt-6-astra", "high", 7, "upstream error", 20, now, now, now))
+			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id",
+		}).AddRow(9, 3, "group test", "Pelican", 0, "Group", 7, "all_accounts", "failed", "", "html", "", nil, 12, "gpt-6-astra", "high", 7, "upstream error", 20, now, now, now, 1))
 	result, err := repo.GetByID(context.Background(), 9)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), result.PlanID)
@@ -59,7 +59,7 @@ func TestScheduledTestResultRepositoryRestartFailedUpdatesExistingRow(t *testing
 		ReasoningEffort: "high", StartedAt: started, FinishedAt: finished,
 	}
 	mock.ExpectExec(`(?s)UPDATE scheduled_test_results.*SET status = 'running'.*response_text = ''.*output_numeric = NULL.*WHERE id = \$1 AND plan_id = \$8 AND account_id = \$9 AND status = 'failed'`).
-		WithArgs(int64(9), "html", "gpt-6-astra", "high", int64(7), started, finished, int64(3), int64(12)).
+		WithArgs(int64(9), "html", "gpt-6-astra", "high", int64(7), started, finished, int64(3), int64(12), nil, "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.RestartFailed(context.Background(), running))
@@ -74,7 +74,7 @@ func TestScheduledTestResultRepositoryRestartFailedCASFailure(t *testing.T) {
 	accountID := int64(12)
 	running := &service.ScheduledTestResult{ID: 9, PlanID: 3, AccountID: &accountID, StartedAt: time.Now(), FinishedAt: time.Now()}
 	mock.ExpectExec(`(?s)UPDATE scheduled_test_results.*WHERE id = \$1 AND plan_id = \$8 AND account_id = \$9 AND status = 'failed'`).
-		WithArgs(int64(9), "", "", "", nil, running.StartedAt, running.FinishedAt, int64(3), int64(12)).
+		WithArgs(int64(9), "", "", "", nil, running.StartedAt, running.FinishedAt, int64(3), int64(12), nil, "").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	require.ErrorIs(t, repo.RestartFailed(context.Background(), running), service.ErrScheduledTestResultNotFailed)
@@ -109,7 +109,7 @@ func TestScheduledTestResultRepositoryRestartFailedReturnsDatabaseError(t *testi
 	running := &service.ScheduledTestResult{ID: 9, PlanID: 3, AccountID: &accountID, StartedAt: time.Now(), FinishedAt: time.Now()}
 	dbErr := errors.New("database unavailable")
 	mock.ExpectExec(`(?s)UPDATE scheduled_test_results.*WHERE id = \$1 AND plan_id = \$8 AND account_id = \$9 AND status = 'failed'`).
-		WithArgs(int64(9), "", "", "", nil, running.StartedAt, running.FinishedAt, int64(3), int64(12)).
+		WithArgs(int64(9), "", "", "", nil, running.StartedAt, running.FinishedAt, int64(3), int64(12), nil, "").
 		WillReturnError(dbErr)
 
 	require.ErrorIs(t, repo.RestartFailed(context.Background(), running), dbErr)

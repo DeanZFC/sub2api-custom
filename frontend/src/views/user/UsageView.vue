@@ -1,9 +1,9 @@
 <template>
-  <component :is="props.embedded ? 'div' : AppLayout">
+  <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards v-if="!props.sharedOnly" :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
+      <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
-      <div v-if="!props.sharedOnly" class="space-y-4">
+      <div class="space-y-4">
         <div class="card p-4">
           <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2">
@@ -214,7 +214,7 @@
         @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
     </div>
-  </component>
+  </AppLayout>
 
 </template>
 
@@ -256,7 +256,6 @@ import type { Column } from '@/components/common/types'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 
 const { t } = useI18n()
-const props = withDefaults(defineProps<{ embedded?: boolean; sharedOnly?: boolean }>(), { embedded: false, sharedOnly: false })
 const appStore = useAppStore()
 
 type DistributionMetric = 'tokens' | 'actual_cost'
@@ -357,7 +356,7 @@ const groupDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionSource = ref<EndpointSource>('inbound')
 const activeTab = ref<'usage' | 'errors'>('usage')
-const errorViewEnabled = computed(() => !props.sharedOnly && (appStore.cachedPublicSettings?.allow_user_view_error_requests ?? false))
+const errorViewEnabled = computed(() => appStore.cachedPublicSettings?.allow_user_view_error_requests ?? false)
 
 const filters = ref<UsageQueryParams>({
   start_date: startDate.value,
@@ -442,7 +441,6 @@ const buildUsageListParams = (page: number, pageSize: number): UsageQueryParams 
   ...normalizedFilters.value,
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order,
-  ...(props.sharedOnly ? { shared_only: true } : {}),
 })
 
 const loadLogs = async () => {
@@ -545,10 +543,6 @@ const refreshModelOptions = (models: ModelStat[]) => {
 const applyFilters = () => {
   pagination.page = 1
   void loadLogs()
-  if (props.sharedOnly) {
-    resetErrorRows()
-    return
-  }
   void loadStats()
   void loadModelStats()
   void loadChartData()
@@ -557,7 +551,6 @@ const applyFilters = () => {
 
 const refreshData = () => {
   void loadLogs()
-  if (props.sharedOnly) return
   void loadStats()
   void loadModelStats()
   void loadChartData()

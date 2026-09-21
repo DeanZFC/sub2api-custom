@@ -34,8 +34,7 @@ func TestResolveOpenAICodexTicketAccountConfig_GatewayIsMasterSwitch(t *testing.
 func TestOpenAICodexTicketAccountPolicy_GatewayOffStopsHarvestInjectionAndBlocking(t *testing.T) {
 	upstream := &httpUpstreamRecorder{}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
-		Enabled: false, FailClosed: true, HarvestProxyURL: "http://pool.example:8080",
-	}, upstream)
+		Enabled: false, FailClosed: true}, upstream)
 	account := ticketTestAccount(11)
 	account.Status = StatusActive
 	account.Extra = map[string]any{OpenAICodexTicketEnabledExtraKey: true}
@@ -151,7 +150,7 @@ func TestOpenAICodexTicketAccountPolicy_FailOpenOverridesGatewayFailClosed(t *te
 	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader))
 }
 
-func TestOpenAICodexTicketProbe_RotatesSharedGatewayPoolForEachAccount(t *testing.T) {
+func TestOpenAICodexTicketProbe_UsesEachAccountExitAndIgnoresRetiredProxyIDs(t *testing.T) {
 	h := http.Header{}
 	h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(292))
 	upstream := &codexTicketProxyRecordingUpstream{responses: []*http.Response{
@@ -161,7 +160,6 @@ func TestOpenAICodexTicketProbe_RotatesSharedGatewayPoolForEachAccount(t *testin
 	}}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
 		Enabled: true, FailClosed: true,
-		HarvestProxyURL: "http://proxy-a.example:8080\nsocks5h://proxy-b.example:1080",
 	}, upstream)
 	account := ticketTestAccount(14)
 	businessID := int64(123)
@@ -174,7 +172,8 @@ func TestOpenAICodexTicketProbe_RotatesSharedGatewayPoolForEachAccount(t *testin
 	svc.probeOnceOpenAICodexTicket(context.Background(), ticketTestAccount(15), "gpt-6-astra")
 	dueTicketJobs(svc)
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
-	require.Equal(t, []string{"http://proxy-a.example:8080", "socks5h://proxy-b.example:1080", "socks5h://proxy-b.example:1080"}, upstream.proxies)
+	require.Len(t, upstream.proxies, 3)
+	require.Equal(t, []string{account.Proxy.URL(), "", account.Proxy.URL()}, upstream.proxies)
 	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
 	require.Equal(t, businessID, *account.ProxyID)
 }
@@ -215,9 +214,12 @@ func TestOpenAICodexTicketPlans_HarvestValidateInjectAndReportSameLength(t *test
 				return &http.Response{StatusCode: 200, Header: header, Body: http.NoBody}
 			}
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{response(wrong), response(target)}}
+			id := int64(71)
+			account.ProxyID = &id
+			account.Proxy = &Proxy{ID: id, Protocol: "http", Host: "account.example", Port: 3128}
 			svc := ticketTestService(t, config.OpenAICodexTicketConfig{
 				Enabled: true, FailClosed: true, TargetLength: 292,
-				HarvestProxyURL: "http://pool.example:8080", Models: []string{"gpt-6-astra"},
+				Models: []string{"gpt-6-astra"},
 			}, upstream)
 			repo := &codexTicketRefreshRepo{accounts: []Account{*account}}
 			svc.accountRepo = repo
@@ -240,6 +242,7 @@ func TestOpenAICodexTicketPlans_HarvestValidateInjectAndReportSameLength(t *test
 			svc.refreshOpenAICodexTickets(context.Background())
 			svc.openaiCodexTicketScheduler.workers.Wait()
 			require.Len(t, upstream.requests, 2)
+			require.Equal(t, account.Proxy.URL(), upstream.lastProxyURL)
 			account.Extra = repo.updates
 			status := OpenAICodexTicketStatuses(account, svc.openAICodexTicketConfig(), time.Now())
 			require.Len(t, status, 1)

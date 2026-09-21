@@ -1,7 +1,7 @@
 <template>
   <BaseDialog
     :show="show"
-    :title="sharedPool && initialAccount ? t('admin.accounts.editAccount') : t('admin.accounts.createAccount')"
+    :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
   >
@@ -51,13 +51,12 @@
           v-model="form.name"
           type="text"
           :required="!isGrokSSOInputMethod"
-          :maxlength="sharedPool ? 100 : undefined"
           class="input"
           :placeholder="t('admin.accounts.enterAccountName')"
           data-tour="account-form-name"
         />
       </div>
-      <div v-if="!sharedPool">
+      <div>
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
         <textarea
           v-model="form.notes"
@@ -71,7 +70,7 @@
       <!-- Platform Selection - Segmented Control Style -->
       <div>
         <label class="input-label">{{ t('admin.accounts.platform') }}</label>
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700"  :class="props.readonlyPlatform ? 'pointer-events-none opacity-60' : ''" data-tour="account-form-platform">
+        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-tour="account-form-platform">
           <button
             type="button"
             @click="form.platform = 'anthropic'"
@@ -163,7 +162,7 @@
           </button>
         </div>
         <!-- Multi-protocol API-key providers: Kimi / Zhipu GLM / DeepSeek / OpenCode -->
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" :class="props.readonlyPlatform ? 'pointer-events-none opacity-60' : ''">
+        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
           <button
             type="button"
             @click="selectCNPlatform('kimi')"
@@ -628,7 +627,7 @@
       </div>
 
       <!-- Zhipu 团队版 Coding Plan：组织/项目 ID（可选，填写后额度探测走团队版端点） -->
-      <div v-if="!sharedPool && (form.platform === 'zhipu' && accountMode === 'coding')" class="mt-4">
+      <div v-if="(form.platform === 'zhipu' && accountMode === 'coding')" class="mt-4">
         <div class="flex items-center">
           <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.title') }}</label>
           <HelpTooltip trigger="click" width-class="w-80">
@@ -903,7 +902,7 @@
           </div>
 
           <!-- Advanced Options Toggle -->
-          <div v-if="!sharedPool" class="mt-3">
+          <div class="mt-3">
             <button
               type="button"
               @click="showAdvancedOAuth = !showAdvancedOAuth"
@@ -929,7 +928,7 @@
           </div>
 
           <!-- Custom OAuth Client (Advanced) -->
-          <div v-if="!sharedPool && (showAdvancedOAuth)" class="mt-3 group relative">
+          <div v-if="(showAdvancedOAuth)" class="mt-3 group relative">
             <button
               type="button"
               :disabled="!geminiAIStudioOAuthEnabled"
@@ -1005,7 +1004,7 @@
         </div>
 
         <!-- Tier selection (used as fallback when auto-detection is unavailable/fails) -->
-        <div v-if="!sharedPool && (accountCategory !== 'service_account')" class="mt-4">
+        <div v-if="(accountCategory !== 'service_account')" class="mt-4">
           <label class="input-label">{{ t('admin.accounts.gemini.tier.label') }}</label>
           <div class="mt-2">
             <select
@@ -1098,7 +1097,7 @@
         </div>
       </div>
 
-      <div v-if="!sharedPool && (form.platform === 'antigravity' && antigravityAccountType === 'oauth')">
+      <div v-if="(form.platform === 'antigravity' && antigravityAccountType === 'oauth')">
         <label class="input-label">{{ t('admin.accounts.antigravityProjectIdLabel') }}</label>
         <input
           v-model="antigravityProjectId"
@@ -1135,7 +1134,7 @@
           <p class="input-hint">{{ t('admin.accounts.upstream.apiKeyHint') }}</p>
         </div>
         <!-- 上游倍率自动探测：antigravity upstream 也是 API-key 账号 -->
-        <div v-if="!sharedPool" class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -1421,7 +1420,7 @@
         </div>
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
-        <div v-if="!sharedPool"
+        <div
           class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
         >
           <div>
@@ -1438,7 +1437,7 @@
         </div>
 
         <!-- Gemini API Key tier selection -->
-        <div v-if="!sharedPool && (form.platform === 'gemini')">
+        <div v-if="(form.platform === 'gemini')">
           <label class="input-label">{{ t('admin.accounts.gemini.tier.label') }}</label>
           <select v-model="geminiTierAIStudio" class="input">
             <option value="aistudio_free">{{ t('admin.accounts.gemini.tier.aiStudio.free') }}</option>
@@ -1521,8 +1520,6 @@
                 v-model="allowedModels"
                 :platform="form.platform"
                 :sync-credentials="syncPreviewCredentials"
-                :sync-upstream="syncUpstreamModelsFn"
-                :sync-upstream-preview="syncUpstreamPreviewFn"
                 @upstream-synced="upstreamModelsPreviewed = true"
               />
               <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -1641,7 +1638,7 @@
         </div>
 
         <!-- Pool Mode Section -->
-        <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
@@ -1705,7 +1702,7 @@
         </div>
 
         <!-- Custom Error Codes Section -->
-        <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.customErrorCodes') }}</label>
@@ -1804,7 +1801,7 @@
 
         <!-- Header Override Section (eligible API-key platforms) -->
         <div
-          v-if="!sharedPool && (isHeaderOverrideCapable(form.platform, 'apikey'))"
+          v-if="(isHeaderOverrideCapable(form.platform, 'apikey'))"
           class="border-t border-gray-200 pt-4 dark:border-dark-600"
         >
           <div class="mb-3 flex items-center justify-between">
@@ -1960,7 +1957,7 @@
         </div>
 
         <!-- Shared: Force Global -->
-        <div v-if="!sharedPool">
+        <div>
           <label class="flex items-center gap-2 cursor-pointer">
             <input
               v-model="bedrockForceGlobal"
@@ -2010,8 +2007,6 @@
               v-model="allowedModels"
               platform="anthropic"
               :sync-credentials="syncPreviewCredentials"
-              :sync-upstream="syncUpstreamModelsFn"
-              :sync-upstream-preview="syncUpstreamPreviewFn"
               @upstream-synced="upstreamModelsPreviewed = true"
             />
             <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -2049,7 +2044,7 @@
         </div>
 
         <!-- Pool Mode Section for Bedrock -->
-        <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
@@ -2115,7 +2110,7 @@
 
       <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
       <div
-        v-if="!sharedPool && (form.platform === 'anthropic' && (form.type === 'apikey' || form.type === 'bedrock'))"
+        v-if="(form.platform === 'anthropic' && (form.type === 'apikey' || form.type === 'bedrock'))"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2167,7 +2162,7 @@
 
       <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
       <div
-        v-else-if="!sharedPool && (form.type === 'apikey' || form.type === 'bedrock')"
+        v-else-if="(form.type === 'apikey' || form.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2219,7 +2214,7 @@
 
       <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
       <div
-        v-if="!sharedPool && (form.platform === 'grok' && isOAuthFlow)"
+        v-if="(form.platform === 'grok' && isOAuthFlow)"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -2260,7 +2255,7 @@
 
       <!-- Grok OAuth Header Override (OAuth 类型没有 apikey 容器，需要独立区域) -->
       <div
-        v-if="!sharedPool && (form.platform === 'grok' && isOAuthFlow)"
+        v-if="(form.platform === 'grok' && isOAuthFlow)"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -2353,8 +2348,6 @@
               v-model="allowedModels"
               :platform="form.platform"
               :sync-credentials="syncPreviewCredentials"
-              :sync-upstream="syncUpstreamModelsFn"
-              :sync-upstream-preview="syncUpstreamPreviewFn"
               @upstream-synced="upstreamModelsPreviewed = true"
             />
             <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -2446,7 +2439,7 @@
       </div>
 
       <!-- Temp Unschedulable Rules -->
-      <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
         <div class="mb-3 flex items-center justify-between">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.tempUnschedulable.title') }}</label>
@@ -2595,7 +2588,7 @@
 
       <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
       <div
-        v-if="!sharedPool && (form.platform === 'anthropic' || form.platform === 'antigravity')"
+        v-if="(form.platform === 'anthropic' || form.platform === 'antigravity')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -2627,7 +2620,7 @@
 
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
       <div
-        v-if="!sharedPool && (form.platform === 'anthropic' && accountCategory === 'oauth-based')"
+        v-if="(form.platform === 'anthropic' && accountCategory === 'oauth-based')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -3005,25 +2998,7 @@
         </div>
       </div>
 
-      <div v-if="sharedPool" class="space-y-4" data-testid="shared-account-settings">
-        <div>
-          <label for="shared-account-proxy" class="input-label">{{ t('admin.accounts.proxy') }}</label>
-          <input id="shared-account-proxy" v-model="sharedProxyURL" type="text" class="input"
-            placeholder="http://user:pass@host:port 或 socks5://user:pass@host:port" autocomplete="off" />
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label for="shared-account-concurrency" class="input-label">{{ t('admin.accounts.concurrency') }}</label>
-            <input id="shared-account-concurrency" v-model.number="form.concurrency" type="number" min="1" max="1000" step="1" required class="input" />
-          </div>
-          <div>
-            <label for="shared-account-rate" class="input-label">倍率</label>
-            <input id="shared-account-rate" v-model.number="form.rate_multiplier" type="number" min="0" max="100" step="0.001" required class="input" />
-          </div>
-        </div>
-      </div>
-
-      <div v-if="!sharedPool">
+      <div>
         <div class="mb-1 flex items-center gap-2">
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
@@ -3032,13 +3007,13 @@
         <p class="input-hint">{{ t('admin.accounts.proxyPoolHint') }}</p>
       </div>
 
-      <UpstreamRequestIdHeaderField v-if="!sharedPool"
+      <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
         :platform="form.platform"
         :type="form.type"
       />
 
-      <div v-if="!sharedPool" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
@@ -3068,7 +3043,7 @@
           <p class="input-hint">{{ t('admin.accounts.billingRateMultiplierHint') }}</p>
         </div>
       </div>
-      <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <div class="mt-2 flex gap-2">
@@ -3087,7 +3062,7 @@
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
-        v-if="!sharedPool && (form.platform === 'openai')"
+        v-if="(form.platform === 'openai')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -3148,7 +3123,7 @@
 
       <!-- OpenAI Codex account ticket policy (OAuth / Setup Token) -->
       <div
-        v-if="codexTicketGatewayEnabled && !sharedPool && form.platform === 'openai' && accountCategory === 'oauth-based'"
+        v-if="codexTicketGatewayEnabled && form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
         data-testid="create-codex-ticket-config"
       >
@@ -3184,7 +3159,7 @@
 
       <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
       <div
-        v-if="!sharedPool && (form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey'))"
+        v-if="(form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey'))"
         data-testid="create-openai-ws-mode"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
@@ -3206,7 +3181,7 @@
 
       <!-- Anthropic API Key 自动透传开关 -->
       <div
-        v-if="!sharedPool && (form.platform === 'anthropic' && accountCategory === 'apikey')"
+        v-if="(form.platform === 'anthropic' && accountCategory === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -3235,7 +3210,7 @@
       </div>
 
       <div
-        v-if="!sharedPool && (form.platform === 'anthropic' && accountCategory === 'apikey')"
+        v-if="(form.platform === 'anthropic' && accountCategory === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -3254,7 +3229,7 @@
 
       <!-- Anthropic API Key: Web Search Emulation (hidden when global disabled) -->
       <div
-        v-if="!sharedPool && (form.platform === 'anthropic' && accountCategory === 'apikey' && webSearchGlobalEnabled)"
+        v-if="(form.platform === 'anthropic' && accountCategory === 'apikey' && webSearchGlobalEnabled)"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -3274,7 +3249,7 @@
 
       <!-- OpenAI API 长上下文计费开关 -->
       <div
-        v-if="!sharedPool && (form.platform === 'openai' && !hideAccountLongContextBilling && (accountCategory === 'oauth-based' || accountCategory === 'apikey'))"
+        v-if="(form.platform === 'openai' && !hideAccountLongContextBilling && (accountCategory === 'oauth-based' || accountCategory === 'apikey'))"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -3306,7 +3281,7 @@
       </div>
 
       <div
-        v-if="!sharedPool && (form.platform === 'openai' && accountCategory === 'oauth-based')"
+        v-if="(form.platform === 'openai' && accountCategory === 'oauth-based')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -3362,7 +3337,7 @@
 
       <!-- Codex 指纹收敛（仅 OpenAI OAuth） -->
       <div
-        v-if="!sharedPool && (form.platform === 'openai' && accountCategory === 'oauth-based')"
+        v-if="(form.platform === 'openai' && accountCategory === 'oauth-based')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -3380,7 +3355,7 @@
 
       <!-- OpenAI Compact 能力配置 -->
       <div
-        v-if="!sharedPool && (form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey'))"
+        v-if="(form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey'))"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="flex items-center justify-between">
@@ -3419,7 +3394,7 @@
 
       <!-- OpenAI APIKey Responses API support mode -->
       <div
-        v-if="!sharedPool && (form.platform === 'openai' && accountCategory === 'apikey')"
+        v-if="(form.platform === 'openai' && accountCategory === 'apikey')"
         class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -3469,7 +3444,7 @@
 
       <!-- OpenAI APIKey images: backfill b64_json from url -->
       <div
-        v-if="!sharedPool && (form.platform === 'openai' && accountCategory === 'apikey')"
+        v-if="(form.platform === 'openai' && accountCategory === 'apikey')"
         class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div>
@@ -3498,7 +3473,7 @@
         </button>
       </div>
 
-      <div v-if="!sharedPool">
+      <div>
         <div class="flex items-center justify-between">
           <div>
             <label class="input-label mb-0">{{
@@ -3526,7 +3501,7 @@
         </div>
       </div>
 
-      <div v-if="!sharedPool" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <!-- Mixed Scheduling (only for antigravity accounts) -->
         <div v-if="form.platform === 'antigravity'" class="flex items-center gap-2">
           <label class="flex cursor-pointer items-center gap-2">
@@ -3606,7 +3581,7 @@
         :loading="currentOAuthLoading"
         :error="currentOAuthError"
         :show-help="form.platform === 'anthropic'"
-        :show-proxy-warning="form.platform !== 'openai' && form.platform !== 'grok' && (sharedPool ? !!sharedProxyURL : !!form.proxy_id)"
+        :show-proxy-warning="form.platform !== 'openai' && form.platform !== 'grok' && !!form.proxy_id"
         :allow-multiple="form.platform === 'anthropic'"
         :show-cookie-option="form.platform === 'anthropic'"
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
@@ -3948,7 +3923,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
@@ -3963,7 +3938,6 @@ import {
 } from '@/composables/useModelWhitelist'
 import { adminAPI } from '@/api/admin'
 import { useCodexTicketGatewayGate } from '@/composables/useCodexTicketGatewayGate'
-import { createSharedAccountAPI } from '@/api/sharedAccountCreation'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import {
   useAccountOAuth,
@@ -4136,26 +4110,11 @@ const apiKeyValuePlaceholder = computed(() => {
 
 interface Props {
   show: boolean
-  sharedPool?: boolean
-  initialAccount?: {
-    name?: string
-    platform?: string
-    type?: string
-    concurrency?: number
-    rate_multiplier?: number
-  }
-  readonlyPlatform?: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
 }
 
 const props = defineProps<Props>()
-const sharedProxyURL = ref('')
-const accountAPI = props.sharedPool ? createSharedAccountAPI(() => sharedProxyURL.value) : adminAPI
-const loadAntigravityMappings = () => props.sharedPool ? Promise.resolve([]) : fetchAntigravityDefaultMappings()
-const syncUpstreamModelsFn = (id: number) => accountAPI.accounts.syncUpstreamModels(id)
-const syncUpstreamPreviewFn = (params: Parameters<typeof accountAPI.accounts.syncUpstreamModelsPreview>[0]) =>
-  accountAPI.accounts.syncUpstreamModelsPreview(params)
 const emit = defineEmits<{
   close: []
   created: []
@@ -4168,11 +4127,11 @@ const hideAccountLongContextBilling = computed(() => {
 })
 
 // OAuth composables
-const oauth = useAccountOAuth(accountAPI) // For Anthropic OAuth
-const openaiOAuth = useOpenAIOAuth(accountAPI) // For OpenAI OAuth
-const geminiOAuth = useGeminiOAuth(accountAPI) // For Gemini OAuth
-const antigravityOAuth = useAntigravityOAuth(accountAPI) // For Antigravity OAuth
-const grokOAuth = useGrokOAuth(accountAPI) // For Grok OAuth
+const oauth = useAccountOAuth() // For Anthropic OAuth
+const openaiOAuth = useOpenAIOAuth() // For OpenAI OAuth
+const geminiOAuth = useGeminiOAuth() // For Gemini OAuth
+const antigravityOAuth = useAntigravityOAuth() // For Antigravity OAuth
+const grokOAuth = useGrokOAuth() // For Grok OAuth
 
 // Computed: current OAuth state for template binding
 const currentAuthUrl = computed(() => {
@@ -4519,7 +4478,7 @@ const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 const codexTicketEnabled = ref(false)
 const codexTicketFailClosed = ref(true)
-const codexTicketGatewayEnabled = useCodexTicketGatewayGate(() => props.show && !props.sharedPool)
+const codexTicketGatewayEnabled = useCodexTicketGatewayGate(() => props.show)
 type CodexFingerprintMode = 'off' | 'single_machine_multi_window' | 'device' | 'session' | 'full'
 const codexFingerprintMode = ref<CodexFingerprintMode>('single_machine_multi_window')
 const codexFingerprintModeOptions = computed(() => [
@@ -4547,11 +4506,11 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
-if (!props.sharedPool) adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
+adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
 
-if (!props.sharedPool) loadQuotaNotifyGlobal()
+loadQuotaNotifyGlobal()
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityAccountType = ref<'oauth' | 'upstream'>('oauth') // For antigravity: oauth or upstream
@@ -4866,62 +4825,13 @@ const canExchangeCode = computed(() => {
   return authCode.trim() && oauth.sessionId.value && !oauth.loading.value
 })
 
-function applySharedAccountType(type: string, platform: AccountPlatform) {
-  switch (type) {
-    case 'apikey':
-    case 'upstream':
-      if (platform === 'antigravity') {
-        antigravityAccountType.value = 'upstream'
-        accountCategory.value = 'oauth-based'
-      } else {
-        accountCategory.value = 'apikey'
-      }
-      break
-    case 'bedrock':
-      accountCategory.value = 'bedrock'
-      break
-    case 'service_account':
-      accountCategory.value = 'service_account'
-      break
-    case 'setup-token':
-      accountCategory.value = 'oauth-based'
-      addMethod.value = 'setup-token'
-      break
-    default:
-      accountCategory.value = 'oauth-based'
-      addMethod.value = 'oauth'
-      if (platform === 'antigravity') antigravityAccountType.value = 'oauth'
-      break
-  }
-}
-
-function applySharedInitialAccount(initial: NonNullable<Props['initialAccount']>) {
-  if (initial.name) form.name = initial.name
-  if (initial.platform) form.platform = initial.platform as AccountPlatform
-  if (initial.type) applySharedAccountType(initial.type, form.platform)
-  if (typeof initial.concurrency === 'number' && initial.concurrency > 0) {
-    form.concurrency = initial.concurrency
-  }
-  if (typeof initial.rate_multiplier === 'number' && initial.rate_multiplier >= 0) {
-    form.rate_multiplier = initial.rate_multiplier
-  }
-}
-
 // Watchers
 watch(
   () => props.show,
   (newVal) => {
     if (newVal) {
-      if (props.sharedPool && props.initialAccount) {
-        applySharedInitialAccount(props.initialAccount)
-        // Platform watchers (Grok/Antigravity) reset category and concurrency
-        // synchronously; re-apply after they settle so edit echo keeps the
-        // stored account type.
-        const initial = props.initialAccount
-        void nextTick(() => applySharedInitialAccount(initial))
-      }
       // Load TLS fingerprint profiles
-      if (!props.sharedPool) adminAPI.tlsFingerprintProfiles.list()
+      adminAPI.tlsFingerprintProfiles.list()
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
         .catch(() => { tlsFingerprintProfiles.value = [] })
       // Modal opened - fill related models
@@ -4929,7 +4839,7 @@ watch(
       // Antigravity: 默认使用映射模式并填充默认映射
       if (form.platform === 'antigravity') {
         antigravityModelRestrictionMode.value = 'mapping'
-        loadAntigravityMappings().then(mappings => {
+        fetchAntigravityDefaultMappings().then(mappings => {
           antigravityModelMappings.value = [...mappings]
         })
         antigravityWhitelistModels.value = []
@@ -4994,7 +4904,7 @@ watch(
     // Antigravity: 默认使用映射模式并填充默认映射
     if (newPlatform === 'antigravity') {
       antigravityModelRestrictionMode.value = 'mapping'
-      loadAntigravityMappings().then(mappings => {
+      fetchAntigravityDefaultMappings().then(mappings => {
         antigravityModelMappings.value = [...mappings]
       })
       antigravityWhitelistModels.value = []
@@ -5349,7 +5259,7 @@ const withAntigravityConfirmFlag = (payload: CreateAccountRequest): CreateAccoun
 }
 
 const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
-  if (props.sharedPool || !needsMixedChannelCheck(form.platform)) {
+  if (!needsMixedChannelCheck(form.platform)) {
     return true
   }
   if (antigravityMixedChannelConfirmed.value) {
@@ -5381,7 +5291,7 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    const account = await accountAPI.accounts.create(
+    const account = await adminAPI.accounts.create(
       withAntigravityConfirmFlag(payload)
     )
     const modelMapping = payload.credentials.model_mapping
@@ -5393,7 +5303,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       )
     if (upstreamModelsPreviewed.value || hasConcreteMappedTarget) {
       try {
-        const result = await accountAPI.accounts.syncUpstreamModels(account.id)
+        const result = await adminAPI.accounts.syncUpstreamModels(account.id)
         const warnings = result.warnings ?? []
         if (warnings.some(warning => warning.code === 'upstream_model_metadata_incomplete')) {
           appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataIncomplete'))
@@ -5405,7 +5315,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     if (
-      !props.sharedPool && payload.type === 'apikey' &&
+      payload.type === 'apikey' &&
       payload.upstream_billing_probe_enabled === true
     ) {
       try {
@@ -5436,7 +5346,6 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
-  sharedProxyURL.value = ''
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5478,7 +5387,7 @@ const resetForm = () => {
 
   antigravityModelRestrictionMode.value = 'mapping'
   antigravityWhitelistModels.value = []
-  loadAntigravityMappings().then(mappings => {
+  fetchAntigravityDefaultMappings().then(mappings => {
     antigravityModelMappings.value = [...mappings]
   })
   poolModeEnabled.value = false
@@ -5607,7 +5516,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   } else {
     delete extra.codex_cli_only_allow_app_server
   }
-  if (codexTicketGatewayEnabled.value && !props.sharedPool && accountCategory.value === 'oauth-based') {
+  if (codexTicketGatewayEnabled.value && accountCategory.value === 'oauth-based') {
     extra.codex_ticket_enabled = codexTicketEnabled.value
     extra.codex_ticket_fail_closed = codexTicketFailClosed.value
   }
@@ -6205,7 +6114,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           return
         }
 
-        await accountAPI.accounts.create({
+        await adminAPI.accounts.create({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6275,7 +6184,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
   }
 
   try {
-    const result = await accountAPI.grok.createFromSSO({
+    const result = await adminAPI.grok.createFromSSO({
       sso_tokens: ssoTokens,
       name: form.name || undefined,
       notes: form.notes || undefined,
@@ -6384,7 +6293,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           return
         }
 
-        await accountAPI.accounts.create({
+        await adminAPI.accounts.create({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6484,7 +6393,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
-      await accountAPI.accounts.create({
+      await adminAPI.accounts.create({
         name: form.name,
         notes: form.notes,
         platform: 'openai',
@@ -6593,7 +6502,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    const result = await accountAPI.accounts.importCodexSession({
+    const result = await adminAPI.accounts.importCodexSession({
       content: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6672,7 +6581,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    await accountAPI.accounts.createOpenAICodexPAT({
+    await adminAPI.accounts.createOpenAICodexPAT({
       access_token: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6768,7 +6677,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await accountAPI.accounts.create({
+          await adminAPI.accounts.create({
               name: accountName,
             notes: form.notes,
             platform: 'openai',
@@ -6863,7 +6772,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
 
         const credentials = antigravityOAuth.buildCredentials(tokenInfo, refreshTokens[i])
         applyAntigravityProjectID(credentials, antigravityProjectId.value, 'create')
-        
+
         // Generate account name with index for batch
         const accountName = refreshTokens.length > 1 ? `${form.name} #${i + 1}` : form.name
 
@@ -6885,7 +6794,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
-        await accountAPI.accounts.create(createPayload)
+        await adminAPI.accounts.create(createPayload)
         successCount++
       } catch (error: any) {
         failedCount++
@@ -7052,7 +6961,7 @@ const handleAnthropicExchange = async (authCode: string) => {
         ? '/admin/accounts/exchange-code'
         : '/admin/accounts/exchange-setup-token-code'
 
-    const tokenInfo = await accountAPI.accounts.exchangeCode(endpoint, {
+    const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
       session_id: oauth.sessionId.value,
       code: authCode.trim(),
       ...proxyConfig
@@ -7177,7 +7086,7 @@ const handleCookieAuth = async (sessionKey: string) => {
 
     for (let i = 0; i < keys.length; i++) {
       try {
-        const tokenInfo = await accountAPI.accounts.exchangeCode(endpoint, {
+        const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
           session_id: '',
           code: keys[i],
           ...proxyConfig
@@ -7250,7 +7159,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           credentials.temp_unschedulable_rules = tempUnschedPayload
         }
 
-        await accountAPI.accounts.create({
+        await adminAPI.accounts.create({
           name: accountName,
           notes: form.notes,
           platform: form.platform,

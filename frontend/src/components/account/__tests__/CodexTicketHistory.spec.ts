@@ -86,4 +86,14 @@ describe('CodexTicketHistory', () => {
     wrapper.unmount()
     expect(secondSignal.aborted).toBe(true)
   })
+
+  it.each(['account', 'direct', 'pool'])('shows only the safe %s source label in history', async source => {
+    getHistory.mockResolvedValueOnce({ events: [{ ...event, proxy_source: source, proxy_url: 'http://secret@proxy.invalid' }], limit: 20 })
+    const wrapper = mountHistory()
+    await wrapper.get('[data-testid="ticket-history-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(`codexTicketDiagnostics.proxy${source[0].toUpperCase()}${source.slice(1)}`)
+    expect(wrapper.html()).not.toContain('secret')
+    wrapper.unmount()
+  })
 })

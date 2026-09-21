@@ -443,11 +443,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// Affiliate (邀请返利) feature switch
 	updates[SettingKeyAffiliateEnabled] = strconv.FormatBool(settings.AffiliateEnabled)
-	if settings.SharedPoolFeeRatePercent < 0 || settings.SharedPoolFeeRatePercent > 100 {
-		return nil, fmt.Errorf("shared pool fee rate must be between 0 and 100")
-	}
-	updates[SettingKeySharedPoolFeeRate] = strconv.FormatFloat(settings.SharedPoolFeeRatePercent, 'f', 4, 64)
-	updates[SettingKeySharedPoolEnabled] = strconv.FormatBool(settings.SharedPoolEnabled)
 
 	// 风控中心功能开关
 	updates[SettingKeyRiskControlEnabled] = strconv.FormatBool(settings.RiskControlEnabled)
@@ -498,11 +493,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)
 	updates[SettingKeyOpenAICodexTicketEnabled] = strconv.FormatBool(settings.OpenAICodexTicketEnabled)
-	harvestProxies, err := ParseOpenAICodexTicketHarvestProxyPool(settings.OpenAICodexTicketHarvestProxyURL)
-	if err != nil {
-		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
-	}
-	updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = strings.Join(harvestProxies, "\n")
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。
 	// codex_cli_only 加固
@@ -760,7 +750,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// 这里没有它的最新值，重算会把同步结果覆盖成陈旧值。
 	s.InvalidateOpenAICodexClientVersionCache()
 	s.InvalidateOpenAICodexTicketEnabledCache()
-	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,

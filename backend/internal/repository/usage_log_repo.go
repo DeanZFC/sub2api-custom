@@ -68,37 +68,6 @@ func appendUsageLogBillingModeWhereCondition(conditions []string, args []any, bi
 	return appendUsageLogBillingModeWhereConditionWithAlias(conditions, args, billingMode, "")
 }
 
-// appendSharedOnlyWhereCondition limits usage_logs to rows billed through a
-// shared API key. When userID is provided, the key must belong to that user;
-// administrators may pass userID=0 to include shared-pool records from all
-// users. The caller remains responsible for any separate user_id predicate.
-func appendSharedOnlyWhereCondition(conditions []string, args []any, sharedOnly bool, userID int64, alias string) ([]string, []any) {
-	if !sharedOnly {
-		return conditions, args
-	}
-	column := "api_key_id"
-	if alias != "" {
-		column = alias + ".api_key_id"
-	}
-	// Keep soft-deleted keys in scope so historical shared-pool usage remains
-	// visible after a key is revoked or removed. A user-scoped query includes
-	// the owner predicate; admin queries omit it to see every shared key.
-	if userID > 0 {
-		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM shared_api_keys sak WHERE sak.legacy_api_key_id = %s AND sak.user_id = $%d)", column, len(args)+1))
-		return conditions, append(args, userID)
-	}
-	conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM shared_api_keys sak WHERE sak.legacy_api_key_id = %s)", column))
-	return conditions, args
-}
-
-func appendSharedOnlyQueryFilter(query string, args []any, sharedOnly bool, userID int64, alias string) (string, []any) {
-	conditions, args := appendSharedOnlyWhereCondition(nil, args, sharedOnly, userID, alias)
-	if len(conditions) == 0 {
-		return query, args
-	}
-	return query + " AND " + conditions[0], args
-}
-
 func appendUsageLogBillingModeWhereConditionWithAlias(conditions []string, args []any, billingMode string, alias string) ([]string, []any) {
 	mode := strings.TrimSpace(billingMode)
 	if mode == "" {

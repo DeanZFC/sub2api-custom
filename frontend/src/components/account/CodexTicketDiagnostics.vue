@@ -23,7 +23,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CodexTurnTicketStatus } from '@/types'
 import { formatDateTime } from '@/utils/format'
-import { codexTicketErrorKey } from '@/utils/codexTicketDiagnostics'
+import { codexTicketErrorKey, codexTicketProxyKey } from '@/utils/codexTicketDiagnostics'
 
 const props = withDefaults(defineProps<{ ticket: CodexTurnTicketStatus; compact?: boolean }>(), { compact: false })
 const { t } = useI18n()
@@ -56,7 +56,8 @@ const details = computed(() => {
     result.push(t(`${key}.length`, { actual: ticket.last_length, target: ticket.target_length }))
   }
   if (ticket.last_http_status) result.push(t(`${key}.httpStatus`, { status: ticket.last_http_status }))
-  if (ticket.last_proxy_index) result.push(t(`${key}.proxy`, { index: ticket.last_proxy_index }))
+  const proxyKey = codexTicketProxyKey(ticket.last_proxy_source, ticket.last_proxy_index)
+  if (proxyKey) result.push(t(proxyKey, { index: ticket.last_proxy_index ?? 0 }))
   if (ticket.last_attempt_at) result.push(t(`${key}.lastAttempt`, { time: formatDateTime(ticket.last_attempt_at) }))
   if (ticket.next_retry_at && !ticket.in_progress) {
     const retryLabel = ticket.paused ? 'nextCheck' : ticket.ready ? 'nextRefresh' : 'nextRetry'

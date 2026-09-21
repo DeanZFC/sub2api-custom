@@ -312,19 +312,17 @@ gateway:
   # 当 compact 端点暂未支持更新模型时，可通过这里降级规避失败。
   openai_compact_model: "gpt-5.5"
   # Codex tickets: gateway master switch + account enable/fail-closed switches.
-  # 系统设置 → 网关 → Codex 门票：总开关和共享打票代理池（每行一个完整代理 URL）。
+  # 系统设置 → 网关 → Codex 门票：总开关。
   # 总开关关闭后所有账号停止打票、注入和缺票拦截，账号配置/状态在界面隐藏。
-  # 账号管理仅设置是否启用、缺票是否禁用模型（默认开启）；业务代理保持独立。
+  # 账号管理仅设置是否启用、缺票是否禁用模型（默认开启）；不改变业务请求的代理选路。
   # Pro 门票长度 292；Team/Business 332；target_length 仅作为其他/未知套餐默认值。
-  # 下方 harvest_proxy_url 接受单行或 YAML 多行（|）；后台显式清空后不再回退此值。
-  # 旧账号专用打票代理池已停用，需要在网关配置共享池。
+  # 打票始终使用账号业务代理；未配置代理的账号直连，代理缺失或无效时暂停打票。
+  # 旧 harvest_proxy_url / harvest_proxy_mode 配置已停用，不再使用独立打票代理池。
   openai_codex_ticket:
     enabled: false
     target_length: 292
     ttl_seconds: 3600
     refresh_before_seconds: 600
-    # 只有后台尚未保存代理池时才使用此值；HTTP(S)/SOCKS5(h)，每行一个。
-    harvest_proxy_url: ""
     # 每个账号/模型独立重试，普通未命中在完成后至少等 6 秒，并加少量抖动。
     # 429 遵守 Retry-After；认证/权限/额度错误冷却，明确不支持的模型暂停 30 分钟。
     # 配置/认证修改或重新启用账号后可提前恢复。业务并发设置不受影响。
@@ -333,6 +331,7 @@ gateway:
     harvest_attempt_timeout_seconds: 25
     harvest_max_concurrent: 8
     harvest_account_concurrency: 1
+    # 多个账号使用同一出口代理时，该代理的打票并发上限（直连账号共用直连上限）。
     harvest_proxy_concurrency: 2
     fail_closed: true
     models:

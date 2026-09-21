@@ -21,6 +21,7 @@ type OpenAICodexTicketEvent struct {
 	Length       int       `json:"length"`
 	TargetLength int       `json:"target_length"`
 	ProxyIndex   int       `json:"proxy_index"`
+	ProxySource  string    `json:"proxy_source"`
 	DurationMs   int64     `json:"duration_ms"`
 }
 
@@ -56,13 +57,14 @@ func (s *OpenAIGatewayService) recordOpenAICodexTicketInjectMiss(accountID int64
 }
 
 // Caller holds r.mu. One event per actual completed probe, including cancellation.
-func (r *codexTicketScheduler) recordProbeEvent(accountID int64, model string, result *openAICodexTicketProbeError, status, length, target, proxyIndex int, started, finished time.Time) {
+func (r *codexTicketScheduler) recordProbeEvent(accountID int64, model string, result *openAICodexTicketProbeError, status, length, target, proxyIndex int, proxySource string, started, finished time.Time) {
 	t := r.measurements(accountID, model)
 	r.nextEventID++
 	event := OpenAICodexTicketEvent{
 		ID: r.nextEventID, At: finished, Model: model, Outcome: "success",
 		HTTPStatus: status, Length: length, TargetLength: target, ProxyIndex: proxyIndex,
-		DurationMs: finished.Sub(started).Milliseconds(),
+		ProxySource: proxySource,
+		DurationMs:  finished.Sub(started).Milliseconds(),
 	}
 	if result == nil {
 		t.successes++

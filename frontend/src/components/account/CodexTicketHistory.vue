@@ -24,7 +24,7 @@
           <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-gray-500 dark:text-gray-400">
             <span>{{ t(`${key}.length`, { actual: event.length, target: event.target_length }) }}</span>
             <span v-if="event.http_status">HTTP {{ event.http_status }}</span>
-            <span v-if="event.proxy_index">{{ t(`${key}.proxy`, { index: event.proxy_index }) }}</span>
+            <span v-if="codexTicketProxyKey(event.proxy_source, event.proxy_index)">{{ t(codexTicketProxyKey(event.proxy_source, event.proxy_index), { index: event.proxy_index }) }}</span>
             <span>{{ t(`${key}.duration`, { duration: event.duration_ms }) }}</span>
           </div>
         </li>
@@ -39,7 +39,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
 import type { CodexTicketHistoryEvent } from '@/types'
-import { codexTicketErrorKey } from '@/utils/codexTicketDiagnostics'
+import { codexTicketErrorKey, codexTicketProxyKey } from '@/utils/codexTicketDiagnostics'
 import { formatDateTime } from '@/utils/format'
 
 const props = defineProps<{ accountId: number; model: string }>()

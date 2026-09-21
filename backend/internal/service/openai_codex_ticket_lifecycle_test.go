@@ -98,7 +98,7 @@ func (r *codexTicketLifecycleSettings) GetValue(ctx context.Context, key string)
 }
 
 func TestCodexTicketHarvesterStopCancelsInFlightWork(t *testing.T) {
-	for _, stage := range []string{"settings-enabled", "settings-proxy", "accounts", "upstream", "persist"} {
+	for _, stage := range []string{"settings-enabled", "accounts", "upstream", "persist"} {
 		t.Run(stage, func(t *testing.T) {
 			started := make(chan struct{})
 			cancelled := make(chan struct{})
@@ -118,7 +118,7 @@ func TestCodexTicketHarvesterStopCancelsInFlightWork(t *testing.T) {
 				}
 				return codexTicketResponse(), nil
 			}}
-			svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://proxy.example.com:8080", HarvestAttemptTimeoutSeconds: 25, Models: []string{"gpt-6-astra"}}, upstream)
+			svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestAttemptTimeoutSeconds: 25, Models: []string{"gpt-6-astra"}}, upstream)
 			svc.accountRepo = repo
 			if stage == "accounts" {
 				repo.list = func(ctx context.Context) ([]Account, error) { return nil, block(ctx) }
@@ -128,7 +128,7 @@ func TestCodexTicketHarvesterStopCancelsInFlightWork(t *testing.T) {
 			}
 			if strings.HasPrefix(stage, "settings-") {
 				svc.settingService = NewSettingService(&codexTicketLifecycleSettings{get: func(ctx context.Context, key string) (string, error) {
-					if stage == "settings-enabled" && key == SettingKeyOpenAICodexTicketEnabled || stage == "settings-proxy" && key == SettingKeyOpenAICodexTicketHarvestProxyURL {
+					if stage == "settings-enabled" && key == SettingKeyOpenAICodexTicketEnabled {
 						return "", block(ctx)
 					}
 					if key == SettingKeyOpenAICodexTicketEnabled {
@@ -187,7 +187,7 @@ func TestCodexTicketPolicyExemptsCredentialShadows(t *testing.T) {
 	shadow := ticketTestAccount(42)
 	shadow.ParentAccountID = &parentID
 	shadow.Status = StatusActive
-	cfg := config.OpenAICodexTicketConfig{Enabled: true, FailClosed: true, HarvestProxyURL: "http://proxy.example.com:8080"}
+	cfg := config.OpenAICodexTicketConfig{Enabled: true, FailClosed: true}
 	upstream := &httpUpstreamRecorder{}
 	svc := ticketTestService(t, cfg, upstream)
 	svc.accountRepo = &codexTicketRefreshRepo{accounts: []Account{*shadow}}

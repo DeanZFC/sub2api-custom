@@ -126,8 +126,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyDefaultConcurrency:                        strconv.Itoa(s.cfg.Default.UserConcurrency),
 		SettingKeyDefaultBalance:                            strconv.FormatFloat(s.cfg.Default.UserBalance, 'f', 8, 64),
 		SettingKeyAffiliateRebateRate:                       strconv.FormatFloat(AffiliateRebateRateDefault, 'f', 8, 64),
-		SettingKeySharedPoolFeeRate:                         "10",
-		SettingKeySharedPoolEnabled:                         "true",
 		SettingKeyAffiliateRebateFreezeHours:                strconv.Itoa(AffiliateRebateFreezeHoursDefault),
 		SettingKeyAffiliateRebateDurationDays:               strconv.Itoa(AffiliateRebateDurationDaysDefault),
 		SettingKeyAffiliateRebatePerInviteeCap:              strconv.FormatFloat(AffiliateRebatePerInviteeCapDefault, 'f', 2, 64),
@@ -836,16 +834,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Affiliate (邀请返利) feature (default: disabled; strict true)
 	result.AffiliateEnabled = settings[SettingKeyAffiliateEnabled] == "true"
-	result.SharedPoolFeeRatePercent = 10
-	if v, err := strconv.ParseFloat(settings[SettingKeySharedPoolFeeRate], 64); err == nil && v >= 0 && v <= 100 {
-		result.SharedPoolFeeRatePercent = v
-	}
-	rawSharedPoolEnabled := settings[SettingKeySharedPoolEnabled]
-	if rawSharedPoolEnabled == "" {
-		result.SharedPoolEnabled = true
-	} else {
-		result.SharedPoolEnabled = rawSharedPoolEnabled == "true"
-	}
 
 	// 风控中心功能（默认关闭，严格 true 才启用）
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"
@@ -909,11 +897,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.OpenAICodexTicketEnabled = v == "true"
 	} else if s != nil && s.cfg != nil {
 		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
-	}
-	if value, exists := settings[SettingKeyOpenAICodexTicketHarvestProxyURL]; exists {
-		result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(value)
-	} else if s != nil && s.cfg != nil {
-		result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(s.cfg.Gateway.OpenAICodexTicket.HarvestProxyURL)
 	}
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]

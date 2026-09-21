@@ -244,7 +244,7 @@ const routes: RouteRecordRaw[] = [
     path: '/test-results',
     name: 'TestResults',
     component: () => import('@/views/user/TestResultsView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: false, title: 'Test Results', titleKey: 'tests.title', descriptionKey: 'tests.description' }
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'Channel Quality Checks', titleKey: 'tests.title', descriptionKey: 'tests.description' }
   },
   {
     path: '/redeem',
@@ -269,10 +269,6 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'affiliate.title',
       descriptionKey: 'affiliate.description'
     }
-  },
-  {
-    path: '/shared-pool', name: 'SharedPool', component: () => import('@/views/user/SharedPoolView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: false, title: 'Shared Account Pool', titleKey: 'nav.sharedPool' }
   },
   {
     path: '/available-channels',
@@ -440,7 +436,7 @@ const routes: RouteRecordRaw[] = [
     path: '/admin/tests',
     name: 'AdminTests',
     component: () => import('@/views/admin/TestManagementView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Test Management', titleKey: 'admin.tests.title', descriptionKey: 'admin.tests.description' }
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Channel Quality Management', titleKey: 'admin.tests.title', descriptionKey: 'admin.tests.description' }
   },
   {
     path: '/admin/audit-logs',
@@ -539,17 +535,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Account Management',
       titleKey: 'admin.accounts.title',
       descriptionKey: 'admin.accounts.description'
-    }
-  },
-  {
-    path: '/admin/shared-pool',
-    name: 'AdminSharedPool',
-    component: () => import('@/views/admin/SharedPoolAdminView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Shared Pool Management',
-      titleKey: 'nav.sharedPoolAdmin'
     }
   },
   {

@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
-vi.mock('@/api/client', () => ({ apiClient: { get, post } }))
+const { get } = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock('@/api/client', () => ({ apiClient: { get } }))
 import { getCodexTicketHistory } from '@/api/admin/accounts'
-import { testCodexTicketProxy } from '@/api/admin/settings'
 
 describe('Codex ticket diagnostics API', () => {
-  beforeEach(() => { get.mockReset(); post.mockReset() })
+  beforeEach(() => { get.mockReset() })
 
   it('scopes history by account and model and supports cancellation', async () => {
     const data = { events: [], limit: 20 }
@@ -17,11 +16,4 @@ describe('Codex ticket diagnostics API', () => {
     })
   })
 
-  it('sends only the saved proxy index to exit testing', async () => {
-    const data = { proxy_index: 2, success: false, latency_ms: 90, error_code: 'proxy_auth' }
-    const controller = new AbortController()
-    post.mockResolvedValueOnce({ data })
-    await expect(testCodexTicketProxy(2, controller.signal)).resolves.toEqual(data)
-    expect(post).toHaveBeenCalledWith('/admin/settings/openai-codex-ticket/test-proxy', { proxy_index: 2 }, { signal: controller.signal })
-  })
 })

@@ -152,10 +152,6 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 		response.BadRequest(c, "Invalid billing_mode")
 		return nil, false
 	}
-	sharedOnly, ok := parseBoolQueryWithDefault(c, "shared_only", false)
-	if !ok {
-		return nil, false
-	}
 
 	userTZ := c.Query("timezone")
 	now := timezone.NowInUserLocation(userTZ)
@@ -211,7 +207,6 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 		Filters: usagestats.UsageLogFilters{
 			UserID:             subject.UserID,
 			APIKeyID:           apiKeyID,
-			SharedOnly:         sharedOnly,
 			GroupID:            groupID,
 			Model:              strings.TrimSpace(c.Query("model")),
 			ModelFilterSource:  usagestats.ModelSourceRequested,

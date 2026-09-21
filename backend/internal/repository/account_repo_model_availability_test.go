@@ -27,9 +27,6 @@ func TestListModelAvailabilityCandidates_GroupQueryIgnoresTransientState(t *test
 	repo := newAccountRepositoryWithSQL(client, db, nil)
 
 	groupID := int64(42)
-	mock.ExpectQuery("group account scope").
-		WithArgs(groupID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "is_shared_pool"}).AddRow(groupID, false))
 	mock.ExpectQuery("model availability candidates").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	accounts, err := repo.ListModelAvailabilityCandidates(

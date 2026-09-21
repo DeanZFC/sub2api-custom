@@ -38,9 +38,11 @@ export function buildTestPreviewHTML(source: string): string {
       const body = document.body
       const root = document.documentElement
       let height = Math.max(body?.scrollHeight || 0, root?.scrollHeight || 0, body?.offsetHeight || 0, root?.offsetHeight || 0, body?.clientHeight || 0, root?.clientHeight || 0)
+      let width = Math.max(body?.scrollWidth || 0, root?.scrollWidth || 0, body?.offsetWidth || 0, root?.offsetWidth || 0)
       for (const node of document.querySelectorAll('*')) {
         const rect = node.getBoundingClientRect()
         if (Number.isFinite(rect.bottom)) height = Math.max(height, rect.bottom + window.scrollY)
+        if (Number.isFinite(rect.right)) width = Math.max(width, rect.right + window.scrollX)
         if (node instanceof SVGGraphicsElement) {
           try {
             const box = node.getBBox()
@@ -48,7 +50,7 @@ export function buildTestPreviewHTML(source: string): string {
           } catch (_) {}
         }
       }
-      window.parent.postMessage({ type: 'sub2api-test-preview-size', height }, '*')
+      window.parent.postMessage({ type: 'sub2api-test-preview-size', height, width }, '*')
     }
     window.addEventListener('load', report)
     if (window.ResizeObserver) {

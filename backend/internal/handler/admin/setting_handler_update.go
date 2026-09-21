@@ -260,7 +260,6 @@ type UpdateSettingsRequest struct {
 	OpenAICodexClientVersion               *string `json:"openai_codex_client_version"`
 	OpenAICodexVersionAutoSyncEnabled      *bool   `json:"openai_codex_version_auto_sync_enabled"`
 	OpenAICodexTicketEnabled               *bool   `json:"openai_codex_ticket_enabled"`
-	OpenAICodexTicketHarvestProxyURL       string  `json:"openai_codex_ticket_harvest_proxy_url"`
 
 	// codex_cli_only 加固（global-only）
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -360,9 +359,7 @@ type UpdateSettingsRequest struct {
 	PluginManagementEnabled *bool `json:"plugin_management_enabled"`
 
 	// Affiliate (邀请返利) feature switch
-	AffiliateEnabled         *bool    `json:"affiliate_enabled"`
-	SharedPoolFeeRatePercent *float64 `json:"shared_pool_fee_rate_percent"`
-	SharedPoolEnabled        *bool    `json:"shared_pool_enabled"`
+	AffiliateEnabled *bool `json:"affiliate_enabled"`
 
 	// 风控中心功能开关
 	RiskControlEnabled *bool `json:"risk_control_enabled"`
@@ -507,14 +504,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
-	}
-	codexTicketHarvestProxyPool := previousSettings.OpenAICodexTicketHarvestProxyURL
-	if _, sent := sentFields["openai_codex_ticket_harvest_proxy_url"]; sent {
-		codexTicketHarvestProxyPool, err = service.MergeOpenAICodexTicketHarvestProxyPool(req.OpenAICodexTicketHarvestProxyURL, previousSettings.OpenAICodexTicketHarvestProxyURL)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
 	}
 	previousAuthSourceDefaults, err := h.settingService.GetAuthSourceDefaultSettings(c.Request.Context())
 	if err != nil {
@@ -1794,11 +1783,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAICodexTicketEnabled
 		}(),
-		OpenAICodexTicketHarvestProxyURL: codexTicketHarvestProxyPool,
-		MinCodexVersion:                  strings.TrimSpace(req.MinCodexVersion),
-		MaxCodexVersion:                  strings.TrimSpace(req.MaxCodexVersion),
-		CodexCLIOnlyBlacklist:            strings.TrimSpace(req.CodexCLIOnlyBlacklist),
-		CodexCLIOnlyWhitelist:            strings.TrimSpace(req.CodexCLIOnlyWhitelist),
+		MinCodexVersion:       strings.TrimSpace(req.MinCodexVersion),
+		MaxCodexVersion:       strings.TrimSpace(req.MaxCodexVersion),
+		CodexCLIOnlyBlacklist: strings.TrimSpace(req.CodexCLIOnlyBlacklist),
+		CodexCLIOnlyWhitelist: strings.TrimSpace(req.CodexCLIOnlyWhitelist),
 		CodexCLIOnlyAllowAppServerClients: func() bool {
 			if req.CodexCLIOnlyAllowAppServerClients != nil {
 				return *req.CodexCLIOnlyAllowAppServerClients
@@ -2002,18 +1990,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.AffiliateEnabled
 			}
 			return previousSettings.AffiliateEnabled
-		}(),
-		SharedPoolFeeRatePercent: func() float64 {
-			if req.SharedPoolFeeRatePercent != nil {
-				return *req.SharedPoolFeeRatePercent
-			}
-			return previousSettings.SharedPoolFeeRatePercent
-		}(),
-		SharedPoolEnabled: func() bool {
-			if req.SharedPoolEnabled != nil {
-				return *req.SharedPoolEnabled
-			}
-			return previousSettings.SharedPoolEnabled
 		}(),
 		RiskControlEnabled: func() bool {
 			if req.RiskControlEnabled != nil {
@@ -2351,9 +2327,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexClientVersionSynced:                         updatedSettings.OpenAICodexClientVersionSynced,
 		OpenAICodexVersionAutoSyncEnabled:                      updatedSettings.OpenAICodexVersionAutoSyncEnabled,
 		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
-		OpenAICodexTicketHarvestProxyURL:                       service.MaskOpenAICodexTicketHarvestProxyPool(updatedSettings.OpenAICodexTicketHarvestProxyURL),
-		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
-		OpenAICodexTicketHarvestProxyCount:                     openAICodexTicketProxyCount(updatedSettings.OpenAICodexTicketHarvestProxyURL),
 		MinCodexVersion:                                        updatedSettings.MinCodexVersion,
 		MaxCodexVersion:                                        updatedSettings.MaxCodexVersion,
 		CodexCLIOnlyBlacklist:                                  updatedSettings.CodexCLIOnlyBlacklist,
@@ -2440,9 +2413,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelPlazaDescription:   updatedSettings.ModelPlazaDescription,
 		PluginManagementEnabled: updatedSettings.PluginManagementEnabled,
 
-		AffiliateEnabled:         updatedSettings.AffiliateEnabled,
-		SharedPoolFeeRatePercent: updatedSettings.SharedPoolFeeRatePercent,
-		SharedPoolEnabled:        updatedSettings.SharedPoolEnabled,
+		AffiliateEnabled: updatedSettings.AffiliateEnabled,
 
 		RiskControlEnabled:          updatedSettings.RiskControlEnabled,
 		CyberSessionBlockEnabled:    updatedSettings.CyberSessionBlockEnabled,

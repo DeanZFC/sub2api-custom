@@ -39,12 +39,7 @@ func newAPIKeyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *apiKeyR
 
 func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
 	// 默认过滤已软删除记录，避免删除后仍被查询到。
-	return r.client.APIKey.Query().Where(apikey.DeletedAtIsNil(), func(s *entsql.Selector) {
-		// Shared keys keep a hidden compatibility row in api_keys so usage_logs
-		// can satisfy its legacy foreign key. They are managed exclusively by
-		// shared_api_keys and must never appear in ordinary API-key operations.
-		s.Where(entsql.Not(entsql.HasPrefix(s.C(apikey.FieldKey), "sk-shared-")))
-	})
+	return r.client.APIKey.Query().Where(apikey.DeletedAtIsNil())
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
@@ -998,7 +993,6 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		Platform:                        g.Platform,
 		RateMultiplier:                  g.RateMultiplier,
 		IsExclusive:                     g.IsExclusive,
-		IsSharedPool:                    g.IsSharedPool,
 		Status:                          g.Status,
 		Hydrated:                        true,
 		DuplicateOperationID:            derefString(g.DuplicateOperationID),

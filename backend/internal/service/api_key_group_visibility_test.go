@@ -98,20 +98,3 @@ func TestGetUserGroupVisibilityEmptyAndErrors(t *testing.T) {
 		})
 	}
 }
-
-func TestGetAvailableGroupsExcludesSharedPoolGroups(t *testing.T) {
-	svc := &APIKeyService{
-		userRepo:    &visibilityUserRepo{user: &User{ID: 1}},
-		userSubRepo: &visibilitySubRepo{},
-		groupRepo: &visibilityGroupRepo{groups: []Group{
-			{ID: 10, Name: "normal", Status: StatusActive},
-			{ID: 11, Name: "shared", Status: StatusActive, IsSharedPool: true},
-		}},
-	}
-
-	available, err := svc.GetAvailableGroups(context.Background(), 1)
-	require.NoError(t, err)
-	require.Len(t, available, 1)
-	require.Equal(t, int64(10), available[0].ID)
-	require.False(t, svc.canUserBindGroup(context.Background(), &User{ID: 1}, &Group{ID: 11, IsSharedPool: true}))
-}

@@ -38,13 +38,11 @@ type UsageBillingCommand struct {
 	ImageCount          int
 	MediaType           string
 
-	BalanceCost                 float64
-	SubscriptionCost            float64
-	APIKeyQuotaCost             float64
-	APIKeyRateLimitCost         float64
-	AccountQuotaCost            float64
-	SharedAccountFeeRatePercent *float64
-	SharedAccountFreezeHours    int
+	BalanceCost         float64
+	SubscriptionCost    float64
+	APIKeyQuotaCost     float64
+	APIKeyRateLimitCost float64
+	AccountQuotaCost    float64
 }
 
 func (c *UsageBillingCommand) Normalize() {

@@ -27,19 +27,6 @@ type UsageHandler struct {
 	cleanupService *service.UsageCleanupService
 }
 
-func parseSharedOnlyQuery(c *gin.Context) (bool, bool) {
-	raw := strings.TrimSpace(c.Query("shared_only"))
-	if raw == "" {
-		return false, true
-	}
-	v, err := strconv.ParseBool(raw)
-	if err != nil {
-		response.BadRequest(c, "Invalid shared_only value, use true or false")
-		return false, false
-	}
-	return v, true
-}
-
 // NewUsageHandler creates a new admin usage handler
 func NewUsageHandler(
 	usageService *service.UsageService,
@@ -171,10 +158,6 @@ func (h *UsageHandler) List(c *gin.Context) {
 		}
 		upstreamModelMismatch = &value
 	}
-	sharedOnly, ok := parseSharedOnlyQuery(c)
-	if !ok {
-		return
-	}
 
 	// Parse date range
 	var startTime, endTime *time.Time
@@ -219,7 +202,6 @@ func (h *UsageHandler) List(c *gin.Context) {
 		BillingType:           billingType,
 		BillingMode:           billingMode,
 		UpstreamModelMismatch: upstreamModelMismatch,
-		SharedOnly:            sharedOnly,
 		StartTime:             startTime,
 		EndTime:               endTime,
 		ExactTotal:            exactTotal,
@@ -327,10 +309,6 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		}
 		upstreamModelMismatch = &value
 	}
-	sharedOnly, ok := parseSharedOnlyQuery(c)
-	if !ok {
-		return
-	}
 
 	// Parse date range
 	userTZ := c.Query("timezone")
@@ -383,7 +361,6 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		BillingType:           billingType,
 		BillingMode:           billingMode,
 		UpstreamModelMismatch: upstreamModelMismatch,
-		SharedOnly:            sharedOnly,
 		StartTime:             &startTime,
 		EndTime:               &endTime,
 	}

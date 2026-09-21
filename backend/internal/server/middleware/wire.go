@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/wire"
 )
@@ -19,23 +17,12 @@ type AdminAuthMiddleware gin.HandlerFunc
 // APIKeyAuthMiddleware API Key 认证中间件类型
 type APIKeyAuthMiddleware gin.HandlerFunc
 
-// ProvideAPIKeyAuthMiddleware exposes the shared-key dependency explicitly to
-// Wire while keeping the constructor's optional argument for existing callers.
-func ProvideAPIKeyAuthMiddleware(
-	apiKeys *service.APIKeyService,
-	subscriptions *service.SubscriptionService,
-	cfg *config.Config,
-	sharedKeys *service.SharedAPIKeyService,
-) APIKeyAuthMiddleware {
-	return NewAPIKeyAuthMiddleware(apiKeys, subscriptions, cfg, sharedKeys)
-}
-
 // ProviderSet 中间件层的依赖注入
 var ProviderSet = wire.NewSet(
 	NewJWTAuthMiddleware,
 	NewOptionalJWTAuthMiddleware,
 	NewAdminAuthMiddleware,
-	ProvideAPIKeyAuthMiddleware,
+	NewAPIKeyAuthMiddleware,
 	NewAuditLogMiddleware,
 	NewStepUpAuthMiddleware,
 )

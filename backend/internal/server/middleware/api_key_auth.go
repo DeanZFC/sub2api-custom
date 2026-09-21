@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -19,12 +18,8 @@ import (
 const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
-func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, shared ...*service.SharedAPIKeyService) APIKeyAuthMiddleware {
-	var sharedService *service.SharedAPIKeyService
-	if len(shared) > 0 {
-		sharedService = shared[0]
-	}
-	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg, sharedService))
+func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
+	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
 }
 
 // apiKeyAuthWithSubscription API Key认证中间件（支持订阅验证）
@@ -36,7 +31,7 @@ func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionS
 // /v1/usage、/v1/sub2api/billing 端点与异步生图任务查询只需鉴权，不需要计费执行。
 // usage 允许过期/配额耗尽的 Key 查询自身用量，billing 用于读取当前 Key 的倍率配置，
 // 异步生图查询允许已耗尽额度的 Key 拉取自身任务结果。
-func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, sharedService *service.SharedAPIKeyService) gin.HandlerFunc {
+func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
 		if rejectInvalidAuthAbuse(c, apiKeyService) {
@@ -102,33 +97,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		// ── 2. 验证 Key 存在 ─────────────────────────────────────────
 
-		var apiKey *service.APIKey
-		var err error
-		sharedLookupFailed := false
-		if sharedService != nil {
-			if sk, e := sharedService.GetByKey(c.Request.Context(), apiKeyString); e == nil {
-				if sk.Status != service.StatusAPIKeyActive || sk.User == nil || sk.Group == nil {
-					AbortWithError(c, http.StatusUnauthorized, "API_KEY_DISABLED", "API key is disabled")
-					return
-				}
-				gid := sk.Group.ID
-				apiKeyID := sk.LegacyAPIKeyID
-				if apiKeyID <= 0 {
-					apiKeyID = -sk.ID
-				}
-				apiKey = &service.APIKey{ID: apiKeyID, UserID: sk.UserID, Key: apiKeyString, Name: sk.Name, GroupID: &gid, Status: service.StatusAPIKeyActive, User: sk.User, Group: sk.Group}
-				c.Request = c.Request.WithContext(service.WithSharedKeySchedule(c.Request.Context(), service.SharedKeySchedule{Priority: sk.PriorityMode, AccountIDs: sk.ListingAccountIDs}))
-			} else if !errors.Is(e, service.ErrSharedAPIKeyNotFound) {
-				// A shared-pool lookup is an optional authentication path. Do not
-				// let a missing table or transient shared DB outage reject normal
-				// API keys; fall through to the canonical key service.
-				slog.Warn("shared_api_key_lookup_failed", "error", e)
-				sharedLookupFailed = true
-			}
-		}
-		if apiKey == nil && err == nil {
-			apiKey, err = apiKeyService.GetByKey(c.Request.Context(), apiKeyString)
-		}
+		apiKey, err := apiKeyService.GetByKey(c.Request.Context(), apiKeyString)
 		if err != nil {
 			if errors.Is(err, service.ErrAPIKeyNotFound) {
 				recordInvalidAuthFailure(c, apiKeyService)
@@ -142,13 +111,6 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				return
 			}
 			AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
-			return
-		}
-		// Shared keys have a mirrored legacy api_keys row for compatibility. If
-		// the shared-pool store is temporarily unavailable, never route that
-		// mirror through ordinary system-account scheduling.
-		if sharedLookupFailed && apiKey != nil && strings.HasPrefix(strings.TrimSpace(apiKey.Name), "[shared]") {
-			AbortWithError(c, http.StatusServiceUnavailable, "SHARED_POOL_UNAVAILABLE", "Shared account pool is temporarily unavailable")
 			return
 		}
 

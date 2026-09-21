@@ -15,10 +15,12 @@ import (
 )
 
 const (
-	schedulerBucketSetKey          = "sched:buckets"
-	schedulerOutboxWatermarkKey    = "sched:outbox:watermark"
-	schedulerAccountPrefix         = "sched:acc:"
-	schedulerAccountMetaPrefix     = "sched:meta:"
+	schedulerBucketSetKey       = "sched:buckets"
+	schedulerOutboxWatermarkKey = "sched:outbox:watermark"
+	// The v2 payload namespace cannot reuse legacy accounts whose removed scope
+	// marker would otherwise disappear on decode before the startup rebuild.
+	schedulerAccountPrefix         = "sched:acc:v2:"
+	schedulerAccountMetaPrefix     = "sched:meta:v2:"
 	schedulerAccountLastUsedPrefix = "sched:acc:last_used:"
 	schedulerActivePrefix          = "sched:active:"
 	schedulerReadyPrefix           = "sched:ready:"

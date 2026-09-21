@@ -120,7 +120,7 @@ func TestAccountResponseCodexTicketDiagnosticsAPIWiring(t *testing.T) {
 		},
 	}
 	cfg := &config.Config{Gateway: config.GatewayConfig{OpenAICodexTicket: config.OpenAICodexTicketConfig{
-		Enabled: true, Models: []string{"gpt-6-astra"}, HarvestProxyURL: proxySecret,
+		Enabled: true, Models: []string{"gpt-6-astra"},
 	}}}
 	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyOpenAICodexTicketEnabled: "true"}}
 	settings := service.NewSettingService(repo, cfg)

@@ -13,32 +13,34 @@ type ScheduledTestPlan struct {
 	// on the user-facing test-results page. It is intentionally stored on the
 	// rule/plan rather than on groups, because the same group can participate
 	// in multiple test rules with different display positions.
-	SortOrder        int        `json:"sort_order"`
-	AccountID        *int64     `json:"account_id,omitempty"`
-	GroupID          *int64     `json:"group_id,omitempty"`
-	TestDefinitionID *int64     `json:"test_definition_id,omitempty"`
-	TestType         string     `json:"test_type"`
-	TargetMode       string     `json:"target_mode"`
-	ModelID          string     `json:"model_id"`
-	ReasoningEffort  string     `json:"reasoning_effort,omitempty"`
-	CronExpression   string     `json:"cron_expression"`
-	Enabled          bool       `json:"enabled"`
-	MaxResults       int        `json:"max_results"`
-	AutoRecover      bool       `json:"auto_recover"`
-	LastRunAt        *time.Time `json:"last_run_at"`
-	NextRunAt        *time.Time `json:"next_run_at"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	SortOrder         int        `json:"sort_order"`
+	AccountID         *int64     `json:"account_id,omitempty"`
+	GroupID           *int64     `json:"group_id,omitempty"`
+	TestDefinitionID  *int64     `json:"test_definition_id,omitempty"`
+	TestDefinitionIDs []int64    `json:"test_definition_ids"`
+	TestType          string     `json:"test_type"`
+	TargetMode        string     `json:"target_mode"`
+	ModelID           string     `json:"model_id"`
+	ReasoningEffort   string     `json:"reasoning_effort,omitempty"`
+	CronExpression    string     `json:"cron_expression"`
+	Enabled           bool       `json:"enabled"`
+	MaxResults        int        `json:"max_results"`
+	AutoRecover       bool       `json:"auto_recover"`
+	LastRunAt         *time.Time `json:"last_run_at"`
+	NextRunAt         *time.Time `json:"next_run_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
-	ID        int64  `json:"id"`
-	PlanID    int64  `json:"plan_id"`
-	PlanName  string `json:"plan_name"`
-	TestName  string `json:"test_name"`
-	TestOrder int    `json:"test_order"`
-	GroupName string `json:"group_name"`
+	ID               int64  `json:"id"`
+	PlanID           int64  `json:"plan_id"`
+	TestDefinitionID *int64 `json:"test_definition_id,omitempty"`
+	PlanName         string `json:"plan_name"`
+	TestName         string `json:"test_name"`
+	TestOrder        int    `json:"test_order"`
+	GroupName        string `json:"group_name"`
 	// PlanOrder is the administrator-configured order of the test rule/plan
 	// that produced this result. The user-facing page sorts by this value and
 	// derives its group list from that ordered result stream.

@@ -46,9 +46,6 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
 
-		// 共享账号池审核与运营控制（独立于普通账号管理）
-		registerSharedAccountPoolRoutes(admin, h)
-
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 
@@ -133,24 +130,6 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
-	}
-}
-
-func registerSharedAccountPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	pool := admin.Group("/shared-pool")
-	{
-		pool.GET("/listings", h.Admin.SharedAccountPool.AdminListCards)
-		pool.GET("/listings/:id/account", h.Admin.SharedAccountPool.AdminGetAccount)
-		pool.GET("/listings/:id/models", h.Admin.SharedAccountPool.AdminGetAvailableModels)
-		pool.PUT("/listings/:id/account", h.Admin.SharedAccountPool.AdminUpdateAccount)
-		pool.POST("/listings/:id/test", h.Admin.SharedAccountPool.AdminTestAccount)
-		pool.GET("/users", h.Admin.SharedAccountPool.AdminListUsers)
-		pool.GET("/revenue", h.Admin.SharedAccountPool.AdminListRevenue)
-		pool.GET("/revenue/records", h.Admin.SharedAccountPool.AdminListRevenueRecords)
-		pool.PUT("/listings/:id/status", h.Admin.SharedAccountPool.AdminSetStatus)
-		pool.PUT("/listings/:id/listed", h.Admin.SharedAccountPool.AdminSetListed)
-		pool.DELETE("/listings/:id", h.Admin.SharedAccountPool.AdminDelete)
-		pool.PUT("/users/:user_id/publish-permission", h.Admin.SharedAccountPool.AdminSetUserPublishPermission)
 	}
 }
 
@@ -581,7 +560,6 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
-		adminSettings.POST("/openai-codex-ticket/test-proxy", h.Admin.Setting.TestOpenAICodexTicketProxy)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)

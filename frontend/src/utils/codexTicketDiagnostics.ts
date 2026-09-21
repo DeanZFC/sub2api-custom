@@ -8,3 +8,11 @@ const knownErrors = new Set([
 export function codexTicketErrorKey(code: string | undefined): string {
   return `admin.accounts.openai.codexTicketDiagnostics.errors.${code && knownErrors.has(code) ? code : 'unknown'}`
 }
+
+export function codexTicketProxyKey(source: string | undefined, index = 0): string {
+  const key = 'admin.accounts.openai.codexTicketDiagnostics'
+  if (source === 'account') return `${key}.proxyAccount`
+  if (source === 'direct') return `${key}.proxyDirect`
+  if (source === 'pool' || (!source && index > 0)) return `${key}.proxyPool`
+  return ''
+}

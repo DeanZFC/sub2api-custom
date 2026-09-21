@@ -96,7 +96,10 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	default:
 		return fmt.Errorf("target_mode must be group, all_accounts, or account")
 	}
-	if plan.GroupID != nil && *plan.GroupID > 0 && plan.TestDefinitionID == nil {
+	if err := normalizeScheduledTestDefinitionIDs(plan); err != nil {
+		return err
+	}
+	if plan.GroupID != nil && *plan.GroupID > 0 && len(plan.TestDefinitionIDs) == 0 {
 		return fmt.Errorf("group targets require a test_definition_id")
 	}
 	plan.ModelID = strings.TrimSpace(plan.ModelID)
@@ -115,6 +118,34 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	}
 	if plan.MaxResults < 0 {
 		return fmt.Errorf("max_results cannot be negative")
+	}
+	return nil
+}
+
+// The scalar remains the first selected definition for older API clients.
+func normalizeScheduledTestDefinitionIDs(plan *ScheduledTestPlan) error {
+	ids := plan.TestDefinitionIDs
+	if ids == nil && plan.TestDefinitionID != nil {
+		ids = []int64{*plan.TestDefinitionID}
+	}
+	if len(ids) > 32 {
+		return fmt.Errorf("at most 32 test definitions may be selected")
+	}
+	seen := make(map[int64]bool, len(ids))
+	plan.TestDefinitionIDs = make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return fmt.Errorf("test_definition_ids must contain positive IDs")
+		}
+		if !seen[id] {
+			plan.TestDefinitionIDs = append(plan.TestDefinitionIDs, id)
+			seen[id] = true
+		}
+	}
+	plan.TestDefinitionID = nil
+	if len(plan.TestDefinitionIDs) > 0 {
+		id := plan.TestDefinitionIDs[0]
+		plan.TestDefinitionID = &id
 	}
 	return nil
 }
@@ -218,7 +249,10 @@ func (s *ScheduledTestService) RetryResult(ctx context.Context, id int64) (*Sche
 	result.PlanName = plan.Name
 	result.TestName = previous.TestName
 	result.GroupName = previous.GroupName
-	result.TargetMode = plan.TargetMode
+	result.TargetMode = previous.TargetMode
+	if result.TargetMode == "" {
+		result.TargetMode = plan.TargetMode
+	}
 	return result, nil
 }
 
@@ -335,21 +369,22 @@ func (s *ScheduledTestService) UpdatePlan(ctx context.Context, plan *ScheduledTe
 }
 
 func (s *ScheduledTestService) validateDefinitionForPlan(ctx context.Context, plan *ScheduledTestPlan) error {
-	if plan == nil || plan.TestDefinitionID == nil {
+	if plan == nil || len(plan.TestDefinitionIDs) == 0 {
 		return nil
 	}
 	if s.definitionRepo == nil {
 		return fmt.Errorf("test definitions unavailable")
 	}
-	d, err := s.definitionRepo.GetByID(ctx, *plan.TestDefinitionID)
-	if err != nil {
-		return fmt.Errorf("test definition not found: %w", err)
+	hasEnabled := false
+	for _, id := range plan.TestDefinitionIDs {
+		d, err := s.definitionRepo.GetByID(ctx, id)
+		if err != nil || d == nil {
+			return fmt.Errorf("test definition %d not found", id)
+		}
+		hasEnabled = hasEnabled || d.Enabled
 	}
-	if d == nil {
-		return fmt.Errorf("test definition is disabled")
-	}
-	if !d.Enabled && plan.Enabled {
-		return fmt.Errorf("test definition is disabled")
+	if plan.Enabled && !hasEnabled {
+		return fmt.Errorf("all selected test definitions are disabled")
 	}
 	return nil
 }

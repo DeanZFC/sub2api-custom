@@ -42,7 +42,7 @@ var (
 
 const scheduledTestPersistenceTimeout = 15 * time.Second
 
-var ErrScheduledTestAccountRunning = errors.New("this account is already being tested for this plan")
+var ErrScheduledTestAccountRunning = errors.New("this account and test type are already being tested for this plan")
 var ErrScheduledTestResultNotFailed = errors.New("test result is no longer failed; refresh the results before retrying")
 
 // ScheduledTestRunnerService periodically scans due test plans and executes them.
@@ -69,7 +69,7 @@ type ScheduledTestRunnerService struct {
 	workerMu        sync.Mutex
 	workerSem       chan struct{}
 	accountRunMu    sync.Mutex
-	runningAccounts map[[2]int64]struct{}
+	runningAccounts map[[3]int64]struct{}
 }
 
 // NewScheduledTestRunnerService creates a new runner.
@@ -186,14 +186,34 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 		return
 	}
 	defer s.endPlanRun(plan.ID)
+	defer s.advancePlan(ctx, plan)
 
-	// Resolve the configured test definition before selecting an account. A
-	// disabled/deleted definition is a failed execution and must still advance
-	// next_run_at, otherwise the plan remains due forever and silently retries.
+	// Each definition has an independent result stream. A disabled definition
+	// must not prevent the remaining checks in the same rule from executing.
+	for _, execution := range scheduledTestExecutionPlans(plan) {
+		s.runPlanDefinition(ctx, execution)
+	}
+}
+
+func scheduledTestExecutionPlans(plan *ScheduledTestPlan) []*ScheduledTestPlan {
+	ids := plan.TestDefinitionIDs
+	if len(ids) == 0 {
+		return []*ScheduledTestPlan{plan}
+	}
+	result := make([]*ScheduledTestPlan, 0, len(ids))
+	for _, id := range ids {
+		execution := *plan
+		execution.TestDefinitionID = &id
+		execution.TestDefinitionIDs = []int64{id}
+		result = append(result, &execution)
+	}
+	return result
+}
+
+func (s *ScheduledTestRunnerService) runPlanDefinition(ctx context.Context, plan *ScheduledTestPlan) {
 	prompt, outputKind, definitionErr := s.resolveDefinition(ctx, plan)
 	if definitionErr != nil {
 		s.savePlanFailure(ctx, plan, "text", definitionErr)
-		s.advancePlan(ctx, plan)
 		return
 	}
 
@@ -203,7 +223,6 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 			resolveErr = fmt.Errorf("no schedulable account is available for this group")
 		}
 		s.savePlanFailure(ctx, plan, outputKind, resolveErr)
-		s.advancePlan(ctx, plan)
 		return
 	}
 
@@ -223,7 +242,6 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 		}()
 	}
 	wg.Wait()
-	s.advancePlan(ctx, plan)
 }
 
 func (s *ScheduledTestRunnerService) resolveDefinition(ctx context.Context, plan *ScheduledTestPlan) (string, string, error) {
@@ -273,11 +291,11 @@ func (s *ScheduledTestRunnerService) resolveTargetAccounts(ctx context.Context, 
 }
 
 func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *ScheduledTestPlan, accountID int64, prompt, outputKind string) {
-	if !s.beginAccountRun(plan.ID, accountID) {
+	if !s.beginAccountRun(plan.ID, accountID, plan.TestDefinitionID) {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d is already running; skipping overlapping run", plan.ID, accountID)
 		return
 	}
-	defer s.endAccountRun(plan.ID, accountID)
+	defer s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID)
 
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	pending, err := s.startAccountResult(persistCtx, plan, accountID, outputKind)
@@ -297,14 +315,16 @@ func (s *ScheduledTestRunnerService) startAccountResult(ctx context.Context, pla
 	// long-running test visible immediately and lets completion update the same
 	// row instead of briefly showing no result (or creating duplicate history).
 	pending := &ScheduledTestResult{
-		Status:          "running",
-		OutputKind:      outputKind,
-		AccountID:       &accountID,
-		ModelID:         plan.ModelID,
-		ReasoningEffort: plan.ReasoningEffort,
-		GroupID:         plan.GroupID,
-		StartedAt:       started,
-		FinishedAt:      started,
+		TestDefinitionID: plan.TestDefinitionID,
+		TargetMode:       plan.TargetMode,
+		Status:           "running",
+		OutputKind:       outputKind,
+		AccountID:        &accountID,
+		ModelID:          plan.ModelID,
+		ReasoningEffort:  plan.ReasoningEffort,
+		GroupID:          plan.GroupID,
+		StartedAt:        started,
+		FinishedAt:       started,
 	}
 	return s.scheduledSvc.StartResult(ctx, plan.ID, pending)
 }
@@ -345,6 +365,8 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	result.ModelID = plan.ModelID
 	result.ReasoningEffort = plan.ReasoningEffort
 	result.GroupID = plan.GroupID
+	result.TestDefinitionID = plan.TestDefinitionID
+	result.TargetMode = plan.TargetMode
 	result.OutputKind = outputKind
 	s.applyOutputContract(result, outputKind)
 	persistCtx, cancel := scheduledTestPersistenceContext()
@@ -377,7 +399,7 @@ func (s *ScheduledTestRunnerService) savePlanFailure(ctx context.Context, plan *
 	if cause != nil {
 		errorMessage = cause.Error()
 	}
-	result := &ScheduledTestResult{Status: "running", OutputKind: outputKind, GroupID: plan.GroupID, ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, StartedAt: now, FinishedAt: now}
+	result := &ScheduledTestResult{Status: "running", TestDefinitionID: plan.TestDefinitionID, TargetMode: plan.TargetMode, OutputKind: outputKind, GroupID: plan.GroupID, ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, StartedAt: now, FinishedAt: now}
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	defer cancel()
 	created, err := s.scheduledSvc.StartResult(persistCtx, plan.ID, result)
@@ -691,14 +713,26 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if previous.Status != "failed" {
 		return nil, ErrScheduledTestResultNotFailed
 	}
+	// Retry the failed execution's type and target snapshot, even when its
+	// parent rule has subsequently been edited to select different checks.
+	execution := *plan
+	execution.TestDefinitionID = previous.TestDefinitionID
+	execution.TestDefinitionIDs = nil
+	if previous.TargetMode != "" {
+		execution.TargetMode = previous.TargetMode
+		execution.GroupID = previous.GroupID
+		execution.ModelID = previous.ModelID
+		execution.ReasoningEffort = previous.ReasoningEffort
+	}
+	plan = &execution
 	accountID := *previous.AccountID
-	if !s.beginAccountRun(plan.ID, accountID) {
+	if !s.beginAccountRun(plan.ID, accountID, plan.TestDefinitionID) {
 		return nil, ErrScheduledTestAccountRunning
 	}
 	queued := false
 	defer func() {
 		if !queued {
-			s.endAccountRun(plan.ID, accountID)
+			s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID)
 		}
 	}()
 	if plan.AccountID != nil && *plan.AccountID != accountID {
@@ -736,6 +770,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	started := time.Now()
 	pending := &ScheduledTestResult{
 		ID: previous.ID, PlanID: plan.ID, CreatedAt: previous.CreatedAt,
+		TestDefinitionID: previous.TestDefinitionID, TargetMode: plan.TargetMode,
 		Status: "running", OutputKind: outputKind, AccountID: &accountID,
 		ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, GroupID: plan.GroupID,
 		StartedAt: started, FinishedAt: started,
@@ -750,7 +785,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	queued = true
 	go func() {
 		defer cancel()
-		defer s.endAccountRun(plan.ID, accountID)
+		defer s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID)
 		s.runAccountWithResult(bg, plan, accountID, prompt, outputKind, pending)
 	}()
 	return &response, nil
@@ -779,13 +814,22 @@ func (s *ScheduledTestRunnerService) endPlanRun(planID int64) {
 	delete(s.runningPlans, planID)
 }
 
-func (s *ScheduledTestRunnerService) beginAccountRun(planID, accountID int64) bool {
+// A retry suppresses duplicate executions of its check, never another type.
+func scheduledTestAccountRunKey(planID, accountID int64, definitionID *int64) [3]int64 {
+	key := [3]int64{planID, accountID, 0}
+	if definitionID != nil {
+		key[2] = *definitionID
+	}
+	return key
+}
+
+func (s *ScheduledTestRunnerService) beginAccountRun(planID, accountID int64, definitionID *int64) bool {
 	s.accountRunMu.Lock()
 	defer s.accountRunMu.Unlock()
 	if s.runningAccounts == nil {
-		s.runningAccounts = make(map[[2]int64]struct{})
+		s.runningAccounts = make(map[[3]int64]struct{})
 	}
-	key := [2]int64{planID, accountID}
+	key := scheduledTestAccountRunKey(planID, accountID, definitionID)
 	if _, running := s.runningAccounts[key]; running {
 		return false
 	}
@@ -793,10 +837,10 @@ func (s *ScheduledTestRunnerService) beginAccountRun(planID, accountID int64) bo
 	return true
 }
 
-func (s *ScheduledTestRunnerService) endAccountRun(planID, accountID int64) {
+func (s *ScheduledTestRunnerService) endAccountRun(planID, accountID int64, definitionID *int64) {
 	s.accountRunMu.Lock()
 	defer s.accountRunMu.Unlock()
-	delete(s.runningAccounts, [2]int64{planID, accountID})
+	delete(s.runningAccounts, scheduledTestAccountRunKey(planID, accountID, definitionID))
 }
 
 func (s *ScheduledTestRunnerService) acquireWorker(ctx context.Context) bool {

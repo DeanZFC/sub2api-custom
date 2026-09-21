@@ -79,11 +79,10 @@ func TestApplyOpenAICodexTicket_ReplacesHeader(t *testing.T) {
 
 func TestApplyOpenAICodexTicket_DoesNotReuseOtherModelOrAccount(t *testing.T) {
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
-		Enabled:         true,
-		TargetLength:    292,
-		TTLSeconds:      3600,
-		FailClosed:      true,
-		HarvestProxyURL: "socks5h://harvest",
+		Enabled:      true,
+		TargetLength: 292,
+		TTLSeconds:   3600,
+		FailClosed:   true,
 	}, &httpUpstreamRecorder{err: io.EOF})
 	a := ticketTestAccount(41)
 	b := ticketTestAccount(42)
@@ -141,11 +140,10 @@ func TestLookupOpenAICodexTicket_PrefersNewerExtra(t *testing.T) {
 
 func TestApplyOpenAICodexTicket_ExpiredNotInjected(t *testing.T) {
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
-		Enabled:         true,
-		TargetLength:    292,
-		TTLSeconds:      3600,
-		FailClosed:      true,
-		HarvestProxyURL: "socks5h://harvest",
+		Enabled:      true,
+		TargetLength: 292,
+		TTLSeconds:   3600,
+		FailClosed:   true,
 	}, &httpUpstreamRecorder{err: io.EOF})
 	account := ticketTestAccount(41)
 	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
@@ -206,7 +204,7 @@ func TestApplyOpenAICodexTicket_DisabledNoop(t *testing.T) {
 	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader))
 }
 
-func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
+func TestHarvestOpenAICodexTicket_StopsAt292AndUsesAccountProxy(t *testing.T) {
 	state312 := fakeCodexTicketState(312)
 	state292 := fakeCodexTicketState(292)
 	header312 := http.Header{}
@@ -231,11 +229,13 @@ func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
 		Enabled:                      true,
 		TargetLength:                 292,
 		TTLSeconds:                   3600,
-		HarvestProxyURL:              "socks5h://user:pass@harvest.example:31",
 		HarvestAttemptTimeoutSeconds: 5,
 		FailClosed:                   true,
 	}, upstream)
 	account := ticketTestAccount(41)
+	id := int64(11)
+	account.ProxyID = &id
+	account.Proxy = &Proxy{ID: id, Protocol: "socks5h", Host: "harvest.example", Port: 31, Username: "user", Password: "pass"}
 
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
@@ -277,7 +277,6 @@ func TestHarvestOpenAICodexTicket_HTTP503DoesNotAbortHunt(t *testing.T) {
 		Enabled:                      true,
 		TargetLength:                 292,
 		TTLSeconds:                   3600,
-		HarvestProxyURL:              "socks5h://harvest.example:31",
 		HarvestAttemptTimeoutSeconds: 5,
 		FailClosed:                   true,
 	}, upstream)
@@ -387,7 +386,7 @@ func TestRefreshOpenAICodexTickets_ConcurrentModelsPreserveAccountSnapshot(t *te
 	account.Extra = map[string]any{"existing": true}
 	repo := &codexTicketRefreshRepo{accounts: []Account{*account}}
 	upstream := &codexTicketConcurrentUpstream{ready: make(chan struct{})}
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "socks5h://proxy.example.com:1080", HarvestAccountConcurrency: 2}, upstream)
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestAccountConcurrency: 2}, upstream)
 	svc.accountRepo = repo
 	svc.refreshOpenAICodexTickets(context.Background())
 	svc.openaiCodexTicketScheduler.workers.Wait()
@@ -420,7 +419,7 @@ func TestProbeOpenAICodexTicket_RejectsInvalidState(t *testing.T) {
 		h := http.Header{}
 		h.Set(openAICodexTurnStateHeader, state)
 		upstream := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(""))}}}
-		svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://proxy.example.com:8080"}, upstream)
+		svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, upstream)
 		account := ticketTestAccount(41)
 		svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 		require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))

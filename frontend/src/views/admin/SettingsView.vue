@@ -4551,36 +4551,9 @@
                     v-model="form.openai_codex_ticket_enabled"
                   />
                 </div>
-                <div>
-                  <h3 class="text-base font-semibold text-gray-900 dark:text-white">
-                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxy") }}
-                  </h3>
-                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyDesc") }}
-                  </p>
-                  <textarea
-                    id="codex-ticket-harvest-proxy"
-                    v-model="form.openai_codex_ticket_harvest_proxy_url"
-                    rows="5"
-                    class="input mt-3 w-full resize-y font-mono text-sm"
-                    :placeholder="t('admin.settings.gatewayForwarding.codexTicketHarvestProxyPlaceholder')"
-                    autocomplete="off"
-                    autocapitalize="off"
-                    :spellcheck="false"
-                  />
-                  <p
-                    v-if="form.openai_codex_ticket_harvest_proxy_configured"
-                    class="mt-1.5 text-xs text-gray-500 dark:text-gray-400"
-                  >
-                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyConfigured") }}
-                  </p>
-                  <CodexTicketProxyTest
-                    :proxy-pool="form.openai_codex_ticket_harvest_proxy_url"
-                    :saved-proxy-pool="savedCodexTicketProxyPool"
-                    :saved-proxy-count="savedCodexTicketProxyCount"
-                    :disabled="loading || saving || loadFailed"
-                  />
-                </div>
+                <p class="text-sm text-gray-500 dark:text-gray-400" data-testid="codex-ticket-account-route-hint">
+                  {{ t("admin.settings.gatewayForwarding.codexTicketAccountRouteHint") }}
+                </p>
                 <div>
                   <h3 class="text-base font-semibold text-gray-900 dark:text-white">
                     {{ t("admin.settings.gatewayForwarding.codexClientRestrictionTitle") }}
@@ -7453,12 +7426,6 @@
               <Toggle v-model="form.affiliate_enabled" />
             </div>
 
-            <div class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700">
-              <div><label class="text-sm font-medium text-gray-700 dark:text-gray-300">共享账号池</label><p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">允许用户上传账号并加入共享池</p></div>
-              <Toggle v-model="form.shared_pool_enabled" />
-            </div>
-            <div><label class="input-label">共享池平台抽成比例 (%)</label><input v-model.number="form.shared_pool_fee_rate_percent" type="number" min="0" max="100" step="0.01" class="input w-full" /></div>
-
             <div v-if="form.affiliate_enabled" class="space-y-6">
               <div class="flex items-center justify-between">
                 <div>
@@ -8960,7 +8927,6 @@ import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
-import CodexTicketProxyTest from "@/views/admin/settings/CodexTicketProxyTest.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
   useStepUp,
@@ -9088,8 +9054,6 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(true);
 const loadFailed = ref(false);
 const saving = ref(false);
-const savedCodexTicketProxyPool = ref("");
-const savedCodexTicketProxyCount = ref(0);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
 const smtpPasswordManuallyEdited = ref(false);
@@ -9929,9 +9893,6 @@ const form = reactive<SettingsForm>({
   openai_codex_client_version_synced: "",
   openai_codex_version_auto_sync_enabled: true,
   openai_codex_ticket_enabled: false,
-  openai_codex_ticket_harvest_proxy_url: "",
-  openai_codex_ticket_harvest_proxy_configured: false,
-  openai_codex_ticket_harvest_proxy_count: 0,
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -9965,8 +9926,6 @@ const form = reactive<SettingsForm>({
   plugin_management_enabled: false,
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
-  shared_pool_enabled: false,
-  shared_pool_fee_rate_percent: 10,
   // Allow user view error requests
   allow_user_view_error_requests: false,
 });
@@ -10926,8 +10885,6 @@ async function loadSettings() {
   loadFailed.value = false;
   try {
     const settings = await adminAPI.settings.getSettings();
-    savedCodexTicketProxyPool.value = settings.openai_codex_ticket_harvest_proxy_url ?? "";
-    savedCodexTicketProxyCount.value = settings.openai_codex_ticket_harvest_proxy_count ?? 0;
     settings.payment_load_balance_strategy =
       settings.payment_load_balance_strategy || "round-robin";
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
@@ -11554,8 +11511,6 @@ async function saveSettings() {
       openai_codex_version_auto_sync_enabled:
         form.openai_codex_version_auto_sync_enabled,
       openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
-      openai_codex_ticket_harvest_proxy_url:
-        form.openai_codex_ticket_harvest_proxy_url.trim(),
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:
@@ -11666,8 +11621,6 @@ async function saveSettings() {
       plugin_management_enabled: form.plugin_management_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
-      shared_pool_enabled: form.shared_pool_enabled,
-      shared_pool_fee_rate_percent: Number(form.shared_pool_fee_rate_percent) || 0,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
     };
 
@@ -11712,8 +11665,6 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
-    savedCodexTicketProxyPool.value = updated.openai_codex_ticket_harvest_proxy_url ?? "";
-    savedCodexTicketProxyCount.value = updated.openai_codex_ticket_harvest_proxy_count ?? 0;
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {

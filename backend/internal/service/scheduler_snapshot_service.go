@@ -210,7 +210,7 @@ func (s *SchedulerSnapshotService) Stop() {
 func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	mode := s.resolveMode(platform, hasForcePlatform)
-	bucket := s.bucketFor(ctx, groupID, platform, mode)
+	bucket := s.bucketFor(groupID, platform, mode)
 	var writeToken SchedulerBucketWriteToken
 	canPublish := false
 	if err := ctx.Err(); err != nil {
@@ -225,7 +225,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return applySharedListingOrder(ctx, derefAccounts(cached)), useMixed, nil
+			return derefAccounts(cached), useMixed, nil
 		}
 		token, err := s.cache.CaptureBucketWriteToken(ctx, bucket)
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -268,11 +268,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		}
 	}
 
-	return applySharedListingOrder(ctx, accounts), useMixed, nil
-}
-
-func applySharedListingOrder(ctx context.Context, accounts []Account) []Account {
-	return applySharedKeySchedule(ctx, accounts)
+	return accounts, useMixed, nil
 }
 
 func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (*Account, error) {
@@ -1533,19 +1529,19 @@ func (s *SchedulerSnapshotService) loadAccountsForRebuild(
 	return accounts, nil
 }
 
-func (s *SchedulerSnapshotService) bucketFor(ctx context.Context, groupID *int64, platform string, mode string) SchedulerBucket {
+func (s *SchedulerSnapshotService) bucketFor(groupID *int64, platform string, mode string) SchedulerBucket {
 	return SchedulerBucket{
-		GroupID:  s.normalizeGroupID(ctx, groupID),
+		GroupID:  s.normalizeGroupID(groupID),
 		Platform: platform,
 		Mode:     mode,
 	}
 }
 
-func (s *SchedulerSnapshotService) normalizeGroupID(ctx context.Context, groupID *int64) int64 {
+func (s *SchedulerSnapshotService) normalizeGroupID(groupID *int64) int64 {
 	if groupID == nil || *groupID <= 0 {
 		return 0
 	}
-	if s.isRunModeSimple() && !IsSharedPoolSchedule(ctx) {
+	if s.isRunModeSimple() {
 		return 0
 	}
 	return *groupID

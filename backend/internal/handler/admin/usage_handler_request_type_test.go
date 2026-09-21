@@ -60,41 +60,6 @@ func TestAdminUsageListRequestTypePriority(t *testing.T) {
 	require.Nil(t, repo.listFilters.Stream)
 }
 
-func TestAdminUsageListSharedOnlyFilter(t *testing.T) {
-	repo := &adminUsageRepoCapture{}
-	router := newAdminUsageRequestTypeTestRouter(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/admin/usage?shared_only=true", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.listFilters.SharedOnly)
-}
-
-func TestAdminUsageStatsSharedOnlyFilter(t *testing.T) {
-	repo := &adminUsageRepoCapture{}
-	router := newAdminUsageRequestTypeTestRouter(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/admin/usage/stats?shared_only=true", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.statsFilters.SharedOnly)
-}
-
-func TestAdminUsageListInvalidSharedOnly(t *testing.T) {
-	repo := &adminUsageRepoCapture{}
-	router := newAdminUsageRequestTypeTestRouter(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/admin/usage?shared_only=maybe", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
 func TestAdminUsageListUsesRequestedModelForDisplayModelFilter(t *testing.T) {
 	repo := &adminUsageRepoCapture{}
 	router := newAdminUsageRequestTypeTestRouter(repo)

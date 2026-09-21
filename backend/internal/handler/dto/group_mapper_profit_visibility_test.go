@@ -73,11 +73,3 @@ func TestGroupFromServiceAdminIncludesProfitControl(t *testing.T) {
 		}
 	}
 }
-
-func TestGroupFromServiceIncludesSharedPoolMarker(t *testing.T) {
-	group := &service.Group{ID: 9, Name: "shared-openai", IsSharedPool: true}
-	fields := marshalToMap(t, GroupFromService(group))
-	if value, ok := fields["is_shared_pool"].(bool); !ok || !value {
-		t.Fatalf("普通用户分组 DTO 应透传共享池标记: %#v", fields["is_shared_pool"])
-	}
-}

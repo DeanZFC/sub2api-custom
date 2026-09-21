@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 import TestResultOutput from '../TestResultOutput.vue'
 import { buildTestPreviewHTML } from '@/utils/testPreview'
@@ -27,6 +28,30 @@ describe('test result output', () => {
     const wrapper = mount(TestResultOutput, { global, props: { result: { id: 3, status: 'success', output_kind: 'future-json', response_text: '<img src=x onerror=alert(1)>' } } })
     expect(wrapper.get('pre').text()).toBe('<img src=x onerror=alert(1)>')
     expect(wrapper.find('img').exists()).toBe(false)
+  })
+
+  it('scales the full HTML document in a compact gallery without clipping tall or wide content', async () => {
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 240 } as DOMRect)
+    const wrapper = mount(TestResultOutput, { global, props: { compact: true, result: { id: 4, status: 'success', output_kind: 'html', output_html: '<div style="width:1200px;height:1600px">Full artwork</div>', response_text: 'raw content' } } })
+    const frame = wrapper.get('iframe')
+    window.dispatchEvent(new MessageEvent('message', { source: frame.element.contentWindow, data: { type: 'sub2api-test-preview-size', height: 1600, width: 1200 } }))
+    await nextTick()
+    expect(frame.attributes('style')).toContain('width: 1200px')
+    expect(frame.attributes('style')).toContain('height: 1600px')
+    expect(frame.attributes('style')).toContain('scale(0.2)')
+    expect(frame.element.parentElement?.style.height).toBe('320px')
+    expect(frame.attributes('sandbox')).toBe('allow-scripts')
+    expect(wrapper.find('details').exists()).toBe(false)
+    wrapper.unmount()
+    measure.mockRestore()
+  })
+
+  it('ignores preview sizing messages sent by another iframe', async () => {
+    const wrapper = mount(TestResultOutput, { global, props: { compact: true, result: { id: 5, status: 'success', output_kind: 'html', output_html: '<p>Preview</p>' } } })
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: { type: 'sub2api-test-preview-size', height: 9000, width: 9000 } }))
+    await nextTick()
+    expect(wrapper.get('iframe').attributes('style')).toContain('height: 448px')
+    wrapper.unmount()
   })
 
   it('blocks external embeds while allowing inline animation in the opaque sandbox', () => {

@@ -5,7 +5,7 @@ import { adminAPI } from '@/api/admin'
 import type { GrokTokenInfo } from '@/api/admin/grok'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 
-export function useGrokOAuth(api: { grok: Pick<typeof adminAPI.grok, 'generateAuthUrl' | 'exchangeCode' | 'refreshGrokToken' | 'validateSSOToken' | 'authorizePassword'> } = adminAPI) {
+export function useGrokOAuth() {
   const appStore = useAppStore()
   const { t } = useI18n()
 
@@ -34,7 +34,7 @@ export function useGrokOAuth(api: { grok: Pick<typeof adminAPI.grok, 'generateAu
       const payload: Record<string, unknown> = {}
       if (proxyId) payload.proxy_id = proxyId
 
-      const response = await api.grok.generateAuthUrl(payload)
+      const response = await adminAPI.grok.generateAuthUrl(payload)
       authUrl.value = response.auth_url
       sessionId.value = response.session_id
       state.value = response.state
@@ -71,7 +71,7 @@ export function useGrokOAuth(api: { grok: Pick<typeof adminAPI.grok, 'generateAu
       }
       if (params.proxyId) payload.proxy_id = params.proxyId
 
-      return await api.grok.exchangeCode(payload as any)
+      return await adminAPI.grok.exchangeCode(payload as any)
     } catch (err: any) {
       error.value = extractI18nErrorMessage(
         err,
@@ -99,7 +99,7 @@ export function useGrokOAuth(api: { grok: Pick<typeof adminAPI.grok, 'generateAu
     error.value = ''
 
     try {
-      return await api.grok.refreshGrokToken(refreshToken.trim(), proxyId)
+      return await adminAPI.grok.refreshGrokToken(refreshToken.trim(), proxyId)
     } catch (err: any) {
       error.value = extractI18nErrorMessage(
         err,
@@ -158,7 +158,7 @@ export function useGrokOAuth(api: { grok: Pick<typeof adminAPI.grok, 'generateAu
     loading.value = true
     error.value = ''
     try {
-      return await api.grok.validateSSOToken(ssoToken.trim(), proxyId)
+      return await adminAPI.grok.validateSSOToken(ssoToken.trim(), proxyId)
     } catch (err: any) {
       error.value = extractI18nErrorMessage(
         err,
@@ -184,7 +184,7 @@ export function useGrokOAuth(api: { grok: Pick<typeof adminAPI.grok, 'generateAu
     loading.value = true
     error.value = ''
     try {
-      return await api.grok.authorizePassword(emailAndPassword, proxyId)
+      return await adminAPI.grok.authorizePassword(emailAndPassword, proxyId)
     } catch (err: any) {
       error.value = extractI18nErrorMessage(
         err,

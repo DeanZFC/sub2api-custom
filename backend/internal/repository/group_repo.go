@@ -100,7 +100,6 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
 		SetSortOrder(groupIn.SortOrder).
-		SetIsSharedPool(groupIn.IsSharedPool).
 		SetIsExclusive(groupIn.IsExclusive).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
@@ -471,7 +470,6 @@ func (r *groupRepository) ListBindableWithFilters(ctx context.Context, params pa
 }
 
 func (r *groupRepository) listWithFiltersQuery(ctx context.Context, q *dbent.GroupQuery, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]service.Group, *pagination.PaginationResult, error) {
-
 	if platform != "" {
 		q = q.Where(group.PlatformEQ(platform))
 	}

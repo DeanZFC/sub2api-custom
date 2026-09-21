@@ -34,6 +34,7 @@ type OpenAICodexTicketDiagnostics struct {
 	LastHTTPStatus      int        `json:"last_http_status"`
 	LastLength          int        `json:"last_length"`
 	LastProxyIndex      int        `json:"last_proxy_index"`
+	LastProxySource     string     `json:"last_proxy_source,omitempty"`
 	Paused              bool       `json:"paused"`
 	PlanKnown           bool       `json:"plan_known"`
 }
@@ -43,7 +44,6 @@ type codexTicketJob struct {
 	signature [32]byte
 	accountID int64
 	model     string
-	nextProxy int
 	cancel    context.CancelFunc
 }
 type codexTicketProxyHealth struct {
@@ -55,6 +55,7 @@ type codexTicketScheduler struct {
 	mu            sync.Mutex
 	jobs          map[string]*codexTicketJob
 	proxies       map[string]*codexTicketProxyHealth
+	bindings      map[int64]*codexTicketProxyBinding
 	active        int
 	accountActive map[int64]int
 	authRefreshAt map[int64]time.Time
@@ -72,16 +73,20 @@ func codexTicketPlanKnown(account *Account) bool {
 	return strings.HasPrefix(plan, "selfservebusiness")
 }
 
-// Changing credentials, workspace, model configuration or the proxy pool releases
+// Changing credentials, workspace, model configuration or the account exit releases
 // a suspended job promptly. Frequent usage/ticket writes must not reset backoff.
-func codexTicketJobSignature(account *Account, cfg config.OpenAICodexTicketConfig, proxies []string) [32]byte {
+func codexTicketJobSignature(account *Account, cfg config.OpenAICodexTicketConfig) [32]byte {
+	route := openAICodexTicketProxyRoute(account)
 	data, _ := json.Marshal(struct {
 		Credentials map[string]any
 		Type        string
 		Models      []string
-		Proxies     []string
+		Proxy       string
+		ProxyID     *int64
+		ProxyValid  bool
+		ProxySource string
 		Target      int
-	}{account.Credentials, account.Type, cfg.Models, proxies, openAICodexTicketTargetLength(account, cfg)})
+	}{account.Credentials, account.Type, cfg.Models, route.proxy, account.ProxyID, route.valid, route.source, openAICodexTicketTargetLength(account, cfg)})
 	return sha256.Sum256(data)
 }
 
@@ -91,6 +96,9 @@ func (r *codexTicketScheduler) init() {
 	}
 	if r.proxies == nil {
 		r.proxies = make(map[string]*codexTicketProxyHealth)
+	}
+	if r.bindings == nil {
+		r.bindings = make(map[int64]*codexTicketProxyBinding)
 	}
 	if r.accountActive == nil {
 		r.accountActive = make(map[int64]int)
@@ -112,6 +120,7 @@ func (s *OpenAIGatewayService) cancelOpenAICodexTicketJobs() {
 	}
 	clear(r.authRefreshAt)
 	clear(r.telemetry)
+	clear(r.bindings)
 }
 
 type codexTicketCandidate struct {
@@ -131,7 +140,6 @@ func (s *OpenAIGatewayService) dispatchOpenAICodexTickets(ctx context.Context, a
 		return
 	}
 	cfg := s.openAICodexTicketConfig()
-	proxies := s.openAICodexTicketHarvestProxies(ctx)
 	now := time.Now()
 	activeKeys := make(map[string]bool)
 	candidates := make([]codexTicketCandidate, 0)
@@ -150,7 +158,7 @@ func (s *OpenAIGatewayService) dispatchOpenAICodexTickets(ctx context.Context, a
 			activeKeys[key] = true
 			r.mu.Lock()
 			r.init()
-			job := r.job(&account, model, cfg, proxies)
+			job := r.job(&account, model, cfg)
 			lastAttempt := time.Time{}
 			// Fair admission is based on the last actual attempt, not on a
 			// moving proxy-capacity wait. Unattempted jobs always come first.
@@ -184,9 +192,16 @@ func (s *OpenAIGatewayService) dispatchOpenAICodexTickets(ctx context.Context, a
 			delete(r.authRefreshAt, id)
 		}
 	}
+	for id := range r.bindings {
+		if !activeAccounts[id] {
+			delete(r.bindings, id)
+		}
+	}
 	configuredProxies := make(map[string]bool)
-	for _, proxy := range proxies {
-		configuredProxies[proxy] = true
+	for _, candidate := range candidates {
+		if route := openAICodexTicketProxyRoute(&candidate.account); route.valid {
+			configuredProxies[route.proxy] = true
+		}
 	}
 	for proxy, health := range r.proxies {
 		if !configuredProxies[proxy] && health.active == 0 {
@@ -199,25 +214,18 @@ func (s *OpenAIGatewayService) dispatchOpenAICodexTickets(ctx context.Context, a
 		if ctx.Err() != nil {
 			return
 		}
-		s.startOpenAICodexTicketProbe(ctx, &candidate.account, candidate.model, cfg, proxies, now, true)
+		s.startOpenAICodexTicketProbe(ctx, &candidate.account, candidate.model, cfg, now, true)
 	}
 }
 
 // r.mu must be held. A running job finishes with its original credential snapshot;
 // the next dispatch invalidates its retry state when the snapshot has changed.
-func (r *codexTicketScheduler) job(account *Account, model string, cfg config.OpenAICodexTicketConfig, proxies []string) *codexTicketJob {
+func (r *codexTicketScheduler) job(account *Account, model string, cfg config.OpenAICodexTicketConfig) *codexTicketJob {
 	key := openAICodexTicketKey(account.ID, model)
-	signature := codexTicketJobSignature(account, cfg, proxies)
+	signature := codexTicketJobSignature(account, cfg)
 	job := r.jobs[key]
 	if job == nil {
-		offset := 0
-		for i, m := range cfg.Models {
-			if strings.TrimSpace(m) == model {
-				offset = i
-				break
-			}
-		}
-		job = &codexTicketJob{accountID: account.ID, model: model, nextProxy: int(account.ID) + offset, signature: signature}
+		job = &codexTicketJob{accountID: account.ID, model: model, signature: signature}
 		r.jobs[key] = job
 	} else if job.InProgress && job.signature != signature {
 		if job.cancel != nil {
@@ -234,7 +242,7 @@ func (r *codexTicketScheduler) job(account *Account, model string, cfg config.Op
 	return job
 }
 
-func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, account *Account, model string, cfg config.OpenAICodexTicketConfig, proxies []string, now time.Time, async bool) bool {
+func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, account *Account, model string, cfg config.OpenAICodexTicketConfig, now time.Time, async bool) bool {
 	if ctx.Err() != nil || s.httpUpstream == nil || !s.openAICodexTicketAccountConfig(ctx, account).Enabled {
 		return false
 	}
@@ -242,7 +250,7 @@ func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, 
 	r := &s.openaiCodexTicketScheduler
 	r.mu.Lock()
 	r.init()
-	job := r.job(account, model, cfg, proxies)
+	job := r.job(account, model, cfg)
 	if job.InProgress {
 		r.mu.Unlock()
 		return false
@@ -262,15 +270,16 @@ func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, 
 		r.mu.Unlock()
 		return false
 	}
-	if len(proxies) == 0 {
+	route := openAICodexTicketProxyRoute(account)
+	if !route.valid {
 		next := now.Add(time.Duration(cfg.HarvestProbeIntervalSeconds) * time.Second)
-		job.LastErrorCode, job.LastError = "no_proxy", "No harvest proxy is configured"
+		job.LastErrorCode, job.LastError = "no_proxy", "The account's configured proxy is unavailable or invalid"
 		job.NextRetryAt = &next
 		r.mu.Unlock()
 		return false
 	}
-	proxy, index, next := r.acquireProxy(job, proxies, cfg.HarvestProxyConcurrency, now)
-	if proxy == "" {
+	selection, next, admitted := r.acquireProxy(job, route, cfg.HarvestProxyConcurrency, now)
+	if !admitted {
 		job.NextRetryAt = &next
 		// Keep the last actual failure visible while its proxy is cooling down.
 		if job.LastErrorCode == "" || job.LastErrorCode == "no_proxy" || job.LastErrorCode == "proxy_cooldown" {
@@ -283,7 +292,7 @@ func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, 
 	job.InProgress, job.Paused, job.cancel = true, false, cancel
 	job.Attempts++
 	job.LastAttemptAt, job.NextRetryAt = &now, nil
-	job.LastProxyIndex = index
+	job.LastProxyIndex, job.LastProxySource = 0, selection.source
 	r.active++
 	r.accountActive[account.ID]++
 	r.workers.Add(1)
@@ -293,7 +302,7 @@ func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, 
 	run := func() {
 		defer r.workers.Done()
 		defer cancel()
-		s.runOpenAICodexTicketProbe(attemptCtx, &acc, model, proxy, job, cfg)
+		s.runOpenAICodexTicketProbe(attemptCtx, &acc, model, selection, job, cfg)
 	}
 	if async {
 		go run()
@@ -303,41 +312,9 @@ func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, 
 	return true
 }
 
-// Proxy health is shared across accounts; a ticket-length mismatch never marks
-// an exit unhealthy. Account/model offset and round-robin retain fair exploration.
-func (r *codexTicketScheduler) acquireProxy(job *codexTicketJob, proxies []string, limit int, now time.Time) (string, int, time.Time) {
-	var earliest time.Time
-	for offset := 0; offset < len(proxies); offset++ {
-		index := (job.nextProxy + offset) % len(proxies)
-		proxy := proxies[index]
-		health := r.proxies[proxy]
-		if health == nil {
-			health = &codexTicketProxyHealth{}
-			r.proxies[proxy] = health
-		}
-		availableAt := health.cooldown
-		if health.active >= limit && availableAt.Before(now.Add(time.Second)) {
-			availableAt = now.Add(time.Second)
-		}
-		if availableAt.After(now) {
-			if earliest.IsZero() || availableAt.Before(earliest) {
-				earliest = availableAt
-			}
-			continue
-		}
-		health.active++
-		job.nextProxy = index + 1
-		return proxy, index + 1, time.Time{}
-	}
-	if earliest.IsZero() {
-		earliest = now.Add(time.Second)
-	}
-	return "", 0, earliest
-}
-
-func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, account *Account, model, proxy string, job *codexTicketJob, cfg config.OpenAICodexTicketConfig) {
+func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, account *Account, model string, selection codexTicketProxySelection, job *codexTicketJob, cfg config.OpenAICodexTicketConfig) {
 	started := time.Now()
-	proxyIndex, attempts := job.LastProxyIndex, job.Attempts
+	proxy, proxyIndex, attempts := selection.proxy, 0, job.Attempts
 	var result *openAICodexTicketProbeError
 	var state string
 	status := 0
@@ -370,6 +347,11 @@ func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, ac
 			result.ProxyFailure = false
 		}
 	}
+	// Receiving HTTP headers proves connectivity. A later timeout must not
+	// penalize the account exit merely because the upstream response was slow.
+	if result != nil && status > 0 && status != http.StatusProxyAuthRequired {
+		result.ProxyFailure = false
+	}
 	now := time.Now()
 	if result == nil {
 		ticket := &openAICodexTicket{AccountID: account.ID, Model: model, State: state, Length: len(state), CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second), Attempts: attempts}
@@ -396,7 +378,7 @@ func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, ac
 	job.LastHTTPStatus, job.LastLength = status, len(state)
 	// Removed/disabled jobs must not recreate telemetry after cancellation.
 	if r.jobs[openAICodexTicketKey(account.ID, model)] == job {
-		r.recordProbeEvent(account.ID, model, result, status, len(state), target, proxyIndex, started, now)
+		r.recordProbeEvent(account.ID, model, result, status, len(state), target, proxyIndex, selection.source, started, now)
 	}
 	if result == nil {
 		job.ConsecutiveFailures = 0
@@ -419,9 +401,9 @@ func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, ac
 	}
 	r.mu.Unlock()
 	if result == nil {
-		logger.L().Info("openai_codex_ticket harvested", zap.Int64("account_id", account.ID), zap.String("model", model), zap.Int("harvest_proxy_index", proxyIndex), zap.Int("length", len(state)))
+		logger.L().Info("openai_codex_ticket harvested", zap.Int64("account_id", account.ID), zap.String("model", model), zap.String("harvest_proxy_source", selection.source), zap.Int("harvest_proxy_index", proxyIndex), zap.Int("length", len(state)))
 	} else if result.Code != "canceled" {
-		logger.L().Info("openai_codex_ticket probe miss", zap.Int64("account_id", account.ID), zap.String("model", model), zap.Int("harvest_proxy_index", proxyIndex), zap.String("reason", result.Code), zap.Int("http", status), zap.Int("len", len(state)), zap.Int("target_length", target))
+		logger.L().Info("openai_codex_ticket probe miss", zap.Int64("account_id", account.ID), zap.String("model", model), zap.String("harvest_proxy_source", selection.source), zap.Int("harvest_proxy_index", proxyIndex), zap.String("reason", result.Code), zap.Int("http", status), zap.Int("len", len(state)), zap.Int("target_length", target))
 	}
 }
 

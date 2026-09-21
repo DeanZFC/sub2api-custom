@@ -72,7 +72,7 @@ func activeTicketAccounts(ids ...int64) []Account {
 }
 func TestCodexTicketSchedulerSlowAccountDoesNotDelayAnotherRetry(t *testing.T) {
 	upstream := &ticketScheduledUpstream{requests: make(chan ticketScheduledRequest, 10)}
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://pool.example:80", Models: []string{"gpt-6-astra"}}, upstream)
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, Models: []string{"gpt-6-astra"}}, upstream)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() { cancel(); svc.openaiCodexTicketScheduler.workers.Wait() }()
 	accounts := activeTicketAccounts(1, 2)
@@ -93,10 +93,15 @@ func TestCodexTicketSchedulerSlowAccountDoesNotDelayAnotherRetry(t *testing.T) {
 }
 func TestCodexTicketSchedulerRespectsAllThreeLimitsAndDoesNotOverlapKeys(t *testing.T) {
 	upstream := &ticketScheduledUpstream{requests: make(chan ticketScheduledRequest, 10)}
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://a.example:80\nhttp://b.example:80", HarvestMaxConcurrent: 2, HarvestProxyConcurrency: 1, HarvestAccountConcurrency: 1}, upstream)
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestMaxConcurrent: 2, HarvestProxyConcurrency: 1, HarvestAccountConcurrency: 1}, upstream)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() { cancel(); svc.openaiCodexTicketScheduler.workers.Wait() }()
 	accounts := activeTicketAccounts(1, 2, 3, 4)
+	for i := range accounts {
+		id := int64(i%2 + 1)
+		accounts[i].ProxyID = &id
+		accounts[i].Proxy = &Proxy{ID: id, Protocol: "http", Host: fmt.Sprintf("proxy%d.example", id), Port: 80}
+	}
 	svc.dispatchOpenAICodexTickets(ctx, accounts)
 	a, b := nextTicketRequest(t, upstream), nextTicketRequest(t, upstream)
 	require.NotEqual(t, a.id, b.id)
@@ -127,8 +132,11 @@ func TestCodexTicketSchedulerFailureBackoffAndConfigurationRecovery(t *testing.T
 		count++
 		return &http.Response{StatusCode: 400, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"model_not_found","message":"sensitive upstream information"}}`))}, nil
 	}}
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://user:password@pool.example:80"}, upstream)
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, upstream)
 	account := activeTicketAccounts(1)[0]
+	proxyID := int64(9)
+	account.ProxyID = &proxyID
+	account.Proxy = &Proxy{ID: proxyID, Protocol: "http", Host: "account.example", Port: 80, Username: "user", Password: "password"}
 	svc.probeOnceOpenAICodexTicket(context.Background(), &account, "gpt-6-astra")
 	statuses := OpenAICodexTicketStatuses(&account, svc.openAICodexTicketConfig(), time.Now())
 	svc.EnrichOpenAICodexTicketDiagnostics(&account, statuses)
@@ -139,7 +147,7 @@ func TestCodexTicketSchedulerFailureBackoffAndConfigurationRecovery(t *testing.T
 	require.WithinDuration(t, time.Now().Add(30*time.Minute), *status.NextRetryAt, 2*time.Second)
 	payload, err := json.Marshal(statuses)
 	require.NoError(t, err)
-	for _, secret := range []string{"sensitive upstream information", "password", "tok", "pool.example"} {
+	for _, secret := range []string{"sensitive upstream information", "password", "tok", "account.example"} {
 		require.NotContains(t, string(payload), secret)
 	}
 	svc.probeOnceOpenAICodexTicket(context.Background(), &account, "gpt-6-astra")
@@ -149,31 +157,12 @@ func TestCodexTicketSchedulerFailureBackoffAndConfigurationRecovery(t *testing.T
 	require.Equal(t, 2, count, "updating credentials should release the stale pause")
 }
 func TestCodexTicketSchedulerProxyCooldownDoesNotPenalizeLengthMismatch(t *testing.T) {
-	now := time.Now()
-	r := &codexTicketScheduler{}
-	r.init()
-	proxies := []string{"http://a.example:80", "http://b.example:80"}
-	r.proxies[proxies[0]] = &codexTicketProxyHealth{failures: 1, cooldown: now.Add(time.Minute)}
-	job := &codexTicketJob{nextProxy: 0}
-	proxy, index, _ := r.acquireProxy(job, proxies, 1, now)
-	require.Equal(t, proxies[1], proxy)
-	require.Equal(t, 2, index)
-	proxy, _, retry := r.acquireProxy(&codexTicketJob{}, proxies, 1, now)
-	require.Empty(t, proxy)
-	require.Equal(t, now.Add(time.Second), retry)
-	r.proxies[proxies[1]].active = 0
-	r.proxies[proxies[1]].cooldown = now.Add(2 * time.Minute)
-	_, _, retry = r.acquireProxy(&codexTicketJob{}, proxies, 1, now)
-	require.Equal(t, now.Add(time.Minute), retry)
-	proxy, _, _ = r.acquireProxy(&codexTicketJob{}, proxies, 1, now.Add(time.Minute))
-	require.Equal(t, proxies[0], proxy, "expired cooldown must restore exploration")
-
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: proxies[0]}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: http.NoBody}, nil
 	}})
 	account := activeTicketAccounts(1)[0]
 	svc.probeOnceOpenAICodexTicket(context.Background(), &account, "gpt-6-astra")
-	health := svc.openaiCodexTicketScheduler.proxies[proxies[0]]
+	health := svc.openaiCodexTicketScheduler.proxies[""]
 	require.Zero(t, health.failures)
 	require.True(t, health.cooldown.IsZero())
 	statuses := OpenAICodexTicketStatuses(&account, svc.openAICodexTicketConfig(), time.Now())
@@ -194,7 +183,7 @@ func TestCodexTicketSchedulerRateLimitAndNetworkFailures(t *testing.T) {
 		{name: "network", code: "network", err: errors.New("connect to http://user:secret@proxy.example failed"), minimum: 6 * time.Second, proxyBad: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://pool.example:80"}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+			svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
 				if test.err != nil {
 					return nil, test.err
 				}
@@ -207,13 +196,13 @@ func TestCodexTicketSchedulerRateLimitAndNetworkFailures(t *testing.T) {
 			svc.EnrichOpenAICodexTicketDiagnostics(&account, statuses)
 			require.Equal(t, test.code, statuses[0].LastErrorCode)
 			require.False(t, statuses[0].NextRetryAt.Before(before.Add(test.minimum)))
-			require.Equal(t, test.proxyBad, !svc.openaiCodexTicketScheduler.proxies["http://pool.example:80"].cooldown.IsZero())
+			require.Equal(t, test.proxyBad, !svc.openaiCodexTicketScheduler.proxies[""].cooldown.IsZero())
 		})
 	}
 }
 func TestCodexTicketSchedulerOffCancelsInflightAndClearsDiagnostics(t *testing.T) {
 	upstream := &ticketScheduledUpstream{requests: make(chan ticketScheduledRequest, 10)}
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://pool.example:80"}, upstream)
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, upstream)
 	accounts := activeTicketAccounts(1)
 	svc.dispatchOpenAICodexTickets(context.Background(), accounts)
 	_ = nextTicketRequest(t, upstream)
@@ -233,6 +222,8 @@ func TestCodexTicketSchedulerOffCancelsInflightAndClearsDiagnostics(t *testing.T
 func TestCodexTicketSchedulerMissingPlanVisibleAndNoProxyDoesNotCountAttempt(t *testing.T) {
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, &httpUpstreamRecorder{})
 	account := ticketTestAccount(1)
+	id := int64(9)
+	account.ProxyID = &id // A configured proxy whose relation is missing cannot become direct.
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	statuses := OpenAICodexTicketStatuses(account, svc.openAICodexTicketConfig(), time.Now())
 	svc.EnrichOpenAICodexTicketDiagnostics(account, statuses)
@@ -256,9 +247,9 @@ func TestCodexTicketScheduler401RefreshUsesCoordinatorAndRateLimit(t *testing.T)
 	require.Equal(t, 1, executor.refreshCalls)
 }
 
-func TestCodexTicketSchedulerSmallProxyPoolDoesNotStarveLaterAccounts(t *testing.T) {
+func TestCodexTicketSchedulerSharedAccountExitDoesNotStarveLaterAccounts(t *testing.T) {
 	upstream := &ticketScheduledUpstream{requests: make(chan ticketScheduledRequest, 100)}
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://pool.example:80", HarvestMaxConcurrent: 8, HarvestProxyConcurrency: 2, Models: []string{"gpt-6-astra"}}, upstream)
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestMaxConcurrent: 8, HarvestProxyConcurrency: 2, Models: []string{"gpt-6-astra"}}, upstream)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() { cancel(); svc.openaiCodexTicketScheduler.workers.Wait() }()
 	var ids []int64
@@ -306,7 +297,7 @@ func TestCodexTicketSchedulerRefreshClearsConcurrentStaleCacheRefill(t *testing.
 
 func TestCodexTicketSchedulerReadFailurePreservesRetryAfter(t *testing.T) {
 	account := activeTicketAccounts(1)[0]
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://pool.example:80"}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"600"}}, Body: http.NoBody}, nil
 	}})
 	svc.probeOnceOpenAICodexTicket(context.Background(), &account, "gpt-6-astra")
@@ -320,7 +311,7 @@ func TestCodexTicketSchedulerReadFailurePreservesRetryAfter(t *testing.T) {
 }
 
 func TestCodexTicketSchedulerCoolingProxyKeepsLastFailureVisible(t *testing.T) {
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://pool.example:80"}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) { return nil, errors.New("connection refused") }})
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) { return nil, errors.New("connection refused") }})
 	account := activeTicketAccounts(1)[0]
 	svc.probeOnceOpenAICodexTicket(context.Background(), &account, "gpt-6-astra")
 	dueTicketJobs(svc)

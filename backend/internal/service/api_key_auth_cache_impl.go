@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 25 // v25: official model_allowlist semantics with custom fallback billing and concurrency fields
+const apiKeyAuthSnapshotVersion = 26 // v26: reload authorization after legacy shared-pool keys are retired.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -341,7 +341,6 @@ func apiKeyAuthGroupSnapshotFromGroup(group *Group) *APIKeyAuthGroupSnapshot {
 		Description:                     group.Description,
 		Platform:                        group.Platform,
 		IsExclusive:                     group.IsExclusive,
-		IsSharedPool:                    group.IsSharedPool,
 		Status:                          group.Status,
 		SubscriptionType:                group.SubscriptionType,
 		RateMultiplier:                  group.RateMultiplier,
@@ -413,7 +412,6 @@ func apiKeyAuthGroupFromSnapshot(snapshot *APIKeyAuthGroupSnapshot) *Group {
 		Description:                     snapshot.Description,
 		Platform:                        snapshot.Platform,
 		IsExclusive:                     snapshot.IsExclusive,
-		IsSharedPool:                    snapshot.IsSharedPool,
 		Status:                          snapshot.Status,
 		Hydrated:                        true,
 		SubscriptionType:                snapshot.SubscriptionType,
@@ -530,7 +528,6 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			Description:                     apiKey.Group.Description,
 			Platform:                        apiKey.Group.Platform,
 			IsExclusive:                     apiKey.Group.IsExclusive,
-			IsSharedPool:                    apiKey.Group.IsSharedPool,
 			Status:                          apiKey.Group.Status,
 			SubscriptionType:                apiKey.Group.SubscriptionType,
 			RateMultiplier:                  apiKey.Group.RateMultiplier,
@@ -648,7 +645,6 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			Description:                     snapshot.Group.Description,
 			Platform:                        snapshot.Group.Platform,
 			IsExclusive:                     snapshot.Group.IsExclusive,
-			IsSharedPool:                    snapshot.Group.IsSharedPool,
 			Status:                          snapshot.Group.Status,
 			Hydrated:                        true,
 			SubscriptionType:                snapshot.Group.SubscriptionType,

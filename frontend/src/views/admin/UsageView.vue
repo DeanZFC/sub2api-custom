@@ -1,13 +1,9 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <div v-if="filters.shared_only" class="flex items-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-700 dark:border-primary-800 dark:bg-primary-900/20 dark:text-primary-300">
-        <Icon name="users" size="sm" />
-        <span>当前仅显示共享账号池请求记录</span>
-      </div>
       <UsageStatsCards :stats="usageStats" />
       <!-- Charts Section -->
-      <div v-if="!filters.shared_only" class="space-y-4">
+      <div class="space-y-4">
         <div class="card p-4">
           <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2">
@@ -321,19 +317,10 @@ const getNumericQueryValue = (value: string | null | Array<string | null> | unde
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
-const getBooleanQueryValue = (value: string | null | Array<string | null> | undefined): boolean | undefined => {
-  const raw = getSingleQueryValue(value)
-  if (!raw) return undefined
-  if (['1', 'true', 'yes', 'on'].includes(raw.toLowerCase())) return true
-  if (['0', 'false', 'no', 'off'].includes(raw.toLowerCase())) return false
-  return undefined
-}
-
 const applyRouteQueryFilters = () => {
   const queryStartDate = getSingleQueryValue(route.query.start_date)
   const queryEndDate = getSingleQueryValue(route.query.end_date)
   const queryUserId = getNumericQueryValue(route.query.user_id)
-  const querySharedOnly = getBooleanQueryValue(route.query.shared_only)
 
   if (queryStartDate) {
     startDate.value = queryStartDate
@@ -345,7 +332,6 @@ const applyRouteQueryFilters = () => {
   filters.value = {
     ...filters.value,
     user_id: queryUserId,
-    shared_only: querySharedOnly,
     start_date: startDate.value,
     end_date: endDate.value
   }
@@ -536,12 +522,6 @@ const applyFilters = () => {
   invalidateModelStatsCache()
   loadLogs()
   loadStats()
-  if (filters.value.shared_only) {
-    errPage.value = 1
-    if (activeTab.value === 'errors') loadAdminErrors()
-    else errRows.value = []
-    return
-  }
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
   errPage.value = 1
@@ -555,7 +535,6 @@ const refreshData = () => {
   invalidateModelStatsCache()
   loadLogs()
   loadStats(true)
-  if (filters.value.shared_only) return
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
   if (activeTab.value === 'errors') loadAdminErrors()
@@ -565,7 +544,7 @@ const resetFilters = () => {
   const range = getLast24HoursRangeDates()
   startDate.value = range.start
   endDate.value = range.end
-  filters.value = { start_date: startDate.value, end_date: endDate.value, request_type: undefined, native_compaction_v2: null, billing_type: null, billing_mode: undefined, shared_only: filters.value.shared_only }
+  filters.value = { start_date: startDate.value, end_date: endDate.value, request_type: undefined, native_compaction_v2: null, billing_type: null, billing_mode: undefined }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()
 }
@@ -890,12 +869,10 @@ onMounted(() => {
   void loadRouteUserFilterLabel()
   loadLogs()
   loadStats()
-  if (!filters.value.shared_only) {
-    loadModelStats(modelDistributionSource.value, true)
-    window.setTimeout(() => {
-      void loadChartData()
-    }, 120)
-  }
+  loadModelStats(modelDistributionSource.value, true)
+  window.setTimeout(() => {
+    void loadChartData()
+  }, 120)
   loadSavedColumns()
   loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)

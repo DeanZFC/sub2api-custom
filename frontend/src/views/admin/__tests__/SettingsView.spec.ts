@@ -11,7 +11,6 @@ import SettingsView from "../SettingsView.vue";
 const {
   getSettings,
   updateSettings,
-  testCodexTicketProxy,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
   getAdminApiKey,
@@ -40,7 +39,6 @@ const {
 } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
-  testCodexTicketProxy: vi.fn(),
   getWebSearchEmulationConfig: vi.fn(),
   updateWebSearchEmulationConfig: vi.fn(),
   getAdminApiKey: vi.fn(),
@@ -88,7 +86,6 @@ vi.mock("@/api", () => ({
     settings: {
       getSettings,
       updateSettings,
-      testCodexTicketProxy,
       getWebSearchEmulationConfig,
       updateWebSearchEmulationConfig,
       getAdminApiKey,
@@ -641,7 +638,6 @@ describe("admin SettingsView payment visible method controls", () => {
   beforeEach(() => {
     getSettings.mockReset();
     updateSettings.mockReset();
-    testCodexTicketProxy.mockReset().mockResolvedValue({ proxy_index: 1, success: true, exit_ip: "198.51.100.1", latency_ms: 50 });
     getWebSearchEmulationConfig.mockReset();
     updateWebSearchEmulationConfig.mockReset();
     getAdminApiKey.mockReset();
@@ -732,71 +728,31 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
-  it("loads and saves the multiline gateway harvest pool with masked rows preserved", async () => {
-    const storedPool = "http://user:***@old.example.com:8080\nsocks5h://user:***@other.example.com:1080";
+  it.each([true, false])("keeps the ticket master switch while removing proxy pool controls and payload (enabled=%s)", async (enabled) => {
+    // An older backend may still return these retired fields; saving settings
+    // must not send them back or expose a pool/test control.
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      openai_codex_ticket_enabled: true,
-      openai_codex_ticket_harvest_proxy_url: storedPool,
-      openai_codex_ticket_harvest_proxy_configured: true,
-    });
-    const wrapper = mountView();
-    await flushPromises();
-    await openGatewayTab(wrapper);
-    expect(wrapper.find("#codex-ticket-enabled").exists()).toBe(true);
-    const input = wrapper.get<HTMLTextAreaElement>("#codex-ticket-harvest-proxy");
-    expect(input.element.tagName).toBe("TEXTAREA");
-    expect(input.element.value).toBe(storedPool);
-    const editedPool = storedPool + "\nhttp://new:password@third.example.com:8080";
-    await input.setValue(editedPool);
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
-      openai_codex_ticket_enabled: true,
-      openai_codex_ticket_harvest_proxy_url: editedPool,
-    });
-    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_configured");
-    wrapper.unmount();
-  });
-
-  it("submits an explicit empty pool when all harvest proxy lines are removed", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      openai_codex_ticket_enabled: true,
+      openai_codex_ticket_enabled: !enabled,
+      openai_codex_ticket_harvest_proxy_mode: "pool",
       openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080",
+      openai_codex_ticket_harvest_proxy_configured: true,
+      openai_codex_ticket_harvest_proxy_count: 1,
     });
     const wrapper = mountView();
     await flushPromises();
     await openGatewayTab(wrapper);
-    await wrapper.get("#codex-ticket-harvest-proxy").setValue("");
+    await wrapper.get("#codex-ticket-enabled").setValue(enabled);
+    expect(wrapper.find("#codex-ticket-proxy-mode").exists()).toBe(false);
+    expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="codex-ticket-proxy-test"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="codex-ticket-account-route-hint"]').text())
+      .toContain("codexTicketAccountRouteHint");
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0]?.openai_codex_ticket_harvest_proxy_url).toBe("");
-    wrapper.unmount();
-  });
-
-  it("tests only saved proxy indices and updates the test snapshot after saving", async () => {
-    const storedPool = "http://user:***@old.example.com:8080";
-    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_codex_ticket_harvest_proxy_url: storedPool, openai_codex_ticket_harvest_proxy_count: 1 });
-    const wrapper = mountView();
-    await flushPromises();
-    await openGatewayTab(wrapper);
-    const button = wrapper.get('[data-testid="codex-ticket-test-exit"]');
-    expect(button.attributes("disabled")).toBeUndefined();
-    await button.trigger("click");
-    await flushPromises();
-    expect(testCodexTicketProxy).toHaveBeenCalledWith(1, expect.any(AbortSignal));
-    const changedPool = storedPool + "\nhttp://new:password@new.example.com:8080";
-    await wrapper.get("#codex-ticket-harvest-proxy").setValue(changedPool);
-    expect(button.attributes("disabled")).toBeDefined();
-    expect(wrapper.text()).toContain("codexTicketProxyTest.saveFirst");
-    const savedPool = storedPool + "\nhttp://new:***@new.example.com:8080";
-    updateSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_codex_ticket_harvest_proxy_url: savedPool, openai_codex_ticket_harvest_proxy_count: 2 });
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(wrapper.get<HTMLTextAreaElement>("#codex-ticket-harvest-proxy").element.value).toBe(savedPool);
-    expect(button.attributes("disabled")).toBeUndefined();
-    expect(wrapper.findAll("#codex-ticket-proxy-index option")).toHaveLength(2);
+    const payload = updateSettings.mock.calls[0]?.[0];
+    expect(payload?.openai_codex_ticket_enabled).toBe(enabled);
+    expect(Object.keys(payload ?? {}).some((key) => key.startsWith("openai_codex_ticket_harvest_proxy_"))).toBe(false);
     wrapper.unmount();
   });
 

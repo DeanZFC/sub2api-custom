@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // --- Plan Repository ---
@@ -24,16 +25,16 @@ func (r *scheduledTestPlanRepository) Create(ctx context.Context, plan *service.
 		return nil, err
 	}
 	row := r.db.QueryRowContext(ctx, `
-		INSERT INTO scheduled_test_plans (name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, next_run_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
-		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at
-	`, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt)
+		INSERT INTO scheduled_test_plans (name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, next_run_at, test_definition_ids, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15::bigint[], '{}'), NOW(), NOW())
+		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
+	`, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt, pq.Array(plan.TestDefinitionIDs))
 	return scanPlan(row)
 }
 
 func (r *scheduledTestPlanRepository) GetByID(ctx context.Context, id int64) (*service.ScheduledTestPlan, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at
+		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
 		FROM scheduled_test_plans WHERE id = $1
 	`, id)
 	return scanPlan(row)
@@ -41,7 +42,7 @@ func (r *scheduledTestPlanRepository) GetByID(ctx context.Context, id int64) (*s
 
 func (r *scheduledTestPlanRepository) ListByAccountID(ctx context.Context, accountID int64) ([]*service.ScheduledTestPlan, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at
+		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
 		FROM scheduled_test_plans WHERE account_id = $1
 		ORDER BY created_at DESC
 	`, accountID)
@@ -54,7 +55,7 @@ func (r *scheduledTestPlanRepository) ListByAccountID(ctx context.Context, accou
 
 func (r *scheduledTestPlanRepository) ListDue(ctx context.Context, now time.Time) ([]*service.ScheduledTestPlan, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at
+		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
 		FROM scheduled_test_plans
 		WHERE enabled = true AND next_run_at <= $1
 		ORDER BY next_run_at ASC
@@ -72,10 +73,10 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	}
 	row := r.db.QueryRowContext(ctx, `
 		UPDATE scheduled_test_plans
-		SET name = $2, sort_order = $3, account_id = $4, group_id = $5, test_definition_id = $6, test_type = $7, target_mode = $8, model_id = $9, reasoning_effort = $10, cron_expression = $11, enabled = $12, max_results = $13, auto_recover = $14, next_run_at = $15, updated_at = NOW()
+		SET name = $2, sort_order = $3, account_id = $4, group_id = $5, test_definition_id = $6, test_type = $7, target_mode = $8, model_id = $9, reasoning_effort = $10, cron_expression = $11, enabled = $12, max_results = $13, auto_recover = $14, next_run_at = $15, test_definition_ids = COALESCE($16::bigint[], '{}'), updated_at = NOW()
 		WHERE id = $1
-		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at
-	`, plan.ID, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt)
+		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
+	`, plan.ID, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt, pq.Array(plan.TestDefinitionIDs))
 	return scanPlan(row)
 }
 
@@ -129,7 +130,7 @@ func (r *scheduledTestPlanRepository) UpdateAfterRun(ctx context.Context, id int
 }
 
 func (r *scheduledTestPlanRepository) List(ctx context.Context) ([]*service.ScheduledTestPlan, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at FROM scheduled_test_plans ORDER BY created_at DESC`)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids FROM scheduled_test_plans ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -150,13 +151,13 @@ func NewScheduledTestResultRepository(db *sql.DB) service.ScheduledTestResultRep
 func (r *scheduledTestResultRepository) GetByID(ctx context.Context, id int64) (*service.ScheduledTestResult, error) {
 	out := &service.ScheduledTestResult{}
 	err := r.db.QueryRowContext(ctx, `
-		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), COALESCE(p.sort_order, 2147483647), p.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at
+		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), COALESCE(p.sort_order, 2147483647), r.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at, r.test_definition_id
 		FROM scheduled_test_results r
 		JOIN scheduled_test_plans p ON p.id = r.plan_id
-		LEFT JOIN scheduled_test_definitions d ON d.id = p.test_definition_id
+		LEFT JOIN scheduled_test_definitions d ON d.id = r.test_definition_id
 		LEFT JOIN groups g ON g.id = r.group_id
 		WHERE r.id = $1
-	`, id).Scan(&out.ID, &out.PlanID, &out.PlanName, &out.TestName, &out.TestOrder, &out.GroupName, &out.PlanOrder, &out.TargetMode, &out.Status, &out.ResponseText, &out.OutputKind, &out.OutputHTML, &out.OutputNumeric, &out.AccountID, &out.ModelID, &out.ReasoningEffort, &out.GroupID, &out.ErrorMessage, &out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt)
+	`, id).Scan(&out.ID, &out.PlanID, &out.PlanName, &out.TestName, &out.TestOrder, &out.GroupName, &out.PlanOrder, &out.TargetMode, &out.Status, &out.ResponseText, &out.OutputKind, &out.OutputHTML, &out.OutputNumeric, &out.AccountID, &out.ModelID, &out.ReasoningEffort, &out.GroupID, &out.ErrorMessage, &out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt, &out.TestDefinitionID)
 	if err != nil {
 		return nil, err
 	}
@@ -204,8 +205,8 @@ func (r *scheduledTestDefinitionRepository) Update(ctx context.Context, d *servi
 func (r *scheduledTestDefinitionRepository) Delete(ctx context.Context, id int64) error {
 	result, e := r.db.ExecContext(ctx, `DELETE FROM scheduled_test_definitions
 		WHERE id=$1 AND NOT EXISTS (
-			SELECT 1 FROM scheduled_test_plans WHERE test_definition_id=$1
-		)`, id)
+			SELECT 1 FROM scheduled_test_plans WHERE test_definition_id=$1 OR $1=ANY(test_definition_ids)
+		) AND NOT EXISTS (SELECT 1 FROM scheduled_test_results WHERE test_definition_id=$1)`, id)
 	if e != nil {
 		return e
 	}
@@ -215,7 +216,7 @@ func (r *scheduledTestDefinitionRepository) Delete(ctx context.Context, id int64
 			return err
 		}
 		if exists {
-			return fmt.Errorf("test definition is used by a scheduled test plan; disable it instead")
+			return fmt.Errorf("test definition is used by a scheduled test plan or result; disable it instead")
 		}
 	}
 	return nil
@@ -228,15 +229,15 @@ func (r *scheduledTestDefinitionRepository) scan(row scannable) (*service.Schedu
 
 func (r *scheduledTestResultRepository) Create(ctx context.Context, result *service.ScheduledTestResult) (*service.ScheduledTestResult, error) {
 	row := r.db.QueryRowContext(ctx, `
-		INSERT INTO scheduled_test_results (plan_id, status, response_text, output_kind, output_html, output_numeric, account_id, model_id, reasoning_effort, group_id, error_message, latency_ms, started_at, finished_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-		RETURNING id, plan_id, status, response_text, output_kind, output_html, output_numeric, account_id, model_id, reasoning_effort, group_id, error_message, latency_ms, started_at, finished_at, created_at
-	`, result.PlanID, result.Status, result.ResponseText, result.OutputKind, result.OutputHTML, result.OutputNumeric, result.AccountID, result.ModelID, result.ReasoningEffort, result.GroupID, result.ErrorMessage, result.LatencyMs, result.StartedAt, result.FinishedAt)
+		INSERT INTO scheduled_test_results (plan_id, status, response_text, output_kind, output_html, output_numeric, account_id, model_id, reasoning_effort, group_id, error_message, latency_ms, started_at, finished_at, test_definition_id, target_mode, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+		RETURNING id, plan_id, status, response_text, output_kind, output_html, output_numeric, account_id, model_id, reasoning_effort, group_id, error_message, latency_ms, started_at, finished_at, created_at, test_definition_id, target_mode
+	`, result.PlanID, result.Status, result.ResponseText, result.OutputKind, result.OutputHTML, result.OutputNumeric, result.AccountID, result.ModelID, result.ReasoningEffort, result.GroupID, result.ErrorMessage, result.LatencyMs, result.StartedAt, result.FinishedAt, result.TestDefinitionID, result.TargetMode)
 
 	out := &service.ScheduledTestResult{}
 	if err := row.Scan(
 		&out.ID, &out.PlanID, &out.Status, &out.ResponseText, &out.OutputKind, &out.OutputHTML, &out.OutputNumeric, &out.AccountID, &out.ModelID, &out.ReasoningEffort, &out.GroupID, &out.ErrorMessage,
-		&out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt,
+		&out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt, &out.TestDefinitionID, &out.TargetMode,
 	); err != nil {
 		return nil, err
 	}
@@ -289,7 +290,8 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 		    output_numeric = NULL, model_id = $3, reasoning_effort = $4, group_id = $5,
 		    error_message = '', latency_ms = 0, started_at = $6, finished_at = $7
 		WHERE id = $1 AND plan_id = $8 AND account_id = $9 AND status = 'failed'
-	`, result.ID, result.OutputKind, result.ModelID, result.ReasoningEffort, result.GroupID, result.StartedAt, result.FinishedAt, result.PlanID, *result.AccountID)
+		  AND test_definition_id IS NOT DISTINCT FROM $10 AND target_mode = $11
+	`, result.ID, result.OutputKind, result.ModelID, result.ReasoningEffort, result.GroupID, result.StartedAt, result.FinishedAt, result.PlanID, *result.AccountID, result.TestDefinitionID, result.TargetMode)
 	if err != nil {
 		return err
 	}
@@ -307,10 +309,10 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 // its original ID/created_at while refreshing started_at.
 func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID int64, limit int) ([]*service.ScheduledTestResult, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), COALESCE(p.sort_order, 2147483647), p.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at
+		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), COALESCE(p.sort_order, 2147483647), r.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at, r.test_definition_id
 		FROM scheduled_test_results r
 		JOIN scheduled_test_plans p ON p.id = r.plan_id
-		LEFT JOIN scheduled_test_definitions d ON d.id = p.test_definition_id
+		LEFT JOIN scheduled_test_definitions d ON d.id = r.test_definition_id
 		LEFT JOIN groups g ON g.id = r.group_id
 		WHERE plan_id = $1
 		ORDER BY r.started_at DESC, r.id DESC
@@ -326,7 +328,7 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 		r := &service.ScheduledTestResult{}
 		if err := rows.Scan(
 			&r.ID, &r.PlanID, &r.PlanName, &r.TestName, &r.TestOrder, &r.GroupName, &r.PlanOrder, &r.TargetMode, &r.Status, &r.ResponseText, &r.OutputKind, &r.OutputHTML, &r.OutputNumeric, &r.AccountID, &r.ModelID, &r.ReasoningEffort, &r.GroupID, &r.ErrorMessage,
-			&r.LatencyMs, &r.StartedAt, &r.FinishedAt, &r.CreatedAt,
+			&r.LatencyMs, &r.StartedAt, &r.FinishedAt, &r.CreatedAt, &r.TestDefinitionID,
 		); err != nil {
 			return nil, err
 		}
@@ -336,22 +338,22 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 }
 
 func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID int64, limit int) ([]*service.ScheduledTestResult, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 50
+	if limit <= 0 || limit > 4 {
+		limit = 4
 	}
 	// Group plans carry p.group_id directly. Legacy account plans carry the
 	// tested account and resolve its account_groups bindings. An ungrouped
 	// account plan is private until it is attached to an entitled group.
 	rows, err := r.db.QueryContext(ctx, `WITH visible_results AS (
-    SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,COALESCE(g.name, '') AS group_name,COALESCE(p.sort_order, 2147483647) AS plan_order,p.target_mode,r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,
-           CASE WHEN COALESCE(p.target_mode, '') IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END AS visible_account_id,
-           r.model_id,r.reasoning_effort,r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,
-           CASE WHEN COALESCE(p.target_mode, '') IN ('account', 'all_accounts')
+    SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,COALESCE(g.name, '') AS group_name,COALESCE(p.sort_order, 2147483647) AS plan_order,r.target_mode,r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,
+           CASE WHEN r.target_mode IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END AS visible_account_id,
+           r.model_id,r.reasoning_effort,r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,
+           CASE WHEN r.target_mode IN ('account', 'all_accounts')
                 THEN COALESCE(r.account_id::text, '')
                 ELSE 'group'
            END AS result_target_key
     FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
-    LEFT JOIN scheduled_test_definitions d ON d.id=p.test_definition_id
+    LEFT JOIN scheduled_test_definitions d ON d.id=r.test_definition_id
     LEFT JOIN groups g ON g.id=r.group_id
     WHERE EXISTS (
         SELECT 1
@@ -365,7 +367,6 @@ func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID 
             WHERE g.status = 'active'
               AND g.deleted_at IS NULL
               AND g.is_exclusive = false
-              AND g.is_shared_pool = false
               AND g.subscription_type <> 'subscription'
             UNION
             SELECT us.group_id
@@ -377,26 +378,30 @@ func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID 
               AND us.expires_at > NOW()
         ) entitled
         WHERE entitled.group_id = r.group_id
-           OR (p.group_id IS NULL AND r.group_id IS NULL AND EXISTS (
+           OR (r.group_id IS NULL AND EXISTS (
                 SELECT 1 FROM account_groups ag
                 WHERE ag.account_id = r.account_id
                   AND ag.group_id = entitled.group_id
            ))
     )
+), success_state AS (
+    SELECT vr.*, bool_or(status IN ('success', 'passed')) OVER (
+        PARTITION BY group_id, result_target_key, test_definition_id, model_id, reasoning_effort
+    ) AS has_success
+    FROM visible_results vr
+), ranked_results AS (
+    SELECT vr.*, row_number() OVER (
+        PARTITION BY group_id, result_target_key, test_definition_id, model_id, reasoning_effort
+        ORDER BY started_at DESC, id DESC
+    ) AS history_rank
+    FROM success_state vr
+    WHERE status IN ('success', 'passed')
+       OR (status IN ('pending', 'running') AND NOT has_success)
 )
-SELECT vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at
-FROM visible_results vr
--- Never expose failed executions. Show initial progress only until the target
--- has a successful result, then keep that result visible while tests rerun.
-WHERE vr.status IN ('success', 'passed')
-   OR (vr.status IN ('pending', 'running') AND NOT EXISTS (
-       SELECT 1
-       FROM visible_results successful
-       WHERE successful.plan_id = vr.plan_id
-         AND successful.result_target_key = vr.result_target_key
-         AND successful.status IN ('success', 'passed')
-   ))
-ORDER BY vr.started_at DESC, vr.id DESC LIMIT $2`, userID, limit)
+SELECT vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id
+FROM ranked_results vr
+WHERE history_rank <= $2
+ORDER BY vr.started_at DESC, vr.id DESC`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +409,7 @@ ORDER BY vr.started_at DESC, vr.id DESC LIMIT $2`, userID, limit)
 	var out []*service.ScheduledTestResult
 	for rows.Next() {
 		v := &service.ScheduledTestResult{}
-		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -432,9 +437,15 @@ func (r *scheduledTestResultRepository) PruneOldResults(ctx context.Context, pla
 		DELETE FROM scheduled_test_results
 		WHERE id IN (
 			SELECT id FROM (
-				SELECT id, ROW_NUMBER() OVER (PARTITION BY plan_id ORDER BY started_at DESC, id DESC) AS rn
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY plan_id, test_definition_id, group_id,
+					CASE WHEN target_mode = 'group' THEN NULL ELSE account_id END,
+					model_id, reasoning_effort,
+					CASE WHEN status IN ('success', 'passed') THEN 'success' ELSE 'failed' END
+					ORDER BY started_at DESC, id DESC
+				) AS rn
 				FROM scheduled_test_results
-				WHERE plan_id = $1 AND status <> 'running'
+				WHERE plan_id = $1 AND status NOT IN ('running', 'pending')
 			) ranked
 			WHERE rn > $2
 		)
@@ -452,7 +463,7 @@ func scanPlan(row scannable) (*service.ScheduledTestPlan, error) {
 	p := &service.ScheduledTestPlan{}
 	if err := row.Scan(
 		&p.ID, &p.Name, &p.SortOrder, &p.AccountID, &p.GroupID, &p.TestDefinitionID, &p.TestType, &p.TargetMode, &p.ModelID, &p.ReasoningEffort, &p.CronExpression, &p.Enabled, &p.MaxResults, &p.AutoRecover,
-		&p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt,
+		&p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt, pq.Array(&p.TestDefinitionIDs),
 	); err != nil {
 		return nil, err
 	}

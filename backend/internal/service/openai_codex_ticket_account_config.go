@@ -75,18 +75,6 @@ func (s *OpenAIGatewayService) openAICodexTicketAccountConfig(ctx context.Contex
 	return ResolveOpenAICodexTicketAccountConfig(account, cfg)
 }
 
-func (s *OpenAIGatewayService) openAICodexTicketHarvestProxies(ctx context.Context) []string {
-	fallback := s.openAICodexTicketConfig().HarvestProxyURL
-	if s.settingService != nil {
-		return s.settingService.GetOpenAICodexTicketHarvestProxyPool(ctx, fallback)
-	}
-	proxies, err := ParseOpenAICodexTicketHarvestProxyPool(fallback)
-	if err != nil {
-		return nil
-	}
-	return proxies
-}
-
 func normalizedOpenAICodexTicketPlan(account *Account) string {
 	if account == nil {
 		return ""

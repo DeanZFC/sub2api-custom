@@ -64,17 +64,6 @@ func ProvidePluginManager(
 	return manager
 }
 
-// ProvideSharedAPIKeyService makes the optional constructor dependencies
-// explicit for Wire, retaining user/group validation and auth-cache invalidation.
-func ProvideSharedAPIKeyService(
-	repo SharedAPIKeyRepository,
-	users UserRepository,
-	groups GroupRepository,
-	apiKeys *APIKeyService,
-) *SharedAPIKeyService {
-	return NewSharedAPIKeyService(repo, users, groups, apiKeys)
-}
-
 // ProvideEmailQueueService creates EmailQueueService with default worker count
 func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
@@ -972,9 +961,6 @@ var ProviderSet = wire.NewSet(
 	NewModelPlazaService,
 	NewContentModerationService,
 	NewAffiliateService,
-	NewSharedWalletService,
-	ProvideSharedAPIKeyService,
-	ProvideSharedAccountUploadService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,

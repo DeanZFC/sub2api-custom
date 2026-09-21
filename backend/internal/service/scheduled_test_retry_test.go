@@ -234,8 +234,8 @@ func TestScheduledTestRetryResetFailureDoesNotStartExecution(t *testing.T) {
 			require.Empty(t, results.restarted)
 			require.Empty(t, results.updated)
 			require.Equal(t, "original failure", results.previous.ErrorMessage)
-			require.True(t, runner.beginAccountRun(3, accountID), "failed reset must release its account guard")
-			runner.endAccountRun(3, accountID)
+			require.True(t, runner.beginAccountRun(3, accountID, nil), "failed reset must release its account guard")
+			runner.endAccountRun(3, accountID, nil)
 		})
 	}
 }

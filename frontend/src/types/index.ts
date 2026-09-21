@@ -566,8 +566,6 @@ export interface Group {
   description: string | null
   platform: GroupPlatform
   rate_multiplier: number
-	/** Internal marker for groups managed by the shared account pool. */
-	is_shared_pool?: boolean
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
 	max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
 	max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
@@ -1164,6 +1162,8 @@ export interface OllamaCloudUsageSettings {
   debounce_minutes: number
 }
 
+export type CodexTicketProxySource = 'account' | 'direct' | 'pool'
+
 export interface CodexTurnTicketStatus {
   model: string
   length?: number
@@ -1186,6 +1186,7 @@ export interface CodexTurnTicketStatus {
   last_http_status?: number
   last_length?: number
   last_proxy_index?: number
+  last_proxy_source?: CodexTicketProxySource
   paused?: boolean
   plan_known?: boolean
 }
@@ -1200,6 +1201,7 @@ export interface CodexTicketHistoryEvent {
   length: number
   target_length: number
   proxy_index: number
+  proxy_source?: CodexTicketProxySource
   duration_ms: number
 }
 
@@ -1272,8 +1274,6 @@ export interface Account {
   scheduler_scores?: AccountSchedulerGroupScore[] | null
   priority: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
-  shared_total_call_count?: number
-  shared_listing_status?: string
   status: 'active' | 'inactive' | 'error'
   error_message: string | null
   last_used_at: string | null
@@ -2222,7 +2222,6 @@ export interface UsageQueryParams {
   page?: number
   page_size?: number
   api_key_id?: number
-  shared_only?: boolean
   user_id?: number
   account_id?: number
   group_id?: number
@@ -2513,7 +2512,7 @@ export interface TestType {
   output_kind: 'html' | 'number' | 'text' | string
   prompt: string
   enabled: boolean
-  /** Controls the order of test type tabs shown to end users. */
+  /** Controls the order of detection types in each account's quality results. */
   sort_order?: number
   created_at?: string
   updated_at?: string
@@ -2525,11 +2524,13 @@ export interface TestPlan {
   /** Controls the order of this rule's group in user-facing test results. */
   sort_order?: number
   test_definition_id?: number | null
+  test_definition_ids?: number[]
   group_id?: number | null
   account_id?: number | null
   /** Execution target selected by the administrator. */
   target_mode?: 'group' | 'all_accounts' | 'account'
   test_definition?: TestType | null
+  test_definitions?: TestType[]
   model_id?: string
   /** Optional effort forwarded to the selected model (Codex-style). */
   reasoning_effort?: string | null
@@ -2545,7 +2546,7 @@ export interface TestPlan {
 export interface TestResult {
   plan_name?: string
   test_name?: string
-  /** Configured test type order for the user-facing tabs. */
+  /** Configured check type order within the account's quality results. */
   test_order?: number
   /** Configured test rule/plan order used to derive group display order. */
   plan_order?: number
@@ -2588,7 +2589,8 @@ export interface UpdateTestTypeRequest extends Partial<CreateTestTypeRequest> {}
 export interface CreateTestPlanRequest {
   name?: string
   sort_order?: number
-  test_definition_id: number
+  test_definition_id?: number
+  test_definition_ids?: number[]
   group_id?: number | null
   account_id?: number | null
   target_mode?: 'group' | 'all_accounts' | 'account'

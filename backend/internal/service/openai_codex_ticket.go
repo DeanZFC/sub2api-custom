@@ -178,14 +178,6 @@ func (s *OpenAIGatewayService) openAICodexTicketEnabledContext(ctx context.Conte
 	return fallback
 }
 
-func (s *OpenAIGatewayService) openAICodexTicketHarvestProxyURL() string {
-	return s.openAICodexTicketHarvestProxyURLContext(context.Background())
-}
-
-func (s *OpenAIGatewayService) openAICodexTicketHarvestProxyURLContext(ctx context.Context) string {
-	return strings.Join(s.openAICodexTicketHarvestProxies(ctx), "\n")
-}
-
 func (t *openAICodexTicket) valid(now time.Time, targetLen int) bool {
 	if t == nil {
 		return false
@@ -549,7 +541,8 @@ func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, a
 	if model == "" {
 		return
 	}
-	s.startOpenAICodexTicketProbe(ctx, account, model, s.openAICodexTicketConfig(), s.openAICodexTicketHarvestProxies(ctx), time.Now(), false)
+	cfg := s.openAICodexTicketConfig()
+	s.startOpenAICodexTicketProbe(ctx, account, model, cfg, time.Now(), false)
 }
 
 // IsOpenAICodexTicketExtraKey identifies server-managed ticket material.
@@ -601,35 +594,6 @@ func ValidateOpenAICodexTicketHarvestProxyURL(raw string) error {
 		}
 	}
 	return nil
-}
-
-// MaskProxyURL never returns a stored proxy password, even for invalid legacy data.
-func MaskProxyURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || ValidateOpenAICodexTicketHarvestProxyURL(raw) != nil {
-		return ""
-	}
-	parsed, _ := url.Parse(raw)
-	if parsed.User != nil {
-		if _, ok := parsed.User.Password(); ok {
-			parsed.User = url.UserPassword(parsed.User.Username(), "***")
-		}
-	}
-	return parsed.String()
-}
-
-// IsMaskedProxyURL recognizes the exact password placeholder emitted by the API.
-func IsMaskedProxyURL(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return true
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.User == nil {
-		return false
-	}
-	password, ok := parsed.User.Password()
-	return ok && password == "***"
 }
 
 // Credential shadows do not own tickets. Keep their existing forwarding policy
