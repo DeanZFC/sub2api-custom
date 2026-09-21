@@ -1134,19 +1134,11 @@
           <p class="input-hint">{{ t('admin.accounts.upstream.apiKeyHint') }}</p>
         </div>
         <!-- 上游倍率自动探测：antigravity upstream 也是 API-key 账号 -->
-        <div class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.upstreamBilling.autoProbeHint') }}
-            </p>
-          </div>
-          <Toggle
-            v-model="upstreamBillingAutoProbeEnabled"
-            data-testid="upstream-billing-auto-probe-antigravity"
-            :aria-label="t('admin.accounts.upstreamBilling.autoProbe')"
-          />
-        </div>
+        <UpstreamBillingProbeSettings
+          v-model:auto-probe-enabled="upstreamBillingAutoProbeEnabled"
+          v-model:rate-limit="upstreamBillingRateLimit"
+          toggle-test-id="upstream-billing-auto-probe-antigravity"
+        />
       </div>
 
       <!-- Vertex Service Account -->
@@ -1420,21 +1412,10 @@
         </div>
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
-        <div
-          class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
-        >
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.upstreamBilling.autoProbeHint') }}
-            </p>
-          </div>
-          <Toggle
-            v-model="upstreamBillingAutoProbeEnabled"
-            data-testid="upstream-billing-auto-probe"
-            :aria-label="t('admin.accounts.upstreamBilling.autoProbe')"
-          />
-        </div>
+        <UpstreamBillingProbeSettings
+          v-model:auto-probe-enabled="upstreamBillingAutoProbeEnabled"
+          v-model:rate-limit="upstreamBillingRateLimit"
+        />
 
         <!-- Gemini API Key tier selection -->
         <div v-if="(form.platform === 'gemini')">
@@ -3973,6 +3954,7 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
+import UpstreamBillingProbeSettings from './UpstreamBillingProbeSettings.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
@@ -4190,6 +4172,7 @@ const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
+const upstreamBillingRateLimit = ref<number | null>(null)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
 const accountMode = ref<CnAccountMode>('payg')
@@ -5371,6 +5354,7 @@ const resetForm = () => {
   apiKeyValue.value = ''
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true
+  upstreamBillingRateLimit.value = null
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
   editQuotaWeeklyLimit.value = null
@@ -5588,6 +5572,18 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
 
 // Helper function to create account with mixed channel warning handling
 const doCreateAccount = async (payload: CreateAccountRequest) => {
+  if (payload.type === 'apikey') {
+    const limit = upstreamBillingRateLimit.value
+    if (limit != null && (!Number.isFinite(limit) || limit < 0)) {
+      appStore.showError(t('admin.accounts.upstreamBilling.rateLimitInvalid'))
+      return
+    }
+    payload = {
+      ...payload,
+      upstream_billing_probe_enabled: limit != null || upstreamBillingAutoProbeEnabled.value,
+      extra: { ...payload.extra, upstream_billing_rate_limit: limit }
+    }
+  }
   const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
     await submitCreateAccount(payload)
   })

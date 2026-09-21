@@ -1153,6 +1153,52 @@ describe('EditAccountModal', () => {
     )
   })
 
+  it('setting an upstream rate limit enables and locks probing without enabling billing rate sync', async () => {
+    const account = buildAccount()
+    account.extra = { quota_limit: 100 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="upstream-billing-rate-limit"]').setValue('0.75')
+    const probe = wrapper.get<HTMLButtonElement>('[data-testid="upstream-billing-auto-probe"]')
+    expect(probe.attributes('aria-checked')).toBe('true')
+    expect(probe.element.disabled).toBe(true)
+    await probe.trigger('click')
+    expect(probe.attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-testid="upstream-billing-rate-sync"]').attributes('aria-checked')).toBe('false')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.extra).toMatchObject({ upstream_billing_rate_limit: 0.75, quota_limit: 100 })
+    expect(payload?.upstream_billing_probe_enabled).toBe(true)
+    expect(payload?.upstream_billing_rate_sync_enabled).toBe(false)
+    expect(payload?.rate_multiplier).toBe(1)
+  })
+
+  it('loads a zero limit, then explicitly clears it and allows probing to be disabled', async () => {
+    const account = buildAccount()
+    account.extra = { upstream_billing_rate_limit: 0, upstream_billing_probe_enabled: false }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    const input = wrapper.get<HTMLInputElement>('[data-testid="upstream-billing-rate-limit"]')
+    const probe = wrapper.get<HTMLButtonElement>('[data-testid="upstream-billing-auto-probe"]')
+    expect(input.element.value).toBe('0')
+    expect(probe.element.disabled).toBe(true)
+    expect(probe.attributes('aria-checked')).toBe('true')
+    await input.setValue('')
+    expect(probe.element.disabled).toBe(false)
+    await probe.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.upstream_billing_rate_limit).toBeNull()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.upstream_billing_probe_enabled).toBe(false)
+  })
+
+  it('rejects a negative upstream rate limit', async () => {
+    updateAccountMock.mockReset()
+    const wrapper = mountModal(buildAccount())
+    await wrapper.get('[data-testid="upstream-billing-rate-limit"]').setValue('-0.1')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
   it('exposes the upstream billing auto-probe toggle for non-OpenAI API-key accounts', async () => {
     // 探测已放宽到全部 API-key 平台：grok 账号同样能开启并保存。
     const account = buildAccount()

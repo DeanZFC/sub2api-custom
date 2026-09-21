@@ -1855,22 +1855,27 @@ func buildOpenAIResponseFailedSSE(responseID, model string, source []byte, fallb
 		errorBody["type"] = errorType
 	}
 	response := gin.H{
-		"id":     responseID,
-		"object": "response",
-		"status": "failed",
-		"output": []any{},
-		"error":  errorBody,
+		"id":         responseID,
+		"object":     "response",
+		"created_at": time.Now().Unix(),
+		"status":     "failed",
+		"output":     []any{},
+		"error":      errorBody,
+	}
+	if created := gjson.GetBytes(source, "response.created_at"); created.Type == gjson.Number {
+		response["created_at"] = created.Int()
 	}
 	if model = strings.TrimSpace(model); model != "" {
 		response["model"] = model
 	}
 	payload, err := marshalOpenAIUpstreamJSON(gin.H{
-		"type":     "response.failed",
-		"response": response,
+		"type":            "response.failed",
+		"sequence_number": gjson.GetBytes(source, "sequence_number").Int(),
+		"response":        response,
 	})
 	if err != nil {
 		// All values above are JSON primitives, so this is only a defensive fallback.
-		payload = []byte(`{"type":"response.failed","response":{"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
+		payload = []byte(`{"type":"response.failed","sequence_number":0,"response":{"id":"resp_error","object":"response","created_at":0,"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
 	}
 	return "event: response.failed\ndata: " + string(payload) + "\n\n"
 }
@@ -1889,14 +1894,19 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 			"type": "upstream_error", "code": "upstream_account_unavailable",
 			"message": UpstreamBillingExhaustedClientMessage,
 		}
-		safe := gin.H{"type": eventType}
-		if seq := gjson.GetBytes(payload, "sequence_number"); seq.Type == gjson.Number {
-			safe["sequence_number"] = seq.Int()
+		// Rebuilding the error must retain the protocol envelope even when a
+		// compatible provider omitted fields required by strict Responses clients.
+		safe := gin.H{
+			"type": eventType, "sequence_number": gjson.GetBytes(payload, "sequence_number").Int(),
 		}
 		if isFailedEvent || gjson.GetBytes(payload, "response").IsObject() {
-			response := gin.H{"status": "failed", "error": safeError}
+			response := gin.H{
+				"id":     "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+				"object": "response", "created_at": time.Now().Unix(),
+				"status": "failed", "output": []any{}, "error": safeError,
+			}
 			for _, key := range []string{"id", "object", "model"} {
-				if value := gjson.GetBytes(payload, "response."+key); value.Type == gjson.String {
+				if value := gjson.GetBytes(payload, "response."+key); value.Type == gjson.String && strings.TrimSpace(value.String()) != "" {
 					response[key] = value.String()
 				}
 			}

@@ -306,17 +306,32 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 }
 
 // Sort and retain results by the latest execution time: a manual retry keeps
-// its original ID/created_at while refreshing started_at.
+// its original ID/created_at while refreshing started_at. Apply the history
+// limit to each retained series, not the entire plan: otherwise a later test
+// type can hide every result of earlier types. Always include in-flight runs.
 func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID int64, limit int) ([]*service.ScheduledTestResult, error) {
 	rows, err := r.db.QueryContext(ctx, `
+		WITH ranked_results AS (
+			SELECT id, ROW_NUMBER() OVER (
+				PARTITION BY test_definition_id, group_id,
+				CASE WHEN target_mode = 'group' THEN NULL ELSE account_id END,
+				model_id, reasoning_effort,
+				CASE WHEN status IN ('success', 'passed') THEN 'success'
+				     WHEN status IN ('running', 'pending') THEN 'in_progress'
+				     ELSE 'failed' END
+				ORDER BY started_at DESC, id DESC
+			) AS history_rank
+			FROM scheduled_test_results
+			WHERE plan_id = $1
+		)
 		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), COALESCE(p.sort_order, 2147483647), r.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at, r.test_definition_id
 		FROM scheduled_test_results r
+		JOIN ranked_results ranked ON ranked.id = r.id
 		JOIN scheduled_test_plans p ON p.id = r.plan_id
 		LEFT JOIN scheduled_test_definitions d ON d.id = r.test_definition_id
 		LEFT JOIN groups g ON g.id = r.group_id
-		WHERE plan_id = $1
+		WHERE ranked.history_rank <= $2 OR r.status IN ('running', 'pending')
 		ORDER BY r.started_at DESC, r.id DESC
-		LIMIT $2
 	`, planID, limit)
 	if err != nil {
 		return nil, err

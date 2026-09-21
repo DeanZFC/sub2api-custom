@@ -1293,13 +1293,16 @@ const applyUpstreamBillingRateSnapshots = async (
     if (!item) return account
     const nextSnapshot = item.snapshot ?? null
     const previousSnapshot = account.extra?.upstream_billing_probe ?? null
-    if (JSON.stringify(previousSnapshot) === JSON.stringify(nextSnapshot)) return account
+    const nextRateLimited = item.upstream_billing_rate_limited === true
+    if (JSON.stringify(previousSnapshot) === JSON.stringify(nextSnapshot) &&
+      (account.upstream_billing_rate_limited === true) === nextRateLimited) return account
 
     const nextExtra = { ...(account.extra ?? {}) }
     if (nextSnapshot) nextExtra.upstream_billing_probe = nextSnapshot
     else delete nextExtra.upstream_billing_probe
     const nextAccount = {
       ...account,
+      upstream_billing_rate_limited: nextRateLimited,
       ...(typeof nextSnapshot?.synced_rate_multiplier === 'number'
         ? { rate_multiplier: nextSnapshot.synced_rate_multiplier }
         : {}),
@@ -1474,6 +1477,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.current_window_cost !== next.current_window_cost ||
     current.active_sessions !== next.active_sessions ||
     current.schedulable !== next.schedulable ||
+    current.upstream_billing_rate_limited !== next.upstream_billing_rate_limited ||
     current.status !== next.status ||
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||

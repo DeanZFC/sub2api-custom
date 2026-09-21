@@ -278,6 +278,34 @@ describe('UpstreamBillingRateCell', () => {
     expect(wrapper.text()).toBe('-')
   })
 
+  it('shows mandatory probing and its next check with a zero limit even when global probing is off', () => {
+    const wrapper = mount(UpstreamBillingRateCell, {
+      props: {
+        account: makeAccount({
+          upstream_billing_rate_limited: true,
+          extra: {
+            upstream_billing_rate_limit: 0,
+            upstream_billing_probe_enabled: false,
+            upstream_billing_probe: {
+              status: 'ok', data: billingData,
+              received_at: '2026-07-13T00:00:00Z',
+              fresh_until: '2026-07-13T01:00:00Z',
+              last_attempt_at: '2026-07-13T00:00:00Z',
+              next_probe_at: '2026-07-13T00:30:00Z'
+            }
+          }
+        }),
+        now: Date.now(), globalProbeEnabled: false
+      },
+      global: { stubs: { HelpTooltip: { template: '<div><slot name="trigger" /><slot /></div>' } } }
+    })
+    expect(wrapper.get('[data-testid="upstream-billing-limit-value"]').text()).toContain('rateLimitValue:0')
+    expect(wrapper.find('[data-testid="upstream-billing-next-probe"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="upstream-billing-global-probe-state"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="upstream-billing-probe-state"]').text()).toContain('upstreamBilling.enabled')
+    expect(wrapper.text()).toContain('upstreamBilling.rateLimitPaused')
+  })
+
   it('fails neutral for malformed data and timestamps', async () => {
     const malformedAccount = (
       dataOverrides: Partial<typeof billingData> = {},

@@ -485,6 +485,50 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
   })
 
+  it.each([true, false])('updates the rate protection state to %s even when the probe snapshot is unchanged', async (limited) => {
+    const snapshot = {
+      status: 'ok',
+      data: { effective_rate_multiplier: 1 },
+      last_attempt_at: '2026-07-13T00:00:00Z',
+      next_probe_at: '2026-07-13T00:30:00Z'
+    }
+    listAccounts.mockResolvedValue({
+      items: [{
+        id: 7, name: 'account', platform: 'openai', type: 'apikey',
+        status: 'active', schedulable: true, rate_multiplier: 2,
+        upstream_billing_rate_limited: !limited,
+        extra: { upstream_billing_probe: snapshot },
+        created_at: '2026-07-13T00:00:00Z', updated_at: '2026-07-13T00:00:00Z'
+      }], total: 1, page: 1, page_size: 20, pages: 1
+    })
+    probeUpstreamBillingBatch.mockResolvedValue([{ account_id: 7, snapshot }])
+    getUpstreamBillingRatesWithEtag.mockResolvedValue({
+      notModified: false, etag: 'changed',
+      data: { items: [{ account_id: 7, snapshot, upstream_billing_rate_limited: limited }], total: 1, page: 1, page_size: 20 }
+    })
+    const wrapper = mount(AccountsView, {
+      shallow: true,
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="table" /></div>' },
+          DataTable: DataTableStub,
+          AccountBulkActionsBar: AccountBulkActionsBarStub
+        }
+      }
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="select-row"] input').trigger('change')
+    await wrapper.get('[data-test="probe-upstream-billing"]').trigger('click')
+    await flushPromises()
+    const row = wrapper.getComponent(DataTableStub).props('data')[0]
+    expect(row.upstream_billing_rate_limited).toBe(limited)
+    expect(row.rate_multiplier).toBe(2)
+    expect(row.schedulable).toBe(true)
+    expect(listAccounts).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('does not report a successful batch probe as failed when reconciliation is skipped', async () => {
     const account = {
       id: 7,

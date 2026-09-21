@@ -45,6 +45,7 @@ export async function deletePlan(id: number): Promise<void> {
 export async function runPlan(id: number): Promise<void> {
   await apiClient.post(`/admin/test-plans/${id}/run`)
 }
+/** History limit applies per account/type/model/effort and outcome; active runs are always included. */
 export async function listResults(planId: number, limit = 50): Promise<TestResult[]> {
   const { data } = await apiClient.get<TestResult[]>(`/admin/test-plans/${planId}/results`, { params: { limit } })
   return data ?? []

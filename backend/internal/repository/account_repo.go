@@ -143,6 +143,10 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	if _, limited := account.UpstreamBillingRateLimit(); limited {
+		account.Extra = copyJSONMap(account.Extra)
+		account.Extra[service.UpstreamBillingProbeEnabledExtraKey] = true
+	}
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -539,6 +543,7 @@ func (r *accountRepository) updateAccount(
 	}
 
 	account.UpdatedAt = updated.UpdatedAt
+	account.UpstreamBillingRateLimitChanged = false
 	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
 	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
 	if contextTx == nil {
@@ -745,6 +750,7 @@ func lockAndMergeAccountProbeExtra(
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
+		service.UpstreamBillingRateLimitExtraKey,
 		service.UpstreamBillingProbeExtraKey,
 		service.OllamaCloudUsageSessionExtraKey,
 		service.OllamaCloudUsageAutoRefreshExtraKey,
@@ -753,6 +759,19 @@ func lockAndMergeAccountProbeExtra(
 		delete(extra, key)
 	}
 	probeAccount := service.IsUpstreamBillingProbeIdentity(account.Platform, account.Type)
+	// Full-account writes may carry stale Extra. Only a validated, explicit
+	// setting edit may replace the current limit; unrelated writes preserve it.
+	if probeAccount {
+		limitExtra := currentExtra
+		if account.UpstreamBillingRateLimitChanged {
+			limitExtra = account.Extra
+		}
+		if value, exists := limitExtra[service.UpstreamBillingRateLimitExtraKey]; exists {
+			extra[service.UpstreamBillingRateLimitExtraKey] = value
+		}
+	}
+	limitAccount := &service.Account{Platform: account.Platform, Type: account.Type, Extra: extra}
+	_, hasRateLimit := limitAccount.UpstreamBillingRateLimit()
 	probeEnabled := false
 	probeEnabledPresent := false
 	if probeAccount {
@@ -764,6 +783,10 @@ func lockAndMergeAccountProbeExtra(
 		}
 		if explicitProbeEnabled != nil {
 			probeEnabled = *explicitProbeEnabled
+			probeEnabledPresent = true
+		}
+		if hasRateLimit {
+			probeEnabled = true
 			probeEnabledPresent = true
 		}
 	}
@@ -780,7 +803,7 @@ func lockAndMergeAccountProbeExtra(
 			rateSyncEnabled = *explicitRateSyncEnabled
 			rateSyncEnabledPresent = true
 		}
-		if explicitProbeEnabled != nil && !*explicitProbeEnabled {
+		if explicitProbeEnabled != nil && !*explicitProbeEnabled && !hasRateLimit {
 			rateSyncEnabled = false
 			rateSyncEnabledPresent = true
 		}
@@ -1117,6 +1140,8 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 			dbaccount.FieldID,
 			dbaccount.FieldName,
 			dbaccount.FieldPlatform,
+			dbaccount.FieldType,
+			dbaccount.FieldExtra,
 			dbaccount.FieldConcurrency,
 			dbaccount.FieldLoadFactor,
 			dbaccount.FieldStatus,
@@ -2722,10 +2747,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			client = tx.Client()
 		}
 	}
-	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
-	if clearProbeSnapshot {
-		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
-	}
+	extraExpression := enforceUpstreamBillingRateLimitProbeSQL("COALESCE(extra, '{}'::jsonb) || $1::jsonb", updates)
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 	}
@@ -2961,6 +2983,37 @@ func upstreamBillingProbeSnapshotClearRequested(extra map[string]any) bool {
 	return ok && value == nil
 }
 
+// Match the service's finite nonnegative JSON-number policy without casting
+// malformed historical values. Numeric values exceeding float64 are invalid.
+func validUpstreamBillingRateLimitSQL(extraExpression string) string {
+	value := "((" + extraExpression + ") -> 'upstream_billing_rate_limit')"
+	number := "((" + extraExpression + ") ->> 'upstream_billing_rate_limit')::numeric"
+	return "(CASE WHEN jsonb_typeof(" + value + ") = 'number' THEN " + number + " >= 0 AND " + number + " <= 1.7976931348623157e308 ELSE FALSE END)"
+}
+
+func enforceUpstreamBillingRateLimitProbeSQL(extraExpression string, updates map[string]any) string {
+	_, limitChanged := updates[service.UpstreamBillingRateLimitExtraKey]
+	_, probeChanged := updates[service.UpstreamBillingProbeEnabledExtraKey]
+	if !limitChanged && !probeChanged {
+		// Ordinary telemetry patches cannot change the ceiling or detector flag;
+		// avoid repeatedly evaluating the JSONB ceiling on those hot writes.
+		if upstreamBillingProbeSnapshotClearRequested(updates) {
+			return "(" + extraExpression + ") - 'upstream_billing_probe'"
+		}
+		return extraExpression
+	}
+	withoutLimit := extraExpression
+	if upstreamBillingProbeExplicitlyDisabled(updates) {
+		withoutLimit = "(" + withoutLimit + ") - 'upstream_billing_probe'"
+	}
+	result := "CASE WHEN type = 'apikey' AND " + validUpstreamBillingRateLimitSQL(extraExpression) +
+		" THEN jsonb_set((" + extraExpression + "), '{upstream_billing_probe_enabled}', 'true'::jsonb, true) ELSE " + withoutLimit + " END"
+	if upstreamBillingProbeSnapshotClearRequested(updates) {
+		result = "(" + result + ") - 'upstream_billing_probe'"
+	}
+	return result
+}
+
 func ollamaCloudUsageSnapshotClearRequested(extra map[string]any) bool {
 	value, ok := extra[service.OllamaCloudUsageSnapshotExtraKey]
 	return ok && value == nil
@@ -3068,9 +3121,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
 			args = append(args, payload)
 			idx++
-			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
-				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
-			}
+			extraExpression = enforceUpstreamBillingRateLimitProbeSQL(extraExpression, updates.Extra)
 			if ollamaCloudUsageSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'ollama_cloud_usage_snapshot'"
 			}
@@ -3182,7 +3233,8 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if rows > 0 && contextTx == nil {
-		shouldSync := updates.ProxyID != nil
+		_, limitChanged := updates.Extra[service.UpstreamBillingRateLimitExtraKey]
+		shouldSync := updates.ProxyID != nil || limitChanged
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}
@@ -3664,6 +3716,16 @@ func (r *accountRepository) FindByExtraField(ctx context.Context, key string, va
 // fail-open ordering pins the cycle to the lowest account IDs, starving the
 // rest of the pool.
 func (r *accountRepository) ListDueUpstreamBillingProbeAccounts(ctx context.Context, now time.Time, limit int) ([]service.Account, error) {
+	return r.listDueUpstreamBillingProbeAccounts(ctx, now, limit, false)
+}
+
+// Explicit account limits keep their mandatory detector running even when
+// optional, globally enabled billing probes are turned off.
+func (r *accountRepository) ListDueUpstreamBillingRateLimitedProbeAccounts(ctx context.Context, now time.Time, limit int) ([]service.Account, error) {
+	return r.listDueUpstreamBillingProbeAccounts(ctx, now, limit, true)
+}
+
+func (r *accountRepository) listDueUpstreamBillingProbeAccounts(ctx context.Context, now time.Time, limit int, onlyLimited bool) ([]service.Account, error) {
 	if limit <= 0 {
 		return []service.Account{}, nil
 	}
@@ -3671,6 +3733,10 @@ func (r *accountRepository) ListDueUpstreamBillingProbeAccounts(ctx context.Cont
 		return nil, errors.New("account repository SQL executor not configured")
 	}
 
+	eligibility := validUpstreamBillingRateLimitSQL("extra")
+	if !onlyLimited {
+		eligibility = "(extra @> '{\"upstream_billing_probe_enabled\": true}'::jsonb OR " + eligibility + ")"
+	}
 	rows, err := r.sql.QueryContext(ctx, `
 		WITH candidates AS (
 			SELECT
@@ -3681,7 +3747,7 @@ func (r *accountRepository) ListDueUpstreamBillingProbeAccounts(ctx context.Cont
 			WHERE deleted_at IS NULL
 				AND status = 'active'
 				AND type = 'apikey'
-				AND extra @> '{"upstream_billing_probe_enabled": true}'::jsonb
+				AND `+eligibility+`
 		), parsed AS MATERIALIZED (
 			SELECT
 				id,

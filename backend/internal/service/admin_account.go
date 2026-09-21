@@ -418,7 +418,8 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	if err != nil {
 		return nil, err
 	}
-	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
+	// Probe/session observations are system-managed. A configured rate ceiling
+	// explicitly opts the new account into automatic detection.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingProbeExtraKey)
@@ -439,6 +440,12 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Priority:    input.Priority,
 		Status:      StatusActive,
 		Schedulable: true,
+	}
+	if err := normalizeUpstreamBillingRateLimitExtra(account.Platform, account.Type, account.Extra); err != nil {
+		return nil, err
+	}
+	if _, limited := account.UpstreamBillingRateLimit(); limited {
+		account.Extra[UpstreamBillingProbeEnabledExtraKey] = true
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -684,6 +691,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	requestedProbeEnabledUpdate := input.ProbeEnabled
 	requestedRateSyncEnabledUpdate := input.RateSyncEnabled
 	if input.Extra != nil {
+		_, account.UpstreamBillingRateLimitChanged = input.Extra[UpstreamBillingRateLimitExtraKey]
+		if !account.UpstreamBillingRateLimitChanged {
+			if value, exists := account.Extra[UpstreamBillingRateLimitExtraKey]; exists {
+				normalizedExtra[UpstreamBillingRateLimitExtraKey] = value
+			}
+		}
 		requestedProbeEnabled, hasRequestedProbeEnabled := normalizedExtra[UpstreamBillingProbeEnabledExtraKey]
 		if hasRequestedProbeEnabled {
 			enabled, ok := requestedProbeEnabled.(bool)
@@ -744,6 +757,21 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if input.Extra == nil {
 		account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
+	}
+	if !isUpstreamBillingProbeAccount(account) && !account.UpstreamBillingRateLimitChanged {
+		// An identity change retires the previous upstream's ceiling along with
+		// its snapshot, but cannot accept a new ceiling for an unsupported type.
+		if _, exists := account.Extra[UpstreamBillingRateLimitExtraKey]; exists {
+			delete(account.Extra, UpstreamBillingRateLimitExtraKey)
+			account.UpstreamBillingRateLimitChanged = true
+		}
+	}
+	if err := normalizeUpstreamBillingRateLimitExtra(account.Platform, account.Type, account.Extra); err != nil {
+		return nil, err
+	}
+	if _, limited := account.UpstreamBillingRateLimit(); limited {
+		enabled := true
+		requestedProbeEnabledUpdate = &enabled
 	}
 	if requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate {
 		if requestedProbeEnabledUpdate != nil && !*requestedProbeEnabledUpdate {
@@ -959,6 +987,18 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSessionExtraKey)
 	delete(updates, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
+	if _, provided := updates[UpstreamBillingRateLimitExtraKey]; provided {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := normalizeUpstreamBillingRateLimitExtra(account.Platform, account.Type, updates); err != nil {
+			return err
+		}
+		if _, limited := upstreamBillingRateLimitValue(updates); limited {
+			updates[UpstreamBillingProbeEnabledExtraKey] = true
+		}
+	}
 	if hasOpenAICodexTicketAccountPolicyKeys(updates) {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
@@ -1015,6 +1055,14 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OllamaCloudUsageSessionExtraKey)
 	delete(input.Extra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(input.Extra, OllamaCloudUsageSnapshotExtraKey)
+	_, updatesUpstreamBillingRateLimit := input.Extra[UpstreamBillingRateLimitExtraKey]
+	if err := normalizeUpstreamBillingRateLimitExtra(PlatformOpenAI, AccountTypeAPIKey, input.Extra); err != nil {
+		return nil, err
+	}
+	if _, limited := upstreamBillingRateLimitValue(input.Extra); limited {
+		enabled := true
+		input.ProbeEnabled = &enabled
+	}
 	updatesCodexTicketPolicy := hasOpenAICodexTicketAccountPolicyKeys(input.Extra)
 	if updatesCodexTicketPolicy {
 		normalized, err := normalizeOpenAICodexTicketAccountExtra(PlatformOpenAI, input.Extra, false)
@@ -1058,7 +1106,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || updatesCodexTicketPolicy {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || updatesCodexTicketPolicy || updatesUpstreamBillingRateLimit {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1097,6 +1145,20 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			}
 			if !isUpstreamBillingProbeAccount(account) {
 				return nil, ErrUpstreamBillingProbeAccountInvalid
+			}
+			if _, limited := account.UpstreamBillingRateLimit(); !*input.ProbeEnabled && limited && !updatesUpstreamBillingRateLimit {
+				return nil, ErrUpstreamBillingRateLimitRequiresProbe
+			}
+		}
+	}
+	if updatesUpstreamBillingRateLimit {
+		for _, accountID := range input.AccountIDs {
+			account, ok := targetsByID[accountID]
+			if !ok {
+				return nil, ErrAccountNotFound
+			}
+			if err := normalizeUpstreamBillingRateLimitExtra(account.Platform, account.Type, input.Extra); err != nil {
+				return nil, err
 			}
 		}
 	}

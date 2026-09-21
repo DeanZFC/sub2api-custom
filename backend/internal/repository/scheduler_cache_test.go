@@ -108,3 +108,25 @@ func TestSchedulerMetadataAccountDropsInvalidUpstreamBillingProbe(t *testing.T) 
 		require.NotContains(t, metadata.Extra, service.UpstreamBillingProbeExtraKey)
 	}
 }
+
+func TestSchedulerMetadataAccountRetainsBillingRateLimitAfterFailedProbe(t *testing.T) {
+	for _, status := range []string{"ok", "failed", "unsupported"} {
+		t.Run(status, func(t *testing.T) {
+			account := service.Account{
+				ID: 43, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Extra: map[string]any{
+					service.UpstreamBillingRateLimitExtraKey: 0.5,
+					service.UpstreamBillingProbeExtraKey: map[string]any{
+						"status":      status,
+						"received_at": "2026-07-13T10:00:00Z",
+						"fresh_until": "2026-07-13T11:00:00Z",
+						"data":        map[string]any{"billing_scope": "token", "resolved_rate_multiplier": 0.8, "peak_rate_enabled": false},
+					},
+				},
+			}
+			metadata := buildSchedulerMetadataAccount(account)
+			require.Equal(t, 0.5, metadata.Extra[service.UpstreamBillingRateLimitExtraKey])
+			require.True(t, metadata.IsUpstreamBillingRateLimited(), "old successful data remains authoritative after failed refresh")
+		})
+	}
+}

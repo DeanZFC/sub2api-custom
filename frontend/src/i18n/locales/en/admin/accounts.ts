@@ -317,6 +317,14 @@ export default {
         }
       },
       upstreamBilling: {
+        rateLimit: 'Upstream rate limit',
+        rateLimitPlaceholder: 'Leave blank for no limit',
+        rateLimitHint: 'Requires automatic probing. Scheduling pauses when the current effective upstream rate (including peak rates) exceeds this limit and resumes when it returns within the limit. Manually disabled accounts stay disabled. This does not change the account billing rate.',
+        rateLimitLocksProbe: 'Clear the upstream rate limit before disabling automatic probing',
+        rateLimitInvalid: 'The upstream rate limit must be a finite number greater than or equal to 0',
+        rateLimitValue: 'Upstream rate limit: {value}x',
+        rateLimited: 'Upstream rate exceeded',
+        rateLimitPaused: 'Scheduling paused until the upstream rate returns within the limit',
         trustWarning: 'This rate is declared by the upstream site for the current API key. Sub2API cannot verify that it matches actual charges. The upstream site or an intermediary may return forged, stale, or modified data. Verify it against bills, balance changes, and actual usage.',
         autoProbe: 'Automatically probe upstream declared rate',
         autoProbeHint: 'Refresh the upstream declared rate on the global interval. This switch alone does not change the account rate.',

@@ -196,6 +196,57 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, definitions.Delete(ctx, candyID))
 
+	t.Run("admin history limit preserves every account and test type", func(t *testing.T) {
+		multiPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
+			Name: "History limit", GroupID: &groupID, TestDefinitionID: &htmlID,
+			TestDefinitionIDs: []int64{htmlID, candyID}, TestType: "quality", TargetMode: "all_accounts",
+			ModelID: "model-a", ReasoningEffort: "high", CronExpression: "0 * * * *", Enabled: true, MaxResults: 1,
+		})
+		require.NoError(t, err)
+		// The second type finishes later, as it does during sequential execution.
+		// A plan-wide LIMIT would hide every result of the first type.
+		var expectedIDs []int64
+		sequence := 0
+		addResult := func(accountID, definitionID int64, status, model, effort string) int64 {
+			t.Helper()
+			sequence++
+			runAt := started.Add(time.Duration(sequence) * time.Second)
+			result, err := results.Create(ctx, &service.ScheduledTestResult{
+				PlanID: multiPlan.ID, TestDefinitionID: &definitionID, TargetMode: "all_accounts",
+				GroupID: &groupID, AccountID: &accountID, Status: status, ModelID: model,
+				ReasoningEffort: effort, OutputKind: "text", ResponseText: "Output",
+				StartedAt: runAt, FinishedAt: runAt,
+			})
+			require.NoError(t, err)
+			return result.ID
+		}
+		for _, definitionID := range []int64{htmlID, candyID} {
+			for _, accountID := range []int64{62, 63} {
+				addResult(accountID, definitionID, "success", "model-a", "high")
+				expectedIDs = append(expectedIDs, addResult(accountID, definitionID, "passed", "model-a", "high"))
+			}
+		}
+		// Failures, in-flight runs, models and efforts must not displace each other.
+		addResult(62, htmlID, "failed", "model-a", "high")
+		expectedIDs = append(expectedIDs, addResult(62, htmlID, "failed", "model-a", "high"))
+		expectedIDs = append(expectedIDs, addResult(62, htmlID, "running", "model-a", "high"))
+		expectedIDs = append(expectedIDs, addResult(62, htmlID, "pending", "model-a", "high"))
+		expectedIDs = append(expectedIDs, addResult(62, htmlID, "success", "model-b", "high"))
+		expectedIDs = append(expectedIDs, addResult(62, htmlID, "success", "model-a", "medium"))
+
+		history, err := results.ListByPlanID(ctx, multiPlan.ID, 1)
+		require.NoError(t, err)
+		var actualIDs []int64
+		for i, result := range history {
+			actualIDs = append(actualIDs, result.ID)
+			require.Equal(t, multiPlan.ID, result.PlanID)
+			if i > 0 {
+				require.False(t, result.StartedAt.After(history[i-1].StartedAt))
+			}
+		}
+		require.ElementsMatch(t, expectedIDs, actualIDs)
+	})
+
 	t.Run("secondary definition is protected during concurrent plan creation", func(t *testing.T) {
 		definition, err := definitions.Create(ctx, &service.ScheduledTestDefinition{
 			Key: "concurrent", Name: "Concurrent", Prompt: "Test", OutputKind: "text", Enabled: true,

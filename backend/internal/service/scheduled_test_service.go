@@ -13,8 +13,8 @@ import (
 var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 // Scheduled tests may generate large HTML/SVG responses (for example the
-// pelican animation). Keep their background context independent from the
-// short-lived admin HTTP request and allow enough time for streamed output.
+// pelican animation). Each account/type execution gets this budget after it
+// acquires a worker; waiting behind other tests must not consume the budget.
 const scheduledTestExecutionTimeout = 15 * time.Minute
 
 var scheduledTestDefinitionKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,99}$`)
@@ -271,9 +271,10 @@ func (s *ScheduledTestService) RunNow(ctx context.Context, id int64) error {
 	if s.runFunc == nil {
 		return fmt.Errorf("test runner unavailable")
 	}
-	// The HTTP request context is cancelled as soon as the 202 response is
-	// returned; background execution must therefore use its own bounded context.
-	bg, cancel := context.WithTimeout(context.Background(), scheduledTestExecutionTimeout)
+	// Detach from the short-lived HTTP request. The runner owns shutdown
+	// cancellation and applies the timeout separately to each account/type,
+	// after queueing, rather than sharing one deadline across the entire rule.
+	bg, cancel := context.WithCancel(context.Background())
 	go func() { defer cancel(); s.runFunc(bg, p) }()
 	return nil
 }
@@ -394,7 +395,8 @@ func (s *ScheduledTestService) DeletePlan(ctx context.Context, id int64) error {
 	return s.planRepo.Delete(ctx, id)
 }
 
-// ListResults returns the most recent results for a plan.
+// ListResults returns recent results per account/type/model series for a plan.
+// The limit applies independently to each series, rather than to the plan.
 func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, limit int) ([]*ScheduledTestResult, error) {
 	if limit <= 0 {
 		limit = 50

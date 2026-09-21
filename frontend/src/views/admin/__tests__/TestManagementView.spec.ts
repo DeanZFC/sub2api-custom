@@ -13,7 +13,7 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.success,
 
 const plan = { id: 10, name: 'Candy hourly', test_definition_id: 2, group_id: 8, model_id: 'test-model', cron_expression: '0 * * * *', enabled: true, max_results: 50 }
 const makeWrapper = () => mount(TestManagementView, { global: {
-  plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: {} } })],
+  plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: { tests: { elapsed: ({ named }: { named: (key: string) => string }) => `Elapsed ${named('duration')}` } } } } })],
   stubs: { AppLayout: { template: '<main><slot /></main>' }, Icon: true, BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><h3>{{ title }}</h3><slot /><slot name="footer" /></section>' } }
 } })
 
@@ -72,11 +72,38 @@ describe('configurable test management', () => {
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect(wrapper.get('[data-dialog]').text()).toContain('29')
     expect(wrapper.get('[data-dialog]').text()).toContain('admin.tests.reasoningEffort: ultra')
-    expect(api.listResults).toHaveBeenLastCalledWith(10, 50)
+    expect(api.listResults).toHaveBeenLastCalledWith(10, 1)
     wrapper.unmount()
     const count = api.listResults.mock.calls.length
     await vi.advanceTimersByTimeAsync(5000)
     expect(api.listResults).toHaveBeenCalledTimes(count)
+  })
+
+  it('loads history on demand and only polls the latest results', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('button[aria-label="admin.tests.results"]').trigger('click')
+    await flushPromises()
+    expect(api.listResults).toHaveBeenLastCalledWith(10, 1)
+    const dialog = wrapper.get('[data-dialog]')
+    await dialog.findAll('button').find(button => button.text() === 'admin.tests.showHistory')!.trigger('click')
+    await flushPromises()
+    expect(api.listResults).toHaveBeenLastCalledWith(10, 50)
+    expect(dialog.text()).toContain('admin.tests.historyHint')
+    const historyCalls = api.listResults.mock.calls.length
+    await vi.advanceTimersByTimeAsync(15000); await flushPromises()
+    expect(api.listResults).toHaveBeenCalledTimes(historyCalls)
+    await dialog.findAll('button').find(button => button.text() === 'common.refresh')!.trigger('click')
+    await flushPromises()
+    expect(api.listResults).toHaveBeenCalledTimes(historyCalls + 1)
+    expect(api.listResults).toHaveBeenLastCalledWith(10, 50)
+    await dialog.findAll('button').find(button => button.text() === 'admin.tests.latestResults')!.trigger('click')
+    await flushPromises()
+    expect(api.listResults).toHaveBeenLastCalledWith(10, 1)
+    const latestCalls = api.listResults.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(api.listResults).toHaveBeenCalledTimes(latestCalls + 1)
+    wrapper.unmount()
   })
 
   it('replaces a failed result in place when retrying the same account', async () => {
@@ -116,6 +143,44 @@ describe('configurable test management', () => {
     expect(cards[0].text()).toContain('running')
     expect(cards[0].text()).not.toContain('upstream failed')
     expect(cards[0].text()).not.toContain('old output')
+    wrapper.unmount()
+  })
+
+  it('shows elapsed time for running results and final latency only after completion', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    vi.setSystemTime(new Date('2026-09-21T06:09:16Z'))
+    const running = { id: 101, plan_id: 10, test_definition_id: 2, status: 'running', output_kind: 'number', latency_ms: 0, started_at: '2026-09-21T06:07:11Z' }
+    api.listResults.mockResolvedValue([running])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('button[aria-label="admin.tests.results"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-dialog] article').text()).toContain('Elapsed 02:05')
+    expect(wrapper.get('[data-dialog] article').text()).not.toContain('0ms')
+
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.get('[data-dialog] article').text()).toContain('Elapsed 02:10')
+
+    api.listResults.mockResolvedValue([{ ...running, status: 'success', latency_ms: 130123, output_numeric: 29 }])
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.get('[data-dialog] article').text()).toContain('130123ms')
+    expect(wrapper.get('[data-dialog] article').text()).not.toContain('Elapsed')
+    wrapper.unmount()
+  })
+
+  it('keeps every selected type when reopening a plan with a legacy scalar definition', async () => {
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count candies', enabled: true },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw a pelican', enabled: true },
+    ])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_id: 3, test_definition_ids: [3, 2] }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    expect((dialog.get('[data-testid="plan-type-2"]').element as HTMLInputElement).checked).toBe(true)
+    expect((dialog.get('[data-testid="plan-type-3"]').element as HTMLInputElement).checked).toBe(true)
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
+    await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ test_definition_id: 3, test_definition_ids: [3, 2] }))
     wrapper.unmount()
   })
 

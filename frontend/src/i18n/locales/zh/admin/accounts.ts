@@ -193,6 +193,14 @@ export default {
         }
       },
       upstreamBilling: {
+        rateLimit: '上游倍率上限',
+        rateLimitPlaceholder: '留空不限制',
+        rateLimitHint: '配置后强制开启自动检测。当前生效倍率（含高峰倍率）超过上限时暂停调度，恢复至上限以内时自动解除；不会启用手动停用的账号，也不会修改账号计费倍率。',
+        rateLimitLocksProbe: '已设置上游倍率上限，清空上限后才能关闭自动检测',
+        rateLimitInvalid: '上游倍率上限必须是大于或等于 0 的有效数字',
+        rateLimitValue: '上游倍率上限：{value}x',
+        rateLimited: '上游倍率超限',
+        rateLimitPaused: '已暂停调度，倍率恢复至上限以内后自动解除',
         trustWarning: '此倍率由上游站点针对当前 API Key 自行声明。Sub2API 无法验证该值是否与实际扣费一致；上游站点或中间代理可能返回伪造、过期或被篡改的数据。请结合账单、余额变化和实际用量自行核验。',
         autoProbe: '自动探测上游声明倍率',
         autoProbeHint: '启用后按全局周期刷新上游声明倍率；此开关本身不会修改账号倍率。',

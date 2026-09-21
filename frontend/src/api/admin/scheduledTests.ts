@@ -61,7 +61,7 @@ export async function deletePlan(id: number): Promise<void> {
 /**
  * List test results for a plan
  * @param planId - Plan ID
- * @param limit - Optional max number of results to return
+ * @param limit - History per account/type/model/effort and outcome; in-flight runs are always included
  * @returns List of test results
  */
 export async function listResults(planId: number, limit?: number): Promise<ScheduledTestResult[]> {

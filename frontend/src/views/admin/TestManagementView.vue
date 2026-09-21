@@ -76,15 +76,19 @@
       <div v-if="resultPlan" class="space-y-3">
         <div class="flex items-center justify-between gap-3">
           <span class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ typeName(resultPlan) }}</span>
-          <button class="btn btn-secondary btn-sm" :disabled="resultsLoading" @click="refreshResults"><Icon name="refresh" size="sm" />{{ t('common.refresh') }}</button>
+          <div class="flex shrink-0 items-center gap-2">
+            <button class="btn btn-secondary btn-sm" :disabled="resultsLoading" @click="toggleResultHistory">{{ t(resultsHistory ? 'admin.tests.latestResults' : 'admin.tests.showHistory') }}</button>
+            <button class="btn btn-secondary btn-sm" :disabled="resultsLoading" @click="refreshResults"><Icon name="refresh" size="sm" />{{ t('common.refresh') }}</button>
+          </div>
         </div>
+        <p class="text-xs text-gray-500">{{ t(resultsHistory ? 'admin.tests.historyHint' : 'admin.tests.resultsHint') }}</p>
         <p v-if="!results.length" class="text-sm text-gray-500">{{ resultsLoading ? t('common.loading') : t('common.noData') }}</p>
         <article v-for="result in results" :key="result.id" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
           <div v-if="result.error_message" class="mb-2 rounded bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div>
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
             <span>{{ result.test_name || resultTypeName(result) }} · {{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('admin.tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template><template v-if="result.account_id && result.target_mode !== 'group'"> · {{ t('admin.tests.account') }} #{{ result.account_id }}</template></span>
             <span class="flex items-center gap-2">
-              <span>{{ result.status }} · {{ result.latency_ms ?? '-' }}ms · {{ formatDate(result.started_at) }}</span>
+              <span>{{ result.status }} · {{ resultDuration(result) }} · {{ formatDate(result.started_at) }}</span>
               <button
                 v-if="result.status === 'failed' && result.account_id"
                 type="button"
@@ -141,6 +145,8 @@ const accounts = ref<AccountListItem[]>([])
 const modelOptions = ref<SelectOption[]>([])
 const modelOptionsLoading = ref(false)
 const results = ref<TestResult[]>([])
+const resultsNow = ref(Date.now())
+const resultsHistory = ref(false)
 // A manual run is asynchronous. Keep a local placeholder visible immediately
 // after the request is accepted until the first persisted result arrives.
 const pendingRuns = ref(new Map<number, TestResult[]>())
@@ -381,6 +387,7 @@ const run = async (plan: TestPlan) => {
     started_at: startedAt,
     created_at: startedAt,
   })))
+  resultsHistory.value = false
   resultPlan.value = plan
   results.value = pendingRuns.value.get(plan.id)!
   try {
@@ -396,15 +403,21 @@ const run = async (plan: TestPlan) => {
 }
 const showResults = async (plan: TestPlan) => {
   results.value = []
+  resultsHistory.value = false
   resultPlan.value = plan
   await refreshResults()
 }
+const toggleResultHistory = async () => {
+  resultsHistory.value = !resultsHistory.value
+  await refreshResults()
+}
 const refreshResults = async () => {
+  resultsNow.value = Date.now()
   const id = resultPlan.value?.id
   if (!id || resultsLoading.value) return
   resultsLoading.value = true
   try {
-    const next = await adminAPI.tests.listResults(id, resultPlan.value?.max_results || 50)
+    const next = await adminAPI.tests.listResults(id, resultsHistory.value ? resultPlan.value?.max_results || 50 : 1)
     if (resultPlan.value?.id === id) {
       const placeholders = (pendingRuns.value.get(id) || []).filter(pending => !next.some(result => {
         const started = result.started_at ? new Date(result.started_at).getTime() : 0
@@ -480,9 +493,22 @@ watch(
 )
 watch(resultPlan, plan => {
   clearInterval(resultTimer)
-  if (plan) resultTimer = setInterval(() => { if (!document.hidden) void refreshResults() }, 5000)
+  if (plan) resultTimer = setInterval(() => {
+    if (!document.hidden && !resultsHistory.value) void refreshResults()
+  }, 5000)
 })
 onUnmounted(() => clearInterval(resultTimer))
+const resultDuration = (result: TestResult) => {
+  if (result.status !== 'running' && result.status !== 'pending') return `${result.latency_ms ?? '-'}ms`
+  const started = result.started_at ? new Date(result.started_at).getTime() : NaN
+  if (!Number.isFinite(started)) return '-'
+  const elapsed = Math.max(0, Math.floor((resultsNow.value - started) / 1000))
+  const seconds = String(elapsed % 60).padStart(2, '0')
+  const minutes = String(Math.floor(elapsed / 60) % 60).padStart(2, '0')
+  const hours = Math.floor(elapsed / 3600)
+  const duration = hours > 0 ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`
+  return t('admin.tests.elapsed', { duration })
+}
 const typeName = (plan: TestPlan) => planTypes(plan).map(type => type.name).join(' · ') || '-'
 const resultTypeName = (result: TestResult) => types.value.find(type => type.id === result.test_definition_id)?.name || result.test_definition?.name || '-'
 const groupName = (plan: TestPlan) => plan.group_id ? groups.value.find(group => group.id === plan.group_id)?.name || `#${plan.group_id}` : '-'

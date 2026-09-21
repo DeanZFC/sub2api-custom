@@ -431,6 +431,9 @@ func (s *GeminiMessagesCompatService) getSchedulableAccount(ctx context.Context,
 }
 
 func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
+	if account != nil && account.IsUpstreamBillingRateLimited() {
+		return nil, ErrNoAvailableAccounts
+	}
 	if account == nil || s.schedulerSnapshot == nil {
 		return account, nil
 	}
@@ -440,6 +443,9 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 	}
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gemini account %d not found during hydration", account.ID)
+	}
+	if hydrated.IsUpstreamBillingRateLimited() {
+		return nil, ErrNoAvailableAccounts
 	}
 	return hydrated, nil
 }
