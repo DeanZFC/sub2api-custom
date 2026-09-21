@@ -93,6 +93,9 @@ func (r *runnerResultRepoStub) ListByPlanID(context.Context, int64, int) ([]*Sch
 func (r *runnerResultRepoStub) ListVisible(context.Context, int64, int) ([]*ScheduledTestResult, error) {
 	return nil, nil
 }
+func (r *runnerResultRepoStub) ListVisibleHistory(context.Context, int64, int64, int64, int) ([]*ScheduledTestResult, error) {
+	return nil, nil
+}
 func (r *runnerResultRepoStub) Delete(context.Context, int64) error { return nil }
 func (r *runnerResultRepoStub) PruneOldResults(ctx context.Context, _ int64, _ int) error {
 	return ctx.Err()

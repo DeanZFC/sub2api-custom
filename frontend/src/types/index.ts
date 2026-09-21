@@ -2547,6 +2547,8 @@ export interface TestPlan {
 }
 
 export interface TestResult {
+  /** Returned only by administrator result endpoints. */
+  account_name?: string
   plan_name?: string
   test_name?: string
   /** Configured check type order within the account's quality results. */

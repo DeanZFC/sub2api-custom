@@ -220,6 +220,7 @@ export default {
   },
 
   tests: {
+    loadMore: 'Load more',
     preview: 'Preview HTML', closePreview: 'Close preview', rawOutput: 'Original response', noOutput: 'No output returned', running: 'Test is running…', loadFailed: 'Unable to load or save test data',
     title: 'Channel Quality Checks', description: 'View quality check results by group and account', empty: 'No channel quality check results yet', htmlResult: 'HTML channel quality check result', allTypes: 'All types', groupFilter: 'Group', modelFilter: 'Model', reasoningEffort: 'Reasoning effort', allGroups: 'All groups', allModels: 'All models', noMatches: 'No results match the selected filters', viewHistory: 'View history', historyHint: 'Historical quality check results for this group or account', group: 'Group', account: 'Account', ungrouped: 'Ungrouped', unknownType: 'Unknown check', groupCheck: 'Group check', latestResult: 'Latest result', previousResult: 'Previous result', completed: 'Completed', awaitingReview: 'Awaiting review'
   },

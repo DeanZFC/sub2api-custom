@@ -52,6 +52,7 @@ type ScheduledTestResult struct {
 	OutputHTML      string    `json:"output_html,omitempty"`
 	OutputNumeric   *float64  `json:"output_numeric,omitempty"`
 	AccountID       *int64    `json:"account_id,omitempty"`
+	AccountName     string    `json:"account_name,omitempty"` // populated by admin queries only
 	ModelID         string    `json:"model_id"`
 	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
 	GroupID         *int64    `json:"group_id,omitempty"`
@@ -60,6 +61,11 @@ type ScheduledTestResult struct {
 	StartedAt       time.Time `json:"started_at"`
 	FinishedAt      time.Time `json:"finished_at"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+type ScheduledTestResultHistory struct {
+	Items        []*ScheduledTestResult `json:"items"`
+	NextBeforeID *int64                 `json:"next_before_id,omitempty"`
 }
 
 type ScheduledTestDefinition struct {
@@ -104,6 +110,7 @@ type ScheduledTestResultRepository interface {
 	RestartFailed(ctx context.Context, result *ScheduledTestResult) error
 	ListByPlanID(ctx context.Context, planID int64, limit int) ([]*ScheduledTestResult, error)
 	ListVisible(ctx context.Context, userID int64, limit int) ([]*ScheduledTestResult, error)
+	ListVisibleHistory(ctx context.Context, userID, resultID, beforeID int64, limit int) ([]*ScheduledTestResult, error)
 	Delete(ctx context.Context, id int64) error
 	PruneOldResults(ctx context.Context, planID int64, keepCount int) error
 }

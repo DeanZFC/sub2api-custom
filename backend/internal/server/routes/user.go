@@ -40,6 +40,7 @@ func RegisterUserRoutes(
 			user.GET("/api-keys/:id/usage/daily", panelRateLimiter.Heavy(), h.Usage.GetMyAPIKeyDailyUsage)
 			user.GET("/platform-quotas", h.User.GetMyPlatformQuotas)
 			user.GET("/test-results", h.User.ListTestResults)
+			user.GET("/test-results/:id/history", h.User.ListTestResultHistory)
 
 			// 通知邮箱管理
 			notifyEmail := user.Group("/notify-email")

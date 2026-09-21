@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestResultsView from '../TestResultsView.vue'
 
-const api = vi.hoisted(() => ({ list: vi.fn(), error: vi.fn() }))
-vi.mock('@/api/testResults', () => ({ testResultsAPI: { list: api.list } }))
+const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), error: vi.fn() }))
+vi.mock('@/api/testResults', () => ({ testResultsAPI: { list: api.list, history: api.history } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: api.error }) }))
 
 const baseResult = { plan_id: 10, test_definition_id: 1, test_name: 'Pelican', group_id: 8, group_name: 'Group Eight', account_id: 3, model_id: 'gpt-6-astra', output_kind: 'html', status: 'success', created_at: '2026-09-15T12:00:00Z' }
@@ -13,11 +13,14 @@ const mountResults = () => mount(TestResultsView, { global: {
   stubs: {
     AppLayout: { template: '<main><slot /></main>' }, Icon: true,
     TestResultOutput: { props: ['result', 'compact'], template: '<div data-output :data-result-id="result.id" :data-compact="compact" />' },
-    BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><slot /></section>' },
+    BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><button data-close @click="$emit(\'close\')">Close</button><slot /></section>' },
   },
 } })
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.resetAllMocks()
+  api.history.mockResolvedValue({ items: [] })
+})
 afterEach(() => vi.useRealTimers())
 
 describe('channel quality result groups', () => {
@@ -30,7 +33,8 @@ describe('channel quality result groups', () => {
     const wrapper = mountResults()
     await flushPromises()
 
-    expect(api.list).toHaveBeenCalledWith(4)
+    expect(api.list).toHaveBeenCalledWith(3)
+    expect(api.history).not.toHaveBeenCalled()
     expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Group Eight', 'Next Group'])
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
     expect(wrapper.get('[data-account-result] h3').text()).toBe('tests.account #3')
@@ -94,24 +98,30 @@ describe('channel quality result groups', () => {
 })
 
 describe('channel quality result series', () => {
-  it('shows a larger latest artwork and three previous outputs with full history available', async () => {
-    api.list.mockResolvedValue([1, 2, 3, 4, 5].map(id => ({ ...baseResult, id, created_at: `2026-09-15T${10 + id}:00:00Z` })))
+  it('shows only the three newest outputs and fetches complete history on demand', async () => {
+    const results = [1, 2, 3, 4, 5].map(id => ({ ...baseResult, id, created_at: `2026-09-15T${10 + id}:00:00Z` }))
+    api.list.mockResolvedValue(results)
+    api.history.mockResolvedValue({ items: results })
     const wrapper = mountResults()
     await flushPromises()
-    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['5', '4', '3', '2'])
+    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['5', '4', '3'])
     expect(wrapper.findAll('[data-result-gallery] [data-output]').every(output => output.attributes('data-compact') === '')).toBe(true)
     await wrapper.get('[data-content-test] button').trigger('click')
+    await flushPromises()
+    expect(api.history).toHaveBeenCalledWith(5, undefined)
     expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['5', '4', '3', '2', '1'])
     wrapper.unmount()
   })
 
   it('uses stable type IDs and keeps different model and reasoning configurations separate', async () => {
-    api.list.mockResolvedValue([
+    const results = [
       { ...baseResult, id: 4, test_name: 'Renamed Pelican', reasoning_effort: 'ultra', created_at: '2026-09-15T14:00:00Z' },
       { ...baseResult, id: 3, reasoning_effort: 'ultra', created_at: '2026-09-15T13:00:00Z' },
       { ...baseResult, id: 2, reasoning_effort: 'high' },
       { ...baseResult, id: 1, reasoning_effort: 'ultra', model_id: 'another-model' },
-    ])
+    ]
+    api.list.mockResolvedValue(results)
+    api.history.mockResolvedValue({ items: results.slice(0, 2) })
     const wrapper = mountResults()
     await flushPromises()
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
@@ -121,6 +131,7 @@ describe('channel quality result series', () => {
     expect(renamed.text()).toContain('gpt-6-astra · tests.reasoningEffort: ultra')
     expect(renamed.findAll('[data-output]').map(output => output.attributes('data-result-id'))).toEqual(['4', '3'])
     await renamed.get('button').trigger('click')
+    await flushPromises()
     expect(wrapper.findAll('[data-dialog] [data-output]')).toHaveLength(2)
     wrapper.unmount()
   })
@@ -149,15 +160,18 @@ describe('channel quality result series', () => {
   })
 
   it('keeps previous successful outputs and removes failed records from cards and history', async () => {
-    api.list.mockResolvedValue([
+    const results = [
       { ...baseResult, id: 3, status: 'failed', error_message: 'private upstream failure', created_at: '2026-09-15T14:00:00Z' },
       { ...baseResult, id: 2, status: 'success' },
       { ...baseResult, id: 1, status: 'passed' },
-    ])
+    ]
+    api.list.mockResolvedValue(results)
+    api.history.mockResolvedValue({ items: results })
     const wrapper = mountResults()
     await flushPromises()
     expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['2', '1'])
     await wrapper.get('[data-content-test] button').trigger('click')
+    await flushPromises()
     expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['2', '1'])
     expect(wrapper.text()).not.toContain('private')
     wrapper.unmount()
@@ -178,6 +192,75 @@ describe('channel quality result series', () => {
     await flushPromises()
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
     expect(wrapper.text()).toContain('tests.running')
+    expect(wrapper.find('[data-content-test] button').exists()).toBe(false)
+    expect(api.history).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each(['number', 'text'])('shows three recent %s results newest first', async outputKind => {
+    api.list.mockResolvedValue([1, 2, 3, 4].map(id => ({ ...baseResult, id, output_kind: outputKind, output_numeric: id })))
+    const wrapper = mountResults()
+    await flushPromises()
+    if (outputKind === 'number') {
+      expect(wrapper.findAll('[data-numeric-gallery] strong').map(item => item.text())).toEqual(['4', '3', '2'])
+    } else {
+      expect(wrapper.findAll('[data-result-gallery] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['4', '3', '2'])
+    }
+    wrapper.unmount()
+  })
+
+  it('labels completed HTML tests as completed without a manual review state', async () => {
+    api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
+    const wrapper = mountResults()
+    await flushPromises()
+    expect(wrapper.get('[data-content-test] .badge').text()).toBe('tests.completed')
+    expect(wrapper.get('[data-content-test] .badge').classes()).toContain('badge-success')
+    expect(wrapper.text()).not.toContain('tests.awaitingReview')
+    wrapper.unmount()
+  })
+
+  it('pages history and retries a failed page without discarding earlier results', async () => {
+    api.list.mockResolvedValue([{ ...baseResult, id: 5 }])
+    api.history.mockResolvedValueOnce({ items: [{ ...baseResult, id: 5 }], next_before_id: 5 })
+      .mockRejectedValueOnce(new Error('history unavailable'))
+      .mockResolvedValueOnce({ items: [{ ...baseResult, id: 4 }, { ...baseResult, id: 3 }] })
+    const wrapper = mountResults()
+    await flushPromises()
+    await wrapper.get('[data-content-test] button').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('[data-dialog] button').find(button => button.text() === 'tests.loadMore')!.trigger('click')
+    await flushPromises()
+    expect(api.history).toHaveBeenLastCalledWith(5, 5)
+    expect(wrapper.find('[data-dialog] [role="alert"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-dialog] [data-output]')).toHaveLength(1)
+    await wrapper.findAll('[data-dialog] button').find(button => button.text() === 'common.retry')!.trigger('click')
+    await flushPromises()
+    expect(api.history).toHaveBeenLastCalledWith(5, 5)
+    expect(wrapper.findAll('[data-dialog] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['5', '4', '3'])
+    expect(wrapper.find('[data-dialog] [role="alert"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-dialog] button').some(button => button.text() === 'tests.loadMore')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('ignores a slow history response after opening a different test', async () => {
+    const first = { ...baseResult, id: 1, test_name: 'Alpha' }
+    const second = { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Beta' }
+    api.list.mockResolvedValue([first, second])
+    let resolveFirst!: (value: unknown) => void
+    api.history.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+      .mockResolvedValueOnce({ items: [second] })
+    const wrapper = mountResults()
+    await flushPromises()
+    const buttons = wrapper.findAll('[data-content-test] button')
+    await buttons[0].trigger('click')
+    expect(wrapper.find('[data-dialog] [role="status"]').exists()).toBe(true)
+    await wrapper.get('[data-close]').trigger('click')
+    await buttons[1].trigger('click')
+    await flushPromises()
+    resolveFirst({ items: [first], next_before_id: 1 })
+    await flushPromises()
+    expect(wrapper.findAll('[data-dialog] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['2'])
+    expect(wrapper.find('[data-dialog] [role="status"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

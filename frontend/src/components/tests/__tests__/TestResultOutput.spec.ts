@@ -50,8 +50,49 @@ describe('test result output', () => {
     const wrapper = mount(TestResultOutput, { global, props: { compact: true, result: { id: 5, status: 'success', output_kind: 'html', output_html: '<p>Preview</p>' } } })
     window.dispatchEvent(new MessageEvent('message', { source: window, data: { type: 'sub2api-test-preview-size', height: 9000, width: 9000 } }))
     await nextTick()
-    expect(wrapper.get('iframe').attributes('style')).toContain('height: 448px')
+    expect(wrapper.get('iframe').attributes('style')).toContain('height: 640px')
     wrapper.unmount()
+  })
+
+  it('fits wide history output and keeps measurements received before load', async () => {
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
+    const wrapper = mount(TestResultOutput, { global, props: { result: { id: 6, status: 'success', output_kind: 'html', output_html: '<div style="width:1200px;height:1600px">Full history</div>' } } })
+    const frame = wrapper.get('iframe')
+    window.dispatchEvent(new MessageEvent('message', { source: frame.element.contentWindow, data: { type: 'sub2api-test-preview-size', height: 1600, width: 1200 } }))
+    await nextTick()
+    await frame.trigger('load')
+    expect(frame.attributes('style')).toContain('width: 1200px')
+    expect(frame.attributes('style')).toContain('scale(0.25)')
+    expect(frame.element.parentElement?.style.height).toBe('400px')
+
+    await wrapper.setProps({ result: { ...wrapper.props('result') } })
+    expect(wrapper.get('iframe').element).toBe(frame.element)
+    expect(wrapper.get('iframe').element.parentElement?.style.height).toBe('400px')
+
+    await wrapper.setProps({ result: { id: 7, status: 'success', output_kind: 'html', output_html: '<p>Next result</p>' } })
+    const nextFrame = wrapper.get('iframe')
+    expect(nextFrame.element).not.toBe(frame.element)
+    expect(nextFrame.attributes('style')).toContain('height: 640px')
+    wrapper.unmount()
+    measure.mockRestore()
+  })
+
+  it('authorizes sandbox scripts with the host nonce without weakening isolation', () => {
+    const hostScript = document.createElement('script')
+    hostScript.nonce = 'test-preview-nonce'
+    document.head.appendChild(hostScript)
+    const wrapper = mount(TestResultOutput, { global, props: { result: { id: 8, status: 'success', output_kind: 'html', output_html: '<script nonce="untrusted">document.body.dataset.animated="yes"</script>' } } })
+    const frame = wrapper.get('iframe')
+    const preview = new DOMParser().parseFromString(frame.attributes('srcdoc'), 'text/html')
+    expect(Array.from(preview.scripts).every(script => script.nonce === 'test-preview-nonce')).toBe(true)
+    const policy = preview.querySelector('meta[http-equiv]')?.getAttribute('content')
+    expect(policy).toContain("script-src 'unsafe-inline'")
+    expect(policy).not.toContain("'nonce-test-preview-nonce'")
+    expect(policy).toContain("default-src 'none'")
+    expect(frame.attributes('sandbox')).toBe('allow-scripts')
+    expect(preview.querySelector('[nonce="untrusted"]')).toBeNull()
+    wrapper.unmount()
+    hostScript.remove()
   })
 
   it('blocks external embeds while allowing inline animation in the opaque sandbox', () => {

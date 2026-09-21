@@ -1,7 +1,12 @@
 export default {
     tests: {
+      searchResultsAccount: '搜索账号名称或 ID',
+      resultCount: '{count} 条结果', failedCount: '{count} 失败', runningCount: '{count} 进行中',
+      noMatchingResults: '没有符合筛选条件的结果', allResultTypes: '全部检测类型', allResultStatuses: '全部状态',
+      groupResultTarget: '分组测试', unassignedResultTarget: '等待分配账号', executedByAccount: '执行账号',
+      expandResult: '展开结果', collapseResult: '收起结果',
       elapsed: '已运行 {duration}',
-      showHistory: '查看历史', latestResults: '仅看最新', historyHint: '已加载保留的历史记录；点击“刷新”获取更新。',
+      showHistory: '历史记录', latestResults: '最近结果', historyHint: '已加载保留的历史记录；点击“刷新”获取更新。',
       cronHint: 'Cron 五项：分 时 日 月 周。例如 0 * * * * 为每小时运行；默认使用服务器时区，可在前面加 CRON_TZ=Asia/Shanghai 指定时区。',
       nextRun: '下次运行', runStarted: '测试已开始，完成后结果将自动更新。', resultsHint: '窗口打开时，每 5 秒自动更新测试结果。',
       title: '渠道质量管理', description: '配置渠道质量检测类型、分组、模型和定时规则', types: '检测类型', plans: '检测规则', name: '名称', key: '标识', type: '检测类型', target: '目标', group: '分组', account: '账号', accountOptional: '检测账号', accountHint: '只检测选中的账号；用户查看结果时会显示账号 ID。', groupHint: '执行分组检测；用户查看结果时不显示账号 ID。', allAccountsHint: '检测分组内每个可调度账号；用户查看结果时显示账号 ID。', groupTest: '不选择账号（分组检测）', allAccountsInGroup: '分组内所有账号', enablePlan: '启用', disablePlan: '禁用', retry: '重试', retryStarted: '已开始重试该账号。', selectGroupFirst: '请先选择分组', selectType: '选择检测类型', selectGroup: '选择分组', selectAccount: '选择账号', model: '模型', reasoningEffort: '推理强度', reasoningEffortDefault: '使用模型默认值', reasoningEffortHint: '仅显示所选模型和目标账号共同支持的选项。', schedule: '计划', cron: 'Cron 表达式', manual: '手动', run: '立即运行', results: '结果', kind: '输出类型', number: '数字', text: '文本', descriptionLabel: '说明', prompt: '提示词', maxResults: '保留结果数', htmlResult: 'HTML 检测结果', sortOrder: '显示顺序', sortOrderHint: '数值越小，该检测类型在账号结果中越靠前。', planSortOrderHint: '数值越小，该检测规则对应的分组越靠前。', uncategorized: '未分类'

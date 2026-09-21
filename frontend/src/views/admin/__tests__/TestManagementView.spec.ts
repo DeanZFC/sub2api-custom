@@ -2,11 +2,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestManagementView from '../TestManagementView.vue'
+import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vue'
 
 const api = vi.hoisted(() => ({
   listTypes: vi.fn(), listPlans: vi.fn(), createType: vi.fn(), updateType: vi.fn(), deleteType: vi.fn(),
   createPlan: vi.fn(), updatePlan: vi.fn(), deletePlan: vi.fn(), runPlan: vi.fn(), listResults: vi.fn(),
-  retryResult: vi.fn(), getGroups: vi.fn(), getAccounts: vi.fn(), getModelAllowlistCandidates: vi.fn(), success: vi.fn(), error: vi.fn()
+  retryResult: vi.fn(), deleteResult: vi.fn(), getGroups: vi.fn(), getAccounts: vi.fn(), getModelAllowlistCandidates: vi.fn(), success: vi.fn(), error: vi.fn()
 }))
 vi.mock('@/api/admin', () => ({ adminAPI: { tests: api, groups: { getAll: api.getGroups, getModelAllowlistCandidates: api.getModelAllowlistCandidates }, accounts: { list: api.getAccounts } } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.success, showError: api.error }) }))
@@ -27,6 +28,7 @@ beforeEach(() => {
   api.listResults.mockResolvedValue([])
   api.runPlan.mockResolvedValue(undefined)
   api.retryResult.mockResolvedValue(undefined)
+  api.deleteResult.mockResolvedValue(undefined)
 })
 afterEach(() => vi.useRealTimers())
 
@@ -89,7 +91,7 @@ describe('configurable test management', () => {
     await dialog.findAll('button').find(button => button.text() === 'admin.tests.showHistory')!.trigger('click')
     await flushPromises()
     expect(api.listResults).toHaveBeenLastCalledWith(10, 50)
-    expect(dialog.text()).toContain('admin.tests.historyHint')
+    expect(dialog.get('button[role="tab"][aria-selected="true"]').text()).toBe('admin.tests.showHistory')
     const historyCalls = api.listResults.mock.calls.length
     await vi.advanceTimersByTimeAsync(15000); await flushPromises()
     expect(api.listResults).toHaveBeenCalledTimes(historyCalls)
@@ -134,7 +136,7 @@ describe('configurable test management', () => {
     expect(wrapper.findAll('[data-dialog] article')).toHaveLength(1)
     expect(wrapper.get('[data-dialog]').text()).toContain('upstream failed')
 
-    await wrapper.find('[data-dialog] article').findAll('button').find(b => b.text() === 'admin.tests.retry')!.trigger('click')
+    await wrapper.find('[data-dialog] article').get('button[aria-label="admin.tests.retry"]').trigger('click')
     await flushPromises()
 
     expect(api.retryResult).toHaveBeenCalledWith(101)
@@ -262,6 +264,53 @@ describe('configurable test management', () => {
     await orderInput.trigger('change')
     await flushPromises()
     expect(api.updateType).toHaveBeenCalledWith(2, { sort_order: 7 })
+    wrapper.unmount()
+  })
+
+  it.each(['retry', 'delete'] as const)('ignores an older refresh after %s completes', async action => {
+    const failed = { id: 101, plan_id: 10, account_id: 3, account_name: 'Account Three', status: 'failed', output_kind: 'number', error_message: 'old error' }
+    api.listResults.mockResolvedValue([failed])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('button[aria-label="admin.tests.results"]').trigger('click')
+    await flushPromises()
+    const pane = wrapper.getComponent(AdminTestResultHistory)
+    let resolveOld!: (rows: typeof failed[]) => void
+    api.listResults.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    await wrapper.get('[data-dialog]').findAll('button').find(button => button.text() === 'common.refresh')!.trigger('click')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    if (action === 'retry') {
+      api.retryResult.mockResolvedValue({ ...failed, account_name: undefined, status: 'running', error_message: '' })
+      pane.vm.$emit('retry', failed)
+    } else {
+      api.listResults.mockResolvedValue([])
+      pane.vm.$emit('delete', failed)
+    }
+    await flushPromises()
+    resolveOld([failed]); await flushPromises()
+    const rows = pane.props('results')
+    if (action === 'retry') {
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({ status: 'running', account_name: 'Account Three' })
+    } else {
+      expect(rows).toHaveLength(0)
+      expect(api.deleteResult).toHaveBeenCalledWith(101)
+    }
+    confirm.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('does not let an old rule request overwrite a newly opened rule', async () => {
+    api.listPlans.mockResolvedValue([plan, { ...plan, id: 11, name: 'Other rule' }])
+    let resolveOld!: (rows: unknown[]) => void
+    api.listResults.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    api.listResults.mockResolvedValueOnce([{ id: 202, plan_id: 11, account_id: 4, account_name: 'Other account', status: 'success', output_kind: 'number', output_numeric: 22 }])
+    const wrapper = makeWrapper(); await flushPromises()
+    const buttons = wrapper.findAll('button[aria-label="admin.tests.results"]')
+    await buttons[0].trigger('click')
+    await buttons[1].trigger('click'); await flushPromises()
+    resolveOld([{ id: 101, plan_id: 10, status: 'failed', output_kind: 'text' }]); await flushPromises()
+    expect(wrapper.getComponent(AdminTestResultHistory).props('results').map(row => row.id)).toEqual([202])
+    expect(wrapper.getComponent(AdminTestResultHistory).props('loading')).toBe(false)
     wrapper.unmount()
   })
 })

@@ -45,11 +45,11 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 
 	repo := &scheduledTestResultRepository{db: db}
 	createdAt := time.Now()
-	mock.ExpectQuery(`(?s)SELECT r\.id, r\.plan_id.*FROM scheduled_test_results r.*ORDER BY r\.started_at DESC, r\.id DESC`).
+	mock.ExpectQuery(`(?s)SELECT r\.id, r\.plan_id.*COALESCE\(a.name, ''\).*FROM scheduled_test_results r.*LEFT JOIN accounts a ON a.id = r.account_id.*ORDER BY r\.started_at DESC, r\.id DESC`).
 		WithArgs(int64(10), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt, 2))
+			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "account_name",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt, 2, "Account Seven"))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -59,6 +59,7 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 	require.Equal(t, "公开组", results[0].GroupName)
 	require.Equal(t, 12, results[0].PlanOrder)
 	require.Equal(t, "high", results[0].ReasoningEffort)
+	require.Equal(t, "Account Seven", results[0].AccountName)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -100,7 +101,7 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 	repo := &scheduledTestResultRepository{db: db}
 	now := time.Now()
 	mock.ExpectQuery(`(?s)WITH visible_results AS .*r.target_mode IN \('account', 'all_accounts'\).*visible_account_id.*result_target_key.*FROM scheduled_test_results r.*success_state AS.*PARTITION BY group_id, result_target_key, test_definition_id, model_id, reasoning_effort.*ranked_results AS.*WHERE status IN \('success', 'passed'\).*NOT has_success.*WHERE history_rank <= \$2.*ORDER BY vr\.started_at DESC, vr\.id DESC`).
-		WithArgs(int64(5), 4).
+		WithArgs(int64(5), 3).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id",
 		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now, 2))

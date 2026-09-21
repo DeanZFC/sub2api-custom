@@ -72,45 +72,16 @@
       <template #footer><button class="btn btn-secondary" @click="editingPlan = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="saving || !canSavePlan" @click="savePlan">{{ t('common.save') }}</button></template>
     </BaseDialog>
 
-    <BaseDialog :show="!!resultPlan" :title="`${t('admin.tests.results')} · ${resultPlan?.name || ''}`" width="wide" @close="resultPlan = null">
-      <div v-if="resultPlan" class="space-y-3">
-        <div class="flex items-center justify-between gap-3">
-          <span class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ typeName(resultPlan) }}</span>
-          <div class="flex shrink-0 items-center gap-2">
-            <button class="btn btn-secondary btn-sm" :disabled="resultsLoading" @click="toggleResultHistory">{{ t(resultsHistory ? 'admin.tests.latestResults' : 'admin.tests.showHistory') }}</button>
-            <button class="btn btn-secondary btn-sm" :disabled="resultsLoading" @click="refreshResults"><Icon name="refresh" size="sm" />{{ t('common.refresh') }}</button>
+    <BaseDialog :show="!!resultPlan" :title="`${t('admin.tests.results')} · ${resultPlan?.name || ''}`" width="extra-wide" @close="closeResults">
+      <div v-if="resultPlan" class="min-w-0 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3 dark:border-dark-700">
+          <div class="flex gap-1" role="tablist" :aria-label="t('admin.tests.results')">
+            <button type="button" role="tab" :aria-selected="!resultsHistory" class="rounded-md px-3 py-2 text-sm font-medium" :class="!resultsHistory ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/30 dark:text-primary-300' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-dark-800'" :disabled="resultsLoading" @click="setResultHistory(false)">{{ t('admin.tests.latestResults') }}</button>
+            <button type="button" role="tab" :aria-selected="resultsHistory" class="rounded-md px-3 py-2 text-sm font-medium" :class="resultsHistory ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/30 dark:text-primary-300' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-dark-800'" :disabled="resultsLoading" @click="setResultHistory(true)">{{ t('admin.tests.showHistory') }}</button>
           </div>
+          <button class="btn btn-secondary btn-sm" :disabled="resultsLoading" @click="refreshResults"><Icon name="refresh" size="sm" />{{ t('common.refresh') }}</button>
         </div>
-        <p class="text-xs text-gray-500">{{ t(resultsHistory ? 'admin.tests.historyHint' : 'admin.tests.resultsHint') }}</p>
-        <p v-if="!results.length" class="text-sm text-gray-500">{{ resultsLoading ? t('common.loading') : t('common.noData') }}</p>
-        <article v-for="result in results" :key="result.id" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
-          <div v-if="result.error_message" class="mb-2 rounded bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ result.error_message }}</div>
-          <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-            <span>{{ result.test_name || resultTypeName(result) }} · {{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('admin.tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template><template v-if="result.account_id && result.target_mode !== 'group'"> · {{ t('admin.tests.account') }} #{{ result.account_id }}</template></span>
-            <span class="flex items-center gap-2">
-              <span>{{ result.status }} · {{ resultDuration(result) }} · {{ formatDate(result.started_at) }}</span>
-              <button
-                v-if="result.status === 'failed' && result.account_id"
-                type="button"
-                class="text-primary-600 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
-                :disabled="retryingResultId === result.id"
-                @click="retryResult(result)"
-              >
-                {{ retryingResultId === result.id ? t('common.loading') : t('admin.tests.retry') }}
-              </button>
-              <button
-                v-if="result.id > 0"
-                type="button"
-                class="text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                :disabled="deletingResultId === result.id"
-                @click="removeResult(result)"
-              >
-                {{ deletingResultId === result.id ? t('common.loading') : t('common.delete') }}
-              </button>
-            </span>
-          </div>
-          <TestResultOutput class="mt-3" :result="result" />
-        </article>
+        <AdminTestResultHistory :key="resultPlan.id" :results="results" :accounts="accounts" :types="types" :now="resultsNow" :history="resultsHistory" :loading="resultsLoading" :retrying-result-id="retryingResultId" :deleting-result-id="deletingResultId" @retry="retryResult" @delete="removeResult" />
       </div>
     </BaseDialog>
   </AppLayout>
@@ -123,7 +94,7 @@ import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { reasoningEffortsForTestModel } from '@/utils/testReasoningEfforts'
-import TestResultOutput from '@/components/tests/TestResultOutput.vue'
+import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vue'
 import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -147,6 +118,7 @@ const modelOptionsLoading = ref(false)
 const results = ref<TestResult[]>([])
 const resultsNow = ref(Date.now())
 const resultsHistory = ref(false)
+let resultsRequest = 0
 // A manual run is asynchronous. Keep a local placeholder visible immediately
 // after the request is accepted until the first persisted result arrives.
 const pendingRuns = ref(new Map<number, TestResult[]>())
@@ -388,6 +360,8 @@ const run = async (plan: TestPlan) => {
     created_at: startedAt,
   })))
   resultsHistory.value = false
+  resultsRequest++
+  resultsLoading.value = false
   resultPlan.value = plan
   results.value = pendingRuns.value.get(plan.id)!
   try {
@@ -402,23 +376,32 @@ const run = async (plan: TestPlan) => {
   finally { runningPlans.value.delete(plan.id) }
 }
 const showResults = async (plan: TestPlan) => {
+  resultsRequest++
+  resultsLoading.value = false
   results.value = []
   resultsHistory.value = false
   resultPlan.value = plan
   await refreshResults()
 }
-const toggleResultHistory = async () => {
-  resultsHistory.value = !resultsHistory.value
+const closeResults = () => {
+  resultsRequest++
+  resultsLoading.value = false
+  resultPlan.value = null
+}
+const setResultHistory = async (history: boolean) => {
+  if (resultsHistory.value === history) return
+  resultsHistory.value = history
   await refreshResults()
 }
 const refreshResults = async () => {
   resultsNow.value = Date.now()
   const id = resultPlan.value?.id
   if (!id || resultsLoading.value) return
+  const request = ++resultsRequest
   resultsLoading.value = true
   try {
     const next = await adminAPI.tests.listResults(id, resultsHistory.value ? resultPlan.value?.max_results || 50 : 1)
-    if (resultPlan.value?.id === id) {
+    if (request === resultsRequest && resultPlan.value?.id === id) {
       const placeholders = (pendingRuns.value.get(id) || []).filter(pending => !next.some(result => {
         const started = result.started_at ? new Date(result.started_at).getTime() : 0
         return result.test_definition_id === pending.test_definition_id && started >= new Date(pending.started_at || 0).getTime()
@@ -427,17 +410,23 @@ const refreshResults = async () => {
       else pendingRuns.value.delete(id)
       results.value = [...placeholders, ...next]
     }
-  } catch (error) { reportError(error) }
-  finally { resultsLoading.value = false }
+  } catch (error) { if (request === resultsRequest) reportError(error) }
+  finally { if (request === resultsRequest) resultsLoading.value = false }
 }
 const removeResult = async (result: TestResult) => {
   if (!window.confirm(`${t('common.delete')} #${result.id}?`)) return
   if (deletingResultId.value !== null) return
+  const planID = resultPlan.value?.id
   deletingResultId.value = result.id
   try {
     await adminAPI.tests.deleteResult(result.id)
     app.showSuccess(t('common.deleted'))
-    await refreshResults()
+    if (resultPlan.value?.id === planID) {
+      resultsRequest++
+      resultsLoading.value = false
+      results.value = results.value.filter(item => item.id !== result.id)
+      await refreshResults()
+    }
   } catch (error) {
     reportError(error)
   } finally {
@@ -454,8 +443,10 @@ const retryResult = async (result: TestResult) => {
     // row in its new running state. Replace it in place so the administrator
     // sees the cleared output/error immediately without adding another card.
     if (resultPlan.value?.id === planID && (updated.plan_id == null || updated.plan_id === planID)) {
+      resultsRequest++
+      resultsLoading.value = false
       const index = results.value.findIndex(item => item.id === result.id)
-      if (index >= 0 && updated.id === result.id) results.value.splice(index, 1, updated)
+      if (index >= 0 && updated.id === result.id) results.value.splice(index, 1, { ...updated, account_name: updated.account_name || results.value[index].account_name })
     }
     app.showSuccess(t('admin.tests.retryStarted'))
   } catch (error) {
@@ -494,23 +485,15 @@ watch(
 watch(resultPlan, plan => {
   clearInterval(resultTimer)
   if (plan) resultTimer = setInterval(() => {
-    if (!document.hidden && !resultsHistory.value) void refreshResults()
+    resultsNow.value = Date.now()
+    const hasRunning = results.value.some(result => result.status === 'running' || result.status === 'pending')
+    if (!document.hidden && (!resultsHistory.value || hasRunning)) void refreshResults()
   }, 5000)
 })
-onUnmounted(() => clearInterval(resultTimer))
-const resultDuration = (result: TestResult) => {
-  if (result.status !== 'running' && result.status !== 'pending') return `${result.latency_ms ?? '-'}ms`
-  const started = result.started_at ? new Date(result.started_at).getTime() : NaN
-  if (!Number.isFinite(started)) return '-'
-  const elapsed = Math.max(0, Math.floor((resultsNow.value - started) / 1000))
-  const seconds = String(elapsed % 60).padStart(2, '0')
-  const minutes = String(Math.floor(elapsed / 60) % 60).padStart(2, '0')
-  const hours = Math.floor(elapsed / 3600)
-  const duration = hours > 0 ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`
-  return t('admin.tests.elapsed', { duration })
-}
-const typeName = (plan: TestPlan) => planTypes(plan).map(type => type.name).join(' · ') || '-'
-const resultTypeName = (result: TestResult) => types.value.find(type => type.id === result.test_definition_id)?.name || result.test_definition?.name || '-'
+onUnmounted(() => {
+  clearInterval(resultTimer)
+  resultsRequest++
+})
 const groupName = (plan: TestPlan) => plan.group_id ? groups.value.find(group => group.id === plan.group_id)?.name || `#${plan.group_id}` : '-'
 const targetName = (plan: TestPlan) => plan.account_id
   ? `${accounts.value.find(account => account.id === plan.account_id)?.name || t('admin.tests.account')} (#${plan.account_id})`

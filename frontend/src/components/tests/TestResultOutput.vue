@@ -1,18 +1,18 @@
 <template>
   <div ref="outputContainer" class="min-w-0">
     <template v-if="result.output_kind === 'html' && result.output_html">
-      <div :class="compact ? 'relative w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700' : ''" :style="compact ? { height: `${Math.ceil(htmlFrameHeight * previewScale)}px` } : undefined">
+      <div class="relative w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700" :style="{ height: `${Math.ceil(htmlFrameHeight * previewScale)}px` }">
       <iframe
+        :key="previewRevision"
         ref="htmlFrame"
-        :class="compact ? 'absolute left-0 top-0 block origin-top-left border-0 bg-white' : 'block w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700'"
+        class="absolute left-0 top-0 block origin-top-left border-0 bg-white"
         scrolling="no"
         loading="lazy"
-        :style="compact ? { width: `${htmlFrameWidth}px`, height: `${htmlFrameHeight}px`, transform: `scale(${previewScale})` } : { height: `${htmlFrameHeight}px` }"
+        :style="{ width: `${htmlFrameWidth}px`, height: `${htmlFrameHeight}px`, transform: `scale(${previewScale})` }"
         sandbox="allow-scripts"
         referrerpolicy="no-referrer"
         :srcdoc="safeHTML"
         :title="t('tests.htmlResult')"
-        @load="onHTMLLoad"
       />
       </div>
     </template>
@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { TestResult } from '@/types'
 import { buildTestPreviewHTML } from '@/utils/testPreview'
@@ -43,8 +43,9 @@ const { t } = useI18n()
 const outputContainer = ref<HTMLElement | null>(null)
 const containerWidth = ref(960)
 const htmlFrame = ref<HTMLIFrameElement | null>(null)
-const htmlFrameHeight = ref(448)
+const htmlFrameHeight = ref(640)
 const htmlFrameWidth = ref(960)
+const previewRevision = ref(0)
 const previewScale = computed(() => Math.min(containerWidth.value / htmlFrameWidth.value, 1))
 const onPreviewMessage = (event: MessageEvent<unknown>) => {
   if (event.source !== htmlFrame.value?.contentWindow) return
@@ -58,17 +59,16 @@ const onPreviewMessage = (event: MessageEvent<unknown>) => {
   // Do not shrink after a short first measurement; late-loading fonts,
   // animation layout, and responsive SVGs can report their full height later.
   htmlFrameHeight.value = Math.max(htmlFrameHeight.value, 320, Math.ceil(reported))
-  if (props.compact) {
-    const width = Number((data as { width?: unknown }).width)
-    if (Number.isFinite(width) && width > 0) htmlFrameWidth.value = Math.max(htmlFrameWidth.value, Math.ceil(width))
-  }
+  const width = Number((data as { width?: unknown }).width)
+  if (Number.isFinite(width) && width > 0) htmlFrameWidth.value = Math.max(htmlFrameWidth.value, Math.ceil(width))
 }
-const onHTMLLoad = () => {
-  // Reset while a new result is loading; the embedded script will immediately
-  // report the precise document height afterwards.
-  htmlFrameHeight.value = 448
+watch([() => props.result.id, () => props.result.output_html], () => {
+  // A load event can arrive after the first size message. Reset only when
+  // replacing the document, and reject messages from the previous iframe.
+  htmlFrameHeight.value = 640
   htmlFrameWidth.value = 960
-}
+  previewRevision.value++
+})
 let containerObserver: ResizeObserver | undefined
 onMounted(() => {
   window.addEventListener('message', onPreviewMessage)
@@ -77,7 +77,7 @@ onMounted(() => {
     if (width && width > 0) containerWidth.value = width
   }
   measureContainer()
-  if (props.compact && typeof ResizeObserver !== 'undefined' && outputContainer.value) {
+  if (typeof ResizeObserver !== 'undefined' && outputContainer.value) {
     containerObserver = new ResizeObserver(measureContainer)
     containerObserver.observe(outputContainer.value)
   }
@@ -88,5 +88,6 @@ onBeforeUnmount(() => {
 })
 // Render HTML results as soon as they arrive. The helper strips unsafe markup
 // while keeping the test animation in an isolated sandboxed iframe.
-const safeHTML = computed(() => buildTestPreviewHTML(props.result.output_html || ''))
+const nonce = document.querySelector<HTMLScriptElement>('script[nonce]')?.nonce
+const safeHTML = computed(() => buildTestPreviewHTML(props.result.output_html || '', nonce))
 </script>

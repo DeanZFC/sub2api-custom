@@ -417,6 +417,28 @@ func (s *ScheduledTestService) ListVisibleResults(ctx context.Context, userID in
 	return results, nil
 }
 
+func (s *ScheduledTestService) ListVisibleResultHistory(ctx context.Context, userID, resultID, beforeID int64, limit int) (*ScheduledTestResultHistory, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	results, err := s.resultRepo.ListVisibleHistory(ctx, userID, resultID, beforeID, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	page := &ScheduledTestResultHistory{Items: make([]*ScheduledTestResult, 0, len(results))}
+	if len(results) > limit {
+		cursor := results[limit-1].ID
+		page.NextBeforeID = &cursor
+		results = results[:limit]
+	}
+	normalizeStoredTestResults(results)
+	page.Items = append(page.Items, results...)
+	return page, nil
+}
+
 // normalizeStoredTestResults repairs derived output from older parsers when
 // results are read. Keep the response and status unchanged so historical
 // records remain available for diagnosis without rewriting persisted data.

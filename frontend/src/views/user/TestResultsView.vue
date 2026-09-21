@@ -25,9 +25,14 @@
             <div v-if="account.numericTests.length" class="grid min-w-0 flex-1 gap-x-8 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
               <section v-for="test in account.numericTests" :key="test.key" data-numeric-test>
                 <div class="flex flex-wrap items-center gap-2"><h4 class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ test.name }}</h4><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span></div>
-                <div class="mt-2 flex items-baseline gap-3"><strong class="text-3xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ test.latest.output_numeric ?? '-' }}</strong><button type="button" class="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button></div>
+                <div class="mt-3 grid grid-cols-3 gap-3" data-numeric-gallery>
+                  <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
+                    <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ result.output_numeric ?? '-' }}</strong>
+                    <figcaption class="mt-1 text-xs text-gray-500 dark:text-gray-400"><span class="block">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span class="mt-1 block">{{ formatDate(resultTime(result)) }}</span><span v-if="result.latency_ms != null" class="mt-1 block">{{ result.latency_ms }}ms</span></figcaption>
+                  </figure>
+                </div>
                 <p class="mt-2 break-words text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}</p>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(resultTime(test.latest)) }}<span v-if="test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></p>
+                <button v-if="historyAnchor(test)" type="button" class="mt-2 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
               </section>
             </div>
           </div>
@@ -35,22 +40,27 @@
           <section v-for="test in account.contentTests" :key="test.key" class="border-t border-gray-200 p-4 dark:border-dark-700 sm:p-5" data-content-test>
             <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ test.name }}</h4><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span></div><p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}<span v-if="test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></p></div>
-              <button type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
+              <button v-if="historyAnchor(test)" type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
             </div>
-            <div v-if="test.latest.output_kind === 'html'" class="grid items-end gap-4 sm:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr]" data-result-gallery>
+            <div class="grid items-start gap-4 lg:grid-cols-3" data-result-gallery>
               <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
                 <TestResultOutput :result="result" compact />
                 <figcaption class="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-gray-500 dark:text-gray-400"><span :class="index === 0 ? 'font-medium text-gray-700 dark:text-gray-200' : ''">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span>· {{ formatDate(resultTime(result)) }}</span></figcaption>
               </figure>
             </div>
-            <template v-else><TestResultOutput :result="test.latest" /><p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(resultTime(test.latest)) }}</p></template>
           </section>
         </article>
       </section>
     </div>
 
-    <BaseDialog :show="!!historyTarget" :title="historyTarget ? `${targetName(historyTarget.latest)} · ${historyTarget.name}` : ''" width="extra-wide" @close="historyTarget = null">
-      <div v-if="historyTarget" class="divide-y divide-gray-200 dark:divide-dark-700"><article v-for="result in historyTarget.results" :key="result.id" class="py-5 first:pt-0"><div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ modelLabel(result) }}<span v-if="result.latency_ms != null"> · {{ result.latency_ms }}ms</span> · {{ formatDate(resultTime(result)) }}</span><span :class="statusClass(result)">{{ statusLabel(result) }}</span></div><TestResultOutput :result="result" /></article></div>
+    <BaseDialog :show="!!historyTarget" :title="historyTarget ? `${targetName(historyTarget.latest)} · ${historyTarget.name}` : ''" width="extra-wide" @close="closeHistory">
+      <div v-if="historyTarget" class="space-y-4">
+        <div class="divide-y divide-gray-200 dark:divide-dark-700"><article v-for="result in historyResults" :key="result.id" class="py-5 first:pt-0"><div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ modelLabel(result) }}<span v-if="result.latency_ms != null"> · {{ result.latency_ms }}ms</span> · {{ formatDate(resultTime(result)) }}</span><span :class="statusClass(result)">{{ statusLabel(result) }}</span></div><TestResultOutput :result="result" /></article></div>
+        <p v-if="historyLoading" class="py-4 text-center text-sm text-gray-500" role="status">{{ t('common.loading') }}</p>
+        <div v-else-if="historyError" class="flex flex-wrap items-center justify-center gap-3 py-4 text-sm"><p class="text-red-600 dark:text-red-400" role="alert">{{ historyError }}</p><button type="button" class="btn btn-secondary" @click="loadHistory"><Icon name="refresh" size="sm" />{{ t('common.retry') }}</button></div>
+        <p v-else-if="!historyResults.length" class="py-4 text-center text-sm text-gray-500">{{ t('tests.empty') }}</p>
+        <div v-else-if="historyBeforeId" class="flex justify-center"><button type="button" class="btn btn-secondary" @click="loadHistory">{{ t('tests.loadMore') }}</button></div>
+      </div>
     </BaseDialog>
   </AppLayout>
 </template>
@@ -83,6 +93,11 @@ const allResults = ref<TestResult[]>([])
 const activeGroup = ref('')
 const modelFilter = ref('')
 const historyTarget = ref<TestSeries | null>(null)
+const historyResults = ref<TestResult[]>([])
+const historyLoading = ref(false)
+const historyError = ref('')
+const historyBeforeId = ref<number>()
+let historyRequest = 0
 const resultsPanel = ref<HTMLElement | null>(null)
 watch([activeGroup, modelFilter], () => {
   if (resultsPanel.value) resultsPanel.value.scrollTop = 0
@@ -135,14 +150,49 @@ const accountResults = computed(() => {
   }
   return [...accounts.values()].sort((a, b) => a.order - b.order).map(account => {
     const tests = [...account.tests.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
-    for (const test of tests) test.recent = test.results.slice(0, 4)
+    for (const test of tests) test.recent = test.results.slice(0, 3)
     return { ...account, numericTests: tests.filter(test => test.latest.output_kind === 'number'), contentTests: tests.filter(test => test.latest.output_kind !== 'number') }
   })
 })
 
-const openHistory = (series: TestSeries) => { historyTarget.value = series }
-const statusClass = (result: TestResult) => result.status === 'running' || result.status === 'pending' || result.output_kind === 'html' ? 'badge badge-warning' : 'badge badge-success'
-const statusLabel = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? t('tests.running') : result.output_kind === 'html' ? t('tests.awaitingReview') : t('tests.completed')
+const isSuccessful = (result: TestResult) => ['success', 'passed'].includes(result.status)
+const historyAnchor = (series: TestSeries) => series.results.find(isSuccessful)
+const closeHistory = () => {
+  historyRequest++
+  historyTarget.value = null
+  historyLoading.value = false
+}
+const loadHistory = async () => {
+  const anchor = historyTarget.value && historyAnchor(historyTarget.value)
+  if (!anchor || historyLoading.value) return
+  const request = ++historyRequest
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    const page = await testResultsAPI.history(anchor.id, historyBeforeId.value)
+    if (request !== historyRequest) return
+    const records = new Map(historyResults.value.map(result => [result.id, result]))
+    for (const result of page.items.filter(isSuccessful)) records.set(result.id, result)
+    historyResults.value = sortResults([...records.values()])
+    historyBeforeId.value = page.next_before_id
+  } catch (error) {
+    if (request === historyRequest) historyError.value = extractApiErrorMessage(error, t('tests.loadFailed'))
+  } finally {
+    if (request === historyRequest) historyLoading.value = false
+  }
+}
+const openHistory = (series: TestSeries) => {
+  if (!historyAnchor(series)) return
+  historyRequest++
+  historyTarget.value = series
+  historyResults.value = []
+  historyBeforeId.value = undefined
+  historyError.value = ''
+  historyLoading.value = false
+  void loadHistory()
+}
+const statusClass = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? 'badge badge-warning' : 'badge badge-success'
+const statusLabel = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? t('tests.running') : t('tests.completed')
 const modelLabel = (result: TestResult) => `${result.model_id || '-'}${result.reasoning_effort ? ` · ${t('tests.reasoningEffort')}: ${result.reasoning_effort}` : ''}`
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '-'
 const onGroupKeydown = async (event: KeyboardEvent, key: string) => {
@@ -163,7 +213,7 @@ const load = async () => {
   if (loading.value) return
   loading.value = true
   try {
-    const results = await testResultsAPI.list(4)
+    const results = await testResultsAPI.list(3)
     // Failed upstream responses must stay private, including against an older server.
     allResults.value = sortResults(results.filter(result => ['success', 'passed', 'pending', 'running'].includes(result.status)))
   } catch (error) {
@@ -175,5 +225,8 @@ onMounted(() => {
   void load()
   resultTimer = setInterval(() => { if (!document.hidden) void load() }, 5000)
 })
-onUnmounted(() => clearInterval(resultTimer))
+onUnmounted(() => {
+  clearInterval(resultTimer)
+  historyRequest++
+})
 </script>

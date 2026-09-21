@@ -54,12 +54,12 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.NoError(t, err)
 		execSQL(string(data))
 	}
-	execSQL(`CREATE TABLE accounts (id BIGINT PRIMARY KEY, deleted_at TIMESTAMPTZ);
+	execSQL(`CREATE TABLE accounts (id BIGINT PRIMARY KEY, name TEXT, deleted_at TIMESTAMPTZ);
 		CREATE TABLE groups (id BIGINT PRIMARY KEY, name TEXT, status TEXT DEFAULT 'active', deleted_at TIMESTAMPTZ, is_exclusive BOOLEAN DEFAULT false, subscription_type TEXT DEFAULT 'standard');
 		CREATE TABLE account_groups (account_id BIGINT, group_id BIGINT);
 		CREATE TABLE user_allowed_groups (user_id BIGINT, group_id BIGINT);
 		CREATE TABLE user_subscriptions (user_id BIGINT, group_id BIGINT, deleted_at TIMESTAMPTZ, status TEXT, starts_at TIMESTAMPTZ, expires_at TIMESTAMPTZ);
-		INSERT INTO accounts (id) VALUES (62), (63);
+		INSERT INTO accounts (id, name) VALUES (62, 'Private account alpha'), (63, 'Private account beta');
 		INSERT INTO groups (id, name, is_exclusive) VALUES (8, 'Public group', false), (9, 'Private group', true);
 		INSERT INTO account_groups VALUES (62, 8), (63, 8), (62, 9);`)
 	for _, name := range []string{
@@ -88,6 +88,16 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, candyID, *legacyResult.TestDefinitionID)
 	require.Equal(t, "group", legacyResult.TargetMode)
+	require.Equal(t, "Private account alpha", legacyResult.AccountName)
+	execSQL("UPDATE accounts SET deleted_at=NOW() WHERE id=62")
+	deletedAccountResult, err := results.GetByID(ctx, legacyResultID)
+	require.NoError(t, err)
+	require.Equal(t, "Private account alpha", deletedAccountResult.AccountName, "admin history must keep soft-deleted account names")
+	deletedAccountHistory, err := results.ListByPlanID(ctx, legacyPlanID, 3)
+	require.NoError(t, err)
+	require.Len(t, deletedAccountHistory, 1)
+	require.Equal(t, "Private account alpha", deletedAccountHistory[0].AccountName)
+	execSQL("UPDATE accounts SET deleted_at=NULL WHERE id=62")
 
 	groupID, privateGroupID, accountID := int64(8), int64(9), int64(62)
 	plan, err := plans.Create(ctx, &service.ScheduledTestPlan{
@@ -140,20 +150,101 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	for _, result := range visible {
 		seen[result.ID] = true
 		require.NotEqual(t, "failed", result.Status)
+		require.Empty(t, result.AccountName, "public previews must not load account names")
 		if result.ID == legacyResultID {
 			require.Nil(t, result.AccountID, "group results must not expose the executing account")
 			continue
 		}
 		seriesCounts[fmt.Sprintf("%d/%s/%s", *result.TestDefinitionID, result.ModelID, result.ReasoningEffort)]++
 	}
-	require.Equal(t, 4, seriesCounts[fmt.Sprintf("%d/model-a/high", candyID)])
-	require.Equal(t, 4, seriesCounts[fmt.Sprintf("%d/model-a/high", htmlID)])
+	require.Equal(t, 3, seriesCounts[fmt.Sprintf("%d/model-a/high", candyID)], "the public preview caps each series at three results")
+	require.Equal(t, 3, seriesCounts[fmt.Sprintf("%d/model-a/high", htmlID)])
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-a/medium", candyID)])
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-b/high", candyID)])
 	require.True(t, seen[initialRunning.ID])
 	require.False(t, seen[running.ID], "progress must not displace a previous success")
 	require.False(t, seen[failed.ID])
 	require.False(t, seen[privateResult.ID])
+	publicJSON, err := json.Marshal(visible)
+	require.NoError(t, err)
+	require.NotContains(t, string(publicJSON), "account_name")
+	require.NotContains(t, string(publicJSON), "Private account alpha")
+
+	t.Run("public history is authorized and paginates one successful series", func(t *testing.T) {
+		var anchor *service.ScheduledTestResult
+		for _, result := range visible {
+			if result.TargetMode == "all_accounts" && *result.TestDefinitionID == candyID && result.ModelID == "model-a" && result.ReasoningEffort == "high" {
+				anchor = result
+				break
+			}
+		}
+		require.NotNil(t, anchor)
+		first, err := results.ListVisibleHistory(ctx, 100, anchor.ID, 0, 2)
+		require.NoError(t, err)
+		require.Len(t, first, 2)
+		second, err := results.ListVisibleHistory(ctx, 100, anchor.ID, first[1].ID, 10)
+		require.NoError(t, err)
+		require.Len(t, second, 4)
+		all := append(first, second...)
+		for i, result := range all {
+			require.Equal(t, "success", result.Status)
+			require.Empty(t, result.AccountName, "public history must not load account names")
+			require.Equal(t, candyID, *result.TestDefinitionID)
+			require.Equal(t, "model-a", result.ModelID)
+			require.Equal(t, "high", result.ReasoningEffort)
+			require.Equal(t, accountID, *result.AccountID)
+			if i > 0 {
+				require.True(t, result.StartedAt.Before(all[i-1].StartedAt))
+			}
+		}
+		historyJSON, err := json.Marshal(all)
+		require.NoError(t, err)
+		require.NotContains(t, string(historyJSON), "account_name")
+		require.NotContains(t, string(historyJSON), "Private account alpha")
+		last, err := results.ListVisibleHistory(ctx, 100, anchor.ID, all[len(all)-1].ID, 10)
+		require.NoError(t, err)
+		require.Empty(t, last)
+		for _, hiddenID := range []int64{privateResult.ID, failed.ID, running.ID, initialRunning.ID, 999999} {
+			_, err := results.ListVisibleHistory(ctx, 100, hiddenID, 0, 20)
+			require.ErrorIs(t, err, sql.ErrNoRows)
+			_, err = results.ListVisibleHistory(ctx, 100, anchor.ID, hiddenID, 20)
+			require.ErrorIs(t, err, sql.ErrNoRows)
+		}
+		_, err = results.ListVisibleHistory(ctx, 100, anchor.ID, legacyResultID, 20)
+		require.ErrorIs(t, err, sql.ErrNoRows, "a visible cursor from another series must be rejected")
+		groupHistory, err := results.ListVisibleHistory(ctx, 100, legacyResultID, 0, 20)
+		require.NoError(t, err)
+		require.Len(t, groupHistory, 1)
+		encoded, err := json.Marshal(groupHistory)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), "account_id")
+		require.NotContains(t, string(encoded), "account_name")
+		require.NotContains(t, string(encoded), "credentials")
+
+		// A manually retried result keeps its ID but becomes the newest result.
+		oldest := all[len(all)-1]
+		oldest.StartedAt = started.Add(time.Minute)
+		require.NoError(t, results.Update(ctx, oldest))
+		reordered, err := results.ListVisibleHistory(ctx, 100, anchor.ID, 0, 2)
+		require.NoError(t, err)
+		require.Equal(t, oldest.ID, reordered[0].ID)
+		oldest.StartedAt = started.Add(-6 * time.Minute)
+		require.NoError(t, results.Update(ctx, oldest))
+		tied := all[len(all)-2]
+		tiedStartedAt := tied.StartedAt
+		tied.StartedAt = oldest.StartedAt
+		require.NoError(t, results.Update(ctx, tied))
+		tiePage, err := results.ListVisibleHistory(ctx, 100, anchor.ID, all[len(all)-3].ID, 1)
+		require.NoError(t, err)
+		require.Len(t, tiePage, 1)
+		require.Equal(t, oldest.ID, tiePage[0].ID, "equal timestamps sort by descending ID")
+		tieNext, err := results.ListVisibleHistory(ctx, 100, anchor.ID, oldest.ID, 1)
+		require.NoError(t, err)
+		require.Len(t, tieNext, 1)
+		require.Equal(t, tied.ID, tieNext[0].ID)
+		tied.StartedAt = tiedStartedAt
+		require.NoError(t, results.Update(ctx, tied))
+	})
 
 	// Editing the rule must not relabel a historical result or reveal a hidden account.
 	legacy.TargetMode, legacy.AccountID = "account", &accountID
@@ -181,6 +272,12 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		privateVisible = privateVisible || result.ID == privateResult.ID
 	}
 	require.True(t, privateVisible)
+	privateHistory, err := results.ListVisibleHistory(ctx, 100, privateResult.ID, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, privateHistory, 1)
+	execSQL("DELETE FROM user_allowed_groups WHERE user_id=100 AND group_id=9")
+	_, err = results.ListVisibleHistory(ctx, 100, privateResult.ID, 0, 20)
+	require.ErrorIs(t, err, sql.ErrNoRows, "history rechecks permissions after access is revoked")
 
 	// Retention keeps a successful history independently from failures and in-flight runs.
 	createResult(htmlID, "failed", "model-a", "high", -1)
@@ -238,6 +335,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.NoError(t, err)
 		var actualIDs []int64
 		for i, result := range history {
+			require.NotEmpty(t, result.AccountName, "admin history includes the tested account's name")
 			actualIDs = append(actualIDs, result.ID)
 			require.Equal(t, multiPlan.ID, result.PlanID)
 			if i > 0 {

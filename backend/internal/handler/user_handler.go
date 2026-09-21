@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,8 +42,8 @@ func (h *UserHandler) ListTestResults(c *gin.Context) {
 		response.InternalError(c, "test results unavailable")
 		return
 	}
-	limit := 50
-	if n, err := strconv.Atoi(c.Query("limit")); err == nil && n > 0 && n < 201 {
+	limit := 3
+	if n, err := strconv.Atoi(c.Query("limit")); err == nil && n > 0 && n <= 3 {
 		limit = n
 	}
 	rows, err := h.scheduledTestSvc.ListVisibleResults(c.Request.Context(), subject.UserID, limit)
@@ -50,6 +52,49 @@ func (h *UserHandler) ListTestResults(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, rows)
+}
+
+func (h *UserHandler) ListTestResultHistory(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "authentication required")
+		return
+	}
+	if h.scheduledTestSvc == nil {
+		response.InternalError(c, "test results unavailable")
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid test result id")
+		return
+	}
+	var beforeID int64
+	if raw, provided := c.GetQuery("before_id"); provided {
+		beforeID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || beforeID <= 0 {
+			response.BadRequest(c, "invalid history cursor")
+			return
+		}
+	}
+	limit := 20
+	if raw, provided := c.GetQuery("limit"); provided {
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit <= 0 || limit > 50 {
+			response.BadRequest(c, "history limit must be between 1 and 50")
+			return
+		}
+	}
+	page, err := h.scheduledTestSvc.ListVisibleResultHistory(c.Request.Context(), subject.UserID, id, beforeID, limit)
+	if errors.Is(err, sql.ErrNoRows) {
+		response.NotFound(c, "test result history not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "test result history unavailable")
+		return
+	}
+	c.JSON(http.StatusOK, page)
 }
 
 // NewUserHandler creates a new UserHandler
