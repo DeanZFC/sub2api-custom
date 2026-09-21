@@ -38,7 +38,11 @@ func (s *ScheduledTestRunnerService) runStatisticsDefinition(ctx context.Context
 		return
 	}
 	var ids []int64
-	if protectionRepo := s.scheduledSvc.protectionRepository(); protectionRepo != nil {
+	if actionRepo, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRepository); ok {
+		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
+		ids, err = actionRepo.ListPlanDetectionAccountIDs(queryCtx, plan, plan.AccountID)
+		cancel()
+	} else if protectionRepo := s.scheduledSvc.protectionRepository(); protectionRepo != nil {
 		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 		ids, err = protectionRepo.ListDetectionAccountIDs(queryCtx, plan.GroupID, plan.AccountID)
 		cancel()
@@ -145,8 +149,13 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 					}
 					queryCtx, cancel := context.WithTimeout(attemptCtx, scheduledTestPersistenceTimeout)
 					defer cancel()
+					statisticsGroupID := plan.GroupID
+					if accountID != nil && plan.HasGroupActions() {
+						// Track this account across its quality tiers, including after a move.
+						statisticsGroupID = nil
+					}
 					attempt.OutputStatistics, err = repo.CollectStatistics(queryCtx, ScheduledTestStatisticsFilter{
-						GroupID: plan.GroupID, AccountID: accountID, Model: plan.ModelID,
+						GroupID: statisticsGroupID, AccountID: accountID, Model: plan.ModelID,
 						WindowStart: windowEnd.Add(-time.Hour), WindowEnd: windowEnd,
 					})
 				}()

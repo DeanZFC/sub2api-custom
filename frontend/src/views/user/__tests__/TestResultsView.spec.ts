@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestResultsView from '../TestResultsView.vue'
 
-const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), votes: vi.fn(), vote: vi.fn(), error: vi.fn() }))
+const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), votes: vi.fn(), vote: vi.fn(), error: vi.fn(), reviews: vi.fn(), decide: vi.fn(), adminResults: vi.fn(), isAdmin: false }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: api.isAdmin }) }))
+vi.mock('@/api/admin/tests', () => ({ listReviews: api.reviews, decideResult: api.decide, listResults: api.adminResults, default: { listReviews: api.reviews, decideResult: api.decide } }))
 vi.mock('@/api/testResults', () => ({ testResultsAPI: { list: api.list, history: api.history, votes: api.votes, vote: api.vote } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: api.error }) }))
 
@@ -19,12 +21,86 @@ const mountResults = () => mount(TestResultsView, { global: {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  api.isAdmin = false
+  api.reviews.mockResolvedValue([])
+  api.adminResults.mockResolvedValue([])
   api.history.mockResolvedValue({ items: [] })
   api.votes.mockResolvedValue([])
 })
 afterEach(() => vi.useRealTimers())
 
 describe('channel quality result groups', () => {
+  it('uses admin access for paused account history and filters out other accounts and tests', async () => {
+    api.isAdmin = true
+    api.list.mockResolvedValue([])
+    const result = { ...baseResult, id: 91 }
+    api.reviews.mockResolvedValue([{ result, generation: 7, verdict: 'fail', admin_verdict: 'fail', account_paused: true }])
+    api.adminResults.mockResolvedValue([result, { ...result, id: 92, account_id: 99 }, { ...result, id: 93, test_definition_id: 5 }, { ...result, id: 94, status: 'failed' }])
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    expect(api.adminResults).toHaveBeenCalledWith(10, 21)
+    expect(api.history).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-dialog]').findAll('[data-output]').map(output => output.attributes('data-result-id'))).toEqual(['91'])
+    wrapper.unmount()
+  })
+
+  it('shows administrator decisions for current paused results and refreshes after a verdict', async () => {
+    api.isAdmin = true
+    api.list.mockResolvedValue([])
+    const result = { ...baseResult, id: 91, account_name: 'Review Account' }
+    const review = { result, generation: 7, verdict: 'pending', admin_verdict: '', account_paused: true }
+    api.reviews.mockResolvedValue([review])
+    api.decide.mockResolvedValue(undefined)
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-account-info]').text()).toContain('Review Account')
+    expect(wrapper.get('[data-admin-decision]').text()).toContain('tests.voting.paused')
+    api.reviews.mockResolvedValue([{ ...review, verdict: 'pass', admin_verdict: 'pass', account_paused: false }])
+    await wrapper.get('[data-admin-pass]').trigger('click'); await flushPromises()
+    expect(api.decide).toHaveBeenCalledWith(91, 7, 'pass')
+    expect(wrapper.get('[data-admin-pass]').attributes('disabled')).toBeDefined()
+    api.reviews.mockResolvedValue([{ ...review, verdict: 'fail', admin_verdict: 'fail' }])
+    await wrapper.get('[data-admin-fail]').trigger('click'); await flushPromises()
+    expect(api.decide).toHaveBeenLastCalledWith(91, 7, 'fail')
+    expect(wrapper.get('[data-admin-fail]').attributes('disabled')).toBeDefined()
+    expect(api.vote).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('never exposes administrator review controls or requests to ordinary users', async () => {
+    api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(api.reviews).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-admin-decision]').exists()).toBe(false)
+    expect(api.votes).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not offer decisions for superseded historical results', async () => {
+    api.isAdmin = true
+    const latest = { ...baseResult, id: 2, created_at: '2026-09-16T12:00:00Z' }
+    api.list.mockResolvedValue([latest, { ...baseResult, id: 1 }])
+    api.reviews.mockResolvedValue([{ result: latest, generation: 3, verdict: 'pending', admin_verdict: '', account_paused: false }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[data-admin-decision]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-result-gallery] figure')[1].find('[data-admin-decision]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('reports rejected decisions and reloads the current review generation', async () => {
+    api.isAdmin = true
+    const result = { ...baseResult, id: 2 }
+    api.list.mockResolvedValue([result])
+    api.reviews.mockResolvedValue([{ result, generation: 3, verdict: 'pending', admin_verdict: '', account_paused: false }])
+    api.decide.mockRejectedValue(new Error('stale round'))
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-admin-fail]').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-admin-decision] [role="alert"]').text()).toBeTruthy()
+    expect(api.reviews).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-admin-fail]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+
   it('uses ordered group tabs and combines multiple test types under one account', async () => {
     api.list.mockResolvedValue([
       { ...baseResult, id: 1, plan_order: 10 },
@@ -297,77 +373,39 @@ describe('channel quality result series', () => {
 })
 
 
-describe('quality voting', () => {
+describe('public quality voting is disabled', () => {
   const voting = { enabled: true, open: true, pass_count: 0, fail_count: 0, reject_above: 0, pass_at_least: 2, account_paused: true, reference_answer: '<b>Expected answer</b>' }
 
-  it('shows paused accounts in a separate voting area, with only IDs, and allows changing a vote', async () => {
+  it('does not load or display voting-only results even when an older server offers them', async () => {
     api.list.mockResolvedValue([])
     const result = { ...baseResult, id: 44, target_mode: 'account', account_name: 'Must stay private' }
     api.votes.mockResolvedValue([{ result, voting }])
-    api.vote.mockResolvedValueOnce({ result, voting: { ...voting, my_vote: 'fail', fail_count: 1 } })
-      .mockResolvedValueOnce({ result, voting: { ...voting, my_vote: 'pass', pass_count: 1 } })
     const wrapper = mountResults(); await flushPromises()
-    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Group Eight'])
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(0)
     expect(wrapper.find('[data-account-result]').exists()).toBe(false)
-    const card = wrapper.get('[data-vote-result="44"]')
-    expect(card.text()).toContain('tests.account #3')
-    expect(card.text()).not.toContain('Must stay private')
-    expect(card.get('[data-reference-answer]').text()).toBe('<b>Expected answer</b>')
-    expect(card.find('[data-reference-answer] b').exists()).toBe(false)
-    expect(card.get('[data-output]').attributes('data-result-id')).toBe('44')
-    await card.get('[data-vote-fail]').trigger('click'); await flushPromises()
-    expect(api.vote).toHaveBeenLastCalledWith(44, 'fail')
-    expect(card.get('[data-vote-fail]').attributes('aria-pressed')).toBe('true')
-    await card.get('[data-vote-pass]').trigger('click'); await flushPromises()
-    expect(api.vote).toHaveBeenLastCalledWith(44, 'pass')
-    expect(card.get('[data-vote-fail]').attributes('aria-pressed')).toBe('false')
-    expect(card.get('[data-vote-pass]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('[data-voting-section]').exists()).toBe(false)
+    expect(wrapper.find('[data-vote-result]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Must stay private')
+    expect(api.votes).not.toHaveBeenCalled()
+    expect(api.vote).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
-  it('rejects failed and group outputs and disables expired voting buttons', async () => {
-    api.list.mockResolvedValue([])
-    api.votes.mockResolvedValue([
-      { result: { ...baseResult, id: 1, status: 'failed' }, voting },
-      { result: { ...baseResult, id: 2, target_mode: 'group' }, voting },
-      { result: { ...baseResult, id: 3 }, voting: { ...voting, open: false } },
-    ])
-    const wrapper = mountResults(); await flushPromises()
-    expect(wrapper.findAll('[data-vote-result]')).toHaveLength(1)
-    expect(wrapper.get('[data-vote-result]').attributes('data-vote-result')).toBe('3')
-    expect(wrapper.get('[data-vote-pass]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-vote-fail]').attributes('disabled')).toBeDefined()
-    wrapper.unmount()
-  })
-
-  it('keeps regular results usable when voting fails and renders vote submission errors inline', async () => {
+  it('keeps regular results and automatic refresh working without polling voting endpoints', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
-    api.votes.mockRejectedValueOnce(new Error('network')).mockResolvedValue([{ result: { ...baseResult, id: 2 }, voting }])
+    api.votes.mockRejectedValue(new Error('voting disabled'))
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.find('[data-account-result]').exists()).toBe(true)
-    expect(wrapper.find('[data-votes-error]').exists()).toBe(true)
-    await wrapper.get('[data-votes-error] button').trigger('click'); await flushPromises()
-    api.vote.mockRejectedValue(new Error('vote closed'))
-    await wrapper.get('[data-vote-fail]').trigger('click'); await flushPromises()
-    expect(wrapper.get('[data-vote-result] [role="alert"]').exists()).toBe(true)
-    expect(wrapper.get('[data-vote-fail]').attributes('aria-pressed')).toBe('false')
-    wrapper.unmount()
-  })
-
-  it('does not let a polling response replace a newly submitted vote', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
-    api.list.mockResolvedValue([])
-    const item = { result: { ...baseResult, id: 44 }, voting }
-    api.votes.mockResolvedValueOnce([item])
-    const wrapper = mountResults(); await flushPromises()
-    let resolvePoll!: (items: unknown[]) => void
-    api.votes.mockImplementationOnce(() => new Promise(resolve => { resolvePoll = resolve }))
     await vi.advanceTimersByTimeAsync(5000)
-    api.vote.mockResolvedValue({ ...item, voting: { ...voting, my_vote: 'pass', pass_count: 1 } })
-    await wrapper.get('[data-vote-pass]').trigger('click'); await flushPromises()
-    resolvePoll([item]); await flushPromises()
-    expect(wrapper.get('[data-vote-pass]').attributes('aria-pressed')).toBe('true')
-    expect(wrapper.get('[data-vote-pass]').text()).toContain('1')
+    await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(2)
+    expect(api.votes).not.toHaveBeenCalled()
+    expect(api.vote).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-votes-error]').exists()).toBe(false)
+    expect(wrapper.find('[data-vote-pass]').exists()).toBe(false)
+    expect(wrapper.find('[data-vote-fail]').exists()).toBe(false)
+    expect(api.error).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

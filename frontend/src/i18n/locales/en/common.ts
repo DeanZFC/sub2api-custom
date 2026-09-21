@@ -220,11 +220,17 @@ export default {
   },
 
   tests: {
+    adminReview: {
+      title: 'Admin decision', markPass: 'Mark as passed', markFail: 'Mark as failed',
+      pass: 'Marked as passed', fail: 'Marked as failed',
+      automaticHold: 'Automatic checks have not passed',
+      loadFailed: 'Failed to load admin reviews', saveFailed: 'Decision not saved. Refresh and try again.',
+    },
     voting: {
       title: 'Quality review', description: 'Review this round’s output and vote. Latest results remain available for accounts paused by quality protection.',
       paused: 'Paused by quality protection', referenceAnswer: 'Reference answer', pass: 'Pass', fail: 'Fail',
       closed: 'Voting has closed', canChange: 'Your vote is recorded. You can change it; only one vote counts per round.', oneVote: 'One vote per user per round. You can change your vote.',
-      thresholdHint: 'Pause above {reject} failed votes. Recovery requires {pass} passed votes and all other issues to be cleared.',
+      thresholdHint: 'More than {reject} failed votes fails the check. Passing requires {pass} passed votes and passing automatic checks. Failure takes priority.',
       loadFailed: 'Unable to load voting results', voteFailed: 'Your vote was not saved. Refresh and try again.',
     },
     statisticsSuccessRate: 'Success rate', statisticsCacheRate: 'Cache rate', statisticsFirstToken: 'Average first token',

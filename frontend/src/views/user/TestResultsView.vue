@@ -6,6 +6,8 @@
         <button class="btn btn-secondary" :disabled="loading" @click="load"><Icon name="refresh" size="sm" />{{ t('common.refresh') }}</button>
       </header>
 
+      <p v-if="auth.isAdmin && reviewError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ reviewError }}</p>
+
       <div v-if="displayResults.length" class="flex flex-wrap items-end justify-between gap-3 border-b border-gray-200 dark:border-dark-700">
         <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" :aria-label="t('tests.groupFilter')">
           <button v-for="group in availableGroups" :id="tabId(group.key)" :key="group.key" type="button" role="tab" :aria-selected="activeGroup === group.key" aria-controls="quality-results" :tabindex="activeGroup === group.key ? 0 : -1" class="shrink-0 border-b-2 px-4 py-3 text-base font-semibold transition-colors" :class="activeGroup === group.key ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'" @click="activeGroup = group.key" @keydown="onGroupKeydown($event, group.key)">{{ group.name }}</button>
@@ -16,14 +18,9 @@
         </label>
       </div>
 
-      <div v-if="votesLoadError" class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200" role="alert" data-votes-error>{{ votesLoadError }}<button type="button" class="ml-3 underline" :disabled="loading" @click="load">{{ t('common.retry') }}</button></div>
       <p v-if="!displayResults.length" class="py-16 text-center text-sm text-gray-500">{{ loading ? t('common.loading') : t('tests.empty') }}</p>
       <section v-else id="quality-results" ref="resultsPanel" class="min-w-0 space-y-5" role="tabpanel" :aria-labelledby="tabId(activeGroup)" tabindex="0">
-        <section v-if="filteredVotes.length" class="space-y-4" data-voting-section>
-          <div><h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('tests.voting.title') }}</h3><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('tests.voting.description') }}</p></div>
-          <TestVoteCard v-for="item in filteredVotes" :key="item.result.id" :item="item" :busy="votingResultIds.has(item.result.id)" :error="voteErrors[item.result.id]" @vote="castVote(item.result.id, $event)" />
-        </section>
-        <p v-if="!accountResults.length && !filteredVotes.length" class="py-16 text-center text-sm text-gray-500">{{ t('tests.noMatches') }}</p>
+        <p v-if="!accountResults.length" class="py-16 text-center text-sm text-gray-500">{{ t('tests.noMatches') }}</p>
         <article v-for="account in accountResults" :key="account.key" class="grid overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900 lg:grid-cols-[12rem_minmax(0,1fr)]" data-account-result>
           <header class="flex min-w-0 flex-col justify-center border-b border-gray-200 p-4 dark:border-dark-700 sm:p-5 lg:border-b-0 lg:border-r" data-account-info>
             <div class="min-w-0 break-words"><h3 class="text-xl font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
@@ -42,17 +39,22 @@
                 <div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ test.name }}</h4><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span></div><p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}<span v-if="test.latest.output_kind !== 'statistics' && test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></p></div>
                 <button v-if="historyAnchor(test)" type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
               </div>
-              <TestResultOutput v-if="test.latest.output_kind === 'statistics'" :result="test.latest" />
+              <template v-if="test.latest.output_kind === 'statistics'">
+                <TestResultOutput :result="test.latest" />
+                <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="loadReviews" />
+              </template>
               <div v-else-if="test.latest.output_kind === 'number'" class="grid grid-cols-3 gap-3" data-numeric-gallery>
                 <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
                   <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ result.output_numeric ?? '-' }}</strong>
                   <figcaption class="mt-1 text-xs text-gray-500 dark:text-gray-400"><span class="block">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span class="mt-1 block">{{ formatDate(resultTime(result)) }}</span><span v-if="result.latency_ms != null" class="mt-1 block">{{ result.latency_ms }}ms</span></figcaption>
+                  <AdminTestDecision v-if="reviewFor(result)" :review="reviewFor(result)!" @decided="loadReviews" />
                 </figure>
               </div>
               <div v-else class="grid items-start gap-4 lg:grid-cols-3" data-result-gallery>
                 <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
                   <TestResultOutput :result="result" compact />
                   <figcaption class="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-gray-500 dark:text-gray-400"><span :class="index === 0 ? 'font-medium text-gray-700 dark:text-gray-200' : ''">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span>· {{ formatDate(resultTime(result)) }}</span></figcaption>
+                  <AdminTestDecision v-if="reviewFor(result)" :review="reviewFor(result)!" @decided="loadReviews" />
                 </figure>
               </div>
             </section>
@@ -77,13 +79,15 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { testResultsAPI } from '@/api/testResults'
-import type { TestResult, TestVote, TestVoteResult } from '@/types'
+import { listReviews, listResults as listAdminResults, type TestAdminReview } from '@/api/admin/tests'
+import type { TestResult } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import TestResultOutput from '@/components/tests/TestResultOutput.vue'
-import TestVoteCard from '@/components/tests/TestVoteCard.vue'
+import AdminTestDecision from '@/components/tests/AdminTestDecision.vue'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 interface TestSeries {
@@ -97,14 +101,19 @@ interface TestSeries {
 
 const { t } = useI18n()
 const app = useAppStore()
+const auth = useAuthStore()
 const loading = ref(false)
 const allResults = ref<TestResult[]>([])
-const voteResults = ref<TestVoteResult[]>([])
-const votesLoadError = ref('')
-const votingResultIds = ref(new Set<number>())
-const voteErrors = ref<Record<number, string>>({})
-let voteRevision = 0
-const displayResults = computed(() => [...allResults.value, ...voteResults.value.map(item => item.result)])
+const adminReviews = ref<TestAdminReview[]>([])
+const reviewError = ref('')
+let reviewRequest = 0
+const reviewIndex = computed(() => new Map(auth.isAdmin ? adminReviews.value.map(review => [review.result.id, review]) : []))
+const reviewFor = (result: TestResult) => reviewIndex.value.get(result.id)
+const displayResults = computed(() => {
+  const records = new Map(allResults.value.map(result => [result.id, result]))
+  if (auth.isAdmin) for (const review of adminReviews.value) records.set(review.result.id, review.result)
+  return [...records.values()]
+})
 const activeGroup = ref('')
 const modelFilter = ref('')
 const historyTarget = ref<TestSeries | null>(null)
@@ -112,6 +121,7 @@ const historyResults = ref<TestResult[]>([])
 const historyLoading = ref(false)
 const historyError = ref('')
 const historyBeforeId = ref<number>()
+let adminHistoryLimit = 20
 let historyRequest = 0
 const resultsPanel = ref<HTMLElement | null>(null)
 watch([activeGroup, modelFilter], () => {
@@ -127,7 +137,7 @@ const exposesAccount = (result: TestResult) => result.target_mode !== 'group' &&
 const targetKey = (result: TestResult) => exposesAccount(result) ? `account:${result.account_id}` : 'group'
 const groupKey = (result: TestResult) => result.group_id != null ? `group:${result.group_id}` : result.group_name ? `name:${result.group_name}` : 'ungrouped'
 const groupName = (result: TestResult) => result.group_name || (result.group_id != null ? `${t('tests.group')} #${result.group_id}` : t('tests.ungrouped'))
-const targetName = (result: TestResult) => exposesAccount(result) ? `${t('tests.account')} #${result.account_id}` : t('tests.groupCheck')
+const targetName = (result: TestResult) => exposesAccount(result) ? `${t('tests.account')} #${result.account_id}${auth.isAdmin && result.account_name ? ` · ${result.account_name}` : ''}` : t('tests.groupCheck')
 const testKey = (result: TestResult) => `${result.test_definition_id ?? result.test_definition?.id ?? testName(result)}:${result.model_id || ''}:${result.reasoning_effort || ''}`
 const tabId = (key: string) => `quality-group-${encodeURIComponent(key)}`
 
@@ -145,8 +155,7 @@ watch(availableGroups, groups => {
   if (!groups.some(group => group.key === activeGroup.value)) activeGroup.value = groups[0]?.key || ''
 }, { immediate: true })
 const availableModels = computed(() => [...new Set(displayResults.value.map(result => result.model_id).filter((model): model is string => Boolean(model)))].sort())
-const filteredVotes = computed(() => voteResults.value.filter(item => groupKey(item.result) === activeGroup.value && (!modelFilter.value || item.result.model_id === modelFilter.value)))
-const filteredResults = computed(() => sortResults(allResults.value.filter(result => groupKey(result) === activeGroup.value && (!modelFilter.value || result.model_id === modelFilter.value))))
+const filteredResults = computed(() => sortResults(displayResults.value.filter(result => groupKey(result) === activeGroup.value && (!modelFilter.value || result.model_id === modelFilter.value))))
 const accountResults = computed(() => {
   const accounts = new Map<string, { key: string; name: string; groupName: string; order: number; tests: Map<string, TestSeries> }>()
   for (const result of filteredResults.value) {
@@ -185,12 +194,20 @@ const loadHistory = async () => {
   historyLoading.value = true
   historyError.value = ''
   try {
-    const page = await testResultsAPI.history(anchor.id, historyBeforeId.value)
+    // Paused or moved accounts remain reviewable through administrator access.
+    const planID = anchor.plan_id
+    const page = auth.isAdmin && planID != null ? await (async () => {
+      const rows = await listAdminResults(planID, adminHistoryLimit + 1)
+      const items = sortResults(rows.filter(result => isSuccessful(result) && groupKey(result) === groupKey(anchor)
+        && targetKey(result) === targetKey(anchor) && testKey(result) === testKey(anchor)))
+      return { items: items.slice(0, adminHistoryLimit), next_before_id: items.length > adminHistoryLimit ? items[adminHistoryLimit - 1].id : undefined }
+    })() : await testResultsAPI.history(anchor.id, historyBeforeId.value)
     if (request !== historyRequest) return
     const records = new Map(historyResults.value.map(result => [result.id, result]))
     for (const result of page.items.filter(isSuccessful)) records.set(result.id, result)
     historyResults.value = sortResults([...records.values()])
     historyBeforeId.value = page.next_before_id
+    if (auth.isAdmin) adminHistoryLimit += 20
   } catch (error) {
     if (request === historyRequest) historyError.value = extractApiErrorMessage(error, t('tests.loadFailed'))
   } finally {
@@ -203,6 +220,7 @@ const openHistory = (series: TestSeries) => {
   historyTarget.value = series
   historyResults.value = []
   historyBeforeId.value = undefined
+  adminHistoryLimit = 20
   historyError.value = ''
   historyLoading.value = false
   void loadHistory()
@@ -225,56 +243,37 @@ const onGroupKeydown = async (event: KeyboardEvent, key: string) => {
   await nextTick()
   document.getElementById(tabId(activeGroup.value))?.focus()
 }
-const visibleVote = (item: TestVoteResult) => item.voting.enabled && isSuccessful(item.result)
-  && item.result.account_id != null && item.result.target_mode !== 'group' && item.result.output_kind !== 'statistics'
-const castVote = async (id: number, vote: TestVote) => {
-  if (votingResultIds.value.has(id)) return
-  const current = voteResults.value.find(item => item.result.id === id)
-  if (!current?.voting.open) return
-  voteRevision++
-  votingResultIds.value.add(id)
-  delete voteErrors.value[id]
+const loadReviews = async () => {
+  const request = ++reviewRequest
+  if (!auth.isAdmin) {
+    adminReviews.value = []
+    return
+  }
   try {
-    const updated = await testResultsAPI.vote(id, vote)
-    const index = voteResults.value.findIndex(item => item.result.id === id)
-    if (index >= 0 && updated.result.id === id) {
-      if (visibleVote(updated)) voteResults.value.splice(index, 1, updated)
-      else voteResults.value.splice(index, 1)
-    }
+    const reviews = await listReviews()
+    if (request !== reviewRequest) return
+    adminReviews.value = reviews
+    reviewError.value = ''
   } catch (error) {
-    voteErrors.value[id] = extractApiErrorMessage(error, t('tests.voting.voteFailed'))
-  } finally {
-    voteRevision++
-    votingResultIds.value.delete(id)
+    if (request !== reviewRequest) return
+    adminReviews.value = []
+    reviewError.value = extractApiErrorMessage(error, t('tests.adminReview.loadFailed'))
   }
 }
 const load = async () => {
   if (loading.value) return
   loading.value = true
-  const revision = voteRevision
-  await Promise.all([
-    (async () => {
-      try {
-        const results = await testResultsAPI.list(3)
-        // Failed upstream responses must stay private, including against an older server.
-        allResults.value = sortResults(results.filter(result => ['success', 'passed', 'pending', 'running'].includes(result.status)))
-      } catch (error) {
-        app.showError(extractApiErrorMessage(error, t('tests.loadFailed')))
-      }
-    })(),
-    (async () => {
-      try {
-        const votes = await testResultsAPI.votes()
-        // A response that predates a vote must not undo its count or selected state.
-        if (revision !== voteRevision || votingResultIds.value.size) return
-        voteResults.value = votes.filter(visibleVote)
-        votesLoadError.value = ''
-      } catch (error) {
-        if (revision === voteRevision) votesLoadError.value = extractApiErrorMessage(error, t('tests.voting.loadFailed'))
-      }
-    })(),
-  ])
-  loading.value = false
+  const reviews = loadReviews()
+  try {
+    const results = await testResultsAPI.list(3)
+    // Failed upstream responses must stay private, including against an older server.
+    allResults.value = sortResults(results.filter(result => ['success', 'passed', 'pending', 'running'].includes(result.status)))
+  } catch (error) {
+    app.showError(extractApiErrorMessage(error, t('tests.loadFailed')))
+  } finally {
+    await reviews
+    loading.value = false
+  }
 }
 let resultTimer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
@@ -282,6 +281,7 @@ onMounted(() => {
   resultTimer = setInterval(() => { if (!document.hidden) void load() }, 5000)
 })
 onUnmounted(() => {
+  reviewRequest++
   clearInterval(resultTimer)
   historyRequest++
 })

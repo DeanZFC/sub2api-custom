@@ -86,7 +86,7 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 		return nil, err
 	}
 	defer tx.Rollback()
-	previous, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection FROM scheduled_test_plans WHERE id=$1 FOR UPDATE`, plan.ID))
+	previous, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,9 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 		!reflect.DeepEqual(previous.AccountID, plan.AccountID) || !reflect.DeepEqual(previous.GroupID, plan.GroupID) ||
 		!reflect.DeepEqual(previous.TestDefinitionIDs, plan.TestDefinitionIDs) || !reflect.DeepEqual(previous.TestDefinitionID, plan.TestDefinitionID) ||
 		previous.TargetMode != plan.TargetMode || previous.ModelID != plan.ModelID || previous.ReasoningEffort != plan.ReasoningEffort {
-		if err := clearPlanProtectionTx(ctx, tx, plan.ID); err != nil {
+		retainTracking := plan.HasGroupActions() && previous.TargetMode == plan.TargetMode &&
+			reflect.DeepEqual(previous.AccountID, plan.AccountID) && reflect.DeepEqual(previous.GroupID, plan.GroupID)
+		if err := resetPlanProtectionTx(ctx, tx, plan.ID, retainTracking); err != nil {
 			return nil, err
 		}
 	}
@@ -144,11 +146,17 @@ func (r *scheduledTestPlanRepository) validateTarget(ctx context.Context, plan *
 		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM account_groups WHERE account_id = $1 AND group_id = $2)`, *plan.AccountID, *plan.GroupID).Scan(&linked); err != nil {
 			return err
 		}
+		if !linked && plan.ID > 0 {
+			if err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM scheduled_test_managed_accounts ma JOIN scheduled_test_plans p ON p.id=ma.plan_id
+			 WHERE ma.plan_id=$1 AND ma.account_id=$2 AND ma.source_group_id=$3 AND p.group_id=$3 AND p.account_id=$2)`, plan.ID, *plan.AccountID, *plan.GroupID).Scan(&linked); err != nil {
+				return err
+			}
+		}
 		if !linked {
 			return fmt.Errorf("account %d is not assigned to group %d", *plan.AccountID, *plan.GroupID)
 		}
 	}
-	return nil
+	return r.validateProtectionGroups(ctx, plan)
 }
 
 func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) error {

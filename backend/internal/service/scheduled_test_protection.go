@@ -20,13 +20,15 @@ type ScheduledTestProtectionConfig struct {
 }
 
 type ScheduledTestProtectionRule struct {
-	TestDefinitionID int64                    `json:"test_definition_id"`
-	Thresholds       []ScheduledTestThreshold `json:"thresholds,omitempty"`
-	MinSamples       int64                    `json:"min_samples,omitempty"`
-	PauseOnFailure   bool                     `json:"pause_on_failure,omitempty"`
-	ExpectedAnswer   string                   `json:"expected_answer,omitempty"`
-	AnswerMatch      string                   `json:"answer_match,omitempty"`
-	Vote             *ScheduledTestVoteConfig `json:"vote,omitempty"`
+	TestDefinitionID int64                       `json:"test_definition_id"`
+	Thresholds       []ScheduledTestThreshold    `json:"thresholds,omitempty"`
+	MinSamples       int64                       `json:"min_samples,omitempty"`
+	PauseOnFailure   bool                        `json:"pause_on_failure,omitempty"`
+	ExpectedAnswer   string                      `json:"expected_answer,omitempty"`
+	AnswerMatch      string                      `json:"answer_match,omitempty"`
+	Vote             *ScheduledTestVoteConfig    `json:"vote,omitempty"`
+	OnPass           *ScheduledTestOutcomeAction `json:"on_pass,omitempty"`
+	OnFail           *ScheduledTestOutcomeAction `json:"on_fail,omitempty"`
 }
 
 type ScheduledTestThreshold struct {
@@ -103,6 +105,9 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 			return fmt.Errorf("protection rules must refer to distinct selected test definitions")
 		}
 		seen[rule.TestDefinitionID] = true
+		if err := validateScheduledTestActions(rule); err != nil {
+			return err
+		}
 		if rule.MinSamples < 0 || rule.MinSamples > 1000000000 {
 			return fmt.Errorf("min_samples must be between 0 and 1000000000")
 		}

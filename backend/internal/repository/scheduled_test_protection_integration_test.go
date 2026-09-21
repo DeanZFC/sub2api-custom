@@ -85,7 +85,8 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		"247_generalized_scheduled_tests.sql", "248_scheduled_test_reasoning_effort.sql", "249_scheduled_test_result_reasoning_effort.sql",
 		"250_allow_group_account_scheduled_test_targets.sql", "251_scheduled_test_target_modes.sql", "252_scheduled_test_definition_sort_order.sql",
 		"253_scheduled_test_plan_sort_order.sql", "256_scheduled_test_multiple_definitions.sql", "257_scheduled_test_hourly_statistics.sql",
-		"258_scheduled_test_protection.sql", "258_scheduled_test_protection.sql",
+		"258_scheduled_test_protection.sql", "259_scheduled_test_outcome_actions.sql",
+		"261_scheduled_test_admin_review.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)

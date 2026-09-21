@@ -12,6 +12,7 @@
         </label>
         <p v-if="!type.enabled" class="text-xs text-amber-700 dark:text-amber-300" data-disabled-type-hint>{{ t('admin.tests.protection.disabledType') }}</p>
         <fieldset v-if="ruleFor(type.id)" :disabled="!type.enabled" class="space-y-3">
+          <h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.conditions') }}</h4>
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.pause_on_failure" type="checkbox" data-rule-failure @change="patchRule(type.id, { pause_on_failure: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.pauseOnFailure') }}</label>
           <label v-if="type.output_kind === 'statistics'" class="input-label block">{{ t('admin.tests.protection.minSamples') }}<input :value="ruleFor(type.id)?.min_samples ?? 1" type="number" min="0" max="1000000000" step="1" class="input mt-1 w-32" data-rule-samples @input="patchRule(type.id, { min_samples: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
           <div v-for="(threshold, index) in ruleFor(type.id)?.thresholds || []" :key="index" class="flex flex-wrap items-center gap-2" data-threshold>
@@ -31,20 +32,27 @@
             <label class="input-label block">{{ t(ruleFor(type.id)?.vote?.enabled ? 'admin.tests.protection.referenceAnswer' : 'admin.tests.protection.expectedAnswer') }}<textarea :value="ruleFor(type.id)?.expected_answer || ''" rows="2" maxlength="10000" class="input mt-1 w-full" data-rule-answer @input="patchRule(type.id, { expected_answer: ($event.target as HTMLTextAreaElement).value })" /></label>
             <label v-if="!ruleFor(type.id)?.vote?.enabled" class="input-label block">{{ t('admin.tests.protection.answerMatch') }}<select :value="ruleFor(type.id)?.answer_match || 'exact'" class="input ml-2" data-rule-answer-match @change="patchRule(type.id, { answer_match: ($event.target as HTMLSelectElement).value as TestProtectionRule['answer_match'] })"><option value="exact">{{ t('admin.tests.protection.exact') }}</option><option value="contains">{{ t('admin.tests.protection.contains') }}</option><option value="numeric">{{ t('admin.tests.protection.numeric') }}</option></select></label>
           </template>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.conditionsHint') }}</p>
+          <div class="grid gap-3 lg:grid-cols-2">
+            <TestOutcomeActionEditor :model-value="ruleFor(type.id)?.on_pass" outcome="pass" :groups="groups" @update:model-value="patchRule(type.id, { on_pass: $event })" />
+            <TestOutcomeActionEditor :model-value="ruleFor(type.id)?.on_fail" outcome="fail" :groups="groups" @update:model-value="patchRule(type.id, { on_fail: $event })" />
+          </div>
+          <p v-if="ruleFor(type.id)?.on_pass?.group_mode === 'assign' || ruleFor(type.id)?.on_fail?.group_mode === 'assign'" class="text-xs text-gray-500 dark:text-gray-400" data-routing-hint>{{ t('admin.tests.protection.actions.routingHint') }}</p>
         </fieldset>
       </section>
       <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.rulesHint') }}</p>
-      <p v-if="!validTestProtection(modelValue, targetMode, types)" class="text-xs text-red-600 dark:text-red-400" role="alert">{{ t('admin.tests.protection.invalid') }}</p>
+      <p v-if="!validTestProtection(modelValue, targetMode, types, groups)" class="text-xs text-red-600 dark:text-red-400" role="alert">{{ t('admin.tests.protection.invalid') }}</p>
     </div>
   </fieldset>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import type { TestProtectionConfig, TestProtectionMetric, TestProtectionRule, TestProtectionThreshold, TestType } from '@/types'
+import type { AdminGroup, TestProtectionConfig, TestProtectionMetric, TestProtectionRule, TestProtectionThreshold, TestType } from '@/types'
 import { copyTestProtection, defaultProtectionRule, protectionMetrics, validTestProtection } from '@/utils/testProtection'
+import TestOutcomeActionEditor from './TestOutcomeActionEditor.vue'
 
-const props = defineProps<{ modelValue: TestProtectionConfig; types: TestType[]; targetMode?: string }>()
+const props = withDefaults(defineProps<{ modelValue: TestProtectionConfig; types: TestType[]; targetMode?: string; groups?: AdminGroup[] }>(), { groups: () => [] })
 const emit = defineEmits<{ 'update:modelValue': [value: TestProtectionConfig] }>()
 const { t } = useI18n()
 const ruleFor = (id: number) => props.modelValue.rules.find(rule => rule.test_definition_id === id)

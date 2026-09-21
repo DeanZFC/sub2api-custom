@@ -19,7 +19,7 @@ var _ service.ScheduledTestProtectionRepository = (*scheduledTestResultRepositor
 func lockProtectionPlan(ctx context.Context, tx *sql.Tx, planID int64) (*service.ScheduledTestProtectionConfig, error) {
 	var enabled bool
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT enabled, protection FROM scheduled_test_plans WHERE id=$1 FOR UPDATE`, planID).Scan(&enabled, &raw); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT enabled, protection FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, planID).Scan(&enabled, &raw); err != nil {
 		return nil, err
 	}
 	var config service.ScheduledTestProtectionConfig
@@ -52,7 +52,7 @@ func protectionResultCurrent(ctx context.Context, tx *sql.Tx, resultID int64) (b
 	 AND r.target_mode=p.target_mode AND (p.account_id IS NULL OR p.account_id=r.account_id)
 	 AND (r.output_kind='statistics' OR r.reasoning_effort=p.reasoning_effort)
 	 AND (r.test_definition_id=ANY(p.test_definition_ids) OR r.test_definition_id=p.test_definition_id)
-	 AND (p.group_id IS NULL OR EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=r.account_id AND ag.group_id=p.group_id))
+	 AND `+protectionSourceMembershipSQL+`
 	)`, resultID).Scan(&current)
 	return current, err
 }
@@ -61,7 +61,7 @@ func lockProtectionAccount(ctx context.Context, tx *sql.Tx, accountID int64) (bo
 	var status string
 	var schedulable bool
 	var deleted sql.NullTime
-	err := tx.QueryRowContext(ctx, `SELECT status, schedulable, deleted_at FROM accounts WHERE id=$1 FOR UPDATE`, accountID).Scan(&status, &schedulable, &deleted)
+	err := tx.QueryRowContext(ctx, `SELECT status, schedulable, deleted_at FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, accountID).Scan(&status, &schedulable, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -119,6 +119,9 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 	if err != nil || !eligible {
 		return err
 	}
+	if err := initializeProtectionActionStates(ctx, tx, result.PlanID, *result.AccountID, config); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(rule)
 	if err != nil {
 		return err
@@ -133,8 +136,10 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 		ON CONFLICT (plan_id,account_id,test_definition_id) DO UPDATE SET
 		 result_id=EXCLUDED.result_id,result_started_at=EXCLUDED.result_started_at,
 		 generation=scheduled_test_protection_states.generation+1,
-		 automated_verdict='pending',verdict='pending',completed=FALSE,rule_config=EXCLUDED.rule_config,updated_at=NOW()
-		WHERE (EXCLUDED.result_started_at,EXCLUDED.result_id) >
+		 automated_verdict='pending',verdict='pending',completed=FALSE,rule_config=EXCLUDED.rule_config,
+		 admin_verdict='',admin_user_id=NULL,admin_decided_at=NULL,updated_at=NOW()
+		WHERE EXCLUDED.result_started_at >= scheduled_test_protection_states.round_started_at
+		 AND (EXCLUDED.result_started_at,EXCLUDED.result_id) >
 		 (scheduled_test_protection_states.result_started_at,COALESCE(scheduled_test_protection_states.result_id,0))
 		RETURNING generation`, result.PlanID, *result.AccountID, rule.TestDefinitionID, result.ID, raw).Scan(&generation)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -150,6 +155,8 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 }
 
 type protectionState struct {
+	adminVerdict                                          string
+	roundStarted                                          time.Time
 	planID, accountID, definitionID, resultID, generation int64
 	started                                               time.Time
 	automated, verdict, reason                            string
@@ -161,9 +168,9 @@ func loadProtectionState(ctx context.Context, tx *sql.Tx, resultID int64) (*prot
 	s := &protectionState{}
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT plan_id,account_id,test_definition_id,result_id,generation,result_started_at,
-		automated_verdict,verdict,reason,blocked,completed,rule_config
+		automated_verdict,verdict,reason,blocked,completed,rule_config,round_started_at,admin_verdict
 		FROM scheduled_test_protection_states WHERE result_id=$1 FOR UPDATE`, resultID).Scan(
-		&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started, &s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw)
+		&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started, &s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw, &s.roundStarted, &s.adminVerdict)
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +192,12 @@ func combineProtectionVerdict(state *protectionState, pass, fail int) (string, b
 		return "fail", true, state.reason
 	}
 	if vote := state.rule.Vote; vote != nil && vote.Enabled {
+		if state.adminVerdict == "fail" {
+			return "fail", true, "管理员判定渠道质量检测不通过"
+		}
+		if state.adminVerdict == "pass" && state.automated == "pass" {
+			return "pass", false, ""
+		}
 		if fail > vote.RejectAbove {
 			return "fail", true, "渠道质量检测不通过票数超过阈值"
 		}
@@ -204,11 +217,26 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	if err != nil {
 		return err
 	}
-	verdict, blocked, reason := combineProtectionVerdict(state, pass, fail)
+	verdict, _, reason := combineProtectionVerdict(state, pass, fail)
+	blocked := state.blocked
+	switch state.rule.OutcomeAction(verdict).Scheduling {
+	case "pause":
+		blocked = true
+		if reason == "" {
+			reason = "渠道质量检测规则触发自动暂停"
+		}
+	case "resume":
+		blocked = false
+	}
+
 	_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states
-		SET automated_verdict=$2,verdict=$3,reason=$4,blocked=$5,completed=$6,updated_at=NOW()
+		SET automated_verdict=$2,verdict=$3,reason=$4,blocked=$5,completed=$6,
+		 routing_verdict=CASE WHEN $3 IN ('pass','fail') THEN $3 ELSE routing_verdict END,updated_at=NOW()
 		WHERE result_id=$1 AND generation=$7`, state.resultID, state.automated, verdict, reason, blocked, state.completed, state.generation)
 	if err != nil {
+		return err
+	}
+	if err := reconcileProtectionGroups(ctx, tx, state.accountID); err != nil {
 		return err
 	}
 	return reconcileProtectionAccount(ctx, tx, state.accountID)
@@ -277,7 +305,7 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 	}
 	// PostgreSQL timestamps round nanoseconds to microseconds. Manual retries
 	// keep the in-memory start value rather than rereading the updated row.
-	if state.planID != result.PlanID || state.accountID != *result.AccountID || !state.started.Equal(result.StartedAt.Round(time.Microsecond)) || !protectionRuleCurrent(config, state.rule) {
+	if state.planID != result.PlanID || state.accountID != *result.AccountID || result.StartedAt.Round(time.Microsecond).Before(state.roundStarted) || !state.started.Equal(result.StartedAt.Round(time.Microsecond)) || !protectionRuleCurrent(config, state.rule) {
 		return nil
 	}
 	current, err := protectionResultCurrent(ctx, tx, result.ID)
@@ -304,13 +332,17 @@ func (r *scheduledTestResultRepository) ClearPlanProtection(ctx context.Context,
 }
 
 func clearPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64) error {
+	return resetPlanProtectionTx(ctx, tx, planID, false)
+}
+
+func resetPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64, retainTracking bool) error {
 	if _, err := lockProtectionPlan(ctx, tx, planID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT account_id FROM scheduled_test_protection_states WHERE plan_id=$1 ORDER BY account_id`, planID)
+	rows, err := tx.QueryContext(ctx, `SELECT account_id FROM scheduled_test_protection_states WHERE plan_id=$1 UNION SELECT account_id FROM scheduled_test_managed_accounts WHERE plan_id=$1 ORDER BY account_id`, planID)
 	if err != nil {
 		return err
 	}
@@ -331,6 +363,11 @@ func clearPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64) error 
 	for _, id := range ids {
 		if _, err := lockProtectionAccount(ctx, tx, id); err != nil {
 			return err
+		}
+		if !retainTracking {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_managed_accounts WHERE plan_id=$1 AND account_id=$2`, planID, id); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_protection_states WHERE plan_id=$1 AND account_id=$2`, planID, id); err != nil {
 			return err
@@ -376,7 +413,7 @@ const protectionVotingQuery = `SELECT ` + protectionVoteResultJSON + `,s.rule_co
 	 AND s.completed AND r.status IN ('success','passed')
 	 AND (NULLIF(BTRIM(r.response_text),'') IS NOT NULL OR NULLIF(BTRIM(r.output_html),'') IS NOT NULL OR r.output_numeric IS NOT NULL)
 	 AND a.deleted_at IS NULL AND a.schedulable=TRUE AND a.status IN ('active','quality_paused')
-	 AND (r.group_id IS NULL OR EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=r.account_id AND ag.group_id=r.group_id))
+	 AND ` + protectionSourceMembershipSQL + `
 	 AND ` + protectionVoteEntitlementSQL
 
 func scanProtectionVoting(rows *sql.Rows) ([]*service.ScheduledTestVoteResult, error) {

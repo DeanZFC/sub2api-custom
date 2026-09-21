@@ -63,10 +63,11 @@
         <label class="input-label">{{ t('admin.tests.group') }}<select v-model.number="editingPlan.group_id" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.selectGroup') }}</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} (#{{ group.id }})</option></select></label>
         <label class="input-label">{{ t('admin.tests.accountOptional') }}<select v-model="accountSelection" class="input mt-1 w-full" :disabled="!editingPlan.group_id"><option :value="null">{{ editingPlan.group_id ? t('admin.tests.groupTest') : t('admin.tests.selectGroupFirst') }}</option><option value="all" :disabled="!editingPlan.group_id">{{ t('admin.tests.allAccountsInGroup') }}</option><option v-for="account in filteredAccounts" :key="account.id" :value="account.id">{{ account.name || t('admin.tests.account') }} (#{{ account.id }})</option></select></label>
         <p class="text-xs text-gray-500 sm:col-span-2">{{ targetModeHint }}</p>
+        <p v-if="invalidAccountTarget" class="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2" data-invalid-account-target>{{ t('admin.tests.protection.accountMovedHint') }}</p>
         <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_id || modelOptionsLoading" :placeholder="editingPlan.group_id ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /></label>
         <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
         <label class="input-label sm:col-span-2">{{ t('admin.tests.cron') }}<input v-model.trim="editingPlan.cron_expression" class="input mt-1 w-full" placeholder="*/30 * * * *" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.cronHint') }}</span></label>
-        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :target-mode="editingPlan.target_mode" class="sm:col-span-2" />
+        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :target-mode="editingPlan.target_mode" :groups="protectionGroups" class="sm:col-span-2" />
         <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
         <label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label>
       </div>
@@ -153,16 +154,27 @@ const planTypes = (plan: TestPlan) => planTypeIDs(plan).map(id => ({
 const canSavePlan = computed(() => {
   const plan = editingPlan.value
   return Boolean(plan?.test_definition_ids.length && plan.model_id && plan.cron_expression && plan.group_id
-    && validTestProtection(plan.protection, plan.target_mode, selectedProtectionTypes.value))
+    && !invalidAccountTarget.value
+    && validTestProtection(plan.protection, plan.target_mode, selectedProtectionTypes.value, protectionGroups.value))
 })
 
 const selectedProtectionTypes = computed(() => orderedTypes.value.filter(type => editingPlan.value?.test_definition_ids.includes(type.id)))
+const eligibleProtectionGroups = (groupID?: number | null) => {
+  const source = groups.value.find(group => group.id === groupID)
+  return source ? groups.value.filter(group => group.platform === source.platform && group.platform !== 'composite' && group.status === 'active') : []
+}
+const protectionGroups = computed(() => eligibleProtectionGroups(editingPlan.value?.group_id))
 
 const filteredAccounts = computed(() => {
   const groupID = editingPlan.value?.group_id
   if (!groupID) return []
-  return accounts.value.filter(account => account.group_ids?.includes(Number(groupID)))
+  const savedPlan = plans.value.find(plan => plan.id === editingPlan.value?.id)
+  // Keep an existing target editable after its quality rules moved it to a new group.
+  return accounts.value.filter(account => account.group_ids?.includes(Number(groupID))
+    || (savedPlan?.group_id === groupID && savedPlan.account_id === account.id))
 })
+const invalidAccountTarget = computed(() => editingPlan.value?.target_mode === 'account'
+  && !filteredAccounts.value.some(account => account.id === editingPlan.value?.account_id))
 const accountSelection = computed<AccountSelection>({
   get: () => {
     const plan = editingPlan.value
@@ -310,6 +322,17 @@ const openPlan = (plan?: TestPlan) => {
 const savePlan = async () => { if (!editingPlan.value || !canSavePlan.value) return; saving.value = true; try { const { id, ...body } = editingPlan.value; const payload = { ...body, test_definition_id: body.test_definition_ids[0], group_id: body.group_id || null, account_id: body.account_id || null }; if (id) await adminAPI.tests.updatePlan(id, payload); else await adminAPI.tests.createPlan(payload); editingPlan.value = null; await load() } catch (error) { reportError(error) } finally { saving.value = false } }
 const copyPlan = async (plan: TestPlan) => {
   if (saving.value) return
+  const selectedAccount = plan.account_id ? accounts.value.find(account => account.id === plan.account_id) : undefined
+  const targetInvalid = Boolean(plan.account_id && (!plan.group_id || !selectedAccount?.group_ids?.includes(plan.group_id)))
+  const protectionInvalid = !validTestProtection(plan.protection, plan.target_mode, types.value.filter(type => planTypeIDs(plan).includes(type.id)), eligibleProtectionGroups(plan.group_id))
+  if (targetInvalid || protectionInvalid) {
+    // An existing rule can continue checking a moved account. Its copy has no
+    // tracked membership yet, so let the administrator choose a valid target.
+    openPlan(plan)
+    editingPlan.value!.id = undefined
+    editingPlan.value!.name = `${plan.name || `#${plan.id}`}（Copy）`
+    return
+  }
   saving.value = true
   try {
     await adminAPI.tests.createPlan({

@@ -121,7 +121,7 @@ func TestScheduledTestResultRepositoryDelete(t *testing.T) {
 	mock.ExpectQuery(`SELECT plan_id,account_id FROM scheduled_test_results WHERE id=\$1`).
 		WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"plan_id", "account_id"}).AddRow(8, nil))
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT enabled, protection FROM scheduled_test_plans WHERE id=\$1 FOR UPDATE`).
+	mock.ExpectQuery(`SELECT enabled, protection FROM scheduled_test_plans WHERE id=\$1 FOR NO KEY UPDATE`).
 		WithArgs(int64(8)).WillReturnRows(sqlmock.NewRows([]string{"enabled", "protection"}).AddRow(true, "{}"))
 	mock.ExpectExec(`DELETE FROM scheduled_test_results WHERE id = \$1`).
 		WithArgs(int64(42)).

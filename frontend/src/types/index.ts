@@ -2553,6 +2553,11 @@ export interface TestProtectionThreshold {
   operator: 'lt' | 'gt'
   value: number
 }
+export interface TestOutcomeAction {
+  scheduling: 'keep' | 'pause' | 'resume'
+  group_mode: 'keep' | 'assign'
+  group_ids?: number[]
+}
 export interface TestProtectionRule {
   test_definition_id: number
   thresholds?: TestProtectionThreshold[]
@@ -2561,6 +2566,8 @@ export interface TestProtectionRule {
   expected_answer?: string
   answer_match?: 'exact' | 'contains' | 'numeric'
   vote?: { enabled: boolean; reject_above: number; pass_at_least: number }
+  on_pass?: TestOutcomeAction
+  on_fail?: TestOutcomeAction
 }
 export interface TestProtectionConfig {
   enabled: boolean

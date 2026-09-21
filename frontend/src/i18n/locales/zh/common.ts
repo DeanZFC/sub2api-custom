@@ -220,11 +220,17 @@ export default {
   },
 
   tests: {
+    adminReview: {
+      title: '管理员判定', markPass: '判定通过', markFail: '判定不通过',
+      pass: '已判通过', fail: '已判不通过',
+      automaticHold: '自动检测尚未通过',
+      loadFailed: '管理员判定加载失败', saveFailed: '判定未保存，请刷新后重试',
+    },
     voting: {
       title: '质量评议', description: '查看本轮检测输出并投票。质量保护暂停的账号也会保留最新结果供评议。',
       paused: '质量保护暂停', referenceAnswer: '参考答案', pass: '通过', fail: '不通过',
       closed: '本轮投票已结束', canChange: '已投票，可改投；每轮只计一票。', oneVote: '每轮每人一票，可改投。',
-      thresholdHint: '不通过超过 {reject} 票时暂停；通过达到 {pass} 票且其他异常解除后可恢复。',
+      thresholdHint: '不通过超过 {reject} 票时判定不通过；通过达到 {pass} 票且自动检查通过时判定通过。不通过优先。',
       loadFailed: '暂时无法加载投票结果', voteFailed: '投票未成功，请刷新后重试',
     },
     statisticsSuccessRate: '成功率', statisticsCacheRate: '缓存率', statisticsFirstToken: '平均首字',

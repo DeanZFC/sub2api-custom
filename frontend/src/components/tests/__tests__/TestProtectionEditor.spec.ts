@@ -2,23 +2,25 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestProtectionEditor from '../TestProtectionEditor.vue'
-import type { TestProtectionConfig, TestType } from '@/types'
-import { validTestProtection } from '@/utils/testProtection'
+import type { AdminGroup, TestOutcomeAction, TestProtectionConfig, TestType } from '@/types'
+import { copyTestProtection, validTestProtection } from '@/utils/testProtection'
 
 const types: TestType[] = [
   { id: 1, name: 'Statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true },
   { id: 2, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
   { id: 3, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
 ]
+const groups = [{ id: 8, name: 'Basic', platform: 'openai' }, { id: 9, name: 'Premium', platform: 'openai' }, { id: 10, name: 'Priority', platform: 'openai' }] as AdminGroup[]
 const mountEditor = (config: TestProtectionConfig = { enabled: false, rules: [] }, targetMode = 'account') => {
   const wrapper = mount(TestProtectionEditor, {
-    props: { modelValue: config, types, targetMode, 'onUpdate:modelValue': (value: TestProtectionConfig) => wrapper.setProps({ modelValue: value }) },
+    props: { modelValue: config, types, targetMode, groups, 'onUpdate:modelValue': (value: TestProtectionConfig) => wrapper.setProps({ modelValue: value }) },
     global: { plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: {} } })] },
   })
   return wrapper
 }
 
 describe('quality protection settings', () => {
+
   it('defaults to disabled, blocks group mode and initializes independent type rules', async () => {
     const wrapper = mountEditor()
     expect(wrapper.find('[data-protection-type]').exists()).toBe(false)
@@ -86,6 +88,77 @@ describe('quality protection settings', () => {
     await wrapper.get('[data-protection-enabled]').setValue(true)
     expect(wrapper.props('modelValue').rules.map(rule => rule.test_definition_id)).toEqual([1, 2])
     expect(validTestProtection(wrapper.props('modelValue'), 'account', disabledTypes)).toBe(true)
+  })
+
+  it('configures independent pass and fail group actions without changing other types', async () => {
+    const wrapper = mountEditor()
+    await wrapper.get('[data-protection-enabled]').setValue(true)
+    const stats = wrapper.get('[data-protection-type="1"]')
+    const pass = stats.get('[data-outcome="pass"]')
+    const fail = stats.get('[data-outcome="fail"]')
+    await pass.get('[data-action-scheduling]').setValue('keep')
+    await fail.get('[data-action-scheduling]').setValue('keep')
+    await pass.get('[data-action-group-mode]').setValue('assign')
+    await pass.get('[data-action-group="9"]').setValue(true)
+    await pass.get('[data-action-group="10"]').setValue(true)
+    await fail.get('[data-action-group-mode]').setValue('assign')
+    await fail.get('[data-action-group="8"]').setValue(true)
+    expect(wrapper.props('modelValue').rules[0]).toMatchObject({
+      on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [9, 10] },
+      on_fail: { scheduling: 'keep', group_mode: 'assign', group_ids: [8] },
+    })
+    expect(wrapper.props('modelValue').rules[1].on_fail).toEqual({ scheduling: 'pause', group_mode: 'keep' })
+    expect(validTestProtection(wrapper.props('modelValue'), 'account', types, groups)).toBe(true)
+    await pass.get('[data-group-search]').setValue('premium')
+    expect(pass.find('[data-action-group="9"]').exists()).toBe(true)
+    expect(pass.find('[data-action-group="10"]').exists()).toBe(false)
+    expect(pass.get('[data-selected-groups]').text()).toContain('Priority')
+    await pass.get('[data-group-search]').setValue('10')
+    expect(pass.find('[data-action-group="10"]').exists()).toBe(true)
+    await pass.get('[data-action-group-mode]').setValue('keep')
+    expect(wrapper.props('modelValue').rules[0].on_pass?.group_ids).toBeUndefined()
+  })
+
+  it('preserves legacy defaults without rewriting actions until they are edited', async () => {
+    const legacy: TestProtectionConfig = { enabled: true, rules: [{ test_definition_id: 2, pause_on_failure: true }] }
+    const wrapper = mountEditor(legacy)
+    const html = wrapper.get('[data-protection-type="2"]')
+    expect((html.get('[data-outcome="pass"] [data-action-scheduling]').element as HTMLSelectElement).value).toBe('resume')
+    expect((html.get('[data-outcome="fail"] [data-action-scheduling]').element as HTMLSelectElement).value).toBe('pause')
+    await html.get('[data-rule-vote]').setValue(true)
+    expect(wrapper.props('modelValue').rules[0].on_pass).toBeUndefined()
+    await html.get('[data-outcome="fail"] [data-action-scheduling]').setValue('keep')
+    expect(wrapper.props('modelValue').rules[0].on_fail?.scheduling).toBe('keep')
+    expect(legacy.rules[0].on_fail).toBeUndefined()
+  })
+
+  it('allows an empty outcome to remove managed groups but rejects empty or invalid targets', () => {
+    const config: TestProtectionConfig = { enabled: true, rules: [{ test_definition_id: 3, expected_answer: '29', answer_match: 'numeric', on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [9] }, on_fail: { scheduling: 'keep', group_mode: 'assign', group_ids: [] } }] }
+    expect(validTestProtection(config, 'account', types, groups)).toBe(true)
+    for (const ids of [[], [9, 9], [0], [-1], [1.5], [99], Array.from({ length: 101 }, (_, index) => index + 1)]) {
+      const next = copyTestProtection(config)
+      next.rules[0].on_pass!.group_ids = ids
+      expect(validTestProtection(next, 'account', types, groups)).toBe(false)
+    }
+    for (const patch of [{ group_mode: 'keep' }, { scheduling: 'invalid' }, { group_mode: 'invalid' }]) {
+      const next = copyTestProtection(config)
+      Object.assign(next.rules[0].on_pass!, patch as Partial<TestOutcomeAction>)
+      expect(validTestProtection(next, 'account', types, groups)).toBe(false)
+    }
+  })
+
+  it('deep copies actions and visibly rejects removed or incompatible groups without losing IDs', async () => {
+    const original: TestProtectionConfig = { enabled: true, rules: [{ test_definition_id: 1, pause_on_failure: true, on_pass: { scheduling: 'resume', group_mode: 'assign', group_ids: [9] }, on_fail: { scheduling: 'pause', group_mode: 'assign', group_ids: [8] } }] }
+    const copied = copyTestProtection(original)
+    copied.rules[0].on_pass!.group_ids!.push(10)
+    copied.rules[0].on_fail!.group_ids!.splice(0, 1)
+    expect(original.rules[0].on_pass!.group_ids).toEqual([9])
+    expect(original.rules[0].on_fail!.group_ids).toEqual([8])
+    const wrapper = mountEditor(original)
+    await wrapper.setProps({ groups: groups.filter(group => group.id !== 9) })
+    expect(wrapper.find('[data-unavailable-groups]').exists()).toBe(true)
+    expect(wrapper.props('modelValue').rules[0].on_pass!.group_ids).toEqual([9])
+    expect(validTestProtection(original, 'account', types, groups.filter(group => group.id !== 9))).toBe(false)
   })
 
 })

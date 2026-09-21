@@ -9,6 +9,25 @@ import type {
   UpdateTestTypeRequest
 } from '@/types'
 
+export interface TestAdminReview {
+  result: TestResult
+  generation: number
+  verdict: 'pending' | 'pass' | 'fail'
+  admin_verdict: '' | 'pass' | 'fail'
+  admin_user_id?: number
+  decided_at?: string
+  account_paused: boolean
+}
+
+export async function listReviews(): Promise<TestAdminReview[]> {
+  const { data } = await apiClient.get<TestAdminReview[]>('/admin/test-reviews')
+  return data ?? []
+}
+
+export async function decideResult(id: number, generation: number, verdict: 'pass' | 'fail'): Promise<void> {
+  await apiClient.post(`/admin/test-results/${id}/decision`, { generation, verdict })
+}
+
 export async function listTypes(enabledOnly = true): Promise<TestType[]> {
   const { data } = await apiClient.get<TestType[]>('/admin/scheduled-test-definitions', {
     params: { enabled_only: enabledOnly }
@@ -60,5 +79,5 @@ export async function retryResult(id: number): Promise<TestResult> {
   return data
 }
 
-export const testsAPI = { listTypes, createType, updateType, deleteType, listPlans, createPlan, updatePlan, deletePlan, runPlan, listResults, deleteResult, retryResult }
+export const testsAPI = { listTypes, createType, updateType, deleteType, listPlans, createPlan, updatePlan, deletePlan, runPlan, listResults, deleteResult, retryResult, listReviews, decideResult }
 export default testsAPI

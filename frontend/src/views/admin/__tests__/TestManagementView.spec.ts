@@ -33,6 +33,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('configurable test management', () => {
+
   it('saves a new type with its chosen output format and prompt', async () => {
     const wrapper = makeWrapper(); await flushPromises()
     await wrapper.findAll('button').find(b => b.text().includes('common.create'))!.trigger('click')
@@ -350,6 +351,86 @@ describe('configurable test management', () => {
 
 describe('automatic protection plan integration', () => {
   const protection = { enabled: true, rules: [{ test_definition_id: 2, pause_on_failure: true, expected_answer: '29', answer_match: 'numeric', thresholds: [], vote: { enabled: false, reject_above: 0, pass_at_least: 3 } }] }
+  it('saves multiple action targets from the source platform and preserves the loaded plan on edits', async () => {
+    const actions = {
+      ...protection,
+      rules: [{ ...protection.rules[0], on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [9] }, on_fail: { scheduling: 'keep', group_mode: 'assign', group_ids: [8] } }],
+    }
+    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection: actions }])
+    api.getGroups.mockResolvedValue([{ id: 8, name: 'Basic', platform: 'openai', status: 'active' }, { id: 9, name: 'Premium', platform: 'openai', status: 'active' }, { id: 10, name: 'Priority', platform: 'openai', status: 'active' }, { id: 11, name: 'Claude', platform: 'anthropic', status: 'active' }, { id: 12, name: 'Inactive', platform: 'openai', status: 'inactive' }, { id: 13, name: 'Composite', platform: 'composite', status: 'active' }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    const pass = dialog.get('[data-outcome="pass"]')
+    expect(pass.find('[data-action-group="11"]').exists()).toBe(false)
+    expect(pass.find('[data-action-group="12"]').exists()).toBe(false)
+    expect(pass.find('[data-action-group="13"]').exists()).toBe(false)
+    await pass.get('[data-action-group="10"]').setValue(true)
+    expect(actions.rules[0].on_pass.group_ids).toEqual([9])
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ protection: expect.objectContaining({ rules: [expect.objectContaining({ on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [9, 10] } })] }) }))
+    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ protection: actions }))
+    const copied = api.createPlan.mock.calls[0][0]
+    copied.protection.rules[0].on_pass.group_ids.push(10)
+    expect(actions.rules[0].on_pass.group_ids).toEqual([9])
+    wrapper.unmount()
+  })
+
+  it('keeps an existing account target visible after automation moved it out of the source group', async () => {
+    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
+    api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Moved Account', group_ids: [9] }, { id: 4, name: 'Unrelated Account', group_ids: [9] }], pages: 1, total: 2 })
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    const accountSelect = dialog.findAll('select').find(select => select.find('option[value="3"]').exists())!
+    expect(accountSelect.text()).toContain('Moved Account')
+    expect(accountSelect.find('option[value="4"]').exists()).toBe(false)
+    expect((accountSelect.element as HTMLSelectElement).value).toBe('3')
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ group_id: 8, account_id: 3 }))
+    wrapper.unmount()
+  })
+
+  it('opens a moved-account copy for correction and prevents creating it until a current member is selected', async () => {
+    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
+    api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Moved Account', group_ids: [9] }, { id: 4, name: 'Current Member', group_ids: [8] }], pages: 1, total: 2 })
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).not.toHaveBeenCalled()
+    const dialog = wrapper.get('[data-dialog]')
+    expect(dialog.find('[data-invalid-account-target]').exists()).toBe(true)
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    expect(save.attributes('disabled')).toBeDefined()
+    const accountSelect = dialog.findAll('select').find(select => select.find('option[value="4"]').exists())!
+    expect(accountSelect.find('option[value="3"]').exists()).toBe(false)
+    await accountSelect.setValue('4')
+    expect(dialog.find('[data-invalid-account-target]').exists()).toBe(false)
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ name: 'Candy hourly（Copy）', group_id: 8, account_id: 4, protection }))
+    expect(api.updatePlan).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('retains disabled selected group IDs for correction instead of silently removing them', async () => {
+    const actionProtection = { ...protection, rules: [{ ...protection.rules[0], on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [9] } }] }
+    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection: actionProtection }])
+    api.getGroups.mockResolvedValue([{ id: 8, name: 'Basic', platform: 'openai', status: 'active' }, { id: 9, name: 'Disabled', platform: 'openai', status: 'inactive' }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    const pass = dialog.get('[data-outcome="pass"]')
+    expect(pass.find('[data-action-group="9"]').exists()).toBe(false)
+    expect(pass.get('[data-selected-groups]').text()).toContain('#9')
+    expect(pass.find('[data-unavailable-groups]').exists()).toBe(true)
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    expect(save.attributes('disabled')).toBeDefined()
+    expect(actionProtection.rules[0].on_pass.group_ids).toEqual([9])
+    await pass.get('[data-action-group-mode]').setValue('keep')
+    expect(save.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
   it('edits and copies protection without mutating the loaded plan', async () => {
     api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
     const wrapper = makeWrapper(); await flushPromises()

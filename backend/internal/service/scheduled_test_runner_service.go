@@ -275,6 +275,17 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 
 func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *ScheduledTestPlan) {
 	defer s.advancePlan(ctx, plan)
+	if plan.Protection.Enabled && s.scheduledSvc != nil {
+		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRoundRepository); ok {
+			queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
+			err := repo.BeginProtectionRun(queryCtx, plan, time.Now().UTC())
+			cancel()
+			if err != nil {
+				logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d protection round initialization error: %v", plan.ID, err)
+				return
+			}
+		}
+	}
 	executions := scheduledTestExecutionPlans(plan)
 	// Local statistics must not wait behind a potentially fifteen-minute model
 	// generation. Display ordering remains a separate definition setting.
@@ -398,6 +409,11 @@ func (s *ScheduledTestRunnerService) resolveDefinition(ctx context.Context, plan
 }
 
 func (s *ScheduledTestRunnerService) resolveTargetAccounts(ctx context.Context, plan *ScheduledTestPlan) ([]int64, error) {
+	if s.scheduledSvc != nil {
+		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRepository); ok {
+			return repo.ListPlanDetectionAccountIDs(ctx, plan, plan.AccountID)
+		}
+	}
 	if repo := s.scheduledSvc.protectionRepository(); repo != nil {
 		return repo.ListDetectionAccountIDs(ctx, plan.GroupID, plan.AccountID)
 	}
@@ -955,7 +971,11 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if eligible, err := s.detectionAccountEligible(ctx, plan, accountID); err != nil || !eligible {
 		return nil, fmt.Errorf("account is not enabled for detection")
 	}
-	if plan.GroupID != nil {
+	followsMoves := false
+	if s.scheduledSvc != nil {
+		_, followsMoves = s.scheduledSvc.resultRepo.(ScheduledTestActionRepository)
+	}
+	if plan.GroupID != nil && !followsMoves {
 		linked := false
 		for _, groupID := range account.GroupIDs {
 			if groupID == *plan.GroupID {
