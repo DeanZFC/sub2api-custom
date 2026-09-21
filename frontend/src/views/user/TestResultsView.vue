@@ -6,7 +6,7 @@
         <button class="btn btn-secondary" :disabled="loading" @click="load"><Icon name="refresh" size="sm" />{{ t('common.refresh') }}</button>
       </header>
 
-      <div v-if="allResults.length" class="flex flex-wrap items-end justify-between gap-3 border-b border-gray-200 dark:border-dark-700">
+      <div v-if="displayResults.length" class="flex flex-wrap items-end justify-between gap-3 border-b border-gray-200 dark:border-dark-700">
         <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" :aria-label="t('tests.groupFilter')">
           <button v-for="group in availableGroups" :id="tabId(group.key)" :key="group.key" type="button" role="tab" :aria-selected="activeGroup === group.key" aria-controls="quality-results" :tabindex="activeGroup === group.key ? 0 : -1" class="shrink-0 border-b-2 px-4 py-3 text-base font-semibold transition-colors" :class="activeGroup === group.key ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'" @click="activeGroup = group.key" @keydown="onGroupKeydown($event, group.key)">{{ group.name }}</button>
         </nav>
@@ -16,46 +16,54 @@
         </label>
       </div>
 
-      <p v-if="!allResults.length" class="py-16 text-center text-sm text-gray-500">{{ loading ? t('common.loading') : t('tests.empty') }}</p>
+      <div v-if="votesLoadError" class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200" role="alert" data-votes-error>{{ votesLoadError }}<button type="button" class="ml-3 underline" :disabled="loading" @click="load">{{ t('common.retry') }}</button></div>
+      <p v-if="!displayResults.length" class="py-16 text-center text-sm text-gray-500">{{ loading ? t('common.loading') : t('tests.empty') }}</p>
       <section v-else id="quality-results" ref="resultsPanel" class="min-w-0 space-y-5" role="tabpanel" :aria-labelledby="tabId(activeGroup)" tabindex="0">
-        <p v-if="!accountResults.length" class="py-16 text-center text-sm text-gray-500">{{ t('tests.noMatches') }}</p>
-        <article v-for="account in accountResults" :key="account.key" class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900" data-account-result>
-          <div class="flex flex-col gap-5 p-4 sm:p-5 lg:flex-row lg:gap-8">
-            <div class="min-w-0 shrink-0 lg:w-40"><h3 class="text-xl font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
-            <div v-if="account.numericTests.length" class="grid min-w-0 flex-1 gap-x-8 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
-              <section v-for="test in account.numericTests" :key="test.key" data-numeric-test>
-                <div class="flex flex-wrap items-center gap-2"><h4 class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ test.name }}</h4><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span></div>
-                <div class="mt-3 grid grid-cols-3 gap-3" data-numeric-gallery>
-                  <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
-                    <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ result.output_numeric ?? '-' }}</strong>
-                    <figcaption class="mt-1 text-xs text-gray-500 dark:text-gray-400"><span class="block">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span class="mt-1 block">{{ formatDate(resultTime(result)) }}</span><span v-if="result.latency_ms != null" class="mt-1 block">{{ result.latency_ms }}ms</span></figcaption>
-                  </figure>
-                </div>
-                <p class="mt-2 break-words text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}</p>
-                <button v-if="historyAnchor(test)" type="button" class="mt-2 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
-              </section>
-            </div>
+        <section v-if="filteredVotes.length" class="space-y-4" data-voting-section>
+          <div><h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('tests.voting.title') }}</h3><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('tests.voting.description') }}</p></div>
+          <TestVoteCard v-for="item in filteredVotes" :key="item.result.id" :item="item" :busy="votingResultIds.has(item.result.id)" :error="voteErrors[item.result.id]" @vote="castVote(item.result.id, $event)" />
+        </section>
+        <p v-if="!accountResults.length && !filteredVotes.length" class="py-16 text-center text-sm text-gray-500">{{ t('tests.noMatches') }}</p>
+        <article v-for="account in accountResults" :key="account.key" class="grid overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900 lg:grid-cols-[12rem_minmax(0,1fr)]" data-account-result>
+          <header class="flex min-w-0 flex-col justify-center border-b border-gray-200 p-4 dark:border-dark-700 sm:p-5 lg:border-b-0 lg:border-r" data-account-info>
+            <div class="min-w-0 break-words"><h3 class="text-xl font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
+          </header>
+          <div class="min-w-0 divide-y divide-gray-200 dark:divide-dark-700" data-account-tests>
+            <section
+              v-for="test in account.tests"
+              :key="test.key"
+              class="min-w-0 p-4 sm:p-5"
+              data-test-section
+              :data-numeric-test="test.latest.output_kind === 'number' ? '' : undefined"
+              :data-statistics-test="test.latest.output_kind === 'statistics' ? '' : undefined"
+              :data-content-test="!['number', 'statistics'].includes(test.latest.output_kind) ? '' : undefined"
+            >
+              <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ test.name }}</h4><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span></div><p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}<span v-if="test.latest.output_kind !== 'statistics' && test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></p></div>
+                <button v-if="historyAnchor(test)" type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
+              </div>
+              <TestResultOutput v-if="test.latest.output_kind === 'statistics'" :result="test.latest" />
+              <div v-else-if="test.latest.output_kind === 'number'" class="grid grid-cols-3 gap-3" data-numeric-gallery>
+                <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
+                  <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ result.output_numeric ?? '-' }}</strong>
+                  <figcaption class="mt-1 text-xs text-gray-500 dark:text-gray-400"><span class="block">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span class="mt-1 block">{{ formatDate(resultTime(result)) }}</span><span v-if="result.latency_ms != null" class="mt-1 block">{{ result.latency_ms }}ms</span></figcaption>
+                </figure>
+              </div>
+              <div v-else class="grid items-start gap-4 lg:grid-cols-3" data-result-gallery>
+                <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
+                  <TestResultOutput :result="result" compact />
+                  <figcaption class="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-gray-500 dark:text-gray-400"><span :class="index === 0 ? 'font-medium text-gray-700 dark:text-gray-200' : ''">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span>· {{ formatDate(resultTime(result)) }}</span></figcaption>
+                </figure>
+              </div>
+            </section>
           </div>
-
-          <section v-for="test in account.contentTests" :key="test.key" class="border-t border-gray-200 p-4 dark:border-dark-700 sm:p-5" data-content-test>
-            <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ test.name }}</h4><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span></div><p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}<span v-if="test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></p></div>
-              <button v-if="historyAnchor(test)" type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
-            </div>
-            <div class="grid items-start gap-4 lg:grid-cols-3" data-result-gallery>
-              <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
-                <TestResultOutput :result="result" compact />
-                <figcaption class="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-gray-500 dark:text-gray-400"><span :class="index === 0 ? 'font-medium text-gray-700 dark:text-gray-200' : ''">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span>· {{ formatDate(resultTime(result)) }}</span></figcaption>
-              </figure>
-            </div>
-          </section>
         </article>
       </section>
     </div>
 
     <BaseDialog :show="!!historyTarget" :title="historyTarget ? `${targetName(historyTarget.latest)} · ${historyTarget.name}` : ''" width="extra-wide" @close="closeHistory">
       <div v-if="historyTarget" class="space-y-4">
-        <div class="divide-y divide-gray-200 dark:divide-dark-700"><article v-for="result in historyResults" :key="result.id" class="py-5 first:pt-0"><div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ modelLabel(result) }}<span v-if="result.latency_ms != null"> · {{ result.latency_ms }}ms</span> · {{ formatDate(resultTime(result)) }}</span><span :class="statusClass(result)">{{ statusLabel(result) }}</span></div><TestResultOutput :result="result" /></article></div>
+        <div class="divide-y divide-gray-200 dark:divide-dark-700"><article v-for="result in historyResults" :key="result.id" class="py-5 first:pt-0"><div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ modelLabel(result) }}<span v-if="result.output_kind !== 'statistics' && result.latency_ms != null"> · {{ result.latency_ms }}ms</span> · {{ formatDate(resultTime(result)) }}</span><span :class="statusClass(result)">{{ statusLabel(result) }}</span></div><TestResultOutput :result="result" /></article></div>
         <p v-if="historyLoading" class="py-4 text-center text-sm text-gray-500" role="status">{{ t('common.loading') }}</p>
         <div v-else-if="historyError" class="flex flex-wrap items-center justify-center gap-3 py-4 text-sm"><p class="text-red-600 dark:text-red-400" role="alert">{{ historyError }}</p><button type="button" class="btn btn-secondary" @click="loadHistory"><Icon name="refresh" size="sm" />{{ t('common.retry') }}</button></div>
         <p v-else-if="!historyResults.length" class="py-4 text-center text-sm text-gray-500">{{ t('tests.empty') }}</p>
@@ -69,11 +77,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { testResultsAPI } from '@/api/testResults'
-import type { TestResult } from '@/types'
+import type { TestResult, TestVote, TestVoteResult } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import TestResultOutput from '@/components/tests/TestResultOutput.vue'
+import TestVoteCard from '@/components/tests/TestVoteCard.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -90,6 +99,12 @@ const { t } = useI18n()
 const app = useAppStore()
 const loading = ref(false)
 const allResults = ref<TestResult[]>([])
+const voteResults = ref<TestVoteResult[]>([])
+const votesLoadError = ref('')
+const votingResultIds = ref(new Set<number>())
+const voteErrors = ref<Record<number, string>>({})
+let voteRevision = 0
+const displayResults = computed(() => [...allResults.value, ...voteResults.value.map(item => item.result)])
 const activeGroup = ref('')
 const modelFilter = ref('')
 const historyTarget = ref<TestSeries | null>(null)
@@ -118,7 +133,7 @@ const tabId = (key: string) => `quality-group-${encodeURIComponent(key)}`
 
 const availableGroups = computed(() => {
   const groups = new Map<string, { key: string; name: string; order: number }>()
-  for (const result of allResults.value) {
+  for (const result of displayResults.value) {
     const key = groupKey(result)
     const order = orderValue(result.plan_order)
     const previous = groups.get(key)
@@ -129,7 +144,8 @@ const availableGroups = computed(() => {
 watch(availableGroups, groups => {
   if (!groups.some(group => group.key === activeGroup.value)) activeGroup.value = groups[0]?.key || ''
 }, { immediate: true })
-const availableModels = computed(() => [...new Set(allResults.value.map(result => result.model_id).filter((model): model is string => Boolean(model)))].sort())
+const availableModels = computed(() => [...new Set(displayResults.value.map(result => result.model_id).filter((model): model is string => Boolean(model)))].sort())
+const filteredVotes = computed(() => voteResults.value.filter(item => groupKey(item.result) === activeGroup.value && (!modelFilter.value || item.result.model_id === modelFilter.value)))
 const filteredResults = computed(() => sortResults(allResults.value.filter(result => groupKey(result) === activeGroup.value && (!modelFilter.value || result.model_id === modelFilter.value))))
 const accountResults = computed(() => {
   const accounts = new Map<string, { key: string; name: string; groupName: string; order: number; tests: Map<string, TestSeries> }>()
@@ -151,7 +167,7 @@ const accountResults = computed(() => {
   return [...accounts.values()].sort((a, b) => a.order - b.order).map(account => {
     const tests = [...account.tests.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
     for (const test of tests) test.recent = test.results.slice(0, 3)
-    return { ...account, numericTests: tests.filter(test => test.latest.output_kind === 'number'), contentTests: tests.filter(test => test.latest.output_kind !== 'number') }
+    return { ...account, tests }
   })
 })
 
@@ -209,16 +225,56 @@ const onGroupKeydown = async (event: KeyboardEvent, key: string) => {
   await nextTick()
   document.getElementById(tabId(activeGroup.value))?.focus()
 }
+const visibleVote = (item: TestVoteResult) => item.voting.enabled && isSuccessful(item.result)
+  && item.result.account_id != null && item.result.target_mode !== 'group' && item.result.output_kind !== 'statistics'
+const castVote = async (id: number, vote: TestVote) => {
+  if (votingResultIds.value.has(id)) return
+  const current = voteResults.value.find(item => item.result.id === id)
+  if (!current?.voting.open) return
+  voteRevision++
+  votingResultIds.value.add(id)
+  delete voteErrors.value[id]
+  try {
+    const updated = await testResultsAPI.vote(id, vote)
+    const index = voteResults.value.findIndex(item => item.result.id === id)
+    if (index >= 0 && updated.result.id === id) {
+      if (visibleVote(updated)) voteResults.value.splice(index, 1, updated)
+      else voteResults.value.splice(index, 1)
+    }
+  } catch (error) {
+    voteErrors.value[id] = extractApiErrorMessage(error, t('tests.voting.voteFailed'))
+  } finally {
+    voteRevision++
+    votingResultIds.value.delete(id)
+  }
+}
 const load = async () => {
   if (loading.value) return
   loading.value = true
-  try {
-    const results = await testResultsAPI.list(3)
-    // Failed upstream responses must stay private, including against an older server.
-    allResults.value = sortResults(results.filter(result => ['success', 'passed', 'pending', 'running'].includes(result.status)))
-  } catch (error) {
-    app.showError(extractApiErrorMessage(error, t('tests.loadFailed')))
-  } finally { loading.value = false }
+  const revision = voteRevision
+  await Promise.all([
+    (async () => {
+      try {
+        const results = await testResultsAPI.list(3)
+        // Failed upstream responses must stay private, including against an older server.
+        allResults.value = sortResults(results.filter(result => ['success', 'passed', 'pending', 'running'].includes(result.status)))
+      } catch (error) {
+        app.showError(extractApiErrorMessage(error, t('tests.loadFailed')))
+      }
+    })(),
+    (async () => {
+      try {
+        const votes = await testResultsAPI.votes()
+        // A response that predates a vote must not undo its count or selected state.
+        if (revision !== voteRevision || votingResultIds.value.size) return
+        voteResults.value = votes.filter(visibleVote)
+        votesLoadError.value = ''
+      } catch (error) {
+        if (revision === voteRevision) votesLoadError.value = extractApiErrorMessage(error, t('tests.voting.loadFailed'))
+      }
+    })(),
+  ])
+  loading.value = false
 }
 let resultTimer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {

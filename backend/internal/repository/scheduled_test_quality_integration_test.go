@@ -54,7 +54,8 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.NoError(t, err)
 		execSQL(string(data))
 	}
-	execSQL(`CREATE TABLE accounts (id BIGINT PRIMARY KEY, name TEXT, deleted_at TIMESTAMPTZ);
+	execSQL(`CREATE TABLE users (id BIGINT PRIMARY KEY);
+		CREATE TABLE accounts (id BIGINT PRIMARY KEY, name TEXT, status TEXT NOT NULL DEFAULT 'active', schedulable BOOLEAN NOT NULL DEFAULT true, deleted_at TIMESTAMPTZ);
 		CREATE TABLE groups (id BIGINT PRIMARY KEY, name TEXT, status TEXT DEFAULT 'active', deleted_at TIMESTAMPTZ, is_exclusive BOOLEAN DEFAULT false, subscription_type TEXT DEFAULT 'standard');
 		CREATE TABLE account_groups (account_id BIGINT, group_id BIGINT);
 		CREATE TABLE user_allowed_groups (user_id BIGINT, group_id BIGINT);
@@ -78,6 +79,12 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO scheduled_test_plans (name, group_id, test_definition_id, target_mode) VALUES ('Legacy', 8, $1, 'group') RETURNING id`, candyID).Scan(&legacyPlanID))
 	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO scheduled_test_results (plan_id, group_id, account_id, status) VALUES ($1, 8, 62, 'success') RETURNING id`, legacyPlanID).Scan(&legacyResultID))
 	applyMigration("256_scheduled_test_multiple_definitions.sql")
+	applyMigration("257_scheduled_test_hourly_statistics.sql")
+	applyMigration("257_scheduled_test_hourly_statistics.sql")
+	applyMigration("258_scheduled_test_protection.sql")
+	var statisticsCount int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))
+	require.Equal(t, 1, statisticsCount, "the local statistics definition is seeded idempotently")
 	plans := NewScheduledTestPlanRepository(db)
 	results := NewScheduledTestResultRepository(db)
 	definitions := NewScheduledTestDefinitionRepository(db)
@@ -368,5 +375,191 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.Error(t, <-deleted, "the concurrent delete must not leave a broken secondary reference")
 		require.NoError(t, plans.Delete(ctx, newPlanID))
 		require.NoError(t, definitions.Delete(ctx, definition.ID), "deleting a plan releases its references")
+	})
+
+	t.Run("statistics storage survives public projection without exposing raw JSON", func(t *testing.T) {
+		definition, err := definitions.GetByKey(ctx, "hourly_stats")
+		require.NoError(t, err)
+		statsPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
+			Name: "Local statistics", GroupID: &groupID, TestDefinitionID: &definition.ID,
+			TestDefinitionIDs: []int64{definition.ID}, TestType: "quality", TargetMode: "group",
+			ModelID: "model-a", CronExpression: "0 * * * *", Enabled: true, MaxResults: 5,
+		})
+		require.NoError(t, err)
+		svc := service.NewScheduledTestService(plans, results)
+		pending, err := svc.StartResult(ctx, statsPlan.ID, &service.ScheduledTestResult{
+			TestDefinitionID: &definition.ID, GroupID: &groupID, TargetMode: "group",
+			ModelID: "model-a", OutputKind: "statistics", StartedAt: started,
+		})
+		require.NoError(t, err)
+		snapshot := &service.ScheduledTestStatistics{
+			WindowStart: started.Add(-time.Hour), WindowEnd: started, TotalRequests: 4, SuccessRequests: 3, FailedRequests: 1,
+			RecentRequests: []service.ScheduledTestRecentRequest{
+				{Success: false, CreatedAt: started.Add(-time.Minute)},
+				{Success: true, CreatedAt: started.Add(-2 * time.Minute)},
+			},
+		}
+		rate := 0.75
+		snapshot.SuccessRate = &rate
+		encoded, err := json.Marshal(snapshot)
+		require.NoError(t, err)
+		pending.Status, pending.ResponseText, pending.FinishedAt = "success", string(encoded), started
+		pending.OutputStatistics = snapshot
+		require.NoError(t, svc.CompleteResult(ctx, 5, pending))
+		stored, err := results.GetByID(ctx, pending.ID)
+		require.NoError(t, err)
+		require.JSONEq(t, string(encoded), stored.ResponseText)
+		visible, err := svc.ListVisibleResults(ctx, 100, 5)
+		require.NoError(t, err)
+		found := false
+		for _, result := range visible {
+			if result.ID != pending.ID {
+				continue
+			}
+			found = true
+			require.Empty(t, result.ResponseText)
+			require.Nil(t, result.AccountID)
+			require.Empty(t, result.AccountName)
+			require.Empty(t, result.ReasoningEffort)
+			require.Equal(t, snapshot, result.OutputStatistics)
+		}
+		require.True(t, found)
+		stored, err = results.GetByID(ctx, pending.ID)
+		require.NoError(t, err)
+		require.JSONEq(t, string(encoded), stored.ResponseText, "read normalization must never overwrite stored statistics")
+	})
+
+	t.Run("public results follow current account availability while admin history remains", func(t *testing.T) {
+		const unavailableID, availableID = int64(70), int64(71)
+		execSQL(`INSERT INTO accounts (id,name) VALUES (70,'Visibility changing account'),(71,'Visibility control account');
+INSERT INTO account_groups VALUES (70,8),(71,8)`)
+		definition, err := definitions.GetByKey(ctx, "hourly_stats")
+		require.NoError(t, err)
+		statsPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
+			Name: "Availability independent statistics", GroupID: &groupID,
+			TestDefinitionID: &definition.ID, TestDefinitionIDs: []int64{definition.ID},
+			TargetMode: "group", TestType: "quality", ModelID: "visibility-stats", CronExpression: "* * * * *",
+		})
+		require.NoError(t, err)
+		groupStatistics, err := results.Create(ctx, &service.ScheduledTestResult{
+			PlanID: statsPlan.ID, TestDefinitionID: &definition.ID, GroupID: &groupID,
+			TargetMode: "group", Status: "success", OutputKind: "statistics", ModelID: "visibility-stats",
+			StartedAt: started, FinishedAt: started,
+		})
+		require.NoError(t, err)
+		containsID := func(rows []*service.ScheduledTestResult, id int64) bool {
+			for _, row := range rows {
+				if row.ID == id {
+					return true
+				}
+			}
+			return false
+		}
+		for _, mode := range []string{"account", "all_accounts", "group"} {
+			t.Run(mode, func(t *testing.T) {
+				plan := &service.ScheduledTestPlan{
+					Name: "Availability " + mode, GroupID: &groupID, TestDefinitionID: &candyID,
+					TestDefinitionIDs: []int64{candyID}, TargetMode: mode, TestType: "quality",
+					ModelID: "visibility-" + mode, CronExpression: "* * * * *",
+				}
+				accountID := unavailableID
+				if mode == "account" {
+					plan.AccountID = &accountID
+				}
+				plan, err = plans.Create(ctx, plan)
+				require.NoError(t, err)
+				create := func(id *int64, age time.Duration) *service.ScheduledTestResult {
+					t.Helper()
+					result, err := results.Create(ctx, &service.ScheduledTestResult{
+						PlanID: plan.ID, TestDefinitionID: &candyID, GroupID: &groupID, AccountID: id,
+						TargetMode: mode, Status: "success", OutputKind: "number", ResponseText: "29",
+						ModelID: plan.ModelID, StartedAt: started.Add(-age), FinishedAt: started,
+					})
+					require.NoError(t, err)
+					return result
+				}
+				older := create(&accountID, 3*time.Minute)
+				latest := create(&accountID, time.Minute)
+				var control, orphan *service.ScheduledTestResult
+				if mode == "group" {
+					controlID := availableID
+					control = create(&controlID, 30*time.Second)
+				} else {
+					// Deleted-account foreign keys may leave an orphaned account
+					// result. A public group entitlement must not make it visible.
+					orphan = create(nil, 0)
+				}
+				initial, err := results.ListVisible(ctx, 100, 3)
+				require.NoError(t, err)
+				require.True(t, containsID(initial, latest.ID))
+				if orphan != nil {
+					require.False(t, containsID(initial, orphan.ID))
+					_, err := results.ListVisibleHistory(ctx, 100, orphan.ID, 0, 20)
+					require.ErrorIs(t, err, sql.ErrNoRows)
+				}
+
+				for _, state := range []struct {
+					name        string
+					status      string
+					schedulable bool
+					deleted     any
+				}{
+					{name: "error", status: "error", schedulable: true},
+					{name: "inactive", status: "inactive", schedulable: true},
+					{name: "unschedulable", status: "active", schedulable: false},
+					{name: "soft deleted", status: "active", schedulable: true, deleted: started},
+				} {
+					t.Run(state.name, func(t *testing.T) {
+						execSQL("UPDATE accounts SET status=$2,schedulable=$3,deleted_at=$4 WHERE id=$1", unavailableID, state.status, state.schedulable, state.deleted)
+						public, err := results.ListVisible(ctx, 100, 3)
+						require.NoError(t, err)
+						require.False(t, containsID(public, older.ID))
+						require.False(t, containsID(public, latest.ID))
+						require.True(t, containsID(public, groupStatistics.ID), "a group-only statistics snapshot does not depend on an executing account")
+						for _, beforeID := range []int64{0, older.ID} {
+							_, err = results.ListVisibleHistory(ctx, 100, latest.ID, beforeID, 20)
+							require.ErrorIs(t, err, sql.ErrNoRows, "historical anchors must recheck the current account state")
+						}
+						if control != nil {
+							require.True(t, containsID(public, control.ID), "another active group-test account stays visible")
+							history, err := results.ListVisibleHistory(ctx, 100, control.ID, 0, 20)
+							require.NoError(t, err)
+							require.Len(t, history, 1, "a group series must exclude unavailable underlying accounts even though their IDs are hidden")
+							require.Equal(t, control.ID, history[0].ID)
+							require.Nil(t, history[0].AccountID)
+							_, err = results.ListVisibleHistory(ctx, 100, control.ID, older.ID, 20)
+							require.ErrorIs(t, err, sql.ErrNoRows, "a hidden cursor in the same group series cannot bypass availability checks")
+						}
+						adminHistory, err := results.ListByPlanID(ctx, plan.ID, 50)
+						require.NoError(t, err)
+						require.True(t, containsID(adminHistory, older.ID))
+						require.True(t, containsID(adminHistory, latest.ID))
+						adminResult, err := results.GetByID(ctx, latest.ID)
+						require.NoError(t, err)
+						require.Equal(t, "Visibility changing account", adminResult.AccountName)
+						if orphan != nil {
+							require.True(t, containsID(adminHistory, orphan.ID), "administrators retain orphaned-result diagnostics")
+						}
+
+						execSQL("UPDATE accounts SET status='active',schedulable=true,deleted_at=NULL WHERE id=$1", unavailableID)
+						restored, err := results.ListVisible(ctx, 100, 3)
+						require.NoError(t, err)
+						require.True(t, containsID(restored, latest.ID), "eligible accounts become visible without rewriting historical results")
+						history, err := results.ListVisibleHistory(ctx, 100, latest.ID, 0, 20)
+						require.NoError(t, err)
+						require.True(t, containsID(history, older.ID))
+						require.True(t, containsID(history, latest.ID))
+					})
+				}
+			})
+		}
+		execSQL("UPDATE accounts SET status='error',schedulable=false WHERE id IN (70,71)")
+		public, err := results.ListVisible(ctx, 100, 3)
+		require.NoError(t, err)
+		require.True(t, containsID(public, groupStatistics.ID))
+		history, err := results.ListVisibleHistory(ctx, 100, groupStatistics.ID, 0, 20)
+		require.NoError(t, err)
+		require.Len(t, history, 1)
+		require.Nil(t, history[0].AccountID)
 	})
 }

@@ -879,6 +879,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if input.Status != "" {
 		account.Status = input.Status
+		account.StatusChanged = true
 	}
 	if input.ExpiresAt != nil {
 		if *input.ExpiresAt <= 0 {

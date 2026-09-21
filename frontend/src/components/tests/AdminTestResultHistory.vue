@@ -42,7 +42,7 @@
                 <span class="min-w-0 flex-1">
                   <span class="flex flex-wrap items-center gap-2"><strong class="break-words text-sm font-semibold text-gray-900 dark:text-white">{{ resultTypeName(result) }}</strong><span :class="statusClass(result)">{{ statusLabel(result) }}</span></span>
                   <span class="mt-1 block break-words text-xs text-gray-500 dark:text-gray-400">{{ result.model_id || '-' }}<template v-if="result.reasoning_effort"> · {{ t('admin.tests.reasoningEffort') }}: {{ result.reasoning_effort }}</template></span>
-                  <span class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400"><time :datetime="resultTime(result)">{{ formatDate(resultTime(result)) }}</time><span class="tabular-nums">{{ resultDuration(result) }}</span><span v-if="result.id > 0" class="tabular-nums">#{{ result.id }}</span></span>
+                  <span class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400"><time :datetime="resultTime(result)">{{ formatDate(resultTime(result)) }}</time><span v-if="result.output_kind !== 'statistics' || isRunning(result)" class="tabular-nums">{{ resultDuration(result) }}</span><span v-if="result.id > 0" class="tabular-nums">#{{ result.id }}</span></span>
                 </span>
               </button>
               <div class="flex shrink-0 gap-1">
@@ -177,6 +177,7 @@ const statusLabel = (result: TestResult) => isRunning(result) ? t('admin.schedul
 const resultSummary = (result: TestResult) => {
   if (result.status === 'failed') return (result.error_message || t('admin.scheduledTests.failed')).slice(0, 180)
   if (isRunning(result)) return t('tests.running')
+  if (result.output_kind === 'statistics') return result.output_statistics ? t('admin.tests.statistics') : t('tests.noOutput')
   if (result.output_kind === 'number' && result.output_numeric != null) return String(result.output_numeric)
   if (result.output_kind === 'html' && result.output_html) return 'HTML / SVG'
   const text = (result.response_text || '').replace(/\s+/g, ' ').trim()

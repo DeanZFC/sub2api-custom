@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -24,17 +26,21 @@ func (r *scheduledTestPlanRepository) Create(ctx context.Context, plan *service.
 	if err := r.validateTarget(ctx, plan); err != nil {
 		return nil, err
 	}
+	protection, err := json.Marshal(plan.Protection)
+	if err != nil {
+		return nil, err
+	}
 	row := r.db.QueryRowContext(ctx, `
-		INSERT INTO scheduled_test_plans (name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, next_run_at, test_definition_ids, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15::bigint[], '{}'), NOW(), NOW())
-		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
-	`, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt, pq.Array(plan.TestDefinitionIDs))
+		INSERT INTO scheduled_test_plans (name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, next_run_at, test_definition_ids, protection, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15::bigint[], '{}'), $16::jsonb, NOW(), NOW())
+		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection
+	`, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt, pq.Array(plan.TestDefinitionIDs), protection)
 	return scanPlan(row)
 }
 
 func (r *scheduledTestPlanRepository) GetByID(ctx context.Context, id int64) (*service.ScheduledTestPlan, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
+		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection
 		FROM scheduled_test_plans WHERE id = $1
 	`, id)
 	return scanPlan(row)
@@ -42,7 +48,7 @@ func (r *scheduledTestPlanRepository) GetByID(ctx context.Context, id int64) (*s
 
 func (r *scheduledTestPlanRepository) ListByAccountID(ctx context.Context, accountID int64) ([]*service.ScheduledTestPlan, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
+		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection
 		FROM scheduled_test_plans WHERE account_id = $1
 		ORDER BY created_at DESC
 	`, accountID)
@@ -55,7 +61,7 @@ func (r *scheduledTestPlanRepository) ListByAccountID(ctx context.Context, accou
 
 func (r *scheduledTestPlanRepository) ListDue(ctx context.Context, now time.Time) ([]*service.ScheduledTestPlan, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
+		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection
 		FROM scheduled_test_plans
 		WHERE enabled = true AND next_run_at <= $1
 		ORDER BY next_run_at ASC
@@ -71,13 +77,41 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	if err := r.validateTarget(ctx, plan); err != nil {
 		return nil, err
 	}
-	row := r.db.QueryRowContext(ctx, `
+	protection, err := json.Marshal(plan.Protection)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	previous, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection FROM scheduled_test_plans WHERE id=$1 FOR UPDATE`, plan.ID))
+	if err != nil {
+		return nil, err
+	}
+	if !plan.Enabled || !plan.Protection.Enabled || !reflect.DeepEqual(previous.Protection, plan.Protection) ||
+		!reflect.DeepEqual(previous.AccountID, plan.AccountID) || !reflect.DeepEqual(previous.GroupID, plan.GroupID) ||
+		!reflect.DeepEqual(previous.TestDefinitionIDs, plan.TestDefinitionIDs) || !reflect.DeepEqual(previous.TestDefinitionID, plan.TestDefinitionID) ||
+		previous.TargetMode != plan.TargetMode || previous.ModelID != plan.ModelID || previous.ReasoningEffort != plan.ReasoningEffort {
+		if err := clearPlanProtectionTx(ctx, tx, plan.ID); err != nil {
+			return nil, err
+		}
+	}
+	row := tx.QueryRowContext(ctx, `
 		UPDATE scheduled_test_plans
-		SET name = $2, sort_order = $3, account_id = $4, group_id = $5, test_definition_id = $6, test_type = $7, target_mode = $8, model_id = $9, reasoning_effort = $10, cron_expression = $11, enabled = $12, max_results = $13, auto_recover = $14, next_run_at = $15, test_definition_ids = COALESCE($16::bigint[], '{}'), updated_at = NOW()
+		SET name = $2, sort_order = $3, account_id = $4, group_id = $5, test_definition_id = $6, test_type = $7, target_mode = $8, model_id = $9, reasoning_effort = $10, cron_expression = $11, enabled = $12, max_results = $13, auto_recover = $14, next_run_at = $15, test_definition_ids = COALESCE($16::bigint[], '{}'), protection = $17::jsonb, updated_at = NOW()
 		WHERE id = $1
-		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids
-	`, plan.ID, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt, pq.Array(plan.TestDefinitionIDs))
-	return scanPlan(row)
+		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection
+	`, plan.ID, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt, pq.Array(plan.TestDefinitionIDs), protection)
+	updated, err := scanPlan(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (r *scheduledTestPlanRepository) validateTarget(ctx context.Context, plan *service.ScheduledTestPlan) error {
@@ -118,8 +152,18 @@ func (r *scheduledTestPlanRepository) validateTarget(ctx context.Context, plan *
 }
 
 func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM scheduled_test_plans WHERE id = $1`, id)
-	return err
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := clearPlanProtectionTx(ctx, tx, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_plans WHERE id = $1`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *scheduledTestPlanRepository) UpdateAfterRun(ctx context.Context, id int64, lastRunAt time.Time, nextRunAt time.Time) error {
@@ -130,7 +174,7 @@ func (r *scheduledTestPlanRepository) UpdateAfterRun(ctx context.Context, id int
 }
 
 func (r *scheduledTestPlanRepository) List(ctx context.Context) ([]*service.ScheduledTestPlan, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids FROM scheduled_test_plans ORDER BY created_at DESC`)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection FROM scheduled_test_plans ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -356,6 +400,9 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 
 // Both public queries authorize the stored result's group (or legacy account
 // bindings). The account is projected only as an ID and hidden for group tests.
+// Read its current status and scheduling switch, even for group-mode model
+// tests whose executing account ID is hidden. Account-free group statistics
+// remain visible; orphaned account results do not.
 const scheduledTestVisibleResultsCTE = `WITH visible_results AS NOT MATERIALIZED (
     SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,COALESCE(g.name, '') AS group_name,COALESCE(p.sort_order, 2147483647) AS plan_order,r.target_mode,r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,
            CASE WHEN r.target_mode IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END AS visible_account_id,
@@ -367,7 +414,16 @@ const scheduledTestVisibleResultsCTE = `WITH visible_results AS NOT MATERIALIZED
     FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
     LEFT JOIN scheduled_test_definitions d ON d.id=r.test_definition_id
     LEFT JOIN groups g ON g.id=r.group_id
-    WHERE EXISTS (
+    WHERE (
+        (r.account_id IS NULL AND r.target_mode = 'group')
+        OR EXISTS (
+            SELECT 1 FROM accounts visible_account
+            WHERE visible_account.id = r.account_id
+              AND visible_account.deleted_at IS NULL
+              AND visible_account.status = 'active'
+              AND visible_account.schedulable = TRUE
+        )
+    ) AND EXISTS (
         SELECT 1
         FROM (
             SELECT uag.group_id
@@ -487,7 +543,27 @@ func scanVisibleTestResults(rows *sql.Rows) ([]*service.ScheduledTestResult, err
 }
 
 func (r *scheduledTestResultRepository) Delete(ctx context.Context, id int64) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM scheduled_test_results WHERE id = $1`, id)
+	// Follow protection's plan/account lock order before ON DELETE SET NULL
+	// touches the active state. The hold survives removing its visible output.
+	var planID int64
+	var accountID sql.NullInt64
+	if err := r.db.QueryRowContext(ctx, `SELECT plan_id,account_id FROM scheduled_test_results WHERE id=$1`, id).Scan(&planID, &accountID); err != nil {
+		return err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := lockProtectionPlan(ctx, tx, planID); err != nil {
+		return err
+	}
+	if accountID.Valid {
+		if _, err := lockProtectionAccount(ctx, tx, accountID.Int64); err != nil {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_results WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
@@ -498,7 +574,7 @@ func (r *scheduledTestResultRepository) Delete(ctx context.Context, id int64) er
 	if affected == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *scheduledTestResultRepository) PruneOldResults(ctx context.Context, planID int64, keepCount int) error {
@@ -515,6 +591,7 @@ func (r *scheduledTestResultRepository) PruneOldResults(ctx context.Context, pla
 				) AS rn
 				FROM scheduled_test_results
 				WHERE plan_id = $1 AND status NOT IN ('running', 'pending')
+				  AND NOT EXISTS (SELECT 1 FROM scheduled_test_protection_states protection WHERE protection.result_id = scheduled_test_results.id)
 			) ranked
 			WHERE rn > $2
 		)
@@ -530,11 +607,17 @@ type scannable interface {
 
 func scanPlan(row scannable) (*service.ScheduledTestPlan, error) {
 	p := &service.ScheduledTestPlan{}
+	var protection []byte
 	if err := row.Scan(
 		&p.ID, &p.Name, &p.SortOrder, &p.AccountID, &p.GroupID, &p.TestDefinitionID, &p.TestType, &p.TargetMode, &p.ModelID, &p.ReasoningEffort, &p.CronExpression, &p.Enabled, &p.MaxResults, &p.AutoRecover,
-		&p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt, pq.Array(&p.TestDefinitionIDs),
+		&p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt, pq.Array(&p.TestDefinitionIDs), &protection,
 	); err != nil {
 		return nil, err
+	}
+	if len(protection) > 0 {
+		if err := json.Unmarshal(protection, &p.Protection); err != nil {
+			return nil, fmt.Errorf("decode test protection: %w", err)
+		}
 	}
 	return p, nil
 }

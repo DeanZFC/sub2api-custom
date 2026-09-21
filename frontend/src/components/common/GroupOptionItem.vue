@@ -1,5 +1,5 @@
 <template>
-  <div class="flex min-w-0 flex-1 items-start justify-between gap-3">
+  <div class="flex min-w-0 flex-1 items-start justify-between gap-3" :class="{ 'flex-wrap sm:flex-nowrap': $slots.status }">
     <!-- Left: name + description -->
     <div
       class="flex min-w-0 flex-1 flex-col items-start"
@@ -12,6 +12,8 @@
         :subscription-type="subscriptionType"
         :show-rate="false"
         class="groupOptionItemBadge"
+        :class="{ 'max-w-full': $slots.status }"
+        :title="$slots.status ? name : undefined"
       />
       <!-- Row 2: description with top spacing -->
       <span
@@ -20,6 +22,10 @@
       >
         {{ description }}
       </span>
+    </div>
+
+    <div v-if="$slots.status" class="order-last basis-full sm:order-none sm:basis-auto sm:shrink-0 sm:pt-2">
+      <slot name="status" />
     </div>
 
     <!-- Right: rate pill + checkmark (vertically centered to first row) -->
@@ -45,8 +51,9 @@
       </div>
       <!-- Checkmark -->
       <svg
-        v-if="showCheckmark && selected"
+        v-if="showCheckmark && (selected || $slots.status)"
         class="h-4 w-4 shrink-0 text-primary-600 dark:text-primary-400"
+        :class="{ invisible: !selected }"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"

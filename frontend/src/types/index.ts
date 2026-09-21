@@ -1277,7 +1277,7 @@ export interface Account {
   scheduler_scores?: AccountSchedulerGroupScore[] | null
   priority: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
-  status: 'active' | 'inactive' | 'error'
+  status: 'active' | 'inactive' | 'error' | 'quality_paused'
   error_message: string | null
   last_used_at: string | null
   expires_at: number | null
@@ -1573,7 +1573,7 @@ export interface UpdateAccountRequest {
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
   schedulable?: boolean
-  status?: 'active' | 'inactive' | 'error'
+  status?: 'active' | 'inactive' | 'error' | 'quality_paused'
   group_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean
@@ -2512,7 +2512,7 @@ export interface TestType {
   name: string
   key: string
   description?: string | null
-  output_kind: 'html' | 'number' | 'text' | string
+  output_kind: 'html' | 'number' | 'text' | 'statistics' | string
   prompt: string
   enabled: boolean
   /** Controls the order of detection types in each account's quality results. */
@@ -2540,10 +2540,67 @@ export interface TestPlan {
   cron_expression?: string
   enabled: boolean
   max_results?: number
+  protection?: TestProtectionConfig
   last_run_at?: string | null
   next_run_at?: string | null
   created_at?: string
   updated_at?: string
+}
+
+export type TestProtectionMetric = 'success_rate' | 'cache_rate' | 'avg_first_token_ms' | 'latency_ms' | 'output_numeric'
+export interface TestProtectionThreshold {
+  metric: TestProtectionMetric
+  operator: 'lt' | 'gt'
+  value: number
+}
+export interface TestProtectionRule {
+  test_definition_id: number
+  thresholds?: TestProtectionThreshold[]
+  min_samples?: number
+  pause_on_failure?: boolean
+  expected_answer?: string
+  answer_match?: 'exact' | 'contains' | 'numeric'
+  vote?: { enabled: boolean; reject_above: number; pass_at_least: number }
+}
+export interface TestProtectionConfig {
+  enabled: boolean
+  rules: TestProtectionRule[]
+}
+export type TestVote = 'pass' | 'fail'
+export interface TestVoteResult {
+  result: TestResult
+  voting: {
+    enabled: boolean
+    open: boolean
+    pass_count: number
+    fail_count: number
+    my_vote?: TestVote
+    reject_above: number
+    pass_at_least: number
+    reference_answer?: string
+    account_paused: boolean
+  }
+}
+
+export interface TestStatisticsRecentRequest {
+  success: boolean
+  created_at: string
+}
+
+export interface TestOutputStatistics {
+  window_start: string
+  window_end: string
+  total_requests: number
+  success_requests: number
+  failed_requests: number
+  success_rate: number | null
+  cache_rate: number | null
+  avg_first_token_ms: number | null
+  first_token_samples: number
+  cache_read_tokens: number
+  cache_input_tokens: number
+  /** Latest ten outcomes, newest first; older snapshots may omit this field. */
+  recent_requests?: TestStatisticsRecentRequest[] | null
 }
 
 export interface TestResult {
@@ -2568,9 +2625,10 @@ export interface TestResult {
   /** Reasoning level used for this test execution, when explicitly selected. */
   reasoning_effort?: string | null
   status: string
-  output_kind: 'html' | 'number' | 'text' | string
+  output_kind: 'html' | 'number' | 'text' | 'statistics' | string
   output_html?: string | null
   output_numeric?: number | null
+  output_statistics?: TestOutputStatistics | null
   response_text?: string | null
   error_message?: string | null
   latency_ms?: number | null
@@ -2604,6 +2662,7 @@ export interface CreateTestPlanRequest {
   cron_expression?: string
   enabled?: boolean
   max_results?: number
+  protection?: TestProtectionConfig
 }
 
 export type UpdateTestPlanRequest = Partial<CreateTestPlanRequest>

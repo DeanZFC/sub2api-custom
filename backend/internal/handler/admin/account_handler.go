@@ -162,7 +162,7 @@ type UpdateAccountRequest struct {
 	Priority                *int           `json:"priority"`
 	RateMultiplier          *float64       `json:"rate_multiplier"`
 	LoadFactor              *int           `json:"load_factor"`
-	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
+	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error quality_paused"`
 	GroupIDs                *[]int64       `json:"group_ids"`
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
@@ -182,7 +182,7 @@ type BulkUpdateAccountsRequest struct {
 	Priority                *int                      `json:"priority"`
 	RateMultiplier          *float64                  `json:"rate_multiplier"`
 	LoadFactor              *int                      `json:"load_factor"`
-	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
+	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error quality_paused"`
 	Schedulable             *bool                     `json:"schedulable"`
 	GroupIDs                *[]int64                  `json:"group_ids"`
 	Credentials             map[string]any            `json:"credentials"`

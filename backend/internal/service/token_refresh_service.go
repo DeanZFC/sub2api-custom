@@ -530,6 +530,7 @@ func (s *TokenRefreshService) processRefreshContext(parent context.Context) {
 			AfterID:              afterID,
 			Limit:                pageSize,
 			ActiveOnly:           true,
+			IncludeQualityPaused: true,
 			IncludeSetupToken:    true,
 			RequireRefreshToken:  true,
 			ExcludeRetryCooldown: true,

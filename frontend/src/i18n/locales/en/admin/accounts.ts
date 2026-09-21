@@ -203,6 +203,8 @@ export default {
         error: 'Error',
         cooldown: 'Cooldown',
         paused: 'Paused',
+        qualityPaused: 'Paused by quality checks',
+        qualityPausedManualStop: 'Scheduling disabled manually; automatic recovery is off',
         limited: 'Limited',
         rateLimited: 'Rate Limited',
         overloaded: 'Overloaded',

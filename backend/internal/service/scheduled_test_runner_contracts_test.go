@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -43,6 +44,7 @@ func (r *runnerPlanRepoStub) UpdateAfterRun(ctx context.Context, _ int64, _, _ t
 }
 
 type runnerResultRepoStub struct {
+	mu              sync.Mutex
 	created         []*ScheduledTestResult
 	createdStatuses []string
 	createdEfforts  []string
@@ -59,6 +61,8 @@ func (r *runnerResultRepoStub) RestartFailed(context.Context, *ScheduledTestResu
 }
 
 func (r *runnerResultRepoStub) Create(ctx context.Context, result *ScheduledTestResult) (*ScheduledTestResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -75,6 +79,8 @@ func (r *runnerResultRepoStub) Create(ctx context.Context, result *ScheduledTest
 	return &copy, nil
 }
 func (r *runnerResultRepoStub) Update(ctx context.Context, result *ScheduledTestResult) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

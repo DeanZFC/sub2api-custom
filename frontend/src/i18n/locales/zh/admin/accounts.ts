@@ -431,6 +431,8 @@ export default {
         error: '错误',
         cooldown: '冷却中',
         paused: '暂停',
+        qualityPaused: '检测自动暂停',
+        qualityPausedManualStop: '已手动关闭调度，不会自动恢复',
         limited: '限流',
         rateLimited: '限流中',
         overloaded: '过载中',

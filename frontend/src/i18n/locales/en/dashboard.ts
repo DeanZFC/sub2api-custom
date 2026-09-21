@@ -66,6 +66,11 @@ export default {
 
   // API Keys
   keys: {
+    groupChannelStatus: {
+      recent: 'Recent channel health; newest interval on the right',
+      composite: 'Each interval shows the worst known health across platforms',
+      unavailable: 'Status unavailable',
+    },
     title: 'API Keys',
     description: 'Manage your API keys and access tokens',
     searchPlaceholder: 'Search name or key...',

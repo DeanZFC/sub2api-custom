@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -40,7 +41,7 @@ func ValidateScheduledTestDefinitionInput(d *ScheduledTestDefinition) error {
 	if d.Name == "" || len([]rune(d.Name)) > 200 {
 		return fmt.Errorf("name is required and must be at most 200 characters")
 	}
-	if d.Prompt == "" {
+	if d.Prompt == "" && d.OutputKind != "statistics" {
 		return fmt.Errorf("prompt is required")
 	}
 	if d.OutputKind == "" {
@@ -119,7 +120,7 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	if plan.MaxResults < 0 {
 		return fmt.Errorf("max_results cannot be negative")
 	}
-	return nil
+	return validateScheduledTestProtection(plan)
 }
 
 // The scalar remains the first selected definition for older API clients.
@@ -383,6 +384,18 @@ func (s *ScheduledTestService) validateDefinitionForPlan(ctx context.Context, pl
 			return fmt.Errorf("test definition %d not found", id)
 		}
 		hasEnabled = hasEnabled || d.Enabled
+		if plan.Protection.Enabled {
+			for i := range plan.Protection.Rules {
+				if plan.Protection.Rules[i].TestDefinitionID == id {
+					if !d.Enabled {
+						return fmt.Errorf("protected test definition %d is disabled", id)
+					}
+					if err := validateProtectionOutputKind(&plan.Protection.Rules[i], d.OutputKind); err != nil {
+						return err
+					}
+				}
+			}
+		}
 	}
 	if plan.Enabled && !hasEnabled {
 		return fmt.Errorf("all selected test definitions are disabled")
@@ -440,14 +453,29 @@ func (s *ScheduledTestService) ListVisibleResultHistory(ctx context.Context, use
 }
 
 // normalizeStoredTestResults repairs derived output from older parsers when
-// results are read. Keep the response and status unchanged so historical
-// records remain available for diagnosis without rewriting persisted data.
+// results are read, without rewriting persisted data. Local statistics expose
+// their typed public payload instead of the underlying JSON storage field.
 func normalizeStoredTestResults(results []*ScheduledTestResult) {
 	for _, result := range results {
 		if result == nil {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(result.OutputKind)) {
+		case "statistics":
+			var snapshot ScheduledTestStatistics
+			result.OutputStatistics = nil
+			if json.Unmarshal([]byte(result.ResponseText), &snapshot) == nil && !snapshot.WindowStart.IsZero() && snapshot.WindowEnd.After(snapshot.WindowStart) {
+				if snapshot.RecentRequests == nil {
+					snapshot.RecentRequests = []ScheduledTestRecentRequest{}
+				} else if len(snapshot.RecentRequests) > 10 {
+					snapshot.RecentRequests = snapshot.RecentRequests[:10]
+				}
+				result.OutputStatistics = &snapshot
+			}
+			result.ResponseText = ""
+			result.OutputHTML = ""
+			result.OutputNumeric = nil
+			result.ReasoningEffort = ""
 		case "html":
 			// Prefer the original response; older output_html values may have
 			// lost the doctype or retained JSON string escapes from tool output.

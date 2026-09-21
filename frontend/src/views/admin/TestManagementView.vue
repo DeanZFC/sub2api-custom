@@ -12,8 +12,8 @@
         <div class="mb-4 flex items-center justify-between"><h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.types') }}</h3><button class="btn btn-primary btn-sm" @click="openType()"><Icon name="plus" size="sm" /> {{ t('common.create') }}</button></div>
         <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <article v-for="type in orderedTypes" :key="type.id" class="rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-900">
-            <div class="flex items-start justify-between gap-2"><div class="min-w-0 break-words"><strong class="text-sm text-gray-900 dark:text-white">{{ type.name }}</strong><span class="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ type.output_kind }}</span></div><div class="flex shrink-0 gap-1"><button class="btn btn-secondary h-8 w-8 p-0" :title="t('common.copy')" :aria-label="t('common.copy')" :disabled="saving" @click="copyType(type)"><Icon name="copy" size="sm" /></button><button class="btn btn-secondary h-8 w-8 p-0" :title="t('common.edit')" :aria-label="t('common.edit')" @click="openType(type)"><Icon name="edit" size="sm" /></button><button class="btn btn-secondary h-8 w-8 p-0 text-red-600" :title="t('common.delete')" :aria-label="t('common.delete')" @click="removeType(type)"><Icon name="trash" size="sm" /></button></div></div>
-            <p class="mt-1 text-xs text-gray-500">{{ type.key }}</p><p class="mt-2 line-clamp-2 text-xs text-gray-600 dark:text-gray-300">{{ type.description || type.prompt }}</p>
+            <div class="flex items-start justify-between gap-2"><div class="min-w-0 break-words"><strong class="text-sm text-gray-900 dark:text-white">{{ type.name }}</strong><span class="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ typeKindLabel(type.output_kind) }}</span></div><div class="flex shrink-0 gap-1"><button class="btn btn-secondary h-8 w-8 p-0" :title="t('common.copy')" :aria-label="t('common.copy')" :disabled="saving" @click="copyType(type)"><Icon name="copy" size="sm" /></button><button class="btn btn-secondary h-8 w-8 p-0" :title="t('common.edit')" :aria-label="t('common.edit')" @click="openType(type)"><Icon name="edit" size="sm" /></button><button class="btn btn-secondary h-8 w-8 p-0 text-red-600" :title="t('common.delete')" :aria-label="t('common.delete')" @click="removeType(type)"><Icon name="trash" size="sm" /></button></div></div>
+            <p class="mt-1 text-xs text-gray-500">{{ type.key }}</p><p class="mt-2 line-clamp-2 text-xs text-gray-600 dark:text-gray-300">{{ type.description || (type.output_kind === 'statistics' ? t('admin.tests.statisticsHint') : type.prompt) }}</p>
             <label class="mt-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.sortOrder') }}<input v-model.number="type.sort_order" type="number" min="0" class="input h-8 w-20 text-xs" @change="updateTypeOrder(type)" /></label>
           </article>
           <p v-if="!types.length" class="text-sm text-gray-500">{{ t('common.noData') }}</p>
@@ -29,9 +29,9 @@
             <td class="min-w-32 px-2 py-3">{{ groupName(plan) }}<div class="mt-1 text-xs text-gray-500">{{ targetName(plan) }}</div></td>
             <td class="min-w-32 px-2 py-3 font-mono text-xs">{{ plan.model_id || '-' }}<span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td>
             <td class="min-w-40 px-2 py-3 font-mono text-xs">{{ plan.cron_expression || '-' }}<div class="mt-1 font-sans text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td>
-            <td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span></td>
+            <td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span><span v-if="plan.protection?.enabled" class="badge badge-primary mt-1">{{ t('admin.tests.protection.title') }}</span></td>
             <td class="px-2 py-3"><div class="flex justify-end gap-1">
-              <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('admin.tests.run')" :aria-label="t('admin.tests.run')" :disabled="runningPlans.has(plan.id)" @click="run(plan)"><Icon name="play" size="sm" /></button>
+              <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('admin.tests.run')" :aria-label="t('admin.tests.run')" :disabled="runningPlans.has(plan.id) || manualSchedulingStopped(plan)" @click="run(plan)"><Icon name="play" size="sm" /></button>
               <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('admin.tests.results')" :aria-label="t('admin.tests.results')" @click="showResults(plan)"><Icon name="eye" size="sm" /></button>
               <button role="switch" :aria-checked="plan.enabled" class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="plan.enabled ? t('admin.tests.disablePlan') : t('admin.tests.enablePlan')" :aria-label="plan.enabled ? t('admin.tests.disablePlan') : t('admin.tests.enablePlan')" :disabled="togglingPlanId === plan.id" @click="togglePlanStatus(plan)"><Icon :name="plan.enabled ? 'ban' : 'checkCircle'" size="sm" /></button>
               <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('common.copy')" :aria-label="t('common.copy')" :disabled="saving" @click="copyPlan(plan)"><Icon name="copy" size="sm" /></button>
@@ -44,7 +44,7 @@
       </section>
     </div>
 
-    <BaseDialog :show="!!editingType" :title="editingType?.id ? t('common.edit') : t('common.create')" width="wide" @close="editingType = null"><div v-if="editingType" class="space-y-3"><label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingType.name" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.key') }}<input v-model.trim="editingType.key" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingType.sort_order" min="0" type="number" class="input mt-1 w-full" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.sortOrderHint') }}</span></label><label class="input-label">{{ t('admin.tests.kind') }}<input v-model.trim="editingType.output_kind" list="test-output-kinds" class="input mt-1 w-full" /><datalist id="test-output-kinds"><option value="html">HTML / SVG</option><option value="number">{{ t('admin.tests.number') }}</option><option value="text">{{ t('admin.tests.text') }}</option></datalist></label><label class="input-label">{{ t('admin.tests.descriptionLabel') }}<input v-model.trim="editingType.description" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.prompt') }}<textarea v-model="editingType.prompt" rows="6" class="input mt-1 w-full" /></label><label class="flex items-center gap-2 text-sm"><input v-model="editingType.enabled" type="checkbox" /> {{ t('common.enabled') }}</label></div><template #footer><button class="btn btn-secondary" @click="editingType = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="saving || !canSaveType" @click="saveType">{{ t('common.save') }}</button></template></BaseDialog>
+    <BaseDialog :show="!!editingType" :title="editingType?.id ? t('common.edit') : t('common.create')" width="wide" @close="editingType = null"><div v-if="editingType" class="space-y-3"><label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingType.name" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.key') }}<input v-model.trim="editingType.key" class="input mt-1 w-full" /></label><label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingType.sort_order" min="0" type="number" class="input mt-1 w-full" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.sortOrderHint') }}</span></label><label class="input-label">{{ t('admin.tests.kind') }}<select v-model="editingType.output_kind" class="input mt-1 w-full" data-type-kind><option value="html">HTML / SVG</option><option value="number">{{ t('admin.tests.number') }}</option><option value="text">{{ t('admin.tests.text') }}</option><option value="statistics">{{ t('admin.tests.statistics') }}</option><option v-if="!['html', 'number', 'text', 'statistics'].includes(editingType.output_kind)" :value="editingType.output_kind">{{ editingType.output_kind }}</option></select></label><label class="input-label">{{ t('admin.tests.descriptionLabel') }}<input v-model.trim="editingType.description" class="input mt-1 w-full" /></label><p v-if="editingType.output_kind === 'statistics'" class="text-sm text-gray-500 dark:text-gray-400" data-statistics-hint>{{ t('admin.tests.statisticsHint') }}</p><label v-else class="input-label">{{ t('admin.tests.prompt') }}<textarea v-model="editingType.prompt" rows="6" class="input mt-1 w-full" /></label><label class="flex items-center gap-2 text-sm"><input v-model="editingType.enabled" type="checkbox" /> {{ t('common.enabled') }}</label></div><template #footer><button class="btn btn-secondary" @click="editingType = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="saving || !canSaveType" @click="saveType">{{ t('common.save') }}</button></template></BaseDialog>
 
     <BaseDialog :show="!!editingPlan" :title="editingPlan?.id ? t('common.edit') : t('common.create')" width="wide" @close="editingPlan = null">
       <div v-if="editingPlan" class="grid gap-4 sm:grid-cols-2">
@@ -66,6 +66,7 @@
         <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_id || modelOptionsLoading" :placeholder="editingPlan.group_id ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /></label>
         <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
         <label class="input-label sm:col-span-2">{{ t('admin.tests.cron') }}<input v-model.trim="editingPlan.cron_expression" class="input mt-1 w-full" placeholder="*/30 * * * *" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.cronHint') }}</span></label>
+        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :target-mode="editingPlan.target_mode" class="sm:col-span-2" />
         <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
         <label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label>
       </div>
@@ -95,7 +96,9 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { reasoningEffortsForTestModel } from '@/utils/testReasoningEfforts'
 import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vue'
-import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType } from '@/types'
+import TestProtectionEditor from '@/components/tests/TestProtectionEditor.vue'
+import { copyTestProtection, validTestProtection } from '@/utils/testProtection'
+import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType, TestProtectionConfig } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -125,11 +128,12 @@ const pendingRuns = ref(new Map<number, TestResult[]>())
 const deletingResultId = ref<number | null>(null)
 const retryingResultId = ref<number | null>(null)
 const editingType = ref<(CreateTestTypeRequest & { id?: number }) | null>(null)
-const editingPlan = ref<(CreateTestPlanRequest & { id?: number; test_definition_ids: number[] }) | null>(null)
+const editingPlan = ref<(CreateTestPlanRequest & { id?: number; test_definition_ids: number[]; protection: TestProtectionConfig }) | null>(null)
 const resultPlan = ref<TestPlan | null>(null)
 type AccountSelection = number | 'all' | null
 
-const canSaveType = computed(() => Boolean(editingType.value?.name && editingType.value?.key && editingType.value?.prompt && editingType.value?.output_kind))
+const canSaveType = computed(() => Boolean(editingType.value?.name && editingType.value?.key && editingType.value?.output_kind && (editingType.value.output_kind === 'statistics' || editingType.value.prompt.trim())))
+const typeKindLabel = (kind: string) => kind === 'statistics' ? t('admin.tests.statistics') : kind
 const orderedTypes = computed(() => [...types.value].sort((a, b) => {
   const orderA = a.sort_order == null ? Number.MAX_SAFE_INTEGER : a.sort_order
   const orderB = b.sort_order == null ? Number.MAX_SAFE_INTEGER : b.sort_order
@@ -148,8 +152,11 @@ const planTypes = (plan: TestPlan) => planTypeIDs(plan).map(id => ({
 }))
 const canSavePlan = computed(() => {
   const plan = editingPlan.value
-  return Boolean(plan?.test_definition_ids.length && plan.model_id && plan.cron_expression && plan.group_id)
+  return Boolean(plan?.test_definition_ids.length && plan.model_id && plan.cron_expression && plan.group_id
+    && validTestProtection(plan.protection, plan.target_mode, selectedProtectionTypes.value))
 })
+
+const selectedProtectionTypes = computed(() => orderedTypes.value.filter(type => editingPlan.value?.test_definition_ids.includes(type.id)))
 
 const filteredAccounts = computed(() => {
   const groupID = editingPlan.value?.group_id
@@ -215,7 +222,7 @@ const loadModelOptions = async (groupID: number | null) => {
 const load = async () => {
   loading.value = true
   try {
-    const [loadedTypes, loadedPlans, loadedGroups, loadedAccounts] = await Promise.all([adminAPI.tests.listTypes(false), adminAPI.tests.listPlans(), adminAPI.groups.getAll(), loadAllActiveAccounts()])
+    const [loadedTypes, loadedPlans, loadedGroups, loadedAccounts] = await Promise.all([adminAPI.tests.listTypes(false), adminAPI.tests.listPlans(), adminAPI.groups.getAll(), loadTestAccounts()])
     types.value = loadedTypes
     plans.value = loadedPlans
     groups.value = loadedGroups
@@ -227,22 +234,25 @@ const load = async () => {
   }
 }
 
-// The account endpoint is paginated. A group plan can target any schedulable
-// account, so loading only the first page would make older accounts impossible
-// to select and would render their names as bare IDs in the plan table.
-const loadAllActiveAccounts = async (): Promise<AccountListItem[]> => {
+// Include quality-paused accounts so administrators can edit their existing
+// protection or schedule follow-up checks. A manual scheduling stop is retained
+// in the selector; the runner, and the single-account Run button, respect it.
+const loadTestAccounts = async (): Promise<AccountListItem[]> => {
   const pageSize = 1000
-  const first = await adminAPI.accounts.list(1, pageSize, { lite: '1', status: 'active' })
-  const items = [...(first.items || [])]
-  const pages = Math.max(first.pages || 1, Math.ceil((first.total || items.length) / pageSize))
-  if (pages <= 1) return items
-  const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, index) => adminAPI.accounts.list(index + 2, pageSize, { lite: '1', status: 'active' })))
-  for (const page of rest) items.push(...(page.items || []))
-  return items
+  const loadStatus = async (status: 'active' | 'quality_paused') => {
+    const first = await adminAPI.accounts.list(1, pageSize, { lite: '1', status })
+    const items = [...(first.items || [])]
+    const pages = Math.max(first.pages || 1, Math.ceil((first.total || items.length) / pageSize))
+    const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, index) => adminAPI.accounts.list(index + 2, pageSize, { lite: '1', status })))
+    for (const page of rest) items.push(...(page.items || []))
+    return items
+  }
+  const batches = await Promise.all([loadStatus('active'), loadStatus('quality_paused')])
+  return [...new Map(batches.flat().map(account => [account.id, account])).values()]
 }
 
 const openType = (type?: TestType) => { editingType.value = type ? { id: type.id, name: type.name, key: type.key, output_kind: type.output_kind, prompt: type.prompt, description: type.description || '', enabled: type.enabled, sort_order: type.sort_order ?? 0 } : { name: '', key: '', output_kind: 'html', prompt: '', description: '', enabled: true, sort_order: orderedTypes.value.length ? Math.max(...orderedTypes.value.map(item => item.sort_order ?? 0)) + 1 : 0 } }
-const saveType = async () => { if (!editingType.value) return; saving.value = true; try { const { id, ...body } = editingType.value; if (id) await adminAPI.tests.updateType(id, body); else await adminAPI.tests.createType(body); editingType.value = null; await load() } catch (error) { reportError(error) } finally { saving.value = false } }
+const saveType = async () => { if (!editingType.value) return; saving.value = true; try { const { id, ...body } = editingType.value; if (body.output_kind === 'statistics') body.prompt = ''; if (id) await adminAPI.tests.updateType(id, body); else await adminAPI.tests.createType(body); editingType.value = null; await load() } catch (error) { reportError(error) } finally { saving.value = false } }
 const copyType = async (type: TestType) => {
   if (saving.value) return
   saving.value = true
@@ -262,7 +272,7 @@ const copyType = async (type: TestType) => {
       key,
       description: type.description || '',
       output_kind: type.output_kind,
-      prompt: type.prompt,
+      prompt: type.output_kind === 'statistics' ? '' : type.prompt,
       enabled: type.enabled,
       sort_order: type.sort_order,
     })
@@ -291,9 +301,9 @@ const openPlan = (plan?: TestPlan) => {
   if (plan) {
     const account = plan.account_id ? accounts.value.find(item => item.id === plan.account_id) : undefined
     const targetMode = plan.target_mode || (plan.account_id ? 'account' : 'all_accounts')
-    editingPlan.value = { id: plan.id, name: plan.name, sort_order: plan.sort_order ?? 0, test_definition_ids: planTypeIDs(plan), group_id: plan.group_id ?? account?.group_ids?.[0] ?? null, account_id: plan.account_id ?? null, target_mode: targetMode, model_id: plan.model_id || '', reasoning_effort: plan.reasoning_effort ?? null, cron_expression: plan.cron_expression || '', enabled: plan.enabled, max_results: plan.max_results || 50 }
+    editingPlan.value = { id: plan.id, name: plan.name, sort_order: plan.sort_order ?? 0, test_definition_ids: planTypeIDs(plan), group_id: plan.group_id ?? account?.group_ids?.[0] ?? null, account_id: plan.account_id ?? null, target_mode: targetMode, model_id: plan.model_id || '', reasoning_effort: plan.reasoning_effort ?? null, cron_expression: plan.cron_expression || '', enabled: plan.enabled, max_results: plan.max_results || 50, protection: copyTestProtection(plan.protection) }
   } else {
-    editingPlan.value = { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_id: null, account_id: null, target_mode: 'group', model_id: '', reasoning_effort: null, cron_expression: '*/30 * * * *', enabled: true, max_results: 50 }
+    editingPlan.value = { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_id: null, account_id: null, target_mode: 'group', model_id: '', reasoning_effort: null, cron_expression: '*/30 * * * *', enabled: true, max_results: 50, protection: copyTestProtection() }
   }
   void loadModelOptions(editingPlan.value.group_id ?? null)
 }
@@ -315,6 +325,7 @@ const copyPlan = async (plan: TestPlan) => {
       cron_expression: plan.cron_expression || '*/30 * * * *',
       enabled: plan.enabled,
       max_results: plan.max_results || 50,
+      protection: copyTestProtection(plan.protection),
     })
     await load()
   } catch (error) {
@@ -336,8 +347,9 @@ const togglePlanStatus = async (plan: TestPlan) => {
     togglingPlanId.value = null
   }
 }
+const manualSchedulingStopped = (plan: TestPlan) => Boolean(plan.account_id && accounts.value.find(account => account.id === plan.account_id)?.schedulable === false)
 const run = async (plan: TestPlan) => {
-  if (runningPlans.value.has(plan.id)) return
+  if (runningPlans.value.has(plan.id) || manualSchedulingStopped(plan)) return
   runningPlans.value.add(plan.id)
   const startedAt = new Date().toISOString()
   pendingRuns.value.set(plan.id, planTypeIDs(plan).map((typeID, index) => ({
@@ -456,6 +468,15 @@ const retryResult = async (result: TestResult) => {
   }
 }
 let resultTimer: ReturnType<typeof setInterval> | undefined
+watch(
+  () => editingPlan.value ? [editingPlan.value.target_mode, ...editingPlan.value.test_definition_ids] : [],
+  () => {
+    const plan = editingPlan.value
+    if (!plan) return
+    if (plan.target_mode === 'group') plan.protection.enabled = false
+    plan.protection.rules = plan.protection.rules.filter(rule => plan.test_definition_ids.includes(rule.test_definition_id))
+  },
+)
 watch(
   () => [editingPlan.value?.model_id, editingPlan.value?.group_id, editingPlan.value?.account_id] as const,
   () => {

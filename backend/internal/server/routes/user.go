@@ -41,6 +41,8 @@ func RegisterUserRoutes(
 			user.GET("/platform-quotas", h.User.GetMyPlatformQuotas)
 			user.GET("/test-results", h.User.ListTestResults)
 			user.GET("/test-results/:id/history", h.User.ListTestResultHistory)
+			user.GET("/test-votes", h.User.ListTestVotes)
+			user.POST("/test-results/:id/vote", h.User.VoteTestResult)
 
 			// 通知邮箱管理
 			notifyEmail := user.Group("/notify-email")

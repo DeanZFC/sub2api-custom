@@ -168,6 +168,18 @@ describe('admin result account history', () => {
     expect(wrapper.get('[role="status"]').text()).toBe('No data')
   })
 
+  it('summarizes statistics without raw JSON or a misleading model latency', async () => {
+    const wrapper = mountHistory([result(1, {
+      output_kind: 'statistics', latency_ms: 12, response_text: '{"internal":"not public"}',
+      output_statistics: { window_start: '2026-09-21T09:00:00Z', window_end: '2026-09-21T10:00:00Z', total_requests: 0, success_requests: 0, failed_requests: 0, success_rate: null, cache_rate: null, avg_first_token_ms: null, first_token_samples: 0, cache_read_tokens: 0, cache_input_tokens: 0 },
+    })])
+    await flushPromises()
+    await wrapper.get('[data-expand-result]').trigger('click')
+    expect(wrapper.get('[data-result-summary]').text()).toBe('Last-hour statistics')
+    expect(wrapper.text()).not.toContain('12ms')
+    expect(wrapper.text()).not.toContain('internal')
+  })
+
   it('keeps the newest result expanded after a placeholder is persisted, unless manually collapsed', async () => {
     const wrapper = mountHistory([result(-1, { status: 'running' })])
     await flushPromises()

@@ -543,6 +543,7 @@ func (r *accountRepository) updateAccount(
 	}
 
 	account.UpdatedAt = updated.UpdatedAt
+	account.StatusChanged = false
 	account.UpstreamBillingRateLimitChanged = false
 	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
 	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
@@ -570,6 +571,7 @@ func (r *accountRepository) updateLockedAccount(
 	if account.Status == service.StatusError {
 		schedulable = false
 	}
+	account.Schedulable = schedulable
 
 	builder := client.Account.UpdateOneID(account.ID).
 		SetName(account.Name).
@@ -687,7 +689,10 @@ func lockAndMergeAccountProbeExtra(
 			extra -> 'ollama_cloud_usage_session',
 			extra -> 'ollama_cloud_usage_auto_refresh',
 			extra -> 'ollama_cloud_usage_snapshot',
-			COALESCE(extra, '{}'::jsonb)
+			COALESCE(extra, '{}'::jsonb),
+			status,
+			schedulable,
+			COALESCE(error_message, '')
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
@@ -714,6 +719,7 @@ func lockAndMergeAccountProbeExtra(
 		currentOllamaAutoRefresh     []byte
 		currentOllamaSnapshot        []byte
 		currentExtraJSON             []byte
+		currentSchedulingState       accountSchedulingState
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
@@ -726,6 +732,9 @@ func lockAndMergeAccountProbeExtra(
 		&currentOllamaAutoRefresh,
 		&currentOllamaSnapshot,
 		&currentExtraJSON,
+		&currentSchedulingState.status,
+		&currentSchedulingState.schedulable,
+		&currentSchedulingState.errorMessage,
 	); err != nil {
 		return nil, err
 	}
@@ -849,7 +858,34 @@ func lockAndMergeAccountProbeExtra(
 			}
 		}
 	}
+	preserveLockedAccountSchedulingState(account, currentSchedulingState, currentExtra, extra)
 	return extra, nil
+}
+
+type accountSchedulingState struct {
+	status       string
+	schedulable  bool
+	errorMessage string
+}
+
+// Full-account writes also run after slow credential refreshes and probes. The
+// row lock above makes the live scheduling state authoritative when quality
+// protection or an administrator changed it after the caller loaded the account.
+func preserveLockedAccountSchedulingState(account *service.Account, current accountSchedulingState, currentExtra, extra map[string]any) {
+	const qualityReasonKey = "quality_protection_reason"
+	_, currentHasQualityReason := currentExtra[qualityReasonKey]
+	_, incomingHasQualityReason := account.Extra[qualityReasonKey]
+	if !account.StatusChanged && (current.status == service.StatusQualityPaused || account.Status == service.StatusQualityPaused || currentHasQualityReason || incomingHasQualityReason) {
+		account.Status = current.status
+		account.ErrorMessage = current.errorMessage
+	}
+	// Enabling scheduling is an explicit SetSchedulable operation, never a side
+	// effect of saving an account snapshot loaded before a manual pause.
+	account.Schedulable = account.Schedulable && current.schedulable
+	delete(extra, qualityReasonKey)
+	if !(account.StatusChanged && account.Status != service.StatusQualityPaused) && currentHasQualityReason {
+		extra[qualityReasonKey] = currentExtra[qualityReasonKey]
+	}
 }
 
 func decodeAccountExtraJSON(raw []byte) (any, bool, error) {
@@ -1294,8 +1330,9 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 	// probe. Excluding them lets the token silently expire, after which the
 	// dashboard reports a false "needs re-auth" even though Test Connection
 	// (which refreshes on demand) succeeds. Permanent rejection is already
-	// covered by the status = 'active' filter (error accounts drop out), and
-	// accounts whose refresh actually fails are rate-limited by the
+	// covered by the status filter (error accounts drop out). Quality protection
+	// only pauses gateway traffic, so token refresh can explicitly include it.
+	// Accounts whose refresh actually fails are rate-limited by the
 	// ExcludeRetryCooldown clause below.
 	query := `
 		SELECT id
@@ -1304,8 +1341,13 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			AND platform = ANY($1)
 			AND id > $2`
 	if options.ActiveOnly {
-		query += `
+		if options.IncludeQualityPaused {
+			query += `
+			AND status IN ('active', 'quality_paused')`
+		} else {
+			query += `
 			AND status = 'active'`
+		}
 	}
 	if options.IncludeSetupToken {
 		query += `
@@ -1635,7 +1677,8 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 // SetGrokOAuthRefreshErrorIfCredentialsUnchanged is the background-refresh
 // counterpart to reconciliation's stricter missing-refresh-token mutation. It
 // matches the complete credential document used by the failed upstream attempt
-// but deliberately does not require the refresh token to be absent.
+// but deliberately does not require the refresh token to be absent. A quality
+// pause also allows background refresh and must stop retrying rejected tokens.
 func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 	ctx context.Context,
 	id int64,
@@ -1661,7 +1704,7 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 			AND a.deleted_at IS NULL
 			AND a.platform = $4
 			AND a.type = $5
-			AND a.status = $6
+			AND a.status IN ($6, 'quality_paused')
 			AND a.credentials = $7::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $8
 		RETURNING a.id
@@ -1694,7 +1737,7 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 }
 
 // SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnchanged applies a bounded
-// transient refresh quarantine only while the active Grok OAuth credential
+// transient refresh quarantine only while an active or quality-paused Grok OAuth credential
 // document still matches the exact upstream attempt.
 func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnchanged(
 	ctx context.Context,
@@ -1721,7 +1764,7 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 			AND a.deleted_at IS NULL
 			AND a.platform = $4
 			AND a.type = $5
-			AND a.status = $6
+			AND a.status IN ($6, 'quality_paused')
 			AND a.credentials = $7::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $8
 			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until < $1)

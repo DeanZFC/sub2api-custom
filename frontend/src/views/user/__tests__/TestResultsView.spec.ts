@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestResultsView from '../TestResultsView.vue'
 
-const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), error: vi.fn() }))
-vi.mock('@/api/testResults', () => ({ testResultsAPI: { list: api.list, history: api.history } }))
+const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), votes: vi.fn(), vote: vi.fn(), error: vi.fn() }))
+vi.mock('@/api/testResults', () => ({ testResultsAPI: { list: api.list, history: api.history, votes: api.votes, vote: api.vote } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: api.error }) }))
 
 const baseResult = { plan_id: 10, test_definition_id: 1, test_name: 'Pelican', group_id: 8, group_name: 'Group Eight', account_id: 3, model_id: 'gpt-6-astra', output_kind: 'html', status: 'success', created_at: '2026-09-15T12:00:00Z' }
@@ -20,6 +20,7 @@ const mountResults = () => mount(TestResultsView, { global: {
 beforeEach(() => {
   vi.resetAllMocks()
   api.history.mockResolvedValue({ items: [] })
+  api.votes.mockResolvedValue([])
 })
 afterEach(() => vi.useRealTimers())
 
@@ -159,6 +160,36 @@ describe('channel quality result series', () => {
     wrapper.unmount()
   })
 
+  it('preserves configured order across statistics, numeric, and HTML sections', async () => {
+    api.list.mockResolvedValue([
+      { ...baseResult, id: 1, test_name: 'Pelican', test_order: 0 },
+      { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29, test_order: 20 },
+      { ...baseResult, id: 3, test_definition_id: 3, test_name: 'Last hour', output_kind: 'statistics', test_order: 10 },
+    ])
+    const wrapper = mountResults()
+    await flushPromises()
+    expect(wrapper.findAll('[data-account-tests] > [data-test-section] h4').map(heading => heading.text())).toEqual(['Pelican', 'Last hour', 'Candy'])
+    expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-statistics-test]')).toHaveLength(1)
+    expect(wrapper.get('[data-numeric-test] strong').text()).toBe('29')
+    wrapper.unmount()
+  })
+
+  it('shows the latest statistics snapshot and loads previous snapshots through history', async () => {
+    const results = [1, 2, 3].map(id => ({ ...baseResult, id, test_name: 'Last hour', output_kind: 'statistics', latency_ms: 8 }))
+    api.list.mockResolvedValue(results)
+    api.history.mockResolvedValue({ items: results })
+    const wrapper = mountResults()
+    await flushPromises()
+    expect(wrapper.findAll('[data-statistics-test] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['3'])
+    expect(wrapper.get('[data-statistics-test]').text()).not.toContain('8ms')
+    await wrapper.get('[data-statistics-test] button').trigger('click')
+    await flushPromises()
+    expect(api.history).toHaveBeenCalledWith(3, undefined)
+    expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['3', '2', '1'])
+    wrapper.unmount()
+  })
+
   it('keeps previous successful outputs and removes failed records from cards and history', async () => {
     const results = [
       { ...baseResult, id: 3, status: 'failed', error_message: 'private upstream failure', created_at: '2026-09-15T14:00:00Z' },
@@ -261,6 +292,82 @@ describe('channel quality result series', () => {
     await flushPromises()
     expect(wrapper.findAll('[data-dialog] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['2'])
     expect(wrapper.find('[data-dialog] [role="status"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+
+describe('quality voting', () => {
+  const voting = { enabled: true, open: true, pass_count: 0, fail_count: 0, reject_above: 0, pass_at_least: 2, account_paused: true, reference_answer: '<b>Expected answer</b>' }
+
+  it('shows paused accounts in a separate voting area, with only IDs, and allows changing a vote', async () => {
+    api.list.mockResolvedValue([])
+    const result = { ...baseResult, id: 44, target_mode: 'account', account_name: 'Must stay private' }
+    api.votes.mockResolvedValue([{ result, voting }])
+    api.vote.mockResolvedValueOnce({ result, voting: { ...voting, my_vote: 'fail', fail_count: 1 } })
+      .mockResolvedValueOnce({ result, voting: { ...voting, my_vote: 'pass', pass_count: 1 } })
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Group Eight'])
+    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    const card = wrapper.get('[data-vote-result="44"]')
+    expect(card.text()).toContain('tests.account #3')
+    expect(card.text()).not.toContain('Must stay private')
+    expect(card.get('[data-reference-answer]').text()).toBe('<b>Expected answer</b>')
+    expect(card.find('[data-reference-answer] b').exists()).toBe(false)
+    expect(card.get('[data-output]').attributes('data-result-id')).toBe('44')
+    await card.get('[data-vote-fail]').trigger('click'); await flushPromises()
+    expect(api.vote).toHaveBeenLastCalledWith(44, 'fail')
+    expect(card.get('[data-vote-fail]').attributes('aria-pressed')).toBe('true')
+    await card.get('[data-vote-pass]').trigger('click'); await flushPromises()
+    expect(api.vote).toHaveBeenLastCalledWith(44, 'pass')
+    expect(card.get('[data-vote-fail]').attributes('aria-pressed')).toBe('false')
+    expect(card.get('[data-vote-pass]').attributes('aria-pressed')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('rejects failed and group outputs and disables expired voting buttons', async () => {
+    api.list.mockResolvedValue([])
+    api.votes.mockResolvedValue([
+      { result: { ...baseResult, id: 1, status: 'failed' }, voting },
+      { result: { ...baseResult, id: 2, target_mode: 'group' }, voting },
+      { result: { ...baseResult, id: 3 }, voting: { ...voting, open: false } },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[data-vote-result]')).toHaveLength(1)
+    expect(wrapper.get('[data-vote-result]').attributes('data-vote-result')).toBe('3')
+    expect(wrapper.get('[data-vote-pass]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-vote-fail]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('keeps regular results usable when voting fails and renders vote submission errors inline', async () => {
+    api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
+    api.votes.mockRejectedValueOnce(new Error('network')).mockResolvedValue([{ result: { ...baseResult, id: 2 }, voting }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.find('[data-account-result]').exists()).toBe(true)
+    expect(wrapper.find('[data-votes-error]').exists()).toBe(true)
+    await wrapper.get('[data-votes-error] button').trigger('click'); await flushPromises()
+    api.vote.mockRejectedValue(new Error('vote closed'))
+    await wrapper.get('[data-vote-fail]').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-vote-result] [role="alert"]').exists()).toBe(true)
+    expect(wrapper.get('[data-vote-fail]').attributes('aria-pressed')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('does not let a polling response replace a newly submitted vote', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.list.mockResolvedValue([])
+    const item = { result: { ...baseResult, id: 44 }, voting }
+    api.votes.mockResolvedValueOnce([item])
+    const wrapper = mountResults(); await flushPromises()
+    let resolvePoll!: (items: unknown[]) => void
+    api.votes.mockImplementationOnce(() => new Promise(resolve => { resolvePoll = resolve }))
+    await vi.advanceTimersByTimeAsync(5000)
+    api.vote.mockResolvedValue({ ...item, voting: { ...voting, my_vote: 'pass', pass_count: 1 } })
+    await wrapper.get('[data-vote-pass]').trigger('click'); await flushPromises()
+    resolvePoll([item]); await flushPromises()
+    expect(wrapper.get('[data-vote-pass]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-vote-pass]').text()).toContain('1')
     wrapper.unmount()
   })
 })

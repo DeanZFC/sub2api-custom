@@ -18,6 +18,7 @@ const {
   copyToClipboard,
   isCurrentStep,
   nextStep,
+  getMatrix,
 } = vi.hoisted(() => ({
   listKeys: vi.fn(),
   updateKey: vi.fn(),
@@ -30,6 +31,7 @@ const {
   copyToClipboard: vi.fn(),
   isCurrentStep: vi.fn(),
   nextStep: vi.fn(),
+  getMatrix: vi.fn(),
 }))
 
 const messages: Record<string, string> = {
@@ -90,6 +92,12 @@ vi.mock('@/stores/app', () => ({
     showSuccess,
   }),
 }))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ user: { id: 1 } }),
+}))
+
+vi.mock('@/api/channelMonitorV2', () => ({ getMatrix }))
 
 vi.mock('@/stores/onboarding', () => ({
   useOnboardingStore: () => ({
@@ -217,7 +225,7 @@ const DataTableStub = {
 const SelectStub = {
   name: 'Select',
   props: ['modelValue', 'options'],
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'open-change'],
   template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"></select>',
 }
 
@@ -251,7 +259,7 @@ const GroupBadgeStub = {
 
 const GroupOptionItemStub = {
   props: ['name'],
-  template: '<span data-test="group-option-item">{{ name }}</span>',
+  template: '<span data-test="group-option-item">{{ name }}<slot name="status" /></span>',
 }
 
 const mountView = async () => {
@@ -277,6 +285,10 @@ const mountView = async () => {
         EndpointPopover: true,
         GroupBadge: GroupBadgeStub,
         GroupOptionItem: GroupOptionItemStub,
+        GroupChannelStatus: {
+          props: ['rows', 'coverage', 'loading', 'unavailable'],
+          template: '<span data-group-preview :data-unavailable="unavailable">{{ rows.map(row => row.group_id).join(",") }}</span>',
+        },
         Teleport: true,
       },
     },
@@ -316,6 +328,8 @@ describe('user KeysView', () => {
     copyToClipboard.mockReset()
     isCurrentStep.mockReset()
     nextStep.mockReset()
+    getMatrix.mockReset()
+    getMatrix.mockResolvedValue({ items: [], coverage: null })
 
     listKeys.mockResolvedValue({
       items: [createApiKey()],
@@ -581,6 +595,84 @@ describe('user KeysView', () => {
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
+  })
+
+  it('loads channel status only when a form group chooser opens and shares the snapshot with fallback and edit', async () => {
+    getAvailableGroups.mockResolvedValue([createGroup(10, 'OpenAI')])
+    getPublicSettings.mockResolvedValue({ channel_monitor_enabled: true, channel_monitor_mode: 'v2' })
+    const wrapper = await mountView()
+    expect(getMatrix).not.toHaveBeenCalled()
+    await wrapper.get('[data-tour="keys-create-btn"]').trigger('click')
+    expect(getMatrix).not.toHaveBeenCalled()
+
+    const primary = wrapper.findComponent('[data-tour="key-form-group"]')
+    primary.vm.$emit('open-change', true)
+    await flushPromises()
+    expect(getMatrix).toHaveBeenCalledTimes(1)
+    expect(getMatrix).toHaveBeenCalledWith(
+      { range: '90m', platforms: [], groupIds: [10], models: [] },
+      'platform_group', false, expect.any(AbortSignal),
+    )
+    primary.vm.$emit('open-change', false)
+    wrapper.findComponent('[data-test="fallback-group-select"]').vm.$emit('open-change', true)
+    await flushPromises()
+    expect(getMatrix).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-test="close-dialog"]').trigger('click')
+    await getButtonByText(wrapper, 'common.edit').trigger('click')
+    wrapper.findComponent('[data-tour="key-form-group"]').vm.$emit('open-change', true)
+    await flushPromises()
+    expect(getMatrix).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('maps inline group status by group ID and platform and still saves the chosen group', async () => {
+    const primary = createGroup(10, 'Same name')
+    const fallback = createGroup(11, 'Same name')
+    getAvailableGroups.mockResolvedValue([primary, fallback])
+    getPublicSettings.mockResolvedValue({ channel_monitor_enabled: true, channel_monitor_mode: 'v2' })
+    getMatrix.mockResolvedValue({ coverage: null, items: [
+      { group_id: 10, platform: 'openai' },
+      { group_id: 11, platform: 'openai' },
+      { group_id: 10, platform: 'anthropic' },
+    ] })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="primary-group-trigger-1"]').trigger('click')
+    await flushPromises()
+    const previews = wrapper.findAll('[data-group-preview]')
+    expect(previews.map(preview => preview.text())).toEqual(['10', '11'])
+    await previews[1].trigger('click')
+    await flushPromises()
+    expect(updateKey).toHaveBeenCalledWith(1, { group_id: 11 })
+    wrapper.unmount()
+  })
+
+  it('keeps group selection working when the monitor is unavailable', async () => {
+    getAvailableGroups.mockResolvedValue([createGroup(10, 'OpenAI')])
+    getPublicSettings.mockResolvedValue({ channel_monitor_enabled: true, channel_monitor_mode: 'v2' })
+    getMatrix.mockRejectedValue(new Error('monitor unavailable'))
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="primary-group-trigger-1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-group-preview]').attributes('data-unavailable')).toBe('true')
+    expect(showError).not.toHaveBeenCalled()
+    await getButtonByText(wrapper, 'OpenAI').trigger('click')
+    await flushPromises()
+    expect(updateKey).toHaveBeenCalledWith(1, { group_id: 10 })
+    wrapper.unmount()
+  })
+
+  it.each([
+    { channel_monitor_enabled: false, channel_monitor_mode: 'v2' },
+    { channel_monitor_enabled: true, channel_monitor_mode: 'v1' },
+  ])('does not request or show V2 status when monitoring is inactive: %o', async settings => {
+    getAvailableGroups.mockResolvedValue([createGroup(10, 'OpenAI')])
+    getPublicSettings.mockResolvedValue(settings)
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="primary-group-trigger-1"]').trigger('click')
+    await flushPromises()
+    expect(getMatrix).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-group-preview]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('shows the fallback group in the group cell and switches it independently', async () => {

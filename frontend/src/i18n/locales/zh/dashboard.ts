@@ -66,6 +66,11 @@ export default {
 
   // API Keys
   keys: {
+    groupChannelStatus: {
+      recent: '最近渠道健康状态，右侧为最新区间',
+      composite: '多个平台按每个区间中最差的已知健康状态显示',
+      unavailable: '状态暂不可用',
+    },
     title: 'API 密钥',
     description: '管理您的 API 密钥和访问令牌',
     searchPlaceholder: '搜索名称或Key...',

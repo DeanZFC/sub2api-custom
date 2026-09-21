@@ -151,37 +151,39 @@ type createScheduledTestPlanRequest struct {
 	TestDefinitionID  *int64  `json:"test_definition_id"`
 	TestDefinitionIDs []int64 `json:"test_definition_ids"`
 	// test_type_id/type_id are aliases used by older generalized-test clients.
-	TestTypeID      *int64 `json:"test_type_id"`
-	TypeID          *int64 `json:"type_id"`
-	TestType        string `json:"test_type"`
-	TargetMode      string `json:"target_mode"`
-	ModelID         string `json:"model_id"`
-	ReasoningEffort string `json:"reasoning_effort"`
-	CronExpression  string `json:"cron_expression" binding:"required"`
-	Enabled         *bool  `json:"enabled"`
-	MaxResults      int    `json:"max_results"`
-	AutoRecover     *bool  `json:"auto_recover"`
+	TestTypeID      *int64                                `json:"test_type_id"`
+	TypeID          *int64                                `json:"type_id"`
+	TestType        string                                `json:"test_type"`
+	TargetMode      string                                `json:"target_mode"`
+	ModelID         string                                `json:"model_id"`
+	ReasoningEffort string                                `json:"reasoning_effort"`
+	CronExpression  string                                `json:"cron_expression" binding:"required"`
+	Enabled         *bool                                 `json:"enabled"`
+	MaxResults      int                                   `json:"max_results"`
+	AutoRecover     *bool                                 `json:"auto_recover"`
+	Protection      service.ScheduledTestProtectionConfig `json:"protection"`
 }
 
 type updateScheduledTestPlanRequest struct {
 	// RawMessage preserves the distinction between an omitted field and an
 	// explicit null. The latter is required when switching a plan from an
 	// account target to a group target (or vice versa).
-	AccountID         json.RawMessage `json:"account_id"`
-	Name              *string         `json:"name"`
-	SortOrder         *int            `json:"sort_order"`
-	GroupID           json.RawMessage `json:"group_id"`
-	TestDefinitionID  json.RawMessage `json:"test_definition_id"`
-	TestDefinitionIDs json.RawMessage `json:"test_definition_ids"`
-	TestTypeID        *int64          `json:"test_type_id"`
-	TypeID            *int64          `json:"type_id"`
-	TargetMode        string          `json:"target_mode"`
-	ModelID           string          `json:"model_id"`
-	ReasoningEffort   json.RawMessage `json:"reasoning_effort"`
-	CronExpression    string          `json:"cron_expression"`
-	Enabled           *bool           `json:"enabled"`
-	MaxResults        int             `json:"max_results"`
-	AutoRecover       *bool           `json:"auto_recover"`
+	AccountID         json.RawMessage                        `json:"account_id"`
+	Name              *string                                `json:"name"`
+	SortOrder         *int                                   `json:"sort_order"`
+	GroupID           json.RawMessage                        `json:"group_id"`
+	TestDefinitionID  json.RawMessage                        `json:"test_definition_id"`
+	TestDefinitionIDs json.RawMessage                        `json:"test_definition_ids"`
+	TestTypeID        *int64                                 `json:"test_type_id"`
+	TypeID            *int64                                 `json:"type_id"`
+	TargetMode        string                                 `json:"target_mode"`
+	ModelID           string                                 `json:"model_id"`
+	ReasoningEffort   json.RawMessage                        `json:"reasoning_effort"`
+	CronExpression    string                                 `json:"cron_expression"`
+	Enabled           *bool                                  `json:"enabled"`
+	MaxResults        int                                    `json:"max_results"`
+	AutoRecover       *bool                                  `json:"auto_recover"`
+	Protection        *service.ScheduledTestProtectionConfig `json:"protection"`
 }
 
 func parseNullableInt64(raw json.RawMessage, field string) (*int64, error) {
@@ -247,6 +249,7 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 		CronExpression:    req.CronExpression,
 		Enabled:           true,
 		MaxResults:        req.MaxResults,
+		Protection:        req.Protection,
 	}
 	if req.SortOrder != nil {
 		if *req.SortOrder < 0 {
@@ -375,6 +378,9 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 	}
 	if req.AutoRecover != nil {
 		existing.AutoRecover = *req.AutoRecover
+	}
+	if req.Protection != nil {
+		existing.Protection = *req.Protection
 	}
 
 	updated, err := h.scheduledTestSvc.UpdatePlan(c.Request.Context(), existing)

@@ -220,6 +220,18 @@ export default {
   },
 
   tests: {
+    voting: {
+      title: '质量评议', description: '查看本轮检测输出并投票。质量保护暂停的账号也会保留最新结果供评议。',
+      paused: '质量保护暂停', referenceAnswer: '参考答案', pass: '通过', fail: '不通过',
+      closed: '本轮投票已结束', canChange: '已投票，可改投；每轮只计一票。', oneVote: '每轮每人一票，可改投。',
+      thresholdHint: '不通过超过 {reject} 票时暂停；通过达到 {pass} 票且其他异常解除后可恢复。',
+      loadFailed: '暂时无法加载投票结果', voteFailed: '投票未成功，请刷新后重试',
+    },
+    statisticsSuccessRate: '成功率', statisticsCacheRate: '缓存率', statisticsFirstToken: '平均首字',
+    statisticsRequestSamples: '{success} / {total} 次成功', statisticsTokenSamples: '{cached} / {input} 输入 Token 命中缓存', statisticsFirstTokenSamples: '{count} 次有效计时',
+    statisticsWindow: '统计时间', statisticsUpdated: '更新时间',
+    statisticsSourceHint: '根据最近一小时已记录的请求统计。缓存率按输入 Token 加权；首字为有效计时样本的平均值。',
+    statisticsRecentRequests: '最近请求', statisticsRecentRequestsHint: '最近 10 次请求，从左到右由旧到新', statisticsRequestSuccess: '成功', statisticsRequestFailure: '失败',
     loadMore: '加载更多',
     preview: '预览 HTML', closePreview: '关闭预览', rawOutput: '查看原始输出', noOutput: '未返回内容', running: '测试进行中…', loadFailed: '测试数据加载或保存失败',
     title: '渠道质量检测', description: '查看分组与账号的质量检测结果', empty: '暂无渠道质量检测结果', htmlResult: 'HTML 渠道质量检测结果', allTypes: '全部类型', groupFilter: '分组', modelFilter: '模型', reasoningEffort: '推理强度', allGroups: '全部分组', allModels: '全部模型', noMatches: '没有符合筛选条件的结果', viewHistory: '查看历史', historyHint: '以下为该分组或账号的历史质量检测结果', group: '分组', account: '账号', ungrouped: '未分组', unknownType: '未知检测', groupCheck: '分组检测', latestResult: '最新结果', previousResult: '历史结果', completed: '已完成', awaitingReview: '待人工判定'

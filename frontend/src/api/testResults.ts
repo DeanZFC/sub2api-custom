@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { TestResult } from '@/types'
+import type { TestResult, TestVote, TestVoteResult } from '@/types'
 
 export async function list(limit = 3): Promise<TestResult[]> {
   const { data } = await apiClient.get<TestResult[]>('/user/test-results', { params: { limit } })
@@ -18,5 +18,15 @@ export async function history(id: number, beforeId?: number): Promise<TestResult
   return data
 }
 
-export const testResultsAPI = { list, history }
+export async function votes(): Promise<TestVoteResult[]> {
+  const { data } = await apiClient.get<TestVoteResult[]>('/user/test-votes')
+  return data ?? []
+}
+
+export async function vote(id: number, vote: TestVote): Promise<TestVoteResult> {
+  const { data } = await apiClient.post<TestVoteResult>(`/user/test-results/${id}/vote`, { vote })
+  return data
+}
+
+export const testResultsAPI = { list, history, votes, vote }
 export default testResultsAPI

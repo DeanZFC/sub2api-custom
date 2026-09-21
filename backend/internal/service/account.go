@@ -45,6 +45,7 @@ type Account struct {
 	RateMultiplier     *float64
 	LoadFactor         *int // 调度负载因子；nil 表示使用 Concurrency
 	Status             string
+	StatusChanged      bool `json:"-"` // explicit admin status edit; ordinary writes preserve quality protection
 	ErrorMessage       string
 	LastUsedAt         *time.Time
 	ExpiresAt          *time.Time

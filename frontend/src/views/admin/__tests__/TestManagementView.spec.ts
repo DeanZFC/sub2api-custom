@@ -40,11 +40,43 @@ describe('configurable test management', () => {
     const inputs = dialog.findAll('input')
     await inputs[0].setValue('Pelican')
     await inputs[1].setValue('pelican-custom')
-    await dialog.get('input[list="test-output-kinds"]').setValue('html')
+    await dialog.get('[data-type-kind]').setValue('html')
     await dialog.get('textarea').setValue('Draw a pelican riding a motorcycle in HTML.')
     await dialog.findAll('button').find(b => b.text() === 'common.save')!.trigger('click')
     await flushPromises()
     expect(api.createType).toHaveBeenCalledWith(expect.objectContaining({ name: 'Pelican', key: 'pelican-custom', output_kind: 'html', prompt: 'Draw a pelican riding a motorcycle in HTML.' }))
+    wrapper.unmount()
+  })
+
+  it('creates a statistics definition without a prompt and still requires prompts for model tests', async () => {
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('common.create'))!.trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    const inputs = dialog.findAll('input')
+    await inputs[0].setValue('Hourly metrics')
+    await inputs[1].setValue('hourly-metrics')
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    expect(save.attributes('disabled')).toBeDefined()
+    await dialog.get('[data-type-kind]').setValue('statistics')
+    expect(dialog.find('textarea').exists()).toBe(false)
+    expect(dialog.find('[data-statistics-hint]').exists()).toBe(true)
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.createType).toHaveBeenCalledWith(expect.objectContaining({ output_kind: 'statistics', prompt: '', name: 'Hourly metrics' }))
+    wrapper.unmount()
+  })
+
+  it('edits and copies statistics definitions with empty prompts', async () => {
+    const statistics = { id: 7, name: 'Hourly statistics', key: 'hourly_stats', output_kind: 'statistics', prompt: '', enabled: true }
+    api.listTypes.mockResolvedValue([statistics])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('article button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createType).toHaveBeenCalledWith(expect.objectContaining({ name: 'Hourly statistics（Copy）', key: 'hourly_stats-copy', output_kind: 'statistics', prompt: '' }))
+    await wrapper.get('article button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    expect(dialog.find('textarea').exists()).toBe(false)
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(api.updateType).toHaveBeenCalledWith(7, expect.objectContaining({ output_kind: 'statistics', prompt: '' }))
     wrapper.unmount()
   })
 
@@ -313,4 +345,93 @@ describe('configurable test management', () => {
     expect(wrapper.getComponent(AdminTestResultHistory).props('loading')).toBe(false)
     wrapper.unmount()
   })
+})
+
+
+describe('automatic protection plan integration', () => {
+  const protection = { enabled: true, rules: [{ test_definition_id: 2, pause_on_failure: true, expected_answer: '29', answer_match: 'numeric', thresholds: [], vote: { enabled: false, reject_above: 0, pass_at_least: 3 } }] }
+  it('edits and copies protection without mutating the loaded plan', async () => {
+    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    expect((dialog.get('[data-protection-enabled]').element as HTMLInputElement).checked).toBe(true)
+    await dialog.get('[data-rule-answer]').setValue('30')
+    expect(protection.rules[0].expected_answer).toBe('29')
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ protection: expect.objectContaining({ enabled: true, rules: [expect.objectContaining({ expected_answer: '30' })] }) }))
+    await wrapper.get('tbody tr button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ protection }))
+    wrapper.unmount()
+  })
+
+  it('removes deselected type protection and turns it off for group checks', async () => {
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
+    ])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_ids: [2, 3], target_mode: 'account', account_id: 3, protection }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    await dialog.get('[data-testid="plan-type-2"]').setValue(false)
+    expect(dialog.find('[data-protection-type="2"]').exists()).toBe(false)
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    expect(save.attributes('disabled')).toBeDefined()
+    const accountSelect = dialog.findAll('select').find(select => select.find('option[value="3"]').exists())!
+    await accountSelect.findAll('option')[0].setValue()
+    expect((dialog.get('[data-protection-enabled]').element as HTMLInputElement).checked).toBe(false)
+    expect(dialog.get('[data-protection-enabled]').attributes('disabled')).toBeDefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ target_mode: 'group', protection: { enabled: false, rules: [] } }))
+    wrapper.unmount()
+  })
+  it('loads active and quality-paused accounts across pages, deduplicates IDs and keeps manual stops', async () => {
+    const paused = { id: 5, name: 'Paused account', group_ids: [8], status: 'quality_paused', schedulable: true }
+    const stopped = { id: 6, name: 'Manually stopped', group_ids: [8], status: 'active', schedulable: false }
+    api.getAccounts.mockImplementation(async (page: number, _size: number, filter: { status: string }) => {
+      if (filter.status === 'quality_paused') return { items: page === 1 ? [paused] : [{ ...paused }, { id: 7, name: 'Paused older account', group_ids: [8], status: 'quality_paused', schedulable: true }], pages: 2, total: 2 }
+      return { items: [stopped], pages: 1, total: 1 }
+    })
+    api.listPlans.mockResolvedValue([{ ...plan, account_id: 5, target_mode: 'account', protection }, { ...plan, id: 11, account_id: 6, target_mode: 'account' }])
+    const wrapper = makeWrapper(); await flushPromises()
+    expect(api.getAccounts).toHaveBeenCalledWith(1, 1000, { lite: '1', status: 'active' })
+    expect(api.getAccounts).toHaveBeenCalledWith(2, 1000, { lite: '1', status: 'quality_paused' })
+    expect(wrapper.get('tbody tr').text()).toContain('Paused account (#5)')
+    expect(wrapper.findAll('tbody tr')[1].get('button[aria-label="admin.tests.run"]').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('tbody tr')[1].get('button[aria-label="admin.tests.run"]').trigger('click')
+    expect(api.runPlan).not.toHaveBeenCalled()
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    const accountSelect = dialog.findAll('select').find(select => select.find('option[value="5"]').exists())!
+    expect(accountSelect.findAll('option[value="5"]')).toHaveLength(1)
+    expect(accountSelect.find('option[value="6"]').text()).toContain('Manually stopped')
+    expect(accountSelect.find('option[value="7"]').exists()).toBe(true)
+    expect((accountSelect.element as HTMLSelectElement).value).toBe('5')
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ account_id: 5, protection }))
+    wrapper.unmount()
+  })
+
+  it('blocks saving a protected disabled definition while retaining its configured answer', async () => {
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: false },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
+    ])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_ids: [2, 3], account_id: 3, target_mode: 'account', protection }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    expect((dialog.get('[data-rule-answer]').element as HTMLTextAreaElement).value).toBe('29')
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    expect(save.attributes('disabled')).toBeDefined()
+    await save.trigger('click')
+    expect(api.updatePlan).not.toHaveBeenCalled()
+    await dialog.get('[data-protection-enabled]').setValue(false)
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ protection: { ...protection, enabled: false } }))
+    wrapper.unmount()
+  })
+
 })

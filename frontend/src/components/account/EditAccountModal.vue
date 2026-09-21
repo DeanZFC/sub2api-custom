@@ -2947,7 +2947,7 @@
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div>
           <label class="input-label">{{ t('common.status') }}</label>
-          <Select v-model="form.status" :options="statusOptions" />
+          <Select v-model="form.status" :options="statusOptions" data-testid="account-status" />
         </div>
 
         <!-- Mixed Scheduling (only for antigravity accounts, read-only in edit mode) -->
@@ -3923,7 +3923,7 @@ const form = reactive({
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
-  status: 'active' as 'active' | 'inactive' | 'error',
+  status: 'active' as Account['status'],
   group_ids: [] as number[],
   expires_at: null as number | null
 })
@@ -3950,6 +3950,9 @@ const statusOptions = computed(() => {
   ]
   if (form.status === 'error') {
     options.push({ value: 'error', label: t('admin.accounts.status.error') })
+  }
+  if (props.account?.status === 'quality_paused') {
+    options.push({ value: 'quality_paused', label: t('admin.accounts.status.qualityPaused') })
   }
   return options
 })
@@ -4033,7 +4036,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
-  form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'error')
+  form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'error' || newAccount.status === 'quality_paused')
     ? newAccount.status
     : 'active'
   form.group_ids = newAccount.group_ids || []
@@ -5049,7 +5052,7 @@ const handleSubmit = async () => {
   }
   const accountID = props.account.id
 
-  if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
+  if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error' && form.status !== 'quality_paused') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
     return
   }
@@ -5062,6 +5065,11 @@ const handleSubmit = async () => {
 	}
 
   const updatePayload: Record<string, unknown> = { ...form }
+  // Only an explicit status edit may override an automatic quality pause
+  // that happened while this dialog was open.
+  if (form.status === props.account.status) {
+    delete updatePayload.status
+  }
   try {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {

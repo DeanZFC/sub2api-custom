@@ -350,6 +350,42 @@ describe('EditAccountModal', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('preserves quality protection when saving unrelated account settings', async () => {
+    const account = { ...buildAccount(), status: 'quality_paused', schedulable: false }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="account-status"]').element.value).toBe('quality_paused')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('status')
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('schedulable')
+    wrapper.unmount()
+  })
+
+  it.each(['active', 'inactive'])('allows manually changing quality-paused account status to %s', async (status) => {
+    const account = { ...buildAccount(), status: 'quality_paused', schedulable: false }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    await wrapper.get('[data-testid="account-status"]').setValue(status)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.status).toBe(status)
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('schedulable')
+    wrapper.unmount()
+  })
+
+  it('does not resend an unchanged active status when saving an older account snapshot', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset().mockResolvedValue({ ...account, status: 'quality_paused' })
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('status')
+    wrapper.unmount()
+  })
+
   it('sets expiry presets from now instead of extending the saved expiry', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2028-02-29T12:34:00'))

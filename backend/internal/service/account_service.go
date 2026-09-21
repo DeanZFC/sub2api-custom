@@ -22,10 +22,13 @@ const AccountPrivacyModeUnsetFilter = "__unset__"
 // accounts. Candidate platforms are supplied by TokenRefreshService's refresher
 // registry so repository eligibility cannot drift from registered providers.
 type OAuthRefreshPageOptions struct {
-	Platforms            []string
-	AfterID              int64
-	Limit                int
-	ActiveOnly           bool
+	Platforms  []string
+	AfterID    int64
+	Limit      int
+	ActiveOnly bool
+	// IncludeQualityPaused keeps credentials alive while quality protection
+	// blocks gateway traffic; it never changes scheduling eligibility.
+	IncludeQualityPaused bool
 	IncludeSetupToken    bool
 	RequireRefreshToken  bool
 	ExcludeRetryCooldown bool

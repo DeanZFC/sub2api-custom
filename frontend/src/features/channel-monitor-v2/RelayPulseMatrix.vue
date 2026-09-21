@@ -471,6 +471,8 @@ function formatBucketRange(value: string) {
 }
 </script>
 
+<style scoped src="./monitorHealthColors.css"></style>
+
 <style scoped>
 /* dimension | success | ttft | cache | pulse */
 .matrix-row {
@@ -506,24 +508,6 @@ function formatBucketRange(value: string) {
   flex: none;
   border-radius: 9999px;
 }
-
-/* Multi-stop green → yellow → red (score10 best … score0 worst) */
-.health-score10 { background: #16a34a; }
-.health-score9  { background: #22c55e; }
-.health-score8  { background: #4ade80; }
-.health-score7  { background: #a3e635; }
-.health-score6  { background: #facc15; }
-.health-score5  { background: #fbbf24; }
-.health-score4  { background: #f59e0b; }
-.health-score3  { background: #f97316; }
-.health-score2  { background: #fb7185; }
-.health-score1  { background: #f87171; }
-.health-score0  { background: rgb(239, 67, 67); }
-/* Coarse fallbacks (older payloads without score) */
-.health-healthy  { background: #22c55e; }
-.health-warning  { background: #f59e0b; }
-.health-critical { background: #ef4444; }
-.health-unknown  { background: #9ca3af; }
 
 .score-legend {
   background: linear-gradient(

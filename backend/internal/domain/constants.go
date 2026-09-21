@@ -8,6 +8,9 @@ const (
 	StatusUnused   = "unused"
 	StatusUsed     = "used"
 	StatusExpired  = "expired"
+	// StatusQualityPaused stops gateway scheduling while quality checks continue.
+	// The independent schedulable flag remains the administrator's switch.
+	StatusQualityPaused = "quality_paused"
 )
 
 // Role constants

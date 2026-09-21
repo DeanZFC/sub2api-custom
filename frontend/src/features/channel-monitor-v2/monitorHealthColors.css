@@ -1,0 +1,17 @@
+/* Shared channel-health palette: score10 is best; score0 is worst. */
+.health-score10 { background: #16a34a; }
+.health-score9  { background: #22c55e; }
+.health-score8  { background: #4ade80; }
+.health-score7  { background: #a3e635; }
+.health-score6  { background: #facc15; }
+.health-score5  { background: #fbbf24; }
+.health-score4  { background: #f59e0b; }
+.health-score3  { background: #f97316; }
+.health-score2  { background: #fb7185; }
+.health-score1  { background: #f87171; }
+.health-score0  { background: rgb(239, 67, 67); }
+/* Coarse fallbacks for older payloads without scores. */
+.health-healthy  { background: #22c55e; }
+.health-warning  { background: #f59e0b; }
+.health-critical { background: #ef4444; }
+.health-unknown  { background: #9ca3af; }

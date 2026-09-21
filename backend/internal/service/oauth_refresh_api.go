@@ -225,7 +225,9 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	if freshAccount.ID != account.ID {
 		return nil, fmt.Errorf("%w: account identity mismatch", errOAuthRefreshAccountRereadFailed)
 	}
-	if !freshAccount.IsActive() {
+	// Background refresh must keep quality-paused credentials alive. Requests
+	// still reject an account paused after scheduling, even with a valid token.
+	if !freshAccount.IsActive() && (requestPath || freshAccount.Status != StatusQualityPaused) {
 		if requestPath {
 			return nil, fmt.Errorf("%w: account is not active", errOAuthRefreshAccountStateChanged)
 		}
