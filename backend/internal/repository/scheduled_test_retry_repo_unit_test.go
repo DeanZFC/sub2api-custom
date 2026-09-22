@@ -23,8 +23,8 @@ func TestScheduledTestResultRepositoryGetByIDLoadsActualTestedAccount(t *testing
 	mock.ExpectQuery(`(?s)SELECT r.id, r.plan_id, p.name,.*r.account_id,.*COALESCE\(a.name, ''\).*LEFT JOIN accounts a ON a.id = r.account_id.*WHERE r.id = \$1`).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "account_name",
-		}).AddRow(9, 3, "group test", "Pelican", 0, "Group", 7, "all_accounts", "failed", "", "html", "", nil, 12, "gpt-6-astra", "high", 7, "upstream error", 20, now, now, now, 1, "Private Account Twelve"))
+			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "account_name", "run_id",
+		}).AddRow(9, 3, "group test", "Pelican", 0, "Group", 7, "all_accounts", "failed", "", "html", "", nil, 12, "gpt-6-astra", "high", 7, "upstream error", 20, now, now, now, 1, "Private Account Twelve", "round-9"))
 	result, err := repo.GetByID(context.Background(), 9)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), result.PlanID)
@@ -33,6 +33,7 @@ func TestScheduledTestResultRepositoryGetByIDLoadsActualTestedAccount(t *testing
 	require.Equal(t, "failed", result.Status)
 	require.Equal(t, "all_accounts", result.TargetMode)
 	require.Equal(t, "Private Account Twelve", result.AccountName)
+	require.Equal(t, "round-9", result.RunID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

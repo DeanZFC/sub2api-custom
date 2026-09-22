@@ -30,7 +30,7 @@ function defaultPriceFields(pricing?: ModelDefaultPricing | null) {
     cache_read_price: perTokenToMTok(pricing?.cache_read_price),
     image_input_price: perTokenToMTok(pricing?.image_input_price),
     image_output_price: perTokenToMTok(pricing?.image_output_price),
-    max_reasoning_effort_multiplier: pricing?.max_reasoning_effort_multiplier ?? null,
+    reasoning_effort_multipliers: pricing?.reasoning_effort_multipliers ? { ...pricing.reasoning_effort_multipliers } : null,
   }
 }
 

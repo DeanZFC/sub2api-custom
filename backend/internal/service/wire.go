@@ -199,9 +199,10 @@ func ProvideOpenAIQuotaService(
 	proxyRepo ProxyRepository,
 	tokenProvider *OpenAITokenProvider,
 	privacyClientFactory PrivacyClientFactory,
+	referralClient OpenAIReferralClient,
 	openAIGatewayService *OpenAIGatewayService,
 ) *OpenAIQuotaService {
-	service := NewOpenAIQuotaService(accountRepo, proxyRepo, tokenProvider, privacyClientFactory)
+	service := NewOpenAIQuotaService(accountRepo, proxyRepo, tokenProvider, privacyClientFactory, referralClient)
 	service.agentIdentityWS = openAIGatewayService
 	return service
 }

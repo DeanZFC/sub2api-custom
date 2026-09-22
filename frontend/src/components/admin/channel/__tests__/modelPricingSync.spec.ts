@@ -71,7 +71,7 @@ describe('channel model default price synchronization', () => {
   it('keeps models with different cache or effort prices in separate rules', () => {
     const defaults = new Map([
       ['a', flash], ['b', { ...flash, cache_read_price: 0 }],
-      ['c', { ...flash, max_reasoning_effort_multiplier: 2 }],
+      ['c', { ...flash, reasoning_effort_multipliers: { max: 2 } }],
     ])
     expect(createModelPricingEntries([...defaults.keys()], defaults)).toHaveLength(3)
   })
