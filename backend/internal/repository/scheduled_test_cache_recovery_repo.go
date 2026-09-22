@@ -206,6 +206,8 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 		// alternate forever while another hold prevents any real traffic.
 		var ready bool
 		err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS (
+		 SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
+		 AND NOT EXISTS (
 		 SELECT 1 FROM scheduled_test_protection_states other WHERE other.account_id=$1 AND other.blocked
 		 AND (other.plan_id<>$2 OR other.test_definition_id<>$3)
 		 AND NOT COALESCE(other.rule_config->'recovery'->>'enabled'='true'

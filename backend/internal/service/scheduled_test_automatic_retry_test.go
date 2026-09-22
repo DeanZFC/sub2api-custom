@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,10 +17,6 @@ func automaticRetryTestPlan() *ScheduledTestPlan {
 	plan := scheduledTestExecutionPlan()
 	plan.TestDefinitionIDs = []int64{1}
 	return plan
-}
-
-func automaticRetryTestContext(parent context.Context) context.Context {
-	return context.WithValue(parent, scheduledTestAutomaticRunKey{}, true)
 }
 
 func automaticRetryTestRunner(results ScheduledTestResultRepository, accounts AccountRepository) *ScheduledTestRunnerService {
@@ -60,7 +58,7 @@ func TestScheduledTestAutomaticRetryStopsAfterSuccessAndPersistsOnce(t *testing.
 	}}
 	runner := automaticRetryTestRunner(results, accounts)
 	defer runner.Stop()
-	runner.runOnePlan(automaticRetryTestContext(context.Background()), automaticRetryTestPlan())
+	runner.runOnePlan(context.Background(), automaticRetryTestPlan())
 	completed := automaticRetryCompleted(t, results)
 	require.Equal(t, int32(3), calls.Load(), "failed status with nil error must retry; success must stop retries")
 	require.Equal(t, "success", completed.Status)
@@ -78,7 +76,7 @@ func TestScheduledTestAutomaticRetryExhaustsExactlyThreeRetries(t *testing.T) {
 	}}
 	runner := automaticRetryTestRunner(results, accounts)
 	defer runner.Stop()
-	runner.runOnePlan(automaticRetryTestContext(context.Background()), automaticRetryTestPlan())
+	runner.runOnePlan(context.Background(), automaticRetryTestPlan())
 	completed := automaticRetryCompleted(t, results)
 	require.Equal(t, int32(4), calls.Load(), "one initial execution plus three retries")
 	require.Equal(t, "failed", completed.Status)
@@ -102,7 +100,7 @@ func TestScheduledTestAutomaticRetryIncludesOutputContractFailures(t *testing.T)
 			runner.scheduledSvc.SetDefinitionRepository(multiDefinitionRepoStub{definitions: map[int64]*ScheduledTestDefinition{
 				1: {ID: 1, Enabled: true, Prompt: "produce structured output", OutputKind: kind},
 			}})
-			runner.runOnePlan(automaticRetryTestContext(context.Background()), automaticRetryTestPlan())
+			runner.runOnePlan(context.Background(), automaticRetryTestPlan())
 			completed := automaticRetryCompleted(t, results)
 			require.Equal(t, int32(4), calls.Load(), "output parsing must happen inside each automatic attempt")
 			require.Equal(t, "failed", completed.Status)
@@ -110,6 +108,29 @@ func TestScheduledTestAutomaticRetryIncludesOutputContractFailures(t *testing.T)
 			requireAutomaticRetrySingleRow(t, results, completed)
 		})
 	}
+}
+
+func TestScheduledTestAutomaticRetryDoesNotRetryWrongNumericAnswer(t *testing.T) {
+	plan := protectionPlan()
+	plan.Protection.Rules[0].ExpectedAnswer = "21"
+	plan.Protection.Rules[0].AnswerMatch = "numeric"
+	repo := &protectionRepositoryStub{eligible: true}
+	accounts := &modelIdentityAccountRepo{account: &Account{
+		ID: *plan.AccountID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+		Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"},
+		Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: true},
+	}}
+	upstream := &modelIdentityHTTPUpstream{body: `{"model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"29"}]}]}`}
+	accountTests := &AccountTestService{accountRepo: accounts, httpUpstream: upstream, cfg: &config.Config{}}
+	runner := NewScheduledTestRunnerService(nil, NewScheduledTestService(nil, repo), accountTests, accounts, nil, nil)
+	runner.automaticRetryBaseDelay = time.Millisecond
+	defer runner.Stop()
+	runner.runOneAccount(context.Background(), plan, *plan.AccountID, "count the candies", "number")
+	require.Equal(t, 1, upstream.requests, "a completed wrong answer is a quality failure, not an execution failure")
+	require.Equal(t, "success", repo.completed.Status)
+	require.Equal(t, 29.0, *repo.completed.OutputNumeric)
+	require.Equal(t, "fail", repo.verdict)
+	require.Equal(t, []string{"create", "begin", "update", "complete"}, repo.events)
 }
 
 func TestScheduledTestAutomaticRetryContinuesOtherDefinitionsAfterExhaustion(t *testing.T) {
@@ -127,7 +148,7 @@ func TestScheduledTestAutomaticRetryContinuesOtherDefinitionsAfterExhaustion(t *
 	}})
 	plan := automaticRetryTestPlan()
 	plan.TestDefinitionIDs = []int64{1, 2}
-	runner.runOnePlan(automaticRetryTestContext(context.Background()), plan)
+	runner.runOnePlan(context.Background(), plan)
 	first := automaticRetryCompleted(t, results)
 	second := automaticRetryCompleted(t, results)
 	require.Equal(t, int32(5), calls.Load(), "the invalid HTML consumes four attempts, then the text check runs once")
@@ -167,7 +188,7 @@ func TestScheduledTestAutomaticRetryGetsFreshTimeoutAfterTimedOutAttempt(t *test
 	runner := automaticRetryTestRunner(results, accounts)
 	runner.executionTimeout = 40 * time.Millisecond
 	defer runner.Stop()
-	runner.runOnePlan(automaticRetryTestContext(context.Background()), automaticRetryTestPlan())
+	runner.RunPlanNow(context.Background(), automaticRetryTestPlan())
 	completed := automaticRetryCompleted(t, results)
 	require.Equal(t, int32(2), calls.Load())
 	require.Positive(t, secondBudget)
@@ -193,7 +214,7 @@ func TestScheduledTestAutomaticRetryBackoffReleasesWorkerAndCanBeInterrupted(t *
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				runner.runOnePlan(automaticRetryTestContext(ctx), automaticRetryTestPlan())
+				runner.runOnePlan(ctx, automaticRetryTestPlan())
 			}()
 			t.Cleanup(func() {
 				cancel()
@@ -235,7 +256,7 @@ func TestScheduledTestAutomaticRetryBackoffReleasesWorkerAndCanBeInterrupted(t *
 	}
 }
 
-func TestScheduledTestAutomaticRetryDoesNotApplyToManualRunOrSingleResultRetry(t *testing.T) {
+func TestScheduledTestAutomaticRetryAppliesToManualRunAndSingleResultRetry(t *testing.T) {
 	t.Run("RunPlanNow", func(t *testing.T) {
 		results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
 		var calls atomic.Int32
@@ -247,7 +268,7 @@ func TestScheduledTestAutomaticRetryDoesNotApplyToManualRunOrSingleResultRetry(t
 		defer runner.Stop()
 		runner.RunPlanNow(context.Background(), automaticRetryTestPlan())
 		completed := automaticRetryCompleted(t, results)
-		require.Equal(t, int32(1), calls.Load())
+		require.Equal(t, int32(4), calls.Load(), "manual run receives one initial attempt and three retries")
 		require.Equal(t, "failed", completed.Status)
 		requireAutomaticRetrySingleRow(t, results, completed)
 	})
@@ -272,7 +293,7 @@ func TestScheduledTestAutomaticRetryDoesNotApplyToManualRunOrSingleResultRetry(t
 		require.NoError(t, err)
 		completed := automaticRetryCompleted(t, results)
 		runner.activeRuns.Wait()
-		require.Equal(t, int32(2), calls.Load(), "one validation and one actual attempt")
+		require.Equal(t, int32(5), calls.Load(), "one validation followed by one initial attempt and three retries")
 		require.Equal(t, previous.ID, pending.ID)
 		require.Equal(t, previous.ID, completed.ID)
 		require.Equal(t, "failed", completed.Status)
@@ -291,7 +312,7 @@ func TestScheduledTestAutomaticRetryCronDiscoveryEnablesRetries(t *testing.T) {
 	runner := automaticRetryTestRunner(results, accounts)
 	defer runner.Stop()
 	runner.planRepo = &scheduledTestDiscoveryPlanRepo{due: []*ScheduledTestPlan{automaticRetryTestPlan()}}
-	// Use the real cron discovery entrypoint, with no test-only context marker.
+	// Admitted cron work must survive cancellation of the discovery request.
 	ctx, cancel := context.WithCancel(context.Background())
 	runner.runDuePlans(ctx)
 	cancel()

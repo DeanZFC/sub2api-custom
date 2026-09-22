@@ -58,12 +58,28 @@ func (p *ScheduledTestPlan) HasGroupActions() bool {
 	if p == nil || !p.Protection.Enabled {
 		return false
 	}
-	for _, rule := range p.Protection.Rules {
-		if len(rule.ManagedGroupIDs()) > 0 {
-			return true
+	return len(p.ProtectionActionGroupIDs()) > 0
+}
+
+// ProtectionActionGroupIDs includes only actions used by the selected mode.
+func (p *ScheduledTestPlan) ProtectionActionGroupIDs() []int64 {
+	if p == nil {
+		return nil
+	}
+	var ids []int64
+	if p.Protection.UsesCombinations() {
+		for _, rule := range p.Protection.Combinations {
+			if rule.Action.GroupMode == "assign" {
+				ids = append(ids, rule.Action.GroupIDs...)
+			}
+		}
+	} else {
+		for _, rule := range p.Protection.Rules {
+			ids = append(ids, rule.ManagedGroupIDs()...)
 		}
 	}
-	return false
+	slices.Sort(ids)
+	return slices.Compact(ids)
 }
 
 func validateScheduledTestActions(rule *ScheduledTestProtectionRule) error {

@@ -163,6 +163,7 @@ type protectionState struct {
 	planID, accountID, definitionID, resultID, generation          int64
 	started                                                        time.Time
 	automated, verdict, reason                                     string
+	actionReason                                                   string
 	blocked, completed                                             bool
 	rule                                                           service.ScheduledTestProtectionRule
 }
@@ -239,7 +240,13 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	}
 	verdict, _, reason := combineProtectionVerdict(state, pass, fail)
 	blocked := state.blocked
-	switch state.rule.OutcomeAction(verdict).Scheduling {
+	scheduling := state.rule.OutcomeAction(verdict).Scheduling
+	// Combined mode consumes the original check verdicts without executing its
+	// legacy actions. Cache recovery remains an independent bounded safeguard.
+	if config.UsesCombinations() && (state.rule.Recovery == nil || !state.rule.Recovery.Enabled) {
+		scheduling = "keep"
+	}
+	switch scheduling {
 	case "pause":
 		blocked = true
 		if reason == "" {
@@ -274,13 +281,16 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 func reconcileProtectionAccount(ctx context.Context, tx *sql.Tx, accountID int64) error {
 	var reason string
 	var trial bool
-	err := tx.QueryRowContext(ctx, `SELECT reason,
-		NOT EXISTS (SELECT 1 FROM scheduled_test_protection_states other WHERE other.account_id=$1 AND other.blocked
+	err := tx.QueryRowContext(ctx, `WITH holds AS (
+ SELECT reason,updated_at,plan_id,test_definition_id,false AS combined FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked
+ UNION ALL SELECT reason,updated_at,plan_id,0,true FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked
+ ) SELECT reason,
+        NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
+		AND NOT EXISTS (SELECT 1 FROM scheduled_test_protection_states other WHERE other.account_id=$1 AND other.blocked
 		 AND (other.recovery_phase<>'trial' OR other.rule_config->'recovery'->>'enabled' IS DISTINCT FROM 'true'
 	 OR other.recovery_trial_started_at IS NULL OR other.recovery_trial_started_at>NOW()
 	 OR other.recovery_trial_ends_at IS NULL OR other.recovery_trial_ends_at<=NOW()))
-		FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked
-		ORDER BY updated_at DESC,plan_id,test_definition_id LIMIT 1`, accountID).Scan(&reason, &trial)
+		FROM holds ORDER BY combined DESC,updated_at DESC,plan_id,test_definition_id LIMIT 1`, accountID).Scan(&reason, &trial)
 	blocked := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -364,6 +374,14 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 		if err != nil {
 			return err
 		}
+		if config.UsesCombinations() {
+			if err := reconcileProtectionGroups(ctx, tx, state); err != nil {
+				return err
+			}
+			if err := reconcileProtectionAccount(ctx, tx, state.accountID); err != nil {
+				return err
+			}
+		}
 		if err := recordProtectionAction(ctx, tx, state, before, "fail", state.reason); err != nil {
 			return err
 		}
@@ -404,7 +422,8 @@ func resetPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64) error 
 		}
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT account_id FROM scheduled_test_protection_states WHERE plan_id=$1 ORDER BY account_id`, planID)
+	rows, err := tx.QueryContext(ctx, `SELECT account_id FROM scheduled_test_protection_states WHERE plan_id=$1
+ UNION SELECT account_id FROM scheduled_test_combination_states WHERE plan_id=$1 ORDER BY account_id`, planID)
 	if err != nil {
 		return err
 	}
@@ -427,6 +446,9 @@ func resetPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64) error 
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_protection_states WHERE plan_id=$1 AND account_id=$2`, planID, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2`, planID, id); err != nil {
 			return err
 		}
 		if err := reconcileProtectionAccount(ctx, tx, id); err != nil {

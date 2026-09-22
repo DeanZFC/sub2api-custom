@@ -16,8 +16,10 @@ var (
 )
 
 type ScheduledTestProtectionConfig struct {
-	Enabled bool                          `json:"enabled"`
-	Rules   []ScheduledTestProtectionRule `json:"rules"`
+	Enabled      bool                           `json:"enabled"`
+	Rules        []ScheduledTestProtectionRule  `json:"rules"`
+	Mode         string                         `json:"mode,omitempty"`
+	Combinations []ScheduledTestCombinationRule `json:"combinations,omitempty"`
 }
 
 type ScheduledTestProtectionRule struct {
@@ -91,6 +93,9 @@ func (p *ScheduledTestPlan) ProtectionRule(definitionID *int64) *ScheduledTestPr
 
 func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 	config := &plan.Protection
+	if config.Mode != "" && config.Mode != "per_test" && config.Mode != "combined" {
+		return fmt.Errorf("protection mode must be per_test or combined")
+	}
 	if !config.Enabled {
 		return nil
 	}
@@ -108,17 +113,19 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 			return fmt.Errorf("protection rules must refer to distinct selected test definitions")
 		}
 		seen[rule.TestDefinitionID] = true
-		if rule.Priority < 0 || rule.Priority > 1000 {
+		if !config.UsesCombinations() && (rule.Priority < 0 || rule.Priority > 1000) {
 			return fmt.Errorf("priority must be between 0 and 1000")
 		}
-		if rule.RequiredPass && rule.Vote != nil && rule.Vote.Enabled {
+		if !config.UsesCombinations() && rule.RequiredPass && rule.Vote != nil && rule.Vote.Enabled {
 			return fmt.Errorf("required_pass only supports automatic conditions")
 		}
-		if err := validateScheduledTestActions(rule); err != nil {
-			return err
+		if !config.UsesCombinations() || (rule.Recovery != nil && rule.Recovery.Enabled) {
+			if err := validateScheduledTestActions(rule); err != nil {
+				return err
+			}
 		}
 		for _, groupID := range rule.ManagedGroupIDs() {
-			if !slices.Contains(plan.GroupIDs, groupID) {
+			if !config.UsesCombinations() && !slices.Contains(plan.GroupIDs, groupID) {
 				return fmt.Errorf("action group %d must be selected in group_ids", groupID)
 			}
 		}
@@ -181,7 +188,7 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 			return err
 		}
 	}
-	return nil
+	return validateScheduledTestCombinations(plan)
 }
 
 func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string) error {

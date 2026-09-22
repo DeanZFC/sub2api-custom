@@ -24,10 +24,8 @@ func scheduledTestRoutingScope(plan *service.ScheduledTestPlan) []int64 {
 	for _, id := range plan.GroupIDs {
 		ids[id] = true
 	}
-	for _, rule := range plan.Protection.Rules {
-		for _, id := range rule.ManagedGroupIDs() {
-			ids[id] = true
-		}
+	for _, id := range plan.ProtectionActionGroupIDs() {
+		ids[id] = true
 	}
 	return sortedProtectionIDs(ids)
 }
@@ -82,12 +80,16 @@ func validateScheduledTestPlanConflicts(ctx context.Context, tx *sql.Tx, plan *s
 // Caller SQL supplies the current plan alias p and account alias a.
 const scheduledTestRuntimeOwnershipSQL = `(
  NOT (p.enabled AND p.protection->>'enabled'='true' AND EXISTS(
-  SELECT 1 FROM jsonb_array_elements(COALESCE(p.protection->'rules','[]'::jsonb)) rule
-  WHERE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign'))
+  SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN p.protection->>'mode'='combined'
+   THEN p.protection->'combinations' ELSE p.protection->'rules' END,'[]'::jsonb)) rule
+  WHERE CASE WHEN p.protection->>'mode'='combined' THEN rule->'action'->>'group_mode'='assign'
+   ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END))
  OR NOT EXISTS(SELECT 1 FROM scheduled_test_plans other
   WHERE other.id<>p.id AND other.enabled AND other.protection->>'enabled'='true'
-  AND EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(other.protection->'rules','[]'::jsonb)) rule
-   WHERE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign')
+  AND EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN other.protection->>'mode'='combined'
+   THEN other.protection->'combinations' ELSE other.protection->'rules' END,'[]'::jsonb)) rule
+   WHERE CASE WHEN other.protection->>'mode'='combined' THEN rule->'action'->>'group_mode'='assign'
+    ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END)
   AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=ANY(other.group_ids))))`
 
 func scheduledTestAccountOwnershipCurrent(ctx context.Context, tx *sql.Tx, planID, accountID int64) (bool, error) {

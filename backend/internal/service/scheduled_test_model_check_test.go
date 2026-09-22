@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +38,7 @@ func TestScheduledTestModelCheckEvidence(t *testing.T) {
 		{name: "invalid UTF8", upstream: "gpt-5", returned: []string{string([]byte{0xff})}, verdict: "unknown", reason: "invalid_evidence"},
 		{name: "invalid mode", upstream: "gpt-5", returned: []string{"gpt-5"}, mode: "contains", verdict: "unknown", reason: "invalid_evidence"},
 		{name: "failed execution cannot pass", upstream: "gpt-5", returned: []string{"gpt-5"}, failed: true, verdict: "unknown", reason: "upstream_error"},
+		{name: "failed execution cannot prove mismatch", upstream: "gpt-5", returned: []string{"gpt-5-mini"}, failed: true, verdict: "unknown", reason: "upstream_error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := buildScheduledTestModelCheck("public-alias", tc.upstream, tc.returned, tc.mode, tc.invalid, tc.failed)
@@ -172,13 +175,67 @@ func TestScheduledTestModelCheckRunnerPersistsVerdictAndRunsActions(t *testing.T
 			prompt, kind, err := runner.resolveDefinition(context.Background(), plan)
 			require.NoError(t, err)
 			require.Equal(t, scheduledTestModelCheckPrompt, prompt)
-			runner.runOneAccount(automaticRetryTestContext(context.Background()), plan, 42, prompt, kind)
+			runner.runOneAccount(context.Background(), plan, 42, prompt, kind)
 			require.Equal(t, 1, calls, "completed metadata checks must not trigger transport retries")
 			require.Equal(t, "success", repo.completed.Status)
 			require.Equal(t, repo.created.ID, repo.completed.ID)
 			require.Equal(t, tc.verdict, repo.completed.OutputModelCheck.Verdict)
 			require.Equal(t, tc.action, repo.verdict)
 			require.Contains(t, repo.completed.ResponseText, `"upstream_model":"mapped-model"`)
+		})
+	}
+}
+
+func TestScheduledTestModelCheckManualRunRetriesOverloadBeforeApplyingActions(t *testing.T) {
+	const overload = `data: {"type":"response.failed","response":{"model":"another-model","status":"failed","error":{"message":"Our servers are currently overloaded. Please try again later."}}}` + "\n\n"
+	for _, recover := range []bool{true, false} {
+		t.Run(fmt.Sprintf("recovers=%v", recover), func(t *testing.T) {
+			plan := protectionPlan()
+			plan.ModelID = "requested-model"
+			plans := &runnerPlanRepoStub{}
+			repo := &protectionRepositoryStub{eligible: true}
+			accounts := &modelIdentityAccountRepo{account: &Account{
+				ID: *plan.AccountID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+				Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"},
+				Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: true},
+			}}
+			upstream := &modelIdentityHTTPUpstream{
+				body:      overload,
+				responses: []*http.Response{{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(overload))}},
+				beforeReturn: func(_ *http.Request, _ int) {
+					require.Nil(t, repo.completed, "intermediate failures must not finish the result or apply actions")
+					require.Empty(t, repo.verdict, "an incomplete response's mismatched model must not downgrade the account")
+				},
+			}
+			if recover {
+				upstream.body = `{"model":"requested-model","status":"completed","output":[]}`
+			}
+			svc := NewScheduledTestService(plans, repo)
+			svc.SetDefinitionRepository(multiDefinitionRepoStub{definitions: map[int64]*ScheduledTestDefinition{
+				1: {ID: 1, Enabled: true, OutputKind: "model_check"},
+			}})
+			accountTests := &AccountTestService{accountRepo: accounts, httpUpstream: upstream, cfg: &config.Config{}}
+			runner := NewScheduledTestRunnerService(plans, svc, accountTests, accounts, nil, nil)
+			runner.automaticRetryBaseDelay = time.Millisecond
+			defer runner.Stop()
+			runner.RunPlanNow(context.Background(), plan)
+			require.Equal(t, []string{"create", "begin", "update", "complete"}, repo.events, "all attempts share one result and one final quality decision")
+			require.Equal(t, repo.created.ID, repo.completed.ID)
+			if recover {
+				require.Equal(t, 2, upstream.requests)
+				require.Equal(t, "success", repo.completed.Status)
+				require.Equal(t, "pass", repo.completed.OutputModelCheck.Verdict)
+				require.Equal(t, []string{"requested-model"}, repo.completed.OutputModelCheck.ReturnedModels)
+				require.Equal(t, "pass", repo.verdict)
+				require.Empty(t, repo.completed.ErrorMessage)
+			} else {
+				require.Equal(t, 4, upstream.requests)
+				require.Equal(t, "failed", repo.completed.Status)
+				require.Equal(t, "unknown", repo.completed.OutputModelCheck.Verdict)
+				require.Equal(t, "upstream_error", repo.completed.OutputModelCheck.Reason)
+				require.Equal(t, "fail", repo.verdict, "configured failure actions run only after all attempts fail")
+				require.Contains(t, repo.completed.ErrorMessage, "overloaded")
+			}
 		})
 	}
 }

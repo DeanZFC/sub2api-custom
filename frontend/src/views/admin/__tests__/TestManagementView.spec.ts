@@ -370,6 +370,43 @@ describe('automatic protection plan integration', () => {
 
 
 
+  it('saves and copies nested combined rules and preserves dangling conditions when a check is deselected', async () => {
+    const combinations = [{ id: 'route', name: 'Route to A', priority: 2,
+      condition: { operator: 'all', conditions: [{ operator: 'any', conditions: [{ operator: 'test', test_definition_id: 2, verdict: 'pass' }] }] },
+      action: { scheduling: 'resume', group_mode: 'assign', group_ids: [8] },
+    }]
+    const combinedProtection = { ...protection, mode: 'combined', combinations }
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
+    ])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_ids: [2, 3], protection: combinedProtection }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    const dialog = wrapper.get('[data-dialog]')
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    await dialog.get('[data-combination-name]').setValue('Updated routing')
+    await dialog.get('[data-condition-verdict]').setValue('fail')
+    expect(combinations[0].name).toBe('Route to A')
+    expect(combinations[0].condition.conditions[0].conditions[0].verdict).toBe('pass')
+    await dialog.get('[data-testid="plan-type-2"]').setValue(false)
+    expect(dialog.find('[data-missing-condition-test]').exists()).toBe(true)
+    expect(save.attributes('disabled')).toBeDefined()
+    await dialog.get('[data-testid="plan-type-2"]').setValue(true)
+    await dialog.get('[data-protection-type="2"] [data-rule-enabled]').setValue(true)
+    expect(dialog.find('[data-missing-condition-test]').exists()).toBe(false)
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ protection: expect.objectContaining({ mode: 'combined', combinations: [expect.objectContaining({ name: 'Updated routing', condition: { operator: 'all', conditions: [{ operator: 'any', conditions: [{ operator: 'test', test_definition_id: 2, verdict: 'fail' }] }] } })] }) }))
+    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, protection: combinedProtection }))
+    api.createPlan.mock.calls[0][0].protection.combinations[0].condition.conditions[0].conditions[0].verdict = 'fail'
+    api.createPlan.mock.calls[0][0].protection.combinations[0].action.group_ids.push(99)
+    expect(combinations[0].condition.conditions[0].conditions[0].verdict).toBe('pass')
+    expect(combinations[0].action.group_ids).toEqual([8])
+    wrapper.unmount()
+  })
+
   it('saves and copies cache recovery settings without mutating the loaded plan', async () => {
     const recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 85 }
     const cacheProtection = { enabled: true, rules: [{ test_definition_id: 7, priority: 0, required_pass: false, thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }], on_pass: { scheduling: 'resume', group_mode: 'keep' }, on_fail: { scheduling: 'pause', group_mode: 'keep' }, recovery }] }

@@ -29,7 +29,8 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	// Most accounts have no quality hold. Check live scheduling state and the
 	// indexed hold set in one read without serializing ordinary traffic.
 	var eligible, held bool
-	err := db.QueryRowContext(ctx, `SELECT status='active' AND schedulable AND deleted_at IS NULL,
+	err := db.QueryRowContext(ctx, `SELECT status='active' AND schedulable AND deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked),
 		EXISTS (SELECT 1 FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked)
 		FROM accounts WHERE id=$1`, accountID).Scan(&eligible, &held)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -50,6 +51,7 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	// Every protection writer takes this account lock before its state locks.
 	// Gate calls never lock plans, preserving the plan -> account -> state order.
 	err = tx.QueryRowContext(ctx, `SELECT status='active' AND schedulable AND deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
 		FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, accountID).Scan(&eligible)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil

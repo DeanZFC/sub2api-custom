@@ -53,6 +53,7 @@ func newScheduledTestExecutionRunner(results ScheduledTestResultRepository, acco
 	}})
 	runner := NewScheduledTestRunnerService(plans, svc, &AccountTestService{accountRepo: accounts}, accounts, nil, nil)
 	runner.executionTimeout = 40 * time.Millisecond
+	runner.automaticRetryBaseDelay = time.Millisecond
 	return runner
 }
 
@@ -63,8 +64,8 @@ func TestScheduledTestEachDefinitionGetsFreshExecutionTimeout(t *testing.T) {
 		if _, bounded := ctx.Deadline(); !bounded {
 			return nil, fmt.Errorf("account execution has no deadline")
 		}
-		if calls.Add(1) == 1 {
-			<-ctx.Done() // The first type consumes its entire execution budget.
+		if calls.Add(1) <= 4 {
+			<-ctx.Done() // Every attempt of the first type consumes its execution budget.
 			return nil, ctx.Err()
 		}
 		if err := ctx.Err(); err != nil {
@@ -80,7 +81,7 @@ func TestScheduledTestEachDefinitionGetsFreshExecutionTimeout(t *testing.T) {
 	require.Equal(t, "failed", first.Status)
 	require.Equal(t, int64(2), *second.TestDefinitionID)
 	require.Equal(t, "success", second.Status, "the first type's timeout must not cancel the second type")
-	require.Equal(t, int32(2), calls.Load())
+	require.Equal(t, int32(5), calls.Load(), "four attempts for the first type, then one successful second type")
 }
 
 func TestScheduledTestWorkerQueueDoesNotConsumeExecutionTimeout(t *testing.T) {

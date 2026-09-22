@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -70,10 +71,8 @@ func (r *scheduledTestPlanRepository) validateProtectionGroups(ctx context.Conte
 		return nil
 	}
 	ids := make(map[int64]bool)
-	for _, rule := range plan.Protection.Rules {
-		for _, id := range rule.ManagedGroupIDs() {
-			ids[id] = true
-		}
+	for _, id := range plan.ProtectionActionGroupIDs() {
+		ids[id] = true
 	}
 	selected := make(map[int64]bool, len(plan.GroupIDs))
 	for _, id := range plan.GroupIDs {
@@ -290,7 +289,10 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 	if err != nil || !current {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT s.rule_config,s.verdict,s.automated_verdict,s.admin_verdict,p.protection
+	rows, err := tx.QueryContext(ctx, `SELECT s.rule_config,s.verdict,s.automated_verdict,s.admin_verdict,p.protection,
+ s.completed AND s.result_started_at>=s.round_started_at AND EXISTS (
+ SELECT 1 FROM scheduled_test_results evidence WHERE evidence.id=s.result_id
+ AND evidence.started_at=s.result_started_at AND evidence.run_id<>'' AND evidence.run_id=p.latest_run_id)
  FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
  WHERE s.plan_id=$1 AND s.account_id=$2 AND s.round_started_at=$3
  AND p.enabled AND p.protection->>'enabled'='true'
@@ -299,14 +301,16 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		return err
 	}
 	var rules []protectionRoutingRule
+	var config service.ScheduledTestProtectionConfig
+	verdicts := map[int64]string{}
 	for rows.Next() {
 		var entry protectionRoutingRule
 		var raw, configRaw []byte
-		if err := rows.Scan(&raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &configRaw); err != nil {
+		var evidenceCurrent bool
+		if err := rows.Scan(&raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &configRaw, &evidenceCurrent); err != nil {
 			rows.Close()
 			return err
 		}
-		var config service.ScheduledTestProtectionConfig
 		if err := json.Unmarshal(raw, &entry.rule); err != nil {
 			rows.Close()
 			return err
@@ -317,6 +321,9 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		}
 		if protectionRuleCurrent(&config, entry.rule) {
 			rules = append(rules, entry)
+			if evidenceCurrent {
+				verdicts[entry.rule.TestDefinitionID] = entry.currentVerdict
+			}
 		}
 	}
 	err = rows.Err()
@@ -328,7 +335,40 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 	if err != nil {
 		return err
 	}
-	changes := protectionRoutingChanges(rules, before.groups)
+	var changes []protectionRoutingChange
+	if config.UsesCombinations() {
+		decision := service.EvaluateScheduledTestCombinations(config, verdicts)
+		if decision.Action == nil {
+			return nil
+		}
+		labels := make([]string, 0, len(decision.RuleIDs))
+		for _, id := range decision.RuleIDs {
+			label := id
+			for _, combination := range config.Combinations {
+				if combination.ID == id && combination.Name != "" {
+					label = combination.Name
+					break
+				}
+			}
+			labels = append(labels, label)
+		}
+		state.actionReason = "命中组合规则：" + strings.Join(labels, "、")
+		if err := applyCombinationScheduling(ctx, tx, state, decision); err != nil {
+			return err
+		}
+		if decision.Action.GroupMode == "assign" {
+			desired, scope := map[int64]bool{}, map[int64]bool{}
+			for id := range before.groups {
+				scope[id] = true
+			}
+			for _, id := range decision.Action.GroupIDs {
+				desired[id], scope[id] = true, true
+			}
+			changes = []protectionRoutingChange{{scope: scope, desired: desired}}
+		}
+	} else {
+		changes = protectionRoutingChanges(rules, before.groups)
+	}
 	if len(changes) == 0 {
 		return nil
 	}
@@ -371,6 +411,22 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		return err
 	}
 	return enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountGroupsChanged, &state.accountID, nil, buildSchedulerGroupPayload(sortedProtectionIDs(change.scope)))
+}
+
+func applyCombinationScheduling(ctx context.Context, tx *sql.Tx, state *protectionState, decision service.ScheduledTestCombinationDecision) error {
+	if decision.Action == nil || (decision.Action.Scheduling != "pause" && decision.Action.Scheduling != "resume") {
+		return nil
+	}
+	raw, err := json.Marshal(decision.RuleIDs)
+	if err != nil {
+		return err
+	}
+	blocked := decision.Action.Scheduling == "pause"
+	_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_combination_states(plan_id,account_id,blocked,reason,rule_ids)
+ VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(plan_id,account_id) DO UPDATE SET
+ blocked=EXCLUDED.blocked,reason=EXCLUDED.reason,rule_ids=EXCLUDED.rule_ids,updated_at=NOW()`,
+		state.planID, state.accountID, blocked, state.actionReason, raw)
+	return err
 }
 
 // The execution snapshot, rather than live memberships, establishes every

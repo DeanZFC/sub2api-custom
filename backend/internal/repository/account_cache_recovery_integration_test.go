@@ -57,6 +57,7 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		 recovery_phase TEXT NOT NULL DEFAULT 'trial',recovery_trial_started_at TIMESTAMPTZ DEFAULT clock_timestamp()-INTERVAL '1 minute',
 		 recovery_trial_ends_at TIMESTAMPTZ DEFAULT clock_timestamp()+INTERVAL '1 hour',recovery_trial_requests BIGINT NOT NULL DEFAULT 0,rule_config JSONB NOT NULL,
 		 PRIMARY KEY(plan_id,account_id,test_definition_id));
+		CREATE TABLE scheduled_test_combination_states(plan_id BIGINT,account_id BIGINT,blocked BOOLEAN NOT NULL DEFAULT TRUE,PRIMARY KEY(plan_id,account_id));
 		INSERT INTO accounts(id) VALUES(41);`)
 	repos := []*accountRepository{{sql: db}, {sql: otherDB}}
 	check := func(want bool) {
@@ -66,7 +67,7 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		require.Equal(t, want, allowed)
 	}
 	reset := func() {
-		exec(`TRUNCATE scheduled_test_protection_states; UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL`)
+		exec(`TRUNCATE scheduled_test_protection_states,scheduled_test_combination_states; UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL`)
 	}
 	hold := func(planID, maxRequests int64) {
 		exec(`INSERT INTO scheduled_test_protection_states(plan_id,account_id,test_definition_id,rule_config)
@@ -102,6 +103,17 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		exec(`UPDATE scheduled_test_protection_states SET recovery_trial_ends_at=clock_timestamp()+INTERVAL '1 hour',recovery_trial_started_at=clock_timestamp()+INTERVAL '1 minute' WHERE plan_id=2`)
 		check(false)
 		exec(`UPDATE scheduled_test_protection_states SET blocked=FALSE WHERE plan_id=2`)
+		check(true)
+	})
+	t.Run("combination hold overrides an active cache trial", func(t *testing.T) {
+		reset()
+		hold(1, 3)
+		exec(`INSERT INTO scheduled_test_combination_states(plan_id,account_id) VALUES(2,41)`)
+		check(false)
+		var used int64
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT recovery_trial_requests FROM scheduled_test_protection_states WHERE plan_id=1`).Scan(&used))
+		require.Zero(t, used, "combination rejection must not consume the cache trial budget")
+		exec(`UPDATE scheduled_test_combination_states SET blocked=FALSE`)
 		check(true)
 	})
 	t.Run("two instances share the smallest atomic trial budget", func(t *testing.T) {

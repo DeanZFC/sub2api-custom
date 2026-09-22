@@ -10,16 +10,10 @@ import (
 
 const scheduledTestAutomaticRetries = 3
 
-// Private provenance marker: only the cron dispatch path sets this value.
-type scheduledTestAutomaticRunKey struct{}
-
 // runWithAutomaticRetries keeps persistence outside the retry loop. The same
 // running row and account/type lock cover all attempts, with one final result.
+// Scheduled runs, manual runs and single-result retries share the same budget.
 func (s *ScheduledTestRunnerService) runWithAutomaticRetries(ctx context.Context, plan *ScheduledTestPlan, accountID *int64, execute func(context.Context) *ScheduledTestResult) *ScheduledTestResult {
-	retryLimit := 0
-	if automatic, _ := ctx.Value(scheduledTestAutomaticRunKey{}).(bool); automatic {
-		retryLimit = scheduledTestAutomaticRetries
-	}
 	baseDelay := s.automaticRetryBaseDelay
 	if baseDelay <= 0 {
 		baseDelay = time.Second
@@ -55,14 +49,12 @@ func (s *ScheduledTestRunnerService) runWithAutomaticRetries(ctx context.Context
 				result.ErrorMessage = "test did not complete successfully"
 			}
 		}
-		if attempt >= retryLimit {
-			if retryLimit > 0 {
-				logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d definition=%d automatic_retry_exhausted retries=%d", plan.ID, account, definition, retryLimit)
-			}
+		if attempt >= scheduledTestAutomaticRetries {
+			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d definition=%d automatic_retry_exhausted retries=%d", plan.ID, account, definition, scheduledTestAutomaticRetries)
 			return result
 		}
 		delay := baseDelay * time.Duration(1<<attempt)
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d definition=%d automatic_retry=%d/%d delay=%s", plan.ID, account, definition, attempt+1, retryLimit, delay)
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d definition=%d automatic_retry=%d/%d delay=%s", plan.ID, account, definition, attempt+1, scheduledTestAutomaticRetries, delay)
 		timer := time.NewTimer(delay)
 		select {
 		case <-timer.C:

@@ -84,7 +84,6 @@ func TestScheduledTestStatisticsAutomaticRetryKeepsOneResultAndWindow(t *testing
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	ctx = context.WithValue(ctx, scheduledTestAutomaticRunKey{}, true)
 	runner.runPlanDefinition(ctx, statisticsTestPlan())
 	require.NoError(t, ctx.Err())
 	require.Equal(t, 2, attempts)
@@ -326,6 +325,7 @@ func TestScheduledTestStatisticsFailureCompletesTheRunningRow(t *testing.T) {
 				},
 			}
 			runner := NewScheduledTestRunnerService(nil, statisticsTestService(repo), nil, nil, nil, nil)
+			runner.automaticRetryBaseDelay = time.Millisecond
 			runner.runPlanDefinition(context.Background(), statisticsTestPlan())
 			require.Equal(t, 1, repo.countCreated())
 			completed := <-repo.updated

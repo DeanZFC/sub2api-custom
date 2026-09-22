@@ -96,10 +96,11 @@ func (r *statisticsRunEligibilityRepo) IsPlanRunAccountEligible(context.Context,
 func TestScheduledTestStatisticsQueuedRunInvalidatedBeforeCollection(t *testing.T) {
 	repo := &statisticsRunEligibilityRepo{
 		statisticsResultRepoStub: &statisticsResultRepoStub{retryResultRepoStub: &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 3)}},
-		checked:                  make(chan struct{}, 3),
+		checked:                  make(chan struct{}, 5),
 	}
 	repo.current.Store(true)
 	runner := NewScheduledTestRunnerService(nil, statisticsTestService(repo), nil, nil, nil, nil)
+	runner.automaticRetryBaseDelay = time.Millisecond
 	runner.statisticsSem = make(chan struct{}, 1)
 	runner.statisticsSem <- struct{}{}
 	plan := statisticsTestPlan()

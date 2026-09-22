@@ -84,7 +84,7 @@ CREATE TABLE ops_error_logs (
 		"253_scheduled_test_plan_sort_order.sql", "256_scheduled_test_multiple_definitions.sql", "257_scheduled_test_hourly_statistics.sql",
 		"258_scheduled_test_protection.sql", "259_scheduled_test_outcome_actions.sql",
 		"260_scheduled_test_model_check.sql", "261_scheduled_test_admin_review.sql", "262_scheduled_test_execution_snapshot.sql",
-		"264_scheduled_test_cache_recovery.sql", "264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql",
+		"264_scheduled_test_cache_recovery.sql", "264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -106,11 +106,15 @@ CREATE TABLE ops_error_logs (
 		exec(`TRUNCATE scheduled_test_plans,scheduled_test_results,scheduled_test_plan_definitions,scheduled_test_protection_states,scheduled_test_managed_accounts,scheduled_test_votes,scheduler_outbox,usage_logs,ops_error_logs RESTART IDENTITY CASCADE`)
 		exec(`UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL,extra='{}'`)
 	}
-	newHold := func(rule service.ScheduledTestProtectionRule) (*service.ScheduledTestPlan, *service.ScheduledTestResult) {
+	newHold := func(rule service.ScheduledTestProtectionRule, combinations ...service.ScheduledTestCombinationRule) (*service.ScheduledTestPlan, *service.ScheduledTestResult) {
 		t.Helper()
+		protection := service.ScheduledTestProtectionConfig{Enabled: true, Rules: []service.ScheduledTestProtectionRule{rule}}
+		if len(combinations) > 0 {
+			protection.Mode, protection.Combinations = "combined", combinations
+		}
 		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Cache recovery", GroupIDs: []int64{groupID}, GroupID: &groupID, TargetMode: "all_accounts",
 			TestDefinitionID: &definitionID, TestDefinitionIDs: []int64{definitionID}, ModelID: "model", CronExpression: "0 * * * *", Enabled: true, MaxResults: 3,
-			Protection: service.ScheduledTestProtectionConfig{Enabled: true, Rules: []service.ScheduledTestProtectionRule{rule}}})
+			Protection: protection})
 		require.NoError(t, err)
 		result, err := repo.Create(ctx, &service.ScheduledTestResult{PlanID: p.ID, TestDefinitionID: &definitionID, GroupID: &groupID, AccountID: &accountID,
 			TargetMode: "all_accounts", ModelID: "model", Status: "success", OutputKind: "statistics", StartedAt: now.Add(-time.Minute), FinishedAt: now,
@@ -293,6 +297,25 @@ CREATE TABLE ops_error_logs (
 			require.NoError(t, err)
 			require.Equal(t, now, *start)
 		}
+	})
+	t.Run("combined mode retains cache safeguard and combination pause blocks its trial", func(t *testing.T) {
+		reset()
+		p, _ := newHold(rule, service.ScheduledTestCombinationRule{ID: "observe", Condition: combinedTestLeaf(definitionID, "fail"), Action: service.ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "keep"}})
+		phase, blocked, _ := state(p.ID)
+		require.Equal(t, "cooldown", phase)
+		require.True(t, blocked)
+		exec(`INSERT INTO scheduled_test_combination_states(plan_id,account_id,blocked,reason) VALUES($1,62,TRUE,'combination pause')`, p.ID)
+		exec(`UPDATE scheduled_test_protection_states SET recovery_cooldown_until=$2 WHERE plan_id=$1`, p.ID, now.Add(-time.Second))
+		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now))
+		phase, _, _ = state(p.ID)
+		require.Equal(t, "cooldown", phase)
+		status("quality_paused", false)
+		exec(`UPDATE scheduled_test_combination_states SET blocked=FALSE WHERE plan_id=$1`, p.ID)
+		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now))
+		phase, blocked, _ = state(p.ID)
+		require.Equal(t, "trial", phase)
+		require.True(t, blocked)
+		status("active", true)
 	})
 
 	t.Run("manual status and schedulability remain authoritative", func(t *testing.T) {

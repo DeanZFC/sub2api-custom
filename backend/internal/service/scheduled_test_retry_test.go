@@ -160,6 +160,7 @@ func TestScheduledTestRetryReusesRunningRowAndSurvivesRequestCancellation(t *tes
 	plans := &runnerPlanRepoStub{}
 	runner := NewScheduledTestRunnerService(plans, NewScheduledTestService(plans, results), nil,
 		retryAccountRepoStub{account: &Account{ID: accountID, GroupIDs: []int64{groupID}, Status: "error", Schedulable: false}}, nil, nil)
+	runner.automaticRetryBaseDelay = time.Millisecond
 	// Keep the background call queued so duplicate protection can be tested
 	// deterministically without contacting an upstream.
 	runner.workerSem = make(chan struct{}, 1)

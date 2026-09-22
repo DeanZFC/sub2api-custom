@@ -1,12 +1,12 @@
 <template>
   <section class="min-w-0 space-y-3 rounded-lg border p-3" :class="outcome === 'pass' ? 'border-green-200 bg-green-50/40 dark:border-green-900 dark:bg-green-950/10' : 'border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/10'" :data-outcome="outcome">
-    <h5 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t(`admin.tests.protection.actions.${outcome}`) }}</h5>
+    <h5 class="text-sm font-semibold text-gray-900 dark:text-white">{{ title || t(`admin.tests.protection.actions.${outcome}`) }}</h5>
     <label class="input-label block">
       {{ t('admin.tests.protection.actions.scheduling') }}
       <select :value="action.scheduling" class="input mt-1 w-full" data-action-scheduling @change="patch({ scheduling: ($event.target as HTMLSelectElement).value as TestOutcomeAction['scheduling'] })">
         <option value="keep">{{ t('admin.tests.protection.actions.keepScheduling') }}</option>
         <option value="pause">{{ t('admin.tests.protection.actions.pause') }}</option>
-        <option value="resume">{{ t('admin.tests.protection.actions.resume') }}</option>
+        <option value="resume">{{ resumeLabel || t('admin.tests.protection.actions.resume') }}</option>
       </select>
     </label>
     <label class="input-label block">
@@ -44,7 +44,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminGroup, TestOutcomeAction } from '@/types'
 
-const props = defineProps<{ modelValue?: TestOutcomeAction; outcome: 'pass' | 'fail'; groups: AdminGroup[] }>()
+const props = defineProps<{ modelValue?: TestOutcomeAction; outcome: 'pass' | 'fail'; groups: AdminGroup[]; title?: string; resumeLabel?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [value: TestOutcomeAction] }>()
 const { t } = useI18n()
 const search = ref('')

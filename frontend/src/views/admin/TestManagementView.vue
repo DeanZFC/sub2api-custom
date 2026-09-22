@@ -486,6 +486,7 @@ watch(
   () => editingPlan.value?.test_definition_ids.slice(),
   () => {
     const plan = editingPlan.value
+    // Keep combined conditions intact so removed checks remain visible and must be repaired.
     if (plan) plan.protection.rules = plan.protection.rules.filter(rule => plan.test_definition_ids.includes(rule.test_definition_id))
   },
 )

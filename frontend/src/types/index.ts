@@ -2599,7 +2599,22 @@ export interface TestProtectionRule {
 }
 export interface TestProtectionConfig {
   enabled: boolean
+  mode?: 'per_test' | 'combined'
   rules: TestProtectionRule[]
+  combinations?: TestCombinationRule[]
+}
+export interface TestCombinationCondition {
+  operator: 'all' | 'any' | 'test'
+  conditions?: TestCombinationCondition[]
+  test_definition_id?: number
+  verdict?: 'pass' | 'fail'
+}
+export interface TestCombinationRule {
+  id: string
+  name: string
+  priority: number
+  condition: TestCombinationCondition
+  action: TestOutcomeAction
 }
 export type TestVote = 'pass' | 'fail'
 export interface TestVoteResult {

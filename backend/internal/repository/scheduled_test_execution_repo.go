@@ -126,6 +126,12 @@ func readProtectionAccountSnapshot(ctx context.Context, tx *sql.Tx, accountID in
 }
 
 func recordProtectionAction(ctx context.Context, tx *sql.Tx, state *protectionState, before *protectionAccountSnapshot, verdict, reason string) error {
+	if state.actionReason != "" {
+		if reason != "" {
+			reason += "；"
+		}
+		reason += state.actionReason
+	}
 	after, err := readProtectionAccountSnapshot(ctx, tx, state.accountID)
 	if err != nil {
 		return err

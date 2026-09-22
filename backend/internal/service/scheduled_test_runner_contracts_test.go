@@ -311,10 +311,11 @@ func TestScheduledTestRunnerSavesOneResultPerGroupAccount(t *testing.T) {
 	scheduled := NewScheduledTestService(planRepo, resultRepo)
 	groupID := int64(8)
 	runner := &ScheduledTestRunnerService{
-		planRepo:       planRepo,
-		scheduledSvc:   scheduled,
-		accountRepo:    scheduledTestAccountRepoStub{accounts: []Account{{ID: 21}, {ID: 22}}},
-		accountTestSvc: nil, // each account records an independent failure result
+		planRepo:                planRepo,
+		scheduledSvc:            scheduled,
+		accountRepo:             scheduledTestAccountRepoStub{accounts: []Account{{ID: 21}, {ID: 22}}},
+		accountTestSvc:          nil, // each account records an independent failure result
+		automaticRetryBaseDelay: time.Millisecond,
 	}
 	plan := &ScheduledTestPlan{ID: 10, GroupID: &groupID, ModelID: "model", ReasoningEffort: "ultra", CronExpression: "*/5 * * * *", MaxResults: 5}
 	runner.runOnePlan(context.Background(), plan)

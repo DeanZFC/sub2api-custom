@@ -231,9 +231,7 @@ func (s *ScheduledTestRunnerService) runDuePlans(ctx context.Context) {
 		}
 		go func() {
 			defer finish()
-			// Only timer-triggered runs receive automatic retries. Manual runs
-			// and retries retain their existing single-execution semantics.
-			s.executePlan(context.WithValue(runCtx, scheduledTestAutomaticRunKey{}, true), plan)
+			s.executePlan(runCtx, plan)
 		}()
 	}
 }

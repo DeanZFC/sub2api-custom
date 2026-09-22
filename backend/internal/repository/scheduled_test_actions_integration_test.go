@@ -70,7 +70,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 		"258_scheduled_test_protection.sql", "259_scheduled_test_outcome_actions.sql",
 		"260_scheduled_test_model_check.sql", "261_scheduled_test_admin_review.sql", "261_scheduled_test_admin_review.sql",
 		"262_scheduled_test_execution_snapshot.sql",
-		"264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql",
+		"264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -99,4 +99,20 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		testScheduledTestGenericPolicy(t, ctx, db, plans, repo, candyID, pelicanID)
 	})
 	t.Run("generic routing conflicts", func(t *testing.T) { reset(t); testScheduledTestGenericConflicts(t, ctx, db, plans, candyID) })
+	t.Run("combined condition lifecycle and retry", func(t *testing.T) {
+		reset(t)
+		testScheduledTestCombinedLifecycle(t, ctx, db, plans, repo, candyID, pelicanID)
+	})
+	t.Run("combined votes and administrator verdicts", func(t *testing.T) {
+		reset(t)
+		testScheduledTestCombinedVotes(t, ctx, db, plans, repo, candyID, pelicanID)
+	})
+	t.Run("combined ownership and hold cleanup", func(t *testing.T) {
+		reset(t)
+		testScheduledTestCombinedConflictAndCleanup(t, ctx, db, plans, repo, candyID, pelicanID)
+	})
+	t.Run("combined equal priority merges actions", func(t *testing.T) {
+		reset(t)
+		testScheduledTestCombinedMergedActions(t, ctx, db, plans, repo, candyID, pelicanID)
+	})
 }
