@@ -2582,6 +2582,13 @@ export interface TestProtectionRule {
 export interface TestProtectionConfig {
   enabled: boolean
   rules: TestProtectionRule[]
+  group_workflow?: TestGroupWorkflow
+}
+export interface TestGroupWorkflow {
+  automatic_test_id: number
+  review_test_id: number
+  pass_group_id: number
+  fail_group_id: number
 }
 export type TestVote = 'pass' | 'fail'
 export interface TestVoteResult {

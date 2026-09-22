@@ -7,6 +7,7 @@ import (
 
 // Administrator decisions are distinct from counted public ballots.
 type ScheduledTestAdminReview struct {
+	GroupWorkflow bool                 `json:"group_workflow,omitempty"`
 	Result        *ScheduledTestResult `json:"result"`
 	Generation    int64                `json:"generation"`
 	Verdict       string               `json:"verdict"`

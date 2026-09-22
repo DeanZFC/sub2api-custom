@@ -24,11 +24,14 @@ func TestScheduledTestPlanRepositoryCreatePersistsName(t *testing.T) {
 	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM accounts WHERE id = \$1 AND deleted_at IS NULL\)`).
 		WithArgs(accountID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`(?s)INSERT INTO scheduled_test_plans \(name, sort_order, account_id`).
 		WithArgs("nightly candy", 0, accountID, nil, nil, "candy", "account", "model", "", "*/5 * * * *", true, 20, false, nextRun, nil, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "sort_order", "account_id", "group_id", "test_definition_id", "test_type", "target_mode", "model_id", "reasoning_effort", "cron_expression", "enabled", "max_results", "auto_recover", "last_run_at", "next_run_at", "created_at", "updated_at", "test_definition_ids", "protection",
 		}).AddRow(10, "nightly candy", 0, accountID, nil, nil, "candy", "account", "model", "", "*/5 * * * *", true, 20, false, nil, nextRun, createdAt, createdAt, "{}", "{}"))
+	mock.ExpectCommit()
 
 	got, err := repo.Create(context.Background(), &service.ScheduledTestPlan{
 		Name: "nightly candy", AccountID: &accountID, TargetMode: "account", TestType: "candy", ModelID: "model", CronExpression: "*/5 * * * *", Enabled: true, MaxResults: 20, NextRunAt: &nextRun,

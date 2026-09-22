@@ -15,8 +15,9 @@ var (
 )
 
 type ScheduledTestProtectionConfig struct {
-	Enabled bool                          `json:"enabled"`
-	Rules   []ScheduledTestProtectionRule `json:"rules"`
+	Enabled       bool                          `json:"enabled"`
+	Rules         []ScheduledTestProtectionRule `json:"rules"`
+	GroupWorkflow *ScheduledTestGroupWorkflow   `json:"group_workflow,omitempty"`
 }
 
 type ScheduledTestProtectionRule struct {
@@ -87,6 +88,9 @@ func (p *ScheduledTestPlan) ProtectionRule(definitionID *int64) *ScheduledTestPr
 
 func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 	config := &plan.Protection
+	if err := normalizeScheduledTestGroupWorkflow(plan); err != nil {
+		return err
+	}
 	if !config.Enabled {
 		return nil
 	}

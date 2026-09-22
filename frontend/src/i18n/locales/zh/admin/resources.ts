@@ -1,5 +1,15 @@
 export default {
     tests: {
+      groupWorkflow: {
+        mode: '分组处理方式', standard: '分别配置检测规则', title: '糖果分组 + 鹈鹕人工调整',
+        description: '检测两个分组内的所有账号。糖果数值等于 21 时进入通过分组；数值不符或最终执行失败时进入不通过分组。鹈鹕由管理员点击通过或不通过，立即覆盖本轮分组，不需要用户投票。',
+        automaticTest: '糖果数字检测（等于 21）', reviewTest: '鹈鹕动画检测（管理员判定）', selectTest: '请选择检测类型',
+        passGroup: '通过分组（Pro-不降智）', failGroup: '不通过分组（Pro）', bothGroups: '两个分组内所有账号',
+        replaceHint: '每次直接移动：删除账号原有的全部分组，只保留本次目标分组。手动关闭调度的账号不会被处理。',
+        roundHint: '每轮糖果完成后重新分组；管理员判定只对本轮生效，下一轮重新开始。默认每小时执行，也可修改下方 Cron。',
+        conflictHint: '只保留这一条分组计划；请停用原 Pro / Pro-不降智 两条分组计划，避免重复检测和互相调整。',
+        invalid: '请选择已启用的数字与 HTML 检测，以及同一平台下两个不同的有效分组。',
+      },
       protection: {
         actionTaken: '处理结果',
         actionPause: '自动暂停调度',

@@ -30,12 +30,30 @@ func (r *scheduledTestPlanRepository) Create(ctx context.Context, plan *service.
 	if err != nil {
 		return nil, err
 	}
-	row := r.db.QueryRowContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
+		return nil, err
+	}
+	if err := validateScheduledTestGroupWorkflowConflicts(ctx, tx, plan); err != nil {
+		return nil, err
+	}
+	row := tx.QueryRowContext(ctx, `
 		INSERT INTO scheduled_test_plans (name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, next_run_at, test_definition_ids, protection, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15::bigint[], '{}'), $16::jsonb, NOW(), NOW())
 		RETURNING id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection
 	`, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt, pq.Array(plan.TestDefinitionIDs), protection)
-	return scanPlan(row)
+	created, err := scanPlan(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return created, nil
 }
 
 func (r *scheduledTestPlanRepository) GetByID(ctx context.Context, id int64) (*service.ScheduledTestPlan, error) {
@@ -86,8 +104,14 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
+		return nil, err
+	}
 	previous, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
 	if err != nil {
+		return nil, err
+	}
+	if err := validateScheduledTestGroupWorkflowConflicts(ctx, tx, plan); err != nil {
 		return nil, err
 	}
 	if !plan.Enabled || !plan.Protection.Enabled || !reflect.DeepEqual(previous.Protection, plan.Protection) ||
@@ -165,6 +189,9 @@ func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) erro
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
+		return err
+	}
 	if err := clearPlanProtectionTx(ctx, tx, id); err != nil {
 		return err
 	}

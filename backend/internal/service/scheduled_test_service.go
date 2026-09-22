@@ -387,6 +387,9 @@ func (s *ScheduledTestService) validateDefinitionForPlan(ctx context.Context, pl
 			return fmt.Errorf("test definition %d not found", id)
 		}
 		hasEnabled = hasEnabled || d.Enabled
+		if err := validateScheduledTestGroupWorkflowDefinition(plan, d); err != nil {
+			return err
+		}
 		if plan.Protection.Enabled {
 			for i := range plan.Protection.Rules {
 				if plan.Protection.Rules[i].TestDefinitionID == id {

@@ -375,6 +375,62 @@ describe('configurable test management', () => {
 
 describe('automatic protection plan integration', () => {
   const protection = { enabled: true, rules: [{ test_definition_id: 2, pause_on_failure: true, expected_answer: '29', answer_match: 'numeric', thresholds: [], vote: { enabled: false, reject_above: 0, pass_at_least: 3 } }] }
+  it('converts to one workflow for both groups and prevents selecting the same outcome group', async () => {
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
+    ])
+    api.getGroups.mockResolvedValue([
+      { id: 8, name: 'GPT-Pro-不降智', platform: 'openai', status: 'active' },
+      { id: 9, name: 'GPT-Pro', platform: 'openai', status: 'active' },
+      { id: 12, name: 'Other platform', platform: 'anthropic', status: 'active' },
+    ])
+    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    await dialog.get('[data-plan-mode]').setValue('group_workflow')
+    expect(dialog.find('[data-protection-editor]').exists()).toBe(false)
+    expect(dialog.find('[data-testid="plan-type-2"]').exists()).toBe(false)
+    expect(dialog.get('[data-workflow-replace-hint]').text()).toContain('admin.tests.groupWorkflow.replaceHint')
+    expect(dialog.get('[data-workflow-pass-group]').find('option[value="12"]').exists()).toBe(false)
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    await dialog.get('[data-workflow-fail-group]').setValue('8')
+    expect(save.attributes('disabled')).toBeDefined()
+    await dialog.get('[data-workflow-fail-group]').setValue('9')
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({
+      group_id: 8, account_id: null, target_mode: 'all_accounts', test_definition_ids: [2, 3], cron_expression: '0 * * * *',
+      protection: { enabled: true, group_workflow: { automatic_test_id: 2, review_test_id: 3, pass_group_id: 8, fail_group_id: 9 }, rules: [
+        expect.objectContaining({ test_definition_id: 2, expected_answer: '21', answer_match: 'numeric', on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [8] }, on_fail: { scheduling: 'keep', group_mode: 'assign', group_ids: [9] } }),
+        expect.objectContaining({ test_definition_id: 3, vote: { enabled: true, reject_above: 0, pass_at_least: 1 } }),
+      ] },
+    }))
+    expect(protection.rules[0].expected_answer).toBe('29')
+    wrapper.unmount()
+  })
+
+  it('copies workflow settings independently and keeps the selected custom schedule', async () => {
+    const groupWorkflow = { automatic_test_id: 2, review_test_id: 3, pass_group_id: 8, fail_group_id: 9 }
+    const configured = { enabled: true, rules: [], group_workflow: groupWorkflow }
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
+    ])
+    api.getGroups.mockResolvedValue([{ id: 8, name: 'Premium', platform: 'openai', status: 'active' }, { id: 9, name: 'Pro', platform: 'openai', status: 'active' }])
+    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'all_accounts', test_definition_ids: [2, 3], cron_expression: '15 * * * *', protection: configured }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ cron_expression: '15 * * * *', protection: configured }))
+    api.createPlan.mock.calls[0][0].protection.group_workflow.pass_group_id = 99
+    expect(groupWorkflow.pass_group_id).toBe(8)
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    expect(wrapper.get('[data-plan-mode]').element).toHaveProperty('value', 'group_workflow')
+    expect(wrapper.find('[data-protection-editor]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('saves and copies cache recovery settings without mutating the loaded plan', async () => {
     const recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 85 }
     const cacheProtection = { enabled: true, rules: [{ test_definition_id: 7, thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }], recovery }] }

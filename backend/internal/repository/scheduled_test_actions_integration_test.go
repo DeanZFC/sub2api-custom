@@ -167,6 +167,11 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		return started
 	}
 
+	t.Run("direct group workflow resets automatic placement and accepts administrator overrides", func(t *testing.T) {
+		reset(t)
+		testScheduledTestGroupWorkflow(t, ctx, db, plans, repo, candyID, pelicanID)
+	})
+
 	t.Run("administrator verdict bypasses vote counts but preserves automatic failures", func(t *testing.T) {
 		reset(t)
 		candy := ruleFor(candyID, []int64{10}, []int64{8, 11}, false)

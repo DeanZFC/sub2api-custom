@@ -320,6 +320,9 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 
 func scheduledTestExecutionPlans(plan *ScheduledTestPlan) []*ScheduledTestPlan {
 	ids := plan.TestDefinitionIDs
+	if workflow := plan.Protection.GroupWorkflow; plan.Protection.Enabled && workflow != nil {
+		ids = []int64{workflow.AutomaticTestID, workflow.ReviewTestID}
+	}
 	if len(ids) == 0 {
 		return []*ScheduledTestPlan{plan}
 	}

@@ -16,9 +16,12 @@ import (
 var _ service.ScheduledTestActionRepository = (*scheduledTestResultRepository)(nil)
 var _ service.ScheduledTestActionRoundRepository = (*scheduledTestResultRepository)(nil)
 
-// The source group remains the visibility/authorization boundary for a test.
-// Only an automatic move can enroll an account for subsequent off-group retests.
+// Ordinary tests retain their source-group boundary and enrolled retests. A
+// dedicated group workflow explicitly includes both tiers in its source scope.
 const protectionSourceMembershipSQL = `(r.group_id IS NULL
+ OR (p.protection->'group_workflow' IS NOT NULL AND EXISTS (
+     SELECT 1 FROM account_groups workflow_group WHERE workflow_group.account_id=r.account_id
+     AND workflow_group.group_id::text IN (p.protection->'group_workflow'->>'pass_group_id',p.protection->'group_workflow'->>'fail_group_id')))
  OR EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=r.account_id AND ag.group_id=r.group_id)
  OR EXISTS (SELECT 1 FROM scheduled_test_managed_accounts ma
             WHERE ma.plan_id=r.plan_id AND ma.account_id=r.account_id AND ma.source_group_id=r.group_id))`
@@ -26,6 +29,9 @@ const protectionSourceMembershipSQL = `(r.group_id IS NULL
 func (r *scheduledTestResultRepository) ListPlanDetectionAccountIDs(ctx context.Context, plan *service.ScheduledTestPlan, accountID *int64) ([]int64, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("test plan is required")
+	}
+	if plan.Protection.Enabled && plan.Protection.GroupWorkflow != nil {
+		return r.listGroupWorkflowAccountIDs(ctx, plan, accountID, true)
 	}
 	if !plan.HasGroupActions() {
 		return r.ListDetectionAccountIDs(ctx, plan.GroupID, accountID)
@@ -61,6 +67,9 @@ func (r *scheduledTestResultRepository) ListPlanDetectionAccountIDs(ctx context.
 func (r *scheduledTestResultRepository) ListPlanTargetAccountIDs(ctx context.Context, plan *service.ScheduledTestPlan, accountID *int64) ([]int64, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("test plan is required")
+	}
+	if plan.Protection.Enabled && plan.Protection.GroupWorkflow != nil {
+		return r.listGroupWorkflowAccountIDs(ctx, plan, accountID, false)
 	}
 	if accountID != nil {
 		var exists bool
@@ -268,6 +277,22 @@ func sortedProtectionIDs(ids map[int64]bool) []int64 {
 }
 
 func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, accountID int64) error {
+	// A dedicated workflow owns this account's complete group assignment. A
+	// legacy result already queued before the workflow was enabled must not
+	// restore its old memberships; scheduling holds remain independent.
+	var workflowOwnsGroups bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+ SELECT 1 FROM scheduled_test_plans p WHERE p.enabled AND p.protection->>'enabled'='true'
+ AND p.protection->'group_workflow' IS NOT NULL AND p.protection->'group_workflow'<>'null'::jsonb
+ AND (EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=$1
+      AND ag.group_id::text IN (p.protection->'group_workflow'->>'pass_group_id',p.protection->'group_workflow'->>'fail_group_id'))
+      OR EXISTS (SELECT 1 FROM scheduled_test_managed_accounts ma WHERE ma.plan_id=p.id AND ma.account_id=$1 AND ma.source_group_id=p.group_id))
+ )`, accountID).Scan(&workflowOwnsGroups); err != nil {
+		return err
+	}
+	if workflowOwnsGroups {
+		return nil
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT s.plan_id,p.group_id,s.rule_config,s.routing_verdict,p.protection,s.verdict
  FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
  WHERE s.account_id=$1 AND p.enabled AND p.protection->>'enabled'='true'
@@ -292,7 +317,7 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, accountID int64)
 			rows.Close()
 			return err
 		}
-		if protectionRuleCurrent(&config, entry.rule) && len(entry.rule.ManagedGroupIDs()) > 0 {
+		if config.GroupWorkflow == nil && protectionRuleCurrent(&config, entry.rule) && len(entry.rule.ManagedGroupIDs()) > 0 {
 			rules = append(rules, entry)
 		}
 	}

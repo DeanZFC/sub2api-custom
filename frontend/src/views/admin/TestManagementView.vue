@@ -50,7 +50,9 @@
       <div v-if="editingPlan" class="grid gap-4 sm:grid-cols-2">
         <label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingPlan.name" class="input mt-1 w-full" /></label>
         <label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingPlan.sort_order" min="0" type="number" class="input mt-1 w-full" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.planSortOrderHint') }}</span></label>
-        <fieldset class="sm:col-span-2">
+        <label class="input-label sm:col-span-2">{{ t('admin.tests.groupWorkflow.mode') }}<select :value="editingPlan.protection.group_workflow ? 'group_workflow' : 'standard'" class="input mt-1 w-full" data-plan-mode @change="setGroupWorkflowMode(($event.target as HTMLSelectElement).value === 'group_workflow')"><option value="standard">{{ t('admin.tests.groupWorkflow.standard') }}</option><option value="group_workflow">{{ t('admin.tests.groupWorkflow.title') }}</option></select></label>
+        <TestGroupWorkflowEditor v-if="editingPlan.protection.group_workflow" :model-value="editingPlan.protection.group_workflow" :types="orderedTypes" :groups="workflowGroups" class="sm:col-span-2" @update:model-value="updateGroupWorkflow" />
+        <fieldset v-else class="sm:col-span-2">
           <legend class="input-label">{{ t('admin.tests.types') }}</legend>
           <div class="mt-2 flex flex-wrap gap-x-6 gap-y-3">
             <label v-for="type in orderedTypes" :key="type.id" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200" :class="{ 'opacity-50': !type.enabled }">
@@ -60,14 +62,14 @@
           </div>
           <p v-if="!orderedTypes.length" class="mt-2 text-sm text-gray-500">{{ t('common.noData') }}</p>
         </fieldset>
-        <label class="input-label">{{ t('admin.tests.group') }}<select v-model.number="editingPlan.group_id" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.selectGroup') }}</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} (#{{ group.id }})</option></select></label>
-        <label class="input-label">{{ t('admin.tests.accountOptional') }}<select v-model="accountSelection" class="input mt-1 w-full" :disabled="!editingPlan.group_id"><option :value="null">{{ editingPlan.group_id ? t('admin.tests.groupTest') : t('admin.tests.selectGroupFirst') }}</option><option value="all" :disabled="!editingPlan.group_id">{{ t('admin.tests.allAccountsInGroup') }}</option><option v-for="account in filteredAccounts" :key="account.id" :value="account.id">{{ account.name || t('admin.tests.account') }} (#{{ account.id }})</option></select></label>
-        <p class="text-xs text-gray-500 sm:col-span-2">{{ targetModeHint }}</p>
+        <label v-if="!editingPlan.protection.group_workflow" class="input-label">{{ t('admin.tests.group') }}<select v-model.number="editingPlan.group_id" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.selectGroup') }}</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} (#{{ group.id }})</option></select></label>
+        <label v-if="!editingPlan.protection.group_workflow" class="input-label">{{ t('admin.tests.accountOptional') }}<select v-model="accountSelection" class="input mt-1 w-full" :disabled="!editingPlan.group_id"><option :value="null">{{ editingPlan.group_id ? t('admin.tests.groupTest') : t('admin.tests.selectGroupFirst') }}</option><option value="all" :disabled="!editingPlan.group_id">{{ t('admin.tests.allAccountsInGroup') }}</option><option v-for="account in filteredAccounts" :key="account.id" :value="account.id">{{ account.name || t('admin.tests.account') }} (#{{ account.id }})</option></select></label>
+        <p v-if="!editingPlan.protection.group_workflow" class="text-xs text-gray-500 sm:col-span-2">{{ targetModeHint }}</p>
         <p v-if="invalidAccountTarget" class="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2" data-invalid-account-target>{{ t('admin.tests.protection.accountMovedHint') }}</p>
         <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_id || modelOptionsLoading" :placeholder="editingPlan.group_id ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /></label>
         <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
         <label class="input-label sm:col-span-2">{{ t('admin.tests.cron') }}<input v-model.trim="editingPlan.cron_expression" class="input mt-1 w-full" placeholder="*/30 * * * *" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.cronHint') }}</span></label>
-        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :target-mode="editingPlan.target_mode" :groups="protectionGroups" class="sm:col-span-2" />
+        <TestProtectionEditor v-if="!editingPlan.protection.group_workflow" v-model="editingPlan.protection" :types="selectedProtectionTypes" :target-mode="editingPlan.target_mode" :groups="protectionGroups" class="sm:col-span-2" />
         <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
         <label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label>
       </div>
@@ -98,8 +100,9 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { reasoningEffortsForTestModel } from '@/utils/testReasoningEfforts'
 import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vue'
 import TestProtectionEditor from '@/components/tests/TestProtectionEditor.vue'
-import { copyTestProtection, validTestProtection } from '@/utils/testProtection'
-import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType, TestProtectionConfig } from '@/types'
+import TestGroupWorkflowEditor from '@/components/tests/TestGroupWorkflowEditor.vue'
+import { copyTestProtection, groupWorkflowProtection, validTestProtection } from '@/utils/testProtection'
+import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType, TestProtectionConfig, TestGroupWorkflow } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -164,6 +167,40 @@ const eligibleProtectionGroups = (groupID?: number | null) => {
   return source ? groups.value.filter(group => group.platform === source.platform && group.platform !== 'composite' && group.status === 'active') : []
 }
 const protectionGroups = computed(() => eligibleProtectionGroups(editingPlan.value?.group_id))
+const workflowGroups = computed(() => {
+  const source = groups.value.find(group => group.id === editingPlan.value?.group_id)
+  return groups.value.filter(group => group.status === 'active' && group.platform !== 'composite'
+    && (!source || group.platform === source.platform))
+})
+const updateGroupWorkflow = (workflow: TestGroupWorkflow) => {
+  const plan = editingPlan.value
+  if (!plan) return
+  plan.protection = groupWorkflowProtection(workflow)
+  plan.test_definition_ids = [workflow.automatic_test_id, workflow.review_test_id].filter(id => id > 0)
+  plan.target_mode = 'all_accounts'
+  plan.account_id = null
+  if (!plan.group_id || ![workflow.pass_group_id, workflow.fail_group_id].includes(plan.group_id)) {
+    plan.group_id = workflow.pass_group_id || workflow.fail_group_id || null
+  }
+}
+const setGroupWorkflowMode = (enabled: boolean) => {
+  const plan = editingPlan.value
+  if (!plan) return
+  if (!enabled) {
+    delete plan.protection.group_workflow
+    return
+  }
+  const available = workflowGroups.value
+  const automatic = orderedTypes.value.find(type => type.enabled && type.output_kind === 'number' && /candy/i.test(type.key))
+    || orderedTypes.value.find(type => type.enabled && type.output_kind === 'number')
+  const review = orderedTypes.value.find(type => type.enabled && type.output_kind === 'html' && /pelican/i.test(type.key))
+    || orderedTypes.value.find(type => type.enabled && type.output_kind === 'html')
+  const pass = available.find(group => /不降智/.test(group.name)) || available.find(group => group.id === plan.group_id)
+  const failID = plan.protection.rules.flatMap(rule => rule.on_fail?.group_ids || []).find(id => id !== pass?.id && available.some(group => group.id === id))
+    || available.find(group => group.id !== pass?.id && /^(?:GPT-)?Pro$/i.test(group.name.trim()))?.id || 0
+  updateGroupWorkflow({ automatic_test_id: automatic?.id || 0, review_test_id: review?.id || 0, pass_group_id: pass?.id || 0, fail_group_id: failID })
+  if (plan.cron_expression === '*/30 * * * *') plan.cron_expression = '0 * * * *'
+}
 
 const filteredAccounts = computed(() => {
   const groupID = editingPlan.value?.group_id
@@ -538,8 +575,10 @@ onUnmounted(() => {
   clearInterval(resultTimer)
   resultsRequest++
 })
-const groupName = (plan: TestPlan) => plan.group_id ? groups.value.find(group => group.id === plan.group_id)?.name || `#${plan.group_id}` : '-'
-const targetName = (plan: TestPlan) => plan.account_id
+const groupName = (plan: TestPlan) => plan.protection?.group_workflow
+  ? [plan.protection.group_workflow.pass_group_id, plan.protection.group_workflow.fail_group_id].map(id => groups.value.find(group => group.id === id)?.name || `#${id}`).join(' / ')
+  : plan.group_id ? groups.value.find(group => group.id === plan.group_id)?.name || `#${plan.group_id}` : '-'
+const targetName = (plan: TestPlan) => plan.protection?.group_workflow ? t('admin.tests.groupWorkflow.bothGroups') : plan.account_id
   ? `${accounts.value.find(account => account.id === plan.account_id)?.name || t('admin.tests.account')} (#${plan.account_id})`
   : t(plan.target_mode === 'group' ? 'admin.tests.groupTest' : 'admin.tests.allAccountsInGroup')
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '-'

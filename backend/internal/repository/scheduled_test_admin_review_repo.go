@@ -63,6 +63,7 @@ func (r *scheduledTestResultRepository) ListAdminReviews(ctx context.Context) ([
 			return nil, err
 		}
 		if protectionRuleCurrent(&config, rule) {
+			out.GroupWorkflow = config.GroupWorkflow != nil
 			results = append(results, out)
 		}
 	}

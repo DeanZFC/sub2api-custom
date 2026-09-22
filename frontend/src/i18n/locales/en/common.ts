@@ -221,6 +221,7 @@ export default {
 
   tests: {
     adminReview: {
+      groupWorkflowHint: 'This immediately replaces all account groups with the target group. The decision applies only to this round; the next candy round decides again.',
       title: 'Admin decision', markPass: 'Mark as passed', markFail: 'Mark as failed',
       pass: 'Marked as passed', fail: 'Marked as failed',
       automaticHold: 'Automatic checks have not passed',

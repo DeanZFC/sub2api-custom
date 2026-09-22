@@ -1,4 +1,4 @@
-import type { TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRecovery, TestProtectionRule, TestType } from '@/types'
+import type { TestGroupWorkflow, TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRecovery, TestProtectionRule, TestType } from '@/types'
 
 export const protectionMetrics = (kind: string): TestProtectionMetric[] => kind === 'statistics'
   ? ['success_rate', 'cache_rate', 'avg_first_token_ms']
@@ -12,8 +12,31 @@ export const defaultTestOutcomeAction = (outcome: 'pass' | 'fail'): TestOutcomeA
 })
 
 export const copyTestProtection = (value?: TestProtectionConfig): TestProtectionConfig => value
-  ? { enabled: value.enabled, rules: (value.rules || []).map(rule => ({ ...rule, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })) }
+  ? { enabled: value.enabled, rules: (value.rules || []).map(rule => ({ ...rule, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })), ...(value.group_workflow ? { group_workflow: { ...value.group_workflow } } : {}) }
   : { enabled: false, rules: [] }
+
+export function groupWorkflowProtection(workflow: TestGroupWorkflow): TestProtectionConfig {
+  const actions = () => ({
+    on_pass: { scheduling: 'keep' as const, group_mode: 'assign' as const, group_ids: [workflow.pass_group_id] },
+    on_fail: { scheduling: 'keep' as const, group_mode: 'assign' as const, group_ids: [workflow.fail_group_id] },
+  })
+  return {
+    enabled: true,
+    group_workflow: { ...workflow },
+    rules: [
+      { test_definition_id: workflow.automatic_test_id, pause_on_failure: true, expected_answer: '21', answer_match: 'numeric', ...actions() },
+      { test_definition_id: workflow.review_test_id, pause_on_failure: true, answer_match: 'exact', vote: { enabled: true, reject_above: 0, pass_at_least: 1 }, ...actions() },
+    ],
+  }
+}
+
+export function validTestGroupWorkflow(workflow: TestGroupWorkflow, types: TestType[], groups?: readonly { id: number }[]): boolean {
+  return Object.values(workflow).every(id => Number.isSafeInteger(id) && id > 0)
+    && workflow.automatic_test_id !== workflow.review_test_id && workflow.pass_group_id !== workflow.fail_group_id
+    && types.some(type => type.id === workflow.automatic_test_id && type.enabled && type.output_kind === 'number')
+    && types.some(type => type.id === workflow.review_test_id && type.enabled && type.output_kind === 'html')
+    && (!groups || [workflow.pass_group_id, workflow.fail_group_id].every(id => groups.some(group => group.id === id)))
+}
 
 export const defaultProtectionRule = (type: TestType): TestProtectionRule => ({
   test_definition_id: type.id,
@@ -70,6 +93,7 @@ function validAction(action: TestOutcomeAction | undefined, groups?: readonly { 
 }
 
 export function validTestProtection(value: TestProtectionConfig | undefined, target: string | undefined, types: TestType[], groups?: readonly { id: number }[]): boolean {
+  if (value?.group_workflow) return value.enabled && target === 'all_accounts' && validTestGroupWorkflow(value.group_workflow, types, groups)
   if (!value?.enabled) return true
   if (target === 'group' || !value.rules.length || value.rules.length > 32) return false
   if (new Set(value.rules.map(rule => rule.test_definition_id)).size !== value.rules.length) return false

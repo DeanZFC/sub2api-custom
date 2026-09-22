@@ -1,5 +1,15 @@
 export default {
     tests: {
+      groupWorkflow: {
+        mode: 'Group assignment mode', standard: 'Configure each test separately', title: 'Candy routing + manual pelican review',
+        description: 'Test all accounts in both groups. A candy result equal to 21 selects the pass group; a different result or a final execution failure selects the fail group. An administrator can immediately override this round by marking the pelican result pass or fail. Public votes are not required.',
+        automaticTest: 'Candy number test (equals 21)', reviewTest: 'Pelican animation test (administrator decision)', selectTest: 'Select a test type',
+        passGroup: 'Pass group (premium)', failGroup: 'Fail group (standard)', bothGroups: 'All accounts in both groups',
+        replaceHint: 'Each move removes all existing account groups and keeps only the selected target group. Accounts with scheduling manually disabled are not changed.',
+        roundHint: 'Every round starts a new candy assignment. Administrator decisions apply to that round only. The default schedule is hourly; the Cron expression below remains editable.',
+        conflictHint: 'Keep only this group workflow. Disable the original Pro and Pro premium group plans to avoid duplicate tests and conflicting moves.',
+        invalid: 'Select an enabled number test, an enabled HTML test, and two different active groups on the same platform.',
+      },
       protection: {
         actionTaken: 'Action taken',
         actionPause: 'Automatically paused scheduling',
