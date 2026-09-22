@@ -63,7 +63,7 @@ func TestGetOverloadCooldownSettings_DefaultsWhenNotSet(t *testing.T) {
 
 	settings, err := svc.GetOverloadCooldownSettings(context.Background())
 	require.NoError(t, err)
-	require.True(t, settings.Enabled)
+	require.False(t, settings.Enabled)
 	require.Equal(t, 10, settings.CooldownMinutes)
 }
 
@@ -108,7 +108,7 @@ func TestGetOverloadCooldownSettings_InvalidJSON_ReturnsDefaults(t *testing.T) {
 
 	settings, err := svc.GetOverloadCooldownSettings(context.Background())
 	require.NoError(t, err)
-	require.True(t, settings.Enabled)
+	require.False(t, settings.Enabled)
 	require.Equal(t, 10, settings.CooldownMinutes)
 }
 
@@ -119,7 +119,7 @@ func TestGetOverloadCooldownSettings_EmptyValue_ReturnsDefaults(t *testing.T) {
 
 	settings, err := svc.GetOverloadCooldownSettings(context.Background())
 	require.NoError(t, err)
-	require.True(t, settings.Enabled)
+	require.False(t, settings.Enabled)
 	require.Equal(t, 10, settings.CooldownMinutes)
 }
 
@@ -339,7 +339,7 @@ func TestHandleUpstreamError_529CustomCodeDisablesInsteadOfOverloadCooldown(t *t
 
 func TestDefaultOverloadCooldownSettings(t *testing.T) {
 	d := DefaultOverloadCooldownSettings()
-	require.True(t, d.Enabled)
+	require.False(t, d.Enabled)
 	require.Equal(t, 10, d.CooldownMinutes)
 }
 

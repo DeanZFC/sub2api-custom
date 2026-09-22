@@ -41,8 +41,9 @@ curl -fsSL https://raw.githubusercontent.com/DeanZFC/sub2api-custom/sub2api-cust
 sudo bash /tmp/install-custom-docker.sh
 ```
 
-安装更新器后，管理员可在页面右上角版本菜单点击“立即更新”。更新器会自动备份
-PostgreSQL、快进拉取 `sub2api-custom`、重建应用镜像、仅重建 `sub2api` 容器并执行健康检查。
+安装更新器后，管理员可在页面右上角版本菜单点击“立即更新”。更新器会快进拉取
+`sub2api-custom`、重建应用镜像、仅重建 `sub2api` 容器并执行健康检查。
+更新器不自动备份 PostgreSQL；失败时可恢复源码和应用镜像，但不会回滚数据库迁移。
 更新器不会接收网页传入的命令、仓库或路径，也不会删除 PostgreSQL/Redis 数据卷。
 此功能仅适用于 Linux Docker + systemd。macOS Apple container 不会安装宿主机更新器，页面会保留手动更新提示。
 
@@ -58,7 +59,7 @@ sudo bash /tmp/install-custom-docker.sh \
 ```
 
 源码镜像会把根目录的 `FORK_VERSION` 写入版本信息。安装宿主机更新器后，管理后台可直接拉取本项目
-源码、备份数据库、重建应用容器并进行健康检查；更新成功后还会原子替换宿主机更新器自身，后续版本可继续使用同一个按钮。
+源码、重建应用容器并进行健康检查；更新成功后还会原子替换宿主机更新器自身，后续版本可继续使用同一个按钮。
 完整安装和故障排查见部署指南的“后台页面自动更新”。
 自动更新的仓库、分支、版本号规则、服务器凭据检查和排查命令见 [docs/AUTO_UPDATE.md](docs/AUTO_UPDATE.md)。
 
@@ -410,7 +411,7 @@ sudo bash /tmp/install-custom-docker.sh
 - 克隆 `sub2api-custom` 源码并构建自定义镜像
 - 自动生成安全凭证（JWT_SECRET、TOTP_ENCRYPTION_KEY、POSTGRES_PASSWORD）
 - 创建本地数据目录，并安装宿主机 systemd 更新器
-- 后台页面可直接检查版本、备份数据库、构建和健康检查
+- 后台页面可直接检查版本、构建和健康检查；数据库备份由管理员自行安排
 
 #### 手动部署
 

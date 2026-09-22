@@ -562,7 +562,7 @@ export default {
         codexTicketEnabled: 'Codex 292 / 332 打票',
         codexTicketEnabledDesc:
           '网关总开关。开启后可在账号中独立启用打票；关闭后所有账号停止打票和缺票拦截，并隐藏账号打票设置及状态。Pro 使用 292 门票，Team 使用 332 门票。',
-        codexTicketAccountRouteHint: '打票使用账号自身出口，未配置代理时直连。门票默认最多有效 240 秒，提前 60 秒续票；292 自动携带所需路由 Cookie，同账号模型共享。',
+        codexTicketAccountRouteHint: '打票使用账号主代理，未配置代理时直连；业务多代理池可能使用其他出口。门票默认最多有效 240 秒，提前 60 秒续票；292 自动携带所需路由 Cookie，同账号模型共享。',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:
           '仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效（全局）。在 User-Agent/Originator 之外，用版本区间、引擎指纹门与黑/白名单巩固判定。',

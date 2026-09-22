@@ -14,7 +14,7 @@ func exportCodexTicketExtra(account *service.Account) map[string]any {
 }
 
 // Older backups may still contain local proxy IDs. Ignore them without requiring
-// the old proxy records: harvesting now uses the gateway's dedicated proxy pool.
+// the old proxy records: harvesting now uses the account's primary proxy.
 func stripLegacyCodexTicketProxyExtra(extra map[string]any) map[string]any {
 	result := maps.Clone(extra)
 	delete(result, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
