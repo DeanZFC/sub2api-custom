@@ -48,18 +48,18 @@
                 <TestResultOutput :result="test.latest" />
                 <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="refreshAfterDecision" />
               </template>
-              <div v-else-if="test.latest.output_kind === 'number'" class="grid grid-cols-3 gap-3" data-numeric-gallery>
-                <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
-                  <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ result.output_numeric ?? '-' }}</strong>
-                  <figcaption class="mt-1 text-xs text-gray-500 dark:text-gray-400"><span class="block">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span class="mt-1 block">{{ formatDate(resultTime(result)) }}</span><span v-if="result.latency_ms != null" class="mt-1 block">{{ result.latency_ms }}ms</span></figcaption>
-                  <AdminTestDecision v-if="reviewFor(result)" :review="reviewFor(result)!" @decided="refreshAfterDecision" />
+              <div v-else-if="test.latest.output_kind === 'number'" data-numeric-gallery>
+                <figure :key="test.latest.id" class="min-w-0">
+                  <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ test.latest.output_numeric ?? '-' }}</strong>
+                  <figcaption class="mt-1 text-xs text-gray-500 dark:text-gray-400"><span class="block">{{ t('tests.latestResult') }}</span><span class="mt-1 block">{{ formatDate(resultTime(test.latest)) }}</span><span v-if="test.latest.latency_ms != null" class="mt-1 block">{{ test.latest.latency_ms }}ms</span></figcaption>
+                  <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="refreshAfterDecision" />
                 </figure>
               </div>
-              <div v-else class="grid items-start gap-4 lg:grid-cols-3" data-result-gallery>
-                <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
-                  <TestResultOutput :result="result" compact />
-                  <figcaption class="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-gray-500 dark:text-gray-400"><span :class="index === 0 ? 'font-medium text-gray-700 dark:text-gray-200' : ''">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span>· {{ formatDate(resultTime(result)) }}</span></figcaption>
-                  <AdminTestDecision v-if="reviewFor(result)" :review="reviewFor(result)!" @decided="refreshAfterDecision" />
+              <div v-else data-result-gallery>
+                <figure :key="test.latest.id" class="min-w-0">
+                  <TestResultOutput :result="test.latest" compact />
+                  <figcaption class="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-gray-500 dark:text-gray-400"><span class="font-medium text-gray-700 dark:text-gray-200">{{ t('tests.latestResult') }}</span><span>· {{ formatDate(resultTime(test.latest)) }}</span></figcaption>
+                  <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="refreshAfterDecision" />
                 </figure>
               </div>
             </section>
@@ -102,7 +102,6 @@ interface TestSeries {
   order: number
   latest: TestResult
   results: TestResult[]
-  recent: TestResult[]
 }
 
 const { t } = useI18n()
@@ -201,14 +200,13 @@ const accountResults = computed(() => {
     const seriesKey = testKey(result)
     let series = account.tests.get(seriesKey)
     if (!series) {
-      series = { key: seriesKey, name: testName(result), order: orderValue(result.test_order ?? result.test_definition?.sort_order), latest: result, results: [], recent: [] }
+      series = { key: seriesKey, name: testName(result), order: orderValue(result.test_order ?? result.test_definition?.sort_order), latest: result, results: [] }
       account.tests.set(seriesKey, series)
     }
     series.results.push(result)
   }
   return [...accounts.values()].sort((a, b) => a.order - b.order).map(account => {
     const tests = [...account.tests.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
-    for (const test of tests) test.recent = test.results.slice(0, 3)
     return { ...account, tests }
   })
 })

@@ -128,7 +128,8 @@ describe('channel quality result groups', () => {
     api.reviews.mockResolvedValue([{ result: latest, generation: 3, verdict: 'pending', admin_verdict: '', account_paused: false }])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.findAll('[data-admin-decision]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-result-gallery] figure')[1].find('[data-admin-decision]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-result-gallery] figure')).toHaveLength(1)
+    expect(wrapper.get('[data-result-gallery] [data-output]').attributes('data-result-id')).toBe('2')
     wrapper.unmount()
   })
 
@@ -237,14 +238,16 @@ describe('channel quality result groups', () => {
 })
 
 describe('channel quality result series', () => {
-  it('shows only the three newest outputs and fetches complete history on demand', async () => {
+  it('shows only the latest output and fetches complete history on demand', async () => {
     const results = [1, 2, 3, 4, 5].map(id => ({ ...baseResult, id, created_at: `2026-09-15T${10 + id}:00:00Z` }))
     api.list.mockResolvedValue(results)
     api.history.mockResolvedValue({ items: results })
     const wrapper = mountResults()
     await flushPromises()
-    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['5', '4', '3'])
+    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['5'])
     expect(wrapper.findAll('[data-result-gallery] [data-output]').every(output => output.attributes('data-compact') === '')).toBe(true)
+    expect(wrapper.text()).not.toContain('tests.previousResult')
+    expect(api.history).not.toHaveBeenCalled()
     await wrapper.get('[data-content-test] button').trigger('click')
     await flushPromises()
     expect(api.history).toHaveBeenCalledWith(5, undefined)
@@ -268,7 +271,7 @@ describe('channel quality result series', () => {
     expect(series).toHaveLength(3)
     const renamed = series.find(item => item.text().includes('Renamed Pelican'))!
     expect(renamed.text()).toContain('gpt-6-astra · tests.reasoningEffort: ultra')
-    expect(renamed.findAll('[data-output]').map(output => output.attributes('data-result-id'))).toEqual(['4', '3'])
+    expect(renamed.findAll('[data-output]').map(output => output.attributes('data-result-id'))).toEqual(['4'])
     await renamed.get('button').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('[data-dialog] [data-output]')).toHaveLength(2)
@@ -282,7 +285,7 @@ describe('channel quality result series', () => {
     ])
     const wrapper = mountResults()
     await flushPromises()
-    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['1', '2'])
+    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['1'])
     expect(wrapper.findAll('figcaption')[0].text()).toContain(new Date('2026-09-15T13:00:00Z').toLocaleString())
     wrapper.unmount()
   })
@@ -328,7 +331,7 @@ describe('channel quality result series', () => {
     wrapper.unmount()
   })
 
-  it('keeps previous successful outputs and removes failed records from cards and history', async () => {
+  it('shows the latest successful output and removes failed records from cards and history', async () => {
     const results = [
       { ...baseResult, id: 3, status: 'failed', error_message: 'private upstream failure', created_at: '2026-09-15T14:00:00Z' },
       { ...baseResult, id: 2, status: 'success' },
@@ -338,7 +341,7 @@ describe('channel quality result series', () => {
     api.history.mockResolvedValue({ items: results })
     const wrapper = mountResults()
     await flushPromises()
-    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['2', '1'])
+    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['2'])
     await wrapper.get('[data-content-test] button').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['2', '1'])
@@ -366,15 +369,22 @@ describe('channel quality result series', () => {
     wrapper.unmount()
   })
 
-  it.each(['number', 'text'])('shows three recent %s results newest first', async outputKind => {
-    api.list.mockResolvedValue([1, 2, 3, 4].map(id => ({ ...baseResult, id, output_kind: outputKind, output_numeric: id })))
+  it.each(['number', 'text'])('shows only the latest %s result and opens older results through history', async outputKind => {
+    const results = [1, 2, 3, 4].map(id => ({ ...baseResult, id, output_kind: outputKind, output_numeric: id }))
+    api.list.mockResolvedValue(results)
+    api.history.mockResolvedValue({ items: results })
     const wrapper = mountResults()
     await flushPromises()
     if (outputKind === 'number') {
-      expect(wrapper.findAll('[data-numeric-gallery] strong').map(item => item.text())).toEqual(['4', '3', '2'])
+      expect(wrapper.findAll('[data-numeric-gallery] strong').map(item => item.text())).toEqual(['4'])
     } else {
-      expect(wrapper.findAll('[data-result-gallery] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['4', '3', '2'])
+      expect(wrapper.findAll('[data-result-gallery] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['4'])
     }
+    expect(api.history).not.toHaveBeenCalled()
+    await wrapper.get('[data-test-section] button').trigger('click')
+    await flushPromises()
+    expect(api.history).toHaveBeenCalledWith(4, undefined)
+    expect(wrapper.findAll('[data-dialog] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['4', '3', '2', '1'])
     wrapper.unmount()
   })
 
