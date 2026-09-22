@@ -6,19 +6,25 @@ import "fmt"
 // policy. The number check places an account first; an administrator can then
 // override that placement for this round. Each placement replaces all groups.
 type ScheduledTestGroupWorkflow struct {
-	AutomaticTestID int64 `json:"automatic_test_id"`
-	ReviewTestID    int64 `json:"review_test_id"`
-	PassGroupID     int64 `json:"pass_group_id"`
-	FailGroupID     int64 `json:"fail_group_id"`
+	AutomaticTestID int64                    `json:"automatic_test_id"`
+	ReviewTestID    int64                    `json:"review_test_id"`
+	PassGroupID     int64                    `json:"pass_group_id"`
+	FailGroupID     int64                    `json:"fail_group_id"`
+	ReviewVote      *ScheduledTestVoteConfig `json:"review_vote,omitempty"`
 }
 
 func (c *ScheduledTestGroupWorkflow) Rules() []ScheduledTestProtectionRule {
 	action := func(groupID int64) *ScheduledTestOutcomeAction {
 		return &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{groupID}}
 	}
+	vote := ScheduledTestVoteConfig{Enabled: true, RejectAbove: 0, PassAtLeast: 1}
+	if c.ReviewVote != nil {
+		vote = *c.ReviewVote
+		vote.Enabled = true
+	}
 	return []ScheduledTestProtectionRule{
 		{TestDefinitionID: c.AutomaticTestID, PauseOnFailure: true, ExpectedAnswer: "21", AnswerMatch: "numeric", OnPass: action(c.PassGroupID), OnFail: action(c.FailGroupID)},
-		{TestDefinitionID: c.ReviewTestID, PauseOnFailure: true, AnswerMatch: "exact", Vote: &ScheduledTestVoteConfig{Enabled: true, RejectAbove: 0, PassAtLeast: 1}, OnPass: action(c.PassGroupID), OnFail: action(c.FailGroupID)},
+		{TestDefinitionID: c.ReviewTestID, PauseOnFailure: true, AnswerMatch: "exact", Vote: &vote, OnPass: action(c.PassGroupID), OnFail: action(c.FailGroupID)},
 	}
 }
 
@@ -46,6 +52,9 @@ func normalizeScheduledTestGroupWorkflow(plan *ScheduledTestPlan) error {
 	automaticID := c.AutomaticTestID
 	plan.TestDefinitionID = &automaticID
 	plan.Protection.Rules = c.Rules()
+	if c.ReviewVote != nil {
+		c.ReviewVote = plan.Protection.Rules[1].Vote
+	}
 	plan.AutoRecover = false
 	return nil
 }

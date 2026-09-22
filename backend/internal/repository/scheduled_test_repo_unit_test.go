@@ -109,12 +109,14 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 	mock.ExpectQuery(`(?s)WITH projected_results AS .*r.target_mode IN \('account', 'all_accounts'\).*visible_account_id.*result_target_key.*FROM scheduled_test_results r.*success_state AS.*PARTITION BY group_id, result_target_key, test_definition_id, model_id, reasoning_effort.*ranked_results AS.*WHERE status IN \('success', 'passed'\).*NOT has_success.*WHERE history_rank <= \$2.*ORDER BY vr\.started_at DESC, vr\.id DESC`).
 		WithArgs(int64(5), 3).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now, 2))
+			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "group_order",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now, 2, 0))
 	results, err := repo.ListVisible(context.Background(), 5, 20)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, "medium", results[0].ReasoningEffort)
+	require.NotNil(t, results[0].GroupOrder)
+	require.Zero(t, *results[0].GroupOrder)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

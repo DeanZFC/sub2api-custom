@@ -689,4 +689,8 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 		})
 
 	})
+
+	t.Run("group display order follows current memberships and current rule configuration", func(t *testing.T) {
+		testScheduledTestCurrentGroupOrder(t, ctx, db, plans, results, candyID)
+	})
 }

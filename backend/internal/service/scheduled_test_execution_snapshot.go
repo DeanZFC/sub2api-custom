@@ -94,31 +94,56 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 			}
 		}
 	}
-	// All targets already exist in storage. Preserve definition order while
-	// bounding dispatched work; queued records remain visible throughout.
+	// Keep local statistics ahead of model requests. Each account then advances
+	// through its own definitions; one slow account must not hold every other
+	// account behind a definition-wide barrier. The workflow still runs candy
+	// before pelican for each account, after persisting its grouping decision.
+	s.runExecutionTargetQueues(ctx, local, started)
+	s.runExecutionTargetQueues(ctx, upstream, started)
+}
+
+func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Context, targets []*scheduledTestExecutionTarget, started time.Time) {
+	var queues [][]*scheduledTestExecutionTarget
+	accountQueues := make(map[int64]int)
+	for _, target := range targets {
+		var accountID int64
+		if target.accountID != nil {
+			accountID = *target.accountID
+		}
+		index, ok := accountQueues[accountID]
+		if !ok {
+			index = len(queues)
+			accountQueues[accountID] = index
+			queues = append(queues, nil)
+		}
+		queues[index] = append(queues[index], target)
+	}
+	// Bound active account queues as well as upstream requests. All pending
+	// rows were saved before dispatch, including those cancelled while queued.
 	sem := make(chan struct{}, scheduledTestDefaultMaxWorkers)
 	var wg sync.WaitGroup
-	var previousPlan *ScheduledTestPlan
-	for _, target := range targets {
-		if previousPlan != target.plan {
-			wg.Wait()
-			previousPlan = target.plan
-		}
+	for _, queue := range queues {
 		if ctx.Err() != nil {
-			s.failExecutionTarget(target, ctx.Err())
+			for _, target := range queue {
+				s.failExecutionTarget(target, ctx.Err())
+			}
 			continue
 		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
-			s.failExecutionTarget(target, ctx.Err())
+			for _, target := range queue {
+				s.failExecutionTarget(target, ctx.Err())
+			}
 			continue
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			s.runExecutionTarget(ctx, target, started)
+			for _, target := range queue {
+				s.runExecutionTarget(ctx, target, started)
+			}
 		}()
 	}
 	wg.Wait()

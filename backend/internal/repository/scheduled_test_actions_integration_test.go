@@ -92,7 +92,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 			"on_fail": map[string]any{"scheduling": "keep", "group_mode": "assign", "group_ids": failGroups},
 		}
 		if voting {
-			raw["vote"] = map[string]any{"enabled": true, "reject_above": 1, "pass_at_least": 2}
+			raw["vote"] = map[string]any{"enabled": true, "public_enabled": true, "reject_above": 1, "pass_at_least": 2}
 		}
 		encoded, err := json.Marshal(raw)
 		require.NoError(currentT, err)
@@ -170,6 +170,16 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 	t.Run("direct group workflow resets automatic placement and accepts administrator overrides", func(t *testing.T) {
 		reset(t)
 		testScheduledTestGroupWorkflow(t, ctx, db, plans, repo, candyID, pelicanID)
+	})
+
+	t.Run("public voting switch applies to the current round without resetting review or ballots", func(t *testing.T) {
+		reset(t)
+		testScheduledTestPublicVotingSwitch(t, ctx, db, plans, repo, pelicanID)
+	})
+
+	t.Run("workflow public votes replace groups with administrator priority and reset each round", func(t *testing.T) {
+		reset(t)
+		testScheduledTestGroupWorkflowPublicVotes(t, ctx, db, plans, repo, candyID, pelicanID)
 	})
 
 	t.Run("administrator verdict bypasses vote counts but preserves automatic failures", func(t *testing.T) {

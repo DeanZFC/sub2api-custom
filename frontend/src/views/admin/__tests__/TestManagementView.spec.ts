@@ -375,6 +375,33 @@ describe('configurable test management', () => {
 
 describe('automatic protection plan integration', () => {
   const protection = { enabled: true, rules: [{ test_definition_id: 2, pause_on_failure: true, expected_answer: '29', answer_match: 'numeric', thresholds: [], vote: { enabled: false, reject_above: 0, pass_at_least: 3 } }] }
+  it('saves and copies workflow user vote access without changing the candy rule', async () => {
+    const reviewVote = { enabled: true, public_enabled: true, reject_above: 5, pass_at_least: 3 }
+    const configured = { enabled: true, rules: [], group_workflow: { automatic_test_id: 2, review_test_id: 3, pass_group_id: 8, fail_group_id: 9, review_vote: reviewVote } }
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
+      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
+    ])
+    api.getGroups.mockResolvedValue([{ id: 8, name: 'Premium', platform: 'openai', status: 'active' }, { id: 9, name: 'Pro', platform: 'openai', status: 'active' }])
+    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'all_accounts', test_definition_ids: [2, 3], protection: configured }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    await dialog.get('[data-workflow-public-vote]').setValue(false)
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    const saved = api.updatePlan.mock.calls[0][1]
+    expect(saved.protection.group_workflow.review_vote).toEqual({ ...reviewVote, public_enabled: false })
+    expect(saved.protection.rules[0]).toMatchObject({ expected_answer: '21', answer_match: 'numeric' })
+    expect(saved.protection.rules[0].vote).toBeUndefined()
+    expect(saved.protection.rules[1].vote).toEqual({ ...reviewVote, public_enabled: false })
+    expect(reviewVote.public_enabled).toBe(true)
+    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    const copied = api.createPlan.mock.calls[0][0]
+    copied.protection.group_workflow.review_vote.pass_at_least = 9
+    expect(reviewVote.pass_at_least).toBe(3)
+    wrapper.unmount()
+  })
+
   it('converts to one workflow for both groups and prevents selecting the same outcome group', async () => {
     api.listTypes.mockResolvedValue([
       { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },

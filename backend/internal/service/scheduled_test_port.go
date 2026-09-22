@@ -43,10 +43,11 @@ type ScheduledTestResult struct {
 	TestName         string `json:"test_name"`
 	TestOrder        int    `json:"test_order"`
 	GroupName        string `json:"group_name"`
-	// PlanOrder is the administrator-configured order of the test rule/plan
-	// that produced this result. The user-facing page sorts by this value and
-	// derives its group list from that ordered result stream.
+	// PlanOrder belongs to the rule that produced the result. GroupOrder is
+	// resolved from the displayed group's current rules, so moving an account
+	// does not carry its source rule's display position into the new group.
 	PlanOrder            int                              `json:"plan_order"`
+	GroupOrder           *int                             `json:"group_order,omitempty"`
 	TargetMode           string                           `json:"target_mode,omitempty"`
 	Status               string                           `json:"status"`
 	ResponseText         string                           `json:"response_text"`

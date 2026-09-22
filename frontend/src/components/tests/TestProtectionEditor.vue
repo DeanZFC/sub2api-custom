@@ -28,7 +28,11 @@
           <button type="button" class="text-xs font-medium text-primary-600 dark:text-primary-400" :disabled="(ruleFor(type.id)?.thresholds?.length || 0) >= 20" data-add-threshold @click="addThreshold(type)">+ {{ t('admin.tests.protection.addThreshold') }}</button>
           <template v-if="!['statistics', 'model_check'].includes(type.output_kind)">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.vote?.enabled || false" type="checkbox" data-rule-vote @change="toggleVote(type.id, ($event.target as HTMLInputElement).checked)" />{{ t('admin.tests.protection.vote') }}</label>
-            <div v-if="ruleFor(type.id)?.vote?.enabled" class="grid gap-3 sm:grid-cols-2">
+            <template v-if="ruleFor(type.id)?.vote?.enabled">
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.vote?.public_enabled === true" type="checkbox" data-rule-public-vote @change="patchVote(type.id, { public_enabled: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.publicVote') }}</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400" data-public-vote-hint>{{ t(ruleFor(type.id)?.vote?.public_enabled ? 'admin.tests.protection.publicVoteHint' : 'admin.tests.protection.adminOnlyHint') }}</p>
+            </template>
+            <div v-if="ruleFor(type.id)?.vote?.enabled && ruleFor(type.id)?.vote?.public_enabled" class="grid gap-3 sm:grid-cols-2">
               <label class="input-label">{{ t('admin.tests.protection.rejectAbove') }}<input :value="ruleFor(type.id)?.vote?.reject_above" type="number" min="0" max="1000000" step="1" class="input mt-1 w-full" data-vote-reject @input="patchVote(type.id, { reject_above: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
               <label class="input-label">{{ t('admin.tests.protection.passAtLeast') }}<input :value="ruleFor(type.id)?.vote?.pass_at_least" type="number" min="1" max="1000000" step="1" class="input mt-1 w-full" data-vote-pass @input="patchVote(type.id, { pass_at_least: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
               <p class="text-xs text-gray-500 sm:col-span-2">{{ t('admin.tests.protection.voteHint') }}</p>
@@ -86,6 +90,6 @@ const addThreshold = (type: TestType) => {
 }
 const patchThreshold = (id: number, index: number, patch: Partial<TestProtectionThreshold>) => patchRule(id, { thresholds: ruleFor(id)?.thresholds?.map((value, i) => i === index ? { ...value, ...patch } : { ...value }) })
 const removeThreshold = (id: number, index: number) => patchRule(id, { thresholds: ruleFor(id)?.thresholds?.filter((_, i) => i !== index) })
-const toggleVote = (id: number, enabled: boolean) => patchRule(id, { vote: { reject_above: 0, pass_at_least: 3, ...ruleFor(id)?.vote, enabled } })
-const patchVote = (id: number, patch: Partial<NonNullable<TestProtectionRule['vote']>>) => patchRule(id, { vote: { enabled: true, reject_above: 0, pass_at_least: 3, ...ruleFor(id)?.vote, ...patch } })
+const toggleVote = (id: number, enabled: boolean) => patchRule(id, { vote: { reject_above: 0, pass_at_least: 3, public_enabled: false, ...ruleFor(id)?.vote, enabled, ...(!enabled ? { public_enabled: false } : {}) } })
+const patchVote = (id: number, patch: Partial<NonNullable<TestProtectionRule['vote']>>) => patchRule(id, { vote: { enabled: true, public_enabled: false, reject_above: 0, pass_at_least: 3, ...ruleFor(id)?.vote, ...patch } })
 </script>

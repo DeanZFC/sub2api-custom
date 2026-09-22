@@ -34,37 +34,39 @@ func (r *scheduledTestResultRepository) listGroupWorkflowAccountIDs(ctx context.
 	return ids, rows.Err()
 }
 
-// The caller holds the plan, account and triggering state locks. A manual
-// review in this round overrides the numeric result until the next full round;
-// merely producing an animation never moves an account.
-func reconcileGroupWorkflow(ctx context.Context, tx *sql.Tx, state *protectionState, config *service.ScheduledTestProtectionConfig, verdict string) (manualOverride bool, err error) {
+// The caller holds the plan, account and triggering state locks. An administrator
+// decision or public ballot verdict overrides the numeric result for this round.
+// Merely producing an animation never moves an account.
+func reconcileGroupWorkflow(ctx context.Context, tx *sql.Tx, state *protectionState, config *service.ScheduledTestProtectionConfig, verdict string) (reviewOverride bool, err error) {
 	workflow := config.GroupWorkflow
 	if workflow == nil || (verdict != "pass" && verdict != "fail") {
-		return manualOverride, nil
+		return reviewOverride, nil
 	}
 	switch state.definitionID {
 	case workflow.ReviewTestID:
-		if state.adminVerdict != "pass" && state.adminVerdict != "fail" {
-			return manualOverride, nil
+		if state.adminVerdict != "pass" && state.adminVerdict != "fail" && state.automated != "pass" {
+			return reviewOverride, nil
 		}
-		verdict = state.adminVerdict
+		if state.adminVerdict == "pass" || state.adminVerdict == "fail" {
+			verdict = state.adminVerdict
+		}
 	case workflow.AutomaticTestID:
 		var reviewVerdict string
-		err := tx.QueryRowContext(ctx, `SELECT s.admin_verdict
+		err := tx.QueryRowContext(ctx, `SELECT s.verdict
  FROM scheduled_test_protection_states s JOIN scheduled_test_results r ON r.id=s.result_id
  WHERE s.plan_id=$1 AND s.account_id=$2 AND s.test_definition_id=$3
- AND s.round_started_at=$4 AND s.completed AND s.admin_verdict IN ('pass','fail')
+	 AND s.round_started_at=$4 AND s.completed AND s.verdict IN ('pass','fail')
  AND r.started_at=s.result_started_at AND r.started_at>=s.round_started_at
  AND r.status IN ('success','passed')`, state.planID, state.accountID, workflow.ReviewTestID, state.roundStarted).Scan(&reviewVerdict)
 		if err != nil && err != sql.ErrNoRows {
-			return manualOverride, err
+			return reviewOverride, err
 		}
 		if err == nil {
-			manualOverride = true
+			reviewOverride = true
 			verdict = reviewVerdict
 		}
 	default:
-		return manualOverride, nil
+		return reviewOverride, nil
 	}
 	target := workflow.FailGroupID
 	if verdict == "pass" {
@@ -72,10 +74,10 @@ func reconcileGroupWorkflow(ctx context.Context, tx *sql.Tx, state *protectionSt
 	}
 	before, err := readProtectionAccountSnapshot(ctx, tx, state.accountID)
 	if err != nil {
-		return manualOverride, err
+		return reviewOverride, err
 	}
 	if len(before.groups) == 1 && before.groups[target] {
-		return manualOverride, nil
+		return reviewOverride, nil
 	}
 	affected := map[int64]bool{workflow.PassGroupID: true, workflow.FailGroupID: true}
 	for id := range before.groups {
@@ -85,39 +87,39 @@ func reconcileGroupWorkflow(ctx context.Context, tx *sql.Tx, state *protectionSt
 	// memberships that this explicit replacement is allowed to remove.
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM groups WHERE id=ANY($1) ORDER BY id FOR SHARE`, pq.Array(sortedProtectionIDs(affected)))
 	if err != nil {
-		return manualOverride, err
+		return reviewOverride, err
 	}
 	for rows.Next() {
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return manualOverride, err
+		return reviewOverride, err
 	}
 	var compatible int
 	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM groups g JOIN accounts a ON a.id=$1
  WHERE g.id=ANY($2) AND g.deleted_at IS NULL AND g.status='active'
  AND g.platform=a.platform AND g.platform<>'composite'`, state.accountID, pq.Array([]int64{workflow.PassGroupID, workflow.FailGroupID})).Scan(&compatible)
 	if err != nil {
-		return manualOverride, err
+		return reviewOverride, err
 	}
 	if compatible != 2 {
-		return manualOverride, fmt.Errorf("quality workflow groups are unavailable or have incompatible platforms")
+		return reviewOverride, fmt.Errorf("quality workflow groups are unavailable or have incompatible platforms")
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_groups WHERE account_id=$1 AND group_id<>$2`, state.accountID, target); err != nil {
-		return manualOverride, err
+		return reviewOverride, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id,priority,created_at)
  VALUES($1,$2,50,NOW()) ON CONFLICT(account_id,group_id) DO NOTHING`, state.accountID, target); err != nil {
-		return manualOverride, err
+		return reviewOverride, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_test_managed_accounts(plan_id,account_id,source_group_id)
  SELECT id,$2,group_id FROM scheduled_test_plans WHERE id=$1 AND group_id IS NOT NULL
  ON CONFLICT(plan_id,account_id) DO NOTHING`, state.planID, state.accountID); err != nil {
-		return manualOverride, err
+		return reviewOverride, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE accounts SET updated_at=NOW() WHERE id=$1`, state.accountID); err != nil {
-		return manualOverride, err
+		return reviewOverride, err
 	}
-	return manualOverride, enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountGroupsChanged, &state.accountID, nil, buildSchedulerGroupPayload(sortedProtectionIDs(affected)))
+	return reviewOverride, enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountGroupsChanged, &state.accountID, nil, buildSchedulerGroupPayload(sortedProtectionIDs(affected)))
 }

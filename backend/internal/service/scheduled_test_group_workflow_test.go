@@ -104,3 +104,18 @@ func TestScheduledTestGroupWorkflowAlwaysExecutesAutomaticBeforeReview(t *testin
 	require.Equal(t, int64(12), *executions[1].TestDefinitionID)
 	require.Equal(t, []int64{12, 11}, p.TestDefinitionIDs, "runner must not mutate a shared plan snapshot")
 }
+
+func TestScheduledTestGroupWorkflowPublicVotingIsExplicit(t *testing.T) {
+	p := groupWorkflowPlan()
+	require.NoError(t, validateScheduledTestPlan(p))
+	require.True(t, p.Protection.Rules[1].Vote.Enabled)
+	require.False(t, p.Protection.Rules[1].Vote.PublicEnabled)
+	p.Protection.GroupWorkflow.ReviewVote = &ScheduledTestVoteConfig{PublicEnabled: true, PassAtLeast: 3, RejectAbove: 1}
+	require.NoError(t, validateScheduledTestPlan(p))
+	require.True(t, p.Protection.Rules[1].Vote.Enabled, "workflow administrator review stays enabled")
+	require.True(t, p.Protection.Rules[1].Vote.PublicEnabled)
+	require.Equal(t, 3, p.Protection.Rules[1].Vote.PassAtLeast)
+	require.Nil(t, p.Protection.Rules[0].Vote)
+	p.Protection.GroupWorkflow.ReviewVote.PassAtLeast = 0
+	require.Error(t, validateScheduledTestPlan(p))
+}

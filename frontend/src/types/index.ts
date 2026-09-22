@@ -2566,6 +2566,12 @@ export interface TestProtectionRecovery {
   min_samples: number
   recover_rate: number
 }
+export interface TestProtectionVote {
+  enabled: boolean
+  public_enabled?: boolean
+  reject_above: number
+  pass_at_least: number
+}
 export interface TestProtectionRule {
   test_definition_id: number
   thresholds?: TestProtectionThreshold[]
@@ -2574,7 +2580,7 @@ export interface TestProtectionRule {
   expected_answer?: string
   answer_match?: 'exact' | 'contains' | 'numeric'
   model_match?: 'exact' | 'snapshot'
-  vote?: { enabled: boolean; reject_above: number; pass_at_least: number }
+  vote?: TestProtectionVote
   on_pass?: TestOutcomeAction
   on_fail?: TestOutcomeAction
   recovery?: TestProtectionRecovery
@@ -2589,6 +2595,7 @@ export interface TestGroupWorkflow {
   review_test_id: number
   pass_group_id: number
   fail_group_id: number
+  review_vote?: TestProtectionVote
 }
 export type TestVote = 'pass' | 'fail'
 export interface TestVoteResult {
@@ -2655,8 +2662,10 @@ export interface TestResult {
   test_name?: string
   /** Configured check type order within the account's quality results. */
   test_order?: number
-  /** Configured test rule/plan order used to derive group display order. */
+  /** Configured display order of the originating test rule/plan. */
   plan_order?: number
+  /** Live display order of the account's current group; preferred over plan_order. */
+  group_order?: number
   group_name?: string
   account_id?: number | null
   target_mode?: 'group' | 'all_accounts' | 'account'

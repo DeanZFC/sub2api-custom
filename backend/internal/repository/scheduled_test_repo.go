@@ -114,7 +114,7 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	if err := validateScheduledTestGroupWorkflowConflicts(ctx, tx, plan); err != nil {
 		return nil, err
 	}
-	if !plan.Enabled || !plan.Protection.Enabled || !reflect.DeepEqual(previous.Protection, plan.Protection) ||
+	if !plan.Enabled || !plan.Protection.Enabled || !protectionConfigSamePolicy(previous.Protection, plan.Protection) ||
 		!reflect.DeepEqual(previous.AccountID, plan.AccountID) || !reflect.DeepEqual(previous.GroupID, plan.GroupID) ||
 		!reflect.DeepEqual(previous.TestDefinitionIDs, plan.TestDefinitionIDs) || !reflect.DeepEqual(previous.TestDefinitionID, plan.TestDefinitionID) ||
 		previous.TargetMode != plan.TargetMode || previous.ModelID != plan.ModelID || previous.ReasoningEffort != plan.ReasoningEffort {
@@ -488,8 +488,14 @@ WHERE id = ANY($1) AND protection_decision IS NOT NULL`, pq.Array(ids))
 	return rows.Err()
 }
 
-// Both public queries authorize the stored result's group (or legacy account
-// bindings). The account is projected only as an ID and hidden for group tests.
+// Display position belongs to the current group, independently of the rule
+// that produced a historical result. Retain disabled rules' display settings;
+// disabling execution does not remove their groups' configured positions.
+const scheduledTestGroupDisplayOrdersSQL = `SELECT group_id, MIN(sort_order) AS sort_order
+    FROM scheduled_test_plans WHERE group_id IS NOT NULL GROUP BY group_id`
+
+// Both public queries authorize the projected current group. The account is
+// projected only as an ID and hidden for group tests.
 // Read its current status and scheduling switch, even for group-mode model
 // tests whose executing account ID is hidden. Account-free group statistics
 // remain visible; orphaned account results do not.
@@ -501,6 +507,7 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
            r.model_id,r.reasoning_effort,
            CASE WHEN r.account_id IS NULL THEN r.group_id ELSE projected_group.group_id END AS group_id,
            r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,
+           COALESCE(group_display_order.sort_order, 2147483647) AS group_order,
            CASE WHEN r.target_mode IN ('account', 'all_accounts')
                 THEN COALESCE(r.account_id::text, '')
                 ELSE 'group'
@@ -525,10 +532,12 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
         ORDER BY CASE WHEN ag.group_id = r.group_id THEN 0 ELSE 1 END, ag.group_id
         LIMIT 1
     ) projected_group ON TRUE
+    LEFT JOIN (` + scheduledTestGroupDisplayOrdersSQL + `) group_display_order
+      ON group_display_order.group_id = CASE WHEN r.account_id IS NULL THEN r.group_id ELSE projected_group.group_id END
 ), visible_results AS NOT MATERIALIZED (
     SELECT r.id,r.plan_id,r.plan_name,r.test_name,r.test_order,r.group_name,r.plan_order,r.target_mode,r.status,
            r.response_text,r.output_kind,r.output_html,r.output_numeric,r.visible_account_id,r.model_id,r.reasoning_effort,
-           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key
+           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key,r.group_order
     FROM projected_results r
     WHERE (
         (r.account_id IS NULL AND r.target_mode = 'group')
@@ -569,7 +578,7 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
     )
 )`
 
-const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id`
+const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id,vr.group_order`
 
 func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID int64, limit int) ([]*service.ScheduledTestResult, error) {
 	if limit <= 0 || limit > 3 {
@@ -649,7 +658,7 @@ func scanVisibleTestResults(rows *sql.Rows) ([]*service.ScheduledTestResult, err
 	var out []*service.ScheduledTestResult
 	for rows.Next() {
 		v := &service.ScheduledTestResult{}
-		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID); err != nil {
+		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID, &v.GroupOrder); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

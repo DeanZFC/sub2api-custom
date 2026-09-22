@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"sort"
 	"time"
 
@@ -471,7 +470,7 @@ func (r *scheduledTestResultRepository) BeginProtectionRun(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	if !config.Enabled || !reflect.DeepEqual(*config, plan.Protection) {
+	if !config.Enabled || !protectionConfigSamePolicy(*config, plan.Protection) {
 		return fmt.Errorf("quality plan changed before execution")
 	}
 	for _, id := range ids {

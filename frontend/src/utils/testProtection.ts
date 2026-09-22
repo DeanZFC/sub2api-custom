@@ -1,4 +1,4 @@
-import type { TestGroupWorkflow, TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRecovery, TestProtectionRule, TestType } from '@/types'
+import type { TestGroupWorkflow, TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRecovery, TestProtectionRule, TestProtectionVote, TestType } from '@/types'
 
 export const protectionMetrics = (kind: string): TestProtectionMetric[] => kind === 'statistics'
   ? ['success_rate', 'cache_rate', 'avg_first_token_ms']
@@ -6,13 +6,14 @@ export const protectionMetrics = (kind: string): TestProtectionMetric[] => kind 
 
 const copyAction = (value?: TestOutcomeAction): TestOutcomeAction | undefined => value
   ? { ...value, group_ids: value.group_ids ? [...value.group_ids] : undefined } : undefined
+const copyGroupWorkflow = (workflow: TestGroupWorkflow): TestGroupWorkflow => ({ ...workflow, ...(workflow.review_vote ? { review_vote: { ...workflow.review_vote } } : {}) })
 
 export const defaultTestOutcomeAction = (outcome: 'pass' | 'fail'): TestOutcomeAction => ({
   scheduling: outcome === 'pass' ? 'resume' : 'pause', group_mode: 'keep',
 })
 
 export const copyTestProtection = (value?: TestProtectionConfig): TestProtectionConfig => value
-  ? { enabled: value.enabled, rules: (value.rules || []).map(rule => ({ ...rule, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })), ...(value.group_workflow ? { group_workflow: { ...value.group_workflow } } : {}) }
+  ? { enabled: value.enabled, rules: (value.rules || []).map(rule => ({ ...rule, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })), ...(value.group_workflow ? { group_workflow: copyGroupWorkflow(value.group_workflow) } : {}) }
   : { enabled: false, rules: [] }
 
 export function groupWorkflowProtection(workflow: TestGroupWorkflow): TestProtectionConfig {
@@ -22,20 +23,28 @@ export function groupWorkflowProtection(workflow: TestGroupWorkflow): TestProtec
   })
   return {
     enabled: true,
-    group_workflow: { ...workflow },
+    group_workflow: copyGroupWorkflow(workflow),
     rules: [
       { test_definition_id: workflow.automatic_test_id, pause_on_failure: true, expected_answer: '21', answer_match: 'numeric', ...actions() },
-      { test_definition_id: workflow.review_test_id, pause_on_failure: true, answer_match: 'exact', vote: { enabled: true, reject_above: 0, pass_at_least: 1 }, ...actions() },
+      { test_definition_id: workflow.review_test_id, pause_on_failure: true, answer_match: 'exact', vote: { reject_above: 0, pass_at_least: 1, ...workflow.review_vote, enabled: true }, ...actions() },
     ],
   }
 }
 
 export function validTestGroupWorkflow(workflow: TestGroupWorkflow, types: TestType[], groups?: readonly { id: number }[]): boolean {
-  return Object.values(workflow).every(id => Number.isSafeInteger(id) && id > 0)
+  return [workflow.automatic_test_id, workflow.review_test_id, workflow.pass_group_id, workflow.fail_group_id].every(id => Number.isSafeInteger(id) && id > 0)
     && workflow.automatic_test_id !== workflow.review_test_id && workflow.pass_group_id !== workflow.fail_group_id
     && types.some(type => type.id === workflow.automatic_test_id && type.enabled && type.output_kind === 'number')
     && types.some(type => type.id === workflow.review_test_id && type.enabled && type.output_kind === 'html')
     && (!groups || [workflow.pass_group_id, workflow.fail_group_id].every(id => groups.some(group => group.id === id)))
+    && (!workflow.review_vote || (workflow.review_vote.enabled && validTestVote(workflow.review_vote)))
+}
+
+function validTestVote(vote: TestProtectionVote): boolean {
+  return (vote.public_enabled == null || typeof vote.public_enabled === 'boolean')
+    && (!vote.public_enabled || vote.enabled)
+    && (!vote.enabled || (Number.isInteger(vote.reject_above) && vote.reject_above >= 0 && vote.reject_above <= 1_000_000
+      && Number.isInteger(vote.pass_at_least) && vote.pass_at_least >= 1 && vote.pass_at_least <= 1_000_000))
 }
 
 export const defaultProtectionRule = (type: TestType): TestProtectionRule => ({
@@ -110,8 +119,7 @@ export function validTestProtection(value: TestProtectionConfig | undefined, tar
       || (item.metric.endsWith('_ms') && item.value < 0))) return false
     if (rule.min_samples != null && (!Number.isInteger(rule.min_samples) || rule.min_samples < 0 || rule.min_samples > 1_000_000_000)) return false
     const voting = rule.vote?.enabled
-    if (voting && (!Number.isInteger(rule.vote!.reject_above) || rule.vote!.reject_above < 0 || rule.vote!.reject_above > 1_000_000
-      || !Number.isInteger(rule.vote!.pass_at_least) || rule.vote!.pass_at_least < 1 || rule.vote!.pass_at_least > 1_000_000)) return false
+    if (rule.vote && !validTestVote(rule.vote)) return false
     const answer = rule.expected_answer?.trim()
     if (answer && [...answer].length > 10000) return false
     if (rule.answer_match && !['exact', 'contains', 'numeric'].includes(rule.answer_match)) return false

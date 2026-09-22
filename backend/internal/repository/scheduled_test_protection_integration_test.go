@@ -101,7 +101,7 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 	repo := &scheduledTestResultRepository{db: db}
 	groupID, accountID := int64(8), int64(62)
 	plain := service.ScheduledTestProtectionRule{TestDefinitionID: candyID, PauseOnFailure: true}
-	voting := service.ScheduledTestProtectionRule{TestDefinitionID: htmlID, ExpectedAnswer: "reference-only", Vote: &service.ScheduledTestVoteConfig{Enabled: true, RejectAbove: 1, PassAtLeast: 2}}
+	voting := service.ScheduledTestProtectionRule{TestDefinitionID: htmlID, ExpectedAnswer: "reference-only", Vote: &service.ScheduledTestVoteConfig{Enabled: true, PublicEnabled: true, RejectAbove: 1, PassAtLeast: 2}}
 	reset := func() {
 		exec(`TRUNCATE scheduled_test_plans,scheduled_test_results,scheduled_test_plan_definitions,scheduled_test_protection_states,scheduled_test_votes,scheduler_outbox RESTART IDENTITY CASCADE`)
 		exec(`UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL,extra='{}';TRUNCATE user_allowed_groups,user_subscriptions`)

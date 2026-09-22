@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,25 +18,10 @@ import (
 const scheduledTestDefaultMaxWorkers = 10
 
 var (
-	// Keep the number grammar deliberately strict. In particular, accepting a
-	// number only after an answer marker (or as a standalone line) prevents
-	// table values and step numbers in the model's reasoning from becoming the
-	// recorded answer.
-	scheduledTestNumberPattern      = `[-+]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][-+]?\d+)?`
-	scheduledTestNumberRE           = regexp.MustCompile(scheduledTestNumberPattern)
-	scheduledTestStandaloneNumberRE = regexp.MustCompile(`^` + scheduledTestNumberPattern + `$`)
-	// Keep the marker and number on the same line. Models frequently format
-	// the answer as "最少取出 **29个**"; the markdown emphasis and Chinese unit
-	// must not make the parser fall through to a step number such as "1.".
-	scheduledTestMarkerGap       = "[ \\t*_`~]*"
-	scheduledTestStrongNumberRE  = regexp.MustCompile(`(?i)(?:final\s+(?:answer|result)|answer|result|答案|最终\s*(?:答案|结果)|结论)` + scheduledTestMarkerGap + `(?:(?:is|are|为|是)` + scheduledTestMarkerGap + `)?(?:=|:|：)?` + scheduledTestMarkerGap + `(` + scheduledTestNumberPattern + `)`)
-	scheduledTestMinimumNumberRE = regexp.MustCompile(`(?i)(?:minimum(?:\s+number)?|最少(?:取出)?)` + scheduledTestMarkerGap + `(?:(?:is|are|为|是)` + scheduledTestMarkerGap + `)?(?:=|:|：)?` + scheduledTestMarkerGap + `(` + scheduledTestNumberPattern + `)`)
-	scheduledTestAtLeastNumberRE = regexp.MustCompile(`(?i)至少` + scheduledTestMarkerGap + `(?:(?:is|are|为|是)` + scheduledTestMarkerGap + `)?(?:=|:|：)?` + scheduledTestMarkerGap + `(` + scheduledTestNumberPattern + `)`)
-	scheduledTestAnswerLineRE    = regexp.MustCompile(`(?i)(?:final\s+(?:answer|result)|answer|result|答案|最终|结论|minimum|最少|至少)`)
-	scheduledTestHTMLRootRE      = regexp.MustCompile(`(?is)<\s*([a-z][a-z0-9:._-]*)(?:\s|/?>)`)
-	scheduledTestHTMLDoctypeRE   = regexp.MustCompile(`(?is)<!doctype\s+html\s*>(?:\s|\\[nrt])*$`)
-	scheduledTestHTMLAttrRE      = regexp.MustCompile(`=\s*\\"`)
-	scheduledTestHTMLSpaceRE     = regexp.MustCompile(`^(?:\s|\\[nrt])*\\[nrt](?:\s|\\[nrt])*<`)
+	scheduledTestHTMLRootRE    = regexp.MustCompile(`(?is)<\s*([a-z][a-z0-9:._-]*)(?:\s|/?>)`)
+	scheduledTestHTMLDoctypeRE = regexp.MustCompile(`(?is)<!doctype\s+html\s*>(?:\s|\\[nrt])*$`)
+	scheduledTestHTMLAttrRE    = regexp.MustCompile(`=\s*\\"`)
+	scheduledTestHTMLSpaceRE   = regexp.MustCompile(`^(?:\s|\\[nrt])*\\[nrt](?:\s|\\[nrt])*<`)
 )
 
 const scheduledTestPersistenceTimeout = 15 * time.Second
@@ -702,6 +686,7 @@ func (s *ScheduledTestRunnerService) applyOutputContract(result *ScheduledTestRe
 		}
 		result.OutputHTML = html
 	case "number":
+		result.OutputNumeric = nil
 		if n, ok := extractScheduledTestNumber(result.ResponseText); ok {
 			result.OutputNumeric = &n
 			return
@@ -900,54 +885,6 @@ func scheduledTestTagEnd(text string, start int) int {
 		}
 	}
 	return -1
-}
-
-func extractScheduledTestNumber(text string) (float64, bool) {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return 0, false
-	}
-	// A bare numeric response is unambiguous, including decimals, signs and
-	// scientific notation.
-	if scheduledTestStandaloneNumberRE.MatchString(trimmed) {
-		if n, err := strconv.ParseFloat(trimmed, 64); err == nil {
-			return n, true
-		}
-	}
-
-	// Prefer an explicit final-answer marker. A later phrase such as
-	// "至少 1 个" often appears in the proof and must not overwrite the
-	// actual answer "最少取出 29 个".
-	for _, markerRE := range []*regexp.Regexp{scheduledTestStrongNumberRE, scheduledTestMinimumNumberRE, scheduledTestAtLeastNumberRE} {
-		matches := markerRE.FindAllStringSubmatch(trimmed, -1)
-		for i := len(matches) - 1; i >= 0; i-- {
-			if len(matches[i]) > 1 {
-				if n, err := strconv.ParseFloat(matches[i][1], 64); err == nil {
-					return n, true
-				}
-			}
-		}
-	}
-
-	// A final non-empty line may contain an answer marker that was not matched
-	// above because the model used punctuation or markdown formatting. Search
-	// lines from the end but still require exactly one numeric token and a
-	// marker-like word; this avoids returning an unrelated line number.
-	lines := strings.Split(trimmed, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(strings.Trim(lines[i], "`*_ \\t"))
-		if line == "" || !scheduledTestAnswerLineRE.MatchString(line) {
-			continue
-		}
-		matches := scheduledTestNumberRE.FindAllString(line, -1)
-		if len(matches) != 1 {
-			continue
-		}
-		if n, err := strconv.ParseFloat(matches[0], 64); err == nil {
-			return n, true
-		}
-	}
-	return 0, false
 }
 
 func (s *ScheduledTestRunnerService) RunPlanNow(ctx context.Context, plan *ScheduledTestPlan) {

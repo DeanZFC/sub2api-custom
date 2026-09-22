@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -159,4 +160,63 @@ func TestScheduledTestSnapshotRecordsProtectionInitializationFailureForEveryTarg
 		require.Contains(t, result.ErrorMessage, "initialize test protection")
 	}
 	require.Equal(t, 2, count)
+}
+
+func TestScheduledTestSnapshotFastAccountAdvancesWhileAnotherWaits(t *testing.T) {
+	repo := &snapshotResultRepoStub{retryResultRepoStub: &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 20)}, targets: []int64{12, 13}}
+	releaseSlow := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseSlow) })
+	accounts := scheduledTestExecutionAccountRepo{get: func(ctx context.Context, id int64) (*Account, error) {
+		if id == 12 {
+			select {
+			case <-releaseSlow:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return &Account{ID: id, Extra: map[string]any{"synthetic_ui_test": true}}, nil
+	}}
+	runner := newSnapshotRunner(repo, accounts)
+	runner.executionTimeout = time.Minute
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	plan := scheduledTestExecutionPlan()
+	plan.AccountID, plan.GroupID, plan.TargetMode = nil, scheduledTestPtrInt64(8), "all_accounts"
+	done := make(chan struct{})
+	go func() { defer close(done); runner.RunPlanNow(ctx, plan) }()
+
+	completed := map[[2]int64]bool{}
+	consume := func(result *ScheduledTestResult) {
+		accountID, definitionID := *result.AccountID, *result.TestDefinitionID
+		if result.Status == "running" && definitionID == 2 {
+			require.True(t, completed[[2]int64{accountID, 1}], "each account's first result must be saved before starting its next type")
+		}
+		if result.Status == "success" {
+			completed[[2]int64{accountID, definitionID}] = true
+		}
+	}
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+	for !completed[[2]int64{13, 2}] {
+		select {
+		case result := <-repo.updated:
+			consume(result)
+		case <-timeout.C:
+			t.Fatal("fast account's second test waited for the slow account's first test")
+		}
+	}
+	require.False(t, completed[[2]int64{12, 1}])
+	releaseOnce.Do(func() { close(releaseSlow) })
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("remaining account queue did not complete")
+	}
+	close(repo.updated)
+	for result := range repo.updated {
+		consume(result)
+	}
+	require.Len(t, completed, 4)
+	require.EqualValues(t, 1, repo.queries.Load(), "moving an account must not change this round's frozen target list")
 }

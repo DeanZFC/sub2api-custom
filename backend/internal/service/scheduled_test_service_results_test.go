@@ -42,6 +42,7 @@ func TestScheduledTestListRepairsLegacyNumericDisplayFromResponse(t *testing.T) 
 				{ID: 2, Status: "success", OutputKind: "number", OutputNumeric: &oldValue, ResponseText: "1. Inspect the input.\n2. Compare the values."},
 				{ID: 3, Status: "success", OutputKind: "number", OutputNumeric: &storedOnly},
 				{ID: 4, Status: "success", OutputKind: "text", ResponseText: body},
+				{ID: 5, Status: "success", OutputKind: "number", OutputNumeric: protectionFloat(8), ResponseText: scheduledTestCandyScreenshotResponse},
 			}
 			svc := NewScheduledTestService(nil, scheduledTestReadResultsStub{rows: rows})
 			list := svc.ListResults
@@ -50,7 +51,7 @@ func TestScheduledTestListRepairsLegacyNumericDisplayFromResponse(t *testing.T) 
 			}
 			got, err := list(context.Background(), 1, 10)
 			require.NoError(t, err)
-			require.Len(t, got, 4)
+			require.Len(t, got, 5)
 			require.NotNil(t, got[0].OutputNumeric)
 			require.Equal(t, 29.0, *got[0].OutputNumeric)
 			require.Equal(t, body, got[0].ResponseText)
@@ -58,6 +59,8 @@ func TestScheduledTestListRepairsLegacyNumericDisplayFromResponse(t *testing.T) 
 			require.Nil(t, got[1].OutputNumeric, "ambiguous text should be displayed without a guessed number")
 			require.Equal(t, 42.0, *got[2].OutputNumeric, "preserve legacy values without source text")
 			require.Nil(t, got[3].OutputNumeric, "text results must not be converted to numeric results")
+			require.Equal(t, 21.0, *got[4].OutputNumeric, "repair the screenshot's stored 8 from its original conclusion")
+			require.Equal(t, scheduledTestCandyScreenshotResponse, got[4].ResponseText)
 		})
 	}
 }

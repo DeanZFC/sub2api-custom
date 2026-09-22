@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestResultsView from '../TestResultsView.vue'
+import TestVoteCard from '@/components/tests/TestVoteCard.vue'
 
 const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), votes: vi.fn(), vote: vi.fn(), error: vi.fn(), reviews: vi.fn(), decide: vi.fn(), adminResults: vi.fn(), isAdmin: false }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: api.isAdmin }) }))
@@ -27,7 +28,7 @@ beforeEach(() => {
   api.history.mockResolvedValue({ items: [] })
   api.votes.mockResolvedValue([])
 })
-afterEach(() => vi.useRealTimers())
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('channel quality result groups', () => {
   it('explains direct group replacement and sends an immediate admin decision for a workflow review', async () => {
@@ -116,7 +117,7 @@ describe('channel quality result groups', () => {
     const wrapper = mountResults(); await flushPromises()
     expect(api.reviews).not.toHaveBeenCalled()
     expect(wrapper.find('[data-admin-decision]').exists()).toBe(false)
-    expect(api.votes).not.toHaveBeenCalled()
+    expect(api.votes).toHaveBeenCalledOnce()
     wrapper.unmount()
   })
 
@@ -434,39 +435,345 @@ describe('channel quality result series', () => {
 })
 
 
-describe('public quality voting is disabled', () => {
+describe('public quality voting follows the configured entries', () => {
   const voting = { enabled: true, open: true, pass_count: 0, fail_count: 0, reject_above: 0, pass_at_least: 2, account_paused: true, reference_answer: '<b>Expected answer</b>' }
 
-  it('does not load or display voting-only results even when an older server offers them', async () => {
-    api.list.mockResolvedValue([])
-    const result = { ...baseResult, id: 44, target_mode: 'account', account_name: 'Must stay private' }
-    api.votes.mockResolvedValue([{ result, voting }])
+  it('keeps the voting area hidden when no entries are enabled', async () => {
+    api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
     const wrapper = mountResults(); await flushPromises()
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(0)
-    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    expect(api.votes).toHaveBeenCalledOnce()
+    expect(wrapper.find('[data-account-result]').exists()).toBe(true)
     expect(wrapper.find('[data-voting-section]').exists()).toBe(false)
     expect(wrapper.find('[data-vote-result]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Must stay private')
-    expect(api.votes).not.toHaveBeenCalled()
     expect(api.vote).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
-  it('keeps regular results and automatic refresh working without polling voting endpoints', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
-    api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
-    api.votes.mockRejectedValue(new Error('voting disabled'))
+  it('offers only entries returned by the voting endpoint while keeping other results visible', async () => {
+    const enabled = { ...baseResult, id: 1 }
+    const disabled = { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Private review' }
+    api.list.mockResolvedValue([enabled, disabled])
+    api.votes.mockResolvedValue([{ result: enabled, voting }])
     const wrapper = mountResults(); await flushPromises()
-    expect(wrapper.find('[data-account-result]').exists()).toBe(true)
-    await vi.advanceTimersByTimeAsync(5000)
-    await flushPromises()
+    expect(wrapper.findAll('[data-test-section]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-vote-result]').map(card => card.attributes('data-vote-result'))).toEqual(['1'])
+    expect(wrapper.get('[data-reference-answer]').text()).toBe('<b>Expected answer</b>')
+    expect(wrapper.get('[data-reference-answer]').find('b').exists()).toBe(false)
+    expect(api.reviews).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-admin-decision]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows voting-only results without exposing the account name', async () => {
+    api.list.mockResolvedValue([])
+    const result = { ...baseResult, id: 44, target_mode: 'account', account_name: 'Must stay private' }
+    api.votes.mockResolvedValue([{ result, voting }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Group Eight'])
+    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    expect(wrapper.find('[data-voting-section]').exists()).toBe(true)
+    expect(wrapper.get('[data-vote-result]').attributes('data-vote-result')).toBe('44')
+    expect(wrapper.text()).not.toContain('Must stay private')
+    wrapper.unmount()
+  })
+
+  it('submits once while busy and refreshes the vote counts and selected state', async () => {
+    const result = { ...baseResult, id: 44 }
+    api.list.mockResolvedValue([result])
+    api.votes.mockResolvedValueOnce([{ result, voting }]).mockResolvedValue([{ result, voting: { ...voting, pass_count: 1, my_vote: 'pass' } }])
+    let resolveVote!: () => void
+    api.vote.mockReturnValue(new Promise<void>(resolve => { resolveVote = resolve }))
+    const wrapper = mountResults(); await flushPromises()
+    const pass = wrapper.get('[data-vote-pass]')
+    await pass.trigger('click')
+    await pass.trigger('click')
+    expect(api.vote).toHaveBeenCalledOnce()
+    expect(api.vote).toHaveBeenCalledWith(44, 'pass')
+    expect(pass.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-vote-fail]').attributes('disabled')).toBeDefined()
+    resolveVote(); await flushPromises()
     expect(api.list).toHaveBeenCalledTimes(2)
-    expect(api.votes).not.toHaveBeenCalled()
+    expect(api.votes).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-vote-pass]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-vote-pass]').text()).toContain('1')
+    expect(wrapper.get('[data-vote-pass]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('fully refreshes after a vote moves an account out of the user scope', async () => {
+    const result = { ...baseResult, id: 44 }
+    api.list.mockResolvedValueOnce([result]).mockResolvedValue([])
+    api.votes.mockResolvedValueOnce([{ result, voting }]).mockResolvedValue([])
+    api.vote.mockResolvedValue({ result, voting: { ...voting, my_vote: 'fail' } })
+    api.history.mockResolvedValue({ items: [result] })
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(true)
+    await wrapper.get('[data-vote-fail]').trigger('click'); await flushPromises()
+    expect(api.vote).toHaveBeenCalledWith(44, 'fail')
+    expect(api.list).toHaveBeenCalledTimes(2)
+    expect(api.votes).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    expect(wrapper.find('[data-voting-section]').exists()).toBe(false)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('reports a rejected stale vote and removes revoked entries after refresh', async () => {
+    const result = { ...baseResult, id: 44 }
+    api.list.mockResolvedValueOnce([result]).mockResolvedValue([])
+    api.votes.mockResolvedValueOnce([{ result, voting }]).mockResolvedValue([])
+    api.vote.mockRejectedValue(new Error('This round has closed'))
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-vote-pass]').trigger('click'); await flushPromises()
+    expect(api.error).toHaveBeenCalledOnce()
+    expect(api.votes).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-voting-section]').exists()).toBe(false)
+    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not allow votes for closed entries or show disabled and failed entries', async () => {
+    api.list.mockResolvedValue([])
+    api.votes.mockResolvedValue([
+      { result: { ...baseResult, id: 44 }, voting: { ...voting, open: false } },
+      { result: { ...baseResult, id: 45 }, voting: { ...voting, enabled: false } },
+      { result: { ...baseResult, id: 46, status: 'failed' }, voting },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[data-vote-result]').map(card => card.attributes('data-vote-result'))).toEqual(['44'])
+    expect(wrapper.get('[data-vote-pass]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-vote-pass]').trigger('click'); await flushPromises()
     expect(api.vote).not.toHaveBeenCalled()
-    expect(wrapper.find('[data-votes-error]').exists()).toBe(false)
-    expect(wrapper.find('[data-vote-pass]').exists()).toBe(false)
-    expect(wrapper.find('[data-vote-fail]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('clears stale entries on voting refresh errors while regular results keep refreshing', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const result = { ...baseResult, id: 1 }
+    api.list.mockResolvedValue([result])
+    api.votes.mockResolvedValueOnce([{ result, voting }]).mockRejectedValue(new Error('unavailable'))
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.find('[data-voting-section]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(2)
+    expect(api.votes).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-account-result]').exists()).toBe(true)
+    expect(wrapper.find('[data-voting-section]').exists()).toBe(false)
+    expect(wrapper.find('[data-votes-error]').exists()).toBe(true)
     expect(api.error).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('ignores a poll started before a vote and reloads permissions after it finishes', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const result = { ...baseResult, id: 44 }
+    let resolvePoll!: (value: unknown) => void
+    api.list.mockResolvedValue([result])
+    api.votes.mockResolvedValueOnce([{ result, voting }])
+      .mockReturnValueOnce(new Promise(resolve => { resolvePoll = resolve }))
+      .mockResolvedValue([])
+    api.vote.mockResolvedValue({ result, voting: { ...voting, my_vote: 'fail' } })
+    const wrapper = mountResults(); await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    api.list.mockResolvedValue([])
+    await wrapper.get('[data-vote-fail]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-voting-section]').exists()).toBe(false)
+    resolvePoll([{ result, voting }]); await flushPromises()
+    expect(api.votes).toHaveBeenCalledTimes(3)
+    expect(wrapper.find('[data-voting-section]').exists()).toBe(false)
+    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+
+describe('current group refresh and access changes', () => {
+  const initial = { ...baseResult, id: 44, group_name: 'Original Group' }
+  const moved = { ...initial, group_id: 12, group_name: 'Current Group' }
+  const voting = { enabled: true, open: true, pass_count: 0, fail_count: 0, reject_above: 0, pass_at_least: 2, account_paused: false }
+
+  it('updates group tabs on the next five-second visible-page poll', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.list.mockResolvedValueOnce([initial]).mockResolvedValue([moved])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Original Group'])
+    await vi.advanceTimersByTimeAsync(4999); await flushPromises()
+    expect(api.list).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Current Group'])
+    expect(wrapper.get('[data-account-info]').text()).toContain('Current Group')
+    wrapper.unmount()
+  })
+
+  it('refreshes immediately after an admin decision even with an older poll still pending', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.isAdmin = true
+    const review = { result: initial, generation: 1, verdict: 'pending', admin_verdict: '', account_paused: false }
+    let resolveOldResults!: (value: unknown) => void
+    let resolveOldReviews!: (value: unknown) => void
+    api.list.mockResolvedValueOnce([initial])
+      .mockReturnValueOnce(new Promise(resolve => { resolveOldResults = resolve }))
+      .mockResolvedValue([moved])
+    api.reviews.mockResolvedValueOnce([review])
+      .mockReturnValueOnce(new Promise(resolve => { resolveOldReviews = resolve }))
+      .mockResolvedValue([{ ...review, result: moved, verdict: 'pass', admin_verdict: 'pass' }])
+    api.decide.mockResolvedValue(undefined)
+    const wrapper = mountResults(); await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(2)
+    await wrapper.get('[data-admin-pass]').trigger('click'); await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(3)
+    expect(api.reviews).toHaveBeenCalledTimes(3)
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Current Group'])
+    resolveOldResults([initial]); resolveOldReviews([review]); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Current Group'])
+    expect(wrapper.get('[data-admin-pass]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('publishes all result projections together without mixing a new group and old reviews', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.isAdmin = true
+    const review = { result: { ...initial, id: 45 }, generation: 1, verdict: 'pending', admin_verdict: '', account_paused: false }
+    let resolveReviews!: (value: unknown) => void
+    api.list.mockResolvedValueOnce([initial]).mockResolvedValue([moved])
+    api.reviews.mockResolvedValueOnce([review]).mockReturnValueOnce(new Promise(resolve => { resolveReviews = resolve }))
+    const wrapper = mountResults(); await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Original Group'])
+    resolveReviews([{ ...review, result: { ...moved, id: 45 } }]); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Current Group'])
+    wrapper.unmount()
+  })
+
+  it('uses the current result group for its voting card when review projection is older', async () => {
+    api.list.mockResolvedValue([moved])
+    api.votes.mockResolvedValue([{ result: initial, voting }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Current Group'])
+    expect(wrapper.get('[data-vote-result]').attributes('data-vote-result')).toBe('44')
+    wrapper.unmount()
+  })
+
+  it('closes cached history when access disappears and ignores its delayed response', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    let resolveHistory!: (value: unknown) => void
+    api.list.mockResolvedValueOnce([initial]).mockResolvedValue([])
+    api.history.mockReturnValue(new Promise(resolve => { resolveHistory = resolve }))
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    resolveHistory({ items: [initial] }); await flushPromises()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    expect(wrapper.find('[data-output]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps unchanged history open but closes it when the account moves', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.list.mockResolvedValue([initial])
+    api.history.mockResolvedValue({ items: [initial] })
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(true)
+    api.list.mockResolvedValue([moved])
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Current Group'])
+    wrapper.unmount()
+  })
+
+  it.each([403, 404])('clears old history and reloads permissions after a top-level %s error', async status => {
+    api.list.mockResolvedValueOnce([initial]).mockResolvedValue([])
+    api.history.mockResolvedValueOnce({ items: [initial], next_before_id: 44 })
+      .mockRejectedValueOnce({ status, message: 'Access is no longer available' })
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    expect(wrapper.findAll('[data-dialog] [data-output]')).toHaveLength(1)
+    await wrapper.findAll('[data-dialog] button').find(button => button.text() === 'tests.loadMore')!.trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    expect(api.list).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('refreshes when the page becomes visible or focused and removes both listeners on unmount', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    api.list.mockResolvedValueOnce([initial]).mockResolvedValue([moved])
+    const wrapper = mountResults(); await flushPromises()
+    hidden.mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(api.list).toHaveBeenCalledOnce()
+    hidden.mockReturnValue(false)
+    document.dispatchEvent(new Event('visibilitychange')); await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Current Group'])
+    window.dispatchEvent(new Event('focus')); await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(3)
+    wrapper.unmount()
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('focus')); await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(3)
+  })
+})
+
+
+describe('current group display order', () => {
+  const proPlus = { ...baseResult, id: 1, group_id: 43, group_name: 'Pro-不降智', group_order: 0, plan_order: 99 }
+  // This result was produced by Pro-不降智's plan before its account moved.
+  const pro = { ...baseResult, id: 2, account_id: 4, group_id: 2, group_name: 'Pro', group_order: 1, plan_order: 0 }
+  const plus = { ...baseResult, id: 3, account_id: 5, group_id: 3, group_name: 'Plus', group_order: 2, plan_order: 0 }
+
+  it('uses current group order including zero, independent of source plan and API row order', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const unconfigured = { ...baseResult, id: 4, group_id: 4, group_name: 'No group plan', group_order: 2147483647, plan_order: 0 }
+    api.list.mockResolvedValueOnce([pro, unconfigured, plus, proPlus]).mockResolvedValue([plus, proPlus, unconfigured, pro])
+    const wrapper = mountResults(); await flushPromises()
+    const expected = ['Pro-不降智', 'Pro', 'Plus', 'No group plan']
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(expected)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(expected)
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    expect(wrapper.get('[data-account-info]').text()).toContain('tests.account #4')
+    expect(wrapper.get('[data-account-info]').text()).toContain('Pro')
+    wrapper.unmount()
+  })
+
+  it('applies newly configured group orders without new test results and preserves the selected group', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.list.mockResolvedValueOnce([proPlus, pro, plus])
+      .mockResolvedValue([{ ...proPlus, group_order: 2 }, pro, { ...plus, group_order: 0 }])
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Plus', 'Pro', 'Pro-不降智'])
+    expect(wrapper.findAll('[role="tab"]').filter(tab => tab.attributes('aria-selected') === 'true').map(tab => tab.text())).toEqual(['Pro'])
+    expect(wrapper.get('[data-output]').attributes('data-result-id')).toBe('2')
+    expect(api.list).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('sorts voting-only groups by current order and copies current projection order into existing voting cards', async () => {
+    const voting = { enabled: true, open: true, pass_count: 0, fail_count: 0, reject_above: 0, pass_at_least: 1, account_paused: false }
+    api.list.mockResolvedValue([proPlus, pro])
+    api.votes.mockResolvedValue([
+      { result: { ...pro, group_id: 43, group_name: 'Pro-不降智', group_order: 0, plan_order: 55 }, voting },
+      { result: plus, voting },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Pro-不降智', 'Pro', 'Plus'])
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    expect(wrapper.getComponent(TestVoteCard).props('item').result).toMatchObject({ id: 2, group_id: 2, group_name: 'Pro', group_order: 1, plan_order: 0 })
+    await wrapper.findAll('[role="tab"]')[2].trigger('click')
+    expect(wrapper.get('[data-vote-result]').attributes('data-vote-result')).toBe('3')
     wrapper.unmount()
   })
 })

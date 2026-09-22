@@ -38,7 +38,7 @@ func protectionRuleCurrent(config *service.ScheduledTestProtectionConfig, rule s
 	}
 	for _, current := range config.Rules {
 		if current.TestDefinitionID == rule.TestDefinitionID {
-			return reflect.DeepEqual(current, rule)
+			return reflect.DeepEqual(protectionRuleWithoutPublicVote(current), protectionRuleWithoutPublicVote(rule))
 		}
 	}
 	return false
@@ -236,9 +236,16 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	}
 	verdict, _, reason := combineProtectionVerdict(state, pass, fail)
 	if workflow := config.GroupWorkflow; workflow != nil && state.definitionID == workflow.ReviewTestID {
-		// A generated animation is evidence for the administrator, never an
-		// automatic group decision. Public vote totals have no authority here.
+		// Generating an animation alone never changes the group. An explicit
+		// administrator decision wins; otherwise use authorized public ballots.
 		verdict, reason = "pending", "等待管理员判定动画结果"
+		if state.rule.Vote != nil && state.rule.Vote.Enabled {
+			if fail > state.rule.Vote.RejectAbove {
+				verdict, reason = "fail", "用户不通过票数超过阈值"
+			} else if pass >= state.rule.Vote.PassAtLeast {
+				verdict, reason = "pass", "用户通过票数达到阈值"
+			}
+		}
 		if state.automated == "fail" {
 			verdict, reason = "fail", "动画执行失败，保留当前分组"
 			if state.reason != "" {
@@ -274,15 +281,15 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 		reason = state.reason
 	}
 	if config.GroupWorkflow != nil {
-		manualOverride, err := reconcileGroupWorkflow(ctx, tx, state, &config, verdict)
+		reviewOverride, err := reconcileGroupWorkflow(ctx, tx, state, &config, verdict)
 		if err != nil {
 			return err
 		}
-		if manualOverride {
+		if reviewOverride {
 			if reason != "" {
 				reason += "；"
 			}
-			reason += "本轮分组以管理员判定为准"
+			reason += "本轮分组以动画评议结果为准"
 		}
 	} else if err := reconcileProtectionGroups(ctx, tx, state.accountID); err != nil {
 		return err
@@ -476,6 +483,7 @@ const protectionVoteEntitlementSQL = `EXISTS (
 const protectionVoteResultJSON = `jsonb_build_object(
 	'id',r.id,'plan_id',r.plan_id,'plan_name',p.name,'test_definition_id',r.test_definition_id,
 	'test_name',COALESCE(d.name,''),'test_order',COALESCE(d.sort_order,0),'group_name',COALESCE(current_group.name,g.name,''),'plan_order',p.sort_order,
+	'group_order',COALESCE(group_display_order.sort_order,2147483647),
 	'target_mode',r.target_mode,'status',r.status,'response_text',r.response_text,'output_kind',r.output_kind,'output_html',r.output_html,'output_numeric',r.output_numeric,
 	'account_id',CASE WHEN r.target_mode IN ('account','all_accounts') THEN r.account_id ELSE NULL END,
 	'model_id',r.model_id,'reasoning_effort',r.reasoning_effort,
@@ -500,9 +508,14 @@ const protectionVotingQuery = `SELECT ` + protectionVoteResultJSON + `,s.rule_co
 		ORDER BY CASE WHEN ag.group_id=r.group_id THEN 0 ELSE 1 END,ag.group_id
 		LIMIT 1
 	) current_group ON TRUE
+	LEFT JOIN (` + scheduledTestGroupDisplayOrdersSQL + `) group_display_order
+	 ON group_display_order.group_id=CASE WHEN r.account_id IS NULL THEN r.group_id ELSE current_group.group_id END
 	WHERE p.enabled AND p.protection->>'enabled'='true' AND s.rule_config->'vote'->>'enabled'='true'
-	 AND (p.protection->'group_workflow' IS NULL OR p.protection->'group_workflow'='null'::jsonb)
+	 AND EXISTS (SELECT 1 FROM jsonb_array_elements(p.protection->'rules') current_rule
+	     WHERE current_rule->>'test_definition_id'=s.test_definition_id::text
+	     AND current_rule->'vote'->>'enabled'='true' AND current_rule->'vote'->>'public_enabled'='true')
 	 AND s.completed AND r.status IN ('success','passed')
+	 AND r.started_at=s.result_started_at AND r.started_at>=s.round_started_at
 	 AND (NULLIF(BTRIM(r.response_text),'') IS NOT NULL OR NULLIF(BTRIM(r.output_html),'') IS NOT NULL OR r.output_numeric IS NOT NULL)
 	 AND a.deleted_at IS NULL AND a.schedulable=TRUE AND a.status IN ('active','quality_paused')
 	 AND ` + protectionSourceMembershipSQL + `
@@ -529,7 +542,7 @@ func scanProtectionVoting(rows *sql.Rows) ([]*service.ScheduledTestVoteResult, e
 		if err := json.Unmarshal(configRaw, &config); err != nil {
 			return nil, err
 		}
-		if !protectionRuleCurrent(&config, rule) || rule.Vote == nil || !rule.Vote.Enabled {
+		if !protectionPublicVoteCurrent(&config, rule) {
 			continue
 		}
 		out.Voting.Enabled = true
@@ -588,7 +601,7 @@ func (r *scheduledTestResultRepository) CastTestVote(ctx context.Context, userID
 	if err != nil {
 		return nil, err
 	}
-	if config.GroupWorkflow != nil || !state.completed || state.automated == "fail" || !protectionRuleCurrent(config, state.rule) || state.rule.Vote == nil || !state.rule.Vote.Enabled {
+	if !state.completed || state.automated == "fail" || !protectionPublicVoteCurrent(config, state.rule) {
 		return nil, service.ErrScheduledTestVoteUnavailable
 	}
 	// Keep a concurrent manual retry/result deletion from changing the row
