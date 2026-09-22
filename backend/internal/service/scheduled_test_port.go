@@ -107,6 +107,7 @@ type ScheduledTestStatistics struct {
 	FirstTokenSamples int64                        `json:"first_token_samples"`
 	CacheReadTokens   int64                        `json:"cache_read_tokens"`
 	CacheInputTokens  int64                        `json:"cache_input_tokens"`
+	CacheSamples      int64                        `json:"cache_samples"`
 	RecentRequests    []ScheduledTestRecentRequest `json:"recent_requests"`
 }
 
@@ -117,11 +118,12 @@ type ScheduledTestRecentRequest struct {
 }
 
 type ScheduledTestStatisticsFilter struct {
-	GroupID     *int64
-	AccountID   *int64
-	Model       string
-	WindowStart time.Time
-	WindowEnd   time.Time
+	GroupID             *int64
+	AccountID           *int64
+	Model               string
+	WindowStart         time.Time
+	WindowEnd           time.Time
+	RequestStartedAfter *time.Time
 }
 
 // Optional capability implemented by the SQL result repository. Existing test

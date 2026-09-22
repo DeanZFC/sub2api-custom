@@ -2558,6 +2558,14 @@ export interface TestOutcomeAction {
   group_mode: 'keep' | 'assign'
   group_ids?: number[]
 }
+export interface TestProtectionRecovery {
+  enabled: boolean
+  cooldown_seconds: number
+  trial_seconds: number
+  max_requests: number
+  min_samples: number
+  recover_rate: number
+}
 export interface TestProtectionRule {
   test_definition_id: number
   thresholds?: TestProtectionThreshold[]
@@ -2569,6 +2577,7 @@ export interface TestProtectionRule {
   vote?: { enabled: boolean; reject_above: number; pass_at_least: number }
   on_pass?: TestOutcomeAction
   on_fail?: TestOutcomeAction
+  recovery?: TestProtectionRecovery
 }
 export interface TestProtectionConfig {
   enabled: boolean
@@ -2607,6 +2616,8 @@ export interface TestOutputStatistics {
   first_token_samples: number
   cache_read_tokens: number
   cache_input_tokens: number
+  /** Eligible streaming and WebSocket cache observations; older snapshots may omit this field. */
+  cache_samples?: number
   /** Latest ten outcomes, newest first; older snapshots may omit this field. */
   recent_requests?: TestStatisticsRecentRequest[] | null
 }

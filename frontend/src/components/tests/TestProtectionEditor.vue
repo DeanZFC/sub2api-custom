@@ -42,6 +42,7 @@
             <TestOutcomeActionEditor :model-value="ruleFor(type.id)?.on_fail" outcome="fail" :groups="groups" @update:model-value="patchRule(type.id, { on_fail: $event })" />
           </div>
           <p v-if="ruleFor(type.id)?.on_pass?.group_mode === 'assign' || ruleFor(type.id)?.on_fail?.group_mode === 'assign'" class="text-xs text-gray-500 dark:text-gray-400" data-routing-hint>{{ t('admin.tests.protection.actions.routingHint') }}</p>
+          <TestCacheRecoveryEditor v-if="type.output_kind === 'statistics' || ruleFor(type.id)?.recovery" :rule="ruleFor(type.id)!" :output-kind="type.output_kind" @update:model-value="patchRule(type.id, { recovery: $event })" />
         </fieldset>
       </section>
       <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.rulesHint') }}</p>
@@ -55,6 +56,7 @@ import { useI18n } from 'vue-i18n'
 import type { AdminGroup, TestProtectionConfig, TestProtectionMetric, TestProtectionRule, TestProtectionThreshold, TestType } from '@/types'
 import { copyTestProtection, defaultProtectionRule, protectionMetrics, validTestProtection } from '@/utils/testProtection'
 import TestOutcomeActionEditor from './TestOutcomeActionEditor.vue'
+import TestCacheRecoveryEditor from './TestCacheRecoveryEditor.vue'
 
 const props = withDefaults(defineProps<{ modelValue: TestProtectionConfig; types: TestType[]; targetMode?: string; groups?: AdminGroup[] }>(), { groups: () => [] })
 const emit = defineEmits<{ 'update:modelValue': [value: TestProtectionConfig] }>()

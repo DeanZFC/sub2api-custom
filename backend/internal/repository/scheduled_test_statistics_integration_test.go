@@ -54,6 +54,7 @@ CREATE TABLE usage_logs (
  id BIGSERIAL PRIMARY KEY, api_key_id BIGINT DEFAULT 1, request_id TEXT,
  group_id BIGINT DEFAULT 8, account_id BIGINT DEFAULT 62, created_at TIMESTAMPTZ NOT NULL,
  model TEXT DEFAULT 'model-a', requested_model TEXT, request_type SMALLINT DEFAULT 2,
+ stream BOOLEAN DEFAULT true, openai_ws_mode BOOLEAN DEFAULT false, duration_ms INTEGER DEFAULT 0,
  actual_cost NUMERIC DEFAULT 0, total_cost NUMERIC DEFAULT 0,
  input_tokens BIGINT DEFAULT 0, output_tokens BIGINT DEFAULT 0,
  cache_creation_tokens BIGINT DEFAULT 0, cache_read_tokens BIGINT DEFAULT 0,
@@ -64,7 +65,7 @@ CREATE TABLE usage_logs (
 );
 CREATE TABLE ops_error_logs (
  id BIGSERIAL PRIMARY KEY, api_key_id BIGINT DEFAULT 1, request_id TEXT, client_request_id TEXT,
- group_id BIGINT DEFAULT 8, account_id BIGINT DEFAULT 62, created_at TIMESTAMPTZ NOT NULL,
+ group_id BIGINT DEFAULT 8, account_id BIGINT DEFAULT 62, created_at TIMESTAMPTZ NOT NULL, duration_ms INTEGER DEFAULT 0,
  model TEXT DEFAULT 'model-a', requested_model TEXT, request_type SMALLINT DEFAULT 2,
  status_code INTEGER DEFAULT 502, error_type TEXT DEFAULT 'upstream_error', is_count_tokens BOOLEAN DEFAULT false
 );`)
@@ -111,6 +112,30 @@ CREATE TABLE ops_error_logs (
 		require.Nil(t, result.AvgFirstTokenMs)
 		require.Equal(t, filter.WindowStart, result.WindowStart)
 		require.Equal(t, filter.WindowEnd, result.WindowEnd)
+	})
+	t.Run("synchronous traffic affects success but not cache samples", func(t *testing.T) {
+		reset()
+		usage(map[string]any{"request_id": "stream", "input_tokens": 10, "cache_read_tokens": 90})
+		usage(map[string]any{"request_id": "sync", "request_type": 1, "stream": false, "input_tokens": 9000, "cache_read_tokens": 1000})
+		usage(map[string]any{"request_id": "legacy-sync", "request_type": 0, "stream": false, "input_tokens": 9000})
+		usage(map[string]any{"request_id": "ws", "request_type": 3, "stream": false, "openai_ws_mode": true, "input_tokens": 10, "cache_read_tokens": 90})
+		result := collect(filter)
+		require.Equal(t, int64(4), result.SuccessRequests)
+		require.Equal(t, int64(2), result.CacheSamples)
+		require.Equal(t, int64(200), result.CacheInputTokens)
+		require.InDelta(t, .9, *result.CacheRate, .00001)
+	})
+	t.Run("trial excludes old in flight requests and unknown start times", func(t *testing.T) {
+		reset()
+		start := end.Add(-5 * time.Minute)
+		usage(map[string]any{"request_id": "late-old", "created_at": start.Add(time.Second), "duration_ms": 2000, "input_tokens": 1000})
+		usage(map[string]any{"request_id": "unknown", "created_at": start.Add(time.Second), "duration_ms": nil, "input_tokens": 1000})
+		usage(map[string]any{"request_id": "fresh", "created_at": start.Add(time.Second), "duration_ms": 500, "input_tokens": 10, "cache_read_tokens": 90})
+		trial := filter
+		trial.WindowStart, trial.RequestStartedAfter = start, &start
+		result := collect(trial)
+		require.Equal(t, int64(1), result.CacheSamples)
+		require.InDelta(t, .9, *result.CacheRate, .00001)
 	})
 	t.Run("weighted cache and free successes exclude blocked placeholders and compaction cache", func(t *testing.T) {
 		reset()

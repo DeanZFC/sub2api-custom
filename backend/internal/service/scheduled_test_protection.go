@@ -20,16 +20,17 @@ type ScheduledTestProtectionConfig struct {
 }
 
 type ScheduledTestProtectionRule struct {
-	TestDefinitionID int64                       `json:"test_definition_id"`
-	Thresholds       []ScheduledTestThreshold    `json:"thresholds,omitempty"`
-	MinSamples       int64                       `json:"min_samples,omitempty"`
-	PauseOnFailure   bool                        `json:"pause_on_failure,omitempty"`
-	ExpectedAnswer   string                      `json:"expected_answer,omitempty"`
-	AnswerMatch      string                      `json:"answer_match,omitempty"`
-	ModelMatch       string                      `json:"model_match,omitempty"`
-	Vote             *ScheduledTestVoteConfig    `json:"vote,omitempty"`
-	OnPass           *ScheduledTestOutcomeAction `json:"on_pass,omitempty"`
-	OnFail           *ScheduledTestOutcomeAction `json:"on_fail,omitempty"`
+	TestDefinitionID int64                             `json:"test_definition_id"`
+	Thresholds       []ScheduledTestThreshold          `json:"thresholds,omitempty"`
+	MinSamples       int64                             `json:"min_samples,omitempty"`
+	PauseOnFailure   bool                              `json:"pause_on_failure,omitempty"`
+	ExpectedAnswer   string                            `json:"expected_answer,omitempty"`
+	AnswerMatch      string                            `json:"answer_match,omitempty"`
+	ModelMatch       string                            `json:"model_match,omitempty"`
+	Vote             *ScheduledTestVoteConfig          `json:"vote,omitempty"`
+	OnPass           *ScheduledTestOutcomeAction       `json:"on_pass,omitempty"`
+	OnFail           *ScheduledTestOutcomeAction       `json:"on_fail,omitempty"`
+	Recovery         *ScheduledTestCacheRecoveryConfig `json:"recovery,omitempty"`
 }
 
 type ScheduledTestThreshold struct {
@@ -161,6 +162,9 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 				return fmt.Errorf("unsupported protection metric %q", threshold.Metric)
 			}
 		}
+		if err := validateScheduledTestCacheRecovery(rule); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -168,6 +172,9 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string) error {
 	if rule == nil {
 		return nil
+	}
+	if rule.Recovery != nil && rule.Recovery.Enabled && kind != "statistics" {
+		return fmt.Errorf("cache recovery requires a statistics test")
 	}
 	if kind == "model_check" {
 		if (rule.Vote != nil && rule.Vote.Enabled) || rule.ExpectedAnswer != "" {
@@ -332,7 +339,7 @@ func scheduledTestMetric(result *ScheduledTestResult, metric string, minSamples 
 		case "success_rate":
 			value = snapshot.SuccessRate
 		case "cache_rate":
-			if snapshot.CacheInputTokens <= 0 {
+			if snapshot.CacheInputTokens <= 0 || snapshot.CacheSamples < minSamples {
 				return 0, false
 			}
 			value = snapshot.CacheRate

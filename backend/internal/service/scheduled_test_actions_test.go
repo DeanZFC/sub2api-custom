@@ -122,7 +122,7 @@ func TestScheduledTestActionsPreserveVerdictGates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			verdict, _ := evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "success", OutputStatistics: &ScheduledTestStatistics{
-				TotalRequests: tc.samples, CacheInputTokens: 100, CacheRate: protectionFloat(tc.cacheRate),
+				TotalRequests: tc.samples, CacheSamples: tc.samples, CacheInputTokens: 100, CacheRate: protectionFloat(tc.cacheRate),
 			}})
 			require.Equal(t, tc.verdict, verdict)
 			action := rule.OutcomeAction(verdict)

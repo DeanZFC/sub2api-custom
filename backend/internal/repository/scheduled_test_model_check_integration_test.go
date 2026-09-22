@@ -68,6 +68,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source tier'),(10,'Higher tier'),(11,'Unre
 		"260_scheduled_test_model_check.sql", "260_scheduled_test_model_check.sql",
 		"261_scheduled_test_admin_review.sql",
 		"262_scheduled_test_execution_snapshot.sql",
+		"264_scheduled_test_cache_recovery.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)

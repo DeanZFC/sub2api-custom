@@ -60,7 +60,7 @@ func TestScheduledTestProtectionThresholdsAndSamples(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rule := ScheduledTestProtectionRule{MinSamples: tc.minSamples, Thresholds: []ScheduledTestThreshold{{Metric: tc.metric, Operator: tc.operator, Value: tc.threshold}}}
 			result := &ScheduledTestResult{Status: "success", LatencyMs: int64(tc.observed), OutputNumeric: protectionFloat(tc.observed), OutputStatistics: &ScheduledTestStatistics{
-				TotalRequests: tc.samples, FirstTokenSamples: tc.firstSamples, CacheInputTokens: tc.inputTokens,
+				TotalRequests: tc.samples, CacheSamples: tc.samples, FirstTokenSamples: tc.firstSamples, CacheInputTokens: tc.inputTokens,
 				SuccessRate: protectionFloat(tc.observed), CacheRate: protectionFloat(tc.observed), AvgFirstTokenMs: protectionFloat(tc.observed),
 			}}
 			verdict, reason := evaluateScheduledTestProtection(rule, result)
@@ -318,7 +318,7 @@ func TestScheduledTestProtectionRunnerStatisticsWiring(t *testing.T) {
 	repo.collect = func(_ context.Context, filter ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error) {
 		require.Equal(t, []string{"create", "begin", "collect"}, repo.events)
 		require.Equal(t, int64(42), *filter.AccountID)
-		return &ScheduledTestStatistics{WindowStart: filter.WindowStart, WindowEnd: filter.WindowEnd, TotalRequests: 10, CacheInputTokens: 100, CacheReadTokens: 90, CacheRate: protectionFloat(.9)}, nil
+		return &ScheduledTestStatistics{WindowStart: filter.WindowStart, WindowEnd: filter.WindowEnd, TotalRequests: 10, CacheSamples: 10, CacheInputTokens: 100, CacheReadTokens: 90, CacheRate: protectionFloat(.9)}, nil
 	}
 	plan := protectionPlan()
 	plan.TargetMode = "all_accounts"

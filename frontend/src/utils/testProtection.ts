@@ -1,4 +1,4 @@
-import type { TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRule, TestType } from '@/types'
+import type { TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRecovery, TestProtectionRule, TestType } from '@/types'
 
 export const protectionMetrics = (kind: string): TestProtectionMetric[] => kind === 'statistics'
   ? ['success_rate', 'cache_rate', 'avg_first_token_ms']
@@ -12,7 +12,7 @@ export const defaultTestOutcomeAction = (outcome: 'pass' | 'fail'): TestOutcomeA
 })
 
 export const copyTestProtection = (value?: TestProtectionConfig): TestProtectionConfig => value
-  ? { enabled: value.enabled, rules: (value.rules || []).map(rule => ({ ...rule, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail) })) }
+  ? { enabled: value.enabled, rules: (value.rules || []).map(rule => ({ ...rule, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })) }
   : { enabled: false, rules: [] }
 
 export const defaultProtectionRule = (type: TestType): TestProtectionRule => ({
@@ -25,6 +25,40 @@ export const defaultProtectionRule = (type: TestType): TestProtectionRule => ({
     : type.output_kind === 'model_check' ? { model_match: 'exact' }
       : { answer_match: type.output_kind === 'number' ? 'numeric' : 'exact' }),
 })
+
+export function cacheRecoveryThreshold(rule: TestProtectionRule): number {
+  return Math.max(0, ...(rule.thresholds || []).filter(item => item.metric === 'cache_rate' && item.operator === 'lt' && Number.isFinite(item.value)).map(item => item.value))
+}
+
+export function canEnableCacheRecovery(rule: TestProtectionRule, kind: string): boolean {
+  const cacheThresholds = (rule.thresholds || []).filter(item => item.metric === 'cache_rate')
+  return kind === 'statistics' && cacheThresholds.length > 0
+    && cacheThresholds.every(item => item.operator === 'lt') && !rule.vote?.enabled
+    && (rule.on_fail?.scheduling ?? 'pause') === 'pause'
+    && (rule.on_pass?.scheduling ?? 'resume') === 'resume'
+    && (rule.on_fail?.group_mode !== 'assign' || Boolean(rule.on_fail.group_ids?.length))
+}
+
+export const defaultTestProtectionRecovery = (rule: TestProtectionRule): TestProtectionRecovery => ({
+  enabled: false,
+  cooldown_seconds: 300,
+  trial_seconds: 300,
+  max_requests: 20,
+  min_samples: 10,
+  recover_rate: Math.min(100, cacheRecoveryThreshold(rule) + 5),
+})
+
+function validCacheRecovery(rule: TestProtectionRule, kind: string): boolean {
+  const recovery = rule.recovery
+  if (!recovery?.enabled) return true
+  const integerInRange = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max
+  return canEnableCacheRecovery(rule, kind)
+    && integerInRange(recovery.cooldown_seconds, 60, 86400)
+    && integerInRange(recovery.trial_seconds, 60, 3600)
+    && integerInRange(recovery.max_requests, 1, 1000)
+    && integerInRange(recovery.min_samples, 1, recovery.max_requests)
+    && Number.isFinite(recovery.recover_rate) && recovery.recover_rate >= cacheRecoveryThreshold(rule) && recovery.recover_rate <= 100
+}
 
 function validAction(action: TestOutcomeAction | undefined, groups?: readonly { id: number }[]): boolean {
   if (!action) return true
@@ -42,6 +76,7 @@ export function validTestProtection(value: TestProtectionConfig | undefined, tar
   return value.rules.every(rule => {
     const type = types.find(item => item.id === rule.test_definition_id)
     if (!type?.enabled) return false
+    if (!validCacheRecovery(rule, type.output_kind)) return false
     if (!validAction(rule.on_pass, groups) || !validAction(rule.on_fail, groups)) return false
     const assigned = [rule.on_pass, rule.on_fail].filter(action => action?.group_mode === 'assign')
     if (assigned.length && !assigned.some(action => action?.group_ids?.length)) return false

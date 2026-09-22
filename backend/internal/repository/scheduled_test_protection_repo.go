@@ -155,22 +155,27 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 }
 
 type protectionState struct {
-	adminVerdict                                          string
-	roundStarted                                          time.Time
-	planID, accountID, definitionID, resultID, generation int64
-	started                                               time.Time
-	automated, verdict, reason                            string
-	blocked, completed                                    bool
-	rule                                                  service.ScheduledTestProtectionRule
+	recoveryPhase                                                  string
+	recoveryCooldownUntil, recoveryTrialStarted, recoveryTrialEnds sql.NullTime
+	recoveryTrialRequests                                          int64
+	adminVerdict                                                   string
+	roundStarted                                                   time.Time
+	planID, accountID, definitionID, resultID, generation          int64
+	started                                                        time.Time
+	automated, verdict, reason                                     string
+	blocked, completed                                             bool
+	rule                                                           service.ScheduledTestProtectionRule
 }
 
 func loadProtectionState(ctx context.Context, tx *sql.Tx, resultID int64) (*protectionState, error) {
 	s := &protectionState{}
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT plan_id,account_id,test_definition_id,result_id,generation,result_started_at,
-		automated_verdict,verdict,reason,blocked,completed,rule_config,round_started_at,admin_verdict
+		automated_verdict,verdict,reason,blocked,completed,rule_config,round_started_at,admin_verdict,
+		recovery_phase,recovery_cooldown_until,recovery_trial_started_at,recovery_trial_ends_at,recovery_trial_requests
 		FROM scheduled_test_protection_states WHERE result_id=$1 FOR UPDATE`, resultID).Scan(
-		&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started, &s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw, &s.roundStarted, &s.adminVerdict)
+		&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started, &s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw, &s.roundStarted, &s.adminVerdict,
+		&s.recoveryPhase, &s.recoveryCooldownUntil, &s.recoveryTrialStarted, &s.recoveryTrialEnds, &s.recoveryTrialRequests)
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +245,12 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	if err != nil {
 		return err
 	}
+	if blocked && verdict == "fail" && state.rule.Recovery != nil && state.rule.Recovery.Enabled && state.recoveryPhase == "" {
+		if err := startCacheRecoveryCooldown(ctx, tx, state, time.Now().UTC(), reason); err != nil {
+			return err
+		}
+		reason = state.reason
+	}
 	if err := reconcileProtectionGroups(ctx, tx, state.accountID); err != nil {
 		return err
 	}
@@ -251,24 +262,36 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 
 func reconcileProtectionAccount(ctx context.Context, tx *sql.Tx, accountID int64) error {
 	var reason string
-	err := tx.QueryRowContext(ctx, `SELECT reason FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked
-		ORDER BY updated_at DESC,plan_id,test_definition_id LIMIT 1`, accountID).Scan(&reason)
+	var trial bool
+	err := tx.QueryRowContext(ctx, `SELECT reason,
+		NOT EXISTS (SELECT 1 FROM scheduled_test_protection_states other WHERE other.account_id=$1 AND other.blocked
+		 AND (other.recovery_phase<>'trial' OR other.rule_config->'recovery'->>'enabled' IS DISTINCT FROM 'true'
+	 OR other.recovery_trial_started_at IS NULL OR other.recovery_trial_started_at>NOW()
+	 OR other.recovery_trial_ends_at IS NULL OR other.recovery_trial_ends_at<=NOW()))
+		FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked
+		ORDER BY updated_at DESC,plan_id,test_definition_id LIMIT 1`, accountID).Scan(&reason, &trial)
 	blocked := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	var changed sql.Result
-	if blocked {
+	if blocked && !trial {
 		if reason == "" {
 			reason = "渠道质量检测保护"
 		}
 		changed, err = tx.ExecContext(ctx, `UPDATE accounts SET status='quality_paused',
-		 extra=jsonb_set(COALESCE(extra,'{}'::jsonb),'{quality_protection_reason}',to_jsonb($2::text)),updated_at=NOW()
+			 extra=jsonb_set(COALESCE(extra,'{}'::jsonb)-'quality_protection_trial','{quality_protection_reason}',to_jsonb($2::text)),updated_at=NOW()
 		 WHERE id=$1 AND deleted_at IS NULL AND schedulable=TRUE AND status IN ('active','quality_paused')
-		 AND (status <> 'quality_paused' OR extra->>'quality_protection_reason' IS DISTINCT FROM $2)`, accountID, reason)
+			 AND (status <> 'quality_paused' OR extra->>'quality_protection_reason' IS DISTINCT FROM $2 OR extra ? 'quality_protection_trial')`, accountID, reason)
+	} else if trial {
+		changed, err = tx.ExecContext(ctx, `UPDATE accounts SET status='active',
+		 extra=jsonb_set(jsonb_set(COALESCE(extra,'{}'::jsonb),'{quality_protection_trial}','true'::jsonb),'{quality_protection_reason}',to_jsonb($2::text)),updated_at=NOW()
+		 WHERE id=$1 AND deleted_at IS NULL AND schedulable=TRUE AND status IN ('active','quality_paused')
+		 AND (status<>'active' OR extra->>'quality_protection_trial' IS DISTINCT FROM 'true' OR extra->>'quality_protection_reason' IS DISTINCT FROM $2)`, accountID, reason)
 	} else {
-		changed, err = tx.ExecContext(ctx, `UPDATE accounts SET status='active',extra=COALESCE(extra,'{}'::jsonb)-'quality_protection_reason',updated_at=NOW()
-		 WHERE id=$1 AND deleted_at IS NULL AND schedulable=TRUE AND status='quality_paused'`, accountID)
+		changed, err = tx.ExecContext(ctx, `UPDATE accounts SET status='active',extra=COALESCE(extra,'{}'::jsonb)-'quality_protection_reason'-'quality_protection_trial',updated_at=NOW()
+			 WHERE id=$1 AND deleted_at IS NULL AND schedulable=TRUE AND status IN ('active','quality_paused')
+			 AND (status='quality_paused' OR extra ? 'quality_protection_reason' OR extra ? 'quality_protection_trial')`, accountID)
 	}
 	if err != nil {
 		return err
@@ -318,6 +341,27 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 	current, err := protectionResultCurrent(ctx, tx, result.ID)
 	if err != nil || !current {
 		return err
+	}
+	// Recovery owns the hold until a fresh, bounded trial has been evaluated.
+	// Ordinary hourly completions must neither release it nor restart its clock.
+	if state.blocked && state.recoveryPhase != "" {
+		_, err := tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET completed=TRUE,automated_verdict='fail',verdict='fail' WHERE result_id=$1 AND generation=$2`, result.ID, state.generation)
+		if err != nil {
+			return err
+		}
+		before, err := readProtectionAccountSnapshot(ctx, tx, state.accountID)
+		if err != nil {
+			return err
+		}
+		if err := recordProtectionAction(ctx, tx, state, before, "fail", state.reason); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	// An hourly query started before a successful trial must not re-pause the
+	// account with samples that the new recovery window deliberately excluded.
+	if state.recoveryTrialStarted.Valid && (result.OutputStatistics == nil || result.OutputStatistics.WindowStart.Before(state.recoveryTrialStarted.Time)) {
+		return tx.Commit()
 	}
 	state.automated, state.reason, state.completed = verdict, reason, true
 	if err := saveProtectionVerdict(ctx, tx, state); err != nil {

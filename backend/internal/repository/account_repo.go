@@ -873,9 +873,12 @@ type accountSchedulingState struct {
 // protection or an administrator changed it after the caller loaded the account.
 func preserveLockedAccountSchedulingState(account *service.Account, current accountSchedulingState, currentExtra, extra map[string]any) {
 	const qualityReasonKey = "quality_protection_reason"
+	const qualityTrialKey = "quality_protection_trial"
 	_, currentHasQualityReason := currentExtra[qualityReasonKey]
 	_, incomingHasQualityReason := account.Extra[qualityReasonKey]
-	if !account.StatusChanged && (current.status == service.StatusQualityPaused || account.Status == service.StatusQualityPaused || currentHasQualityReason || incomingHasQualityReason) {
+	_, currentHasQualityTrial := currentExtra[qualityTrialKey]
+	_, incomingHasQualityTrial := account.Extra[qualityTrialKey]
+	if !account.StatusChanged && (current.status == service.StatusQualityPaused || account.Status == service.StatusQualityPaused || currentHasQualityReason || incomingHasQualityReason || currentHasQualityTrial || incomingHasQualityTrial) {
 		account.Status = current.status
 		account.ErrorMessage = current.errorMessage
 	}
@@ -885,6 +888,12 @@ func preserveLockedAccountSchedulingState(account *service.Account, current acco
 	delete(extra, qualityReasonKey)
 	if !(account.StatusChanged && account.Status != service.StatusQualityPaused) && currentHasQualityReason {
 		extra[qualityReasonKey] = currentExtra[qualityReasonKey]
+	}
+	// Trial metadata belongs to durable protection state, never a stale account
+	// snapshot. Explicit status changes cannot create or extend a trial either.
+	delete(extra, qualityTrialKey)
+	if !account.StatusChanged && currentHasQualityTrial {
+		extra[qualityTrialKey] = currentExtra[qualityTrialKey]
 	}
 }
 

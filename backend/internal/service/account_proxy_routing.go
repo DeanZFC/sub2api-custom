@@ -32,7 +32,7 @@ func (s *ConcurrencyService) acquireAccountProxyPoolSlot(ctx context.Context, ac
 		return &AcquireResult{}, nil
 	}
 	var once sync.Once
-	return &AcquireResult{Acquired: true, ProxyID: proxyID, ReleaseFunc: func() {
+	return s.admitCacheRecoveryRequest(ctx, accountID, &AcquireResult{Acquired: true, ProxyID: proxyID, ReleaseFunc: func() {
 		once.Do(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -41,7 +41,7 @@ func (s *ConcurrencyService) acquireAccountProxyPoolSlot(ctx context.Context, ac
 				slog.Warn("failed to release proxy slot", "account_id", accountID, "proxy_id", proxyID, "error", err)
 			}
 		})
-	}}, nil
+	}})
 }
 
 // WithProxyRoute copies the account snapshot. Shared scheduler snapshots must

@@ -159,9 +159,24 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 						// Track this account across its quality tiers, including after a move.
 						statisticsGroupID = nil
 					}
+					windowStart := windowEnd.Add(-time.Hour)
+					var requestStartedAfter *time.Time
+					if recoveryRepo, ok := repo.(ScheduledTestCacheRecoveryRepository); ok && accountID != nil && plan.TestDefinitionID != nil {
+						requestStartedAfter, err = recoveryRepo.CacheRecoveryWindowStart(queryCtx, plan.ID, *accountID, *plan.TestDefinitionID)
+						if err != nil {
+							return
+						}
+						if requestStartedAfter != nil && requestStartedAfter.After(windowStart) {
+							windowStart = *requestStartedAfter
+						}
+					}
+					if !windowEnd.After(windowStart) {
+						attempt.OutputStatistics = &ScheduledTestStatistics{WindowStart: windowStart, WindowEnd: windowEnd}
+						return
+					}
 					attempt.OutputStatistics, err = repo.CollectStatistics(queryCtx, ScheduledTestStatisticsFilter{
 						GroupID: statisticsGroupID, AccountID: accountID, Model: plan.ModelID,
-						WindowStart: windowEnd.Add(-time.Hour), WindowEnd: windowEnd,
+						WindowStart: windowStart, WindowEnd: windowEnd, RequestStartedAfter: requestStartedAfter,
 					})
 				}()
 			case <-attemptCtx.Done():

@@ -95,7 +95,7 @@ func TestScheduledTestActionStatisticsFollowMovedAccountsWithoutChangingVisibili
 				}
 				return &ScheduledTestStatistics{
 					WindowStart: filter.WindowStart, WindowEnd: filter.WindowEnd,
-					TotalRequests: 20, CacheInputTokens: 100, CacheReadTokens: 90, CacheRate: protectionFloat(.9),
+					TotalRequests: 20, CacheSamples: 20, CacheInputTokens: 100, CacheReadTokens: 90, CacheRate: protectionFloat(.9),
 				}, nil
 			}
 			runner := NewScheduledTestRunnerService(nil, statisticsTestService(repo), nil, nil, nil, nil)

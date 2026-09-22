@@ -44,6 +44,15 @@ func (r *scheduledTestResultRepository) CollectStatistics(ctx context.Context, f
 		usageScope += fmt.Sprintf(" AND ul.account_id=$%d", len(args))
 		errorScope += fmt.Sprintf(" AND e.account_id=$%d", len(args))
 	}
+	if filter.RequestStartedAfter != nil {
+		args = append(args, *filter.RequestStartedAfter)
+		// Usage is recorded asynchronously when a request finishes. Use the
+		// recorded duration as a best-effort lower bound so completed rows from
+		// before the trial are excluded; request-entry timestamps are not present
+		// in the legacy usage schema.
+		usageScope += fmt.Sprintf(" AND ul.duration_ms IS NOT NULL AND ul.created_at - GREATEST(ul.duration_ms,0) * INTERVAL '1 millisecond' >= $%d", len(args))
+		errorScope += fmt.Sprintf(" AND e.duration_ms IS NOT NULL AND e.created_at - GREATEST(e.duration_ms,0) * INTERVAL '1 millisecond' >= $%d", len(args))
+	}
 	// Positive costs OR usage identify free/zero-multiplier successes, while
 	// all-zero failed-request placeholders cannot establish a successful result.
 	// A billed partial response may subsequently fail: final errors take precedence.
@@ -51,7 +60,7 @@ func (r *scheduledTestResultRepository) CollectStatistics(ctx context.Context, f
 	// instead of correlating that connection ID with unrelated successful turns.
 	query := `WITH usage_candidates AS MATERIALIZED (
  SELECT DISTINCT ON (ul.api_key_id, COALESCE(NULLIF(ul.request_id,''), 'usage:'||ul.id::text))
-   ul.id, ul.created_at, ul.api_key_id, ul.request_id, ul.request_type,
+   ul.id, ul.created_at, ul.api_key_id, ul.request_id, ul.request_type, ul.stream, ul.openai_ws_mode,
    ul.input_tokens, ul.image_input_tokens, ul.cache_creation_tokens, ul.cache_read_tokens,
    ul.first_token_ms, ul.native_compaction_v2, ul.inbound_endpoint, ul.upstream_endpoint
  FROM usage_logs ul
@@ -98,22 +107,25 @@ func (r *scheduledTestResultRepository) CollectStatistics(ctx context.Context, f
  ORDER BY created_at DESC, id DESC, success DESC LIMIT 10
 ), success_metrics AS (
  SELECT COUNT(*) AS success_requests,
- COALESCE(SUM(GREATEST(cache_read_tokens,0)) FILTER (WHERE NOT COALESCE(native_compaction_v2,false)
+ COALESCE(SUM(GREATEST(cache_read_tokens,0)) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND NOT COALESCE(native_compaction_v2,false)
    AND COALESCE(inbound_endpoint,'') NOT LIKE '%/compact%' AND COALESCE(upstream_endpoint,'') NOT LIKE '%/compact%'),0) AS cache_read,
- COALESCE(SUM(GREATEST(input_tokens-image_input_tokens,0)::bigint+GREATEST(cache_creation_tokens,0)+GREATEST(cache_read_tokens,0)) FILTER (WHERE NOT COALESCE(native_compaction_v2,false)
+ COALESCE(SUM(GREATEST(input_tokens-image_input_tokens,0)::bigint+GREATEST(cache_creation_tokens,0)+GREATEST(cache_read_tokens,0)) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND NOT COALESCE(native_compaction_v2,false)
    AND COALESCE(inbound_endpoint,'') NOT LIKE '%/compact%' AND COALESCE(upstream_endpoint,'') NOT LIKE '%/compact%'),0) AS cache_input,
  (AVG(first_token_ms) FILTER (WHERE first_token_ms>=0))::float8 AS avg_first_token_ms,
- COUNT(first_token_ms) FILTER (WHERE first_token_ms>=0) AS first_token_samples
- FROM successful_usage
+ COUNT(first_token_ms) FILTER (WHERE first_token_ms>=0) AS first_token_samples,
+ COUNT(*) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND NOT COALESCE(native_compaction_v2,false)
+   AND COALESCE(inbound_endpoint,'') NOT LIKE '%/compact%' AND COALESCE(upstream_endpoint,'') NOT LIKE '%/compact%'
+   AND GREATEST(input_tokens-image_input_tokens,0)::bigint+GREATEST(cache_creation_tokens,0)+GREATEST(cache_read_tokens,0)>0) AS cache_samples
+ FROM successful_usage ul
 )
-SELECT success_requests, (SELECT COUNT(*) FROM failed), cache_read,cache_input,avg_first_token_ms,first_token_samples,
+SELECT success_requests, (SELECT COUNT(*) FROM failed), cache_read,cache_input,avg_first_token_ms,first_token_samples,cache_samples,
  (SELECT COALESCE(jsonb_agg(jsonb_build_object('success',success,'created_at',created_at)
                           ORDER BY created_at DESC,id DESC,success DESC),'[]'::jsonb)
   FROM recent_requests)
 FROM success_metrics`
 	result := &service.ScheduledTestStatistics{WindowStart: filter.WindowStart, WindowEnd: filter.WindowEnd}
 	var recentJSON []byte
-	err := r.db.QueryRowContext(ctx, query, args...).Scan(&result.SuccessRequests, &result.FailedRequests, &result.CacheReadTokens, &result.CacheInputTokens, &result.AvgFirstTokenMs, &result.FirstTokenSamples, &recentJSON)
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&result.SuccessRequests, &result.FailedRequests, &result.CacheReadTokens, &result.CacheInputTokens, &result.AvgFirstTokenMs, &result.FirstTokenSamples, &result.CacheSamples, &recentJSON)
 	if err != nil {
 		return nil, err
 	}

@@ -206,6 +206,7 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	case <-ctx.Done():
 		return
 	}
+	s.advanceCacheRecovery(ctx, time.Now().UTC())
 	s.runDuePlans(ctx)
 }
 

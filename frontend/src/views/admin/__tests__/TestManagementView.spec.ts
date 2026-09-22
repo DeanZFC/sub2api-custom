@@ -375,6 +375,30 @@ describe('configurable test management', () => {
 
 describe('automatic protection plan integration', () => {
   const protection = { enabled: true, rules: [{ test_definition_id: 2, pause_on_failure: true, expected_answer: '29', answer_match: 'numeric', thresholds: [], vote: { enabled: false, reject_above: 0, pass_at_least: 3 } }] }
+  it('saves and copies cache recovery settings without mutating the loaded plan', async () => {
+    const recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 85 }
+    const cacheProtection = { enabled: true, rules: [{ test_definition_id: 7, thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }], recovery }] }
+    api.listTypes.mockResolvedValue([{ id: 7, name: 'Statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true }])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_id: 7, target_mode: 'account', account_id: 3, protection: cacheProtection }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    await dialog.get('[data-recovery-rate]').setValue(90)
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    expect(save.attributes('disabled')).toBeUndefined()
+    await dialog.get('[data-recovery-min-samples]').setValue(21)
+    expect(save.attributes('disabled')).toBeDefined()
+    await dialog.get('[data-recovery-min-samples]').setValue(10)
+    await save.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ protection: expect.objectContaining({ rules: [expect.objectContaining({ recovery: { ...recovery, recover_rate: 90 } })] }) }))
+    expect(recovery.recover_rate).toBe(85)
+    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ protection: cacheProtection }))
+    api.createPlan.mock.calls[0][0].protection.rules[0].recovery.cooldown_seconds = 600
+    expect(recovery.cooldown_seconds).toBe(300)
+    wrapper.unmount()
+  })
+
   it('saves multiple action targets from the source platform and preserves the loaded plan on edits', async () => {
     const actions = {
       ...protection,
