@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -75,7 +76,12 @@ type openAIWSAcquireRequest struct {
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
 	HeadersFactory func(context.Context, http.Header) (http.Header, error)
-	ProxyURL       string
+	// Short-lived ticket credentials are refreshed before pool selection and
+	// again before dialing (including delayed prewarm). The boolean distinguishes
+	// managed tickets from ordinary client turn-state headers.
+	CodexTicketHeadersFactory func(context.Context, http.Header) (http.Header, bool, error)
+	codexTicketManaged        bool
+	ProxyURL                  string
 	// ProxyID is part of the pool identity. Two proxy records may intentionally
 	// share a URL while still representing independent concurrency buckets.
 	ProxyID         int64
@@ -87,6 +93,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	codexTicketDigest   [sha256.Size]byte
 	tlsProfile          string
 	betaFeatures        string
 	codexInstallationID string
@@ -1135,7 +1142,32 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 		p.metrics.acquireTotal.Add(1)
 	}
 	queueWait := &openAIWSAcquireQueueWait{}
-	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
+	var lease *openAIWSConnLease
+	var err error
+	for attempt := 0; ; attempt++ {
+		lease, err = p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
+		if lease == nil || req.CodexTicketHeadersFactory == nil {
+			break
+		}
+		// A queued acquisition or health check can outlive the ticket selected
+		// above. Never hand that stale handshake to a new request.
+		current := cloneOpenAIWSAcquireRequest(req)
+		if refreshErr := current.refreshCodexTicketHeaders(ctx); refreshErr != nil {
+			lease.Release()
+			return nil, refreshErr
+		}
+		if lease.conn.matchesHandshakeCompatibility(normalizeOpenAIWSHandshakeCompatibility(current.Account, current.Headers, current.codexTicketManaged)) {
+			break
+		}
+		lease.Release()
+		if req.ForcePreferredConn {
+			return nil, errOpenAIWSPreferredConnUnavailable
+		}
+		if attempt >= 1 {
+			return nil, ErrOpenAICodexTicketUnavailable
+		}
+		req = current
+	}
 	if lease != nil && queueWait.rewoken {
 		// 广播重选经 tryAcquire 拿令牌，不像排队分支那样在取得令牌后检查取消，
 		// 这里补上复查：上下文已取消就归还令牌并按取消返回。
@@ -1168,9 +1200,12 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 	}
 
 retryAcquire:
+	if err := req.refreshCodexTicketHeaders(ctx); err != nil {
+		return nil, err
+	}
 	accountID := req.Account.ID
 	proxyKey := openAIWSRequestProxyKey(req)
-	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers, req.codexTicketManaged)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -2243,6 +2278,9 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	if p == nil || p.clientDialer == nil {
 		return nil, errors.New("openai ws client dialer is nil")
 	}
+	if err := req.refreshCodexTicketHeaders(ctx); err != nil {
+		return nil, err
+	}
 	headers := cloneHeader(req.Headers)
 	var err error
 	if req.HeadersFactory != nil {
@@ -2277,7 +2315,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	id := p.nextConnID(req.Account.ID)
 	pooledConn := newOpenAIWSConnWithProxy(id, req.Account.ID, conn, handshakeHeaders, openAIWSRequestProxyKey(req))
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, headers, req.codexTicketManaged)
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
@@ -2465,7 +2503,25 @@ func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
 	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
 		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
 		a.ProxyID == b.ProxyID &&
-		normalizeOpenAIWSHandshakeCompatibility(a.Account, a.Headers) == normalizeOpenAIWSHandshakeCompatibility(b.Account, b.Headers)
+		normalizeOpenAIWSHandshakeCompatibility(a.Account, a.Headers, a.codexTicketManaged) == normalizeOpenAIWSHandshakeCompatibility(b.Account, b.Headers, b.codexTicketManaged)
+}
+
+func (req *openAIWSAcquireRequest) refreshCodexTicketHeaders(ctx context.Context) error {
+	if req.CodexTicketHeadersFactory == nil {
+		return nil
+	}
+	headers, managed, err := req.CodexTicketHeadersFactory(ctx, cloneHeader(req.Headers))
+	if err != nil {
+		return err
+	}
+	if req.codexTicketManaged && !managed {
+		// Cached reconnect/prewarm headers are ours, not a new client echo.
+		// A disabled policy or fail-open miss must not replay expired material.
+		headers.Del(openAICodexTurnStateHeader)
+		headers.Del("Cookie")
+	}
+	req.Headers, req.codexTicketManaged = headers, managed
+	return nil
 }
 
 func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
@@ -2493,9 +2549,12 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 	return strings.Join(normalized, ",")
 }
 
-func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {
+func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header, managedTicket ...bool) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
 		betaFeatures: normalizeOpenAIWSBetaFeatures(headers),
+	}
+	if len(managedTicket) > 0 && managedTicket[0] {
+		key.codexTicketDigest = sha256.Sum256([]byte(headers.Get(openAICodexTurnStateHeader) + "\x00" + headers.Get("Cookie")))
 	}
 	// Even identical application headers cannot reuse a socket established
 	// with another TLS identity after the account's fingerprint mode changes.

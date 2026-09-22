@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -144,39 +143,24 @@ func NewScheduledTestHandler(scheduledTestSvc *service.ScheduledTestService) *Sc
 }
 
 type createScheduledTestPlanRequest struct {
-	Name              string  `json:"name"`
-	SortOrder         *int    `json:"sort_order"`
-	AccountID         *int64  `json:"account_id"`
-	GroupID           *int64  `json:"group_id"`
-	TestDefinitionID  *int64  `json:"test_definition_id"`
-	TestDefinitionIDs []int64 `json:"test_definition_ids"`
-	// test_type_id/type_id are aliases used by older generalized-test clients.
-	TestTypeID      *int64                                `json:"test_type_id"`
-	TypeID          *int64                                `json:"type_id"`
-	TestType        string                                `json:"test_type"`
-	TargetMode      string                                `json:"target_mode"`
-	ModelID         string                                `json:"model_id"`
-	ReasoningEffort string                                `json:"reasoning_effort"`
-	CronExpression  string                                `json:"cron_expression" binding:"required"`
-	Enabled         *bool                                 `json:"enabled"`
-	MaxResults      int                                   `json:"max_results"`
-	AutoRecover     *bool                                 `json:"auto_recover"`
-	Protection      service.ScheduledTestProtectionConfig `json:"protection"`
+	Name              string                                `json:"name"`
+	SortOrder         *int                                  `json:"sort_order"`
+	GroupIDs          []int64                               `json:"group_ids" binding:"required"`
+	TestDefinitionIDs []int64                               `json:"test_definition_ids" binding:"required"`
+	ModelID           string                                `json:"model_id"`
+	ReasoningEffort   string                                `json:"reasoning_effort"`
+	CronExpression    string                                `json:"cron_expression" binding:"required"`
+	Enabled           *bool                                 `json:"enabled"`
+	MaxResults        int                                   `json:"max_results"`
+	AutoRecover       *bool                                 `json:"auto_recover"`
+	Protection        service.ScheduledTestProtectionConfig `json:"protection"`
 }
 
 type updateScheduledTestPlanRequest struct {
-	// RawMessage preserves the distinction between an omitted field and an
-	// explicit null. The latter is required when switching a plan from an
-	// account target to a group target (or vice versa).
-	AccountID         json.RawMessage                        `json:"account_id"`
 	Name              *string                                `json:"name"`
 	SortOrder         *int                                   `json:"sort_order"`
-	GroupID           json.RawMessage                        `json:"group_id"`
-	TestDefinitionID  json.RawMessage                        `json:"test_definition_id"`
+	GroupIDs          json.RawMessage                        `json:"group_ids"`
 	TestDefinitionIDs json.RawMessage                        `json:"test_definition_ids"`
-	TestTypeID        *int64                                 `json:"test_type_id"`
-	TypeID            *int64                                 `json:"type_id"`
-	TargetMode        string                                 `json:"target_mode"`
 	ModelID           string                                 `json:"model_id"`
 	ReasoningEffort   json.RawMessage                        `json:"reasoning_effort"`
 	CronExpression    string                                 `json:"cron_expression"`
@@ -184,23 +168,6 @@ type updateScheduledTestPlanRequest struct {
 	MaxResults        int                                    `json:"max_results"`
 	AutoRecover       *bool                                  `json:"auto_recover"`
 	Protection        *service.ScheduledTestProtectionConfig `json:"protection"`
-}
-
-func parseNullableInt64(raw json.RawMessage, field string) (*int64, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return nil, nil
-	}
-	var value int64
-	if err := json.Unmarshal(raw, &value); err != nil || value <= 0 {
-		if err == nil {
-			err = fmt.Errorf("must be positive")
-		}
-		return nil, fmt.Errorf("%s %w", field, err)
-	}
-	return &value, nil
 }
 
 // ListByAccount GET /admin/accounts/:id/scheduled-test-plans
@@ -238,12 +205,8 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 
 	plan := &service.ScheduledTestPlan{
 		Name:              req.Name,
-		AccountID:         req.AccountID,
-		GroupID:           req.GroupID,
-		TestDefinitionID:  req.TestDefinitionID,
+		GroupIDs:          req.GroupIDs,
 		TestDefinitionIDs: req.TestDefinitionIDs,
-		TestType:          req.TestType,
-		TargetMode:        req.TargetMode,
 		ModelID:           req.ModelID,
 		ReasoningEffort:   req.ReasoningEffort,
 		CronExpression:    req.CronExpression,
@@ -257,13 +220,6 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 			return
 		}
 		plan.SortOrder = *req.SortOrder
-	}
-	if plan.TestDefinitionID == nil {
-		if req.TestTypeID != nil {
-			plan.TestDefinitionID = req.TestTypeID
-		} else {
-			plan.TestDefinitionID = req.TypeID
-		}
 	}
 	if req.Enabled != nil {
 		plan.Enabled = *req.Enabled
@@ -300,11 +256,12 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 		return
 	}
 
+	if existing.MigrationNote != "" && (len(req.GroupIDs) == 0 || len(req.TestDefinitionIDs) == 0) {
+		response.BadRequest(c, "migrated strategy requires reviewing and saving group_ids and test_definition_ids before activation")
+		return
+	}
 	if req.ModelID != "" {
 		existing.ModelID = req.ModelID
-	}
-	if req.TargetMode != "" {
-		existing.TargetMode = req.TargetMode
 	}
 	if len(req.ReasoningEffort) > 0 {
 		if bytes.Equal(bytes.TrimSpace(req.ReasoningEffort), []byte("null")) {
@@ -328,21 +285,13 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 		}
 		existing.SortOrder = *req.SortOrder
 	}
-	if len(req.AccountID) > 0 {
-		value, parseErr := parseNullableInt64(req.AccountID, "account_id")
-		if parseErr != nil {
-			response.BadRequest(c, parseErr.Error())
+	if len(req.GroupIDs) > 0 {
+		var ids []int64
+		if err := json.Unmarshal(req.GroupIDs, &ids); err != nil || ids == nil {
+			response.BadRequest(c, "group_ids must be an array")
 			return
 		}
-		existing.AccountID = value
-	}
-	if len(req.GroupID) > 0 {
-		value, parseErr := parseNullableInt64(req.GroupID, "group_id")
-		if parseErr != nil {
-			response.BadRequest(c, parseErr.Error())
-			return
-		}
-		existing.GroupID = value
+		existing.GroupIDs = ids
 	}
 	if len(req.TestDefinitionIDs) > 0 {
 		var ids []int64
@@ -352,21 +301,8 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 		}
 		existing.TestDefinitionIDs = ids
 		existing.TestDefinitionID = nil
-	} else if len(req.TestDefinitionID) > 0 {
-		value, parseErr := parseNullableInt64(req.TestDefinitionID, "test_definition_id")
-		if parseErr != nil {
-			response.BadRequest(c, parseErr.Error())
-			return
-		}
-		existing.TestDefinitionID = value
-		existing.TestDefinitionIDs = nil
-	} else if req.TestTypeID != nil {
-		existing.TestDefinitionID = req.TestTypeID
-		existing.TestDefinitionIDs = nil
-	} else if req.TypeID != nil {
-		existing.TestDefinitionID = req.TypeID
-		existing.TestDefinitionIDs = nil
 	}
+
 	if req.CronExpression != "" {
 		existing.CronExpression = req.CronExpression
 	}

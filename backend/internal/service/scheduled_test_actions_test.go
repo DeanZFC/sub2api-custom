@@ -7,11 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestScheduledTestActionsLegacyAndExplicitNoop(t *testing.T) {
+func TestScheduledTestActionsRequireExplicitConfiguration(t *testing.T) {
 	var legacy ScheduledTestProtectionRule
 	require.NoError(t, json.Unmarshal([]byte(`{"test_definition_id":1,"pause_on_failure":true}`), &legacy))
-	require.Equal(t, ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "keep"}, legacy.OutcomeAction("pass"))
-	require.Equal(t, ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "keep"}, legacy.OutcomeAction("fail"))
+	require.Equal(t, ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "keep"}, legacy.OutcomeAction("pass"))
+	require.Equal(t, ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "keep"}, legacy.OutcomeAction("fail"))
 	for _, verdict := range []string{"pending", "", "unknown"} {
 		require.Equal(t, ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "keep"}, legacy.OutcomeAction(verdict))
 	}
@@ -47,13 +47,10 @@ func TestScheduledTestActionsManagedScopeAndIsolation(t *testing.T) {
 	scope[0] = 999
 	require.Equal(t, int64(20), rule.OnFail.GroupIDs[0])
 
-	// Empty assign means remove this rule's groups for that outcome. It keeps
-	// the other outcome's IDs in scope without including unrelated bindings.
+	// An empty destination would strand the account outside future rounds.
 	rule.OnFail.GroupIDs = nil
-	require.NoError(t, validateScheduledTestActions(&rule))
-	require.Equal(t, []int64{20, 30}, rule.ManagedGroupIDs())
-	require.Empty(t, rule.OutcomeAction("fail").GroupIDs)
-	require.Equal(t, "assign", rule.OutcomeAction("fail").GroupMode)
+	require.ErrorContains(t, validateScheduledTestActions(&rule), "destination")
+
 }
 
 func TestScheduledTestActionsValidation(t *testing.T) {
@@ -82,6 +79,7 @@ func TestScheduledTestActionsValidation(t *testing.T) {
 	}
 
 	plan := protectionPlan()
+	plan.GroupIDs = []int64{4, 9}
 	plan.Protection.Rules[0].OnPass = &ScheduledTestOutcomeAction{}
 	plan.Protection.Rules[0].OnFail = &ScheduledTestOutcomeAction{GroupMode: "assign", GroupIDs: []int64{9, 4, 9, 4}}
 	require.NoError(t, validateScheduledTestProtection(plan))
@@ -95,6 +93,7 @@ func TestScheduledTestActionsValidation(t *testing.T) {
 	for i := range ids {
 		ids[i] = int64(i + 1)
 	}
+	plan.GroupIDs = ids
 	plan.Protection.Rules[0].OnPass = &ScheduledTestOutcomeAction{GroupMode: "assign", GroupIDs: append(ids, 1)}
 	require.NoError(t, validateScheduledTestProtection(plan))
 	require.Len(t, plan.Protection.Rules[0].OnPass.GroupIDs, 100)

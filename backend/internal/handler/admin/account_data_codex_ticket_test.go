@@ -2,12 +2,14 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,6 +29,7 @@ func TestAccountDataCodexTicketProxiesAreRetired(t *testing.T) {
 			service.OpenAICodexTicketFailClosedExtraKey:      true,
 			service.OpenAICodexTicketHarvestProxyIDsExtraKey: []int64{33, 22},
 			"codex_turn_ticket:gpt-6-astra":                  map[string]any{"state": "private-state"},
+			"codex_turn_cookies":                             map[string]any{"__cflb": "private-cookie", "__oailb": "private-cookie"},
 		},
 	}}
 	for _, include := range []bool{true, false} {
@@ -47,6 +50,8 @@ func TestAccountDataCodexTicketProxiesAreRetired(t *testing.T) {
 			require.NotContains(t, rec.Body.String(), "codex_ticket_proxy_keys")
 			require.NotContains(t, account.Extra, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
 			require.NotContains(t, rec.Body.String(), "private-state")
+			require.NotContains(t, rec.Body.String(), "private-cookie")
+			require.NotContains(t, account.Extra, "codex_turn_cookies")
 			if include {
 				require.Len(t, exported.Data.Proxies, 1, "only business proxies are exported")
 				require.Equal(t, "business.example", exported.Data.Proxies[0].Host)
@@ -69,6 +74,7 @@ func TestAccountDataCodexTicketProxiesAreRetired(t *testing.T) {
 			created := target.createdAccounts[0]
 			require.Equal(t, true, created.Extra[service.OpenAICodexTicketEnabledExtraKey])
 			require.NotContains(t, created.Extra, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
+			require.NotContains(t, created.Extra, "codex_turn_cookies")
 			if include {
 				require.Equal(t, int64(111), *created.ProxyID)
 			} else {
@@ -77,6 +83,53 @@ func TestAccountDataCodexTicketProxiesAreRetired(t *testing.T) {
 		})
 	}
 	require.Equal(t, []int64{33, 22}, source.accounts[0].Extra[service.OpenAICodexTicketHarvestProxyIDsExtraKey], "export must not mutate source routing")
+}
+
+type codexTicketImportAccountRepo struct {
+	service.AdminAccountRepository
+	created []*service.Account
+}
+
+func (r *codexTicketImportAccountRepo) Create(_ context.Context, account *service.Account) error {
+	account.ID = 1
+	r.created = append(r.created, account)
+	return nil
+}
+
+type codexTicketImportAdminService struct {
+	*stubAdminService
+	createService service.AdminService
+}
+
+func (s *codexTicketImportAdminService) CreateAccount(ctx context.Context, input *service.CreateAccountInput) (*service.Account, error) {
+	return s.createService.CreateAccount(ctx, input)
+}
+
+func TestImportCodexTicketCookiesAreStrippedBeforePersistence(t *testing.T) {
+	repo := &codexTicketImportAccountRepo{}
+	adminSvc := &codexTicketImportAdminService{
+		stubAdminService: newStubAdminService(),
+		createService: service.NewAdminService(
+			nil, nil, nil, repo, nil, nil, nil, nil, nil, nil, nil, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		),
+	}
+	h := &AccountHandler{adminService: adminSvc}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/v1/admin/accounts/data", h.ImportData)
+	body := []byte(`{"data":{"accounts":[{"name":"imported", "platform":"openai", "type":"setup-token", "credentials":{"access_token":"test-token"}, "extra":{"codex_ticket_enabled":true,"codex_turn_cookies":{"__cflb":"spoofed-cookie","__oailb":"spoofed-cookie"},"codex_turn_ticket:gpt-6-astra":{"state":"spoofed-ticket"},"ordinary":"retained"}}],"proxies":[]},"skip_default_group_bind":true}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, repo.created, 1, rec.Body.String())
+	extra := repo.created[0].Extra
+	require.NotContains(t, extra, "codex_turn_cookies")
+	require.NotContains(t, extra, "codex_turn_ticket:gpt-6-astra")
+	require.Equal(t, true, extra[service.OpenAICodexTicketEnabledExtraKey])
+	require.Equal(t, "retained", extra["ordinary"])
 }
 
 func TestImportCodexTicketProxiesIgnoresRetiredConfiguration(t *testing.T) {

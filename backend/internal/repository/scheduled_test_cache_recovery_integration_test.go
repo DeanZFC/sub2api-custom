@@ -50,8 +50,8 @@ func TestScheduledTestCacheRecoveryIntegration(t *testing.T) {
 		require.NoError(t, err)
 	}
 	exec(`CREATE TABLE users(id BIGINT PRIMARY KEY);
-CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,extra JSONB DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT NOW(),deleted_at TIMESTAMPTZ);
-CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ,is_exclusive BOOLEAN DEFAULT FALSE,subscription_type TEXT DEFAULT 'standard');
+CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,extra JSONB DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT NOW(),deleted_at TIMESTAMPTZ);
+CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ,is_exclusive BOOLEAN DEFAULT FALSE,subscription_type TEXT DEFAULT 'standard');
 CREATE TABLE account_groups(account_id BIGINT,group_id BIGINT);
 CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE UNIQUE INDEX idx_recovery_outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL;
@@ -84,7 +84,7 @@ CREATE TABLE ops_error_logs (
 		"253_scheduled_test_plan_sort_order.sql", "256_scheduled_test_multiple_definitions.sql", "257_scheduled_test_hourly_statistics.sql",
 		"258_scheduled_test_protection.sql", "259_scheduled_test_outcome_actions.sql",
 		"260_scheduled_test_model_check.sql", "261_scheduled_test_admin_review.sql", "262_scheduled_test_execution_snapshot.sql",
-		"264_scheduled_test_cache_recovery.sql", "264_scheduled_test_cache_recovery.sql",
+		"264_scheduled_test_cache_recovery.sql", "264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -108,14 +108,17 @@ CREATE TABLE ops_error_logs (
 	}
 	newHold := func(rule service.ScheduledTestProtectionRule) (*service.ScheduledTestPlan, *service.ScheduledTestResult) {
 		t.Helper()
-		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Cache recovery", GroupID: &groupID, AccountID: &accountID, TargetMode: "account",
+		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Cache recovery", GroupIDs: []int64{groupID}, GroupID: &groupID, TargetMode: "all_accounts",
 			TestDefinitionID: &definitionID, TestDefinitionIDs: []int64{definitionID}, ModelID: "model", CronExpression: "0 * * * *", Enabled: true, MaxResults: 3,
 			Protection: service.ScheduledTestProtectionConfig{Enabled: true, Rules: []service.ScheduledTestProtectionRule{rule}}})
 		require.NoError(t, err)
 		result, err := repo.Create(ctx, &service.ScheduledTestResult{PlanID: p.ID, TestDefinitionID: &definitionID, GroupID: &groupID, AccountID: &accountID,
-			TargetMode: "account", ModelID: "model", Status: "success", OutputKind: "statistics", StartedAt: now.Add(-time.Minute), FinishedAt: now,
+			TargetMode: "all_accounts", ModelID: "model", Status: "success", OutputKind: "statistics", StartedAt: now.Add(-time.Minute), FinishedAt: now,
 			OutputStatistics: &service.ScheduledTestStatistics{WindowStart: now.Add(-time.Hour), WindowEnd: now}})
 		require.NoError(t, err)
+		exec(`UPDATE scheduled_test_plans SET latest_run_id=$2 WHERE id=$1`, p.ID, fmt.Sprintf("fixture-%d", p.ID))
+		exec(`UPDATE scheduled_test_results SET run_id=$2 WHERE id=$1`, result.ID, fmt.Sprintf("fixture-%d", p.ID))
+		result.RunID = fmt.Sprintf("fixture-%d", p.ID)
 		result.OutputStatistics = &service.ScheduledTestStatistics{WindowStart: now.Add(-time.Hour), WindowEnd: now}
 		require.NoError(t, repo.BeginProtection(ctx, result, rule))
 		require.NoError(t, repo.CompleteProtection(ctx, result, "fail", "缓存率低于暂停阈值"))

@@ -1,7 +1,7 @@
 const knownErrors = new Set([
   'auth', 'forbidden', 'model_unsupported', 'quota', 'rate_limited', 'proxy_auth',
   'network', 'timeout', 'upstream_5xx', 'invalid_response', 'length_mismatch',
-  'invalid_ticket', 'no_proxy', 'proxy_cooldown', 'canceled',
+  'invalid_ticket', 'cookie_missing', 'no_proxy', 'proxy_cooldown', 'canceled',
 ])
 
 /** Only fixed translations reach the UI; never render upstream error bodies. */

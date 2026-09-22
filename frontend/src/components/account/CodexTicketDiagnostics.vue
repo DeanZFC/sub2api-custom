@@ -46,6 +46,11 @@ const unknownPlan = computed(() => props.ticket.plan_known === false
 const details = computed(() => {
   const ticket = props.ticket
   const result: string[] = []
+  if (ticket.target_length === 292 && ticket.cookie_ready !== undefined) {
+    result.push(ticket.cookie_ready
+      ? t(`${key}.cookieReady`, { seconds: ticket.cookie_remaining_seconds ?? 0 })
+      : t(`${key}.cookieMissing`))
+  }
   if (ticket.attempts !== undefined) result.push(t(`${key}.attempts`, { count: ticket.attempts }))
   if (ticket.successes !== undefined) result.push(t(`${key}.successCount`, { count: ticket.successes }))
   if (ticket.failures !== undefined) result.push(t(`${key}.failureCount`, { count: ticket.failures }))

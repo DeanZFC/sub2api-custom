@@ -101,6 +101,7 @@ func TestAccountFromServiceShallow_RedactsCodexTurnTicketState(t *testing.T) {
 		ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
 		Extra: map[string]any{
 			"codex_harvest_proxy_url": "http://user:legacy-proxy-secret@proxy.example.com:8080",
+			"codex_turn_cookies":      map[string]any{"__cflb": "private-routing-cookie", "__oailb": "private-upstream-cookie"},
 			"codex_turn_ticket:gpt-6-astra": map[string]any{
 				"state":       blob,
 				"length":      292,
@@ -113,12 +114,16 @@ func TestAccountFromServiceShallow_RedactsCodexTurnTicketState(t *testing.T) {
 	}
 	got := AccountFromServiceShallow(src)
 	require.NotContains(t, got.Extra, "codex_turn_ticket:gpt-6-astra")
+	require.NotContains(t, got.Extra, "codex_turn_cookies")
 	raw, err := json.Marshal(got)
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), blob)
 	require.NotContains(t, string(raw), "legacy-proxy-secret")
+	require.NotContains(t, string(raw), "private-routing-cookie")
+	require.NotContains(t, string(raw), "private-upstream-cookie")
 	require.NotContains(t, got.Extra, "codex_harvest_proxy_url")
 	require.Contains(t, src.Extra, "codex_harvest_proxy_url")
+	require.Contains(t, src.Extra, "codex_turn_cookies", "redaction must not mutate live cookie state")
 }
 
 func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {

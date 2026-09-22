@@ -15,8 +15,8 @@ func TestScheduledTestAdminVerdictPriority(t *testing.T) {
 		{"admin passes without public votes", "pass", "pass", "pass", 0, 0},
 		{"admin overrides public rejection", "pass", "pass", "pass", 0, 100},
 		{"admin rejects despite public approval", "pass", "fail", "fail", 100, 0},
-		{"automatic failure cannot be overridden", "fail", "pass", "fail", 100, 0},
-		{"missing automatic evidence cannot be approved", "pending", "pass", "pending", 100, 0},
+		{"administrator overrides ordinary automatic failure", "fail", "pass", "pass", 100, 0},
+		{"administrator can decide an ordinary pending result", "pending", "pass", "pass", 100, 0},
 		{"ordinary vote threshold stays intact", "pass", "", "pending", 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

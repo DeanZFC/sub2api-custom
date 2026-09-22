@@ -139,6 +139,7 @@ docs/*
 !docs/codex-ticket-diagnostics.md
 !docs/upstream-billing-rate-limit.md
 !docs/channel-quality-protection.md
+!docs/channel-test-strategies.md
 !docs/ANTIGRAVITY_ATTRIBUTION_429.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md

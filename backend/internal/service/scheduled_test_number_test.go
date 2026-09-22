@@ -86,7 +86,7 @@ func TestExtractScheduledTestNumberDoesNotGuessFromProof(t *testing.T) {
 
 func TestScheduledTestNumericProtectionReparsesLegacyValue(t *testing.T) {
 	result := &ScheduledTestResult{Status: "success", OutputKind: "number", OutputNumeric: protectionFloat(8), ResponseText: scheduledTestCandyScreenshotResponse}
-	rule := groupWorkflowPlan().Protection.GroupWorkflow.Rules()[0]
+	rule := strategyPlan().Protection.Rules[0]
 	verdict, _ := evaluateScheduledTestProtection(rule, result)
 	require.Equal(t, "pass", verdict)
 	value, ok := scheduledTestMetric(result, "output_numeric", 0)
@@ -107,7 +107,7 @@ func TestScheduledTestCandyOutputContractUsesExtractedConclusion(t *testing.T) {
 	(&ScheduledTestRunnerService{}).applyOutputContract(result, "number")
 	require.Equal(t, "success", result.Status)
 	require.Equal(t, 21.0, *result.OutputNumeric)
-	rule := groupWorkflowPlan().Protection.GroupWorkflow.Rules()[0]
+	rule := strategyPlan().Protection.Rules[0]
 	verdict, _ := evaluateScheduledTestProtection(rule, result)
 	require.Equal(t, "pass", verdict, "group switching must use the conclusion, not the proof's 8")
 

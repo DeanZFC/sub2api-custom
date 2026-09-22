@@ -205,9 +205,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	defer acquireCancel()
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		Account:                   account,
+		WSURL:                     wsURL,
+		Headers:                   wsHeaders,
+		CodexTicketHeadersFactory: s.openAIWSCodexTicketHeadersFactory(account, openAIWSPayloadString(payload, "model")),
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},

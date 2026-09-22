@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -15,12 +16,13 @@ var (
 )
 
 type ScheduledTestProtectionConfig struct {
-	Enabled       bool                          `json:"enabled"`
-	Rules         []ScheduledTestProtectionRule `json:"rules"`
-	GroupWorkflow *ScheduledTestGroupWorkflow   `json:"group_workflow,omitempty"`
+	Enabled bool                          `json:"enabled"`
+	Rules   []ScheduledTestProtectionRule `json:"rules"`
 }
 
 type ScheduledTestProtectionRule struct {
+	Priority         int                               `json:"priority"`
+	RequiredPass     bool                              `json:"required_pass"`
 	TestDefinitionID int64                             `json:"test_definition_id"`
 	Thresholds       []ScheduledTestThreshold          `json:"thresholds,omitempty"`
 	MinSamples       int64                             `json:"min_samples,omitempty"`
@@ -89,14 +91,8 @@ func (p *ScheduledTestPlan) ProtectionRule(definitionID *int64) *ScheduledTestPr
 
 func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 	config := &plan.Protection
-	if err := normalizeScheduledTestGroupWorkflow(plan); err != nil {
-		return err
-	}
 	if !config.Enabled {
 		return nil
-	}
-	if plan.TargetMode == "group" {
-		return fmt.Errorf("automatic protection requires an account or all_accounts target")
 	}
 	if len(config.Rules) == 0 || len(config.Rules) > 32 {
 		return fmt.Errorf("automatic protection requires between 1 and 32 rules")
@@ -112,8 +108,19 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 			return fmt.Errorf("protection rules must refer to distinct selected test definitions")
 		}
 		seen[rule.TestDefinitionID] = true
+		if rule.Priority < 0 || rule.Priority > 1000 {
+			return fmt.Errorf("priority must be between 0 and 1000")
+		}
+		if rule.RequiredPass && rule.Vote != nil && rule.Vote.Enabled {
+			return fmt.Errorf("required_pass only supports automatic conditions")
+		}
 		if err := validateScheduledTestActions(rule); err != nil {
 			return err
+		}
+		for _, groupID := range rule.ManagedGroupIDs() {
+			if !slices.Contains(plan.GroupIDs, groupID) {
+				return fmt.Errorf("action group %d must be selected in group_ids", groupID)
+			}
 		}
 		if rule.MinSamples < 0 || rule.MinSamples > 1000000000 {
 			return fmt.Errorf("min_samples must be between 0 and 1000000000")

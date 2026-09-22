@@ -17,7 +17,6 @@ export interface TestAdminReview {
   admin_user_id?: number
   decided_at?: string
   account_paused: boolean
-  group_workflow?: boolean
 }
 
 export async function listReviews(): Promise<TestAdminReview[]> {

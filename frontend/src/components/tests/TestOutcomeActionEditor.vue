@@ -43,13 +43,12 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminGroup, TestOutcomeAction } from '@/types'
-import { defaultTestOutcomeAction } from '@/utils/testProtection'
 
 const props = defineProps<{ modelValue?: TestOutcomeAction; outcome: 'pass' | 'fail'; groups: AdminGroup[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: TestOutcomeAction] }>()
 const { t } = useI18n()
 const search = ref('')
-const action = computed(() => props.modelValue || defaultTestOutcomeAction(props.outcome))
+const action = computed<TestOutcomeAction>(() => props.modelValue ?? { scheduling: 'keep', group_mode: 'keep' })
 const selectedIDs = computed(() => action.value.group_ids || [])
 const unavailableIDs = computed(() => selectedIDs.value.filter(id => !props.groups.some(group => group.id === id)))
 const filteredGroups = computed(() => {

@@ -21,6 +21,17 @@ func fakeCodexTicketState(n int) string {
 	return openAICodexTicketStatePrefix + strings.Repeat("B", n-len(openAICodexTicketStatePrefix))
 }
 
+func addFakeCodexTicketCookies(h http.Header) {
+	h.Add("Set-Cookie", "__cflb=test-cflb; Path=/; Secure; HttpOnly")
+	h.Add("Set-Cookie", "__oailb=test-oailb; Path=/; Secure; HttpOnly")
+}
+
+func seedCodexTicketCookies(s *OpenAIGatewayService, account *Account) {
+	h := http.Header{}
+	addFakeCodexTicketCookies(h)
+	s.captureOpenAICodexTicketCookies(context.Background(), account, h, time.Now())
+}
+
 func ticketTestAccount(id int64) *Account {
 	return &Account{
 		ID:          id,
@@ -60,6 +71,7 @@ func TestApplyOpenAICodexTicket_ReplacesHeader(t *testing.T) {
 		FailClosed:   true,
 	}, nil)
 	account := ticketTestAccount(41)
+	seedCodexTicketCookies(svc, account)
 	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
@@ -87,6 +99,7 @@ func TestApplyOpenAICodexTicket_DoesNotReuseOtherModelOrAccount(t *testing.T) {
 	a := ticketTestAccount(41)
 	b := ticketTestAccount(42)
 	astra := fakeCodexTicketState(292)
+	seedCodexTicketCookies(svc, a)
 	svc.storeOpenAICodexTicket(context.Background(), a, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
@@ -116,6 +129,7 @@ func TestLookupOpenAICodexTicket_PrefersNewerExtra(t *testing.T) {
 	account := ticketTestAccount(41)
 	oldState := fakeCodexTicketState(292)
 	newState := openAICodexTicketStatePrefix + strings.Repeat("C", 286)
+	seedCodexTicketCookies(svc, account)
 	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
@@ -146,6 +160,7 @@ func TestApplyOpenAICodexTicket_ExpiredNotInjected(t *testing.T) {
 		FailClosed:   true,
 	}, &httpUpstreamRecorder{err: io.EOF})
 	account := ticketTestAccount(41)
+	seedCodexTicketCookies(svc, account)
 	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
@@ -168,6 +183,7 @@ func TestApplyOpenAICodexTicket_WrongLengthNotInjected(t *testing.T) {
 		FailClosed:   true,
 	}, nil)
 	account := ticketTestAccount(41)
+	seedCodexTicketCookies(svc, account)
 	svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{
 		AccountID:  41,
 		Model:      "gpt-6-astra",
@@ -209,8 +225,10 @@ func TestHarvestOpenAICodexTicket_StopsAt292AndUsesAccountProxy(t *testing.T) {
 	state292 := fakeCodexTicketState(292)
 	header312 := http.Header{}
 	header312.Set(openAICodexTurnStateHeader, state312)
+	addFakeCodexTicketCookies(header312)
 	header292 := http.Header{}
 	header292.Set(openAICodexTurnStateHeader, state292)
+	addFakeCodexTicketCookies(header292)
 	upstream := &httpUpstreamRecorder{
 		responses: []*http.Response{
 			{
@@ -261,6 +279,7 @@ func TestHarvestOpenAICodexTicket_HTTP503DoesNotAbortHunt(t *testing.T) {
 	header503 := http.Header{}
 	header292 := http.Header{}
 	header292.Set(openAICodexTurnStateHeader, state292)
+	addFakeCodexTicketCookies(header292)
 	responses := make([]*http.Response, 0, 3)
 	responses = append(responses, &http.Response{
 		StatusCode: http.StatusServiceUnavailable,
@@ -317,17 +336,20 @@ func TestOpenAICodexTicketStatuses_ReportsRemainingTTL(t *testing.T) {
 			"state":       fakeCodexTicketState(292),
 			"length":      292,
 			"model":       "gpt-6-astra",
-			"captured_at": time.Now().Add(-10 * time.Minute),
+			"captured_at": time.Now().Add(-time.Minute),
 			"expires_at":  time.Now().Add(50 * time.Minute),
 		},
 	}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{}, nil)
+	seedCodexTicketCookies(svc, account)
+	account.Extra[openAICodexTicketCookiesExtraKey] = svc.lookupOpenAICodexTicketCookies(account)
 	now := time.Now()
 	got := OpenAICodexTicketStatuses(account, config.OpenAICodexTicketConfig{Enabled: true, FailClosed: true}, now)
 	require.Len(t, got, 2)
 	require.Equal(t, "gpt-6-astra", got[0].Model)
 	require.True(t, got[0].Ready)
-	require.Greater(t, got[0].RemainingSeconds, int64(40*60))
-	require.LessOrEqual(t, got[0].RemainingSeconds, int64(50*60))
+	require.Greater(t, got[0].RemainingSeconds, int64(170))
+	require.LessOrEqual(t, got[0].RemainingSeconds, int64(180))
 	require.Equal(t, "gpt-5.6-sol", got[1].Model)
 	require.False(t, got[1].Ready)
 }
@@ -378,6 +400,7 @@ func (u *codexTicketConcurrentUpstream) Do(req *http.Request, _ string, _ int64,
 	}
 	h := http.Header{}
 	h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(292))
+	addFakeCodexTicketCookies(h)
 	return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("data: {}\n\n"))}, nil
 }
 func TestRefreshOpenAICodexTickets_ConcurrentModelsPreserveAccountSnapshot(t *testing.T) {
@@ -392,7 +415,7 @@ func TestRefreshOpenAICodexTickets_ConcurrentModelsPreserveAccountSnapshot(t *te
 	svc.openaiCodexTicketScheduler.workers.Wait()
 	require.Equal(t, int64(2), upstream.started.Load())
 	require.Equal(t, map[string]any{"existing": true}, account.Extra)
-	require.Len(t, repo.updates, 2)
+	require.Len(t, repo.updates, 3)
 	for _, model := range []string{openAICodexTicketDefaultModel, openAICodexTicketDefaultSolModel} {
 		ticket := svc.lookupOpenAICodexTicket(account, model)
 		require.NotNil(t, ticket)
@@ -418,6 +441,7 @@ func TestProbeOpenAICodexTicket_RejectsInvalidState(t *testing.T) {
 	for _, state := range []string{fakeCodexTicketState(312), strings.Repeat("X", 292), ""} {
 		h := http.Header{}
 		h.Set(openAICodexTurnStateHeader, state)
+		addFakeCodexTicketCookies(h)
 		upstream := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(""))}}}
 		svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, upstream)
 		account := ticketTestAccount(41)
@@ -426,7 +450,7 @@ func TestProbeOpenAICodexTicket_RejectsInvalidState(t *testing.T) {
 	}
 }
 func TestOpenAICodexTicket_RequiresActualLengthAndExpiry(t *testing.T) {
-	ticket := &openAICodexTicket{State: fakeCodexTicketState(312), Length: 292, ExpiresAt: time.Now().Add(time.Hour)}
+	ticket := &openAICodexTicket{State: fakeCodexTicketState(312), Length: 292, CapturedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
 	require.False(t, ticket.valid(time.Now(), 292))
 	ticket.State = fakeCodexTicketState(292)
 	ticket.ExpiresAt = time.Time{}

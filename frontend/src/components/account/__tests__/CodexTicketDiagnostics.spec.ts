@@ -31,6 +31,21 @@ function mountDiagnostics(overrides: Partial<CodexTurnTicketStatus> = {}, compac
 }
 
 describe('CodexTicketDiagnostics', () => {
+  it('shows 292 routing cookie availability and a fixed safe error', async () => {
+    const wrapper = mountDiagnostics({ target_length: 292, cookie_ready: false, last_error_code: 'cookie_missing' })
+    expect(wrapper.text()).toContain('路由 Cookie 缺失或已过期')
+    expect(wrapper.text()).toContain('账号路由 Cookie：缺失或已过期')
+    expect(wrapper.html()).not.toContain('private-token')
+    await wrapper.setProps({ ticket: { ...ticket, target_length: 292, cookie_ready: true, cookie_remaining_seconds: 42, last_error_code: undefined } })
+    expect(wrapper.text()).toContain('账号路由 Cookie：剩余 42 秒')
+    expect(wrapper.text()).not.toContain('缺失或已过期')
+  })
+
+  it('does not require cookie status for 332 tickets or older servers', () => {
+    expect(mountDiagnostics({ cookie_ready: false }).text()).not.toContain('账号路由 Cookie')
+    expect(mountDiagnostics({ target_length: 292 }).text()).not.toContain('账号路由 Cookie')
+  })
+
   it('shows safe failure details, zero returned length, retry time and unknown plan', () => {
     const wrapper = mountDiagnostics()
     expect(wrapper.text()).toContain('返回门票长度与账号套餐不符')

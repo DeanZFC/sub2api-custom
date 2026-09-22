@@ -87,7 +87,7 @@ func (r *codexTicketScheduler) recordProbeEvent(accountID int64, model string, r
 
 func safeCodexTicketEventErrorCode(code string) string {
 	switch code {
-	case "auth", "forbidden", "model_unsupported", "quota", "rate_limited", "proxy_auth", "network", "timeout", "upstream_5xx", "invalid_response", "canceled", "length_mismatch", "invalid_ticket":
+	case "auth", "forbidden", "model_unsupported", "quota", "rate_limited", "proxy_auth", "network", "timeout", "upstream_5xx", "invalid_response", "canceled", "length_mismatch", "invalid_ticket", "cookie_missing":
 		return code
 	default:
 		return "invalid_response"

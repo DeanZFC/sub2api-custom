@@ -23,15 +23,17 @@ func testScheduledTestPublicVotingSwitch(t *testing.T, ctx context.Context, db *
 		Vote:             &service.ScheduledTestVoteConfig{Enabled: true, RejectAbove: 1, PassAtLeast: 2},
 	}
 	plan, err := plans.Create(ctx, &service.ScheduledTestPlan{
-		Name: "Private until explicitly opened", GroupID: &groupID, AccountID: &accountID,
-		TargetMode: "account", TestDefinitionID: &definitionID, TestDefinitionIDs: []int64{definitionID},
+		Name: "Private until explicitly opened", GroupID: &groupID, GroupIDs: []int64{groupID},
+		TargetMode: "all_accounts", TestDefinitionID: &definitionID, TestDefinitionIDs: []int64{definitionID},
 		ModelID: "model", CronExpression: "0 * * * *", Enabled: true, MaxResults: 20,
 		Protection: service.ScheduledTestProtectionConfig{Enabled: true, Rules: []service.ScheduledTestProtectionRule{rule}},
 	})
 	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE scheduled_test_plans SET latest_run_id='test-round' WHERE id=$1`, plan.ID)
+	require.NoError(t, err)
 	started := time.Now().UTC().Truncate(time.Microsecond)
 	result, err := repo.Create(ctx, &service.ScheduledTestResult{
-		PlanID: plan.ID, TestDefinitionID: &definitionID, GroupID: &groupID, AccountID: &accountID,
+		RunID: "test-round", PlanID: plan.ID, TestDefinitionID: &definitionID, GroupID: &groupID, AccountID: &accountID,
 		TargetMode: plan.TargetMode, ModelID: plan.ModelID, Status: "running", OutputKind: "html",
 		StartedAt: started, FinishedAt: started,
 	})
@@ -99,25 +101,18 @@ func testScheduledTestPublicVotingSwitch(t *testing.T, ctx context.Context, db *
 	require.NoError(t, repo.BeginProtectionRun(ctx, queuedSnapshot, started.Add(time.Hour)), "a visibility-only edit must not invalidate a queued runner snapshot")
 }
 
-func testScheduledTestGroupWorkflowPublicVotes(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, candyID, pelicanID int64) {
+func testScheduledTestGenericPublicVotes(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, candyID, pelicanID int64) {
 	t.Helper()
-	groupID, accountID := int64(8), int64(62)
-	workflow := &service.ScheduledTestGroupWorkflow{
-		AutomaticTestID: candyID, ReviewTestID: pelicanID, PassGroupID: 10, FailGroupID: 8,
-		ReviewVote: &service.ScheduledTestVoteConfig{Enabled: true, PublicEnabled: true, RejectAbove: 1, PassAtLeast: 2},
+	accountID, upperGroupID := int64(62), int64(10)
+	rules := []service.ScheduledTestProtectionRule{
+		{TestDefinitionID: candyID, ExpectedAnswer: "21", AnswerMatch: "numeric", OnPass: &service.ScheduledTestOutcomeAction{GroupMode: "assign", GroupIDs: []int64{10}}, OnFail: &service.ScheduledTestOutcomeAction{GroupMode: "assign", GroupIDs: []int64{8}}},
+		{TestDefinitionID: pelicanID, Priority: 100, Vote: &service.ScheduledTestVoteConfig{Enabled: true, PublicEnabled: true, RejectAbove: 1, PassAtLeast: 2}, OnPass: &service.ScheduledTestOutcomeAction{GroupMode: "assign", GroupIDs: []int64{10}}, OnFail: &service.ScheduledTestOutcomeAction{GroupMode: "assign", GroupIDs: []int64{8}}},
 	}
 	plan, err := plans.Create(ctx, &service.ScheduledTestPlan{
-		Name: "Public review workflow", SortOrder: 1, GroupID: &groupID, TargetMode: "all_accounts",
+		Name: "Public review policy", SortOrder: 1, GroupIDs: []int64{10, 8}, GroupID: &upperGroupID, TargetMode: "all_accounts",
 		TestDefinitionID: &candyID, TestDefinitionIDs: []int64{candyID, pelicanID},
 		ModelID: "model", CronExpression: "0 * * * *", Enabled: true, MaxResults: 20,
-		Protection: service.ScheduledTestProtectionConfig{Enabled: true, GroupWorkflow: workflow, Rules: workflow.Rules()},
-	})
-	require.NoError(t, err)
-	upperGroupID := int64(10)
-	_, err = plans.Create(ctx, &service.ScheduledTestPlan{
-		Name: "Upper tier display order", SortOrder: 0, GroupID: &upperGroupID, TargetMode: "group",
-		TestDefinitionID: &candyID, TestDefinitionIDs: []int64{candyID},
-		ModelID: "model", CronExpression: "0 * * * *", Enabled: false, MaxResults: 20,
+		Protection: service.ScheduledTestProtectionConfig{Enabled: true, Rules: rules},
 	})
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `UPDATE groups SET is_exclusive=TRUE WHERE id IN (8,10);
@@ -132,25 +127,27 @@ INSERT INTO user_subscriptions(user_id,group_id,status,starts_at,expires_at) VAL
 		return []int64(ids)
 	}
 	round := time.Now().UTC().Truncate(time.Microsecond)
+	var roundResults []*service.ScheduledTestResult
 	startRound := func() {
 		t.Helper()
 		round = round.Add(time.Hour)
+		inputs := make([]*service.ScheduledTestResult, 0, len(plan.Protection.Rules))
+		for index, rule := range plan.Protection.Rules {
+			kind := "number"
+			if index == 1 {
+				kind = "html"
+			}
+			id := rule.TestDefinitionID
+			inputs = append(inputs, &service.ScheduledTestResult{PlanID: plan.ID, TestDefinitionID: &id, GroupID: plan.GroupID, AccountID: &accountID, TargetMode: plan.TargetMode, ModelID: plan.ModelID, Status: "pending", OutputKind: kind, StartedAt: round, FinishedAt: round})
+		}
+		roundResults, err = repo.BeginRun(ctx, plan, round.Format(time.RFC3339Nano), inputs)
+		require.NoError(t, err)
 		require.NoError(t, repo.BeginProtectionRun(ctx, plan, round))
 	}
 	complete := func(index int, verdict string) *service.ScheduledTestResult {
 		t.Helper()
-		rule := plan.Protection.Rules[index]
-		kind := "number"
-		if index == 1 {
-			kind = "html"
-		}
-		result, err := repo.Create(ctx, &service.ScheduledTestResult{
-			PlanID: plan.ID, TestDefinitionID: &rule.TestDefinitionID, GroupID: plan.GroupID,
-			AccountID: &accountID, TargetMode: plan.TargetMode, ModelID: plan.ModelID,
-			Status: "running", OutputKind: kind, StartedAt: round, FinishedAt: round,
-		})
-		require.NoError(t, err)
-		require.NoError(t, repo.BeginProtection(ctx, result, rule))
+		result := roundResults[index]
+		require.NoError(t, repo.BeginProtection(ctx, result, plan.Protection.Rules[index]))
 		result.Status, result.ResponseText = "success", "21"
 		if index == 1 {
 			result.OutputHTML = "<svg>animation</svg>"
@@ -183,7 +180,7 @@ INSERT INTO user_subscriptions(user_id,group_id,status,starts_at,expires_at) VAL
 		assertOrder := func(row *service.ScheduledTestResult) {
 			t.Helper()
 			require.NotNil(t, row.GroupOrder)
-			require.Equal(t, groupOrder, *row.GroupOrder, "display order follows the current group even when its configured plan is disabled")
+			require.Equal(t, groupOrder, *row.GroupOrder, "display order follows the selected group order")
 			require.Equal(t, 1, row.PlanOrder, "the result retains its producing plan's order")
 		}
 		for _, userID := range []int64{1, allowedUser, allowedUser + 2} {
@@ -230,7 +227,7 @@ INSERT INTO user_subscriptions(user_id,group_id,status,starts_at,expires_at) VAL
 		}
 		stored, err := repo.GetByID(ctx, manual.ID)
 		require.NoError(t, err)
-		require.Equal(t, int64(8), *stored.GroupID, "live projection leaves the original execution record intact")
+		require.Equal(t, upperGroupID, *stored.GroupID, "live projection leaves the original execution record intact")
 	}
 	assertCurrentGroupViews(10)
 	public, err := repo.ListVotingResults(ctx, 1)
@@ -244,7 +241,7 @@ INSERT INTO user_subscriptions(user_id,group_id,status,starts_at,expires_at) VAL
 	require.Equal(t, []int64{8}, bindings(), "two failures replace all memberships with the lower tier")
 	assertCurrentGroupViews(8)
 	cast(1, manual.ID, "pass")
-	require.Equal(t, []int64{8}, bindings(), "pending vote totals preserve current placement")
+	require.Equal(t, []int64{10}, bindings(), "pending review permits the automatic tier to apply")
 	cast(2, manual.ID, "pass")
 	require.Equal(t, []int64{10}, bindings(), "two passes reach the promotion threshold")
 	assertCurrentGroupViews(10)
@@ -267,8 +264,7 @@ INSERT INTO user_subscriptions(user_id,group_id,status,starts_at,expires_at) VAL
 	require.Equal(t, []int64{10}, bindings(), "administrator pass overrides a rejecting public majority")
 	assertCurrentGroupViews(10)
 
-	plan.Protection.GroupWorkflow.ReviewVote.PublicEnabled = false
-	plan.Protection.Rules = plan.Protection.GroupWorkflow.Rules()
+	plan.Protection.Rules[1].Vote.PublicEnabled = false
 	plan, err = plans.Update(ctx, plan)
 	require.NoError(t, err)
 	public, err = repo.ListVotingResults(ctx, 1)
@@ -281,9 +277,8 @@ INSERT INTO user_subscriptions(user_id,group_id,status,starts_at,expires_at) VAL
 	require.Len(t, reviews, 1)
 	require.Equal(t, generation, reviews[0].Generation)
 	require.Equal(t, "pass", reviews[0].AdminVerdict)
-	require.Equal(t, []int64{10}, bindings(), "closing workflow voting preserves the current group and administrator decision")
-	plan.Protection.GroupWorkflow.ReviewVote.PublicEnabled = true
-	plan.Protection.Rules = plan.Protection.GroupWorkflow.Rules()
+	require.Equal(t, []int64{10}, bindings(), "closing strategy voting preserves the current group and administrator decision")
+	plan.Protection.Rules[1].Vote.PublicEnabled = true
 	plan, err = plans.Update(ctx, plan)
 	require.NoError(t, err)
 	public, err = repo.ListVotingResults(ctx, 1)

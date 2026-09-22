@@ -67,44 +67,31 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	if plan.SortOrder < 0 {
 		return fmt.Errorf("sort_order must be non-negative")
 	}
-	if (plan.AccountID == nil || *plan.AccountID <= 0) && (plan.GroupID == nil || *plan.GroupID <= 0) {
-		return fmt.Errorf("group_id or account_id is required")
+	if len(plan.GroupIDs) == 0 || len(plan.GroupIDs) > 100 {
+		return fmt.Errorf("group_ids requires between 1 and 100 groups")
 	}
-	plan.TargetMode = strings.ToLower(strings.TrimSpace(plan.TargetMode))
-	if plan.TargetMode == "" {
-		if plan.AccountID != nil && *plan.AccountID > 0 {
-			plan.TargetMode = "account"
-		} else {
-			plan.TargetMode = "all_accounts"
+	seenGroups := make(map[int64]bool, len(plan.GroupIDs))
+	groups := make([]int64, 0, len(plan.GroupIDs))
+	for _, id := range plan.GroupIDs {
+		if id <= 0 {
+			return fmt.Errorf("group_ids must contain positive IDs")
+		}
+		if !seenGroups[id] {
+			groups = append(groups, id)
+			seenGroups[id] = true
 		}
 	}
-	switch plan.TargetMode {
-	case "group":
-		if plan.GroupID == nil || *plan.GroupID <= 0 {
-			return fmt.Errorf("group target requires group_id")
-		}
-		if plan.AccountID != nil && *plan.AccountID > 0 {
-			return fmt.Errorf("group target cannot include account_id")
-		}
-	case "all_accounts":
-		if plan.GroupID == nil || *plan.GroupID <= 0 {
-			return fmt.Errorf("all_accounts target requires group_id")
-		}
-		if plan.AccountID != nil && *plan.AccountID > 0 {
-			return fmt.Errorf("all_accounts target cannot include account_id")
-		}
-	case "account":
-		if plan.AccountID == nil || *plan.AccountID <= 0 {
-			return fmt.Errorf("account target requires account_id")
-		}
-	default:
-		return fmt.Errorf("target_mode must be group, all_accounts, or account")
-	}
+	plan.GroupIDs = groups
+	// These scalar columns are internal anchors for historical result joins.
+	// They no longer select an alternative execution mode.
+	plan.GroupID = &plan.GroupIDs[0]
+	plan.AccountID = nil
+	plan.TargetMode = "all_accounts"
 	if err := normalizeScheduledTestDefinitionIDs(plan); err != nil {
 		return err
 	}
-	if plan.GroupID != nil && *plan.GroupID > 0 && len(plan.TestDefinitionIDs) == 0 {
-		return fmt.Errorf("group targets require a test_definition_id")
+	if len(plan.TestDefinitionIDs) == 0 {
+		return fmt.Errorf("test_definition_ids requires at least one test")
 	}
 	plan.ModelID = strings.TrimSpace(plan.ModelID)
 	if plan.ModelID == "" {
@@ -126,12 +113,9 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	return validateScheduledTestProtection(plan)
 }
 
-// The scalar remains the first selected definition for older API clients.
+// The scalar is the internal execution anchor for the selected definitions.
 func normalizeScheduledTestDefinitionIDs(plan *ScheduledTestPlan) error {
 	ids := plan.TestDefinitionIDs
-	if ids == nil && plan.TestDefinitionID != nil {
-		ids = []int64{*plan.TestDefinitionID}
-	}
 	if len(ids) > 32 {
 		return fmt.Errorf("at most 32 test definitions may be selected")
 	}
@@ -272,6 +256,9 @@ func (s *ScheduledTestService) RunNow(ctx context.Context, id int64) error {
 	if e != nil {
 		return e
 	}
+	if p == nil || p.MigrationNote != "" {
+		return fmt.Errorf("review and save the migrated strategy before running it")
+	}
 	if s.runFunc == nil {
 		return fmt.Errorf("test runner unavailable")
 	}
@@ -387,9 +374,6 @@ func (s *ScheduledTestService) validateDefinitionForPlan(ctx context.Context, pl
 			return fmt.Errorf("test definition %d not found", id)
 		}
 		hasEnabled = hasEnabled || d.Enabled
-		if err := validateScheduledTestGroupWorkflowDefinition(plan, d); err != nil {
-			return err
-		}
 		if plan.Protection.Enabled {
 			for i := range plan.Protection.Rules {
 				if plan.Protection.Rules[i].TestDefinitionID == id {

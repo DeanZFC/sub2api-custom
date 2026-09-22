@@ -24,14 +24,14 @@
         <div class="mb-4 flex items-center justify-between"><h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.plans') }}</h3><button data-testid="plan-create" class="btn btn-primary btn-sm" @click="openPlan()"><Icon name="plus" size="sm" /> {{ t('common.create') }}</button></div>
         <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-700"><th class="px-2 py-2">{{ t('admin.tests.name') }}</th><th class="px-2 py-2">{{ t('admin.tests.type') }}</th><th class="px-2 py-2">{{ t('admin.tests.target') }}</th><th class="px-2 py-2">{{ t('admin.tests.model') }}</th><th class="px-2 py-2">{{ t('admin.tests.schedule') }}</th><th class="px-2 py-2">{{ t('common.status') }}</th><th class="px-2 py-2 text-right">{{ t('common.actions') }}</th></tr></thead><tbody>
           <tr v-for="plan in orderedPlans" :key="plan.id" class="border-b border-gray-100 dark:border-dark-800">
-            <td class="min-w-32 px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}<div class="mt-1 text-xs font-normal text-gray-500">{{ t('admin.tests.sortOrder') }}: {{ plan.sort_order ?? 0 }}</div></td>
+            <td class="min-w-32 px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}<div class="mt-1 text-xs font-normal text-gray-500">{{ t('admin.tests.sortOrder') }}: {{ plan.sort_order ?? 0 }}</div><p v-if="plan.migration_note" class="mt-2 text-xs font-normal text-amber-700 dark:text-amber-300" data-migration-note>{{ plan.migration_note }}</p></td>
             <td class="min-w-32 px-2 py-3"><div class="flex flex-wrap gap-1"><span v-for="type in planTypes(plan)" :key="type.id" class="badge badge-gray">{{ type.name }}</span><span v-if="!planTypes(plan).length">-</span></div></td>
-            <td class="min-w-32 px-2 py-3">{{ groupName(plan) }}<div class="mt-1 text-xs text-gray-500">{{ targetName(plan) }}</div></td>
+            <td class="min-w-32 px-2 py-3">{{ groupName(plan) }}<div class="mt-1 text-xs text-gray-500">{{ targetName() }}</div></td>
             <td class="min-w-32 px-2 py-3 font-mono text-xs">{{ plan.model_id || '-' }}<span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td>
             <td class="min-w-40 px-2 py-3 font-mono text-xs">{{ plan.cron_expression || '-' }}<div class="mt-1 font-sans text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td>
             <td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span><span v-if="plan.protection?.enabled" class="badge badge-primary mt-1">{{ t('admin.tests.protection.title') }}</span></td>
             <td class="px-2 py-3"><div class="flex justify-end gap-1">
-              <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('admin.tests.run')" :aria-label="t('admin.tests.run')" :disabled="runningPlans.has(plan.id) || manualSchedulingStopped(plan)" @click="run(plan)"><Icon name="play" size="sm" /></button>
+              <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('admin.tests.run')" :aria-label="t('admin.tests.run')" :disabled="runningPlans.has(plan.id) || !!plan.migration_note" @click="run(plan)"><Icon name="play" size="sm" /></button>
               <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('admin.tests.results')" :aria-label="t('admin.tests.results')" @click="showResults(plan)"><Icon name="eye" size="sm" /></button>
               <button role="switch" :aria-checked="plan.enabled" class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="plan.enabled ? t('admin.tests.disablePlan') : t('admin.tests.enablePlan')" :aria-label="plan.enabled ? t('admin.tests.disablePlan') : t('admin.tests.enablePlan')" :disabled="togglingPlanId === plan.id" @click="togglePlanStatus(plan)"><Icon :name="plan.enabled ? 'ban' : 'checkCircle'" size="sm" /></button>
               <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('common.copy')" :aria-label="t('common.copy')" :disabled="saving" @click="copyPlan(plan)"><Icon name="copy" size="sm" /></button>
@@ -50,26 +50,33 @@
       <div v-if="editingPlan" class="grid gap-4 sm:grid-cols-2">
         <label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingPlan.name" class="input mt-1 w-full" /></label>
         <label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingPlan.sort_order" min="0" type="number" class="input mt-1 w-full" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.planSortOrderHint') }}</span></label>
-        <label class="input-label sm:col-span-2">{{ t('admin.tests.groupWorkflow.mode') }}<select :value="editingPlan.protection.group_workflow ? 'group_workflow' : 'standard'" class="input mt-1 w-full" data-plan-mode @change="setGroupWorkflowMode(($event.target as HTMLSelectElement).value === 'group_workflow')"><option value="standard">{{ t('admin.tests.groupWorkflow.standard') }}</option><option value="group_workflow">{{ t('admin.tests.groupWorkflow.title') }}</option></select></label>
-        <TestGroupWorkflowEditor v-if="editingPlan.protection.group_workflow" :model-value="editingPlan.protection.group_workflow" :types="orderedTypes" :groups="workflowGroups" class="sm:col-span-2" @update:model-value="updateGroupWorkflow" />
-        <fieldset v-else class="sm:col-span-2">
+        <p v-if="editingPlan.migration_note" class="text-sm text-amber-700 dark:text-amber-300 sm:col-span-2" data-plan-migration-note>{{ editingPlan.migration_note }}</p>
+        <fieldset class="sm:col-span-2">
           <legend class="input-label">{{ t('admin.tests.types') }}</legend>
           <div class="mt-2 flex flex-wrap gap-x-6 gap-y-3">
             <label v-for="type in orderedTypes" :key="type.id" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200" :class="{ 'opacity-50': !type.enabled }">
-              <input v-model="editingPlan.test_definition_ids" :data-testid="`plan-type-${type.id}`" type="checkbox" :value="type.id" :disabled="!type.enabled && !editingPlan.test_definition_ids.includes(type.id)" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+              <input v-model="editingPlan.test_definition_ids" :data-testid="`plan-type-${type.id}`" type="checkbox" :value="type.id" :disabled="!editingPlan.test_definition_ids.includes(type.id) && (!type.enabled || editingPlan.test_definition_ids.length >= 32)" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
               {{ type.name }}<span v-if="!type.enabled" class="text-xs text-gray-500">{{ t('common.disabled') }}</span>
             </label>
           </div>
           <p v-if="!orderedTypes.length" class="mt-2 text-sm text-gray-500">{{ t('common.noData') }}</p>
         </fieldset>
-        <label v-if="!editingPlan.protection.group_workflow" class="input-label">{{ t('admin.tests.group') }}<select v-model.number="editingPlan.group_id" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.selectGroup') }}</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} (#{{ group.id }})</option></select></label>
-        <label v-if="!editingPlan.protection.group_workflow" class="input-label">{{ t('admin.tests.accountOptional') }}<select v-model="accountSelection" class="input mt-1 w-full" :disabled="!editingPlan.group_id"><option :value="null">{{ editingPlan.group_id ? t('admin.tests.groupTest') : t('admin.tests.selectGroupFirst') }}</option><option value="all" :disabled="!editingPlan.group_id">{{ t('admin.tests.allAccountsInGroup') }}</option><option v-for="account in filteredAccounts" :key="account.id" :value="account.id">{{ account.name || t('admin.tests.account') }} (#{{ account.id }})</option></select></label>
-        <p v-if="!editingPlan.protection.group_workflow" class="text-xs text-gray-500 sm:col-span-2">{{ targetModeHint }}</p>
-        <p v-if="invalidAccountTarget" class="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2" data-invalid-account-target>{{ t('admin.tests.protection.accountMovedHint') }}</p>
-        <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_id || modelOptionsLoading" :placeholder="editingPlan.group_id ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /></label>
+        <fieldset class="space-y-3 sm:col-span-2" data-plan-groups>
+          <legend class="input-label">{{ t('admin.tests.strategyGroups') }}</legend>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.strategyGroupsHint') }}</p>
+          <div class="flex flex-wrap gap-3">
+            <label v-for="group in groups" :key="group.id" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input type="checkbox" :checked="editingPlan.group_ids.includes(group.id)" :disabled="!editingPlan.group_ids.includes(group.id) && (!selectableGroup(group) || editingPlan.group_ids.length >= 100)" :data-plan-group="group.id" @change="selectGroup(group.id, ($event.target as HTMLInputElement).checked)" />{{ group.name }} (#{{ group.id }})</label>
+          </div>
+          <ol class="space-y-2" data-selected-plan-groups>
+            <li v-for="(id, index) in editingPlan.group_ids" :key="id" class="flex items-center justify-between gap-2 rounded-md border border-gray-200 p-2 text-sm dark:border-dark-700" :data-selected-plan-group="id"><span>{{ index + 1 }}. {{ groups.find(group => group.id === id)?.name || `#${id}` }}</span><div class="flex gap-2"><button type="button" class="btn btn-secondary btn-sm" :disabled="index === 0" data-group-up :aria-label="t('admin.tests.moveGroupUp')" @click="moveGroup(index, -1)">↑</button><button type="button" class="btn btn-secondary btn-sm" :disabled="index === editingPlan.group_ids.length - 1" data-group-down :aria-label="t('admin.tests.moveGroupDown')" @click="moveGroup(index, 1)">↓</button><button type="button" class="btn btn-secondary btn-sm" :aria-label="t('common.remove')" @click="selectGroup(id, false)">×</button></div></li>
+          </ol>
+          <p v-if="editingPlan.group_ids.length && !validStrategyGroups(editingPlan.group_ids)" role="alert" class="text-xs text-red-600 dark:text-red-400">{{ t('admin.tests.invalidStrategyGroups') }}</p>
+        </fieldset>
+        <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_ids.length || modelOptionsLoading" :placeholder="editingPlan.group_ids.length ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.commonModelsHint') }}</span></label>
+        <p v-if="editingPlan.group_ids.length && !modelOptionsLoading && !modelOptions.length" class="text-xs text-amber-700 dark:text-amber-300" data-no-common-model>{{ t('admin.tests.noCommonModels') }}</p>
         <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
         <label class="input-label sm:col-span-2">{{ t('admin.tests.cron') }}<input v-model.trim="editingPlan.cron_expression" class="input mt-1 w-full" placeholder="*/30 * * * *" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.cronHint') }}</span></label>
-        <TestProtectionEditor v-if="!editingPlan.protection.group_workflow" v-model="editingPlan.protection" :types="selectedProtectionTypes" :target-mode="editingPlan.target_mode" :groups="protectionGroups" class="sm:col-span-2" />
+        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :groups="protectionGroups" class="sm:col-span-2" />
         <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
         <label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label>
       </div>
@@ -100,9 +107,8 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { reasoningEffortsForTestModel } from '@/utils/testReasoningEfforts'
 import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vue'
 import TestProtectionEditor from '@/components/tests/TestProtectionEditor.vue'
-import TestGroupWorkflowEditor from '@/components/tests/TestGroupWorkflowEditor.vue'
-import { copyTestProtection, groupWorkflowProtection, validTestProtection } from '@/utils/testProtection'
-import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType, TestProtectionConfig, TestGroupWorkflow } from '@/types'
+import { copyTestProtection, validTestProtection } from '@/utils/testProtection'
+import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType, TestProtectionConfig } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -132,9 +138,9 @@ const pendingRuns = ref(new Map<number, TestResult[]>())
 const deletingResultId = ref<number | null>(null)
 const retryingResultId = ref<number | null>(null)
 const editingType = ref<(CreateTestTypeRequest & { id?: number }) | null>(null)
-const editingPlan = ref<(CreateTestPlanRequest & { id?: number; test_definition_ids: number[]; protection: TestProtectionConfig }) | null>(null)
+const editingPlan = ref<(CreateTestPlanRequest & { id?: number; protection: TestProtectionConfig; migration_note?: string }) | null>(null)
 const resultPlan = ref<TestPlan | null>(null)
-type AccountSelection = number | 'all' | null
+let modelOptionsRequest = 0
 
 const canSaveType = computed(() => Boolean(editingType.value?.name && editingType.value?.key && editingType.value?.output_kind && (['statistics', 'model_check'].includes(editingType.value.output_kind) || editingType.value.prompt.trim())))
 const typeKindLabel = (kind: string) => kind === 'statistics' ? t('admin.tests.statistics') : kind === 'model_check' ? t('admin.tests.modelCheck') : kind
@@ -154,118 +160,69 @@ const planTypes = (plan: TestPlan) => planTypeIDs(plan).map(id => ({
   id,
   name: types.value.find(type => type.id === id)?.name || plan.test_definitions?.find(type => type.id === id)?.name || (plan.test_definition?.id === id ? plan.test_definition.name : `#${id}`),
 }))
-const canSavePlan = computed(() => {
-  const plan = editingPlan.value
-  return Boolean(plan?.test_definition_ids.length && plan.model_id && plan.cron_expression && plan.group_id
-    && !invalidAccountTarget.value
-    && validTestProtection(plan.protection, plan.target_mode, selectedProtectionTypes.value, protectionGroups.value))
-})
-
 const selectedProtectionTypes = computed(() => orderedTypes.value.filter(type => editingPlan.value?.test_definition_ids.includes(type.id)))
-const eligibleProtectionGroups = (groupID?: number | null) => {
-  const source = groups.value.find(group => group.id === groupID)
-  return source ? groups.value.filter(group => group.platform === source.platform && group.platform !== 'composite' && group.status === 'active') : []
+const validStrategyTypes = (ids: number[]) => ids.length >= 1 && ids.length <= 32
+  && new Set(ids).size === ids.length
+  && ids.every(id => types.value.some(type => type.id === id && type.enabled))
+const strategyGroups = (ids: number[]) => ids.map(id => groups.value.find(group => group.id === id)).filter((group): group is AdminGroup => Boolean(group))
+const validStrategyGroups = (ids: number[]) => {
+  const selected = strategyGroups(ids)
+  return ids.length >= 1 && ids.length <= 100 && new Set(ids).size === ids.length && selected.length === ids.length
+    && selected.every(group => group.status === 'active' && group.platform !== 'composite' && group.platform === selected[0].platform)
 }
-const protectionGroups = computed(() => eligibleProtectionGroups(editingPlan.value?.group_id))
-const workflowGroups = computed(() => {
-  const source = groups.value.find(group => group.id === editingPlan.value?.group_id)
-  return groups.value.filter(group => group.status === 'active' && group.platform !== 'composite'
-    && (!source || group.platform === source.platform))
-})
-const updateGroupWorkflow = (workflow: TestGroupWorkflow) => {
+const protectionGroups = computed(() => strategyGroups(editingPlan.value?.group_ids || []).filter(group => group.status === 'active' && group.platform !== 'composite'))
+const selectableGroup = (group: AdminGroup) => {
+  const selected = strategyGroups(editingPlan.value?.group_ids || [])
+  return group.status === 'active' && group.platform !== 'composite' && (!selected.length || group.platform === selected[0].platform)
+}
+const selectGroup = (id: number, selected: boolean) => {
   const plan = editingPlan.value
   if (!plan) return
-  plan.protection = groupWorkflowProtection(workflow)
-  plan.test_definition_ids = [workflow.automatic_test_id, workflow.review_test_id].filter(id => id > 0)
-  plan.target_mode = 'all_accounts'
-  plan.account_id = null
-  if (!plan.group_id || ![workflow.pass_group_id, workflow.fail_group_id].includes(plan.group_id)) {
-    plan.group_id = workflow.pass_group_id || workflow.fail_group_id || null
-  }
+  plan.group_ids = selected ? [...new Set([...plan.group_ids, id])] : plan.group_ids.filter(value => value !== id)
 }
-const setGroupWorkflowMode = (enabled: boolean) => {
+const moveGroup = (index: number, direction: number) => {
   const plan = editingPlan.value
-  if (!plan) return
-  if (!enabled) {
-    delete plan.protection.group_workflow
-    return
-  }
-  const available = workflowGroups.value
-  const automatic = orderedTypes.value.find(type => type.enabled && type.output_kind === 'number' && /candy/i.test(type.key))
-    || orderedTypes.value.find(type => type.enabled && type.output_kind === 'number')
-  const review = orderedTypes.value.find(type => type.enabled && type.output_kind === 'html' && /pelican/i.test(type.key))
-    || orderedTypes.value.find(type => type.enabled && type.output_kind === 'html')
-  const pass = available.find(group => /不降智/.test(group.name)) || available.find(group => group.id === plan.group_id)
-  const failID = plan.protection.rules.flatMap(rule => rule.on_fail?.group_ids || []).find(id => id !== pass?.id && available.some(group => group.id === id))
-    || available.find(group => group.id !== pass?.id && /^(?:GPT-)?Pro$/i.test(group.name.trim()))?.id || 0
-  updateGroupWorkflow({ automatic_test_id: automatic?.id || 0, review_test_id: review?.id || 0, pass_group_id: pass?.id || 0, fail_group_id: failID })
-  if (plan.cron_expression === '*/30 * * * *') plan.cron_expression = '0 * * * *'
+  if (!plan || index + direction < 0 || index + direction >= plan.group_ids.length) return
+  const ids = [...plan.group_ids]
+  const selected = ids[index]
+  ids[index] = ids[index + direction]
+  ids[index + direction] = selected
+  plan.group_ids = ids
 }
-
-const filteredAccounts = computed(() => {
-  const groupID = editingPlan.value?.group_id
-  if (!groupID) return []
-  const savedPlan = plans.value.find(plan => plan.id === editingPlan.value?.id)
-  // Keep an existing target editable after its quality rules moved it to a new group.
-  return accounts.value.filter(account => account.group_ids?.includes(Number(groupID))
-    || (savedPlan?.group_id === groupID && savedPlan.account_id === account.id))
-})
-const invalidAccountTarget = computed(() => editingPlan.value?.target_mode === 'account'
-  && !filteredAccounts.value.some(account => account.id === editingPlan.value?.account_id))
-const accountSelection = computed<AccountSelection>({
-  get: () => {
-    const plan = editingPlan.value
-    if (!plan || plan.target_mode === 'group') return null
-    if (plan.target_mode === 'all_accounts' || !plan.account_id) return 'all'
-    return plan.account_id
-  },
-  set: value => {
-    const plan = editingPlan.value
-    if (!plan) return
-    if (value === null) {
-      plan.target_mode = 'group'
-      plan.account_id = null
-    } else if (value === 'all') {
-      plan.target_mode = 'all_accounts'
-      plan.account_id = null
-    } else {
-      plan.target_mode = 'account'
-      plan.account_id = Number(value)
-    }
-  },
-})
-const targetModeHint = computed(() => {
-  const mode = editingPlan.value?.target_mode
-  if (mode === 'group') return t('admin.tests.groupHint')
-  if (mode === 'all_accounts') return t('admin.tests.allAccountsHint')
-  return t('admin.tests.accountHint')
-})
 const reasoningEffortOptions = computed(() => {
   const plan = editingPlan.value
-  if (!plan?.model_id) return []
-  return reasoningEffortsForTestModel(plan.model_id, accounts.value, plan.group_id, plan.account_id)
+  if (!plan?.model_id || !plan.group_ids.length) return []
+  const choices = plan.group_ids.map(id => reasoningEffortsForTestModel(plan.model_id, accounts.value.filter(account => account.schedulable !== false), id))
+  return choices.slice(1).reduce((common, options) => common.filter(effort => options.includes(effort)), choices[0])
 })
-const loadModelOptions = async (groupID: number | null) => {
-  if (!groupID) {
-    modelOptions.value = []
+const canSavePlan = computed(() => {
+  const plan = editingPlan.value
+  return Boolean(plan && validStrategyTypes(plan.test_definition_ids)
+    && plan.model_id && plan.cron_expression && validStrategyGroups(plan.group_ids)
+    && !modelOptionsLoading.value && modelOptions.value.some(option => option.value === plan.model_id)
+    && validTestProtection(plan.protection, selectedProtectionTypes.value, protectionGroups.value))
+})
+const loadModelOptions = async () => {
+  const request = ++modelOptionsRequest
+  const plan = editingPlan.value
+  const selected = strategyGroups(plan?.group_ids || [])
+  modelOptions.value = []
+  if (!plan || !selected.length || !validStrategyGroups(plan.group_ids)) {
+    modelOptionsLoading.value = false
     return
   }
-  const group = groups.value.find(item => item.id === groupID)
-  if (!group) return
   modelOptionsLoading.value = true
   try {
-    const models = await adminAPI.groups.getModelAllowlistCandidates(groupID, group.platform)
-    const unique = Array.from(new Set(models.map(model => String(model).trim()).filter(Boolean)))
-    // Keep an existing plan's model selectable even if the upstream catalog
-    // has since changed or the model was removed from the current allowlist.
-    const current = editingPlan.value?.model_id?.trim()
-    if (current && !unique.includes(current)) unique.unshift(current)
-    modelOptions.value = unique.map(value => ({ value, label: value }))
+    const catalogs = await Promise.all(selected.map(group => adminAPI.groups.getModelAllowlistCandidates(group.id, group.platform)))
+    if (request !== modelOptionsRequest || editingPlan.value !== plan) return
+    const lists = catalogs.map(models => [...new Set(models.map(model => String(model).trim()).filter(Boolean))])
+    const common = lists.slice(1).reduce((values, choices) => values.filter(value => choices.includes(value)), lists[0])
+    modelOptions.value = common.map(value => ({ value, label: value }))
+    if (plan.model_id && !common.includes(plan.model_id)) plan.model_id = ''
   } catch (error) {
-    modelOptions.value = editingPlan.value?.model_id ? [{ value: editingPlan.value.model_id, label: editingPlan.value.model_id }] : []
-    reportError(error)
+    if (request === modelOptionsRequest) reportError(error)
   } finally {
-    modelOptionsLoading.value = false
+    if (request === modelOptionsRequest) modelOptionsLoading.value = false
   }
 }
 const load = async () => {
@@ -283,9 +240,9 @@ const load = async () => {
   }
 }
 
-// Include quality-paused accounts so administrators can edit their existing
-// protection or schedule follow-up checks. A manual scheduling stop is retained
-// in the selector; the runner, and the single-account Run button, respect it.
+// Include quality-paused accounts when resolving model capabilities and
+// labeling retained results. Manually stopped accounts do not constrain
+// strategy reasoning options and are skipped by the runner.
 const loadTestAccounts = async (): Promise<AccountListItem[]> => {
   const pageSize = 1000
   const loadStatus = async (status: 'active' | 'quality_paused') => {
@@ -346,56 +303,54 @@ const updateTypeOrder = async (type: TestType) => {
 }
 const removeType = async (type: TestType) => { if (!window.confirm(`${t('common.delete')} ${type.name}?`)) return; try { await adminAPI.tests.deleteType(type.id); await load() } catch (error) { reportError(error) } }
 
+const planPayload = (plan: TestPlan): CreateTestPlanRequest => ({
+  name: plan.name || '', sort_order: plan.sort_order ?? 0,
+  group_ids: [...(plan.group_ids || [])], test_definition_ids: planTypeIDs(plan),
+  model_id: plan.model_id || '', reasoning_effort: plan.reasoning_effort ?? null,
+  cron_expression: plan.cron_expression || '0 * * * *', enabled: plan.enabled,
+  max_results: plan.max_results || 50, protection: copyTestProtection(plan.protection),
+})
 const openPlan = (plan?: TestPlan) => {
-  if (plan) {
-    const account = plan.account_id ? accounts.value.find(item => item.id === plan.account_id) : undefined
-    const targetMode = plan.target_mode || (plan.account_id ? 'account' : 'all_accounts')
-    editingPlan.value = { id: plan.id, name: plan.name, sort_order: plan.sort_order ?? 0, test_definition_ids: planTypeIDs(plan), group_id: plan.group_id ?? account?.group_ids?.[0] ?? null, account_id: plan.account_id ?? null, target_mode: targetMode, model_id: plan.model_id || '', reasoning_effort: plan.reasoning_effort ?? null, cron_expression: plan.cron_expression || '', enabled: plan.enabled, max_results: plan.max_results || 50, protection: copyTestProtection(plan.protection) }
-  } else {
-    editingPlan.value = { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_id: null, account_id: null, target_mode: 'group', model_id: '', reasoning_effort: null, cron_expression: '*/30 * * * *', enabled: true, max_results: 50, protection: copyTestProtection() }
-  }
-  void loadModelOptions(editingPlan.value.group_id ?? null)
+  editingPlan.value = plan
+    ? { ...planPayload(plan), id: plan.id, migration_note: plan.migration_note, protection: copyTestProtection(plan.protection) }
+    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], model_id: '', reasoning_effort: null, cron_expression: '0 * * * *', enabled: true, max_results: 50, protection: copyTestProtection() }
 }
-const savePlan = async () => { if (!editingPlan.value || !canSavePlan.value) return; saving.value = true; try { const { id, ...body } = editingPlan.value; const payload = { ...body, test_definition_id: body.test_definition_ids[0], group_id: body.group_id || null, account_id: body.account_id || null }; if (id) await adminAPI.tests.updatePlan(id, payload); else await adminAPI.tests.createPlan(payload); editingPlan.value = null; await load() } catch (error) { reportError(error) } finally { saving.value = false } }
+const savePlan = async () => {
+  if (!editingPlan.value || !canSavePlan.value) return
+  saving.value = true
+  try {
+    const { id, migration_note: _migrationNote, ...body } = editingPlan.value
+    if (id) await adminAPI.tests.updatePlan(id, body)
+    else await adminAPI.tests.createPlan(body)
+    editingPlan.value = null
+    await load()
+  } catch (error) { reportError(error) } finally { saving.value = false }
+}
 const copyPlan = async (plan: TestPlan) => {
   if (saving.value) return
-  const selectedAccount = plan.account_id ? accounts.value.find(account => account.id === plan.account_id) : undefined
-  const targetInvalid = Boolean(plan.account_id && (!plan.group_id || !selectedAccount?.group_ids?.includes(plan.group_id)))
-  const protectionInvalid = !validTestProtection(plan.protection, plan.target_mode, types.value.filter(type => planTypeIDs(plan).includes(type.id)), eligibleProtectionGroups(plan.group_id))
-  if (targetInvalid || protectionInvalid) {
-    // An existing rule can continue checking a moved account. Its copy has no
-    // tracked membership yet, so let the administrator choose a valid target.
+  const payload = planPayload(plan)
+  payload.name = `${plan.name || `#${plan.id}`}（Copy）`
+  // Copies stay disabled until the administrator checks their shared scope.
+  payload.enabled = false
+  if (!validStrategyTypes(payload.test_definition_ids) || !validStrategyGroups(payload.group_ids) || !validTestProtection(payload.protection, types.value.filter(type => payload.test_definition_ids.includes(type.id)), strategyGroups(payload.group_ids))) {
     openPlan(plan)
     editingPlan.value!.id = undefined
-    editingPlan.value!.name = `${plan.name || `#${plan.id}`}（Copy）`
+    editingPlan.value!.name = payload.name
+    editingPlan.value!.enabled = false
     return
   }
   saving.value = true
   try {
-    await adminAPI.tests.createPlan({
-      name: `${plan.name || `#${plan.id}`}（Copy）`,
-      sort_order: plan.sort_order ?? 0,
-      test_definition_id: planTypeIDs(plan)[0],
-      test_definition_ids: planTypeIDs(plan),
-      group_id: plan.group_id ?? null,
-      account_id: plan.account_id ?? null,
-      target_mode: plan.target_mode,
-      model_id: plan.model_id || '',
-      reasoning_effort: plan.reasoning_effort ?? null,
-      cron_expression: plan.cron_expression || '*/30 * * * *',
-      enabled: plan.enabled,
-      max_results: plan.max_results || 50,
-      protection: copyTestProtection(plan.protection),
-    })
+    await adminAPI.tests.createPlan(payload)
     await load()
-  } catch (error) {
-    reportError(error)
-  } finally {
-    saving.value = false
-  }
+  } catch (error) { reportError(error) } finally { saving.value = false }
 }
 const removePlan = async (plan: TestPlan) => { if (!window.confirm(`${t('common.delete')} ${plan.name || `#${plan.id}`}?`)) return; try { await adminAPI.tests.deletePlan(plan.id); await load() } catch (error) { reportError(error) } }
 const togglePlanStatus = async (plan: TestPlan) => {
+  if (plan.migration_note) {
+    openPlan(plan)
+    return
+  }
   if (togglingPlanId.value === plan.id) return
   togglingPlanId.value = plan.id
   try {
@@ -407,9 +362,8 @@ const togglePlanStatus = async (plan: TestPlan) => {
     togglingPlanId.value = null
   }
 }
-const manualSchedulingStopped = (plan: TestPlan) => Boolean(plan.account_id && accounts.value.find(account => account.id === plan.account_id)?.schedulable === false)
 const run = async (plan: TestPlan) => {
-  if (runningPlans.value.has(plan.id) || manualSchedulingStopped(plan)) return
+  if (runningPlans.value.has(plan.id) || plan.migration_note) return
   runningPlans.value.add(plan.id)
   const startedAt = new Date().toISOString()
   pendingRuns.value.set(plan.id, planTypeIDs(plan).map((typeID, index) => ({
@@ -418,9 +372,9 @@ const run = async (plan: TestPlan) => {
     plan_name: plan.name,
     test_definition_id: typeID,
     test_name: planTypes(plan).find(type => type.id === typeID)?.name,
-    group_id: plan.group_id ?? null,
-    account_id: plan.account_id ?? null,
-    target_mode: plan.target_mode,
+    group_id: null,
+    account_id: null,
+    target_mode: 'all_accounts',
     model_id: plan.model_id,
     reasoning_effort: plan.reasoning_effort ?? null,
     status: 'running',
@@ -529,39 +483,19 @@ const retryResult = async (result: TestResult) => {
 }
 let resultTimer: ReturnType<typeof setInterval> | undefined
 watch(
-  () => editingPlan.value ? [editingPlan.value.target_mode, ...editingPlan.value.test_definition_ids] : [],
+  () => editingPlan.value?.test_definition_ids.slice(),
   () => {
     const plan = editingPlan.value
-    if (!plan) return
-    if (plan.target_mode === 'group') plan.protection.enabled = false
-    plan.protection.rules = plan.protection.rules.filter(rule => plan.test_definition_ids.includes(rule.test_definition_id))
+    if (plan) plan.protection.rules = plan.protection.rules.filter(rule => plan.test_definition_ids.includes(rule.test_definition_id))
   },
 )
+watch(reasoningEffortOptions, choices => {
+  const plan = editingPlan.value
+  if (plan?.reasoning_effort && !choices.includes(plan.reasoning_effort)) plan.reasoning_effort = null
+})
 watch(
-  () => [editingPlan.value?.model_id, editingPlan.value?.group_id, editingPlan.value?.account_id] as const,
-  () => {
-    const plan = editingPlan.value
-    if (plan?.reasoning_effort && !reasoningEffortOptions.value.includes(plan.reasoning_effort)) {
-      plan.reasoning_effort = null
-    }
-  },
-  { deep: true },
-)
-watch(
-  () => editingPlan.value?.group_id,
-  (groupID, previous) => {
-    if (groupID !== previous) {
-      // Opening an existing plan initializes the watcher from undefined;
-      // preserve its current model until the catalog has loaded. Clear only
-      // when the administrator actively switches to another group.
-      if (previous !== undefined && editingPlan.value) {
-        editingPlan.value.model_id = ''
-        const selected = editingPlan.value.account_id
-        if (selected && !filteredAccounts.value.some(account => account.id === selected)) accountSelection.value = null
-      }
-      void loadModelOptions(groupID ?? null)
-    }
-  },
+  () => editingPlan.value ? JSON.stringify([...editingPlan.value.group_ids].sort((a, b) => a - b)) : undefined,
+  () => { void loadModelOptions() },
 )
 watch(resultPlan, plan => {
   clearInterval(resultTimer)
@@ -574,13 +508,10 @@ watch(resultPlan, plan => {
 onUnmounted(() => {
   clearInterval(resultTimer)
   resultsRequest++
+  modelOptionsRequest++
 })
-const groupName = (plan: TestPlan) => plan.protection?.group_workflow
-  ? [plan.protection.group_workflow.pass_group_id, plan.protection.group_workflow.fail_group_id].map(id => groups.value.find(group => group.id === id)?.name || `#${id}`).join(' / ')
-  : plan.group_id ? groups.value.find(group => group.id === plan.group_id)?.name || `#${plan.group_id}` : '-'
-const targetName = (plan: TestPlan) => plan.protection?.group_workflow ? t('admin.tests.groupWorkflow.bothGroups') : plan.account_id
-  ? `${accounts.value.find(account => account.id === plan.account_id)?.name || t('admin.tests.account')} (#${plan.account_id})`
-  : t(plan.target_mode === 'group' ? 'admin.tests.groupTest' : 'admin.tests.allAccountsInGroup')
+const groupName = (plan: TestPlan) => (plan.group_ids || []).map(id => groups.value.find(group => group.id === id)?.name || `#${id}`).join(' / ') || '-'
+const targetName = () => t('admin.tests.strategyTarget')
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '-'
 onMounted(load)
 </script>

@@ -322,6 +322,7 @@ func TestExportDataExcludesCodexTicketMaterial(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 	extra := map[string]any{
 		"codex_turn_ticket:gpt-6-astra": map[string]any{"state": "private-ticket-blob", "length": 292},
+		"codex_turn_cookies":            map[string]any{"__cflb": "private-routing-cookie", "__oailb": "private-upstream-cookie"},
 		"codex_harvest_proxy_url":       "http://user:legacy-proxy-secret@proxy.example.com:8080",
 		"ordinary":                      "retained",
 	}
@@ -335,7 +336,11 @@ func TestExportDataExcludesCodexTicketMaterial(t *testing.T) {
 	require.Equal(t, map[string]any{"ordinary": "retained"}, resp.Data.Accounts[0].Extra)
 	require.Equal(t, "backup-token", resp.Data.Accounts[0].Credentials["access_token"])
 	require.NotContains(t, rec.Body.String(), "private-ticket-blob")
+	require.NotContains(t, rec.Body.String(), "private-routing-cookie")
+	require.NotContains(t, rec.Body.String(), "private-upstream-cookie")
+	require.NotContains(t, rec.Body.String(), "codex_turn_cookies")
 	require.NotContains(t, rec.Body.String(), "legacy-proxy-secret")
 	require.Contains(t, extra, "codex_turn_ticket:gpt-6-astra")
+	require.Contains(t, extra, "codex_turn_cookies")
 	require.Contains(t, extra, "codex_harvest_proxy_url")
 }

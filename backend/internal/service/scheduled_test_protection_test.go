@@ -133,7 +133,6 @@ func TestScheduledTestProtectionValidation(t *testing.T) {
 		name   string
 		mutate func(*ScheduledTestPlan)
 	}{
-		{"group target", func(p *ScheduledTestPlan) { p.TargetMode = "group" }},
 		{"no rules", func(p *ScheduledTestPlan) { p.Protection.Rules = nil }},
 		{"too many rules", func(p *ScheduledTestPlan) { p.Protection.Rules = make([]ScheduledTestProtectionRule, 33) }},
 		{"unselected definition", func(p *ScheduledTestPlan) { p.Protection.Rules[0].TestDefinitionID = 2 }},

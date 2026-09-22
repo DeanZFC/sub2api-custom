@@ -318,11 +318,14 @@ gateway:
   # Pro 门票长度 292；Team/Business 332；target_length 仅作为其他/未知套餐默认值。
   # 打票始终使用账号业务代理；未配置代理的账号直连，代理缺失或无效时暂停打票。
   # 旧 harvest_proxy_url / harvest_proxy_mode 配置已停用，不再使用独立打票代理池。
+  # 292 需同时携带采票响应中的 __cflb / __oailb Cookie，按账号共享并自动更新。
+  # 292/332 共用保守的 240 秒寿命上限；旧长寿命配置会自动收敛。
   openai_codex_ticket:
     enabled: false
     target_length: 292
-    ttl_seconds: 3600
-    refresh_before_seconds: 600
+    ttl_seconds: 240
+    # 提前刷新最多占 TTL 的 1/4，防止旧 600/300 秒配置导致连续打票。
+    refresh_before_seconds: 60
     # 每个账号/模型独立重试，普通未命中在完成后至少等 6 秒，并加少量抖动。
     # 429 遵守 Retry-After；认证/权限/额度错误冷却，明确不支持的模型暂停 30 分钟。
     # 配置/认证修改或重新启用账号后可提前恢复。业务并发设置不受影响。

@@ -221,7 +221,7 @@ export default {
 
   tests: {
     adminReview: {
-      groupWorkflowHint: '点击后立即删除账号原有的全部分组，只保留目标分组。本次人工判定仅对本轮生效，下一轮由糖果重新判定。',
+      roundOverrideHint: '管理员判定优先于本轮普通规则，晋级仍须满足所有必需的自动条件。指定分组会替换全部原分组，下轮重新判定。',
       title: '管理员判定', markPass: '判定通过', markFail: '判定不通过',
       pass: '已判通过', fail: '已判不通过',
       automaticHold: '自动检测尚未通过',

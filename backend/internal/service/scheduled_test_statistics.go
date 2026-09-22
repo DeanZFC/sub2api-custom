@@ -132,6 +132,11 @@ func (s *ScheduledTestRunnerService) startStatisticsResult(ctx context.Context, 
 }
 
 func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, plan *ScheduledTestPlan, accountID *int64, pending *ScheduledTestResult, windowEnd time.Time) {
+	if accountID != nil {
+		if release, acquired := s.acquireAccountExecution(ctx, *accountID); acquired {
+			defer release()
+		}
+	}
 	started := time.Now()
 	s.workerMu.Lock()
 	if s.statisticsSem == nil {
@@ -154,9 +159,20 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 					}
 					queryCtx, cancel := context.WithTimeout(attemptCtx, scheduledTestPersistenceTimeout)
 					defer cancel()
+					if accountID != nil {
+						var eligible bool
+						eligible, err = s.runAccountEligible(queryCtx, plan, pending, *accountID)
+						if err != nil {
+							return
+						}
+						if !eligible {
+							err = fmt.Errorf("account is no longer enabled for detection")
+							return
+						}
+					}
 					statisticsGroupID := plan.GroupID
-					if accountID != nil && plan.HasGroupActions() {
-						// Track this account across its quality tiers, including after a move.
+					if accountID != nil {
+						// Account statistics span every selected tier, including after a move.
 						statisticsGroupID = nil
 					}
 					windowStart := windowEnd.Add(-time.Hour)
@@ -205,6 +221,7 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 	result.AccountID, result.ModelID, result.GroupID = accountID, plan.ModelID, plan.GroupID
 	result.StartedAt = started
 	if pending != nil {
+		result.RunID = pending.RunID
 		result.ID, result.StartedAt, result.CreatedAt = pending.ID, pending.StartedAt, pending.CreatedAt
 	}
 	result.FinishedAt, result.LatencyMs = time.Now(), time.Since(started).Milliseconds()

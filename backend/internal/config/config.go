@@ -1225,8 +1225,8 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 // Enabled 是网关总开关，打票与业务请求使用同一个账号出口。
 // 账号通过 extra 的 codex_ticket_* 保留启用和缺票策略；Pro 使用 292，Team/Business 使用 332。
 // TargetLength 是其他/未知套餐的默认长度，FailClosed 兼容未配置账号策略的旧账号。
-// 打票请求独立调度；未配置代理的账号直连，业务出站只替换 x-codex-turn-state 请求头。
-// 门票默认有效 3600 秒，临近过期前 refresh_before_seconds 重新打票。
+// 打票请求独立调度；未配置代理的账号直连，292 门票还需携带账号路由 Cookie。
+// 门票默认最多有效 240 秒，默认提前 60 秒重新打票。
 type OpenAICodexTicketConfig struct {
 	Enabled                      bool     `mapstructure:"enabled"`
 	TargetLength                 int      `mapstructure:"target_length"`
@@ -1239,6 +1239,26 @@ type OpenAICodexTicketConfig struct {
 	HarvestProxyConcurrency      int      `mapstructure:"harvest_proxy_concurrency"`
 	FailClosed                   bool     `mapstructure:"fail_closed"`
 	Models                       []string `mapstructure:"models"`
+}
+
+const (
+	DefaultOpenAICodexTicketTTLSeconds           = 240
+	DefaultOpenAICodexTicketRefreshBeforeSeconds = 60
+)
+
+// NormalizeOpenAICodexTicketTiming keeps old deployments within the shortened
+// ticket lifetime. Both ticket lengths share this conservative limit until the
+// upstream provides a separate lifetime for 332 tickets. Limit the refresh lead
+// to one quarter of the lifetime so legacy values cannot cause continuous renewals.
+func NormalizeOpenAICodexTicketTiming(cfg OpenAICodexTicketConfig) OpenAICodexTicketConfig {
+	if cfg.TTLSeconds <= 0 || cfg.TTLSeconds > DefaultOpenAICodexTicketTTLSeconds {
+		cfg.TTLSeconds = DefaultOpenAICodexTicketTTLSeconds
+	}
+	if cfg.RefreshBeforeSeconds <= 0 {
+		cfg.RefreshBeforeSeconds = DefaultOpenAICodexTicketRefreshBeforeSeconds
+	}
+	cfg.RefreshBeforeSeconds = min(cfg.RefreshBeforeSeconds, cfg.TTLSeconds/4)
+	return cfg
 }
 
 // DefaultOpenAIWSClientFirstMessageTimeoutSeconds preserves the legacy ingress deadline.
@@ -2406,8 +2426,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
 	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
 	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
-	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
-	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 600)
+	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", DefaultOpenAICodexTicketTTLSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", DefaultOpenAICodexTicketRefreshBeforeSeconds)
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_probe_interval_seconds", 6)
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_attempt_timeout_seconds", 25)
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_max_concurrent", 8)
@@ -2685,6 +2705,7 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	c.Gateway.OpenAICodexTicket = NormalizeOpenAICodexTicketTiming(c.Gateway.OpenAICodexTicket)
 	forwardedClientIPHeaders, err := NormalizeForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders)
 	if err != nil {
 		return fmt.Errorf("security.forwarded_client_ip_headers: %w", err)

@@ -31,14 +31,14 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('channel quality result groups', () => {
-  it('explains direct group replacement and sends an immediate admin decision for a workflow review', async () => {
+  it('explains direct group replacement and sends an immediate admin decision for a strategy review', async () => {
     api.isAdmin = true
     api.list.mockResolvedValue([])
     const result = { ...baseResult, id: 91 }
-    api.reviews.mockResolvedValue([{ result, generation: 7, verdict: 'pending', admin_verdict: '', account_paused: false, group_workflow: true }])
+    api.reviews.mockResolvedValue([{ result, generation: 7, verdict: 'pending', admin_verdict: '', account_paused: false }])
     api.decide.mockResolvedValue(undefined)
     const wrapper = mountResults(); await flushPromises()
-    expect(wrapper.get('[data-group-workflow-review]').text()).toContain('tests.adminReview.groupWorkflowHint')
+    expect(wrapper.get('[data-review-round-hint]').text()).toContain('tests.adminReview.roundOverrideHint')
     await wrapper.get('[data-admin-pass]').trigger('click'); await flushPromises()
     expect(api.decide).toHaveBeenCalledWith(91, 7, 'pass')
     expect(api.vote).not.toHaveBeenCalled()

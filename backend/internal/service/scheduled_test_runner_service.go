@@ -13,15 +13,17 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/robfig/cron/v3"
+	"golang.org/x/net/html"
 )
 
 const scheduledTestDefaultMaxWorkers = 10
 
 var (
-	scheduledTestHTMLRootRE    = regexp.MustCompile(`(?is)<\s*([a-z][a-z0-9:._-]*)(?:\s|/?>)`)
-	scheduledTestHTMLDoctypeRE = regexp.MustCompile(`(?is)<!doctype\s+html\s*>(?:\s|\\[nrt])*$`)
-	scheduledTestHTMLAttrRE    = regexp.MustCompile(`=\s*\\"`)
-	scheduledTestHTMLSpaceRE   = regexp.MustCompile(`^(?:\s|\\[nrt])*\\[nrt](?:\s|\\[nrt])*<`)
+	scheduledTestHTMLCandidateRE = regexp.MustCompile(`(?is)<!--|(?:<|\\u003c)\s*([a-z][a-z0-9:._-]*)(?:\s|/?>|\\u003e)`)
+	scheduledTestHTMLRootRE      = regexp.MustCompile(`(?is)<\s*([a-z][a-z0-9:._-]*)(?:\s|/?>)`)
+	scheduledTestHTMLDoctypeRE   = regexp.MustCompile(`(?is)<!doctype\s+html\s*>(?:\s|\\[nrt])*$`)
+	scheduledTestHTMLAttrRE      = regexp.MustCompile(`=\s*\\"`)
+	scheduledTestHTMLSpaceRE     = regexp.MustCompile(`^(?:\s|\\[nrt])*\\[nrt](?:\s|\\[nrt])*<`)
 )
 
 const scheduledTestPersistenceTimeout = 15 * time.Second
@@ -55,13 +57,19 @@ type ScheduledTestRunnerService struct {
 	// one trigger). workerSem is shared by every plan and every account, so a
 	// group plan cannot multiply the configured concurrency by the number of
 	// concurrently running plans.
-	planRunMu       sync.Mutex
-	runningPlans    map[int64]struct{}
-	workerMu        sync.Mutex
-	workerSem       chan struct{}
-	statisticsSem   chan struct{}
-	accountRunMu    sync.Mutex
-	runningAccounts map[[3]int64]struct{}
+	planRunMu         sync.Mutex
+	runningPlans      map[int64]struct{}
+	workerMu          sync.Mutex
+	workerSem         chan struct{}
+	statisticsSem     chan struct{}
+	accountRunMu      sync.Mutex
+	runningAccounts   map[[3]int64]struct{}
+	accountExecutions map[int64]*scheduledTestAccountExecution
+}
+
+type scheduledTestAccountExecution struct {
+	sem   chan struct{}
+	users int
 }
 
 // NewScheduledTestRunnerService creates a new runner.
@@ -304,9 +312,6 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 
 func scheduledTestExecutionPlans(plan *ScheduledTestPlan) []*ScheduledTestPlan {
 	ids := plan.TestDefinitionIDs
-	if workflow := plan.Protection.GroupWorkflow; plan.Protection.Enabled && workflow != nil {
-		ids = []int64{workflow.AutomaticTestID, workflow.ReviewTestID}
-	}
 	if len(ids) == 0 {
 		return []*ScheduledTestPlan{plan}
 	}
@@ -534,6 +539,9 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 		s.runStatisticsResult(ctx, plan, &accountID, pending, time.Now().UTC())
 		return
 	}
+	if release, acquired := s.acquireAccountExecution(ctx, accountID); acquired {
+		defer release()
+	}
 	started := time.Now()
 	if pending != nil {
 		started = pending.StartedAt
@@ -554,7 +562,7 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 		defer cancel()
 		attemptStarted := time.Now()
 		checkCtx, checkCancel := context.WithTimeout(executionCtx, scheduledTestPersistenceTimeout)
-		eligible, err := s.detectionAccountEligible(checkCtx, plan, accountID)
+		eligible, err := s.runAccountEligible(checkCtx, plan, pending, accountID)
 		checkCancel()
 		if err != nil {
 			return scheduledTestFailedAttempt(attemptStarted, err)
@@ -583,6 +591,7 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	result.AccountID = &accountID
 	result.PlanID = plan.ID
 	if pending != nil {
+		result.RunID = pending.RunID
 		result.ID = pending.ID
 		result.StartedAt = pending.StartedAt
 		result.CreatedAt = pending.CreatedAt
@@ -618,7 +627,11 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	modelCheckPassed := outputKind != "model_check" || (result.OutputModelCheck != nil && result.OutputModelCheck.Verdict == "pass")
 	if result.Status == "success" && modelCheckPassed && plan.AutoRecover && !plan.Protection.Enabled {
 		recoveryCtx, cancelRecovery := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
-		s.tryRecoverAccount(recoveryCtx, accountID, plan.ID)
+		// A configuration edit while the upstream was answering invalidates
+		// automatic recovery just as it invalidates protection actions.
+		if eligible, err := s.runAccountEligible(recoveryCtx, plan, result, accountID); err == nil && eligible {
+			s.tryRecoverAccount(recoveryCtx, accountID, plan.ID)
+		}
 		cancelRecovery()
 	}
 }
@@ -701,63 +714,108 @@ func (s *ScheduledTestRunnerService) applyOutputContract(result *ScheduledTestRe
 }
 
 func extractScheduledTestHTML(text string) string {
-	// Some upstreams include tool-call transcripts in their text response. The
-	// document can then be inside a JSON command string. Decode that string
-	// once, without executing the command or unescaping ordinary HTML/scripts.
-	if root := scheduledTestHTMLRootRE.FindStringIndex(text); root != nil {
-		for i := root[0] - 1; i >= 0; i-- {
-			if text[i] != '"' {
-				continue
-			}
-			backslashes := 0
-			for j := i - 1; j >= 0 && text[j] == '\\'; j-- {
-				backslashes++
-			}
-			if backslashes%2 != 0 {
-				continue
-			}
-			var decoded string
-			if err := json.NewDecoder(strings.NewReader(text[i:])).Decode(&decoded); err == nil {
-				if html := extractScheduledTestHTMLDocument(decoded); html != "" {
-					return html
-				}
-			}
-			break
-		}
-	}
-	html := extractScheduledTestHTMLDocument(text)
-	return decodeScheduledTestEscapedHTML(html)
+	return selectScheduledTestHTMLDocument(text, true)
 }
 
 func extractScheduledTestHTMLDocument(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return ""
-	}
-	trimmed = unwrapScheduledTestMarkdownFence(trimmed)
-	root := scheduledTestHTMLRootRE.FindStringSubmatchIndex(trimmed)
-	if len(root) < 4 {
-		// Plain text (including a model's explanatory sentence) is not an HTML
-		// result. The output contract must fail closed instead of displaying it
-		// as if it were a document.
-		return ""
-	}
-	start := root[0]
-	rootName := strings.ToLower(trimmed[root[2]:root[3]])
-	end := scheduledTestHTMLRootEnd(trimmed, start, rootName)
-	if end <= start {
-		return ""
-	}
+	return selectScheduledTestHTMLDocument(text, false)
+}
 
-	// Keep a doctype when the model emitted one immediately before the root,
-	// while dropping prose such as "Here is the HTML:" before it.
-	prefix := strings.TrimSpace(trimmed[:start])
-	if prefix != "" {
-		if loc := scheduledTestHTMLDoctypeRE.FindStringIndex(prefix); loc != nil {
-			start = loc[0]
+// A transcript may contain an initial placeholder followed by a revised
+// document. Choose the last complete outer HTML/SVG, not the first placeholder
+// or a nested element. Smaller explanatory fragments cannot replace a document.
+func selectScheduledTestHTMLDocument(text string, decodeJSON bool) string {
+	// Fences are transcript delimiters, not the end of the response: a later
+	// revision may follow the first code block as raw HTML or a JSON command.
+	text = strings.TrimSpace(text)
+	selected, rank := "", -1
+	selectDocument := func(document string) {
+		root := scheduledTestHTMLRootRE.FindStringSubmatch(document)
+		if len(root) < 2 {
+			return
+		}
+		candidateRank := 1
+		switch strings.ToLower(root[1]) {
+		case "html", "svg":
+			candidateRank = 2
+		case "script", "style", "title", "textarea":
+			candidateRank = 0
+		}
+		if candidateRank >= rank {
+			selected, rank = document, candidateRank
 		}
 	}
-	return strings.TrimSpace(trimmed[start:end])
+	for cursor := 0; cursor < len(text); {
+		root := scheduledTestHTMLCandidateRE.FindStringSubmatchIndex(text[cursor:])
+		if root == nil {
+			break
+		}
+		start := cursor + root[0]
+		if decodeJSON {
+			// Decode before skipping a comment: it may be the first markup in
+			// a JSON command, whose opening quote precedes the comment.
+			// Never execute the command or unescape ordinary HTML/JavaScript.
+			if decoded, end, ok := scheduledTestHTMLJSONString(text, cursor, start); ok {
+				selectDocument(extractScheduledTestHTMLDocument(decoded))
+				cursor = end
+				continue
+			}
+		}
+		if root[2] < 0 { // Comment contents are not document candidates.
+			end := strings.Index(text[start+4:], "-->")
+			if end < 0 {
+				break
+			}
+			cursor = start + 4 + end + 3
+			continue
+		}
+		if text[start] != '<' {
+			cursor += root[1]
+			continue
+		}
+		rootName := strings.ToLower(text[cursor+root[2] : cursor+root[3]])
+		end := scheduledTestHTMLRootEnd(text, start, rootName)
+		if end <= start {
+			// Do not select a complete child of a truncated final document.
+			break
+		}
+		prefix := strings.TrimRight(text[cursor:start], " \t\r\n")
+		if loc := scheduledTestHTMLDoctypeRE.FindStringIndex(prefix); loc != nil {
+			start = cursor + loc[0]
+		}
+		document := strings.TrimSpace(text[start:end])
+		if decodeJSON {
+			document = decodeScheduledTestEscapedHTML(document)
+		}
+		selectDocument(document)
+		cursor = end
+	}
+	return selected
+}
+
+func scheduledTestHTMLJSONString(text string, from, root int) (string, int, bool) {
+	for i := root - 1; i >= from; i-- {
+		if text[i] != '"' {
+			continue
+		}
+		backslashes := 0
+		for j := i - 1; j >= from && text[j] == '\\'; j-- {
+			backslashes++
+		}
+		if backslashes%2 != 0 {
+			continue
+		}
+		var decoded string
+		decoder := json.NewDecoder(strings.NewReader(text[i:]))
+		if err := decoder.Decode(&decoded); err == nil {
+			end := i + int(decoder.InputOffset())
+			if end > root {
+				return decoded, end, true
+			}
+		}
+		break
+	}
+	return "", 0, false
 }
 
 // Older results may contain only the escaped document, without its enclosing
@@ -782,88 +840,40 @@ func decodeScheduledTestEscapedHTML(html string) string {
 	return html
 }
 
-func unwrapScheduledTestMarkdownFence(text string) string {
-	text = strings.TrimSpace(text)
-	if !strings.HasPrefix(text, "```") {
-		return text
-	}
-	lineEnd := strings.IndexByte(text, '\n')
-	if lineEnd < 0 {
-		return ""
-	}
-	header := strings.TrimSpace(text[3:lineEnd])
-	if header != "" && !strings.EqualFold(header, "html") && !strings.EqualFold(header, "svg") {
-		return text
-	}
-	body := text[lineEnd+1:]
-	if close := strings.LastIndex(body, "```"); close >= 0 {
-		body = body[:close]
-	}
-	return strings.TrimSpace(body)
-}
-
 // scheduledTestHTMLRootEnd returns the end offset of the first complete root
-// element. It intentionally performs a small, quote-aware tag scan instead of
-// taking everything after the opening tag, so a model's trailing explanation
-// never leaks into the rendered result. It accepts normal HTML/SVG and custom
-// element names, which keeps future output definitions extensible.
+// element. Tokenizing preserves byte offsets while treating comments and
+// script/style contents as text, so embedded markup cannot truncate a document.
 func scheduledTestHTMLRootEnd(text string, start int, rootName string) int {
 	depth := 0
-	for i := start; i < len(text); {
-		open := strings.IndexByte(text[i:], '<')
-		if open < 0 {
+	end := start
+	tokens := html.NewTokenizer(strings.NewReader(text[start:]))
+	for {
+		kind := tokens.Next()
+		end += len(tokens.Raw())
+		if kind == html.ErrorToken {
 			return 0
 		}
-		i += open
-		if strings.HasPrefix(text[i:], "<!--") {
-			if close := strings.Index(text[i+4:], "-->"); close >= 0 {
-				i += close + 7
-				continue
-			}
-			return 0
-		}
-		end := scheduledTestTagEnd(text, i+1)
-		if end < 0 {
-			return 0
-		}
-		inside := strings.TrimSpace(text[i+1 : end])
-		if inside == "" || strings.HasPrefix(inside, "!") || strings.HasPrefix(inside, "?") {
-			i = end + 1
+		if kind != html.StartTagToken && kind != html.EndTagToken && kind != html.SelfClosingTagToken {
 			continue
 		}
-		closing := strings.HasPrefix(inside, "/")
-		if closing {
-			inside = strings.TrimSpace(strings.TrimPrefix(inside, "/"))
-		}
-		nameEnd := 0
-		for nameEnd < len(inside) {
-			c := inside[nameEnd]
-			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ':' || c == '.' || c == '_' || c == '-' {
-				nameEnd++
-				continue
-			}
-			break
-		}
-		name := strings.ToLower(inside[:nameEnd])
-		if name != rootName {
-			i = end + 1
+		name, _ := tokens.TagName()
+		if string(name) != rootName {
 			continue
 		}
-		if closing {
+		switch kind {
+		case html.EndTagToken:
 			depth--
 			if depth == 0 {
-				return end + 1
+				return end
 			}
-		} else if strings.HasSuffix(strings.TrimSpace(inside), "/") {
+		case html.SelfClosingTagToken:
 			if depth == 0 {
-				return end + 1
+				return end
 			}
-		} else {
+		case html.StartTagToken:
 			depth++
 		}
-		i = end + 1
 	}
-	return 0
 }
 
 func scheduledTestTagEnd(text string, start int) int {
@@ -955,7 +965,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if account == nil {
 		return nil, fmt.Errorf("test account unavailable")
 	}
-	if eligible, err := s.detectionAccountEligible(ctx, plan, accountID); err != nil || !eligible {
+	if eligible, err := s.runAccountEligible(ctx, plan, previous, accountID); err != nil || !eligible {
 		return nil, fmt.Errorf("account is not enabled for detection")
 	}
 	followsMoves := false
@@ -986,7 +996,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	}
 	started := time.Now()
 	pending := &ScheduledTestResult{
-		ID: previous.ID, PlanID: plan.ID, CreatedAt: previous.CreatedAt,
+		ID: previous.ID, RunID: previous.RunID, PlanID: plan.ID, CreatedAt: previous.CreatedAt,
 		TestDefinitionID: previous.TestDefinitionID, TargetMode: plan.TargetMode,
 		Status: "running", OutputKind: outputKind, AccountID: &accountID,
 		ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, GroupID: plan.GroupID,
@@ -1064,6 +1074,49 @@ func (s *ScheduledTestRunnerService) endAccountRun(planID, accountID int64, defi
 	s.accountRunMu.Lock()
 	defer s.accountRunMu.Unlock()
 	delete(s.runningAccounts, scheduledTestAccountRunKey(planID, accountID, definitionID))
+}
+
+// Full rounds already queue each account's definitions in order. Retries and
+// other strategies share this gate, so they wait for that account's current
+// check through persistence and reconciliation without skipping another type.
+func (s *ScheduledTestRunnerService) acquireAccountExecution(ctx context.Context, accountID int64) (func(), bool) {
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	s.accountRunMu.Lock()
+	if s.accountExecutions == nil {
+		s.accountExecutions = make(map[int64]*scheduledTestAccountExecution)
+	}
+	execution := s.accountExecutions[accountID]
+	if execution == nil {
+		execution = &scheduledTestAccountExecution{sem: make(chan struct{}, 1)}
+		s.accountExecutions[accountID] = execution
+	}
+	execution.users++
+	s.accountRunMu.Unlock()
+	releaseReference := func() {
+		s.accountRunMu.Lock()
+		defer s.accountRunMu.Unlock()
+		execution.users--
+		if execution.users == 0 {
+			delete(s.accountExecutions, accountID)
+		}
+	}
+	select {
+	case execution.sem <- struct{}{}:
+		if ctx.Err() != nil {
+			<-execution.sem
+			releaseReference()
+			return nil, false
+		}
+		return func() {
+			<-execution.sem
+			releaseReference()
+		}, true
+	case <-ctx.Done():
+		releaseReference()
+		return nil, false
+	}
 }
 
 func (s *ScheduledTestRunnerService) acquireWorker(ctx context.Context) bool {

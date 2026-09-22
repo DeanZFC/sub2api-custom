@@ -1171,6 +1171,8 @@ export interface CodexTurnTicketStatus {
   target_length: number
   ready: boolean
   remaining_seconds: number
+  cookie_ready?: boolean
+  cookie_remaining_seconds?: number
   blocked: boolean
   expires_at?: string
   attempts?: number
@@ -2523,8 +2525,11 @@ export interface TestType {
 
 export interface TestPlan {
   id: number
+  /** Ordered strategy groups; this order is also used by the user result tabs. */
+  group_ids: number[]
+  migration_note?: string
   name?: string
-  /** Controls the order of this rule's group in user-facing test results. */
+  /** Controls the display order of this strategy. */
   sort_order?: number
   test_definition_id?: number | null
   test_definition_ids?: number[]
@@ -2574,6 +2579,8 @@ export interface TestProtectionVote {
 }
 export interface TestProtectionRule {
   test_definition_id: number
+  priority: number
+  required_pass: boolean
   thresholds?: TestProtectionThreshold[]
   min_samples?: number
   pause_on_failure?: boolean
@@ -2588,14 +2595,6 @@ export interface TestProtectionRule {
 export interface TestProtectionConfig {
   enabled: boolean
   rules: TestProtectionRule[]
-  group_workflow?: TestGroupWorkflow
-}
-export interface TestGroupWorkflow {
-  automatic_test_id: number
-  review_test_id: number
-  pass_group_id: number
-  fail_group_id: number
-  review_vote?: TestProtectionVote
 }
 export type TestVote = 'pass' | 'fail'
 export interface TestVoteResult {
@@ -2708,11 +2707,8 @@ export interface UpdateTestTypeRequest extends Partial<CreateTestTypeRequest> {}
 export interface CreateTestPlanRequest {
   name?: string
   sort_order?: number
-  test_definition_id?: number
-  test_definition_ids?: number[]
-  group_id?: number | null
-  account_id?: number | null
-  target_mode?: 'group' | 'all_accounts' | 'account'
+  group_ids: number[]
+  test_definition_ids: number[]
   model_id: string
   reasoning_effort?: string | null
   cron_expression?: string

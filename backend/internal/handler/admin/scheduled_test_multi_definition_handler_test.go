@@ -49,18 +49,19 @@ func TestScheduledTestHandlerCreatesSingleRuleWithMultipleTypes(t *testing.T) {
 	router := gin.New()
 	router.POST("/test-plans", NewScheduledTestHandler(svc).Create)
 	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/test-plans", strings.NewReader(`{"name":"quality","group_id":3,"target_mode":"all_accounts","test_definition_ids":[2,1,2],"model_id":"model","cron_expression":"* * * * *"}`))
+	request := httptest.NewRequest(http.MethodPost, "/test-plans", strings.NewReader(`{"name":"quality","group_ids":[3,4,3],"test_definition_ids":[2,1,2],"model_id":"model","cron_expression":"* * * * *"}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(response, request)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var plan service.ScheduledTestPlan
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &plan))
+	require.Equal(t, []int64{3, 4}, plan.GroupIDs)
 	require.Equal(t, []int64{2, 1}, plan.TestDefinitionIDs)
 	require.Equal(t, int64(2), *plan.TestDefinitionID)
 	require.Equal(t, 1, repo.writes)
 }
 
-func TestScheduledTestHandlerUpdatesMultipleTypesAndLegacyScalar(t *testing.T) {
+func TestScheduledTestHandlerUpdatesMultipleTypesAndGroups(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		body   string
@@ -69,16 +70,16 @@ func TestScheduledTestHandlerUpdatesMultipleTypesAndLegacyScalar(t *testing.T) {
 	}{
 		{"multiple types", `{"test_definition_ids":[2,3,2]}`, []int64{2, 3}, http.StatusOK},
 		{"state only preserves types", `{"enabled":false}`, []int64{1, 2}, http.StatusOK},
-		{"legacy scalar replaces selection", `{"test_definition_id":3}`, []int64{3}, http.StatusOK},
-		{"legacy alias replaces selection", `{"test_type_id":3}`, []int64{3}, http.StatusOK},
-		{"array wins over legacy scalar", `{"test_definition_ids":[2,3],"test_definition_id":1}`, []int64{2, 3}, http.StatusOK},
+		{"empty sources rejected", `{"group_ids":[]}`, nil, http.StatusBadRequest},
+		{"null sources rejected", `{"group_ids":null}`, nil, http.StatusBadRequest},
+		{"invalid sources rejected", `{"group_ids":[0]}`, nil, http.StatusBadRequest},
 		{"empty group selection rejected", `{"test_definition_ids":[]}`, nil, http.StatusBadRequest},
 		{"null selection rejected", `{"test_definition_ids":null}`, nil, http.StatusBadRequest},
 		{"nonpositive type rejected", `{"test_definition_ids":[1,0]}`, nil, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			groupID, definitionID := int64(3), int64(1)
-			repo := &qualityPlanHandlerRepo{plan: &service.ScheduledTestPlan{ID: 7, GroupID: &groupID, TargetMode: "all_accounts", TestDefinitionID: &definitionID, TestDefinitionIDs: []int64{1, 2}, ModelID: "model", CronExpression: "* * * * *", Enabled: true}}
+			repo := &qualityPlanHandlerRepo{plan: &service.ScheduledTestPlan{ID: 7, GroupIDs: []int64{3, 4}, GroupID: &groupID, TargetMode: "all_accounts", TestDefinitionID: &definitionID, TestDefinitionIDs: []int64{1, 2}, ModelID: "model", CronExpression: "* * * * *", Enabled: true}}
 			svc := service.NewScheduledTestService(repo, nil)
 			svc.SetDefinitionRepository(qualityDefinitionHandlerRepo{})
 			router := gin.New()
@@ -99,5 +100,30 @@ func TestScheduledTestHandlerUpdatesMultipleTypesAndLegacyScalar(t *testing.T) {
 				require.Zero(t, repo.writes)
 			}
 		})
+	}
+}
+
+func TestScheduledTestMigratedStrategyRequiresFullConfigurationReview(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want int
+	}{
+		{`{"enabled":true}`, http.StatusBadRequest},
+		{`{"name":"renamed"}`, http.StatusBadRequest},
+		{`{"enabled":true,"group_ids":[3,4],"test_definition_ids":[1,2]}`, http.StatusOK},
+	} {
+		repo := &qualityPlanHandlerRepo{plan: &service.ScheduledTestPlan{ID: 7, GroupIDs: []int64{3, 4}, TestDefinitionIDs: []int64{1, 2}, ModelID: "model", CronExpression: "0 * * * *", MigrationNote: "review scope"}}
+		svc := service.NewScheduledTestService(repo, nil)
+		svc.SetDefinitionRepository(qualityDefinitionHandlerRepo{})
+		router := gin.New()
+		router.PUT("/plans/:id", NewScheduledTestHandler(svc).Update)
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPut, "/plans/7", strings.NewReader(tc.body))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(response, request)
+		require.Equal(t, tc.want, response.Code, response.Body.String())
+		if tc.want != http.StatusOK {
+			require.Zero(t, repo.writes)
+		}
 	}
 }

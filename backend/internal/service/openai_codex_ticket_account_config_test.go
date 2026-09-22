@@ -68,6 +68,7 @@ func TestOpenAICodexTicketAccountPolicy_GatewayHotTogglePreservesCachedTicketAnd
 	account := ticketTestAccount(11)
 	account.Extra = map[string]any{OpenAICodexTicketEnabledExtraKey: true}
 	state := fakeCodexTicketState(292)
+	seedCodexTicketCookies(svc, account)
 	svc.storeOpenAICodexTicket(ctx, account, &openAICodexTicket{
 		AccountID: account.ID, Model: "gpt-6-astra", State: state, Length: len(state),
 		CapturedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
@@ -114,6 +115,7 @@ func TestOpenAICodexTicketAccountPolicy_ValidTicketAllowsThenExpiryBlocks(t *tes
 		CapturedAt: time.Now(),
 		ExpiresAt:  time.Now().Add(time.Hour),
 	}
+	seedCodexTicketCookies(svc, account)
 	svc.storeOpenAICodexTicket(context.Background(), account, ticket)
 	h := http.Header{}
 	require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h))
@@ -124,6 +126,7 @@ func TestOpenAICodexTicketAccountPolicy_ValidTicketAllowsThenExpiryBlocks(t *tes
 	// ticket expires; a stale cached ticket must not keep the account schedulable.
 	expired := *ticket
 	expired.ExpiresAt = time.Now().Add(-time.Second)
+	seedCodexTicketCookies(svc, account)
 	svc.storeOpenAICodexTicket(context.Background(), account, &expired)
 	require.True(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
 	h = http.Header{}
@@ -153,6 +156,7 @@ func TestOpenAICodexTicketAccountPolicy_FailOpenOverridesGatewayFailClosed(t *te
 func TestOpenAICodexTicketProbe_UsesEachAccountExitAndIgnoresRetiredProxyIDs(t *testing.T) {
 	h := http.Header{}
 	h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(292))
+	addFakeCodexTicketCookies(h)
 	upstream := &codexTicketProxyRecordingUpstream{responses: []*http.Response{
 		{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: http.NoBody},
 		{StatusCode: http.StatusOK, Header: h, Body: http.NoBody},
@@ -211,6 +215,7 @@ func TestOpenAICodexTicketPlans_HarvestValidateInjectAndReportSameLength(t *test
 			response := func(length int) *http.Response {
 				header := http.Header{}
 				header.Set(openAICodexTurnStateHeader, fakeCodexTicketState(length))
+				addFakeCodexTicketCookies(header)
 				return &http.Response{StatusCode: 200, Header: header, Body: http.NoBody}
 			}
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{response(wrong), response(target)}}

@@ -102,7 +102,7 @@ export interface TestReasoningAccountLike {
  * Return options in ascending effort order. For a group plan, only efforts
  * advertised by every account with metadata are retained, preventing a
  * choice that one of the scheduled accounts cannot accept. If no account has
- * synced metadata, use the model-family fallback.
+ * synced metadata, use the model-family fallback for that account.
  */
 export function reasoningEffortsForTestModel(
   modelID: string,
@@ -115,16 +115,14 @@ export function reasoningEffortsForTestModel(
     : groupID
       ? accounts.filter((account) => account.group_ids?.includes(Number(groupID)))
       : accounts
-  const metadataChoices = candidates.map((account) => metadataEfforts(metadataForModel(account.extra, modelID)))
-
-  // A group run must be safe for every selected account. If even one account
-  // has no synced capability snapshot, use the model-family fallback instead
-  // of showing a level that may fail on that account.
-  if (metadataChoices.length > 0 && metadataChoices.every((choices) => choices.length > 0)) {
-    const common = metadataChoices.slice(1).reduce((result, choices) => result.filter((effort) => choices.includes(effort)), metadataChoices[0])
-    return orderEfforts(common)
-  }
-  return orderEfforts(fallbackEfforts(modelID))
+  const choices = candidates.map(account => {
+    const metadata = metadataForModel(account.extra, modelID)
+    if (metadata?.reasoning === false) return []
+    const advertised = metadataEfforts(metadata)
+    return advertised.length ? advertised : fallbackEfforts(modelID)
+  })
+  if (!choices.length) return orderEfforts(fallbackEfforts(modelID))
+  return orderEfforts(choices.slice(1).reduce((common, next) => common.filter(effort => next.includes(effort)), choices[0]))
 }
 
 function orderEfforts(efforts: string[]): string[] {

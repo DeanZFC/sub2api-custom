@@ -155,30 +155,21 @@ func TestScheduledTestRunnerApplyOutputContract(t *testing.T) {
 	}
 }
 
-func TestValidateScheduledTestPlanRequiresGroupAndAllowsOptionalAccount(t *testing.T) {
-	accountID := int64(1)
-	groupID := int64(2)
-	definitionID := int64(3)
+func TestValidateScheduledTestPlanRequiresSourcesAndDefinitions(t *testing.T) {
 	base := &ScheduledTestPlan{ModelID: "model", CronExpression: "*/5 * * * *"}
-
 	if err := validateScheduledTestPlan(base); err == nil {
-		t.Fatal("expected missing target to be rejected")
+		t.Fatal("expected missing groups to be rejected")
 	}
-	base.AccountID = &accountID
-	base.GroupID = &groupID
-	base.TestDefinitionID = &definitionID
-	if err := validateScheduledTestPlan(base); err != nil {
-		t.Fatalf("group plus account target rejected: %v", err)
-	}
-	base.GroupID = nil
-	if err := validateScheduledTestPlan(base); err != nil {
-		t.Fatalf("account target rejected: %v", err)
-	}
-	base.AccountID = nil
-	base.GroupID = &groupID
-	base.TestDefinitionID = nil
+	base.GroupIDs = []int64{2, 3}
 	if err := validateScheduledTestPlan(base); err == nil {
-		t.Fatal("expected group target without test definition to be rejected")
+		t.Fatal("expected missing test definitions to be rejected")
+	}
+	base.TestDefinitionIDs = []int64{3}
+	if err := validateScheduledTestPlan(base); err != nil {
+		t.Fatal(err)
+	}
+	if base.TargetMode != "all_accounts" || base.AccountID != nil {
+		t.Fatal("strategy must scan group union")
 	}
 }
 

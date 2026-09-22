@@ -52,8 +52,8 @@ func TestScheduledTestActionStatisticsFollowMovedAccountsWithoutChangingVisibili
 		{name: "account follows automatic moves", mode: "account", actionsEnabled: true, protectionEnabled: true, wantCrossGroupSample: true},
 		{name: "all accounts follow automatic moves", mode: "all_accounts", actionsEnabled: true, protectionEnabled: true, wantCrossGroupSample: true},
 		{name: "a different detection type can move the account", mode: "account", actionsEnabled: true, protectionEnabled: true, actionOnAnotherType: true, wantCrossGroupSample: true},
-		{name: "disabled protection retains the source filter", mode: "account", actionsEnabled: true},
-		{name: "scheduling-only protection retains the source filter", mode: "account", protectionEnabled: true},
+		{name: "disabled protection still samples across source groups", mode: "account", actionsEnabled: true, wantCrossGroupSample: true},
+		{name: "scheduling-only protection samples across source groups", mode: "account", protectionEnabled: true, wantCrossGroupSample: true},
 		{name: "group aggregate never follows individual moves", mode: "group", actionsEnabled: true, protectionEnabled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestScheduledTestActionStatisticsFollowMovedAccountsWithoutChangingVisibili
 				require.Equal(t, plan.GroupID, result.GroupID, "source group remains the result visibility boundary")
 				require.Equal(t, plan.ModelID, result.ModelID)
 				require.Equal(t, int64(20), result.OutputStatistics.TotalRequests)
-				if tc.wantCrossGroupSample {
+				if tc.wantCrossGroupSample && tc.protectionEnabled {
 					require.Equal(t, "pass", repo.completedVerdict[result.ID], "destination traffic must allow the configured metric to recover")
 				}
 			}

@@ -569,7 +569,7 @@ export default {
         codexTicketEnabled: 'Codex 292 / 332 tickets',
         codexTicketEnabledDesc:
           'Gateway master switch. Enable tickets separately for each account when on. Turning off stops harvesting and missing-ticket blocking for every account and hides account ticket controls and status. Pro uses 292 tickets; Team uses 332 tickets.',
-        codexTicketAccountRouteHint: 'Ticket harvesting uses the account’s own proxy route, or a direct connection when no proxy is configured.',
+        codexTicketAccountRouteHint: 'Harvesting uses the account route, or a direct connection without a proxy. Tickets last at most 240 seconds by default and renew 60 seconds early. Required 292 routing cookies are attached automatically and shared within the account.',
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:
           "Only affects OpenAI OAuth accounts with 'Codex official clients only' enabled (global). Beyond User-Agent/Originator, harden the decision with a version range, an engine-fingerprint gate, and black/whitelists.",

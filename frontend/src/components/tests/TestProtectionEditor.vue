@@ -1,19 +1,24 @@
 <template>
   <fieldset class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-700" data-protection-editor>
     <label class="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
-      <input :checked="modelValue.enabled" type="checkbox" :disabled="targetMode === 'group'" data-protection-enabled @change="setEnabled(($event.target as HTMLInputElement).checked)" />
+      <input :checked="modelValue.enabled" type="checkbox" data-protection-enabled @change="setEnabled(($event.target as HTMLInputElement).checked)" />
       {{ t('admin.tests.protection.title') }}
     </label>
-    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(targetMode === 'group' ? 'admin.tests.protection.accountOnly' : 'admin.tests.protection.description') }}</p>
-    <div v-if="modelValue.enabled && targetMode !== 'group'" class="space-y-4">
+    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.description') }}</p>
+    <div v-if="modelValue.enabled" class="space-y-4">
       <section v-for="type in types" :key="type.id" class="space-y-3 rounded-md bg-gray-50 p-3 dark:bg-dark-800" :data-protection-type="type.id">
         <label class="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-white">
           <input :checked="!!ruleFor(type.id)" type="checkbox" :disabled="!type.enabled && !ruleFor(type.id)" data-rule-enabled @change="toggleRule(type, ($event.target as HTMLInputElement).checked)" />{{ type.name }}
         </label>
         <p v-if="!type.enabled" class="text-xs text-amber-700 dark:text-amber-300" data-disabled-type-hint>{{ t('admin.tests.protection.disabledType') }}</p>
         <fieldset v-if="ruleFor(type.id)" :disabled="!type.enabled" class="space-y-3">
+          <label class="input-label block">{{ t('admin.tests.protection.priority') }}<input :value="ruleFor(type.id)?.priority ?? 0" type="number" min="0" max="1000" step="1" class="input mt-1 w-32" data-rule-priority @input="patchRule(type.id, { priority: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.priorityHint') }}</p>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.required_pass || false" :disabled="ruleFor(type.id)?.vote?.enabled" type="checkbox" data-rule-required-pass @change="patchRule(type.id, { required_pass: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.requiredPass') }}</label>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.requiredPassHint') }}</p>
           <h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.conditions') }}</h4>
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.pause_on_failure" type="checkbox" data-rule-failure @change="patchRule(type.id, { pause_on_failure: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.pauseOnFailure') }}</label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.pause_on_failure || !!ruleFor(type.id)?.on_fail" :disabled="!!ruleFor(type.id)?.on_fail" type="checkbox" data-rule-failure @change="patchRule(type.id, { pause_on_failure: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.pauseOnFailure') }}</label>
+          <p v-if="ruleFor(type.id)?.on_fail" class="text-xs text-gray-500 dark:text-gray-400" data-rule-failure-action-hint>{{ t('admin.tests.protection.failureActionHint') }}</p>
           <label v-if="type.output_kind === 'statistics'" class="input-label block">{{ t('admin.tests.protection.minSamples') }}<input :value="ruleFor(type.id)?.min_samples ?? 1" type="number" min="0" max="1000000000" step="1" class="input mt-1 w-32" data-rule-samples @input="patchRule(type.id, { min_samples: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
           <template v-if="type.output_kind === 'model_check'">
             <label class="input-label block">{{ t('tests.modelCheck.matchMode') }}<select :value="ruleFor(type.id)?.model_match || 'exact'" class="input mt-1 w-full" data-rule-model-match @change="patchRule(type.id, { model_match: ($event.target as HTMLSelectElement).value as TestProtectionRule['model_match'] })"><option value="exact">{{ t('tests.modelCheck.exact') }}</option><option value="snapshot">{{ t('tests.modelCheck.snapshot') }}</option></select></label>
@@ -50,7 +55,7 @@
         </fieldset>
       </section>
       <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.rulesHint') }}</p>
-      <p v-if="!validTestProtection(modelValue, targetMode, types, groups)" class="text-xs text-red-600 dark:text-red-400" role="alert">{{ t('admin.tests.protection.invalid') }}</p>
+      <p v-if="!validTestProtection(modelValue, types, groups)" class="text-xs text-red-600 dark:text-red-400" role="alert">{{ t('admin.tests.protection.invalid') }}</p>
     </div>
   </fieldset>
 </template>
@@ -62,7 +67,7 @@ import { copyTestProtection, defaultProtectionRule, protectionMetrics, validTest
 import TestOutcomeActionEditor from './TestOutcomeActionEditor.vue'
 import TestCacheRecoveryEditor from './TestCacheRecoveryEditor.vue'
 
-const props = withDefaults(defineProps<{ modelValue: TestProtectionConfig; types: TestType[]; targetMode?: string; groups?: AdminGroup[] }>(), { groups: () => [] })
+const props = withDefaults(defineProps<{ modelValue: TestProtectionConfig; types: TestType[]; groups?: AdminGroup[] }>(), { groups: () => [] })
 const emit = defineEmits<{ 'update:modelValue': [value: TestProtectionConfig] }>()
 const { t } = useI18n()
 const ruleFor = (id: number) => props.modelValue.rules.find(rule => rule.test_definition_id === id)
@@ -72,7 +77,7 @@ const update = (change: (value: TestProtectionConfig) => void) => {
   emit('update:modelValue', next)
 }
 const setEnabled = (enabled: boolean) => update(next => {
-  next.enabled = enabled && props.targetMode !== 'group'
+  next.enabled = enabled
   if (next.enabled && !next.rules.length) next.rules = props.types.filter(type => type.enabled).map(defaultProtectionRule)
 })
 const toggleRule = (type: TestType, enabled: boolean) => update(next => {
@@ -90,6 +95,6 @@ const addThreshold = (type: TestType) => {
 }
 const patchThreshold = (id: number, index: number, patch: Partial<TestProtectionThreshold>) => patchRule(id, { thresholds: ruleFor(id)?.thresholds?.map((value, i) => i === index ? { ...value, ...patch } : { ...value }) })
 const removeThreshold = (id: number, index: number) => patchRule(id, { thresholds: ruleFor(id)?.thresholds?.filter((_, i) => i !== index) })
-const toggleVote = (id: number, enabled: boolean) => patchRule(id, { vote: { reject_above: 0, pass_at_least: 3, public_enabled: false, ...ruleFor(id)?.vote, enabled, ...(!enabled ? { public_enabled: false } : {}) } })
+const toggleVote = (id: number, enabled: boolean) => patchRule(id, { ...(enabled ? { required_pass: false } : {}), vote: { reject_above: 0, pass_at_least: 3, public_enabled: false, ...ruleFor(id)?.vote, enabled, ...(!enabled ? { public_enabled: false } : {}) } })
 const patchVote = (id: number, patch: Partial<NonNullable<TestProtectionRule['vote']>>) => patchRule(id, { vote: { enabled: true, public_enabled: false, reject_above: 0, pass_at_least: 3, ...ruleFor(id)?.vote, ...patch } })
 </script>

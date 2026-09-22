@@ -3,6 +3,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestManagementView from '../TestManagementView.vue'
 import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vue'
+import Select from '@/components/common/Select.vue'
 
 const api = vi.hoisted(() => ({
   listTypes: vi.fn(), listPlans: vi.fn(), createType: vi.fn(), updateType: vi.fn(), deleteType: vi.fn(),
@@ -12,17 +13,17 @@ const api = vi.hoisted(() => ({
 vi.mock('@/api/admin', () => ({ adminAPI: { tests: api, groups: { getAll: api.getGroups, getModelAllowlistCandidates: api.getModelAllowlistCandidates }, accounts: { list: api.getAccounts } } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.success, showError: api.error }) }))
 
-const plan = { id: 10, name: 'Candy hourly', test_definition_id: 2, group_id: 8, model_id: 'test-model', cron_expression: '0 * * * *', enabled: true, max_results: 50 }
+const plan = { id: 10, name: 'Candy hourly', test_definition_id: 2, test_definition_ids: [2], group_ids: [8], model_id: 'test-model', cron_expression: '0 * * * *', enabled: true, max_results: 50 }
 const makeWrapper = () => mount(TestManagementView, { global: {
   plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: { tests: { elapsed: ({ named }: { named: (key: string) => string }) => `Elapsed ${named('duration')}` } } } } })],
   stubs: { AppLayout: { template: '<main><slot /></main>' }, Icon: true, BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><h3>{{ title }}</h3><slot /><slot name="footer" /></section>' } }
 } })
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   api.listTypes.mockResolvedValue([{ id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count candies', enabled: true }])
   api.listPlans.mockResolvedValue([plan])
-  api.getGroups.mockResolvedValue([{ id: 8, name: 'Group Eight' }])
+  api.getGroups.mockResolvedValue([{ id: 8, name: 'Group Eight', platform: 'openai', status: 'active' }])
   api.getModelAllowlistCandidates.mockResolvedValue(['test-model'])
   api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Account Three', group_ids: [8] }, { id: 4, name: 'Other Group Account', group_ids: [9] }], pages: 1, total: 2 })
   api.listResults.mockResolvedValue([])
@@ -105,19 +106,7 @@ describe('configurable test management', () => {
     wrapper.unmount()
   })
 
-  it('selects an account within a group while preserving the group target', async () => {
-    const wrapper = makeWrapper(); await flushPromises()
-    const row = wrapper.findAll('tbody tr')[0]
-    await row.get('button[aria-label="common.edit"]').trigger('click')
-    const dialog = wrapper.get('[data-dialog]')
-    const accountSelect = dialog.findAll('select').find(s => s.find('option[value="3"]').exists())!
-    expect(accountSelect.find('option[value="4"]').exists()).toBe(false)
-    await accountSelect.setValue('3')
-    await dialog.findAll('button').find(b => b.text() === 'common.save')!.trigger('click')
-    await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ group_id: 8, account_id: 3, model_id: 'test-model', cron_expression: '0 * * * *' }))
-    wrapper.unmount()
-  })
+
 
   it('refreshes retained results after asynchronous execution without a page reload', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
@@ -233,13 +222,13 @@ describe('configurable test management', () => {
     ])
     api.listPlans.mockResolvedValue([{ ...plan, test_definition_id: 3, test_definition_ids: [3, 2] }])
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click'); await flushPromises()
     const dialog = wrapper.get('[data-dialog]')
     expect((dialog.get('[data-testid="plan-type-2"]').element as HTMLInputElement).checked).toBe(true)
     expect((dialog.get('[data-testid="plan-type-3"]').element as HTMLInputElement).checked).toBe(true)
     await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
     await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ test_definition_id: 3, test_definition_ids: [3, 2] }))
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ test_definition_ids: [3, 2], group_ids: [8] }))
     wrapper.unmount()
   })
 
@@ -263,7 +252,7 @@ describe('configurable test management', () => {
     await dialog.get('[data-testid="plan-type-3"]').setValue(true)
     await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
     await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ test_definition_id: 2, test_definition_ids: [2, 3] }))
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ test_definition_ids: [2, 3], group_ids: [8] }))
     wrapper.unmount()
   })
 
@@ -279,13 +268,13 @@ describe('configurable test management', () => {
     expect(row.text()).toContain('Pelican')
     await row.get('button[aria-label="common.copy"]').trigger('click')
     await flushPromises()
-    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ name: 'Candy hourly（Copy）', test_definition_id: 2, test_definition_ids: [2, 3], sort_order: 7, target_mode: 'account', account_id: 3 }))
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ name: 'Candy hourly（Copy）', test_definition_ids: [2, 3], group_ids: [8], sort_order: 7, enabled: false }))
     wrapper.unmount()
   })
 
   it('does not save a rule without any selected check type', async () => {
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click'); await flushPromises()
     await wrapper.get('[data-testid="plan-type-2"]').setValue(false)
     const saveButton = wrapper.get('[data-dialog]').findAll('button').find(button => button.text() === 'common.save')!
     expect(saveButton.attributes('disabled')).toBeDefined()
@@ -374,97 +363,20 @@ describe('configurable test management', () => {
 
 
 describe('automatic protection plan integration', () => {
-  const protection = { enabled: true, rules: [{ test_definition_id: 2, pause_on_failure: true, expected_answer: '29', answer_match: 'numeric', thresholds: [], vote: { enabled: false, reject_above: 0, pass_at_least: 3 } }] }
-  it('saves and copies workflow user vote access without changing the candy rule', async () => {
-    const reviewVote = { enabled: true, public_enabled: true, reject_above: 5, pass_at_least: 3 }
-    const configured = { enabled: true, rules: [], group_workflow: { automatic_test_id: 2, review_test_id: 3, pass_group_id: 8, fail_group_id: 9, review_vote: reviewVote } }
-    api.listTypes.mockResolvedValue([
-      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
-      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
-    ])
-    api.getGroups.mockResolvedValue([{ id: 8, name: 'Premium', platform: 'openai', status: 'active' }, { id: 9, name: 'Pro', platform: 'openai', status: 'active' }])
-    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'all_accounts', test_definition_ids: [2, 3], protection: configured }])
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
-    const dialog = wrapper.get('[data-dialog]')
-    await dialog.get('[data-workflow-public-vote]').setValue(false)
-    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
-    const saved = api.updatePlan.mock.calls[0][1]
-    expect(saved.protection.group_workflow.review_vote).toEqual({ ...reviewVote, public_enabled: false })
-    expect(saved.protection.rules[0]).toMatchObject({ expected_answer: '21', answer_match: 'numeric' })
-    expect(saved.protection.rules[0].vote).toBeUndefined()
-    expect(saved.protection.rules[1].vote).toEqual({ ...reviewVote, public_enabled: false })
-    expect(reviewVote.public_enabled).toBe(true)
-    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
-    const copied = api.createPlan.mock.calls[0][0]
-    copied.protection.group_workflow.review_vote.pass_at_least = 9
-    expect(reviewVote.pass_at_least).toBe(3)
-    wrapper.unmount()
-  })
+  const protection = { enabled: true, rules: [{ test_definition_id: 2, priority: 0, required_pass: false, pause_on_failure: true, expected_answer: '29', answer_match: 'numeric', thresholds: [], vote: { enabled: false, reject_above: 0, pass_at_least: 3 } }] }
 
-  it('converts to one workflow for both groups and prevents selecting the same outcome group', async () => {
-    api.listTypes.mockResolvedValue([
-      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
-      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
-    ])
-    api.getGroups.mockResolvedValue([
-      { id: 8, name: 'GPT-Pro-不降智', platform: 'openai', status: 'active' },
-      { id: 9, name: 'GPT-Pro', platform: 'openai', status: 'active' },
-      { id: 12, name: 'Other platform', platform: 'anthropic', status: 'active' },
-    ])
-    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
-    const dialog = wrapper.get('[data-dialog]')
-    await dialog.get('[data-plan-mode]').setValue('group_workflow')
-    expect(dialog.find('[data-protection-editor]').exists()).toBe(false)
-    expect(dialog.find('[data-testid="plan-type-2"]').exists()).toBe(false)
-    expect(dialog.get('[data-workflow-replace-hint]').text()).toContain('admin.tests.groupWorkflow.replaceHint')
-    expect(dialog.get('[data-workflow-pass-group]').find('option[value="12"]').exists()).toBe(false)
-    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
-    await dialog.get('[data-workflow-fail-group]').setValue('8')
-    expect(save.attributes('disabled')).toBeDefined()
-    await dialog.get('[data-workflow-fail-group]').setValue('9')
-    expect(save.attributes('disabled')).toBeUndefined()
-    await save.trigger('click'); await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({
-      group_id: 8, account_id: null, target_mode: 'all_accounts', test_definition_ids: [2, 3], cron_expression: '0 * * * *',
-      protection: { enabled: true, group_workflow: { automatic_test_id: 2, review_test_id: 3, pass_group_id: 8, fail_group_id: 9 }, rules: [
-        expect.objectContaining({ test_definition_id: 2, expected_answer: '21', answer_match: 'numeric', on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [8] }, on_fail: { scheduling: 'keep', group_mode: 'assign', group_ids: [9] } }),
-        expect.objectContaining({ test_definition_id: 3, vote: { enabled: true, reject_above: 0, pass_at_least: 1 } }),
-      ] },
-    }))
-    expect(protection.rules[0].expected_answer).toBe('29')
-    wrapper.unmount()
-  })
 
-  it('copies workflow settings independently and keeps the selected custom schedule', async () => {
-    const groupWorkflow = { automatic_test_id: 2, review_test_id: 3, pass_group_id: 8, fail_group_id: 9 }
-    const configured = { enabled: true, rules: [], group_workflow: groupWorkflow }
-    api.listTypes.mockResolvedValue([
-      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
-      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
-    ])
-    api.getGroups.mockResolvedValue([{ id: 8, name: 'Premium', platform: 'openai', status: 'active' }, { id: 9, name: 'Pro', platform: 'openai', status: 'active' }])
-    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'all_accounts', test_definition_ids: [2, 3], cron_expression: '15 * * * *', protection: configured }])
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
-    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ cron_expression: '15 * * * *', protection: configured }))
-    api.createPlan.mock.calls[0][0].protection.group_workflow.pass_group_id = 99
-    expect(groupWorkflow.pass_group_id).toBe(8)
-    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
-    expect(wrapper.get('[data-plan-mode]').element).toHaveProperty('value', 'group_workflow')
-    expect(wrapper.find('[data-protection-editor]').exists()).toBe(false)
-    wrapper.unmount()
-  })
+
+
+
 
   it('saves and copies cache recovery settings without mutating the loaded plan', async () => {
     const recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 85 }
-    const cacheProtection = { enabled: true, rules: [{ test_definition_id: 7, thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }], recovery }] }
+    const cacheProtection = { enabled: true, rules: [{ test_definition_id: 7, priority: 0, required_pass: false, thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }], on_pass: { scheduling: 'resume', group_mode: 'keep' }, on_fail: { scheduling: 'pause', group_mode: 'keep' }, recovery }] }
     api.listTypes.mockResolvedValue([{ id: 7, name: 'Statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true }])
-    api.listPlans.mockResolvedValue([{ ...plan, test_definition_id: 7, target_mode: 'account', account_id: 3, protection: cacheProtection }])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_id: 7, test_definition_ids: [7], target_mode: 'account', account_id: 3, protection: cacheProtection }])
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
     const dialog = wrapper.get('[data-dialog]')
     await dialog.get('[data-recovery-rate]').setValue(90)
     const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
@@ -487,10 +399,10 @@ describe('automatic protection plan integration', () => {
       ...protection,
       rules: [{ ...protection.rules[0], on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [9] }, on_fail: { scheduling: 'keep', group_mode: 'assign', group_ids: [8] } }],
     }
-    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection: actions }])
+    api.listPlans.mockResolvedValue([{ ...plan, group_ids: [8, 9, 10], protection: actions }])
     api.getGroups.mockResolvedValue([{ id: 8, name: 'Basic', platform: 'openai', status: 'active' }, { id: 9, name: 'Premium', platform: 'openai', status: 'active' }, { id: 10, name: 'Priority', platform: 'openai', status: 'active' }, { id: 11, name: 'Claude', platform: 'anthropic', status: 'active' }, { id: 12, name: 'Inactive', platform: 'openai', status: 'inactive' }, { id: 13, name: 'Composite', platform: 'composite', status: 'active' }])
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
     const dialog = wrapper.get('[data-dialog]')
     const pass = dialog.get('[data-outcome="pass"]')
     expect(pass.find('[data-action-group="11"]').exists()).toBe(false)
@@ -508,48 +420,16 @@ describe('automatic protection plan integration', () => {
     wrapper.unmount()
   })
 
-  it('keeps an existing account target visible after automation moved it out of the source group', async () => {
-    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
-    api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Moved Account', group_ids: [9] }, { id: 4, name: 'Unrelated Account', group_ids: [9] }], pages: 1, total: 2 })
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
-    const dialog = wrapper.get('[data-dialog]')
-    const accountSelect = dialog.findAll('select').find(select => select.find('option[value="3"]').exists())!
-    expect(accountSelect.text()).toContain('Moved Account')
-    expect(accountSelect.find('option[value="4"]').exists()).toBe(false)
-    expect((accountSelect.element as HTMLSelectElement).value).toBe('3')
-    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ group_id: 8, account_id: 3 }))
-    wrapper.unmount()
-  })
 
-  it('opens a moved-account copy for correction and prevents creating it until a current member is selected', async () => {
-    api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
-    api.getAccounts.mockResolvedValue({ items: [{ id: 3, name: 'Moved Account', group_ids: [9] }, { id: 4, name: 'Current Member', group_ids: [8] }], pages: 1, total: 2 })
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
-    expect(api.createPlan).not.toHaveBeenCalled()
-    const dialog = wrapper.get('[data-dialog]')
-    expect(dialog.find('[data-invalid-account-target]').exists()).toBe(true)
-    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
-    expect(save.attributes('disabled')).toBeDefined()
-    const accountSelect = dialog.findAll('select').find(select => select.find('option[value="4"]').exists())!
-    expect(accountSelect.find('option[value="3"]').exists()).toBe(false)
-    await accountSelect.setValue('4')
-    expect(dialog.find('[data-invalid-account-target]').exists()).toBe(false)
-    expect(save.attributes('disabled')).toBeUndefined()
-    await save.trigger('click'); await flushPromises()
-    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ name: 'Candy hourly（Copy）', group_id: 8, account_id: 4, protection }))
-    expect(api.updatePlan).not.toHaveBeenCalled()
-    wrapper.unmount()
-  })
+
+
 
   it('retains disabled selected group IDs for correction instead of silently removing them', async () => {
     const actionProtection = { ...protection, rules: [{ ...protection.rules[0], on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [9] } }] }
     api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection: actionProtection }])
     api.getGroups.mockResolvedValue([{ id: 8, name: 'Basic', platform: 'openai', status: 'active' }, { id: 9, name: 'Disabled', platform: 'openai', status: 'inactive' }])
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
     const dialog = wrapper.get('[data-dialog]')
     const pass = dialog.get('[data-outcome="pass"]')
     expect(pass.find('[data-action-group="9"]').exists()).toBe(false)
@@ -565,7 +445,7 @@ describe('automatic protection plan integration', () => {
   it('edits and copies protection without mutating the loaded plan', async () => {
     api.listPlans.mockResolvedValue([{ ...plan, target_mode: 'account', account_id: 3, protection }])
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click'); await flushPromises()
     const dialog = wrapper.get('[data-dialog]')
     expect((dialog.get('[data-protection-enabled]').element as HTMLInputElement).checked).toBe(true)
     await dialog.get('[data-rule-answer]').setValue('30')
@@ -577,53 +457,8 @@ describe('automatic protection plan integration', () => {
     wrapper.unmount()
   })
 
-  it('removes deselected type protection and turns it off for group checks', async () => {
-    api.listTypes.mockResolvedValue([
-      { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
-      { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
-    ])
-    api.listPlans.mockResolvedValue([{ ...plan, test_definition_ids: [2, 3], target_mode: 'account', account_id: 3, protection }])
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
-    const dialog = wrapper.get('[data-dialog]')
-    await dialog.get('[data-testid="plan-type-2"]').setValue(false)
-    expect(dialog.find('[data-protection-type="2"]').exists()).toBe(false)
-    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
-    expect(save.attributes('disabled')).toBeDefined()
-    const accountSelect = dialog.findAll('select').find(select => select.find('option[value="3"]').exists())!
-    await accountSelect.findAll('option')[0].setValue()
-    expect((dialog.get('[data-protection-enabled]').element as HTMLInputElement).checked).toBe(false)
-    expect(dialog.get('[data-protection-enabled]').attributes('disabled')).toBeDefined()
-    await save.trigger('click'); await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ target_mode: 'group', protection: { enabled: false, rules: [] } }))
-    wrapper.unmount()
-  })
-  it('loads active and quality-paused accounts across pages, deduplicates IDs and keeps manual stops', async () => {
-    const paused = { id: 5, name: 'Paused account', group_ids: [8], status: 'quality_paused', schedulable: true }
-    const stopped = { id: 6, name: 'Manually stopped', group_ids: [8], status: 'active', schedulable: false }
-    api.getAccounts.mockImplementation(async (page: number, _size: number, filter: { status: string }) => {
-      if (filter.status === 'quality_paused') return { items: page === 1 ? [paused] : [{ ...paused }, { id: 7, name: 'Paused older account', group_ids: [8], status: 'quality_paused', schedulable: true }], pages: 2, total: 2 }
-      return { items: [stopped], pages: 1, total: 1 }
-    })
-    api.listPlans.mockResolvedValue([{ ...plan, account_id: 5, target_mode: 'account', protection }, { ...plan, id: 11, account_id: 6, target_mode: 'account' }])
-    const wrapper = makeWrapper(); await flushPromises()
-    expect(api.getAccounts).toHaveBeenCalledWith(1, 1000, { lite: '1', status: 'active' })
-    expect(api.getAccounts).toHaveBeenCalledWith(2, 1000, { lite: '1', status: 'quality_paused' })
-    expect(wrapper.get('tbody tr').text()).toContain('Paused account (#5)')
-    expect(wrapper.findAll('tbody tr')[1].get('button[aria-label="admin.tests.run"]').attributes('disabled')).toBeDefined()
-    await wrapper.findAll('tbody tr')[1].get('button[aria-label="admin.tests.run"]').trigger('click')
-    expect(api.runPlan).not.toHaveBeenCalled()
-    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
-    const dialog = wrapper.get('[data-dialog]')
-    const accountSelect = dialog.findAll('select').find(select => select.find('option[value="5"]').exists())!
-    expect(accountSelect.findAll('option[value="5"]')).toHaveLength(1)
-    expect(accountSelect.find('option[value="6"]').text()).toContain('Manually stopped')
-    expect(accountSelect.find('option[value="7"]').exists()).toBe(true)
-    expect((accountSelect.element as HTMLSelectElement).value).toBe('5')
-    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ account_id: 5, protection }))
-    wrapper.unmount()
-  })
+
+
 
   it('blocks saving a protected disabled definition while retaining its configured answer', async () => {
     api.listTypes.mockResolvedValue([
@@ -632,7 +467,7 @@ describe('automatic protection plan integration', () => {
     ])
     api.listPlans.mockResolvedValue([{ ...plan, test_definition_ids: [2, 3], account_id: 3, target_mode: 'account', protection }])
     const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('tbody tr button[aria-label="common.edit"]').trigger('click'); await flushPromises()
     const dialog = wrapper.get('[data-dialog]')
     expect((dialog.get('[data-rule-answer]').element as HTMLTextAreaElement).value).toBe('29')
     const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
@@ -640,10 +475,163 @@ describe('automatic protection plan integration', () => {
     await save.trigger('click')
     expect(api.updatePlan).not.toHaveBeenCalled()
     await dialog.get('[data-protection-enabled]').setValue(false)
+    expect(save.attributes('disabled')).toBeDefined()
+    await dialog.get('[data-testid="plan-type-2"]').setValue(false)
     expect(save.attributes('disabled')).toBeUndefined()
     await save.trigger('click'); await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ protection: { ...protection, enabled: false } }))
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ test_definition_ids: [3], protection: { enabled: false, rules: [] } }))
     wrapper.unmount()
   })
 
+  it('opens a disabled copy for correction when a selected definition has been disabled', async () => {
+    api.listTypes.mockResolvedValue([
+      { id: 2, name: 'Retired check', key: 'retired', output_kind: 'number', prompt: 'Count', enabled: false },
+      { id: 3, name: 'Current check', key: 'current', output_kind: 'text', prompt: 'Answer', enabled: true },
+    ])
+    api.listPlans.mockResolvedValue([{ ...plan, test_definition_ids: [2, 3], protection: { enabled: false, rules: [] } }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody tr button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).not.toHaveBeenCalled()
+    const dialog = wrapper.get('[data-dialog]')
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    expect(save.attributes('disabled')).toBeDefined()
+    expect((dialog.get('[data-testid="plan-type-2"]').element as HTMLInputElement).checked).toBe(true)
+    await dialog.get('[data-testid="plan-type-2"]').setValue(false)
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ name: 'Candy hourly（Copy）', enabled: false, test_definition_ids: [3] }))
+    expect(api.updatePlan).not.toHaveBeenCalled()
+    expect(plan.test_definition_ids).toEqual([2])
+    wrapper.unmount()
+  })
+
+})
+
+
+describe('general strategies across ordered groups', () => {
+  const strategyGroups = [
+    { id: 8, name: 'Premium', platform: 'openai', status: 'active' },
+    { id: 9, name: 'Standard', platform: 'openai', status: 'active' },
+    { id: 10, name: 'Reserve', platform: 'openai', status: 'active' },
+    { id: 11, name: 'Different platform', platform: 'anthropic', status: 'active' },
+    { id: 12, name: 'Inactive', platform: 'openai', status: 'inactive' },
+    { id: 13, name: 'Composite', platform: 'composite', status: 'active' },
+  ]
+  const saveButton = (wrapper: ReturnType<typeof makeWrapper>) => wrapper.get('[data-dialog]').findAll('button').find(button => button.text() === 'common.save')!
+
+  it('saves ordered group arrays and generic conditions without any legacy target or special mode', async () => {
+    api.getGroups.mockResolvedValue(strategyGroups)
+    api.listPlans.mockResolvedValue([{ ...plan, group_ids: [8, 9, 10] }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-plan-mode]').exists()).toBe(false)
+    expect(wrapper.find('[data-protection-editor]').exists()).toBe(true)
+    await wrapper.get('[data-selected-plan-group="10"] [data-group-up]').trigger('click')
+    expect(wrapper.findAll('[data-selected-plan-group]').map(row => row.attributes('data-selected-plan-group'))).toEqual(['8', '10', '9'])
+    await wrapper.get('[data-protection-enabled]').setValue(true)
+    await wrapper.get('[data-rule-priority]').setValue(200)
+    await wrapper.get('[data-rule-required-pass]').setValue(true)
+    await wrapper.get('[data-rule-answer]').setValue('7')
+    await wrapper.get('[data-outcome="pass"] [data-action-group-mode]').setValue('assign')
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-outcome="pass"] [data-action-group="11"]').exists()).toBe(false)
+    await wrapper.get('[data-outcome="pass"] [data-action-group="8"]').setValue(true)
+    expect(saveButton(wrapper).attributes('disabled')).toBeUndefined()
+    await saveButton(wrapper).trigger('click'); await flushPromises()
+    const payload = api.updatePlan.mock.calls[0][1]
+    expect(payload.group_ids).toEqual([8, 10, 9])
+    expect(payload.test_definition_ids).toEqual([2])
+    expect(payload).not.toHaveProperty('group_id')
+    expect(payload).not.toHaveProperty('account_id')
+    expect(payload).not.toHaveProperty('target_mode')
+    expect(payload).not.toHaveProperty('test_definition_id')
+    expect(payload.protection).not.toHaveProperty('group_workflow')
+    expect(payload.protection.rules[0]).toMatchObject({ priority: 200, required_pass: true, expected_answer: '7', on_pass: { group_mode: 'assign', group_ids: [8] } })
+    wrapper.unmount()
+  })
+
+  it('limits destination groups to the selected strategy and rejects stale destinations when a group is removed', async () => {
+    const protection = { enabled: true, rules: [{ test_definition_id: 2, priority: 1, required_pass: false, expected_answer: '7', answer_match: 'numeric', on_pass: { scheduling: 'keep', group_mode: 'assign', group_ids: [9] } }] }
+    api.getGroups.mockResolvedValue(strategyGroups)
+    api.listPlans.mockResolvedValue([{ ...plan, group_ids: [8, 9], protection }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-outcome="pass"] [data-action-group="10"]').exists()).toBe(false)
+    expect(wrapper.get('[data-plan-group="11"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-plan-group="12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-plan-group="13"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-plan-group="9"]').setValue(false); await flushPromises()
+    expect(wrapper.get('[data-unavailable-groups]').text()).toContain('admin.tests.protection.actions.unavailableGroups')
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-outcome="pass"] [data-action-group-mode]').setValue('keep')
+    expect(saveButton(wrapper).attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-plan-group="8"]').setValue(false); await flushPromises()
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('intersects supported models and reasoning levels across all groups', async () => {
+    api.getGroups.mockResolvedValue(strategyGroups)
+    api.listPlans.mockResolvedValue([{ ...plan, group_ids: [8, 9], model_id: 'gpt-6-astra', reasoning_effort: 'ultra' }])
+    api.getModelAllowlistCandidates.mockImplementation(async (id: number) => id === 8 ? ['gpt-6-astra', 'only-premium'] : ['standard-only', 'gpt-6-astra'])
+    api.getAccounts.mockResolvedValue({ items: [
+      { id: 1, group_ids: [8], extra: { upstream_model_metadata: { models: { 'gpt-6-astra': { supported_reasoning_levels: ['medium', 'high', 'ultra'] } } } } },
+      { id: 2, group_ids: [9], extra: { upstream_model_metadata: { models: { 'gpt-6-astra': { supported_reasoning_levels: ['low', 'high'] } } } } },
+    ], pages: 1, total: 2 })
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    expect(wrapper.getComponent(Select).props('options')).toEqual([{ value: 'gpt-6-astra', label: 'gpt-6-astra' }])
+    const effort = wrapper.get('[data-dialog]').findAll('select').find(select => select.find('option[value="high"]').exists())!
+    expect(effort.find('option[value="ultra"]').exists()).toBe(false)
+    expect(effort.find('option[value="low"]').exists()).toBe(false)
+    expect((effort.element as HTMLSelectElement).value).not.toBe('ultra')
+    await effort.setValue('high')
+    await saveButton(wrapper).trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ group_ids: [8, 9], reasoning_effort: 'high' }))
+    wrapper.unmount()
+  })
+
+  it('rejects groups without a common model and ignores an older catalog response', async () => {
+    api.getGroups.mockResolvedValue(strategyGroups)
+    let resolveOld!: (models: string[]) => void
+    api.getModelAllowlistCandidates.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+      .mockImplementation(async (id: number) => id === 8 ? ['shared'] : ['other'])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-plan-group="9"]').setValue(true); await flushPromises()
+    expect(wrapper.getComponent(Select).props('options')).toEqual([])
+    expect(wrapper.find('[data-no-common-model]').exists()).toBe(true)
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+    resolveOld(['test-model']); await flushPromises()
+    expect(wrapper.getComponent(Select).props('options')).toEqual([])
+    expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('shows migrated strategy notes and sends only corrected strategy fields', async () => {
+    api.listPlans.mockResolvedValue([{ ...plan, enabled: false, migration_note: 'Choose a replacement for a removed group' }])
+    const wrapper = makeWrapper(); await flushPromises()
+    expect(wrapper.get('[data-migration-note]').text()).toContain('Choose a replacement')
+    expect(wrapper.get('tbody button[aria-label="admin.tests.run"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('tbody button[role="switch"]').trigger('click'); await flushPromises()
+    expect(api.updatePlan).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-plan-migration-note]').text()).toContain('Choose a replacement')
+    await saveButton(wrapper).trigger('click'); await flushPromises()
+    expect(api.updatePlan.mock.calls[0][1]).not.toHaveProperty('migration_note')
+    wrapper.unmount()
+  })
+
+  it('allows at most 100 groups and 32 selected test types', async () => {
+    const groups = Array.from({ length: 101 }, (_, i) => ({ id: i + 1, name: `Group ${i}`, platform: 'openai', status: 'active' }))
+    const types = Array.from({ length: 33 }, (_, i) => ({ id: i + 1, name: `Test ${i}`, key: `test-${i}`, output_kind: 'number', prompt: 'Count', enabled: true }))
+    api.getGroups.mockResolvedValue(groups)
+    api.listTypes.mockResolvedValue(types)
+    api.listPlans.mockResolvedValue([{ ...plan, group_ids: groups.slice(0, 100).map(group => group.id), test_definition_ids: types.slice(0, 32).map(type => type.id) }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-plan-group="101"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="plan-type-33"]').attributes('disabled')).toBeDefined()
+    expect(saveButton(wrapper).attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
 })

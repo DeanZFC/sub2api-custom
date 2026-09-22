@@ -25,15 +25,6 @@ func protectionConfigWithoutPublicVote(config service.ScheduledTestProtectionCon
 		}
 		config.Rules = rules
 	}
-	if config.GroupWorkflow != nil {
-		workflow := *config.GroupWorkflow
-		// Compare effective settings, including the administrator-only default
-		// when review_vote was omitted by an older client.
-		vote := *workflow.Rules()[1].Vote
-		vote.PublicEnabled = false
-		workflow.ReviewVote = &vote
-		config.GroupWorkflow = &workflow
-	}
 	return config
 }
 

@@ -55,9 +55,10 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		execSQL(string(data))
 	}
 	execSQL(`CREATE TABLE users (id BIGINT PRIMARY KEY);
-		CREATE TABLE accounts (id BIGINT PRIMARY KEY, name TEXT, status TEXT NOT NULL DEFAULT 'active', schedulable BOOLEAN NOT NULL DEFAULT true, deleted_at TIMESTAMPTZ);
-		CREATE TABLE groups (id BIGINT PRIMARY KEY, name TEXT, status TEXT DEFAULT 'active', deleted_at TIMESTAMPTZ, is_exclusive BOOLEAN DEFAULT false, subscription_type TEXT DEFAULT 'standard');
+		CREATE TABLE accounts (id BIGINT PRIMARY KEY, name TEXT, platform TEXT NOT NULL DEFAULT 'openai', status TEXT NOT NULL DEFAULT 'active', schedulable BOOLEAN NOT NULL DEFAULT true, extra JSONB NOT NULL DEFAULT '{}', updated_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
+		CREATE TABLE groups (id BIGINT PRIMARY KEY, name TEXT, platform TEXT NOT NULL DEFAULT 'openai', status TEXT DEFAULT 'active', deleted_at TIMESTAMPTZ, is_exclusive BOOLEAN DEFAULT false, subscription_type TEXT DEFAULT 'standard');
 		CREATE TABLE account_groups (account_id BIGINT, group_id BIGINT);
+        CREATE TABLE scheduler_outbox(event_type TEXT,account_id BIGINT);
 		CREATE TABLE user_allowed_groups (user_id BIGINT, group_id BIGINT);
 		CREATE TABLE user_subscriptions (user_id BIGINT, group_id BIGINT, deleted_at TIMESTAMPTZ, status TEXT, starts_at TIMESTAMPTZ, expires_at TIMESTAMPTZ);
 		INSERT INTO accounts (id, name) VALUES (62, 'Private account alpha'), (63, 'Private account beta');
@@ -88,6 +89,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	applyMigration("262_scheduled_test_execution_snapshot.sql")
 	applyMigration("262_scheduled_test_execution_snapshot.sql")
 	applyMigration("264_scheduled_test_cache_recovery.sql")
+	applyMigration("265_scheduled_test_generic_policy.sql")
 	var statisticsCount int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))
 	require.Equal(t, 1, statisticsCount, "the local statistics definition is seeded idempotently")
@@ -114,7 +116,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 
 	groupID, privateGroupID, accountID := int64(8), int64(9), int64(62)
 	plan, err := plans.Create(ctx, &service.ScheduledTestPlan{
-		Name: "Multiple checks", GroupID: &groupID, TestDefinitionID: &candyID,
+		Name: "Multiple checks", GroupIDs: []int64{groupID}, GroupID: &groupID, TestDefinitionID: &candyID,
 		TestDefinitionIDs: []int64{candyID, htmlID}, TestType: "quality", TargetMode: "all_accounts",
 		ModelID: "model-a", ReasoningEffort: "high", CronExpression: "0 * * * *", Enabled: true, MaxResults: 4,
 	})
@@ -260,7 +262,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	})
 
 	// Editing the rule must not relabel a historical result or reveal a hidden account.
-	legacy.TargetMode, legacy.AccountID = "account", &accountID
+	legacy.TargetMode, legacy.AccountID = "all_accounts", nil
 	legacy.TestDefinitionID, legacy.TestDefinitionIDs = &htmlID, []int64{htmlID}
 	_, err = plans.Update(ctx, legacy)
 	require.NoError(t, err)
@@ -308,7 +310,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 
 	t.Run("admin history limit preserves every account and test type", func(t *testing.T) {
 		multiPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
-			Name: "History limit", GroupID: &groupID, TestDefinitionID: &htmlID,
+			Name: "History limit", GroupIDs: []int64{groupID}, GroupID: &groupID, TestDefinitionID: &htmlID,
 			TestDefinitionIDs: []int64{htmlID, candyID}, TestType: "quality", TargetMode: "all_accounts",
 			ModelID: "model-a", ReasoningEffort: "high", CronExpression: "0 * * * *", Enabled: true, MaxResults: 1,
 		})
@@ -364,18 +366,18 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	})
 
 	t.Run("latest execution excludes removed accounts and types and retains queued targets", func(t *testing.T) {
-		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Snapshot", GroupID: &groupID, TestDefinitionID: &htmlID, TestDefinitionIDs: []int64{htmlID, candyID}, TargetMode: "all_accounts", ModelID: "model", CronExpression: "* * * * *", MaxResults: 10})
+		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Snapshot", GroupIDs: []int64{groupID}, GroupID: &groupID, TestDefinitionID: &htmlID, TestDefinitionIDs: []int64{htmlID, candyID}, TargetMode: "all_accounts", ModelID: "model", CronExpression: "* * * * *", MaxResults: 10})
 		require.NoError(t, err)
 		input := func(accountID, definitionID int64, at time.Time) *service.ScheduledTestResult {
 			return &service.ScheduledTestResult{PlanID: p.ID, AccountID: &accountID, GroupID: &groupID, TestDefinitionID: &definitionID, TargetMode: "all_accounts", ModelID: "model", Status: "pending", OutputKind: "text", StartedAt: at, FinishedAt: at}
 		}
-		older, err := results.BeginRun(ctx, p.ID, "older", []*service.ScheduledTestResult{input(62, htmlID, started), input(63, candyID, started)})
+		older, err := results.BeginRun(ctx, p, "older", []*service.ScheduledTestResult{input(62, htmlID, started), input(63, candyID, started)})
 		require.NoError(t, err)
 		for _, result := range older {
 			result.Status = "success"
 			require.NoError(t, results.Update(ctx, result))
 		}
-		newer, err := results.BeginRun(ctx, p.ID, "newer", []*service.ScheduledTestResult{input(62, htmlID, started.Add(time.Minute))})
+		newer, err := results.BeginRun(ctx, p, "newer", []*service.ScheduledTestResult{input(62, htmlID, started.Add(time.Minute))})
 		require.NoError(t, err)
 		latest, err := results.ListByPlanID(ctx, p.ID, 1)
 		require.NoError(t, err)
@@ -385,7 +387,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		history, err := results.ListByPlanID(ctx, p.ID, 10)
 		require.NoError(t, err)
 		require.Len(t, history, 3)
-		_, err = results.BeginRun(ctx, p.ID, "broken", []*service.ScheduledTestResult{input(62, htmlID, started), {PlanID: p.ID + 100}})
+		_, err = results.BeginRun(ctx, p, "broken", []*service.ScheduledTestResult{input(62, htmlID, started), {PlanID: p.ID + 100}})
 		require.Error(t, err)
 		latest, err = results.ListByPlanID(ctx, p.ID, 1)
 		require.NoError(t, err)
@@ -394,7 +396,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	})
 
 	t.Run("group-mode retention keeps every actual account and type", func(t *testing.T) {
-		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Group retention", GroupID: &groupID, TestDefinitionID: &htmlID, TestDefinitionIDs: []int64{htmlID, candyID}, TargetMode: "group", ModelID: "model", CronExpression: "* * * * *", MaxResults: 1})
+		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Group retention", GroupIDs: []int64{groupID}, GroupID: &groupID, TestDefinitionID: &htmlID, TestDefinitionIDs: []int64{htmlID, candyID}, TargetMode: "all_accounts", ModelID: "model", CronExpression: "* * * * *", MaxResults: 1})
 		require.NoError(t, err)
 		for _, id := range []int64{62, 63} {
 			for _, definition := range []int64{htmlID, candyID} {
@@ -421,8 +423,8 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		defer tx.Rollback()
 		var newPlanID int64
 		require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO scheduled_test_plans
-			(name, group_id, test_definition_id, test_definition_ids, target_mode)
-			VALUES ('Concurrent plan', 8, $1, $2, 'group') RETURNING id`, htmlID, pq.Array([]int64{htmlID, definition.ID})).Scan(&newPlanID))
+			(name, group_id, group_ids, test_definition_id, test_definition_ids, target_mode)
+			VALUES ('Concurrent plan', 8, ARRAY[8]::bigint[], $1, $2, 'all_accounts') RETURNING id`, htmlID, pq.Array([]int64{htmlID, definition.ID})).Scan(&newPlanID))
 		deleted := make(chan error, 1)
 		go func() { deleted <- definitions.Delete(ctx, definition.ID) }()
 		select {
@@ -440,8 +442,8 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		definition, err := definitions.GetByKey(ctx, "hourly_stats")
 		require.NoError(t, err)
 		statsPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
-			Name: "Local statistics", GroupID: &groupID, TestDefinitionID: &definition.ID,
-			TestDefinitionIDs: []int64{definition.ID}, TestType: "quality", TargetMode: "group",
+			Name: "Local statistics", GroupIDs: []int64{groupID}, GroupID: &groupID, TestDefinitionID: &definition.ID,
+			TestDefinitionIDs: []int64{definition.ID}, TestType: "quality", TargetMode: "all_accounts",
 			ModelID: "model-a", CronExpression: "0 * * * *", Enabled: true, MaxResults: 5,
 		})
 		require.NoError(t, err)
@@ -495,9 +497,9 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 		definition, err := definitions.GetByKey(ctx, "hourly_stats")
 		require.NoError(t, err)
 		statsPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
-			Name: "Availability independent statistics", GroupID: &groupID,
+			Name: "Availability independent statistics", GroupIDs: []int64{groupID}, GroupID: &groupID,
 			TestDefinitionID: &definition.ID, TestDefinitionIDs: []int64{definition.ID},
-			TargetMode: "group", TestType: "quality", ModelID: "visibility-stats", CronExpression: "* * * * *",
+			TargetMode: "all_accounts", TestType: "quality", ModelID: "visibility-stats", CronExpression: "* * * * *",
 		})
 		require.NoError(t, err)
 		groupStatistics, err := results.Create(ctx, &service.ScheduledTestResult{
@@ -517,14 +519,11 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 		for _, mode := range []string{"account", "all_accounts", "group"} {
 			t.Run(mode, func(t *testing.T) {
 				plan := &service.ScheduledTestPlan{
-					Name: "Availability " + mode, GroupID: &groupID, TestDefinitionID: &candyID,
-					TestDefinitionIDs: []int64{candyID}, TargetMode: mode, TestType: "quality",
+					Name: "Availability " + mode, GroupIDs: []int64{groupID}, GroupID: &groupID, TestDefinitionID: &candyID,
+					TestDefinitionIDs: []int64{candyID}, TargetMode: "all_accounts", TestType: "quality",
 					ModelID: "visibility-" + mode, CronExpression: "* * * * *",
 				}
 				accountID := unavailableID
-				if mode == "account" {
-					plan.AccountID = &accountID
-				}
 				plan, err = plans.Create(ctx, plan)
 				require.NoError(t, err)
 				create := func(id *int64, age time.Duration) *service.ScheduledTestResult {
@@ -624,7 +623,7 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 		t.Run("public result follows moved account group", func(t *testing.T) {
 			const movedAccountID = int64(72)
 			movedPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
-				Name: "Dynamic account group", GroupID: &groupID, TestDefinitionID: &candyID,
+				Name: "Dynamic account group", GroupIDs: []int64{groupID}, GroupID: &groupID, TestDefinitionID: &candyID,
 				TestDefinitionIDs: []int64{candyID}, TargetMode: "all_accounts", TestType: "quality",
 				ModelID: "dynamic-group", CronExpression: "* * * * *",
 			})

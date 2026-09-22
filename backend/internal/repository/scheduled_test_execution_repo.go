@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -21,8 +23,8 @@ func (r *scheduledTestResultRepository) RecordDecision(ctx context.Context, resu
 	return err
 }
 
-func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, planID int64, runID string, inputs []*service.ScheduledTestResult) ([]*service.ScheduledTestResult, error) {
-	if runID == "" || len(inputs) == 0 {
+func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *service.ScheduledTestPlan, runID string, inputs []*service.ScheduledTestResult) ([]*service.ScheduledTestResult, error) {
+	if plan == nil || runID == "" || len(inputs) == 0 {
 		return nil, fmt.Errorf("execution ID and target results are required")
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -30,9 +32,40 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, planID int
 		return nil, err
 	}
 	defer tx.Rollback()
-	var id int64
-	if err = tx.QueryRowContext(ctx, `UPDATE scheduled_test_plans SET latest_run_id=$2 WHERE id=$1 RETURNING id`, planID, runID).Scan(&id); err != nil {
+	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
 		return nil, err
+	}
+	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
+	if err != nil {
+		return nil, err
+	}
+	if !scheduledTestSameExecutionPolicy(current, plan) {
+		return nil, fmt.Errorf("test policy changed before execution")
+	}
+	if err := validateScheduledTestPlanConflicts(ctx, tx, current); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE scheduled_test_plans SET latest_run_id=$2 WHERE id=$1`, plan.ID, runID); err != nil {
+		return nil, err
+	}
+	planID := plan.ID
+	accountIDs := map[int64]bool{}
+	for _, input := range inputs {
+		if input != nil && input.AccountID != nil {
+			accountIDs[*input.AccountID] = true
+		}
+	}
+	for _, accountID := range sortedProtectionIDs(accountIDs) {
+		if _, err := lockProtectionAccount(ctx, tx, accountID); err != nil {
+			return nil, err
+		}
+		owned, err := scheduledTestAccountOwnershipCurrent(ctx, tx, planID, accountID)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			return nil, fmt.Errorf("account belongs to conflicting enabled test strategies")
+		}
 	}
 	results := make([]*service.ScheduledTestResult, 0, len(inputs))
 	for _, input := range inputs {
@@ -50,6 +83,21 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, planID int
 		return nil, err
 	}
 	return results, nil
+}
+
+// Display order and public ballot visibility do not alter a running strategy.
+// Every change to execution or routing semantics invalidates its frozen round.
+func scheduledTestSameExecutionPolicy(a, b *service.ScheduledTestPlan) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	ag, bg := slices.Clone(a.GroupIDs), slices.Clone(b.GroupIDs)
+	slices.Sort(ag)
+	slices.Sort(bg)
+	return slices.Equal(ag, bg) && reflect.DeepEqual(a.AccountID, b.AccountID) &&
+		reflect.DeepEqual(a.TestDefinitionIDs, b.TestDefinitionIDs) && reflect.DeepEqual(a.TestDefinitionID, b.TestDefinitionID) &&
+		a.TargetMode == b.TargetMode && a.TestType == b.TestType && a.ModelID == b.ModelID && a.ReasoningEffort == b.ReasoningEffort &&
+		a.Enabled == b.Enabled && a.AutoRecover == b.AutoRecover && protectionConfigSamePolicy(a.Protection, b.Protection)
 }
 
 type protectionAccountSnapshot struct {

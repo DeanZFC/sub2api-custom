@@ -21,6 +21,7 @@ func TestAccountResponseCodexTicketAccountPolicyWithinGateway(t *testing.T) {
 		service.OpenAICodexTicketFailClosedExtraKey:      false,
 		service.OpenAICodexTicketHarvestProxyIDsExtraKey: []any{float64(8), float64(2)},
 		"codex_turn_ticket:gpt-6-astra":                  map[string]any{"state": "private-ticket-material"},
+		"codex_turn_cookies":                             map[string]any{"__cflb": "private-cookie-material"},
 	}}
 	h := &AccountHandler{cfg: &config.Config{}}
 	h.cfg.Gateway.OpenAICodexTicket.Enabled = true
@@ -35,7 +36,9 @@ func TestAccountResponseCodexTicketAccountPolicyWithinGateway(t *testing.T) {
 		payload, err := json.Marshal(got)
 		require.NoError(t, err)
 		require.False(t, strings.Contains(string(payload), "private-ticket-material"))
+		require.NotContains(t, string(payload), "private-cookie-material")
 		require.NotContains(t, got.Extra, "codex_turn_ticket:gpt-6-astra")
+		require.NotContains(t, got.Extra, "codex_turn_cookies")
 		require.NotContains(t, got.Extra, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
 		compact := dto.AccountListItemFromAccount(got)
 		require.Equal(t, got.CodexTicketConfig, compact.CodexTicketConfig)
@@ -107,6 +110,7 @@ func TestAccountResponseCodexTicketDiagnosticsAPIWiring(t *testing.T) {
 	lastAttempt := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	nextRetry := lastAttempt.Add(30 * time.Second)
 	const ticketSecret = "private-ticket-material"
+	const cookieSecret = "private-cookie-material"
 	const proxySecret = "http://harvest-user:private-proxy-password@proxy.example:8080"
 	account := service.Account{
 		ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive,
@@ -116,6 +120,7 @@ func TestAccountResponseCodexTicketDiagnosticsAPIWiring(t *testing.T) {
 			service.OpenAICodexTicketFailClosedExtraKey:      true,
 			service.OpenAICodexTicketHarvestProxyIDsExtraKey: []any{float64(8)},
 			"codex_turn_ticket:gpt-6-astra":                  map[string]any{"state": ticketSecret},
+			"codex_turn_cookies":                             map[string]any{"__cflb": cookieSecret, "__oailb": cookieSecret},
 			"codex_harvest_proxy_url":                        proxySecret,
 		},
 	}
@@ -158,10 +163,11 @@ func TestAccountResponseCodexTicketDiagnosticsAPIWiring(t *testing.T) {
 				router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, endpoint, nil))
 				require.Equal(t, http.StatusOK, recorder.Code)
 				payload := recorder.Body.String()
-				for _, secret := range []string{ticketSecret, proxySecret, "private-proxy-password", "private-access-token", "private-refresh-token"} {
+				for _, secret := range []string{ticketSecret, cookieSecret, proxySecret, "private-proxy-password", "private-access-token", "private-refresh-token"} {
 					require.NotContains(t, payload, secret)
 				}
 				require.NotContains(t, payload, "codex_turn_ticket:gpt-6-astra")
+				require.NotContains(t, payload, "codex_turn_cookies")
 				require.NotContains(t, payload, "codex_harvest_proxy_url")
 				require.NotContains(t, payload, service.OpenAICodexTicketHarvestProxyIDsExtraKey)
 

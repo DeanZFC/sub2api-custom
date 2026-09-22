@@ -52,6 +52,8 @@ func TestScheduledTestCacheRecoveryRunnerUsesFreshWindow(t *testing.T) {
 func cacheRecoveryRule() ScheduledTestProtectionRule {
 	return ScheduledTestProtectionRule{
 		TestDefinitionID: 1, MinSamples: 100,
+		OnPass:     &ScheduledTestOutcomeAction{Scheduling: "resume"},
+		OnFail:     &ScheduledTestOutcomeAction{Scheduling: "pause"},
 		Thresholds: []ScheduledTestThreshold{{Metric: "cache_rate", Operator: "lt", Value: 80}},
 		Recovery:   &ScheduledTestCacheRecoveryConfig{Enabled: true, CooldownSeconds: 300, TrialSeconds: 300, MaxRequests: 20, MinSamples: 10, RecoverRate: 85},
 	}

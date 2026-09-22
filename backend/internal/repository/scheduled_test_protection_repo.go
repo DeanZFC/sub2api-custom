@@ -48,7 +48,7 @@ func protectionResultCurrent(ctx context.Context, tx *sql.Tx, resultID int64) (b
 	var current bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS (
 	 SELECT 1 FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
-	 WHERE r.id=$1 AND r.group_id IS NOT DISTINCT FROM p.group_id AND r.model_id=p.model_id
+	 WHERE r.id=$1 AND r.model_id=p.model_id
 	 AND r.target_mode=p.target_mode AND (p.account_id IS NULL OR p.account_id=r.account_id)
 	 AND (r.output_kind='statistics' OR r.reasoning_effort=p.reasoning_effort)
 	 AND (r.test_definition_id=ANY(p.test_definition_ids) OR r.test_definition_id=p.test_definition_id)
@@ -193,6 +193,9 @@ func protectionVoteCounts(ctx context.Context, tx *sql.Tx, state *protectionStat
 }
 
 func combineProtectionVerdict(state *protectionState, pass, fail int) (string, bool, string) {
+	if state.adminVerdict == "pass" || state.adminVerdict == "fail" {
+		return state.adminVerdict, state.adminVerdict == "fail", "管理员判定渠道质量检测结果"
+	}
 	if state.automated == "fail" {
 		return "fail", true, state.reason
 	}
@@ -235,27 +238,6 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 		return err
 	}
 	verdict, _, reason := combineProtectionVerdict(state, pass, fail)
-	if workflow := config.GroupWorkflow; workflow != nil && state.definitionID == workflow.ReviewTestID {
-		// Generating an animation alone never changes the group. An explicit
-		// administrator decision wins; otherwise use authorized public ballots.
-		verdict, reason = "pending", "等待管理员判定动画结果"
-		if state.rule.Vote != nil && state.rule.Vote.Enabled {
-			if fail > state.rule.Vote.RejectAbove {
-				verdict, reason = "fail", "用户不通过票数超过阈值"
-			} else if pass >= state.rule.Vote.PassAtLeast {
-				verdict, reason = "pass", "用户通过票数达到阈值"
-			}
-		}
-		if state.automated == "fail" {
-			verdict, reason = "fail", "动画执行失败，保留当前分组"
-			if state.reason != "" {
-				reason += "：" + state.reason
-			}
-		}
-		if state.adminVerdict == "pass" || state.adminVerdict == "fail" {
-			verdict, reason = state.adminVerdict, "管理员判定动画结果"
-		}
-	}
 	blocked := state.blocked
 	switch state.rule.OutcomeAction(verdict).Scheduling {
 	case "pause":
@@ -269,7 +251,7 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 
 	_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states
 		SET automated_verdict=$2,verdict=$3,reason=$4,blocked=$5,completed=$6,
-		 routing_verdict=CASE WHEN $3 IN ('pass','fail') THEN $3 ELSE routing_verdict END,updated_at=NOW()
+		 updated_at=NOW()
 		WHERE result_id=$1 AND generation=$7`, state.resultID, state.automated, verdict, reason, blocked, state.completed, state.generation)
 	if err != nil {
 		return err
@@ -280,18 +262,7 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 		}
 		reason = state.reason
 	}
-	if config.GroupWorkflow != nil {
-		reviewOverride, err := reconcileGroupWorkflow(ctx, tx, state, &config, verdict)
-		if err != nil {
-			return err
-		}
-		if reviewOverride {
-			if reason != "" {
-				reason += "；"
-			}
-			reason += "本轮分组以动画评议结果为准"
-		}
-	} else if err := reconcileProtectionGroups(ctx, tx, state.accountID); err != nil {
+	if err := reconcileProtectionGroups(ctx, tx, state); err != nil {
 		return err
 	}
 	if err := reconcileProtectionAccount(ctx, tx, state.accountID); err != nil {
@@ -423,17 +394,17 @@ func (r *scheduledTestResultRepository) ClearPlanProtection(ctx context.Context,
 }
 
 func clearPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64) error {
-	return resetPlanProtectionTx(ctx, tx, planID, false)
+	return resetPlanProtectionTx(ctx, tx, planID)
 }
 
-func resetPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64, retainTracking bool) error {
+func resetPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64) error {
 	if _, err := lockProtectionPlan(ctx, tx, planID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT account_id FROM scheduled_test_protection_states WHERE plan_id=$1 UNION SELECT account_id FROM scheduled_test_managed_accounts WHERE plan_id=$1 ORDER BY account_id`, planID)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT account_id FROM scheduled_test_protection_states WHERE plan_id=$1 ORDER BY account_id`, planID)
 	if err != nil {
 		return err
 	}
@@ -454,11 +425,6 @@ func resetPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64, retain
 	for _, id := range ids {
 		if _, err := lockProtectionAccount(ctx, tx, id); err != nil {
 			return err
-		}
-		if !retainTracking {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_managed_accounts WHERE plan_id=$1 AND account_id=$2`, planID, id); err != nil {
-				return err
-			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_protection_states WHERE plan_id=$1 AND account_id=$2`, planID, id); err != nil {
 			return err

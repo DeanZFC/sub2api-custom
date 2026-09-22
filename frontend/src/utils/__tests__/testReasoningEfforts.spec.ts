@@ -24,3 +24,17 @@ describe('reasoningEffortsForTestModel', () => {
     expect(reasoningEffortsForTestModel('o3', accounts, 7, 2)).toEqual(['high', 'xhigh'])
   })
 })
+
+
+it('does not replace an explicit no-reasoning capability with the model-family fallback', () => {
+  const accounts = [{ id: 1, group_ids: [7], extra: { upstream_model_metadata: { models: { 'gpt-6-astra': { reasoning: false } } } } }]
+  expect(reasoningEffortsForTestModel('gpt-6-astra', accounts, 7)).toEqual([])
+})
+
+it('intersects known capabilities with the fallback for accounts whose metadata is missing', () => {
+  const accounts = [
+    { id: 1, group_ids: [7], extra: { upstream_model_metadata: { models: { 'gpt-6-astra': { supported_reasoning_levels: ['high'] } } } } },
+    { id: 2, group_ids: [7] },
+  ]
+  expect(reasoningEffortsForTestModel('gpt-6-astra', accounts, 7)).toEqual(['high'])
+})

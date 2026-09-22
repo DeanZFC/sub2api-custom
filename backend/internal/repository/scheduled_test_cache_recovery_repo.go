@@ -35,7 +35,7 @@ func startCacheRecoveryCooldown(ctx context.Context, tx *sql.Tx, state *protecti
 	until := now.Add(time.Duration(c.CooldownSeconds) * time.Second)
 	reason = fmt.Sprintf("%s；冷却至 %s 后限量试运行", reason, until.Format(time.RFC3339))
 	_, err := tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET
-	 blocked=TRUE,automated_verdict='fail',verdict='fail',routing_verdict='fail',completed=TRUE,
+	 blocked=TRUE,automated_verdict='fail',verdict='fail',completed=TRUE,
 	 recovery_phase='cooldown',recovery_cooldown_until=$4,
 	 recovery_trial_started_at=NULL,recovery_trial_ends_at=NULL,recovery_trial_requests=0,
 	 reason=$5,updated_at=$6 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`,
@@ -74,8 +74,7 @@ func (r *scheduledTestResultRepository) AdvanceCacheRecovery(ctx context.Context
 	 AND a.deleted_at IS NULL AND a.schedulable AND a.status IN ('active','quality_paused')
 	 AND (p.account_id IS NULL OR p.account_id=s.account_id)
 	 AND (s.test_definition_id=ANY(p.test_definition_ids) OR s.test_definition_id=p.test_definition_id)
-	 AND (p.group_id IS NULL OR EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=s.account_id AND ag.group_id=p.group_id)
-	 OR EXISTS (SELECT 1 FROM scheduled_test_managed_accounts ma WHERE ma.plan_id=p.id AND ma.account_id=s.account_id AND ma.source_group_id=p.group_id))
+	 AND EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=s.account_id AND ag.group_id=ANY(p.group_ids))
 	 AND (s.recovery_phase='trial' OR (s.recovery_phase='cooldown' AND s.recovery_cooldown_until<=$1))
 	 ORDER BY s.updated_at,s.plan_id,s.account_id,s.test_definition_id LIMIT 200`, now)
 	if err != nil {
@@ -115,10 +114,7 @@ func (r *scheduledTestResultRepository) AdvanceCacheRecovery(ctx context.Context
 			if c.trialEnds.Time.Before(end) {
 				end = c.trialEnds.Time
 			}
-			groupID := c.plan.GroupID
-			if c.plan.HasGroupActions() {
-				groupID = nil
-			}
+			var groupID *int64
 			if end.After(c.trialStarted.Time) {
 				stats, err = r.CollectStatistics(ctx, service.ScheduledTestStatisticsFilter{
 					GroupID: groupID, AccountID: &c.accountID, Model: c.plan.ModelID,
@@ -192,8 +188,7 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 	err = tx.QueryRowContext(ctx, `SELECT p.model_id,p.group_id,
 	 (p.account_id IS NULL OR p.account_id=$2)
 	 AND ($3=ANY(p.test_definition_ids) OR $3=p.test_definition_id)
-	 AND (p.group_id IS NULL OR EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=$2 AND ag.group_id=p.group_id)
-	 OR EXISTS (SELECT 1 FROM scheduled_test_managed_accounts ma WHERE ma.plan_id=p.id AND ma.account_id=$2 AND ma.source_group_id=p.group_id))
+	 AND EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=$2 AND ag.group_id=ANY(p.group_ids))
 	 FROM scheduled_test_plans p WHERE p.id=$1`, c.planID, c.accountID, c.definitionID).Scan(&model, &groupID, &member)
 	if err != nil || !member || model != c.plan.ModelID || !reflect.DeepEqual(groupID, c.plan.GroupID) {
 		return err
@@ -238,7 +233,7 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 			reason = cacheRecoverySampleReason("限量试运行缓存质量达标，解除本规则调度保护", state, stats)
 			// Keep trial_started_at as the lower bound for later scheduled checks.
 			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET blocked=FALSE,
-			 automated_verdict='pass',verdict='pass',routing_verdict='pass',completed=TRUE,
+			 automated_verdict='pass',verdict='pass',completed=TRUE,
 			 recovery_phase='',recovery_cooldown_until=NULL,recovery_trial_ends_at=NULL,
 			 reason=$4,updated_at=$5 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`,
 				state.planID, state.accountID, state.definitionID, reason, now)
@@ -260,7 +255,7 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 	if err != nil {
 		return err
 	}
-	if err := reconcileProtectionGroups(ctx, tx, state.accountID); err != nil {
+	if err := reconcileProtectionGroups(ctx, tx, state); err != nil {
 		return err
 	}
 	if err := reconcileProtectionAccount(ctx, tx, state.accountID); err != nil {

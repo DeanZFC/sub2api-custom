@@ -45,6 +45,9 @@ type codexTicketJob struct {
 	accountID int64
 	model     string
 	cancel    context.CancelFunc
+	// A short-lived cookie can already need refresh at probe completion. Keep
+	// the minimum interval separate from a replaceable successful refresh time.
+	minNextAttempt time.Time
 }
 type codexTicketProxyHealth struct {
 	active   int
@@ -234,6 +237,7 @@ func (r *codexTicketScheduler) job(account *Account, model string, cfg config.Op
 	} else if !job.InProgress && job.signature != signature {
 		job.signature = signature
 		job.NextRetryAt = nil
+		job.minNextAttempt = time.Time{}
 		job.Paused = false
 		job.ConsecutiveFailures = 0
 		job.LastErrorCode, job.LastError = "", ""
@@ -247,6 +251,7 @@ func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, 
 		return false
 	}
 	ticket := s.lookupOpenAICodexTicket(account, model)
+	readyUntil := openAICodexTicketReadyUntil(ticket, s.lookupOpenAICodexTicketCookies(account), now, openAICodexTicketTargetLength(account, cfg))
 	r := &s.openaiCodexTicketScheduler
 	r.mu.Lock()
 	r.init()
@@ -255,14 +260,17 @@ func (s *OpenAIGatewayService) startOpenAICodexTicketProbe(ctx context.Context, 
 		r.mu.Unlock()
 		return false
 	}
-	if ticket.valid(now, openAICodexTicketTargetLength(account, cfg)) && !ticket.needsRefresh(now, time.Duration(cfg.RefreshBeforeSeconds)*time.Second) {
-		next := ticket.ExpiresAt.Add(-time.Duration(cfg.RefreshBeforeSeconds) * time.Second)
+	refreshAt := readyUntil.Add(-time.Duration(cfg.RefreshBeforeSeconds) * time.Second)
+	if !readyUntil.IsZero() && now.Before(refreshAt) {
+		next := refreshAt
 		job.NextRetryAt = &next
 		job.Paused = false
 		r.mu.Unlock()
 		return false
 	}
-	if job.NextRetryAt != nil && now.Before(*job.NextRetryAt) {
+	// Cookie deletion/expiry can make a previously scheduled successful refresh
+	// urgent. Preserve failure and capacity backoff, but not that stale deadline.
+	if now.Before(job.minNextAttempt) || (job.NextRetryAt != nil && now.Before(*job.NextRetryAt) && job.LastErrorCode != "") {
 		r.mu.Unlock()
 		return false
 	}
@@ -334,6 +342,9 @@ func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, ac
 	if result == nil && !strings.HasPrefix(state, openAICodexTicketStatePrefix) {
 		result = &openAICodexTicketProbeError{Code: "invalid_ticket", Message: "Upstream returned an invalid ticket", HTTPStatus: status}
 	}
+	if result == nil && target == 292 && s.lookupOpenAICodexTicketCookies(account).header(time.Now()) == "" {
+		result = &openAICodexTicketProbeError{Code: "cookie_missing", Message: "Routing cookies are missing or expired", HTTPStatus: status}
+	}
 	refreshed := false
 	if result != nil && result.Code == "auth" && status == http.StatusUnauthorized && ctx.Err() == nil {
 		refreshed = s.refreshOpenAICodexTicketAuthentication(ctx, account, token)
@@ -353,10 +364,16 @@ func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, ac
 		result.ProxyFailure = false
 	}
 	now := time.Now()
+	var harvested *openAICodexTicket
 	if result == nil {
-		ticket := &openAICodexTicket{AccountID: account.ID, Model: model, State: state, Length: len(state), CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second), Attempts: attempts}
-		s.storeOpenAICodexTicket(ctx, account, ticket)
+		// Start the lifetime before the request, so network/persistence latency
+		// cannot silently extend a ticket beyond the upstream's short window.
+		harvested = &openAICodexTicket{AccountID: account.ID, Model: model, State: state, Length: len(state), CapturedAt: started, ExpiresAt: started.Add(time.Duration(cfg.TTLSeconds) * time.Second), Attempts: attempts}
+		s.storeOpenAICodexTicket(ctx, account, harvested)
 	}
+	// Persistence is part of the attempt too; even a slow database must not
+	// consume the minimum quiet interval after completion.
+	now = time.Now()
 	r := &s.openaiCodexTicketScheduler
 	r.mu.Lock()
 	r.active--
@@ -383,7 +400,13 @@ func (s *OpenAIGatewayService) runOpenAICodexTicketProbe(ctx context.Context, ac
 	if result == nil {
 		job.ConsecutiveFailures = 0
 		job.LastErrorCode, job.LastError = "", ""
-		next := now.Add(time.Duration(max(1, cfg.TTLSeconds-cfg.RefreshBeforeSeconds)) * time.Second)
+		until := openAICodexTicketReadyUntil(harvested, s.lookupOpenAICodexTicketCookies(account), now, target)
+		next := until.Add(-time.Duration(cfg.RefreshBeforeSeconds) * time.Second)
+		minimum := now.Add(time.Duration(cfg.HarvestProbeIntervalSeconds) * time.Second)
+		job.minNextAttempt = minimum
+		if next.Before(minimum) {
+			next = minimum
+		}
 		job.NextRetryAt = &next
 	} else if result.Code != "canceled" {
 		job.ConsecutiveFailures++
@@ -444,14 +467,20 @@ func (s *OpenAIGatewayService) EnrichOpenAICodexTicketDiagnostics(account *Accou
 	now := time.Now()
 	for i := range statuses {
 		status := &statuses[i]
-		if ticket := s.lookupOpenAICodexTicket(account, status.Model); ticket.valid(now, status.TargetLength) {
+		cookies := s.lookupOpenAICodexTicketCookies(account)
+		status.setCookieStatus(cookies, now)
+		// The runtime cookie pool may invalidate an older account snapshot.
+		status.Ready, status.Length, status.RemainingSeconds, status.ExpiresAt = false, 0, 0, nil
+		status.Blocked = s.openAICodexTicketAccountConfig(context.Background(), account).FailClosed
+		ticket := s.lookupOpenAICodexTicket(account, status.Model)
+		if until := openAICodexTicketReadyUntil(ticket, cookies, now, status.TargetLength); !until.IsZero() {
 			status.Ready = true
 			status.Length = ticket.Length
-			status.RemainingSeconds = int64(ticket.ExpiresAt.Sub(now) / time.Second)
+			status.RemainingSeconds = int64(until.Sub(now) / time.Second)
 			if status.RemainingSeconds < 0 {
 				status.RemainingSeconds = 0
 			}
-			exp := ticket.ExpiresAt
+			exp := until
 			status.ExpiresAt = &exp
 			status.Blocked = false
 		}

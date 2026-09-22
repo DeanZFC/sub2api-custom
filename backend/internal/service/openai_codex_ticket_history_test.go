@@ -72,7 +72,8 @@ func TestCodexTicketInjectMissOnlyCountsEligibleOutboundInjection(t *testing.T) 
 			case "non_oauth":
 				account.Type = AccountTypeAPIKey
 			case "valid":
-				svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{Model: model, State: fakeCodexTicketState(292), Length: 292, ExpiresAt: time.Now().Add(time.Hour)})
+				seedCodexTicketCookies(svc, account)
+				svc.storeOpenAICodexTicket(context.Background(), account, &openAICodexTicket{Model: model, State: fakeCodexTicketState(292), Length: 292, CapturedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)})
 			case "fail_open":
 				svc.cfg.Gateway.OpenAICodexTicket.FailClosed = false
 			}
@@ -142,6 +143,7 @@ func TestCodexTicketHistoryRecordsSuccessfulProbe(t *testing.T) {
 	upstream := &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
 		h := http.Header{}
 		h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(292))
+		addFakeCodexTicketCookies(h)
 		return &http.Response{StatusCode: 200, Header: h, Body: http.NoBody}, nil
 	}}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, upstream)

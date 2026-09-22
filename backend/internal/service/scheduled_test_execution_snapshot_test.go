@@ -13,11 +13,14 @@ import (
 
 type snapshotResultRepoStub struct {
 	*retryResultRepoStub
-	targets   []int64
-	blocked   map[int64]bool
-	initErr   error
-	queries   atomic.Int32
-	published chan []*ScheduledTestResult
+	targets                  []int64
+	blocked                  map[int64]bool
+	initErr                  error
+	queries                  atomic.Int32
+	published                chan []*ScheduledTestResult
+	latestRun                string
+	frozenMembers            map[int64]bool
+	forbiddenMembershipReads atomic.Int32
 }
 
 func (r *snapshotResultRepoStub) ListPlanTargetAccountIDs(context.Context, *ScheduledTestPlan, *int64) ([]int64, error) {
@@ -26,20 +29,30 @@ func (r *snapshotResultRepoStub) ListPlanTargetAccountIDs(context.Context, *Sche
 }
 
 func (r *snapshotResultRepoStub) ListPlanDetectionAccountIDs(_ context.Context, _ *ScheduledTestPlan, accountID *int64) ([]int64, error) {
+	r.forbiddenMembershipReads.Add(1)
 	if r.blocked[*accountID] {
 		return nil, nil
 	}
 	return []int64{*accountID}, nil
 }
 
+func (r *snapshotResultRepoStub) IsPlanRunAccountEligible(_ context.Context, _ int64, runID string, accountID int64) (bool, error) {
+	return runID == r.latestRun && r.frozenMembers[accountID] && !r.blocked[accountID], nil
+}
+
 func (r *snapshotResultRepoStub) BeginProtectionRun(context.Context, *ScheduledTestPlan, time.Time) error {
 	return r.initErr
 }
 
-func (r *snapshotResultRepoStub) BeginRun(ctx context.Context, planID int64, runID string, inputs []*ScheduledTestResult) ([]*ScheduledTestResult, error) {
+func (r *snapshotResultRepoStub) BeginRun(ctx context.Context, plan *ScheduledTestPlan, runID string, inputs []*ScheduledTestResult) ([]*ScheduledTestResult, error) {
+	r.latestRun = runID
+	r.frozenMembers = make(map[int64]bool)
 	var results, snapshots []*ScheduledTestResult
 	for _, input := range inputs {
 		input.RunID = runID
+		if input.AccountID != nil {
+			r.frozenMembers[*input.AccountID] = true
+		}
 		result, err := r.Create(ctx, input)
 		if err != nil {
 			return nil, err
@@ -141,6 +154,7 @@ func TestScheduledTestSnapshotIncludesStatisticsAndEverySkippedAccountType(t *te
 	require.Len(t, finals, 6)
 	for _, id := range plan.TestDefinitionIDs {
 		require.Equal(t, "success", finals[[2]int64{12, id}].Status)
+		require.Equal(t, repo.latestRun, finals[[2]int64{12, id}].RunID, "all result kinds must retain their frozen round")
 		require.Equal(t, "failed", finals[[2]int64{13, id}].Status)
 		require.Contains(t, finals[[2]int64{13, id}].ErrorMessage, "检测跳过")
 	}
@@ -219,4 +233,52 @@ func TestScheduledTestSnapshotFastAccountAdvancesWhileAnotherWaits(t *testing.T)
 	}
 	require.Len(t, completed, 4)
 	require.EqualValues(t, 1, repo.queries.Load(), "moving an account must not change this round's frozen target list")
+}
+
+// Membership changes can happen as soon as a first result is reconciled. The
+// second test must use the frozen round, and new arrivals wait for a fresh run.
+func TestScheduledTestSnapshotDeduplicatesAndIgnoresMidRoundMembershipChanges(t *testing.T) {
+	repo := &snapshotResultRepoStub{retryResultRepoStub: &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 30)}, targets: []int64{12, 12}}
+	var reads atomic.Int32
+	accounts := scheduledTestExecutionAccountRepo{get: func(ctx context.Context, id int64) (*Account, error) {
+		reads.Add(1)
+		repo.targets = []int64{13}
+		return &Account{ID: id, Extra: map[string]any{"synthetic_ui_test": true}}, nil
+	}}
+	runner := newSnapshotRunner(repo, accounts)
+	plan := scheduledTestExecutionPlan()
+	plan.GroupIDs = []int64{8, 10}
+	plan.AccountID = nil
+	plan.TargetMode = "all_accounts"
+	runner.RunPlanNow(context.Background(), plan)
+	require.EqualValues(t, 2, reads.Load(), "one upstream execution per selected test, despite duplicate group membership")
+	require.EqualValues(t, 1, repo.queries.Load())
+	require.Zero(t, repo.forbiddenMembershipReads.Load(), "eligibility must use persisted snapshot, not live source groups")
+	require.True(t, repo.frozenMembers[12])
+	require.False(t, repo.frozenMembers[13])
+	firstRun := repo.latestRun
+	runner.RunPlanNow(context.Background(), plan)
+	require.NotEqual(t, firstRun, repo.latestRun)
+	require.True(t, repo.frozenMembers[13], "newly joined accounts are admitted next round")
+	require.False(t, repo.frozenMembers[12])
+	require.EqualValues(t, 4, reads.Load())
+	close(repo.updated)
+	finals := map[string]map[[2]int64]int{}
+	for result := range repo.updated {
+		if result.Status != "success" {
+			continue
+		}
+		require.NotEmpty(t, result.RunID, "completion must retain snapshot identity for protection")
+		if finals[result.RunID] == nil {
+			finals[result.RunID] = map[[2]int64]int{}
+		}
+		finals[result.RunID][[2]int64{*result.AccountID, *result.TestDefinitionID}]++
+	}
+	require.Len(t, finals, 2)
+	for _, pairs := range finals {
+		require.Len(t, pairs, 2)
+		for _, count := range pairs {
+			require.Equal(t, 1, count)
+		}
+	}
 }

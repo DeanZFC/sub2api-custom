@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -360,5 +361,24 @@ func TestScheduledTestRunnerPlanFailureSnapshotsReasoningEffort(t *testing.T) {
 	}
 	if got := resultRepo.created[0]; got.ReasoningEffort != "xhigh" || got.Status != "failed" {
 		t.Fatalf("plan failure result = %#v, want failed result with xhigh effort", got)
+	}
+}
+
+func TestExtractScheduledTestHTMLPreservesReportedPelicanTranscript(t *testing.T) {
+	raw, err := os.ReadFile("testdata/scheduled_test_pelican_transcript.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	start := strings.Index(source, "<!doctype html>")
+	end := strings.LastIndex(source, "</html>") + len("</html>")
+	got := extractScheduledTestHTML(source)
+	if got != source[start:end] {
+		t.Fatalf("extracted %d bytes, want complete %d-byte document", len(got), end-start)
+	}
+	result := &ScheduledTestResult{Status: "success", OutputKind: "html", ResponseText: source, OutputHTML: "<html><body>old truncated preview</body></html>"}
+	normalizeStoredTestResults([]*ScheduledTestResult{result})
+	if result.OutputHTML != got {
+		t.Fatal("historical preview did not re-extract full original response")
 	}
 }

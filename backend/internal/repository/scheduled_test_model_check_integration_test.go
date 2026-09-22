@@ -68,7 +68,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source tier'),(10,'Higher tier'),(11,'Unre
 		"260_scheduled_test_model_check.sql", "260_scheduled_test_model_check.sql",
 		"261_scheduled_test_admin_review.sql",
 		"262_scheduled_test_execution_snapshot.sql",
-		"264_scheduled_test_cache_recovery.sql",
+		"264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -89,7 +89,7 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,8),(62,11);`)
 	}
 	newPlan := func(t *testing.T, rule *service.ScheduledTestProtectionRule) *service.ScheduledTestPlan {
 		t.Helper()
-		input := &service.ScheduledTestPlan{Name: "Model evidence", AccountID: &accountID, GroupID: &groupID, TargetMode: "account", TestDefinitionID: &definitionID, TestDefinitionIDs: []int64{definitionID}, ModelID: "public-model-alias", CronExpression: "* * * * *", Enabled: true, MaxResults: 10}
+		input := &service.ScheduledTestPlan{Name: "Model evidence", GroupIDs: []int64{8, 10}, GroupID: &groupID, TargetMode: "all_accounts", TestDefinitionID: &definitionID, TestDefinitionIDs: []int64{definitionID}, ModelID: "public-model-alias", CronExpression: "* * * * *", Enabled: true, MaxResults: 10}
 		if rule != nil {
 			input.Protection = service.ScheduledTestProtectionConfig{Enabled: true, Rules: []service.ScheduledTestProtectionRule{*rule}}
 		}
@@ -104,8 +104,13 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,8),(62,11);`)
 		started := time.Now().UTC().Add(time.Duration(sequence) * time.Second).Truncate(time.Microsecond)
 		raw, err := json.Marshal(snapshot)
 		require.NoError(t, err)
-		row, err := results.Create(ctx, &service.ScheduledTestResult{PlanID: plan.ID, TestDefinitionID: &definitionID, GroupID: plan.GroupID, AccountID: plan.AccountID, TargetMode: plan.TargetMode, ModelID: plan.ModelID, Status: status, OutputKind: "model_check", ResponseText: string(raw), StartedAt: started, FinishedAt: started})
+		row, err := results.Create(ctx, &service.ScheduledTestResult{PlanID: plan.ID, TestDefinitionID: &definitionID, GroupID: plan.GroupID, AccountID: &accountID, TargetMode: plan.TargetMode, ModelID: plan.ModelID, Status: status, OutputKind: "model_check", ResponseText: string(raw), StartedAt: started, FinishedAt: started})
 		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `UPDATE scheduled_test_plans SET latest_run_id=$2 WHERE id=$1`, plan.ID, fmt.Sprintf("fixture-%d", plan.ID))
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `UPDATE scheduled_test_results SET run_id=$2 WHERE id=$1`, row.ID, fmt.Sprintf("fixture-%d", plan.ID))
+		require.NoError(t, err)
+		row.RunID = fmt.Sprintf("fixture-%d", plan.ID)
 		return row
 	}
 	assertSnapshot := func(t *testing.T, result *service.ScheduledTestResult, expected service.ScheduledTestModelCheck, public bool) {
@@ -225,20 +230,20 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,8),(62,11);`)
 		missing := service.ScheduledTestModelCheck{RequestedModel: plan.ModelID, UpstreamModel: "gpt-5.6-sol", ReturnedModels: []string{}, MatchMode: "exact", Verdict: "unknown", Reason: "missing_model"}
 		mismatch := service.ScheduledTestModelCheck{RequestedModel: plan.ModelID, UpstreamModel: "gpt-5.6-sol", ReturnedModels: []string{"gpt-5.6-terra"}, MatchMode: "exact", Verdict: "fail", Reason: "mismatch"}
 		apply(matching, "pass")
-		assertGroups([]int64{10, 11})
+		assertGroups([]int64{10})
 		apply(missing, "pending")
-		assertGroups([]int64{10, 11})
+		assertGroups([]int64{10})
 		apply(mismatch, "fail")
-		assertGroups([]int64{8, 11})
+		assertGroups([]int64{8})
 		visible, err := svc.ListVisibleResults(ctx, 1, 3)
 		require.NoError(t, err)
 		require.Len(t, visible, 3)
 		assertSnapshot(t, visible[0], mismatch, true)
 		require.Equal(t, "success", visible[0].Status)
 		apply(missing, "pending")
-		assertGroups([]int64{8, 11})
+		assertGroups([]int64{8})
 		apply(matching, "pass")
-		assertGroups([]int64{10, 11})
+		assertGroups([]int64{10})
 		var status string
 		require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM accounts WHERE id=62`).Scan(&status))
 		require.Equal(t, "active", status)

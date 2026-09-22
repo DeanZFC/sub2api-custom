@@ -93,7 +93,7 @@ func TestScheduledTestMultipleDefinitionsPlanValidation(t *testing.T) {
 				1: {ID: 1, Enabled: true},
 				2: {ID: 2, Enabled: false},
 			}})
-			plan := &ScheduledTestPlan{ID: 10, GroupID: scheduledTestPtrInt64(8), TargetMode: "all_accounts", TestDefinitionIDs: []int64{2, 1, 2}, ModelID: "model", CronExpression: "*/5 * * * *", Enabled: true}
+			plan := &ScheduledTestPlan{ID: 10, GroupIDs: []int64{8}, GroupID: scheduledTestPtrInt64(8), TargetMode: "all_accounts", TestDefinitionIDs: []int64{2, 1, 2}, ModelID: "model", CronExpression: "*/5 * * * *", Enabled: true}
 			write := svc.CreatePlan
 			if operation == "update" {
 				write = svc.UpdatePlan
@@ -114,15 +114,15 @@ func TestScheduledTestMultipleDefinitionsPlanValidation(t *testing.T) {
 	}
 }
 
-func TestScheduledTestDefinitionSelectionKeepsLegacyAccountPlans(t *testing.T) {
+func TestScheduledTestDefinitionSelectionRequiresNewStrategyArrays(t *testing.T) {
 	plan := &ScheduledTestPlan{AccountID: scheduledTestPtrInt64(1), ModelID: "model", CronExpression: "* * * * *"}
-	require.NoError(t, validateScheduledTestPlan(plan))
-	require.Empty(t, plan.TestDefinitionIDs)
-	require.Nil(t, plan.TestDefinitionID)
-	plan.TestDefinitionIDs = nil
+	require.ErrorContains(t, validateScheduledTestPlan(plan), "group_ids")
+	plan.GroupIDs = []int64{8}
 	plan.TestDefinitionID = scheduledTestPtrInt64(2)
+	require.ErrorContains(t, validateScheduledTestPlan(plan), "test_definition_ids")
+	plan.TestDefinitionIDs = []int64{2}
 	require.NoError(t, validateScheduledTestPlan(plan))
-	require.Equal(t, []int64{2}, plan.TestDefinitionIDs)
+	require.Nil(t, plan.AccountID)
 }
 
 func TestScheduledTestRunnerExecutesEachDefinitionAndContinuesPastDisabledType(t *testing.T) {

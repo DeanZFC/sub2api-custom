@@ -7,6 +7,18 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
+func (s *ScheduledTestRunnerService) runAccountEligible(ctx context.Context, plan *ScheduledTestPlan, result *ScheduledTestResult, accountID int64) (bool, error) {
+	if s.scheduledSvc != nil {
+		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestRunEligibilityRepository); ok {
+			if result == nil || result.RunID == "" {
+				return false, fmt.Errorf("test run snapshot is required")
+			}
+			return repo.IsPlanRunAccountEligible(ctx, plan.ID, result.RunID, accountID)
+		}
+	}
+	return s.detectionAccountEligible(ctx, plan, accountID)
+}
+
 func (s *ScheduledTestRunnerService) detectionAccountEligible(ctx context.Context, plan *ScheduledTestPlan, accountID int64) (bool, error) {
 	if s.scheduledSvc != nil {
 		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRepository); ok {

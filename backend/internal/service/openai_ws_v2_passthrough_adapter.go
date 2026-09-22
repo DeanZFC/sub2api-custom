@@ -880,6 +880,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	statusCode := 0
 	var handshakeHeaders http.Header
 	for {
+		headers, _, err = s.openAIWSCodexTicketHeadersFactory(account, gjson.GetBytes(firstClientMessage, "model").String())(ctx, headers)
+		if err != nil {
+			return fmt.Errorf("refresh ws ticket headers: %w", err)
+		}
 		headers, err = s.refreshOpenAIAgentIdentityHeaders(ctx, account, headers)
 		if err != nil {
 			return fmt.Errorf("refresh ws authentication headers: %w", err)

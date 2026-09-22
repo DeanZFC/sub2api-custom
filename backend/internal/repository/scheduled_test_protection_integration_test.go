@@ -69,8 +69,8 @@ func TestScheduledTestProtectionIntegration(t *testing.T) {
 		require.NoError(t, err)
 	}
 	exec(`CREATE TABLE users (id BIGINT PRIMARY KEY);
-CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,extra JSONB DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT NOW(),deleted_at TIMESTAMPTZ);
-CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ,is_exclusive BOOLEAN DEFAULT FALSE,subscription_type TEXT DEFAULT 'standard');
+CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,extra JSONB DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT NOW(),deleted_at TIMESTAMPTZ);
+CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ,is_exclusive BOOLEAN DEFAULT FALSE,subscription_type TEXT DEFAULT 'standard');
 CREATE TABLE account_groups(account_id BIGINT,group_id BIGINT);
 CREATE TABLE user_allowed_groups(user_id BIGINT,group_id BIGINT);
 CREATE TABLE user_subscriptions(user_id BIGINT,group_id BIGINT,deleted_at TIMESTAMPTZ,status TEXT,starts_at TIMESTAMPTZ,expires_at TIMESTAMPTZ);
@@ -88,7 +88,7 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		"258_scheduled_test_protection.sql", "259_scheduled_test_outcome_actions.sql",
 		"260_scheduled_test_model_check.sql", "261_scheduled_test_admin_review.sql",
 		"262_scheduled_test_execution_snapshot.sql",
-		"264_scheduled_test_cache_recovery.sql",
+		"264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -100,8 +100,8 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 	plans := &scheduledTestPlanRepository{db: db}
 	repo := &scheduledTestResultRepository{db: db}
 	groupID, accountID := int64(8), int64(62)
-	plain := service.ScheduledTestProtectionRule{TestDefinitionID: candyID, PauseOnFailure: true}
-	voting := service.ScheduledTestProtectionRule{TestDefinitionID: htmlID, ExpectedAnswer: "reference-only", Vote: &service.ScheduledTestVoteConfig{Enabled: true, PublicEnabled: true, RejectAbove: 1, PassAtLeast: 2}}
+	plain := service.ScheduledTestProtectionRule{TestDefinitionID: candyID, PauseOnFailure: true, OnPass: &service.ScheduledTestOutcomeAction{Scheduling: "resume"}, OnFail: &service.ScheduledTestOutcomeAction{Scheduling: "pause"}}
+	voting := service.ScheduledTestProtectionRule{TestDefinitionID: htmlID, ExpectedAnswer: "reference-only", OnPass: &service.ScheduledTestOutcomeAction{Scheduling: "resume"}, OnFail: &service.ScheduledTestOutcomeAction{Scheduling: "pause"}, Vote: &service.ScheduledTestVoteConfig{Enabled: true, PublicEnabled: true, RejectAbove: 1, PassAtLeast: 2}}
 	reset := func() {
 		exec(`TRUNCATE scheduled_test_plans,scheduled_test_results,scheduled_test_plan_definitions,scheduled_test_protection_states,scheduled_test_votes,scheduler_outbox RESTART IDENTITY CASCADE`)
 		exec(`UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL,extra='{}';TRUNCATE user_allowed_groups,user_subscriptions`)
@@ -112,7 +112,7 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		for _, rule := range rules {
 			ids = append(ids, rule.TestDefinitionID)
 		}
-		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Quality rule", GroupID: &groupID, AccountID: &accountID, TargetMode: "account", TestDefinitionID: &ids[0], TestDefinitionIDs: ids, ModelID: "model", CronExpression: "* * * * *", Enabled: true, MaxResults: 3, Protection: service.ScheduledTestProtectionConfig{Enabled: true, Rules: rules}})
+		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Quality rule", GroupIDs: []int64{groupID}, GroupID: &groupID, TargetMode: "all_accounts", TestDefinitionID: &ids[0], TestDefinitionIDs: ids, ModelID: "model", CronExpression: "* * * * *", Enabled: true, MaxResults: 3, Protection: service.ScheduledTestProtectionConfig{Enabled: true, Rules: rules}})
 		require.NoError(t, err)
 		return p
 	}
@@ -121,8 +121,11 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		t.Helper()
 		sequence++
 		started := time.Now().UTC().Add(time.Duration(sequence) * time.Second).Truncate(time.Microsecond)
-		result, err := repo.Create(ctx, &service.ScheduledTestResult{PlanID: plan.ID, TestDefinitionID: &definition, GroupID: plan.GroupID, AccountID: plan.AccountID, TargetMode: plan.TargetMode, ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, Status: "running", OutputKind: "html", StartedAt: started, FinishedAt: started})
+		result, err := repo.Create(ctx, &service.ScheduledTestResult{PlanID: plan.ID, TestDefinitionID: &definition, GroupID: plan.GroupID, AccountID: &accountID, TargetMode: plan.TargetMode, ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, Status: "running", OutputKind: "html", StartedAt: started, FinishedAt: started})
 		require.NoError(t, err)
+		exec(`UPDATE scheduled_test_plans SET latest_run_id=$2 WHERE id=$1`, plan.ID, fmt.Sprintf("fixture-%d", plan.ID))
+		exec(`UPDATE scheduled_test_results SET run_id=$2 WHERE id=$1`, result.ID, fmt.Sprintf("fixture-%d", plan.ID))
+		result.RunID = fmt.Sprintf("fixture-%d", plan.ID)
 		return result
 	}
 	begin := func(plan *service.ScheduledTestPlan, rule service.ScheduledTestProtectionRule) *service.ScheduledTestResult {
@@ -272,6 +275,7 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		p := newPlan(voting)
 		private := int64(9)
 		p.GroupID = &private
+		p.GroupIDs = []int64{private}
 		p, err = plans.Update(ctx, p)
 		require.NoError(t, err)
 		r := begin(p, voting)
@@ -419,10 +423,11 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 	})
 	t.Run("runner persists metrics and pauses then retests and recovers without enabling manual stops", func(t *testing.T) {
 		reset()
+		exec(`UPDATE accounts SET schedulable=FALSE WHERE id=63`)
 		definitions := NewScheduledTestDefinitionRepository(db)
 		stats, err := definitions.GetByKey(ctx, "hourly_stats")
 		require.NoError(t, err)
-		rule := service.ScheduledTestProtectionRule{TestDefinitionID: stats.ID, MinSamples: 10, Thresholds: []service.ScheduledTestThreshold{{Metric: "cache_rate", Operator: "lt", Value: 80}}}
+		rule := service.ScheduledTestProtectionRule{TestDefinitionID: stats.ID, MinSamples: 10, OnPass: &service.ScheduledTestOutcomeAction{Scheduling: "resume"}, OnFail: &service.ScheduledTestOutcomeAction{Scheduling: "pause"}, Thresholds: []service.ScheduledTestThreshold{{Metric: "cache_rate", Operator: "lt", Value: 80}}}
 		p := newPlan(rule)
 		results := &protectionRunnerStatisticsRepo{scheduledTestResultRepository: repo, cacheRate: .5, requests: 20}
 		svc := service.NewScheduledTestService(plans, results)

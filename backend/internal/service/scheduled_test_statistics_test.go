@@ -247,7 +247,11 @@ func TestScheduledTestStatisticsScopesAndAvoidsUpstreamAndRecovery(t *testing.T)
 				}
 			}
 			for _, filter := range repo.filters {
-				require.Equal(t, plan.GroupID, filter.GroupID)
+				if filter.AccountID != nil {
+					require.Nil(t, filter.GroupID)
+				} else {
+					require.Equal(t, plan.GroupID, filter.GroupID)
+				}
 				require.Equal(t, plan.ModelID, filter.Model)
 				require.Equal(t, time.Hour, filter.WindowEnd.Sub(filter.WindowStart))
 				require.False(t, filter.WindowEnd.Before(before))

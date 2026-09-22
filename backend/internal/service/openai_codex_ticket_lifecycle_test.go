@@ -26,6 +26,7 @@ func (u *codexTicketFuncUpstream) Do(req *http.Request, _ string, _ int64, _ int
 func codexTicketResponse() *http.Response {
 	h := http.Header{}
 	h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(292))
+	addFakeCodexTicketCookies(h)
 	return &http.Response{StatusCode: http.StatusOK, Header: h, Body: io.NopCloser(strings.NewReader("data: {}\n\n"))}
 }
 

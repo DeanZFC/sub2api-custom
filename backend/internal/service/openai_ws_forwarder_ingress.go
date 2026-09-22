@@ -790,9 +790,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		Account:                   account,
+		WSURL:                     wsURL,
+		Headers:                   wsHeaders,
+		CodexTicketHeadersFactory: s.openAIWSCodexTicketHeadersFactory(account, firstRoutingFields[0].String()),
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -1674,6 +1675,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 		}
+		if ticketErr := baseAcquireReq.refreshCodexTicketHeaders(ctx); ticketErr != nil {
+			return fmt.Errorf("refresh ws ticket headers: %w", ticketErr)
+		}
+		if sessionLease != nil && currentPreviousResponseID == "" && !hasFunctionCallOutput {
+			compatibility := normalizeOpenAIWSHandshakeCompatibility(account, baseAcquireReq.Headers, baseAcquireReq.codexTicketManaged)
+			if sessionLease.conn.handshakeCompatibility.codexTicketDigest != compatibility.codexTicketDigest {
+				// A standalone turn can safely send its complete input on a fresh
+				// handshake. Keep continuation/tool-output turns on their existing
+				// socket: replacing it could destroy connection-local context.
+				resetSessionLease(false)
+			}
+		}
 		forcePreferredConn := isStrictAffinityTurn(currentPayload)
 		if sessionLease == nil {
 			acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn, turnRetry > 0)
@@ -1934,6 +1947,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return parseErr
 		}
 		nextRoutingFields := gjson.GetManyBytes(nextPayload.payloadRaw, "model", "service_tier")
+		baseAcquireReq.CodexTicketHeadersFactory = s.openAIWSCodexTicketHeadersFactory(account, nextRoutingFields[0].String())
 		if nextPayload.promptCacheKey != "" {
 			// ingress 会话在整个客户端 WS 生命周期内复用同一上游连接；
 			// prompt_cache_key 对握手头的更新仅在未来需要重新建连时生效。

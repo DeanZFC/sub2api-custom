@@ -67,12 +67,7 @@ func (s *OpenAIGatewayService) openAICodexTicketConfig() config.OpenAICodexTicke
 	if cfg.TargetLength <= 0 {
 		cfg.TargetLength = 292
 	}
-	if cfg.TTLSeconds <= 0 {
-		cfg.TTLSeconds = 3600
-	}
-	if cfg.RefreshBeforeSeconds <= 0 {
-		cfg.RefreshBeforeSeconds = 600
-	}
+	cfg = config.NormalizeOpenAICodexTicketTiming(cfg)
 	if cfg.HarvestProbeIntervalSeconds <= 0 {
 		cfg.HarvestProbeIntervalSeconds = 6
 	}
@@ -113,13 +108,15 @@ func (s *OpenAIGatewayService) openAICodexTicketGatedModel(model string) bool {
 // OpenAICodexTicketStatus 是给管理端看的门票摘要，不含 state blob。
 type OpenAICodexTicketStatus struct {
 	OpenAICodexTicketDiagnostics
-	Model            string     `json:"model"`
-	Length           int        `json:"length,omitempty"`
-	TargetLength     int        `json:"target_length"`
-	Ready            bool       `json:"ready"`
-	RemainingSeconds int64      `json:"remaining_seconds"`
-	Blocked          bool       `json:"blocked"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	Model                  string     `json:"model"`
+	Length                 int        `json:"length,omitempty"`
+	TargetLength           int        `json:"target_length"`
+	Ready                  bool       `json:"ready"`
+	RemainingSeconds       int64      `json:"remaining_seconds"`
+	Blocked                bool       `json:"blocked"`
+	ExpiresAt              *time.Time `json:"expires_at,omitempty"`
+	CookieReady            bool       `json:"cookie_ready"`
+	CookieRemainingSeconds int64      `json:"cookie_remaining_seconds"`
 }
 
 func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) []OpenAICodexTicketStatus {
@@ -146,15 +143,23 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 		if account != nil && account.Extra != nil {
 			ticket = parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
 		}
-		if ticket.valid(now, targetLen) {
+		ticket = limitOpenAICodexTicketLifetime(ticket, cfg)
+		cookies := parseOpenAICodexTicketCookies(account)
+		if cookies != nil {
+			ttl := time.Duration(config.NormalizeOpenAICodexTicketTiming(cfg).TTLSeconds) * time.Second
+			cookies.CFLB.ExpiresAt = minCodexTicketTime(cookies.CFLB.ExpiresAt, cookies.CFLB.CapturedAt.Add(ttl))
+			cookies.OAILB.ExpiresAt = minCodexTicketTime(cookies.OAILB.ExpiresAt, cookies.OAILB.CapturedAt.Add(ttl))
+		}
+		status.setCookieStatus(cookies, now)
+		if until := openAICodexTicketReadyUntil(ticket, cookies, now, targetLen); !until.IsZero() {
 			status.Ready = true
 			status.Length = ticket.Length
-			remaining := int64(ticket.ExpiresAt.Sub(now) / time.Second)
+			remaining := int64(until.Sub(now) / time.Second)
 			if remaining < 0 {
 				remaining = 0
 			}
 			status.RemainingSeconds = remaining
-			exp := ticket.ExpiresAt
+			exp := until
 			status.ExpiresAt = &exp
 		}
 		status.Blocked = policy.FailClosed && !status.Ready
@@ -186,17 +191,65 @@ func (t *openAICodexTicket) valid(now time.Time, targetLen int) bool {
 	if len(state) != targetLen || t.Length != targetLen || !strings.HasPrefix(state, openAICodexTicketStatePrefix) {
 		return false
 	}
-	if t.ExpiresAt.IsZero() || !now.Before(t.ExpiresAt) {
+	if t.CapturedAt.IsZero() || t.CapturedAt.After(now) || !now.Before(t.expiresAt()) {
 		return false
 	}
 	return true
+}
+
+// Old persisted one-hour tickets must obey the short lifetime immediately after
+// an upgrade. A missing capture timestamp cannot establish ticket freshness.
+func (t *openAICodexTicket) expiresAt() time.Time {
+	if t == nil || t.CapturedAt.IsZero() || t.ExpiresAt.IsZero() {
+		return time.Time{}
+	}
+	return minCodexTicketTime(t.ExpiresAt, t.CapturedAt.Add(time.Duration(config.DefaultOpenAICodexTicketTTLSeconds)*time.Second))
+}
+
+func minCodexTicketTime(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
+}
+
+func limitOpenAICodexTicketLifetime(ticket *openAICodexTicket, cfg config.OpenAICodexTicketConfig) *openAICodexTicket {
+	if ticket == nil {
+		return nil
+	}
+	copy := *ticket
+	ttl := time.Duration(config.NormalizeOpenAICodexTicketTiming(cfg).TTLSeconds) * time.Second
+	copy.ExpiresAt = minCodexTicketTime(ticket.expiresAt(), ticket.CapturedAt.Add(ttl))
+	return &copy
+}
+
+func openAICodexTicketReadyUntil(ticket *openAICodexTicket, cookies *openAICodexTicketCookies, now time.Time, target int) time.Time {
+	if !ticket.valid(now, target) {
+		return time.Time{}
+	}
+	until := ticket.expiresAt()
+	if target == 292 {
+		if cookies.header(now) == "" {
+			return time.Time{}
+		}
+		until = minCodexTicketTime(until, cookies.expiresAt())
+	}
+	return until
+}
+
+func (status *OpenAICodexTicketStatus) setCookieStatus(cookies *openAICodexTicketCookies, now time.Time) {
+	status.CookieReady = cookies.header(now) != ""
+	status.CookieRemainingSeconds = 0
+	if status.CookieReady {
+		status.CookieRemainingSeconds = int64(cookies.expiresAt().Sub(now) / time.Second)
+	}
 }
 
 func (t *openAICodexTicket) needsRefresh(now time.Time, refreshBefore time.Duration) bool {
 	if t == nil || t.ExpiresAt.IsZero() {
 		return true
 	}
-	return !t.ExpiresAt.After(now.Add(refreshBefore))
+	return !t.expiresAt().After(now.Add(refreshBefore))
 }
 
 func (s *OpenAIGatewayService) lookupOpenAICodexTicket(account *Account, model string) *openAICodexTicket {
@@ -218,6 +271,8 @@ func (s *OpenAIGatewayService) lookupOpenAICodexTicket(account *Account, model s
 	if account.Extra != nil {
 		extra = parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
 	}
+	mem = limitOpenAICodexTicketLifetime(mem, s.openAICodexTicketConfig())
+	extra = limitOpenAICodexTicketLifetime(extra, s.openAICodexTicketConfig())
 	if extra.valid(now, targetLen) && (mem == nil || extra.CapturedAt.After(mem.CapturedAt)) {
 		s.openaiCodexTickets.Store(key, extra)
 		return extra
@@ -289,27 +344,39 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 // 请求路径只注入已捕获的有效门票，不现场打票；无票则返回
 // ErrOpenAICodexTicketUnavailable。打票由后台 harvester 完成。
 func (s *OpenAIGatewayService) applyOpenAICodexTicket(ctx context.Context, account *Account, model string, h http.Header) error {
+	_, err := s.applyOpenAICodexTicketWithResult(ctx, account, model, h)
+	return err
+}
+
+// The result identifies what was actually injected from one snapshot, so WS
+// reuse cannot confuse a concurrently renewed ticket with the sent headers.
+func (s *OpenAIGatewayService) applyOpenAICodexTicketWithResult(ctx context.Context, account *Account, model string, h http.Header) (bool, error) {
 	if s == nil || h == nil || !isOpenAICodexTicketAccount(account) {
-		return nil
+		return false, nil
 	}
 	policy := s.openAICodexTicketAccountConfig(ctx, account)
 	if !policy.Enabled {
-		return nil
+		return false, nil
 	}
 	model = normalizeOpenAICodexTicketModel(model)
 	if model == "" || !s.openAICodexTicketGatedModel(model) {
-		return nil
+		return false, nil
 	}
 	ticket := s.lookupOpenAICodexTicket(account, model)
-	if ticket.valid(time.Now(), policy.TargetLength) {
+	now := time.Now()
+	cookies := s.lookupOpenAICodexTicketCookies(account)
+	if !openAICodexTicketReadyUntil(ticket, cookies, now, policy.TargetLength).IsZero() {
 		h.Set(openAICodexTurnStateHeader, ticket.State)
-		return nil
+		if cookie := cookies.header(now); cookie != "" {
+			h.Set("Cookie", cookie)
+		}
+		return true, nil
 	}
 	s.recordOpenAICodexTicketInjectMiss(account.ID, model)
 	if !policy.FailClosed {
-		return nil
+		return false, nil
 	}
-	return ErrOpenAICodexTicketUnavailable
+	return false, ErrOpenAICodexTicketUnavailable
 }
 
 // openAICodexTicketOutboundModel 预测本请求真正出站的模型名，也就是
@@ -357,7 +424,7 @@ func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, 
 		return false
 	}
 	ticket := s.lookupOpenAICodexTicket(account, model)
-	return !ticket.valid(time.Now(), policy.TargetLength)
+	return openAICodexTicketReadyUntil(ticket, s.lookupOpenAICodexTicketCookies(account), time.Now(), policy.TargetLength).IsZero()
 }
 
 func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, account *Account, token, model, proxyURL string, attemptTimeout time.Duration) (state string, status int, err error) {
@@ -404,6 +471,9 @@ func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, a
 	}()
 	if resp.StatusCode != http.StatusOK {
 		return "", resp.StatusCode, openAICodexTicketProbeResponseError(resp)
+	}
+	if attemptCtx.Err() == nil {
+		s.captureOpenAICodexTicketCookies(attemptCtx, account, resp.Header, time.Now())
 	}
 	return extractOpenAICodexTurnState(resp.Header), resp.StatusCode, nil
 }
@@ -547,7 +617,7 @@ func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, a
 
 // IsOpenAICodexTicketExtraKey identifies server-managed ticket material.
 func IsOpenAICodexTicketExtraKey(key string) bool {
-	return strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix)
+	return strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix) || key == openAICodexTicketCookiesExtraKey
 }
 
 // MergeOpenAICodexTicketExtra preserves only persisted tickets, never summaries or

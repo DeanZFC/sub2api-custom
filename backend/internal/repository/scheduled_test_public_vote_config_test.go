@@ -25,17 +25,13 @@ func TestScheduledTestPublicVotingDefaultsClosedAndTogglesIndependently(t *testi
 	require.False(t, protectionRuleCurrent(&current, rule))
 }
 
-func TestScheduledTestPublicVotingWorkflowNormalizesPrivateDefault(t *testing.T) {
-	w := &service.ScheduledTestGroupWorkflow{AutomaticTestID: 1, ReviewTestID: 2, PassGroupID: 3, FailGroupID: 4}
-	old := service.ScheduledTestProtectionConfig{Enabled: true, GroupWorkflow: w, Rules: w.Rules()}
+func TestScheduledTestPublicVotingPolicyFieldsInvalidateRound(t *testing.T) {
+	rule := service.ScheduledTestProtectionRule{TestDefinitionID: 1, Priority: 0, Vote: &service.ScheduledTestVoteConfig{Enabled: true, PassAtLeast: 1}}
+	old := service.ScheduledTestProtectionConfig{Enabled: true, Rules: []service.ScheduledTestProtectionRule{rule}}
 	current := protectionConfigWithoutPublicVote(old)
-	current.GroupWorkflow.ReviewVote.PublicEnabled = true
-	current.Rules = current.GroupWorkflow.Rules()
-	require.True(t, protectionConfigSamePolicy(old, current))
-	require.True(t, protectionPublicVoteCurrent(&current, old.Rules[1]))
-	require.False(t, protectionPublicVoteCurrent(&current, old.Rules[0]), "numeric automatic check is not public review")
-	require.Nil(t, old.GroupWorkflow.ReviewVote)
-	current.GroupWorkflow.ReviewVote.RejectAbove = 2
-	current.Rules = current.GroupWorkflow.Rules()
+	current.Rules[0].Priority = 100
+	require.False(t, protectionConfigSamePolicy(old, current))
+	current.Rules[0].Priority = 0
+	current.Rules[0].RequiredPass = true
 	require.False(t, protectionConfigSamePolicy(old, current))
 }

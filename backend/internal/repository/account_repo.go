@@ -69,6 +69,7 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 
 var schedulerNeutralExtraKeys = map[string]struct{}{
 	"codex_usage_updated_at":     {},
+	"codex_turn_cookies":         {},
 	"grok_billing_snapshot":      {},
 	"session_window_utilization": {},
 }
@@ -744,7 +745,7 @@ func lockAndMergeAccountProbeExtra(
 
 	// extra 理论上恒为 JSON 对象，但历史数据若存成非对象（数组/标量），在此硬失败
 	// 会让该账号的任何编辑都保存不了——而这条路径覆盖所有平台的账号更新。
-	// 门票是 1 小时 TTL 的临时凭据，下个打票周期会自动补回，因此解析失败时降级为
+	// 门票和路由 Cookie 是短寿命临时凭据，下个打票周期会自动补回，因此解析失败时降级为
 	// 「无门票可保留」继续完成编辑，不要把整个账号更新拖垮。
 	var currentExtra map[string]any
 	if len(currentExtraJSON) > 0 {
