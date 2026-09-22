@@ -132,6 +132,7 @@ func (s *AccountTestService) processCNProviderAdaptiveAnthropicStream(c *gin.Con
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 			continue
 		}
+		captureAccountTestReturnedModels(c, data)
 		switch eventType, _ := data["type"].(string); eventType {
 		case "content_block_delta":
 			if delta, ok := data["delta"].(map[string]any); ok {
@@ -254,6 +255,7 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	beginAccountTestModelAttempt(c, testModelID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {

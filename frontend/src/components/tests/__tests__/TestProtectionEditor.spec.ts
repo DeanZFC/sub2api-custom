@@ -20,6 +20,30 @@ const mountEditor = (config: TestProtectionConfig = { enabled: false, rules: [] 
 }
 
 describe('quality protection settings', () => {
+  it('provides model metadata matching without requiring answers, votes or thresholds', async () => {
+    const modelType: TestType = { id: 4, name: 'Model consistency', key: 'model-consistency', output_kind: 'model_check', prompt: '', enabled: true }
+    const wrapper = mountEditor()
+    await wrapper.setProps({ types: [modelType] })
+    await wrapper.get('[data-protection-enabled]').setValue(true)
+    const section = wrapper.get('[data-protection-type="4"]')
+    expect(section.find('[data-rule-answer]').exists()).toBe(false)
+    expect(section.find('[data-rule-vote]').exists()).toBe(false)
+    expect(wrapper.props('modelValue').rules[0].model_match).toBe('exact')
+    expect(wrapper.props('modelValue').rules[0].answer_match).toBeUndefined()
+    await section.get('[data-rule-failure]').setValue(false)
+    expect(validTestProtection(wrapper.props('modelValue'), 'account', [modelType], groups)).toBe(true)
+    await section.get('[data-rule-model-match]').setValue('snapshot')
+    expect(wrapper.props('modelValue').rules[0].model_match).toBe('snapshot')
+    await section.get('[data-add-threshold]').trigger('click')
+    expect(section.findAll('[data-threshold] select')[0].findAll('option').map(option => option.attributes('value'))).toEqual(['latency_ms'])
+    for (const patch of [{ model_match: 'fuzzy' }, { expected_answer: 'OK' }, { vote: { enabled: true, reject_above: 0, pass_at_least: 1 } }, { thresholds: [{ metric: 'output_numeric', operator: 'gt', value: 1 }] }]) {
+      const config = copyTestProtection(wrapper.props('modelValue'))
+      Object.assign(config.rules[0], patch)
+      expect(validTestProtection(config, 'account', [modelType], groups)).toBe(false)
+    }
+    expect(validTestProtection({ enabled: true, rules: [{ test_definition_id: 3, pause_on_failure: true, model_match: 'snapshot' }] }, 'account', types)).toBe(false)
+    wrapper.unmount()
+  })
 
   it('defaults to disabled, blocks group mode and initializes independent type rules', async () => {
     const wrapper = mountEditor()
@@ -60,7 +84,10 @@ describe('quality protection settings', () => {
     await wrapper.get('[data-protection-type="1"] [data-rule-enabled]').setValue(true)
     const stats = wrapper.get('[data-protection-type="1"]')
     await stats.get('[data-rule-failure]').setValue(false)
-    expect(validTestProtection(wrapper.props('modelValue'), 'account', types)).toBe(false)
+    expect(validTestProtection(wrapper.props('modelValue'), 'account', types)).toBe(true)
+    const legacy = copyTestProtection(wrapper.props('modelValue'))
+    delete legacy.rules[0].on_fail
+    expect(validTestProtection(legacy, 'account', types)).toBe(false)
     await stats.get('[data-add-threshold]').trigger('click')
     await stats.get('[data-threshold] input').setValue(101)
     expect(validTestProtection(wrapper.props('modelValue'), 'account', types)).toBe(false)

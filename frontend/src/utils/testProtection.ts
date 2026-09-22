@@ -21,7 +21,9 @@ export const defaultProtectionRule = (type: TestType): TestProtectionRule => ({
   thresholds: [],
   on_pass: defaultTestOutcomeAction('pass'),
   on_fail: defaultTestOutcomeAction('fail'),
-  ...(type.output_kind === 'statistics' ? { min_samples: 10 } : { answer_match: type.output_kind === 'number' ? 'numeric' : 'exact' }),
+  ...(type.output_kind === 'statistics' ? { min_samples: 10 }
+    : type.output_kind === 'model_check' ? { model_match: 'exact' }
+      : { answer_match: type.output_kind === 'number' ? 'numeric' : 'exact' }),
 })
 
 function validAction(action: TestOutcomeAction | undefined, groups?: readonly { id: number }[]): boolean {
@@ -54,9 +56,10 @@ export function validTestProtection(value: TestProtectionConfig | undefined, tar
     const answer = rule.expected_answer?.trim()
     if (answer && [...answer].length > 10000) return false
     if (rule.answer_match && !['exact', 'contains', 'numeric'].includes(rule.answer_match)) return false
-    if (type.output_kind === 'statistics' && (voting || answer)) return false
+    if (['statistics', 'model_check'].includes(type.output_kind) && (voting || answer)) return false
+    if (rule.model_match && (type.output_kind !== 'model_check' || !['exact', 'snapshot'].includes(rule.model_match))) return false
     if (!voting && answer && rule.answer_match === 'numeric'
       && (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(answer) || !Number.isFinite(Number(answer)))) return false
-    return Boolean(rule.pause_on_failure || thresholds.length || voting || answer)
+    return Boolean(type.output_kind === 'model_check' || rule.pause_on_failure || thresholds.length || voting || answer || rule.on_fail)
   })
 }

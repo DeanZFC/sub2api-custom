@@ -41,20 +41,20 @@
               </div>
               <template v-if="test.latest.output_kind === 'statistics'">
                 <TestResultOutput :result="test.latest" />
-                <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="loadReviews" />
+                <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="load" />
               </template>
               <div v-else-if="test.latest.output_kind === 'number'" class="grid grid-cols-3 gap-3" data-numeric-gallery>
                 <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
                   <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ result.output_numeric ?? '-' }}</strong>
                   <figcaption class="mt-1 text-xs text-gray-500 dark:text-gray-400"><span class="block">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span class="mt-1 block">{{ formatDate(resultTime(result)) }}</span><span v-if="result.latency_ms != null" class="mt-1 block">{{ result.latency_ms }}ms</span></figcaption>
-                  <AdminTestDecision v-if="reviewFor(result)" :review="reviewFor(result)!" @decided="loadReviews" />
+                  <AdminTestDecision v-if="reviewFor(result)" :review="reviewFor(result)!" @decided="load" />
                 </figure>
               </div>
               <div v-else class="grid items-start gap-4 lg:grid-cols-3" data-result-gallery>
                 <figure v-for="(result, index) in test.recent" :key="result.id" class="min-w-0">
                   <TestResultOutput :result="result" compact />
                   <figcaption class="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-gray-500 dark:text-gray-400"><span :class="index === 0 ? 'font-medium text-gray-700 dark:text-gray-200' : ''">{{ index === 0 ? t('tests.latestResult') : t('tests.previousResult') }}</span><span>· {{ formatDate(resultTime(result)) }}</span></figcaption>
-                  <AdminTestDecision v-if="reviewFor(result)" :review="reviewFor(result)!" @decided="loadReviews" />
+                  <AdminTestDecision v-if="reviewFor(result)" :review="reviewFor(result)!" @decided="load" />
                 </figure>
               </div>
             </section>
@@ -111,7 +111,15 @@ const reviewIndex = computed(() => new Map(auth.isAdmin ? adminReviews.value.map
 const reviewFor = (result: TestResult) => reviewIndex.value.get(result.id)
 const displayResults = computed(() => {
   const records = new Map(allResults.value.map(result => [result.id, result]))
-  if (auth.isAdmin) for (const review of adminReviews.value) records.set(review.result.id, review.result)
+  // The normal result endpoint contains the freshest group projection. Review
+  // records are merged only when that result is unavailable (for example,
+  // quality-paused accounts are intentionally hidden from the public list),
+  // otherwise an older review payload could move a freshly re-routed account
+  // back to its source group until the next poll.
+  if (auth.isAdmin) for (const review of adminReviews.value) {
+    const current = records.get(review.result.id)
+    records.set(review.result.id, current ? { ...review.result, ...current, account_name: review.result.account_name } : review.result)
+  }
   return [...records.values()]
 })
 const activeGroup = ref('')
@@ -198,7 +206,7 @@ const loadHistory = async () => {
     const planID = anchor.plan_id
     const page = auth.isAdmin && planID != null ? await (async () => {
       const rows = await listAdminResults(planID, adminHistoryLimit + 1)
-      const items = sortResults(rows.filter(result => isSuccessful(result) && groupKey(result) === groupKey(anchor)
+      const items = sortResults(rows.filter(result => isSuccessful(result) && (exposesAccount(anchor) || groupKey(result) === groupKey(anchor))
         && targetKey(result) === targetKey(anchor) && testKey(result) === testKey(anchor)))
       return { items: items.slice(0, adminHistoryLimit), next_before_id: items.length > adminHistoryLimit ? items[adminHistoryLimit - 1].id : undefined }
     })() : await testResultsAPI.history(anchor.id, historyBeforeId.value)
@@ -225,8 +233,10 @@ const openHistory = (series: TestSeries) => {
   historyLoading.value = false
   void loadHistory()
 }
-const statusClass = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? 'badge badge-warning' : 'badge badge-success'
-const statusLabel = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? t('tests.running') : t('tests.completed')
+const statusClass = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? 'badge badge-warning'
+  : result.output_kind === 'model_check' ? result.output_model_check?.verdict === 'pass' ? 'badge badge-success' : result.output_model_check?.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning' : 'badge badge-success'
+const statusLabel = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? t('tests.running')
+  : result.output_kind === 'model_check' ? t(`tests.modelCheck.${result.output_model_check?.verdict || 'unknown'}`) : t('tests.completed')
 const modelLabel = (result: TestResult) => `${result.model_id || '-'}${result.reasoning_effort ? ` · ${t('tests.reasoningEffort')}: ${result.reasoning_effort}` : ''}`
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '-'
 const onGroupKeydown = async (event: KeyboardEvent, key: string) => {

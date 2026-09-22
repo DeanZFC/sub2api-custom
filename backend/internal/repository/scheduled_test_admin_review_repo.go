@@ -23,6 +23,13 @@ func (r *scheduledTestResultRepository) ListAdminReviews(ctx context.Context) ([
 	 JOIN accounts a ON a.id=s.account_id
 	 LEFT JOIN scheduled_test_definitions d ON d.id=s.test_definition_id
 	 LEFT JOIN groups g ON g.id=r.group_id
+	 LEFT JOIN LATERAL (
+		SELECT ag.group_id,cg.name
+		FROM account_groups ag JOIN groups cg ON cg.id=ag.group_id
+		WHERE r.account_id IS NOT NULL AND ag.account_id=r.account_id AND cg.deleted_at IS NULL AND cg.status='active'
+		ORDER BY CASE WHEN ag.group_id=r.group_id THEN 0 ELSE 1 END,ag.group_id
+		LIMIT 1
+	 ) current_group ON TRUE
 	 WHERE p.enabled AND p.protection->>'enabled'='true' AND s.rule_config->'vote'->>'enabled'='true'
 	 AND s.completed AND r.status IN ('success','passed')
 	 AND r.started_at=s.result_started_at AND r.started_at>=s.round_started_at

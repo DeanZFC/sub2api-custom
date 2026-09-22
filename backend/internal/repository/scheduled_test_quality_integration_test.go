@@ -83,12 +83,15 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	applyMigration("257_scheduled_test_hourly_statistics.sql")
 	applyMigration("258_scheduled_test_protection.sql")
 	applyMigration("259_scheduled_test_outcome_actions.sql")
+	applyMigration("260_scheduled_test_model_check.sql")
 	applyMigration("261_scheduled_test_admin_review.sql")
+	applyMigration("262_scheduled_test_execution_snapshot.sql")
+	applyMigration("262_scheduled_test_execution_snapshot.sql")
 	var statisticsCount int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))
 	require.Equal(t, 1, statisticsCount, "the local statistics definition is seeded idempotently")
 	plans := NewScheduledTestPlanRepository(db)
-	results := NewScheduledTestResultRepository(db)
+	results := &scheduledTestResultRepository{db: db}
 	definitions := NewScheduledTestDefinitionRepository(db)
 	legacy, err := plans.GetByID(ctx, legacyPlanID)
 	require.NoError(t, err)
@@ -311,7 +314,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.NoError(t, err)
 		// The second type finishes later, as it does during sequential execution.
 		// A plan-wide LIMIT would hide every result of the first type.
-		var expectedIDs []int64
+		latestBySeries := make(map[[2]int64]int64)
 		sequence := 0
 		addResult := func(accountID, definitionID int64, status, model, effort string) int64 {
 			t.Helper()
@@ -329,16 +332,17 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		for _, definitionID := range []int64{htmlID, candyID} {
 			for _, accountID := range []int64{62, 63} {
 				addResult(accountID, definitionID, "success", "model-a", "high")
-				expectedIDs = append(expectedIDs, addResult(accountID, definitionID, "passed", "model-a", "high"))
+				latestBySeries[[2]int64{definitionID, accountID}] = addResult(accountID, definitionID, "passed", "model-a", "high")
 			}
 		}
-		// Failures, in-flight runs, models and efforts must not displace each other.
+		// A later failure, in-flight run, model, or effort replaces the previous
+		// row for the same account/type in the administrator's latest view.
 		addResult(62, htmlID, "failed", "model-a", "high")
-		expectedIDs = append(expectedIDs, addResult(62, htmlID, "failed", "model-a", "high"))
-		expectedIDs = append(expectedIDs, addResult(62, htmlID, "running", "model-a", "high"))
-		expectedIDs = append(expectedIDs, addResult(62, htmlID, "pending", "model-a", "high"))
-		expectedIDs = append(expectedIDs, addResult(62, htmlID, "success", "model-b", "high"))
-		expectedIDs = append(expectedIDs, addResult(62, htmlID, "success", "model-a", "medium"))
+		addResult(62, htmlID, "failed", "model-a", "high")
+		addResult(62, htmlID, "running", "model-a", "high")
+		addResult(62, htmlID, "pending", "model-a", "high")
+		addResult(62, htmlID, "success", "model-b", "high")
+		latestBySeries[[2]int64{htmlID, 62}] = addResult(62, htmlID, "success", "model-a", "medium")
 
 		history, err := results.ListByPlanID(ctx, multiPlan.ID, 1)
 		require.NoError(t, err)
@@ -351,7 +355,59 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 				require.False(t, result.StartedAt.After(history[i-1].StartedAt))
 			}
 		}
+		var expectedIDs []int64
+		for _, id := range latestBySeries {
+			expectedIDs = append(expectedIDs, id)
+		}
 		require.ElementsMatch(t, expectedIDs, actualIDs)
+	})
+
+	t.Run("latest execution excludes removed accounts and types and retains queued targets", func(t *testing.T) {
+		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Snapshot", GroupID: &groupID, TestDefinitionID: &htmlID, TestDefinitionIDs: []int64{htmlID, candyID}, TargetMode: "all_accounts", ModelID: "model", CronExpression: "* * * * *", MaxResults: 10})
+		require.NoError(t, err)
+		input := func(accountID, definitionID int64, at time.Time) *service.ScheduledTestResult {
+			return &service.ScheduledTestResult{PlanID: p.ID, AccountID: &accountID, GroupID: &groupID, TestDefinitionID: &definitionID, TargetMode: "all_accounts", ModelID: "model", Status: "pending", OutputKind: "text", StartedAt: at, FinishedAt: at}
+		}
+		older, err := results.BeginRun(ctx, p.ID, "older", []*service.ScheduledTestResult{input(62, htmlID, started), input(63, candyID, started)})
+		require.NoError(t, err)
+		for _, result := range older {
+			result.Status = "success"
+			require.NoError(t, results.Update(ctx, result))
+		}
+		newer, err := results.BeginRun(ctx, p.ID, "newer", []*service.ScheduledTestResult{input(62, htmlID, started.Add(time.Minute))})
+		require.NoError(t, err)
+		latest, err := results.ListByPlanID(ctx, p.ID, 1)
+		require.NoError(t, err)
+		require.Len(t, latest, 1)
+		require.Equal(t, newer[0].ID, latest[0].ID)
+		require.Equal(t, "pending", latest[0].Status)
+		history, err := results.ListByPlanID(ctx, p.ID, 10)
+		require.NoError(t, err)
+		require.Len(t, history, 3)
+		_, err = results.BeginRun(ctx, p.ID, "broken", []*service.ScheduledTestResult{input(62, htmlID, started), {PlanID: p.ID + 100}})
+		require.Error(t, err)
+		latest, err = results.ListByPlanID(ctx, p.ID, 1)
+		require.NoError(t, err)
+		require.Len(t, latest, 1)
+		require.Equal(t, newer[0].ID, latest[0].ID, "failed snapshot publication rolls back both rows and the latest-run pointer")
+	})
+
+	t.Run("group-mode retention keeps every actual account and type", func(t *testing.T) {
+		p, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Group retention", GroupID: &groupID, TestDefinitionID: &htmlID, TestDefinitionIDs: []int64{htmlID, candyID}, TargetMode: "group", ModelID: "model", CronExpression: "* * * * *", MaxResults: 1})
+		require.NoError(t, err)
+		for _, id := range []int64{62, 63} {
+			for _, definition := range []int64{htmlID, candyID} {
+				for round := 0; round < 2; round++ {
+					at := started.Add(time.Duration(round) * time.Minute)
+					_, err = results.Create(ctx, &service.ScheduledTestResult{PlanID: p.ID, AccountID: &id, GroupID: &groupID, TestDefinitionID: &definition, TargetMode: "group", Status: "success", OutputKind: "text", StartedAt: at, FinishedAt: at})
+					require.NoError(t, err)
+				}
+			}
+		}
+		require.NoError(t, results.PruneOldResults(ctx, p.ID, 1))
+		latest, err := results.ListByPlanID(ctx, p.ID, 1)
+		require.NoError(t, err)
+		require.Len(t, latest, 4, "one result per real account/type, even when public display hides account IDs")
 	})
 
 	t.Run("secondary definition is protected during concurrent plan creation", func(t *testing.T) {
@@ -563,5 +619,73 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 		require.NoError(t, err)
 		require.Len(t, history, 1)
 		require.Nil(t, history[0].AccountID)
+
+		t.Run("public result follows moved account group", func(t *testing.T) {
+			const movedAccountID = int64(72)
+			movedPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
+				Name: "Dynamic account group", GroupID: &groupID, TestDefinitionID: &candyID,
+				TestDefinitionIDs: []int64{candyID}, TargetMode: "all_accounts", TestType: "quality",
+				ModelID: "dynamic-group", CronExpression: "* * * * *",
+			})
+			require.NoError(t, err)
+			execSQL("INSERT INTO accounts (id,name) VALUES ($1,'Moved account')", movedAccountID)
+			execSQL("INSERT INTO account_groups VALUES ($1,$2)", movedAccountID, groupID)
+			movedAccount := movedAccountID
+			result, err := results.Create(ctx, &service.ScheduledTestResult{
+				PlanID: movedPlan.ID, TestDefinitionID: &candyID, GroupID: &groupID,
+				AccountID: &movedAccount, TargetMode: "all_accounts", Status: "success",
+				OutputKind: "number", ResponseText: "29", ModelID: movedPlan.ModelID,
+				StartedAt: started, FinishedAt: started,
+			})
+			require.NoError(t, err)
+
+			visible, err := results.ListVisible(ctx, 100, 3)
+			require.NoError(t, err)
+			var projected *service.ScheduledTestResult
+			for _, row := range visible {
+				if row.ID == result.ID {
+					projected = row
+					break
+				}
+			}
+			require.NotNil(t, projected)
+			require.Equal(t, groupID, *projected.GroupID)
+			require.Equal(t, "Public group", projected.GroupName)
+
+			// A protection action can remove the source group and add a new one.
+			// Public results must immediately follow that current membership while
+			// retaining the original source group on the stored/admin row.
+			execSQL("DELETE FROM account_groups WHERE account_id=$1 AND group_id=$2", movedAccountID, groupID)
+			execSQL("INSERT INTO account_groups VALUES ($1,$2)", movedAccountID, privateGroupID)
+			execSQL("INSERT INTO user_allowed_groups VALUES (100,$1) ON CONFLICT DO NOTHING", privateGroupID)
+			visible, err = results.ListVisible(ctx, 100, 3)
+			require.NoError(t, err)
+			projected = nil
+			for _, row := range visible {
+				if row.ID == result.ID {
+					projected = row
+					break
+				}
+			}
+			require.NotNil(t, projected)
+			require.Equal(t, privateGroupID, *projected.GroupID)
+			require.Equal(t, "Private group", projected.GroupName)
+			history, err := results.ListVisibleHistory(ctx, 100, result.ID, 0, 20)
+			require.NoError(t, err)
+			require.Len(t, history, 1)
+			require.Equal(t, privateGroupID, *history[0].GroupID)
+
+			// Once the account leaves all groups, neither latest nor history may
+			// fall back to the stale source group and bypass entitlement checks.
+			execSQL("DELETE FROM account_groups WHERE account_id=$1", movedAccountID)
+			visible, err = results.ListVisible(ctx, 100, 3)
+			require.NoError(t, err)
+			for _, row := range visible {
+				require.NotEqual(t, result.ID, row.ID)
+			}
+			_, err = results.ListVisibleHistory(ctx, 100, result.ID, 0, 20)
+			require.ErrorIs(t, err, sql.ErrNoRows)
+		})
+
 	})
 }

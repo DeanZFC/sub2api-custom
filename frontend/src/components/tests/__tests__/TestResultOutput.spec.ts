@@ -8,6 +8,31 @@ import { buildTestPreviewHTML } from '@/utils/testPreview'
 const global = { plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: {} } })] }
 
 describe('test result output', () => {
+  it('renders model metadata and its verdict without exposing raw response text', async () => {
+    const check = { requested_model: 'public-alias', upstream_model: 'gpt-5.6-sol', returned_models: ['gpt-5.6-sol-2026-09-21'], match_mode: 'snapshot' as const, verdict: 'pass' as const, reason: 'match' as const }
+    const wrapper = mount(TestResultOutput, { global, props: { result: { id: 50, status: 'success', output_kind: 'model_check', output_model_check: check, response_text: '{"private":"not for display"}' } } })
+    expect(wrapper.get('[data-model-check-verdict]').text()).toBe('tests.modelCheck.pass')
+    expect(wrapper.get('[data-model-check-requested]').text()).toBe('public-alias')
+    expect(wrapper.get('[data-model-check-upstream]').text()).toBe('gpt-5.6-sol')
+    expect(wrapper.get('[data-model-check-returned]').text()).toBe('gpt-5.6-sol-2026-09-21')
+    expect(wrapper.find('[data-model-check-reason]').exists()).toBe(false)
+    expect(wrapper.find('pre').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('private')
+    await wrapper.setProps({ result: { ...wrapper.props('result'), output_model_check: { ...check, verdict: 'fail', reason: 'mismatch', returned_models: ['gpt-5.6-sol', '<script>not-a-model</script>'] } } })
+    expect(wrapper.get('[data-model-check-verdict]').classes()).toContain('badge-danger')
+    expect(wrapper.get('[data-model-check-reason]').text()).toBe('tests.modelCheck.reasons.mismatch')
+    expect(wrapper.get('[data-model-check-returned]').text()).toContain('<script>not-a-model</script>')
+    expect(wrapper.find('script').exists()).toBe(false)
+    await wrapper.setProps({ result: { ...wrapper.props('result'), output_model_check: { ...check, verdict: 'unknown', reason: 'missing_model', returned_models: [] } } })
+    expect(wrapper.get('[data-model-check-verdict]').classes()).toContain('badge-warning')
+    expect(wrapper.get('[data-model-check-returned]').text()).toBe('-')
+    expect(wrapper.get('[data-model-check-reason]').text()).toBe('tests.modelCheck.reasons.missing_model')
+    await wrapper.setProps({ result: { ...wrapper.props('result'), output_model_check: null } })
+    expect(wrapper.find('[data-model-check-output]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('private')
+    wrapper.unmount()
+  })
+
   it('shows recent request colors with the newest on the right and no hover or click details', async () => {
     const recent = [
       { success: false, created_at: '2026-09-21T10:59:00Z' },

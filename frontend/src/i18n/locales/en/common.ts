@@ -226,6 +226,18 @@ export default {
       automaticHold: 'Automatic checks have not passed',
       loadFailed: 'Failed to load admin reviews', saveFailed: 'Decision not saved. Refresh and try again.',
     },
+    modelCheck: {
+      pass: 'Consistent', fail: 'Mismatch', unknown: 'Unconfirmed',
+      requestedModel: 'Requested model', upstreamModel: 'Upstream request model', returnedModels: 'Returned model',
+      matchMode: 'Model matching', exact: 'Strict match', snapshot: 'Allow dated snapshot',
+      reasons: {
+        mismatch: 'The returned model field differs from the upstream request model.',
+        missing_model: 'The upstream response did not provide a model field.',
+        missing_upstream_model: 'The actual upstream request model was not available.',
+        upstream_error: 'The upstream request did not complete, so model consistency is unconfirmed.',
+        invalid_evidence: 'The upstream model evidence is invalid; consistency is unconfirmed.',
+      },
+    },
     voting: {
       title: 'Quality review', description: 'Review this round’s output and vote. Latest results remain available for accounts paused by quality protection.',
       paused: 'Paused by quality protection', referenceAnswer: 'Reference answer', pass: 'Pass', fail: 'Fail',

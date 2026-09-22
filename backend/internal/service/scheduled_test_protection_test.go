@@ -94,6 +94,7 @@ func TestScheduledTestProtectionAnswersAndExecutionFailure(t *testing.T) {
 		name, match, expected, actual, status, want string
 		number                                      *float64
 		voting, pause                               bool
+		onFailAction                                bool
 	}{
 		{name: "exact trims outer whitespace", match: "exact", expected: "PASS", actual: " \nPASS\n ", status: "success", want: "pass"},
 		{name: "exact rejects other answer", match: "exact", expected: "PASS", actual: "FAIL", status: "success", want: "fail"},
@@ -108,11 +109,17 @@ func TestScheduledTestProtectionAnswersAndExecutionFailure(t *testing.T) {
 		{name: "vote reference is not auto compared", match: "exact", expected: "reference picture", actual: "different model output", status: "success", voting: true, want: "pass"},
 		{name: "vote numeric reference is not auto parsed", match: "numeric", expected: "for humans only", actual: "no number", status: "success", voting: true, want: "pass"},
 		{name: "execution failure pauses when configured", status: "failed", pause: true, want: "fail"},
+		{name: "execution failure runs explicit failure action", status: "failed", onFailAction: true, want: "fail"},
 		{name: "execution failure is inconclusive otherwise", status: "failed", want: "pending"},
 		{name: "not completed does not recover", status: "running", want: "pending"},
+		{name: "configured failure action waits for completion", status: "running", onFailAction: true, want: "pending"},
+		{name: "queued protection waits for completion", status: "pending", pause: true, want: "pending"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rule := ScheduledTestProtectionRule{ExpectedAnswer: tc.expected, AnswerMatch: tc.match, PauseOnFailure: tc.pause, Vote: &ScheduledTestVoteConfig{Enabled: tc.voting}}
+			if tc.onFailAction {
+				rule.OnFail = &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{8}}
+			}
 			verdict, reason := evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: tc.status, ResponseText: tc.actual, OutputNumeric: tc.number})
 			require.Equal(t, tc.want, verdict, reason)
 		})
@@ -150,7 +157,7 @@ func TestScheduledTestProtectionValidation(t *testing.T) {
 		{"huge vote threshold", func(p *ScheduledTestPlan) {
 			p.Protection.Rules[0].Vote = &ScheduledTestVoteConfig{Enabled: true, PassAtLeast: 1000001}
 		}},
-		{"empty rule", func(p *ScheduledTestPlan) { p.Protection.Rules[0].PauseOnFailure = false }},
+		{"unknown model match", func(p *ScheduledTestPlan) { p.Protection.Rules[0].ModelMatch = "contains" }},
 		{"unknown metric", func(p *ScheduledTestPlan) {
 			p.Protection.Rules[0].Thresholds = []ScheduledTestThreshold{{Metric: "credentials", Operator: "lt"}}
 		}},
@@ -350,7 +357,8 @@ func TestScheduledTestProtectionRunnerModelWiringAndEligibility(t *testing.T) {
 			runner.runOneAccount(context.Background(), protectionPlan(), 42, "hello", "text")
 			if !tc.eligible {
 				require.Zero(t, calls)
-				require.Empty(t, repo.events)
+				require.Equal(t, []string{"create", "update"}, repo.events, "an ineligible account gets an administrator-visible skipped result without an upstream call")
+				require.Equal(t, "failed", repo.completed.Status)
 				return
 			}
 			if tc.beginErr != nil {

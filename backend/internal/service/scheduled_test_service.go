@@ -32,6 +32,9 @@ func ValidateScheduledTestDefinitionInput(d *ScheduledTestDefinition) error {
 	d.Description = strings.TrimSpace(d.Description)
 	d.Prompt = strings.TrimSpace(d.Prompt)
 	d.OutputKind = strings.ToLower(strings.TrimSpace(d.OutputKind))
+	if d.OutputKind == "model_check" {
+		d.Prompt = scheduledTestModelCheckPrompt
+	}
 	if d.SortOrder < 0 {
 		return fmt.Errorf("sort_order must be non-negative")
 	}
@@ -408,8 +411,9 @@ func (s *ScheduledTestService) DeletePlan(ctx context.Context, id int64) error {
 	return s.planRepo.Delete(ctx, id)
 }
 
-// ListResults returns recent results per account/type/model series for a plan.
-// The limit applies independently to each series, rather than to the plan.
+// ListResults returns recent results per account and configured test type.
+// The limit applies independently to each account/type series, rather than to
+// the plan. Model and reasoning effort are execution details of that row.
 func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, limit int) ([]*ScheduledTestResult, error) {
 	if limit <= 0 {
 		limit = 50
@@ -461,6 +465,8 @@ func normalizeStoredTestResults(results []*ScheduledTestResult) {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(result.OutputKind)) {
+		case "model_check":
+			normalizeScheduledTestModelCheck(result)
 		case "statistics":
 			var snapshot ScheduledTestStatistics
 			result.OutputStatistics = nil

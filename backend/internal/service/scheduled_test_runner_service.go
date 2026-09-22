@@ -275,6 +275,12 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 
 func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *ScheduledTestPlan) {
 	defer s.advancePlan(ctx, plan)
+	if s.scheduledSvc != nil {
+		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestRunRepository); ok {
+			s.executePlanSnapshot(ctx, plan, repo)
+			return
+		}
+	}
 	if plan.Protection.Enabled && s.scheduledSvc != nil {
 		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRoundRepository); ok {
 			queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
@@ -405,11 +411,17 @@ func (s *ScheduledTestRunnerService) resolveDefinition(ctx context.Context, plan
 	if outputKind == "" {
 		outputKind = "text"
 	}
+	if outputKind == "model_check" {
+		return scheduledTestModelCheckPrompt, outputKind, nil
+	}
 	return d.Prompt, outputKind, nil
 }
 
 func (s *ScheduledTestRunnerService) resolveTargetAccounts(ctx context.Context, plan *ScheduledTestPlan) ([]int64, error) {
 	if s.scheduledSvc != nil {
+		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestTargetAccountRepository); ok {
+			return repo.ListPlanTargetAccountIDs(ctx, plan, plan.AccountID)
+		}
 		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRepository); ok {
 			return repo.ListPlanDetectionAccountIDs(ctx, plan, plan.AccountID)
 		}
@@ -454,6 +466,7 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 	if eligibleErr != nil || !eligible {
 		cancel()
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d skipped: account unavailable for detection (%v)", plan.ID, accountID, eligibleErr)
+		s.saveSkippedAccountResult(ctx, plan, accountID, outputKind, eligibleErr)
 		return
 	}
 	pending, err := s.startAccountResult(persistCtx, plan, accountID, outputKind)
@@ -474,6 +487,35 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 		}
 	}
 	s.runAccountWithResult(ctx, plan, accountID, prompt, outputKind, pending)
+}
+
+func (s *ScheduledTestRunnerService) saveSkippedAccountResult(ctx context.Context, plan *ScheduledTestPlan, accountID int64, outputKind string, cause error) {
+	if s.scheduledSvc == nil {
+		return
+	}
+	now := time.Now()
+	result := &ScheduledTestResult{
+		PlanID: plan.ID, TestDefinitionID: plan.TestDefinitionID, TargetMode: plan.TargetMode,
+		OutputKind: outputKind, AccountID: &accountID, ModelID: plan.ModelID,
+		ReasoningEffort: plan.ReasoningEffort, GroupID: plan.GroupID, Status: "running",
+		StartedAt: now, FinishedAt: now,
+	}
+	persistCtx, cancel := scheduledTestPersistenceContext()
+	defer cancel()
+	created, err := s.scheduledSvc.StartResult(persistCtx, plan.ID, result)
+	if err != nil || created == nil {
+		return
+	}
+	created.Status = "failed"
+	created.ErrorMessage = "检测跳过：账号未开启调度或当前状态不可检测"
+	if cause != nil {
+		created.ErrorMessage += ": " + cause.Error()
+	}
+	created.FinishedAt = time.Now()
+	created.LatencyMs = created.FinishedAt.Sub(created.StartedAt).Milliseconds()
+	if err := s.scheduledSvc.CompleteResult(persistCtx, plan.MaxResults, created); err != nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d skipped result error: %v", plan.ID, accountID, err)
+	}
 }
 
 func (s *ScheduledTestRunnerService) startAccountResult(ctx context.Context, plan *ScheduledTestPlan, accountID int64, outputKind string) (*ScheduledTestResult, error) {
@@ -563,6 +605,9 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	result.TestDefinitionID = plan.TestDefinitionID
 	result.TargetMode = plan.TargetMode
 	result.OutputKind = outputKind
+	if outputKind == "model_check" {
+		applyScheduledTestModelCheck(result, plan)
+	}
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	defer cancel()
 	if s.scheduledSvc == nil {
@@ -582,7 +627,8 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	if ctx.Err() == nil {
 		s.completeResultProtection(persistCtx, plan, result)
 	}
-	if result.Status == "success" && plan.AutoRecover && !plan.Protection.Enabled {
+	modelCheckPassed := outputKind != "model_check" || (result.OutputModelCheck != nil && result.OutputModelCheck.Verdict == "pass")
+	if result.Status == "success" && modelCheckPassed && plan.AutoRecover && !plan.Protection.Enabled {
 		recoveryCtx, cancelRecovery := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 		s.tryRecoverAccount(recoveryCtx, accountID, plan.ID)
 		cancelRecovery()

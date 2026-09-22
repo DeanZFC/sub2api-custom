@@ -38,7 +38,11 @@ func (s *ScheduledTestRunnerService) runStatisticsDefinition(ctx context.Context
 		return
 	}
 	var ids []int64
-	if actionRepo, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRepository); ok {
+	if targetRepo, ok := s.scheduledSvc.resultRepo.(ScheduledTestTargetAccountRepository); ok {
+		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
+		ids, err = targetRepo.ListPlanTargetAccountIDs(queryCtx, plan, plan.AccountID)
+		cancel()
+	} else if actionRepo, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRepository); ok {
 		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 		ids, err = actionRepo.ListPlanDetectionAccountIDs(queryCtx, plan, plan.AccountID)
 		cancel()
@@ -103,6 +107,7 @@ func (s *ScheduledTestRunnerService) startStatisticsResult(ctx context.Context, 
 		eligible, err := s.detectionAccountEligible(persistCtx, plan, *accountID)
 		if err != nil || !eligible {
 			cancel()
+			s.saveSkippedAccountResult(ctx, plan, *accountID, "statistics", err)
 			return
 		}
 	}

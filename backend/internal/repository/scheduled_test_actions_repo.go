@@ -54,6 +54,48 @@ func (r *scheduledTestResultRepository) ListPlanDetectionAccountIDs(ctx context.
 	return ids, rows.Err()
 }
 
+// ListPlanTargetAccountIDs intentionally does not apply schedulable/status
+// filters. The runner uses this list to create an administrator-visible
+// skipped result for every configured account, then performs the authoritative
+// eligibility check immediately before calling the upstream.
+func (r *scheduledTestResultRepository) ListPlanTargetAccountIDs(ctx context.Context, plan *service.ScheduledTestPlan, accountID *int64) ([]int64, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("test plan is required")
+	}
+	if accountID != nil {
+		var exists bool
+		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM accounts WHERE id=$1 AND deleted_at IS NULL)`, *accountID).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			return []int64{}, nil
+		}
+		return []int64{*accountID}, nil
+	}
+	if plan.GroupID == nil {
+		return []int64{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT a.id
+FROM accounts a
+WHERE a.deleted_at IS NULL
+  AND (EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=$1)
+       OR EXISTS (SELECT 1 FROM scheduled_test_managed_accounts ma WHERE ma.plan_id=$2 AND ma.account_id=a.id AND ma.source_group_id=$1))
+ORDER BY a.id`, *plan.GroupID, plan.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *scheduledTestPlanRepository) validateProtectionGroups(ctx context.Context, plan *service.ScheduledTestPlan) error {
 	if !plan.HasGroupActions() {
 		return nil

@@ -50,6 +50,9 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "account_name",
 		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt, 2, "Account Seven"))
+	mock.ExpectQuery(`(?s)SELECT id, protection_decision.*FROM scheduled_test_results`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision"}))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -76,7 +79,7 @@ func TestScheduledTestResultRepositoryPersistsReasoningEffort(t *testing.T) {
 		GroupID: &groupID, ModelID: "gpt-6-astra", ReasoningEffort: "ultra", StartedAt: now, FinishedAt: now,
 	}
 	mock.ExpectQuery(`(?s)INSERT INTO scheduled_test_results .*reasoning_effort.*RETURNING .*reasoning_effort`).
-		WithArgs(int64(10), "running", "", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", int64(0), now, now, nil, "").
+		WithArgs(int64(10), "running", "", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", int64(0), now, now, nil, "", "").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "target_mode",
 		}).AddRow(1, 10, "running", "", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", 0, now, now, now, nil, ""))
@@ -100,7 +103,7 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 
 	repo := &scheduledTestResultRepository{db: db}
 	now := time.Now()
-	mock.ExpectQuery(`(?s)WITH visible_results AS .*r.target_mode IN \('account', 'all_accounts'\).*visible_account_id.*result_target_key.*FROM scheduled_test_results r.*success_state AS.*PARTITION BY group_id, result_target_key, test_definition_id, model_id, reasoning_effort.*ranked_results AS.*WHERE status IN \('success', 'passed'\).*NOT has_success.*WHERE history_rank <= \$2.*ORDER BY vr\.started_at DESC, vr\.id DESC`).
+	mock.ExpectQuery(`(?s)WITH projected_results AS .*r.target_mode IN \('account', 'all_accounts'\).*visible_account_id.*result_target_key.*FROM scheduled_test_results r.*success_state AS.*PARTITION BY group_id, result_target_key, test_definition_id, model_id, reasoning_effort.*ranked_results AS.*WHERE status IN \('success', 'passed'\).*NOT has_success.*WHERE history_rank <= \$2.*ORDER BY vr\.started_at DESC, vr\.id DESC`).
 		WithArgs(int64(5), 3).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id",

@@ -26,6 +26,7 @@ type ScheduledTestProtectionRule struct {
 	PauseOnFailure   bool                        `json:"pause_on_failure,omitempty"`
 	ExpectedAnswer   string                      `json:"expected_answer,omitempty"`
 	AnswerMatch      string                      `json:"answer_match,omitempty"`
+	ModelMatch       string                      `json:"model_match,omitempty"`
 	Vote             *ScheduledTestVoteConfig    `json:"vote,omitempty"`
 	OnPass           *ScheduledTestOutcomeAction `json:"on_pass,omitempty"`
 	OnFail           *ScheduledTestOutcomeAction `json:"on_fail,omitempty"`
@@ -123,6 +124,9 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 		default:
 			return fmt.Errorf("answer_match must be exact, contains, or numeric")
 		}
+		if rule.ModelMatch != "" && rule.ModelMatch != "exact" && rule.ModelMatch != "snapshot" {
+			return fmt.Errorf("model_match must be exact or snapshot")
+		}
 		voting := rule.Vote != nil && rule.Vote.Enabled
 		if voting && (rule.Vote.RejectAbove < 0 || rule.Vote.PassAtLeast < 1 || rule.Vote.RejectAbove > 1000000 || rule.Vote.PassAtLeast > 1000000) {
 			return fmt.Errorf("reject_above must be non-negative and pass_at_least positive (maximum 1000000)")
@@ -157,9 +161,6 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 				return fmt.Errorf("unsupported protection metric %q", threshold.Metric)
 			}
 		}
-		if !voting && !rule.PauseOnFailure && rule.ExpectedAnswer == "" && len(rule.Thresholds) == 0 {
-			return fmt.Errorf("each protection rule needs a threshold, answer, voting, or failure check")
-		}
 	}
 	return nil
 }
@@ -167,6 +168,21 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string) error {
 	if rule == nil {
 		return nil
+	}
+	if kind == "model_check" {
+		if (rule.Vote != nil && rule.Vote.Enabled) || rule.ExpectedAnswer != "" {
+			return fmt.Errorf("model consistency uses response metadata and cannot use answer comparison or voting")
+		}
+		if rule.ModelMatch == "" {
+			rule.ModelMatch = "exact"
+		}
+	} else {
+		if rule.ModelMatch != "" {
+			return fmt.Errorf("model_match requires a model_check test")
+		}
+		if (rule.Vote == nil || !rule.Vote.Enabled) && !rule.PauseOnFailure && rule.ExpectedAnswer == "" && len(rule.Thresholds) == 0 && rule.OnFail == nil {
+			return fmt.Errorf("each protection rule needs a threshold, answer, voting, or failure check")
+		}
 	}
 	if kind == "statistics" && ((rule.Vote != nil && rule.Vote.Enabled) || rule.ExpectedAnswer != "") {
 		return fmt.Errorf("statistics cannot use answer comparison or voting")
@@ -193,13 +209,28 @@ func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string
 // Missing observations are inconclusive, never a synthetic zero or a pass that
 // could release an existing suspension. Any observed violation wins.
 func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *ScheduledTestResult) (string, string) {
-	if result == nil || (result.Status != "success" && result.Status != "passed") {
-		if rule.PauseOnFailure {
+	if result == nil || result.Status == "pending" || result.Status == "running" {
+		return "pending", "检测未完成，等待下一轮"
+	}
+	if result.Status != "success" && result.Status != "passed" {
+		// A configured failure action is an explicit request to resolve an
+		// unsuccessful execution as a failed quality check.  This lets rules
+		// such as Candy immediately run their on_fail group/scheduling action
+		// after the final retry, while preserving the legacy pending behavior
+		// for rules that have neither an action nor pause_on_failure enabled.
+		if rule.PauseOnFailure || rule.OnFail != nil {
 			return "fail", "检测执行失败"
 		}
 		return "pending", "检测未完成，等待下一轮"
 	}
 	missing := false
+	if result.OutputKind == "model_check" {
+		check := result.OutputModelCheck
+		if check != nil && check.Verdict == "fail" {
+			return "fail", "上游返回模型与实际请求模型不一致"
+		}
+		missing = check == nil || check.Verdict != "pass"
+	}
 	for _, threshold := range rule.Thresholds {
 		value, ok := scheduledTestMetric(result, threshold.Metric, rule.MinSamples)
 		if !ok {
@@ -250,6 +281,9 @@ func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *S
 		}
 	}
 	if missing {
+		if result.OutputKind == "model_check" {
+			return "pending", "缺少有效模型标识，无法确认一致性"
+		}
 		return "pending", "有效样本不足，等待下一轮"
 	}
 	return "pass", ""

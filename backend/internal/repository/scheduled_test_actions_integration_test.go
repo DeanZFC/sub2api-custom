@@ -70,7 +70,8 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 		"250_allow_group_account_scheduled_test_targets.sql", "251_scheduled_test_target_modes.sql", "252_scheduled_test_definition_sort_order.sql",
 		"253_scheduled_test_plan_sort_order.sql", "256_scheduled_test_multiple_definitions.sql", "257_scheduled_test_hourly_statistics.sql",
 		"258_scheduled_test_protection.sql", "259_scheduled_test_outcome_actions.sql",
-		"261_scheduled_test_admin_review.sql", "261_scheduled_test_admin_review.sql",
+		"260_scheduled_test_model_check.sql", "261_scheduled_test_admin_review.sql", "261_scheduled_test_admin_review.sql",
+		"262_scheduled_test_execution_snapshot.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -102,7 +103,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 		currentT = testT
 		exec(`TRUNCATE scheduled_test_plans,scheduled_test_results,scheduled_test_plan_definitions,scheduled_test_protection_states,scheduled_test_managed_accounts,scheduled_test_votes,scheduler_outbox RESTART IDENTITY CASCADE`)
 		exec(`UPDATE accounts SET platform='openai',status='active',schedulable=TRUE,deleted_at=NULL,extra='{}';
-UPDATE groups SET platform='openai',status='active',deleted_at=NULL;
+UPDATE groups SET platform='openai',status='active',deleted_at=NULL,is_exclusive=FALSE;
 TRUNCATE user_allowed_groups,user_subscriptions,account_groups;
 INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,72),(63,8,73);`)
 	}
@@ -244,10 +245,35 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		candy := ruleFor(candyID, []int64{10, 11}, []int64{8}, false)
 		pelican := ruleFor(pelicanID, []int64{10, 11}, []int64{8}, false)
 		p := newPlan(candy, pelican)
-		complete(begin(p, candy), "pass")
+		first := begin(p, candy)
+		complete(first, "pass")
 		require.Equal(t, []int64{8, 9}, bindings(), "a definition not run yet must not be treated as passing")
-		complete(begin(p, pelican), "pass")
+		second := begin(p, pelican)
+		complete(second, "pass")
 		require.Equal(t, []int64{9, 10, 11}, bindings())
+		latest, err := repo.ListByPlanID(ctx, p.ID, 1)
+		require.NoError(t, err)
+		require.Len(t, latest, 2)
+		for _, result := range latest {
+			require.NotNil(t, result.ProtectionDecision)
+			if result.ID == first.ID {
+				require.Equal(t, "unchanged", result.ProtectionDecision.Status, "configured promotion must not be reported as applied before all types pass")
+				require.Empty(t, result.ProtectionDecision.AddedGroupIDs)
+			} else {
+				require.Equal(t, "applied", result.ProtectionDecision.Status)
+				require.Equal(t, []int64{10, 11}, result.ProtectionDecision.AddedGroupIDs)
+				require.Equal(t, []int64{8}, result.ProtectionDecision.RemovedGroupIDs)
+			}
+		}
+		complete(begin(p, candy), "pass")
+		history, err := repo.ListByPlanID(ctx, p.ID, 10)
+		require.NoError(t, err)
+		for _, result := range history {
+			if result.ID == first.ID {
+				require.NotNil(t, result.ProtectionDecision)
+				require.Equal(t, "unchanged", result.ProtectionDecision.Status)
+			}
+		}
 		assertActive(t)
 		var unrelatedPriority int
 		require.NoError(t, db.QueryRowContext(ctx, `SELECT priority FROM account_groups WHERE account_id=62 AND group_id=9`).Scan(&unrelatedPriority))
@@ -263,6 +289,79 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		require.Equal(t, []int64{9, 10, 11}, bindings(), "starting a new round retains the applied outcome")
 		complete(pending, "pending")
 		require.Equal(t, []int64{9, 10, 11}, bindings(), "insufficient samples retain the applied outcome")
+	})
+
+	t.Run("vote that removes entitlement commits without exposing the destination group", func(t *testing.T) {
+		reset(t)
+		exec(`UPDATE groups SET is_exclusive=TRUE;
+DELETE FROM account_groups WHERE account_id=62 AND group_id=9;
+INSERT INTO user_allowed_groups(user_id,group_id) VALUES(1,8),(2,8),(3,10);`)
+		voting := ruleFor(pelicanID, []int64{10}, []int64{8}, true)
+		p := newPlan(voting)
+		result := begin(p, voting)
+		complete(result, "pass")
+		first := cast(1, result.ID, "pass")
+		require.Equal(t, int64(8), *first.Result.GroupID)
+		require.Equal(t, 1, first.Voting.PassCount)
+		receipt := cast(2, result.ID, "pass")
+		require.Equal(t, []int64{10}, bindings(), "the authorized vote must commit its promotion")
+		require.Equal(t, int64(8), *receipt.Result.GroupID, "the receipt keeps the pre-authorized group")
+		require.Equal(t, "Source and lower tier", receipt.Result.GroupName)
+		require.Equal(t, "pass", receipt.Voting.MyVote)
+		require.Equal(t, 2, receipt.Voting.PassCount)
+		require.False(t, receipt.Voting.Open)
+		for _, userID := range []int64{1, 2} {
+			visible, err := repo.ListVotingResults(ctx, userID)
+			require.NoError(t, err)
+			require.Empty(t, visible, "source-only users lose access after promotion")
+			_, err = repo.CastTestVote(ctx, userID, result.ID, "fail")
+			require.ErrorIs(t, err, service.ErrScheduledTestVoteUnavailable)
+		}
+		visible, err := repo.ListVotingResults(ctx, 3)
+		require.NoError(t, err)
+		require.Len(t, visible, 1)
+		require.Equal(t, int64(10), *visible[0].Result.GroupID, "another account's source membership must not affect this projection")
+		require.Equal(t, "Upper tier one", visible[0].Result.GroupName)
+		reviews, err := repo.ListAdminReviews(ctx)
+		require.NoError(t, err)
+		require.Len(t, reviews, 1)
+		require.Equal(t, int64(10), *reviews[0].Result.GroupID)
+		require.Equal(t, "Upper tier one", reviews[0].Result.GroupName)
+		var count int
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scheduled_test_votes WHERE result_id=$1 AND vote='pass'`, result.ID).Scan(&count))
+		require.Equal(t, 2, count)
+		// With no current membership, even the original source entitlement
+		// must not provide a fallback projection or permission to vote.
+		exec(`DELETE FROM account_groups WHERE account_id=62`)
+		visible, err = repo.ListVotingResults(ctx, 1)
+		require.NoError(t, err)
+		require.Empty(t, visible)
+		_, err = repo.CastTestVote(ctx, 1, result.ID, "fail")
+		require.ErrorIs(t, err, service.ErrScheduledTestVoteUnavailable)
+	})
+
+	t.Run("voting requires entitlement to the projected current membership", func(t *testing.T) {
+		reset(t)
+		exec(`UPDATE groups SET is_exclusive=TRUE;
+INSERT INTO user_allowed_groups(user_id,group_id) VALUES(1,10),(2,11);`)
+		voting := ruleFor(pelicanID, []int64{10, 11}, []int64{8}, true)
+		p := newPlan(voting)
+		result := begin(p, voting)
+		complete(result, "pass")
+		reviews, err := repo.ListAdminReviews(ctx)
+		require.NoError(t, err)
+		require.Len(t, reviews, 1)
+		require.NoError(t, repo.DecideTestResult(ctx, 1, result.ID, reviews[0].Generation, "pass"))
+		exec(`DELETE FROM account_groups WHERE account_id=62 AND group_id=9`)
+		visible, err := repo.ListVotingResults(ctx, 1)
+		require.NoError(t, err)
+		require.Len(t, visible, 1)
+		require.Equal(t, int64(10), *visible[0].Result.GroupID)
+		visible, err = repo.ListVotingResults(ctx, 2)
+		require.NoError(t, err)
+		require.Empty(t, visible, "a different current membership does not authorize the projected group")
+		_, err = repo.CastTestVote(ctx, 2, result.ID, "fail")
+		require.ErrorIs(t, err, service.ErrScheduledTestVoteUnavailable)
 	})
 
 	t.Run("moved accounts remain detected and votes can upgrade and downgrade", func(t *testing.T) {

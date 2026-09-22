@@ -8,7 +8,7 @@ const messages = {
   admin: resources, common: { delete: 'Delete', loading: 'Loading', noData: 'No data', status: 'Status' },
   tests: { running: 'Test is running', noOutput: 'No output' },
 }
-vi.mock('vue-i18n', () => ({ useI18n: () => ({
+vi.mock('vue-i18n', async (importOriginal) => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({
   t: (key: string, params: Record<string, unknown> = {}) => {
     const value = key.split('.').reduce<unknown>((current, part) => current && typeof current === 'object' ? (current as Record<string, unknown>)[part] : undefined, messages)
     return typeof value === 'string' ? value.replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? '')) : key
@@ -34,6 +34,21 @@ const mountHistory = (results: TestResult[], extra = {}) => mount(AdminTestResul
 })
 
 describe('admin result account history', () => {
+  it('shows model mismatch and missing evidence instead of a successful execution badge', async () => {
+    const check = { requested_model: 'alias', upstream_model: 'expected', returned_models: ['different'], match_mode: 'exact' as const, verdict: 'fail' as const, reason: 'mismatch' as const }
+    const wrapper = mountHistory([
+      result(1, { output_kind: 'model_check', output_model_check: check, output_html: null }),
+      result(2, { started_at: '2026-09-21T09:00:00Z', output_kind: 'model_check', output_model_check: { ...check, verdict: 'unknown', reason: 'missing_model', returned_models: [] }, response_text: '{"private":"not for display"}', output_html: null }),
+    ])
+    await flushPromises()
+    expect(wrapper.get('[data-result-id="1"] .badge').text()).toBe('tests.modelCheck.fail')
+    expect(wrapper.get('[data-result-id="1"] .badge').classes()).toContain('badge-danger')
+    expect(wrapper.get('[data-result-id="2"] .badge').text()).toBe('tests.modelCheck.unknown')
+    expect(wrapper.get('[data-result-id="2"] [data-result-summary]').text()).toBe('tests.modelCheck.unknown')
+    expect(wrapper.text()).not.toContain('private')
+    wrapper.unmount()
+  })
+
   it('groups by account, shows names and IDs, and orders each execution independently', async () => {
     const wrapper = mountHistory([
       result(8, { account_id: 20 }),
@@ -86,16 +101,34 @@ describe('admin result account history', () => {
   it('keeps group checks and unassigned placeholders separate from direct account checks', async () => {
     const wrapper = mountHistory([
       result(2), result(3, { target_mode: 'group', account_id: 20 }),
+      result(4, { target_mode: 'group', account_id: null, output_kind: 'statistics' }),
       result(-1, { account_id: null, target_mode: 'all_accounts', status: 'pending' }),
     ])
     await flushPromises()
-    expect(wrapper.findAll('[data-account-key]').map(item => item.attributes('data-account-key'))).toEqual(['group', 'unassigned', 'account:10'])
+    expect(wrapper.findAll('[data-account-key]').map(item => item.attributes('data-account-key'))).toEqual(['group', 'unassigned', 'account:10', 'account:20'])
     expect(wrapper.get('[data-selected-account] h3').text()).toBe('Group check')
+    await wrapper.get('[data-account-key="account:20"]').trigger('click')
     expect(wrapper.get('[data-result-id="3"]').text()).toContain('Execution account: Team Beta #20')
     await wrapper.get('[data-account-key="unassigned"]').trigger('click')
     expect(wrapper.get('[data-selected-account] h3').text()).toBe('Waiting for an account')
     expect(wrapper.find('[data-delete-result]').exists()).toBe(false)
     expect(wrapper.find('[data-retry-result]').exists()).toBe(false)
+    expect(wrapper.get('[data-result-id="-1"] .badge').text()).toBe('Queued')
+  })
+
+  it('shows actual group changes, pending verdicts and unchanged actions', async () => {
+    const wrapper = mountHistory([
+      result(1, { protection_decision: { verdict: 'pass', status: 'unchanged', scheduling: 'keep' } }),
+      result(2, { protection_decision: { verdict: 'pass', status: 'applied', scheduling: 'resume', added_group_ids: [10, 11], removed_group_ids: [8] } }),
+      result(3, { protection_decision: { verdict: 'pending', status: 'pending', scheduling: 'keep' } }),
+      result(4, { protection_decision: { verdict: '', status: 'disabled' } }),
+    ])
+    await flushPromises()
+    expect(wrapper.get('[data-result-id="1"] [data-protection-decision]').text()).toContain('Scheduling and groups unchanged')
+    expect(wrapper.get('[data-result-id="2"] [data-protection-decision]').text()).toContain('Groups added: #10, #11')
+    expect(wrapper.get('[data-result-id="2"] [data-protection-decision]').text()).toContain('Groups removed: #8')
+    expect(wrapper.get('[data-result-id="3"] [data-protection-decision]').text()).toContain('Awaiting verdict')
+    expect(wrapper.get('[data-result-id="4"] [data-protection-decision]').text()).toContain('No automatic action configured')
   })
 
   it('filters type and status while preserving distinct execution records', async () => {
@@ -105,6 +138,7 @@ describe('admin result account history', () => {
       result(4, { test_definition_id: 2, test_name: 'Candy', status: 'pending' }),
     ])
     await flushPromises()
+    expect(wrapper.find('[data-status-filter] option[value="unknown"]').exists()).toBe(false)
     await wrapper.get('[data-type-filter]').setValue('2')
     await wrapper.get('[data-status-filter]').setValue('running')
     expect(wrapper.findAll('[data-result-id]').map(item => item.attributes('data-result-id'))).toEqual(['4', '3'])
@@ -114,6 +148,43 @@ describe('admin result account history', () => {
     expect(wrapper.findAll('[data-result-id]').map(item => item.attributes('data-result-id'))).toEqual(['2'])
     await wrapper.get('[data-status-filter]').setValue('success')
     expect(wrapper.findAll('[data-result-id]').map(item => item.attributes('data-result-id'))).toEqual(['1'])
+  })
+
+  it('filters and counts model verdicts separately from transport execution failures', async () => {
+    const evidence = { requested_model: 'model', upstream_model: 'model', returned_models: ['model'], match_mode: 'exact' as const, verdict: 'pass' as const, reason: 'match' as const }
+    const rows = [
+      result(1), result(2, { status: 'passed' }), result(3, { status: 'failed' }),
+      result(4, { output_kind: 'model_check', output_model_check: evidence }),
+      result(5, { output_kind: 'model_check', output_model_check: { ...evidence, verdict: 'fail', reason: 'mismatch' } }),
+      result(6, { output_kind: 'model_check', output_model_check: { ...evidence, verdict: 'unknown', reason: 'missing_model', returned_models: [] } }),
+      result(7, { output_kind: 'model_check', output_model_check: null }),
+      result(8, { output_kind: 'model_check', status: 'running', output_model_check: { ...evidence, verdict: 'fail', reason: 'mismatch' } }),
+      result(9, { output_kind: 'model_check', status: 'pending' }),
+      result(10, { output_kind: 'model_check', status: 'failed', output_model_check: { ...evidence, verdict: 'unknown', reason: 'upstream_error' } }),
+    ]
+    const wrapper = mountHistory(rows)
+    await flushPromises()
+    expect(wrapper.get('[data-account-key="account:10"]').text()).toContain('3 failed')
+    expect(wrapper.get('[data-account-key="account:10"]').text()).toContain('2 running')
+    expect(wrapper.get('[data-status-filter] option[value="unknown"]').text()).toBe('tests.modelCheck.unknown')
+    const ids = () => wrapper.findAll('[data-result-id]').map(item => Number(item.attributes('data-result-id')))
+    await wrapper.get('[data-status-filter]').setValue('success')
+    expect(ids()).toEqual([4, 2, 1])
+    await wrapper.get('[data-status-filter]').setValue('failed')
+    expect(ids()).toEqual([10, 5, 3])
+    expect(wrapper.get('[data-result-id="5"] .badge').text()).toBe('tests.modelCheck.fail')
+    expect(wrapper.find('[data-result-id="5"] [data-retry-result]').exists()).toBe(false)
+    expect(wrapper.get('[data-result-id="10"] [data-retry-result]').exists()).toBe(true)
+    expect(wrapper.get('[data-result-id="3"] [data-retry-result]').exists()).toBe(true)
+    await wrapper.get('[data-status-filter]').setValue('unknown')
+    expect(ids()).toEqual([7, 6])
+    await wrapper.get('[data-status-filter]').setValue('running')
+    expect(ids()).toEqual([9, 8])
+    await wrapper.get('[data-status-filter]').setValue('unknown')
+    await wrapper.setProps({ results: rows.slice(0, 3) })
+    expect(wrapper.find('[data-status-filter] option[value="unknown"]').exists()).toBe(false)
+    expect(ids()).toEqual([3, 2, 1])
+    wrapper.unmount()
   })
 
   it('allows multiple expanded outputs and exposes retry and delete as independent commands', async () => {

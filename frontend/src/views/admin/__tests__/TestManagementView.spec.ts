@@ -33,6 +33,30 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('configurable test management', () => {
+  it('creates, edits and copies model consistency definitions without a user prompt', async () => {
+    const modelType = { id: 7, name: 'Model consistency', key: 'model-consistency', output_kind: 'model_check', prompt: 'Server managed prompt', enabled: true }
+    api.listTypes.mockResolvedValue([modelType])
+    const wrapper = makeWrapper(); await flushPromises()
+    expect(wrapper.get('article').text()).toContain('admin.tests.modelCheck')
+    await wrapper.get('article button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createType).toHaveBeenCalledWith(expect.objectContaining({ name: 'Model consistency（Copy）', output_kind: 'model_check', prompt: '' }))
+    await wrapper.get('article button[aria-label="common.edit"]').trigger('click')
+    let dialog = wrapper.get('[data-dialog]')
+    expect(dialog.find('textarea').exists()).toBe(false)
+    expect(dialog.find('[data-model-check-hint]').exists()).toBe(true)
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(api.updateType).toHaveBeenCalledWith(7, expect.objectContaining({ output_kind: 'model_check', prompt: '' }))
+    await wrapper.findAll('button').find(button => button.text().includes('common.create'))!.trigger('click')
+    dialog = wrapper.get('[data-dialog]')
+    await dialog.findAll('input')[0].setValue('New check')
+    await dialog.findAll('input')[1].setValue('new-check')
+    await dialog.get('textarea').setValue('Should not be submitted')
+    await dialog.get('[data-type-kind]').setValue('model_check')
+    expect(dialog.find('textarea').exists()).toBe(false)
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(api.createType).toHaveBeenLastCalledWith(expect.objectContaining({ output_kind: 'model_check', prompt: '', name: 'New check' }))
+    wrapper.unmount()
+  })
 
   it('saves a new type with its chosen output format and prompt', async () => {
     const wrapper = makeWrapper(); await flushPromises()

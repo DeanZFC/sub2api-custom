@@ -31,7 +31,7 @@
         </header>
         <div class="mb-2 grid gap-3 sm:grid-cols-2">
           <label class="min-w-0 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.type') }}<select v-model="typeFilter" class="input mt-1 w-full text-sm" data-type-filter><option value="">{{ t('admin.tests.allResultTypes') }}</option><option v-for="type in availableTypes" :key="type.key" :value="type.key">{{ type.name }}</option></select></label>
-          <label class="min-w-0 text-xs text-gray-500 dark:text-gray-400">{{ t('common.status') }}<select v-model="statusFilter" class="input mt-1 w-full text-sm" data-status-filter><option value="">{{ t('admin.tests.allResultStatuses') }}</option><option value="success">{{ t('admin.scheduledTests.success') }}</option><option value="failed">{{ t('admin.scheduledTests.failed') }}</option><option value="running">{{ t('admin.scheduledTests.running') }}</option></select></label>
+          <label class="min-w-0 text-xs text-gray-500 dark:text-gray-400">{{ t('common.status') }}<select v-model="statusFilter" class="input mt-1 w-full text-sm" data-status-filter><option value="">{{ t('admin.tests.allResultStatuses') }}</option><option value="success">{{ t('admin.scheduledTests.success') }}</option><option value="failed">{{ t('admin.scheduledTests.failed') }}</option><option v-if="hasModelChecks" value="unknown">{{ t('tests.modelCheck.unknown') }}</option><option value="running">{{ t('admin.scheduledTests.running') }}</option></select></label>
         </div>
         <p v-if="!filteredResults.length" class="py-8 text-center text-sm text-gray-500">{{ t('admin.tests.noMatchingResults') }}</p>
         <div v-else class="divide-y divide-gray-200 dark:divide-dark-700">
@@ -51,7 +51,8 @@
               </div>
             </div>
             <p v-if="result.target_mode === 'group' && result.account_id" class="ml-6 mt-2 break-words text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.executedByAccount') }}: {{ accountLabel(result) }}</p>
-            <p v-if="!expanded.has(result.id)" class="ml-6 mt-2 break-words text-sm" :class="result.status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'" data-result-summary>{{ resultSummary(result) }}</p>
+            <p v-if="!expanded.has(result.id)" class="ml-6 mt-2 break-words text-sm" :class="resultStatus(result) === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'" data-result-summary>{{ resultSummary(result) }}</p>
+            <p v-if="result.protection_decision" class="ml-6 mt-2 break-words text-xs text-gray-500 dark:text-gray-400" data-protection-decision>{{ protectionDecisionLabel(result) }}</p>
             <div v-if="expanded.has(result.id)" :id="`admin-test-output-${result.id}`" class="mt-3 min-w-0 sm:ml-6" data-result-detail>
               <p v-if="result.error_message" class="mb-3 whitespace-pre-wrap break-words text-sm text-red-600 dark:text-red-400" role="alert">{{ result.error_message }}</p>
               <TestResultOutput :result="result" />
@@ -92,6 +93,12 @@ const page = ref(1)
 const pageSize = 15
 const expanded = ref(new Set<number>())
 const isRunning = (result: TestResult) => result.status === 'running' || result.status === 'pending'
+const resultStatus = (result: TestResult) => {
+  if (isRunning(result)) return 'running'
+  if (result.status === 'failed') return 'failed'
+  if (result.output_kind === 'model_check') return result.output_model_check?.verdict === 'pass' ? 'success' : result.output_model_check?.verdict === 'fail' ? 'failed' : 'unknown'
+  return result.status === 'passed' ? 'success' : result.status
+}
 const resultTime = (result: TestResult) => result.started_at || result.created_at || result.finished_at
 const timestamp = (result: TestResult) => {
   const value = Date.parse(resultTime(result) || '')
@@ -107,8 +114,8 @@ const accountGroups = computed(() => {
   const groups = new Map<string, { key: string; id: number | null; name: string; label: string; results: TestResult[]; failed: number; running: number }>()
   const results = [...props.results].sort((a, b) => timestamp(b) - timestamp(a) || b.id - a.id)
   for (const result of results) {
-    const groupTarget = result.target_mode === 'group'
-    const id = groupTarget ? null : result.account_id ?? null
+    const groupTarget = result.target_mode === 'group' && result.account_id == null
+    const id = result.account_id ?? null
     const key = groupTarget ? 'group' : id != null ? `account:${id}` : 'unassigned'
     let group = groups.get(key)
     if (!group) {
@@ -117,7 +124,7 @@ const accountGroups = computed(() => {
       groups.set(key, group)
     }
     group.results.push(result)
-    if (result.status === 'failed') group.failed++
+    if (resultStatus(result) === 'failed') group.failed++
     if (isRunning(result)) group.running++
   }
   return [...groups.values()].sort((a, b) => (a.key === 'group' ? -2 : a.id ?? -1) - (b.key === 'group' ? -2 : b.id ?? -1))
@@ -130,6 +137,7 @@ watch(visibleAccounts, accounts => {
   if (!accounts.some(account => account.key === selectedKey.value)) selectedKey.value = accounts[0]?.key || ''
 }, { immediate: true })
 const selectedAccount = computed(() => visibleAccounts.value.find(account => account.key === selectedKey.value))
+const hasModelChecks = computed(() => selectedAccount.value?.results.some(result => result.output_kind === 'model_check') || false)
 const availableTypes = computed(() => {
   const types = new Map<string, string>()
   for (const result of selectedAccount.value?.results || []) types.set(resultTypeKey(result), resultTypeName(result))
@@ -137,12 +145,11 @@ const availableTypes = computed(() => {
 })
 const filteredResults = computed(() => (selectedAccount.value?.results || []).filter(result => {
   if (typeFilter.value && resultTypeKey(result) !== typeFilter.value) return false
-  if (statusFilter.value === 'success') return result.status === 'success' || result.status === 'passed'
-  if (statusFilter.value === 'running') return isRunning(result)
-  return !statusFilter.value || result.status === statusFilter.value
+  return !statusFilter.value || resultStatus(result) === statusFilter.value
 }))
 const pageResults = computed(() => filteredResults.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 watch(selectedKey, () => { typeFilter.value = ''; statusFilter.value = ''; page.value = 1 })
+watch(hasModelChecks, value => { if (!value && statusFilter.value === 'unknown') statusFilter.value = '' })
 watch([typeFilter, statusFilter], () => { page.value = 1 })
 watch(() => filteredResults.value.length, count => { page.value = Math.min(page.value, Math.max(1, Math.ceil(count / pageSize))) })
 watch([selectedKey, typeFilter, statusFilter, page], () => {
@@ -162,6 +169,7 @@ const toggleResult = (id: number) => {
 }
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '-'
 const resultDuration = (result: TestResult) => {
+  if (result.status === 'pending') return t('admin.tests.queued')
   if (!isRunning(result)) return result.latency_ms == null ? '-' : `${result.latency_ms}ms`
   const started = timestamp(result)
   if (!started) return '-'
@@ -172,15 +180,35 @@ const resultDuration = (result: TestResult) => {
   const duration = hours > 0 ? `${hours}:${minutePart}:${secondPart}` : `${minutePart}:${secondPart}`
   return t('admin.tests.elapsed', { duration })
 }
-const statusClass = (result: TestResult) => result.status === 'failed' ? 'badge badge-danger' : isRunning(result) ? 'badge badge-warning' : ['success', 'passed'].includes(result.status) ? 'badge badge-success' : 'badge badge-gray'
-const statusLabel = (result: TestResult) => isRunning(result) ? t('admin.scheduledTests.running') : result.status === 'failed' ? t('admin.scheduledTests.failed') : ['success', 'passed'].includes(result.status) ? t('admin.scheduledTests.success') : result.status
+const statusClass = (result: TestResult) => resultStatus(result) === 'failed' ? 'badge badge-danger' : ['running', 'unknown'].includes(resultStatus(result)) ? 'badge badge-warning' : resultStatus(result) === 'success' ? 'badge badge-success' : 'badge badge-gray'
+const statusLabel = (result: TestResult) => result.status === 'pending' ? t('admin.tests.queued') : isRunning(result) ? t('admin.scheduledTests.running') : result.status === 'failed' ? t('admin.scheduledTests.failed')
+  : result.output_kind === 'model_check' ? t(`tests.modelCheck.${result.output_model_check?.verdict || 'unknown'}`) : ['success', 'passed'].includes(result.status) ? t('admin.scheduledTests.success') : result.status
 const resultSummary = (result: TestResult) => {
   if (result.status === 'failed') return (result.error_message || t('admin.scheduledTests.failed')).slice(0, 180)
   if (isRunning(result)) return t('tests.running')
   if (result.output_kind === 'statistics') return result.output_statistics ? t('admin.tests.statistics') : t('tests.noOutput')
+  if (result.output_kind === 'model_check') return result.output_model_check?.returned_models?.join(', ') || t('tests.modelCheck.unknown')
   if (result.output_kind === 'number' && result.output_numeric != null) return String(result.output_numeric)
   if (result.output_kind === 'html' && result.output_html) return 'HTML / SVG'
   const text = (result.response_text || '').replace(/\s+/g, ' ').trim()
   return text ? text.length > 180 ? `${text.slice(0, 180)}...` : text : t('tests.noOutput')
+}
+const protectionDecisionLabel = (result: TestResult) => {
+  const decision = result.protection_decision
+  if (!decision) return ''
+  const action = decision.scheduling === 'pause' ? t('admin.tests.protection.actionPause')
+    : decision.scheduling === 'resume' ? t('admin.tests.protection.actionResume')
+      : decision.scheduling === 'keep' ? t('admin.tests.protection.actionKeep') : ''
+  const groups = [
+    decision.added_group_ids?.length ? `${t('admin.tests.protection.actionGroupsAdded')}: ${decision.added_group_ids.map(id => `#${id}`).join(', ')}` : '',
+    decision.removed_group_ids?.length ? `${t('admin.tests.protection.actionGroupsRemoved')}: ${decision.removed_group_ids.map(id => `#${id}`).join(', ')}` : '',
+  ].filter(Boolean).join(' · ')
+  const state = decision.status === 'pending' ? t('admin.tests.protection.actionPending')
+    : decision.status === 'disabled' ? t('admin.tests.protection.actionDisabled')
+      : decision.status === 'skipped' ? t('admin.tests.protection.actionSkipped')
+        : decision.status === 'error' ? t('admin.tests.protection.actionError')
+          : decision.status === 'unchanged' ? t('admin.tests.protection.actionUnchanged') : action
+  const reason = decision.reason ? ` · ${decision.reason}` : ''
+  return `${t('admin.tests.protection.actionTaken')}: ${state || t('admin.tests.protection.actionNone')}${groups ? ` · ${groups}` : ''}${reason}`
 }
 </script>

@@ -15,6 +15,10 @@
           <h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.conditions') }}</h4>
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.pause_on_failure" type="checkbox" data-rule-failure @change="patchRule(type.id, { pause_on_failure: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.pauseOnFailure') }}</label>
           <label v-if="type.output_kind === 'statistics'" class="input-label block">{{ t('admin.tests.protection.minSamples') }}<input :value="ruleFor(type.id)?.min_samples ?? 1" type="number" min="0" max="1000000000" step="1" class="input mt-1 w-32" data-rule-samples @input="patchRule(type.id, { min_samples: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
+          <template v-if="type.output_kind === 'model_check'">
+            <label class="input-label block">{{ t('tests.modelCheck.matchMode') }}<select :value="ruleFor(type.id)?.model_match || 'exact'" class="input mt-1 w-full" data-rule-model-match @change="patchRule(type.id, { model_match: ($event.target as HTMLSelectElement).value as TestProtectionRule['model_match'] })"><option value="exact">{{ t('tests.modelCheck.exact') }}</option><option value="snapshot">{{ t('tests.modelCheck.snapshot') }}</option></select></label>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.modelMatchHint') }}</p>
+          </template>
           <div v-for="(threshold, index) in ruleFor(type.id)?.thresholds || []" :key="index" class="flex flex-wrap items-center gap-2" data-threshold>
             <select :value="threshold.metric" class="input flex-1" :aria-label="t('admin.tests.protection.metric')" @change="patchThreshold(type.id, index, { metric: ($event.target as HTMLSelectElement).value as TestProtectionMetric })"><option v-for="metric in protectionMetrics(type.output_kind)" :key="metric" :value="metric">{{ t(`admin.tests.protection.metrics.${metric}`) }}</option></select>
             <select :value="threshold.operator" class="input w-28" :aria-label="t('admin.tests.protection.operator')" @change="patchThreshold(type.id, index, { operator: ($event.target as HTMLSelectElement).value as 'lt' | 'gt' })"><option value="lt">{{ t('admin.tests.protection.below') }}</option><option value="gt">{{ t('admin.tests.protection.above') }}</option></select>
@@ -22,7 +26,7 @@
             <button type="button" class="btn btn-secondary btn-sm" :aria-label="t('admin.tests.protection.removeThreshold')" @click="removeThreshold(type.id, index)">{{ t('common.delete') }}</button>
           </div>
           <button type="button" class="text-xs font-medium text-primary-600 dark:text-primary-400" :disabled="(ruleFor(type.id)?.thresholds?.length || 0) >= 20" data-add-threshold @click="addThreshold(type)">+ {{ t('admin.tests.protection.addThreshold') }}</button>
-          <template v-if="type.output_kind !== 'statistics'">
+          <template v-if="!['statistics', 'model_check'].includes(type.output_kind)">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.vote?.enabled || false" type="checkbox" data-rule-vote @change="toggleVote(type.id, ($event.target as HTMLInputElement).checked)" />{{ t('admin.tests.protection.vote') }}</label>
             <div v-if="ruleFor(type.id)?.vote?.enabled" class="grid gap-3 sm:grid-cols-2">
               <label class="input-label">{{ t('admin.tests.protection.rejectAbove') }}<input :value="ruleFor(type.id)?.vote?.reject_above" type="number" min="0" max="1000000" step="1" class="input mt-1 w-full" data-vote-reject @input="patchVote(type.id, { reject_above: ($event.target as HTMLInputElement).valueAsNumber })" /></label>

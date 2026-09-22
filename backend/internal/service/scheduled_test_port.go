@@ -35,6 +35,7 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
+	RunID            string `json:"-"`
 	ID               int64  `json:"id"`
 	PlanID           int64  `json:"plan_id"`
 	TestDefinitionID *int64 `json:"test_definition_id,omitempty"`
@@ -45,24 +46,52 @@ type ScheduledTestResult struct {
 	// PlanOrder is the administrator-configured order of the test rule/plan
 	// that produced this result. The user-facing page sorts by this value and
 	// derives its group list from that ordered result stream.
-	PlanOrder        int                      `json:"plan_order"`
-	TargetMode       string                   `json:"target_mode,omitempty"`
-	Status           string                   `json:"status"`
-	ResponseText     string                   `json:"response_text"`
-	OutputKind       string                   `json:"output_kind"`
-	OutputHTML       string                   `json:"output_html,omitempty"`
-	OutputNumeric    *float64                 `json:"output_numeric,omitempty"`
-	OutputStatistics *ScheduledTestStatistics `json:"output_statistics,omitempty"`
-	AccountID        *int64                   `json:"account_id,omitempty"`
-	AccountName      string                   `json:"account_name,omitempty"` // populated by admin queries only
-	ModelID          string                   `json:"model_id"`
-	ReasoningEffort  string                   `json:"reasoning_effort,omitempty"`
-	GroupID          *int64                   `json:"group_id,omitempty"`
-	ErrorMessage     string                   `json:"error_message"`
-	LatencyMs        int64                    `json:"latency_ms"`
-	StartedAt        time.Time                `json:"started_at"`
-	FinishedAt       time.Time                `json:"finished_at"`
-	CreatedAt        time.Time                `json:"created_at"`
+	PlanOrder            int                              `json:"plan_order"`
+	TargetMode           string                           `json:"target_mode,omitempty"`
+	Status               string                           `json:"status"`
+	ResponseText         string                           `json:"response_text"`
+	OutputKind           string                           `json:"output_kind"`
+	OutputHTML           string                           `json:"output_html,omitempty"`
+	OutputNumeric        *float64                         `json:"output_numeric,omitempty"`
+	OutputStatistics     *ScheduledTestStatistics         `json:"output_statistics,omitempty"`
+	OutputModelCheck     *ScheduledTestModelCheck         `json:"output_model_check,omitempty"`
+	ProtectionDecision   *ScheduledTestProtectionDecision `json:"protection_decision,omitempty"`
+	UpstreamModel        string                           `json:"-"`
+	ReturnedModels       []string                         `json:"-"`
+	ModelEvidenceInvalid bool                             `json:"-"`
+	AccountID            *int64                           `json:"account_id,omitempty"`
+	AccountName          string                           `json:"account_name,omitempty"` // populated by admin queries only
+	ModelID              string                           `json:"model_id"`
+	ReasoningEffort      string                           `json:"reasoning_effort,omitempty"`
+	GroupID              *int64                           `json:"group_id,omitempty"`
+	ErrorMessage         string                           `json:"error_message"`
+	LatencyMs            int64                            `json:"latency_ms"`
+	StartedAt            time.Time                        `json:"started_at"`
+	FinishedAt           time.Time                        `json:"finished_at"`
+	CreatedAt            time.Time                        `json:"created_at"`
+}
+
+// ScheduledTestProtectionDecision is populated for administrator result views.
+// It records the verdict and actual account changes in the same transaction;
+// public result endpoints deliberately do not expose it.
+type ScheduledTestProtectionDecision struct {
+	Status          string  `json:"status,omitempty"`
+	Verdict         string  `json:"verdict"`
+	Reason          string  `json:"reason,omitempty"`
+	Scheduling      string  `json:"scheduling,omitempty"`
+	GroupIDs        []int64 `json:"group_ids,omitempty"`
+	AddedGroupIDs   []int64 `json:"added_group_ids,omitempty"`
+	RemovedGroupIDs []int64 `json:"removed_group_ids,omitempty"`
+}
+
+// BeginRun atomically publishes the complete account/type snapshot before any
+// upstream work begins, including records waiting for a worker.
+type ScheduledTestRunRepository interface {
+	BeginRun(context.Context, int64, string, []*ScheduledTestResult) ([]*ScheduledTestResult, error)
+}
+
+type ScheduledTestDecisionRepository interface {
+	RecordDecision(context.Context, *ScheduledTestResult, ScheduledTestProtectionDecision) error
 }
 
 // ScheduledTestStatistics is a local snapshot, never an upstream model output.
@@ -152,4 +181,12 @@ type ScheduledTestResultRepository interface {
 	ListVisibleHistory(ctx context.Context, userID, resultID, beforeID int64, limit int) ([]*ScheduledTestResult, error)
 	Delete(ctx context.Context, id int64) error
 	PruneOldResults(ctx context.Context, planID int64, keepCount int) error
+}
+
+// ScheduledTestTargetAccountRepository returns all configured target accounts
+// for an execution. Eligibility is checked again immediately before upstream
+// work, allowing the runner to persist a visible skipped result for an account
+// that was manually stopped or otherwise unavailable.
+type ScheduledTestTargetAccountRepository interface {
+	ListPlanTargetAccountIDs(context.Context, *ScheduledTestPlan, *int64) ([]int64, error)
 }

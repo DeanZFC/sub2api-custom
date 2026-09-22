@@ -563,6 +563,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 	// Send test_start event
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	beginAccountTestModelAttempt(c, testModelID)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -661,6 +662,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	}
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	beginAccountTestModelAttempt(c, testModelID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
 	if err != nil {
@@ -904,6 +906,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
+	beginAccountTestModelAttempt(c, upstreamTestModelID)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -988,6 +991,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 						}
 					}
 					retryReq.Host = req.Host
+					beginAccountTestModelAttempt(c, upstreamTestModelID)
 					resp, err = s.doOpenAIAccountTestUpstream(retryReq, proxyURL, account, true)
 					if err != nil {
 						return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
@@ -1307,6 +1311,7 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
+	beginAccountTestModelAttempt(c, testModelID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -2184,6 +2189,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过 /v1/chat/completions 测试连接"})
+	beginAccountTestModelAttempt(c, testModelID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -2482,6 +2488,7 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 
 	// Send test_start event
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	beginAccountTestModelAttempt(c, testModelID)
 
 	// Get proxy and execute request
 	proxyURL := ""
@@ -2772,6 +2779,7 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 		// Support two Gemini response formats:
 		// - AI Studio: {"candidates": [...]}
 		// - Gemini CLI: {"response": {"candidates": [...]}}
+		captureAccountTestReturnedModels(c, data)
 		if resp, ok := data["response"].(map[string]any); ok && resp != nil {
 			data = resp
 		}
@@ -2923,6 +2931,12 @@ func isAccountTestTruncationFinishReason(reason string) bool {
 // stop_reason, and rejects max_tokens so a non-SSE truncated document cannot
 // be mistaken for a successful test.
 func (s *AccountTestService) processClaudeJSONResponse(c *gin.Context, body []byte) error {
+	if accountTestIdentity(c) != nil {
+		var metadata map[string]any
+		if json.Unmarshal(body, &metadata) == nil {
+			captureAccountTestReturnedModels(c, metadata)
+		}
+	}
 	var response struct {
 		Type       string `json:"type"`
 		StopReason string `json:"stop_reason"`
@@ -2981,6 +2995,7 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 
 				var data map[string]any
 				if err := json.Unmarshal([]byte(jsonStr), &data); err == nil {
+					captureAccountTestReturnedModels(c, data)
 					eventType, _ := data["type"].(string)
 					switch eventType {
 					case "content_block_delta":
@@ -3064,6 +3079,13 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 		line, readErr := reader.ReadString('\n')
 
 		line = strings.TrimSpace(line)
+		if !seenJSON && strings.HasPrefix(line, "{") {
+			rest, err := io.ReadAll(reader)
+			if err != nil || (readErr != nil && readErr != io.EOF) {
+				return s.sendErrorAndEnd(c, "Chat Completions JSON response read failed")
+			}
+			return s.processOpenAIJSONTestResponse(c, append([]byte(line+"\n"), rest...), true)
+		}
 		if line != "" && sseDataPrefix.MatchString(line) {
 			jsonStr := sseDataPrefix.ReplaceAllString(line, "")
 			if jsonStr == "[DONE]" {
@@ -3082,6 +3104,7 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 			if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 				return s.sendErrorAndEnd(c, "Invalid Chat Completions response from /v1/chat/completions: expected JSON data")
 			}
+			captureAccountTestReturnedModels(c, data)
 			seenJSON = true
 
 			if errData, ok := data["error"].(map[string]any); ok {
@@ -3141,10 +3164,11 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
 	seenCompleted := false
+	seenData := false
 
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
+		if err != nil && (err != io.EOF || len(line) == 0) {
 			if err == io.EOF {
 				if seenCompleted {
 					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
@@ -3156,9 +3180,17 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 		}
 
 		line = strings.TrimSpace(line)
+		if !seenData && strings.HasPrefix(line, "{") {
+			rest, readErr := io.ReadAll(reader)
+			if readErr != nil {
+				return s.sendErrorAndEnd(c, "OpenAI JSON response read failed")
+			}
+			return s.processOpenAIJSONTestResponse(c, append([]byte(line+"\n"), rest...), false)
+		}
 		if line == "" || !sseDataPrefix.MatchString(line) {
 			continue
 		}
+		seenData = true
 
 		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
 		if jsonStr == "[DONE]" {
@@ -3173,6 +3205,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 			continue
 		}
+		captureAccountTestReturnedModels(c, data)
 
 		eventType, _ := data["type"].(string)
 
@@ -3469,6 +3502,9 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 }
 
 func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
+	if event.Type == "test_start" {
+		captureAccountTestUpstreamModel(c, event.Model)
+	}
 	if event.Type == "test_complete" {
 		if suppress, ok := c.Get(accountTestSuppressCompletionContextKey); ok {
 			if suppressCompletion, _ := suppress.(bool); suppressCompletion {
@@ -3507,6 +3543,7 @@ func (s *AccountTestService) RunTestBackgroundWithPrompt(ctx context.Context, ac
 // that forwards an explicitly selected Codex-style reasoning effort.
 func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context.Context, accountID int64, modelID, prompt, reasoningEffort string) (*ScheduledTestResult, error) {
 	startedAt := time.Now()
+	ctx, modelIdentity := newAccountTestModelIdentity(ctx)
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
@@ -3526,13 +3563,17 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 		}
 	}
 
+	upstreamModel, returnedModels, invalidModelEvidence := modelIdentity.snapshot()
 	return &ScheduledTestResult{
-		Status:       status,
-		ResponseText: responseText,
-		ErrorMessage: errMsg,
-		LatencyMs:    finishedAt.Sub(startedAt).Milliseconds(),
-		StartedAt:    startedAt,
-		FinishedAt:   finishedAt,
+		UpstreamModel:        upstreamModel,
+		ReturnedModels:       returnedModels,
+		ModelEvidenceInvalid: invalidModelEvidence,
+		Status:               status,
+		ResponseText:         responseText,
+		ErrorMessage:         errMsg,
+		LatencyMs:            finishedAt.Sub(startedAt).Milliseconds(),
+		StartedAt:            startedAt,
+		FinishedAt:           finishedAt,
 	}, nil
 }
 

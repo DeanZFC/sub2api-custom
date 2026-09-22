@@ -36,6 +36,22 @@ type multiDefinitionObservedResultRepo struct {
 	started chan *ScheduledTestResult
 }
 
+// targetAccountResultRepo models the production split between the configured
+// target list and the live eligibility check. The account is configured for
+// every definition, but is deliberately ineligible, so each type must still
+// leave an administrator-visible skipped result.
+type targetAccountResultRepo struct {
+	*runnerResultRepoStub
+}
+
+func (*targetAccountResultRepo) ListPlanTargetAccountIDs(context.Context, *ScheduledTestPlan, *int64) ([]int64, error) {
+	return []int64{42}, nil
+}
+
+func (*targetAccountResultRepo) ListPlanDetectionAccountIDs(context.Context, *ScheduledTestPlan, *int64) ([]int64, error) {
+	return nil, nil
+}
+
 func (r *multiDefinitionObservedResultRepo) Create(ctx context.Context, result *ScheduledTestResult) (*ScheduledTestResult, error) {
 	created, err := r.retryResultRepoStub.Create(ctx, result)
 	if err == nil {
@@ -205,6 +221,31 @@ func TestScheduledTestMultipleDefinitionsRunEveryAccountTypePair(t *testing.T) {
 		for _, definitionID := range []int64{1, 2} {
 			require.True(t, pairs[[2]int64{account.ID, definitionID}])
 		}
+	}
+}
+
+func TestScheduledTestSkippedAccountStillProducesEveryConfiguredType(t *testing.T) {
+	plans := &runnerPlanRepoStub{}
+	results := &targetAccountResultRepo{runnerResultRepoStub: &runnerResultRepoStub{}}
+	svc := NewScheduledTestService(plans, results)
+	svc.SetDefinitionRepository(multiDefinitionRepoStub{definitions: map[int64]*ScheduledTestDefinition{
+		1: {ID: 1, Enabled: true, Prompt: "first", OutputKind: "text"},
+		2: {ID: 2, Enabled: true, Prompt: "second", OutputKind: "text"},
+		3: {ID: 3, Enabled: true, Prompt: "third", OutputKind: "text"},
+	}})
+	runner := NewScheduledTestRunnerService(plans, svc, nil, nil, nil, nil)
+	accountID, groupID := int64(42), int64(8)
+	runner.runOnePlan(context.Background(), &ScheduledTestPlan{
+		ID: 18, AccountID: &accountID, GroupID: &groupID, TargetMode: "account",
+		TestDefinitionIDs: []int64{1, 2, 3}, ModelID: "model", CronExpression: "* * * * *",
+		Enabled: true, MaxResults: 10,
+	})
+	require.Len(t, results.created, 3)
+	for index, result := range results.created {
+		require.Equal(t, int64(index+1), *result.TestDefinitionID)
+		require.Equal(t, "failed", result.Status)
+		require.Contains(t, result.ErrorMessage, "检测跳过")
+		require.Equal(t, accountID, *result.AccountID)
 	}
 }
 

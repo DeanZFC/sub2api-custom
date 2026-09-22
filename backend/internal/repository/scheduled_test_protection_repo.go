@@ -213,6 +213,10 @@ func combineProtectionVerdict(state *protectionState, pass, fail int) (string, b
 }
 
 func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionState) error {
+	before, err := readProtectionAccountSnapshot(ctx, tx, state.accountID)
+	if err != nil {
+		return err
+	}
 	pass, fail, err := protectionVoteCounts(ctx, tx, state)
 	if err != nil {
 		return err
@@ -239,7 +243,10 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	if err := reconcileProtectionGroups(ctx, tx, state.accountID); err != nil {
 		return err
 	}
-	return reconcileProtectionAccount(ctx, tx, state.accountID)
+	if err := reconcileProtectionAccount(ctx, tx, state.accountID); err != nil {
+		return err
+	}
+	return recordProtectionAction(ctx, tx, state, before, verdict, reason)
 }
 
 func reconcileProtectionAccount(ctx context.Context, tx *sql.Tx, accountID int64) error {
@@ -386,16 +393,16 @@ const protectionVoteEntitlementSQL = `EXISTS (
 	 SELECT group_id FROM user_allowed_groups WHERE user_id=$1
 	 UNION SELECT id FROM groups WHERE status='active' AND deleted_at IS NULL AND is_exclusive=FALSE AND subscription_type<>'subscription'
 	 UNION SELECT group_id FROM user_subscriptions WHERE user_id=$1 AND deleted_at IS NULL AND status='active' AND starts_at<=NOW() AND expires_at>NOW()
-	) entitled WHERE entitled.group_id=r.group_id OR (r.group_id IS NULL AND EXISTS (
-	 SELECT 1 FROM account_groups ag WHERE ag.account_id=r.account_id AND ag.group_id=entitled.group_id
-	)))`
+	) entitled WHERE entitled.group_id=CASE WHEN r.account_id IS NULL THEN r.group_id ELSE current_group.group_id END
+	)`
 
 const protectionVoteResultJSON = `jsonb_build_object(
 	'id',r.id,'plan_id',r.plan_id,'plan_name',p.name,'test_definition_id',r.test_definition_id,
-	'test_name',COALESCE(d.name,''),'test_order',COALESCE(d.sort_order,0),'group_name',COALESCE(g.name,''),'plan_order',p.sort_order,
+	'test_name',COALESCE(d.name,''),'test_order',COALESCE(d.sort_order,0),'group_name',COALESCE(current_group.name,g.name,''),'plan_order',p.sort_order,
 	'target_mode',r.target_mode,'status',r.status,'response_text',r.response_text,'output_kind',r.output_kind,'output_html',r.output_html,'output_numeric',r.output_numeric,
 	'account_id',CASE WHEN r.target_mode IN ('account','all_accounts') THEN r.account_id ELSE NULL END,
-	'model_id',r.model_id,'reasoning_effort',r.reasoning_effort,'group_id',r.group_id,'error_message','','latency_ms',r.latency_ms,
+	'model_id',r.model_id,'reasoning_effort',r.reasoning_effort,
+	'group_id',CASE WHEN r.account_id IS NULL THEN r.group_id ELSE current_group.group_id END,'error_message','','latency_ms',r.latency_ms,
 	'started_at',r.started_at,'finished_at',r.finished_at,'created_at',r.created_at)`
 
 const protectionVotingQuery = `SELECT ` + protectionVoteResultJSON + `,s.rule_config,p.protection,s.automated_verdict,s.completed,
@@ -409,6 +416,13 @@ const protectionVotingQuery = `SELECT ` + protectionVoteResultJSON + `,s.rule_co
 	JOIN accounts a ON a.id=s.account_id
 	LEFT JOIN scheduled_test_definitions d ON d.id=s.test_definition_id
 	LEFT JOIN groups g ON g.id=r.group_id
+	LEFT JOIN LATERAL (
+		SELECT ag.group_id,cg.name
+		FROM account_groups ag JOIN groups cg ON cg.id=ag.group_id
+		WHERE r.account_id IS NOT NULL AND ag.account_id=r.account_id AND cg.deleted_at IS NULL AND cg.status='active'
+		ORDER BY CASE WHEN ag.group_id=r.group_id THEN 0 ELSE 1 END,ag.group_id
+		LIMIT 1
+	) current_group ON TRUE
 	WHERE p.enabled AND p.protection->>'enabled'='true' AND s.rule_config->'vote'->>'enabled'='true'
 	 AND s.completed AND r.status IN ('success','passed')
 	 AND (NULLIF(BTRIM(r.response_text),'') IS NOT NULL OR NULLIF(BTRIM(r.output_html),'') IS NOT NULL OR r.output_numeric IS NOT NULL)
@@ -518,22 +532,8 @@ func (r *scheduledTestResultRepository) CastTestVote(ctx context.Context, userID
 	if !current {
 		return nil, service.ErrScheduledTestVoteUnavailable
 	}
-	var allowed bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM scheduled_test_results r WHERE r.id=$2 AND r.status IN ('success','passed') AND `+protectionVoteEntitlementSQL+`)`, userID, resultID).Scan(&allowed)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, service.ErrScheduledTestVoteUnavailable
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_votes(result_id,user_id,generation,vote) VALUES($1,$2,$3,$4)
-		ON CONFLICT(result_id,user_id) DO UPDATE SET generation=EXCLUDED.generation,vote=EXCLUDED.vote,updated_at=NOW()`, resultID, userID, state.generation, vote)
-	if err != nil {
-		return nil, err
-	}
-	if err := saveProtectionVerdict(ctx, tx, state); err != nil {
-		return nil, err
-	}
+	// Capture the authorized projection before applying the ballot: its outcome
+	// can move the account to a group that this voter cannot access.
 	rows, err := tx.QueryContext(ctx, protectionVotingQuery+` AND r.id=$2`, userID, resultID)
 	if err != nil {
 		return nil, err
@@ -546,8 +546,39 @@ func (r *scheduledTestResultRepository) CastTestVote(ctx context.Context, userID
 	if len(results) != 1 {
 		return nil, service.ErrScheduledTestVoteUnavailable
 	}
+	receipt := results[0]
+	_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_votes(result_id,user_id,generation,vote) VALUES($1,$2,$3,$4)
+		ON CONFLICT(result_id,user_id) DO UPDATE SET generation=EXCLUDED.generation,vote=EXCLUDED.vote,updated_at=NOW()`, resultID, userID, state.generation, vote)
+	if err != nil {
+		return nil, err
+	}
+	if err := saveProtectionVerdict(ctx, tx, state); err != nil {
+		return nil, err
+	}
+	rows, err = tx.QueryContext(ctx, protectionVotingQuery+` AND r.id=$2`, userID, resultID)
+	if err != nil {
+		return nil, err
+	}
+	results, err = scanProtectionVoting(rows)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 1 {
+		receipt = results[0]
+	} else {
+		// A valid ballot must still commit when it removes the voter's access.
+		// Return only the previously authorized result, with the saved counts;
+		// never expose the newly selected group's identity through the receipt.
+		receipt.Voting.PassCount, receipt.Voting.FailCount, err = protectionVoteCounts(ctx, tx, state)
+		if err != nil {
+			return nil, err
+		}
+		receipt.Voting.MyVote = vote
+		receipt.Voting.Open = false
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return results[0], nil
+	return receipt, nil
 }

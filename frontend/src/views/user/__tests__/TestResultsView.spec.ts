@@ -66,6 +66,37 @@ describe('channel quality result groups', () => {
     wrapper.unmount()
   })
 
+  it('reloads result projections after an administrator decision', async () => {
+    api.isAdmin = true
+    const initial = { ...baseResult, id: 101, group_id: 8, group_name: 'Source Group' }
+    const moved = { ...initial, group_id: 12, group_name: 'Target Group', protection_decision: { verdict: 'pass', status: 'applied', scheduling: 'resume' } }
+    api.list.mockResolvedValueOnce([initial]).mockResolvedValueOnce([moved])
+    api.reviews.mockResolvedValueOnce([{ result: initial, generation: 4, verdict: 'pending', admin_verdict: '', account_paused: true }])
+      .mockResolvedValueOnce([{ result: moved, generation: 4, verdict: 'pass', admin_verdict: 'pass', account_paused: false }])
+    api.decide.mockResolvedValue(undefined)
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Source Group'])
+    await wrapper.get('[data-admin-pass]').trigger('click'); await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Target Group'])
+    wrapper.unmount()
+  })
+
+  it('preserves the admin account name and history after moving the display group', async () => {
+    api.isAdmin = true
+    const stored = { ...baseResult, id: 91, account_name: 'Review Account' }
+    const moved = { ...baseResult, id: 91, group_id: 12, group_name: 'Target Group' }
+    api.list.mockResolvedValue([moved])
+    api.reviews.mockResolvedValue([{ result: stored, generation: 7, verdict: 'pass', admin_verdict: 'pass', account_paused: false }])
+    api.adminResults.mockResolvedValue([stored, { ...stored, id: 92, account_id: 99 }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Target Group'])
+    expect(wrapper.get('[data-account-info]').text()).toContain('Review Account')
+    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-dialog]').findAll('[data-output]').map(output => output.attributes('data-result-id'))).toEqual(['91'])
+    wrapper.unmount()
+  })
+
   it('never exposes administrator review controls or requests to ordinary users', async () => {
     api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
     const wrapper = mountResults(); await flushPromises()
@@ -100,6 +131,22 @@ describe('channel quality result groups', () => {
     wrapper.unmount()
   })
 
+  it('labels completed model checks by evidence and displays their history without account names', async () => {
+    const check = { requested_model: 'alias', upstream_model: 'expected', returned_models: ['different'], match_mode: 'exact', verdict: 'fail', reason: 'mismatch' }
+    const latest = { ...baseResult, id: 1, output_kind: 'model_check', test_name: 'Model consistency', output_model_check: check, account_name: 'Private account name' }
+    api.list.mockResolvedValue([latest])
+    api.history.mockResolvedValue({ items: [latest, { ...latest, id: 2, created_at: '2026-09-15T11:00:00Z', output_model_check: { ...check, verdict: 'unknown', reason: 'missing_model', returned_models: [] } }] })
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-test-section] .badge').text()).toBe('tests.modelCheck.fail')
+    expect(wrapper.get('[data-test-section] .badge').classes()).toContain('badge-danger')
+    expect(wrapper.text()).not.toContain('Private account name')
+    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    const badges = wrapper.get('[data-dialog]').findAll('.badge')
+    expect(badges.map(badge => badge.text())).toEqual(['tests.modelCheck.fail', 'tests.modelCheck.unknown'])
+    expect(badges[1].classes()).toContain('badge-warning')
+    expect(wrapper.text()).not.toContain('Private account name')
+    wrapper.unmount()
+  })
 
   it('uses ordered group tabs and combines multiple test types under one account', async () => {
     api.list.mockResolvedValue([

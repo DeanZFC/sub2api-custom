@@ -281,13 +281,19 @@ func (r *scheduledTestDefinitionRepository) scan(row scannable) (*service.Schedu
 }
 
 func (r *scheduledTestResultRepository) Create(ctx context.Context, result *service.ScheduledTestResult) (*service.ScheduledTestResult, error) {
-	row := r.db.QueryRowContext(ctx, `
-		INSERT INTO scheduled_test_results (plan_id, status, response_text, output_kind, output_html, output_numeric, account_id, model_id, reasoning_effort, group_id, error_message, latency_ms, started_at, finished_at, test_definition_id, target_mode, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
-		RETURNING id, plan_id, status, response_text, output_kind, output_html, output_numeric, account_id, model_id, reasoning_effort, group_id, error_message, latency_ms, started_at, finished_at, created_at, test_definition_id, target_mode
-	`, result.PlanID, result.Status, result.ResponseText, result.OutputKind, result.OutputHTML, result.OutputNumeric, result.AccountID, result.ModelID, result.ReasoningEffort, result.GroupID, result.ErrorMessage, result.LatencyMs, result.StartedAt, result.FinishedAt, result.TestDefinitionID, result.TargetMode)
+	return createScheduledTestResult(ctx, r.db, result)
+}
 
-	out := &service.ScheduledTestResult{}
+func createScheduledTestResult(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, result *service.ScheduledTestResult) (*service.ScheduledTestResult, error) {
+	row := db.QueryRowContext(ctx, `
+		INSERT INTO scheduled_test_results (plan_id, status, response_text, output_kind, output_html, output_numeric, account_id, model_id, reasoning_effort, group_id, error_message, latency_ms, started_at, finished_at, test_definition_id, target_mode, run_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+		RETURNING id, plan_id, status, response_text, output_kind, output_html, output_numeric, account_id, model_id, reasoning_effort, group_id, error_message, latency_ms, started_at, finished_at, created_at, test_definition_id, target_mode
+	`, result.PlanID, result.Status, result.ResponseText, result.OutputKind, result.OutputHTML, result.OutputNumeric, result.AccountID, result.ModelID, result.ReasoningEffort, result.GroupID, result.ErrorMessage, result.LatencyMs, result.StartedAt, result.FinishedAt, result.TestDefinitionID, result.TargetMode, result.RunID)
+
+	out := &service.ScheduledTestResult{RunID: result.RunID}
 	if err := row.Scan(
 		&out.ID, &out.PlanID, &out.Status, &out.ResponseText, &out.OutputKind, &out.OutputHTML, &out.OutputNumeric, &out.AccountID, &out.ModelID, &out.ReasoningEffort, &out.GroupID, &out.ErrorMessage,
 		&out.LatencyMs, &out.StartedAt, &out.FinishedAt, &out.CreatedAt, &out.TestDefinitionID, &out.TargetMode,
@@ -341,7 +347,7 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 		UPDATE scheduled_test_results
 		SET status = 'running', response_text = '', output_kind = $2, output_html = '',
 		    output_numeric = NULL, model_id = $3, reasoning_effort = $4, group_id = $5,
-		    error_message = '', latency_ms = 0, started_at = $6, finished_at = $7
+		    error_message = '', latency_ms = 0, started_at = $6, finished_at = $7, protection_decision = NULL
 		WHERE id = $1 AND plan_id = $8 AND account_id = $9 AND status = 'failed'
 		  AND test_definition_id IS NOT DISTINCT FROM $10 AND target_mode = $11
 	`, result.ID, result.OutputKind, result.ModelID, result.ReasoningEffort, result.GroupID, result.StartedAt, result.FinishedAt, result.PlanID, *result.AccountID, result.TestDefinitionID, result.TargetMode)
@@ -360,22 +366,23 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 
 // Sort and retain results by the latest execution time: a manual retry keeps
 // its original ID/created_at while refreshing started_at. Apply the history
-// limit to each retained series, not the entire plan: otherwise a later test
-// type can hide every result of earlier types. Always include in-flight runs.
+// limit to each account/type series, not the entire plan: otherwise a later
+// test type can hide every result of earlier types. Latest view is restricted
+// to the last full execution snapshot when one has been recorded.
 func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID int64, limit int) ([]*service.ScheduledTestResult, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		WITH ranked_results AS (
 			SELECT id, ROW_NUMBER() OVER (
-				PARTITION BY test_definition_id, group_id,
-				CASE WHEN target_mode = 'group' THEN NULL ELSE account_id END,
-				model_id, reasoning_effort,
-				CASE WHEN status IN ('success', 'passed') THEN 'success'
-				     WHEN status IN ('running', 'pending') THEN 'in_progress'
-				     ELSE 'failed' END
+				-- The administrator's latest view is one row per account and
+				-- configured test type. Model/effort belong to that execution
+				-- snapshot and must not make an older run visible beside it.
+				PARTITION BY test_definition_id, account_id
 				ORDER BY started_at DESC, id DESC
 			) AS history_rank
 			FROM scheduled_test_results
-			WHERE plan_id = $1
+			WHERE plan_id = $1 AND ($2 > 1 OR run_id = (
+				SELECT latest_run_id FROM scheduled_test_plans WHERE id=$1
+			) OR (SELECT latest_run_id FROM scheduled_test_plans WHERE id=$1) = '')
 		)
 		SELECT r.id, r.plan_id, p.name, COALESCE(d.name, ''), COALESCE(d.sort_order, 0), COALESCE(g.name, ''), COALESCE(p.sort_order, 2147483647), r.target_mode, r.status, r.response_text, r.output_kind, r.output_html, r.output_numeric, r.account_id, r.model_id, r.reasoning_effort, r.group_id, r.error_message, r.latency_ms, r.started_at, r.finished_at, r.created_at, r.test_definition_id, COALESCE(a.name, '')
 		FROM scheduled_test_results r
@@ -384,7 +391,7 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 		LEFT JOIN scheduled_test_definitions d ON d.id = r.test_definition_id
 		LEFT JOIN groups g ON g.id = r.group_id
 		LEFT JOIN accounts a ON a.id = r.account_id
-		WHERE ranked.history_rank <= $2 OR r.status IN ('running', 'pending')
+		WHERE ranked.history_rank <= $2
 		ORDER BY r.started_at DESC, r.id DESC
 	`, planID, limit)
 	if err != nil {
@@ -403,7 +410,55 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 		}
 		results = append(results, r)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateProtectionDecisions(ctx, results); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func (r *scheduledTestResultRepository) hydrateProtectionDecisions(ctx context.Context, results []*service.ScheduledTestResult) error {
+	ids := make([]int64, 0, len(results))
+	for _, result := range results {
+		if result != nil && result.ID > 0 {
+			ids = append(ids, result.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id, protection_decision
+FROM scheduled_test_results
+WHERE id = ANY($1) AND protection_decision IS NOT NULL`, pq.Array(ids))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	byID := make(map[int64]*service.ScheduledTestResult, len(results))
+	for _, result := range results {
+		if result != nil {
+			byID[result.ID] = result
+		}
+	}
+	for rows.Next() {
+		var id int64
+		var raw []byte
+		if err := rows.Scan(&id, &raw); err != nil {
+			return err
+		}
+		result := byID[id]
+		if result == nil {
+			continue
+		}
+		decision := &service.ScheduledTestProtectionDecision{}
+		if err := json.Unmarshal(raw, decision); err != nil {
+			return err
+		}
+		result.ProtectionDecision = decision
+	}
+	return rows.Err()
 }
 
 // Both public queries authorize the stored result's group (or legacy account
@@ -411,25 +466,55 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 // Read its current status and scheduling switch, even for group-mode model
 // tests whose executing account ID is hidden. Account-free group statistics
 // remain visible; orphaned account results do not.
-const scheduledTestVisibleResultsCTE = `WITH visible_results AS NOT MATERIALIZED (
-    SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,COALESCE(g.name, '') AS group_name,COALESCE(p.sort_order, 2147483647) AS plan_order,r.target_mode,r.status,r.response_text,r.output_kind,r.output_html,r.output_numeric,
+const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZED (
+    SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,
+           COALESCE(projected_group.name, source_group.name, '') AS group_name,COALESCE(p.sort_order, 2147483647) AS plan_order,r.target_mode,r.status,
+           r.response_text,r.output_kind,r.output_html,r.output_numeric,
            CASE WHEN r.target_mode IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END AS visible_account_id,
-           r.model_id,r.reasoning_effort,r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,
+           r.model_id,r.reasoning_effort,
+           CASE WHEN r.account_id IS NULL THEN r.group_id ELSE projected_group.group_id END AS group_id,
+           r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,
            CASE WHEN r.target_mode IN ('account', 'all_accounts')
                 THEN COALESCE(r.account_id::text, '')
                 ELSE 'group'
-           END AS result_target_key
+           END AS result_target_key,
+           r.account_id
     FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
     LEFT JOIN scheduled_test_definitions d ON d.id=r.test_definition_id
-    LEFT JOIN groups g ON g.id=r.group_id
+    LEFT JOIN groups source_group ON source_group.id=r.group_id
+    -- Account results follow the account's current group memberships. Prefer
+    -- the original source group when it is still assigned so an unchanged
+    -- result keeps its existing grouping; otherwise choose a stable current
+    -- membership. A group aggregate (account_id NULL) remains on its source
+    -- group and is never projected through account memberships.
+    LEFT JOIN LATERAL (
+        SELECT ag.group_id, cg.name
+        FROM account_groups ag
+        JOIN groups cg ON cg.id=ag.group_id
+        WHERE r.account_id IS NOT NULL
+          AND ag.account_id = r.account_id
+          AND cg.deleted_at IS NULL
+          AND cg.status = 'active'
+        ORDER BY CASE WHEN ag.group_id = r.group_id THEN 0 ELSE 1 END, ag.group_id
+        LIMIT 1
+    ) projected_group ON TRUE
+), visible_results AS NOT MATERIALIZED (
+    SELECT r.id,r.plan_id,r.plan_name,r.test_name,r.test_order,r.group_name,r.plan_order,r.target_mode,r.status,
+           r.response_text,r.output_kind,r.output_html,r.output_numeric,r.visible_account_id,r.model_id,r.reasoning_effort,
+           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key
+    FROM projected_results r
     WHERE (
         (r.account_id IS NULL AND r.target_mode = 'group')
-        OR EXISTS (
-            SELECT 1 FROM accounts visible_account
-            WHERE visible_account.id = r.account_id
-              AND visible_account.deleted_at IS NULL
-              AND visible_account.status = 'active'
-              AND visible_account.schedulable = TRUE
+        OR (
+            r.account_id IS NOT NULL
+            AND r.group_id IS NOT NULL
+            AND EXISTS (
+                SELECT 1 FROM accounts visible_account
+                WHERE visible_account.id = r.account_id
+                  AND visible_account.deleted_at IS NULL
+                  AND visible_account.status = 'active'
+                  AND visible_account.schedulable = TRUE
+            )
         )
     ) AND EXISTS (
         SELECT 1
@@ -454,11 +539,6 @@ const scheduledTestVisibleResultsCTE = `WITH visible_results AS NOT MATERIALIZED
               AND us.expires_at > NOW()
         ) entitled
         WHERE entitled.group_id = r.group_id
-           OR (r.group_id IS NULL AND EXISTS (
-                SELECT 1 FROM account_groups ag
-                WHERE ag.account_id = r.account_id
-                  AND ag.group_id = entitled.group_id
-           ))
     )
 )`
 
@@ -591,8 +671,7 @@ func (r *scheduledTestResultRepository) PruneOldResults(ctx context.Context, pla
 		WHERE id IN (
 			SELECT id FROM (
 				SELECT id, ROW_NUMBER() OVER (
-					PARTITION BY plan_id, test_definition_id, group_id,
-					CASE WHEN target_mode = 'group' THEN NULL ELSE account_id END,
+					PARTITION BY plan_id, test_definition_id, group_id, account_id,
 					model_id, reasoning_effort,
 					CASE WHEN status IN ('success', 'passed') THEN 'success' ELSE 'failed' END
 					ORDER BY started_at DESC, id DESC

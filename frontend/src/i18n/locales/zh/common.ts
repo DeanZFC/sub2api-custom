@@ -226,6 +226,18 @@ export default {
       automaticHold: '自动检测尚未通过',
       loadFailed: '管理员判定加载失败', saveFailed: '判定未保存，请刷新后重试',
     },
+    modelCheck: {
+      pass: '一致', fail: '不一致', unknown: '无法确认',
+      requestedModel: '请求模型', upstreamModel: '上游请求模型', returnedModels: '实际返回模型',
+      matchMode: '模型匹配方式', exact: '严格匹配', snapshot: '允许日期快照版本',
+      reasons: {
+        mismatch: '返回的模型字段与上游请求模型不一致。',
+        missing_model: '上游响应未提供模型字段。',
+        missing_upstream_model: '未取得实际发送的上游模型信息。',
+        upstream_error: '本次上游请求未完成，无法确认模型一致性。',
+        invalid_evidence: '上游模型信息无效，无法确认一致性。',
+      },
+    },
     voting: {
       title: '质量评议', description: '查看本轮检测输出并投票。质量保护暂停的账号也会保留最新结果供评议。',
       paused: '质量保护暂停', referenceAnswer: '参考答案', pass: '通过', fail: '不通过',

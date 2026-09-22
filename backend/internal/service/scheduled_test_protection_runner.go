@@ -38,7 +38,11 @@ func (s *ScheduledTestRunnerService) beginResultProtection(ctx context.Context, 
 
 func (s *ScheduledTestRunnerService) completeResultProtection(ctx context.Context, plan *ScheduledTestPlan, result *ScheduledTestResult) {
 	rule := plan.ProtectionRule(plan.TestDefinitionID)
-	if rule == nil || result == nil || result.ID <= 0 {
+	if result == nil || result.ID <= 0 {
+		return
+	}
+	if rule == nil {
+		s.recordResultDecision(ctx, result, ScheduledTestProtectionDecision{Status: "disabled"})
 		return
 	}
 	repo := s.scheduledSvc.protectionRepository()
@@ -48,5 +52,14 @@ func (s *ScheduledTestRunnerService) completeResultProtection(ctx context.Contex
 	verdict, reason := evaluateScheduledTestProtection(*rule, result)
 	if err := repo.CompleteProtection(ctx, result, verdict, reason); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d result=%d protection completion error: %v", plan.ID, result.ID, err)
+		s.recordResultDecision(ctx, result, ScheduledTestProtectionDecision{Status: "error", Verdict: verdict, Reason: err.Error()})
+	}
+}
+
+func (s *ScheduledTestRunnerService) recordResultDecision(ctx context.Context, result *ScheduledTestResult, decision ScheduledTestProtectionDecision) {
+	if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestDecisionRepository); ok {
+		if err := repo.RecordDecision(ctx, result, decision); err != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] result=%d action record error: %v", result.ID, err)
+		}
 	}
 }

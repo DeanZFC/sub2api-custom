@@ -2512,7 +2512,7 @@ export interface TestType {
   name: string
   key: string
   description?: string | null
-  output_kind: 'html' | 'number' | 'text' | 'statistics' | string
+  output_kind: 'html' | 'number' | 'text' | 'statistics' | 'model_check' | string
   prompt: string
   enabled: boolean
   /** Controls the order of detection types in each account's quality results. */
@@ -2565,6 +2565,7 @@ export interface TestProtectionRule {
   pause_on_failure?: boolean
   expected_answer?: string
   answer_match?: 'exact' | 'contains' | 'numeric'
+  model_match?: 'exact' | 'snapshot'
   vote?: { enabled: boolean; reject_above: number; pass_at_least: number }
   on_pass?: TestOutcomeAction
   on_fail?: TestOutcomeAction
@@ -2610,6 +2611,25 @@ export interface TestOutputStatistics {
   recent_requests?: TestStatisticsRecentRequest[] | null
 }
 
+export interface TestOutputModelCheck {
+  requested_model: string
+  upstream_model: string
+  returned_models: string[]
+  match_mode: 'exact' | 'snapshot'
+  verdict: 'pass' | 'fail' | 'unknown'
+  reason: 'match' | 'mismatch' | 'missing_model' | 'missing_upstream_model' | 'upstream_error' | 'invalid_evidence'
+}
+
+export interface TestProtectionDecision {
+  status?: 'applied' | 'unchanged' | 'pending' | 'disabled' | 'skipped' | 'error'
+  verdict: 'pass' | 'fail' | 'pending' | string
+  reason?: string
+  scheduling?: 'keep' | 'pause' | 'resume' | string
+  group_ids?: number[]
+  added_group_ids?: number[]
+  removed_group_ids?: number[]
+}
+
 export interface TestResult {
   /** Returned only by administrator result endpoints. */
   account_name?: string
@@ -2632,10 +2652,12 @@ export interface TestResult {
   /** Reasoning level used for this test execution, when explicitly selected. */
   reasoning_effort?: string | null
   status: string
-  output_kind: 'html' | 'number' | 'text' | 'statistics' | string
+  output_kind: 'html' | 'number' | 'text' | 'statistics' | 'model_check' | string
   output_html?: string | null
   output_numeric?: number | null
   output_statistics?: TestOutputStatistics | null
+  output_model_check?: TestOutputModelCheck | null
+  protection_decision?: TestProtectionDecision | null
   response_text?: string | null
   error_message?: string | null
   latency_ms?: number | null
