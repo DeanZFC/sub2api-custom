@@ -604,7 +604,10 @@ func TestSchedulerFullRebuildSimpleModePreservesRegistryWithoutLifecycleAuthorit
 	require.Empty(t, freshCalls)
 	require.Equal(t, schedulerCanonicalBucketCount()+len(registered), cache.captureAttemptCount())
 	require.Equal(t, schedulerCanonicalAccountQueryCount()+len(registered), accounts.callCount())
-	require.Equal(t, schedulerCanonicalAccountQueryCount()+len(registered), accounts.groupCallCount(0))
+	// Simple mode keeps historical registrations without acquiring lifecycle
+	// authority, but must not fill a positive-group bucket with global accounts.
+	require.Equal(t, schedulerCanonicalAccountQueryCount()+len(registered)-1, accounts.groupCallCount(0))
+	require.Equal(t, 1, accounts.groupCallCount(106))
 	require.Empty(t, cache.retiredBuckets())
 	require.Empty(t, cache.tokens())
 	for _, bucket := range registered {

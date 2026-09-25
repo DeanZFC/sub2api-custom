@@ -244,6 +244,10 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 	if state := service.OllamaCloudUsageStateFromAccount(a); state.Eligible {
 		ollamaCloudUsage = state
 	}
+	var openCodeGoUsage *service.OpenCodeGoUsageState
+	if state := service.OpenCodeGoUsageStateFromAccount(a); state.Eligible {
+		openCodeGoUsage = state
+	}
 	out := &Account{
 		ID:                         a.ID,
 		Name:                       a.Name,
@@ -254,6 +258,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		CredentialsStatus:          credsStatus,
 		Extra:                      extra,
 		OllamaCloudUsage:           ollamaCloudUsage,
+		OpenCodeGoUsage:            openCodeGoUsage,
 		ProxyID:                    a.ProxyID,
 		ProxyIDs:                   a.ProxyIDs,
 		ProxyFallbackOriginID:      a.ProxyFallbackOriginID,
@@ -422,7 +427,9 @@ func redactAccountManagedExtra(extra map[string]any) map[string]any {
 		switch {
 		case key == service.OllamaCloudUsageSessionExtraKey,
 			key == service.OllamaCloudUsageAutoRefreshExtraKey,
-			key == service.OllamaCloudUsageSnapshotExtraKey:
+			key == service.OllamaCloudUsageSnapshotExtraKey,
+			key == service.OpenCodeGoUsageAutoRefreshExtraKey,
+			key == service.OpenCodeGoUsageSnapshotExtraKey:
 			continue
 		case service.IsOpenAICodexTicketPrivateExtraKey(key):
 			continue
@@ -466,6 +473,7 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		ID: a.ID, Name: a.Name, Notes: a.Notes, Platform: a.Platform, Type: a.Type,
 		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra,
 		OllamaCloudUsage:  a.OllamaCloudUsage,
+		OpenCodeGoUsage:   a.OpenCodeGoUsage,
 		CodexTicketConfig: a.CodexTicketConfig,
 		CodexTurnTickets:  a.CodexTurnTickets,
 		ProxyIDs:          a.ProxyIDs,

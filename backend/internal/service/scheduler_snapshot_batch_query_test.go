@@ -511,14 +511,42 @@ func TestSchedulerRebuildBatchKeepsMixedAndDifferentKeysIndependent(t *testing.T
 }
 
 func TestSchedulerRebuildBatchKeepsSimpleModeBucketGroupsIndependent(t *testing.T) {
-	single := SchedulerBucket{GroupID: 204, Platform: PlatformOpenAI, Mode: SchedulerModeSingle}
-	forced := SchedulerBucket{GroupID: 0, Platform: PlatformOpenAI, Mode: SchedulerModeForced}
-	cache := newBatchSnapshotCache()
-	repo := newBatchAccountQueryRepo()
-	svc := newBatchQueryTestService(cache, repo, config.RunModeSimple)
+	for _, tc := range []struct {
+		name       string
+		platform   string
+		groupMode  string
+		globalMode string
+		mixed      bool
+	}{
+		{name: "single and forced", platform: PlatformOpenAI, groupMode: SchedulerModeSingle, globalMode: SchedulerModeForced},
+		{name: "mixed", platform: PlatformAnthropic, groupMode: SchedulerModeMixed, globalMode: SchedulerModeMixed, mixed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groupBucket := SchedulerBucket{GroupID: 204, Platform: tc.platform, Mode: tc.groupMode}
+			globalBucket := SchedulerBucket{GroupID: 0, Platform: tc.platform, Mode: tc.globalMode}
+			groupKey := batchAccountQueryKey{groupID: groupBucket.GroupID, platform: tc.platform, mixed: tc.mixed}
+			globalKey := batchAccountQueryKey{platform: tc.platform, mixed: tc.mixed}
+			groupAccounts := []Account{{ID: 20401, Platform: tc.platform, GroupIDs: []int64{204}}}
+			globalAccounts := []Account{{ID: 90001, Platform: tc.platform, GroupIDs: []int64{900}}}
+			cache := newBatchSnapshotCache()
+			repo := newBatchAccountQueryRepo()
+			repo.results[groupKey] = []batchAccountQueryResult{{accounts: groupAccounts}}
+			repo.results[globalKey] = []batchAccountQueryResult{{accounts: globalAccounts}}
+			svc := newBatchQueryTestService(cache, repo, config.RunModeSimple)
 
-	require.NoError(t, svc.rebuildBuckets(context.Background(), []SchedulerBucket{single, forced}, "test"))
-	require.Equal(t, 2, repo.callCount(batchAccountQueryKey{platform: PlatformOpenAI}))
+			require.NoError(t, svc.rebuildBuckets(context.Background(), []SchedulerBucket{groupBucket, globalBucket}, "test"))
+			// A historical positive-group bucket must retain its account boundary even
+			// while simple mode rebuilds the global bucket without group authority.
+			require.Equal(t, 1, repo.callCount(groupKey))
+			require.Equal(t, 1, repo.callCount(globalKey))
+			_, _, _, groupWrites := cache.bucketState(groupBucket)
+			_, _, _, globalWrites := cache.bucketState(globalBucket)
+			require.Len(t, groupWrites, 1)
+			require.Len(t, globalWrites, 1)
+			require.Equal(t, groupAccounts, groupWrites[0].accounts)
+			require.Equal(t, globalAccounts, globalWrites[0].accounts)
+		})
+	}
 }
 
 func TestSchedulerRebuildBatchDoesNotCacheMixedOrHistoricalQueries(t *testing.T) {

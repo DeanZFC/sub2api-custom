@@ -59,8 +59,8 @@ func TestLockAndMergeAccountPreservesQualityAndManualSchedulingState(t *testing.
 			require.NoError(t, err)
 			mock.ExpectQuery(`(?s)SELECT.*status,.*schedulable,.*FOR NO KEY UPDATE`).
 				WithArgs(int64(41), service.PlatformOpenAI, service.AccountTypeOAuth, `{"access_token":"new-token"}`, nil).
-				WillReturnRows(sqlmock.NewRows([]string{"identity", "ollama_identity", "proxy_identity", "probe", "sync", "snapshot", "session", "auto", "ollama_snapshot", "extra", "status", "schedulable", "error_message"}).
-					AddRow(false, false, true, nil, nil, nil, nil, nil, nil, extraJSON, tt.currentStatus, !tt.currentPaused, tt.currentError))
+				WillReturnRows(sqlmock.NewRows([]string{"identity", "ollama_identity", "proxy_identity", "probe", "sync", "snapshot", "session", "auto", "ollama_snapshot", "opencode_group_unchanged", "opencode_auto", "opencode_snapshot", "extra", "status", "schedulable", "error_message"}).
+					AddRow(false, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, extraJSON, tt.currentStatus, !tt.currentPaused, tt.currentError))
 			account := &service.Account{
 				ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
 				Credentials: map[string]any{"access_token": "new-token"}, Extra: map[string]any{"setting": "edited"},

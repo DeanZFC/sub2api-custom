@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 const compatPromptCacheKeyPrefix = "compat_cc_"
@@ -47,9 +48,8 @@ func deriveCompatPromptCacheKeyForBody(req *apicompat.ChatCompletionsRequest, ma
 func shouldAutoInjectPromptCacheKeyForCompat(model string) bool {
 	trimmed := strings.TrimSpace(strings.ToLower(model))
 	canonical := canonicalizeOpenAIModelAliasSpelling(trimmed)
-	// GPT-6 is the public alias for Astra. Keep this deliberately scoped to
-	// Astra so other GPT-6 families do not inherit Messages compatibility state.
-	if canonical == "gpt-6" || canonical == "gpt-6-astra" {
+	// GPT-6 Sol/Luna share the supported Responses cache identity contract.
+	if canonical == "gpt-6" || canonical == "gpt-6-astra" || openai.IsGPT6SolOrLunaModelSpelling(canonical) {
 		return true
 	}
 	// 仅对 Responses 兼容路径支持的 GPT-5 族开启自动注入，避免 normalizeCodexModel

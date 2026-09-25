@@ -220,6 +220,7 @@ type Account struct {
 	CredentialsStatus       map[string]bool                         `json:"credentials_status,omitempty"`
 	Extra                   map[string]any                          `json:"extra"`
 	OllamaCloudUsage        *service.OllamaCloudUsageState          `json:"ollama_cloud_usage,omitempty"`
+	OpenCodeGoUsage         *service.OpenCodeGoUsageState           `json:"opencode_go_usage,omitempty"`
 	CodexTicketConfig       *service.OpenAICodexTicketAccountConfig `json:"codex_ticket_config,omitempty"`
 	CodexTurnTickets        []service.OpenAICodexTicketStatus       `json:"codex_turn_tickets,omitempty"`
 	ProxyIDs                []int64                                 `json:"proxy_ids,omitempty"`
@@ -352,6 +353,7 @@ type AccountListItem struct {
 	OllamaCloudUsage  *service.OllamaCloudUsageState          `json:"ollama_cloud_usage,omitempty"`
 	CodexTicketConfig *service.OpenAICodexTicketAccountConfig `json:"codex_ticket_config,omitempty"`
 	CodexTurnTickets  []service.OpenAICodexTicketStatus       `json:"codex_turn_tickets,omitempty"`
+	OpenCodeGoUsage   *service.OpenCodeGoUsageState           `json:"opencode_go_usage,omitempty"`
 
 	ProxyIDs                []int64    `json:"proxy_ids,omitempty"`
 	ProxyID                 *int64     `json:"proxy_id"`

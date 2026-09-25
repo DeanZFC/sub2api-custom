@@ -19,6 +19,24 @@ func TestOpsRequestDetails_UsageAndIdentity(t *testing.T) {
 	group := &service.Group{Name: "recent-" + uuid.NewString()}
 	account := &service.Account{Name: "recent-account-" + uuid.NewString()}
 	key := &service.APIKey{Name: "Recent requests key"}
+	// This repository owns its transactions, so its fixtures are committed.
+	// Remove them explicitly before later dashboard tests read global totals.
+	t.Cleanup(func() {
+		for _, cleanup := range []struct {
+			query string
+			id    int64
+		}{
+			{"DELETE FROM usage_logs WHERE api_key_id = $1", key.ID},
+			{"DELETE FROM ops_error_logs WHERE api_key_id = $1", key.ID},
+			{"DELETE FROM api_keys WHERE id = $1", key.ID},
+			{"DELETE FROM accounts WHERE id = $1", account.ID},
+			{"DELETE FROM groups WHERE id = $1", group.ID},
+			{"DELETE FROM users WHERE id = $1", user.ID},
+		} {
+			_, err := integrationDB.ExecContext(context.Background(), cleanup.query, cleanup.id)
+			require.NoError(t, err)
+		}
+	})
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users (email, password_hash) VALUES ($1, 'test-only') RETURNING id`, user.Email).Scan(&user.ID))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups (name) VALUES ($1) RETURNING id`, group.Name).Scan(&group.ID))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts (name, platform, type) VALUES ($1, 'openai', 'oauth') RETURNING id`, account.Name).Scan(&account.ID))
@@ -122,6 +140,10 @@ func TestOpsRequestDetails_MissingIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := NewOpsRepository(integrationDB).(*opsRepository)
 	requestID := uuid.NewString()
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(context.Background(), "DELETE FROM ops_error_logs WHERE request_id = $1", requestID)
+		require.NoError(t, err)
+	})
 	_, err := repo.InsertErrorLog(ctx, &service.OpsInsertErrorLogInput{
 		RequestID: requestID, ErrorPhase: "auth", ErrorType: "auth_error", Severity: "error",
 		StatusCode: 401, CreatedAt: time.Now().UTC(),

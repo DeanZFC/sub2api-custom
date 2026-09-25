@@ -486,7 +486,7 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_ThrottlesExtraWrites(t *t
 	}
 }
 
-func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_PrearmBypassesThrottle(t *testing.T) {
+func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_HighUsageStillThrottlesExtraWrites(t *testing.T) {
 	repo := &openAICodexSnapshotAsyncRepo{
 		updateExtraCh: make(chan map[string]any, 2),
 	}
@@ -494,7 +494,7 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_PrearmBypassesThrottle(t 
 		accountRepo:           repo,
 		codexSnapshotThrottle: newAccountWriteThrottle(time.Hour),
 	}
-	belowPrearm := &OpenAICodexUsageSnapshot{
+	snapshot := &OpenAICodexUsageSnapshot{
 		PrimaryUsedPercent:         ptrFloat64WS(94),
 		PrimaryResetAfterSeconds:   ptrIntWS(3600),
 		PrimaryWindowMinutes:       ptrIntWS(10080),
@@ -502,22 +502,22 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_PrearmBypassesThrottle(t 
 		SecondaryResetAfterSeconds: ptrIntWS(1200),
 		SecondaryWindowMinutes:     ptrIntWS(300),
 	}
-	atPrearm := *belowPrearm
-	atPrearm.PrimaryUsedPercent = ptrFloat64WS(95)
+	highUsage := *snapshot
+	highUsage.PrimaryUsedPercent = ptrFloat64WS(95)
 
-	svc.updateCodexUsageSnapshot(context.Background(), 778, belowPrearm)
+	svc.updateCodexUsageSnapshot(context.Background(), 778, snapshot)
 	select {
 	case <-repo.updateExtraCh:
 	case <-time.After(2 * time.Second):
 		t.Fatal("等待首次 codex 快照落库超时")
 	}
 
-	svc.updateCodexUsageSnapshot(context.Background(), 778, &atPrearm)
+	// The retired overdraft prearm path no longer bypasses snapshot throttling.
+	svc.updateCodexUsageSnapshot(context.Background(), 778, &highUsage)
 	select {
 	case updates := <-repo.updateExtraCh:
-		require.Equal(t, 95.0, updates["codex_7d_used_percent"])
-	case <-time.After(2 * time.Second):
-		t.Fatal("95% 预热快照不应被写入节流拦截")
+		t.Fatalf("unexpected high-usage snapshot write inside throttle window: %v", updates)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

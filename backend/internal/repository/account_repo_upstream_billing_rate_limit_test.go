@@ -41,8 +41,8 @@ func TestLockAndMergeAccountProbeExtraProtectsRateLimit(t *testing.T) {
 			require.NoError(t, err)
 			mock.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).
 				WithArgs(int64(41), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"test"}`, nil).
-				WillReturnRows(sqlmock.NewRows([]string{"identity", "ollama_identity", "proxy_identity", "probe", "sync", "snapshot", "session", "auto", "ollama_snapshot", "extra", "status", "schedulable", "error_message"}).
-					AddRow(true, false, true, []byte(`true`), []byte(`true`), []byte(`{"status":"ok"}`), nil, nil, nil, current, service.StatusActive, true, ""))
+				WillReturnRows(sqlmock.NewRows([]string{"identity", "ollama_identity", "proxy_identity", "probe", "sync", "snapshot", "session", "auto", "ollama_snapshot", "opencode_group_unchanged", "opencode_auto", "opencode_snapshot", "extra", "status", "schedulable", "error_message"}).
+					AddRow(true, false, true, []byte(`true`), []byte(`true`), []byte(`{"status":"ok"}`), nil, nil, nil, false, nil, nil, current, service.StatusActive, true, ""))
 			account := &service.Account{
 				ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
 				Credentials:                     map[string]any{"api_key": "test"},
