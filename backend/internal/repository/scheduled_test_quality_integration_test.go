@@ -145,9 +145,13 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.NoError(t, err)
 		return result
 	}
+	var candyHistoryAnchor *service.ScheduledTestResult
 	for _, definitionID := range []int64{candyID, htmlID} {
 		for i := 1; i <= 6; i++ {
-			createResult(definitionID, "success", "model-a", "high", i)
+			row := createResult(definitionID, "success", "model-a", "high", i)
+			if definitionID == candyID && i == 1 {
+				candyHistoryAnchor = row
+			}
 		}
 	}
 	createResult(candyID, "success", "model-a", "medium", 1)
@@ -173,12 +177,12 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		}
 		seriesCounts[fmt.Sprintf("%d/%s/%s", *result.TestDefinitionID, result.ModelID, result.ReasoningEffort)]++
 	}
-	require.Equal(t, 3, seriesCounts[fmt.Sprintf("%d/model-a/high", candyID)], "the public preview caps each series at three results")
-	require.Equal(t, 3, seriesCounts[fmt.Sprintf("%d/model-a/high", htmlID)])
+	require.Zero(t, seriesCounts[fmt.Sprintf("%d/model-a/high", candyID)], "a running check must not fall back to earlier successes")
+	require.Zero(t, seriesCounts[fmt.Sprintf("%d/model-a/high", htmlID)], "a failed check must not fall back to earlier successes")
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-a/medium", candyID)])
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-b/high", candyID)])
-	require.True(t, seen[initialRunning.ID])
-	require.False(t, seen[running.ID], "progress must not displace a previous success")
+	require.False(t, seen[initialRunning.ID], "the user list contains completed successes only")
+	require.False(t, seen[running.ID], "in-progress checks are not successful results")
 	require.False(t, seen[failed.ID])
 	require.False(t, seen[privateResult.ID])
 	publicJSON, err := json.Marshal(visible)
@@ -187,13 +191,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	require.NotContains(t, string(publicJSON), "Private account alpha")
 
 	t.Run("public history is authorized and paginates one successful series", func(t *testing.T) {
-		var anchor *service.ScheduledTestResult
-		for _, result := range visible {
-			if result.TargetMode == "all_accounts" && *result.TestDefinitionID == candyID && result.ModelID == "model-a" && result.ReasoningEffort == "high" {
-				anchor = result
-				break
-			}
-		}
+		anchor := candyHistoryAnchor
 		require.NotNil(t, anchor)
 		first, err := results.ListVisibleHistory(ctx, 100, anchor.ID, 0, 2)
 		require.NoError(t, err)
@@ -364,6 +362,10 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 			expectedIDs = append(expectedIDs, id)
 		}
 		require.ElementsMatch(t, expectedIDs, actualIDs)
+	})
+
+	t.Run("public list shows only successful latest-run results", func(t *testing.T) {
+		testScheduledTestLatestPublicRun(t, ctx, db, plans, results, candyID, htmlID)
 	})
 
 	t.Run("latest execution excludes removed accounts and types and retains queued targets", func(t *testing.T) {
@@ -550,7 +552,7 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 				}
 				initial, err := results.ListVisible(ctx, 100, 3)
 				require.NoError(t, err)
-				require.True(t, containsID(initial, latest.ID))
+				require.Equal(t, control == nil, containsID(initial, latest.ID), "group tests show only the newest output across their executing accounts")
 				if orphan != nil {
 					require.False(t, containsID(initial, orphan.ID))
 					_, err := results.ListVisibleHistory(ctx, 100, orphan.ID, 0, 20)
@@ -603,7 +605,7 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 						execSQL("UPDATE accounts SET status='active',schedulable=true,deleted_at=NULL WHERE id=$1", unavailableID)
 						restored, err := results.ListVisible(ctx, 100, 3)
 						require.NoError(t, err)
-						require.True(t, containsID(restored, latest.ID), "eligible accounts become visible without rewriting historical results")
+						require.Equal(t, control == nil, containsID(restored, latest.ID), "only the newest eligible result is shown without rewriting history")
 						history, err := results.ListVisibleHistory(ctx, 100, latest.ID, 0, 20)
 						require.NoError(t, err)
 						require.True(t, containsID(history, older.ID))

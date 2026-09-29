@@ -564,28 +564,24 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
 
 const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id,vr.group_order`
 
-func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID int64, limit int) ([]*service.ScheduledTestResult, error) {
-	if limit <= 0 || limit > 3 {
-		limit = 3
-	}
-	rows, err := r.db.QueryContext(ctx, scheduledTestVisibleResultsCTE+`, success_state AS (
-    SELECT vr.*, bool_or(status IN ('success', 'passed')) OVER (
-        PARTITION BY group_id, result_target_key, test_definition_id, model_id, reasoning_effort
-    ) AS has_success
-    FROM visible_results vr
-), ranked_results AS (
+// The user list shows successful results from each plan's current execution.
+// Rank before checking success so legacy rows without a run ID cannot fall
+// back to an older success after a newer failure. History uses its own query.
+func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID int64, _ int) ([]*service.ScheduledTestResult, error) {
+	rows, err := r.db.QueryContext(ctx, scheduledTestVisibleResultsCTE+`, ranked_results AS (
     SELECT vr.*, row_number() OVER (
-        PARTITION BY group_id, result_target_key, test_definition_id, model_id, reasoning_effort
-        ORDER BY started_at DESC, id DESC
+        PARTITION BY vr.group_id, vr.result_target_key, vr.test_definition_id, vr.model_id, vr.reasoning_effort
+        ORDER BY vr.started_at DESC, vr.id DESC
     ) AS history_rank
-    FROM success_state vr
-    WHERE status IN ('success', 'passed')
-       OR (status IN ('pending', 'running') AND NOT has_success)
+    FROM visible_results vr
+    JOIN scheduled_test_results execution ON execution.id = vr.id
+    JOIN scheduled_test_plans plan ON plan.id = vr.plan_id
+    WHERE execution.run_id = plan.latest_run_id
 )
 SELECT `+scheduledTestVisibleResultColumns+`
 FROM ranked_results vr
-WHERE history_rank <= $2
-ORDER BY vr.started_at DESC, vr.id DESC`, userID, limit)
+WHERE history_rank = 1 AND status IN ('success', 'passed')
+ORDER BY vr.started_at DESC, vr.id DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
