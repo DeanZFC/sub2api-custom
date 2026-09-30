@@ -137,6 +137,7 @@ type SettingService struct {
 	claudeCodeVersionCache        atomic.Value // *cachedClaudeCodeClientVersion
 	claudeCodeVersionSF           singleflight.Group
 
+	cyberSessionBlockRuntimeMu    sync.Mutex
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group
 

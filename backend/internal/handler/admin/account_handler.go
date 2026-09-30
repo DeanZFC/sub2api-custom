@@ -52,6 +52,7 @@ type codexTicketDiagnosticsEnricher interface {
 
 // AccountHandler handles admin account management
 type AccountHandler struct {
+	claudeResetCredits      claudeResetReader
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
 	openaiOAuthService      *service.OpenAIOAuthService
