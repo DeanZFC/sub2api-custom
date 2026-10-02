@@ -1015,6 +1015,7 @@ export default {
       fillRelatedModels: '同步最新支持模型',
       syncUpstreamModels: '同步上游支持的模型',
       syncUpstreamModelsLoading: '同步上游中...',
+      syncUpstreamModelsCatalogSuccess: '已同步上游模型目录，共 {count} 个模型',
       syncUpstreamModelsSuccess: '已从上游同步 {count} 个新模型（上游共 {total} 个）',
       syncUpstreamModelsNoChanges: '上游 {count} 个模型均已在白名单中',
       syncUpstreamModelsEmpty: '上游没有返回可同步的模型',

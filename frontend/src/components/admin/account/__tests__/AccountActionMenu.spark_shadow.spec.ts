@@ -141,6 +141,16 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
     wrapper.unmount()
   })
 
+  it('影子账号隐藏同步上游模型入口，因为影子账号不持有上游凭据', () => {
+    const account = makeAccount({ platform: 'openai', type: 'oauth', parent_account_id: 42 })
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account, anchorRect },
+      attachTo: document.body,
+    })
+    expect(getBodyText()).not.toContain('admin.accounts.syncUpstreamModels')
+    wrapper.unmount()
+  })
+
   it('普通 OpenAI OAuth 母账号仍显示凭据/隐私类操作', () => {
     const account = makeAccount({ platform: 'openai', type: 'oauth', parent_account_id: null })
     const wrapper = mount(AccountActionMenu, {
@@ -170,6 +180,26 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
     const emitted = wrapper.emitted('create-spark-shadow')
     expect(emitted).toBeTruthy()
     expect(emitted![0][0]).toMatchObject({ id: account.id, platform: 'openai' })
+
+    wrapper.unmount()
+  })
+
+  it('点击「同步上游支持的模型」触发 sync-models 事件并携带 account', async () => {
+    const account = makeAccount({ platform: 'openai', type: 'oauth', parent_account_id: null })
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account, anchorRect },
+      attachTo: document.body,
+    })
+
+    const syncBtn = getBodyButtons().find(b => b.textContent?.includes('admin.accounts.syncUpstreamModels'))
+    expect(syncBtn).toBeDefined()
+
+    syncBtn!.click()
+    await wrapper.vm.$nextTick()
+
+    const emitted = wrapper.emitted('sync-models')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0][0]).toMatchObject({ id: account.id, name: account.name })
 
     wrapper.unmount()
   })

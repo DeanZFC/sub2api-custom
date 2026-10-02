@@ -15,8 +15,11 @@ const {
   getAllProxies,
   getAllGroups,
   refreshCredentials,
+  syncUpstreamModels,
   showError,
-  showWarning
+  showWarning,
+  showSuccess,
+  showInfo
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
@@ -26,8 +29,11 @@ const {
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
   refreshCredentials: vi.fn(),
+  syncUpstreamModels: vi.fn(),
   showError: vi.fn(),
-  showWarning: vi.fn()
+  showWarning: vi.fn(),
+  showSuccess: vi.fn(),
+  showInfo: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -42,7 +48,8 @@ vi.mock('@/api/admin', () => ({
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn(),
-      refreshCredentials
+      refreshCredentials,
+      syncUpstreamModels
     },
     proxies: { getAll: getAllProxies },
     groups: { getAll: getAllGroups }
@@ -50,7 +57,7 @@ vi.mock('@/api/admin', () => ({
 }))
 
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ showError, showWarning, showSuccess: vi.fn(), showInfo: vi.fn() })
+  useAppStore: () => ({ showError, showWarning, showSuccess, showInfo })
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -168,8 +175,11 @@ describe('admin AccountsView lite account list', () => {
     getAllProxies.mockReset().mockResolvedValue([])
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
     refreshCredentials.mockReset()
+    syncUpstreamModels.mockReset()
     showError.mockReset()
     showWarning.mockReset()
+    showSuccess.mockReset()
+    showInfo.mockReset()
   })
 
   afterEach(() => {
@@ -216,6 +226,21 @@ describe('admin AccountsView lite account list', () => {
     wrapper.getComponent(DataTableStub).element.dispatchEvent(new Event('scroll'))
     await flushPromises()
     expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('syncs upstream models from the account action menu without loading account details', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['gpt-5'], warnings: [] })
+    const wrapper = mountView(false)
+    await flushPromises()
+
+    const menu = wrapper.findComponent(AccountActionMenu)
+    menu.vm.$emit('sync-models', listRow)
+    await flushPromises()
+
+    expect(syncUpstreamModels).toHaveBeenCalledWith(listRow.id)
+    expect(getById).not.toHaveBeenCalled()
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsCatalogSuccess')
     wrapper.unmount()
   })
 
