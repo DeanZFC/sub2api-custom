@@ -418,6 +418,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	if err != nil {
 		return nil, err
 	}
+	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
+		return nil, errors.New("typesafe accounts only support apikey credentials")
+	}
 	// Probe/session observations are system-managed. A configured rate ceiling
 	// explicitly opts the new account into automatic detection.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
@@ -605,6 +608,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
+		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
