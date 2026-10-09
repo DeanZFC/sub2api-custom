@@ -346,13 +346,11 @@ describe('PricingEntryCard automatic default pricing', () => {
     })
   })
 
-  it('ignores a response for a model that was replaced during lookup', async () => {
+  it('ignores a stale response and keeps prices blank when an existing model is replaced', async () => {
     channelsApiMock.getModelDefaultPricing.mockReset()
     let resolveFirst!: (value: ReturnType<typeof defaultPricing>) => void
-    let resolveSecond!: (value: ReturnType<typeof defaultPricing>) => void
     channelsApiMock.getModelDefaultPricing
       .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
-      .mockReturnValueOnce(new Promise(resolve => { resolveSecond = resolve }))
     const entry = createBlankTokenEntry()
     const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
 
@@ -363,11 +361,9 @@ describe('PricingEntryCard automatic default pricing', () => {
 
     resolveFirst(defaultPricing(1, 2))
     await flushAsyncWork()
-    expect(lastUpdate(wrapper)?.input_price).not.toBe(1_000_000)
-
-    resolveSecond(defaultPricing(0.000003, 0.000004))
-    await flushAsyncWork()
-    expect(lastUpdate(wrapper)).toMatchObject({ models: ['model-b'], input_price: 3, output_price: 4 })
+    expect(channelsApiMock.getModelDefaultPricing).toHaveBeenCalledOnce()
+    expect(channelsApiMock.getModelDefaultPricing).toHaveBeenCalledWith('model-a')
+    expect(lastUpdate(wrapper)).toMatchObject({ models: ['model-b'], input_price: null, output_price: null })
   })
 
   it('does not emit a stale update after the entry is removed while lookup is pending', async () => {

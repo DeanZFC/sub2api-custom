@@ -23,9 +23,10 @@ func TestWrapUsageRecordTaskContextCapturesAPIKeyBeforeFallbackMutation(t *testi
 	parent := service.WithAPIKeyGroupFallbackRouting(context.Background(), apiKey)
 
 	var captured *service.APIKey
-	task := wrapUsageRecordTaskContext(parent, func(ctx context.Context) {
+	task, abandon := wrapUsageRecordTaskContext(parent, func(ctx context.Context) {
 		captured, _ = service.APIKeyUsageSnapshotFromContext(ctx)
 	})
+	t.Cleanup(abandon)
 
 	// Simulate a later turn switching the mutable request API key after the
 	// usage task has already been queued.

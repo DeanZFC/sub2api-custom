@@ -455,10 +455,11 @@ async function onModelsUpdate(newModels: string[]) {
   emit('update', { ...props.entry, models: newModels })
 
   // Automatic lookup is intentionally limited to a blank token entry with one
-  // model. A multi-model entry is one shared price rule, so applying the first
-  // model's price would silently make models such as DeepSeek Pro/Flash equal.
+  // model. Existing entries with blank prices keep their per-model defaults;
+  // appending a model must not replace them with one shared price. Likewise,
+  // adding several models at once must not apply the first model's price to all.
   const addedModels = newModels.filter(m => !oldModels.includes(m))
-  if (addedModels.length === 0) return
+  if (oldModels.length !== 0 || addedModels.length !== 1) return
 
   if (props.entry.billing_mode !== 'token' || newModels.length !== 1) return
 
