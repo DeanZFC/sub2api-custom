@@ -94,7 +94,7 @@ func accountToPluginInfo(account *Account) PluginAccountInfo {
 //     credential that ResolveOutboundIdentity does NOT hand out (that channel only
 //     mints a short-lived access token). Keeping it out of this list keeps the
 //     credential surface exactly what the outbound-identity channel already
-//     exposes. Extra remains readable after removing private Codex ticket
+//     exposes. Extra remains readable after removing retired credential
 //     material. The selected proxy remains readable, matching ResolveOutboundIdentity;
 //     the full proxy pool is omitted because it includes unused route credentials.
 //   - Groups / AccountGroups: relational graphs with *Group/*Account
@@ -110,7 +110,7 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	}
 	clone := *account
 	clone.Credentials = nil
-	clone.Extra = RedactOpenAICodexTicketExtra(account.Extra)
+	clone.Extra = StripRetiredAccountExtra(account.Extra)
 	clone.Proxies = nil
 	clone.Groups = nil
 	clone.AccountGroups = nil

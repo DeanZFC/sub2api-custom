@@ -136,7 +136,6 @@ deploy/docker-compose.override.yml
 vite.config.js
 docs/*
 !docs/codex-fingerprint.md
-!docs/codex-ticket-diagnostics.md
 !docs/upstream-billing-rate-limit.md
 !docs/channel-quality-protection.md
 !docs/channel-test-strategies.md

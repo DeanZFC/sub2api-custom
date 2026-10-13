@@ -241,20 +241,6 @@ func TestAccountIsModelSupported(t *testing.T) {
 			expected:       true,
 		},
 		{
-			name:           "deepseek empty mapping preserves advertised v4.1 flash alias",
-			platform:       PlatformDeepseek,
-			credentials:    map[string]any{},
-			requestedModel: "deepseek-v4.1-flash",
-			expected:       true,
-		},
-		{
-			name:           "deepseek flash alias supports long context suffix",
-			platform:       PlatformDeepseek,
-			credentials:    map[string]any{},
-			requestedModel: "deepseek-v4.1-flash[1m]",
-			expected:       true,
-		},
-		{
 			name:           "deepseek empty mapping normalizes claude code long context suffix",
 			platform:       PlatformDeepseek,
 			credentials:    map[string]any{},

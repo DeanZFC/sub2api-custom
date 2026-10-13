@@ -8,18 +8,17 @@ import {
 } from '@/constants/platformCatalog'
 import ChannelsView from '@/views/admin/ChannelsView.vue'
 
-const { listChannels, getGroups, syncPricingModels, getModelDefaultPricing, showSuccess, showError } = vi.hoisted(() => ({
+const { listChannels, getGroups, syncPricingModels, showSuccess, showError } = vi.hoisted(() => ({
   listChannels: vi.fn(),
   getGroups: vi.fn(),
   syncPricingModels: vi.fn(),
-  getModelDefaultPricing: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    channels: { list: listChannels, syncPricingModels, getModelDefaultPricing },
+    channels: { list: listChannels, syncPricingModels },
     groups: { getAll: getGroups },
     settings: { getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false }) }
   }
@@ -88,7 +87,6 @@ describe('ChannelsView pricing model sync', () => {
     listChannels.mockResolvedValue({ items: [], total: 0 })
     getGroups.mockResolvedValue([])
     syncPricingModels.mockReset()
-    getModelDefaultPricing.mockResolvedValue({ found: false })
   })
 
   afterEach(() => {

@@ -89,8 +89,6 @@ func isOpenAIOAuthServableModel(requestedModel string) bool {
 // 计费 pro 档口径一致的版本化名。
 var deepseekServableModels = []string{
 	"deepseek-flash",
-	// Keep the Flash alias already exposed by this fork's model discovery and pricing.
-	"deepseek-v4.1-flash",
 	"deepseek-v4-pro",
 	"deepseek-v4-flash",
 	"deepseek-v4-flash-vision-exp",

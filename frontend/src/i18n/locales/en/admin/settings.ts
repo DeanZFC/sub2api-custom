@@ -585,10 +585,6 @@ export default {
           invalidLimits: "Retries: 1-10; interval: 100-10000 ms; retry window: 1-300 seconds.",
           invalidKeywords: "When enabled, provide 1-50 keywords, at most 256 bytes each.",
         },
-        codexTicketEnabled: 'Codex 292 / 332 tickets',
-        codexTicketEnabledDesc:
-          'Gateway master switch. Enable tickets separately for each account when on. Turning off stops harvesting and missing-ticket blocking for every account and hides account ticket controls and status. Pro uses 292 tickets; Team uses 332 tickets.',
-        codexTicketAccountRouteHint: 'Harvesting uses the account’s primary proxy, or a direct connection without a proxy; the business proxy pool may use other exits. Tickets last at most 240 seconds by default and renew 60 seconds early. Required 292 routing cookies are attached automatically and shared within the account.',
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:
           "Only affects OpenAI OAuth accounts with 'Codex official clients only' enabled (global). Beyond User-Agent/Originator, harden the decision with a version range, an engine-fingerprint gate, and black/whitelists.",

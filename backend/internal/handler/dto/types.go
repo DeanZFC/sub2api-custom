@@ -101,6 +101,10 @@ type Group struct {
 	IsExclusive    bool    `json:"is_exclusive"`
 	Status         string  `json:"status"`
 
+	// I18n 名称与描述的各语言译文。只有管理端输出；用户侧接口经 Localized 把
+	// name/description 换成请求语言的版本后清空本字段。
+	I18n domain.GroupI18n `json:"i18n,omitempty"`
+
 	SubscriptionType          string   `json:"subscription_type"`
 	DailyLimitUSD             *float64 `json:"daily_limit_usd"`
 	WeeklyLimitUSD            *float64 `json:"weekly_limit_usd"`
@@ -216,30 +220,28 @@ type Account struct {
 	Type     string  `json:"type"`
 	// Credentials 经 RedactCredentials 处理后只含非敏感子键；敏感 token / api_key / 私钥
 	// 的存在性通过 CredentialsStatus（has_<key>）暴露，原始值不返回前端。
-	Credentials             map[string]any                          `json:"credentials"`
-	CredentialsStatus       map[string]bool                         `json:"credentials_status,omitempty"`
-	Extra                   map[string]any                          `json:"extra"`
-	OllamaCloudUsage        *service.OllamaCloudUsageState          `json:"ollama_cloud_usage,omitempty"`
-	OpenCodeGoUsage         *service.OpenCodeGoUsageState           `json:"opencode_go_usage,omitempty"`
-	CodexTicketConfig       *service.OpenAICodexTicketAccountConfig `json:"codex_ticket_config,omitempty"`
-	CodexTurnTickets        []service.OpenAICodexTicketStatus       `json:"codex_turn_tickets,omitempty"`
-	ProxyIDs                []int64                                 `json:"proxy_ids,omitempty"`
-	ProxyID                 *int64                                  `json:"proxy_id"`
-	ProxyFallbackOriginID   *int64                                  `json:"proxy_fallback_origin_id"`
-	ProxyFallbackOriginName *string                                 `json:"proxy_fallback_origin_name,omitempty"`
-	Concurrency             int                                     `json:"concurrency"`
-	LoadFactor              *int                                    `json:"load_factor,omitempty"`
-	Priority                int                                     `json:"priority"`
-	RateMultiplier          float64                                 `json:"rate_multiplier"`
-	SharedTotalCallCount    int64                                   `json:"shared_total_call_count,omitempty"`
-	SharedListingStatus     string                                  `json:"shared_listing_status,omitempty"`
-	Status                  string                                  `json:"status"`
-	ErrorMessage            string                                  `json:"error_message"`
-	LastUsedAt              *time.Time                              `json:"last_used_at"`
-	ExpiresAt               *int64                                  `json:"expires_at"`
-	AutoPauseOnExpired      bool                                    `json:"auto_pause_on_expired"`
-	CreatedAt               time.Time                               `json:"created_at"`
-	UpdatedAt               time.Time                               `json:"updated_at"`
+	Credentials             map[string]any                 `json:"credentials"`
+	CredentialsStatus       map[string]bool                `json:"credentials_status,omitempty"`
+	Extra                   map[string]any                 `json:"extra"`
+	OllamaCloudUsage        *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
+	OpenCodeGoUsage         *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
+	ProxyIDs                []int64                        `json:"proxy_ids,omitempty"`
+	ProxyID                 *int64                         `json:"proxy_id"`
+	ProxyFallbackOriginID   *int64                         `json:"proxy_fallback_origin_id"`
+	ProxyFallbackOriginName *string                        `json:"proxy_fallback_origin_name,omitempty"`
+	Concurrency             int                            `json:"concurrency"`
+	LoadFactor              *int                           `json:"load_factor,omitempty"`
+	Priority                int                            `json:"priority"`
+	RateMultiplier          float64                        `json:"rate_multiplier"`
+	SharedTotalCallCount    int64                          `json:"shared_total_call_count,omitempty"`
+	SharedListingStatus     string                         `json:"shared_listing_status,omitempty"`
+	Status                  string                         `json:"status"`
+	ErrorMessage            string                         `json:"error_message"`
+	LastUsedAt              *time.Time                     `json:"last_used_at"`
+	ExpiresAt               *int64                         `json:"expires_at"`
+	AutoPauseOnExpired      bool                           `json:"auto_pause_on_expired"`
+	CreatedAt               time.Time                      `json:"created_at"`
+	UpdatedAt               time.Time                      `json:"updated_at"`
 
 	Schedulable                bool `json:"schedulable"`
 	UpstreamBillingRateLimited bool `json:"upstream_billing_rate_limited,omitempty"`
@@ -347,13 +349,11 @@ type AccountListItem struct {
 	Platform string  `json:"platform"`
 	Type     string  `json:"type"`
 
-	Credentials       map[string]any                          `json:"credentials,omitempty"`
-	CredentialsStatus map[string]bool                         `json:"credentials_status,omitempty"`
-	Extra             map[string]any                          `json:"extra,omitempty"`
-	OllamaCloudUsage  *service.OllamaCloudUsageState          `json:"ollama_cloud_usage,omitempty"`
-	CodexTicketConfig *service.OpenAICodexTicketAccountConfig `json:"codex_ticket_config,omitempty"`
-	CodexTurnTickets  []service.OpenAICodexTicketStatus       `json:"codex_turn_tickets,omitempty"`
-	OpenCodeGoUsage   *service.OpenCodeGoUsageState           `json:"opencode_go_usage,omitempty"`
+	Credentials       map[string]any                 `json:"credentials,omitempty"`
+	CredentialsStatus map[string]bool                `json:"credentials_status,omitempty"`
+	Extra             map[string]any                 `json:"extra,omitempty"`
+	OllamaCloudUsage  *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
+	OpenCodeGoUsage   *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
 
 	ProxyIDs                []int64    `json:"proxy_ids,omitempty"`
 	ProxyID                 *int64     `json:"proxy_id"`

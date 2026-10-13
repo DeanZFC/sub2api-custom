@@ -564,6 +564,16 @@ export interface ReasoningEffortMapping {
   model?: string
 }
 
+/** 分组名称与描述在某个语言下的译文；字段为空表示沿用分组自身的 name/description。 */
+export interface GroupLocaleText {
+  name?: string
+  description?: string
+}
+
+/** 以语言代码（en、zh…）为键的分组文案译文。 */
+export type GroupI18n = Record<string, GroupLocaleText>
+
+// 用户侧接口返回的 name / description 已由后端按请求语言（Accept-Language）选好
 export interface Group {
   id: number
   name: string
@@ -628,6 +638,8 @@ export interface Group {
 }
 
 export interface AdminGroup extends Group {
+  // 管理端的 name / description 始终是原字段，各语言译文另放在 i18n 里
+  i18n?: GroupI18n
   force_openai_fast: boolean
   free_openai_fast: boolean
   model_pricing: import('@/api/admin/channels').ChannelModelPricing[]
@@ -798,6 +810,7 @@ export interface UpdateApiKeyRequest {
 export interface CreateGroupRequest {
   name: string
   description?: string | null
+  i18n?: GroupI18n
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
@@ -864,6 +877,7 @@ export interface CreateGroupRequest {
 export interface UpdateGroupRequest {
   name?: string
   description?: string | null
+  i18n?: GroupI18n
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
@@ -1173,56 +1187,6 @@ export interface OllamaCloudUsageSettings {
   debounce_minutes: number
 }
 
-export type CodexTicketProxySource = 'account' | 'direct' | 'pool'
-
-export interface CodexTurnTicketStatus {
-  model: string
-  length?: number
-  target_length: number
-  ready: boolean
-  remaining_seconds: number
-  cookie_ready?: boolean
-  cookie_remaining_seconds?: number
-  blocked: boolean
-  expires_at?: string
-  attempts?: number
-  successes?: number
-  failures?: number
-  inject_misses?: number
-  last_inject_miss_at?: string | null
-  consecutive_failures?: number
-  in_progress?: boolean
-  last_attempt_at?: string | null
-  next_retry_at?: string | null
-  last_error_code?: string
-  last_error?: string
-  last_http_status?: number
-  last_length?: number
-  last_proxy_index?: number
-  last_proxy_source?: CodexTicketProxySource
-  paused?: boolean
-  plan_known?: boolean
-}
-
-export interface CodexTicketHistoryEvent {
-  id: number
-  at: string
-  model: string
-  outcome: 'success' | 'failure' | 'canceled'
-  error_code: string
-  http_status: number
-  length: number
-  target_length: number
-  proxy_index: number
-  proxy_source?: CodexTicketProxySource
-  duration_ms: number
-}
-
-export interface CodexTicketHistoryResponse {
-  events: CodexTicketHistoryEvent[]
-  limit: number
-}
-
 export type OpenCodeGoUsageStatus = 'ok' | 'unauthorized' | 'failed'
 
 export interface OpenCodeGoUsageWindow {
@@ -1276,16 +1240,7 @@ export interface Account {
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
   ollama_cloud_usage?: OllamaCloudUsageState
-  codex_turn_tickets?: CodexTurnTicketStatus[]
   upstream_billing_rate_limited?: boolean
-  /** Resolved gateway and account policy for Codex 292 / 332 tickets. */
-  codex_ticket_config?: {
-    gateway_enabled: boolean
-    account_enabled: boolean
-    enabled: boolean
-    fail_closed: boolean
-    target_length: number
-  }
   opencode_go_usage?: OpenCodeGoUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
@@ -1307,8 +1262,6 @@ export interface Account {
     auto_reset_credit_enabled?: boolean
     auto_reset_credit_5h_threshold?: number
     auto_reset_credit_7d_threshold?: number
-    codex_ticket_enabled?: boolean
-    codex_ticket_fail_closed?: boolean
     codex_auto_reset_credit_state?: {
       status?: 'checking' | 'available' | 'resetting' | 'success' | 'no_credit' | 'failed'
       trigger_window?: string

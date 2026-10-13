@@ -732,34 +732,6 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
-  it.each([true, false])("keeps the ticket master switch while removing proxy pool controls and payload (enabled=%s)", async (enabled) => {
-    // An older backend may still return these retired fields; saving settings
-    // must not send them back or expose a pool/test control.
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      openai_codex_ticket_enabled: !enabled,
-      openai_codex_ticket_harvest_proxy_mode: "pool",
-      openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080",
-      openai_codex_ticket_harvest_proxy_configured: true,
-      openai_codex_ticket_harvest_proxy_count: 1,
-    });
-    const wrapper = mountView();
-    await flushPromises();
-    await openGatewayTab(wrapper);
-    await wrapper.get("#codex-ticket-enabled").setValue(enabled);
-    expect(wrapper.find("#codex-ticket-proxy-mode").exists()).toBe(false);
-    expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
-    expect(wrapper.find('[data-testid="codex-ticket-proxy-test"]').exists()).toBe(false);
-    expect(wrapper.get('[data-testid="codex-ticket-account-route-hint"]').text())
-      .toContain("codexTicketAccountRouteHint");
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    const payload = updateSettings.mock.calls[0]?.[0];
-    expect(payload?.openai_codex_ticket_enabled).toBe(enabled);
-    expect(Object.keys(payload ?? {}).some((key) => key.startsWith("openai_codex_ticket_harvest_proxy_"))).toBe(false);
-    wrapper.unmount();
-  });
-
   it("loads and saves the open button visibility for each custom menu", async () => {
     const menuItems = [
       { id: "docs", label: "Docs", url: "https://example.com/docs", icon_svg: "", visibility: "user", sort_order: 0 },

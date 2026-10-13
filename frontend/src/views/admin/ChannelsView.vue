@@ -423,19 +423,10 @@
                 <label class="input-label text-xs mb-0">{{ t('admin.channels.form.modelPricing', 'Model Pricing') }}</label>
                 <div class="flex items-center gap-2">
                   <button
-                    v-if="section.platform === 'deepseek' && section.model_pricing.some(isSharedDeepSeekEntry)"
-                    type="button"
-                    @click="splitDeepSeekPrices(sIdx)"
-                    :disabled="syncingPlatform !== null"
-                    class="text-xs text-primary-600 hover:text-primary-700 disabled:opacity-50"
-                  >
-                    {{ t('admin.channels.form.splitDefaultPrices') }}
-                  </button>
-                  <button
                     v-if="supportsPricingModelSync(section.platform)"
                     type="button"
                     @click="syncLatestModels(sIdx)"
-                    :disabled="syncingPlatform !== null"
+                    :disabled="!!syncingPlatform"
                     class="text-xs text-gray-500 hover:text-primary-600 disabled:opacity-50"
                   >
                     {{ syncingPlatform === section.platform ? t('admin.channels.form.syncingModels') : t('admin.channels.form.syncLatestModels') }}
@@ -608,7 +599,7 @@
           <button
             type="submit"
             form="channel-form"
-            :disabled="submitting || syncingPlatform !== null"
+            :disabled="submitting"
             class="btn btn-primary"
           >
             {{ submitting
@@ -644,7 +635,6 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { adminAPI } from '@/api/admin'
 import type { Channel, ChannelModelPricing, CreateChannelRequest, UpdateChannelRequest, AccountStatsPricingRule } from '@/api/admin/channels'
 import type { PricingFormEntry } from '@/components/admin/channel/types'
-import { createPricingEntry, createModelPricingEntries, isSharedDeepSeekEntry, loadModelDefaultPrices, splitDeepSeekPricingEntries } from '@/components/admin/channel/modelPricingSync'
 import { apiIntervalsToForm, apiTimePricingToForm, createDefaultTimePricingForm, findModelConflict, formIntervalsToAPI, formReasoningEffortMultipliersToAPI, formTimePricingToAPI, isValidPositiveMultiplier, mTokToPerToken, perTokenToMTok, validateIntervals, validateReasoningEffortMultipliers, validateTimePricing } from '@/components/admin/channel/types'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -868,7 +858,23 @@ function toggleGroupInSection(sectionIdx: number, groupId: number) {
 
 // ── Pricing helpers ──
 function addPricingEntry(sectionIdx: number) {
-  form.platforms[sectionIdx].model_pricing.push(createPricingEntry([]))
+  form.platforms[sectionIdx].model_pricing.push({
+    models: [],
+    billing_mode: 'token',
+    input_price: null,
+    output_price: null,
+    cache_write_price: null,
+    cache_write_1h_price: null,
+    cache_read_price: null,
+    fast_multiplier: null,
+    flex_multiplier: null,
+    reasoning_effort_multipliers: null,
+    image_input_price: null,
+    image_output_price: null,
+    per_request_price: null,
+    intervals: [],
+    time_pricing: createDefaultTimePricingForm()
+  })
 }
 
 const syncingPlatform = ref<string | null>(null)
@@ -876,52 +882,39 @@ const syncingPlatform = ref<string | null>(null)
 async function syncLatestModels(sectionIdx: number) {
   const section = form.platforms[sectionIdx]
   if (!section || syncingPlatform.value || !supportsPricingModelSync(section.platform)) return
-  const snapshot = JSON.stringify(section.model_pricing)
-  syncingPlatform.value = section.platform
+  const platform = section.platform
+  syncingPlatform.value = platform
   try {
-    const result = await adminAPI.channels.syncPricingModels(section.platform)
-    const existing = new Set(section.model_pricing.flatMap(entry => entry.models))
-    const models = [...new Set(result.models)].filter(model => !existing.has(model))
-    const prices = await loadModelDefaultPrices(models, adminAPI.channels.getModelDefaultPricing)
-    if (!showDialog.value || !form.platforms.includes(section)) return
-    if (JSON.stringify(section.model_pricing) !== snapshot) {
-      appStore.showError(t('admin.channels.form.pricingChangedDuringSync'))
-      return
+    const result = await adminAPI.channels.syncPricingModels(platform)
+    // Collect all model names already present in this platform's pricing entries
+    const existingModels = new Set<string>()
+    for (const entry of section.model_pricing) {
+      for (const m of entry.models) existingModels.add(m)
     }
-    if (!models.length) {
+    const newModels = result.models.filter(m => !existingModels.has(m))
+    if (newModels.length === 0) {
       appStore.showSuccess(t('admin.channels.form.syncModelsAlreadyUpToDate'))
       return
     }
-    section.model_pricing.push(...createModelPricingEntries(models, prices))
-    appStore.showSuccess(t('admin.channels.form.syncModelsSuccess', { count: models.length }))
-  } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.channels.form.syncModelsError')))
-  } finally {
-    syncingPlatform.value = null
-  }
-}
-
-async function splitDeepSeekPrices(sectionIdx: number) {
-  if (syncingPlatform.value) return
-  const section = form.platforms[sectionIdx]
-  const snapshot = JSON.stringify(section.model_pricing)
-  syncingPlatform.value = section.platform
-  try {
-    const entries: PricingFormEntry[] = JSON.parse(snapshot)
-    const models = entries.filter(isSharedDeepSeekEntry).flatMap(entry => entry.models)
-    const prices = await loadModelDefaultPrices(models, adminAPI.channels.getModelDefaultPricing)
-    if (!showDialog.value || !form.platforms.includes(section)) return
-    if (JSON.stringify(section.model_pricing) !== snapshot) {
-      appStore.showError(t('admin.channels.form.pricingChangedDuringSync'))
-      return
-    }
-    const result = splitDeepSeekPricingEntries(entries, prices)
-    if (result.splitCount) {
-      section.model_pricing.splice(0, section.model_pricing.length, ...result.entries)
-      appStore.showSuccess(t('admin.channels.form.splitDefaultPricesSuccess'))
-    } else {
-      appStore.showSuccess(t('admin.channels.form.splitDefaultPricesUnchanged'))
-    }
+    // Add new models as a single new pricing entry (user fills in prices)
+    section.model_pricing.push({
+      models: newModels,
+      billing_mode: 'token',
+      input_price: null,
+      output_price: null,
+      cache_write_price: null,
+      cache_write_1h_price: null,
+      cache_read_price: null,
+      fast_multiplier: null,
+      flex_multiplier: null,
+      reasoning_effort_multipliers: null,
+      image_input_price: null,
+      image_output_price: null,
+      per_request_price: null,
+      intervals: [],
+      time_pricing: createDefaultTimePricingForm()
+    })
+    appStore.showSuccess(t('admin.channels.form.syncModelsSuccess', { count: newModels.length }))
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('admin.channels.form.syncModelsError')))
   } finally {
@@ -1486,7 +1479,7 @@ function closeDialog() {
 }
 
 async function handleSubmit() {
-  if (submitting.value || syncingPlatform.value) return
+  if (submitting.value) return
   if (!form.name.trim()) {
     appStore.showError(t('admin.channels.nameRequired', 'Please enter a channel name'))
     return

@@ -8,12 +8,6 @@ vi.mock('@/api/admin/channels', () => ({
   default: { getModelDefaultPricing: vi.fn() },
 }))
 
-const channelsApiMock = vi.hoisted(() => ({
-  getModelDefaultPricing: vi.fn(),
-}))
-
-vi.mock('@/api/admin/channels', () => ({ default: channelsApiMock }))
-
 vi.mock('vue-i18n', async importOriginal => ({
   ...await importOriginal<typeof import('vue-i18n')>(),
   useI18n: () => ({ t: (key: string) => key }),
@@ -40,40 +34,6 @@ function createEntry(billingMode: PricingFormEntry['billing_mode'] = 'token'): P
       periods: [{ start_time: '09:00', end_time: '12:00', multiplier: '2.00' }],
     },
   }
-}
-
-function modelInput(wrapper: ReturnType<typeof shallowMount>) {
-  return wrapper.findComponent({ name: 'ModelTagInput' })
-}
-
-function lastUpdate(wrapper: ReturnType<typeof shallowMount>): PricingFormEntry | undefined {
-  const updates = wrapper.emitted('update')
-  return updates?.at(-1)?.[0] as PricingFormEntry | undefined
-}
-
-async function flushAsyncWork() {
-  await Promise.resolve()
-  await Promise.resolve()
-}
-
-function defaultPricing(input = 0.000001, output = 0.000002) {
-  return {
-    found: true,
-    input_price: input,
-    output_price: output,
-    cache_write_price: 0.0000005,
-    cache_write_1h_price: null,
-    cache_read_price: 0.0000001,
-    image_input_price: 0.000003,
-    image_output_price: 0.000004,
-    reasoning_effort_multipliers: { max: 1.2 },
-  }
-}
-
-function createBlankTokenEntry(): PricingFormEntry {
-  const entry = createEntry()
-  entry.time_pricing.periods = []
-  return entry
 }
 
 describe('PricingEntryCard time pricing visibility', () => {
@@ -184,8 +144,8 @@ describe('PricingEntryCard request multipliers', () => {
       .toBe('admin.channels.form.reasoningEffortMultiplierDefault')
   })
 
-  it('preserves manual pricing when an effort multiplier is already configured', async () => {
-    vi.mocked(channelsAPI.getModelDefaultPricing).mockReset().mockResolvedValue({
+  it('keeps custom effort multipliers when auto-filling model token prices', async () => {
+    vi.mocked(channelsAPI.getModelDefaultPricing).mockResolvedValue({
       found: true, input_price: 3e-6, output_price: 15e-6,
     })
     const wrapper = shallowMount(PricingEntryCard, {
@@ -194,216 +154,8 @@ describe('PricingEntryCard request multipliers', () => {
     wrapper.findComponent({ name: 'ModelTagInput' }).vm.$emit('update:models', ['example-model'])
     await flushPromises()
     expect(wrapper.emitted('update')!.at(-1)![0]).toMatchObject({
-      models: ['example-model'], input_price: null, output_price: null,
+      models: ['example-model'], input_price: 3, output_price: 15,
       reasoning_effort_multipliers: { high: 0.5 },
     })
-    expect(channelsAPI.getModelDefaultPricing).not.toHaveBeenCalled()
-  })
-})
-
-describe('PricingEntryCard automatic default pricing', () => {
-  it('does not use the first model price for a multi-model entry', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    const entry = createBlankTokenEntry()
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', ['deepseek-v4', 'deepseek-v4.1-flash'])
-    await flushAsyncWork()
-
-    expect(channelsApiMock.getModelDefaultPricing).not.toHaveBeenCalled()
-    expect(lastUpdate(wrapper)).toMatchObject({
-      models: ['deepseek-v4', 'deepseek-v4.1-flash'],
-      input_price: null,
-      output_price: null,
-    })
-  })
-
-  it('does not auto-fill when adding one model to an existing multi-model entry', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    const entry = createBlankTokenEntry()
-    entry.models = ['deepseek-v4', 'deepseek-v4.1']
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', [...entry.models, 'deepseek-v4.1-flash'])
-    await wrapper.setProps({ entry: { ...entry, models: [...entry.models, 'deepseek-v4.1-flash'] } })
-    await flushAsyncWork()
-
-    expect(channelsApiMock.getModelDefaultPricing).not.toHaveBeenCalled()
-    expect(lastUpdate(wrapper)).toMatchObject({
-      models: ['deepseek-v4', 'deepseek-v4.1', 'deepseek-v4.1-flash'],
-      input_price: null,
-      output_price: null,
-    })
-  })
-
-  it('fills a blank token entry when exactly one model is added', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    channelsApiMock.getModelDefaultPricing.mockResolvedValue(defaultPricing())
-    const entry = createBlankTokenEntry()
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', ['deepseek-v4.1-flash'])
-    await wrapper.setProps({ entry: { ...entry, models: ['deepseek-v4.1-flash'] } })
-    await flushAsyncWork()
-
-    expect(channelsApiMock.getModelDefaultPricing).toHaveBeenCalledWith('deepseek-v4.1-flash')
-    expect(lastUpdate(wrapper)).toMatchObject({
-      models: ['deepseek-v4.1-flash'],
-      input_price: 1,
-      output_price: 2,
-      cache_write_price: 0.5,
-      cache_read_price: 0.1,
-      image_input_price: 3,
-      image_output_price: 4,
-      reasoning_effort_multipliers: { max: 1.2 },
-    })
-  })
-
-  it('leaves manually configured values untouched, including media, tiers, time rules, and multipliers', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    const entry = createBlankTokenEntry()
-    entry.image_input_price = 8
-    entry.per_request_price = 9
-    entry.fast_multiplier = 1.1
-    entry.intervals = [{
-      min_tokens: 0,
-      max_tokens: null,
-      tier_label: 'custom',
-      input_price: 7,
-      output_price: null,
-      cache_write_price: null,
-      cache_read_price: null,
-      input_multiplier: null,
-      output_multiplier: null,
-      cache_write_multiplier: null,
-      cache_read_multiplier: null,
-      per_request_price: null,
-      sort_order: 0,
-    }]
-    entry.time_pricing.periods = [{ start_time: '09:00', end_time: '12:00', multiplier: '2.00' }]
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', ['custom-model'])
-    await flushAsyncWork()
-
-    expect(channelsApiMock.getModelDefaultPricing).not.toHaveBeenCalled()
-    expect(lastUpdate(wrapper)).toMatchObject({
-      models: ['custom-model'],
-      image_input_price: 8,
-      per_request_price: 9,
-      fast_multiplier: 1.1,
-      intervals: entry.intervals,
-      time_pricing: entry.time_pricing,
-    })
-  })
-
-  it('ignores an old response after a manual edit while the lookup is pending', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    let resolvePricing!: (value: ReturnType<typeof defaultPricing>) => void
-    channelsApiMock.getModelDefaultPricing.mockReturnValue(new Promise(resolve => {
-      resolvePricing = resolve
-    }))
-    const entry = createBlankTokenEntry()
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', ['deepseek-v4'])
-    await wrapper.setProps({ entry: { ...entry, models: ['deepseek-v4'] } })
-    const input = wrapper.find('input[type="number"]')
-    await input.setValue('9')
-    const updateCountAfterManualEdit = wrapper.emitted('update')?.length ?? 0
-
-    resolvePricing(defaultPricing())
-    await flushAsyncWork()
-
-    expect(wrapper.emitted('update')?.length).toBe(updateCountAfterManualEdit)
-    expect(lastUpdate(wrapper)).toMatchObject({ models: ['deepseek-v4'], input_price: '9' })
-  })
-
-  it('ignores a pending lookup after an effort multiplier is edited and cleared', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    let resolvePricing!: (value: ReturnType<typeof defaultPricing>) => void
-    channelsApiMock.getModelDefaultPricing.mockReturnValue(new Promise(resolve => {
-      resolvePricing = resolve
-    }))
-    const entry = createBlankTokenEntry()
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', ['deepseek-v4'])
-    await wrapper.setProps({ entry: { ...entry, models: ['deepseek-v4'] } })
-    await wrapper.get('[data-reasoning-effort="high"]').setValue('1.5')
-    await wrapper.setProps({ entry: lastUpdate(wrapper)! })
-    await wrapper.get('[data-testid="reasoning-effort-multipliers"] button').trigger('click')
-    await wrapper.setProps({ entry: lastUpdate(wrapper)! })
-    const updateCount = wrapper.emitted('update')!.length
-
-    resolvePricing(defaultPricing())
-    await flushAsyncWork()
-
-    expect(wrapper.emitted('update')).toHaveLength(updateCount)
-    expect(lastUpdate(wrapper)).toMatchObject({
-      input_price: null,
-      reasoning_effort_multipliers: null,
-    })
-  })
-
-  it('ignores a stale response and keeps prices blank when an existing model is replaced', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    let resolveFirst!: (value: ReturnType<typeof defaultPricing>) => void
-    channelsApiMock.getModelDefaultPricing
-      .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
-    const entry = createBlankTokenEntry()
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', ['model-a'])
-    await wrapper.setProps({ entry: { ...entry, models: ['model-a'] } })
-    modelInput(wrapper).vm.$emit('update:models', ['model-b'])
-    await wrapper.setProps({ entry: { ...entry, models: ['model-b'] } })
-
-    resolveFirst(defaultPricing(1, 2))
-    await flushAsyncWork()
-    expect(channelsApiMock.getModelDefaultPricing).toHaveBeenCalledOnce()
-    expect(channelsApiMock.getModelDefaultPricing).toHaveBeenCalledWith('model-a')
-    expect(lastUpdate(wrapper)).toMatchObject({ models: ['model-b'], input_price: null, output_price: null })
-  })
-
-  it('does not emit a stale update after the entry is removed while lookup is pending', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    let resolvePricing!: (value: ReturnType<typeof defaultPricing>) => void
-    channelsApiMock.getModelDefaultPricing.mockReturnValue(new Promise(resolve => {
-      resolvePricing = resolve
-    }))
-    const entry = createBlankTokenEntry()
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', ['model-to-remove'])
-    await wrapper.setProps({ entry: { ...entry, models: ['model-to-remove'] } })
-    wrapper.find('button').trigger('click')
-    const updateCountAfterRemove = wrapper.emitted('update')?.length ?? 0
-
-    resolvePricing(defaultPricing())
-    await flushAsyncWork()
-
-    expect(wrapper.emitted('remove')).toHaveLength(1)
-    expect(wrapper.emitted('update')?.length).toBe(updateCountAfterRemove)
-  })
-
-  it('does not emit a stale update after unmount while lookup is pending', async () => {
-    channelsApiMock.getModelDefaultPricing.mockReset()
-    let resolvePricing!: (value: ReturnType<typeof defaultPricing>) => void
-    channelsApiMock.getModelDefaultPricing.mockReturnValue(new Promise(resolve => {
-      resolvePricing = resolve
-    }))
-    const entry = createBlankTokenEntry()
-    const wrapper = shallowMount(PricingEntryCard, { props: { entry } })
-
-    modelInput(wrapper).vm.$emit('update:models', ['model-to-unmount'])
-    await wrapper.setProps({ entry: { ...entry, models: ['model-to-unmount'] } })
-    wrapper.unmount()
-    const updateCountAfterUnmount = wrapper.emitted('update')?.length ?? 0
-
-    resolvePricing(defaultPricing())
-    await flushAsyncWork()
-
-    expect(wrapper.emitted('update')?.length ?? 0).toBe(updateCountAfterUnmount)
   })
 })
