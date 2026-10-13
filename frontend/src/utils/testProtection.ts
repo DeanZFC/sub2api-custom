@@ -11,7 +11,7 @@ export const defaultTestOutcomeAction = (outcome: 'pass' | 'fail'): TestOutcomeA
 })
 
 export const copyTestProtection = (value?: TestProtectionConfig): TestProtectionConfig => value
-  ? { enabled: value.enabled, ...(value.mode ? { mode: value.mode } : {}), ...(value.combinations ? { combinations: value.combinations.map(copyTestCombination) } : {}), rules: (value.rules || []).map(rule => ({ ...rule, priority: rule.priority ?? 0, required_pass: rule.required_pass ?? false, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })) }
+  ? { enabled: value.enabled, ...(value.mode ? { mode: value.mode } : {}), ...(value.pass_group_ids ? { pass_group_ids: [...value.pass_group_ids] } : {}), ...(value.combinations ? { combinations: value.combinations.map(copyTestCombination) } : {}), rules: (value.rules || []).map(rule => ({ ...rule, priority: rule.priority ?? 0, required_pass: rule.required_pass ?? false, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })) }
   : { enabled: false, rules: [] }
 
 export const copyTestCombinationCondition = (condition: TestCombinationCondition): TestCombinationCondition => ({
@@ -120,9 +120,12 @@ function validAction(action: TestOutcomeAction | undefined, groups?: readonly { 
 }
 
 export function validTestProtection(value: TestProtectionConfig | undefined, types: TestType[], groups?: readonly { id: number }[]): boolean {
-  if (value?.mode && !['per_test', 'combined'].includes(value.mode)) return false
+  if (value?.mode && !['per_test', 'combined', 'all_pass'].includes(value.mode)) return false
   if (!value?.enabled) return true
   const combined = value.mode === 'combined'
+  const allPass = value.mode === 'all_pass'
+  if (value.pass_group_ids !== undefined && (!allPass || !validAction({ scheduling: 'resume', group_mode: 'assign', group_ids: value.pass_group_ids }, groups))) return false
+  if (allPass && (!value.rules.some(rule => !rule.vote?.enabled) || value.rules.some(rule => rule.vote?.public_enabled))) return false
   if (combined ? !validTestCombinations(value, groups) : !!value.combinations?.length) return false
   if (!value.rules.length || value.rules.length > 32) return false
   if (new Set(value.rules.map(rule => rule.test_definition_id)).size !== value.rules.length) return false
@@ -151,4 +154,18 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
       && (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(answer) || !Number.isFinite(Number(answer)))) return false
     return Boolean(type.output_kind === 'model_check' || rule.pause_on_failure || thresholds.length || voting || answer || rule.on_fail)
   })
+}
+
+// Apply the fixed scheduling policy without changing thresholds or answers.
+export function normalizeAllPassProtection(value: TestProtectionConfig): void {
+  if (value.mode !== 'all_pass') return
+  delete value.combinations
+  for (const rule of value.rules) {
+    rule.priority = 0
+    rule.required_pass = false
+    rule.pause_on_failure = true
+    rule.on_pass = defaultTestOutcomeAction('pass')
+    rule.on_fail = defaultTestOutcomeAction('fail')
+    if (rule.vote) rule.vote.public_enabled = false
+  }
 }

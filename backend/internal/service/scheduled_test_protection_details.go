@@ -114,6 +114,11 @@ func buildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 	referenced := map[int64]bool{}
 	if source.DefinitionID != 0 {
 		referenced[source.DefinitionID] = true
+	} else if source.Config.UsesAllPass() {
+		hold.Mode = "all_pass"
+		for _, rule := range source.Config.Rules {
+			referenced[rule.TestDefinitionID] = true
+		}
 	} else {
 		hold.Mode = "combined"
 		for _, id := range source.RuleIDs {

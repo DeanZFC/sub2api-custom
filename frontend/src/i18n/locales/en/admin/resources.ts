@@ -9,6 +9,22 @@ export default {
       commonModelsHint: 'Only models supported by every selected group are available.',
       noCommonModels: 'These groups have no shared model. Adjust the groups or their model settings.',
       protection: {
+        allPass: {
+          role: 'Check role',
+          automatic: 'Automatic requirement (must pass)',
+          review: 'Manual veto (administrator review)',
+          observe: 'Display only (no scheduling effect)',
+          automaticHint: 'Evaluate the configured criteria automatically. A failure pauses the account; all automatic requirements must pass before recovery.',
+          observeHint: 'Run the check and display its result without affecting this strategy’s pauses, recovery, or groups.',
+          newChecksHint: 'Add or remove checks and configure each answer and threshold. Existing checks become automatic requirements when first enabled. Checks added to the strategy later default to display only; choose their roles as needed.',
+          reviewHint: 'This check is reviewed manually. Pending review or generation failure does not block scheduling. An administrator rejection pauses the account; approval still requires all automatic checks to pass.',
+          title: "All automatic checks pass (recommended)",
+          description: "Enable scheduling when all automatic checks pass. Any failure pauses the account; manual review can veto it.",
+          modeHint: "Choose each check’s role. Enable scheduling when all automatic requirements pass and there is no manual veto. Any automatic failure or administrator rejection pauses the account. Each new run reevaluates the checks and keeps the current scheduling state while results are pending. For more complex AND / OR conditions, switch to combined rules.",
+          groups: "After all automatic checks pass",
+          samplesHint: "Missing data or insufficient samples remain pending and cannot lift an existing pause. With statistics recovery enabled, a limited trial starts after cooldown only when other automatic checks pass and no manual rejection exists. All fresh-sample recovery conditions must pass before full recovery and group assignment. Manual review starts anew each round.",
+          invalid: "Enable at least one automatic check and verify thresholds, answers, and recovery settings. Reviews must be administrator-only. When assigning groups, select at least one group within this strategy.",
+        },
         combined: {
           failureActionHint: 'An execution that still fails after all retries is judged as failed for combined conditions. Matched combined rules determine the actions.',
           recoveryConflict: 'A combined pause cannot depend on statistics with independent cache trial recovery, because it would block the requests needed for recovery. Use these statistics only to change groups, or turn off their automatic trial recovery.',

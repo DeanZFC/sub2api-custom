@@ -79,17 +79,19 @@ func validateScheduledTestPlanConflicts(ctx context.Context, tx *sql.Tx, plan *s
 // introduce overlaps after two otherwise disjoint strategies were configured.
 // Caller SQL supplies the current plan alias p and account alias a.
 const scheduledTestRuntimeOwnershipSQL = `(
- NOT (p.enabled AND p.protection->>'enabled'='true' AND EXISTS(
+ NOT (p.enabled AND p.protection->>'enabled'='true' AND (CASE WHEN p.protection->>'mode'='all_pass'
+  THEN jsonb_array_length(COALESCE(p.protection->'pass_group_ids','[]'::jsonb))>0 ELSE EXISTS(
   SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN p.protection->>'mode'='combined'
    THEN p.protection->'combinations' ELSE p.protection->'rules' END,'[]'::jsonb)) rule
   WHERE CASE WHEN p.protection->>'mode'='combined' THEN rule->'action'->>'group_mode'='assign'
-   ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END))
+   ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END) END))
  OR NOT EXISTS(SELECT 1 FROM scheduled_test_plans other
   WHERE other.id<>p.id AND other.enabled AND other.protection->>'enabled'='true'
-  AND EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN other.protection->>'mode'='combined'
+  AND (CASE WHEN other.protection->>'mode'='all_pass'
+   THEN jsonb_array_length(COALESCE(other.protection->'pass_group_ids','[]'::jsonb))>0 ELSE EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN other.protection->>'mode'='combined'
    THEN other.protection->'combinations' ELSE other.protection->'rules' END,'[]'::jsonb)) rule
    WHERE CASE WHEN other.protection->>'mode'='combined' THEN rule->'action'->>'group_mode'='assign'
-    ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END)
+    ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END) END)
   AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=ANY(other.group_ids))))`
 
 func scheduledTestAccountOwnershipCurrent(ctx context.Context, tx *sql.Tx, planID, accountID int64) (bool, error) {

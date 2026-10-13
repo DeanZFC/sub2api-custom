@@ -32,7 +32,7 @@ export interface QualityProtectionEvidence {
 export interface QualityProtectionHold {
   plan_id: number
   plan_name: string
-  mode: 'combined' | 'per_test'
+  mode: 'combined' | 'per_test' | 'all_pass'
   reason: string
   updated_at: string
   prior_round: boolean

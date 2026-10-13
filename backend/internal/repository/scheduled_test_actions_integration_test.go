@@ -89,6 +89,14 @@ UPDATE groups SET platform='openai',status='active',deleted_at=NULL,is_exclusive
 TRUNCATE user_allowed_groups,user_subscriptions,account_groups;
 INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,72),(63,8,73);`)
 	}
+	t.Run("all pass scheduling and manual veto", func(t *testing.T) {
+		reset(t)
+		testScheduledTestAllPassLifecycle(t, ctx, db, plans, repo)
+	})
+	t.Run("all pass bounded statistics recovery", func(t *testing.T) {
+		reset(t)
+		testScheduledTestAllPassRecovery(t, ctx, db, plans, repo)
+	})
 	t.Run("public switch preserves round and decisions", func(t *testing.T) { reset(t); testScheduledTestPublicVotingSwitch(t, ctx, db, plans, repo, pelicanID) })
 	t.Run("generic priorities public review and administrator override", func(t *testing.T) {
 		reset(t)

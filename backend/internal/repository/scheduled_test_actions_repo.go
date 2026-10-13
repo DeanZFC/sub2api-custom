@@ -285,14 +285,27 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		return fmt.Errorf("account belongs to conflicting enabled test strategies")
 	}
 
-	current, err := protectionResultCurrent(ctx, tx, state.resultID)
-	if err != nil || !current {
+	var config service.ScheduledTestProtectionConfig
+	var configRaw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT protection FROM scheduled_test_plans WHERE id=$1`, state.planID).Scan(&configRaw); err != nil {
 		return err
+	}
+	if err := json.Unmarshal(configRaw, &config); err != nil {
+		return err
+	}
+	// The recovery sweep may run before the new statistics result is attached.
+	// All-pass still needs to inspect this round's other checks before admission.
+	if !config.UsesAllPass() {
+		current, err := protectionResultCurrent(ctx, tx, state.resultID)
+		if err != nil || !current {
+			return err
+		}
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT s.rule_config,s.verdict,s.automated_verdict,s.admin_verdict,p.protection,
  s.completed AND s.result_started_at>=s.round_started_at AND EXISTS (
  SELECT 1 FROM scheduled_test_results evidence WHERE evidence.id=s.result_id
- AND evidence.started_at=s.result_started_at AND evidence.run_id<>'' AND evidence.run_id=p.latest_run_id)
+ AND evidence.started_at=s.result_started_at AND evidence.run_id<>'' AND evidence.run_id=p.latest_run_id),
+ s.blocked AND s.recovery_phase<>''
  FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
  WHERE s.plan_id=$1 AND s.account_id=$2 AND s.round_started_at=$3
  AND p.enabled AND p.protection->>'enabled'='true'
@@ -301,13 +314,14 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		return err
 	}
 	var rules []protectionRoutingRule
-	var config service.ScheduledTestProtectionConfig
 	verdicts := map[int64]string{}
+	recovering := map[int64]bool{}
 	for rows.Next() {
 		var entry protectionRoutingRule
 		var raw, configRaw []byte
 		var evidenceCurrent bool
-		if err := rows.Scan(&raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &configRaw, &evidenceCurrent); err != nil {
+		var inRecovery bool
+		if err := rows.Scan(&raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &configRaw, &evidenceCurrent, &inRecovery); err != nil {
 			rows.Close()
 			return err
 		}
@@ -320,9 +334,14 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 			return err
 		}
 		if protectionRuleCurrent(&config, entry.rule) {
+			recovering[entry.rule.TestDefinitionID] = inRecovery
 			rules = append(rules, entry)
 			if evidenceCurrent {
 				verdicts[entry.rule.TestDefinitionID] = entry.currentVerdict
+				if config.UsesAllPass() && entry.rule.Vote != nil && entry.rule.Vote.Enabled {
+					// Reviews are a manual veto, separate from the automatic checks.
+					verdicts[entry.rule.TestDefinitionID] = entry.adminVerdict
+				}
 			}
 		}
 	}
@@ -336,8 +355,21 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		return err
 	}
 	var changes []protectionRoutingChange
-	if config.UsesCombinations() {
-		decision := service.EvaluateScheduledTestCombinations(config, verdicts)
+	if config.UsesCombinations() || config.UsesAllPass() {
+		var decision service.ScheduledTestCombinationDecision
+		if config.UsesAllPass() {
+			var held bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2 AND blocked)`, state.planID, state.accountID).Scan(&held); err != nil {
+				return err
+			}
+			held = held || state.blocked || state.recoveryPhase != "" || before.status == "quality_paused"
+			for _, active := range recovering {
+				held = held || active
+			}
+			decision, state.actionReason = service.EvaluateScheduledTestAllPass(config, verdicts, recovering, held)
+		} else {
+			decision = service.EvaluateScheduledTestCombinations(config, verdicts)
+		}
 		if decision.Action == nil {
 			return nil
 		}
@@ -352,7 +384,9 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 			}
 			labels = append(labels, label)
 		}
-		state.actionReason = "命中组合规则：" + strings.Join(labels, "、")
+		if !config.UsesAllPass() {
+			state.actionReason = "命中组合规则：" + strings.Join(labels, "、")
+		}
 		if err := applyCombinationScheduling(ctx, tx, state, decision); err != nil {
 			return err
 		}

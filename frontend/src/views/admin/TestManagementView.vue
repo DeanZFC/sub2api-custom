@@ -313,7 +313,7 @@ const planPayload = (plan: TestPlan): CreateTestPlanRequest => ({
 const openPlan = (plan?: TestPlan) => {
   editingPlan.value = plan
     ? { ...planPayload(plan), id: plan.id, migration_note: plan.migration_note, protection: copyTestProtection(plan.protection) }
-    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], model_id: '', reasoning_effort: null, cron_expression: '0 * * * *', enabled: true, max_results: 50, protection: copyTestProtection() }
+    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], model_id: '', reasoning_effort: null, cron_expression: '0 * * * *', enabled: true, max_results: 50, protection: { enabled: false, mode: 'all_pass', rules: [] } }
 }
 const savePlan = async () => {
   if (!editingPlan.value || !canSavePlan.value) return

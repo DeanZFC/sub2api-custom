@@ -243,7 +243,7 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	scheduling := state.rule.OutcomeAction(verdict).Scheduling
 	// Combined mode consumes the original check verdicts without executing its
 	// legacy actions. Cache recovery remains an independent bounded safeguard.
-	if config.UsesCombinations() && (state.rule.Recovery == nil || !state.rule.Recovery.Enabled) {
+	if (config.UsesCombinations() || config.UsesAllPass()) && (state.rule.Recovery == nil || !state.rule.Recovery.Enabled) {
 		scheduling = "keep"
 	}
 	switch scheduling {
@@ -374,7 +374,7 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 		if err != nil {
 			return err
 		}
-		if config.UsesCombinations() {
+		if config.UsesCombinations() || config.UsesAllPass() {
 			if err := reconcileProtectionGroups(ctx, tx, state); err != nil {
 				return err
 			}

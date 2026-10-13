@@ -197,6 +197,14 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 	if err != nil {
 		return err
 	}
+	if config.UsesAllPass() {
+		if err := reconcileProtectionGroups(ctx, tx, state); err != nil {
+			return err
+		}
+		if err := reconcileProtectionAccount(ctx, tx, state.accountID); err != nil {
+			return err
+		}
+	}
 	verdict, reason := "pending", "缓存质量冷却结束，限量试运行中"
 	if c.phase == "cooldown" {
 		if !state.recoveryCooldownUntil.Valid || now.Before(state.recoveryCooldownUntil.Time) {

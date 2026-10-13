@@ -2610,7 +2610,8 @@ export interface TestProtectionRule {
 }
 export interface TestProtectionConfig {
   enabled: boolean
-  mode?: 'per_test' | 'combined'
+  mode?: 'per_test' | 'combined' | 'all_pass'
+  pass_group_ids?: number[]
   rules: TestProtectionRule[]
   combinations?: TestCombinationRule[]
 }

@@ -1,0 +1,129 @@
+package service
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestScheduledTestAllPassConfigurableChecks(t *testing.T) {
+	for _, count := range []int{1, 5, 30} {
+		t.Run(fmt.Sprintf("%d automatic checks", count), func(t *testing.T) {
+			p := &ScheduledTestPlan{Protection: ScheduledTestProtectionConfig{Enabled: true, Mode: "all_pass"}}
+			verdicts := map[int64]string{9001: "fail"} // A display-only failure must not affect scheduling.
+			p.TestDefinitionIDs = append(p.TestDefinitionIDs, 9001)
+			for i := 0; i < count; i++ {
+				id := int64(101 + i*17)
+				p.TestDefinitionIDs = append(p.TestDefinitionIDs, id)
+				p.Protection.Rules = append(p.Protection.Rules, ScheduledTestProtectionRule{TestDefinitionID: id})
+				verdicts[id] = "pass"
+			}
+			p.TestDefinitionIDs = append(p.TestDefinitionIDs, 7001)
+			p.Protection.Rules = append(p.Protection.Rules, ScheduledTestProtectionRule{
+				TestDefinitionID: 7001, Vote: &ScheduledTestVoteConfig{Enabled: true, PassAtLeast: 1},
+			})
+			require.NoError(t, validateScheduledTestProtection(p))
+			assertScheduling := func(want string, held bool) {
+				t.Helper()
+				decision, _ := EvaluateScheduledTestAllPass(p.Protection, verdicts, nil, held)
+				require.Equal(t, want, decision.Action.Scheduling)
+			}
+			assertScheduling("resume", true) // Any number of automatic checks; manual review may be pending.
+			last := p.Protection.Rules[count-1].TestDefinitionID
+			delete(verdicts, last)
+			assertScheduling("keep", false)
+			assertScheduling("pause", true)
+			verdicts[last] = "fail"
+			assertScheduling("pause", false)
+			verdicts[last] = "pass"
+			assertScheduling("resume", true)
+			verdicts[7001] = "fail"
+			assertScheduling("pause", false)
+			// Changing the review to display-only removes its veto even if an old verdict remains.
+			p.Protection.Rules = p.Protection.Rules[:count]
+			assertScheduling("resume", true)
+			// Turning that check into an automatic requirement makes its result mandatory.
+			p.Protection.Rules = append(p.Protection.Rules, ScheduledTestProtectionRule{TestDefinitionID: 7001})
+			delete(verdicts, 7001)
+			assertScheduling("pause", true)
+			verdicts[7001] = "pass"
+			assertScheduling("resume", true)
+		})
+	}
+}
+
+func allPassTestPlan() *ScheduledTestPlan {
+	p := combinationTestPlan()
+	p.Protection.Mode, p.Protection.Combinations = "all_pass", nil
+	p.Protection.PassGroupIDs = []int64{10}
+	p.Protection.Rules = append(p.Protection.Rules, ScheduledTestProtectionRule{TestDefinitionID: 4, Vote: &ScheduledTestVoteConfig{Enabled: true, PassAtLeast: 1}})
+	return p
+}
+
+func TestScheduledTestAllPassDecisions(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		verdicts       []string
+		held, recovery bool
+		want           string
+		assign         bool
+	}{
+		{"pending active", []string{"pass", "pending", "pass", "pending"}, false, false, "keep", false},
+		{"pending paused", []string{"pass", "pending", "pass", "pass"}, true, false, "pause", false},
+		{"failure before completion", []string{"fail", "pending", "pending", "pending"}, false, false, "pause", false},
+		{"no review needed", []string{"pass", "pass", "pass", "pending"}, true, false, "resume", true},
+		{"manual veto", []string{"pass", "pass", "pass", "fail"}, false, false, "pause", false},
+		{"manual approval cannot bypass", []string{"pass", "fail", "pass", "pass"}, true, false, "pause", false},
+		{"recovery trial gate", []string{"pass", "pass", "fail", "pending"}, true, true, "resume", false},
+		{"pending blocks trial", []string{"pending", "pass", "fail", "pending"}, true, true, "pause", false},
+		{"manual rejection blocks trial", []string{"pass", "pass", "fail", "fail"}, true, true, "pause", false},
+		{"automatic failure blocks trial", []string{"pass", "fail", "fail", "pass"}, true, true, "pause", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := allPassTestPlan()
+			verdicts, recovering := map[int64]string{}, map[int64]bool{}
+			for i, verdict := range tc.verdicts {
+				verdicts[int64(i+1)] = verdict
+			}
+			if tc.recovery {
+				p.Protection.Rules[2].Recovery = &ScheduledTestCacheRecoveryConfig{Enabled: true}
+				recovering[3] = true
+			}
+			decision, _ := EvaluateScheduledTestAllPass(p.Protection, verdicts, recovering, tc.held)
+			require.Equal(t, tc.want, decision.Action.Scheduling)
+			require.Equal(t, tc.assign, decision.Action.GroupMode == "assign")
+			if tc.assign {
+				require.Equal(t, []int64{10}, decision.Action.GroupIDs)
+			}
+		})
+	}
+}
+
+func TestScheduledTestAllPassValidation(t *testing.T) {
+	p := allPassTestPlan()
+	p.Protection.Rules[0].Priority = 1000
+	p.Protection.Rules[0].RequiredPass = true
+	p.Protection.Rules[0].OnPass = &ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "assign", GroupIDs: []int64{999}}
+	require.NoError(t, validateScheduledTestProtection(p))
+	require.Zero(t, p.Protection.Rules[0].Priority)
+	require.False(t, p.Protection.Rules[0].RequiredPass)
+	require.Equal(t, &ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "keep"}, p.Protection.Rules[0].OnPass)
+	require.Equal(t, []int64{10}, p.ProtectionActionGroupIDs())
+	for _, tc := range []struct {
+		name   string
+		change func(*ScheduledTestPlan)
+	}{
+		{"public review", func(p *ScheduledTestPlan) { p.Protection.Rules[3].Vote.PublicEnabled = true }},
+		{"only review", func(p *ScheduledTestPlan) { p.Protection.Rules = p.Protection.Rules[3:] }},
+		{"outside group", func(p *ScheduledTestPlan) { p.Protection.PassGroupIDs = []int64{999} }},
+		{"extra combinations", func(p *ScheduledTestPlan) { p.Protection.Combinations = combinationTestPlan().Protection.Combinations }},
+		{"groups outside mode", func(p *ScheduledTestPlan) { p.Protection.Mode = "per_test" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := allPassTestPlan()
+			tc.change(p)
+			require.Error(t, validateScheduledTestProtection(p))
+		})
+	}
+}
