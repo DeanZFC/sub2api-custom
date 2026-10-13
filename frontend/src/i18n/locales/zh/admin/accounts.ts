@@ -462,6 +462,36 @@ export default {
       accountSchedulingThresholdOverrideValue: '账号阈值百分比',
       accountSchedulingThresholdOverrideDisabledHint:
         '1-100，达到该用量百分比后临时不可调度；100 表示禁用当前账号自动停调。',
+      qualityDetails: {
+        title: '质量保护 · 命中详情',
+        loadFailed: '详情加载失败',
+        empty: '暂无生效中的暂停明细，账号状态可能已更新。',
+        evidenceHint: '以下为已记录的暂停规则及当前检测依据；历史命中快照未保存。阈值表示判定不通过的条件。',
+        updatedAt: '暂停记录更新于 {time}',
+        retained: '暂停延续自此前轮次，下面显示的是本轮检测结果。',
+        hitRule: '命中规则：{name}',
+        conditionUnavailable: '原组合条件已不可用',
+        currentMatch: '当前条件',
+        matched: '满足',
+        unmatched: '不满足（暂停尚未解除）',
+        pass: '通过',
+        fail: '不通过',
+        pending: '待判定',
+        all: '全部满足',
+        any: '任一满足',
+        waiting: '等待本轮有效结果，不作为当前命中依据。',
+        automatic: '自动检测',
+        admin: '管理员判定',
+        votes: '投票：通过 {pass} / 不通过 {fail}（不通过票 > {reject} 则拒绝；通过票 ≥ {required} 则通过）',
+        observed: '实际',
+        metrics: {
+          success_rate: '成功率',
+          cache_rate: '缓存率',
+          avg_first_token_ms: '平均首字延迟',
+          latency_ms: '检测耗时',
+          output_numeric: '输出数值'
+        }
+      },
       status: {
         active: '正常',
         inactive: '停用',

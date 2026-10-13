@@ -62,7 +62,7 @@ describe('AccountStatusIndicator', () => {
     const status = wrapper.get('[data-testid="quality-paused-status"]')
     expect(status.get('.badge').text()).toBe('admin.accounts.status.qualityPaused')
     expect(status.text()).toContain('最近一小时成功率低于阈值')
-    expect(status.get('.badge').attributes('title')).toBe('最近一小时成功率低于阈值')
+    expect(status.attributes('aria-haspopup')).toBe('dialog')
     expect(status.text()).not.toContain('qualityPausedManualStop')
   })
 

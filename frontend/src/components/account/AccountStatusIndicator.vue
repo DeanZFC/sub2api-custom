@@ -1,16 +1,6 @@
 <template>
   <div class="flex items-center gap-2">
-    <div v-if="isQualityPaused" class="flex flex-col items-center gap-1" data-testid="quality-paused-status">
-      <span class="badge text-xs badge-warning" :title="qualityPauseReason">
-        {{ t('admin.accounts.status.qualityPaused') }}
-      </span>
-      <span v-if="!account.schedulable" class="text-[11px] text-gray-500 dark:text-gray-400">
-        {{ t('admin.accounts.status.qualityPausedManualStop') }}
-      </span>
-      <span v-if="qualityPauseReason" class="line-clamp-2 max-w-[180px] break-words text-center text-[11px] leading-4 text-gray-500 dark:text-gray-400" :title="qualityPauseReason">
-        {{ qualityPauseReason }}
-      </span>
-    </div>
+    <QualityProtectionStatus v-if="isQualityPaused" :account="account" />
 
     <!-- Rate Limit Display (429) - Two-line layout -->
     <div v-else-if="isRateLimited" class="flex flex-col items-center gap-1">
@@ -174,6 +164,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import QualityProtectionStatus from './QualityProtectionStatus.vue'
 import type { Account } from '@/types'
 import { formatCountdown, formatDateTime, formatDateTimeToMinute, formatCountdownWithSuffix, formatTime } from '@/utils/format'
 
@@ -188,10 +179,6 @@ const emit = defineEmits<{
 }>()
 
 const isQualityPaused = computed(() => props.account.status === 'quality_paused')
-const qualityPauseReason = computed(() => {
-  const reason = props.account.extra?.quality_protection_reason
-  return typeof reason === 'string' ? reason.trim() : ''
-})
 
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {

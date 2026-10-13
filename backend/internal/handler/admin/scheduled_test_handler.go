@@ -186,6 +186,21 @@ func (h *ScheduledTestHandler) ListByAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, plans)
 }
 
+// AccountProtectionDetails GET /admin/accounts/:id/quality-protection
+func (h *ScheduledTestHandler) AccountProtectionDetails(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.BadRequest(c, "invalid account id")
+		return
+	}
+	details, err := h.scheduledTestSvc.AccountProtectionDetails(c.Request.Context(), accountID)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, details)
+}
+
 func (h *ScheduledTestHandler) ListPlans(c *gin.Context) {
 	plans, err := h.scheduledTestSvc.ListPlans(c.Request.Context())
 	if err != nil {

@@ -50,8 +50,8 @@ export function buildTestPreviewHTML(source: string, nonce?: string): string {
   // height. The host validates the message source before applying it.
   const resizeScript = document.createElement('script')
   resizeScript.textContent = `(() => {
-    const viewportWidth = window.innerWidth
-    const viewportHeight = window.innerHeight
+    let viewportWidth = 0
+    let viewportHeight = 0
     const freezeViewportValue = ${freezeTestPreviewViewportValue.toString()}
     const freezeStyle = (style) => {
       for (const property of Array.from(style)) {
@@ -98,6 +98,16 @@ export function buildTestPreviewHTML(source: string, nonce?: string): string {
     const report = () => {
       scheduled = false
       lastReportAt = performance.now()
+      // Offscreen lazy iframes can execute before they have a viewport. Wait
+      // for layout before permanently converting viewport units to pixels.
+      // Keep the first valid size so host resizing cannot create a vh loop.
+      if (!viewportWidth || !viewportHeight) {
+        const width = window.innerWidth
+        const height = window.innerHeight
+        if (width <= 0 || height <= 0) return
+        viewportWidth = width
+        viewportHeight = height
+      }
       if (needsNormalization) {
         needsNormalization = false
         normalizeLayout()

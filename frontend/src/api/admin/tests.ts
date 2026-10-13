@@ -6,8 +6,44 @@ import type {
   TestResult,
   TestType,
   UpdateTestPlanRequest,
-  UpdateTestTypeRequest
+  UpdateTestTypeRequest,
+  TestCombinationCondition,
+  TestProtectionThreshold,
+  TestProtectionVote
 } from '@/types'
+
+export interface QualityProtectionEvidence {
+  test_definition_id: number
+  test_name: string
+  result_id?: number
+  started_at?: string
+  current: boolean
+  verdict: string
+  automated_verdict: string
+  admin_verdict: string
+  reason: string
+  automatic_reason: string
+  thresholds: (TestProtectionThreshold & { observed: number | null })[]
+  vote?: TestProtectionVote
+  pass_count: number
+  fail_count: number
+}
+
+export interface QualityProtectionHold {
+  plan_id: number
+  plan_name: string
+  mode: 'combined' | 'per_test'
+  reason: string
+  updated_at: string
+  prior_round: boolean
+  rules: { id: string; name: string; condition?: TestCombinationCondition; current_match: string }[]
+  tests: QualityProtectionEvidence[]
+}
+
+export async function getAccountProtection(id: number): Promise<QualityProtectionHold[]> {
+  const { data } = await apiClient.get<QualityProtectionHold[]>(`/admin/accounts/${id}/quality-protection`)
+  return data ?? []
+}
 
 export interface TestAdminReview {
   result: TestResult
@@ -79,5 +115,5 @@ export async function retryResult(id: number): Promise<TestResult> {
   return data
 }
 
-export const testsAPI = { listTypes, createType, updateType, deleteType, listPlans, createPlan, updatePlan, deletePlan, runPlan, listResults, deleteResult, retryResult, listReviews, decideResult }
+export const testsAPI = { listTypes, createType, updateType, deleteType, listPlans, createPlan, updatePlan, deletePlan, runPlan, listResults, deleteResult, retryResult, listReviews, decideResult, getAccountProtection }
 export default testsAPI

@@ -759,6 +759,7 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.POST("/scheduled-test-results/:id/retry", h.Admin.ScheduledTest.RetryResult)
 	// Nested under accounts
 	admin.GET("/accounts/:id/scheduled-test-plans", h.Admin.ScheduledTest.ListByAccount)
+	admin.GET("/accounts/:id/quality-protection", h.Admin.ScheduledTest.AccountProtectionDetails)
 }
 
 func registerErrorPassthroughRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

@@ -234,6 +234,36 @@ export default {
       accountSchedulingThresholdOverrideValue: 'Account threshold percent',
       accountSchedulingThresholdOverrideDisabledHint:
         'Use 1-100. The account becomes temporarily unschedulable after reaching this usage percent; 100 disables it for this account.',
+      qualityDetails: {
+        title: 'Quality protection · Match details',
+        loadFailed: 'Failed to load details',
+        empty: 'No active hold details. The account status may have changed.',
+        evidenceHint: 'Recorded pause rules and current evidence are shown below. Historical match snapshots were not stored. Thresholds are failure conditions.',
+        updatedAt: 'Pause record updated at {time}',
+        retained: 'The pause is retained from an earlier round. Results below belong to the current round.',
+        hitRule: 'Matched rule: {name}',
+        conditionUnavailable: 'The original condition is unavailable',
+        currentMatch: 'Current condition',
+        matched: 'Met',
+        unmatched: 'Not met (pause still active)',
+        pass: 'Pass',
+        fail: 'Fail',
+        pending: 'Pending',
+        all: 'All of',
+        any: 'Any of',
+        waiting: 'Waiting for valid evidence from this round; excluded from current matching.',
+        automatic: 'Automatic check',
+        admin: 'Administrator decision',
+        votes: 'Votes: {pass} pass / {fail} fail (reject if fail > {reject}; pass if pass ≥ {required})',
+        observed: 'Observed',
+        metrics: {
+          success_rate: 'Success rate',
+          cache_rate: 'Cache rate',
+          avg_first_token_ms: 'Average first token latency',
+          latency_ms: 'Test duration',
+          output_numeric: 'Numeric output'
+        }
+      },
       status: {
         active: 'Active',
         inactive: 'Inactive',

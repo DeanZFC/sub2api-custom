@@ -120,14 +120,30 @@ const adminReviews = ref<TestAdminReview[]>([])
 const reviewError = ref('')
 const reviewIndex = computed(() => new Map(auth.isAdmin ? adminReviews.value.map(review => [review.result.id, review]) : []))
 const reviewFor = (result: TestResult) => reviewIndex.value.get(result.id)
+// The review endpoint intentionally includes quality-paused accounts for
+// administrator decisions. This page is the shared user-facing result view,
+// so a paused account must remain hidden here together with every result and
+// vote belonging to that account.
+const pausedAccountIds = computed(() => {
+  const ids = new Set<number>()
+  for (const review of adminReviews.value) {
+    if (review.account_paused && review.result.account_id != null) ids.add(review.result.account_id)
+  }
+  for (const item of voteResults.value) {
+    if (item.voting.account_paused && item.result.account_id != null) ids.add(item.result.account_id)
+  }
+  return ids
+})
+const isHiddenPausedAccount = (result: TestResult) => result.account_id != null && pausedAccountIds.value.has(result.account_id)
+const visibleVoteResults = computed(() => voteResults.value.filter(item => !isHiddenPausedAccount(item.result)))
 const regularResults = computed(() => {
-  const records = new Map(allResults.value.map(result => [result.id, result]))
-  // The normal result endpoint contains the freshest group projection. Review
-  // records are merged only when that result is unavailable (for example,
-  // quality-paused accounts are intentionally hidden from the public list),
-  // otherwise an older review payload could move a freshly re-routed account
-  // back to its source group until the next poll.
+  const records = new Map(allResults.value.filter(result => !isHiddenPausedAccount(result)).map(result => [result.id, result]))
+  // The normal result endpoint contains the freshest group projection. Active
+  // review records are merged only when that result is unavailable; an older
+  // review payload must not move a freshly re-routed account back to its
+  // source group until the next poll.
   if (auth.isAdmin) for (const review of adminReviews.value) {
+    if (review.account_paused || isHiddenPausedAccount(review.result)) continue
     const current = records.get(review.result.id)
     records.set(review.result.id, current ? { ...review.result, ...current, account_name: review.result.account_name } : review.result)
   }
@@ -135,7 +151,7 @@ const regularResults = computed(() => {
 })
 const displayResults = computed(() => {
   const records = new Map(regularResults.value.map(result => [result.id, result]))
-  for (const item of voteResults.value) if (!records.has(item.result.id)) records.set(item.result.id, item.result)
+  for (const item of visibleVoteResults.value) if (!records.has(item.result.id)) records.set(item.result.id, item.result)
   return [...records.values()]
 })
 const activeGroup = ref('')
@@ -181,7 +197,7 @@ watch(availableGroups, groups => {
 const availableModels = computed(() => [...new Set(displayResults.value.map(result => result.model_id).filter((model): model is string => Boolean(model)))].sort())
 const projectedVotes = computed(() => {
   const records = new Map(regularResults.value.map(result => [result.id, result]))
-  return voteResults.value.map(item => {
+  return visibleVoteResults.value.map(item => {
     const current = records.get(item.result.id)
     return current ? { ...item, result: { ...item.result, group_id: current.group_id, group_name: current.group_name, group_order: current.group_order, plan_order: current.plan_order } } : item
   })
@@ -228,7 +244,7 @@ const loadHistory = async () => {
   historyLoading.value = true
   historyError.value = ''
   try {
-    // Paused or moved accounts remain reviewable through administrator access.
+    // Administrator history can include results from before a group move.
     const planID = anchor.plan_id
     const page = auth.isAdmin && planID != null ? await (async () => {
       const rows = await listAdminResults(planID, adminHistoryLimit + 1)

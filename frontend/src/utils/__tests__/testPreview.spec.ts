@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildTestPreviewHTML, freezeTestPreviewViewportValue } from '../testPreview'
 
 describe('test preview viewport sizing', () => {
@@ -12,6 +12,48 @@ describe('test preview viewport sizing', () => {
     ['var(--panel100vh, 80vh)', 'var(--panel100vh, 512px)'],
   ])('freezes %s to the initial render viewport', (source, expected) => {
     expect(freezeTestPreviewViewportValue(source, 960, 640)).toBe(expected)
+  })
+
+  it.each([[0, 0], [0, 640], [960, 0]])('waits for a valid lazy iframe viewport when initially %s x %s', (width, height) => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 0 })
+    try {
+      const preview = new DOMParser().parseFromString(buildTestPreviewHTML('<main style="width:94vw;height:100vh">Preview</main>'), 'text/html')
+      const content = preview.querySelector('main')!
+      const previewWindow = Object.assign(new EventTarget(), {
+        innerWidth: width, innerHeight: height, scrollX: 0, scrollY: 0,
+        parent: { postMessage: vi.fn() },
+      })
+      Object.defineProperties(preview.documentElement, {
+        scrollWidth: { get: () => previewWindow.innerWidth },
+        scrollHeight: { get: () => previewWindow.innerHeight },
+      })
+      // Run the generated sizing script as the sandbox would, with an
+      // offscreen viewport that only becomes available after a resize event.
+      new Function('window', 'document', preview.scripts[0].textContent!)(previewWindow, preview)
+      vi.advanceTimersByTime(3000)
+      expect(content.style.width).toBe('94vw')
+      expect(content.style.height).toBe('100vh')
+      expect(previewWindow.parent.postMessage).not.toHaveBeenCalled()
+
+      previewWindow.innerWidth = 960
+      previewWindow.innerHeight = 640
+      previewWindow.dispatchEvent(new Event('resize'))
+      vi.advanceTimersByTime(250)
+      expect(content.style.width).toBe('902.4px')
+      expect(content.style.height).toBe('640px')
+      expect(previewWindow.parent.postMessage).toHaveBeenCalledWith({ type: 'sub2api-test-preview-size', width: 960, height: 640 }, '*')
+
+      previewWindow.innerWidth = 1200
+      previewWindow.innerHeight = 900
+      previewWindow.dispatchEvent(new Event('resize'))
+      vi.advanceTimersByTime(250)
+      expect(content.style.width).toBe('902.4px')
+      expect(content.style.height).toBe('640px')
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('propagates the trusted page nonce without relaxing isolation', () => {
