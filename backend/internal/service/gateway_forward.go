@@ -715,7 +715,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				// once instead of the OAuth-403-only retry side effect.
 				s.handleFailoverSideEffects(ctx, resp, account, reqModel)
 			} else {
-				s.handleRetryExhaustedSideEffects(ctx, resp, account)
+				s.handleRetryExhaustedSideEffects(ctx, resp, account, reqModel)
 			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
@@ -749,7 +749,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
-		return s.handleRetryExhaustedError(ctx, resp, c, account)
+		return s.handleRetryExhaustedError(ctx, resp, c, account, reqModel)
 	}
 
 	// 处理可切换账号的错误

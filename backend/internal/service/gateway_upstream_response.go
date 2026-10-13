@@ -536,13 +536,19 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 	return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 }
 
-func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, resp *http.Response, account *Account) {
+// handleRetryExhaustedSideEffects 在重试耗尽后标记账号状态；requestedModel 是实际发往上游的模型，
+// 临时不可调度规则据此按模型隔离。
+func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, resp *http.Response, account *Account, requestedModel ...string) {
 	body, _ := s.readUpstreamErrorBody(resp)
 	statusCode := resp.StatusCode
 
 	// OAuth/Setup Token 账号的 403：标记账号异常
 	if account.IsOAuth() && statusCode == 403 {
-		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
+		if len(requestedModel) > 0 {
+			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body, requestedModel[0])
+		} else {
+			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
+		}
 		logger.LegacyPrintf("service.gateway", "Account %d: marked as error after %d retries for status %d", account.ID, maxRetryAttempts, statusCode)
 	} else {
 		// API Key 未配置错误码：不标记账号状态
@@ -562,7 +568,7 @@ func (s *GatewayService) handleFailoverSideEffects(ctx context.Context, resp *ht
 // handleRetryExhaustedError 处理重试耗尽后的错误
 // OAuth 403：标记账号异常
 // API Key 未配置错误码：仅返回错误，不标记账号
-func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *http.Response, c *gin.Context, account *Account) (*ForwardResult, error) {
+func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, requestedModel ...string) (*ForwardResult, error) {
 	// Capture upstream error body before side-effects consume the stream.
 	respBody, _ := s.readUpstreamErrorBody(resp)
 	_ = resp.Body.Close()
@@ -571,10 +577,10 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 	billingError := IsUpstreamBillingError(resp.StatusCode, respBody)
 	if billingError {
 		if s.rateLimitService != nil {
-			s.handleFailoverSideEffects(ctx, resp, account)
+			s.handleFailoverSideEffects(ctx, resp, account, requestedModel...)
 		}
 	} else {
-		s.handleRetryExhaustedSideEffects(ctx, resp, account)
+		s.handleRetryExhaustedSideEffects(ctx, resp, account, requestedModel...)
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))

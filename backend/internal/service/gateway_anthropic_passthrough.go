@@ -192,7 +192,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			if billingError {
 				s.handleFailoverSideEffects(ctx, resp, account, input.RequestModel)
 			} else {
-				s.handleRetryExhaustedSideEffects(ctx, resp, account)
+				s.handleRetryExhaustedSideEffects(ctx, resp, account, input.RequestModel)
 			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
@@ -222,7 +222,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
-		return s.handleRetryExhaustedError(ctx, resp, c, account)
+		return s.handleRetryExhaustedError(ctx, resp, c, account, input.RequestModel)
 	}
 
 	if resp.StatusCode >= 400 && s.shouldFailoverUpstreamError(resp.StatusCode) {
