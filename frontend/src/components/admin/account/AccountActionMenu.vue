@@ -19,6 +19,7 @@
               v-if="!isShadow"
               @click="$emit('sync-models', account); $emit('close')"
               :disabled="syncingUpstreamModels"
+              :title="t('admin.accounts.syncUpstreamModelsReplaceHint')"
               class="flex w-full items-center gap-2 px-4 py-2 text-sm text-emerald-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-400 dark:hover:bg-dark-700"
             >
               <Icon name="sync" size="sm" :class="syncingUpstreamModels ? 'animate-spin' : ''" />

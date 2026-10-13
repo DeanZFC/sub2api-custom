@@ -1242,6 +1242,29 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	return outAccounts, paginationResultFromTotal(int64(total), params), nil
 }
 
+func (r *accountRepository) ListPlatformCounts(ctx context.Context) ([]service.AccountPlatformCount, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT platform, COUNT(*)
+		FROM accounts
+		WHERE deleted_at IS NULL
+		GROUP BY platform
+		ORDER BY platform
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	counts := make([]service.AccountPlatformCount, 0)
+	for rows.Next() {
+		var item service.AccountPlatformCount
+		if err := rows.Scan(&item.Platform, &item.Count); err != nil {
+			return nil, err
+		}
+		counts = append(counts, item)
+	}
+	return counts, rows.Err()
+}
+
 func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
 	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode).All(ctx)
 	if err != nil {
@@ -3442,7 +3465,8 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 	if rows > 0 && contextTx == nil {
 		_, limitChanged := updates.Extra[service.UpstreamBillingRateLimitExtraKey]
-		shouldSync := updates.ProxyID != nil || limitChanged
+		_, modelMappingChanged := updates.Credentials["model_mapping"]
+		shouldSync := updates.ProxyID != nil || limitChanged || modelMappingChanged
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}

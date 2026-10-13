@@ -2,12 +2,21 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
+        <AccountPlatformTabs
+          :model-value="params.platform"
+          :counts="platformCounts"
+          :loading="platformCountsLoading"
+          :error="platformCountsError"
+          @update:model-value="handlePlatformChange"
+          @retry="refreshPlatformCounts"
+        />
         <div class="flex flex-wrap-reverse items-start justify-between gap-3">
           <AccountTableFilters
             class="lg:w-auto lg:flex-1"
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
+            hide-platform
             @update:filters="(newFilters) => Object.assign(params, newFilters)"
             @change="debouncedReload"
             @update:searchQuery="debouncedReload"
@@ -181,9 +190,11 @@
           :total-results="pagination.total"
           :selecting-all="selectingAllResults"
           :all-results-selected="allResultsSelected"
+          :syncing-upstream-models="batchSyncingUpstreamModels || selIds.some(id => syncingUpstreamModelIds[id])"
           @delete="handleBulkDelete"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
+          @sync-upstream-models="handleBulkSyncUpstreamModels"
           @probe-upstream-billing="handleBulkProbeUpstreamBilling"
           @edit-selected="openBulkEditSelected"
           @edit-filtered="openBulkEditFiltered"
@@ -192,7 +203,31 @@
           @select-all-results="handleSelectAllResults"
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
-        <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <details
+          v-if="bulkModelSyncResult && (bulkModelSyncResult.errors.length || bulkModelSyncResult.warnings?.length)"
+          open
+          class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-900/20"
+          data-test="bulk-model-sync-details"
+        >
+          <summary class="cursor-pointer font-medium text-gray-900 dark:text-gray-100">
+            {{ t('admin.accounts.bulkActions.syncUpstreamModelsDetails') }}
+          </summary>
+          <ul class="mt-2 max-h-48 space-y-1 overflow-y-auto break-words">
+            <li v-for="error in bulkModelSyncResult.errors" :key="`error-${error.account_id}`" class="text-red-700 dark:text-red-300">
+              #{{ error.account_id }}: {{ error.error }}
+            </li>
+            <li v-for="warning in bulkModelSyncResult.warnings" :key="`${warning.account_id}-${warning.code}`" class="text-amber-800 dark:text-amber-200">
+              #{{ warning.account_id }}: {{ upstreamModelSyncWarningMessage(warning) }}
+            </li>
+          </ul>
+        </details>
+        <div
+          id="account-platform-panel"
+          ref="accountTableRef"
+          role="tabpanel"
+          :aria-labelledby="`account-platform-tab-${params.platform || 'all'}`"
+          class="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
         <DataTable
           ref="dataTableRef"
           :columns="cols"
@@ -505,6 +540,8 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
+import type { AccountPlatformCount, BatchSyncUpstreamModelsResult, UpstreamModelSyncWarning } from '@/api/admin/accounts'
+import AccountPlatformTabs from '@/components/admin/account/AccountPlatformTabs.vue'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -633,6 +670,29 @@ const togglingSchedulable = ref<number | null>(null)
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const syncingUpstreamModelIds = ref<Record<number, boolean>>({})
+const batchSyncingUpstreamModels = ref(false)
+const bulkModelSyncResult = ref<BatchSyncUpstreamModelsResult | null>(null)
+const platformCounts = ref<AccountPlatformCount[] | null>(null)
+const platformCountsLoading = ref(false)
+const platformCountsError = ref(false)
+let platformCountsController: AbortController | null = null
+
+const refreshPlatformCounts = async () => {
+  platformCountsController?.abort()
+  const controller = new AbortController()
+  platformCountsController = controller
+  platformCountsLoading.value = true
+  try {
+    const counts = await adminAPI.accounts.getPlatformCounts({ signal: controller.signal })
+    if (controller.signal.aborted) return
+    platformCounts.value = counts
+    platformCountsError.value = false
+  } catch {
+    if (!controller.signal.aborted) platformCountsError.value = true
+  } finally {
+    if (platformCountsController === controller) platformCountsLoading.value = false
+  }
+}
 const probingUpstreamBilling = reactive(new Set<number>())
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
 const upstreamBillingNow = ref(Date.now())
@@ -1249,7 +1309,7 @@ const reload = async () => {
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
-  await baseReload()
+  await Promise.all([baseReload(), refreshPlatformCounts()])
   await refreshTodayStatsBatch()
 }
 
@@ -1377,6 +1437,15 @@ const debouncedReload = () => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
   baseDebouncedReload()
+}
+
+const handlePlatformChange = async (platform: string) => {
+  if (params.platform === platform) return
+  params.platform = platform
+  pagination.page = 1
+  clearSelection()
+  menu.show = false
+  await load()
 }
 
 const handlePageChange = (page: number) => {
@@ -1536,6 +1605,7 @@ const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   syncAccountListDerivedParams()
   autoRefreshFetching.value = true
+  const requestContext = upstreamBillingRateContextKey()
   try {
     const result = await adminAPI.accounts.listWithEtag(
       pagination.page,
@@ -1554,6 +1624,10 @@ const refreshAccountsIncrementally = async () => {
       { etag: autoRefreshETag.value }
     )
 
+    // A platform/filter change during background refresh must not restore rows
+    // from the previous tab after its newer request has completed.
+    if (requestContext !== upstreamBillingRateContextKey()) return
+    void refreshPlatformCounts()
     if (result.etag) {
       autoRefreshETag.value = result.etag
     }
@@ -1575,7 +1649,7 @@ const refreshAccountsIncrementally = async () => {
 }
 
 const handleManualRefresh = async () => {
-  await Promise.all([load(), loadUpstreamBillingProbeGlobalState()])
+  await Promise.all([load(), refreshPlatformCounts(), loadUpstreamBillingProbeGlobalState()])
   // Force usage cells to refetch /usage on explicit user refresh.
   usageManualRefreshToken.value += 1
 }
@@ -2006,6 +2080,64 @@ const handleBulkRefreshToken = async () => {
     appStore.showError(String(error))
   }
 }
+const handleBulkSyncUpstreamModels = async () => {
+  const accountIds = [...selIds.value]
+  if (accountIds.length === 0 || batchSyncingUpstreamModels.value || selectingAllResults.value) return
+  if (accountIds.some(id => syncingUpstreamModelIds.value[id])) return
+
+  const selectionVersion = selectionRequestVersion.value
+  const selectionSnapshot = new Set(accountIds)
+  bulkModelSyncResult.value = null
+  batchSyncingUpstreamModels.value = true
+  syncingUpstreamModelIds.value = accountIds.reduce<Record<number, boolean>>((next, id) => {
+    next[id] = true
+    return next
+  }, { ...syncingUpstreamModelIds.value })
+  try {
+    const result = await adminAPI.accounts.batchSyncUpstreamModels(accountIds)
+    bulkModelSyncResult.value = result
+    // Remove only confirmed successes from the original selection context.
+    // A filter change or clear-selection during sync must not restore old IDs.
+    const selectionUnchanged =
+      selectionRequestVersion.value === selectionVersion &&
+      selectedSet.value.size === selectionSnapshot.size &&
+      Array.from(selectionSnapshot).every(id => selectedSet.value.has(id))
+    if (selectionUnchanged) {
+      if (result.failed > 0) {
+        removeSelectedAccounts(result.success_ids)
+      } else {
+        clearSelection()
+      }
+    }
+    if (result.failed > 0) {
+      appStore.showError(t('admin.accounts.bulkActions.syncUpstreamModelsPartial', {
+        success: result.success,
+        failed: result.failed
+      }))
+    } else {
+      appStore.showSuccess(t('admin.accounts.bulkActions.syncUpstreamModelsSuccess', { count: result.success }))
+    }
+
+    const warningCodes = new Set((result.warnings ?? []).map(warning => warning.code))
+    if (warningCodes.has('upstream_model_metadata_incomplete')) {
+      appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataIncomplete'))
+    } else if (warningCodes.has('upstream_model_metadata_partial')) {
+      appStore.showWarning(t('admin.accounts.syncUpstreamModelsMetadataPartial'))
+    }
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.bulkActions.syncUpstreamModelsFailed')))
+  } finally {
+    const next = { ...syncingUpstreamModelIds.value }
+    accountIds.forEach(id => delete next[id])
+    syncingUpstreamModelIds.value = next
+    batchSyncingUpstreamModels.value = false
+  }
+}
+const upstreamModelSyncWarningMessage = (warning: UpstreamModelSyncWarning) => {
+  if (warning.code === 'upstream_model_metadata_incomplete') return t('admin.accounts.syncUpstreamModelsMetadataIncomplete')
+  if (warning.code === 'upstream_model_metadata_partial') return t('admin.accounts.syncUpstreamModelsMetadataPartial')
+  return warning.message
+}
 const handleBulkProbeUpstreamBilling = async () => {
   const accountIDs = [...selIds.value]
   if (accountIDs.length === 0) {
@@ -2347,6 +2479,9 @@ const handleProbeUpstreamBilling = async (account: Account) => {
   }
 }
 const handleAccountUpdated = (updatedAccount: Account) => {
+  if (accounts.value.find(account => account.id === updatedAccount.id)?.platform !== updatedAccount.platform) {
+    void refreshPlatformCounts()
+  }
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
 }
@@ -2437,7 +2572,7 @@ const handleSyncUpstreamModels = async (a: Pick<Account, 'id'>) => {
 
   syncingUpstreamModelIds.value = { ...syncingUpstreamModelIds.value, [a.id]: true }
   try {
-    const result = await adminAPI.accounts.syncUpstreamModels(a.id)
+    const result = await adminAPI.accounts.syncUpstreamModels(a.id, { replace: true })
     const models = (result.models ?? []).map(model => model.trim()).filter(Boolean)
 
     if (models.length === 0) {
@@ -2659,6 +2794,7 @@ onMounted(async () => {
   }
 
   load()
+  void refreshPlatformCounts()
   // Recent request indicators refresh independently of the account-list auto refresh.
   recentRequestsRefreshTimer = setInterval(() => {
     if (!document.hidden && !loading.value && !isAnyModalOpen.value) {
@@ -2693,6 +2829,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  platformCountsController?.abort()
   if (recentRequestsRefreshTimer !== null) {
     clearInterval(recentRequestsRefreshTimer)
     recentRequestsRefreshTimer = null

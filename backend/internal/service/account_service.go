@@ -136,6 +136,17 @@ type AccountDuplicateRepository interface {
 	CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error
 }
 
+// AccountPlatformCount describes all non-deleted accounts on a platform,
+// regardless of their status or the current list filters.
+type AccountPlatformCount struct {
+	Platform string `json:"platform"`
+	Count    int64  `json:"count"`
+}
+
+type AccountPlatformCountRepository interface {
+	ListPlatformCounts(ctx context.Context) ([]AccountPlatformCount, error)
+}
+
 // AccountBillingSettingsRepository applies an admin edit without overwriting a
 // rate_multiplier that a successful upstream probe synchronized after the edit
 // form was loaded. A nil rateMultiplier means the request did not edit it.

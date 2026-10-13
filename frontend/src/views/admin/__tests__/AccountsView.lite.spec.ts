@@ -238,7 +238,7 @@ describe('admin AccountsView lite account list', () => {
     menu.vm.$emit('sync-models', listRow)
     await flushPromises()
 
-    expect(syncUpstreamModels).toHaveBeenCalledWith(listRow.id)
+    expect(syncUpstreamModels).toHaveBeenCalledWith(listRow.id, { replace: true })
     expect(getById).not.toHaveBeenCalled()
     expect(showSuccess).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsCatalogSuccess')
     wrapper.unmount()

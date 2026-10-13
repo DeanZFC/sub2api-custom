@@ -198,6 +198,14 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 	return models, err
 }
 
+// ReplaceModelMappingWithUpstream fetches an authoritative live model list and
+// replaces the account whitelist with one identity mapping per upstream model.
+// It deliberately does not use the configured-model fallback: when the upstream
+// list cannot be fetched, the existing account configuration is left untouched.
+func (s *AccountTestService) ReplaceModelMappingWithUpstream(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	return s.syncUpstreamModelCatalog(ctx, account, true)
+}
+
 // SyncUpstreamModelCatalog fetches the account's live model list, enriches
 // missing capability fields from the provider registry used by the upstream,
 // and persists a normalized account snapshot when complete metadata is available.
@@ -208,11 +216,15 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 // snapshot. When no model is complete, the existing account snapshot is left
 // untouched.
 func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	return s.syncUpstreamModelCatalog(ctx, account, false)
+}
+
+func (s *AccountTestService) syncUpstreamModelCatalog(ctx context.Context, account *Account, replaceMapping bool) (*UpstreamModelCatalog, error) {
 	models, body, err := s.fetchUpstreamModelList(ctx, account)
 	liveListAvailable := err == nil
 	if err != nil {
 		configuredModels := configuredUpstreamModelsForCapabilitySync(account)
-		if !upstreamModelListEndpointUnsupported(err) || len(configuredModels) == 0 {
+		if replaceMapping || !upstreamModelListEndpointUnsupported(err) || len(configuredModels) == 0 {
 			return nil, err
 		}
 		models = configuredModels
@@ -223,6 +235,9 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 			"status_code", upstreamModelSyncStatusCode(err),
 			"model_count", len(models),
 		)
+	}
+	if replaceMapping && len(models) == 0 {
+		return nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
 	}
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
 	if len(body) > 0 {
@@ -235,7 +250,11 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 	// Capability enrichment also covers concrete model_mapping targets. Admins may
 	// whitelist models that the live /models list omitted; those still need registry
 	// metadata so Codex catalogs can advertise reasoning and modalities.
-	enrichIDs := dedupeAndSortModelIDs(append(append([]string{}, models...), configuredUpstreamModelsForCapabilitySync(account)...))
+	enrichIDs := append([]string{}, models...)
+	if !replaceMapping {
+		enrichIDs = append(enrichIDs, configuredUpstreamModelsForCapabilitySync(account)...)
+	}
+	enrichIDs = dedupeAndSortModelIDs(enrichIDs)
 	// Dedicated image/video generators are not Codex agent catalog entries and often
 	// omit context windows in public registries. Keep them out of completeness checks
 	// so they do not mask successful agent-model capability sync.
@@ -263,7 +282,14 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 
 	completeMetadata := completeUpstreamModelMetadataSubset(capabilityIDs, catalog.Metadata)
 	persistedCapabilities := false
-	if len(completeMetadata) > 0 && account != nil && account.ID > 0 && s.accountRepo != nil {
+	if replaceMapping && (account == nil || account.ID <= 0 || s.accountRepo == nil) {
+		return nil, newUpstreamModelSyncInternalError("Account repository is required to save upstream models", nil)
+	}
+	if (replaceMapping || len(completeMetadata) > 0) && account != nil && account.ID > 0 && s.accountRepo != nil {
+		persistedCapabilities = len(completeMetadata) > 0
+		if completeMetadata == nil {
+			completeMetadata = make(map[string]UpstreamModelMetadata)
+		}
 		// Retain known metadata only for models still listed or explicitly mapped.
 		if previous := account.GetUpstreamModelMetadataSnapshot(); previous != nil {
 			retainedModels := capabilityIDs
@@ -294,11 +320,33 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 			SyncedAt: time.Now().UTC().Format(time.RFC3339),
 			Models:   completeMetadata,
 		}
-		if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{UpstreamModelMetadataExtraKey: snapshot}); err != nil {
+		extra := map[string]any{UpstreamModelMetadataExtraKey: snapshot}
+		if replaceMapping {
+			mapping := make(map[string]any, len(models))
+			for _, modelID := range models {
+				mapping[modelID] = modelID
+			}
+			// Merge only these top-level keys, atomically replacing the nested mapping
+			// and snapshot without overwriting concurrently refreshed credentials.
+			rows, err := s.accountRepo.BulkUpdate(ctx, []int64{account.ID}, AccountBulkUpdate{
+				Credentials: map[string]any{"model_mapping": mapping},
+				Extra:       extra,
+			})
+			if err != nil {
+				return nil, newUpstreamModelSyncInternalError("Failed to save upstream model list", err)
+			}
+			if rows != 1 {
+				return nil, newUpstreamModelSyncInternalError("Account no longer exists", ErrAccountNotFound)
+			}
+			account.Credentials = shallowCopyMap(account.Credentials)
+			if account.Credentials == nil {
+				account.Credentials = make(map[string]any)
+			}
+			account.Credentials["model_mapping"] = mapping
+		} else if err := s.accountRepo.UpdateExtra(ctx, account.ID, extra); err != nil {
 			return nil, newUpstreamModelSyncInternalError("Failed to save upstream model metadata", err)
 		}
 		account.SetUpstreamModelMetadataSnapshot(snapshot)
-		persistedCapabilities = true
 	}
 
 	if upstreamCatalogNeedsRegistry(capabilityIDs, catalog.Metadata) {

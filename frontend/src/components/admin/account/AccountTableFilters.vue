@@ -8,7 +8,7 @@
         @update:model-value="$emit('update:searchQuery', $event)"
         @search="$emit('change')"
       />
-      <Select :model-value="filters.platform" :aria-label="t('admin.accounts.allPlatforms')" class="min-w-0 w-full sm:w-36" :options="pOpts" @update:model-value="updatePlatform" @change="$emit('change')" />
+      <Select v-if="!hidePlatform" :model-value="filters.platform" :aria-label="t('admin.accounts.allPlatforms')" class="min-w-0 w-full sm:w-36" :options="pOpts" @update:model-value="updatePlatform" @change="$emit('change')" />
       <Select :model-value="filters.status" :aria-label="t('admin.accounts.allStatus')" class="min-w-0 w-full sm:w-36" :options="sOpts" @update:model-value="updateStatus" @change="$emit('change')" />
       <button
         type="button"
@@ -34,7 +34,7 @@
 import { computed, ref, useId } from 'vue'; import { useI18n } from 'vue-i18n'; import Select from '@/components/common/Select.vue'; import SearchInput from '@/components/common/SearchInput.vue'
 import type { AdminGroup } from '@/types'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
-const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[] }>()
+const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[]; hidePlatform?: boolean }>()
 const emit = defineEmits(['update:searchQuery', 'update:filters', 'change']); const { t } = useI18n()
 const moreFiltersOpen = ref(false)
 const moreFiltersId = useId()

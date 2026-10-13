@@ -47,4 +47,23 @@ describe('AccountBulkActionsBar', () => {
     await button!.trigger('click')
     expect(wrapper.emitted('probe-upstream-billing')).toHaveLength(1)
   })
+
+  it('emits bulk upstream model sync for the selected accounts', async () => {
+    const wrapper = mount(AccountBulkActionsBar, {
+      props: {
+        selectedIds: [1, 2],
+        totalResults: 45,
+        selectingAll: false,
+        allResultsSelected: false
+      }
+    })
+
+    const button = wrapper.findAll('button').find(item =>
+      item.text().includes('admin.accounts.bulkActions.syncUpstreamModels')
+    )
+
+    expect(button).toBeDefined()
+    await button!.trigger('click')
+    expect(wrapper.emitted('sync-upstream-models')).toHaveLength(1)
+  })
 })
