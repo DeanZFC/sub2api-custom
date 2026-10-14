@@ -9,7 +9,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
-// Recovery is opt-in; existing protection rules retain their current behavior.
+// Recovery is opt-in. The cache-specific names and recover_rate field are kept
+// for compatibility with saved rules; trials support all statistics metrics.
 type ScheduledTestCacheRecoveryConfig struct {
 	Enabled         bool    `json:"enabled"`
 	CooldownSeconds int     `json:"cooldown_seconds"`
@@ -30,53 +31,69 @@ func validateScheduledTestCacheRecovery(rule *ScheduledTestProtectionRule) error
 		return nil
 	}
 	if rule.OutcomeAction("fail").Scheduling != "pause" || rule.OutcomeAction("pass").Scheduling != "resume" || (rule.Vote != nil && rule.Vote.Enabled) {
-		return fmt.Errorf("cache recovery requires pause on failure, resume on pass and no voting")
+		return fmt.Errorf("statistics recovery requires pause on failure, resume on pass and no voting")
 	}
 	if action := rule.OutcomeAction("fail"); action.GroupMode == "assign" && len(action.GroupIDs) == 0 {
-		return fmt.Errorf("cache recovery requires at least one failure group for trial traffic")
+		return fmt.Errorf("statistics recovery requires at least one failure group for trial traffic")
 	}
 	if c.CooldownSeconds < 60 || c.CooldownSeconds > 86400 || c.TrialSeconds < 60 || c.TrialSeconds > 3600 {
-		return fmt.Errorf("cache recovery cooldown must be 60..86400 seconds and trial 60..3600 seconds")
+		return fmt.Errorf("statistics recovery cooldown must be 60..86400 seconds and trial 60..3600 seconds")
 	}
 	if c.MaxRequests < 1 || c.MaxRequests > 1000 || c.MinSamples < 1 || c.MinSamples > c.MaxRequests {
-		return fmt.Errorf("cache recovery max_requests must be 1..1000 and min_samples 1..max_requests")
+		return fmt.Errorf("statistics recovery max_requests must be 1..1000 and min_samples 1..max_requests")
 	}
 	if math.IsNaN(c.RecoverRate) || math.IsInf(c.RecoverRate, 0) || c.RecoverRate < 0 || c.RecoverRate > 100 {
 		return fmt.Errorf("cache recovery recover_rate must be between 0 and 100")
 	}
-	found := false
-	for _, threshold := range rule.Thresholds {
-		if threshold.Metric != "cache_rate" {
-			continue
-		}
-		if threshold.Operator != "lt" || c.RecoverRate < threshold.Value {
-			return fmt.Errorf("cache recovery requires cache_rate lt thresholds and recover_rate at least the pause threshold")
-		}
-		found = true
+	if len(rule.Thresholds) == 0 {
+		return fmt.Errorf("statistics recovery requires at least one statistics threshold")
 	}
-	if !found {
-		return fmt.Errorf("cache recovery requires a cache_rate lt threshold")
+	hasCacheMinimum := false
+	for _, threshold := range rule.Thresholds {
+		switch threshold.Metric {
+		case "success_rate", "cache_rate", "avg_first_token_ms":
+		default:
+			return fmt.Errorf("statistics recovery does not support metric %q", threshold.Metric)
+		}
+		if threshold.Metric == "cache_rate" && threshold.Operator == "lt" {
+			hasCacheMinimum = true
+			if c.RecoverRate < threshold.Value {
+				return fmt.Errorf("cache recovery recover_rate must be at least the pause threshold")
+			}
+		}
+	}
+	if hasCacheMinimum {
+		for _, threshold := range rule.Thresholds {
+			if threshold.Metric == "cache_rate" && threshold.Operator == "gt" && c.RecoverRate > threshold.Value {
+				return fmt.Errorf("cache recovery recover_rate cannot exceed the cache-rate upper bound")
+			}
+		}
 	}
 	return nil
 }
 
-// EvaluateScheduledTestCacheRecovery consumes only a fresh trial snapshot. A
-// missing cache observation is inconclusive even if other requests succeeded.
+// EvaluateScheduledTestCacheRecovery consumes only a fresh trial snapshot.
+// Each configured metric requires its own valid samples; unused metrics never
+// block recovery. Missing observations cannot establish a pass.
 func EvaluateScheduledTestCacheRecovery(rule ScheduledTestProtectionRule, stats *ScheduledTestStatistics) (string, string) {
 	c := rule.Recovery
-	if c == nil || !c.Enabled || stats == nil || stats.CacheSamples < int64(c.MinSamples) {
-		return "pending", "试运行有效缓存样本不足"
+	if c == nil || !c.Enabled || stats == nil || len(rule.Thresholds) == 0 {
+		return "pending", "试运行有效样本不足"
 	}
 	rule.Thresholds = append([]ScheduledTestThreshold(nil), rule.Thresholds...)
 	for i := range rule.Thresholds {
-		if rule.Thresholds[i].Metric == "cache_rate" {
+		if rule.Thresholds[i].Metric == "cache_rate" && rule.Thresholds[i].Operator == "lt" {
 			rule.Thresholds[i].Value = c.RecoverRate
 		}
 	}
 	// Recovery has its own sample requirement; the normal hourly minimum must
 	// not make a bounded trial impossible to complete.
 	rule.MinSamples = int64(c.MinSamples)
-	return evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "success", OutputKind: "statistics", OutputStatistics: stats})
+	verdict, reason := evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "success", OutputKind: "statistics", OutputStatistics: stats})
+	if verdict == "pending" {
+		reason = "试运行有效样本不足，等待新请求"
+	}
+	return verdict, reason
 }
 
 func (s *ScheduledTestRunnerService) advanceCacheRecovery(ctx context.Context, now time.Time) {

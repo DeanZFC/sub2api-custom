@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
@@ -94,8 +95,16 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		testScheduledTestAllPassLifecycle(t, ctx, db, plans, repo)
 	})
 	t.Run("all pass bounded statistics recovery", func(t *testing.T) {
-		reset(t)
-		testScheduledTestAllPassRecovery(t, ctx, db, plans, repo)
+		for _, threshold := range []service.ScheduledTestThreshold{
+			{Metric: "cache_rate", Operator: "lt", Value: 80},
+			{Metric: "success_rate", Operator: "lt", Value: 90},
+			{Metric: "avg_first_token_ms", Operator: "gt", Value: 1000},
+		} {
+			t.Run(threshold.Metric, func(t *testing.T) {
+				reset(t)
+				testScheduledTestAllPassRecovery(t, ctx, db, plans, repo, threshold)
+			})
+		}
 	})
 	t.Run("public switch preserves round and decisions", func(t *testing.T) { reset(t); testScheduledTestPublicVotingSwitch(t, ctx, db, plans, repo, pelicanID) })
 	t.Run("generic priorities public review and administrator override", func(t *testing.T) {

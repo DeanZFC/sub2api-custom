@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -30,7 +31,7 @@ func (r *scheduledTestResultRepository) CacheRecoveryWindowStart(ctx context.Con
 func startCacheRecoveryCooldown(ctx context.Context, tx *sql.Tx, state *protectionState, now time.Time, reason string) error {
 	c := state.rule.Recovery
 	if c == nil || !c.Enabled || c.CooldownSeconds <= 0 {
-		return fmt.Errorf("cache recovery cooldown is invalid")
+		return fmt.Errorf("statistics recovery cooldown is invalid")
 	}
 	until := now.Add(time.Duration(c.CooldownSeconds) * time.Second)
 	reason = fmt.Sprintf("%s；冷却至 %s 后限量试运行", reason, until.Format(time.RFC3339))
@@ -45,15 +46,37 @@ func startCacheRecoveryCooldown(ctx context.Context, tx *sql.Tx, state *protecti
 }
 
 func cacheRecoverySampleReason(reason string, state *protectionState, stats *service.ScheduledTestStatistics) string {
-	samples := int64(0)
-	rate := "无"
-	if stats != nil {
-		samples = stats.CacheSamples
-		if stats.CacheRate != nil {
-			rate = fmt.Sprintf("%.2f%%", *stats.CacheRate*100)
-		}
+	if stats == nil {
+		stats = &service.ScheduledTestStatistics{}
 	}
-	return fmt.Sprintf("%s；试运行有效缓存样本 %d/%d，实测缓存率 %s，恢复阈值 %.2f%%", reason, samples, state.rule.Recovery.MinSamples, rate, state.rule.Recovery.RecoverRate)
+	seen := map[string]bool{}
+	details := []string{reason}
+	for _, threshold := range state.rule.Thresholds {
+		if seen[threshold.Metric] {
+			continue
+		}
+		seen[threshold.Metric] = true
+		var label, unit string
+		var samples int64
+		var observed *float64
+		scale := 1.0
+		switch threshold.Metric {
+		case "success_rate":
+			label, unit, samples, observed, scale = "成功率", "%", stats.TotalRequests, stats.SuccessRate, 100
+		case "cache_rate":
+			label, unit, samples, observed, scale = "缓存率", "%", stats.CacheSamples, stats.CacheRate, 100
+		case "avg_first_token_ms":
+			label, unit, samples, observed = "平均首字延迟", "ms", stats.FirstTokenSamples, stats.AvgFirstTokenMs
+		default:
+			continue
+		}
+		value := "无"
+		if observed != nil {
+			value = fmt.Sprintf("%.2f%s", *observed*scale, unit)
+		}
+		details = append(details, fmt.Sprintf("试运行%s样本 %d/%d，实测%s", label, samples, state.rule.Recovery.MinSamples, value))
+	}
+	return strings.Join(details, "；")
 }
 
 type cacheRecoveryCandidate struct {
@@ -205,7 +228,7 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 			return err
 		}
 	}
-	verdict, reason := "pending", "缓存质量冷却结束，限量试运行中"
+	verdict, reason := "pending", "统计质量冷却结束，限量试运行中"
 	if c.phase == "cooldown" {
 		if !state.recoveryCooldownUntil.Valid || now.Before(state.recoveryCooldownUntil.Time) {
 			return nil
@@ -240,7 +263,7 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 	} else {
 		verdict, reason = service.EvaluateScheduledTestCacheRecovery(state.rule, stats)
 		if verdict == "pass" {
-			reason = cacheRecoverySampleReason("限量试运行缓存质量达标，解除本规则调度保护", state, stats)
+			reason = cacheRecoverySampleReason("限量试运行统计指标全部达标，解除本规则调度保护", state, stats)
 			// Keep trial_started_at as the lower bound for later scheduled checks.
 			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET blocked=FALSE,
 			 automated_verdict='pass',verdict='pass',completed=TRUE,
@@ -249,7 +272,7 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 				state.planID, state.accountID, state.definitionID, reason, now)
 		} else if verdict == "fail" || !state.recoveryTrialEnds.Valid || !now.Before(state.recoveryTrialEnds.Time) {
 			if verdict != "fail" {
-				reason = "限量试运行超时，有效缓存样本不足，重新冷却"
+				reason = "限量试运行超时，有效样本不足，重新冷却"
 			}
 			verdict = "fail"
 			reason = cacheRecoverySampleReason(reason, state, stats)

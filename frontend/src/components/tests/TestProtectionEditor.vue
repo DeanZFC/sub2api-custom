@@ -81,9 +81,9 @@
           <p v-if="!combined && !allPass && (ruleFor(type.id)?.on_pass?.group_mode === 'assign' || ruleFor(type.id)?.on_fail?.group_mode === 'assign')" class="text-xs text-gray-500 dark:text-gray-400" data-routing-hint>{{ t('admin.tests.protection.actions.routingHint') }}</p>
           <div v-if="combined && type.output_kind === 'statistics'" class="space-y-2" data-independent-recovery>
             <p class="text-xs text-blue-700 dark:text-blue-300">{{ t('admin.tests.protection.combined.recoveryHint') }}</p>
-            <button v-if="!canEnableCacheRecovery(ruleFor(type.id)!, type.output_kind) && hasCacheThreshold(type.id)" type="button" class="btn btn-secondary btn-sm" data-prepare-recovery @click="prepareRecovery(type.id)">{{ t('admin.tests.protection.combined.prepareRecovery') }}</button>
+            <button v-if="!canEnableStatisticsRecovery(ruleFor(type.id)!, type.output_kind) && ruleFor(type.id)?.thresholds?.length" type="button" class="btn btn-secondary btn-sm" data-prepare-recovery @click="prepareRecovery(type.id)">{{ t('admin.tests.protection.combined.prepareRecovery') }}</button>
           </div>
-          <TestCacheRecoveryEditor v-if="type.output_kind === 'statistics' || ruleFor(type.id)?.recovery" :rule="ruleFor(type.id)!" :output-kind="type.output_kind" @update:model-value="patchRule(type.id, { recovery: $event })" />
+          <TestStatisticsRecoveryEditor v-if="type.output_kind === 'statistics' || ruleFor(type.id)?.recovery" :rule="ruleFor(type.id)!" :output-kind="type.output_kind" @update:model-value="patchRule(type.id, { recovery: $event })" />
         </fieldset>
       </section>
       <TestCombinationRulesEditor v-if="combined" :model-value="modelValue.combinations || []" :types="combinationTypes" :groups="groups" :recovery-test-ids="modelValue.rules.filter(rule => rule.recovery?.enabled).map(rule => rule.test_definition_id)" @update:model-value="update(next => { next.combinations = $event })" />
@@ -97,9 +97,9 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminGroup, TestCombinationRule, TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRule, TestProtectionThreshold, TestType } from '@/types'
-import { canEnableCacheRecovery, copyTestCombination, copyTestProtection, defaultProtectionRule, newTestCombinationID, normalizeAllPassProtection, protectionMetrics, validTestProtection } from '@/utils/testProtection'
+import { canEnableStatisticsRecovery, copyTestCombination, copyTestProtection, defaultProtectionRule, newTestCombinationID, normalizeAllPassProtection, protectionMetrics, validTestProtection } from '@/utils/testProtection'
 import TestOutcomeActionEditor from './TestOutcomeActionEditor.vue'
-import TestCacheRecoveryEditor from './TestCacheRecoveryEditor.vue'
+import TestStatisticsRecoveryEditor from './TestStatisticsRecoveryEditor.vue'
 import TestCombinationRulesEditor from './TestCombinationRulesEditor.vue'
 
 const props = withDefaults(defineProps<{ modelValue: TestProtectionConfig; types: TestType[]; groups?: AdminGroup[] }>(), { groups: () => [] })
@@ -159,7 +159,6 @@ const setMode = (mode: NonNullable<TestProtectionConfig['mode']>) => update(next
   if (mode !== 'all_pass') delete next.pass_group_ids
   next.mode = mode
 })
-const hasCacheThreshold = (id: number) => !!ruleFor(id)?.thresholds?.some(item => item.metric === 'cache_rate')
 const prepareRecovery = (id: number) => update(next => {
   const rule = next.rules.find(item => item.test_definition_id === id)
   if (!rule) return

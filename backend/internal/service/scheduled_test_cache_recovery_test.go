@@ -73,8 +73,19 @@ func TestScheduledTestCacheRecoveryValidation(t *testing.T) {
 		{"unbounded requests", func(r *ScheduledTestProtectionRule) { r.Recovery.MaxRequests = 1001 }, false},
 		{"lower recovery", func(r *ScheduledTestProtectionRule) { r.Recovery.RecoverRate = 79 }, false},
 		{"nonfinite recovery", func(r *ScheduledTestProtectionRule) { r.Recovery.RecoverRate = math.NaN() }, false},
-		{"wrong direction", func(r *ScheduledTestProtectionRule) { r.Thresholds[0].Operator = "gt" }, false},
-		{"no cache threshold", func(r *ScheduledTestProtectionRule) { r.Thresholds = nil }, false},
+		{"cache upper bound", func(r *ScheduledTestProtectionRule) { r.Thresholds[0].Operator = "gt" }, true},
+		{"success rate only", func(r *ScheduledTestProtectionRule) { r.Thresholds[0].Metric = "success_rate" }, true},
+		{"first token only", func(r *ScheduledTestProtectionRule) {
+			r.Thresholds[0] = ScheduledTestThreshold{Metric: "avg_first_token_ms", Operator: "gt", Value: 1000}
+		}, true},
+		{"unreachable cache range", func(r *ScheduledTestProtectionRule) {
+			r.Thresholds = append(r.Thresholds, ScheduledTestThreshold{Metric: "cache_rate", Operator: "gt", Value: 84})
+		}, false},
+		{"cache range", func(r *ScheduledTestProtectionRule) {
+			r.Thresholds = append(r.Thresholds, ScheduledTestThreshold{Metric: "cache_rate", Operator: "gt", Value: 90})
+		}, true},
+		{"no statistics threshold", func(r *ScheduledTestProtectionRule) { r.Thresholds = nil }, false},
+		{"non statistics metric", func(r *ScheduledTestProtectionRule) { r.Thresholds[0].Metric = "output_numeric" }, false},
 		{"no resume", func(r *ScheduledTestProtectionRule) { r.OnPass = &ScheduledTestOutcomeAction{Scheduling: "keep"} }, false},
 		{"no pause", func(r *ScheduledTestProtectionRule) { r.OnFail = &ScheduledTestOutcomeAction{Scheduling: "keep"} }, false},
 		{"no trial route", func(r *ScheduledTestProtectionRule) {
@@ -135,4 +146,38 @@ func TestScheduledTestCacheSampleMinimumExcludesOtherRequests(t *testing.T) {
 	stats.CacheSamples = 10
 	verdict, _ = evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "success", OutputKind: "statistics", OutputStatistics: stats})
 	require.Equal(t, "fail", verdict)
+}
+
+func TestScheduledTestStatisticsRecoveryUsesConfiguredMetricSamples(t *testing.T) {
+	success := ScheduledTestThreshold{Metric: "success_rate", Operator: "lt", Value: 90}
+	latency := ScheduledTestThreshold{Metric: "avg_first_token_ms", Operator: "gt", Value: 1000}
+	cache := ScheduledTestThreshold{Metric: "cache_rate", Operator: "lt", Value: 80}
+	for _, tc := range []struct {
+		name       string
+		thresholds []ScheduledTestThreshold
+		stats      *ScheduledTestStatistics
+		want       string
+	}{
+		{"missing snapshot", []ScheduledTestThreshold{success}, nil, "pending"},
+		{"no traffic", []ScheduledTestThreshold{success}, &ScheduledTestStatistics{}, "pending"},
+		{"few requests", []ScheduledTestThreshold{success}, &ScheduledTestStatistics{TotalRequests: 9, SuccessRate: protectionFloat(1)}, "pending"},
+		{"success without cache", []ScheduledTestThreshold{success}, &ScheduledTestStatistics{TotalRequests: 10, SuccessRate: protectionFloat(.9)}, "pass"},
+		{"all requests failed without cache", []ScheduledTestThreshold{success}, &ScheduledTestStatistics{TotalRequests: 10, FailedRequests: 10, SuccessRate: protectionFloat(0)}, "fail"},
+		{"few first tokens", []ScheduledTestThreshold{latency}, &ScheduledTestStatistics{TotalRequests: 100, FirstTokenSamples: 9, AvgFirstTokenMs: protectionFloat(500)}, "pending"},
+		{"latency without cache", []ScheduledTestThreshold{latency}, &ScheduledTestStatistics{TotalRequests: 10, FirstTokenSamples: 10, AvgFirstTokenMs: protectionFloat(1000)}, "pass"},
+		{"latency violation", []ScheduledTestThreshold{latency}, &ScheduledTestStatistics{TotalRequests: 10, FirstTokenSamples: 10, AvgFirstTokenMs: protectionFloat(1001)}, "fail"},
+		{"all configured metrics pass", []ScheduledTestThreshold{success, latency}, &ScheduledTestStatistics{TotalRequests: 10, SuccessRate: protectionFloat(.9), FirstTokenSamples: 10, AvgFirstTokenMs: protectionFloat(900)}, "pass"},
+		{"missing latency blocks success", []ScheduledTestThreshold{success, latency}, &ScheduledTestStatistics{TotalRequests: 10, SuccessRate: protectionFloat(1)}, "pending"},
+		{"success failure wins despite missing cache", []ScheduledTestThreshold{cache, success}, &ScheduledTestStatistics{TotalRequests: 10, SuccessRate: protectionFloat(.8)}, "fail"},
+		{"cache still requires its own samples", []ScheduledTestThreshold{cache, success}, &ScheduledTestStatistics{TotalRequests: 100, SuccessRate: protectionFloat(1), CacheSamples: 9, CacheInputTokens: 1000, CacheRate: protectionFloat(.95)}, "pending"},
+		{"cache upper bound uses its configured value", []ScheduledTestThreshold{{Metric: "cache_rate", Operator: "gt", Value: 95}}, &ScheduledTestStatistics{TotalRequests: 10, CacheSamples: 10, CacheInputTokens: 1000, CacheRate: protectionFloat(.9)}, "pass"},
+		{"no configured metrics cannot pass", nil, &ScheduledTestStatistics{TotalRequests: 10}, "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := cacheRecoveryRule()
+			rule.Thresholds = tc.thresholds
+			verdict, _ := EvaluateScheduledTestCacheRecovery(rule, tc.stats)
+			require.Equal(t, tc.want, verdict)
+		})
+	}
 }

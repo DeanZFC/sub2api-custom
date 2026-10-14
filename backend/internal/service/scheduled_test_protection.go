@@ -200,7 +200,7 @@ func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string
 		return nil
 	}
 	if rule.Recovery != nil && rule.Recovery.Enabled && kind != "statistics" {
-		return fmt.Errorf("cache recovery requires a statistics test")
+		return fmt.Errorf("trial recovery requires a statistics test")
 	}
 	if kind == "model_check" {
 		if (rule.Vote != nil && rule.Vote.Enabled) || rule.ExpectedAnswer != "" {

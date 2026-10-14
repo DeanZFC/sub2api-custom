@@ -32,7 +32,7 @@ export function combinationConflictsWithRecovery(rule: TestCombinationRule, reco
   const needsIndependentVerdict = rule.action.scheduling === 'pause'
     || (rule.action.scheduling === 'resume' && combinations.some(item => item.action.scheduling === 'pause'))
   // A combined pause must be releasable before trial traffic can produce fresh
-  // cache statistics, even when the resume condition is in a separate rule.
+  // statistics, even when the resume condition is in a separate rule.
   return needsIndependentVerdict && referencesRecovery(rule.condition)
 }
 
@@ -80,10 +80,10 @@ export function cacheRecoveryThreshold(rule: TestProtectionRule): number {
   return Math.max(0, ...(rule.thresholds || []).filter(item => item.metric === 'cache_rate' && item.operator === 'lt' && Number.isFinite(item.value)).map(item => item.value))
 }
 
-export function canEnableCacheRecovery(rule: TestProtectionRule, kind: string): boolean {
-  const cacheThresholds = (rule.thresholds || []).filter(item => item.metric === 'cache_rate')
-  return kind === 'statistics' && cacheThresholds.length > 0
-    && cacheThresholds.every(item => item.operator === 'lt') && !rule.vote?.enabled
+export function canEnableStatisticsRecovery(rule: TestProtectionRule, kind: string): boolean {
+  const thresholds = rule.thresholds || []
+  return kind === 'statistics' && thresholds.length > 0
+    && thresholds.every(item => protectionMetrics('statistics').includes(item.metric)) && !rule.vote?.enabled
     && (rule.on_fail?.scheduling ?? 'keep') === 'pause'
     && (rule.on_pass?.scheduling ?? 'keep') === 'resume'
     && (rule.on_fail?.group_mode !== 'assign' || Boolean(rule.on_fail.group_ids?.length))
@@ -95,19 +95,22 @@ export const defaultTestProtectionRecovery = (rule: TestProtectionRule): TestPro
   trial_seconds: 300,
   max_requests: 20,
   min_samples: 10,
-  recover_rate: Math.min(100, cacheRecoveryThreshold(rule) + 5),
+  recover_rate: Math.min(100, cacheRecoveryThreshold(rule) + 5, ...(rule.thresholds || []).filter(item => item.metric === 'cache_rate' && item.operator === 'gt').map(item => item.value)),
 })
 
-function validCacheRecovery(rule: TestProtectionRule, kind: string): boolean {
+function validStatisticsRecovery(rule: TestProtectionRule, kind: string): boolean {
   const recovery = rule.recovery
   if (!recovery?.enabled) return true
   const integerInRange = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max
-  return canEnableCacheRecovery(rule, kind)
+  const hasCacheMinimum = rule.thresholds?.some(item => item.metric === 'cache_rate' && item.operator === 'lt')
+  return canEnableStatisticsRecovery(rule, kind)
     && integerInRange(recovery.cooldown_seconds, 60, 86400)
     && integerInRange(recovery.trial_seconds, 60, 3600)
     && integerInRange(recovery.max_requests, 1, 1000)
     && integerInRange(recovery.min_samples, 1, recovery.max_requests)
-    && Number.isFinite(recovery.recover_rate) && recovery.recover_rate >= cacheRecoveryThreshold(rule) && recovery.recover_rate <= 100
+    && Number.isFinite(recovery.recover_rate) && recovery.recover_rate >= 0 && recovery.recover_rate <= 100
+    && (!hasCacheMinimum || (recovery.recover_rate >= cacheRecoveryThreshold(rule)
+      && !(rule.thresholds || []).some(item => item.metric === 'cache_rate' && item.operator === 'gt' && recovery.recover_rate > item.value)))
 }
 
 function validAction(action: TestOutcomeAction | undefined, groups?: readonly { id: number }[]): boolean {
@@ -134,7 +137,7 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
     if (!type?.enabled) return false
     if (!combined && (!Number.isInteger(rule.priority) || rule.priority < 0 || rule.priority > 1000 || typeof rule.required_pass !== 'boolean')) return false
     if (!combined && rule.required_pass && rule.vote?.enabled) return false
-    if (!validCacheRecovery(rule, type.output_kind)) return false
+    if (!validStatisticsRecovery(rule, type.output_kind)) return false
     if ((!combined || rule.recovery?.enabled) && (!validAction(rule.on_pass, combined ? undefined : groups) || !validAction(rule.on_fail, combined ? undefined : groups))) return false
     const assigned = [rule.on_pass, rule.on_fail].filter(action => action?.group_mode === 'assign')
     if (!combined && assigned.length && !assigned.some(action => action?.group_ids?.length)) return false

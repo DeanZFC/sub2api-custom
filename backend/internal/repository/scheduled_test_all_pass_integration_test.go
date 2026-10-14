@@ -21,7 +21,7 @@ type allPassFixture struct {
 	review   func(*service.ScheduledTestResult, string)
 }
 
-func newAllPassFixture(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, recovery bool) allPassFixture {
+func newAllPassFixture(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, recovery bool, thresholds ...service.ScheduledTestThreshold) allPassFixture {
 	t.Helper()
 	ids := make([]int64, 4)
 	for i, key := range []string{"candy", "model_check", "hourly_stats", "pelican"} {
@@ -37,6 +37,9 @@ func newAllPassFixture(t *testing.T, ctx context.Context, db *sql.DB, plans *sch
 	)
 	if recovery {
 		plan.Protection.Rules[2].Recovery = &service.ScheduledTestCacheRecoveryConfig{Enabled: true, CooldownSeconds: 60, TrialSeconds: 60, MaxRequests: 3, MinSamples: 2, RecoverRate: 90}
+	}
+	if len(thresholds) > 0 {
+		plan.Protection.Rules[2].Thresholds = thresholds
 	}
 	// Repository fixtures bypass service validation; supply its canonical actions.
 	for i := range plan.Protection.Rules {
@@ -145,14 +148,15 @@ func testScheduledTestAllPassLifecycle(t *testing.T, ctx context.Context, db *sq
 	require.ErrorContains(t, repo.CompleteProtection(ctx, third[0], "fail", ""), "conflicting enabled test strategies")
 }
 
-func testScheduledTestAllPassRecovery(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository) {
+func testScheduledTestAllPassRecovery(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, threshold service.ScheduledTestThreshold) {
 	exec := func(query string, args ...any) {
 		t.Helper()
 		_, err := db.ExecContext(ctx, query, args...)
 		require.NoError(t, err)
 	}
 	exec(allPassStatisticsFixture)
-	f := newAllPassFixture(t, ctx, db, plans, repo, true)
+	t.Cleanup(func() { exec(`DROP TABLE usage_logs,ops_error_logs`) })
+	f := newAllPassFixture(t, ctx, db, plans, repo, true, threshold)
 	now := time.Now().UTC().Add(-10 * time.Second).Truncate(time.Microsecond)
 	rows := f.round("allpass-recovery", now.Add(-time.Minute))
 	f.complete(rows[2], "fail")
@@ -186,7 +190,12 @@ func testScheduledTestAllPassRecovery(t *testing.T, ctx context.Context, db *sql
 	require.False(t, allowed)
 	require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(time.Second)))
 	f.check("active", true, 8, 9) // No fresh statistics, no full release.
-	exec(`INSERT INTO usage_logs(created_at,input_tokens,cache_read_tokens) VALUES($1,10,90),($1,5,95)`, now.Add(time.Second))
+	if threshold.Metric == "cache_rate" {
+		exec(`INSERT INTO usage_logs(created_at,input_tokens,cache_read_tokens) VALUES($1,10,90),($1,5,95)`, now.Add(time.Second))
+	} else {
+		// Success-rate and latency recovery must work without any cache samples.
+		exec(`INSERT INTO usage_logs(created_at,input_tokens,request_type,stream,first_token_ms) VALUES($1,10,1,FALSE,500),($1,10,1,FALSE,1000)`, now.Add(time.Second))
+	}
 	require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
 	f.check("active", false, 10)
 }

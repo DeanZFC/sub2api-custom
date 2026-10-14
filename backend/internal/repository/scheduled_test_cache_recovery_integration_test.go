@@ -232,6 +232,97 @@ CREATE TABLE ops_error_logs (
 		status("quality_paused", false)
 	})
 
+	t.Run("success rate and latency recover using fresh synchronous requests without cache samples", func(t *testing.T) {
+		for _, threshold := range []service.ScheduledTestThreshold{
+			{Metric: "success_rate", Operator: "lt", Value: 90},
+			{Metric: "avg_first_token_ms", Operator: "gt", Value: 1000},
+		} {
+			t.Run(threshold.Metric, func(t *testing.T) {
+				reset()
+				statsRule := rule
+				statsRule.Thresholds = []service.ScheduledTestThreshold{threshold}
+				p, _ := newHold(statsRule)
+				openTrial(p.ID)
+				status("active", true)
+				// Neither old failures nor completions of requests started before
+				// the trial can establish recovery or keep a healthy trial paused.
+				exec(`INSERT INTO ops_error_logs(created_at) VALUES($1)`, now.Add(-time.Minute))
+				exec(`INSERT INTO usage_logs(created_at,input_tokens,first_token_ms,duration_ms) VALUES($1,10,50000,30000)`, now.Add(time.Second))
+				require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
+				phase, blocked, _ := state(p.ID)
+				require.Equal(t, "trial", phase)
+				require.True(t, blocked, "old samples must not establish recovery")
+				// Synchronous calls have no eligible cache samples. Only the
+				// configured metric should determine whether this trial passes.
+				exec(`INSERT INTO usage_logs(created_at,input_tokens,request_type,stream,first_token_ms) VALUES($1,10,1,FALSE,500),($1,10,1,FALSE,1000)`, now.Add(2*time.Second))
+				require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
+				phase, blocked, _ = state(p.ID)
+				require.Empty(t, phase)
+				require.False(t, blocked)
+				status("active", false)
+				var reason string
+				require.NoError(t, db.QueryRowContext(ctx, `SELECT reason FROM scheduled_test_protection_states WHERE plan_id=$1`, p.ID).Scan(&reason))
+				require.NotContains(t, reason, "缓存")
+				require.Contains(t, reason, "样本 2/2")
+			})
+		}
+	})
+
+	t.Run("success rate counts new failures and returns to cooldown without cache observations", func(t *testing.T) {
+		reset()
+		statsRule := rule
+		statsRule.Thresholds = []service.ScheduledTestThreshold{{Metric: "success_rate", Operator: "lt", Value: 90}}
+		p, _ := newHold(statsRule)
+		openTrial(p.ID)
+		exec(`INSERT INTO usage_logs(created_at,input_tokens,request_type,stream) VALUES($1,10,1,FALSE)`, now.Add(time.Second))
+		exec(`INSERT INTO ops_error_logs(created_at) VALUES($1)`, now.Add(2*time.Second))
+		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
+		phase, blocked, until := state(p.ID)
+		require.Equal(t, "cooldown", phase)
+		require.True(t, blocked)
+		require.Equal(t, now.Add(65*time.Second), until)
+		status("quality_paused", false)
+		var reason string
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT reason FROM scheduled_test_protection_states WHERE plan_id=$1`, p.ID).Scan(&reason))
+		require.Contains(t, reason, "实测50.00%")
+		require.NotContains(t, reason, "缓存")
+	})
+
+	t.Run("success rate alone never recovers on empty windows", func(t *testing.T) {
+		reset()
+		statsRule := rule
+		statsRule.Thresholds = []service.ScheduledTestThreshold{{Metric: "success_rate", Operator: "lt", Value: 90}}
+		p, _ := newHold(statsRule)
+		openTrial(p.ID)
+		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(61*time.Second)))
+		phase, blocked, _ := state(p.ID)
+		require.Equal(t, "cooldown", phase)
+		require.True(t, blocked)
+		status("quality_paused", false)
+	})
+
+	t.Run("every configured metric needs enough of its own samples", func(t *testing.T) {
+		reset()
+		statsRule := rule
+		statsRule.Thresholds = []service.ScheduledTestThreshold{
+			{Metric: "success_rate", Operator: "lt", Value: 90},
+			{Metric: "avg_first_token_ms", Operator: "gt", Value: 1000},
+		}
+		p, _ := newHold(statsRule)
+		openTrial(p.ID)
+		exec(`INSERT INTO usage_logs(created_at,input_tokens,first_token_ms) VALUES($1,10,500),($1,10,NULL)`, now.Add(time.Second))
+		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
+		phase, blocked, _ := state(p.ID)
+		require.Equal(t, "trial", phase)
+		require.True(t, blocked, "successful requests cannot replace missing first-token samples")
+		exec(`INSERT INTO usage_logs(created_at,input_tokens,first_token_ms) VALUES($1,10,500)`, now.Add(6*time.Second))
+		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(10*time.Second)))
+		phase, blocked, _ = state(p.ID)
+		require.Empty(t, phase)
+		require.False(t, blocked)
+		status("active", false)
+	})
+
 	t.Run("ordinary hold keeps recovery waiting without spending its trial", func(t *testing.T) {
 		reset()
 		p, _ := newHold(rule)

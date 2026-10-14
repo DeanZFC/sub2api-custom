@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestProtectionEditor from '../TestProtectionEditor.vue'
 import type { AdminGroup, TestOutcomeAction, TestProtectionConfig, TestProtectionRecovery, TestType } from '@/types'
-import { canEnableCacheRecovery, copyTestProtection, defaultTestProtectionRecovery, validTestProtection } from '@/utils/testProtection'
+import { canEnableStatisticsRecovery, copyTestProtection, defaultTestProtectionRecovery, validTestProtection } from '@/utils/testProtection'
 import resources from '@/i18n/locales/en/admin/resources'
 
 const types: TestType[] = [
@@ -221,11 +221,11 @@ describe('quality protection settings', () => {
     const rule = config.rules[0]
     if (missing === 'both' || missing === 'on_pass') delete rule.on_pass
     if (missing === 'both' || missing === 'on_fail') delete rule.on_fail
-    expect(canEnableCacheRecovery(rule, 'statistics')).toBe(false)
+    expect(canEnableStatisticsRecovery(rule, 'statistics')).toBe(false)
     expect(validTestProtection(config, types, groups)).toBe(false)
     const wrapper = mountEditor(config)
     const stats = wrapper.get('[data-protection-type="1"]')
-    expect(stats.get('[data-cache-recovery] fieldset').attributes('disabled')).toBeDefined()
+    expect(stats.get('[data-statistics-recovery] fieldset').attributes('disabled')).toBeDefined()
     expect(stats.get('[data-recovery-enabled]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
@@ -259,13 +259,13 @@ describe('quality protection settings', () => {
     expect(validTestProtection(original, types, groups.filter(group => group.id !== 9))).toBe(false)
   })
 
-  it('keeps cache recovery off for old rules and enables it only after a cache pause threshold exists', async () => {
+  it('keeps recovery opt-in and explains fresh sampling after a statistics threshold exists', async () => {
     const wrapper = mountEditor()
     await wrapper.get('[data-protection-enabled]').setValue(true)
     const stats = wrapper.get('[data-protection-type="1"]')
     expect(stats.get('[data-recovery-enabled]').attributes('disabled')).toBeDefined()
     expect(wrapper.props('modelValue').rules.every(rule => rule.recovery === undefined)).toBe(true)
-    expect(wrapper.get('[data-protection-type="2"]').find('[data-cache-recovery]').exists()).toBe(false)
+    expect(wrapper.get('[data-protection-type="2"]').find('[data-statistics-recovery]').exists()).toBe(false)
     await stats.get('[data-add-threshold]').trigger('click')
     await stats.get('[data-threshold] select').setValue('cache_rate')
     await stats.get('[data-threshold] input').setValue(80)
@@ -274,9 +274,9 @@ describe('quality protection settings', () => {
     await stats.get('[data-recovery-enabled]').setValue(true)
     expect(wrapper.props('modelValue').rules[0].recovery).toEqual({ enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 85 })
     expect(stats.text()).toContain('once per minute')
-    expect(stats.text()).toContain('at most 20 normal request attempts')
-    expect(stats.text()).toContain('Synchronous and failed requests consume this allowance')
-    expect(stats.text()).toContain('after the trial starts')
+    expect(stats.text()).toContain('at most 20 real request attempts')
+    expect(stats.text()).toContain('including failures')
+    expect(stats.text()).toContain('after the trial begins')
     expect(stats.text()).toContain('never count as recovery')
     expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
     wrapper.unmount()
@@ -322,6 +322,58 @@ describe('quality protection settings', () => {
     wrapper.unmount()
   })
 
+  it.each(['per_test', 'all_pass', 'combined'] as const)('recovers success-rate and latency rules without requiring cache configuration in %s mode', async mode => {
+    const config: TestProtectionConfig = { enabled: true, mode, rules: [{
+      test_definition_id: 1, priority: 0, required_pass: false, min_samples: 100,
+      thresholds: [{ metric: 'success_rate', operator: 'lt', value: 95 }, { metric: 'avg_first_token_ms', operator: 'gt', value: 1500 }],
+      on_pass: { scheduling: 'resume', group_mode: 'keep' }, on_fail: { scheduling: 'pause', group_mode: 'keep' },
+    }], ...(mode === 'combined' ? { combinations: [{ id: 'observe', name: 'Observe', priority: 0, condition: { operator: 'test', test_definition_id: 1, verdict: 'pass' }, action: { scheduling: 'keep', group_mode: 'keep' } }] } : {}) }
+    const wrapper = mountEditor(config)
+    const stats = wrapper.get('[data-protection-type="1"]')
+    expect(stats.get('[data-recovery-enabled]').attributes('disabled')).toBeUndefined()
+    await stats.get('[data-recovery-enabled]').setValue(true)
+    expect(stats.find('[data-recovery-rate]').exists()).toBe(false)
+    expect(stats.get('[data-recovery-conditions]').text()).toContain('≥ 95')
+    expect(stats.get('[data-recovery-conditions]').text()).toContain('≤ 1500')
+    expect(stats.get('[data-recovery-min-samples]').element).toHaveProperty('value', '10')
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
+    expect(config.rules[0].recovery).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('prepares independent recovery actions for success-rate-only statistics in combined mode', async () => {
+    const wrapper = mountEditor({ enabled: true, mode: 'combined', rules: [{
+      test_definition_id: 1, priority: 0, required_pass: false,
+      thresholds: [{ metric: 'success_rate', operator: 'lt', value: 90 }],
+    }] })
+    const stats = wrapper.get('[data-protection-type="1"]')
+    expect(stats.get('[data-recovery-enabled]').attributes('disabled')).toBeDefined()
+    await stats.get('[data-prepare-recovery]').trigger('click')
+    expect(stats.get('[data-recovery-enabled]').attributes('disabled')).toBeUndefined()
+    await stats.get('[data-recovery-enabled]').setValue(true)
+    expect(wrapper.props('modelValue').rules[0].recovery?.enabled).toBe(true)
+    expect(stats.find('[data-recovery-rate]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows the preserved cache recovery rate and current recovery requirements after metric edits', async () => {
+    const wrapper = mountEditor({ enabled: true, rules: [{
+      test_definition_id: 1, priority: 0, required_pass: false,
+      thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }],
+      on_pass: { scheduling: 'resume', group_mode: 'keep' }, on_fail: { scheduling: 'pause', group_mode: 'keep' },
+      recovery: { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 85 },
+    }] })
+    const stats = wrapper.get('[data-protection-type="1"]')
+    expect(stats.get('[data-recovery-conditions]').text()).toContain('≥ 85')
+    await stats.get('[data-threshold] select').setValue('success_rate')
+    expect(stats.find('[data-recovery-rate]').exists()).toBe(false)
+    expect(stats.get('[data-recovery-conditions]').text()).toContain('≥ 80')
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
+    await stats.get('[data-threshold] select').setValue('cache_rate')
+    expect(stats.get('[data-recovery-rate]').element).toHaveProperty('value', '85')
+    wrapper.unmount()
+  })
+
   it('retains incompatible saved recovery settings and lets the administrator turn them off', async () => {
     const config: TestProtectionConfig = { enabled: true, rules: [{ test_definition_id: 1, priority: 0, required_pass: false, thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }], on_pass: { scheduling: 'resume', group_mode: 'keep' }, on_fail: { scheduling: 'pause', group_mode: 'keep' }, recovery: { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 85 } }] }
     const wrapper = mountEditor(config)
@@ -329,7 +381,7 @@ describe('quality protection settings', () => {
     await stats.get('[data-outcome="fail"] [data-action-scheduling]').setValue('keep')
     expect(stats.get('[data-recovery-eligibility]').text()).toContain('fail action must pause')
     expect(wrapper.props('modelValue').rules[0].recovery?.enabled).toBe(true)
-    expect(stats.get('[data-cache-recovery] fieldset').attributes('disabled')).toBeDefined()
+    expect(stats.get('[data-statistics-recovery] fieldset').attributes('disabled')).toBeDefined()
     expect(stats.get('[data-recovery-enabled]').attributes('disabled')).toBeUndefined()
     expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(false)
     await stats.get('[data-recovery-enabled]').setValue(false)
@@ -359,8 +411,8 @@ describe('quality protection settings', () => {
     zero.rules[0].recovery!.recover_rate = 0
     expect(validTestProtection(zero, types, groups)).toBe(true)
     for (const patch of [
-      { test_definition_id: 2 }, { thresholds: [{ metric: 'success_rate', operator: 'lt', value: 80 }] },
-      { thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }, { metric: 'cache_rate', operator: 'gt', value: 90 }] },
+      { test_definition_id: 2 }, { thresholds: [] },
+      { thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }, { metric: 'cache_rate', operator: 'gt', value: 84 }] },
       { on_fail: { scheduling: 'keep', group_mode: 'keep' } }, { on_pass: { scheduling: 'keep', group_mode: 'keep' } },
       { vote: { enabled: true, reject_above: 0, pass_at_least: 1 } },
     ]) {

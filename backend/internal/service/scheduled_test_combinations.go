@@ -92,7 +92,7 @@ func validateScheduledTestCombinations(plan *ScheduledTestPlan) error {
 		// release can be resolved without waiting for the blocked trial.
 		if hasCombinationPause && rule.Action.Scheduling == "resume" {
 			if id := scheduledTestCombinationRecoveryReference(rule.Condition, recoveryDefinitions); id != 0 {
-				return fmt.Errorf("组合规则「%s」的恢复动作不能依赖已启用自动试运行的检测 #%d：本策略配置了组合暂停，会阻止该检测试运行，造成相互等待；请将解除组合暂停与缓存达标后的分组规则拆开，或关闭该检测的自动试运行", rule.Name, id)
+				return fmt.Errorf("组合规则「%s」的恢复动作不能依赖已启用自动试运行的检测 #%d：本策略配置了组合暂停，会阻止该检测试运行，造成相互等待；请将解除组合暂停与统计达标后的分组规则拆开，或关闭该检测的自动试运行", rule.Name, id)
 			}
 		}
 		for _, id := range rule.Action.GroupIDs {
