@@ -1,7 +1,7 @@
 <template>
   <div ref="outputContainer" class="min-w-0">
-    <TestStatisticsOutput v-if="result.output_kind === 'statistics' && result.output_statistics" :statistics="result.output_statistics" :updated-at="result.finished_at || result.created_at" />
-    <TestModelCheckOutput v-else-if="result.output_kind === 'model_check' && result.output_model_check" :result="result.output_model_check" />
+    <TestStatisticsOutput v-if="result.output_kind === 'statistics' && result.output_statistics" :statistics="result.output_statistics" :updated-at="result.finished_at || result.created_at" :compact="compact" />
+    <TestModelCheckOutput v-else-if="result.output_kind === 'model_check' && result.output_model_check" :result="result.output_model_check" :compact="compact" />
     <template v-else-if="result.output_kind === 'html' && result.output_html">
       <div class="relative w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700" :style="{ height: `${Math.ceil(htmlFrameHeight * previewScale)}px` }">
       <iframe
@@ -10,7 +10,7 @@
         class="absolute left-0 top-0 block origin-top-left border-0 bg-white"
         scrolling="no"
         loading="lazy"
-        :style="{ width: `${htmlFrameWidth}px`, height: `${htmlFrameHeight}px`, transform: `scale(${previewScale})` }"
+        :style="{ width: `${htmlFrameWidth}px`, height: `${htmlFrameHeight}px`, transform: `scale(${previewScale})`, left: `${Math.max(0, (containerWidth - htmlFrameWidth * previewScale) / 2)}px` }"
         sandbox="allow-scripts"
         referrerpolicy="no-referrer"
         :srcdoc="safeHTML"
@@ -42,7 +42,7 @@ import { buildTestPreviewHTML } from '@/utils/testPreview'
 import TestStatisticsOutput from '@/components/tests/TestStatisticsOutput.vue'
 import TestModelCheckOutput from '@/components/tests/TestModelCheckOutput.vue'
 
-const props = withDefaults(defineProps<{ result: TestResult; compact?: boolean }>(), { compact: false })
+const props = withDefaults(defineProps<{ result: TestResult; compact?: boolean; maxPreviewHeight?: number }>(), { compact: false })
 const { t } = useI18n()
 const outputContainer = ref<HTMLElement | null>(null)
 const containerWidth = ref(960)
@@ -50,7 +50,11 @@ const htmlFrame = ref<HTMLIFrameElement | null>(null)
 const htmlFrameHeight = ref(640)
 const htmlFrameWidth = ref(960)
 const previewRevision = ref(0)
-const previewScale = computed(() => Math.min(containerWidth.value / htmlFrameWidth.value, 1))
+const previewScale = computed(() => Math.min(
+  containerWidth.value / htmlFrameWidth.value,
+  props.maxPreviewHeight && props.maxPreviewHeight > 0 ? props.maxPreviewHeight / htmlFrameHeight.value : 1,
+  1,
+))
 const onPreviewMessage = (event: MessageEvent<unknown>) => {
   if (event.source !== htmlFrame.value?.contentWindow) return
   const data = event.data

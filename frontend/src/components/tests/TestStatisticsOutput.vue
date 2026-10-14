@@ -1,9 +1,9 @@
 <template>
   <div class="min-w-0" data-statistics-output>
-    <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsSuccessRate') }}</dt><dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white" data-success-rate>{{ successRate }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsRequestSamples', { success: count(statistics.success_requests), total: count(statistics.total_requests) }) }}</p></div>
-      <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsCacheRate') }}</dt><dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white" data-cache-rate>{{ cacheRate }}</dd><p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsTokenSamples', { cached: count(statistics.cache_read_tokens), input: count(statistics.cache_input_tokens) }) }}</p></div>
-      <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsFirstToken') }}</dt><dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white" data-first-token>{{ firstToken }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsFirstTokenSamples', { count: count(statistics.first_token_samples) }) }}</p></div>
+    <dl class="grid" :class="compact ? 'grid-cols-2 gap-x-3 gap-y-2' : 'grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'">
+      <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsSuccessRate') }}</dt><dd class="mt-1 break-all font-semibold tabular-nums text-gray-900 dark:text-white" :class="compact ? 'text-lg' : 'text-2xl'" data-success-rate>{{ successRate }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsRequestSamples', { success: count(statistics.success_requests), total: count(statistics.total_requests) }) }}</p></div>
+      <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsCacheRate') }}</dt><dd class="mt-1 break-all font-semibold tabular-nums text-gray-900 dark:text-white" :class="compact ? 'text-lg' : 'text-2xl'" data-cache-rate>{{ cacheRate }}</dd><p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsTokenSamples', { cached: count(statistics.cache_read_tokens), input: count(statistics.cache_input_tokens) }) }}</p></div>
+      <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsFirstToken') }}</dt><dd class="mt-1 break-all font-semibold tabular-nums text-gray-900 dark:text-white" :class="compact ? 'text-lg' : 'text-2xl'" data-first-token>{{ firstToken }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsFirstTokenSamples', { count: count(statistics.first_token_samples) }) }}</p></div>
       <div class="min-w-0" data-statistics-recent-requests>
         <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsRecentRequests') }}</dt>
         <dd v-if="recentRequests.length" class="mt-1 w-fit min-w-[6rem]">
@@ -22,7 +22,7 @@
         <dd v-else class="mt-1 text-2xl font-semibold text-gray-400">—</dd>
       </div>
     </dl>
-    <div class="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t border-gray-100 pt-2 text-xs text-gray-500 dark:border-dark-800 dark:text-gray-400">
+    <div class="flex flex-wrap gap-x-4 gap-y-1 border-t border-gray-100 pt-2 text-xs text-gray-500 dark:border-dark-800 dark:text-gray-400" :class="compact ? 'mt-2' : 'mt-4'">
       <span>{{ t('tests.statisticsWindow') }}: {{ formatTime(statistics.window_start) }} – {{ formatTime(statistics.window_end) }}</span>
       <span>{{ t('tests.statisticsUpdated') }}: {{ formatTime(updatedAt || statistics.window_end) }}</span>
     </div>
@@ -35,7 +35,7 @@ import { useI18n } from 'vue-i18n'
 import type { TestOutputStatistics } from '@/types'
 import { formatDateTime } from '@/utils/format'
 
-const props = defineProps<{ statistics: TestOutputStatistics; updatedAt?: string }>()
+const props = withDefaults(defineProps<{ statistics: TestOutputStatistics; updatedAt?: string; compact?: boolean }>(), { compact: false })
 const { t } = useI18n()
 const validCount = (value: number) => Number.isFinite(value) && value >= 0
 const count = (value: number) => validCount(value) ? Math.floor(value).toLocaleString() : '—'

@@ -203,7 +203,10 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 }
 
 func (s *ScheduledTestRunnerService) runDuePlans(ctx context.Context) {
-	now := time.Now()
+	s.runDuePlansAt(ctx, time.Now())
+}
+
+func (s *ScheduledTestRunnerService) runDuePlansAt(ctx context.Context, now time.Time) {
 	queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 	plans, err := s.planRepo.ListDue(queryCtx, now)
 	cancel()
@@ -220,6 +223,25 @@ func (s *ScheduledTestRunnerService) runDuePlans(ctx context.Context) {
 	for _, plan := range plans {
 		if ctx.Err() != nil {
 			return
+		}
+		// An overdue run (for example after downtime) must wait if discovery
+		// happens outside the configured periods. Do not record a phantom run.
+		allowed, err := scheduledTestScheduleAllows(plan.Schedule, now)
+		if err != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d invalid schedule: %v", plan.ID, err)
+			continue
+		}
+		if !allowed {
+			next, err := computeScheduledTestNextRun(plan, now)
+			if err == nil {
+				persistCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
+				err = s.planRepo.UpdateNextRun(persistCtx, plan, next)
+				cancel()
+			}
+			if err != nil {
+				logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d defer outside time periods: %v", plan.ID, err)
+			}
+			continue
 		}
 		// Register before launching. Repeated ticks cannot accumulate blocked
 		// goroutines for the same rule, and shutdown waits for admitted work.
@@ -667,14 +689,14 @@ func (s *ScheduledTestRunnerService) advancePlan(ctx context.Context, plan *Sche
 		return
 	}
 	now := time.Now()
-	nextRun, err := computeNextRun(plan.CronExpression, now)
+	nextRun, err := computeScheduledTestNextRun(plan, now)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d computeNextRun error: %v", plan.ID, err)
 		return
 	}
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	defer cancel()
-	if err := s.planRepo.UpdateAfterRun(persistCtx, plan.ID, now, nextRun); err != nil {
+	if err := s.planRepo.UpdateAfterRun(persistCtx, plan, now, nextRun); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d UpdateAfterRun error: %v", plan.ID, err)
 	}
 }

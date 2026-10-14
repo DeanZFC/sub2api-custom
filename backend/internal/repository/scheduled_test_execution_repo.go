@@ -35,7 +35,7 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *serv
 	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
 		return nil, err
 	}
-	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
+	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
 	if err != nil {
 		return nil, err
 	}

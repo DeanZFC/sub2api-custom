@@ -104,7 +104,11 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 		}
 	}
 	plan.CronExpression = strings.TrimSpace(plan.CronExpression)
-	if plan.CronExpression == "" {
+	if plan.Schedule != nil {
+		if _, _, err := parseScheduledTestSchedule(plan.Schedule); err != nil {
+			return err
+		}
+	} else if plan.CronExpression == "" {
 		return fmt.Errorf("cron_expression is required")
 	}
 	if plan.MaxResults < 0 {
@@ -309,7 +313,7 @@ func (s *ScheduledTestService) DeleteDefinition(ctx context.Context, id int64) e
 	return s.definitionRepo.Delete(ctx, id)
 }
 
-// CreatePlan validates the cron expression, computes next_run_at, and persists the plan.
+// CreatePlan validates the schedule, computes next_run_at, and persists the plan.
 func (s *ScheduledTestService) CreatePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error) {
 	if err := validateScheduledTestPlan(plan); err != nil {
 		return nil, err
@@ -317,9 +321,9 @@ func (s *ScheduledTestService) CreatePlan(ctx context.Context, plan *ScheduledTe
 	if err := s.validateDefinitionForPlan(ctx, plan); err != nil {
 		return nil, err
 	}
-	nextRun, err := computeNextRun(plan.CronExpression, time.Now())
+	nextRun, err := computeScheduledTestNextRun(plan, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression: %w", err)
+		return nil, fmt.Errorf("invalid test schedule: %w", err)
 	}
 	plan.NextRunAt = &nextRun
 
@@ -340,7 +344,7 @@ func (s *ScheduledTestService) ListPlansByAccount(ctx context.Context, accountID
 	return s.planRepo.ListByAccountID(ctx, accountID)
 }
 
-// UpdatePlan validates cron and updates the plan.
+// UpdatePlan validates the schedule and updates the plan.
 func (s *ScheduledTestService) UpdatePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error) {
 	if err := validateScheduledTestPlan(plan); err != nil {
 		return nil, err
@@ -348,9 +352,9 @@ func (s *ScheduledTestService) UpdatePlan(ctx context.Context, plan *ScheduledTe
 	if err := s.validateDefinitionForPlan(ctx, plan); err != nil {
 		return nil, err
 	}
-	nextRun, err := computeNextRun(plan.CronExpression, time.Now())
+	nextRun, err := computeScheduledTestNextRun(plan, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression: %w", err)
+		return nil, fmt.Errorf("invalid test schedule: %w", err)
 	}
 	plan.NextRunAt = &nextRun
 	if plan.MaxResults <= 0 {

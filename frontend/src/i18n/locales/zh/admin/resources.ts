@@ -143,6 +143,16 @@ export default {
       queued: '排队中',
       showHistory: '历史记录', latestResults: '最近结果', historyHint: '已加载保留的历史记录；点击“刷新”获取更新。',
       cronHint: 'Cron 五项：分 时 日 月 周。例如 0 * * * * 为每小时运行；默认使用服务器时区，可在前面加 CRON_TZ=Asia/Shanghai 指定时区。',
+      timing: {
+        title: '检测时间', periodMode: '按时间段配置', cronMode: 'Cron 表达式（高级）',
+        timezone: '时区', timezoneHint: '北京时间填 Asia/Shanghai；协调世界时填 UTC。所有时段均按此时区执行。',
+        start: '开始时间', end: '结束时间（可填 24:00）', interval: '检测间隔', intervalUnit: '间隔单位', hours: '小时', minutes: '分钟',
+        addPeriod: '+ 添加时段', removePeriod: '删除第 {number} 个时段', overnight: '跨午夜', times: '每天执行时间：',
+        everyHours: '每 {count} 小时一次', everyMinutes: '每 {count} 分钟一次',
+        periodHint: '从各时段的开始时间起按间隔检测，包含开始、不包含结束。结束早于开始表示跨午夜；全天可填 00:00–24:00。未覆盖的时段不自动检测，时段不能重叠。立即运行不受时段限制，质量恢复的冷却和试运行仍独立执行。',
+        timezoneError: '请输入有效时区，例如 Asia/Shanghai 或 UTC。', periodCountError: '请配置 1–24 个检测时段。',
+        timeError: '时间格式为 HH:mm，开始和结束不能相同；全天请填 00:00–24:00。', intervalError: '检测间隔须为整数分钟，至少 1 分钟，且不能超过该时段长度。', overlapError: '检测时段存在重叠，请调整起止时间。',
+      },
       nextRun: '下次运行', runStarted: '测试已开始，完成后结果将自动更新。', resultsHint: '窗口打开时，每 5 秒自动更新测试结果。',
       title: '渠道质量管理', description: '配置渠道质量检测类型、分组、模型和定时规则', types: '检测类型', plans: '检测策略', name: '名称', key: '标识', type: '检测类型', target: '目标', group: '分组', account: '账号', accountOptional: '检测账号', accountHint: '只检测选中的账号；用户查看结果时会显示账号 ID。', groupHint: '执行分组检测；用户查看结果时不显示账号 ID。', allAccountsHint: '检测分组内每个可调度账号；用户查看结果时显示账号 ID。', groupTest: '不选择账号（分组检测）', allAccountsInGroup: '分组内所有账号', enablePlan: '启用', disablePlan: '禁用', retry: '重试', retryStarted: '已开始重试该账号。', selectGroupFirst: '请先选择分组', selectType: '选择检测类型', selectGroup: '选择分组', selectAccount: '选择账号', model: '模型', reasoningEffort: '推理强度', reasoningEffortDefault: '使用模型默认值', reasoningEffortHint: '仅显示所选模型和目标账号共同支持的选项。', schedule: '计划', cron: 'Cron 表达式', manual: '手动', run: '立即运行', results: '结果', kind: '输出类型', number: '数字', text: '文本', descriptionLabel: '说明', prompt: '提示词', maxResults: '保留结果数', htmlResult: 'HTML 检测结果', sortOrder: '显示顺序', sortOrderHint: '数值越小，该检测类型在账号结果中越靠前。', planSortOrderHint: '数值越小，策略越靠前；策略内分组按所选分组列表的上下顺序展示。', uncategorized: '未分类'
     },

@@ -23,6 +23,7 @@ type ScheduledTestPlan struct {
 	ModelID           string                        `json:"model_id"`
 	ReasoningEffort   string                        `json:"reasoning_effort,omitempty"`
 	CronExpression    string                        `json:"cron_expression"`
+	Schedule          *ScheduledTestSchedule        `json:"schedule,omitempty"`
 	Enabled           bool                          `json:"enabled"`
 	MaxResults        int                           `json:"max_results"`
 	AutoRecover       bool                          `json:"auto_recover"`
@@ -161,7 +162,8 @@ type ScheduledTestPlanRepository interface {
 	ListDue(ctx context.Context, now time.Time) ([]*ScheduledTestPlan, error)
 	Update(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error)
 	Delete(ctx context.Context, id int64) error
-	UpdateAfterRun(ctx context.Context, id int64, lastRunAt time.Time, nextRunAt time.Time) error
+	UpdateAfterRun(ctx context.Context, plan *ScheduledTestPlan, lastRunAt time.Time, nextRunAt time.Time) error
+	UpdateNextRun(ctx context.Context, plan *ScheduledTestPlan, nextRunAt time.Time) error
 }
 
 type ScheduledTestDefinitionRepository interface {

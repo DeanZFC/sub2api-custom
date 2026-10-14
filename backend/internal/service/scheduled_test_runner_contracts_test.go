@@ -36,12 +36,16 @@ func (r *runnerPlanRepoStub) Update(context.Context, *ScheduledTestPlan) (*Sched
 func (r *runnerPlanRepoStub) Delete(context.Context, int64) error {
 	return errors.New("not implemented")
 }
-func (r *runnerPlanRepoStub) UpdateAfterRun(ctx context.Context, _ int64, _, _ time.Time) error {
+func (r *runnerPlanRepoStub) UpdateAfterRun(ctx context.Context, _ *ScheduledTestPlan, _, _ time.Time) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	r.updated++
 	return nil
+}
+
+func (r *runnerPlanRepoStub) UpdateNextRun(context.Context, *ScheduledTestPlan, time.Time) error {
+	return errors.New("unexpected reschedule")
 }
 
 type runnerResultRepoStub struct {

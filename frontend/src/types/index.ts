@@ -2539,6 +2539,17 @@ export interface TestType {
   updated_at?: string
 }
 
+export interface TestSchedulePeriod {
+  start: string
+  end: string
+  interval_minutes: number
+}
+
+export interface TestSchedule {
+  timezone: string
+  periods: TestSchedulePeriod[]
+}
+
 export interface TestPlan {
   id: number
   /** Ordered strategy groups; this order is also used by the user result tabs. */
@@ -2559,6 +2570,7 @@ export interface TestPlan {
   /** Optional effort forwarded to the selected model (Codex-style). */
   reasoning_effort?: string | null
   cron_expression?: string
+  schedule?: TestSchedule | null
   enabled: boolean
   max_results?: number
   protection?: TestProtectionConfig
@@ -2744,6 +2756,7 @@ export interface CreateTestPlanRequest {
   model_id: string
   reasoning_effort?: string | null
   cron_expression?: string
+  schedule?: TestSchedule | null
   enabled?: boolean
   max_results?: number
   protection?: TestProtectionConfig

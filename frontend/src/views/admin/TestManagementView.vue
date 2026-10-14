@@ -28,7 +28,7 @@
             <td class="min-w-32 px-2 py-3"><div class="flex flex-wrap gap-1"><span v-for="type in planTypes(plan)" :key="type.id" class="badge badge-gray">{{ type.name }}</span><span v-if="!planTypes(plan).length">-</span></div></td>
             <td class="min-w-32 px-2 py-3">{{ groupName(plan) }}<div class="mt-1 text-xs text-gray-500">{{ targetName() }}</div></td>
             <td class="min-w-32 px-2 py-3 font-mono text-xs">{{ plan.model_id || '-' }}<span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td>
-            <td class="min-w-40 px-2 py-3 font-mono text-xs">{{ plan.cron_expression || '-' }}<div class="mt-1 font-sans text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td>
+            <td class="min-w-52 px-2 py-3 text-xs"><template v-if="plan.schedule"><div v-for="(period, index) in plan.schedule.periods" :key="index">{{ period.start }}–{{ period.end }} · {{ period.interval_minutes % 60 === 0 ? t('admin.tests.timing.everyHours', { count: period.interval_minutes / 60 }) : t('admin.tests.timing.everyMinutes', { count: period.interval_minutes }) }}</div><div class="mt-1 text-gray-500">{{ plan.schedule.timezone }}</div></template><span v-else class="font-mono">{{ plan.cron_expression || '-' }}</span><div class="mt-1 text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td>
             <td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span><span v-if="plan.protection?.enabled" class="badge badge-primary mt-1">{{ t('admin.tests.protection.title') }}</span></td>
             <td class="px-2 py-3"><div class="flex justify-end gap-1">
               <button class="btn btn-secondary h-8 w-8 shrink-0 p-0" :title="t('admin.tests.run')" :aria-label="t('admin.tests.run')" :disabled="runningPlans.has(plan.id) || !!plan.migration_note" @click="run(plan)"><Icon name="play" size="sm" /></button>
@@ -75,7 +75,7 @@
         <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_ids.length || modelOptionsLoading" :placeholder="editingPlan.group_ids.length ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.commonModelsHint') }}</span></label>
         <p v-if="editingPlan.group_ids.length && !modelOptionsLoading && !modelOptions.length" class="text-xs text-amber-700 dark:text-amber-300" data-no-common-model>{{ t('admin.tests.noCommonModels') }}</p>
         <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
-        <label class="input-label sm:col-span-2">{{ t('admin.tests.cron') }}<input v-model.trim="editingPlan.cron_expression" class="input mt-1 w-full" placeholder="*/30 * * * *" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.cronHint') }}</span></label>
+        <TestScheduleEditor v-model:schedule="editingPlan.schedule" v-model:cron-expression="editingPlan.cron_expression" class="sm:col-span-2" />
         <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :groups="protectionGroups" class="sm:col-span-2" />
         <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
         <label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label>
@@ -107,6 +107,8 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { reasoningEffortsForTestModel } from '@/utils/testReasoningEfforts'
 import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vue'
 import TestProtectionEditor from '@/components/tests/TestProtectionEditor.vue'
+import TestScheduleEditor from '@/components/tests/TestScheduleEditor.vue'
+import { copyTestSchedule, defaultTestSchedule, validTestSchedule } from '@/utils/testSchedule'
 import { copyTestProtection, validTestProtection } from '@/utils/testProtection'
 import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType, TestProtectionConfig } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -198,7 +200,7 @@ const reasoningEffortOptions = computed(() => {
 const canSavePlan = computed(() => {
   const plan = editingPlan.value
   return Boolean(plan && validStrategyTypes(plan.test_definition_ids)
-    && plan.model_id && plan.cron_expression && validStrategyGroups(plan.group_ids)
+    && plan.model_id && validTestSchedule(plan.schedule, plan.cron_expression) && validStrategyGroups(plan.group_ids)
     && !modelOptionsLoading.value && modelOptions.value.some(option => option.value === plan.model_id)
     && validTestProtection(plan.protection, selectedProtectionTypes.value, protectionGroups.value))
 })
@@ -308,12 +310,13 @@ const planPayload = (plan: TestPlan): CreateTestPlanRequest => ({
   group_ids: [...(plan.group_ids || [])], test_definition_ids: planTypeIDs(plan),
   model_id: plan.model_id || '', reasoning_effort: plan.reasoning_effort ?? null,
   cron_expression: plan.cron_expression || '0 * * * *', enabled: plan.enabled,
+  schedule: copyTestSchedule(plan.schedule),
   max_results: plan.max_results || 50, protection: copyTestProtection(plan.protection),
 })
 const openPlan = (plan?: TestPlan) => {
   editingPlan.value = plan
     ? { ...planPayload(plan), id: plan.id, migration_note: plan.migration_note, protection: copyTestProtection(plan.protection) }
-    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], model_id: '', reasoning_effort: null, cron_expression: '0 * * * *', enabled: true, max_results: 50, protection: { enabled: false, mode: 'all_pass', rules: [] } }
+    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], model_id: '', reasoning_effort: null, cron_expression: '0 * * * *', schedule: defaultTestSchedule(), enabled: true, max_results: 50, protection: { enabled: false, mode: 'all_pass', rules: [] } }
 }
 const savePlan = async () => {
   if (!editingPlan.value || !canSavePlan.value) return
@@ -332,7 +335,7 @@ const copyPlan = async (plan: TestPlan) => {
   payload.name = `${plan.name || `#${plan.id}`}（Copy）`
   // Copies stay disabled until the administrator checks their shared scope.
   payload.enabled = false
-  if (!validStrategyTypes(payload.test_definition_ids) || !validStrategyGroups(payload.group_ids) || !validTestProtection(payload.protection, types.value.filter(type => payload.test_definition_ids.includes(type.id)), strategyGroups(payload.group_ids))) {
+  if (!validStrategyTypes(payload.test_definition_ids) || !validStrategyGroups(payload.group_ids) || !validTestSchedule(payload.schedule, payload.cron_expression) || !validTestProtection(payload.protection, types.value.filter(type => payload.test_definition_ids.includes(type.id)), strategyGroups(payload.group_ids))) {
     openPlan(plan)
     editingPlan.value!.id = undefined
     editingPlan.value!.name = payload.name

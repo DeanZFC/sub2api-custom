@@ -128,6 +128,24 @@ describe('test result output', () => {
     measure.mockRestore()
   })
 
+  it('fits the full artwork within a thumbnail height and removes the limit for an expanded view', async () => {
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
+    const wrapper = mount(TestResultOutput, { global, props: { compact: true, maxPreviewHeight: 180, result: { id: 4, status: 'success', output_kind: 'html', output_html: '<div style="width:1200px;height:1600px">Tall artwork</div>' } } })
+    const frame = wrapper.get('iframe')
+    window.dispatchEvent(new MessageEvent('message', { source: frame.element.contentWindow, data: { type: 'sub2api-test-preview-size', height: 1600, width: 1200 } }))
+    await nextTick()
+    expect(frame.element.style.width).toBe('1200px')
+    expect(frame.element.style.height).toBe('1600px')
+    expect(frame.element.style.transform).toBe('scale(0.1125)')
+    expect(frame.element.style.left).toBe('82.5px')
+    expect(frame.element.parentElement?.style.height).toBe('180px')
+    await wrapper.setProps({ maxPreviewHeight: undefined })
+    expect(frame.element.style.transform).toBe('scale(0.25)')
+    expect(frame.element.parentElement?.style.height).toBe('400px')
+    wrapper.unmount()
+    measure.mockRestore()
+  })
+
   it('ignores preview sizing messages sent by another iframe', async () => {
     const wrapper = mount(TestResultOutput, { global, props: { compact: true, result: { id: 5, status: 'success', output_kind: 'html', output_html: '<p>Preview</p>' } } })
     window.dispatchEvent(new MessageEvent('message', { source: window, data: { type: 'sub2api-test-preview-size', height: 9000, width: 9000 } }))

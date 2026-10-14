@@ -33,7 +33,7 @@ func (r *scheduledTestDiscoveryPlanRepo) ListDue(context.Context, time.Time) ([]
 	return r.due, nil
 }
 
-func (*scheduledTestDiscoveryPlanRepo) UpdateAfterRun(context.Context, int64, time.Time, time.Time) error {
+func (*scheduledTestDiscoveryPlanRepo) UpdateAfterRun(context.Context, *ScheduledTestPlan, time.Time, time.Time) error {
 	return nil
 }
 

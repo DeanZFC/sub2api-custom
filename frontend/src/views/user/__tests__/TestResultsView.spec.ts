@@ -275,6 +275,37 @@ describe('channel quality result groups', () => {
 })
 
 describe('channel quality result series', () => {
+  it('expands the latest artwork locally and retains its administrator review controls', async () => {
+    api.isAdmin = true
+    const result = { ...baseResult, id: 91, output_html: '<svg />' }
+    api.list.mockResolvedValue([result])
+    api.reviews.mockResolvedValue([{ result, generation: 7, verdict: 'pending', admin_verdict: '', account_paused: false }])
+    api.decide.mockResolvedValue(undefined)
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-expand-preview]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    expect(dialog.get('[data-output]').attributes('data-result-id')).toBe('91')
+    expect(dialog.get('[data-output]').attributes('data-compact')).toBeUndefined()
+    expect(api.history).not.toHaveBeenCalled()
+    expect(api.adminResults).not.toHaveBeenCalled()
+    await dialog.get('[data-admin-fail]').trigger('click'); await flushPromises()
+    expect(api.decide).toHaveBeenCalledWith(91, 7, 'fail')
+    await dialog.get('[data-close]').trigger('click')
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('closes an expanded preview if the result is no longer visible after refresh', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.list.mockResolvedValueOnce([{ ...baseResult, id: 1, output_html: '<svg />' }]).mockResolvedValue([])
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-expand-preview]').trigger('click')
+    expect(wrapper.find('[data-dialog]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows only the latest output and fetches complete history on demand', async () => {
     const results = [1, 2, 3, 4, 5].map(id => ({ ...baseResult, id, created_at: `2026-09-15T${10 + id}:00:00Z` }))
     api.list.mockResolvedValue(results)

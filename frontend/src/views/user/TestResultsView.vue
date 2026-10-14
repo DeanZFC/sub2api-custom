@@ -26,40 +26,43 @@
           <TestVoteCard v-for="item in filteredVotes" :key="item.result.id" :item="item" :busy="votingResultIds.has(item.result.id)" :error="voteErrors[item.result.id]" @vote="castVote(item.result.id, $event)" />
         </section>
         <p v-if="!accountResults.length && !filteredVotes.length" class="py-16 text-center text-sm text-gray-500">{{ t('tests.noMatches') }}</p>
-        <article v-for="account in accountResults" :key="account.key" class="grid overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900 lg:grid-cols-[12rem_minmax(0,1fr)]" data-account-result>
-          <header class="flex min-w-0 flex-col justify-center border-b border-gray-200 p-4 dark:border-dark-700 sm:p-5 lg:border-b-0 lg:border-r" data-account-info>
-            <div class="min-w-0 break-words"><h3 class="text-xl font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
+        <article v-for="account in accountResults" :key="account.key" class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900" data-account-result>
+          <header class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-800/50" data-account-info>
+            <div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 break-words"><h3 class="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="text-xs text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
           </header>
-          <div class="min-w-0 divide-y divide-gray-200 dark:divide-dark-700" data-account-tests>
+          <div class="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3 p-3" data-account-tests>
             <section
               v-for="test in account.tests"
               :key="test.key"
-              class="min-w-0 p-4 sm:p-5"
+              class="min-w-0 rounded-md border border-gray-100 p-3 dark:border-dark-800"
               data-test-section
               :data-numeric-test="test.latest.output_kind === 'number' ? '' : undefined"
               :data-statistics-test="test.latest.output_kind === 'statistics' ? '' : undefined"
               :data-content-test="!['number', 'statistics'].includes(test.latest.output_kind) ? '' : undefined"
             >
-              <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-                <div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ test.name }}</h4><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span></div><p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}<span v-if="test.latest.output_kind !== 'statistics' && test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></p></div>
-                <button v-if="historyAnchor(test)" type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
+              <div class="mb-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <h4 class="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-white">{{ test.name }}</h4>
+                  <button v-if="historyAnchor(test)" type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
+                </div>
+                <div class="mt-1.5 flex flex-wrap items-center gap-1.5"><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span><span class="min-w-0 break-all text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}<span v-if="test.latest.output_kind !== 'statistics' && test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></span></div>
               </div>
               <template v-if="test.latest.output_kind === 'statistics'">
-                <TestResultOutput :result="test.latest" />
-                <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="refreshAfterDecision" />
+                <TestResultOutput :result="test.latest" compact />
+                <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" compact @decided="refreshAfterDecision" />
               </template>
               <div v-else-if="test.latest.output_kind === 'number'" data-numeric-gallery>
                 <figure :key="test.latest.id" class="min-w-0">
                   <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ test.latest.output_numeric ?? '-' }}</strong>
-                  <figcaption class="mt-1 text-xs text-gray-500 dark:text-gray-400"><span class="block">{{ t('tests.latestResult') }}</span><span class="mt-1 block">{{ formatDate(resultTime(test.latest)) }}</span><span v-if="test.latest.latency_ms != null" class="mt-1 block">{{ test.latest.latency_ms }}ms</span></figcaption>
-                  <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="refreshAfterDecision" />
+                  <figcaption class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(resultTime(test.latest)) }}</figcaption>
+                  <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" compact @decided="refreshAfterDecision" />
                 </figure>
               </div>
               <div v-else data-result-gallery>
                 <figure :key="test.latest.id" class="min-w-0">
-                  <TestResultOutput :result="test.latest" compact />
-                  <figcaption class="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-gray-500 dark:text-gray-400"><span class="font-medium text-gray-700 dark:text-gray-200">{{ t('tests.latestResult') }}</span><span>· {{ formatDate(resultTime(test.latest)) }}</span></figcaption>
-                  <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" @decided="refreshAfterDecision" />
+                  <TestResultOutput :result="test.latest" compact :max-preview-height="180" />
+                  <figcaption class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ formatDate(resultTime(test.latest)) }}</span><button v-if="test.latest.output_kind === 'html' && test.latest.output_html" type="button" class="font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" data-expand-preview @click="previewTarget = test.latest">{{ t('tests.expandPreview') }}</button></figcaption>
+                  <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" compact @decided="refreshAfterDecision" />
                 </figure>
               </div>
             </section>
@@ -76,6 +79,12 @@
         <p v-else-if="!historyResults.length" class="py-4 text-center text-sm text-gray-500">{{ t('tests.empty') }}</p>
         <div v-else-if="historyBeforeId" class="flex justify-center"><button type="button" class="btn btn-secondary" @click="loadHistory">{{ t('tests.loadMore') }}</button></div>
       </div>
+    </BaseDialog>
+    <BaseDialog :show="!!previewTarget" :title="previewTarget ? `${targetName(previewTarget)} · ${testName(previewTarget)}` : ''" width="extra-wide" @close="previewTarget = null">
+      <template v-if="previewTarget">
+        <TestResultOutput :result="previewTarget" />
+        <AdminTestDecision v-if="reviewFor(previewTarget)" :review="reviewFor(previewTarget)!" @decided="refreshAfterDecision" />
+      </template>
     </BaseDialog>
   </AppLayout>
 </template>
@@ -157,6 +166,10 @@ const displayResults = computed(() => {
 const activeGroup = ref('')
 const modelFilter = ref('')
 const historyTarget = ref<TestSeries | null>(null)
+const previewTarget = ref<TestResult | null>(null)
+watch(displayResults, results => {
+  if (previewTarget.value) previewTarget.value = results.find(result => result.id === previewTarget.value?.id) ?? null
+})
 const historyResults = ref<TestResult[]>([])
 const historyLoading = ref(false)
 const historyError = ref('')
@@ -340,6 +353,7 @@ const castVote = async (id: number, vote: TestVote) => {
       allResults.value = []
       voteResults.value = []
       closeHistory()
+      previewTarget.value = null
       await load(true)
     }
     votingResultIds.value.delete(id)

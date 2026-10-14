@@ -34,6 +34,39 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('configurable test management', () => {
+  it('validates, saves and copies time periods and can switch back to cron', async () => {
+    const schedule = { timezone: 'Asia/Shanghai', periods: [
+      { start: '08:00', end: '20:00', interval_minutes: 60 },
+      { start: '20:00', end: '08:00', interval_minutes: 180 },
+    ] }
+    api.listPlans.mockResolvedValue([{ ...plan, schedule }])
+    const wrapper = makeWrapper(); await flushPromises()
+    expect(wrapper.get('tbody').text()).toContain('20:00–08:00')
+    expect(wrapper.get('tbody').text()).toContain('Asia/Shanghai')
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    let dialog = wrapper.get('[data-dialog]')
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    await dialog.findAll('[data-period-end]')[1].setValue('09:00')
+    expect(save.attributes('disabled')).toBeDefined()
+    await dialog.findAll('[data-period-end]')[1].setValue('08:00')
+    await dialog.findAll('[data-period-interval]')[1].setValue(2)
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ schedule: { ...schedule, periods: [schedule.periods[0], { ...schedule.periods[1], interval_minutes: 120 }] } }))
+    expect(schedule.periods[1].interval_minutes).toBe(180)
+    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, schedule }))
+    api.createPlan.mock.calls[0][0].schedule.periods[1].interval_minutes = 60
+    expect(schedule.periods[1].interval_minutes).toBe(180)
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    dialog = wrapper.get('[data-dialog]')
+    await dialog.get('[data-schedule-mode]').setValue('cron')
+    await dialog.get('[data-schedule-cron]').setValue('15 * * * *')
+    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenLastCalledWith(10, expect.objectContaining({ schedule: null, cron_expression: '15 * * * *' }))
+    wrapper.unmount()
+  })
+
   it('creates, edits and copies model consistency definitions without a user prompt', async () => {
     const modelType = { id: 7, name: 'Model consistency', key: 'model-consistency', output_kind: 'model_check', prompt: 'Server managed prompt', enabled: true }
     api.listTypes.mockResolvedValue([modelType])

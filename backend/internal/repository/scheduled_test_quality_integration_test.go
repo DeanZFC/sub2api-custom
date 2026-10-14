@@ -91,6 +91,8 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	applyMigration("264_scheduled_test_cache_recovery.sql")
 	applyMigration("265_scheduled_test_generic_policy.sql")
 	applyMigration("268_scheduled_test_combination_states.sql")
+	applyMigration("270_scheduled_test_time_periods.sql")
+	applyMigration("270_scheduled_test_time_periods.sql")
 	var statisticsCount int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))
 	require.Equal(t, 1, statisticsCount, "the local statistics definition is seeded idempotently")
@@ -99,6 +101,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	definitions := NewScheduledTestDefinitionRepository(db)
 	legacy, err := plans.GetByID(ctx, legacyPlanID)
 	require.NoError(t, err)
+	require.Nil(t, legacy.Schedule, "existing plans retain cron after the migration")
 	require.Equal(t, []int64{candyID}, legacy.TestDefinitionIDs)
 	legacyResult, err := results.GetByID(ctx, legacyResultID)
 	require.NoError(t, err)
