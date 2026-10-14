@@ -2706,6 +2706,8 @@ export interface TestProtectionDecision {
 }
 
 export interface TestResult {
+  /** Current account status and scheduling switch; absent for account-free results. */
+  account_schedulable?: boolean | null
   /** Returned only by administrator result endpoints. */
   account_name?: string
   plan_name?: string

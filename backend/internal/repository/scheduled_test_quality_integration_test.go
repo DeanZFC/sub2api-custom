@@ -172,7 +172,6 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	seen := map[int64]bool{}
 	for _, result := range visible {
 		seen[result.ID] = true
-		require.NotEqual(t, "failed", result.Status)
 		require.Empty(t, result.AccountName, "public previews must not load account names")
 		if result.ID == legacyResultID {
 			require.Nil(t, result.AccountID, "group results must not expose the executing account")
@@ -181,12 +180,12 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		seriesCounts[fmt.Sprintf("%d/%s/%s", *result.TestDefinitionID, result.ModelID, result.ReasoningEffort)]++
 	}
 	require.Zero(t, seriesCounts[fmt.Sprintf("%d/model-a/high", candyID)], "a running check must not fall back to earlier successes")
-	require.Zero(t, seriesCounts[fmt.Sprintf("%d/model-a/high", htmlID)], "a failed check must not fall back to earlier successes")
+	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-a/high", htmlID)], "the latest failed check remains visible")
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-a/medium", candyID)])
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-b/high", candyID)])
-	require.False(t, seen[initialRunning.ID], "the user list contains completed successes only")
+	require.False(t, seen[initialRunning.ID], "the user list contains completed results only")
 	require.False(t, seen[running.ID], "in-progress checks are not successful results")
-	require.False(t, seen[failed.ID])
+	require.True(t, seen[failed.ID])
 	require.False(t, seen[privateResult.ID])
 	publicJSON, err := json.Marshal(visible)
 	require.NoError(t, err)
@@ -221,7 +220,28 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		last, err := results.ListVisibleHistory(ctx, 100, anchor.ID, all[len(all)-1].ID, 10)
 		require.NoError(t, err)
 		require.Empty(t, last)
-		for _, hiddenID := range []int64{privateResult.ID, failed.ID, running.ID, initialRunning.ID, 999999} {
+		failedHistory, err := results.ListVisibleHistory(ctx, 100, failed.ID, 0, 20)
+		require.NoError(t, err, "a failed latest result can open the successful history for its own series")
+		require.Len(t, failedHistory, 6)
+		for _, row := range failedHistory {
+			require.Equal(t, htmlID, *row.TestDefinitionID)
+			require.Equal(t, "success", row.Status)
+			require.Equal(t, failed.ModelID, row.ModelID)
+			require.Equal(t, failed.AccountID, row.AccountID)
+		}
+		failedNext, err := results.ListVisibleHistory(ctx, 100, failed.ID, failedHistory[1].ID, 20)
+		require.NoError(t, err)
+		require.Len(t, failedNext, 4)
+		require.Equal(t, failedHistory[2].ID, failedNext[0].ID)
+		for _, state := range []string{"failed", "error"} {
+			emptyAnchor := createResult(htmlID, state, "empty-history-"+state, "high", 0)
+			emptyHistory, err := results.ListVisibleHistory(ctx, 100, emptyAnchor.ID, 0, 20)
+			require.NoError(t, err, "an authorized failure with no successful history returns an empty page")
+			require.Empty(t, emptyHistory)
+		}
+		_, err = results.ListVisibleHistory(ctx, 100, anchor.ID, failed.ID, 20)
+		require.ErrorIs(t, err, sql.ErrNoRows, "failed results are anchors, not successful-history cursors")
+		for _, hiddenID := range []int64{privateResult.ID, running.ID, initialRunning.ID, 999999} {
 			_, err := results.ListVisibleHistory(ctx, 100, hiddenID, 0, 20)
 			require.ErrorIs(t, err, sql.ErrNoRows)
 			_, err = results.ListVisibleHistory(ctx, 100, anchor.ID, hiddenID, 20)
@@ -367,7 +387,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.ElementsMatch(t, expectedIDs, actualIDs)
 	})
 
-	t.Run("public list shows only successful latest-run results", func(t *testing.T) {
+	t.Run("public list shows successful and failed latest-run results", func(t *testing.T) {
 		testScheduledTestLatestPublicRun(t, ctx, db, plans, results, candyID, htmlID)
 	})
 
@@ -496,7 +516,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.JSONEq(t, string(encoded), stored.ResponseText, "read normalization must never overwrite stored statistics")
 	})
 
-	t.Run("public results follow current account availability while admin history remains", func(t *testing.T) {
+	t.Run("public results retain paused accounts and report current scheduling", func(t *testing.T) {
 		const unavailableID, availableID = int64(70), int64(71)
 		execSQL(`INSERT INTO accounts (id,name) VALUES (70,'Visibility changing account'),(71,'Visibility control account');
 INSERT INTO account_groups VALUES (70,8),(71,8)`)
@@ -571,6 +591,7 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 					{name: "error", status: "error", schedulable: true},
 					{name: "inactive", status: "inactive", schedulable: true},
 					{name: "unschedulable", status: "active", schedulable: false},
+					{name: "quality paused", status: "quality_paused", schedulable: true},
 					{name: "soft deleted", status: "active", schedulable: true, deleted: started},
 				} {
 					t.Run(state.name, func(t *testing.T) {
@@ -578,21 +599,39 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 						public, err := results.ListVisible(ctx, 100, 3)
 						require.NoError(t, err)
 						require.False(t, containsID(public, older.ID))
-						require.False(t, containsID(public, latest.ID))
+						require.Equal(t, state.deleted == nil && control == nil, containsID(public, latest.ID))
+						for _, row := range public {
+							if row.ID == latest.ID {
+								require.NotNil(t, row.AccountSchedulable)
+								require.False(t, *row.AccountSchedulable)
+							}
+						}
 						require.True(t, containsID(public, groupStatistics.ID), "a group-only statistics snapshot does not depend on an executing account")
 						for _, beforeID := range []int64{0, older.ID} {
 							_, err = results.ListVisibleHistory(ctx, 100, latest.ID, beforeID, 20)
-							require.ErrorIs(t, err, sql.ErrNoRows, "historical anchors must recheck the current account state")
+							if state.deleted != nil {
+								require.ErrorIs(t, err, sql.ErrNoRows, "deleted accounts remain hidden")
+							} else {
+								require.NoError(t, err, "paused account history remains available")
+							}
 						}
 						if control != nil {
 							require.True(t, containsID(public, control.ID), "another active group-test account stays visible")
 							history, err := results.ListVisibleHistory(ctx, 100, control.ID, 0, 20)
 							require.NoError(t, err)
-							require.Len(t, history, 1, "a group series must exclude unavailable underlying accounts even though their IDs are hidden")
+							if state.deleted != nil {
+								require.Len(t, history, 1)
+							} else {
+								require.Len(t, history, 3)
+							}
 							require.Equal(t, control.ID, history[0].ID)
 							require.Nil(t, history[0].AccountID)
 							_, err = results.ListVisibleHistory(ctx, 100, control.ID, older.ID, 20)
-							require.ErrorIs(t, err, sql.ErrNoRows, "a hidden cursor in the same group series cannot bypass availability checks")
+							if state.deleted != nil {
+								require.ErrorIs(t, err, sql.ErrNoRows)
+							} else {
+								require.NoError(t, err)
+							}
 						}
 						adminHistory, err := results.ListByPlanID(ctx, plan.ID, 50)
 						require.NoError(t, err)
@@ -609,6 +648,12 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 						restored, err := results.ListVisible(ctx, 100, 3)
 						require.NoError(t, err)
 						require.Equal(t, control == nil, containsID(restored, latest.ID), "only the newest eligible result is shown without rewriting history")
+						for _, row := range restored {
+							if row.ID == latest.ID {
+								require.NotNil(t, row.AccountSchedulable)
+								require.True(t, *row.AccountSchedulable)
+							}
+						}
 						history, err := results.ListVisibleHistory(ctx, 100, latest.ID, 0, 20)
 						require.NoError(t, err)
 						require.True(t, containsID(history, older.ID))

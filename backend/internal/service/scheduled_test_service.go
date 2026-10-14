@@ -421,7 +421,7 @@ func (s *ScheduledTestService) ListVisibleResults(ctx context.Context, userID in
 	if err != nil {
 		return nil, err
 	}
-	normalizeStoredTestResults(results)
+	normalizePublicTestResults(results)
 	return results, nil
 }
 
@@ -442,9 +442,19 @@ func (s *ScheduledTestService) ListVisibleResultHistory(ctx context.Context, use
 		page.NextBeforeID = &cursor
 		results = results[:limit]
 	}
-	normalizeStoredTestResults(results)
+	normalizePublicTestResults(results)
 	page.Items = append(page.Items, results...)
 	return page, nil
+}
+
+// Failed results are public, but raw upstream diagnostics remain admin-only.
+func normalizePublicTestResults(results []*ScheduledTestResult) {
+	normalizeStoredTestResults(results)
+	for _, result := range results {
+		if result != nil {
+			result.ErrorMessage = ""
+		}
+	}
 }
 
 // normalizeStoredTestResults repairs derived output from older parsers when

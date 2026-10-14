@@ -220,6 +220,7 @@ export default {
   },
 
   tests: {
+    currentScheduling: 'Current scheduling', schedulingActive: 'Active', schedulingPaused: 'Paused', failed: 'Failed',
     expandPreview: 'Expand preview',
     adminReview: {
       details: 'Review details',

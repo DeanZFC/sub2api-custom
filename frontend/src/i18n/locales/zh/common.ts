@@ -220,6 +220,7 @@ export default {
   },
 
   tests: {
+    currentScheduling: '当前调度', schedulingActive: '参与调度', schedulingPaused: '暂停调度', failed: '未通过',
     expandPreview: '放大查看',
     adminReview: {
       details: '评审说明',

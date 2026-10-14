@@ -523,8 +523,11 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
                 THEN COALESCE(r.account_id::text, '')
                 ELSE 'group'
            END AS result_target_key,
-           r.account_id
+           r.account_id,
+           CASE WHEN r.account_id IS NOT NULL THEN COALESCE(visible_account.status = 'active' AND visible_account.schedulable, FALSE) END AS account_schedulable,
+           visible_account.id IS NOT NULL AND visible_account.deleted_at IS NULL AS account_exists
     FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
+    LEFT JOIN accounts visible_account ON visible_account.id=r.account_id
     LEFT JOIN scheduled_test_definitions d ON d.id=r.test_definition_id
     LEFT JOIN groups source_group ON source_group.id=r.group_id
     -- Account results follow the account's current group memberships. Prefer
@@ -548,20 +551,14 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
 ), visible_results AS NOT MATERIALIZED (
     SELECT r.id,r.plan_id,r.plan_name,r.test_name,r.test_order,r.group_name,r.plan_order,r.target_mode,r.status,
            r.response_text,r.output_kind,r.output_html,r.output_numeric,r.visible_account_id,r.model_id,r.reasoning_effort,
-           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key,r.group_order
+           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key,r.group_order,r.account_schedulable
     FROM projected_results r
     WHERE (
         (r.account_id IS NULL AND r.target_mode = 'group')
         OR (
             r.account_id IS NOT NULL
             AND r.group_id IS NOT NULL
-            AND EXISTS (
-                SELECT 1 FROM accounts visible_account
-                WHERE visible_account.id = r.account_id
-                  AND visible_account.deleted_at IS NULL
-                  AND visible_account.status = 'active'
-                  AND visible_account.schedulable = TRUE
-            )
+            AND r.account_exists
         )
     ) AND EXISTS (
         SELECT 1
@@ -589,11 +586,11 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
     )
 )`
 
-const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id,vr.group_order`
+const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id,vr.group_order,vr.account_schedulable`
 
-// The user list shows successful results from each plan's current execution.
-// Rank before checking success so legacy rows without a run ID cannot fall
-// back to an older success after a newer failure. History uses its own query.
+// The user list shows completed results, including failures, from each plan's
+// current execution. Rank first so a failed or running check cannot fall back
+// to an older success. History uses its own query.
 func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID int64, _ int) ([]*service.ScheduledTestResult, error) {
 	rows, err := r.db.QueryContext(ctx, scheduledTestVisibleResultsCTE+`, ranked_results AS (
     SELECT vr.*, row_number() OVER (
@@ -607,8 +604,8 @@ func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID 
 )
 SELECT `+scheduledTestVisibleResultColumns+`
 FROM ranked_results vr
-WHERE history_rank = 1 AND status IN ('success', 'passed')
-ORDER BY vr.started_at DESC, vr.id DESC`, userID)
+WHERE history_rank = 1 AND status IN ('success', 'passed', 'failed', 'error')
+ORDER BY vr.account_schedulable DESC NULLS LAST, (vr.status IN ('success', 'passed')) DESC, vr.started_at DESC, vr.id DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -616,18 +613,19 @@ ORDER BY vr.started_at DESC, vr.id DESC`, userID)
 	return scanVisibleTestResults(rows)
 }
 
-// A successful, authorized result determines the entire series. Cursor IDs
+// A completed, authorized result determines the entire series. Cursor IDs
 // must belong to that same series; callers cannot choose another group/target.
 func (r *scheduledTestResultRepository) ListVisibleHistory(ctx context.Context, userID, resultID, beforeID int64, limit int) ([]*service.ScheduledTestResult, error) {
 	if limit <= 0 || limit > 51 {
 		limit = 51
 	}
-	const seriesCTE = `, history_series AS (
+	const seriesCTE = `, history_anchor AS (
+    SELECT * FROM visible_results
+    WHERE id = $2 AND status IN ('success', 'passed', 'failed', 'error')
+), history_series AS (
     SELECT vr.*
     FROM visible_results vr
-    JOIN visible_results anchor ON anchor.id = $2
-       AND anchor.status IN ('success', 'passed')
-       AND vr.group_id IS NOT DISTINCT FROM anchor.group_id
+    JOIN history_anchor anchor ON vr.group_id IS NOT DISTINCT FROM anchor.group_id
        AND vr.result_target_key = anchor.result_target_key
        AND vr.test_definition_id IS NOT DISTINCT FROM anchor.test_definition_id
        AND vr.model_id = anchor.model_id
@@ -638,7 +636,7 @@ func (r *scheduledTestResultRepository) ListVisibleHistory(ctx context.Context, 
 )`
 	var anchorVisible, cursorValid bool
 	err := r.db.QueryRowContext(ctx, scheduledTestVisibleResultsCTE+seriesCTE+`
-SELECT EXISTS (SELECT 1 FROM history_series),
+SELECT EXISTS (SELECT 1 FROM history_anchor),
        ($3 = 0 OR EXISTS (SELECT 1 FROM cursor_result))`, userID, resultID, beforeID).Scan(&anchorVisible, &cursorValid)
 	if err != nil {
 		return nil, err
@@ -665,7 +663,7 @@ func scanVisibleTestResults(rows *sql.Rows) ([]*service.ScheduledTestResult, err
 	var out []*service.ScheduledTestResult
 	for rows.Next() {
 		v := &service.ScheduledTestResult{}
-		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID, &v.GroupOrder); err != nil {
+		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID, &v.GroupOrder, &v.AccountSchedulable); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

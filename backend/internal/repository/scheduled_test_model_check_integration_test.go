@@ -154,7 +154,8 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,8),(62,11);`)
 		for i := range checks {
 			stored = append(stored, persist(t, plan, "success", &checks[i]))
 		}
-		persist(t, plan, "failed", &service.ScheduledTestModelCheck{RequestedModel: plan.ModelID, UpstreamModel: "gpt-5.6-sol", ReturnedModels: []string{}, MatchMode: "exact", Verdict: "unknown", Reason: "upstream_error"})
+		failedCheck := service.ScheduledTestModelCheck{RequestedModel: plan.ModelID, UpstreamModel: "gpt-5.6-sol", ReturnedModels: []string{}, MatchMode: "exact", Verdict: "unknown", Reason: "upstream_error"}
+		failed := persist(t, plan, "failed", &failedCheck)
 		adminRows, err := svc.ListResults(ctx, plan.ID, 10)
 		require.NoError(t, err)
 		require.Len(t, adminRows, 5)
@@ -167,7 +168,10 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,8),(62,11);`)
 		}
 		visible, err := svc.ListVisibleResults(ctx, 1, 3)
 		require.NoError(t, err)
-		require.Empty(t, visible, "the latest failed execution must not fall back to older successful model checks")
+		require.Len(t, visible, 1)
+		require.Equal(t, failed.ID, visible[0].ID, "show the latest failure without falling back to an older successful model check")
+		require.Equal(t, "failed", visible[0].Status)
+		assertSnapshot(t, visible[0], failedCheck, true)
 		latest := persist(t, plan, "success", &checks[3])
 		visible, err = svc.ListVisibleResults(ctx, 1, 3)
 		require.NoError(t, err)

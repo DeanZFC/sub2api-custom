@@ -23,6 +23,34 @@ func (r scheduledTestReadResultsStub) ListVisible(context.Context, int64, int) (
 	return r.rows, nil
 }
 
+func (r scheduledTestReadResultsStub) ListVisibleHistory(context.Context, int64, int64, int64, int) ([]*ScheduledTestResult, error) {
+	return r.rows, nil
+}
+
+func TestScheduledTestPublicResultsHideUpstreamErrors(t *testing.T) {
+	for _, view := range []string{"list", "history"} {
+		t.Run(view, func(t *testing.T) {
+			row := &ScheduledTestResult{ID: 1, Status: "failed", OutputKind: "text", ResponseText: "partial output", ErrorMessage: "private upstream diagnostic"}
+			svc := NewScheduledTestService(nil, scheduledTestReadResultsStub{rows: []*ScheduledTestResult{row, nil}})
+			var rows []*ScheduledTestResult
+			if view == "list" {
+				var err error
+				rows, err = svc.ListVisibleResults(context.Background(), 1, 20)
+				require.NoError(t, err)
+			} else {
+				page, err := svc.ListVisibleResultHistory(context.Background(), 1, 1, 0, 20)
+				require.NoError(t, err)
+				rows = page.Items
+			}
+			require.Len(t, rows, 2)
+			require.Equal(t, "failed", rows[0].Status)
+			require.Equal(t, "partial output", rows[0].ResponseText)
+			require.Empty(t, rows[0].ErrorMessage)
+			require.Nil(t, rows[1])
+		})
+	}
+}
+
 func TestScheduledTestResultJSONPreservesZeroSortOrder(t *testing.T) {
 	data, err := json.Marshal(ScheduledTestResult{TestOrder: 0})
 	require.NoError(t, err)
@@ -109,7 +137,11 @@ func TestScheduledTestListRepairsLegacyHTMLDisplay(t *testing.T) {
 			require.Equal(t, "Original output unavailable.", got[1].ResponseText)
 			require.Empty(t, got[2].ResponseText)
 			require.Equal(t, "failed", got[3].Status, "read-time normalization must not change failure visibility")
-			require.Equal(t, "original failure", got[3].ErrorMessage)
+			if view == "admin" {
+				require.Equal(t, "original failure", got[3].ErrorMessage)
+			} else {
+				require.Empty(t, got[3].ErrorMessage)
+			}
 			require.Equal(t, transcript, got[3].ResponseText)
 			require.Equal(t, "legacy partial output", got[4].OutputHTML, "preserve old output when neither source can be parsed")
 			require.Equal(t, escaped, got[5].OutputHTML, "text results must not be interpreted as HTML")

@@ -62,7 +62,8 @@ type ScheduledTestResult struct {
 	ReturnedModels       []string                         `json:"-"`
 	ModelEvidenceInvalid bool                             `json:"-"`
 	AccountID            *int64                           `json:"account_id,omitempty"`
-	AccountName          string                           `json:"account_name,omitempty"` // populated by admin queries only
+	AccountSchedulable   *bool                            `json:"account_schedulable,omitempty"` // current account status and scheduling switch; nil for account-free results
+	AccountName          string                           `json:"account_name,omitempty"`        // populated by admin queries only
 	ModelID              string                           `json:"model_id"`
 	ReasoningEffort      string                           `json:"reasoning_effort,omitempty"`
 	GroupID              *int64                           `json:"group_id,omitempty"`

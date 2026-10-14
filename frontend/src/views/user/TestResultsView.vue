@@ -29,6 +29,10 @@
         <article v-for="account in accountResults" :key="account.key" class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900" data-account-result>
           <header class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-800/50" data-account-info>
             <div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 break-words"><h3 class="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="text-xs text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
+            <div v-if="account.schedulable != null" class="flex shrink-0 items-center gap-2 text-xs" data-scheduling-status>
+              <span class="text-gray-500 dark:text-gray-400">{{ t('tests.currentScheduling') }}</span>
+              <span class="inline-flex items-center gap-1.5 font-medium" :class="account.schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'"><span class="h-1.5 w-1.5 rounded-full bg-current" />{{ t(account.schedulable ? 'tests.schedulingActive' : 'tests.schedulingPaused') }}</span>
+            </div>
           </header>
           <div class="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3 p-3" data-account-tests>
             <section
@@ -129,10 +133,8 @@ const adminReviews = ref<TestAdminReview[]>([])
 const reviewError = ref('')
 const reviewIndex = computed(() => new Map(auth.isAdmin ? adminReviews.value.map(review => [review.result.id, review]) : []))
 const reviewFor = (result: TestResult) => reviewIndex.value.get(result.id)
-// The review endpoint intentionally includes quality-paused accounts for
-// administrator decisions. This page is the shared user-facing result view,
-// so a paused account must remain hidden here together with every result and
-// vote belonging to that account.
+// Reviews and votes provide a fallback when a result has no live scheduling
+// projection. A paused account remains visible in the regular result list.
 const pausedAccountIds = computed(() => {
   const ids = new Set<number>()
   for (const review of adminReviews.value) {
@@ -146,13 +148,12 @@ const pausedAccountIds = computed(() => {
 const isHiddenPausedAccount = (result: TestResult) => result.account_id != null && pausedAccountIds.value.has(result.account_id)
 const visibleVoteResults = computed(() => voteResults.value.filter(item => !isHiddenPausedAccount(item.result)))
 const regularResults = computed(() => {
-  const records = new Map(allResults.value.filter(result => !isHiddenPausedAccount(result)).map(result => [result.id, result]))
+  const records = new Map(allResults.value.map(result => [result.id, result]))
   // The normal result endpoint contains the freshest group projection. Active
   // review records are merged only when that result is unavailable; an older
   // review payload must not move a freshly re-routed account back to its
   // source group until the next poll.
   if (auth.isAdmin) for (const review of adminReviews.value) {
-    if (review.account_paused || isHiddenPausedAccount(review.result)) continue
     const current = records.get(review.result.id)
     records.set(review.result.id, current ? { ...review.result, ...current, account_name: review.result.account_name } : review.result)
   }
@@ -217,6 +218,13 @@ const projectedVotes = computed(() => {
 })
 const filteredVotes = computed(() => projectedVotes.value.filter(item => groupKey(item.result) === activeGroup.value && (!modelFilter.value || item.result.model_id === modelFilter.value)))
 const filteredResults = computed(() => sortResults(regularResults.value.filter(result => groupKey(result) === activeGroup.value && (!modelFilter.value || result.model_id === modelFilter.value))))
+const schedulingState = (result: TestResult) => result.account_schedulable
+  ?? (isHiddenPausedAccount(result) ? false : undefined)
+const resultRank = (result: TestResult) => {
+  if (['failed', 'error'].includes(result.status) || result.output_model_check?.verdict === 'fail') return 2
+  if (!isSuccessful(result) || (result.output_kind === 'model_check' && result.output_model_check?.verdict !== 'pass')) return 1
+  return 0
+}
 const accountResults = computed(() => {
   const accounts = new Map<string, { key: string; name: string; groupName: string; order: number; tests: Map<string, TestSeries> }>()
   for (const result of filteredResults.value) {
@@ -234,14 +242,17 @@ const accountResults = computed(() => {
     }
     series.results.push(result)
   }
-  return [...accounts.values()].sort((a, b) => a.order - b.order).map(account => {
+  return [...accounts.values()].map(account => {
     const tests = [...account.tests.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
-    return { ...account, tests }
-  })
+    const states = tests.map(test => schedulingState(test.latest))
+    const schedulable = states.includes(false) ? false : states.includes(true) ? true : undefined
+    const rank = schedulable === false ? 3 : Math.max(...tests.map(test => resultRank(test.latest)))
+    return { ...account, tests, schedulable, rank }
+  }).sort((a, b) => a.rank - b.rank || a.order - b.order)
 })
 
 const isSuccessful = (result: TestResult) => ['success', 'passed'].includes(result.status)
-const historyAnchor = (series: TestSeries) => series.results.find(isSuccessful)
+const historyAnchor = (series: TestSeries) => series.results.find(result => ['success', 'passed', 'failed', 'error'].includes(result.status))
 const closeHistory = () => {
   historyRequest++
   historyTarget.value = null
@@ -295,8 +306,10 @@ const openHistory = (series: TestSeries) => {
   void loadHistory()
 }
 const statusClass = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? 'badge badge-warning'
+  : !isSuccessful(result) ? 'badge badge-danger'
   : result.output_kind === 'model_check' ? result.output_model_check?.verdict === 'pass' ? 'badge badge-success' : result.output_model_check?.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning' : 'badge badge-success'
 const statusLabel = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? t('tests.running')
+  : !isSuccessful(result) ? t('tests.failed')
   : result.output_kind === 'model_check' ? t(`tests.modelCheck.${result.output_model_check?.verdict || 'unknown'}`) : t('tests.completed')
 const modelLabel = (result: TestResult) => `${result.model_id || '-'}${result.reasoning_effort ? ` · ${t('tests.reasoningEffort')}: ${result.reasoning_effort}` : ''}`
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '-'
@@ -374,7 +387,7 @@ const load = (force = false): Promise<void> => {
     // Publish one complete refresh together. An old voting or review response
     // must never keep the previous group's tab alongside freshly moved results.
     allResults.value = results.status === 'fulfilled'
-      ? sortResults(results.value.filter(result => ['success', 'passed', 'pending', 'running'].includes(result.status))) : []
+      ? sortResults(results.value.filter(result => ['success', 'passed', 'failed', 'error', 'pending', 'running'].includes(result.status))) : []
     voteResults.value = votes.status === 'fulfilled' ? votes.value.filter(visibleVote) : []
     adminReviews.value = administrator && auth.isAdmin && reviews.status === 'fulfilled' ? reviews.value : []
     votesLoadError.value = votes.status === 'rejected' ? extractApiErrorMessage(votes.reason, t('tests.voting.loadFailed')) : ''

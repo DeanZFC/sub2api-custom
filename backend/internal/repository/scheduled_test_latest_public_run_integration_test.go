@@ -65,7 +65,7 @@ INSERT INTO account_groups(account_id,group_id) VALUES (90,8),(91,8),(92,8),(93,
 			for _, row := range rows {
 				if row.PlanID == plan.ID || row.PlanID == independent.ID {
 					got = append(got, row.ID)
-					require.Contains(t, []string{"success", "passed"}, row.Status)
+					require.Contains(t, []string{"success", "passed", "failed", "error"}, row.Status)
 				}
 			}
 			require.ElementsMatch(t, want, got)
@@ -90,7 +90,7 @@ INSERT INTO account_groups(account_id,group_id) VALUES (90,8),(91,8),(92,8),(93,
 	finish(current[1], "passed")
 	finish(current[2], "failed")
 	finish(current[3], "running")
-	assertVisible(current[0].ID, current[1].ID, other[0].ID)
+	assertVisible(current[0].ID, current[1].ID, current[2].ID, other[0].ID)
 
 	// Failed and queued accounts still exist in the administrator's snapshot.
 	admin, err := results.ListByPlanID(ctx, plan.ID, 1)
@@ -127,11 +127,11 @@ INSERT INTO account_groups(account_id,group_id) VALUES (90,8),(91,8),(92,8),(93,
 	finish(previous[2], "success")
 	assertVisible(current[0].ID, current[1].ID, current[2].ID, other[0].ID)
 
-	// When the whole latest round fails, this plan has no public result.
+	// A failed latest round remains visible instead of falling back to old successes.
 	last, err := results.BeginRun(ctx, plan, "two-pm", []*service.ScheduledTestResult{input(plan, 90, candyID, noon.Add(2*time.Hour))})
 	require.NoError(t, err)
 	finish(last[0], "failed")
-	assertVisible(other[0].ID)
+	assertVisible(last[0].ID, other[0].ID)
 	var eligible int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM accounts WHERE id IN (90,91,92,93) AND status='active' AND schedulable`).Scan(&eligible))
 	require.Equal(t, 4, eligible, "listing results does not modify account state or scheduling")
