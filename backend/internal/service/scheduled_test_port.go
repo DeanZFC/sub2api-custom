@@ -111,6 +111,7 @@ type ScheduledTestStatistics struct {
 	CacheInputTokens  int64                        `json:"cache_input_tokens"`
 	CacheSamples      int64                        `json:"cache_samples"`
 	RecentRequests    []ScheduledTestRecentRequest `json:"recent_requests"`
+	RecoveryProbe     *ScheduledTestRecoveryProbe  `json:"recovery_probe,omitempty"`
 }
 
 // ScheduledTestRecentRequest deliberately contains no request or account details.

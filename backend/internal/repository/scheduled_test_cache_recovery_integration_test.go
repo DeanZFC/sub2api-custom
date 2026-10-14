@@ -136,6 +136,25 @@ CREATE TABLE ops_error_logs (
 		require.NoError(t, db.QueryRowContext(ctx, `SELECT recovery_phase,blocked,recovery_cooldown_until FROM scheduled_test_protection_states WHERE plan_id=$1`, planID).Scan(&phase, &blocked, &until))
 		return phase, blocked, until.Time
 	}
+	nextProbe := func(p *service.ScheduledTestPlan, probeStatus string) *service.ScheduledTestResult {
+		t.Helper()
+		at := time.Now().UTC().Truncate(time.Microsecond)
+		rows, err := repo.BeginRun(ctx, p, fmt.Sprintf("probe-%d", at.UnixNano()), []*service.ScheduledTestResult{{
+			PlanID: p.ID, TestDefinitionID: &definitionID, GroupID: &groupID, AccountID: &accountID,
+			TargetMode: "all_accounts", ModelID: "model", Status: "running", OutputKind: "statistics", StartedAt: at, FinishedAt: at,
+		}})
+		require.NoError(t, err)
+		require.NoError(t, repo.BeginProtectionRun(ctx, p, at))
+		row := rows[0]
+		require.NoError(t, repo.BeginProtection(ctx, row, p.Protection.Rules[0]))
+		needed, err := repo.StatisticsRecoveryProbeNeeded(ctx, row)
+		require.NoError(t, err)
+		require.True(t, needed)
+		row.Status, row.FinishedAt = "success", at.Add(time.Second)
+		row.OutputStatistics = &service.ScheduledTestStatistics{WindowStart: at.Add(-time.Hour), WindowEnd: at,
+			RecoveryProbe: &service.ScheduledTestRecoveryProbe{Status: probeStatus, StartedAt: at, FinishedAt: row.FinishedAt, LatencyMs: 1000}}
+		return row
+	}
 	status := func(want string, trial bool) {
 		t.Helper()
 		var got string
@@ -447,6 +466,93 @@ CREATE TABLE ops_error_logs (
 		status("quality_paused", false)
 		_, blocked, _ := state(other.ID)
 		require.True(t, blocked)
+	})
+
+	t.Run("next execution probe recovers without usage or a trial quota", func(t *testing.T) {
+		reset()
+		p, old := newHold(rule)
+		row := nextProbe(p, "success")
+		require.NoError(t, repo.CompleteProtection(ctx, row, "pass", "probe"))
+		phase, blocked, _ := state(p.ID)
+		require.Empty(t, phase)
+		require.False(t, blocked)
+		status("active", false)
+		start, err := repo.CacheRecoveryWindowStart(ctx, p.ID, accountID, definitionID)
+		require.NoError(t, err)
+		require.Equal(t, row.FinishedAt, *start)
+		var reason string
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT reason FROM scheduled_test_protection_states WHERE plan_id=$1`, p.ID).Scan(&reason))
+		require.Contains(t, reason, "主动探测成功")
+		gate := &accountRepository{sql: db}
+		for i := 0; i < rule.Recovery.MaxRequests+1; i++ {
+			allowed, err := gate.AcquireCacheRecoveryRequest(ctx, accountID)
+			require.NoError(t, err)
+			require.True(t, allowed, "probe recovery must remove the old trial budget")
+		}
+		require.NoError(t, repo.CompleteProtection(ctx, old, "fail", "old result"))
+		status("active", false)
+		// Replaying the successful probe cannot release a later timeout/failure.
+		exec(`UPDATE scheduled_test_protection_states SET blocked=TRUE,automated_verdict='fail',verdict='fail',recovery_phase='cooldown' WHERE plan_id=$1`, p.ID)
+		exec(`UPDATE accounts SET status='quality_paused' WHERE id=62`)
+		require.NoError(t, repo.CompleteProtection(ctx, row, "pass", "replayed probe"))
+		status("quality_paused", false)
+	})
+
+	t.Run("failed probe keeps pause and restarts cooldown", func(t *testing.T) {
+		reset()
+		p, _ := newHold(rule)
+		row := nextProbe(p, "failed")
+		require.NoError(t, repo.CompleteProtection(ctx, row, "fail", "probe failure"))
+		phase, blocked, until := state(p.ID)
+		require.Equal(t, "cooldown", phase)
+		require.True(t, blocked)
+		require.True(t, until.After(time.Now().Add(50*time.Second)))
+		status("quality_paused", false)
+		var reason string
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT reason FROM scheduled_test_protection_states WHERE plan_id=$1`, p.ID).Scan(&reason))
+		require.Contains(t, reason, "主动探测失败")
+	})
+
+	t.Run("probe only clears its own pause", func(t *testing.T) {
+		reset()
+		p, _ := newHold(rule)
+		otherRule := rule
+		otherRule.Recovery = nil
+		other, _ := newHold(otherRule)
+		row := nextProbe(p, "success")
+		require.NoError(t, repo.CompleteProtection(ctx, row, "pass", "probe"))
+		_, blocked, _ := state(p.ID)
+		require.False(t, blocked)
+		_, blocked, _ = state(other.ID)
+		require.True(t, blocked)
+		status("quality_paused", false)
+	})
+
+	t.Run("probe cannot override changes made while upstream responds", func(t *testing.T) {
+		for _, change := range []string{"manual disable", "plan disable", "next round", "new recovery verdict"} {
+			t.Run(change, func(t *testing.T) {
+				reset()
+				p, _ := newHold(rule)
+				row := nextProbe(p, "success")
+				switch change {
+				case "manual disable":
+					exec(`UPDATE accounts SET schedulable=FALSE WHERE id=62`)
+				case "plan disable":
+					exec(`UPDATE scheduled_test_plans SET enabled=FALSE WHERE id=$1`, p.ID)
+				case "next round":
+					_ = nextProbe(p, "failed")
+				case "new recovery verdict":
+					exec(`UPDATE scheduled_test_protection_states SET completed=TRUE,automated_verdict='fail',verdict='fail' WHERE plan_id=$1`, p.ID)
+				}
+				require.NoError(t, repo.CompleteProtection(ctx, row, "pass", "stale probe"))
+				_, blocked, _ := state(p.ID)
+				require.True(t, blocked)
+				status("quality_paused", false)
+				needed, err := repo.StatisticsRecoveryProbeNeeded(ctx, row)
+				require.NoError(t, err)
+				require.False(t, needed)
+			})
+		}
 	})
 
 	t.Run("recovery state survives result retention cleanup", func(t *testing.T) {

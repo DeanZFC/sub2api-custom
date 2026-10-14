@@ -152,6 +152,9 @@ func buildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 			evidence.AdminVerdict, evidence.Reason = state.AdminVerdict, state.Reason
 			evidence.PassCount, evidence.FailCount = state.PassCount, state.FailCount
 			_, evidence.AutomaticReason = evaluateScheduledTestProtection(state.Rule, state.Result)
+			if _, probeReason, ok := EvaluateScheduledTestRecoveryProbe(state.Rule, state.Result); ok {
+				evidence.AutomaticReason = probeReason
+			}
 		}
 		for _, threshold := range state.Rule.Thresholds {
 			detail := ScheduledTestThresholdDetail{ScheduledTestThreshold: threshold}

@@ -224,6 +224,16 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 		result.RunID = pending.RunID
 		result.ID, result.StartedAt, result.CreatedAt = pending.ID, pending.StartedAt, pending.CreatedAt
 	}
+	s.probeStatisticsRecovery(ctx, plan, result)
+	if result.OutputStatistics != nil && result.OutputStatistics.RecoveryProbe != nil {
+		encoded, encodeErr := json.Marshal(result.OutputStatistics)
+		if encodeErr != nil {
+			result.Status, result.ErrorMessage = "failed", encodeErr.Error()
+			result.OutputStatistics, result.ResponseText = nil, ""
+		} else {
+			result.ResponseText = string(encoded)
+		}
+	}
 	result.FinishedAt, result.LatencyMs = time.Now(), time.Since(started).Milliseconds()
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	defer cancel()

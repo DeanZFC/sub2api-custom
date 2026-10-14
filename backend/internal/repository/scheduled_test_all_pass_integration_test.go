@@ -198,6 +198,28 @@ func testScheduledTestAllPassRecovery(t *testing.T, ctx context.Context, db *sql
 	}
 	require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
 	f.check("active", false, 10)
+
+	// A later pause can recover on a new round's explicit probe with no usage.
+	rows = f.round("allpass-probe-pause", now.Add(10*time.Second))
+	rows[2].OutputStatistics = &service.ScheduledTestStatistics{WindowStart: now, WindowEnd: rows[2].StartedAt}
+	f.complete(rows[2], "fail")
+	f.check("quality_paused", false, 10)
+	rows = f.round("allpass-probe-recover", now.Add(20*time.Second))
+	needed, err := repo.StatisticsRecoveryProbeNeeded(ctx, rows[2])
+	require.NoError(t, err)
+	require.True(t, needed)
+	rows[2].FinishedAt = rows[2].StartedAt.Add(time.Second)
+	rows[2].OutputStatistics = &service.ScheduledTestStatistics{WindowStart: rows[2].StartedAt.Add(-time.Hour), WindowEnd: rows[2].StartedAt,
+		RecoveryProbe: &service.ScheduledTestRecoveryProbe{Status: "success", StartedAt: rows[2].StartedAt, FinishedAt: rows[2].FinishedAt}}
+	f.complete(rows[2], "pass")
+	f.check("quality_paused", false, 10) // The probe cannot skip pending model/candy.
+	f.complete(rows[0], "pass")
+	f.complete(rows[3], "pass")
+	f.review(rows[3], "fail")
+	f.complete(rows[1], "pass")
+	f.check("quality_paused", false, 10) // A current manual veto remains effective.
+	f.review(rows[3], "pass")
+	f.check("active", false, 10)
 }
 
 const allPassStatisticsFixture = `CREATE TABLE usage_logs (

@@ -2677,6 +2677,13 @@ export interface TestOutputStatistics {
   cache_samples?: number
   /** Latest ten outcomes, newest first; older snapshots may omit this field. */
   recent_requests?: TestStatisticsRecentRequest[] | null
+  /** Connectivity evidence kept separate from real usage statistics. */
+  recovery_probe?: {
+    status: 'success' | 'failed'
+    started_at: string
+    finished_at: string
+    latency_ms: number
+  } | null
 }
 
 export interface TestOutputModelCheck {

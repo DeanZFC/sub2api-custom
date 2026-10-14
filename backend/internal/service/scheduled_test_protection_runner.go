@@ -62,6 +62,9 @@ func (s *ScheduledTestRunnerService) completeResultProtection(ctx context.Contex
 		return
 	}
 	verdict, reason := evaluateScheduledTestProtection(*rule, result)
+	if probeVerdict, probeReason, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
+		verdict, reason = probeVerdict, probeReason
+	}
 	if err := repo.CompleteProtection(ctx, result, verdict, reason); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d result=%d protection completion error: %v", plan.ID, result.ID, err)
 		s.recordResultDecision(ctx, result, ScheduledTestProtectionDecision{Status: "error", Verdict: verdict, Reason: err.Error()})

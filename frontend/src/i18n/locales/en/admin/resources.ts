@@ -22,7 +22,7 @@ export default {
           description: "Enable scheduling when all automatic checks pass. Any failure pauses the account; manual review can veto it.",
           modeHint: "Choose each check’s role. Enable scheduling when all automatic requirements pass and there is no manual veto. Any automatic failure or administrator rejection pauses the account. Each new run reevaluates the checks and keeps the current scheduling state while results are pending. For more complex AND / OR conditions, switch to combined rules.",
           groups: "After all automatic checks pass",
-          samplesHint: "Missing data or insufficient samples remain pending and cannot lift an existing pause. With statistics recovery enabled, a limited trial starts after cooldown only when other automatic checks pass and no manual rejection exists. All fresh-sample recovery conditions must pass before full recovery and group assignment. Manual review starts anew each round.",
+          samplesHint: "Insufficient samples normally remain pending. With statistics recovery enabled, the next check actively probes the upstream if samples are still missing. Success can clear the statistics hold; recovery and group assignment still require all other automatic checks to pass and no manual veto. Limited trials after cooldown also evaluate fresh real requests. Manual review starts anew each round.",
           invalid: "Enable at least one automatic check and verify thresholds, answers, and recovery settings. Reviews must be administrator-only. When assigning groups, select at least one group within this strategy.",
         },
         combined: {
@@ -106,7 +106,7 @@ export default {
         conditionsHint: 'These are failure thresholds: any match fails the check. Passing requires no threshold matches and all answer and voting requirements to be met. Equality does not trigger a threshold.',
         recovery: {
           title: 'Automatic recovery after statistics failures',
-          description: 'Off by default. After a success-rate, cache-rate or first-token latency failure pauses scheduling, wait for a cooldown and admit limited real traffic. Resume when all configured metrics recover.',
+          description: 'Off by default. After a statistics failure, wait for a cooldown and admit limited real traffic. If the next check still lacks samples, probe the upstream. A successful probe clears this rule’s pause; a failed probe keeps it paused.',
           eligibility: 'Requires at least one statistics failure threshold and no voting. The fail action must pause scheduling and the pass action must clear this rule’s pause. If the fail action assigns groups, it must retain at least one group to receive trial requests. Adjust the rule or turn automatic recovery off.',
           conditionsTitle: 'Trial recovery requirements (all must pass)',
           conditionsHint: 'Uses the failure thresholds above without configuring them again. Other automatic checks and manual vetoes still apply.',
@@ -119,7 +119,7 @@ export default {
           trialHint: 'This trial admits at most {count} real request attempts, including failures. Recovery uses only requests started after the trial begins.',
           samplesHint: 'Samples are checked per configured metric: success rate uses successful and failed requests; cache rate uses valid streaming and WebSocket cache samples weighted by input tokens; first-token latency uses successful requests with a first-token time. Required samples cannot exceed the request allowance.',
           cacheHint: 'Cache-rate minimums use the recovery cache rate, which must meet every cache-rate minimum and cannot exceed a configured cache-rate maximum.',
-          retryHint: 'An unmet condition or insufficient samples at expiry starts another cooldown. No traffic or expired old records never count as recovery.',
+          retryHint: 'An unmet condition or insufficient samples at trial expiry starts another cooldown. The next scheduled or manual check probes the upstream if samples are insufficient. A successful probe can clear this rule’s pause; confirmed statistics failures and other holds still apply.',
         },
         actions: {
           pass: 'When conditions pass', fail: 'When conditions fail',
