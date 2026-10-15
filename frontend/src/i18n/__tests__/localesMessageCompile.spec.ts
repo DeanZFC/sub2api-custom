@@ -8,6 +8,7 @@ import zh from '../locales/zh'
 // "{\"user-agent\": ...}"）会在渲染时抛 "Invalid token in placeholder"，
 // 直接炸掉整个组件树，且构建期完全无感。本测试把全部文案预编译一遍，
 // 将该类问题固化为显式失败。字面量花括号请用 {'{'} / {'}'} 转义，
+// @ 也是链接消息的语法符号，普通文本中的 @ 请用 {'@'} 转义；
 // 或将语言中立的示例文本（如 JSON）移出 i18n。
 function collectCompileErrors(node: unknown, path: string, out: string[]): void {
   if (typeof node === 'string') {

@@ -4,6 +4,10 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
+  // Match the production runtime compiler so component tests parse real messages.
+  define: {
+    __INTLIFY_JIT_COMPILATION__: true
+  },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
