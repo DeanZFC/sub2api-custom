@@ -46,6 +46,15 @@ func (s *Service) loadConfig(ctx context.Context, db queryRower) (Config, error)
 }
 func (s *Service) Config(ctx context.Context) (Config, error) { return s.loadConfig(ctx, s.db) }
 
+// Authorize writes against the current settings, then keep them stable until
+// commit. Always take this lock before any binding, reward or usage lock.
+func (s *Service) lockConfig(ctx context.Context, tx *sql.Tx) (Config, error) {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared(71427101)`); err != nil {
+		return Config{}, err
+	}
+	return s.loadConfig(ctx, tx)
+}
+
 func validateURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {

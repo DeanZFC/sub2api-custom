@@ -574,8 +574,13 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/admin/qqbot/runtime',
     name: 'AdminQQBotRuntime',
-    component: () => import('@/views/admin/QQBotRuntimeView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Runtime', titleKey: 'qqbot.runtime' }
+    redirect: '/admin/qqbot/records'
+  },
+  {
+    path: '/admin/qqbot/records',
+    name: 'AdminQQBotRecords',
+    component: () => import('@/views/admin/QQBotRecordsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Activity Records', titleKey: 'qqbot.recordsTitle' }
   },
   {
     path: '/admin/qqbot/activities',

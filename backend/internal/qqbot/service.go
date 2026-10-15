@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/lib/pq"
 )
 
 type Service struct {
@@ -191,10 +193,28 @@ func (s *Service) SettleInvites(ctx context.Context, member string) error {
 	if err != nil {
 		return err
 	}
-	if !c.Enabled || c.InviteReward <= 0 {
+	return s.settleInvites(ctx, c, member)
+}
+
+func (s *Service) settleInvites(ctx context.Context, c Config, member string) error {
+	if !c.Enabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 		return nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT group_id,member_id FROM qq_bot_members WHERE app_id=$1 AND (member_id=$2 OR inviter_id=$2) AND joined_at IS NOT NULL AND left_at IS NULL AND inviter_id<>'' LIMIT 100`, c.AppID, member)
+	// Filter eligibility before bounding the batch. Otherwise old unbound or
+	// already-paid relationships can permanently hide later valid invitations.
+	rows, err := s.db.QueryContext(ctx, `SELECT m.group_id,m.member_id FROM qq_bot_members m
+ JOIN qq_bot_bindings b ON b.app_id=m.app_id AND b.member_id=m.member_id
+ JOIN users u ON u.id=b.user_id AND u.status='active' AND u.deleted_at IS NULL
+ JOIN qq_bot_bindings ib ON ib.app_id=m.app_id AND ib.member_id=m.inviter_id
+ JOIN users iu ON iu.id=ib.user_id AND iu.status='active' AND iu.deleted_at IS NULL
+ WHERE m.app_id=$1 AND (m.member_id=$2 OR m.inviter_id=$2) AND m.group_id=ANY($3)
+ AND m.joined_at IS NOT NULL AND m.left_at IS NULL AND m.inviter_id<>'' AND m.member_id<>m.inviter_id
+ AND m.invited_at<=m.joined_at AND m.invited_at>m.joined_at-INTERVAL '7 days' AND b.user_id<>ib.user_id
+ AND NOT EXISTS(SELECT 1 FROM qq_bot_rewards r WHERE r.kind='invite' AND r.app_id=m.app_id AND r.source_member_id=m.member_id)
+ AND NOT EXISTS(SELECT 1 FROM qq_bot_rewards r WHERE r.kind='invite' AND r.source_user_id=b.user_id)
+ AND (SELECT COUNT(*) FROM qq_bot_rewards r WHERE r.kind='invite' AND r.user_id=ib.user_id
+      AND (r.created_at AT TIME ZONE 'Asia/Shanghai')::date=$5::date)<$4
+ ORDER BY m.joined_at,m.group_id,m.member_id LIMIT 100`, c.AppID, member, pq.Array(c.AllowedGroups), c.InviteDailyLimit, day(time.Now()))
 	if err != nil {
 		return err
 	}
@@ -252,21 +272,48 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		}
 	}
 	cmd, arg := command(e.Content)
+	if strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(e.Content), "")) == "" {
+		cmd = "帮助"
+	}
 	text := ""
 	var img []byte
 	seq := 1
 	switch cmd {
 	case "帮助", "help":
-		text = `/帮助 查看帮助
-/签到 每日签到
-/我的额度 查询账户额度
-/我的奖励 查询累计奖励
-/绑定 邮箱或绑定码，绑定账号
-/邀请奖励 结算邀请奖励
-/抽奖 参与抽奖
-/抽奖次数 查询剩余次数
-/抽奖活动 查看活动规则和奖品
-/生图 图片描述，生成图片`
+		// Keep QQ's automatic reply mention above the command list.
+		text = `
+/帮助
+查看帮助
+
+/签到
+每日签到
+
+/我的额度
+查询账户额度
+
+/我的奖励
+查询各项累计奖励
+
+/绑定 邮箱或绑定码
+绑定账号
+
+/邀请活动
+查看邀请规则和今日进度
+
+/我的邀请
+查询邀请状态和人数
+
+/抽奖
+参与抽奖
+
+/抽奖次数
+查询剩余次数
+
+/抽奖活动
+查看活动规则和奖品
+
+/生图 图片描述
+生成图片（需 @机器人）`
 	case "绑定":
 		if arg == "" {
 			text = "用法：/绑定 邮箱或绑定码"
@@ -311,23 +358,33 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if err != nil {
 			text = "抽奖信息查询失败，请稍后重试。"
 		}
-	case "邀请奖励":
+	case "邀请活动":
 		var err error
-		text, err = s.reward(ctx, c, *j, "invite")
+		text, err = s.inviteInfo(ctx, c, *j)
 		if err != nil {
-			text = "邀请奖励发放失败，请稍后重试。"
+			text = "邀请活动查询失败，请稍后重试。"
 		}
-	case "我的额度", "我的奖励":
-		var balance, total float64
-		err := s.db.QueryRowContext(ctx, `SELECT u.balance,COALESCE((SELECT SUM(amount) FROM qq_bot_rewards WHERE user_id=u.id),0) FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.deleted_at IS NULL AND u.status='active'`, c.AppID, j.MemberID).Scan(&balance, &total)
+	case "我的邀请":
+		var err error
+		text, err = s.myInvites(ctx, c, *j)
+		if err != nil {
+			text = "邀请信息查询失败，请稍后重试。"
+		}
+	case "我的奖励":
+		var err error
+		text, err = s.myRewards(ctx, c, *j)
+		if err != nil {
+			text = "奖励信息查询失败，请稍后重试。"
+		}
+	case "我的额度":
+		var balance float64
+		err := s.db.QueryRowContext(ctx, `SELECT u.balance FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.deleted_at IS NULL AND u.status='active'`, c.AppID, j.MemberID).Scan(&balance)
 		if errors.Is(err, sql.ErrNoRows) {
 			text = "请先使用 /绑定 绑定网站账号。"
 		} else if err != nil {
 			text = "账户信息查询失败，请稍后重试。"
-		} else if cmd == "我的额度" {
-			text = fmt.Sprintf("账户额度：$%.2f", balance)
 		} else {
-			text = fmt.Sprintf("累计活动奖励：$%.2f", total)
+			text = fmt.Sprintf("账户额度：$%.2f", balance)
 		}
 	default:
 		if cmd != "" && cmd != "生图" && cmd != "画图" {

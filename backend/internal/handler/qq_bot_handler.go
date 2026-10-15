@@ -198,10 +198,11 @@ func (h *QQBotHandler) ConfirmBinding(c *gin.Context) {
 		response.Unauthorized(c, "请先登录")
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
 	var req struct {
 		MemberID string `json:"member_id"`
 	}
-	if c.ShouldBindJSON(&req) != nil || req.MemberID == "" {
+	if c.ShouldBindJSON(&req) != nil || req.MemberID == "" || len(req.MemberID) > 128 {
 		response.BadRequest(c, "请确认待绑定 QQ 身份")
 		return
 	}

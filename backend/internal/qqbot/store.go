@@ -75,24 +75,27 @@ func (s *Service) claimBinding(ctx context.Context, c Config, e Event, code stri
 	return "绑定申请已受理，请在网站个人资料页确认。"
 }
 func (s *Service) ConfirmBinding(ctx context.Context, user int64, member string) error {
-	c, err := s.Config(ctx)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	c, err := s.lockConfig(ctx, tx)
 	if err != nil {
 		return err
 	}
 	if !c.Enabled {
 		return ErrDisabled
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	var r BindRequest
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,273))`, c.AppID); err != nil {
 		return err
 	}
-	err = tx.QueryRowContext(ctx, `SELECT member_id,group_id,nickname,expires_at FROM qq_bot_bind_requests WHERE user_id=$1 AND app_id=$2 AND expires_at>NOW() FOR UPDATE`, user, c.AppID).Scan(&r.MemberID, &r.GroupID, &r.Nickname, &r.ExpiresAt)
-	if err != nil || r.MemberID == "" || r.MemberID != member {
+	err = tx.QueryRowContext(ctx, `SELECT r.member_id,r.group_id,r.nickname,r.expires_at FROM qq_bot_bind_requests r JOIN users u ON u.id=r.user_id
+WHERE r.user_id=$1 AND r.app_id=$2 AND r.expires_at>clock_timestamp() AND u.status='active' AND u.deleted_at IS NULL
+FOR UPDATE OF r FOR NO KEY UPDATE OF u`, user, c.AppID).Scan(&r.MemberID, &r.GroupID, &r.Nickname, &r.ExpiresAt)
+	// Row locking can wait after the SQL expiry predicate has been evaluated.
+	if err != nil || r.MemberID == "" || r.MemberID != member || !r.ExpiresAt.After(time.Now()) {
 		return errors.New("绑定请求不存在、尚未收到群内指令或已过期")
 	}
 	if !c.allows(r.GroupID) {
@@ -220,18 +223,31 @@ var (
 // Limits reserve attempts before calling an upstream. Unknown upstream outcomes
 // are never retried automatically: a timeout can still represent a paid request.
 func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string) error {
-	per, total := c.DailyChatLimit, c.TotalDailyChatLimit
-	if kind == "image" {
-		per, total = c.DailyImageLimit, c.TotalDailyImageLimit
-	}
-	if per == 0 || total == 0 {
-		return errFeatureUnavailable
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	current, err := s.lockConfig(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !current.Enabled || current.AppID != c.AppID || !current.allows(j.GroupID) {
+		return errFeatureUnavailable
+	}
+	c = current
+	per, total := c.DailyChatLimit, c.TotalDailyChatLimit
+	if kind == "image" {
+		if !c.ImageEnabled {
+			return errFeatureUnavailable
+		}
+		per, total = c.DailyImageLimit, c.TotalDailyImageLimit
+	} else if kind != "chat" {
+		return errFeatureUnavailable
+	}
+	if per == 0 || total == 0 {
+		return errFeatureUnavailable
+	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,271))`, c.AppID); err != nil {
 		return err
 	}
@@ -242,6 +258,7 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 	if recent > 0 {
 		return errUsageCooldown
 	}
+	usageDay := day(time.Now())
 	for i, scope := range []string{"all", "member:" + j.MemberID} {
 		limit := total
 		if i == 1 {
@@ -249,7 +266,7 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 		}
 		var count int
 		err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_daily_usage(app_id,scope,day,kind,count) VALUES($1,$2,$3,$4,1)
-  ON CONFLICT(app_id,scope,day,kind) DO UPDATE SET count=qq_bot_daily_usage.count+1 WHERE qq_bot_daily_usage.count<$5 RETURNING count`, c.AppID, scope, day(time.Now()), kind, limit).Scan(&count)
+  ON CONFLICT(app_id,scope,day,kind) DO UPDATE SET count=qq_bot_daily_usage.count+1 WHERE qq_bot_daily_usage.count<$5 RETURNING count`, c.AppID, scope, usageDay, kind, limit).Scan(&count)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errUsageLimit
 		}
@@ -264,22 +281,37 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 }
 
 func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (string, error) {
-	amount := c.CheckinReward
-	if kind == "invite" {
-		amount = c.InviteReward
-	}
-	if kind == "invite" && amount <= 0 {
-		return "邀请奖励未开启。", nil
+	if kind != "checkin" && kind != "invite" {
+		return "", errors.New("奖励类型不正确")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
+	current, err := s.lockConfig(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	if !current.Enabled || current.AppID != c.AppID || !current.allows(j.GroupID) {
+		return "当前群未启用机器人。", nil
+	}
+	c = current
+	amount := c.CheckinReward
+	if kind == "invite" {
+		if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+			return "邀请奖励未开启。", nil
+		}
+		amount = c.InviteReward
+	}
 	// Serialize reward eligibility and balance writes, including across replicas.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {
 		return "", err
 	}
+	// Use one settlement instant for both the daily key and ledger timestamp;
+	// NOW() would retain the transaction's pre-lock date across midnight.
+	rewardAt := time.Now()
+	rewardDay := day(rewardAt)
 	if kind == "checkin" {
 		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, checkinConfigLock); err != nil {
 			return "", err
@@ -307,7 +339,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	// Admin-assisted rebinding must not reset a QQ identity's reward eligibility.
 	var rewarded bool
 	if kind == "checkin" {
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_bot_rewards WHERE app_id=$1 AND member_id=$2 AND kind='checkin' AND (created_at AT TIME ZONE 'Asia/Shanghai')::date=$3::date)`, c.AppID, j.MemberID, day(time.Now())).Scan(&rewarded)
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_bot_rewards WHERE app_id=$1 AND member_id=$2 AND kind='checkin' AND (created_at AT TIME ZONE 'Asia/Shanghai')::date=$3::date)`, c.AppID, j.MemberID, rewardDay).Scan(&rewarded)
 	} else {
 		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_bot_rewards WHERE app_id=$1 AND source_member_id=$2 AND kind='invite')`, c.AppID, j.MemberID).Scan(&rewarded)
 	}
@@ -320,7 +352,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		}
 		return "该邀请奖励已发放。", nil
 	}
-	key := fmt.Sprintf("checkin:%d:%s", userID, day(time.Now()))
+	key := fmt.Sprintf("checkin:%d:%s", userID, rewardDay)
 	sourceUser := int64(0)
 	sourceMember := ""
 	recipientMember := j.MemberID
@@ -328,7 +360,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		sourceUser = userID
 		sourceMember = j.MemberID
 		err = tx.QueryRowContext(ctx, `SELECT m.inviter_id,b.user_id FROM qq_bot_members m JOIN qq_bot_bindings b ON b.app_id=m.app_id AND b.member_id=m.inviter_id JOIN users u ON u.id=b.user_id
-   WHERE m.app_id=$1 AND m.group_id=$2 AND m.member_id=$3 AND m.joined_at IS NOT NULL AND m.left_at IS NULL AND m.invited_at<=m.joined_at AND m.invited_at>m.joined_at-INTERVAL '7 days' AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.GroupID, j.MemberID).Scan(&recipientMember, &userID)
+   WHERE m.app_id=$1 AND m.group_id=$2 AND m.member_id=$3 AND m.joined_at IS NOT NULL AND m.left_at IS NULL AND m.invited_at<=m.joined_at AND m.invited_at>m.joined_at-INTERVAL '7 days' AND u.status='active' AND u.deleted_at IS NULL FOR SHARE OF m`, c.AppID, j.GroupID, j.MemberID).Scan(&recipientMember, &userID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "暂无符合条件的邀请记录。", nil
 		}
@@ -340,7 +372,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		}
 		key = fmt.Sprintf("invite:%d", sourceUser)
 		var count int
-		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_rewards WHERE kind='invite' AND user_id=$1 AND (created_at AT TIME ZONE 'Asia/Shanghai')::date=$2::date`, userID, day(time.Now())).Scan(&count); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_rewards WHERE kind='invite' AND user_id=$1 AND (created_at AT TIME ZONE 'Asia/Shanghai')::date=$2::date`, userID, rewardDay).Scan(&count); err != nil {
 			return "", err
 		}
 		if count >= c.InviteDailyLimit {
@@ -348,7 +380,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		}
 	}
 	var rewardID int64
-	err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,source_user_id,source_member_id,amount) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,0),$8,$9) ON CONFLICT(reward_key) DO NOTHING RETURNING id`, key, c.AppID, j.GroupID, recipientMember, userID, kind, sourceUser, sourceMember, amount).Scan(&rewardID)
+	err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,source_user_id,source_member_id,amount,created_at) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,0),$8,$9,$10) ON CONFLICT(reward_key) DO NOTHING RETURNING id`, key, c.AppID, j.GroupID, recipientMember, userID, kind, sourceUser, sourceMember, amount, rewardAt).Scan(&rewardID)
 	if errors.Is(err, sql.ErrNoRows) {
 		if kind == "checkin" {
 			return "今日已签到。", nil

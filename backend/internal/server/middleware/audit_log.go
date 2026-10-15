@@ -110,6 +110,7 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
+	"GET /api/v1/admin/qqbot/records/:kind":          "admin.qqbot.activities.records.read",
 	"GET /api/v1/admin/qqbot/lottery/draws":          "admin.qqbot.lottery.draws.read",
 	"GET /api/v1/admin/qqbot/lottery/users/:user_id": "admin.qqbot.lottery.chances.read",
 	"GET /api/v1/admin/qqbot/bindings":               "admin.qqbot.bindings.read",

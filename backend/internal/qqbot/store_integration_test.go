@@ -72,7 +72,13 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	_, err = db.Exec(string(raw))
 	require.NoError(t, err)
-	_, err = db.Exec(`CREATE TABLE payment_orders(id BIGSERIAL PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id),order_type TEXT NOT NULL DEFAULT 'balance',amount NUMERIC(20,2) NOT NULL,bonus_amount NUMERIC(20,2) NOT NULL DEFAULT 0,refund_amount NUMERIC(20,2) NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'COMPLETED',paid_at TIMESTAMPTZ DEFAULT NOW(),completed_at TIMESTAMPTZ DEFAULT NOW());`)
+	raw, err = migrations.FS.ReadFile("274_qq_bot_activity_record_indexes.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(raw))
+	require.NoError(t, err)
+	_, err = db.Exec(string(raw))
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE payment_orders(id BIGSERIAL PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id),order_type TEXT NOT NULL DEFAULT 'balance',amount NUMERIC(20,2) NOT NULL,bonus_amount NUMERIC(20,2) NOT NULL DEFAULT 0,refund_amount NUMERIC(20,2) NOT NULL DEFAULT 0,recharge_code VARCHAR(64) NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'COMPLETED',paid_at TIMESTAMPTZ DEFAULT NOW(),completed_at TIMESTAMPTZ DEFAULT NOW());`)
 	require.NoError(t, err)
 	return db
 }
@@ -235,6 +241,8 @@ func TestQQBotDailyLimitsAndEventDedup(t *testing.T) {
 	require.NoError(t, err)
 	c.TotalDailyChatLimit = 5
 	c.DailyChatLimit = 3
+	_, err = s.SaveConfig(ctx, c)
+	require.NoError(t, err)
 	e := Event{ID: "message", GroupID: "group", Content: "hi"}
 	e.Author.MemberID = "member"
 	raw, err := json.Marshal(e)

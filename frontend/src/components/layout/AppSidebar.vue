@@ -816,7 +816,7 @@ const adminNavItems = computed((): NavItem[] => {
       children: [
         { path: '/admin/qqbot/config', label: t('qqbot.basicConfig'), icon: BellIcon },
         { path: '/admin/qqbot/bindings', label: t('qqbot.bindingsTitle'), icon: UsersIcon },
-        { path: '/admin/qqbot/runtime', label: t('qqbot.runtime'), icon: OrderIcon },
+        { path: '/admin/qqbot/records', label: t('qqbot.recordsTitle'), icon: OrderIcon },
         { path: '/admin/qqbot/activities', label: t('qqbot.activitiesTitle'), icon: GiftIcon },
       ],
     },

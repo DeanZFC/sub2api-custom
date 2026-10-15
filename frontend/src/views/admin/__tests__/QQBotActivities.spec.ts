@@ -8,9 +8,8 @@ import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
 import QQBotInviteSettings from '@/components/admin/qqbot/QQBotInviteSettings.vue'
 import QQBotActivitiesView from '../QQBotActivitiesView.vue'
-import QQBotRuntimeView from '../QQBotRuntimeView.vue'
 
-const api = vi.hoisted(() => ({ checkinConfig: vi.fn(), saveCheckin: vi.fn(), inviteConfig: vi.fn(), saveInvite: vi.fn(), lotteryConfig: vi.fn(), saveLottery: vi.fn(), lotteryDraws: vi.fn(), lotteryState: vi.fn(), runtime: vi.fn() }))
+const api = vi.hoisted(() => ({ checkinConfig: vi.fn(), saveCheckin: vi.fn(), inviteConfig: vi.fn(), saveInvite: vi.fn(), lotteryConfig: vi.fn(), saveLottery: vi.fn(), lotteryDraws: vi.fn(), lotteryState: vi.fn() }))
 vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 function i18n(locale: 'zh' | 'en') { return createI18n({ legacy: false, locale, messages: { zh, en } }) }
@@ -27,7 +26,6 @@ describe('QQ activity pages with real translations', () => {
     api.saveLottery.mockImplementation(async c => c)
     api.lotteryDraws.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
     api.lotteryState.mockResolvedValue({ user_id: 7, recharge_total: 35, earned: 3, used: 1, remaining: 2, next_recharge: 5 })
-    api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [{ id: 1, user_id: 7, kind: 'lottery', amount: 0, created_at: '2026-10-15' }], bindings: 2, encryption_ready: true })
   })
   afterEach(() => { try { expect(console.error).not.toHaveBeenCalled() } finally { vi.restoreAllMocks() } })
   it.each(['zh', 'en'] as const)('%s saves check-in range independently and rejects reversed endpoints', async locale => {
@@ -71,22 +69,10 @@ describe('QQ activity pages with real translations', () => {
     expect(w.text()).not.toContain('$35.00000000')
     expect(w.text()).toContain('User not found')
   })
-  it('searches draw history and preserves the applied search while paging', async () => {
-    const translation = i18n('zh')
-    const w = mount(QQBotLotterySettings, { global: { plugins: [translation] } }); await flushPromises()
-    api.lotteryDraws.mockResolvedValueOnce({ items: [{ id: 1, user_id: 7, email: 'test@example.com', member_id: 'member', prize_name: 'Thanks', amount: 0, remaining: 2, created_at: '2026-10-15' }], total: 21, page: 1, page_size: 20 })
-    const search = w.findAll('form')[2]!
-    await search.get('input').setValue('test@example.com'); await search.trigger('submit'); await flushPromises()
-    expect(api.lotteryDraws).toHaveBeenLastCalledWith('test@example.com', 1)
-    expect(w.text()).toContain('Thanks')
-    await search.get('input').setValue('unsubmitted')
-    await w.findAll('button').find(b => b.text() === translation.global.t('qqbot.nextPage'))!.trigger('click'); await flushPromises()
-    expect(api.lotteryDraws).toHaveBeenLastCalledWith('test@example.com', 2)
-  })
   it.each(['zh', 'en'] as const)('%s preserves drafts while switching tabs and saves invitations independently', async locale => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/qqbot/activities', component: QQBotActivitiesView }] })
     await router.push('/admin/qqbot/activities')
-    const w = mount(QQBotActivitiesView, { global: { plugins: [i18n(locale), router] } })
+    const w = mount(QQBotActivitiesView, { global: { plugins: [i18n(locale), router], stubs: { RouterLink: true } } })
     await flushPromises()
     expect(w.findAll('[role="tab"]')).toHaveLength(3)
     expect(api.checkinConfig).toHaveBeenCalledTimes(1)
@@ -115,7 +101,7 @@ describe('QQ activity pages with real translations', () => {
   it('opens the linked tab and falls back to check-in for unknown tabs', async () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/qqbot/activities', component: QQBotActivitiesView }] })
     await router.push('/admin/qqbot/activities?tab=invite')
-    const w = mount(QQBotActivitiesView, { global: { plugins: [i18n('zh'), router] } })
+    const w = mount(QQBotActivitiesView, { global: { plugins: [i18n('zh'), router], stubs: { RouterLink: true } } })
     await flushPromises()
     expect(w.get('#qqbot-tab-invite').attributes('aria-selected')).toBe('true')
     expect(api.checkinConfig).not.toHaveBeenCalled()
@@ -134,12 +120,5 @@ describe('QQ activity pages with real translations', () => {
     await w.get('form').trigger('submit'); await flushPromises()
     expect(w.find('[role="alert"]').exists()).toBe(false)
     expect(w.get('[role="status"]').exists()).toBe(true)
-  })
-  it.each(['zh', 'en'] as const)('%s renders the standalone runtime page', async locale => {
-    const translation = i18n(locale)
-    const w = mount(QQBotRuntimeView, { global: { plugins: [translation] } }); await flushPromises()
-    expect(w.text()).toContain(translation.global.t('qqbot.runtime'))
-    expect(w.text()).toContain('lottery')
-    expect(w.find('form').exists()).toBe(false)
   })
 })

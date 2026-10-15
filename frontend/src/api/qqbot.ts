@@ -36,7 +36,20 @@ export interface QQLotteryConfig { enabled: boolean; title: string; recharge_ste
 export interface QQLotteryState { user_id: number; recharge_total: number; earned: number; used: number; remaining: number; next_recharge: number }
 export interface QQLotteryDraw { id: number; user_id: number; email: string; member_id: string; prize_name: string; amount: number; remaining: number; created_at: string }
 export interface QQLotteryDrawsPage { items: QQLotteryDraw[]; total: number; page: number; page_size: number }
+export type QQActivityKind = 'checkin' | 'lottery' | 'invite'
+export interface QQActivityParticipant {
+  member_id: string; user_id: number; email: string; nickname: string
+  bound: boolean; user_status: string; user_deleted: boolean
+}
+export interface QQActivityRecord {
+  id: string; group_id: string; participant: QQActivityParticipant; inviter?: QQActivityParticipant
+  status: string; amount: number; prize_name: string; remaining?: number; created_at: string
+  invited_at?: string; joined_at?: string; left_at?: string; rewarded_at?: string
+  reward_user_id: number; reward_email: string
+}
+export interface QQActivityRecordsPage { items: QQActivityRecord[]; total: number; page: number; page_size: number }
 export const qqbotAPI = {
+  activityRecords: async (kind: QQActivityKind, search: string, page: number) => (await apiClient.get<QQActivityRecordsPage>(`/admin/qqbot/records/${kind}`, { params: { search, page, page_size: 20 } })).data,
   inviteConfig: async () => (await apiClient.get<QQInviteConfig>('/admin/qqbot/invite')).data,
   saveInvite: async (config: QQInviteConfig) => (await apiClient.put<QQInviteConfig>('/admin/qqbot/invite', config)).data,
   checkinConfig: async () => (await apiClient.get<QQCheckinConfig>('/admin/qqbot/checkin')).data,

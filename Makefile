@@ -31,6 +31,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/__tests__/QQBotBindings.spec.ts \
 	src/views/admin/__tests__/QQBotView.spec.ts \
 	src/views/admin/__tests__/QQBotActivities.spec.ts \
+	src/views/admin/__tests__/QQBotRecords.spec.ts \
 	src/views/auth/__tests__/QQBotBindView.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \

@@ -181,18 +181,18 @@ func (s *Service) ConfirmEmailBinding(ctx context.Context, token, member string)
 	if !validBindingToken(token) || member == "" {
 		return "", ErrEmailBindingInvalid
 	}
-	c, err := s.Config(ctx)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	c, err := s.lockConfig(ctx, tx)
 	if err != nil {
 		return "", err
 	}
 	if !c.Enabled {
 		return "", ErrDisabled
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = tx.Rollback() }()
 	// Serializes concurrent email confirmations; unique binding constraints also
 	// protect races with the authenticated website-code flow.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,273))`, c.AppID); err != nil {
@@ -201,8 +201,9 @@ func (s *Service) ConfirmEmailBinding(ctx context.Context, token, member string)
 	var p EmailBindingPreview
 	var uid int64
 	err = tx.QueryRowContext(ctx, `SELECT r.user_id,r.member_id,r.group_id,r.nickname,r.expires_at FROM qq_bot_email_bind_requests r JOIN users u ON u.id=r.user_id
-WHERE r.token_hash=$1 AND r.app_id=$2 AND r.expires_at>NOW() AND u.email=r.email AND u.status='active' AND u.deleted_at IS NULL FOR UPDATE OF r FOR NO KEY UPDATE OF u`, codeHash(token), c.AppID).Scan(&uid, &p.MemberID, &p.GroupID, &p.Nickname, &p.ExpiresAt)
-	if err != nil || p.MemberID != member || !c.allows(p.GroupID) {
+WHERE r.token_hash=$1 AND r.app_id=$2 AND r.expires_at>clock_timestamp() AND u.email=r.email AND u.status='active' AND u.deleted_at IS NULL FOR UPDATE OF r FOR NO KEY UPDATE OF u`, codeHash(token), c.AppID).Scan(&uid, &p.MemberID, &p.GroupID, &p.Nickname, &p.ExpiresAt)
+	// Recheck after acquiring row locks, which may have outlasted the link.
+	if err != nil || p.MemberID != member || !c.allows(p.GroupID) || !p.ExpiresAt.After(time.Now()) {
 		return "", ErrEmailBindingInvalid
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_bindings(app_id,member_id,user_id,nickname,group_id) VALUES($1,$2,$3,$4,$5)`, c.AppID, p.MemberID, uid, p.Nickname, p.GroupID)

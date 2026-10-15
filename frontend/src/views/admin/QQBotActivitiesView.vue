@@ -1,9 +1,10 @@
 <template>
   <AppLayout>
     <div class="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 class="text-2xl font-semibold">{{ t('qqbot.activitiesTitle') }}</h1>
-        <p class="mt-2 text-sm text-gray-500">{{ t('qqbot.activitiesHelp') }}</p>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div><h1 class="text-2xl font-semibold">{{ t('qqbot.activitiesTitle') }}</h1>
+        <p class="mt-2 text-sm text-gray-500">{{ t('qqbot.activitiesHelp') }}</p></div>
+        <RouterLink class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
       </div>
       <nav
         role="tablist"

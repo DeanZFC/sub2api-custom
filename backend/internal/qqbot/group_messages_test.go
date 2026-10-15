@@ -25,7 +25,7 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 	c := DefaultConfig()
 	c.Enabled, c.ImageEnabled = true, true
 	c.BaseURL = server.URL + "/v1"
-	for _, content := range []string{"你好", "签到", "/生图 一只猫", "/画图 一只猫", "/不存在", "/新对话", "/查看结果 task", "帮我解释 /签到", "@CTAV 你好"} {
+	for _, content := range []string{"你好", "签到", "/生图 一只猫", "/画图 一只猫", "/不存在", "/新对话", "/查看结果 task", "/邀请奖励", "帮我解释 /签到", "@CTAV 你好"} {
 		t.Run(content, func(t *testing.T) {
 			e := Event{ID: "ignored", GroupID: "group", Content: content}
 			e.Author.MemberID = "member"
@@ -70,6 +70,49 @@ func TestFullGroupCommandsWithoutMention(t *testing.T) {
 	require.EqualValues(t, 3, replies.Load())
 }
 
+func TestMentionWithoutContentRepliesWithHelp(t *testing.T) {
+	var replies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			_, _ = w.Write([]byte(`{"access_token":"test-only","expires_in":7200}`))
+		case "/v2/groups/group/bot_state":
+			_, _ = w.Write([]byte(`{"member_openid":"this-bot"}`))
+		case "/v2/groups/group/messages":
+			var body struct {
+				Content string `json:"content"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			replies = append(replies, body.Content)
+			_, _ = w.Write([]byte(`{"id":"sent"}`))
+		default:
+			t.Errorf("empty mention called unexpected endpoint: %s", r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+	// Help must work without bindings, model usage reservations or a database.
+	s := New(nil, nil, false, nil)
+	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
+	c := DefaultConfig()
+	j := Job{EventType: groupAtMessageCreate, GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
+	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
+	require.Len(t, replies, 1)
+	help := replies[0]
+	for _, content := range []string{"<@this-bot>", "  <@!this-bot> \t\n\u3000", "", " \t\n\u3000"} {
+		for _, eventType := range []string{groupAtMessageCreate, groupMessageCreate} {
+			t.Run(eventType+"/"+content, func(t *testing.T) {
+				e := Event{GroupID: "group", Content: content, Mentions: []Mention{{ID: "this-bot"}}}
+				j := Job{EventType: eventType, GroupID: "group", MessageID: "empty-mention", CreatedAt: time.Now()}
+				before := len(replies)
+				require.NoError(t, s.message(context.Background(), c, &j, e))
+				require.Len(t, replies, before+1)
+				require.Equal(t, help, replies[len(replies)-1])
+			})
+		}
+	}
+}
+
 func TestFullGroupMessagesRequireThisBotsIdentity(t *testing.T) {
 	var lookups atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +142,7 @@ func TestFullGroupMessagesRequireThisBotsIdentity(t *testing.T) {
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: "ignored", CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, e))
 	}
-	for _, content := range []string{"你好", "/签到", "/抽奖"} {
+	for _, content := range []string{"你好", "/签到", "/抽奖", "/我的邀请"} {
 		e := Event{GroupID: "group", Content: content, Mentions: []Mention{{MemberID: "another-bot"}}}
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: "ignored", CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, e))

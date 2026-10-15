@@ -27,6 +27,7 @@ func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
 	uid := user(t, db)
 	bind(t, db, uid, "member")
 	var chats, images, replies atomic.Int32
+	var lastReply atomic.Value
 	var picture bytes.Buffer
 	require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 16, 16))))
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +45,11 @@ func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
 		case "/v2/groups/group/files":
 			_, _ = w.Write([]byte(`{"file_info":"test-image"}`))
 		case "/v2/groups/group/messages":
+			var body struct {
+				Content string `json:"content"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			lastReply.Store(body.Content)
 			replies.Add(1)
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
@@ -94,17 +100,23 @@ func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
 	bound, _, err := s.Binding(ctx, c.AppID, secondUser)
 	require.NoError(t, err)
 	require.Equal(t, "new-member", bound.MemberID)
-	for _, content := range []string{"/帮助", "/我的额度", "/我的奖励", "/邀请奖励", "/抽奖次数", "/抽奖活动"} {
+	for _, content := range []string{"/帮助", "/我的额度", "/我的奖励", "/邀请活动", "/我的邀请", "/抽奖次数", "/抽奖活动"} {
 		enqueue("command-"+content, content, "member", nil)
 		s.runOne(ctx)
 		var status string
 		require.NoError(t, db.QueryRow(`SELECT status FROM qq_bot_jobs WHERE message_id=$1`, "command-"+content).Scan(&status))
 		require.Equal(t, "completed", status)
+		if content == "/我的邀请" {
+			require.Contains(t, lastReply.Load(), "累计邀请：0 人")
+		}
 	}
+	enqueue("unbound-invites", "/我的邀请", "unbound-member", nil)
+	s.runOne(ctx)
+	require.Contains(t, lastReply.Load(), "累计邀请：0 人")
 	require.Zero(t, chats.Load())
 	require.Zero(t, images.Load())
 	beforeModels := replies.Load()
-	for i, content := range []string{"你好", "/签到", "/抽奖"} {
+	for i, content := range []string{"你好", "/签到", "/抽奖", "/我的邀请"} {
 		enqueue(fmt.Sprintf("other-mention-%d", i), content, "member", []Mention{{ID: "another-bot"}})
 		s.runOne(ctx)
 	}

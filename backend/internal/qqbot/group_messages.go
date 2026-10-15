@@ -26,7 +26,7 @@ func unmentionedGroupCommand(e Event) bool {
 	}
 	cmd, _ := command(e.Content)
 	switch cmd {
-	case "帮助", "help", "绑定", "签到", "邀请奖励", "我的额度", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动":
+	case "帮助", "help", "绑定", "签到", "邀请活动", "我的邀请", "我的额度", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动":
 		return true
 	}
 	return false

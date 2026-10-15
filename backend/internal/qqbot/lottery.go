@@ -40,14 +40,15 @@ type LotteryDrawsPage struct {
 	PageSize int           `json:"page_size"`
 }
 
-// Count USD principal from completed online balance orders, including history.
+// Count USD principal from completed online balance orders and redeemed positive
+// balance codes, including history. Payment-generated codes only count as orders.
 // Bonus credits, subscriptions and administrative credits never create chances.
 // Refund-in-progress orders are suspended; partial refunds remove principal pro rata.
-func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64, lockOrders bool) (LotteryState, error) {
+func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64, lockSources bool) (LotteryState, error) {
 	out := LotteryState{UserID: uid}
 	orderQuery := `SELECT amount,bonus_amount,refund_amount,status FROM payment_orders
         WHERE user_id=$1 AND order_type='balance' AND paid_at IS NOT NULL AND completed_at IS NOT NULL ORDER BY id`
-	if lockOrders {
+	if lockSources {
 		orderQuery += ` FOR SHARE`
 	}
 	var totalText string
@@ -62,6 +63,24 @@ func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64
 	if err != nil {
 		return out, err
 	}
+	// Online fulfillment also redeems a balance code, sometimes before the order
+	// is completed. Exclude codes belonging to any order so bonuses, in-flight
+	// fulfillment and refunds cannot re-enter eligibility through the code ledger.
+	// Match globally: inconsistent legacy ownership must not bypass this exclusion.
+	redeemQuery := `SELECT r.value FROM redeem_codes r
+        WHERE r.used_by=$1 AND r.type='balance' AND r.status='used' AND r.used_at IS NOT NULL AND r.value>0
+        AND NOT EXISTS(SELECT 1 FROM payment_orders p WHERE p.recharge_code=r.code) ORDER BY r.id`
+	if lockSources {
+		redeemQuery += ` FOR SHARE OF r`
+	}
+	if err = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(value),0)::text FROM (`+redeemQuery+`) codes`, uid).Scan(&totalText); err != nil {
+		return out, err
+	}
+	redeemed, err := decimal.NewFromString(totalText)
+	if err != nil {
+		return out, err
+	}
+	total = total.Add(redeemed)
 	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_lottery_draws WHERE user_id=$1`, uid).Scan(&out.Used); err != nil {
 		return out, err
 	}

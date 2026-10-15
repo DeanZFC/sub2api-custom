@@ -36,20 +36,13 @@
       </dl>
       <p v-if="state" class="text-sm text-gray-500">{{ t('qqbot.nextRecharge', { amount: state.next_recharge.toFixed(2) }) }}</p>
     </section>
-    <section class="card space-y-4 p-6">
-      <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('qqbot.drawRecords') }}</h2><button class="btn btn-secondary" :disabled="loadingRecords" @click="loadRecords()">{{ t('common.refresh') }}</button></div>
-      <form class="flex flex-wrap gap-3" @submit.prevent="searchRecords"><input v-model="search" class="input min-w-0 flex-1" :aria-label="t('qqbot.drawSearch')" :placeholder="t('qqbot.drawSearch')" maxlength="254" /><button class="btn btn-secondary" :disabled="loadingRecords">{{ t('common.search') }}</button></form>
-      <p v-if="recordsError" role="alert" class="text-red-600">{{ recordsError }}</p>
-      <div class="overflow-x-auto"><table class="w-full min-w-[640px] text-left text-sm"><thead><tr><th>{{ t('qqbot.websiteAccount') }}</th><th>{{ t('qqbot.prizeName') }}</th><th>USD</th><th>{{ t('qqbot.remainingAtDraw') }}</th><th>{{ t('qqbot.time') }}</th></tr></thead><tbody><tr v-for="draw in records.items" :key="draw.id" class="border-t dark:border-dark-700"><td class="py-3">{{ draw.email }}<div class="text-xs text-gray-500">ID {{ draw.user_id }} · {{ draw.member_id }}</div></td><td>{{ draw.prize_name }}</td><td>{{ draw.amount.toFixed(2) }}</td><td>{{ draw.remaining }}</td><td class="whitespace-nowrap">{{ draw.created_at }}</td></tr></tbody></table></div>
-      <p v-if="!records.items.length && !loadingRecords" class="text-sm text-gray-500">{{ t('common.noData') }}</p>
-      <div class="flex flex-wrap items-center justify-between gap-3"><span class="text-sm text-gray-500">{{ t('qqbot.bindingPage', { total: records.total, page: records.page, pages }) }}</span><div class="flex gap-2"><button class="btn btn-secondary" :disabled="loadingRecords || records.page <= 1" @click="changePage(-1)">{{ t('qqbot.previousPage') }}</button><button class="btn btn-secondary" :disabled="loadingRecords || records.page >= pages" @click="changePage(1)">{{ t('qqbot.nextPage') }}</button></div></div>
-    </section>
+
   </div>
 </template>
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { qqbotAPI, type QQLotteryConfig, type QQLotteryState, type QQLotteryDrawsPage } from '@/api/qqbot'
+import { qqbotAPI, type QQLotteryConfig, type QQLotteryState } from '@/api/qqbot'
 const { t } = useI18n()
 const form = ref<QQLotteryConfig | null>(null)
 const saving = ref(false)
@@ -60,12 +53,6 @@ const userID = ref('')
 const state = ref<QQLotteryState | null>(null)
 const lookingUp = ref(false)
 const lookupError = ref('')
-const search = ref('')
-const appliedSearch = ref('')
-const loadingRecords = ref(false)
-const recordsError = ref('')
-const records = ref<QQLotteryDrawsPage>({ items: [], total: 0, page: 1, page_size: 20 })
-const pages = computed(() => Math.max(1, Math.ceil(records.value.total / records.value.page_size)))
 function message(e: unknown) { return (e as Error).message || t('common.error') }
 function setProbability(index: number, event: Event) {
   if (form.value) form.value.prizes[index]!.probability_bps = Math.round(Number((event.target as HTMLInputElement).value) * 100)
@@ -84,18 +71,8 @@ async function lookup() {
   catch (e) { lookupError.value = message(e) }
   finally { lookingUp.value = false }
 }
-async function loadRecords(page = records.value.page) {
-  loadingRecords.value = true; recordsError.value = ''
-  try { records.value = await qqbotAPI.lotteryDraws(appliedSearch.value, page) }
-  catch (e) { recordsError.value = message(e) }
-  finally { loadingRecords.value = false }
-}
-function searchRecords() { appliedSearch.value = search.value.trim(); void loadRecords(1) }
-function changePage(delta: number) { void loadRecords(records.value.page + delta) }
 onMounted(async () => {
-  await Promise.all([
-    qqbotAPI.lotteryConfig().then(c => { form.value = c }).catch(e => { error.value = message(e) }),
-    loadRecords()
-  ])
+  try { form.value = await qqbotAPI.lotteryConfig() }
+  catch (e) { error.value = message(e) }
 })
 </script>
