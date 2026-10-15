@@ -201,7 +201,11 @@ func TestQQBotBindingCommandAlreadyBound(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, s.Enqueue(ctx, c, Payload{Type: eventType, Data: raw}))
 			s.runOne(ctx)
-			require.Equal(t, []string{"当前 QQ 已绑定账号。"}, replies)
+			expectedReply := "当前 QQ 已绑定账号。"
+			if eventType == groupMessageCreate {
+				expectedReply = "<@member>\n" + expectedReply
+			}
+			require.Equal(t, []string{expectedReply}, replies)
 			require.Empty(t, m.bodies)
 			var requests, limits int
 			require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_email_bind_requests`).Scan(&requests))
@@ -258,7 +262,11 @@ func TestQQBotBindingCommandEmailAlreadyBound(t *testing.T) {
 				require.NoError(t, s.Enqueue(ctx, c, Payload{Type: eventType, Data: raw}))
 				s.runOne(ctx)
 			}
-			require.Equal(t, []string{emailBindingAlreadyBound, emailBindingAlreadyBound}, replies)
+			expectedReply := emailBindingAlreadyBound
+			if eventType == groupMessageCreate {
+				expectedReply = "<@member>\n" + expectedReply
+			}
+			require.Equal(t, []string{expectedReply, expectedReply}, replies)
 			require.Empty(t, m.bodies)
 			var requests int
 			require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_email_bind_requests`).Scan(&requests))

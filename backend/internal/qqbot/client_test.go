@@ -138,6 +138,39 @@ func TestImagesGenerateThenReuseSavedBytesForDelivery(t *testing.T) {
 	require.Error(t, s.send(context.Background(), c, j, "", img, 4))
 	require.Equal(t, 2, uploads)
 }
+func TestGroupTextReplyMentionsSenderForFullMessageCommands(t *testing.T) {
+	var content string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			_, _ = w.Write([]byte(`{"access_token":"qq-token","expires_in":"7200"}`))
+		case "/v2/groups/group/messages":
+			var body struct {
+				Content string `json:"content"`
+				MsgType int    `json:"msg_type"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.Equal(t, 0, body.MsgType)
+			content = body.Content
+			_, _ = w.Write([]byte(`{"id":"sent"}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	s := New(nil, nil, false, nil)
+	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
+	c := DefaultConfig()
+	c.AppID, c.AppSecret = "app", "qq-secret"
+	j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: "member-openid", MessageID: "incoming", CreatedAt: time.Now()}
+	require.NoError(t, s.send(context.Background(), c, j, "回复正文", nil, 1))
+	require.Equal(t, "<@member-openid>\n回复正文", content)
+	j.EventType = groupAtMessageCreate
+	require.NoError(t, s.send(context.Background(), c, j, "回复正文", nil, 2))
+	require.Equal(t, "回复正文", content)
+}
+
 func TestUpstreamErrorsDoNotExposeCredentialsOrRetry(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

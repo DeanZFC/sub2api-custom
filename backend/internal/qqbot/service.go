@@ -513,7 +513,10 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		}
 	}
 	if len(img) > 0 {
-		return s.send(ctx, c, *j, text, img, seq)
+		if err := s.send(ctx, c, *j, "图片已生成。", nil, seq); err != nil {
+			return err
+		}
+		return s.send(ctx, c, *j, text, img, seq+1)
 	}
 	chunks := splitReply(text, 5-seq+1)
 	for _, chunk := range chunks {

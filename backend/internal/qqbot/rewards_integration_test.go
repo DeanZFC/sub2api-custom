@@ -93,7 +93,7 @@ func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T
 	}
 	addInvite("group", "first-invitee")
 	query("invitee-query", "first-invitee")
-	require.Equal(t, "抽奖奖励：$0.00\n邀请奖励：$0.00\n签到奖励：$0.00\n累计奖励：$0.00", reply)
+	require.Equal(t, "<@first-invitee>\n抽奖奖励：$0.00\n邀请奖励：$0.00\n签到奖励：$0.00\n累计奖励：$0.00", reply)
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, inviter).Scan(&balance))
 	require.Equal(t, c.InviteReward, balance)
@@ -102,7 +102,7 @@ func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T
 	addInvite("other-group", "second-invitee")
 	for _, id := range []string{"inviter-query", "repeat-query"} {
 		query(id, "inviter")
-		require.Equal(t, "抽奖奖励：$0.00\n邀请奖励：$2.00\n签到奖励：$0.00\n累计奖励：$2.00", reply)
+		require.Equal(t, "<@inviter>\n抽奖奖励：$0.00\n邀请奖励：$2.00\n签到奖励：$0.00\n累计奖励：$2.00", reply)
 	}
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, inviter).Scan(&balance))
 	require.Equal(t, 2*c.InviteReward, balance)

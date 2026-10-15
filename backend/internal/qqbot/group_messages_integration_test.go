@@ -48,9 +48,12 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		case "/v2/groups/group/messages":
 			var body struct {
 				Content string `json:"content"`
+				MsgType int    `json:"msg_type"`
 			}
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			lastReply.Store(body.Content)
+			if body.MsgType == 0 {
+				lastReply.Store(body.Content)
+			}
 			replies.Add(1)
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
@@ -90,6 +93,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='checkin'`).Scan(&count))
 	require.Equal(t, 1, count)
 	require.EqualValues(t, 1, replies.Load())
+	require.Contains(t, lastReply.Load(), "<@member>\n签到成功")
 
 	// The binding-code flow also works without a mention.
 	secondUser := user(t, db)
@@ -101,6 +105,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	bound, _, err := s.Binding(ctx, c.AppID, secondUser)
 	require.NoError(t, err)
 	require.Equal(t, "new-member", bound.MemberID)
+	require.Contains(t, lastReply.Load(), "<@new-member>\n")
 	for _, content := range []string{"/帮助", "/我的额度", "/我的奖励", "/邀请活动", "/我的邀请", "/抽奖次数", "/抽奖活动"} {
 		enqueue("command-"+content, content, "member", nil)
 		s.runOne(ctx)
@@ -108,12 +113,12 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		require.NoError(t, db.QueryRow(`SELECT status FROM qq_bot_jobs WHERE message_id=$1`, "command-"+content).Scan(&status))
 		require.Equal(t, "completed", status)
 		if content == "/我的邀请" {
-			require.Equal(t, "待进群：0 人\n待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
+			require.Equal(t, "<@member>\n待进群：0 人\n待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
 		}
 	}
 	enqueue("unbound-invites", "/我的邀请", "unbound-member", nil)
 	s.runOne(ctx)
-	require.Equal(t, "待进群：0 人\n待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
+	require.Equal(t, "<@unbound-member>\n待进群：0 人\n待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
 	require.Zero(t, chats.Load())
 	require.Zero(t, images.Load())
 	beforeModels := replies.Load()
@@ -134,7 +139,8 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	enqueue("image", "/生图 一只猫", "member", []Mention{{MemberID: "this-bot"}})
 	s.runOne(ctx)
 	require.EqualValues(t, 1, images.Load())
-	require.Equal(t, beforeModels+4, replies.Load())
+	require.Equal(t, beforeModels+5, replies.Load())
+	require.Equal(t, "<@member>\n图片已生成。", lastReply.Load())
 
 	// The mention event can arrive first and omit mentions of the bot itself.
 	e := Event{ID: "mention-first", GroupID: "group", Content: "继续"}
@@ -146,7 +152,8 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	enqueue(e.ID, e.Content, e.Author.MemberID, []Mention{{ID: "this-bot"}})
 	s.runOne(ctx)
 	require.EqualValues(t, 2, chats.Load())
-	require.Equal(t, beforeModels+6, replies.Load())
+	require.Equal(t, beforeModels+7, replies.Load())
+	require.Equal(t, "answer", lastReply.Load(), "QQ adds the mention for GROUP_AT_MESSAGE_CREATE replies")
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='mention-first'`).Scan(&count))
 	require.Equal(t, 1, count)
 
@@ -162,7 +169,8 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		require.NoError(t, s.Enqueue(ctx, c, p))
 		s.runOne(ctx)
 		require.Equal(t, beforeImages+1, images.Load())
-		require.Equal(t, beforeReplies+2, replies.Load())
+		require.Equal(t, beforeReplies+3, replies.Load())
+		require.Equal(t, "<@image-member>\n图片已生成。", lastReply.Load())
 		var kind, status string
 		require.NoError(t, db.QueryRow(`SELECT kind,status FROM qq_bot_jobs WHERE message_id=$1`, id).Scan(&kind, &status))
 		require.Equal(t, "image", kind)
@@ -175,7 +183,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	enqueue("unmentioned-image-limit", "/生图 一只猫", "image-member", nil)
 	s.runOne(ctx)
 	require.Equal(t, beforeImages, images.Load())
-	require.Equal(t, "今日使用次数已达上限。", lastReply.Load())
+	require.Equal(t, "<@image-member>\n今日使用次数已达上限。", lastReply.Load())
 
 	enqueue("expired-command", "/帮助", "member", nil)
 	_, err = db.Exec(`UPDATE qq_bot_jobs SET created_at=NOW()-INTERVAL '6 minutes' WHERE message_id='expired-command'`)

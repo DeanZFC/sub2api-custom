@@ -406,7 +406,7 @@ func TestQQBotWorkerChatAndImageDelivery(t *testing.T) {
 	require.NoError(t, s.Enqueue(ctx, c, p))
 	s.runOne(ctx)
 	require.Equal(t, 1, imageCalls)
-	require.Equal(t, 4, replies)
+	require.Equal(t, 5, replies)
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
 	require.Zero(t, balance)
