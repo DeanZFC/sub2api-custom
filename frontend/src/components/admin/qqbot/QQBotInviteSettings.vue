@@ -1,0 +1,52 @@
+<template>
+  <div class="space-y-6">
+    <p class="text-sm text-gray-500">{{ t('qqbot.inviteHelp') }}</p>
+    <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
+    <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
+    <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
+      <h2 class="text-lg font-semibold">{{ t('qqbot.inviteSettings') }}</h2>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="space-y-1">
+          {{ t('qqbot.inviteReward') }}
+          <input v-model.number="form.invite_reward" data-testid="invite-reward" class="input" type="number" min="0" max="1000" step="0.00000001" required />
+        </label>
+        <label class="space-y-1">
+          {{ t('qqbot.inviteDaily') }}
+          <input v-model.number="form.invite_daily_limit" data-testid="invite-daily-limit" class="input" type="number" min="0" max="100000" step="1" required />
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary" :disabled="busy">{{ t('common.save') }}</button>
+    </form>
+    <p v-else-if="!error">{{ t('common.loading') }}</p>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { qqbotAPI, type QQInviteConfig } from '@/api/qqbot'
+
+const { t } = useI18n()
+const form = ref<QQInviteConfig | null>(null)
+const busy = ref(false)
+const error = ref('')
+const notice = ref('')
+
+async function save() {
+  if (!form.value) return
+  busy.value = true
+  error.value = ''; notice.value = ''
+  try {
+    form.value = await qqbotAPI.saveInvite({ ...form.value })
+    notice.value = t('common.saved')
+  } catch (e) {
+    error.value = (e as Error).message || t('common.error')
+  } finally {
+    busy.value = false
+  }
+}
+onMounted(async () => {
+  try { form.value = await qqbotAPI.inviteConfig() }
+  catch (e) { error.value = (e as Error).message || t('common.error') }
+})
+</script>

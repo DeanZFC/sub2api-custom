@@ -62,17 +62,17 @@ func (s *Service) CreateBindingCode(ctx context.Context, user int64) (BindReques
 }
 func (s *Service) claimBinding(ctx context.Context, c Config, e Event, code string) string {
 	if len(code) != 24 {
-		return "绑定码格式不正确，请从网站个人资料页复制。"
+		return "绑定码格式无效，请从网站个人资料页复制。"
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE qq_bot_bind_requests SET member_id=$1,nickname=$2,group_id=$3 WHERE app_id=$4 AND code_hash=$5 AND expires_at>NOW() AND member_id=''`, e.Author.MemberID, limitText(e.Author.Username, 100), e.GroupID, c.AppID, codeHash(code))
 	if err != nil {
-		return "绑定服务暂时不可用，请稍后重试。"
+		return "绑定失败，请稍后重试。"
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return "绑定码已过期或已使用，请在网站重新生成。"
+		return "绑定码无效或已过期，请重新生成。"
 	}
-	return "已收到绑定请求。请回到网站个人资料页，核对群和 QQ 身份后点击确认；确认前不会绑定账号。"
+	return "绑定申请已受理，请在网站个人资料页确认。"
 }
 func (s *Service) ConfirmBinding(ctx context.Context, user int64, member string) error {
 	c, err := s.Config(ctx)
@@ -119,6 +119,10 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) error {
 	if e.GroupID == "" || len(e.GroupID) > 128 {
 		return nil
 	}
+	// Ignore ambient full-stream messages before touching the queue or database.
+	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e)) {
+		return nil
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_groups(app_id,group_id,last_event) VALUES($1,$2,$3) ON CONFLICT(app_id,group_id) DO UPDATE SET last_event=EXCLUDED.last_event,last_seen_at=NOW()`, c.AppID, e.GroupID, p.Type)
 	if err != nil {
 		return err
@@ -127,26 +131,24 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) error {
 		return nil
 	}
 	switch p.Type {
-	case "GROUP_AT_MESSAGE_CREATE", "GROUP_JOIN_REQUEST", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE":
+	case groupAtMessageCreate, groupMessageCreate, "GROUP_JOIN_REQUEST", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE":
 	default:
 		return nil
 	}
-	if e.Author.Bot {
-		return nil
-	}
 	member := e.MemberID
-	if p.Type == "GROUP_AT_MESSAGE_CREATE" {
+	if isGroupMessageEvent(p.Type) {
 		member = e.Author.MemberID
 	}
 	if member == "" || len(member) > 128 {
 		return nil
 	}
 	eventKey := p.ID
-	if p.Type == "GROUP_AT_MESSAGE_CREATE" {
+	if isGroupMessageEvent(p.Type) {
 		if e.ID == "" {
 			return nil
 		}
-		eventKey = p.Type + ":" + e.ID
+		// Preserve existing keys and deduplicate delivery across both QQ events.
+		eventKey = groupAtMessageCreate + ":" + e.ID
 	}
 	if eventKey == "" {
 		return errors.New("事件缺少唯一 ID")
@@ -209,6 +211,12 @@ func (s *Service) claimJob(ctx context.Context) (Job, error) {
 	return j, tx.Commit()
 }
 
+var (
+	errFeatureUnavailable = errors.New("功能未启用。")
+	errUsageCooldown      = errors.New("请求频繁，请稍后再试。")
+	errUsageLimit         = errors.New("今日使用次数已达上限。")
+)
+
 // Limits reserve attempts before calling an upstream. Unknown upstream outcomes
 // are never retried automatically: a timeout can still represent a paid request.
 func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string) error {
@@ -217,7 +225,7 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 		per, total = c.DailyImageLimit, c.TotalDailyImageLimit
 	}
 	if per == 0 || total == 0 {
-		return errors.New("该功能今日不可用")
+		return errFeatureUnavailable
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -232,7 +240,7 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 		return err
 	}
 	if recent > 0 {
-		return errors.New("操作太快，请稍后再试")
+		return errUsageCooldown
 	}
 	for i, scope := range []string{"all", "member:" + j.MemberID} {
 		limit := total
@@ -243,7 +251,7 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 		err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_daily_usage(app_id,scope,day,kind,count) VALUES($1,$2,$3,$4,1)
   ON CONFLICT(app_id,scope,day,kind) DO UPDATE SET count=qq_bot_daily_usage.count+1 WHERE qq_bot_daily_usage.count<$5 RETURNING count`, c.AppID, scope, day(time.Now()), kind, limit).Scan(&count)
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("今日免费使用次数已用完，请明天再来")
+			return errUsageLimit
 		}
 		if err != nil {
 			return err
@@ -261,7 +269,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		amount = c.InviteReward
 	}
 	if kind == "invite" && amount <= 0 {
-		return "此奖励当前未开启。", nil
+		return "邀请奖励未开启。", nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -281,7 +289,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 			return "", loadErr
 		}
 		if !cfg.Enabled {
-			return "此奖励当前未开启。", nil
+			return "签到活动未开启。", nil
 		}
 		amount, err = randomCheckinAmount(cfg)
 		if err != nil {
@@ -291,7 +299,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	var userID int64
 	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先绑定网站账号，再领取奖励。", nil
+		return "请先使用 /绑定 绑定网站账号。", nil
 	}
 	if err != nil {
 		return "", err
@@ -307,7 +315,10 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		return "", err
 	}
 	if rewarded {
-		return "该 QQ 身份的奖励已经领取过，不会因换绑重复发放。", nil
+		if kind == "checkin" {
+			return "今日已签到。", nil
+		}
+		return "该邀请奖励已发放。", nil
 	}
 	key := fmt.Sprintf("checkin:%d:%s", userID, day(time.Now()))
 	sourceUser := int64(0)
@@ -319,13 +330,13 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		err = tx.QueryRowContext(ctx, `SELECT m.inviter_id,b.user_id FROM qq_bot_members m JOIN qq_bot_bindings b ON b.app_id=m.app_id AND b.member_id=m.inviter_id JOIN users u ON u.id=b.user_id
    WHERE m.app_id=$1 AND m.group_id=$2 AND m.member_id=$3 AND m.joined_at IS NOT NULL AND m.left_at IS NULL AND m.invited_at<=m.joined_at AND m.invited_at>m.joined_at-INTERVAL '7 days' AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.GroupID, j.MemberID).Scan(&recipientMember, &userID)
 		if errors.Is(err, sql.ErrNoRows) {
-			return "尚无符合条件的邀请记录（需邀请关系、成功入群及双方绑定）。", nil
+			return "暂无符合条件的邀请记录。", nil
 		}
 		if err != nil {
 			return "", err
 		}
 		if userID == sourceUser {
-			return "不能邀请自己领取奖励。", nil
+			return "本人邀请不计奖励。", nil
 		}
 		key = fmt.Sprintf("invite:%d", sourceUser)
 		var count int
@@ -339,7 +350,10 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	var rewardID int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,source_user_id,source_member_id,amount) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,0),$8,$9) ON CONFLICT(reward_key) DO NOTHING RETURNING id`, key, c.AppID, j.GroupID, recipientMember, userID, kind, sourceUser, sourceMember, amount).Scan(&rewardID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "该奖励已经领取过，不会重复发放。", nil
+		if kind == "checkin" {
+			return "今日已签到。", nil
+		}
+		return "该邀请奖励已发放。", nil
 	}
 	if err != nil {
 		return "", err
@@ -362,9 +376,9 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	}
 	s.invalidate(ctx, userID)
 	if kind == "invite" {
-		return fmt.Sprintf("邀请奖励已发放：邀请人获得 $%.8f 额度。", amount), nil
+		return fmt.Sprintf("邀请奖励已发放\n邀请人到账额度：$%.2f", amount), nil
 	}
-	return fmt.Sprintf("签到成功！获得 $%.8f 额度。群内 AI 聊天和生图仍由站长免费提供。", amount), nil
+	return fmt.Sprintf("签到成功\n到账额度：$%.2f", amount), nil
 }
 
 func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {

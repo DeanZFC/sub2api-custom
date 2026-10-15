@@ -30,12 +30,15 @@ export interface QQBindingState {
   pending: QQBindingRequest | null
 }
 export interface QQCheckinConfig { enabled: boolean; min_amount: number; max_amount: number }
+export interface QQInviteConfig { invite_reward: number; invite_daily_limit: number }
 export interface QQLotteryPrize { name: string; amount: number; probability_bps: number }
 export interface QQLotteryConfig { enabled: boolean; title: string; recharge_step: number; chances_per_step: number; prizes: QQLotteryPrize[] }
 export interface QQLotteryState { user_id: number; recharge_total: number; earned: number; used: number; remaining: number; next_recharge: number }
 export interface QQLotteryDraw { id: number; user_id: number; email: string; member_id: string; prize_name: string; amount: number; remaining: number; created_at: string }
 export interface QQLotteryDrawsPage { items: QQLotteryDraw[]; total: number; page: number; page_size: number }
 export const qqbotAPI = {
+  inviteConfig: async () => (await apiClient.get<QQInviteConfig>('/admin/qqbot/invite')).data,
+  saveInvite: async (config: QQInviteConfig) => (await apiClient.put<QQInviteConfig>('/admin/qqbot/invite', config)).data,
   checkinConfig: async () => (await apiClient.get<QQCheckinConfig>('/admin/qqbot/checkin')).data,
   saveCheckin: async (config: QQCheckinConfig) => (await apiClient.put<QQCheckinConfig>('/admin/qqbot/checkin', config)).data,
   lotteryConfig: async () => (await apiClient.get<QQLotteryConfig>('/admin/qqbot/lottery')).data,

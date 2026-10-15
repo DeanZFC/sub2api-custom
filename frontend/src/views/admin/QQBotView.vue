@@ -49,13 +49,6 @@
             <label v-for="field in limitFields" :key="field.key" class="space-y-1">{{ t(`qqbot.${field.label}`) }}<input v-model.number="form[field.key]" type="number" min="0" :max="field.max" class="input" /></label>
           </div>
         </section>
-        <section class="card space-y-4 p-6">
-          <h2 class="text-lg font-semibold">{{ t('qqbot.inviteSettings') }}</h2><p class="text-sm text-gray-500">{{ t('qqbot.inviteHelp') }}</p>
-          <div class="grid gap-4 md:grid-cols-3">
-            <label class="space-y-1">{{ t('qqbot.inviteReward') }}<input v-model.number="form.invite_reward" class="input" type="number" min="0" max="1000" step="0.00000001" /></label>
-            <label class="space-y-1">{{ t('qqbot.inviteDaily') }}<input v-model.number="form.invite_daily_limit" class="input" type="number" min="0" max="100000" /></label>
-          </div>
-        </section>
         <div class="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl border bg-white p-4 shadow-lg dark:border-dark-700 dark:bg-dark-900">
           <button type="submit" :disabled="busy" class="btn btn-primary">{{ t('common.save') }}</button>
           <button v-for="kind in probeKinds" :key="kind" type="button" class="btn btn-secondary" :disabled="busy || dirty" @click="probe(kind)">{{ t(`qqbot.test_${kind}`) }}</button>

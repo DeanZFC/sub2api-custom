@@ -96,7 +96,7 @@ func TestQQBotEmailBindingWorkerAndExplicitConfirmation(t *testing.T) {
 	s.qqURL = qq.URL
 	s.tokenURL = qq.URL + "/token"
 	e.ID = "email-bind-message"
-	e.Content = "<@bot> 绑定 alice@example.com"
+	e.Content = "<@bot> /绑定 alice@example.com"
 	raw, err := json.Marshal(e)
 	require.NoError(t, err)
 	payload := Payload{Type: "GROUP_AT_MESSAGE_CREATE", Data: raw}
@@ -140,6 +140,70 @@ func TestQQBotEmailBindingWorkerAndExplicitConfirmation(t *testing.T) {
 	require.Equal(t, "member", b.MemberID)
 	_, err = s.PreviewEmailBinding(ctx, token)
 	require.ErrorIs(t, err, ErrEmailBindingInvalid)
+}
+
+func TestQQBotBindingCommandAlreadyBound(t *testing.T) {
+	for _, scenario := range []string{"same email", "different email", "unknown email", "binding code", "without mention", "disabled account", "other group"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, m, c, e, uid := emailFixture(t)
+			ctx := context.Background()
+			bind(t, s.db, uid, e.Author.MemberID)
+			other := user(t, s.db)
+			_, err := s.db.Exec(`UPDATE users SET email='other@example.com' WHERE id=$1`, other)
+			require.NoError(t, err)
+			code, err := s.CreateBindingCode(ctx, other)
+			require.NoError(t, err)
+			e.ID = "already-bound-message"
+			e.Content = "<@bot> /绑定 alice@example.com"
+			eventType := groupAtMessageCreate
+			switch scenario {
+			case "different email":
+				e.Content = "<@bot> /绑定 other@example.com"
+			case "unknown email":
+				e.Content = "<@bot> /绑定 unknown@example.com"
+			case "binding code":
+				e.Content = "<@bot> /绑定 " + code.Code
+			case "without mention":
+				e.Content = "/绑定 alice@example.com"
+				eventType = groupMessageCreate
+			case "disabled account":
+				_, err = s.db.Exec(`UPDATE users SET status='disabled' WHERE id=$1`, uid)
+				require.NoError(t, err)
+			case "other group":
+				e.GroupID = "other-group"
+			}
+			var replies []string
+			qq := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" {
+					_, _ = w.Write([]byte(`{"access_token":"test-token","expires_in":7200}`))
+					return
+				}
+				require.Equal(t, "/v2/groups/"+e.GroupID+"/messages", r.URL.Path)
+				var data struct {
+					Content string `json:"content"`
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&data))
+				replies = append(replies, data.Content)
+				_, _ = w.Write([]byte(`{"id":"sent"}`))
+			}))
+			defer qq.Close()
+			s.qqURL, s.tokenURL = qq.URL, qq.URL+"/token"
+			raw, err := json.Marshal(e)
+			require.NoError(t, err)
+			require.NoError(t, s.Enqueue(ctx, c, Payload{Type: eventType, Data: raw}))
+			s.runOne(ctx)
+			require.Equal(t, []string{"当前 QQ 已绑定账号。"}, replies)
+			require.Empty(t, m.bodies)
+			var requests, limits int
+			require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_email_bind_requests`).Scan(&requests))
+			require.Zero(t, requests)
+			require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_email_limits`).Scan(&limits))
+			require.Zero(t, limits)
+			var member string
+			require.NoError(t, s.db.QueryRow(`SELECT member_id FROM qq_bot_bind_requests WHERE user_id=$1`, other).Scan(&member))
+			require.Empty(t, member, "already-bound QQ must not claim another account's binding code")
+		})
+	}
 }
 
 func TestQQBotEmailBindingInvalidation(t *testing.T) {

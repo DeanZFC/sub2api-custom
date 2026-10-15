@@ -100,7 +100,7 @@ func TestQQBotAdminUnbindRevokesRequestsAndPreservesRewards(t *testing.T) {
 	bind(t, s.db, other, "member")
 	text, err := s.reward(ctx, c, Job{AppID: c.AppID, MemberID: "member", GroupID: "group"}, "checkin")
 	require.NoError(t, err)
-	require.Contains(t, text, "不会因换绑重复")
+	require.Contains(t, text, "今日已签到")
 	require.NoError(t, s.db.QueryRow(`SELECT balance FROM users WHERE id=$1`, other).Scan(&balance))
 	require.Zero(t, balance)
 	// Stale removal must not delete even an identical account/member pair rebound later.
@@ -128,7 +128,7 @@ func TestQQBotAdminUnbindInviteRewardCannotBeReset(t *testing.T) {
 	bind(t, s.db, other, "member")
 	text, err := s.reward(ctx, c, j, "invite")
 	require.NoError(t, err)
-	require.Contains(t, text, "不会因换绑重复")
+	require.Contains(t, text, "该邀请奖励已发放")
 	var balance float64
 	require.NoError(t, s.db.QueryRow(`SELECT balance FROM users WHERE id=$1`, inviter).Scan(&balance))
 	require.Equal(t, c.InviteReward, balance)

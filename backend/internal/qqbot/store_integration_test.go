@@ -198,7 +198,7 @@ func TestQQBotInvitationRequiresJoinAndBothBindings(t *testing.T) {
 	bind(t, db, invitee, "invitee")
 	result, err := s.reward(ctx, c, j, "invite")
 	require.NoError(t, err)
-	require.Contains(t, result, "尚无")
+	require.Contains(t, result, "暂无")
 	e.Timestamp = json.RawMessage(strconv.FormatInt(time.Now().Unix(), 10))
 	j.EventType = "GROUP_MEMBER_ADD"
 	require.NoError(t, s.memberEvent(ctx, c, j, e))
@@ -330,7 +330,7 @@ func TestQQBotMembershipEventsMayArriveOutOfOrder(t *testing.T) {
 	require.True(t, left, "late join must not undo a newer departure")
 }
 
-func TestQQBotWorkerChatAndImageResultReplay(t *testing.T) {
+func TestQQBotWorkerChatAndImageDelivery(t *testing.T) {
 	db := testDB(t)
 	s := savedBot(t, db)
 	ctx := context.Background()
@@ -389,17 +389,16 @@ func TestQQBotWorkerChatAndImageResultReplay(t *testing.T) {
 	require.NoError(t, s.Enqueue(ctx, c, p))
 	s.runOne(ctx)
 	require.Equal(t, 1, chatCalls)
-	enqueue("message2", "生图 cat")
+	p = enqueue("message2", "/生图 cat")
 	s.runOne(ctx)
-	var id string
 	var size int
-	require.NoError(t, db.QueryRow(`SELECT id,status,octet_length(result_image) FROM qq_bot_jobs WHERE message_id='message2'`).Scan(&id, &status, &size))
+	require.NoError(t, db.QueryRow(`SELECT status,octet_length(result_image) FROM qq_bot_jobs WHERE message_id='message2'`).Scan(&status, &size))
 	require.Equal(t, "completed", status)
 	require.Positive(t, size)
-	enqueue("message3", "查看结果 "+id)
+	require.NoError(t, s.Enqueue(ctx, c, p))
 	s.runOne(ctx)
 	require.Equal(t, 1, imageCalls)
-	require.Equal(t, 5, replies)
+	require.Equal(t, 4, replies)
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
 	require.Zero(t, balance)

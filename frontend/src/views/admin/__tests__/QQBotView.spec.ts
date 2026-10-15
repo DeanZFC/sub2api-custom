@@ -31,8 +31,9 @@ describe('QQ bot settings', () => {
     const wrapper = mount(QQBotView, { global: { plugins: [i18n], stubs: { AppLayout: { template: '<main><slot /></main>' } } } })
     await flushPromises()
     expect(wrapper.text()).toContain(i18n.global.t('qqbot.eventsHelp'))
+    expect(wrapper.findAll('h2').map(heading => heading.text())).not.toContain(i18n.global.t('qqbot.inviteSettings'))
     expect(wrapper.text()).not.toContain('qqbot.eventsHelp')
-    if (locale === 'zh') expect(wrapper.text()).toContain('订阅群内 @ 消息')
+    if (locale === 'zh') expect(wrapper.text()).toContain('活动指令无需 @，聊天和生图需 @ 机器人')
     expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe('')
     const chatButton = () => wrapper.findAll('button').find(b => b.text() === i18n.global.t('qqbot.test_chat'))!
     expect(chatButton().attributes('disabled')).toBeUndefined()

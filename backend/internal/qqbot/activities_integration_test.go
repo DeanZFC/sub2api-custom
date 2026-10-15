@@ -67,7 +67,7 @@ func TestCheckinRandomRangeLegacyAndZeroDedup(t *testing.T) {
 	require.Contains(t, text, "签到成功")
 	text, err = s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
-	require.Contains(t, text, "已经领取")
+	require.Contains(t, text, "今日已签到")
 	require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{}))
 	text, err = s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestLotteryConcurrentSpendingReplayAndRebinding(t *testing.T) {
 			if err != nil {
 				failed.Add(1)
 			}
-			if strings.Contains(text, "获得 $1.") {
+			if strings.Contains(text, "奖励额度：$1.") {
 				won.Add(1)
 			}
 		}(i)
@@ -122,7 +122,7 @@ func TestLotteryConcurrentSpendingReplayAndRebinding(t *testing.T) {
 	bind(t, db, uid, "other")
 	text, err := s.drawLottery(ctx, c, Job{ID: "after-rebind", GroupID: "group", MemberID: "other"})
 	require.NoError(t, err)
-	require.Contains(t, text, "暂无可用")
+	require.Contains(t, text, "抽奖次数不足")
 	page, err := s.ListLotteryDraws(ctx, fmt.Sprint(uid), 1, 2)
 	require.NoError(t, err)
 	require.Equal(t, 3, page.Total)
@@ -180,12 +180,12 @@ func TestLotteryRefundDeficitAndRuleChangesNeverResetUsage(t *testing.T) {
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
 	text, err := s.drawLottery(ctx, c, Job{ID: "disabled-reset", GroupID: "group", MemberID: "member"})
 	require.NoError(t, err)
-	require.Contains(t, text, "暂无可用")
+	require.Contains(t, text, "抽奖次数不足")
 	_, err = db.Exec(`INSERT INTO payment_orders(user_id,amount) VALUES($1,25)`, uid)
 	require.NoError(t, err)
 	text, err = s.drawLottery(ctx, c, Job{ID: "covered", GroupID: "group", MemberID: "member"})
 	require.NoError(t, err)
-	require.Contains(t, text, "获得 $1.")
+	require.Contains(t, text, "奖励额度：$1.")
 	lottery.RechargeStep = 5
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
 	state, err = s.LotteryState(ctx, uid)
@@ -216,7 +216,7 @@ func TestLotteryAtomicRollbackAndZeroPrize(t *testing.T) {
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
 	text, err := s.drawLottery(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "未获得额度")
+	require.Contains(t, text, "奖励额度：$0.00")
 	state, err = s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Used)
@@ -231,13 +231,13 @@ func TestLotteryRequiresBindingAndActiveGroup(t *testing.T) {
 	for _, j := range []Job{{ID: "unbound", GroupID: "group", MemberID: "stranger"}, {ID: "group", GroupID: "forbidden", MemberID: "member"}} {
 		text, err := s.drawLottery(ctx, c, j)
 		require.NoError(t, err)
-		require.NotContains(t, text, "获得 $1.")
+		require.NotContains(t, text, "奖励额度：$1.")
 	}
 	lottery.Enabled = false
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
 	text, err := s.drawLottery(ctx, c, Job{ID: "disabled", GroupID: "group", MemberID: "member"})
 	require.NoError(t, err)
-	require.Contains(t, text, "尚未开启")
+	require.Contains(t, text, "未开启")
 	lottery.Enabled = true
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
 	_, err = db.Exec(`UPDATE users SET status='disabled' WHERE id=$1`, uid)
@@ -273,7 +273,7 @@ func TestLotteryWaitsForRefundBeforeEligibility(t *testing.T) {
 	select {
 	case r := <-done:
 		require.NoError(t, r.err)
-		require.Contains(t, r.text, "暂无可用")
+		require.Contains(t, r.text, "抽奖次数不足")
 	case <-time.After(5 * time.Second):
 		t.Fatal("draw did not resume")
 	}
@@ -281,7 +281,7 @@ func TestLotteryWaitsForRefundBeforeEligibility(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, state.Used)
 }
-func TestQQWorkerLotteryCommandsAndResultRecovery(t *testing.T) {
+func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 	ctx := context.Background()
 	s, db, c, uid, _ := lotteryFixture(t, 20)
 	var replies []string
@@ -304,39 +304,58 @@ func TestQQWorkerLotteryCommandsAndResultRecovery(t *testing.T) {
 	defer server.Close()
 	s.qqURL = server.URL
 	s.tokenURL = server.URL + "/token"
-	enqueue := func(id, content string) Payload {
+	enqueue := func(eventType, id, content string) Payload {
 		e := Event{ID: id, GroupID: "group", Content: content}
 		e.Author.MemberID = "member"
 		raw, err := json.Marshal(e)
 		require.NoError(t, err)
-		p := Payload{ID: id, Type: "GROUP_AT_MESSAGE_CREATE", Data: raw}
+		p := Payload{ID: id, Type: eventType, Data: raw}
 		require.NoError(t, s.Enqueue(ctx, c, p))
 		return p
 	}
-	p := enqueue("draw", "抽奖")
+	p := enqueue(groupMessageCreate, "draw", "/抽奖")
 	s.runOne(ctx)
 	require.NotEmpty(t, replies)
-	require.Contains(t, replies[0], "获得 $1.")
+	require.Contains(t, replies[0], "奖励额度：$1.")
 	require.NoError(t, s.Enqueue(ctx, c, p))
+	duplicate := p
+	duplicate.Type, duplicate.ID = groupAtMessageCreate, "draw-mention-delivery"
+	require.NoError(t, s.Enqueue(ctx, c, duplicate))
 	s.runOne(ctx)
-	var id, kind string
-	require.NoError(t, db.QueryRow(`SELECT id,kind FROM qq_bot_jobs WHERE message_id='draw'`).Scan(&id, &kind))
+	var kind string
+	require.NoError(t, db.QueryRow(`SELECT kind FROM qq_bot_jobs WHERE message_id='draw'`).Scan(&kind))
 	require.Equal(t, "lottery", kind)
-	enqueue("replay", "查看结果 "+id)
+	enqueue(groupMessageCreate, "chances", "/抽奖次数")
 	s.runOne(ctx)
-	require.Contains(t, replies[len(replies)-1], "获得 $1.")
-	enqueue("chances", "抽奖次数")
+	chancesReply := replies[len(replies)-1]
+	require.Contains(t, chancesReply, "剩余抽奖次数：1 次")
+	require.Contains(t, chancesReply, "下次赠送还需充值：$10.00")
+	require.NotContains(t, chancesReply, "概率")
+	enqueue(groupAtMessageCreate, "rules", "/抽奖活动")
 	s.runOne(ctx)
-	require.Contains(t, strings.Join(replies, "\n"), "剩余 1 次")
-	enqueue("rules", "抽奖活动")
-	s.runOne(ctx)
-	require.Contains(t, strings.Join(replies, "\n"), "概率 100.00%")
+	rulesReply := replies[len(replies)-1]
+	require.Contains(t, rulesReply, "每累计有效充值 $10.00 赠送 1 次")
+	require.Contains(t, rulesReply, "概率 100.00%")
+	require.NotContains(t, rulesReply, "剩余抽奖次数")
 	// Durable message deduplication also survives pruning the job tombstone.
 	_, err := db.Exec(`DELETE FROM qq_bot_jobs WHERE message_id='draw'`)
 	require.NoError(t, err)
 	require.NoError(t, s.Enqueue(ctx, c, p))
 	s.runOne(ctx)
+	require.Equal(t, replies[0], replies[len(replies)-1])
 	state, err := s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Used)
+	// @ commands remain supported, with the full event arriving afterward.
+	legacy := enqueue(groupAtMessageCreate, "mention-first-draw", "/抽奖")
+	s.runOne(ctx)
+	legacy.Type = groupMessageCreate
+	require.NoError(t, s.Enqueue(ctx, c, legacy))
+	s.runOne(ctx)
+	state, err = s.LotteryState(ctx, uid)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), state.Used)
+	var balance float64
+	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
+	require.Equal(t, float64(2), balance)
 }

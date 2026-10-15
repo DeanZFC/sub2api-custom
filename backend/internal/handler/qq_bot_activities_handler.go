@@ -10,6 +10,33 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func (h *QQBotHandler) GetInviteConfig(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
+	cfg, err := h.bot.InviteConfig(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "读取邀请奖励配置失败")
+		return
+	}
+	response.Success(c, cfg)
+}
+func (h *QQBotHandler) SaveInviteConfig(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	var cfg qqbot.InviteConfig
+	if c.ShouldBindJSON(&cfg) != nil {
+		response.BadRequest(c, "邀请奖励配置格式不正确")
+		return
+	}
+	if err := h.bot.SaveInviteConfig(c.Request.Context(), cfg); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, cfg)
+}
 func (h *QQBotHandler) GetCheckinConfig(c *gin.Context) {
 	if !requireQQBotAdmin(c) {
 		return

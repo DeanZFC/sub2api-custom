@@ -24,7 +24,7 @@ func (s *Service) SetBindingEmailDelivery(delivery BindingEmailDelivery) { s.bin
 
 var ErrEmailBindingInvalid = errors.New("绑定链接无效、已过期或已使用，请回群内重新发送绑定指令")
 
-const emailBindingAccepted = "已收到邮箱绑定请求。请前往邮箱（含垃圾邮件）查收确认邮件，收到后请在 10 分钟内打开链接确认绑定。若邮箱未注册、已绑定或请求过于频繁，可能不会发送邮件；也可使用网站绑定码。请勿将确认链接发到群里。"
+const emailBindingAccepted = "绑定申请已受理，请查收邮件并在 10 分钟内确认。"
 
 func validBindingEmail(raw string) bool {
 	address, err := mail.ParseAddress(raw)
@@ -75,18 +75,18 @@ WHERE qq_bot_email_limits.count<$4 AND qq_bot_email_limits.last_sent_at<=NOW()-(
 
 func (s *Service) requestEmailBinding(ctx context.Context, c Config, e Event, email string) string {
 	if !validBindingEmail(email) {
-		return "邮箱格式不正确，请发送：@机器人 绑定 你的注册邮箱。"
+		return "邮箱格式无效，请检查后重新提交。"
 	}
 	if !c.Enabled || !c.allows(e.GroupID) || e.Author.MemberID == "" {
-		return "该群暂不提供绑定服务。"
+		return "当前群未开放账号绑定。"
 	}
 	if s.bindingEmail == nil {
-		return "邮箱绑定暂未配置，请使用网站个人资料页的绑定码。"
+		return "邮箱绑定未启用，请使用网站绑定码。"
 	}
 	token := randomID() + randomID()
 	link, err := emailBindingURL(s.bindingEmail.FrontendURL(ctx), token)
 	if err != nil {
-		return "网站地址尚未配置，请联系站长或使用网站绑定码。"
+		return "邮箱绑定暂不可用，请使用网站绑定码。"
 	}
 	if err = s.reserveBindingEmails(ctx, c.AppID, []string{"member:" + e.Author.MemberID, "all"}, []int{5, 200}, []int{60, 0}); err != nil {
 		return emailBindingAccepted

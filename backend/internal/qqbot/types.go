@@ -81,6 +81,7 @@ type Event struct {
 	MemberID  string          `json:"member_openid"`
 	Content   string          `json:"content"`
 	Timestamp json.RawMessage `json:"timestamp"`
+	Mentions  []Mention       `json:"mentions"`
 	Author    struct {
 		MemberID string `json:"member_openid"`
 		Username string `json:"username"`
@@ -90,6 +91,10 @@ type Event struct {
 	InvitedBy     string `json:"invited_by"`
 	ApplyAt       string `json:"apply_at"`
 	JoinRequestID string `json:"join_request_id"`
+}
+type Mention struct {
+	ID       string `json:"id"`
+	MemberID string `json:"member_openid"`
 }
 type Message struct {
 	Role    string `json:"role"`

@@ -21,6 +21,8 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 		r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), role); c.Next() })
 		r.GET("/checkin", h.GetCheckinConfig)
 		r.PUT("/checkin", h.SaveCheckinConfig)
+		r.GET("/invite", h.GetInviteConfig)
+		r.PUT("/invite", h.SaveInviteConfig)
 		r.GET("/lottery", h.GetLotteryConfig)
 		r.PUT("/lottery", h.SaveLotteryConfig)
 		r.GET("/lottery/draws", h.ListLotteryDraws)
@@ -28,6 +30,11 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 		for _, tc := range []struct{ method, path, body string }{
 			{"PUT", "/checkin", `{"min_amount":2,"max_amount":1}`},
 			{"PUT", "/lottery", `{"enabled":true,"recharge_step":0}`},
+			{"PUT", "/invite", `{"invite_reward":-1,"invite_daily_limit":10}`},
+			{"PUT", "/invite", `{"invite_reward":1001,"invite_daily_limit":10}`},
+			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":100001}`},
+			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":-1}`},
+			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":1.5}`},
 			{"GET", "/lottery/draws?page=-1", ""}, {"GET", "/lottery/users/invalid", ""},
 		} {
 			w := httptest.NewRecorder()
@@ -41,7 +48,7 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 			require.Equal(t, want, w.Code)
 		}
 		if role != "admin" {
-			for _, path := range []string{"/checkin", "/lottery"} {
+			for _, path := range []string{"/checkin", "/lottery", "/invite"} {
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 				require.Equal(t, 403, w.Code)

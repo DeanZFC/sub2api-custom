@@ -134,7 +134,7 @@ func (s *Service) ListLotteryDraws(ctx context.Context, search string, page, pag
 	}
 	return out, tx.Commit()
 }
-func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job) (string, error) {
+func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bool) (string, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return "", err
@@ -145,27 +145,29 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job) (string, err
 		return "", err
 	}
 	if !cfg.Enabled {
-		return "抽奖活动尚未开启。", nil
+		return "抽奖活动未开启。", nil
 	}
 	var uid int64
 	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&uid)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先绑定网站账号，再参加抽奖。", nil
+		return "请先使用 /绑定 绑定网站账号。", nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if showRules {
+		var b strings.Builder
+		fmt.Fprintf(&b, "活动名称：%s\n抽奖规则：每累计有效充值 $%.2f 赠送 %d 次\n每次消耗：1 次", cfg.Title, cfg.RechargeStep, cfg.ChancesPerStep)
+		for _, p := range cfg.Prizes {
+			fmt.Fprintf(&b, "\n%s：$%.2f，概率 %.2f%%", p.Name, p.Amount, float64(p.ProbabilityBPS)/100)
+		}
+		return b.String(), tx.Commit()
 	}
 	state, err := lotteryState(ctx, tx, cfg, uid, false)
 	if err != nil {
 		return "", err
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n历史有效充值：$%.8f\n每累计充值 $%.2f 赠送 %d 次，累计 %d 次，已用 %d 次，剩余 %d 次。\n再充值 $%.8f 可获得新次数。\n", cfg.Title, state.RechargeTotal, cfg.RechargeStep, cfg.ChancesPerStep, state.Earned, state.Used, state.Remaining, state.NextRecharge)
-	for _, p := range cfg.Prizes {
-		fmt.Fprintf(&b, "%s：$%.8f，概率 %.2f%%\n", p.Name, p.Amount, float64(p.ProbabilityBPS)/100)
-	}
-	_, _ = b.WriteString("发送“抽奖”消耗 1 次，金额为 0 的奖项也消耗次数。历史在线余额充值本金计入，赠送、套餐、兑换码和后台加款不计入；退款会减少可用次数。")
-	return b.String(), tx.Commit()
+	return fmt.Sprintf("剩余抽奖次数：%d 次\n下次赠送还需充值：$%.2f", state.Remaining, state.NextRecharge), tx.Commit()
 }
 func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, error) {
 	if j.ID == "" {
@@ -191,7 +193,7 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 		return "", err
 	}
 	if !current.Enabled || current.AppID != c.AppID || !current.allows(j.GroupID) {
-		return "机器人或当前群尚未启用。", nil
+		return "当前群未启用机器人。", nil
 	}
 	cfg, err := loadLotteryConfig(ctx, tx)
 	if err != nil {
@@ -200,7 +202,7 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 	var uid int64
 	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&uid)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先绑定网站账号，再参加抽奖。", nil
+		return "请先使用 /绑定 绑定网站账号。", nil
 	}
 	if err != nil {
 		return "", err
@@ -225,7 +227,7 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 		return "", err
 	}
 	if !cfg.Enabled {
-		return "抽奖活动尚未开启。", nil
+		return "抽奖活动未开启。", nil
 	}
 	if err = validateLottery(cfg); err != nil {
 		return "", err
@@ -235,17 +237,14 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 		return "", err
 	}
 	if state.Remaining < 1 {
-		return fmt.Sprintf("暂无可用抽奖次数。累计有效充值 $%.8f，已抽 %d 次；再充值 $%.8f 可获得新次数。", state.RechargeTotal, state.Used, state.NextRecharge), nil
+		return fmt.Sprintf("抽奖次数不足。\n下次赠送还需充值：$%.2f", state.NextRecharge), nil
 	}
 	n, err := rand.Int(rand.Reader, big.NewInt(10000))
 	if err != nil {
 		return "", err
 	}
 	prize := lotteryPrizeAt(cfg, n.Int64())
-	result = fmt.Sprintf("%s：%s，获得 $%.8f 额度！\n本次消耗 1 次，剩余 %d 次。", cfg.Title, prize.Name, prize.Amount, state.Remaining-1)
-	if prize.Amount == 0 {
-		result = fmt.Sprintf("%s：%s，本次未获得额度。\n本次消耗 1 次，剩余 %d 次。", cfg.Title, prize.Name, state.Remaining-1)
-	}
+	result = fmt.Sprintf("抽奖结果：%s\n奖励额度：$%.2f\n剩余抽奖次数：%d 次", prize.Name, prize.Amount, state.Remaining-1)
 	snapshot, err := json.Marshal(cfg)
 	if err != nil {
 		return "", err
@@ -274,7 +273,7 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 			return "", err
 		}
 	}
-	// A failed QQ delivery can use 查看结果 without consuming another chance.
+	// Persist the result before delivery for auditing and message deduplication.
 	if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_jobs SET kind='lottery',result_text=$2 WHERE id=$1`, j.ID, result); err != nil {
 		return "", err
 	}

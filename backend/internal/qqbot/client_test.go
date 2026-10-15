@@ -175,9 +175,70 @@ func TestConfigAndCommandBoundaries(t *testing.T) {
 	require.True(t, publicIP(net.ParseIP("8.8.8.8")))
 	_, err := downloadImage(context.Background(), "https://127.0.0.1/test")
 	require.Error(t, err)
-	name, arg := command("<@123> /生图 一只猫")
-	require.Equal(t, "生图", name)
-	require.Equal(t, "一只猫", arg)
 	require.Equal(t, "2026-10-16", day(time.Date(2026, 10, 15, 16, 0, 0, 0, time.UTC)))
 	require.NotContains(t, strings.Join([]string{p.APIKey, p.AppSecret}, ""), "secret")
+}
+
+func TestCommandRequiresSlashPrefix(t *testing.T) {
+	for _, tt := range []struct {
+		content string
+		name    string
+		arg     string
+	}{
+		{content: "/帮助", name: "帮助"},
+		{content: "  <@123> /签到  ", name: "签到"},
+		{content: "<@!123>/生图 一只猫 在月球上", name: "生图", arg: "一只猫 在月球上"},
+		{content: "<@123> /绑定\talice@example.com  ", name: "绑定", arg: "alice@example.com"},
+		{content: "/绑定\nbinding-code", name: "绑定", arg: "binding-code"},
+		{content: "<@123> 签到"},
+		{content: "生图 一只猫"},
+		{content: "帮我解释 /签到 的作用"},
+		{content: "<@123> "},
+	} {
+		t.Run(tt.content, func(t *testing.T) {
+			name, arg := command(tt.content)
+			require.Equal(t, tt.name, name)
+			require.Equal(t, tt.arg, arg)
+		})
+	}
+}
+
+func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
+	var replies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			_, _ = w.Write([]byte(`{"access_token":"test-only","expires_in":7200}`))
+		case "/v2/groups/group/messages":
+			var body struct {
+				Content string `json:"content"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			replies = append(replies, body.Content)
+			_, _ = w.Write([]byte(`{"id":"sent"}`))
+		default:
+			t.Errorf("unsupported command called unexpected endpoint: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	// No database is provided: unsupported commands must not read saved results,
+	// delete conversations, reserve model usage, or invoke an upstream model.
+	s := New(nil, nil, false, nil)
+	s.qqURL = server.URL
+	s.tokenURL = server.URL + "/token"
+	c := DefaultConfig()
+	c.AppID, c.AppSecret, c.BaseURL = "app", "test-secret", server.URL+"/v1"
+	for i, content := range []string{"/查看结果 task-id", "/新对话", "/清空", "/不存在"} {
+		j := Job{GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
+		require.NoError(t, s.message(context.Background(), c, &j, Event{Content: content}))
+		require.Len(t, replies, i+1)
+		require.Contains(t, replies[i], "/帮助")
+	}
+	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
+	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
+	help := replies[len(replies)-1]
+	for _, removed := range []string{"/查看结果", "/新对话", "/清空"} {
+		require.NotContains(t, help, removed)
+	}
 }

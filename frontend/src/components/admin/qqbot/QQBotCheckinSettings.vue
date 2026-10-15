@@ -1,6 +1,6 @@
 <template>
-  <AppLayout><div class="mx-auto max-w-3xl space-y-6">
-    <div><h1 class="text-2xl font-semibold">{{ t('qqbot.checkinTitle') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('qqbot.checkinHelp') }}</p></div>
+  <div class="space-y-6">
+    <p class="text-sm text-gray-500">{{ t('qqbot.checkinHelp') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
     <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
@@ -14,12 +14,11 @@
       <button type="submit" class="btn btn-primary" :disabled="busy">{{ t('common.save') }}</button>
     </form>
     <p v-else-if="!error">{{ t('common.loading') }}</p>
-  </div></AppLayout>
+  </div>
 </template>
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import AppLayout from '@/components/layout/AppLayout.vue'
 import { qqbotAPI, type QQCheckinConfig } from '@/api/qqbot'
 const { t } = useI18n()
 const form = ref<QQCheckinConfig | null>(null)

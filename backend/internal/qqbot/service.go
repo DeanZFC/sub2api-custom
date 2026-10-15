@@ -27,6 +27,8 @@ type Service struct {
 	accessToken     string
 	tokenKey        string
 	tokenExpires    time.Time
+	groupBotMu      sync.Mutex
+	groupBots       map[string]groupBotIdentity
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 }
@@ -81,7 +83,7 @@ func (s *Service) maintenance(ctx context.Context) {
 	// An interrupted model request may already have cost money. Preserve its
 	// status for inspection and never replay it after a process crash.
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='interrupted',error='处理进程中断，未自动重试；请检查调用用量',finished_at=NOW(),payload='{}' WHERE status='running' AND started_at<NOW()-INTERVAL '10 minutes'`)
-	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='expired',error='排队超过回复时限，请重新发送',finished_at=NOW(),payload='{}' WHERE status='queued' AND created_at<NOW()-INTERVAL '5 minutes' AND event_type='GROUP_AT_MESSAGE_CREATE'`)
+	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='expired',error='排队超过回复时限，请重新发送',finished_at=NOW(),payload='{}' WHERE status='queued' AND created_at<NOW()-INTERVAL '5 minutes' AND event_type IN ('GROUP_AT_MESSAGE_CREATE','GROUP_MESSAGE_CREATE')`)
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_image=NULL,result_text='',payload='{}' WHERE created_at<NOW()-INTERVAL '24 hours' AND (result_image IS NOT NULL OR result_text<>'' OR payload<>'{}'::jsonb)`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_bind_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_bind_requests WHERE expires_at<NOW()`)
@@ -111,7 +113,7 @@ func (s *Service) runOne(parent context.Context) {
 		s.finish(j, "failed", "事件格式不正确")
 		return
 	}
-	if j.EventType != "GROUP_AT_MESSAGE_CREATE" {
+	if !isGroupMessageEvent(j.EventType) {
 		err = s.memberEvent(ctx, c, j, e)
 		if err != nil {
 			s.finish(j, "failed", "群成员事件处理失败")
@@ -224,6 +226,9 @@ var mentionPrefix = regexp.MustCompile(`^<@!?[^>]+>\s*`)
 
 func command(content string) (string, string) {
 	content = strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(content), ""))
+	if !strings.HasPrefix(content, "/") {
+		return "", ""
+	}
 	content = strings.TrimPrefix(content, "/")
 	pos := strings.IndexFunc(content, unicode.IsSpace)
 	fields := []string{content}
@@ -237,16 +242,42 @@ func command(content string) (string, string) {
 	return fields[0], arg
 }
 func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error {
+	if j.EventType == groupMessageCreate && !unmentionedGroupCommand(e) {
+		addressed, err := s.groupMessageMentionsBot(ctx, c, e)
+		if err != nil {
+			return err
+		}
+		if !addressed {
+			return nil
+		}
+	}
 	cmd, arg := command(e.Content)
 	text := ""
 	var img []byte
 	seq := 1
 	switch cmd {
 	case "帮助", "help":
-		text = "CTAV 群助手（免费使用，费用由站长承担）\n直接 @我 提问；生图 描述；新对话；查看结果 任务号\n绑定 邮箱（收到邮件后确认）或绑定 绑定码；签到；我的额度；我的奖励；邀请奖励；抽奖；抽奖次数；抽奖活动\n绑定码请在网站个人资料页生成，并回网站确认绑定。"
+		text = `/帮助 查看帮助
+/签到 每日签到
+/我的额度 查询账户额度
+/我的奖励 查询累计奖励
+/绑定 邮箱或绑定码，绑定账号
+/邀请奖励 结算邀请奖励
+/抽奖 参与抽奖
+/抽奖次数 查询剩余次数
+/抽奖活动 查看活动规则和奖品
+/生图 图片描述，生成图片`
 	case "绑定":
 		if arg == "" {
-			text = "发送：@机器人 绑定 你的注册邮箱，收到邮件后打开链接确认。也可在网站个人资料页生成绑定码后发送：@机器人 绑定 绑定码。"
+			text = "用法：/绑定 邮箱或绑定码"
+			break
+		}
+		var bound bool
+		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_bot_bindings WHERE app_id=$1 AND member_id=$2)`, c.AppID, e.Author.MemberID).Scan(&bound)
+		if err != nil {
+			text = "绑定状态查询失败，请稍后重试。"
+		} else if bound {
+			text = "当前 QQ 已绑定账号。"
 		} else if strings.Contains(arg, "@") {
 			if validBindingEmail(arg) {
 				// A slow SMTP server must not delay the user's QQ acknowledgement.
@@ -266,83 +297,74 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		var err error
 		text, err = s.reward(ctx, c, *j, "checkin")
 		if err != nil {
-			text = "签到入账失败，请稍后重试。"
+			text = "签到失败，请稍后重试。"
 		}
 	case "抽奖":
 		var err error
 		text, err = s.drawLottery(ctx, c, *j)
 		if err != nil {
-			text = "抽奖处理失败，请稍后查询抽奖次数或联系管理员。"
+			text = "抽奖处理异常，请查询 /抽奖次数。"
 		}
-		text += "\n如未收到结果，可发送“查看结果 " + j.ID + "”。"
 	case "抽奖次数", "我的抽奖", "抽奖活动":
 		var err error
-		text, err = s.lotteryInfo(ctx, c, *j)
+		text, err = s.lotteryInfo(ctx, c, *j, cmd == "抽奖活动")
 		if err != nil {
-			text = "读取抽奖信息失败，请稍后重试。"
+			text = "抽奖信息查询失败，请稍后重试。"
 		}
 	case "邀请奖励":
 		var err error
 		text, err = s.reward(ctx, c, *j, "invite")
 		if err != nil {
-			text = "奖励入账失败，请稍后重试。"
+			text = "邀请奖励发放失败，请稍后重试。"
 		}
 	case "我的额度", "我的奖励":
 		var balance, total float64
 		err := s.db.QueryRowContext(ctx, `SELECT u.balance,COALESCE((SELECT SUM(amount) FROM qq_bot_rewards WHERE user_id=u.id),0) FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.deleted_at IS NULL AND u.status='active'`, c.AppID, j.MemberID).Scan(&balance, &total)
-		if err != nil {
-			text = "请先绑定网站账号。"
+		if errors.Is(err, sql.ErrNoRows) {
+			text = "请先使用 /绑定 绑定网站账号。"
+		} else if err != nil {
+			text = "账户信息查询失败，请稍后重试。"
+		} else if cmd == "我的额度" {
+			text = fmt.Sprintf("账户额度：$%.2f", balance)
 		} else {
-			text = fmt.Sprintf("账户额度：$%.4f\n累计群活动奖励：$%.4f\n群内 AI 由站长免费提供，不扣你的余额。", balance, total)
-		}
-	case "新对话", "清空":
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM qq_bot_conversations WHERE app_id=$1 AND group_id=$2 AND member_id=$3`, c.AppID, j.GroupID, j.MemberID); err != nil {
-			text = "清空失败，请重试。"
-		} else {
-			text = "已开启新对话。"
-		}
-	case "查看结果":
-		old, err := scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM qq_bot_jobs WHERE id=$1 AND app_id=$2 AND group_id=$3 AND member_id=$4 AND created_at>NOW()-INTERVAL '24 hours'`, arg, c.AppID, j.GroupID, j.MemberID))
-		if err != nil {
-			text = "未找到你的任务，或结果已超过 24 小时保留期。"
-		} else if old.Status == "queued" || old.Status == "running" {
-			text = "任务仍在处理中，请稍后查询。"
-		} else if len(old.Image) > 0 {
-			img = old.Image
-		} else if old.ResultText != "" {
-			text = old.ResultText
-		} else {
-			text = "任务没有可领取的结果，请查看失败提示后重新发起。"
+			text = fmt.Sprintf("累计活动奖励：$%.2f", total)
 		}
 	default:
+		if cmd != "" && cmd != "生图" && cmd != "画图" {
+			text = "未知指令，请发送 /帮助。"
+			break
+		}
 		kind := "chat"
 		prompt := strings.TrimSpace(e.Content)
 		if cmd == "生图" || cmd == "画图" {
 			kind = "image"
 			prompt = arg
 			if !c.ImageEnabled {
-				text = "生图功能尚未开启。"
+				text = "生图功能未启用。"
 			}
 			if prompt == "" {
-				text = "请发送：@机器人 生图 图片描述"
+				text = "用法：/生图 图片描述"
 			}
 		}
 		if text != "" {
 			break
 		}
 		if prompt == "" || len([]rune(prompt)) > 6000 {
-			text = "请输入 1 到 6000 字的内容。"
+			text = "内容长度须为 1～6000 字。"
 			break
 		}
 		if err := s.reserveUsage(ctx, c, *j, kind); err != nil {
-			text = err.Error()
+			text = "服务暂时不可用，请稍后重试。"
+			if errors.Is(err, errFeatureUnavailable) || errors.Is(err, errUsageCooldown) || errors.Is(err, errUsageLimit) {
+				text = err.Error()
+			}
 			break
 		}
 		j.Kind = kind
-		if err := s.send(ctx, c, *j, "正在处理，任务号："+j.ID+"。结果保留 24 小时，可发送“查看结果 "+j.ID+"”。", nil, 1); err != nil {
+		if err := s.send(ctx, c, *j, "正在思考中", nil, seq); err != nil {
 			return err
 		}
-		seq = 2
+		seq++
 		var err error
 		if kind == "image" {
 			img, err = s.generateImage(ctx, c, prompt)
@@ -356,13 +378,16 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		}
 		if err != nil {
 			// Record upstream failure distinctly from delivery failures. Never expose raw upstream bodies.
-			text = err.Error()
-			j.Error = text
-			_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET error=$2 WHERE id=$1`, j.ID, text)
+			text = "回复生成失败，请稍后重试。"
+			if kind == "image" {
+				text = "图片生成失败，请稍后重试。"
+			}
+			j.Error = err.Error()
+			_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET error=$2 WHERE id=$1`, j.ID, j.Error)
 			if sendErr := s.send(ctx, c, *j, text, nil, seq); sendErr != nil {
 				return sendErr
 			}
-			return fmt.Errorf("模型调用失败：%s", text)
+			return fmt.Errorf("模型调用失败：%s", j.Error)
 		}
 		// Persist before sending to QQ. Delivery retries only reuse this saved result.
 		if _, err = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_text=$2,result_image=$3,image_type=$4,input_tokens=$5,output_tokens=$6 WHERE id=$1`, j.ID, text, img, "image/jpeg", j.InputTokens, j.OutputTokens); err != nil {
@@ -417,13 +442,13 @@ func (s *Service) saveHistory(ctx context.Context, c Config, j Job, messages []M
 	_, _ = s.db.ExecContext(ctx, `INSERT INTO qq_bot_conversations(app_id,group_id,member_id,messages) VALUES($1,$2,$3,$4) ON CONFLICT(app_id,group_id,member_id) DO UPDATE SET messages=EXCLUDED.messages,updated_at=NOW()`, c.AppID, j.GroupID, j.MemberID, string(raw))
 }
 
-// QQ allows five passive messages per incoming message. The first status reply
-// consumes one slot; split the remaining text without ever exceeding that limit.
+// QQ allows five passive messages per incoming message. Split the reply within
+// the remaining slots, accounting for any messages already sent.
 func splitReply(text string, maxChunks int) []string {
 	r := []rune(text)
 	const width = 1500
 	if len(r) > width*maxChunks {
-		r = append(r[:width*maxChunks-50], []rune("\n（回复过长，已截断；请让机器人分段解释。）")...)
+		r = append(r[:width*maxChunks-50], []rune("\n（内容过长，已截断。）")...)
 	}
 	var chunks []string
 	for len(r) > 0 {

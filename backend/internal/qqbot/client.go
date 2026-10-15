@@ -387,19 +387,26 @@ func (s *Service) token(ctx context.Context, c Config) (string, error) {
 	return v.AccessToken, nil
 }
 func (s *Service) qqRequest(ctx context.Context, c Config, path string, body any) ([]byte, error) {
+	return s.qqRequestMethod(ctx, c, http.MethodPost, path, body)
+}
+func (s *Service) qqRequestMethod(ctx context.Context, c Config, method, path string, body any) ([]byte, error) {
 	token, err := s.token(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(raw)
 	}
 	base := s.qqURL
 	if c.Sandbox && base == "https://api.sgroup.qq.com" {
 		base = "https://sandbox.api.sgroup.qq.com"
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", base+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, method, base+path, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +434,7 @@ func (s *Service) qqRequest(ctx context.Context, c Config, path string, body any
 func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []byte, seq int) error {
 	// Only passive replies: no accidental proactive notification or expired retry.
 	if j.MessageID == "" || time.Since(j.CreatedAt) > 280*time.Second {
-		return errors.New("回复窗口已过期，请使用 查看结果 指令")
+		return errors.New("回复窗口已过期")
 	}
 	base := "/v2/groups/" + url.PathEscape(j.GroupID)
 	body := map[string]any{"msg_type": 0, "content": limitText(text, 1800), "msg_id": j.MessageID, "msg_seq": seq}

@@ -101,6 +101,20 @@ func validateConfig(c Config) error {
 }
 
 func (s *Service) SaveConfig(ctx context.Context, c Config) (Config, error) {
+	return s.saveConfig(ctx, func(Config) Config { return c })
+}
+
+// SaveBasicConfig preserves activity settings under the same lock as invitation edits.
+func (s *Service) SaveBasicConfig(ctx context.Context, c Config) (Config, error) {
+	return s.saveConfig(ctx, func(old Config) Config {
+		c.InviteReward = old.InviteReward
+		c.InviteDailyLimit = old.InviteDailyLimit
+		return c
+	})
+}
+
+func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (Config, error) {
+	var c Config
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return c, err
@@ -113,6 +127,7 @@ func (s *Service) SaveConfig(ctx context.Context, c Config) (Config, error) {
 	if err != nil {
 		return c, err
 	}
+	c = update(old)
 	c.AppID = strings.TrimSpace(c.AppID)
 	c.BaseURL = strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	c.ImageBaseURL = strings.TrimRight(strings.TrimSpace(c.ImageBaseURL), "/")

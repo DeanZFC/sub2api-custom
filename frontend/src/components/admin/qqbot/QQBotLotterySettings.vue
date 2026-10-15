@@ -1,6 +1,6 @@
 <template>
-  <AppLayout><div class="mx-auto max-w-5xl space-y-6">
-    <div><h1 class="text-2xl font-semibold">{{ t('qqbot.lotteryTitle') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('qqbot.lotteryHelp') }}</p></div>
+  <div class="space-y-6">
+    <p class="text-sm text-gray-500">{{ t('qqbot.lotteryHelp') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
     <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
@@ -29,27 +29,26 @@
       <form class="flex flex-wrap gap-3" @submit.prevent="lookup"><label class="min-w-0 flex-1"><span class="sr-only">{{ t('qqbot.userID') }}</span><input v-model="userID" class="input" :placeholder="t('qqbot.userID')" type="number" min="1" step="1" required /></label><button class="btn btn-secondary" :disabled="lookingUp">{{ t('common.search') }}</button></form>
       <p v-if="lookupError" role="alert" class="text-red-600">{{ lookupError }}</p>
       <dl v-if="state" class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
-        <div><dt class="text-gray-500">{{ t('qqbot.eligibleRecharge') }}</dt><dd class="mt-1 font-semibold">${{ state.recharge_total.toFixed(8) }}</dd></div>
+        <div><dt class="text-gray-500">{{ t('qqbot.eligibleRecharge') }}</dt><dd class="mt-1 font-semibold">${{ state.recharge_total.toFixed(2) }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.earnedChances') }}</dt><dd class="mt-1 font-semibold">{{ state.earned }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.usedChances') }}</dt><dd class="mt-1 font-semibold">{{ state.used }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.remainingChances') }}</dt><dd class="mt-1 font-semibold">{{ state.remaining }}</dd></div>
       </dl>
-      <p v-if="state" class="text-sm text-gray-500">{{ t('qqbot.nextRecharge', { amount: state.next_recharge.toFixed(8) }) }}</p>
+      <p v-if="state" class="text-sm text-gray-500">{{ t('qqbot.nextRecharge', { amount: state.next_recharge.toFixed(2) }) }}</p>
     </section>
     <section class="card space-y-4 p-6">
       <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('qqbot.drawRecords') }}</h2><button class="btn btn-secondary" :disabled="loadingRecords" @click="loadRecords()">{{ t('common.refresh') }}</button></div>
       <form class="flex flex-wrap gap-3" @submit.prevent="searchRecords"><input v-model="search" class="input min-w-0 flex-1" :aria-label="t('qqbot.drawSearch')" :placeholder="t('qqbot.drawSearch')" maxlength="254" /><button class="btn btn-secondary" :disabled="loadingRecords">{{ t('common.search') }}</button></form>
       <p v-if="recordsError" role="alert" class="text-red-600">{{ recordsError }}</p>
-      <div class="overflow-x-auto"><table class="w-full min-w-[640px] text-left text-sm"><thead><tr><th>{{ t('qqbot.websiteAccount') }}</th><th>{{ t('qqbot.prizeName') }}</th><th>USD</th><th>{{ t('qqbot.remainingAtDraw') }}</th><th>{{ t('qqbot.time') }}</th></tr></thead><tbody><tr v-for="draw in records.items" :key="draw.id" class="border-t dark:border-dark-700"><td class="py-3">{{ draw.email }}<div class="text-xs text-gray-500">ID {{ draw.user_id }} · {{ draw.member_id }}</div></td><td>{{ draw.prize_name }}</td><td>{{ draw.amount }}</td><td>{{ draw.remaining }}</td><td class="whitespace-nowrap">{{ draw.created_at }}</td></tr></tbody></table></div>
+      <div class="overflow-x-auto"><table class="w-full min-w-[640px] text-left text-sm"><thead><tr><th>{{ t('qqbot.websiteAccount') }}</th><th>{{ t('qqbot.prizeName') }}</th><th>USD</th><th>{{ t('qqbot.remainingAtDraw') }}</th><th>{{ t('qqbot.time') }}</th></tr></thead><tbody><tr v-for="draw in records.items" :key="draw.id" class="border-t dark:border-dark-700"><td class="py-3">{{ draw.email }}<div class="text-xs text-gray-500">ID {{ draw.user_id }} · {{ draw.member_id }}</div></td><td>{{ draw.prize_name }}</td><td>{{ draw.amount.toFixed(2) }}</td><td>{{ draw.remaining }}</td><td class="whitespace-nowrap">{{ draw.created_at }}</td></tr></tbody></table></div>
       <p v-if="!records.items.length && !loadingRecords" class="text-sm text-gray-500">{{ t('common.noData') }}</p>
       <div class="flex flex-wrap items-center justify-between gap-3"><span class="text-sm text-gray-500">{{ t('qqbot.bindingPage', { total: records.total, page: records.page, pages }) }}</span><div class="flex gap-2"><button class="btn btn-secondary" :disabled="loadingRecords || records.page <= 1" @click="changePage(-1)">{{ t('qqbot.previousPage') }}</button><button class="btn btn-secondary" :disabled="loadingRecords || records.page >= pages" @click="changePage(1)">{{ t('qqbot.nextPage') }}</button></div></div>
     </section>
-  </div></AppLayout>
+  </div>
 </template>
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import AppLayout from '@/components/layout/AppLayout.vue'
 import { qqbotAPI, type QQLotteryConfig, type QQLotteryState, type QQLotteryDrawsPage } from '@/api/qqbot'
 const { t } = useI18n()
 const form = ref<QQLotteryConfig | null>(null)

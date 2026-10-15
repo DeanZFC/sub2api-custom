@@ -578,16 +578,20 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Runtime', titleKey: 'qqbot.runtime' }
   },
   {
+    path: '/admin/qqbot/activities',
+    name: 'AdminQQBotActivities',
+    component: () => import('@/views/admin/QQBotActivitiesView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Activity Settings', titleKey: 'qqbot.activitiesTitle', descriptionKey: 'qqbot.activitiesHelp' }
+  },
+  {
     path: '/admin/qqbot/checkin',
     name: 'AdminQQBotCheckin',
-    component: () => import('@/views/admin/QQBotCheckinView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Checkin', titleKey: 'qqbot.checkinTitle' }
+    redirect: { path: '/admin/qqbot/activities', query: { tab: 'checkin' } }
   },
   {
     path: '/admin/qqbot/lottery',
     name: 'AdminQQBotLottery',
-    component: () => import('@/views/admin/QQBotLotteryView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Lottery', titleKey: 'qqbot.lotteryTitle' }
+    redirect: { path: '/admin/qqbot/activities', query: { tab: 'lottery' } }
   },
   {
     path: '/admin/announcements',

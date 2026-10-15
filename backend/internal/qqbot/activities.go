@@ -23,6 +23,10 @@ type CheckinConfig struct {
 	MinAmount float64 `json:"min_amount"`
 	MaxAmount float64 `json:"max_amount"`
 }
+type InviteConfig struct {
+	InviteReward     float64 `json:"invite_reward"`
+	InviteDailyLimit int     `json:"invite_daily_limit"`
+}
 type LotteryPrize struct {
 	Name           string  `json:"name"`
 	Amount         float64 `json:"amount"`
@@ -75,6 +79,24 @@ func (s *Service) LotteryConfig(ctx context.Context) (LotteryConfig, error) {
 }
 func validRewardAmount(n float64) bool {
 	return !math.IsNaN(n) && !math.IsInf(n, 0) && n >= 0 && n <= 1000 && math.Abs(n*1e8-math.Round(n*1e8)) <= .001
+}
+func (s *Service) InviteConfig(ctx context.Context) (InviteConfig, error) {
+	c, err := s.Config(ctx)
+	return InviteConfig{InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit}, err
+}
+func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
+	if !validRewardAmount(c.InviteReward) {
+		return errors.New("邀请奖励需在 0 到 1000 USD 之间，最多 8 位小数；0 表示关闭")
+	}
+	if c.InviteDailyLimit < 0 || c.InviteDailyLimit > 100000 {
+		return errors.New("每位邀请人每日奖励次数需在 0 到 100000 之间；0 表示禁止")
+	}
+	_, err := s.saveConfig(ctx, func(old Config) Config {
+		old.InviteReward = c.InviteReward
+		old.InviteDailyLimit = c.InviteDailyLimit
+		return old
+	})
+	return err
 }
 func validateCheckin(c CheckinConfig) error {
 	if !validRewardAmount(c.MinAmount) || !validRewardAmount(c.MaxAmount) || c.MinAmount > c.MaxAmount {
