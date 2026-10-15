@@ -1,0 +1,286 @@
+package qqbot
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/shopspring/decimal"
+)
+
+type LotteryState struct {
+	UserID        int64   `json:"user_id"`
+	RechargeTotal float64 `json:"recharge_total"`
+	Earned        int64   `json:"earned"`
+	Used          int64   `json:"used"`
+	Remaining     int64   `json:"remaining"`
+	NextRecharge  float64 `json:"next_recharge"`
+}
+type LotteryDraw struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"user_id"`
+	Email     string    `json:"email"`
+	MemberID  string    `json:"member_id"`
+	PrizeName string    `json:"prize_name"`
+	Amount    float64   `json:"amount"`
+	Remaining int64     `json:"remaining"`
+	CreatedAt time.Time `json:"created_at"`
+}
+type LotteryDrawsPage struct {
+	Items    []LotteryDraw `json:"items"`
+	Total    int           `json:"total"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
+}
+
+// Count USD principal from completed online balance orders, including history.
+// Bonus credits, subscriptions and administrative credits never create chances.
+// Refund-in-progress orders are suspended; partial refunds remove principal pro rata.
+func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64, lockOrders bool) (LotteryState, error) {
+	out := LotteryState{UserID: uid}
+	orderQuery := `SELECT amount,bonus_amount,refund_amount,status FROM payment_orders
+        WHERE user_id=$1 AND order_type='balance' AND paid_at IS NOT NULL AND completed_at IS NOT NULL ORDER BY id`
+	if lockOrders {
+		orderQuery += ` FOR SHARE`
+	}
+	var totalText string
+	err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE
+        WHEN status IN ('COMPLETED','REFUND_FAILED') THEN GREATEST(amount-bonus_amount,0)
+        WHEN status='PARTIALLY_REFUNDED' AND amount>0 THEN ROUND(GREATEST(amount-bonus_amount,0)*GREATEST(amount-refund_amount,0)/amount,8)
+        ELSE 0 END),0)::text FROM (`+orderQuery+`) orders`, uid).Scan(&totalText)
+	if err != nil {
+		return out, err
+	}
+	total, err := decimal.NewFromString(totalText)
+	if err != nil {
+		return out, err
+	}
+	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_lottery_draws WHERE user_id=$1`, uid).Scan(&out.Used); err != nil {
+		return out, err
+	}
+	step := decimal.NewFromFloat(c.RechargeStep)
+	if step.LessThanOrEqual(decimal.Zero) || c.ChancesPerStep < 1 {
+		return out, errors.New("抽奖规则不正确")
+	}
+	quotient, _ := total.QuoRem(step, 0)
+	earned := quotient.Mul(decimal.NewFromInt(c.ChancesPerStep))
+	if earned.GreaterThan(decimal.NewFromInt(1e12)) {
+		return out, errors.New("抽奖次数超出支持范围，请联系管理员")
+	}
+	out.RechargeTotal = total.InexactFloat64()
+	out.Earned = earned.IntPart()
+	out.Remaining = max(out.Earned-out.Used, 0)
+	// When refunds/rule changes put usage ahead of entitlement, new recharge
+	// must cover that deficit before another draw becomes available.
+	nextTier := max(quotient.IntPart()+1, out.Used/c.ChancesPerStep+1)
+	out.NextRecharge = decimal.NewFromInt(nextTier).Mul(step).Sub(total).InexactFloat64()
+	return out, nil
+}
+func (s *Service) LotteryState(ctx context.Context, uid int64) (LotteryState, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return LotteryState{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var exists bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND deleted_at IS NULL)`, uid).Scan(&exists); err != nil {
+		return LotteryState{}, err
+	}
+	if !exists {
+		return LotteryState{}, errors.New("网站账号不存在")
+	}
+	c, err := loadLotteryConfig(ctx, tx)
+	if err != nil {
+		return LotteryState{}, err
+	}
+	out, err := lotteryState(ctx, tx, c, uid, false)
+	if err != nil {
+		return out, err
+	}
+	return out, tx.Commit()
+}
+func (s *Service) ListLotteryDraws(ctx context.Context, search string, page, pageSize int) (LotteryDrawsPage, error) {
+	out := LotteryDrawsPage{Items: []LotteryDraw{}, Page: page, PageSize: pageSize}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return out, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	const filter = ` FROM qq_bot_lottery_draws d JOIN users u ON u.id=d.user_id WHERE ($1='' OR d.user_id::text=$1 OR strpos(lower(u.email),lower($1))>0 OR strpos(lower(d.member_id),lower($1))>0)`
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*)`+filter, search).Scan(&out.Total); err != nil {
+		return out, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.user_id,u.email,d.member_id,d.prize_name,d.amount,d.remaining,d.created_at`+filter+` ORDER BY d.id DESC LIMIT $2 OFFSET $3`, search, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return out, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var d LotteryDraw
+		if err = rows.Scan(&d.ID, &d.UserID, &d.Email, &d.MemberID, &d.PrizeName, &d.Amount, &d.Remaining, &d.CreatedAt); err != nil {
+			return out, err
+		}
+		out.Items = append(out.Items, d)
+	}
+	if err = rows.Err(); err != nil {
+		return out, err
+	}
+	return out, tx.Commit()
+}
+func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job) (string, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	cfg, err := loadLotteryConfig(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	if !cfg.Enabled {
+		return "抽奖活动尚未开启。", nil
+	}
+	var uid int64
+	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "请先绑定网站账号，再参加抽奖。", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	state, err := lotteryState(ctx, tx, cfg, uid, false)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n历史有效充值：$%.8f\n每累计充值 $%.2f 赠送 %d 次，累计 %d 次，已用 %d 次，剩余 %d 次。\n再充值 $%.8f 可获得新次数。\n", cfg.Title, state.RechargeTotal, cfg.RechargeStep, cfg.ChancesPerStep, state.Earned, state.Used, state.Remaining, state.NextRecharge)
+	for _, p := range cfg.Prizes {
+		fmt.Fprintf(&b, "%s：$%.8f，概率 %.2f%%\n", p.Name, p.Amount, float64(p.ProbabilityBPS)/100)
+	}
+	_, _ = b.WriteString("发送“抽奖”消耗 1 次，金额为 0 的奖项也消耗次数。历史在线余额充值本金计入，赠送、套餐、兑换码和后台加款不计入；退款会减少可用次数。")
+	return b.String(), tx.Commit()
+}
+func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, error) {
+	if j.ID == "" {
+		return "", errors.New("缺少抽奖请求标识")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Match unbinding's reward lock. Protect config changes while settling a draw.
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared(71427101)`); err != nil {
+		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {
+		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, lotteryConfigLock); err != nil {
+		return "", err
+	}
+	current, err := s.loadConfig(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	if !current.Enabled || current.AppID != c.AppID || !current.allows(j.GroupID) {
+		return "机器人或当前群尚未启用。", nil
+	}
+	cfg, err := loadLotteryConfig(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	var uid int64
+	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "请先绑定网站账号，再参加抽奖。", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	// User-level serialization also protects lifetime usage across AppID changes.
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,274))`, strconv.FormatInt(uid, 10)); err != nil {
+		return "", err
+	}
+	requestKey := c.AppID + ":" + j.ID
+	if j.MessageID != "" {
+		requestKey = c.AppID + ":message:" + j.MessageID
+	}
+	var result string
+	err = tx.QueryRowContext(ctx, `SELECT result_text FROM qq_bot_lottery_draws WHERE request_key=$1 AND user_id=$2 AND member_id=$3`, requestKey, uid, j.MemberID).Scan(&result)
+	if err == nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_jobs SET kind='lottery',result_text=$2 WHERE id=$1`, j.ID, result); err != nil {
+			return "", err
+		}
+		return result, tx.Commit()
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if !cfg.Enabled {
+		return "抽奖活动尚未开启。", nil
+	}
+	if err = validateLottery(cfg); err != nil {
+		return "", err
+	}
+	state, err := lotteryState(ctx, tx, cfg, uid, true)
+	if err != nil {
+		return "", err
+	}
+	if state.Remaining < 1 {
+		return fmt.Sprintf("暂无可用抽奖次数。累计有效充值 $%.8f，已抽 %d 次；再充值 $%.8f 可获得新次数。", state.RechargeTotal, state.Used, state.NextRecharge), nil
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(10000))
+	if err != nil {
+		return "", err
+	}
+	prize := lotteryPrizeAt(cfg, n.Int64())
+	result = fmt.Sprintf("%s：%s，获得 $%.8f 额度！\n本次消耗 1 次，剩余 %d 次。", cfg.Title, prize.Name, prize.Amount, state.Remaining-1)
+	if prize.Amount == 0 {
+		result = fmt.Sprintf("%s：%s，本次未获得额度。\n本次消耗 1 次，剩余 %d 次。", cfg.Title, prize.Name, state.Remaining-1)
+	}
+	snapshot, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	var drawID int64
+	err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_lottery_draws(request_key,app_id,member_id,group_id,user_id,prize_name,amount,config_snapshot,recharge_total,earned,remaining,result_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, requestKey, c.AppID, j.MemberID, j.GroupID, uid, prize.Name, prize.Amount, string(snapshot), state.RechargeTotal, state.Earned, state.Remaining-1, result).Scan(&drawID)
+	if err != nil {
+		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount) VALUES($1,$2,$3,$4,$5,'lottery',$6)`, fmt.Sprintf("lottery:%d", drawID), c.AppID, j.GroupID, j.MemberID, uid, prize.Amount); err != nil {
+		return "", err
+	}
+	updated, err := tx.ExecContext(ctx, `UPDATE users SET balance=balance+$1,updated_at=NOW() WHERE id=$2 AND status='active' AND deleted_at IS NULL`, prize.Amount, uid)
+	if err != nil {
+		return "", err
+	}
+	count, err := updated.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if count != 1 {
+		return "", errors.New("账户不可用")
+	}
+	if prize.Amount > 0 {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO redeem_codes(code,type,value,status,used_by,used_at,notes) VALUES($1,'admin_balance',$2,'used',$3,NOW(),$4)`, "QQ"+randomID(), prize.Amount, uid, fmt.Sprintf("QQ lottery reward #%d: %s", drawID, prize.Name)); err != nil {
+			return "", err
+		}
+	}
+	// A failed QQ delivery can use 查看结果 without consuming another chance.
+	if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_jobs SET kind='lottery',result_text=$2 WHERE id=$1`, j.ID, result); err != nil {
+		return "", err
+	}
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+	s.invalidate(ctx, uid)
+	return result, nil
+}

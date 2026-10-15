@@ -557,9 +557,37 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/admin/qqbot',
+    redirect: '/admin/qqbot/config'
+  },
+  {
+    path: '/admin/qqbot/config',
     name: 'AdminQQBot',
     component: () => import('@/views/admin/QQBotView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Bot', titleKey: 'qqbot.title', descriptionKey: 'qqbot.description' }
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Bot Settings', titleKey: 'qqbot.basicConfig', descriptionKey: 'qqbot.description' }
+  },
+  {
+    path: '/admin/qqbot/bindings',
+    name: 'AdminQQBotBindings',
+    component: () => import('@/views/admin/QQBotBindingsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Bindings', titleKey: 'qqbot.bindingsTitle' }
+  },
+  {
+    path: '/admin/qqbot/runtime',
+    name: 'AdminQQBotRuntime',
+    component: () => import('@/views/admin/QQBotRuntimeView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Runtime', titleKey: 'qqbot.runtime' }
+  },
+  {
+    path: '/admin/qqbot/checkin',
+    name: 'AdminQQBotCheckin',
+    component: () => import('@/views/admin/QQBotCheckinView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Checkin', titleKey: 'qqbot.checkinTitle' }
+  },
+  {
+    path: '/admin/qqbot/lottery',
+    name: 'AdminQQBotLottery',
+    component: () => import('@/views/admin/QQBotLotteryView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Lottery', titleKey: 'qqbot.lotteryTitle' }
   },
   {
     path: '/admin/announcements',

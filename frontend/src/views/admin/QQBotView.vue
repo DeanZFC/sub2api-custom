@@ -2,7 +2,7 @@
   <AppLayout>
     <div class="mx-auto max-w-5xl space-y-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 class="text-2xl font-semibold">{{ t('qqbot.title') }}</h1><p class="mt-1 text-sm text-gray-500">{{ t('qqbot.description') }}</p></div>
+        <div><h1 class="text-2xl font-semibold">{{ t('qqbot.basicConfig') }}</h1><p class="mt-1 text-sm text-gray-500">{{ t('qqbot.description') }}</p></div>
         <button class="btn btn-secondary" :disabled="busy" @click="refreshRuntime">{{ t('common.refresh') }}</button>
       </div>
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
@@ -50,9 +50,8 @@
           </div>
         </section>
         <section class="card space-y-4 p-6">
-          <h2 class="text-lg font-semibold">{{ t('qqbot.rewards') }}</h2><p class="text-sm text-gray-500">{{ t('qqbot.rewardHelp') }}</p>
+          <h2 class="text-lg font-semibold">{{ t('qqbot.inviteSettings') }}</h2><p class="text-sm text-gray-500">{{ t('qqbot.inviteHelp') }}</p>
           <div class="grid gap-4 md:grid-cols-3">
-            <label class="space-y-1">{{ t('qqbot.checkinReward') }}<input v-model.number="form.checkin_reward" class="input" type="number" min="0" max="1000" step="0.00000001" /></label>
             <label class="space-y-1">{{ t('qqbot.inviteReward') }}<input v-model.number="form.invite_reward" class="input" type="number" min="0" max="1000" step="0.00000001" /></label>
             <label class="space-y-1">{{ t('qqbot.inviteDaily') }}<input v-model.number="form.invite_daily_limit" class="input" type="number" min="0" max="100000" /></label>
           </div>
@@ -63,13 +62,7 @@
           <span class="text-xs text-gray-500">{{ dirty ? t('qqbot.saveBeforeTest') : t('qqbot.testCost') }}</span>
         </div>
       </form>
-      <QQBotBindings @changed="refreshRuntime" />
-      <section v-if="runtime" class="card space-y-4 p-6">
-        <h2 class="text-lg font-semibold">{{ t('qqbot.runtime') }} · {{ t('qqbot.boundCount', { count: runtime.bindings }) }}</h2>
-        <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr><th>{{ t('qqbot.task') }}</th><th>{{ t('common.status') }}</th><th>Tokens</th><th>{{ t('common.error') }}</th></tr></thead><tbody><tr v-for="job in runtime.jobs" :key="job.id" class="border-t dark:border-dark-700"><td class="py-2"><code class="text-xs">{{ job.id }}</code><div class="text-gray-500">{{ job.kind }} · {{ job.created_at }}</div></td><td>{{ job.status }}</td><td>{{ job.input_tokens }} / {{ job.output_tokens }}</td><td class="max-w-sm break-words">{{ job.error || '—' }}</td></tr></tbody></table><p v-if="!runtime.jobs.length" class="py-4 text-gray-500">{{ t('common.noData') }}</p></div>
-        <h3 class="font-semibold">{{ t('qqbot.rewardRecords') }}</h3>
-        <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr><th>User ID</th><th>{{ t('qqbot.rewardType') }}</th><th>USD</th><th>{{ t('qqbot.time') }}</th></tr></thead><tbody><tr v-for="reward in runtime.rewards" :key="reward.id" class="border-t dark:border-dark-700"><td class="py-2">{{ reward.user_id }}</td><td>{{ reward.kind }}</td><td>{{ reward.amount }}</td><td>{{ reward.created_at }}</td></tr></tbody></table><p v-if="!runtime.rewards.length" class="py-4 text-gray-500">{{ t('common.noData') }}</p></div>
-      </section>
+
     </div>
   </AppLayout>
 </template>
@@ -78,7 +71,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import QQBotBindings from '@/components/admin/QQBotBindings.vue'
 import { qqbotAPI, type QQBotConfig, type QQBotRuntime } from '@/api/qqbot'
 const { t } = useI18n()
 const form = ref<QQBotConfig | null>(null)

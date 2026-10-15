@@ -811,7 +811,16 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
-    { path: '/admin/qqbot', label: t('qqbot.title'), icon: BellIcon },
+    {
+      path: '/admin/qqbot', label: t('qqbot.title'), icon: BellIcon, expandOnly: true,
+      children: [
+        { path: '/admin/qqbot/config', label: t('qqbot.basicConfig'), icon: BellIcon },
+        { path: '/admin/qqbot/bindings', label: t('qqbot.bindingsTitle'), icon: UsersIcon },
+        { path: '/admin/qqbot/runtime', label: t('qqbot.runtime'), icon: OrderIcon },
+        { path: '/admin/qqbot/checkin', label: t('qqbot.checkinTitle'), icon: GiftIcon },
+        { path: '/admin/qqbot/lottery', label: t('qqbot.lotteryTitle'), icon: TicketIcon },
+      ],
+    },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     {

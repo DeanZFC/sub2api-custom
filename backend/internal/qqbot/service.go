@@ -243,7 +243,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	seq := 1
 	switch cmd {
 	case "帮助", "help":
-		text = "CTAV 群助手（免费使用，费用由站长承担）\n直接 @我 提问；生图 描述；新对话；查看结果 任务号\n绑定 邮箱（收到邮件后确认）或绑定 绑定码；签到；我的额度；我的奖励；邀请奖励\n绑定码请在网站个人资料页生成，并回网站确认绑定。"
+		text = "CTAV 群助手（免费使用，费用由站长承担）\n直接 @我 提问；生图 描述；新对话；查看结果 任务号\n绑定 邮箱（收到邮件后确认）或绑定 绑定码；签到；我的额度；我的奖励；邀请奖励；抽奖；抽奖次数；抽奖活动\n绑定码请在网站个人资料页生成，并回网站确认绑定。"
 	case "绑定":
 		if arg == "" {
 			text = "发送：@机器人 绑定 你的注册邮箱，收到邮件后打开链接确认。也可在网站个人资料页生成绑定码后发送：@机器人 绑定 绑定码。"
@@ -267,6 +267,19 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		text, err = s.reward(ctx, c, *j, "checkin")
 		if err != nil {
 			text = "签到入账失败，请稍后重试。"
+		}
+	case "抽奖":
+		var err error
+		text, err = s.drawLottery(ctx, c, *j)
+		if err != nil {
+			text = "抽奖处理失败，请稍后查询抽奖次数或联系管理员。"
+		}
+		text += "\n如未收到结果，可发送“查看结果 " + j.ID + "”。"
+	case "抽奖次数", "我的抽奖", "抽奖活动":
+		var err error
+		text, err = s.lotteryInfo(ctx, c, *j)
+		if err != nil {
+			text = "读取抽奖信息失败，请稍后重试。"
 		}
 	case "邀请奖励":
 		var err error

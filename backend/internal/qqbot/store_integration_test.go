@@ -66,6 +66,14 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	_, err = db.Exec(string(raw))
 	require.NoError(t, err)
+	raw, err = migrations.FS.ReadFile("273_qq_bot_activities.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(raw))
+	require.NoError(t, err)
+	_, err = db.Exec(string(raw))
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE payment_orders(id BIGSERIAL PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id),order_type TEXT NOT NULL DEFAULT 'balance',amount NUMERIC(20,2) NOT NULL,bonus_amount NUMERIC(20,2) NOT NULL DEFAULT 0,refund_amount NUMERIC(20,2) NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'COMPLETED',paid_at TIMESTAMPTZ DEFAULT NOW(),completed_at TIMESTAMPTZ DEFAULT NOW());`)
+	require.NoError(t, err)
 	return db
 }
 func savedBot(t *testing.T, db *sql.DB) *Service {

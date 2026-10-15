@@ -103,7 +103,7 @@ func (h *QQBotHandler) Runtime(c *gin.Context) {
 func requireQQBotAdmin(c *gin.Context) bool {
 	role, ok := middleware.GetUserRoleFromContext(c)
 	if !ok || role != "admin" {
-		response.Forbidden(c, "仅管理员可管理 QQ 绑定")
+		response.Forbidden(c, "仅管理员可管理 QQ 机器人")
 		return false
 	}
 	return true

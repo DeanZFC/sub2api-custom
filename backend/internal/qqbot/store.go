@@ -260,7 +260,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if kind == "invite" {
 		amount = c.InviteReward
 	}
-	if amount <= 0 {
+	if kind == "invite" && amount <= 0 {
 		return "此奖励当前未开启。", nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -271,6 +271,22 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	// Serialize reward eligibility and balance writes, including across replicas.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {
 		return "", err
+	}
+	if kind == "checkin" {
+		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, checkinConfigLock); err != nil {
+			return "", err
+		}
+		cfg, loadErr := loadCheckinConfig(ctx, tx, c.CheckinReward)
+		if loadErr != nil {
+			return "", loadErr
+		}
+		if !cfg.Enabled {
+			return "此奖励当前未开启。", nil
+		}
+		amount, err = randomCheckinAmount(cfg)
+		if err != nil {
+			return "", err
+		}
 	}
 	var userID int64
 	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&userID)

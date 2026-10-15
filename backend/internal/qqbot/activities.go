@@ -1,0 +1,161 @@
+package qqbot
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"math"
+	"math/big"
+	"strings"
+)
+
+const (
+	checkinConfigKey  = "qq_bot_checkin_config"
+	lotteryConfigKey  = "qq_bot_lottery_config"
+	checkinConfigLock = 71427301
+	lotteryConfigLock = 71427302
+)
+
+type CheckinConfig struct {
+	Enabled   bool    `json:"enabled"`
+	MinAmount float64 `json:"min_amount"`
+	MaxAmount float64 `json:"max_amount"`
+}
+type LotteryPrize struct {
+	Name           string  `json:"name"`
+	Amount         float64 `json:"amount"`
+	ProbabilityBPS int     `json:"probability_bps"`
+}
+type LotteryConfig struct {
+	Enabled        bool           `json:"enabled"`
+	Title          string         `json:"title"`
+	RechargeStep   float64        `json:"recharge_step"`
+	ChancesPerStep int64          `json:"chances_per_step"`
+	Prizes         []LotteryPrize `json:"prizes"`
+}
+
+func defaultLotteryConfig() LotteryConfig {
+	return LotteryConfig{Title: "幸运抽奖", RechargeStep: 10, ChancesPerStep: 1, Prizes: []LotteryPrize{
+		{Name: "额度奖励", Amount: 0.1, ProbabilityBPS: 1000},
+		{Name: "谢谢参与", Amount: 0, ProbabilityBPS: 9000},
+	}}
+}
+func readActivityConfig(ctx context.Context, db queryRower, key string, dst any) (bool, error) {
+	var raw string
+	err := db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, json.Unmarshal([]byte(raw), dst)
+}
+func loadCheckinConfig(ctx context.Context, db queryRower, legacy float64) (CheckinConfig, error) {
+	c := CheckinConfig{Enabled: legacy > 0, MinAmount: legacy, MaxAmount: legacy}
+	_, err := readActivityConfig(ctx, db, checkinConfigKey, &c)
+	return c, err
+}
+func (s *Service) CheckinConfig(ctx context.Context) (CheckinConfig, error) {
+	c, err := s.Config(ctx)
+	if err != nil {
+		return CheckinConfig{}, err
+	}
+	return loadCheckinConfig(ctx, s.db, c.CheckinReward)
+}
+func loadLotteryConfig(ctx context.Context, db queryRower) (LotteryConfig, error) {
+	c := defaultLotteryConfig()
+	_, err := readActivityConfig(ctx, db, lotteryConfigKey, &c)
+	return c, err
+}
+func (s *Service) LotteryConfig(ctx context.Context) (LotteryConfig, error) {
+	return loadLotteryConfig(ctx, s.db)
+}
+func validRewardAmount(n float64) bool {
+	return !math.IsNaN(n) && !math.IsInf(n, 0) && n >= 0 && n <= 1000 && math.Abs(n*1e8-math.Round(n*1e8)) <= .001
+}
+func validateCheckin(c CheckinConfig) error {
+	if !validRewardAmount(c.MinAmount) || !validRewardAmount(c.MaxAmount) || c.MinAmount > c.MaxAmount {
+		return errors.New("签到金额需在 0 到 1000 USD 之间，最多 8 位小数，最低金额不能高于最高金额")
+	}
+	return nil
+}
+func validateLottery(c LotteryConfig) error {
+	if strings.TrimSpace(c.Title) == "" || len([]rune(c.Title)) > 60 {
+		return errors.New("活动名称需为 1 到 60 个字符")
+	}
+	if math.IsNaN(c.RechargeStep) || math.IsInf(c.RechargeStep, 0) || c.RechargeStep < .01 || c.RechargeStep > 1e9 || math.Abs(c.RechargeStep*100-math.Round(c.RechargeStep*100)) > .001 {
+		return errors.New("累计充值门槛需为 0.01 到 1000000000 USD，最多 2 位小数")
+	}
+	if c.ChancesPerStep < 1 || c.ChancesPerStep > 1000 {
+		return errors.New("每档赠送次数需在 1 到 1000 之间")
+	}
+	if len(c.Prizes) < 1 || len(c.Prizes) > 20 {
+		return errors.New("请配置 1 到 20 个奖项")
+	}
+	sum := 0
+	for _, p := range c.Prizes {
+		if strings.TrimSpace(p.Name) == "" || len([]rune(p.Name)) > 60 || !validRewardAmount(p.Amount) || p.ProbabilityBPS < 1 || p.ProbabilityBPS > 10000 {
+			return errors.New("奖项名称、金额或概率不正确；概率最小 0.01%，金额最多 1000 USD")
+		}
+		sum += p.ProbabilityBPS
+	}
+	if sum != 10000 {
+		return errors.New("所有奖项的中奖概率合计必须为 100%，可设置金额为 0 的谢谢参与奖项")
+	}
+	return nil
+}
+func (s *Service) saveActivityConfig(ctx context.Context, key string, lock int64, c any) error {
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, lock); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`, key, string(raw)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Service) SaveCheckinConfig(ctx context.Context, c CheckinConfig) error {
+	if err := validateCheckin(c); err != nil {
+		return err
+	}
+	return s.saveActivityConfig(ctx, checkinConfigKey, checkinConfigLock, c)
+}
+func (s *Service) SaveLotteryConfig(ctx context.Context, c LotteryConfig) error {
+	if err := validateLottery(c); err != nil {
+		return err
+	}
+	return s.saveActivityConfig(ctx, lotteryConfigKey, lotteryConfigLock, c)
+}
+
+// Integer sampling preserves 8-decimal monetary precision and includes both endpoints.
+func randomCheckinAmount(c CheckinConfig) (float64, error) {
+	if err := validateCheckin(c); err != nil {
+		return 0, err
+	}
+	lo, hi := int64(math.Round(c.MinAmount*1e8)), int64(math.Round(c.MaxAmount*1e8))
+	n, err := rand.Int(rand.Reader, big.NewInt(hi-lo+1))
+	if err != nil {
+		return 0, err
+	}
+	return float64(lo+n.Int64()) / 1e8, nil
+}
+func lotteryPrizeAt(c LotteryConfig, roll int64) LotteryPrize {
+	for _, p := range c.Prizes {
+		roll -= int64(p.ProbabilityBPS)
+		if roll < 0 {
+			return p
+		}
+	}
+	panic("lottery roll outside validated distribution")
+}
