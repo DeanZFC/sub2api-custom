@@ -108,12 +108,12 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		require.NoError(t, db.QueryRow(`SELECT status FROM qq_bot_jobs WHERE message_id=$1`, "command-"+content).Scan(&status))
 		require.Equal(t, "completed", status)
 		if content == "/我的邀请" {
-			require.Equal(t, "待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
+			require.Equal(t, "待进群：0 人\n待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
 		}
 	}
 	enqueue("unbound-invites", "/我的邀请", "unbound-member", nil)
 	s.runOne(ctx)
-	require.Equal(t, "待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
+	require.Equal(t, "待进群：0 人\n待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
 	require.Zero(t, chats.Load())
 	require.Zero(t, images.Load())
 	beforeModels := replies.Load()

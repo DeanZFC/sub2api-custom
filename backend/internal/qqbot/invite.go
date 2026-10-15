@@ -34,7 +34,8 @@ func (s *Service) myInvites(ctx context.Context, c Config, j Job) (string, error
 	for _, status := range byMember {
 		counts[status]++
 	}
-	return fmt.Sprintf("待绑定：%d 人\n已奖励：%d 人\n已退群：%d 人",
+	return fmt.Sprintf("待进群：%d 人\n待绑定：%d 人\n已奖励：%d 人\n已退群：%d 人",
+		counts["pending_join"],
 		counts["both_unbound"]+counts["inviter_unbound"]+counts["invitee_unbound"],
 		counts["rewarded"], counts["left_group"]), nil
 }
