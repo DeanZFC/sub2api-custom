@@ -32,7 +32,7 @@ func TestRechargeRequirementValidationAndAlternatives(t *testing.T) {
 func TestRechargeConfigCompatibility(t *testing.T) {
 	var checkin CheckinConfig
 	require.NoError(t, json.Unmarshal([]byte(`{"enabled":true,"min_amount":0.1,"max_amount":0.5}`), &checkin))
-	require.False(t, checkin.RechargeRequirement.enabled(), "existing settings remain unrestricted")
+	require.False(t, checkin.enabled(), "existing settings remain unrestricted")
 	require.NoError(t, json.Unmarshal([]byte(`{"min_recharge_total":20,"min_recharge_30d":5}`), &checkin))
 	require.Equal(t, RechargeRequirement{MinRechargeTotal: 20, MinRecharge30d: 5}, checkin.RechargeRequirement)
 	raw, err := json.Marshal(checkin)
