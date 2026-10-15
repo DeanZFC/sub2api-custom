@@ -61,6 +61,7 @@ export const qqbotAPI = {
   config: async () => (await apiClient.get<QQBotConfig>('/admin/qqbot/config')).data,
   save: async (config: QQBotConfig) => (await apiClient.put<QQBotConfig>('/admin/qqbot/config', config)).data,
   runtime: async () => (await apiClient.get<QQBotRuntime>('/admin/qqbot/runtime')).data,
+  deleteDiscoveredGroup: async (groupID: string) => (await apiClient.delete('/admin/qqbot/groups', { data: { group_id: groupID } })).data,
   bindings: async (search: string, page: number) => (await apiClient.get<QQAdminBindingsPage>('/admin/qqbot/bindings', { params: { search, page, page_size: 20 } })).data,
   unbind: async (binding: QQAdminBinding) => (await apiClient.delete(`/admin/qqbot/bindings/${binding.user_id}`, { data: { app_id: binding.app_id, member_id: binding.member_id, created_at: binding.created_at } })).data,
   probe: async (kind: 'qq' | 'chat' | 'image') => (await apiClient.post<{message: string}>(`/admin/qqbot/test/${kind}`, {}, { timeout: 230000 })).data,

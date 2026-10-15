@@ -100,6 +100,31 @@ func (h *QQBotHandler) Runtime(c *gin.Context) {
 	response.Success(c, r)
 }
 
+func (h *QQBotHandler) DeleteDiscoveredGroup(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
+	var req struct {
+		GroupID string `json:"group_id"`
+	}
+	if c.ShouldBindJSON(&req) != nil || req.GroupID == "" || len(req.GroupID) > 128 || strings.ContainsAny(req.GroupID, " \r\n\t") {
+		response.BadRequest(c, "群 OpenID 格式不正确")
+		return
+	}
+	cfg, err := h.bot.Config(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "读取机器人配置失败")
+		return
+	}
+	middleware.SetAuditExtra(c, map[string]any{"qq_app_id": cfg.AppID, "qq_group_openid": req.GroupID})
+	if err = h.bot.DeleteDiscoveredGroup(c.Request.Context(), cfg.AppID, req.GroupID); err != nil {
+		response.InternalError(c, "删除自动识别群失败")
+		return
+	}
+	response.Success(c, gin.H{"deleted": true})
+}
+
 func requireQQBotAdmin(c *gin.Context) bool {
 	role, ok := middleware.GetUserRoleFromContext(c)
 	if !ok || role != "admin" {

@@ -34,6 +34,7 @@
 4. 在 QQ 开放平台配置 HTTPS 回调地址：`https://你的站点域名/api/v1/qqbot/webhook`。不要使用本地预览的 localhost 地址。
 5. 接入 `GROUP_AT_MESSAGE_CREATE` 和 `GROUP_MESSAGE_CREATE`，由群主在最新版手机 QQ 中打开群内机器人的权限设置，开启“接收所有消息”。后者是无需 @ 执行指令的前提；全量模式识别机器人本人的 @ 还需 `/v2/groups/{group_openid}/bot_state` 接口权限。邀请奖励还需要 `GROUP_JOIN_REQUEST`、`GROUP_MEMBER_ADD`、`GROUP_MEMBER_REMOVE`。平台事件权限以你的机器人实际权限为准；申请事件要求机器人是群管理员。
 6. 将 CTAV 加入测试群，触发一次加群或 @ 消息事件。在后台点击刷新，将发现的群 OpenID 加入允许列表。OpenID 与普通 QQ 群号不同。
+   自动识别列表支持逐条删除，删除后立即生效，仅清除当前机器人的群发现记录，不改动允许群配置、账号绑定和活动记录；后续收到该群的新事件时会再次识别。
 7. 填写中转站 API 根地址（通常为 `https://你的中转站/v1`）、机器人专用 API Key 和聊天模型。不要把 `/chat/completions`、`/responses` 或 `/images/generations` 填入 Base URL。
 8. 若需要生图，填写实际支持 `/images/generations` 的模型并打开生图开关。独立生图地址必须同时配置独立生图 Key，以免将聊天凭据发往另一个服务。
 9. 保存后分别测试 QQ 凭据、聊天和生图。QQ 凭据测试成功只代表可获取调用凭证，仍需测试群验证消息和事件权限。

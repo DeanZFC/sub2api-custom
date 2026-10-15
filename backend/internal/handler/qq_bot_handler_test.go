@@ -74,6 +74,56 @@ func TestQQBotAdminUnbindStaleIdentityReturnsConflict(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestQQBotDeleteDiscoveredGroupIsAdminOnlyAndAppScoped(t *testing.T) {
+	for _, role := range []string{"", "user", "admin"} {
+		t.Run(role, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+			if role == "admin" {
+				cfg := qqbot.DefaultConfig()
+				cfg.AppID = "current-app"
+				raw, err := json.Marshal(cfg)
+				require.NoError(t, err)
+				mock.ExpectQuery("SELECT value FROM settings").WithArgs("qq_bot_config").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(raw)))
+				mock.ExpectExec("DELETE FROM qq_bot_groups WHERE app_id=\\$1 AND group_id=\\$2").WithArgs("current-app", "opaque/group+id").WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+			h := NewQQBotHandler(qqbot.New(db, qqTestEncryptor{}, true, nil))
+			r := gin.New()
+			if role != "" {
+				r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), role); c.Next() })
+			}
+			r.DELETE("/groups", h.DeleteDiscoveredGroup)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("DELETE", "/groups", strings.NewReader(`{"group_id":"opaque/group+id"}`))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			if role == "admin" {
+				require.Equal(t, http.StatusOK, w.Code)
+			} else {
+				require.Equal(t, http.StatusForbidden, w.Code)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestQQBotDeleteDiscoveredGroupRejectsInvalidID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	h := NewQQBotHandler(qqbot.New(db, qqTestEncryptor{}, true, nil))
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), "admin"); c.Next() })
+	r.DELETE("/groups", h.DeleteDiscoveredGroup)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("DELETE", "/groups", strings.NewReader(`{"group_id":"bad id"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestQQBotWebhookRejectsUnsignedAndAlteredEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {

@@ -3,7 +3,7 @@
     <div class="mx-auto max-w-5xl space-y-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.basicConfig') }}</h1><p class="mt-1 text-sm text-gray-500">{{ t('qqbot.description') }}</p></div>
-        <button class="btn btn-secondary" :disabled="busy" @click="refreshRuntime">{{ t('common.refresh') }}</button>
+        <button class="btn btn-secondary" :disabled="busy || refreshingRuntime" @click="refreshRuntime">{{ t('common.refresh') }}</button>
       </div>
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
       <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
@@ -20,7 +20,17 @@
           <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800"><span>{{ t('qqbot.webhook') }}</span><code class="mt-1 block break-all select-all">{{ webhookURL }}</code><p class="mt-2 text-gray-500">{{ t('qqbot.eventsHelp') }}</p></div>
           <label class="block space-y-1">{{ t('qqbot.allowedGroups') }}<textarea v-model="groupsText" rows="3" class="input font-mono" :placeholder="t('qqbot.groupsPlaceholder')" /></label>
           <p class="text-sm text-gray-500">{{ t('qqbot.groupsHelp') }}</p>
-          <div v-if="runtime?.groups.length" class="flex flex-wrap gap-2"><button v-for="group in runtime.groups" :key="group.id" type="button" class="btn btn-secondary text-xs" @click="addGroup(group.id)">{{ group.id }} · {{ t('common.add') }}</button></div>
+          <div v-if="runtime?.groups.length" class="space-y-2">
+            <p class="text-sm font-medium">{{ t('qqbot.discoveredGroups') }}</p>
+            <p class="text-xs text-gray-500">{{ t('qqbot.discoveredGroupsHelp') }}</p>
+            <div v-for="group in runtime.groups" :key="group.id" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2 dark:border-dark-700">
+              <code class="break-all text-sm">{{ group.id }}</code>
+              <div class="flex shrink-0 gap-2">
+                <button type="button" class="btn btn-secondary text-xs" @click="addGroup(group.id)">{{ t('common.add') }}</button>
+                <button type="button" class="btn btn-secondary text-xs" :disabled="busy || refreshingRuntime" :aria-label="t('qqbot.deleteDiscoveredGroup', { id: group.id })" @click="deleteDiscoveredGroup(group.id)">{{ t('common.delete') }}</button>
+              </div>
+            </div>
+          </div>
         </section>
         <section class="card space-y-4 p-6">
           <h2 class="text-lg font-semibold">{{ t('qqbot.ai') }}</h2>
@@ -71,6 +81,7 @@ const runtime = ref<QQBotRuntime | null>(null)
 const groupsText = ref('')
 const savedSnapshot = ref('')
 const busy = ref(false)
+const refreshingRuntime = ref(false)
 const error = ref('')
 const notice = ref('')
 const probeKinds = ['qq', 'chat', 'image'] as const
@@ -87,7 +98,20 @@ const webhookURL = computed(() => `${window.location.origin}/api/v1/qqbot/webhoo
 function secretHint(set: boolean) { return t(set ? 'qqbot.secretStored' : 'qqbot.secretEmpty') }
 function message(e: unknown) { return (e as {message?: string})?.message || t('common.error') }
 function apply(c: QQBotConfig) { form.value = c; groupsText.value = (c.allowed_groups || []).join('\n'); savedSnapshot.value = snapshot.value }
-async function refreshRuntime() { try { runtime.value = await qqbotAPI.runtime() } catch (e) { error.value = message(e) } }
+async function refreshRuntime() {
+  if (refreshingRuntime.value) return
+  refreshingRuntime.value = true
+  try { runtime.value = await qqbotAPI.runtime() } catch (e) { error.value = message(e) } finally { refreshingRuntime.value = false }
+}
+async function deleteDiscoveredGroup(id: string) {
+  if (busy.value || refreshingRuntime.value) return
+  busy.value = true; error.value = ''; notice.value = ''
+  try {
+    await qqbotAPI.deleteDiscoveredGroup(id)
+    if (runtime.value) runtime.value.groups = runtime.value.groups.filter(group => group.id !== id)
+    notice.value = t('qqbot.discoveredGroupDeleted')
+  } catch (e) { error.value = message(e) } finally { busy.value = false }
+}
 async function save() {
   if (!form.value) return
   busy.value = true; error.value = ''; notice.value = ''

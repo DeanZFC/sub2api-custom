@@ -500,3 +500,10 @@ func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {
 	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_bindings WHERE app_id=$1`, c.AppID).Scan(&out.Bindings)
 	return out, err
 }
+
+// DeleteDiscoveredGroup removes a group's automatically discovered runtime
+// record for the current bot application. It does not change the allowlist.
+func (s *Service) DeleteDiscoveredGroup(ctx context.Context, appID, groupID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM qq_bot_groups WHERE app_id=$1 AND group_id=$2`, appID, groupID)
+	return err
+}
