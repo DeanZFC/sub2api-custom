@@ -25,7 +25,7 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 	c := DefaultConfig()
 	c.Enabled, c.ImageEnabled = true, true
 	c.BaseURL = server.URL + "/v1"
-	for _, content := range []string{"你好", "签到", "生图 一只猫", "画图 一只猫", "/不存在", "/新对话", "/查看结果 task", "/邀请奖励", "帮我解释 /签到", "@CTAV 你好"} {
+	for _, content := range []string{"你好", "签到", "生图 一只猫", "画图 一只猫", "/不存在", "/新对话", "/查看结果 task", "帮我解释 /签到", "@CTAV 你好"} {
 		t.Run(content, func(t *testing.T) {
 			e := Event{ID: "ignored", GroupID: "group", Content: content}
 			e.Author.MemberID = "member"
@@ -45,6 +45,7 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 		require.NoError(t, s.Enqueue(context.Background(), c, Payload{Type: groupMessageCreate, Data: raw}))
 	}
 	require.Zero(t, calls.Load())
+	require.True(t, shouldQueueGroupMessage(groupMessageCreate, Event{Content: "/邀请奖励"}))
 }
 
 func TestFullGroupCommandsWithoutMention(t *testing.T) {

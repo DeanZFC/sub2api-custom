@@ -106,7 +106,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "new-member", bound.MemberID)
 	require.Contains(t, lastReply.Load(), "<@new-member>\n")
-	for _, content := range []string{"/帮助", "/我的额度", "/我的奖励", "/邀请活动", "/我的邀请", "/抽奖次数", "/抽奖活动"} {
+	for _, content := range []string{"/帮助", "/我的额度", "/我的奖励", "/邀请活动", "/邀请奖励", "/我的邀请", "/抽奖次数", "/抽奖活动"} {
 		enqueue("command-"+content, content, "member", nil)
 		s.runOne(ctx)
 		var status string
@@ -114,6 +114,10 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		require.Equal(t, "completed", status)
 		if content == "/我的邀请" {
 			require.Equal(t, "<@member>\n待进群：0 人\n待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
+		}
+		if content == "/邀请奖励" {
+			require.Contains(t, lastReply.Load(), "参与条件：")
+			require.Contains(t, lastReply.Load(), "邀请奖励参与条件：")
 		}
 	}
 	enqueue("unbound-invites", "/我的邀请", "unbound-member", nil)

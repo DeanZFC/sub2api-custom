@@ -15,6 +15,20 @@
           <input v-model.number="form.invite_daily_limit" data-testid="invite-daily-limit" class="input" type="number" min="0" max="100000" step="1" required />
         </label>
       </div>
+      <div class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
+        <h3 class="font-medium">{{ t('qqbot.rechargeEligibility') }}</h3>
+        <p class="text-sm text-gray-500">{{ t('qqbot.inviteRechargeEligibilityHelp') }}</p>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label class="space-y-1">
+            {{ t('qqbot.minimumLifetimeRecharge') }}
+            <input v-model.number="form.min_recharge_total" data-testid="invite-min-recharge-total" class="input" type="number" min="0" max="1000000000" step="0.01" required />
+          </label>
+          <label class="space-y-1">
+            {{ t('qqbot.minimum30dRecharge') }}
+            <input v-model.number="form.min_recharge_30d" data-testid="invite-min-recharge-30d" class="input" type="number" min="0" max="1000000000" step="0.01" required />
+          </label>
+        </div>
+      </div>
       <button type="submit" class="btn btn-primary" :disabled="busy">{{ t('common.save') }}</button>
     </form>
     <p v-else-if="!error">{{ t('common.loading') }}</p>
@@ -36,6 +50,11 @@ async function save() {
   if (!form.value) return
   busy.value = true
   error.value = ''; notice.value = ''
+  if (![form.value.min_recharge_total, form.value.min_recharge_30d].every(n => Number.isFinite(n) && n >= 0 && n <= 1_000_000_000 && Number(n.toFixed(2)) === n)) {
+    error.value = t('qqbot.invalidRechargeThreshold')
+    busy.value = false
+    return
+  }
   try {
     form.value = await qqbotAPI.saveInvite({ ...form.value })
     notice.value = t('common.saved')

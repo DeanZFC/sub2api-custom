@@ -329,11 +329,13 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	}
 	c = current
 	amount := c.CheckinReward
+	var requirement RechargeRequirement
 	if kind == "invite" {
 		if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 			return "邀请奖励未开启。", nil
 		}
 		amount = c.InviteReward
+		requirement = RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}
 	}
 	// Serialize reward eligibility and balance writes, including across replicas.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {
@@ -354,6 +356,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		if !cfg.Enabled {
 			return "签到活动未开启。", nil
 		}
+		requirement = cfg.RechargeRequirement
 		amount, err = randomCheckinAmount(cfg)
 		if err != nil {
 			return "", err
@@ -383,6 +386,15 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		}
 		return "该邀请奖励已发放。", nil
 	}
+	if kind == "checkin" && requirement.enabled() {
+		eligibility, eligibilityErr := rechargeEligibility(ctx, tx, userID, true)
+		if eligibilityErr != nil {
+			return "", eligibilityErr
+		}
+		if !requirement.satisfied(eligibility) {
+			return requirement.failure("签到", eligibility), nil
+		}
+	}
 	key := fmt.Sprintf("checkin:%d:%s", userID, rewardDay)
 	sourceUser := int64(0)
 	sourceMember := ""
@@ -400,6 +412,15 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		}
 		if userID == sourceUser {
 			return "本人邀请不计奖励。", nil
+		}
+		if requirement.enabled() {
+			eligibility, eligibilityErr := rechargeEligibility(ctx, tx, userID, true)
+			if eligibilityErr != nil {
+				return "", eligibilityErr
+			}
+			if !requirement.satisfied(eligibility) {
+				return requirement.failure("邀请奖励", eligibility), nil
+			}
 		}
 		key = fmt.Sprintf("invite:%d", sourceUser)
 		var count int

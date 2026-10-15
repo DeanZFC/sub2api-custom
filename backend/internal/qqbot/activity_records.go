@@ -141,16 +141,45 @@ func listInviteRecords(ctx context.Context, tx *sql.Tx, c Config, search string,
 	// another group/account relationship must not appear as a second payout here.
 	return visitInviteRecords(ctx, tx, c, inviteRelationshipSelect+inviteRecordFilter+`
  ORDER BY COALESCE(m.invited_at,m.first_seen_at) DESC,m.group_id,m.member_id LIMIT $3 OFFSET $4`,
-		[]any{c.AppID, search, out.PageSize, (out.Page - 1) * out.PageSize}, func(r ActivityRecord) {
+		[]any{c.AppID, search, out.PageSize, (out.Page - 1) * out.PageSize}, true, func(r ActivityRecord) {
 			out.Items = append(out.Items, r)
 		})
 }
 
 // Share the status and historical payout rules between admin records and the
 // member's invitation summary. The caller supplies only an internal SQL query.
-func visitInviteRecords(ctx context.Context, tx *sql.Tx, c Config, relationships string, args []any, visit func(ActivityRecord)) error {
+func visitInviteRecords(ctx context.Context, tx *sql.Tx, c Config, relationships string, args []any, includeRechargeEligibility bool, visit func(ActivityRecord)) error {
 	dateParam := fmt.Sprintf("$%d::date", len(args)+1)
 	args = append(args, day(time.Now()))
+	qualificationSelect := "true"
+	qualificationJoins := ""
+	requirement := RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}
+	if includeRechargeEligibility && requirement.enabled() {
+		windowParam := fmt.Sprintf("$%d::timestamptz", len(args)+1)
+		args = append(args, time.Now().Add(-rechargeRequirementWindow))
+		lifetimeParam := fmt.Sprintf("$%d::numeric", len(args)+1)
+		recentParam := fmt.Sprintf("$%d::numeric", len(args)+2)
+		args = append(args, requirement.MinRechargeTotal, requirement.MinRecharge30d)
+		qualificationJoins = ` LEFT JOIN LATERAL (
+ SELECT COALESCE(SUM(CASE
+   WHEN p.status IN ('COMPLETED','REFUND_FAILED') THEN GREATEST(p.amount-p.bonus_amount,0)
+   WHEN p.status='PARTIALLY_REFUNDED' AND p.amount>0 THEN ROUND(GREATEST(p.amount-p.bonus_amount,0)*GREATEST(p.amount-p.refund_amount,0)/p.amount,8)
+   ELSE 0 END),0) AS total,
+ COALESCE(SUM(CASE WHEN p.completed_at>=` + windowParam + ` THEN CASE
+   WHEN p.status IN ('COMPLETED','REFUND_FAILED') THEN GREATEST(p.amount-p.bonus_amount,0)
+   WHEN p.status='PARTIALLY_REFUNDED' AND p.amount>0 THEN ROUND(GREATEST(p.amount-p.bonus_amount,0)*GREATEST(p.amount-p.refund_amount,0)/p.amount,8)
+   ELSE 0 END ELSE 0 END),0) AS recent
+ FROM payment_orders p WHERE p.user_id=m.inviter_uid AND p.order_type='balance' AND p.paid_at IS NOT NULL AND p.completed_at IS NOT NULL
+) recharge_orders ON true
+LEFT JOIN LATERAL (
+ SELECT COALESCE(SUM(r.value),0) AS total,
+ COALESCE(SUM(r.value) FILTER (WHERE r.used_at>=` + windowParam + `),0) AS recent
+ FROM redeem_codes r WHERE r.used_by=m.inviter_uid AND r.type='balance' AND r.status='used' AND r.used_at IS NOT NULL AND r.value>0
+ AND NOT EXISTS(SELECT 1 FROM payment_orders p WHERE p.recharge_code=r.code)
+) recharge_codes ON true`
+		qualificationSelect = `((` + lifetimeParam + `>0 AND recharge_orders.total+recharge_codes.total>=` + lifetimeParam + `)
+ OR (` + recentParam + `>0 AND recharge_orders.recent+recharge_codes.recent>=` + recentParam + `))`
+	}
 	rows, err := tx.QueryContext(ctx, `WITH relationships AS (`+relationships+`)
  SELECT m.group_id||':'||m.member_id,m.group_id,
  m.member_id,m.uid,m.email,m.nickname,m.bound,m.user_status,m.user_deleted,
@@ -159,8 +188,8 @@ func visitInviteRecords(ctx context.Context, tx *sql.Tx, c Config, relationships
  COALESCE(r.id,0),COALESCE(r.app_id=m.app_id AND r.group_id=m.group_id AND r.member_id=m.inviter_id,false),
  COALESCE(r.amount,0),r.created_at,COALESCE(r.user_id,0),COALESCE(ru.email,''),
  (SELECT COUNT(*) FROM qq_bot_rewards daily WHERE daily.kind='invite' AND daily.user_id=m.inviter_uid
- AND (daily.created_at AT TIME ZONE 'Asia/Shanghai')::date=`+dateParam+`)
- FROM relationships m LEFT JOIN LATERAL (
+ AND (daily.created_at AT TIME ZONE 'Asia/Shanghai')::date=`+dateParam+`),`+qualificationSelect+`
+ FROM relationships m`+qualificationJoins+` LEFT JOIN LATERAL (
  SELECT r.* FROM qq_bot_rewards r WHERE r.kind='invite' AND
  ((r.app_id=m.app_id AND r.source_member_id=m.member_id) OR r.source_user_id=NULLIF(m.uid,0))
  ORDER BY r.id LIMIT 1) r ON true LEFT JOIN users ru ON ru.id=r.user_id
@@ -174,14 +203,15 @@ func visitInviteRecords(ctx context.Context, tx *sql.Tx, c Config, relationships
 		var rewardID int64
 		var ownReward bool
 		var dailyCount int
+		var rechargeEligible bool
 		targets := append([]any{&r.ID, &r.GroupID}, participantTargets(&r.Participant)...)
 		targets = append(targets, participantTargets(r.Inviter)...)
 		targets = append(targets, &r.CreatedAt, &r.InvitedAt, &r.JoinedAt, &r.LeftAt, &rewardID, &ownReward,
-			&r.Amount, &r.RewardedAt, &r.RewardUserID, &r.RewardEmail, &dailyCount)
+			&r.Amount, &r.RewardedAt, &r.RewardUserID, &r.RewardEmail, &dailyCount, &rechargeEligible)
 		if err = rows.Scan(targets...); err != nil {
 			return err
 		}
-		r.Status = invitationRecordStatus(c, r, rewardID, ownReward, dailyCount)
+		r.Status = invitationRecordStatus(c, r, rewardID, ownReward, dailyCount, rechargeEligible)
 		if rewardID != 0 && !ownReward {
 			r.Amount, r.RewardedAt, r.RewardUserID, r.RewardEmail = 0, nil, 0, ""
 		}
@@ -190,7 +220,7 @@ func visitInviteRecords(ctx context.Context, tx *sql.Tx, c Config, relationships
 	return rows.Err()
 }
 
-func invitationRecordStatus(c Config, r ActivityRecord, rewardID int64, ownReward bool, dailyCount int) string {
+func invitationRecordStatus(c Config, r ActivityRecord, rewardID int64, ownReward bool, dailyCount int, rechargeEligible bool) string {
 	switch {
 	case rewardID != 0 && ownReward:
 		return "rewarded"
@@ -218,6 +248,8 @@ func invitationRecordStatus(c Config, r ActivityRecord, rewardID int64, ownRewar
 		return "group_disabled"
 	case dailyCount >= c.InviteDailyLimit:
 		return "daily_limit"
+	case !rechargeEligible:
+		return "recharge_required"
 	default:
 		return "pending_reward"
 	}

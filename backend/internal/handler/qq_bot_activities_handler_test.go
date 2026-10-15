@@ -29,12 +29,14 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 		r.GET("/lottery/users/:user_id", h.LotteryState)
 		for _, tc := range []struct{ method, path, body string }{
 			{"PUT", "/checkin", `{"min_amount":2,"max_amount":1}`},
+			{"PUT", "/checkin", `{"min_amount":0.1,"max_amount":0.5,"min_recharge_30d":0.001}`},
 			{"PUT", "/lottery", `{"enabled":true,"recharge_step":0}`},
 			{"PUT", "/invite", `{"invite_reward":-1,"invite_daily_limit":10}`},
 			{"PUT", "/invite", `{"invite_reward":1001,"invite_daily_limit":10}`},
 			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":100001}`},
 			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":-1}`},
 			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":1.5}`},
+			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":10,"min_recharge_total":-1}`},
 			{"GET", "/lottery/draws?page=-1", ""}, {"GET", "/lottery/users/invalid", ""},
 		} {
 			w := httptest.NewRecorder()

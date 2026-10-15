@@ -262,7 +262,7 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 	s.tokenURL = server.URL + "/token"
 	c := DefaultConfig()
 	c.AppID, c.AppSecret, c.BaseURL = "app", "test-secret", server.URL+"/v1"
-	for i, content := range []string{"/查看结果 task-id", "/新对话", "/清空", "/邀请奖励", "/不存在"} {
+	for i, content := range []string{"/查看结果 task-id", "/新对话", "/清空", "/不存在"} {
 		j := Job{GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, Event{Content: content}))
 		require.Len(t, replies, i+1)
@@ -272,7 +272,8 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := replies[len(replies)-1]
 	require.Contains(t, help, "指令：/我的邀请\n说明：查询邀请状态和人数")
-	for _, removed := range []string{"/查看结果", "/新对话", "/清空", "/邀请奖励"} {
+	require.Contains(t, help, "指令：/邀请奖励\n说明：查看邀请奖励规则、条件和今日进度")
+	for _, removed := range []string{"/查看结果", "/新对话", "/清空"} {
 		require.NotContains(t, help, removed)
 	}
 }

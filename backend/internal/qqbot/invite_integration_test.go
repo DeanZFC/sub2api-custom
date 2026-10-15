@@ -93,7 +93,8 @@ func TestQQBotInviteActivityUnavailableStates(t *testing.T) {
 	job := Job{MemberID: "member"}
 	info, err := s.inviteInfo(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "请先使用 /绑定 绑定网站账号。", info)
+	require.Contains(t, info, "参与条件：")
+	require.Contains(t, info, "请先使用 /绑定 绑定网站账号。")
 	uid := user(t, db)
 	bind(t, db, uid, "member")
 	for _, state := range []string{"inactive", "deleted"} {
@@ -105,7 +106,8 @@ func TestQQBotInviteActivityUnavailableStates(t *testing.T) {
 		require.NoError(t, err)
 		info, err = s.inviteInfo(ctx, c, job)
 		require.NoError(t, err)
-		require.Equal(t, "请先使用 /绑定 绑定网站账号。", info)
+		require.Contains(t, info, "参与条件：")
+		require.Contains(t, info, "请先使用 /绑定 绑定网站账号。")
 	}
 	for _, disabled := range []Config{
 		{InviteReward: 0, InviteDailyLimit: 10},

@@ -18,7 +18,7 @@ func (s *Service) myInvites(ctx context.Context, c Config, j Job) (string, error
 	// account. Read all relationships rather than a page of admin search results.
 	byMember := make(map[string]string)
 	err = visitInviteRecords(ctx, tx, c, inviteRelationshipSelect+`
- WHERE m.app_id=$1 AND m.inviter_id=$2 AND m.inviter_id<>''`, []any{c.AppID, j.MemberID}, func(r ActivityRecord) {
+ WHERE m.app_id=$1 AND m.inviter_id=$2 AND m.inviter_id<>''`, []any{c.AppID, j.MemberID}, false, func(r ActivityRecord) {
 		previous, found := byMember[r.Participant.MemberID]
 		if !found || invitationStatusPriority(r.Status) < invitationStatusPriority(previous) {
 			byMember[r.Participant.MemberID] = r.Status
@@ -53,20 +53,22 @@ func invitationStatusPriority(status string) int {
 		return 2
 	case "daily_limit":
 		return 3
-	case "invitee_unbound", "inviter_unbound", "both_unbound":
+	case "recharge_required":
 		return 4
-	case "account_unavailable":
+	case "invitee_unbound", "inviter_unbound", "both_unbound":
 		return 5
-	case "self_invitation":
+	case "account_unavailable":
 		return 6
-	case "disabled", "group_disabled":
+	case "self_invitation":
 		return 7
-	case "pending_join":
+	case "disabled", "group_disabled":
 		return 8
-	case "invalid_invitation":
+	case "pending_join":
 		return 9
-	default: // left_group
+	case "invalid_invitation":
 		return 10
+	default: // left_group
+		return 11
 	}
 }
 
@@ -74,23 +76,43 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 	if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 		return "邀请活动未开启。", nil
 	}
-	var joined, rewarded int
-	// Count joins separately from payouts: an invitee can bind on a later day.
-	// Match the payout limit's account-wide scope, including rewards from other groups.
-	err := s.db.QueryRowContext(ctx, `SELECT
- (SELECT COUNT(DISTINCT m.member_id) FROM qq_bot_members m
-  WHERE m.app_id=b.app_id AND m.inviter_id=b.member_id AND m.member_id<>b.member_id
-  AND m.invited_at<=m.joined_at AND m.invited_at>m.joined_at-INTERVAL '7 days'
-  AND (m.joined_at AT TIME ZONE 'Asia/Shanghai')::date=$3::date),
- (SELECT COUNT(*) FROM qq_bot_rewards r WHERE r.kind='invite' AND r.user_id=b.user_id
-  AND (r.created_at AT TIME ZONE 'Asia/Shanghai')::date=$3::date)
- FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
- WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID, day(time.Now())).Scan(&joined, &rewarded)
+	requirement := RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}
+	conditions := "参与条件：收到官方邀请申请，7 天内成功入群且仍在群内；双方绑定有效网站账号；同一被邀请账号仅奖励一次。"
+	var userID int64
+	err := s.db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
+ WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先使用 /绑定 绑定网站账号。", nil
+		return fmt.Sprintf("单人奖励：$%.2f\n每日奖励上限：%d 人\n%s\n%s\n当前状态：请先使用 /绑定 绑定网站账号。",
+			c.InviteReward, c.InviteDailyLimit, conditions, requirement.invite()), nil
 	}
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("单人奖励：$%.2f\n今日邀请入群：%d 人\n今日已奖励：%d 人\n每日奖励上限：%d 人\n奖励条件：新用户受邀入群，双方完成绑定。\n同一用户仅奖励一次；每日按北京时间统计。", c.InviteReward, joined, rewarded, c.InviteDailyLimit), nil
+	var joined, rewarded int
+	// Count joins separately from payouts: an invitee can bind on a later day.
+	// Match the payout limit's account-wide scope, including rewards from other groups.
+	err = s.db.QueryRowContext(ctx, `SELECT
+ (SELECT COUNT(DISTINCT m.member_id) FROM qq_bot_members m
+  WHERE m.app_id=$1 AND m.inviter_id=$2 AND m.member_id<>$2
+  AND m.invited_at<=m.joined_at AND m.invited_at>m.joined_at-INTERVAL '7 days'
+  AND (m.joined_at AT TIME ZONE 'Asia/Shanghai')::date=$3::date),
+	 (SELECT COUNT(*) FROM qq_bot_rewards r WHERE r.kind='invite' AND r.user_id=$4
+  AND (r.created_at AT TIME ZONE 'Asia/Shanghai')::date=$3::date)`, c.AppID, j.MemberID, day(time.Now()), userID).Scan(&joined, &rewarded)
+	if err != nil {
+		return "", err
+	}
+	info := fmt.Sprintf("单人奖励：$%.2f\n今日邀请入群：%d 人\n今日已奖励：%d 人\n每日奖励上限：%d 人\n%s\n%s\n每日按北京时间统计。",
+		c.InviteReward, joined, rewarded, c.InviteDailyLimit, conditions, requirement.invite())
+	if requirement.enabled() {
+		eligibility, eligibilityErr := rechargeEligibility(ctx, s.db, userID, false)
+		if eligibilityErr != nil {
+			return "", eligibilityErr
+		}
+		status := "已满足"
+		if !requirement.satisfied(eligibility) {
+			status = "未满足"
+		}
+		info += fmt.Sprintf("\n充值资格：%s。当前累计有效充值：$%s；近 30 天有效充值：$%s。", status, eligibility.Total.StringFixed(2), eligibility.Last30d.StringFixed(2))
+	}
+	return info, nil
 }

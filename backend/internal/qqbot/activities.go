@@ -22,10 +22,12 @@ type CheckinConfig struct {
 	Enabled   bool    `json:"enabled"`
 	MinAmount float64 `json:"min_amount"`
 	MaxAmount float64 `json:"max_amount"`
+	RechargeRequirement
 }
 type InviteConfig struct {
 	InviteReward     float64 `json:"invite_reward"`
 	InviteDailyLimit int     `json:"invite_daily_limit"`
+	RechargeRequirement
 }
 type LotteryPrize struct {
 	Name           string  `json:"name"`
@@ -82,7 +84,10 @@ func validRewardAmount(n float64) bool {
 }
 func (s *Service) InviteConfig(ctx context.Context) (InviteConfig, error) {
 	c, err := s.Config(ctx)
-	return InviteConfig{InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit}, err
+	return InviteConfig{
+		InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit,
+		RechargeRequirement: RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d},
+	}, err
 }
 func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 	if !validRewardAmount(c.InviteReward) {
@@ -91,9 +96,14 @@ func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 	if c.InviteDailyLimit < 0 || c.InviteDailyLimit > 100000 {
 		return errors.New("每位邀请人每日奖励次数需在 0 到 100000 之间；0 表示禁止")
 	}
+	if err := validateRechargeRequirement(c.RechargeRequirement); err != nil {
+		return err
+	}
 	_, err := s.saveConfig(ctx, func(old Config) Config {
 		old.InviteReward = c.InviteReward
 		old.InviteDailyLimit = c.InviteDailyLimit
+		old.InviteMinRechargeTotal = c.MinRechargeTotal
+		old.InviteMinRecharge30d = c.MinRecharge30d
 		return old
 	})
 	return err
@@ -102,7 +112,7 @@ func validateCheckin(c CheckinConfig) error {
 	if !validRewardAmount(c.MinAmount) || !validRewardAmount(c.MaxAmount) || c.MinAmount > c.MaxAmount {
 		return errors.New("签到金额需在 0 到 1000 USD 之间，最多 8 位小数，最低金额不能高于最高金额")
 	}
-	return nil
+	return validateRechargeRequirement(c.RechargeRequirement)
 }
 func validateLottery(c LotteryConfig) error {
 	if strings.TrimSpace(c.Title) == "" || len([]rune(c.Title)) > 60 {

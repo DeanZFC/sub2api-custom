@@ -9,6 +9,7 @@ export interface QQBotConfig {
   history_turns: number; daily_chat_limit: number; daily_image_limit: number
   total_daily_chat_limit: number; total_daily_image_limit: number; cooldown_seconds: number
   checkin_reward: number; invite_reward: number; invite_daily_limit: number
+  invite_min_recharge_total?: number; invite_min_recharge_30d?: number
   clear_app_secret?: boolean; clear_api_key?: boolean; clear_image_api_key?: boolean
 }
 export interface QQBotRuntime {
@@ -29,8 +30,14 @@ export interface QQBindingState {
   binding: { member_id: string; group_id: string; nickname: string; created_at: string } | null
   pending: QQBindingRequest | null
 }
-export interface QQCheckinConfig { enabled: boolean; min_amount: number; max_amount: number }
-export interface QQInviteConfig { invite_reward: number; invite_daily_limit: number }
+export interface QQCheckinConfig {
+  enabled: boolean; min_amount: number; max_amount: number
+  min_recharge_total: number; min_recharge_30d: number
+}
+export interface QQInviteConfig {
+  invite_reward: number; invite_daily_limit: number
+  min_recharge_total: number; min_recharge_30d: number
+}
 export interface QQLotteryPrize { name: string; amount: number; probability_bps: number }
 export interface QQLotteryConfig { enabled: boolean; title: string; recharge_step: number; chances_per_step: number; prizes: QQLotteryPrize[] }
 export interface QQLotteryState { user_id: number; recharge_total: number; earned: number; used: number; remaining: number; next_recharge: number }

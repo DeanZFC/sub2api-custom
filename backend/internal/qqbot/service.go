@@ -262,6 +262,24 @@ func (s *Service) settleInvites(ctx context.Context, c Config, member string) er
 	if !c.Enabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 		return nil
 	}
+	eligibleAsInviter := true
+	requirement := RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}
+	if requirement.enabled() {
+		var userID int64
+		err := s.db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
+ WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, member).Scan(&userID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		eligibility, err := rechargeEligibility(ctx, s.db, userID, false)
+		if err != nil {
+			return err
+		}
+		eligibleAsInviter = requirement.satisfied(eligibility)
+	}
 	// Filter eligibility before bounding the batch. Otherwise old unbound or
 	// already-paid relationships can permanently hide later valid invitations.
 	rows, err := s.db.QueryContext(ctx, `SELECT m.group_id,m.member_id FROM qq_bot_members m
@@ -269,14 +287,14 @@ func (s *Service) settleInvites(ctx context.Context, c Config, member string) er
  JOIN users u ON u.id=b.user_id AND u.status='active' AND u.deleted_at IS NULL
  JOIN qq_bot_bindings ib ON ib.app_id=m.app_id AND ib.member_id=m.inviter_id
  JOIN users iu ON iu.id=ib.user_id AND iu.status='active' AND iu.deleted_at IS NULL
- WHERE m.app_id=$1 AND (m.member_id=$2 OR m.inviter_id=$2) AND m.group_id=ANY($3)
+ WHERE m.app_id=$1 AND (m.member_id=$2 OR (m.inviter_id=$2 AND $6)) AND m.group_id=ANY($3)
  AND m.joined_at IS NOT NULL AND m.left_at IS NULL AND m.inviter_id<>'' AND m.member_id<>m.inviter_id
  AND m.invited_at<=m.joined_at AND m.invited_at>m.joined_at-INTERVAL '7 days' AND b.user_id<>ib.user_id
  AND NOT EXISTS(SELECT 1 FROM qq_bot_rewards r WHERE r.kind='invite' AND r.app_id=m.app_id AND r.source_member_id=m.member_id)
  AND NOT EXISTS(SELECT 1 FROM qq_bot_rewards r WHERE r.kind='invite' AND r.source_user_id=b.user_id)
  AND (SELECT COUNT(*) FROM qq_bot_rewards r WHERE r.kind='invite' AND r.user_id=ib.user_id
       AND (r.created_at AT TIME ZONE 'Asia/Shanghai')::date=$5::date)<$4
- ORDER BY m.joined_at,m.group_id,m.member_id LIMIT 100`, c.AppID, member, pq.Array(c.AllowedGroups), c.InviteDailyLimit, day(time.Now()))
+ ORDER BY m.joined_at,m.group_id,m.member_id LIMIT 100`, c.AppID, member, pq.Array(c.AllowedGroups), c.InviteDailyLimit, day(time.Now()), eligibleAsInviter)
 	if err != nil {
 		return err
 	}
@@ -359,8 +377,8 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 指令：/绑定 邮箱或绑定码
 说明：绑定账号
 
-指令：/邀请活动
-说明：查看邀请规则和今日进度
+指令：/邀请奖励
+说明：查看邀请奖励规则、条件和今日进度
 
 指令：/我的邀请
 说明：查询邀请状态和人数
@@ -419,7 +437,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if err != nil {
 			text = "抽奖信息查询失败，请稍后重试。"
 		}
-	case "邀请活动":
+	case "邀请奖励", "邀请活动":
 		var err error
 		text, err = s.inviteInfo(ctx, c, *j)
 		if err != nil {
