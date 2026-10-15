@@ -31,6 +31,15 @@ func RegisterAdminRoutes(
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
+		if h.QQBot != nil {
+			bot := admin.Group("/qqbot")
+			bot.GET("/config", h.QQBot.GetConfig)
+			bot.PUT("/config", h.QQBot.SaveConfig)
+			bot.GET("/runtime", h.QQBot.Runtime)
+			bot.GET("/bindings", h.QQBot.ListBindings)
+			bot.DELETE("/bindings/:user_id", h.QQBot.Unbind)
+			bot.POST("/test/:kind", h.QQBot.Probe)
+		}
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
 

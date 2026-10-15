@@ -149,6 +149,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/qqbot/bind',
+    name: 'QQBotBind',
+    component: () => import('@/views/auth/QQBotBindView.vue'),
+    meta: { requiresAuth: false, title: 'Confirm QQ Binding', titleKey: 'qqbot.emailBindTitle' }
+  },
+  {
     path: '/reset-password',
     name: 'ResetPassword',
     component: () => import('@/views/auth/ResetPasswordView.vue'),
@@ -550,6 +556,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/qqbot',
+    name: 'AdminQQBot',
+    component: () => import('@/views/admin/QQBotView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Bot', titleKey: 'qqbot.title', descriptionKey: 'qqbot.description' }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),
@@ -765,6 +777,7 @@ const navigationLoading = useNavigationLoadingState()
 let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
 const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal']
 const BACKEND_MODE_CALLBACK_PATHS = [
+  '/qqbot/bind',
   '/auth/callback',
   '/auth/linuxdo/callback',
   '/auth/dingtalk/callback',

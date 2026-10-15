@@ -25,6 +25,12 @@ func RegisterUserRoutes(
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
 	{
+		if h.QQBot != nil {
+			bot := authenticated.Group("/user/qqbot")
+			bot.GET("/binding", h.QQBot.Binding)
+			bot.POST("/binding-code", panelRateLimiter.Heavy(), h.QQBot.CreateBindingCode)
+			bot.POST("/binding-confirm", h.QQBot.ConfirmBinding)
+		}
 		// 用户接口
 		user := authenticated.Group("/user")
 		{

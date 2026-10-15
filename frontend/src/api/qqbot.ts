@@ -1,0 +1,44 @@
+import { apiClient } from './client'
+
+export interface QQBotConfig {
+  enabled: boolean; app_id: string; app_secret: string; app_secret_set: boolean; sandbox: boolean
+  allowed_groups: string[]; base_url: string; api_key: string; api_key_set: boolean
+  chat_model: string; chat_protocol: 'chat_completions' | 'responses'
+  image_enabled: boolean; image_base_url: string; image_api_key: string; image_api_key_set: boolean
+  image_model: string; image_size: string; system_prompt: string; max_output_tokens: number
+  history_turns: number; daily_chat_limit: number; daily_image_limit: number
+  total_daily_chat_limit: number; total_daily_image_limit: number; cooldown_seconds: number
+  checkin_reward: number; invite_reward: number; invite_daily_limit: number
+  clear_app_secret?: boolean; clear_api_key?: boolean; clear_image_api_key?: boolean
+}
+export interface QQBotRuntime {
+  encryption_ready: boolean; bindings: number
+  groups: { id: string; last_event: string; last_seen_at: string }[]
+  jobs: { id: string; group_id: string; member_id: string; kind: string; status: string; error: string; input_tokens: number; output_tokens: number; created_at: string }[]
+  rewards: { id: number; user_id: number; kind: string; amount: number; created_at: string }[]
+}
+export interface QQBindingRequest { code?: string; member_id: string; group_id: string; nickname: string; expires_at: string }
+export interface QQEmailBindingPreview { member_id: string; group_id: string; nickname: string; expires_at: string }
+export interface QQAdminBinding {
+  app_id: string; member_id: string; user_id: number; nickname: string; group_id: string
+  created_at: string; email: string; user_status: string; user_deleted: boolean
+}
+export interface QQAdminBindingsPage { items: QQAdminBinding[]; total: number; page: number; page_size: number }
+export interface QQBindingState {
+  enabled: boolean
+  binding: { member_id: string; group_id: string; nickname: string; created_at: string } | null
+  pending: QQBindingRequest | null
+}
+export const qqbotAPI = {
+  config: async () => (await apiClient.get<QQBotConfig>('/admin/qqbot/config')).data,
+  save: async (config: QQBotConfig) => (await apiClient.put<QQBotConfig>('/admin/qqbot/config', config)).data,
+  runtime: async () => (await apiClient.get<QQBotRuntime>('/admin/qqbot/runtime')).data,
+  bindings: async (search: string, page: number) => (await apiClient.get<QQAdminBindingsPage>('/admin/qqbot/bindings', { params: { search, page, page_size: 20 } })).data,
+  unbind: async (binding: QQAdminBinding) => (await apiClient.delete(`/admin/qqbot/bindings/${binding.user_id}`, { data: { app_id: binding.app_id, member_id: binding.member_id, created_at: binding.created_at } })).data,
+  probe: async (kind: 'qq' | 'chat' | 'image') => (await apiClient.post<{message: string}>(`/admin/qqbot/test/${kind}`, {}, { timeout: 230000 })).data,
+  binding: async () => (await apiClient.get<QQBindingState>('/user/qqbot/binding')).data,
+  createCode: async () => (await apiClient.post<QQBindingRequest>('/user/qqbot/binding-code')).data,
+  confirm: async (member_id: string) => (await apiClient.post('/user/qqbot/binding-confirm', { member_id })).data,
+  previewEmail: async (token: string) => (await apiClient.post<QQEmailBindingPreview>('/qqbot/email-binding/preview', { token })).data,
+  confirmEmail: async (token: string, member_id: string) => (await apiClient.post('/qqbot/email-binding/confirm', { token, member_id })).data
+}

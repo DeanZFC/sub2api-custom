@@ -8,6 +8,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/middleware"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/server/routes"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -118,6 +119,15 @@ func registerRoutes(
 
 	// API v1
 	v1 := r.Group("/api/v1")
+	if h.QQBot != nil {
+		v1.POST("/qqbot/webhook", h.QQBot.Webhook)
+		limits := middleware.NewRateLimiter(redisClient)
+		binding := v1.Group("/qqbot/email-binding")
+		binding.Use(limits.LimitWithOptions("qqbot-email-binding", 20, time.Minute, middleware.RateLimitOptions{FailureMode: middleware.RateLimitFailClose}))
+		binding.Use(gin.HandlerFunc(auditLog))
+		binding.POST("/preview", h.QQBot.PreviewEmailBinding)
+		binding.POST("/confirm", h.QQBot.ConfirmEmailBinding)
+	}
 
 	// 面板 API 限流器：认证接口按用户 ID、公开接口按安全客户端 IP，
 	// 防止高频刷管理面接口打爆数据库（阈值可在系统设置中调整）。
