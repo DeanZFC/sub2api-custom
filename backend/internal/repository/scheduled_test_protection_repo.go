@@ -364,9 +364,9 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 		return err
 	}
 	// A new statistics execution can explicitly prove connectivity when usage
-	// samples are missing. It only releases its own hold, under the same locks
-	// and current-result checks as the normal quality decisions.
-	if handled, err := completeStatisticsRecoveryProbe(ctx, tx, state, result); handled || err != nil {
+	// samples are missing. It resolves this check and reconciles the policy
+	// under the same locks and current-result checks as normal decisions.
+	if handled, err := completeStatisticsRecoveryProbe(ctx, tx, config, state, result); handled || err != nil {
 		if err != nil {
 			return err
 		}

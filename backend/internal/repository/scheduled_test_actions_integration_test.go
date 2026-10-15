@@ -94,6 +94,22 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		reset(t)
 		testScheduledTestAllPassLifecycle(t, ctx, db, plans, repo)
 	})
+	t.Run("all pass policy hold statistics probe", func(t *testing.T) {
+		for _, origin := range []int{0, 1, 3} {
+			t.Run([]string{"candy", "model", "statistics", "manual veto"}[origin], func(t *testing.T) {
+				reset(t)
+				testScheduledTestAllPassPolicyHoldProbe(t, ctx, db, plans, repo, origin)
+			})
+		}
+	})
+	t.Run("all pass policy probe safeguards", func(t *testing.T) {
+		for _, scenario := range []string{"failed probe", "recovery disabled", "manual disable", "plan disable", "hold released", "other account hold", "other plan hold", "current manual veto", "current model failure"} {
+			t.Run(scenario, func(t *testing.T) {
+				reset(t)
+				testScheduledTestAllPassPolicyProbeSafeguards(t, ctx, db, plans, repo, scenario)
+			})
+		}
+	})
 	t.Run("time period persistence and concurrent schedule edits", func(t *testing.T) {
 		reset(t)
 		testScheduledTestTimePeriodsPersistence(t, ctx, db, plans, candyID)
