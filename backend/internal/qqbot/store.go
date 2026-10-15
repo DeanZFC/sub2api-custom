@@ -114,28 +114,41 @@ FOR UPDATE OF r FOR NO KEY UPDATE OF u`, user, c.AppID).Scan(&r.MemberID, &r.Gro
 	return tx.Commit()
 }
 
-func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) error {
+func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) {
 	var e Event
-	if err := json.Unmarshal(p.Data, &e); err != nil {
+	j := Job{AppID: c.AppID, EventType: p.Type}
+	outcome, reason := "failed", "database_error"
+	defer func() { logMembershipEvent(ctx, j, &e, "enqueue", outcome, reason) }()
+	if err = json.Unmarshal(p.Data, &e); err != nil {
+		reason = "invalid_payload"
 		return err
 	}
+	j.GroupID, j.MemberID = e.GroupID, e.MemberID
 	if e.GroupID == "" || len(e.GroupID) > 128 {
+		outcome, reason = "ignored", "invalid_group"
 		return nil
 	}
 	// Ignore ambient full-stream messages before touching the queue or database.
 	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e)) {
+		outcome, reason = "ignored", "bot_or_ambient_message"
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_groups(app_id,group_id,last_event) VALUES($1,$2,$3) ON CONFLICT(app_id,group_id) DO UPDATE SET last_event=EXCLUDED.last_event,last_seen_at=NOW()`, c.AppID, e.GroupID, p.Type)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO qq_bot_groups(app_id,group_id,last_event) VALUES($1,$2,$3) ON CONFLICT(app_id,group_id) DO UPDATE SET last_event=EXCLUDED.last_event,last_seen_at=NOW()`, c.AppID, e.GroupID, p.Type)
 	if err != nil {
 		return err
 	}
-	if !c.Enabled || !c.allows(e.GroupID) {
+	if !c.Enabled {
+		outcome, reason = "ignored", "bot_disabled"
+		return nil
+	}
+	if !c.allows(e.GroupID) {
+		outcome, reason = "ignored", "group_not_allowed"
 		return nil
 	}
 	switch p.Type {
 	case groupAtMessageCreate, groupMessageCreate, "GROUP_JOIN_REQUEST", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE":
 	default:
+		outcome, reason = "ignored", "unsupported_event"
 		return nil
 	}
 	member := e.MemberID
@@ -143,17 +156,20 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) error {
 		member = e.Author.MemberID
 	}
 	if member == "" || len(member) > 128 {
+		outcome, reason = "ignored", "invalid_member"
 		return nil
 	}
 	eventKey := p.ID
 	if isGroupMessageEvent(p.Type) {
 		if e.ID == "" {
+			outcome, reason = "ignored", "missing_message_id"
 			return nil
 		}
 		// Preserve existing keys and deduplicate delivery across both QQ events.
 		eventKey = groupAtMessageCreate + ":" + e.ID
 	}
 	if eventKey == "" {
+		reason = "missing_event_id"
 		return errors.New("事件缺少唯一 ID")
 	}
 	// A bounded durable queue prevents unbounded work and acknowledges only after commit.
@@ -170,13 +186,28 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) error {
 		return err
 	}
 	if queued >= 200 {
+		reason = "queue_full"
 		return errors.New("机器人队列已满")
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,event_key) DO NOTHING`, randomID(), c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data))
+	jobID := randomID()
+	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,event_key) DO NOTHING`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data))
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	if n == 0 {
+		outcome, reason = "duplicate", "event_already_queued"
+	} else {
+		j.ID = jobID
+		outcome, reason = "queued", "event_accepted"
+	}
+	return nil
 }
 
 const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at`

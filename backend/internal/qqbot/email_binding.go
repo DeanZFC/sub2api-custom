@@ -25,6 +25,13 @@ func (s *Service) SetBindingEmailDelivery(delivery BindingEmailDelivery) { s.bin
 var ErrEmailBindingInvalid = errors.New("绑定链接无效、已过期或已使用，请回群内重新发送绑定指令")
 
 const emailBindingAccepted = "绑定申请已受理，请查收邮件并在 10 分钟内确认。"
+const emailBindingAlreadyBound = "该邮箱已绑定其他 QQ，请联系管理员解除绑定。"
+
+type preparedBindingEmail struct {
+	recipient string
+	token     string
+	link      string
+}
 
 func validBindingEmail(raw string) bool {
 	address, err := mail.ParseAddress(raw)
@@ -73,40 +80,60 @@ WHERE qq_bot_email_limits.count<$4 AND qq_bot_email_limits.last_sent_at<=NOW()-(
 	return tx.Commit()
 }
 
-func (s *Service) requestEmailBinding(ctx context.Context, c Config, e Event, email string) string {
+// Prepare the request before acknowledging it in QQ, then deliver the email
+// after the acknowledgement so SMTP cannot delay the reply.
+func (s *Service) prepareEmailBinding(ctx context.Context, c Config, e Event, email string) (string, *preparedBindingEmail) {
 	if !validBindingEmail(email) {
-		return "邮箱格式无效，请检查后重新提交。"
+		return "邮箱格式无效，请检查后重新提交。", nil
 	}
 	if !c.Enabled || !c.allows(e.GroupID) || e.Author.MemberID == "" {
-		return "当前群未开放账号绑定。"
+		return "当前群未开放账号绑定。", nil
 	}
 	if s.bindingEmail == nil {
-		return "邮箱绑定未启用，请使用网站绑定码。"
+		return "邮箱绑定未启用，请使用网站绑定码。", nil
 	}
 	token := randomID() + randomID()
 	link, err := emailBindingURL(s.bindingEmail.FrontendURL(ctx), token)
 	if err != nil {
-		return "邮箱绑定暂不可用，请使用网站绑定码。"
+		return "邮箱绑定暂不可用，请使用网站绑定码。", nil
 	}
-	if err = s.reserveBindingEmails(ctx, c.AppID, []string{"member:" + e.Author.MemberID, "all"}, []int{5, 200}, []int{60, 0}); err != nil {
-		return emailBindingAccepted
-	}
+	limitErr := s.reserveBindingEmails(ctx, c.AppID, []string{"member:" + e.Author.MemberID, "all"}, []int{5, 200}, []int{60, 0})
 	uid, recipient, err := s.bindingEmail.LookupAccount(ctx, email)
 	if err != nil || uid <= 0 || !validBindingEmail(recipient) {
-		return emailBindingAccepted
-	}
-	// Apply the recipient limit to the canonical registered email, not an alias
-	// supplied in the group command. Never reveal account existence in QQ replies.
-	if err = s.reserveBindingEmails(ctx, c.AppID, []string{"email:" + codeHash(strings.ToLower(recipient))}, []int{3}, []int{60}); err != nil {
-		return emailBindingAccepted
+		return emailBindingAccepted, nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return emailBindingAccepted
+		return emailBindingAccepted, nil
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,273))`, c.AppID); err != nil {
-		return emailBindingAccepted
+		return emailBindingAccepted, nil
+	}
+	// Use the confirmation lock so a completed competing binding is visible
+	// before creating a token or telling the user to check their inbox.
+	var memberBound, accountBound bool
+	err = tx.QueryRowContext(ctx, `SELECT
+EXISTS(SELECT 1 FROM qq_bot_bindings WHERE app_id=$1 AND member_id=$2),
+EXISTS(SELECT 1 FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
+WHERE b.app_id=$1 AND u.id=$3 AND u.email=$4 AND u.status='active' AND u.deleted_at IS NULL)`,
+		c.AppID, e.Author.MemberID, uid, recipient).Scan(&memberBound, &accountBound)
+	if err != nil {
+		return "绑定状态查询失败，请稍后重试。", nil
+	}
+	if memberBound {
+		return "当前 QQ 已绑定账号。", nil
+	}
+	if accountBound {
+		return emailBindingAlreadyBound, nil
+	}
+	if limitErr != nil {
+		return emailBindingAccepted, nil
+	}
+	// Apply the recipient limit to the canonical registered email. Unknown
+	// addresses still receive the same response as eligible unbound accounts.
+	if err = s.reserveBindingEmails(ctx, c.AppID, []string{"email:" + codeHash(strings.ToLower(recipient))}, []int{3}, []int{60}); err != nil {
+		return emailBindingAccepted, nil
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_email_bind_requests(token_hash,app_id,member_id,group_id,nickname,user_id,email,expires_at)
 SELECT $1,$2,$3,$4,$5,u.id,u.email,NOW()+INTERVAL '10 minutes' FROM users u
@@ -116,24 +143,27 @@ ON CONFLICT(app_id,member_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,group
 user_id=EXCLUDED.user_id,email=EXCLUDED.email,expires_at=EXCLUDED.expires_at,created_at=NOW()`,
 		codeHash(token), c.AppID, e.Author.MemberID, e.GroupID, limitText(e.Author.Username, 100), uid, recipient)
 	if err != nil {
-		return emailBindingAccepted
+		return emailBindingAccepted, nil
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return emailBindingAccepted
+		return emailBindingAccepted, nil
 	}
 	if err = tx.Commit(); err != nil {
-		return emailBindingAccepted
+		return emailBindingAccepted, nil
 	}
-	if err = s.bindingEmail.SendEmail(ctx, recipient, "确认绑定 QQ 群账号", bindingEmailBody(link, e)); err != nil {
+	return emailBindingAccepted, &preparedBindingEmail{recipient: recipient, token: token, link: link}
+}
+
+func (s *Service) deliverBindingEmail(ctx context.Context, e Event, pending *preparedBindingEmail) {
+	if err := s.bindingEmail.SendEmail(ctx, pending.recipient, "确认绑定 QQ 群账号", bindingEmailBody(pending.link, e)); err != nil {
 		slog.Warn("QQ bot binding email delivery failed; check SMTP settings")
 		// Even if SMTP delivery is uncertain, an unsuccessful send cannot leave
 		// a usable confirmation token behind. Do not retry automatically.
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = s.db.ExecContext(cleanup, `DELETE FROM qq_bot_email_bind_requests WHERE token_hash=$1`, codeHash(token))
+		_, _ = s.db.ExecContext(cleanup, `DELETE FROM qq_bot_email_bind_requests WHERE token_hash=$1`, codeHash(pending.token))
 	}
-	return emailBindingAccepted
 }
 
 type EmailBindingPreview struct {

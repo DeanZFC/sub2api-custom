@@ -20,13 +20,13 @@ func isGroupMessageEvent(eventType string) bool {
 }
 
 func unmentionedGroupCommand(e Event) bool {
-	// A command addressed to another member or bot must not claim a reward.
+	// Commands addressed to someone else are not unmentioned commands.
 	if len(groupMentionIDs(e)) > 0 {
 		return false
 	}
 	cmd, _ := command(e.Content)
 	switch cmd {
-	case "帮助", "help", "绑定", "签到", "邀请活动", "我的邀请", "我的额度", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动":
+	case "帮助", "help", "绑定", "签到", "邀请活动", "我的邀请", "我的额度", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动", "生图", "画图":
 		return true
 	}
 	return false

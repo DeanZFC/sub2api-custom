@@ -103,15 +103,25 @@ func (s *Service) runOne(parent context.Context) {
 	ctx, cancel := context.WithTimeout(parent, 260*time.Second)
 	defer cancel()
 	c, err := s.Config(ctx)
-	if err == nil && (!c.Enabled || c.AppID != j.AppID || !c.allows(j.GroupID)) {
-		err = ErrDisabled
-	}
 	if err != nil {
+		logMembershipEvent(ctx, j, nil, "process", "failed", "config_unavailable")
 		s.finish(j, "failed", err.Error())
+		return
+	}
+	if !c.Enabled || c.AppID != j.AppID || !c.allows(j.GroupID) {
+		reason := "bot_disabled"
+		if c.AppID != j.AppID {
+			reason = "app_changed"
+		} else if c.Enabled && !c.allows(j.GroupID) {
+			reason = "group_not_allowed"
+		}
+		logMembershipEvent(ctx, j, nil, "process", "ignored", reason)
+		s.finish(j, "failed", ErrDisabled.Error())
 		return
 	}
 	var e Event
 	if err = json.Unmarshal(j.Payload, &e); err != nil {
+		logMembershipEvent(ctx, j, nil, "process", "failed", "invalid_payload")
 		s.finish(j, "failed", "事件格式不正确")
 		return
 	}
@@ -142,49 +152,101 @@ func (s *Service) runOne(parent context.Context) {
 func (s *Service) finish(j Job, status, detail string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status=$2,error=$3,finished_at=NOW(),payload='{}' WHERE id=$1`, j.ID, status, limitText(detail, 250))
+	if _, err := s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status=$2,error=$3,finished_at=NOW(),payload='{}' WHERE id=$1`, j.ID, status, limitText(detail, 250)); err != nil {
+		logMembershipEvent(ctx, j, nil, "finish", "failed", "job_status_write_failed")
+	}
 }
 func (s *Service) memberEvent(ctx context.Context, c Config, j Job, e Event) error {
+	outcome, reason := "failed", "database_error"
+	defer func() { logMembershipEvent(ctx, j, &e, "process", outcome, reason) }()
 	switch j.EventType {
 	case "GROUP_JOIN_REQUEST":
-		if e.ApplySource != "invited" || e.InvitedBy == "" || e.InvitedBy == e.MemberID {
+		if e.ApplySource != "invited" {
+			outcome, reason = "ignored", "not_an_invitation"
+			return nil
+		}
+		if e.InvitedBy == "" {
+			outcome, reason = "ignored", "missing_inviter"
+			return nil
+		}
+		if e.InvitedBy == e.MemberID {
+			outcome, reason = "ignored", "self_invitation"
 			return nil
 		}
 		applied, err := time.Parse(time.RFC3339, e.ApplyAt)
 		if err != nil {
+			reason = "invalid_invitation_time"
 			return errors.New("invalid invitation time")
 		}
 		// Signed events can arrive out of order. A delayed invitation may
 		// complete an earlier join, but cannot be attached after that join.
-		_, err = s.db.ExecContext(ctx, `INSERT INTO qq_bot_members(app_id,group_id,member_id,inviter_id,invited_at) VALUES($1,$2,$3,$4,$5)
+		res, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_members(app_id,group_id,member_id,inviter_id,invited_at) VALUES($1,$2,$3,$4,$5)
         ON CONFLICT(app_id,group_id,member_id) DO UPDATE SET inviter_id=EXCLUDED.inviter_id,invited_at=EXCLUDED.invited_at
         WHERE qq_bot_members.inviter_id='' AND (qq_bot_members.joined_at IS NULL OR EXCLUDED.invited_at<=qq_bot_members.joined_at)`, c.AppID, e.GroupID, e.MemberID, e.InvitedBy, applied)
 		if err != nil {
 			return err
 		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
 		_, err = s.reward(ctx, c, j, "invite")
+		if err != nil {
+			reason = "reward_settlement_failed"
+			return err
+		}
+		if n == 0 {
+			outcome, reason = "ignored", "existing_inviter_or_late_invitation"
+		} else {
+			outcome, reason = "recorded", "invitation_recorded"
+		}
 		return err
 	case "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE":
 		var ts int64
 		if json.Unmarshal(e.Timestamp, &ts) != nil || ts <= 0 {
+			reason = "invalid_membership_time"
 			return errors.New("invalid membership time")
 		}
 		at := time.Unix(ts, 0)
 		if j.EventType == "GROUP_MEMBER_ADD" {
-			_, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_members(app_id,group_id,member_id,joined_at,last_membership_at) VALUES($1,$2,$3,$4,$4)
+			res, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_members(app_id,group_id,member_id,joined_at,last_membership_at) VALUES($1,$2,$3,$4,$4)
             ON CONFLICT(app_id,group_id,member_id) DO UPDATE SET joined_at=COALESCE(qq_bot_members.joined_at,EXCLUDED.joined_at),left_at=NULL,last_membership_at=EXCLUDED.last_membership_at
             WHERE qq_bot_members.last_membership_at IS NULL OR EXCLUDED.last_membership_at>qq_bot_members.last_membership_at`, c.AppID, e.GroupID, e.MemberID, at)
 			if err != nil {
 				return err
 			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
 			_, err = s.reward(ctx, c, j, "invite")
+			if err != nil {
+				reason = "reward_settlement_failed"
+				return err
+			}
+			outcome, reason = "recorded", "member_join_recorded"
+			if n == 0 {
+				outcome, reason = "ignored", "stale_membership_event"
+			}
 			return err
 		}
-		_, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_members(app_id,group_id,member_id,left_at,last_membership_at) VALUES($1,$2,$3,$4,$4)
+		res, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_members(app_id,group_id,member_id,left_at,last_membership_at) VALUES($1,$2,$3,$4,$4)
         ON CONFLICT(app_id,group_id,member_id) DO UPDATE SET left_at=EXCLUDED.left_at,last_membership_at=EXCLUDED.last_membership_at
         WHERE qq_bot_members.last_membership_at IS NULL OR EXCLUDED.last_membership_at>=qq_bot_members.last_membership_at`, c.AppID, e.GroupID, e.MemberID, at)
-		return err
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		outcome, reason = "recorded", "member_leave_recorded"
+		if n == 0 {
+			outcome, reason = "ignored", "stale_membership_event"
+		}
+		return nil
 	}
+	outcome, reason = "ignored", "unsupported_event"
 	return nil
 }
 
@@ -282,38 +344,38 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	case "帮助", "help":
 		// Keep QQ's automatic reply mention above the command list.
 		text = `
-/帮助
-查看帮助
+指令：/帮助
+说明：查看帮助
 
-/签到
-每日签到
+指令：/签到
+说明：每日签到
 
-/我的额度
-查询账户额度
+指令：/我的额度
+说明：查询账户额度
 
-/我的奖励
-查询各项累计奖励
+指令：/我的奖励
+说明：查询各项累计奖励
 
-/绑定 邮箱或绑定码
-绑定账号
+指令：/绑定 邮箱或绑定码
+说明：绑定账号
 
-/邀请活动
-查看邀请规则和今日进度
+指令：/邀请活动
+说明：查看邀请规则和今日进度
 
-/我的邀请
-查询邀请状态和人数
+指令：/我的邀请
+说明：查询邀请状态和人数
 
-/抽奖
-参与抽奖
+指令：/抽奖
+说明：参与抽奖
 
-/抽奖次数
-查询剩余次数
+指令：/抽奖次数
+说明：查询剩余次数
 
-/抽奖活动
-查看活动规则和奖品
+指令：/抽奖活动
+说明：查看活动规则和奖品
 
-/生图 图片描述
-生成图片（需 @机器人）`
+指令：/生图 图片描述
+说明：生成图片`
 	case "绑定":
 		if arg == "" {
 			text = "用法：/绑定 邮箱或绑定码"
@@ -326,15 +388,14 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		} else if bound {
 			text = "当前 QQ 已绑定账号。"
 		} else if strings.Contains(arg, "@") {
-			if validBindingEmail(arg) {
+			var pending *preparedBindingEmail
+			text, pending = s.prepareEmailBinding(ctx, c, e, arg)
+			if pending != nil {
 				// A slow SMTP server must not delay the user's QQ acknowledgement.
-				if err := s.send(ctx, c, *j, emailBindingAccepted, nil, seq); err != nil {
+				if err := s.send(ctx, c, *j, text, nil, seq); err != nil {
 					return err
 				}
-				seq++
-			}
-			text = s.requestEmailBinding(ctx, c, e, arg)
-			if text == emailBindingAccepted {
+				s.deliverBindingEmail(ctx, e, pending)
 				return nil
 			}
 		} else {

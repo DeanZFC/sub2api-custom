@@ -25,7 +25,7 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 	c := DefaultConfig()
 	c.Enabled, c.ImageEnabled = true, true
 	c.BaseURL = server.URL + "/v1"
-	for _, content := range []string{"你好", "签到", "/生图 一只猫", "/画图 一只猫", "/不存在", "/新对话", "/查看结果 task", "/邀请奖励", "帮我解释 /签到", "@CTAV 你好"} {
+	for _, content := range []string{"你好", "签到", "生图 一只猫", "画图 一只猫", "/不存在", "/新对话", "/查看结果 task", "/邀请奖励", "帮我解释 /签到", "@CTAV 你好"} {
 		t.Run(content, func(t *testing.T) {
 			e := Event{ID: "ignored", GroupID: "group", Content: content}
 			e.Author.MemberID = "member"
@@ -36,12 +36,14 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 			require.NoError(t, s.message(context.Background(), c, &j, e))
 		})
 	}
-	// Bot messages are ignored even when they contain a valid activity command.
-	e := Event{ID: "bot", GroupID: "group", Content: "/签到"}
-	e.Author.Bot = true
-	raw, err := json.Marshal(e)
-	require.NoError(t, err)
-	require.NoError(t, s.Enqueue(context.Background(), c, Payload{Type: groupMessageCreate, Data: raw}))
+	// Bot messages must never trigger commands or recursive image generation.
+	for _, content := range []string{"/签到", "/生图 一只猫"} {
+		e := Event{ID: "bot", GroupID: "group", Content: content}
+		e.Author.Bot = true
+		raw, err := json.Marshal(e)
+		require.NoError(t, err)
+		require.NoError(t, s.Enqueue(context.Background(), c, Payload{Type: groupMessageCreate, Data: raw}))
+	}
 	require.Zero(t, calls.Load())
 }
 
@@ -63,11 +65,11 @@ func TestFullGroupCommandsWithoutMention(t *testing.T) {
 	s := New(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
-	for i, content := range []string{"/帮助", "/help", "/绑定"} {
+	for i, content := range []string{"/帮助", "/help", "/绑定", "/生图", "/画图"} {
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, Event{GroupID: "group", Content: content}))
 	}
-	require.EqualValues(t, 3, replies.Load())
+	require.EqualValues(t, 5, replies.Load())
 }
 
 func TestMentionWithoutContentRepliesWithHelp(t *testing.T) {
@@ -142,7 +144,7 @@ func TestFullGroupMessagesRequireThisBotsIdentity(t *testing.T) {
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: "ignored", CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, e))
 	}
-	for _, content := range []string{"你好", "/签到", "/抽奖", "/我的邀请"} {
+	for _, content := range []string{"你好", "/签到", "/抽奖", "/我的邀请", "/生图 一只猫", "/画图 一只猫"} {
 		e := Event{GroupID: "group", Content: content, Mentions: []Mention{{MemberID: "another-bot"}}}
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: "ignored", CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, e))

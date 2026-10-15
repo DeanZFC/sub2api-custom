@@ -88,7 +88,7 @@ func TestBindingCannotExpireWhileWaitingForLocks(t *testing.T) {
 					require.NoError(t, err)
 					require.Contains(t, s.claimBinding(ctx, c, e, code.Code), "已受理")
 				} else {
-					require.Equal(t, emailBindingAccepted, s.requestEmailBinding(ctx, c, e, "Alice@example.com"))
+					require.Equal(t, emailBindingAccepted, requestBindingEmail(s, ctx, c, e, "Alice@example.com"))
 					token, table = mail.token(t), "qq_bot_email_bind_requests"
 				}
 				expiresAt := time.Now().Add(500 * time.Millisecond)

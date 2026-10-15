@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
+func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	db := testDB(t)
 	s := savedBot(t, db)
 	ctx := context.Background()
@@ -26,7 +26,7 @@ func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
 	require.NoError(t, err)
 	uid := user(t, db)
 	bind(t, db, uid, "member")
-	var chats, images, replies atomic.Int32
+	var chats, images, replies, lookups atomic.Int32
 	var lastReply atomic.Value
 	var picture bytes.Buffer
 	require.NoError(t, png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 16, 16))))
@@ -35,6 +35,7 @@ func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
 		case "/token":
 			_, _ = w.Write([]byte(`{"access_token":"qq-test-only","expires_in":7200}`))
 		case "/v2/groups/group/bot_state":
+			lookups.Add(1)
 			_, _ = w.Write([]byte(`{"member_openid":"this-bot"}`))
 		case "/v1/chat/completions":
 			chats.Add(1)
@@ -72,7 +73,7 @@ func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
 		require.NoError(t, s.Enqueue(ctx, c, p))
 		return p
 	}
-	for _, content := range []string{"你好", "/生图 一只猫", "/不存在"} {
+	for _, content := range []string{"你好", "生图 一只猫", "/不存在"} {
 		enqueue("ignored-"+content, content, "member", nil)
 	}
 	var count int
@@ -107,16 +108,16 @@ func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
 		require.NoError(t, db.QueryRow(`SELECT status FROM qq_bot_jobs WHERE message_id=$1`, "command-"+content).Scan(&status))
 		require.Equal(t, "completed", status)
 		if content == "/我的邀请" {
-			require.Contains(t, lastReply.Load(), "累计邀请：0 人")
+			require.Equal(t, "待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
 		}
 	}
 	enqueue("unbound-invites", "/我的邀请", "unbound-member", nil)
 	s.runOne(ctx)
-	require.Contains(t, lastReply.Load(), "累计邀请：0 人")
+	require.Equal(t, "待绑定：0 人\n已奖励：0 人\n已退群：0 人", lastReply.Load())
 	require.Zero(t, chats.Load())
 	require.Zero(t, images.Load())
 	beforeModels := replies.Load()
-	for i, content := range []string{"你好", "/签到", "/抽奖", "/我的邀请"} {
+	for i, content := range []string{"你好", "/签到", "/抽奖", "/我的邀请", "/生图 一只猫", "/画图 一只猫"} {
 		enqueue(fmt.Sprintf("other-mention-%d", i), content, "member", []Mention{{ID: "another-bot"}})
 		s.runOne(ctx)
 	}
@@ -148,6 +149,33 @@ func TestQQBotFullGroupCommandsAndMentionedModels(t *testing.T) {
 	require.Equal(t, beforeModels+6, replies.Load())
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='mention-first'`).Scan(&count))
 	require.Equal(t, 1, count)
+
+	// Both image commands work without a mention or a bot identity lookup.
+	// Receiving the same message through both events must only generate once.
+	beforeLookups := lookups.Load()
+	for i, content := range []string{"/生图 一只猫", "/画图 一只狗"} {
+		beforeImages, beforeReplies := images.Load(), replies.Load()
+		id := fmt.Sprintf("unmentioned-image-%d", i)
+		p := enqueue(id, content, "image-member", nil)
+		s.runOne(ctx)
+		p.Type, p.ID = groupAtMessageCreate, "other-"+id
+		require.NoError(t, s.Enqueue(ctx, c, p))
+		s.runOne(ctx)
+		require.Equal(t, beforeImages+1, images.Load())
+		require.Equal(t, beforeReplies+2, replies.Load())
+		var kind, status string
+		require.NoError(t, db.QueryRow(`SELECT kind,status FROM qq_bot_jobs WHERE message_id=$1`, id).Scan(&kind, &status))
+		require.Equal(t, "image", kind)
+		require.Equal(t, "completed", status)
+	}
+	require.Equal(t, beforeLookups, lookups.Load())
+	require.EqualValues(t, 2, chats.Load())
+	// Omitting the mention must not bypass the existing daily image limit.
+	beforeImages := images.Load()
+	enqueue("unmentioned-image-limit", "/生图 一只猫", "image-member", nil)
+	s.runOne(ctx)
+	require.Equal(t, beforeImages, images.Load())
+	require.Equal(t, "今日使用次数已达上限。", lastReply.Load())
 
 	enqueue("expired-command", "/帮助", "member", nil)
 	_, err = db.Exec(`UPDATE qq_bot_jobs SET created_at=NOW()-INTERVAL '6 minutes' WHERE message_id='expired-command'`)

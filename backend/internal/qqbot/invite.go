@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -35,25 +34,9 @@ func (s *Service) myInvites(ctx context.Context, c Config, j Job) (string, error
 	for _, status := range byMember {
 		counts[status]++
 	}
-	var text strings.Builder
-	fmt.Fprintf(&text, "累计邀请：%d 人\n待入群：%d 人\n待绑定：%d 人\n待结算：%d 人\n已奖励：%d 人\n已退群：%d 人",
-		len(byMember), counts["pending_join"], counts["both_unbound"]+counts["inviter_unbound"]+counts["invitee_unbound"],
-		counts["pending_reward"], counts["rewarded"], counts["left_group"])
-	for _, extra := range []struct {
-		label string
-		count int
-	}{
-		{"今日达上限", counts["daily_limit"]},
-		{"其他邀请已奖励", counts["already_rewarded"]},
-		{"奖励暂停", counts["disabled"] + counts["group_disabled"]},
-		{"账号不可用", counts["account_unavailable"]},
-		{"不符合奖励条件", counts["invalid_invitation"] + counts["self_invitation"]},
-	} {
-		if extra.count > 0 {
-			fmt.Fprintf(&text, "\n%s：%d 人", extra.label, extra.count)
-		}
-	}
-	return text.String(), nil
+	return fmt.Sprintf("待绑定：%d 人\n已奖励：%d 人\n已退群：%d 人",
+		counts["both_unbound"]+counts["inviter_unbound"]+counts["invitee_unbound"],
+		counts["rewarded"], counts["left_group"]), nil
 }
 
 // Count each QQ invitee once across groups. A historical payout wins; otherwise

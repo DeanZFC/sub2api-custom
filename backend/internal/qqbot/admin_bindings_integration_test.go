@@ -64,7 +64,7 @@ func TestQQBotAdminBindingListSearchAndPagination(t *testing.T) {
 func TestQQBotAdminUnbindRevokesRequestsAndPreservesRewards(t *testing.T) {
 	s, m, c, e, uid := emailFixture(t)
 	ctx := context.Background()
-	s.requestEmailBinding(ctx, c, e, "alice@example.com")
+	requestBindingEmail(s, ctx, c, e, "alice@example.com")
 	token := m.token(t)
 	bind(t, s.db, uid, "member")
 	code, err := s.CreateBindingCode(ctx, uid)
@@ -137,7 +137,7 @@ func TestQQBotAdminUnbindInviteRewardCannotBeReset(t *testing.T) {
 func TestQQBotAdminUnbindRaceWithEmailConfirmation(t *testing.T) {
 	s, m, c, e, uid := emailFixture(t)
 	ctx := context.Background()
-	s.requestEmailBinding(ctx, c, e, "alice@example.com")
+	requestBindingEmail(s, ctx, c, e, "alice@example.com")
 	token := m.token(t)
 	// Simulate a still-pending older email alongside an existing binding.
 	bind(t, s.db, uid, "member")

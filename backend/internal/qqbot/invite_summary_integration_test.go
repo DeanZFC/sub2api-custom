@@ -69,7 +69,7 @@ func TestQQBotMyInvitesCountsStatesAndDeduplicatesAcrossGroups(t *testing.T) {
 	for range 2 {
 		info, readErr := s.myInvites(ctx, c, Job{MemberID: "inviter"})
 		require.NoError(t, readErr)
-		require.Equal(t, "累计邀请：10 人\n待入群：1 人\n待绑定：1 人\n待结算：1 人\n已奖励：1 人\n已退群：1 人\n其他邀请已奖励：1 人\n奖励暂停：1 人\n账号不可用：1 人\n不符合奖励条件：2 人", info)
+		require.Equal(t, "待绑定：1 人\n已奖励：1 人\n已退群：1 人", info)
 	}
 	var rewards, history int
 	var balance float64
@@ -81,7 +81,7 @@ func TestQQBotMyInvitesCountsStatesAndDeduplicatesAcrossGroups(t *testing.T) {
 	require.Equal(t, 1.0, balance, "querying invitations must not settle the ready invitation")
 }
 
-func TestQQBotMyInvitesUsesCurrentConditionsAndKeepsHistoricalRewards(t *testing.T) {
+func TestQQBotMyInvitesOmitsOtherStatesAndKeepsHistoricalRewards(t *testing.T) {
 	db := testDB(t)
 	s := savedBot(t, db)
 	ctx := context.Background()
@@ -96,13 +96,16 @@ func TestQQBotMyInvitesUsesCurrentConditionsAndKeepsHistoricalRewards(t *testing
 		require.NoError(t, readErr)
 		return info
 	}
-	require.Contains(t, read(c), "待绑定：1 人", "both users can be unbound")
+	zero := "待绑定：0 人\n已奖励：0 人\n已退群：0 人"
+	unbound := "待绑定：1 人\n已奖励：0 人\n已退群：0 人"
+	paid := "待绑定：0 人\n已奖励：1 人\n已退群：0 人"
+	require.Equal(t, unbound, read(c), "both users can be unbound")
 	invitee := user(t, db)
 	bind(t, db, invitee, "invitee")
-	require.Contains(t, read(c), "待绑定：1 人", "the inviter can still be unbound")
+	require.Equal(t, unbound, read(c), "the inviter can still be unbound")
 	inviter := user(t, db)
 	bind(t, db, inviter, "inviter")
-	require.Contains(t, read(c), "待结算：1 人")
+	require.Equal(t, zero, read(c), "a bound invitation awaiting settlement must not count as unbound")
 	for _, disabled := range []struct {
 		name   string
 		change func(*Config)
@@ -115,9 +118,7 @@ func TestQQBotMyInvitesUsesCurrentConditionsAndKeepsHistoricalRewards(t *testing
 		t.Run(disabled.name, func(t *testing.T) {
 			changed := c
 			disabled.change(&changed)
-			info := read(changed)
-			require.Contains(t, info, "奖励暂停：1 人")
-			require.Contains(t, info, "待结算：0 人")
+			require.Equal(t, zero, read(changed), "paused invitations must not count as unbound")
 		})
 	}
 	for _, update := range []string{
@@ -126,7 +127,7 @@ func TestQQBotMyInvitesUsesCurrentConditionsAndKeepsHistoricalRewards(t *testing
 	} {
 		_, err = db.Exec(update, invitee)
 		require.NoError(t, err)
-		require.Contains(t, read(c), "账号不可用：1 人")
+		require.Equal(t, zero, read(c), "unavailable bound accounts must not count as unbound")
 	}
 	_, err = db.Exec(`UPDATE users SET deleted_at=NULL WHERE id=$1`, invitee)
 	require.NoError(t, err)
@@ -139,14 +140,12 @@ func TestQQBotMyInvitesUsesCurrentConditionsAndKeepsHistoricalRewards(t *testing
  VALUES('app','group','second-invitee','inviter',NOW()-INTERVAL '2 minutes',NOW()-INTERVAL '1 minute')`)
 	require.NoError(t, err)
 	info := read(c)
-	require.Contains(t, info, "已奖励：1 人")
-	require.Contains(t, info, "今日达上限：1 人")
+	require.Equal(t, paid, info, "an invitation blocked by the daily limit must not count as unbound")
 	_, err = db.Exec(`DELETE FROM qq_bot_bindings WHERE member_id IN ('inviter','invitee')`)
 	require.NoError(t, err)
 	bind(t, db, user(t, db), "inviter")
 	info = read(c)
-	require.Contains(t, info, "已奖励：1 人", "rebinding cannot erase a historical QQ invitation reward")
-	require.Contains(t, info, "待结算：1 人", "the daily limit follows the currently bound account")
+	require.Equal(t, paid, info, "rebinding preserves historical rewards and does not count a pending settlement as unbound")
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_rewards`).Scan(&count))
 	require.Equal(t, 1, count)
@@ -158,7 +157,7 @@ func TestQQBotMyInvitesHasNoPaginationLimitAndDoesNotGuessRelationships(t *testi
 	ctx := context.Background()
 	c, err := s.Config(ctx)
 	require.NoError(t, err)
-	zero := "累计邀请：0 人\n待入群：0 人\n待绑定：0 人\n待结算：0 人\n已奖励：0 人\n已退群：0 人"
+	zero := "待绑定：0 人\n已奖励：0 人\n已退群：0 人"
 	info, err := s.myInvites(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
 	require.Equal(t, zero, info)
@@ -168,7 +167,7 @@ func TestQQBotMyInvitesHasNoPaginationLimitAndDoesNotGuessRelationships(t *testi
 	require.NoError(t, err)
 	info, err = s.myInvites(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
-	require.Equal(t, "累计邀请：150 人\n待入群：0 人\n待绑定：150 人\n待结算：0 人\n已奖励：0 人\n已退群：0 人", info)
+	require.Equal(t, "待绑定：150 人\n已奖励：0 人\n已退群：0 人", info)
 	// A member with no attributed invitations must never inherit another QQ's
 	// results, even if it sees the same group or passes a search-like identifier.
 	for _, member := range []string{"new-member", "inviter' OR true --", ""} {

@@ -33,7 +33,7 @@ describe('QQ bot settings', () => {
     expect(wrapper.text()).toContain(i18n.global.t('qqbot.eventsHelp'))
     expect(wrapper.findAll('h2').map(heading => heading.text())).not.toContain(i18n.global.t('qqbot.inviteSettings'))
     expect(wrapper.text()).not.toContain('qqbot.eventsHelp')
-    if (locale === 'zh') expect(wrapper.text()).toContain('活动指令无需 @，聊天和生图需 @ 机器人')
+    if (locale === 'zh') expect(wrapper.text()).toContain('活动指令和生图无需 @，普通聊天需 @ 机器人')
     expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe('')
     const chatButton = () => wrapper.findAll('button').find(b => b.text() === i18n.global.t('qqbot.test_chat'))!
     expect(chatButton().attributes('disabled')).toBeUndefined()

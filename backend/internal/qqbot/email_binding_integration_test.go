@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -70,6 +71,14 @@ func emailFixture(t *testing.T) (*Service, *bindingMailStub, Config, Event, int6
 	_, err = db.Exec(`UPDATE users SET email='Alice@example.com' WHERE id=$1`, uid)
 	require.NoError(t, err)
 	return s, m, c, e, uid
+}
+
+func requestBindingEmail(s *Service, ctx context.Context, c Config, e Event, email string) string {
+	reply, pending := s.prepareEmailBinding(ctx, c, e, email)
+	if pending != nil {
+		s.deliverBindingEmail(ctx, e, pending)
+	}
+	return reply
 }
 
 func TestQQBotEmailBindingWorkerAndExplicitConfirmation(t *testing.T) {
@@ -206,13 +215,93 @@ func TestQQBotBindingCommandAlreadyBound(t *testing.T) {
 	}
 }
 
+func TestQQBotBindingCommandEmailAlreadyBound(t *testing.T) {
+	for _, scenario := range []string{"with mention", "without mention", "email case", "other group", "rate limited"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, m, c, e, uid := emailFixture(t)
+			ctx := context.Background()
+			bind(t, s.db, uid, "original-member")
+			e.Content = "<@bot> /绑定 alice@example.com"
+			eventType := groupAtMessageCreate
+			switch scenario {
+			case "without mention":
+				e.Content = "/绑定 alice@example.com"
+				eventType = groupMessageCreate
+			case "email case":
+				e.Content = "<@bot> /绑定 ALICE@EXAMPLE.COM"
+			case "other group":
+				e.GroupID = "other-group"
+			case "rate limited":
+				require.NoError(t, s.reserveBindingEmails(ctx, c.AppID, []string{"member:" + e.Author.MemberID, "all"}, []int{5, 200}, []int{60, 0}))
+			}
+			var replies []string
+			qq := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" {
+					_, _ = w.Write([]byte(`{"access_token":"test-token","expires_in":7200}`))
+					return
+				}
+				require.Equal(t, "/v2/groups/"+e.GroupID+"/messages", r.URL.Path)
+				var data struct {
+					Content string `json:"content"`
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&data))
+				replies = append(replies, data.Content)
+				_, _ = w.Write([]byte(`{"id":"sent"}`))
+			}))
+			defer qq.Close()
+			s.qqURL, s.tokenURL = qq.URL, qq.URL+"/token"
+			// Repeated attempts must keep the conflict response even during cooldown.
+			for _, id := range []string{"bound-email-first", "bound-email-repeated"} {
+				e.ID = id
+				raw, err := json.Marshal(e)
+				require.NoError(t, err)
+				require.NoError(t, s.Enqueue(ctx, c, Payload{Type: eventType, Data: raw}))
+				s.runOne(ctx)
+			}
+			require.Equal(t, []string{emailBindingAlreadyBound, emailBindingAlreadyBound}, replies)
+			require.Empty(t, m.bodies)
+			var requests int
+			require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_email_bind_requests`).Scan(&requests))
+			require.Zero(t, requests)
+			binding, _, err := s.Binding(ctx, c.AppID, uid)
+			require.NoError(t, err)
+			require.NotNil(t, binding)
+			require.Equal(t, "original-member", binding.MemberID)
+		})
+	}
+}
+
+func TestQQBotEmailBindingDetectsConcurrentBinding(t *testing.T) {
+	s, m, c, e, uid := emailFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	confirmation, err := s.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = confirmation.Rollback() }()
+	var pid int
+	require.NoError(t, confirmation.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid))
+	_, err = confirmation.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,273))`, c.AppID)
+	require.NoError(t, err)
+	_, err = confirmation.ExecContext(ctx, `INSERT INTO qq_bot_bindings(app_id,member_id,user_id,group_id) VALUES($1,'original-member',$2,'group')`, c.AppID, uid)
+	require.NoError(t, err)
+	done := make(chan string, 1)
+	go func() { done <- requestBindingEmail(s, ctx, c, e, "alice@example.com") }()
+	waitForDatabaseBlocker(t, s.db, pid)
+	require.NoError(t, confirmation.Commit())
+	require.Equal(t, emailBindingAlreadyBound, <-done)
+	require.Empty(t, m.bodies)
+	var requests int
+	require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_email_bind_requests`).Scan(&requests))
+	require.Zero(t, requests)
+}
+
 func TestQQBotEmailBindingInvalidation(t *testing.T) {
 	for _, scenario := range []string{"expired", "email changed", "disabled account", "deleted account", "group removed", "bot disabled", "smtp failed", "already bound"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, m, c, e, uid := emailFixture(t)
 			ctx := context.Background()
 			m.fail = scenario == "smtp failed"
-			require.Equal(t, emailBindingAccepted, s.requestEmailBinding(ctx, c, e, "alice@example.com"))
+			require.Equal(t, emailBindingAccepted, requestBindingEmail(s, ctx, c, e, "alice@example.com"))
 			token := m.token(t)
 			var err error
 			switch scenario {
@@ -248,14 +337,14 @@ func TestQQBotEmailBindingLimitsAndWebsiteRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); s.requestEmailBinding(ctx, c, e, "alice@example.com") }()
+		go func() { defer wg.Done(); requestBindingEmail(s, ctx, c, e, "alice@example.com") }()
 	}
 	wg.Wait()
 	require.Len(t, m.bodies, 1)
 	old := m.token(t)
 	_, err := s.db.Exec(`UPDATE qq_bot_email_limits SET last_sent_at=NOW()-INTERVAL '61 seconds'`)
 	require.NoError(t, err)
-	s.requestEmailBinding(ctx, c, e, "alice@example.com")
+	requestBindingEmail(s, ctx, c, e, "alice@example.com")
 	require.Len(t, m.bodies, 2)
 	_, err = s.PreviewEmailBinding(ctx, old)
 	require.Error(t, err)
@@ -292,13 +381,13 @@ func TestQQBotEmailBindingRecipientLimitsAndUnknownAccount(t *testing.T) {
 		e.Author.MemberID = strings.Repeat("x", i+1)
 		_, err := s.db.Exec(`UPDATE qq_bot_email_limits SET last_sent_at=NOW()-INTERVAL '61 seconds'`)
 		require.NoError(t, err)
-		require.Equal(t, emailBindingAccepted, s.requestEmailBinding(ctx, c, e, "alice@example.com"))
+		require.Equal(t, emailBindingAccepted, requestBindingEmail(s, ctx, c, e, "alice@example.com"))
 	}
 	require.Len(t, m.bodies, 3)
 	e.Author.MemberID = "unknown"
-	require.Equal(t, emailBindingAccepted, s.requestEmailBinding(ctx, c, e, "unregistered@example.com"))
+	require.Equal(t, emailBindingAccepted, requestBindingEmail(s, ctx, c, e, "unregistered@example.com"))
 	require.Len(t, m.bodies, 3)
-	require.NotEqual(t, emailBindingAccepted, s.requestEmailBinding(ctx, c, e, "Name <alice@example.com>"))
+	require.NotEqual(t, emailBindingAccepted, requestBindingEmail(s, ctx, c, e, "Name <alice@example.com>"))
 }
 
 func TestQQBotEmailBindingInvitationSettlement(t *testing.T) {
@@ -308,7 +397,7 @@ func TestQQBotEmailBindingInvitationSettlement(t *testing.T) {
 	bind(t, s.db, inviter, "inviter")
 	_, err := s.db.Exec(`INSERT INTO qq_bot_members(app_id,group_id,member_id,inviter_id,invited_at,joined_at) VALUES('app','group','member','inviter',NOW()-INTERVAL '1 minute',NOW())`)
 	require.NoError(t, err)
-	s.requestEmailBinding(ctx, c, e, "alice@example.com")
+	requestBindingEmail(s, ctx, c, e, "alice@example.com")
 	member, err := s.ConfirmEmailBinding(ctx, m.token(t), "member")
 	require.NoError(t, err)
 	require.NoError(t, s.SettleInvites(ctx, member))
