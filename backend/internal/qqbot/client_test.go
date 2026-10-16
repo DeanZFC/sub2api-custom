@@ -138,7 +138,7 @@ func TestImagesGenerateThenReuseSavedBytesForDelivery(t *testing.T) {
 	require.Error(t, s.send(context.Background(), c, j, "", img, 4))
 	require.Equal(t, 2, uploads)
 }
-func TestGroupTextReplyMentionsSenderForFullMessageCommands(t *testing.T) {
+func TestGroupTextReplyUsesQQMentionMarkup(t *testing.T) {
 	var content string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -148,9 +148,13 @@ func TestGroupTextReplyMentionsSenderForFullMessageCommands(t *testing.T) {
 			var body struct {
 				Content string `json:"content"`
 				MsgType int    `json:"msg_type"`
+				MsgID   string `json:"msg_id"`
+				MsgSeq  int    `json:"msg_seq"`
 			}
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			require.Equal(t, 0, body.MsgType)
+			require.Equal(t, "incoming", body.MsgID)
+			require.Equal(t, 1, body.MsgSeq)
 			content = body.Content
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
@@ -163,12 +167,25 @@ func TestGroupTextReplyMentionsSenderForFullMessageCommands(t *testing.T) {
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	c.AppID, c.AppSecret = "app", "qq-secret"
-	j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: "member-openid", MessageID: "incoming", CreatedAt: time.Now()}
-	require.NoError(t, s.send(context.Background(), c, j, "回复正文", nil, 1))
-	require.Equal(t, "<@member-openid>\n回复正文", content)
-	j.EventType = groupAtMessageCreate
-	require.NoError(t, s.send(context.Background(), c, j, "回复正文", nil, 2))
-	require.Equal(t, "回复正文", content)
+	const memberID = "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4"
+	const mention = `<qqbot-at-user id="` + memberID + `" />`
+	for _, tc := range []struct {
+		name, eventType, memberID, text, want string
+	}{
+		{"command", groupMessageCreate, memberID, "回复正文", mention + "\n回复正文"},
+		{"email binding acknowledgement", groupMessageCreate, memberID, emailBindingAccepted, mention + "\n" + emailBindingAccepted},
+		{"help newline", groupMessageCreate, memberID, "\n指令：/帮助", mention + "\n指令：/帮助"},
+		{"QQ automatic mention", groupAtMessageCreate, memberID, "回复正文", "回复正文"},
+		{"missing sender", groupMessageCreate, "", "回复正文", "回复正文"},
+		{"escaped sender", groupMessageCreate, `member"<&`, "回复正文", "<qqbot-at-user id=\"member&#34;&lt;&amp;\" />\n回复正文"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			j := Job{EventType: tc.eventType, GroupID: "group", MemberID: tc.memberID, MessageID: "incoming", CreatedAt: time.Now()}
+			require.NoError(t, s.send(context.Background(), c, j, tc.text, nil, 1))
+			require.Equal(t, tc.want, content)
+			require.NotContains(t, content, "<@")
+		})
+	}
 }
 
 func TestUpstreamErrorsDoNotExposeCredentialsOrRetry(t *testing.T) {

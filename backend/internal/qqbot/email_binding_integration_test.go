@@ -82,6 +82,12 @@ func requestBindingEmail(s *Service, ctx context.Context, c Config, e Event, ema
 }
 
 func TestQQBotEmailBindingWorkerAndExplicitConfirmation(t *testing.T) {
+	for _, eventType := range []string{groupAtMessageCreate, groupMessageCreate} {
+		t.Run(eventType, func(t *testing.T) { testEmailBindingWorkerAndConfirmation(t, eventType) })
+	}
+}
+
+func testEmailBindingWorkerAndConfirmation(t *testing.T, eventType string) {
 	s, m, c, e, uid := emailFixture(t)
 	ctx := context.Background()
 	var reply string
@@ -105,13 +111,20 @@ func TestQQBotEmailBindingWorkerAndExplicitConfirmation(t *testing.T) {
 	s.qqURL = qq.URL
 	s.tokenURL = qq.URL + "/token"
 	e.ID = "email-bind-message"
-	e.Content = "<@bot> /绑定 alice@example.com"
+	e.Content = "/绑定 alice@example.com"
+	if eventType == groupAtMessageCreate {
+		e.Content = "<@bot> " + e.Content
+	}
 	raw, err := json.Marshal(e)
 	require.NoError(t, err)
-	payload := Payload{Type: "GROUP_AT_MESSAGE_CREATE", Data: raw}
+	payload := Payload{Type: eventType, Data: raw}
 	require.NoError(t, s.Enqueue(ctx, c, payload))
 	s.runOne(ctx)
-	require.Equal(t, emailBindingAccepted, reply)
+	expectedReply := emailBindingAccepted
+	if eventType == groupMessageCreate {
+		expectedReply = "<qqbot-at-user id=\"member\" />\n" + expectedReply
+	}
+	require.Equal(t, expectedReply, reply)
 	require.NoError(t, s.Enqueue(ctx, c, payload))
 	s.runOne(ctx)
 	require.Len(t, m.bodies, 1)
@@ -203,7 +216,7 @@ func TestQQBotBindingCommandAlreadyBound(t *testing.T) {
 			s.runOne(ctx)
 			expectedReply := "当前 QQ 已绑定账号。"
 			if eventType == groupMessageCreate {
-				expectedReply = "<@member>\n" + expectedReply
+				expectedReply = "<qqbot-at-user id=\"member\" />\n" + expectedReply
 			}
 			require.Equal(t, []string{expectedReply}, replies)
 			require.Empty(t, m.bodies)
@@ -264,7 +277,7 @@ func TestQQBotBindingCommandEmailAlreadyBound(t *testing.T) {
 			}
 			expectedReply := emailBindingAlreadyBound
 			if eventType == groupMessageCreate {
-				expectedReply = "<@member>\n" + expectedReply
+				expectedReply = "<qqbot-at-user id=\"member\" />\n" + expectedReply
 			}
 			require.Equal(t, []string{expectedReply, expectedReply}, replies)
 			require.Empty(t, m.bodies)

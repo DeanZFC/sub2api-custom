@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"image"
 	"image/jpeg"
 	_ "image/png"
@@ -458,7 +459,9 @@ func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []
 func groupReplyContent(text string, j Job) string {
 	// QQ adds the sender mention for GROUP_AT_MESSAGE_CREATE replies itself.
 	if j.EventType == groupMessageCreate && j.MemberID != "" {
-		text = "<@" + j.MemberID + ">\n" + strings.TrimLeft(text, "\n")
+		// The legacy <@openid> syntax is rendered literally by QQ group clients.
+		// https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/text-chain.html
+		text = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n" + strings.TrimLeft(text, "\n")
 	}
 	return limitText(text, 1800)
 }
