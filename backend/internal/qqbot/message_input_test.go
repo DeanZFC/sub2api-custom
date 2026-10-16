@@ -55,9 +55,15 @@ func TestChatImageWireProtocols(t *testing.T) {
 				require.Equal(t, imageType, parts[1]["type"])
 				var imageURL string
 				if protocol == "responses" {
-					imageURL = parts[1]["image_url"].(string)
+					value, ok := parts[1]["image_url"].(string)
+					require.True(t, ok)
+					imageURL = value
 				} else {
-					imageURL = parts[1]["image_url"].(map[string]any)["url"].(string)
+					imagePart, ok := parts[1]["image_url"].(map[string]any)
+					require.True(t, ok)
+					value, ok := imagePart["url"].(string)
+					require.True(t, ok)
+					imageURL = value
 				}
 				require.Contains(t, imageURL, "data:image/png;base64,")
 				require.NotContains(t, string(body[key]), "image.example")

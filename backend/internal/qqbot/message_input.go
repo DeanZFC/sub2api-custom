@@ -32,8 +32,8 @@ func eventParts(e Event) (string, []Attachment) {
 			}
 			remaining--
 			if text.Len() < 24000 && element.Content != "" {
-				text.WriteString(limitText(element.Content, 6000))
-				text.WriteByte('\n')
+				_, _ = text.WriteString(limitText(element.Content, 6000))
+				_ = text.WriteByte('\n')
 			}
 			attachments = append(attachments, element.Attachments...)
 			visit(element.MsgElements, depth+1)
