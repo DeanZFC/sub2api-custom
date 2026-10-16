@@ -51,6 +51,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.vue'
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
 import QQBotInviteSettings from '@/components/admin/qqbot/QQBotInviteSettings.vue'
+import QQBotTransferSettings from '@/components/admin/qqbot/QQBotTransferSettings.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -58,7 +59,8 @@ const router = useRouter()
 const tabs = [
   { key: 'checkin', label: 'qqbot.checkinTitle', component: QQBotCheckinSettings },
   { key: 'lottery', label: 'qqbot.lotteryTitle', component: QQBotLotterySettings },
-  { key: 'invite', label: 'qqbot.inviteTitle', component: QQBotInviteSettings }
+  { key: 'invite', label: 'qqbot.inviteTitle', component: QQBotInviteSettings },
+  { key: 'transfer', label: 'qqbot.transferTitle', component: QQBotTransferSettings }
 ] as const
 type ActivityTab = (typeof tabs)[number]['key']
 const activeTab = computed(() => tabs.find(tab => tab.key === route.query.tab) ?? tabs[0])

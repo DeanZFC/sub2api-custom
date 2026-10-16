@@ -233,3 +233,35 @@ func (c LotteryConfig) drawsUntilGuarantee(used int64) int64 {
 	}
 	return c.GuaranteeEvery - used%c.GuaranteeEvery
 }
+
+// TransferConfig holds the transfer feature's operator-configurable parameters.
+type TransferConfig struct {
+	TransferEnabled    bool    `json:"transfer_enabled"`
+	TransferFeePercent float64 `json:"transfer_fee_percent"`
+	TransferMinAmount  float64 `json:"transfer_min_amount"`
+	TransferMaxAmount  float64 `json:"transfer_max_amount"`
+}
+
+func (s *Service) TransferConfig(ctx context.Context) (TransferConfig, error) {
+	c, err := s.Config(ctx)
+	if err != nil {
+		return TransferConfig{}, err
+	}
+	return TransferConfig{
+		TransferEnabled:    c.TransferEnabled,
+		TransferFeePercent: c.TransferFeePercent,
+		TransferMinAmount:  c.TransferMinAmount,
+		TransferMaxAmount:  c.TransferMaxAmount,
+	}, nil
+}
+
+func (s *Service) SaveTransferConfig(ctx context.Context, cfg TransferConfig) error {
+	_, err := s.saveConfig(ctx, func(old Config) Config {
+		old.TransferEnabled = cfg.TransferEnabled
+		old.TransferFeePercent = cfg.TransferFeePercent
+		old.TransferMinAmount = cfg.TransferMinAmount
+		old.TransferMaxAmount = cfg.TransferMaxAmount
+		return old
+	})
+	return err
+}

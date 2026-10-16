@@ -64,6 +64,34 @@ func (h *QQBotHandler) SaveCheckinConfig(c *gin.Context) {
 	}
 	response.Success(c, cfg)
 }
+func (h *QQBotHandler) GetTransferConfig(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
+	cfg, err := h.bot.TransferConfig(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "读取转账配置失败")
+		return
+	}
+	response.Success(c, cfg)
+}
+func (h *QQBotHandler) SaveTransferConfig(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	var cfg qqbot.TransferConfig
+	if c.ShouldBindJSON(&cfg) != nil {
+		response.BadRequest(c, "转账配置格式不正确")
+		return
+	}
+	if err := h.bot.SaveTransferConfig(c.Request.Context(), cfg); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, cfg)
+}
+
 func (h *QQBotHandler) GetLotteryConfig(c *gin.Context) {
 	if !requireQQBotAdmin(c) {
 		return

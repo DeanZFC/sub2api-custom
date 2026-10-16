@@ -7,9 +7,10 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.vue'
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
 import QQBotInviteSettings from '@/components/admin/qqbot/QQBotInviteSettings.vue'
+import QQBotTransferSettings from '@/components/admin/qqbot/QQBotTransferSettings.vue'
 import QQBotActivitiesView from '../QQBotActivitiesView.vue'
 
-const api = vi.hoisted(() => ({ checkinConfig: vi.fn(), saveCheckin: vi.fn(), inviteConfig: vi.fn(), saveInvite: vi.fn(), lotteryConfig: vi.fn(), saveLottery: vi.fn(), lotteryDraws: vi.fn(), lotteryState: vi.fn() }))
+const api = vi.hoisted(() => ({ checkinConfig: vi.fn(), saveCheckin: vi.fn(), inviteConfig: vi.fn(), saveInvite: vi.fn(), transferConfig: vi.fn(), saveTransfer: vi.fn(), lotteryConfig: vi.fn(), saveLottery: vi.fn(), lotteryDraws: vi.fn(), lotteryState: vi.fn() }))
 vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 function i18n(locale: 'zh' | 'en') { return createI18n({ legacy: false, locale, messages: { zh, en } }) }
@@ -22,6 +23,8 @@ describe('QQ activity pages with real translations', () => {
     api.saveCheckin.mockImplementation(async c => c)
     api.inviteConfig.mockResolvedValue({ invite_reward: 1, invite_daily_limit: 10, min_recharge_total: 0, min_recharge_30d: 0 })
     api.saveInvite.mockImplementation(async c => c)
+    api.transferConfig.mockResolvedValue({ transfer_enabled: true, transfer_fee_percent: 1, transfer_min_amount: 0.1, transfer_max_amount: 100 })
+    api.saveTransfer.mockImplementation(async c => c)
     api.lotteryConfig.mockResolvedValue({ enabled: false, title: 'Lottery', recharge_step: 10, chances_per_step: 1, prizes: [{ name: 'Win', amount: 1, probability_bps: 1000 }, { name: 'Thanks', amount: 0, probability_bps: 9000 }] })
     api.saveLottery.mockImplementation(async c => c)
     api.lotteryDraws.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
@@ -138,10 +141,11 @@ describe('QQ activity pages with real translations', () => {
     await router.push('/admin/qqbot/activities')
     const w = mount(QQBotActivitiesView, { global: { plugins: [i18n(locale), router], stubs: { RouterLink: true } } })
     await flushPromises()
-    expect(w.findAll('[role="tab"]')).toHaveLength(3)
+    expect(w.findAll('[role="tab"]')).toHaveLength(4)
     expect(api.checkinConfig).toHaveBeenCalledTimes(1)
     expect(api.lotteryConfig).not.toHaveBeenCalled()
     expect(api.inviteConfig).not.toHaveBeenCalled()
+    expect(api.transferConfig).not.toHaveBeenCalled()
     await w.get('[data-testid="min-amount"]').setValue('0.2')
     await w.get('#qqbot-tab-lottery').trigger('click'); await flushPromises()
     await w.get('[data-testid="recharge-step"]').setValue('25')
@@ -163,6 +167,47 @@ describe('QQ activity pages with real translations', () => {
     expect((w.get('[data-testid="recharge-step"]').element as HTMLInputElement).value).toBe('25')
     expect(api.lotteryConfig).toHaveBeenCalledTimes(1)
     expect(api.checkinConfig).toHaveBeenCalledTimes(1)
+    await w.get('#qqbot-tab-transfer').trigger('click'); await flushPromises()
+    expect(router.currentRoute.value.query.tab).toBe('transfer')
+    await w.get('[data-testid="transfer-fee-percent"]').setValue('2.5')
+    await w.get('#qqbot-tab-checkin').trigger('click'); await flushPromises()
+    await w.get('#qqbot-tab-transfer').trigger('click'); await flushPromises()
+    expect((w.get('[data-testid="transfer-fee-percent"]').element as HTMLInputElement).value).toBe('2.5')
+    expect(api.transferConfig).toHaveBeenCalledTimes(1)
+    expect(api.saveTransfer).not.toHaveBeenCalled()
+    w.unmount()
+  })
+  it.each(['zh', 'en'] as const)('%s validates transfer limits and saves transfer settings independently', async locale => {
+    const translation = i18n(locale)
+    const w = mount(QQBotTransferSettings, { global: { plugins: [translation] } })
+    await flushPromises()
+    expect(w.text()).toContain(translation.global.t('qqbot.transferCommand'))
+    for (const [field, value, message] of [
+      ['transfer-fee-percent', '101', 'invalidTransferFee'],
+      ['transfer-min-amount', '-1', 'invalidTransferMin'],
+      ['transfer-max-amount', '-1', 'invalidTransferMax'],
+      ['transfer-max-amount', '0.05', 'invalidTransferRange']
+    ]) {
+      const input = w.get(`[data-testid="${field}"]`)
+      const previous = (input.element as HTMLInputElement).value
+      await input.setValue(value)
+      await w.get('form').trigger('submit')
+      expect(api.saveTransfer).not.toHaveBeenCalled()
+      expect(w.get('[role="alert"]').text()).toBe(translation.global.t(`qqbot.${message}`))
+      await input.setValue(previous)
+    }
+    await w.get('[data-testid="transfer-fee-percent"]').setValue('2.5')
+    await w.get('[data-testid="transfer-max-amount"]').setValue('0')
+    api.saveTransfer.mockRejectedValueOnce(new Error('Save failed'))
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(w.get('[role="alert"]').text()).toBe('Save failed')
+    expect((w.get('[data-testid="transfer-fee-percent"]').element as HTMLInputElement).value).toBe('2.5')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveTransfer).toHaveBeenLastCalledWith({ transfer_enabled: true, transfer_fee_percent: 2.5, transfer_min_amount: 0.1, transfer_max_amount: 0 })
+    expect(api.saveCheckin).not.toHaveBeenCalled()
+    expect(api.saveInvite).not.toHaveBeenCalled()
+    expect(api.saveLottery).not.toHaveBeenCalled()
+    expect(w.get('[role="status"]').text()).toBe(translation.global.t('common.saved'))
     w.unmount()
   })
   it.each(['zh', 'en'] as const)('%s validates custom windows and defaults old settings to 30 days', async locale => {

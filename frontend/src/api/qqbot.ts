@@ -40,6 +40,10 @@ export interface QQInviteConfig {
   invite_reward: number; invite_daily_limit: number
   min_recharge_total: number; min_recharge_30d: number; recharge_window_days: number
 }
+export interface QQTransferConfig {
+  transfer_enabled: boolean; transfer_fee_percent: number
+  transfer_min_amount: number; transfer_max_amount: number
+}
 export interface QQLotteryPrize { name: string; amount: number; probability_bps: number }
 export interface QQLotteryConfig {
   enabled: boolean; title: string; recharge_step: number; chances_per_step: number; prizes: QQLotteryPrize[]
@@ -66,6 +70,8 @@ export const qqbotAPI = {
   saveInvite: async (config: QQInviteConfig) => (await apiClient.put<QQInviteConfig>('/admin/qqbot/invite', config)).data,
   checkinConfig: async () => (await apiClient.get<QQCheckinConfig>('/admin/qqbot/checkin')).data,
   saveCheckin: async (config: QQCheckinConfig) => (await apiClient.put<QQCheckinConfig>('/admin/qqbot/checkin', config)).data,
+  transferConfig: async () => (await apiClient.get<QQTransferConfig>('/admin/qqbot/transfer')).data,
+  saveTransfer: async (config: QQTransferConfig) => (await apiClient.put<QQTransferConfig>('/admin/qqbot/transfer', config)).data,
   lotteryConfig: async () => (await apiClient.get<QQLotteryConfig>('/admin/qqbot/lottery')).data,
   saveLottery: async (config: QQLotteryConfig) => (await apiClient.put<QQLotteryConfig>('/admin/qqbot/lottery', config)).data,
   lotteryState: async (userID: number) => (await apiClient.get<QQLotteryState>(`/admin/qqbot/lottery/users/${userID}`)).data,
