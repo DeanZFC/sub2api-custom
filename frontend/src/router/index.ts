@@ -155,6 +155,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false, title: 'Confirm QQ Binding', titleKey: 'qqbot.emailBindTitle' }
   },
   {
+    path: '/qqbot/transfer',
+    name: 'QQBotTransfer',
+    component: () => import('@/views/auth/QQBotTransferView.vue'),
+    meta: { requiresAuth: false, title: 'Confirm balance transfer', titleKey: 'qqbot.transferConfirmTitle' }
+  },
+  {
     path: '/reset-password',
     name: 'ResetPassword',
     component: () => import('@/views/auth/ResetPasswordView.vue'),
@@ -827,6 +833,7 @@ let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
 const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal']
 const BACKEND_MODE_CALLBACK_PATHS = [
   '/qqbot/bind',
+  '/qqbot/transfer',
   '/auth/callback',
   '/auth/linuxdo/callback',
   '/auth/dingtalk/callback',

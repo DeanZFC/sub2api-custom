@@ -86,6 +86,7 @@ function simulateGuard(
     if (authState.backendModeEnabled && !authState.isAuthenticated) {
       const allowed = ['/login', '/key-usage', '/setup', '/payment/result']
       const callbackPaths = [
+        '/qqbot/transfer',
         '/auth/callback',
         '/auth/linuxdo/callback',
         '/auth/oidc/callback',
@@ -134,6 +135,7 @@ function simulateGuard(
     }
     const allowed = ['/login', '/key-usage', '/setup', '/payment/result']
     const callbackPaths = [
+      '/qqbot/transfer',
       '/auth/callback',
       '/auth/linuxdo/callback',
       '/auth/oidc/callback',

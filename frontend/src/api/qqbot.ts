@@ -44,6 +44,10 @@ export interface QQTransferConfig {
   transfer_enabled: boolean; transfer_fee_percent: number
   transfer_min_amount: number; transfer_max_amount: number
 }
+export interface QQTransferPreview {
+  from_email: string; to_email: string; amount: string; fee: string
+  net_amount: string; expires_at: string
+}
 export interface QQLotteryPrize { name: string; amount: number; probability_bps: number }
 export interface QQLotteryConfig {
   enabled: boolean; title: string; recharge_step: number; chances_per_step: number; prizes: QQLotteryPrize[]
@@ -87,5 +91,7 @@ export const qqbotAPI = {
   createCode: async () => (await apiClient.post<QQBindingRequest>('/user/qqbot/binding-code')).data,
   confirm: async (member_id: string) => (await apiClient.post('/user/qqbot/binding-confirm', { member_id })).data,
   previewEmail: async (token: string) => (await apiClient.post<QQEmailBindingPreview>('/qqbot/email-binding/preview', { token })).data,
-  confirmEmail: async (token: string, member_id: string) => (await apiClient.post('/qqbot/email-binding/confirm', { token, member_id })).data
+  confirmEmail: async (token: string, member_id: string) => (await apiClient.post('/qqbot/email-binding/confirm', { token, member_id })).data,
+  previewTransfer: async (token: string) => (await apiClient.post<QQTransferPreview>('/qqbot/transfer/preview', { token })).data,
+  confirmTransfer: async (token: string) => (await apiClient.post('/qqbot/transfer/confirm', { token })).data
 }

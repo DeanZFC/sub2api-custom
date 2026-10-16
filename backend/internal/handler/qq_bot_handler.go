@@ -288,6 +288,8 @@ func (h *QQBotHandler) emailBinding(c *gin.Context, confirm bool) {
 }
 
 func (h *QQBotHandler) PreviewTransfer(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
 	var req struct {
 		Token string `json:"token"`
@@ -305,6 +307,8 @@ func (h *QQBotHandler) PreviewTransfer(c *gin.Context) {
 }
 
 func (h *QQBotHandler) ConfirmTransfer(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
 	var req struct {
 		Token string `json:"token"`
