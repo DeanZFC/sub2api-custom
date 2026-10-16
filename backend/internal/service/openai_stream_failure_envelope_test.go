@@ -52,7 +52,7 @@ func requireDecodableOpenAIFailedTerminal(t *testing.T, stream string) {
 func TestOpenAIStreamFailureEnvelopePreservesIdentityAndOrdering(t *testing.T) {
 	source := []byte(`{"type":"response.failed","sequence_number":27,"response":{"id":"resp_original","object":"response","created_at":1789656300,"model":"gpt-5.6-terra","output":[],"error":{"code":"insufficient_quota","message":"provider balance is empty"}}}`)
 	for _, stream := range []string{
-		buildOpenAIResponseFailedSSE("resp_original", "gpt-5.6-terra", source, ""),
+		buildOpenAIResponseFailedSSE("resp_original", "gpt-5.6-terra", 0, source, ""),
 		func() string {
 			payload, changed := sanitizeOpenAIResponseFailedEventForClient(source, "response.failed", true)
 			require.True(t, changed)

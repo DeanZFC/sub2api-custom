@@ -344,10 +344,21 @@ func (s *AntigravityGatewayService) IsModelSupported(requestedModel string) bool
 		strings.HasPrefix(requestedModel, "gemini-")
 }
 
+// TestConnectionImage 测试连接返回的图片结果
+type TestConnectionImage struct {
+	ImageURL string
+	MimeType string
+}
+
 // TestConnectionResult 测试连接结果
 type TestConnectionResult struct {
-	Text        string // 响应文本
-	MappedModel string // 实际使用的模型
+	Text        string                // 响应文本
+	Images      []TestConnectionImage // 响应图片（图片生成模型）
+	MappedModel string                // 实际使用的模型
+}
+
+func shouldUseAntigravityGeminiTestRequest(_, mappedModel string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(mappedModel)), "gemini-")
 }
 
 // TestConnection 测试 Antigravity 账号连接。
@@ -384,8 +395,8 @@ func (s *AntigravityGatewayService) TestConnectionWithPrompt(ctx context.Context
 
 	// 构建请求体
 	var requestBody []byte
-	if strings.HasPrefix(modelID, "gemini-") {
-		requestBody, err = s.buildGeminiTestRequest(projectID, mappedModel, prompt)
+	if shouldUseAntigravityGeminiTestRequest(modelID, mappedModel) {
+		requestBody, err = s.buildGeminiTestRequestWithPrompt(projectID, mappedModel, prompt)
 	} else {
 		requestBody, err = s.buildClaudeTestRequest(projectID, mappedModel, prompt)
 	}
@@ -441,11 +452,11 @@ func (s *AntigravityGatewayService) TestConnectionWithPrompt(ctx context.Context
 		return nil, fmt.Errorf("API 返回 %d: %s", result.resp.StatusCode, string(respBody))
 	}
 
-	text, err := extractAntigravityTestResponse(respBody)
+	text, images, err := extractAntigravityTestContent(respBody)
 	if err != nil {
 		return nil, err
 	}
-	return &TestConnectionResult{Text: text, MappedModel: mappedModel}, nil
+	return &TestConnectionResult{Text: text, Images: images, MappedModel: mappedModel}, nil
 }
 
 // testConnectionHandleError 是 TestConnection 使用的轻量 handleError 回调。
@@ -461,10 +472,39 @@ func testConnectionHandleError(
 	return nil
 }
 
-// buildGeminiTestRequest 构建 Gemini 格式测试请求
-// 使用最小 token 消耗：输入 "." + maxOutputTokens: 1
+// buildGeminiTestRequestWithPrompt 构建 Gemini 格式测试请求
+// 文本模型使用最小 token 消耗：输入 "." + maxOutputTokens: 1；图片模型使用图片生成配置
+func (s *AntigravityGatewayService) buildGeminiTestRequestWithPrompt(projectID, model, prompt string) ([]byte, error) {
+	if isImageGenerationModel(model) {
+		imagePrompt := strings.TrimSpace(prompt)
+		if imagePrompt == "" {
+			imagePrompt = defaultGeminiImageTestPrompt
+		}
+		payload := map[string]any{
+			"contents": []map[string]any{
+				{
+					"role": "user",
+					"parts": []map[string]any{
+						{"text": imagePrompt},
+					},
+				},
+			},
+			"systemInstruction": map[string]any{
+				"parts": []map[string]any{
+					{"text": antigravity.GetDefaultIdentityPatch()},
+				},
+			},
+			"generationConfig": map[string]any{
+				"responseModalities": []string{"TEXT", "IMAGE"},
+				"imageConfig": map[string]any{
+					"aspectRatio": "1:1",
+				},
+			},
+		}
+		payloadBytes, _ := json.Marshal(payload)
+		return s.wrapV1InternalRequest(projectID, model, payloadBytes)
+	}
 
-func (s *AntigravityGatewayService) buildGeminiTestRequest(projectID, model, prompt string) ([]byte, error) {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
 		testPrompt = "."
@@ -489,9 +529,18 @@ func (s *AntigravityGatewayService) buildGeminiTestRequest(projectID, model, pro
 				return accountTestMaxOutputTokens(prompt, 1)
 			}(),
 		},
+		"toolConfig": map[string]any{
+			"functionCallingConfig": map[string]any{
+				"mode": "VALIDATED",
+			},
+		},
 	}
 	payloadBytes, _ := json.Marshal(payload)
 	return s.wrapV1InternalRequest(projectID, model, payloadBytes)
+}
+
+func (s *AntigravityGatewayService) buildGeminiTestRequest(projectID, model, prompt string) ([]byte, error) {
+	return s.buildGeminiTestRequestWithPrompt(projectID, model, prompt)
 }
 
 // buildClaudeTestRequest 构建 Claude 格式测试请求并转换为 Gemini 格式
@@ -543,7 +592,13 @@ func extractTextFromSSEResponse(respBody []byte) string {
 // streamGenerateContent; both forms are accepted only when a non-truncating
 // finishReason is present (or an explicit [DONE] marker is received).
 func extractAntigravityTestResponse(respBody []byte) (string, error) {
+	text, _, err := extractAntigravityTestContent(respBody)
+	return text, err
+}
+
+func extractAntigravityTestContent(respBody []byte) (string, []TestConnectionImage, error) {
 	var texts []string
+	var images []TestConnectionImage
 	completed := false
 	seenJSON := false
 	lines := bytes.Split(respBody, []byte("\n"))
@@ -577,12 +632,12 @@ func extractAntigravityTestResponse(respBody []byte) (string, error) {
 		seenJSON = true
 		if errData, ok := data["error"].(map[string]any); ok {
 			if message, _ := errData["message"].(string); strings.TrimSpace(message) != "" {
-				return "", errors.New(message)
+				return "", nil, errors.New(message)
 			}
-			return "", errors.New("Antigravity response contained an error")
+			return "", nil, errors.New("Antigravity response contained an error")
 		}
 
-		// 尝试从 response.candidates[0].content.parts[].text 提取
+		// 尝试从 response.candidates[0].content.parts[] 提取
 		response, ok := data["response"].(map[string]any)
 		if !ok {
 			// 尝试直接从 candidates 提取（某些响应格式）
@@ -600,7 +655,7 @@ func extractAntigravityTestResponse(respBody []byte) (string, error) {
 		}
 		if finishReason, _ := candidate["finishReason"].(string); strings.TrimSpace(finishReason) != "" {
 			if isAccountTestTruncationFinishReason(finishReason) || strings.EqualFold(strings.TrimSpace(finishReason), "max_tokens") {
-				return "", fmt.Errorf("Antigravity response truncated (finishReason=%s)", finishReason)
+				return "", nil, fmt.Errorf("Antigravity response truncated (finishReason=%s)", finishReason)
 			}
 			completed = true
 		}
@@ -620,17 +675,27 @@ func extractAntigravityTestResponse(respBody []byte) (string, error) {
 				if text, ok := partMap["text"].(string); ok && text != "" {
 					texts = append(texts, text)
 				}
+				if inlineData, ok := partMap["inlineData"].(map[string]any); ok {
+					mimeType, _ := inlineData["mimeType"].(string)
+					b64Data, _ := inlineData["data"].(string)
+					if strings.HasPrefix(strings.ToLower(mimeType), "image/") && b64Data != "" {
+						images = append(images, TestConnectionImage{
+							ImageURL: fmt.Sprintf("data:%s;base64,%s", mimeType, b64Data),
+							MimeType: mimeType,
+						})
+					}
+				}
 			}
 		}
 	}
 
 	if !completed {
 		if !seenJSON {
-			return "", errors.New("Antigravity response was not valid SSE or JSON")
+			return "", nil, errors.New("Antigravity response was not valid SSE or JSON")
 		}
-		return "", errors.New("Antigravity response ended without a terminal finishReason")
+		return "", nil, errors.New("Antigravity response ended without a terminal finishReason")
 	}
-	return strings.Join(texts, ""), nil
+	return strings.Join(texts, ""), images, nil
 }
 
 // injectIdentityPatchToGeminiRequest 为 Gemini 格式请求注入身份提示词

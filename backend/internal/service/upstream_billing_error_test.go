@@ -146,6 +146,7 @@ func TestBuildOpenAIResponseFailedSSE_RedactsBillingEvidence(t *testing.T) {
 	sse := buildOpenAIResponseFailedSSE(
 		"resp_test",
 		"gpt-5",
+		0,
 		[]byte(`{"type":"error","error":{"type":"invalid_request_error","code":"insufficient_balance","message":"Provider account has no credits remaining"}}`),
 		"Provider account has no credits remaining",
 	)
