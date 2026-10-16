@@ -237,7 +237,9 @@ func (s *Service) prepareTransfer(ctx context.Context, c Config, e Event, arg st
 		return "转账申请失败，请稍后重试。", nil
 	}
 
-	return "✉️ **转账申请已受理**\n\n请查收邮件并在 **15 分钟内**确认。", &preparedTransferEmail{
+	message := fmt.Sprintf("✉️ **转账申请已受理**\n\n- 转出金额：USD %s\n- 手续费（%s%%）：USD %s\n- 收款方到账：USD %s\n\n手续费从转出金额中扣除，不会额外扣款。\n请查收邮件并在 **15 分钟内**确认，确认后才会扣款。",
+		amount.StringFixed(4), decimal.NewFromFloat(c.TransferFeePercent).String(), fee.StringFixed(4), netAmount.StringFixed(4))
+	return message, &preparedTransferEmail{
 		recipient: fromEmail,
 		token:     token,
 		link:      link,
