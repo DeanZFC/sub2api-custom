@@ -52,6 +52,7 @@
             </div>
             <p v-if="result.target_mode === 'group' && result.account_id" class="ml-6 mt-2 break-words text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.executedByAccount') }}: {{ accountLabel(result) }}</p>
             <p v-if="!expanded.has(result.id)" class="ml-6 mt-2 break-words text-sm" :class="resultStatus(result) === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'" data-result-summary>{{ resultSummary(result) }}</p>
+            <TestExecutionUsage :info="result.execution_info" class="ml-6 mt-2" />
             <p v-if="result.protection_decision" class="ml-6 mt-2 break-words text-xs text-gray-500 dark:text-gray-400" data-protection-decision>{{ protectionDecisionLabel(result) }}</p>
             <div v-if="expanded.has(result.id)" :id="`admin-test-output-${result.id}`" class="mt-3 min-w-0 sm:ml-6" data-result-detail>
               <p v-if="result.error_message" class="mb-3 whitespace-pre-wrap break-words text-sm" :class="isSkippedResult(result) ? 'text-amber-700 dark:text-amber-300' : 'text-red-600 dark:text-red-400'" role="alert">{{ result.error_message }}</p>
@@ -71,6 +72,7 @@ import { useI18n } from 'vue-i18n'
 import type { AccountListItem, TestResult, TestType } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import TestExecutionUsage from '@/components/tests/TestExecutionUsage.vue'
 import TestResultOutput from '@/components/tests/TestResultOutput.vue'
 
 const props = defineProps<{

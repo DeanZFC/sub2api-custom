@@ -29,7 +29,8 @@ func TestScheduledTestStatisticsRecoveryProbe(t *testing.T) {
 		name, body, wantProbe, wantVerdict                                string
 		needed, disabled, cancelled, timeout, queryError, measuredFailure bool
 	}{
-		{name: "paused account with no usage recovers", needed: true, body: `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}`, wantProbe: "success", wantVerdict: "pass"},
+		{name: "paused account with no usage recovers", needed: true, body: `{"status":"completed","usage":{"input_tokens":8,"output_tokens":2},"output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}`, wantProbe: "success", wantVerdict: "pass"},
+		{name: "failed probe still records usage", needed: true, body: "data: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"message\":\"failed\"},\"usage\":{\"input_tokens\":8,\"output_tokens\":2}}\n\n", wantProbe: "failed", wantVerdict: "fail"},
 		{name: "empty completion cannot recover", needed: true, body: `{"status":"completed","output":[]}`, wantProbe: "failed", wantVerdict: "fail"},
 		{name: "incomplete response cannot recover", needed: true, body: "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.incomplete\"}\n\n", wantProbe: "failed", wantVerdict: "fail"},
 		{name: "normal account does not probe", body: `{}`, wantVerdict: "pending"},
@@ -95,6 +96,11 @@ func TestScheduledTestStatisticsRecoveryProbe(t *testing.T) {
 			require.Equal(t, "mapped-model", upstream.requestModel)
 			require.NotNil(t, stats.RecoveryProbe)
 			require.Equal(t, tc.wantProbe, stats.RecoveryProbe.Status)
+			require.Len(t, repo.completed.ExecutionInfo.Attempts, 1, "recovery spending must be attached to the statistics result")
+			if tc.name == "paused account with no usage recovers" || tc.name == "failed probe still records usage" {
+				require.EqualValues(t, 8, *repo.completed.ExecutionInfo.InputTokens)
+				require.EqualValues(t, 2, *repo.completed.ExecutionInfo.OutputTokens)
+			}
 			var stored ScheduledTestStatistics
 			require.NoError(t, json.Unmarshal([]byte(repo.completed.ResponseText), &stored))
 			require.Equal(t, tc.wantProbe, stored.RecoveryProbe.Status, "probe evidence must survive result persistence")

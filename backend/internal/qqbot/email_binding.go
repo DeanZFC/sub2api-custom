@@ -208,7 +208,7 @@ AND NOT EXISTS(SELECT 1 FROM qq_bot_bindings b WHERE b.app_id=r.app_id AND (b.us
 }
 
 func (s *Service) ConfirmEmailBinding(ctx context.Context, token, member string) (string, error) {
-	if !validBindingToken(token) || member == "" {
+	if !validBindingToken(token) || member == "" || len(member) > 128 || strings.ContainsAny(member, " \r\n\t") {
 		return "", ErrEmailBindingInvalid
 	}
 	tx, err := s.db.BeginTx(ctx, nil)

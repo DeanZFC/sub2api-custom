@@ -34,24 +34,28 @@ func channelStatusFixture() *ChannelStatusReport {
 func TestFormatChannelStatus(t *testing.T) {
 	report := channelStatusFixture()
 	chunks := formatChannelStatus(report)
-	require.Equal(t, []string{`【渠道状态】
+	require.Equal(t, []string{`📊 **渠道状态**
+
 统计范围：最近 90 分钟
 数据更新：2026-10-16 14:30（北京时间）
 
-【整体汇总】
+**整体汇总**
+
 成功率：99.68%
 错误率：0.32%
 缓存率：76.25%
 首 Token：1.28 秒（P50）
 
-【各分组】
+**各分组**
 
-1. OpenAI 标准组
+**1. OpenAI 标准组**
+
 成功率：99.68% ｜ 错误率：0.32%
 缓存率：76.25%
 首 Token：1.28 秒（P50）
 
-2. Gemini 分组
+**2. Gemini 分组**
+
 暂无请求数据`}, chunks)
 	require.NotContains(t, chunks[0], "每分钟请求数")
 	require.NotContains(t, chunks[0], "每秒 Token")
@@ -111,7 +115,7 @@ func TestChannelStatusSplitsWithoutLosingOrBreakingGroups(t *testing.T) {
 		require.NotContains(t, chunk, "截断")
 	}
 	for i, group := range report.Groups {
-		block := fmt.Sprintf("%d. %s\n%s", i+1, group.Name, formatChannelStatusMetric(group.Metrics, true, true))
+		block := fmt.Sprintf("**%d. %s**\n\n%s", i+1, group.Name, formatChannelStatusMetric(group.Metrics, true, true))
 		count := 0
 		for _, chunk := range chunks {
 			count += strings.Count(chunk, block)
@@ -177,7 +181,7 @@ func TestChannelStatusCommandMentionModesAndHelp(t *testing.T) {
 	require.False(t, unmentionedGroupCommand(Event{Content: "<@other> /渠道状态"}))
 	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
 	require.NoError(t, s.message(context.Background(), DefaultConfig(), &j, Event{Content: "/帮助"}))
-	require.Contains(t, (*replies)[2].Content, "指令：/渠道状态\n说明：查询整体及各分组的成功率、缓存率和首 Token")
+	require.Contains(t, (*replies)[2].Content, "- **/渠道状态**：查询整体及各分组的成功率、缓存率和首 Token")
 }
 
 func TestChannelStatusCommandFailures(t *testing.T) {

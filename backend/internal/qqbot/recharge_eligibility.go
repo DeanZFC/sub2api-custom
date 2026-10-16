@@ -73,7 +73,8 @@ func (r RechargeRequirement) satisfied(e RechargeEligibility) bool {
 		(r.MinRecharge30d > 0 && e.Recent.GreaterThanOrEqual(decimal.NewFromFloat(r.MinRecharge30d)))
 }
 
-func money(n float64) string { return fmt.Sprintf("$%.2f", n) }
+// Avoid dollar delimiters: QQ clients can parse consecutive amounts as math.
+func money(n float64) string { return fmt.Sprintf("USD %.2f", n) }
 
 func (r RechargeRequirement) describe() string {
 	parts := make([]string, 0, 2)
@@ -93,7 +94,7 @@ func (r RechargeRequirement) describe() string {
 }
 
 func (r RechargeRequirement) failure(activity string, e RechargeEligibility) string {
-	return fmt.Sprintf("暂不满足%s参与条件。\n参与条件：%s。\n当前累计有效充值：$%s；近 %d 天有效充值：$%s。", activity, r.describe(), e.Total.StringFixed(2), r.windowDays(), e.Recent.StringFixed(2))
+	return fmt.Sprintf("**暂不满足%s参与条件。**\n\n参与条件：%s。\n\n- 当前累计有效充值：USD %s\n- 近 %d 天有效充值：USD %s", activity, r.describe(), e.Total.StringFixed(2), r.windowDays(), e.Recent.StringFixed(2))
 }
 
 func (r RechargeRequirement) invite() string {

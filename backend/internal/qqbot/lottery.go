@@ -152,14 +152,14 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 	}
 	if showRules {
 		var b strings.Builder
-		fmt.Fprintf(&b, "活动名称：%s\n抽奖规则：每累计有效充值 $%.2f 赠送 %d 次\n每次消耗：1 次", cfg.Title, cfg.RechargeStep, cfg.ChancesPerStep)
+		fmt.Fprintf(&b, "🎉 **抽奖活动**\n\n活动名称：%s\n\n- 抽奖规则：每累计有效充值 USD %.2f 赠送 %d 次\n- 每次消耗：1 次\n\n**普通奖池**\n", replyPlainLabel(cfg.Title), cfg.RechargeStep, cfg.ChancesPerStep)
 		for _, p := range cfg.Prizes {
-			fmt.Fprintf(&b, "\n%s：$%.2f，概率 %.2f%%", p.Name, p.Amount, float64(p.ProbabilityBPS)/100)
+			fmt.Fprintf(&b, "\n- %s：USD %.2f，概率 %.2f%%", replyPlainLabel(p.Name), p.Amount, float64(p.ProbabilityBPS)/100)
 		}
 		if cfg.GuaranteeEnabled {
-			fmt.Fprintf(&b, "\n保底规则：每个网站账号累计每抽 %d 次，当次改用保底奖池，仍消耗 1 次；包含历史抽奖，普通中奖不重置进度。\n保底奖池：", cfg.GuaranteeEvery)
+			fmt.Fprintf(&b, "\n\n**保底规则**\n\n每个网站账号累计每抽 %d 次，当次改用保底奖池，仍消耗 1 次；包含历史抽奖，普通中奖不重置进度。\n\n**保底奖池**\n", cfg.GuaranteeEvery)
 			for _, p := range cfg.GuaranteePrizes {
-				fmt.Fprintf(&b, "\n%s：$%.2f，概率 %.2f%%", p.Name, p.Amount, float64(p.ProbabilityBPS)/100)
+				fmt.Fprintf(&b, "\n- %s：USD %.2f，概率 %.2f%%", replyPlainLabel(p.Name), p.Amount, float64(p.ProbabilityBPS)/100)
 			}
 		}
 		return b.String(), tx.Commit()
@@ -168,9 +168,9 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 	if err != nil {
 		return "", err
 	}
-	result := fmt.Sprintf("剩余抽奖次数：%d 次\n下次赠送还需充值：$%.2f", state.Remaining, state.NextRecharge)
+	result := fmt.Sprintf("🎟 **抽奖次数**\n\n- 剩余抽奖次数：%d 次\n- 下次赠送还需充值：USD %.2f", state.Remaining, state.NextRecharge)
 	if state.DrawsUntilGuarantee > 0 {
-		result += fmt.Sprintf("\n距离下次保底：%d 次", state.DrawsUntilGuarantee)
+		result += fmt.Sprintf("\n- 距离下次保底：%d 次", state.DrawsUntilGuarantee)
 	}
 	return result, tx.Commit()
 }
@@ -242,7 +242,7 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 		return "", err
 	}
 	if state.Remaining < 1 {
-		return fmt.Sprintf("抽奖次数不足。\n下次赠送还需充值：$%.2f", state.NextRecharge), nil
+		return fmt.Sprintf("**抽奖次数不足。**\n\n下次赠送还需充值：USD %.2f", state.NextRecharge), nil
 	}
 	n, err := rand.Int(rand.Reader, big.NewInt(10000))
 	if err != nil {
@@ -254,12 +254,12 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 		pool = cfg.GuaranteePrizes
 	}
 	prize := lotteryPrizeAt(pool, n.Int64())
-	result = fmt.Sprintf("抽奖结果：%s\n奖励额度：$%.2f\n剩余抽奖次数：%d 次", prize.Name, prize.Amount, state.Remaining-1)
+	result = fmt.Sprintf("🎉 **抽奖结果**\n\n- 抽奖结果：%s\n- 奖励额度：USD %.2f\n- 剩余抽奖次数：%d 次", replyPlainLabel(prize.Name), prize.Amount, state.Remaining-1)
 	if guaranteed {
-		result = "本次触发保底抽奖！\n" + result
+		result += "\n\n**本次触发保底抽奖！**"
 	}
 	if cfg.GuaranteeEnabled {
-		result += fmt.Sprintf("\n距离下次保底：%d 次", cfg.drawsUntilGuarantee(state.Used+1))
+		result += fmt.Sprintf("\n\n距离下次保底：%d 次", cfg.drawsUntilGuarantee(state.Used+1))
 	}
 	// Keep the draw's classification alongside its immutable configuration snapshot.
 	// Older records without this field remain ordinary draws, without a migration.

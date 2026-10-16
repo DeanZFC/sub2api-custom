@@ -253,7 +253,7 @@ func (s *ScheduledTestRunnerService) runDuePlansAt(ctx context.Context, now time
 		}
 		go func() {
 			defer finish()
-			s.executePlan(runCtx, plan)
+			s.executePlan(context.WithValue(runCtx, scheduledTestAutomaticRunKey{}, true), plan)
 		}()
 	}
 }
@@ -636,10 +636,18 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 		}
 		result, err := s.accountTestSvc.RunTestBackgroundWithPromptAndReasoning(executionCtx, accountID, plan.ModelID, prompt, plan.ReasoningEffort)
 		if deadlineErr := executionCtx.Err(); deadlineErr != nil {
-			return scheduledTestFailedAttempt(attemptStarted, deadlineErr)
+			failed := scheduledTestFailedAttempt(attemptStarted, deadlineErr)
+			if result != nil {
+				failed.ExecutionInfo = result.ExecutionInfo
+			}
+			return failed
 		}
 		if err != nil {
-			return scheduledTestFailedAttempt(attemptStarted, err)
+			failed := scheduledTestFailedAttempt(attemptStarted, err)
+			if result != nil {
+				failed.ExecutionInfo = result.ExecutionInfo
+			}
+			return failed
 		}
 		if result == nil {
 			return scheduledTestFailedAttempt(attemptStarted, fmt.Errorf("account test returned no result"))
@@ -652,6 +660,7 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	result.AccountID = &accountID
 	result.PlanID = plan.ID
 	if pending != nil {
+		result.ExecutionInfo = mergeScheduledTestExecution(pending.ExecutionInfo, result.ExecutionInfo)
 		result.RunID = pending.RunID
 		result.ID = pending.ID
 		result.StartedAt = pending.StartedAt
@@ -1058,7 +1067,8 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	}
 	started := time.Now()
 	pending := &ScheduledTestResult{
-		ID: previous.ID, RunID: previous.RunID, PlanID: plan.ID, CreatedAt: previous.CreatedAt,
+		ExecutionInfo: previous.ExecutionInfo,
+		ID:            previous.ID, RunID: previous.RunID, PlanID: plan.ID, CreatedAt: previous.CreatedAt,
 		TestDefinitionID: previous.TestDefinitionID, TargetMode: plan.TargetMode,
 		Status: "running", OutputKind: outputKind, AccountID: &accountID,
 		ModelID: plan.ModelID, ReasoningEffort: plan.ReasoningEffort, GroupID: plan.GroupID,

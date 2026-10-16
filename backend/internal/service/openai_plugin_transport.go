@@ -1,6 +1,9 @@
 package service
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+)
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 	s.pluginManager = manager
@@ -30,13 +33,14 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	useTLSFallback bool,
 ) (*http.Response, error) {
 	if s.pluginManager != nil {
+		started := time.Now().UTC()
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
-			return response, err
+			return observeAccountTestResponse(request.Context(), started, response, err)
 		}
 	}
 	if useTLSFallback {
-		return s.httpUpstream.DoWithTLS(
+		return s.doAccountTestHTTPWithTLS(
 			request,
 			proxyURL,
 			account.ID,
@@ -45,7 +49,7 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		)
 	}
 	if profile := resolveCodexMacTLSProfile(account); profile != nil {
-		return s.httpUpstream.DoWithTLS(request, proxyURL, account.ID, account.Concurrency, profile)
+		return s.doAccountTestHTTPWithTLS(request, proxyURL, account.ID, account.Concurrency, profile)
 	}
-	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
+	return s.doAccountTestHTTP(request, proxyURL, account.ID, account.Concurrency)
 }

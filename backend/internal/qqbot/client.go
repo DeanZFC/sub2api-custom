@@ -456,6 +456,16 @@ func (s *Service) qqRequestMethod(ctx context.Context, c Config, method, path st
 	return data, nil
 }
 func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []byte, seq int) error {
+	if len(img) == 0 {
+		text = normalizeReplyLineBreaks(text)
+	}
+	return s.sendFormatted(ctx, c, j, text, img, seq)
+}
+
+// sendFormatted also accepts chunks normalized before splitting. Normalizing
+// those again would change HTML code in a chunk whose opening fence was in the
+// previous message.
+func (s *Service) sendFormatted(ctx context.Context, c Config, j Job, text string, img []byte, seq int) error {
 	// Only passive replies: no accidental proactive notification or expired retry.
 	if j.MessageID == "" || time.Since(j.CreatedAt) > 280*time.Second {
 		return errors.New("回复窗口已过期")
@@ -479,20 +489,24 @@ func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []
 		}
 		body["msg_type"] = 7
 		body["media"] = map[string]string{"file_info": v.FileInfo}
-	} else if j.EventType == groupMessageCreate && j.MemberID != "" {
-		// Send explicit mentions through Markdown: group clients can display the
-		// same tag literally in plain-text messages (msg_type=0).
-		// https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html
-		text = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n" + strings.TrimLeft(text, "\n")
-		body["msg_type"] = 2
-		// QQ requires content/ark to be absent when markdown is supplied.
-		markdown := limitText(text, 1800)
-		body["markdown"] = map[string]string{"content": markdown}
-		deliveredText = strings.TrimPrefix(markdown, `<qqbot-at-user id="`+html.EscapeString(j.MemberID)+`" />`+"\n")
 	} else {
-		// QQ adds the sender mention for GROUP_AT_MESSAGE_CREATE replies itself.
-		body["msg_type"] = 0
-		body["content"] = limitText(text, 1800)
+		// All text replies use QQ's custom Markdown. A mention tag in plain
+		// content is displayed literally; content/ark must be absent with markdown.
+		prefix := ""
+		if j.EventType == groupMessageCreate && j.MemberID != "" {
+			prefix = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n"
+			text = strings.TrimLeft(text, "\n")
+		}
+		// GROUP_AT_MESSAGE_CREATE already has QQ's automatic mention.
+		// Store exactly the delivered body, without our mention prefix.
+		budget := 1800 - len([]rune(prefix))
+		deliveredText = text
+		if len([]rune(text)) > budget {
+			// limitText appends an ellipsis, which also counts toward QQ's limit.
+			deliveredText = limitText(text, budget-1)
+		}
+		body["msg_type"] = 2
+		body["markdown"] = map[string]string{"content": prefix + deliveredText}
 	}
 	raw, err := s.qqRequest(ctx, c, base+"/messages", body)
 	if err != nil {

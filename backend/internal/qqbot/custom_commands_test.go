@@ -80,6 +80,7 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 		{Command: "/a", Reply: "第一行\n第二行", Enabled: true},
 		{Command: "/停用", Reply: "不会出现", Enabled: false},
 		{Command: "/长回复", Reply: strings.Repeat("字", 2000), Enabled: true},
+		{Command: "/代码", Reply: "```html\n" + strings.Repeat("x", 1600) + "<br />\n```\n正文<br>下一行", Enabled: true},
 	}
 	for _, tt := range []struct {
 		name, eventType, content string
@@ -126,11 +127,18 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 	require.Equal(t, c.CustomCommands[2].Reply, strings.Join(replies[before:], ""))
 	require.Len(t, replies[before:], 2)
 
+	// HTML examples must survive even when their opening code fence appears
+	// in a previous QQ message. Only the final prose break is normalized.
+	before = len(replies)
+	j.MessageID = "code"
+	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/代码"}))
+	require.Equal(t, strings.ReplaceAll(c.CustomCommands[3].Reply, "正文<br>下一行", "正文\n下一行"), strings.Join(replies[before:], ""))
+
 	j.MessageID = "help"
 	before = len(replies)
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := strings.Join(replies[before:], "")
-	require.Contains(t, help, "指令：/a\n说明：自定义回复")
-	require.Contains(t, help, "指令：/长回复\n说明：自定义回复")
+	require.Contains(t, help, "- **/a**：自定义回复")
+	require.Contains(t, help, "- **/长回复**：自定义回复")
 	require.NotContains(t, help, "/停用")
 }

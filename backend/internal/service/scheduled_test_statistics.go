@@ -171,7 +171,8 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 	sem := s.statisticsSem
 	s.workerMu.Unlock()
 	result := s.runWithAutomaticRetries(ctx, plan, accountID, func(attemptCtx context.Context) *ScheduledTestResult {
-		attempt := &ScheduledTestResult{Status: "success"}
+		attempt := &ScheduledTestResult{Status: "success", ExecutionInfo: newScheduledTestExecutionInfo()}
+		attempt.ExecutionInfo.summarize()
 		repo, err := s.statisticsRepository()
 		if err == nil {
 			select {
@@ -247,6 +248,7 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 	result.AccountID, result.ModelID, result.GroupID = accountID, plan.ModelID, plan.GroupID
 	result.StartedAt = started
 	if pending != nil {
+		result.ExecutionInfo = mergeScheduledTestExecution(pending.ExecutionInfo, result.ExecutionInfo)
 		result.RunID = pending.RunID
 		result.ID, result.StartedAt, result.CreatedAt = pending.ID, pending.StartedAt, pending.CreatedAt
 	}

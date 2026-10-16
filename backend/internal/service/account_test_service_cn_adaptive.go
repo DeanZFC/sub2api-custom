@@ -218,7 +218,7 @@ func (s *AccountTestService) doCNProviderAdaptiveRequest(req *http.Request, acco
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	return s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	return s.doAccountTestHTTPWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 }
 
 // testCNProviderAnthropicConnection verifies the native Anthropic endpoint of a

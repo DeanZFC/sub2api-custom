@@ -45,7 +45,7 @@ func TestQQBotInviteActivityCountsJoinsAndRewardLimit(t *testing.T) {
 	job := Job{AppID: "app", GroupID: "group", MemberID: "inviter"}
 	info, err := s.inviteInfo(ctx, c, job)
 	require.NoError(t, err)
-	require.Contains(t, info, "单人奖励：$1.25")
+	require.Contains(t, info, "单人奖励：USD 1.25")
 	require.Contains(t, info, "今日邀请入群：2 人")
 	require.Contains(t, info, "今日已奖励：0 人")
 	require.Contains(t, info, "每日奖励上限：2 人")

@@ -64,7 +64,7 @@ func TestScheduledTestTimeoutSkipsLaterDefinitions(t *testing.T) {
 		if _, bounded := ctx.Deadline(); !bounded {
 			return nil, fmt.Errorf("account execution has no deadline")
 		}
-		if calls.Add(1) <= 4 {
+		if calls.Add(1) <= 2 {
 			<-ctx.Done() // Every attempt of the first type consumes its execution budget.
 			return nil, ctx.Err()
 		}
@@ -82,7 +82,7 @@ func TestScheduledTestTimeoutSkipsLaterDefinitions(t *testing.T) {
 	require.Equal(t, int64(2), *second.TestDefinitionID)
 	require.Equal(t, "failed", second.Status)
 	require.Contains(t, second.ErrorMessage, "前一项检测未满足条件")
-	require.Equal(t, int32(4), calls.Load(), "four attempts for the first type; the second type must not contact upstream")
+	require.Equal(t, int32(2), calls.Load(), "one timeout retry for the first type; the second type must not contact upstream")
 }
 
 func TestScheduledTestWorkerQueueDoesNotConsumeExecutionTimeout(t *testing.T) {

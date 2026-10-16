@@ -470,9 +470,9 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	}
 	s.invalidate(ctx, userID)
 	if kind == "invite" {
-		return fmt.Sprintf("邀请奖励已发放\n邀请人到账额度：$%.2f", amount), nil
+		return fmt.Sprintf("🎁 **邀请奖励已发放**\n\n邀请人到账额度：USD %.2f", amount), nil
 	}
-	return fmt.Sprintf("签到成功\n到账额度：$%.2f", amount), nil
+	return fmt.Sprintf("✅ **签到成功**\n\n到账额度：USD %.2f", amount), nil
 }
 
 func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {

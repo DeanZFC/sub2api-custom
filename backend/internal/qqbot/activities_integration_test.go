@@ -92,7 +92,7 @@ func TestLotteryConcurrentSpendingReplayAndRebinding(t *testing.T) {
 			if err != nil {
 				failed.Add(1)
 			}
-			if strings.Contains(text, "奖励额度：$1.") {
+			if strings.Contains(text, "奖励额度：USD 1.") {
 				won.Add(1)
 			}
 		}(i)
@@ -185,7 +185,7 @@ func TestLotteryRefundDeficitAndRuleChangesNeverResetUsage(t *testing.T) {
 	require.NoError(t, err)
 	text, err = s.drawLottery(ctx, c, Job{ID: "covered", GroupID: "group", MemberID: "member"})
 	require.NoError(t, err)
-	require.Contains(t, text, "奖励额度：$1.")
+	require.Contains(t, text, "奖励额度：USD 1.")
 	lottery.RechargeStep = 5
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
 	state, err = s.LotteryState(ctx, uid)
@@ -216,7 +216,7 @@ func TestLotteryAtomicRollbackAndZeroPrize(t *testing.T) {
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
 	text, err := s.drawLottery(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "奖励额度：$0.00")
+	require.Contains(t, text, "奖励额度：USD 0.00")
 	state, err = s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Used)
@@ -231,7 +231,7 @@ func TestLotteryRequiresBindingAndActiveGroup(t *testing.T) {
 	for _, j := range []Job{{ID: "unbound", GroupID: "group", MemberID: "stranger"}, {ID: "group", GroupID: "forbidden", MemberID: "member"}} {
 		text, err := s.drawLottery(ctx, c, j)
 		require.NoError(t, err)
-		require.NotContains(t, text, "奖励额度：$1.")
+		require.NotContains(t, text, "奖励额度：USD 1.")
 	}
 	lottery.Enabled = false
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
@@ -313,7 +313,7 @@ func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 	p := enqueue(groupMessageCreate, "draw", "/抽奖")
 	s.runOne(ctx)
 	require.NotEmpty(t, replies)
-	require.Contains(t, replies[0], "奖励额度：$1.")
+	require.Contains(t, replies[0], "奖励额度：USD 1.")
 	require.NoError(t, s.Enqueue(ctx, c, p))
 	duplicate := p
 	duplicate.Type, duplicate.ID = groupAtMessageCreate, "draw-mention-delivery"
@@ -326,12 +326,12 @@ func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 	s.runOne(ctx)
 	chancesReply := replies[len(replies)-1]
 	require.Contains(t, chancesReply, "剩余抽奖次数：1 次")
-	require.Contains(t, chancesReply, "下次赠送还需充值：$10.00")
+	require.Contains(t, chancesReply, "下次赠送还需充值：USD 10.00")
 	require.NotContains(t, chancesReply, "概率")
 	enqueue(groupAtMessageCreate, "rules", "/抽奖活动")
 	s.runOne(ctx)
 	rulesReply := replies[len(replies)-1]
-	require.Contains(t, rulesReply, "每累计有效充值 $10.00 赠送 1 次")
+	require.Contains(t, rulesReply, "每累计有效充值 USD 10.00 赠送 1 次")
 	require.Contains(t, rulesReply, "概率 100.00%")
 	require.NotContains(t, rulesReply, "剩余抽奖次数")
 	// Durable message deduplication also survives pruning the job tombstone.

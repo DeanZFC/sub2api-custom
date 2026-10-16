@@ -100,11 +100,7 @@ func testEmailBindingWorkerAndConfirmation(t *testing.T, eventType string) {
 		}
 		require.Equal(t, "/v2/groups/group/messages", r.URL.Path)
 		data := readQQTestReply(t, r)
-		wantType := 0
-		if eventType == groupMessageCreate {
-			wantType = 2
-		}
-		require.Equal(t, wantType, data.MsgType)
+		require.Equal(t, 2, data.MsgType)
 		require.Equal(t, "email-bind-message", data.MsgID)
 		require.Equal(t, 1, data.Sequence)
 		reply = data.text()

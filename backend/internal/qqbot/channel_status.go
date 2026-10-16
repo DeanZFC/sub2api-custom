@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -102,24 +101,23 @@ func formatChannelStatus(report *ChannelStatusReport) []string {
 	if !report.UpdatedAt.IsZero() {
 		updated = report.UpdatedAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02 15:04") + "（北京时间）"
 	}
-	header := "【渠道状态】\n统计范围：最近 90 分钟\n数据更新：" + updated
+	header := "📊 **渠道状态**\n\n统计范围：最近 90 分钟\n数据更新：" + updated
 	if report.Backfilling {
 		header += "\n提示：正在补齐历史监控数据"
 	} else if report.PartialCoverage {
 		header += "\n提示：当前仅覆盖部分统计时段"
 	}
-	text := header + "\n\n【整体汇总】\n" + formatChannelStatusMetric(report.Overall, report.ShowThroughput, false) + "\n\n【各分组】"
+	text := header + "\n\n**整体汇总**\n\n" + formatChannelStatusMetric(report.Overall, report.ShowThroughput, false) + "\n\n**各分组**"
 	if len(report.Groups) == 0 {
 		return []string{text + "\n暂无可展示的分组"}
 	}
 	var chunks []string
 	for i, group := range report.Groups {
-		// Group names are operator-controlled, but must remain a single text line.
-		name := strings.Join(strings.Fields(group.Name), " ")
-		block := fmt.Sprintf("%d. %s\n%s", i+1, name, formatChannelStatusMetric(group.Metrics, report.ShowThroughput, true))
+		// Names stay on one line and cannot introduce Markdown markup.
+		block := fmt.Sprintf("**%d. %s**\n\n%s", i+1, replyPlainLabel(group.Name), formatChannelStatusMetric(group.Metrics, report.ShowThroughput, true))
 		if utf8.RuneCountInString(text)+utf8.RuneCountInString(block)+2 > 1400 {
 			chunks = append(chunks, text)
-			text = header + "\n\n【各分组（续）】"
+			text = header + "\n\n**各分组（续）**"
 		}
 		text += "\n\n" + block
 	}

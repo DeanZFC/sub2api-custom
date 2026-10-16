@@ -92,6 +92,18 @@ func validateConfig(c Config) error {
 	if err := validateRechargeRequirement(c.inviteRechargeRequirement()); err != nil {
 		return err
 	}
+	if math.IsNaN(c.TransferFeePercent) || math.IsInf(c.TransferFeePercent, 0) || c.TransferFeePercent < 0 || c.TransferFeePercent > 100 {
+		return errors.New("手续费比例须在 0 到 100 之间")
+	}
+	if math.IsNaN(c.TransferMinAmount) || math.IsInf(c.TransferMinAmount, 0) || c.TransferMinAmount < 0 || c.TransferMinAmount > 1000000 {
+		return errors.New("最小转账金额须在 0 到 1000000 之间")
+	}
+	if math.IsNaN(c.TransferMaxAmount) || math.IsInf(c.TransferMaxAmount, 0) || c.TransferMaxAmount < 0 {
+		return errors.New("最大转账金额不能为负数")
+	}
+	if c.TransferMaxAmount > 0 && c.TransferMaxAmount < c.TransferMinAmount {
+		return errors.New("最大转账金额不能小于最小转账金额")
+	}
 	if len(c.SystemPrompt) > 8000 || len(c.ChatModel) > 200 || len(c.ImageModel) > 200 || len(c.AllowedGroups) > 100 {
 		return errors.New("配置内容过长")
 	}

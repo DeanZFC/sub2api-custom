@@ -127,6 +127,11 @@ func registerRoutes(
 		binding.Use(gin.HandlerFunc(auditLog))
 		binding.POST("/preview", h.QQBot.PreviewEmailBinding)
 		binding.POST("/confirm", h.QQBot.ConfirmEmailBinding)
+		transfer := v1.Group("/qqbot/transfer")
+		transfer.Use(limits.LimitWithOptions("qqbot-transfer", 10, time.Minute, middleware.RateLimitOptions{FailureMode: middleware.RateLimitFailClose}))
+		transfer.Use(gin.HandlerFunc(auditLog))
+		transfer.POST("/preview", h.QQBot.PreviewTransfer)
+		transfer.POST("/confirm", h.QQBot.ConfirmTransfer)
 	}
 
 	// 面板 API 限流器：认证接口按用户 ID、公开接口按安全客户端 IP，

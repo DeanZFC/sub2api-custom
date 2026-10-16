@@ -211,7 +211,7 @@ func TestScheduledTestSnapshotStopsOnlyTheFailedAccount(t *testing.T) {
 	require.Contains(t, finals[[2]int64{12, 2}].ErrorMessage, "前一项检测未满足条件")
 	require.Equal(t, "success", finals[[2]int64{13, 1}].Status)
 	require.Equal(t, "success", finals[[2]int64{13, 2}].Status)
-	require.EqualValues(t, 4, failedCalls.Load(), "the first check finishes its normal retry budget")
+	require.EqualValues(t, 1, failedCalls.Load(), "a missing account must not be retried")
 	require.EqualValues(t, 2, passingCalls.Load(), "another account still runs both checks")
 }
 

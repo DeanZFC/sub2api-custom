@@ -36,14 +36,15 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
-	RunID            string `json:"-"`
-	ID               int64  `json:"id"`
-	PlanID           int64  `json:"plan_id"`
-	TestDefinitionID *int64 `json:"test_definition_id,omitempty"`
-	PlanName         string `json:"plan_name"`
-	TestName         string `json:"test_name"`
-	TestOrder        int    `json:"test_order"`
-	GroupName        string `json:"group_name"`
+	ExecutionInfo    *ScheduledTestExecutionInfo `json:"execution_info,omitempty"`
+	RunID            string                      `json:"-"`
+	ID               int64                       `json:"id"`
+	PlanID           int64                       `json:"plan_id"`
+	TestDefinitionID *int64                      `json:"test_definition_id,omitempty"`
+	PlanName         string                      `json:"plan_name"`
+	TestName         string                      `json:"test_name"`
+	TestOrder        int                         `json:"test_order"`
+	GroupName        string                      `json:"group_name"`
 	// PlanOrder belongs to the rule that produced the result. GroupOrder is
 	// resolved from the displayed group's current rules, so moving an account
 	// does not carry its source rule's display position into the new group.

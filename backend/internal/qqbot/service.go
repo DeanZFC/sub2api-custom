@@ -91,6 +91,7 @@ func (s *Service) maintenance(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_image=NULL,result_text='',payload='{}' WHERE created_at<NOW()-INTERVAL '24 hours' AND (result_image IS NOT NULL OR result_text<>'' OR payload<>'{}'::jsonb)`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_bind_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_bind_requests WHERE expires_at<NOW()`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_transfer_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_limits WHERE day<CURRENT_DATE-2`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_conversations WHERE updated_at<NOW()-INTERVAL '1 day'`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_message_references WHERE created_at<NOW()-INTERVAL '24 hours'`)
@@ -370,46 +371,31 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	seq := 1
 	switch cmd {
 	case "帮助", "help":
-		// Keep QQ's automatic reply mention above the command list.
-		text = `
-指令：/帮助
-说明：查看帮助
-
-指令：/签到
-说明：每日签到
-
-指令：/我的额度
-说明：查询账户额度
-
-指令：/我的奖励
-说明：查询各项累计奖励
-
-指令：/渠道状态
-说明：查询整体及各分组的成功率、缓存率和首 Token
-
-指令：/绑定 邮箱或绑定码
-说明：绑定账号
-
-指令：/邀请奖励
-说明：查看邀请奖励规则、条件和今日进度
-
-指令：/我的邀请
-说明：查询邀请状态和人数
-
-指令：/抽奖
-说明：参与抽奖
-
-指令：/抽奖次数
-说明：查询剩余次数
-
-指令：/抽奖活动
-说明：查看活动规则和奖品
-
-指令：/生图 图片描述
-说明：生成图片`
+		// Keep QQ's automatic reply mention above a compact Markdown command list.
+		text = "📖 **指令帮助**\n\n"
+		for i, item := range []struct{ command, description string }{
+			{"/帮助", "查看帮助"},
+			{"/签到", "每日签到"},
+			{"/我的额度", "查询账户额度"},
+			{"/我的奖励", "查询各项累计奖励"},
+			{"/渠道状态", "查询整体及各分组的成功率、缓存率和首 Token"},
+			{"/绑定 邮箱或绑定码", "绑定账号"},
+			{"/邀请奖励", "查看邀请奖励规则、条件和今日进度"},
+			{"/我的邀请", "查询邀请状态和人数"},
+			{"/抽奖", "参与抽奖"},
+			{"/抽奖次数", "查询剩余次数"},
+			{"/抽奖活动", "查看活动规则和奖品"},
+			{"/生图 图片描述", "生成图片"},
+			{"/转账 金额 邮箱", "向其他账号转账余额"},
+		} {
+			if i > 0 {
+				text += "\n"
+			}
+			text += "- **" + item.command + "**：" + item.description
+		}
 		for _, custom := range c.CustomCommands {
 			if custom.Enabled {
-				text += "\n\n指令：" + custom.Command + "\n说明：自定义回复"
+				text += "\n- **" + replyPlainLabel(custom.Command) + "**：自定义回复"
 			}
 		}
 	case "渠道状态":
@@ -475,6 +461,23 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if err != nil {
 			text = "奖励信息查询失败，请稍后重试。"
 		}
+	case "转账":
+		if arg == "" {
+			text = transferUsage
+			if c.TransferFeePercent > 0 {
+				text += fmt.Sprintf("\n\n手续费：%.2f%%", c.TransferFeePercent)
+			}
+			break
+		}
+		var pending *preparedTransferEmail
+		text, pending = s.prepareTransfer(ctx, c, e, arg)
+		if pending != nil {
+			if err := s.send(ctx, c, *j, text, nil, seq); err != nil {
+				return err
+			}
+			s.deliverTransferEmail(ctx, pending)
+			return nil
+		}
 	case "我的额度":
 		var balance float64
 		err := s.db.QueryRowContext(ctx, `SELECT u.balance FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.deleted_at IS NULL AND u.status='active'`, c.AppID, j.MemberID).Scan(&balance)
@@ -483,7 +486,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		} else if err != nil {
 			text = "账户信息查询失败，请稍后重试。"
 		} else {
-			text = fmt.Sprintf("账户额度：$%.2f", balance)
+			text = fmt.Sprintf("💳 **账户额度**\n\n**USD %.2f**", balance)
 		}
 	default:
 		if reply, ok := customCommandReply(c.CustomCommands, cmd, arg); ok {
@@ -571,9 +574,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		}
 		return s.send(ctx, c, *j, text, img, seq+1)
 	}
-	chunks := splitReply(text, 5-seq+1)
+	chunks := splitReply(normalizeReplyLineBreaks(text), 5-seq+1)
 	for _, chunk := range chunks {
-		if err := s.send(ctx, c, *j, chunk, nil, seq); err != nil {
+		if err := s.sendFormatted(ctx, c, *j, chunk, nil, seq); err != nil {
 			return err
 		}
 		seq++
@@ -619,24 +622,4 @@ func (s *Service) saveHistory(ctx context.Context, c Config, j Job, messages []M
 	}
 	raw, _ := json.Marshal(kept)
 	_, _ = s.db.ExecContext(ctx, `INSERT INTO qq_bot_conversations(app_id,group_id,member_id,messages) VALUES($1,$2,$3,$4) ON CONFLICT(app_id,group_id,member_id) DO UPDATE SET messages=EXCLUDED.messages,updated_at=NOW()`, c.AppID, j.GroupID, j.MemberID, string(raw))
-}
-
-// QQ allows five passive messages per incoming message. Split the reply within
-// the remaining slots, accounting for any messages already sent.
-func splitReply(text string, maxChunks int) []string {
-	r := []rune(text)
-	const width = 1500
-	if len(r) > width*maxChunks {
-		r = append(r[:width*maxChunks-50], []rune("\n（内容过长，已截断。）")...)
-	}
-	var chunks []string
-	for len(r) > 0 {
-		n := min(len(r), width)
-		chunks = append(chunks, string(r[:n]))
-		r = r[n:]
-	}
-	if len(chunks) == 0 {
-		return []string{"暂无内容。"}
-	}
-	return chunks
 }

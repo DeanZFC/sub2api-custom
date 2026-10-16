@@ -143,7 +143,7 @@ func TestImagesGenerateThenReuseSavedBytesForDelivery(t *testing.T) {
 	require.Error(t, s.send(context.Background(), c, j, "", img, 4))
 	require.Equal(t, 2, uploads)
 }
-func TestGroupReplySendsExplicitMentionAsMarkdown(t *testing.T) {
+func TestGroupTextRepliesUseMarkdownWithConsistentMentions(t *testing.T) {
 	var reply qqTestReply
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -170,13 +170,16 @@ func TestGroupReplySendsExplicitMentionAsMarkdown(t *testing.T) {
 		name, eventType, memberID, text, want string
 		wantType                              int
 	}{
-		{"command", groupMessageCreate, memberID, "回复正文", mention + "\n回复正文", 2},
+		{"unmentioned group message", groupMessageCreate, memberID, "回复正文", mention + "\n回复正文", 2},
 		{"email binding acknowledgement", groupMessageCreate, memberID, emailBindingAccepted, mention + "\n" + emailBindingAccepted, 2},
 		{"help newline", groupMessageCreate, memberID, "\n指令：/帮助\n说明：查看帮助\n\n指令：/签到", mention + "\n指令：/帮助\n说明：查看帮助\n\n指令：/签到", 2},
-		{"QQ automatic mention", groupAtMessageCreate, memberID, "回复正文", "回复正文", 0},
-		{"automatic mention help", groupAtMessageCreate, memberID, "\n指令：/帮助", "\n指令：/帮助", 0},
-		{"missing sender", groupMessageCreate, "", "回复正文", "回复正文", 0},
+		{"QQ automatic mention", groupAtMessageCreate, memberID, "回复正文", "回复正文", 2},
+		{"automatic mention help", groupAtMessageCreate, memberID, "\n指令：/帮助", "\n指令：/帮助", 2},
+		{"missing sender", groupMessageCreate, "", "回复正文", "回复正文", 2},
 		{"escaped sender", groupMessageCreate, `member"<&`, "回复正文", "<qqbot-at-user id=\"member&#34;&lt;&amp;\" />\n回复正文", 2},
+		{"HTML break normalized", groupAtMessageCreate, memberID, "奖励：$19.00<br />\n下一项", "奖励：$19.00\n下一项", 2},
+		{"long automatic mention", groupAtMessageCreate, memberID, strings.Repeat("中", 1900), strings.Repeat("中", 1799) + "…", 2},
+		{"long explicit mention", groupMessageCreate, memberID, strings.Repeat("中", 1900), mention + "\n" + strings.Repeat("中", 1799-len([]rune(mention+"\n"))) + "…", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			j := Job{EventType: tc.eventType, GroupID: "group", MemberID: tc.memberID, MessageID: "incoming", CreatedAt: time.Now()}
@@ -284,11 +287,8 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 		case "/token":
 			_, _ = w.Write([]byte(`{"access_token":"test-only","expires_in":7200}`))
 		case "/v2/groups/group/messages":
-			var body struct {
-				Content string `json:"content"`
-			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			replies = append(replies, body.Content)
+			body := readQQTestReply(t, r)
+			replies = append(replies, body.text())
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
 			t.Errorf("unsupported command called unexpected endpoint: %s", r.URL.Path)
@@ -312,8 +312,8 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := replies[len(replies)-1]
-	require.Contains(t, help, "指令：/我的邀请\n说明：查询邀请状态和人数")
-	require.Contains(t, help, "指令：/邀请奖励\n说明：查看邀请奖励规则、条件和今日进度")
+	require.Contains(t, help, "- **/我的邀请**：查询邀请状态和人数")
+	require.Contains(t, help, "- **/邀请奖励**：查看邀请奖励规则、条件和今日进度")
 	for _, removed := range []string{"/查看结果", "/新对话", "/清空"} {
 		require.NotContains(t, help, removed)
 	}

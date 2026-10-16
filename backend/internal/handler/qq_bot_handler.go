@@ -65,6 +65,9 @@ func (h *QQBotHandler) Webhook(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"op": 12})
 }
 func (h *QQBotHandler) GetConfig(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
 	cfg, err := h.bot.Config(c.Request.Context())
 	if err != nil {
 		response.InternalError(c, err.Error())
@@ -73,6 +76,9 @@ func (h *QQBotHandler) GetConfig(c *gin.Context) {
 	response.Success(c, cfg.Public())
 }
 func (h *QQBotHandler) SaveConfig(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<10)
 	var cfg qqbot.Config
 	if c.ShouldBindJSON(&cfg) != nil {
@@ -87,6 +93,9 @@ func (h *QQBotHandler) SaveConfig(c *gin.Context) {
 	response.Success(c, saved)
 }
 func (h *QQBotHandler) Runtime(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
 	cfg, err := h.bot.Config(c.Request.Context())
 	if err != nil {
 		response.InternalError(c, err.Error())
@@ -97,6 +106,7 @@ func (h *QQBotHandler) Runtime(c *gin.Context) {
 		response.InternalError(c, "读取机器人运行记录失败")
 		return
 	}
+	c.Header("Cache-Control", "no-store")
 	response.Success(c, r)
 }
 
@@ -177,6 +187,9 @@ func (h *QQBotHandler) Unbind(c *gin.Context) {
 	response.Success(c, gin.H{"unbound": true})
 }
 func (h *QQBotHandler) Probe(c *gin.Context) {
+	if !requireQQBotAdmin(c) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 220*time.Second)
 	defer cancel()
 	result, err := h.bot.Probe(ctx, c.Param("kind"))
@@ -272,4 +285,41 @@ func (h *QQBotHandler) emailBinding(c *gin.Context, confirm bool) {
 	}
 	_ = h.bot.SettleInvites(c.Request.Context(), member)
 	response.Success(c, gin.H{"bound": true})
+}
+
+func (h *QQBotHandler) PreviewTransfer(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
+	var req struct {
+		Token string `json:"token"`
+	}
+	if c.ShouldBindJSON(&req) != nil || req.Token == "" {
+		response.BadRequest(c, "转账令牌格式不正确")
+		return
+	}
+	p, err := h.bot.PreviewTransfer(c.Request.Context(), req.Token)
+	if err != nil {
+		response.BadRequest(c, "转账链接无效、已过期或转账功能未启用")
+		return
+	}
+	response.Success(c, p)
+}
+
+func (h *QQBotHandler) ConfirmTransfer(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
+	var req struct {
+		Token string `json:"token"`
+	}
+	if c.ShouldBindJSON(&req) != nil || req.Token == "" {
+		response.BadRequest(c, "转账令牌格式不正确")
+		return
+	}
+	if err := h.bot.ConfirmTransfer(c.Request.Context(), req.Token); err != nil {
+		if errors.Is(err, qqbot.ErrTransferInvalid) {
+			response.BadRequest(c, "转账链接无效、已过期或已使用，请重新发起转账")
+			return
+		}
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"transferred": true})
 }

@@ -88,6 +88,9 @@ func (s *ScheduledTestRunnerService) probeStatisticsRecovery(ctx context.Context
 	// Use the existing small account connectivity test with the plan's model.
 	// It uses the account's provider, model mapping, credentials and proxy route.
 	response, err := s.accountTestSvc.RunTestBackground(probeCtx, *result.AccountID, plan.ModelID)
+	if response != nil {
+		result.ExecutionInfo = mergeScheduledTestExecution(result.ExecutionInfo, response.ExecutionInfo)
+	}
 	probe.FinishedAt = time.Now().UTC()
 	probe.LatencyMs = probe.FinishedAt.Sub(probe.StartedAt).Milliseconds()
 	if ctx.Err() != nil {

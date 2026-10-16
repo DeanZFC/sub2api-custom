@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,29 +46,25 @@ func requireAutomaticRetrySingleRow(t *testing.T, results *retryResultRepoStub, 
 	require.Empty(t, results.updated, "only the final attempt should complete the execution row")
 }
 
-func TestScheduledTestAutomaticRetryStopsAfterSuccessAndPersistsOnce(t *testing.T) {
+func TestScheduledTestAutomaticRetrySuccessPersistsOnce(t *testing.T) {
 	results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
 	var calls atomic.Int32
 	accounts := scheduledTestExecutionAccountRepo{get: func(_ context.Context, id int64) (*Account, error) {
-		if calls.Add(1) <= 2 {
-			// The real AccountTestService turns this into Status=failed while
-			// returning a nil Go error to the runner.
-			return nil, errors.New("temporary upstream account lookup failure")
-		}
+		calls.Add(1)
 		return &Account{ID: id, Extra: map[string]any{"synthetic_ui_test": true}}, nil
 	}}
 	runner := automaticRetryTestRunner(results, accounts)
 	defer runner.Stop()
 	runner.runOnePlan(context.Background(), automaticRetryTestPlan())
 	completed := automaticRetryCompleted(t, results)
-	require.Equal(t, int32(3), calls.Load(), "failed status with nil error must retry; success must stop retries")
+	require.Equal(t, int32(1), calls.Load(), "success must stop retries")
 	require.Equal(t, "success", completed.Status)
 	require.Empty(t, completed.ErrorMessage)
 	require.NotEmpty(t, completed.ResponseText)
 	requireAutomaticRetrySingleRow(t, results, completed)
 }
 
-func TestScheduledTestAutomaticRetryExhaustsExactlyThreeRetries(t *testing.T) {
+func TestScheduledTestAutomaticRetryDoesNotRetryMissingAccount(t *testing.T) {
 	results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
 	var calls atomic.Int32
 	accounts := scheduledTestExecutionAccountRepo{get: func(context.Context, int64) (*Account, error) {
@@ -78,13 +75,13 @@ func TestScheduledTestAutomaticRetryExhaustsExactlyThreeRetries(t *testing.T) {
 	defer runner.Stop()
 	runner.runOnePlan(context.Background(), automaticRetryTestPlan())
 	completed := automaticRetryCompleted(t, results)
-	require.Equal(t, int32(4), calls.Load(), "one initial execution plus three retries")
+	require.Equal(t, int32(1), calls.Load(), "a missing account is not retryable")
 	require.Equal(t, "failed", completed.Status)
 	require.NotEmpty(t, completed.ErrorMessage)
 	requireAutomaticRetrySingleRow(t, results, completed)
 }
 
-func TestScheduledTestAutomaticRetryIncludesOutputContractFailures(t *testing.T) {
+func TestScheduledTestAutomaticRetryDoesNotRetryOutputContractFailures(t *testing.T) {
 	for _, kind := range []string{"html", "number"} {
 		t.Run(kind, func(t *testing.T) {
 			results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
@@ -102,7 +99,7 @@ func TestScheduledTestAutomaticRetryIncludesOutputContractFailures(t *testing.T)
 			}})
 			runner.runOnePlan(context.Background(), automaticRetryTestPlan())
 			completed := automaticRetryCompleted(t, results)
-			require.Equal(t, int32(4), calls.Load(), "output parsing must happen inside each automatic attempt")
+			require.Equal(t, int32(1), calls.Load(), "invalid output must not trigger repeated generation")
 			require.Equal(t, "failed", completed.Status)
 			require.Contains(t, completed.ErrorMessage, "expected")
 			requireAutomaticRetrySingleRow(t, results, completed)
@@ -151,7 +148,7 @@ func TestScheduledTestAutomaticRetrySkipsLaterDefinitionsAfterExhaustion(t *test
 	runner.runOnePlan(context.Background(), plan)
 	first := automaticRetryCompleted(t, results)
 	second := automaticRetryCompleted(t, results)
-	require.Equal(t, int32(4), calls.Load(), "the invalid HTML consumes four attempts; the text check must not call upstream")
+	require.Equal(t, int32(1), calls.Load(), "invalid HTML stops this account after one attempt")
 	require.Equal(t, int64(1), *first.TestDefinitionID)
 	require.Equal(t, "failed", first.Status)
 	require.Contains(t, first.ErrorMessage, "expected HTML")
@@ -254,12 +251,16 @@ func TestScheduledTestAutomaticRetryBackoffReleasesWorkerAndCanBeInterrupted(t *
 			results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
 			entered := make(chan struct{}, 5)
 			var calls atomic.Int32
-			accounts := scheduledTestExecutionAccountRepo{get: func(context.Context, int64) (*Account, error) {
+			accounts := scheduledTestExecutionAccountRepo{get: func(_ context.Context, id int64) (*Account, error) {
 				calls.Add(1)
-				entered <- struct{}{}
-				return nil, errors.New("retryable failure")
+				return &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+					Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"},
+					Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}, nil
 			}}
 			runner := automaticRetryTestRunner(results, accounts)
+			upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{costJSONResponse(503, `{"error":{"type":"server_error"}}`)}, beforeReturn: func(*http.Request, int) { entered <- struct{}{} }}
+			runner.accountTestSvc.httpUpstream = upstream
+			runner.accountTestSvc.cfg = &config.Config{}
 			runner.automaticRetryBaseDelay = time.Hour
 			runner.workerSem = make(chan struct{}, 1)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -284,6 +285,12 @@ func TestScheduledTestAutomaticRetryBackoffReleasesWorkerAndCanBeInterrupted(t *
 			cancelWorker()
 			require.True(t, acquired, "retry backoff retained its model worker")
 			runner.releaseWorker()
+			select {
+			case <-done:
+				t.Fatal("transient failure did not enter the retry delay")
+			default:
+			}
+
 			if interrupt == "cancel" {
 				cancel()
 			} else {
@@ -303,6 +310,8 @@ func TestScheduledTestAutomaticRetryBackoffReleasesWorkerAndCanBeInterrupted(t *
 			require.Equal(t, int32(1), calls.Load(), "interruption must not start another upstream attempt")
 			completed := automaticRetryCompleted(t, results)
 			require.Equal(t, "failed", completed.Status)
+			require.Equal(t, "canceled", completed.ExecutionInfo.FailureKind)
+			require.Len(t, completed.ExecutionInfo.Attempts, 1)
 			requireAutomaticRetrySingleRow(t, results, completed)
 		})
 	}
@@ -320,7 +329,7 @@ func TestScheduledTestAutomaticRetryAppliesToManualRunAndSingleResultRetry(t *te
 		defer runner.Stop()
 		runner.RunPlanNow(context.Background(), automaticRetryTestPlan())
 		completed := automaticRetryCompleted(t, results)
-		require.Equal(t, int32(4), calls.Load(), "manual run receives one initial attempt and three retries")
+		require.Equal(t, int32(1), calls.Load(), "manual run also avoids retrying a missing account")
 		require.Equal(t, "failed", completed.Status)
 		requireAutomaticRetrySingleRow(t, results, completed)
 	})
@@ -345,7 +354,7 @@ func TestScheduledTestAutomaticRetryAppliesToManualRunAndSingleResultRetry(t *te
 		require.NoError(t, err)
 		completed := automaticRetryCompleted(t, results)
 		runner.activeRuns.Wait()
-		require.Equal(t, int32(5), calls.Load(), "one validation followed by one initial attempt and three retries")
+		require.Equal(t, int32(2), calls.Load(), "one validation followed by one non-retryable attempt")
 		require.Equal(t, previous.ID, pending.ID)
 		require.Equal(t, previous.ID, completed.ID)
 		require.Equal(t, "failed", completed.Status)
@@ -354,7 +363,7 @@ func TestScheduledTestAutomaticRetryAppliesToManualRunAndSingleResultRetry(t *te
 	})
 }
 
-func TestScheduledTestAutomaticRetryCronDiscoveryEnablesRetries(t *testing.T) {
+func TestScheduledTestAutomaticRetryCronDiscoverySkipsPermanentRetries(t *testing.T) {
 	results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
 	var calls atomic.Int32
 	accounts := scheduledTestExecutionAccountRepo{get: func(context.Context, int64) (*Account, error) {
@@ -370,7 +379,7 @@ func TestScheduledTestAutomaticRetryCronDiscoveryEnablesRetries(t *testing.T) {
 	cancel()
 	completed := automaticRetryCompleted(t, results)
 	runner.activeRuns.Wait()
-	require.Equal(t, int32(4), calls.Load(), "admitted cron work must receive automatic retries and outlive discovery")
+	require.Equal(t, int32(1), calls.Load(), "admitted cron work outlives discovery and avoids permanent retries")
 	require.Equal(t, "failed", completed.Status)
 	requireAutomaticRetrySingleRow(t, results, completed)
 }

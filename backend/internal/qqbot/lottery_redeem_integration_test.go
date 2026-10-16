@@ -50,7 +50,7 @@ func TestLotteryCountsHistoricalAndNewBalanceRedemptions(t *testing.T) {
 
 	reply, err = s.drawLottery(ctx, c, Job{ID: "redeemed-draw", MemberID: "member", GroupID: "group"})
 	require.NoError(t, err)
-	require.Contains(t, reply, "奖励额度：$1.00")
+	require.Contains(t, reply, "奖励额度：USD 1.00")
 	// The prize writes an admin_balance ledger row and must not create new chances.
 	state, err = s.LotteryState(ctx, uid)
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestLotteryConcurrentDrawsUseRedeemedChancesOnce(t *testing.T) {
 			if err != nil {
 				failed.Add(1)
 			}
-			if strings.Contains(reply, "奖励额度：$1.00") {
+			if strings.Contains(reply, "奖励额度：USD 1.00") {
 				won.Add(1)
 			}
 		}(i)

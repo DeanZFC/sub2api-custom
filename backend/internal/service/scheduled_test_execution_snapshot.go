@@ -251,8 +251,18 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 				}
 				return
 			}
+			policy := scheduledTestQueuePolicy(queue)
+			if s.deferAccountQueue(ctx, queue, policy) {
+				return
+			}
+			var observations []*ScheduledTestResult
+			complete := false
+			defer func() {
+				s.recordAccountQueueBackoff(ctx, queue, policy, observations, accountProgress.stopped, complete)
+			}()
 			for targetIndex, target := range queue {
 				result, ignoreGate := s.runExecutionTarget(ctx, target, started)
+				observations = append(observations, result)
 				if ctx.Err() != nil {
 					for _, remaining := range queue[targetIndex+1:] {
 						s.failExecutionTarget(remaining, ctx.Err())
@@ -272,6 +282,7 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 					return
 				}
 			}
+			complete = true
 		}(queue)
 	}
 	wg.Wait()
@@ -286,6 +297,10 @@ func (s *ScheduledTestRunnerService) skipExecutionTarget(target *scheduledTestEx
 
 func (s *ScheduledTestRunnerService) failExecutionTarget(target *scheduledTestExecutionTarget, err error) {
 	result := target.pending
+	if result.ExecutionInfo == nil {
+		result.ExecutionInfo = newScheduledTestExecutionInfo()
+		result.ExecutionInfo.summarize()
+	}
 	result.Status, result.ErrorMessage, result.FinishedAt = "failed", err.Error(), time.Now()
 	result.LatencyMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 	persistCtx, cancel := scheduledTestPersistenceContext()

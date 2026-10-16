@@ -2495,7 +2495,29 @@ export interface ScheduledTestPlan {
   updated_at: string
 }
 
+export interface TestTokenUsage {
+  input_tokens: number | null
+  output_tokens: number | null
+  reasoning_tokens: number | null
+  cache_read_tokens: number | null
+  cache_creation_tokens: number | null
+}
+export interface TestRequestAttempt extends TestTokenUsage {
+  started_at: string
+  http_status?: number
+  failure_kind?: string
+  retry_after?: string | null
+}
+export interface TestExecutionInfo extends TestTokenUsage {
+  attempts: TestRequestAttempt[]
+  failure_kind?: string
+  retry_after?: string | null
+  next_check_at?: string | null
+  consecutive_failures?: number
+}
+
 export interface ScheduledTestResult {
+  execution_info?: TestExecutionInfo | null
   id: number
   plan_id: number
   status: string
@@ -2706,6 +2728,7 @@ export interface TestProtectionDecision {
 }
 
 export interface TestResult {
+  execution_info?: TestExecutionInfo | null
   /** Current account status and scheduling switch; absent for account-free results. */
   account_schedulable?: boolean | null
   /** Returned only by administrator result endpoints. */

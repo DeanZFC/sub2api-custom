@@ -39,13 +39,17 @@ func TestQQBotBindingManagementRequiresAdmin(t *testing.T) {
 		})
 		r.GET("/bindings", h.ListBindings)
 		r.DELETE("/bindings/:user_id", h.Unbind)
-		for _, method := range []string{"GET", "DELETE"} {
-			path := "/bindings"
-			if method == "DELETE" {
-				path += "/7"
-			}
+		r.GET("/config", h.GetConfig)
+		r.PUT("/config", h.SaveConfig)
+		r.GET("/runtime", h.Runtime)
+		r.POST("/probe/:kind", h.Probe)
+		for _, route := range []struct{ method, path string }{
+			{"GET", "/bindings"}, {"DELETE", "/bindings/7"},
+			{"GET", "/config"}, {"PUT", "/config"},
+			{"GET", "/runtime"}, {"POST", "/probe/qq"},
+		} {
 			w := httptest.NewRecorder()
-			r.ServeHTTP(w, httptest.NewRequest(method, path, nil))
+			r.ServeHTTP(w, httptest.NewRequest(route.method, route.path, nil))
 			require.Equal(t, 403, w.Code)
 		}
 		require.NoError(t, mock.ExpectationsWereMet())
@@ -209,6 +213,7 @@ func TestQQBotConfigDoesNotReturnSecrets(t *testing.T) {
 	bot := qqbot.New(db, qqTestEncryptor{}, true, nil)
 	h := NewQQBotHandler(bot)
 	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), "admin"); c.Next() })
 	r.GET("/config", h.GetConfig)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), "GET", "/config", nil))
@@ -241,6 +246,7 @@ func TestQQBotSaveConfigAcceptsFullCustomCommandList(t *testing.T) {
 	mock.ExpectCommit()
 	h := NewQQBotHandler(qqbot.New(db, qqTestEncryptor{}, true, nil))
 	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), "admin"); c.Next() })
 	r.PUT("/config", h.SaveConfig)
 	req := httptest.NewRequest(http.MethodPut, "/config", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")

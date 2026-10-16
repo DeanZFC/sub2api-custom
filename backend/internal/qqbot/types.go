@@ -43,6 +43,10 @@ type Config struct {
 	InviteMinRechargeTotal   float64         `json:"invite_min_recharge_total"`
 	InviteMinRecharge30d     float64         `json:"invite_min_recharge_30d"`
 	InviteRechargeWindowDays int             `json:"invite_recharge_window_days"`
+	TransferEnabled          bool            `json:"transfer_enabled"`
+	TransferFeePercent       float64         `json:"transfer_fee_percent"`
+	TransferMinAmount        float64         `json:"transfer_min_amount"`
+	TransferMaxAmount        float64         `json:"transfer_max_amount"`
 	ClearAppSecret           bool            `json:"clear_app_secret,omitempty"`
 	ClearAPIKey              bool            `json:"clear_api_key,omitempty"`
 	ClearImageAPIKey         bool            `json:"clear_image_api_key,omitempty"`

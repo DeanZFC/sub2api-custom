@@ -401,6 +401,7 @@
                 </div>
 
                 <!-- Response / Error (collapsible) -->
+                <TestExecutionUsage :info="result.execution_info" class="mt-2" />
                 <div v-if="result.error_message" class="mt-2">
                   <div
                     class="cursor-pointer text-xs font-medium text-red-600 dark:text-red-400"
@@ -475,6 +476,7 @@ import { Icon } from '@/components/icons'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/format'
+import TestExecutionUsage from '@/components/tests/TestExecutionUsage.vue'
 import type { ScheduledTestPlan, ScheduledTestResult } from '@/types'
 
 const { t } = useI18n()
