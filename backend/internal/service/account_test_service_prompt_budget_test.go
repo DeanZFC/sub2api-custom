@@ -106,16 +106,16 @@ func TestProcessOpenAIResponsesRejectsIncompleteTerminal(t *testing.T) {
 	require.Contains(t, err.Error(), "incomplete")
 }
 
-func TestExtractAntigravityTestResponseRejectsTruncation(t *testing.T) {
+func TestExtractAntigravityTestContentRejectsTruncation(t *testing.T) {
 	body := []byte(`data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"MAX_TOKENS"}]}}`)
-	_, err := extractAntigravityTestResponse(body)
+	_, _, err := extractAntigravityTestContent(body)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "truncated")
 }
 
-func TestExtractAntigravityTestResponseAcceptsNonSSECompletion(t *testing.T) {
+func TestExtractAntigravityTestContentAcceptsNonSSECompletion(t *testing.T) {
 	body := []byte(`{"response":{"candidates":[{"content":{"parts":[{"text":"complete"}]},"finishReason":"STOP"}]}}`)
-	text, err := extractAntigravityTestResponse(body)
+	text, _, err := extractAntigravityTestContent(body)
 	require.NoError(t, err)
 	require.Equal(t, "complete", text)
 }

@@ -580,22 +580,11 @@ func (s *AntigravityGatewayService) getClaudeTransformOptions(ctx context.Contex
 	return opts
 }
 
-// extractTextFromSSEResponse 从 SSE 流式响应中提取文本
-func extractTextFromSSEResponse(respBody []byte) string {
-	text, _ := extractAntigravityTestResponse(respBody)
-	return text
-}
-
-// extractAntigravityTestResponse extracts model text and verifies that the
+// extractAntigravityTestContent extracts model text and images and verifies that the
 // upstream emitted an explicit terminal result. Antigravity usually returns
 // SSE, but some compatible gateways return one JSON response despite
 // streamGenerateContent; both forms are accepted only when a non-truncating
 // finishReason is present (or an explicit [DONE] marker is received).
-func extractAntigravityTestResponse(respBody []byte) (string, error) {
-	text, _, err := extractAntigravityTestContent(respBody)
-	return text, err
-}
-
 func extractAntigravityTestContent(respBody []byte) (string, []TestConnectionImage, error) {
 	var texts []string
 	var images []TestConnectionImage
