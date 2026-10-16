@@ -169,6 +169,7 @@ export default {
     apiKeys: 'API 密钥',
     batchImage: '批量生图',
     usage: '使用记录',
+    callErrors: '调用错误',
     testResults: '渠道质量检测',
     tests: '渠道质量管理',
     redeem: '兑换',
@@ -220,7 +221,7 @@ export default {
   },
 
   tests: {
-    currentScheduling: '当前调度', schedulingActive: '参与调度', schedulingPaused: '暂停调度', failed: '未通过',
+    currentScheduling: '当前调度', schedulingActive: '参与调度', schedulingPaused: '暂停调度', failed: '未通过', skipped: '检测跳过',
     expandPreview: '放大查看',
     adminReview: {
       details: '评审说明',

@@ -169,6 +169,7 @@ export default {
     apiKeys: 'API Keys',
     batchImage: 'Batch Images',
     usage: 'Usage',
+    callErrors: 'Call Errors',
     testResults: 'Channel Quality Checks',
     tests: 'Channel Quality Management',
     redeem: 'Redeem',
@@ -220,7 +221,7 @@ export default {
   },
 
   tests: {
-    currentScheduling: 'Current scheduling', schedulingActive: 'Active', schedulingPaused: 'Paused', failed: 'Failed',
+    currentScheduling: 'Current scheduling', schedulingActive: 'Active', schedulingPaused: 'Paused', failed: 'Failed', skipped: 'Skipped',
     expandPreview: 'Expand preview',
     adminReview: {
       details: 'Review details',

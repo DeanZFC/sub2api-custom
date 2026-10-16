@@ -81,13 +81,20 @@ type Payload struct {
 	Data json.RawMessage `json:"d"`
 }
 type Event struct {
-	ID        string          `json:"id"`
-	GroupID   string          `json:"group_openid"`
-	MemberID  string          `json:"member_openid"`
-	Content   string          `json:"content"`
-	Timestamp json.RawMessage `json:"timestamp"`
-	Mentions  []Mention       `json:"mentions"`
-	Author    struct {
+	ID               string           `json:"id"`
+	GroupID          string           `json:"group_openid"`
+	MemberID         string           `json:"member_openid"`
+	Content          string           `json:"content"`
+	Timestamp        json.RawMessage  `json:"timestamp"`
+	Mentions         []Mention        `json:"mentions"`
+	Attachments      []Attachment     `json:"attachments"`
+	MessageScene     MessageScene     `json:"message_scene"`
+	MessageType      int              `json:"message_type"`
+	MsgElements      []MessageElement `json:"msg_elements"`
+	MessageReference struct {
+		MessageID string `json:"message_id"`
+	} `json:"message_reference"`
+	Author struct {
 		MemberID string `json:"member_openid"`
 		Username string `json:"username"`
 		Bot      bool   `json:"bot"`
@@ -97,32 +104,76 @@ type Event struct {
 	ApplyAt       string `json:"apply_at"`
 	JoinRequestID string `json:"join_request_id"`
 }
+type Attachment struct {
+	URL         string `json:"url"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+}
+type MessageScene struct {
+	Ext []string `json:"ext"`
+}
+type MessageElement struct {
+	MsgIdx      string           `json:"msg_idx"`
+	MessageType int              `json:"message_type"`
+	Content     string           `json:"content"`
+	Attachments []Attachment     `json:"attachments"`
+	MsgElements []MessageElement `json:"msg_elements"`
+}
 type Mention struct {
 	ID       string `json:"id"`
 	MemberID string `json:"member_openid"`
 }
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string   `json:"role"`
+	Content string   `json:"content"`
+	Images  []string `json:"-"`
 }
+
+// MarshalJSON keeps ordinary turns compatible with the existing API payload,
+// while turning image-bearing turns into the Chat Completions multimodal shape.
+// Responses requests use responsesMessages in client.go because that protocol
+// names the equivalent parts input_text/input_image.
+func (m Message) MarshalJSON() ([]byte, error) {
+	if len(m.Images) == 0 {
+		return json.Marshal(struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{Role: m.Role, Content: m.Content})
+	}
+	parts := make([]map[string]any, 0, len(m.Images)+1)
+	if m.Content != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": m.Content})
+	}
+	for _, imageURL := range m.Images {
+		if imageURL != "" {
+			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": imageURL}})
+		}
+	}
+	return json.Marshal(struct {
+		Role    string `json:"role"`
+		Content any    `json:"content"`
+	}{Role: m.Role, Content: parts})
+}
+
 type Job struct {
-	ID           string          `json:"id"`
-	AppID        string          `json:"app_id"`
-	EventType    string          `json:"event_type"`
-	GroupID      string          `json:"group_id"`
-	MemberID     string          `json:"member_id"`
-	MessageID    string          `json:"-"`
-	Payload      json.RawMessage `json:"-"`
-	Kind         string          `json:"kind"`
-	Status       string          `json:"status"`
-	ResultText   string          `json:"-"`
-	Image        []byte          `json:"-"`
-	ImageType    string          `json:"-"`
-	Error        string          `json:"error"`
-	InputTokens  int64           `json:"input_tokens"`
-	OutputTokens int64           `json:"output_tokens"`
-	CreatedAt    time.Time       `json:"created_at"`
-	FinishedAt   *time.Time      `json:"finished_at"`
+	ReplyReference string          `json:"-"`
+	ID             string          `json:"id"`
+	AppID          string          `json:"app_id"`
+	EventType      string          `json:"event_type"`
+	GroupID        string          `json:"group_id"`
+	MemberID       string          `json:"member_id"`
+	MessageID      string          `json:"-"`
+	Payload        json.RawMessage `json:"-"`
+	Kind           string          `json:"kind"`
+	Status         string          `json:"status"`
+	ResultText     string          `json:"-"`
+	Image          []byte          `json:"-"`
+	ImageType      string          `json:"-"`
+	Error          string          `json:"error"`
+	InputTokens    int64           `json:"input_tokens"`
+	OutputTokens   int64           `json:"output_tokens"`
+	CreatedAt      time.Time       `json:"created_at"`
+	FinishedAt     *time.Time      `json:"finished_at"`
 }
 type Binding struct {
 	AppID     string    `json:"app_id"`

@@ -79,7 +79,7 @@
         </div>
 
         <!-- Model Filter -->
-        <div class="w-full sm:w-auto sm:min-w-[220px]">
+        <div v-if="showModelFilter" class="w-full sm:w-auto sm:min-w-[220px]">
           <label class="input-label">{{ t('usage.model') }}</label>
           <Select v-model="filters.model" :options="modelOptions" searchable @change="emitChange" />
         </div>
@@ -214,6 +214,7 @@ interface Props {
   startDate: string
   endDate: string
   showActions?: boolean
+  showModelFilter?: boolean
   modelOptions?: string[]
   /**
    * errors 模式:隐藏用量专属字段/按钮,显示错误类型+状态码(错误请求 tab 用)
@@ -226,6 +227,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   showActions: true,
+  showModelFilter: true,
   mode: 'usage',
   flat: false
 })

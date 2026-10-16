@@ -145,6 +145,16 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		outcome, reason = "ignored", "group_not_allowed"
 		return nil
 	}
+	if p.Type == groupMessageCreate && !unmentionedGroupCommand(e, c.CustomCommands...) && len(groupMentionIDs(e)) == 0 {
+		ref, lookupErr := s.referencedMessage(ctx, c, e.GroupID, e.referenceID())
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if ref == nil {
+			outcome, reason = "ignored", "bot_or_ambient_message"
+			return nil
+		}
+	}
 	switch p.Type {
 	case groupAtMessageCreate, groupMessageCreate, "GROUP_JOIN_REQUEST", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE":
 	default:

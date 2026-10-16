@@ -41,4 +41,6 @@ func TestQQBotFullMigrationChain(t *testing.T) {
 	require.True(t, exists)
 	require.NoError(t, db.QueryRow(`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='qq_bot_lottery_draws')`).Scan(&exists))
 	require.True(t, exists)
+	require.NoError(t, db.QueryRow(`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='qq_bot_message_references')`).Scan(&exists))
+	require.True(t, exists)
 }

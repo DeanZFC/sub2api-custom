@@ -56,7 +56,7 @@ func shouldQueueGroupMessage(eventType string, e Event, customCommands ...Custom
 	if eventType == groupAtMessageCreate {
 		return true
 	}
-	return eventType == groupMessageCreate && (unmentionedGroupCommand(e, customCommands...) || len(groupMentionIDs(e)) > 0)
+	return eventType == groupMessageCreate && (unmentionedGroupCommand(e, customCommands...) || len(groupMentionIDs(e)) > 0 || e.referenceID() != "")
 }
 
 type groupBotIdentity struct {

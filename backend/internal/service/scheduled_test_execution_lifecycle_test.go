@@ -57,7 +57,7 @@ func newScheduledTestExecutionRunner(results ScheduledTestResultRepository, acco
 	return runner
 }
 
-func TestScheduledTestEachDefinitionGetsFreshExecutionTimeout(t *testing.T) {
+func TestScheduledTestTimeoutSkipsLaterDefinitions(t *testing.T) {
 	results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 2)}
 	var calls atomic.Int32
 	accounts := scheduledTestExecutionAccountRepo{get: func(ctx context.Context, id int64) (*Account, error) {
@@ -80,8 +80,9 @@ func TestScheduledTestEachDefinitionGetsFreshExecutionTimeout(t *testing.T) {
 	require.Equal(t, int64(1), *first.TestDefinitionID)
 	require.Equal(t, "failed", first.Status)
 	require.Equal(t, int64(2), *second.TestDefinitionID)
-	require.Equal(t, "success", second.Status, "the first type's timeout must not cancel the second type")
-	require.Equal(t, int32(5), calls.Load(), "four attempts for the first type, then one successful second type")
+	require.Equal(t, "failed", second.Status)
+	require.Contains(t, second.ErrorMessage, "前一项检测未满足条件")
+	require.Equal(t, int32(4), calls.Load(), "four attempts for the first type; the second type must not contact upstream")
 }
 
 func TestScheduledTestWorkerQueueDoesNotConsumeExecutionTimeout(t *testing.T) {

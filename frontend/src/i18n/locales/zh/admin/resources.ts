@@ -135,7 +135,7 @@ export default {
       statistics: '近一小时统计', statisticsHint: '统计本地最近一小时的请求记录，不调用上游模型。按检测规则的定时计划更新快照，所选模型用于筛选请求。',
       modelCheck: '返回模型一致性', modelCheckHint: '发送一次简短请求，比较上游实际请求模型与响应中的模型字段。无需填写提示词；匹配方式可在检测规则的质量自动化中设置，默认严格匹配。此检测不能证明实际模型身份或能力。',
       searchResultsAccount: '搜索账号名称或 ID',
-      resultCount: '{count} 条结果', failedCount: '{count} 失败', runningCount: '{count} 进行中',
+      resultCount: '{count} 条结果', failedCount: '{count} 失败', skippedCount: '{count} 跳过', skipped: '检测跳过', runningCount: '{count} 进行中',
       noMatchingResults: '没有符合筛选条件的结果', allResultTypes: '全部检测类型', allResultStatuses: '全部状态',
       groupResultTarget: '分组测试', unassignedResultTarget: '等待分配账号', executedByAccount: '执行账号',
       expandResult: '展开结果', collapseResult: '收起结果',

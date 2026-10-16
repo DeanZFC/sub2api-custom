@@ -697,6 +697,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/call-errors',
+    name: 'AdminCallErrors',
+    component: () => import('@/views/admin/CallErrorsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Call Errors',
+      titleKey: 'usage.errors.pageTitle',
+      descriptionKey: 'usage.errors.pageDescription'
+    }
+  },
+  {
     path: '/admin/affiliates',
     redirect: '/admin/affiliates/invites'
   },

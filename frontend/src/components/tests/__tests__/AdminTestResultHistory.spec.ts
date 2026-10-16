@@ -75,6 +75,22 @@ describe('admin result account history', () => {
     expect(wrapper.findAll('[data-output]').map(item => item.attributes('data-output-id'))).toEqual(['8'])
   })
 
+  it('labels short-circuited results as skipped instead of failed', async () => {
+    const wrapper = mountHistory([
+      result(1, { status: 'failed', error_message: '检测跳过：前一项检测未满足条件' }),
+      result(2, { status: 'failed', error_message: 'upstream unavailable' }),
+    ])
+    await flushPromises()
+    expect(wrapper.get('[data-account-key="account:10"]').text()).toContain('1 failed')
+    expect(wrapper.get('[data-account-key="account:10"]').text()).toContain('1 skipped')
+    expect(wrapper.get('[data-result-id="1"] .badge').text()).toBe('Skipped')
+    expect(wrapper.get('[data-result-id="1"] .badge').classes()).toContain('badge-warning')
+    expect(wrapper.get('[data-result-id="2"] .badge').text()).toBe('Failed')
+    await wrapper.get('[data-status-filter]').setValue('skipped')
+    expect(wrapper.findAll('[data-result-id]').map(item => item.attributes('data-result-id'))).toEqual(['1'])
+    wrapper.unmount()
+  })
+
   it('uses names from historical records when an account is not in the active account list', async () => {
     const wrapper = mountHistory([result(1, { account_id: 99, account_name: 'Archived Pro' })])
     await flushPromises()

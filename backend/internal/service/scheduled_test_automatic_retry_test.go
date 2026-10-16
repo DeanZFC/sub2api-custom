@@ -133,7 +133,7 @@ func TestScheduledTestAutomaticRetryDoesNotRetryWrongNumericAnswer(t *testing.T)
 	require.Equal(t, []string{"create", "begin", "update", "complete"}, repo.events)
 }
 
-func TestScheduledTestAutomaticRetryContinuesOtherDefinitionsAfterExhaustion(t *testing.T) {
+func TestScheduledTestAutomaticRetrySkipsLaterDefinitionsAfterExhaustion(t *testing.T) {
 	results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 8)}
 	var calls atomic.Int32
 	accounts := scheduledTestExecutionAccountRepo{get: func(_ context.Context, id int64) (*Account, error) {
@@ -151,17 +151,69 @@ func TestScheduledTestAutomaticRetryContinuesOtherDefinitionsAfterExhaustion(t *
 	runner.runOnePlan(context.Background(), plan)
 	first := automaticRetryCompleted(t, results)
 	second := automaticRetryCompleted(t, results)
-	require.Equal(t, int32(5), calls.Load(), "the invalid HTML consumes four attempts, then the text check runs once")
+	require.Equal(t, int32(4), calls.Load(), "the invalid HTML consumes four attempts; the text check must not call upstream")
 	require.Equal(t, int64(1), *first.TestDefinitionID)
 	require.Equal(t, "failed", first.Status)
 	require.Contains(t, first.ErrorMessage, "expected HTML")
 	require.Equal(t, int64(2), *second.TestDefinitionID)
-	require.Equal(t, "success", second.Status)
+	require.Equal(t, "failed", second.Status)
+	require.Contains(t, second.ErrorMessage, "前一项检测未满足条件")
 	require.Equal(t, 2, results.countCreated(), "each configured type retains its own single execution record")
 	require.Equal(t, results.created[0].ID, first.ID)
 	require.Equal(t, results.created[1].ID, second.ID)
 	require.Empty(t, results.updated)
 	require.Equal(t, 1, runner.planRepo.(*runnerPlanRepoStub).updated, "one multi-type rule advances its schedule once")
+}
+
+func TestScheduledTestCompatibilityCombinationShortCircuitsOnlyImpossibleBranches(t *testing.T) {
+	for _, operator := range []string{"all", "any"} {
+		t.Run(operator, func(t *testing.T) {
+			results := &protectionRepositoryStub{eligible: true}
+			var calls atomic.Int32
+			accounts := scheduledTestExecutionAccountRepo{get: func(_ context.Context, id int64) (*Account, error) {
+				calls.Add(1)
+				return &Account{ID: id, Extra: map[string]any{"synthetic_ui_test": true}}, nil
+			}}
+			plans := &runnerPlanRepoStub{}
+			svc := NewScheduledTestService(plans, results)
+			svc.SetDefinitionRepository(multiDefinitionRepoStub{definitions: map[int64]*ScheduledTestDefinition{
+				1: {ID: 1, Enabled: true, Prompt: "first", OutputKind: "text"},
+				2: {ID: 2, Enabled: true, Prompt: "second", OutputKind: "text"},
+			}})
+			runner := NewScheduledTestRunnerService(plans, svc, &AccountTestService{accountRepo: accounts}, accounts, nil, nil)
+			runner.automaticRetryBaseDelay = time.Millisecond
+			runner.executionTimeout = time.Second
+			defer runner.Stop()
+			plan := automaticRetryTestPlan()
+			plan.Enabled = true
+			plan.TestDefinitionIDs = []int64{1, 2}
+			plan.Protection = ScheduledTestProtectionConfig{
+				Enabled: true, Mode: "combined",
+				Rules: []ScheduledTestProtectionRule{
+					{TestDefinitionID: 1, ExpectedAnswer: "must-not-match"},
+					{TestDefinitionID: 2},
+				},
+				Combinations: []ScheduledTestCombinationRule{{Condition: ScheduledTestCombinationCondition{
+					Operator: operator,
+					Conditions: []ScheduledTestCombinationCondition{
+						{Operator: "test", TestDefinitionID: 1, Verdict: "pass"},
+						{Operator: "test", TestDefinitionID: 2, Verdict: "pass"},
+					},
+				}}},
+			}
+			runner.runOnePlan(context.Background(), plan)
+			second := results.completed
+			require.Equal(t, int64(2), *second.TestDefinitionID)
+			if operator == "all" {
+				require.EqualValues(t, 1, calls.Load(), "the second upstream check is unreachable after an impossible all-condition")
+				require.Equal(t, "failed", second.Status)
+				require.Equal(t, "检测跳过：前一项检测未满足条件", second.ErrorMessage)
+			} else {
+				require.EqualValues(t, 2, calls.Load(), "both branches remain possible until the second check")
+				require.Equal(t, "success", second.Status)
+			}
+		})
+	}
 }
 
 func TestScheduledTestAutomaticRetryGetsFreshTimeoutAfterTimedOutAttempt(t *testing.T) {

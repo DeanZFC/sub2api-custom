@@ -20,6 +20,10 @@ func (s *ScheduledTestRunnerService) statisticsRepository() (ScheduledTestStatis
 }
 
 func (s *ScheduledTestRunnerService) runStatisticsDefinition(ctx context.Context, plan *ScheduledTestPlan) {
+	s.runStatisticsDefinitionWithProgress(ctx, plan, nil)
+}
+
+func (s *ScheduledTestRunnerService) runStatisticsDefinitionWithProgress(ctx context.Context, plan *ScheduledTestPlan, progress map[int64]*scheduledTestAccountProgress) {
 	execution := *plan
 	execution.ReasoningEffort = ""
 	plan = &execution
@@ -59,6 +63,7 @@ func (s *ScheduledTestRunnerService) runStatisticsDefinition(ctx context.Context
 	} else {
 		err = fmt.Errorf("statistics account or group is required")
 	}
+	ids = scheduledTestUniqueAccountIDs(ids)
 	if err != nil || len(ids) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no account belongs to the statistics group")
@@ -68,33 +73,54 @@ func (s *ScheduledTestRunnerService) runStatisticsDefinition(ctx context.Context
 	}
 	sem := make(chan struct{}, scheduledTestDefaultMaxWorkers)
 	var wg sync.WaitGroup
+	var progressMu sync.Mutex
 dispatch:
 	for _, id := range ids {
+		if progress != nil {
+			progressMu.Lock()
+			accountProgress := progress[id]
+			stopped := accountProgress != nil && accountProgress.stopped
+			progressMu.Unlock()
+			if stopped {
+				s.saveSkippedAccountResultWithReason(ctx, plan, id, "statistics", "前一项检测未满足条件")
+				continue
+			}
+		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			break dispatch
 		}
 		wg.Add(1)
-		go func() {
+		go func(id int64) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			s.startStatisticsResult(ctx, plan, &id, windowEnd)
-		}()
+			result := s.startStatisticsResult(ctx, plan, &id, windowEnd)
+			if progress != nil {
+				progressMu.Lock()
+				accountProgress := progress[id]
+				if accountProgress == nil {
+					accountProgress = &scheduledTestAccountProgress{}
+					progress[id] = accountProgress
+				}
+				accountProgress.allowsNext(plan, result)
+				progressMu.Unlock()
+			}
+		}(id)
 	}
 	wg.Wait()
 }
 
-func (s *ScheduledTestRunnerService) startStatisticsResult(ctx context.Context, plan *ScheduledTestPlan, accountID *int64, windowEnd time.Time) {
+func (s *ScheduledTestRunnerService) startStatisticsResult(ctx context.Context, plan *ScheduledTestPlan, accountID *int64, windowEnd time.Time) *ScheduledTestResult {
 	if ctx.Err() != nil {
-		return
+		return nil
 	}
 	var id int64
 	if accountID != nil {
 		id = *accountID
 	}
 	if !s.beginAccountRun(plan.ID, id, plan.TestDefinitionID) {
-		return
+		return nil
 	}
 	defer s.endAccountRun(plan.ID, id, plan.TestDefinitionID)
 	pending := &ScheduledTestResult{
@@ -108,7 +134,7 @@ func (s *ScheduledTestRunnerService) startStatisticsResult(ctx context.Context, 
 		if err != nil || !eligible {
 			cancel()
 			s.saveSkippedAccountResult(ctx, plan, *accountID, "statistics", err)
-			return
+			return nil
 		}
 	}
 	pending, err := s.scheduledSvc.StartResult(persistCtx, plan.ID, pending)
@@ -125,13 +151,13 @@ func (s *ScheduledTestRunnerService) startStatisticsResult(ctx context.Context, 
 				_ = s.scheduledSvc.CompleteResult(cleanupCtx, plan.MaxResults, pending)
 				cleanupCancel()
 			}
-			return
+			return nil
 		}
 	}
-	s.runStatisticsResult(ctx, plan, accountID, pending, windowEnd)
+	return s.runStatisticsResult(ctx, plan, accountID, pending, windowEnd)
 }
 
-func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, plan *ScheduledTestPlan, accountID *int64, pending *ScheduledTestResult, windowEnd time.Time) {
+func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, plan *ScheduledTestPlan, accountID *int64, pending *ScheduledTestResult, windowEnd time.Time) *ScheduledTestResult {
 	if accountID != nil {
 		if release, acquired := s.acquireAccountExecution(ctx, *accountID); acquired {
 			defer release()
@@ -245,11 +271,12 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 	}
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d statistics completion error: %v", plan.ID, err)
-		return
+		return nil
 	}
 	// Only explicitly configured metrics may affect scheduling; generating a
 	// database snapshot alone must never invoke legacy upstream-test recovery.
 	if ctx.Err() == nil {
 		s.completeResultProtection(persistCtx, plan, result)
 	}
+	return result
 }

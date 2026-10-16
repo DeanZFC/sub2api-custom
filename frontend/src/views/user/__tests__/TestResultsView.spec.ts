@@ -31,6 +31,14 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('channel quality result groups', () => {
+  it('shows a skipped badge when a later check was not executed', async () => {
+    api.list.mockResolvedValue([{ ...baseResult, id: 11, status: 'failed', error_message: '检测跳过：前一项检测未满足条件' }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-test-section] .badge').text()).toBe('tests.skipped')
+    expect(wrapper.get('[data-test-section] .badge').classes()).toContain('badge-warning')
+    wrapper.unmount()
+  })
+
   it('explains direct group replacement and sends an immediate admin decision for a strategy review', async () => {
     api.isAdmin = true
     api.list.mockResolvedValue([])

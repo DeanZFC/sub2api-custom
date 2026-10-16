@@ -18,6 +18,93 @@ type scheduledTestExecutionTarget struct {
 	err          error
 }
 
+type scheduledTestAccountProgress struct {
+	verdicts map[int64]string
+	stopped  bool
+}
+
+func (p *scheduledTestAccountProgress) allowsNext(plan *ScheduledTestPlan, result *ScheduledTestResult) bool {
+	if p.stopped {
+		return false
+	}
+	if plan == nil || !plan.Protection.Enabled || !plan.Protection.UsesCombinations() {
+		p.stopped = !scheduledTestResultSatisfies(plan, result)
+		return !p.stopped
+	}
+	if result == nil {
+		p.stopped = true
+		return false
+	}
+	if plan.TestDefinitionID != nil {
+		if rule := plan.ProtectionRule(plan.TestDefinitionID); rule != nil {
+			verdict, _ := evaluateScheduledTestProtection(*rule, result)
+			if probeVerdict, _, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
+				verdict = probeVerdict
+			}
+			if p.verdicts == nil {
+				p.verdicts = make(map[int64]string)
+			}
+			p.verdicts[*plan.TestDefinitionID] = verdict
+		}
+	}
+	// In a combined rule, one failed test may still leave an OR branch that
+	// can pass. Stop only when no configured action can still match.
+	if len(plan.Protection.Combinations) == 0 {
+		p.stopped = result == nil
+		return !p.stopped
+	}
+	for _, combination := range plan.Protection.Combinations {
+		if EvaluateScheduledTestCombinationCondition(combination.Condition, p.verdicts) != "fail" {
+			return true
+		}
+	}
+	p.stopped = true
+	return false
+}
+
+// scheduledTestResultSatisfies is the gate between two checks for one
+// account. A successful HTTP/upstream response is not enough when the plan
+// has a configured answer, threshold, or model-consistency rule: the quality
+// verdict must also be pass. Unknown, incomplete, and failed automatic
+// observations stop the account queue; display-only and manual-review checks
+// remain informational in the all-pass strategy.
+func scheduledTestResultSatisfies(plan *ScheduledTestPlan, result *ScheduledTestResult) bool {
+	if result == nil {
+		return false
+	}
+	if plan != nil && plan.Protection.Enabled {
+		if plan.Protection.UsesCombinations() {
+			// Combined rules need the account's accumulated verdicts; the
+			// snapshot queue uses scheduledTestAccountProgress instead.
+			return true
+		}
+		if rule := plan.ProtectionRule(plan.TestDefinitionID); rule == nil ||
+			(plan.Protection.UsesAllPass() && rule.Vote != nil && rule.Vote.Enabled) {
+			// A successfully executed display-only or administrator-review
+			// check is not an automatic quality gate in the all-pass strategy.
+			return true
+		}
+	}
+	if result.Status != "success" && result.Status != "passed" {
+		return false
+	}
+	if result.OutputKind == "model_check" && (result.OutputModelCheck == nil || result.OutputModelCheck.Verdict != "pass") {
+		return false
+	}
+	if plan == nil {
+		return true
+	}
+	rule := plan.ProtectionRule(plan.TestDefinitionID)
+	if rule == nil {
+		return true
+	}
+	verdict, _ := evaluateScheduledTestProtection(*rule, result)
+	if probeVerdict, _, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
+		verdict = probeVerdict
+	}
+	return verdict == "pass"
+}
+
 func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, plan *ScheduledTestPlan, repo ScheduledTestRunRepository) {
 	started := time.Now().UTC()
 	queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
@@ -25,15 +112,7 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 	cancel()
 	// Freeze and deduplicate before building any per-type rows. Repositories
 	// already use DISTINCT; keeping this boundary explicit protects adapters.
-	seenAccounts := make(map[int64]bool, len(accountIDs))
-	frozen := make([]int64, 0, len(accountIDs))
-	for _, id := range accountIDs {
-		if id > 0 && !seenAccounts[id] {
-			frozen = append(frozen, id)
-			seenAccounts[id] = true
-		}
-	}
-	accountIDs = frozen
+	accountIDs = scheduledTestUniqueAccountIDs(accountIDs)
 	var local, upstream []*scheduledTestExecutionTarget
 	for _, execution := range scheduledTestExecutionPlans(plan) {
 		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
@@ -47,13 +126,13 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 			executionCopy.ReasoningEffort = ""
 			execution = &executionCopy
 		}
-		var targets []*int64
+		var accountTargets []*int64
 		if len(accountIDs) > 0 && targetErr == nil {
 			for _, id := range accountIDs {
-				targets = append(targets, &id)
+				accountTargets = append(accountTargets, &id)
 			}
 		} else {
-			targets = []*int64{plan.AccountID}
+			accountTargets = []*int64{plan.AccountID}
 			if definitionErr == nil {
 				definitionErr = targetErr
 				if definitionErr == nil {
@@ -61,7 +140,7 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 				}
 			}
 		}
-		for _, id := range targets {
+		for _, id := range accountTargets {
 			target := &scheduledTestExecutionTarget{plan: execution, prompt: prompt, kind: kind, accountID: id, err: definitionErr}
 			target.pending = &ScheduledTestResult{
 				PlanID: plan.ID, TestDefinitionID: execution.TestDefinitionID, TargetMode: plan.TargetMode,
@@ -103,15 +182,13 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 			}
 		}
 	}
-	// Keep local statistics ahead of model requests. Each account then advances
-	// through its own definitions; one slow account must not hold every other
-	// account behind a definition-wide barrier. Each account executes upstream
-	// definitions in configured order, regardless of mid-round group changes.
-	s.runExecutionTargetQueues(ctx, local, started)
-	s.runExecutionTargetQueues(ctx, upstream, started)
+	// Put low-cost statistics first within each account queue. A fast account
+	// can advance to upstream work while another account's statistics are slow.
+	progress := make(map[int64]*scheduledTestAccountProgress, len(accountIDs))
+	s.runExecutionTargetQueues(ctx, targets, started, progress)
 }
 
-func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Context, targets []*scheduledTestExecutionTarget, started time.Time) {
+func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Context, targets []*scheduledTestExecutionTarget, started time.Time, progress map[int64]*scheduledTestAccountProgress) {
 	var queues [][]*scheduledTestExecutionTarget
 	accountQueues := make(map[int64]int)
 	for _, target := range targets {
@@ -127,10 +204,13 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 		}
 		queues[index] = append(queues[index], target)
 	}
-	// Bound active account queues as well as upstream requests. All pending
-	// rows were saved before dispatch, including those cancelled while queued.
+	// Keep the account order from resolveTargetAccounts while allowing different
+	// accounts to use independent workers. All pending rows were saved before
+	// dispatch, including rows that are completed as skipped after the first
+	// unsatisfied check for their account.
 	sem := make(chan struct{}, scheduledTestDefaultMaxWorkers)
 	var wg sync.WaitGroup
+	var progressMu sync.Mutex
 	for _, queue := range queues {
 		if ctx.Err() != nil {
 			for _, target := range queue {
@@ -147,15 +227,58 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 			continue
 		}
 		wg.Add(1)
-		go func() {
+		go func(queue []*scheduledTestExecutionTarget) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			for _, target := range queue {
-				s.runExecutionTarget(ctx, target, started)
+			var accountID int64
+			if len(queue) > 0 && queue[0].accountID != nil {
+				accountID = *queue[0].accountID
 			}
-		}()
+			progressMu.Lock()
+			accountProgress := progress[accountID]
+			if accountProgress == nil {
+				accountProgress = &scheduledTestAccountProgress{}
+				progress[accountID] = accountProgress
+			}
+			stopped := accountProgress.stopped
+			progressMu.Unlock()
+			if stopped {
+				for _, skipped := range queue {
+					s.skipExecutionTarget(skipped)
+				}
+				return
+			}
+			for targetIndex, target := range queue {
+				result, ignoreGate := s.runExecutionTarget(ctx, target, started)
+				if ctx.Err() != nil {
+					for _, remaining := range queue[targetIndex+1:] {
+						s.failExecutionTarget(remaining, ctx.Err())
+					}
+					return
+				}
+				progressMu.Lock()
+				continueQueue := true
+				if !ignoreGate {
+					continueQueue = accountProgress.allowsNext(target.plan, result)
+				}
+				progressMu.Unlock()
+				if !continueQueue {
+					for _, skipped := range queue[targetIndex+1:] {
+						s.skipExecutionTarget(skipped)
+					}
+					return
+				}
+			}
+		}(queue)
 	}
 	wg.Wait()
+}
+
+func (s *ScheduledTestRunnerService) skipExecutionTarget(target *scheduledTestExecutionTarget) {
+	if target == nil || target.pending == nil {
+		return
+	}
+	s.failExecutionTarget(target, fmt.Errorf("检测跳过：前一项检测未满足条件"))
 }
 
 func (s *ScheduledTestRunnerService) failExecutionTarget(target *scheduledTestExecutionTarget, err error) {
@@ -171,14 +294,16 @@ func (s *ScheduledTestRunnerService) failExecutionTarget(target *scheduledTestEx
 	s.recordResultDecision(persistCtx, result, ScheduledTestProtectionDecision{Status: "skipped", Reason: result.ErrorMessage})
 }
 
-func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, target *scheduledTestExecutionTarget, windowEnd time.Time) {
+func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, target *scheduledTestExecutionTarget, windowEnd time.Time) (*ScheduledTestResult, bool) {
 	if target.err != nil {
 		s.failExecutionTarget(target, target.err)
-		return
+		// A missing/disabled definition is not an account-quality observation;
+		// retain the existing behavior of continuing with later definitions.
+		return nil, true
 	}
 	if ctx.Err() != nil {
 		s.failExecutionTarget(target, ctx.Err())
-		return
+		return nil, false
 	}
 	var id int64
 	if target.accountID != nil {
@@ -186,7 +311,7 @@ func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, tar
 	}
 	if !s.beginAccountRun(target.plan.ID, id, target.plan.TestDefinitionID) {
 		s.failExecutionTarget(target, fmt.Errorf("检测跳过：该账号的同类型检测正在执行"))
-		return
+		return nil, false
 	}
 	defer s.endAccountRun(target.plan.ID, id, target.plan.TestDefinitionID)
 	persistCtx, cancel := scheduledTestPersistenceContext()
@@ -198,7 +323,7 @@ func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, tar
 				err = fmt.Errorf("账号未开启调度或当前状态不可检测")
 			}
 			s.failExecutionTarget(target, fmt.Errorf("检测跳过：%w", err))
-			return
+			return nil, false
 		}
 	}
 	target.pending.Status = "running"
@@ -209,13 +334,16 @@ func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, tar
 	cancel()
 	if err != nil {
 		s.failExecutionTarget(target, fmt.Errorf("unable to initialize test result: %w", err))
-		return
+		return nil, false
 	}
+	var result *ScheduledTestResult
 	if target.kind == "statistics" {
-		s.runStatisticsResult(ctx, target.plan, target.accountID, target.pending, windowEnd)
+		result = s.runStatisticsResult(ctx, target.plan, target.accountID, target.pending, windowEnd)
 	} else if target.accountID != nil {
-		s.runAccountWithResult(ctx, target.plan, id, target.prompt, target.kind, target.pending)
+		result = s.runAccountWithResult(ctx, target.plan, id, target.prompt, target.kind, target.pending)
 	} else {
 		s.failExecutionTarget(target, fmt.Errorf("test account is unavailable"))
+		return nil, false
 	}
+	return result, false
 }

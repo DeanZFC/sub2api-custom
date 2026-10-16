@@ -118,13 +118,36 @@ func (s *Service) chat(ctx context.Context, c Config, messages []Message) (strin
 	body := map[string]any{"model": c.ChatModel, "messages": messages, "stream": false, "max_completion_tokens": c.MaxOutputTokens}
 	if c.ChatProtocol == "responses" {
 		path = "/responses"
-		body = map[string]any{"model": c.ChatModel, "input": messages, "stream": false, "store": false, "max_output_tokens": c.MaxOutputTokens}
+		body = map[string]any{"model": c.ChatModel, "input": responsesMessages(messages), "stream": false, "store": false, "max_output_tokens": c.MaxOutputTokens}
 	}
 	raw, ct, err := s.request(ctx, "POST", endpoint(c.BaseURL, path), c.APIKey, body, 4<<20)
 	if err != nil {
 		return "", 0, 0, err
 	}
 	return parseChat(raw, ct)
+}
+
+func responsesMessages(messages []Message) []map[string]any {
+	out := make([]map[string]any, 0, len(messages))
+	for _, message := range messages {
+		item := map[string]any{"role": message.Role}
+		if len(message.Images) == 0 {
+			item["content"] = message.Content
+		} else {
+			parts := make([]map[string]any, 0, len(message.Images)+1)
+			if message.Content != "" {
+				parts = append(parts, map[string]any{"type": "input_text", "text": message.Content})
+			}
+			for _, imageURL := range message.Images {
+				if imageURL != "" {
+					parts = append(parts, map[string]any{"type": "input_image", "image_url": imageURL})
+				}
+			}
+			item["content"] = parts
+		}
+		out = append(out, item)
+	}
+	return out
 }
 func parseChat(raw []byte, ct string) (string, int64, int64, error) {
 	if strings.Contains(ct, "text/event-stream") {
@@ -439,6 +462,10 @@ func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []
 	}
 	base := "/v2/groups/" + url.PathEscape(j.GroupID)
 	body := map[string]any{"msg_id": j.MessageID, "msg_seq": seq}
+	if j.ReplyReference != "" {
+		body["message_reference"] = map[string]string{"message_id": j.ReplyReference}
+	}
+	deliveredText := limitText(text, 1800)
 	if len(img) > 0 {
 		data, err := s.qqRequest(ctx, c, base+"/files", map[string]any{"file_type": 1, "file_name": "ctav.jpg", "file_data": base64.StdEncoding.EncodeToString(img), "srv_send_msg": false})
 		if err != nil {
@@ -459,14 +486,19 @@ func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []
 		text = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n" + strings.TrimLeft(text, "\n")
 		body["msg_type"] = 2
 		// QQ requires content/ark to be absent when markdown is supplied.
-		body["markdown"] = map[string]string{"content": limitText(text, 1800)}
+		markdown := limitText(text, 1800)
+		body["markdown"] = map[string]string{"content": markdown}
+		deliveredText = strings.TrimPrefix(markdown, `<qqbot-at-user id="`+html.EscapeString(j.MemberID)+`" />`+"\n")
 	} else {
 		// QQ adds the sender mention for GROUP_AT_MESSAGE_CREATE replies itself.
 		body["msg_type"] = 0
 		body["content"] = limitText(text, 1800)
 	}
-	_, err := s.qqRequest(ctx, c, base+"/messages", body)
-	return err
+	raw, err := s.qqRequest(ctx, c, base+"/messages", body)
+	if err != nil {
+		return err
+	}
+	return s.rememberSentMessage(ctx, c, j.GroupID, raw, deliveredText, len(img) > 0)
 }
 
 func limitText(s string, n int) string {

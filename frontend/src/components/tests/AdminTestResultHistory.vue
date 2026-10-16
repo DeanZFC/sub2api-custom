@@ -18,7 +18,7 @@
           <button v-for="account in visibleAccounts" :key="account.key" type="button" class="block w-full px-3 py-3 text-left transition-colors" :class="selectedKey === account.key ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/30 dark:text-primary-300' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-dark-800'" :aria-current="selectedKey === account.key ? 'true' : undefined" :data-account-key="account.key" @click="selectedKey = account.key">
             <span class="block break-words text-sm font-semibold">{{ account.name }}</span>
             <span v-if="account.id != null" class="mt-1 block text-xs tabular-nums text-gray-500 dark:text-gray-400">#{{ account.id }}</span>
-            <span class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs"><span class="text-gray-500 dark:text-gray-400">{{ t('admin.tests.resultCount', { count: account.results.length }) }}</span><span v-if="account.failed" class="text-red-600 dark:text-red-400">{{ t('admin.tests.failedCount', { count: account.failed }) }}</span><span v-if="account.running" class="text-blue-600 dark:text-blue-400">{{ t('admin.tests.runningCount', { count: account.running }) }}</span></span>
+            <span class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs"><span class="text-gray-500 dark:text-gray-400">{{ t('admin.tests.resultCount', { count: account.results.length }) }}</span><span v-if="account.failed" class="text-red-600 dark:text-red-400">{{ t('admin.tests.failedCount', { count: account.failed }) }}</span><span v-if="account.skipped" class="text-amber-600 dark:text-amber-400">{{ t('admin.tests.skippedCount', { count: account.skipped }) }}</span><span v-if="account.running" class="text-blue-600 dark:text-blue-400">{{ t('admin.tests.runningCount', { count: account.running }) }}</span></span>
           </button>
         </nav>
         <p v-if="!visibleAccounts.length" class="py-5 text-sm text-gray-500">{{ t('admin.tests.noMatchingResults') }}</p>
@@ -31,7 +31,7 @@
         </header>
         <div class="mb-2 grid gap-3 sm:grid-cols-2">
           <label class="min-w-0 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.type') }}<select v-model="typeFilter" class="input mt-1 w-full text-sm" data-type-filter><option value="">{{ t('admin.tests.allResultTypes') }}</option><option v-for="type in availableTypes" :key="type.key" :value="type.key">{{ type.name }}</option></select></label>
-          <label class="min-w-0 text-xs text-gray-500 dark:text-gray-400">{{ t('common.status') }}<select v-model="statusFilter" class="input mt-1 w-full text-sm" data-status-filter><option value="">{{ t('admin.tests.allResultStatuses') }}</option><option value="success">{{ t('admin.scheduledTests.success') }}</option><option value="failed">{{ t('admin.scheduledTests.failed') }}</option><option v-if="hasModelChecks" value="unknown">{{ t('tests.modelCheck.unknown') }}</option><option value="running">{{ t('admin.scheduledTests.running') }}</option></select></label>
+          <label class="min-w-0 text-xs text-gray-500 dark:text-gray-400">{{ t('common.status') }}<select v-model="statusFilter" class="input mt-1 w-full text-sm" data-status-filter><option value="">{{ t('admin.tests.allResultStatuses') }}</option><option value="success">{{ t('admin.scheduledTests.success') }}</option><option value="failed">{{ t('admin.scheduledTests.failed') }}</option><option value="skipped">{{ t('admin.tests.skipped') }}</option><option v-if="hasModelChecks" value="unknown">{{ t('tests.modelCheck.unknown') }}</option><option value="running">{{ t('admin.scheduledTests.running') }}</option></select></label>
         </div>
         <p v-if="!filteredResults.length" class="py-8 text-center text-sm text-gray-500">{{ t('admin.tests.noMatchingResults') }}</p>
         <div v-else class="divide-y divide-gray-200 dark:divide-dark-700">
@@ -54,7 +54,7 @@
             <p v-if="!expanded.has(result.id)" class="ml-6 mt-2 break-words text-sm" :class="resultStatus(result) === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'" data-result-summary>{{ resultSummary(result) }}</p>
             <p v-if="result.protection_decision" class="ml-6 mt-2 break-words text-xs text-gray-500 dark:text-gray-400" data-protection-decision>{{ protectionDecisionLabel(result) }}</p>
             <div v-if="expanded.has(result.id)" :id="`admin-test-output-${result.id}`" class="mt-3 min-w-0 sm:ml-6" data-result-detail>
-              <p v-if="result.error_message" class="mb-3 whitespace-pre-wrap break-words text-sm text-red-600 dark:text-red-400" role="alert">{{ result.error_message }}</p>
+              <p v-if="result.error_message" class="mb-3 whitespace-pre-wrap break-words text-sm" :class="isSkippedResult(result) ? 'text-amber-700 dark:text-amber-300' : 'text-red-600 dark:text-red-400'" role="alert">{{ result.error_message }}</p>
               <TestResultOutput :result="result" />
             </div>
           </article>
@@ -93,8 +93,10 @@ const page = ref(1)
 const pageSize = 15
 const expanded = ref(new Set<number>())
 const isRunning = (result: TestResult) => result.status === 'running' || result.status === 'pending'
+const isSkippedResult = (result: TestResult) => result.status === 'failed' && (result.error_message || '').startsWith('检测跳过：')
 const resultStatus = (result: TestResult) => {
   if (isRunning(result)) return 'running'
+  if (isSkippedResult(result)) return 'skipped'
   if (result.status === 'failed') return 'failed'
   if (result.output_kind === 'model_check') return result.output_model_check?.verdict === 'pass' ? 'success' : result.output_model_check?.verdict === 'fail' ? 'failed' : 'unknown'
   return result.status === 'passed' ? 'success' : result.status
@@ -111,7 +113,7 @@ const resultTypeKey = (result: TestResult) => String(result.test_definition_id ?
 const resultTypeName = (result: TestResult) => result.test_name || props.types.find(type => type.id === result.test_definition_id)?.name || result.test_definition?.name || t('admin.tests.uncategorized')
 
 const accountGroups = computed(() => {
-  const groups = new Map<string, { key: string; id: number | null; name: string; label: string; results: TestResult[]; failed: number; running: number }>()
+  const groups = new Map<string, { key: string; id: number | null; name: string; label: string; results: TestResult[]; failed: number; skipped: number; running: number }>()
   const results = [...props.results].sort((a, b) => timestamp(b) - timestamp(a) || b.id - a.id)
   for (const result of results) {
     const groupTarget = result.target_mode === 'group' && result.account_id == null
@@ -120,11 +122,12 @@ const accountGroups = computed(() => {
     let group = groups.get(key)
     if (!group) {
       const name = groupTarget ? t('admin.tests.groupResultTarget') : id != null ? accountName(result) : t('admin.tests.unassignedResultTarget')
-      group = { key, id, name, label: id != null ? `${name} #${id}` : name, results: [], failed: 0, running: 0 }
+      group = { key, id, name, label: id != null ? `${name} #${id}` : name, results: [], failed: 0, skipped: 0, running: 0 }
       groups.set(key, group)
     }
     group.results.push(result)
     if (resultStatus(result) === 'failed') group.failed++
+    if (resultStatus(result) === 'skipped') group.skipped++
     if (isRunning(result)) group.running++
   }
   return [...groups.values()].sort((a, b) => (a.key === 'group' ? -2 : a.id ?? -1) - (b.key === 'group' ? -2 : b.id ?? -1))
@@ -180,8 +183,8 @@ const resultDuration = (result: TestResult) => {
   const duration = hours > 0 ? `${hours}:${minutePart}:${secondPart}` : `${minutePart}:${secondPart}`
   return t('admin.tests.elapsed', { duration })
 }
-const statusClass = (result: TestResult) => resultStatus(result) === 'failed' ? 'badge badge-danger' : ['running', 'unknown'].includes(resultStatus(result)) ? 'badge badge-warning' : resultStatus(result) === 'success' ? 'badge badge-success' : 'badge badge-gray'
-const statusLabel = (result: TestResult) => result.status === 'pending' ? t('admin.tests.queued') : isRunning(result) ? t('admin.scheduledTests.running') : result.status === 'failed' ? t('admin.scheduledTests.failed')
+const statusClass = (result: TestResult) => resultStatus(result) === 'failed' ? 'badge badge-danger' : ['running', 'unknown', 'skipped'].includes(resultStatus(result)) ? 'badge badge-warning' : resultStatus(result) === 'success' ? 'badge badge-success' : 'badge badge-gray'
+const statusLabel = (result: TestResult) => result.status === 'pending' ? t('admin.tests.queued') : isRunning(result) ? t('admin.scheduledTests.running') : isSkippedResult(result) ? t('admin.tests.skipped') : result.status === 'failed' ? t('admin.scheduledTests.failed')
   : result.output_kind === 'model_check' ? t(`tests.modelCheck.${result.output_model_check?.verdict || 'unknown'}`) : ['success', 'passed'].includes(result.status) ? t('admin.scheduledTests.success') : result.status
 const resultSummary = (result: TestResult) => {
   if (result.status === 'failed') return (result.error_message || t('admin.scheduledTests.failed')).slice(0, 180)

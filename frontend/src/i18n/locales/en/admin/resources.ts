@@ -135,7 +135,7 @@ export default {
       statistics: 'Last-hour statistics', statisticsHint: 'Aggregates local request records from the last hour without calling an upstream model. The rule schedule refreshes the snapshot; the selected model filters the requests.',
       modelCheck: 'Returned model consistency', modelCheckHint: 'Sends a short request and compares the actual upstream request model with the response model field. No prompt is required. Quality automation settings select the match mode; strict matching is the default. This check cannot verify the actual model identity or capabilities.',
       searchResultsAccount: 'Search account name or ID',
-      resultCount: '{count} results', failedCount: '{count} failed', runningCount: '{count} running',
+      resultCount: '{count} results', failedCount: '{count} failed', skippedCount: '{count} skipped', skipped: 'Skipped', runningCount: '{count} running',
       noMatchingResults: 'No matching results', allResultTypes: 'All check types', allResultStatuses: 'All statuses',
       groupResultTarget: 'Group check', unassignedResultTarget: 'Waiting for an account', executedByAccount: 'Execution account',
       expandResult: 'Expand result', collapseResult: 'Collapse result',

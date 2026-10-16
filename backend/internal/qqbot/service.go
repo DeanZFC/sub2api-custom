@@ -32,6 +32,7 @@ type Service struct {
 	tokenExpires    time.Time
 	groupBotMu      sync.Mutex
 	groupBots       map[string]groupBotIdentity
+	imageDownload   func(context.Context, string) ([]byte, error)
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 }
@@ -40,7 +41,7 @@ func New(db *sql.DB, encryptor Encryptor, ready bool, invalidate func(context.Co
 	if invalidate == nil {
 		invalidate = func(context.Context, int64) {}
 	}
-	return &Service{db: db, encryptor: encryptor, encryptionReady: ready, invalidate: invalidate, http: &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect}, tokenURL: "https://bots.qq.com/app/getAppAccessToken", qqURL: "https://api.sgroup.qq.com"}
+	return &Service{db: db, encryptor: encryptor, encryptionReady: ready, invalidate: invalidate, http: &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect}, imageDownload: downloadImage, tokenURL: "https://bots.qq.com/app/getAppAccessToken", qqURL: "https://api.sgroup.qq.com"}
 }
 func (s *Service) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -92,6 +93,7 @@ func (s *Service) maintenance(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_bind_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_limits WHERE day<CURRENT_DATE-2`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_conversations WHERE updated_at<NOW()-INTERVAL '1 day'`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_message_references WHERE created_at<NOW()-INTERVAL '24 hours'`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_daily_usage WHERE day<CURRENT_DATE-32`)
 	// Keep small deduplication tombstones for the signed event replay lifetime.
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_jobs WHERE created_at<NOW()-INTERVAL '30 days' AND status NOT IN ('queued','running')`)
@@ -343,17 +345,24 @@ func command(content string) (string, string) {
 	return fields[0], arg
 }
 func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error {
+	ref, err := s.referencedMessage(ctx, c, j.GroupID, e.referenceID())
+	if err != nil {
+		return err
+	}
 	if j.EventType == groupMessageCreate && !unmentionedGroupCommand(e, c.CustomCommands...) {
 		addressed, err := s.groupMessageMentionsBot(ctx, c, e)
 		if err != nil {
 			return err
 		}
-		if !addressed {
+		if !addressed && (ref == nil || len(groupMentionIDs(e)) > 0) {
 			return nil
 		}
 	}
+	j.ReplyReference = e.MessageScene.value("msg_idx")
+	parts, attachments := eventParts(e)
+	hasImages := len(imageAttachments(attachments)) > 0
 	cmd, arg := command(e.Content)
-	if strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(e.Content), "")) == "" {
+	if strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(e.Content), "")) == "" && !hasImages && parts == "" && e.referenceID() == "" {
 		cmd = "帮助"
 	}
 	text := ""
@@ -486,7 +495,10 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			break
 		}
 		kind := "chat"
-		prompt := strings.TrimSpace(e.Content)
+		prompt := strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(e.Content), ""))
+		if prompt == "" && (hasImages || parts != "" || e.referenceID() != "") {
+			prompt = "请分析这条消息的内容。"
+		}
 		if cmd == "生图" || cmd == "画图" {
 			kind = "image"
 			prompt = arg
@@ -521,15 +533,23 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			img, err = s.generateImage(ctx, c, prompt)
 		} else {
 			messages := s.history(ctx, c, *j)
-			messages = append(messages, Message{Role: "user", Content: prompt})
-			text, j.InputTokens, j.OutputTokens, err = s.chat(ctx, c, messages)
+			var input Message
+			input, err = s.chatMessage(ctx, e, prompt, ref)
+			if err == nil {
+				messages = append(messages, input)
+				text, j.InputTokens, j.OutputTokens, err = s.chat(ctx, c, messages)
+			} else {
+				text = err.Error()
+			}
 			if err == nil {
 				s.saveHistory(ctx, c, *j, append(messages, Message{Role: "assistant", Content: text}))
 			}
 		}
 		if err != nil {
 			// Record upstream failure distinctly from delivery failures. Never expose raw upstream bodies.
-			text = "回复生成失败，请稍后重试。"
+			if text == "" {
+				text = "回复生成失败，请稍后重试。"
+			}
 			if kind == "image" {
 				text = "图片生成失败，请稍后重试。"
 			}
@@ -585,6 +605,11 @@ func (s *Service) saveHistory(ctx context.Context, c Config, j Job, messages []M
 	var kept []Message
 	for _, m := range messages {
 		if m.Role == "user" || m.Role == "assistant" {
+			if len(m.Images) > 0 {
+				m.Content = limitText(m.Content, 2400)
+				m.Content += "\n（本条附带图片，历史记录不保存图片；需要复查细节时请重新发送。）"
+				m.Images = nil
+			}
 			m.Content = limitText(m.Content, 2500)
 			kept = append(kept, m)
 		}
