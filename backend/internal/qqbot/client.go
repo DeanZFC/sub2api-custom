@@ -438,7 +438,7 @@ func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []
 		return errors.New("回复窗口已过期")
 	}
 	base := "/v2/groups/" + url.PathEscape(j.GroupID)
-	body := map[string]any{"msg_type": 0, "content": groupReplyContent(text, j), "msg_id": j.MessageID, "msg_seq": seq}
+	body := map[string]any{"msg_id": j.MessageID, "msg_seq": seq}
 	if len(img) > 0 {
 		data, err := s.qqRequest(ctx, c, base+"/files", map[string]any{"file_type": 1, "file_name": "ctav.jpg", "file_data": base64.StdEncoding.EncodeToString(img), "srv_send_msg": false})
 		if err != nil {
@@ -450,20 +450,23 @@ func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []
 		if json.Unmarshal(data, &v) != nil || v.FileInfo == "" {
 			return errors.New("QQ 图片上传未返回文件信息")
 		}
-		body = map[string]any{"msg_type": 7, "media": map[string]string{"file_info": v.FileInfo}, "msg_id": j.MessageID, "msg_seq": seq}
+		body["msg_type"] = 7
+		body["media"] = map[string]string{"file_info": v.FileInfo}
+	} else if j.EventType == groupMessageCreate && j.MemberID != "" {
+		// Send explicit mentions through Markdown: group clients can display the
+		// same tag literally in plain-text messages (msg_type=0).
+		// https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html
+		text = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n" + strings.TrimLeft(text, "\n")
+		body["msg_type"] = 2
+		// QQ requires content/ark to be absent when markdown is supplied.
+		body["markdown"] = map[string]string{"content": limitText(text, 1800)}
+	} else {
+		// QQ adds the sender mention for GROUP_AT_MESSAGE_CREATE replies itself.
+		body["msg_type"] = 0
+		body["content"] = limitText(text, 1800)
 	}
 	_, err := s.qqRequest(ctx, c, base+"/messages", body)
 	return err
-}
-
-func groupReplyContent(text string, j Job) string {
-	// QQ adds the sender mention for GROUP_AT_MESSAGE_CREATE replies itself.
-	if j.EventType == groupMessageCreate && j.MemberID != "" {
-		// The legacy <@openid> syntax is rendered literally by QQ group clients.
-		// https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/text-chain.html
-		text = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n" + strings.TrimLeft(text, "\n")
-	}
-	return limitText(text, 1800)
 }
 
 func limitText(s string, n int) string {

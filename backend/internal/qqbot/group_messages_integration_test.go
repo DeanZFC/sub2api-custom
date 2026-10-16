@@ -46,13 +46,9 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		case "/v2/groups/group/files":
 			_, _ = w.Write([]byte(`{"file_info":"test-image"}`))
 		case "/v2/groups/group/messages":
-			var body struct {
-				Content string `json:"content"`
-				MsgType int    `json:"msg_type"`
-			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			if body.MsgType == 0 {
-				lastReply.Store(body.Content)
+			body := readQQTestReply(t, r)
+			if body.MsgType == 0 || body.MsgType == 2 {
+				lastReply.Store(body.text())
 			}
 			replies.Add(1)
 			_, _ = w.Write([]byte(`{"id":"sent"}`))

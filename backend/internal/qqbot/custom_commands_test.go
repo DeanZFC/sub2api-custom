@@ -2,7 +2,6 @@ package qqbot
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,11 +63,8 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 		case "/v2/groups/group/bot_state":
 			_, _ = w.Write([]byte(`{"member_openid":"this-bot"}`))
 		case "/v2/groups/group/messages":
-			var body struct {
-				Content string `json:"content"`
-			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			replies = append(replies, body.Content)
+			body := readQQTestReply(t, r)
+			replies = append(replies, body.text())
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
 			t.Errorf("custom commands must not call models: %s", r.URL.Path)

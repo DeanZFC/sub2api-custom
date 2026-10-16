@@ -99,11 +99,15 @@ func testEmailBindingWorkerAndConfirmation(t *testing.T, eventType string) {
 			return
 		}
 		require.Equal(t, "/v2/groups/group/messages", r.URL.Path)
-		var data struct {
-			Content string `json:"content"`
+		data := readQQTestReply(t, r)
+		wantType := 0
+		if eventType == groupMessageCreate {
+			wantType = 2
 		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&data))
-		reply = data.Content
+		require.Equal(t, wantType, data.MsgType)
+		require.Equal(t, "email-bind-message", data.MsgID)
+		require.Equal(t, 1, data.Sequence)
+		reply = data.text()
 		acknowledged.Store(true)
 		_, _ = w.Write([]byte(`{"id":"sent"}`))
 	}))
@@ -201,11 +205,8 @@ func TestQQBotBindingCommandAlreadyBound(t *testing.T) {
 					return
 				}
 				require.Equal(t, "/v2/groups/"+e.GroupID+"/messages", r.URL.Path)
-				var data struct {
-					Content string `json:"content"`
-				}
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&data))
-				replies = append(replies, data.Content)
+				data := readQQTestReply(t, r)
+				replies = append(replies, data.text())
 				_, _ = w.Write([]byte(`{"id":"sent"}`))
 			}))
 			defer qq.Close()
@@ -258,11 +259,8 @@ func TestQQBotBindingCommandEmailAlreadyBound(t *testing.T) {
 					return
 				}
 				require.Equal(t, "/v2/groups/"+e.GroupID+"/messages", r.URL.Path)
-				var data struct {
-					Content string `json:"content"`
-				}
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&data))
-				replies = append(replies, data.Content)
+				data := readQQTestReply(t, r)
+				replies = append(replies, data.text())
 				_, _ = w.Write([]byte(`{"id":"sent"}`))
 			}))
 			defer qq.Close()

@@ -290,11 +290,8 @@ func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 		case "/token":
 			_, _ = w.Write([]byte(`{"access_token":"test-only","expires_in":7200}`))
 		case "/v2/groups/group/messages":
-			var body struct {
-				Content string `json:"content"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			replies = append(replies, body.Content)
+			body := readQQTestReply(t, r)
+			replies = append(replies, body.text())
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
 			t.Errorf("activity command called unexpected endpoint: %s", r.URL.Path)

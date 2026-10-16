@@ -2,7 +2,6 @@ package qqbot
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -117,12 +116,8 @@ func channelStatusSender(t *testing.T, failAt int) (*Service, *[]channelStatusRe
 		case "/token":
 			_, _ = w.Write([]byte(`{"access_token":"test-only","expires_in":7200}`))
 		case "/v2/groups/group/messages":
-			var body channelStatusReply
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Error(err)
-				w.WriteHeader(400)
-				return
-			}
+			message := readQQTestReply(t, r)
+			body := channelStatusReply{Content: message.text(), Sequence: message.Sequence}
 			replies = append(replies, body)
 			if failAt > 0 && body.Sequence == failAt {
 				w.WriteHeader(500)

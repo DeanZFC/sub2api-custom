@@ -44,7 +44,7 @@
 
 功能指令必须以 `/` 开头。帮助、渠道状态、绑定、签到、额度和奖励查询、抽奖、活动查询及生图无需 @ 机器人；普通聊天必须 @ 机器人。无需 @ 机器人的群指令会在每条文本回复开头 @ 发起人；@ 机器人触发的被动回复沿用 QQ 自动添加的 @，避免重复提及。`/帮助` 每条使用两行：第一行为 `指令：/指令及参数`，第二行为 `说明：简短说明`，条目之间空一行；消息开头换行，让回复 @ 与帮助列表分行。不显示分组标题或费用说明。普通群消息和未 @ 的未知指令会被忽略；@ 后的未知指令仅返回帮助提示，不调用模型。
 
-全量群消息的回复使用 QQ 官方文本交互格式 `<qqbot-at-user id="member_openid" />` 提及发起人；旧的 `<@openid>` 格式可能被客户端原样显示。格式依据：[QQ 文本交互](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/text-chain.html)。
+全量群消息的文本回复通过 Markdown 消息（`msg_type=2`，`markdown.content`）发送 `<qqbot-at-user id="member_openid" />` 和正文，且不同时传顶层 `content`。纯文本消息（`msg_type=0`）实测会将 @ 标签原样显示，仅替换标签不能解决；旧的 `<@openid>` 也不再使用。正文按 QQ Markdown 格式渲染，多行内容保留换行。@ 机器人触发的回复继续使用 QQ 自动提及，图片继续使用独立富媒体消息。Markdown 发送失败时保留错误，不退回携带标签的纯文本。协议依据：[QQ 文本交互](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/text-chain.html)、[发送群聊消息](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html)、[Markdown 消息](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/markdown.html)。QQ 客户端的实际 @ 展示仍需部署后在群内验收。
 
 只 @ 机器人而不输入其他内容（包含仅有空白字符）时，直接返回与 `/帮助` 相同的完整帮助，不调用模型。
 

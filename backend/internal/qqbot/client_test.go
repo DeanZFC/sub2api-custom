@@ -111,6 +111,11 @@ func TestImagesGenerateThenReuseSavedBytesForDelivery(t *testing.T) {
 			_, _ = w.Write([]byte(`{"file_info":"uploaded"}`))
 		case "/v2/groups/group/messages":
 			messages++
+			body := readQQTestReply(t, r)
+			require.Equal(t, 7, body.MsgType)
+			require.Equal(t, "uploaded", body.Media.FileInfo)
+			require.Equal(t, "msg", body.MsgID)
+			require.Equal(t, messages+1, body.Sequence)
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -128,7 +133,7 @@ func TestImagesGenerateThenReuseSavedBytesForDelivery(t *testing.T) {
 	c.AppSecret = "qq-secret"
 	img, err := s.generateImage(context.Background(), c, "cat")
 	require.NoError(t, err)
-	j := Job{GroupID: "group", MessageID: "msg", CreatedAt: time.Now()}
+	j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: "member", MessageID: "msg", CreatedAt: time.Now()}
 	require.NoError(t, s.send(context.Background(), c, j, "", img, 2))
 	require.NoError(t, s.send(context.Background(), c, j, "", img, 3))
 	require.Equal(t, 1, generates)
@@ -138,24 +143,16 @@ func TestImagesGenerateThenReuseSavedBytesForDelivery(t *testing.T) {
 	require.Error(t, s.send(context.Background(), c, j, "", img, 4))
 	require.Equal(t, 2, uploads)
 }
-func TestGroupTextReplyUsesQQMentionMarkup(t *testing.T) {
-	var content string
+func TestGroupReplySendsExplicitMentionAsMarkdown(t *testing.T) {
+	var reply qqTestReply
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
 			_, _ = w.Write([]byte(`{"access_token":"qq-token","expires_in":"7200"}`))
 		case "/v2/groups/group/messages":
-			var body struct {
-				Content string `json:"content"`
-				MsgType int    `json:"msg_type"`
-				MsgID   string `json:"msg_id"`
-				MsgSeq  int    `json:"msg_seq"`
-			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			require.Equal(t, 0, body.MsgType)
-			require.Equal(t, "incoming", body.MsgID)
-			require.Equal(t, 1, body.MsgSeq)
-			content = body.Content
+			reply = readQQTestReply(t, r)
+			require.Equal(t, "incoming", reply.MsgID)
+			require.Equal(t, 1, reply.Sequence)
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -171,21 +168,48 @@ func TestGroupTextReplyUsesQQMentionMarkup(t *testing.T) {
 	const mention = `<qqbot-at-user id="` + memberID + `" />`
 	for _, tc := range []struct {
 		name, eventType, memberID, text, want string
+		wantType                              int
 	}{
-		{"command", groupMessageCreate, memberID, "回复正文", mention + "\n回复正文"},
-		{"email binding acknowledgement", groupMessageCreate, memberID, emailBindingAccepted, mention + "\n" + emailBindingAccepted},
-		{"help newline", groupMessageCreate, memberID, "\n指令：/帮助", mention + "\n指令：/帮助"},
-		{"QQ automatic mention", groupAtMessageCreate, memberID, "回复正文", "回复正文"},
-		{"missing sender", groupMessageCreate, "", "回复正文", "回复正文"},
-		{"escaped sender", groupMessageCreate, `member"<&`, "回复正文", "<qqbot-at-user id=\"member&#34;&lt;&amp;\" />\n回复正文"},
+		{"command", groupMessageCreate, memberID, "回复正文", mention + "\n回复正文", 2},
+		{"email binding acknowledgement", groupMessageCreate, memberID, emailBindingAccepted, mention + "\n" + emailBindingAccepted, 2},
+		{"help newline", groupMessageCreate, memberID, "\n指令：/帮助\n说明：查看帮助\n\n指令：/签到", mention + "\n指令：/帮助\n说明：查看帮助\n\n指令：/签到", 2},
+		{"QQ automatic mention", groupAtMessageCreate, memberID, "回复正文", "回复正文", 0},
+		{"automatic mention help", groupAtMessageCreate, memberID, "\n指令：/帮助", "\n指令：/帮助", 0},
+		{"missing sender", groupMessageCreate, "", "回复正文", "回复正文", 0},
+		{"escaped sender", groupMessageCreate, `member"<&`, "回复正文", "<qqbot-at-user id=\"member&#34;&lt;&amp;\" />\n回复正文", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			j := Job{EventType: tc.eventType, GroupID: "group", MemberID: tc.memberID, MessageID: "incoming", CreatedAt: time.Now()}
 			require.NoError(t, s.send(context.Background(), c, j, tc.text, nil, 1))
-			require.Equal(t, tc.want, content)
-			require.NotContains(t, content, "<@")
+			require.Equal(t, tc.wantType, reply.MsgType)
+			require.Equal(t, tc.want, reply.text())
+			require.NotContains(t, reply.text(), "<@")
 		})
 	}
+}
+
+func TestGroupMentionMarkdownRejectionDoesNotSendLiteralTagFallback(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			_, _ = w.Write([]byte(`{"access_token":"qq-token","expires_in":7200}`))
+			return
+		}
+		require.Equal(t, "/v2/groups/group/messages", r.URL.Path)
+		calls++
+		reply := readQQTestReply(t, r)
+		require.Equal(t, 2, reply.MsgType)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":40034127}`))
+	}))
+	defer server.Close()
+	s := New(nil, nil, false, nil)
+	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
+	c := DefaultConfig()
+	c.AppID, c.AppSecret = "app", "qq-secret"
+	j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: "member", MessageID: "incoming", CreatedAt: time.Now()}
+	require.ErrorContains(t, s.send(context.Background(), c, j, emailBindingAccepted, nil, 1), "40034127")
+	require.Equal(t, 1, calls)
 }
 
 func TestUpstreamErrorsDoNotExposeCredentialsOrRetry(t *testing.T) {
