@@ -23,7 +23,7 @@ var customCommandPattern = regexp.MustCompile(`^/[\p{L}\p{N}_-]{1,32}$`)
 
 func isBuiltinCommand(cmd string) bool {
 	switch cmd {
-	case "帮助", "help", "渠道状态", "绑定", "签到", "邀请奖励", "邀请活动", "我的邀请", "我的额度", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动", "生图", "画图":
+	case "帮助", "help", "渠道状态", "绑定", "签到", "邀请奖励", "邀请活动", "我的邀请", "我的余额", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动", "生图", "画图", "转账":
 		return true
 	}
 	return false

@@ -380,7 +380,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		for i, item := range []struct{ command, description string }{
 			{"/帮助", "查看帮助"},
 			{"/签到", "每日签到"},
-			{"/我的额度", "查询账户额度"},
+			{"/我的余额", "查询账户余额"},
 			{"/我的奖励", "查询各项累计奖励"},
 			{"/渠道状态", "查询整体及各分组的成功率、缓存率和首 Token"},
 			{"/绑定 邮箱或绑定码", "绑定账号"},
@@ -482,7 +482,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			s.deliverTransferEmail(ctx, pending)
 			return nil
 		}
-	case "我的额度":
+	case "我的余额":
 		var balance float64
 		err := s.db.QueryRowContext(ctx, `SELECT u.balance FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.deleted_at IS NULL AND u.status='active'`, c.AppID, j.MemberID).Scan(&balance)
 		if errors.Is(err, sql.ErrNoRows) {
