@@ -11,19 +11,39 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const rechargeRequirementWindow = 30 * 24 * time.Hour
+const (
+	// DefaultRechargeWindowDays preserves the historical recharge window.
+	DefaultRechargeWindowDays = 30
+	maxRechargeWindowDays     = 3650
+)
 
 // RechargeRequirement describes the optional qualification for a group
 // activity. If both thresholds are configured, satisfying either one is
 // enough to participate. Zero disables that side of the requirement.
 type RechargeRequirement struct {
 	MinRechargeTotal float64 `json:"min_recharge_total"`
-	MinRecharge30d   float64 `json:"min_recharge_30d"`
+	// Keep the existing JSON key so saved thresholds survive upgrades.
+	MinRecharge30d     float64 `json:"min_recharge_30d"`
+	RechargeWindowDays int     `json:"recharge_window_days" binding:"min=1,max=3650"`
 }
 
 type RechargeEligibility struct {
-	Total   decimal.Decimal
-	Last30d decimal.Decimal
+	Total  decimal.Decimal
+	Recent decimal.Decimal
+}
+
+func (r RechargeRequirement) windowDays() int {
+	if r.RechargeWindowDays == 0 {
+		return DefaultRechargeWindowDays
+	}
+	return r.RechargeWindowDays
+}
+
+func (c Config) inviteRechargeRequirement() RechargeRequirement {
+	return RechargeRequirement{
+		MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d,
+		RechargeWindowDays: c.InviteRechargeWindowDays,
+	}
 }
 
 func validRechargeThreshold(n float64) bool {
@@ -31,6 +51,10 @@ func validRechargeThreshold(n float64) bool {
 }
 
 func validateRechargeRequirement(r RechargeRequirement) error {
+	// Zero is the legacy value when the window was not configurable.
+	if r.RechargeWindowDays < 0 || r.RechargeWindowDays > maxRechargeWindowDays {
+		return fmt.Errorf("充值统计天数需为 1 到 %d 的整数；未设置时默认 30 天", maxRechargeWindowDays)
+	}
 	if !validRechargeThreshold(r.MinRechargeTotal) || !validRechargeThreshold(r.MinRecharge30d) {
 		return errors.New("充值参与门槛需在 0 到 1000000000 USD 之间，最多 2 位小数；0 表示不启用该门槛")
 	}
@@ -46,7 +70,7 @@ func (r RechargeRequirement) satisfied(e RechargeEligibility) bool {
 		return true
 	}
 	return (r.MinRechargeTotal > 0 && e.Total.GreaterThanOrEqual(decimal.NewFromFloat(r.MinRechargeTotal))) ||
-		(r.MinRecharge30d > 0 && e.Last30d.GreaterThanOrEqual(decimal.NewFromFloat(r.MinRecharge30d)))
+		(r.MinRecharge30d > 0 && e.Recent.GreaterThanOrEqual(decimal.NewFromFloat(r.MinRecharge30d)))
 }
 
 func money(n float64) string { return fmt.Sprintf("$%.2f", n) }
@@ -57,7 +81,7 @@ func (r RechargeRequirement) describe() string {
 		parts = append(parts, fmt.Sprintf("累计有效充值满 %s", money(r.MinRechargeTotal)))
 	}
 	if r.MinRecharge30d > 0 {
-		parts = append(parts, fmt.Sprintf("近 30 天有效充值满 %s", money(r.MinRecharge30d)))
+		parts = append(parts, fmt.Sprintf("近 %d 天有效充值满 %s", r.windowDays(), money(r.MinRecharge30d)))
 	}
 	if len(parts) == 0 {
 		return "无需充值门槛"
@@ -66,7 +90,7 @@ func (r RechargeRequirement) describe() string {
 }
 
 func (r RechargeRequirement) failure(activity string, e RechargeEligibility) string {
-	return fmt.Sprintf("暂不满足%s参与条件。\n参与条件：%s。\n当前累计有效充值：$%s；近 30 天有效充值：$%s。", activity, r.describe(), e.Total.StringFixed(2), e.Last30d.StringFixed(2))
+	return fmt.Sprintf("暂不满足%s参与条件。\n参与条件：%s。\n当前累计有效充值：$%s；近 %d 天有效充值：$%s。", activity, r.describe(), e.Total.StringFixed(2), r.windowDays(), e.Recent.StringFixed(2))
 }
 
 func (r RechargeRequirement) invite() string {
@@ -120,8 +144,11 @@ func rechargeSum(ctx context.Context, db queryRower, uid int64, since *time.Time
 	return total.Add(codeTotal), nil
 }
 
-func rechargeEligibility(ctx context.Context, db queryRower, uid int64, lockSources bool) (RechargeEligibility, error) {
-	cutoff := time.Now().Add(-rechargeRequirementWindow)
+func (r RechargeRequirement) eligibility(ctx context.Context, db queryRower, uid int64, lockSources bool) (RechargeEligibility, error) {
+	if err := validateRechargeRequirement(r); err != nil {
+		return RechargeEligibility{}, err
+	}
+	cutoff := time.Now().Add(-time.Duration(r.windowDays()) * 24 * time.Hour)
 	total, err := rechargeSum(ctx, db, uid, nil, lockSources)
 	if err != nil {
 		return RechargeEligibility{}, err
@@ -130,5 +157,5 @@ func rechargeEligibility(ctx context.Context, db queryRower, uid int64, lockSour
 	if err != nil {
 		return RechargeEligibility{}, err
 	}
-	return RechargeEligibility{Total: total, Last30d: recent}, nil
+	return RechargeEligibility{Total: total, Recent: recent}, nil
 }

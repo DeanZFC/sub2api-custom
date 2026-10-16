@@ -76,7 +76,7 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 	if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 		return "邀请活动未开启。", nil
 	}
-	requirement := RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}
+	requirement := c.inviteRechargeRequirement()
 	conditions := "参与条件：收到官方邀请申请，7 天内成功入群且仍在群内；双方绑定有效网站账号；同一被邀请账号仅奖励一次。"
 	var userID int64
 	err := s.db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
@@ -104,7 +104,7 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 	info := fmt.Sprintf("单人奖励：$%.2f\n今日邀请入群：%d 人\n今日已奖励：%d 人\n每日奖励上限：%d 人\n%s\n%s\n每日按北京时间统计。",
 		c.InviteReward, joined, rewarded, c.InviteDailyLimit, conditions, requirement.invite())
 	if requirement.enabled() {
-		eligibility, eligibilityErr := rechargeEligibility(ctx, s.db, userID, false)
+		eligibility, eligibilityErr := requirement.eligibility(ctx, s.db, userID, false)
 		if eligibilityErr != nil {
 			return "", eligibilityErr
 		}
@@ -112,7 +112,7 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 		if !requirement.satisfied(eligibility) {
 			status = "未满足"
 		}
-		info += fmt.Sprintf("\n充值资格：%s。当前累计有效充值：$%s；近 30 天有效充值：$%s。", status, eligibility.Total.StringFixed(2), eligibility.Last30d.StringFixed(2))
+		info += fmt.Sprintf("\n充值资格：%s。当前累计有效充值：$%s；近 %d 天有效充值：$%s。", status, eligibility.Total.StringFixed(2), requirement.windowDays(), eligibility.Recent.StringFixed(2))
 	}
 	return info, nil
 }

@@ -263,7 +263,7 @@ func (s *Service) settleInvites(ctx context.Context, c Config, member string) er
 		return nil
 	}
 	eligibleAsInviter := true
-	requirement := RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}
+	requirement := c.inviteRechargeRequirement()
 	if requirement.enabled() {
 		var userID int64
 		err := s.db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
@@ -274,7 +274,7 @@ func (s *Service) settleInvites(ctx context.Context, c Config, member string) er
 		if err != nil {
 			return err
 		}
-		eligibility, err := rechargeEligibility(ctx, s.db, userID, false)
+		eligibility, err := requirement.eligibility(ctx, s.db, userID, false)
 		if err != nil {
 			return err
 		}

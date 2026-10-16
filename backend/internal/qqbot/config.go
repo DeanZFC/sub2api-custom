@@ -86,7 +86,7 @@ func validateConfig(c Config) error {
 			return errors.New("奖励需为 0 到 1000 之间的数值，最多 8 位小数；0 表示关闭")
 		}
 	}
-	if err := validateRechargeRequirement(RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}); err != nil {
+	if err := validateRechargeRequirement(c.inviteRechargeRequirement()); err != nil {
 		return err
 	}
 	if len(c.SystemPrompt) > 8000 || len(c.ChatModel) > 200 || len(c.ImageModel) > 200 || len(c.AllowedGroups) > 100 {
@@ -123,6 +123,7 @@ func (s *Service) SaveBasicConfig(ctx context.Context, c Config) (Config, error)
 		c.InviteDailyLimit = old.InviteDailyLimit
 		c.InviteMinRechargeTotal = old.InviteMinRechargeTotal
 		c.InviteMinRecharge30d = old.InviteMinRecharge30d
+		c.InviteRechargeWindowDays = old.InviteRechargeWindowDays
 		return c
 	})
 }

@@ -153,10 +153,13 @@ func visitInviteRecords(ctx context.Context, tx *sql.Tx, c Config, relationships
 	args = append(args, day(time.Now()))
 	qualificationSelect := "true"
 	qualificationJoins := ""
-	requirement := RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}
+	requirement := c.inviteRechargeRequirement()
 	if includeRechargeEligibility && requirement.enabled() {
+		if err := validateRechargeRequirement(requirement); err != nil {
+			return err
+		}
 		windowParam := fmt.Sprintf("$%d::timestamptz", len(args)+1)
-		args = append(args, time.Now().Add(-rechargeRequirementWindow))
+		args = append(args, time.Now().Add(-time.Duration(requirement.windowDays())*24*time.Hour))
 		lifetimeParam := fmt.Sprintf("$%d::numeric", len(args)+1)
 		recentParam := fmt.Sprintf("$%d::numeric", len(args)+2)
 		args = append(args, requirement.MinRechargeTotal, requirement.MinRecharge30d)

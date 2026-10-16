@@ -4,6 +4,7 @@ package qqbot
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ func TestCheckinRechargeThresholdsRejectWithoutConsumingDay(t *testing.T) {
 	c, err := s.Config(ctx)
 	require.NoError(t, err)
 	cfg := CheckinConfig{Enabled: true, MinAmount: .1, MaxAmount: .1,
-		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 25, MinRecharge30d: 10}}
+		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 25, MinRecharge30d: 10, RechargeWindowDays: 7}}
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
 	got, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
@@ -38,16 +39,21 @@ func TestCheckinRechargeThresholdsRejectWithoutConsumingDay(t *testing.T) {
 	text, err = s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
 	require.Contains(t, text, "暂不满足签到参与条件")
-	require.Contains(t, text, "累计有效充值满 $100.00 或 近 30 天有效充值满 $10.00")
-	require.Contains(t, text, "当前累计有效充值：$20.00；近 30 天有效充值：$0.00")
+	require.Contains(t, text, "累计有效充值满 $100.00 或 近 7 天有效充值满 $10.00")
+	require.Contains(t, text, "当前累计有效充值：$20.00；近 7 天有效充值：$0.00")
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_rewards WHERE user_id=$1`, recent).Scan(&count))
 	require.Zero(t, count)
-	_, err = db.Exec(`INSERT INTO payment_orders(user_id,amount) VALUES($1,10)`, recent)
+	_, err = db.Exec(`INSERT INTO payment_orders(user_id,amount,completed_at) VALUES($1,10,NOW()-INTERVAL '8 days')`, recent)
 	require.NoError(t, err)
 	text, err = s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
-	require.Contains(t, text, "签到成功", "recent threshold works independently and the rejected attempt did not consume the day")
+	require.Contains(t, text, "暂不满足签到参与条件", "an eight-day-old recharge does not qualify for a seven-day window")
+	cfg.RechargeWindowDays = 10
+	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
+	text, err = s.reward(ctx, c, j, "checkin")
+	require.NoError(t, err)
+	require.Contains(t, text, "签到成功", "expanding the window qualifies the same recharge without consuming the earlier attempt")
 	text, err = s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
 	require.Equal(t, "今日已签到。", text)
@@ -60,20 +66,26 @@ func TestRechargeEligibilityUsesPrincipalCodesAndRollingWindow(t *testing.T) {
 	_, err := db.Exec(`INSERT INTO payment_orders(user_id,amount,bonus_amount,refund_amount,status,completed_at,recharge_code) VALUES
  ($1,100,0,0,'COMPLETED',NOW()-INTERVAL '31 days','old'),
  ($1,25,5,0,'COMPLETED',NOW(),'online'),
+ ($1,4,0,0,'COMPLETED',NOW()-INTERVAL '20 days','twenty-days'),
  ($1,20,4,10,'PARTIALLY_REFUNDED',NOW(),'partial'),
  ($1,99,0,99,'REFUNDING',NOW(),'refunding'),
  ($1,99,0,0,'PENDING',NULL,'pending')`, uid)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO redeem_codes(code,type,value,status,used_by,used_at) VALUES
- ('recent','balance',3,'used',$1,NOW()),('old-code','balance',2,'used',$1,NOW()-INTERVAL '31 days'),
+ ('recent','balance',3,'used',$1,NOW()),('twenty-code','balance',6,'used',$1,NOW()-INTERVAL '20 days'),('old-code','balance',2,'used',$1,NOW()-INTERVAL '31 days'),
  ('online','balance',25,'used',$1,NOW()),('refunding','balance',99,'used',$1,NOW()),
  ('pending','balance',99,'used',$1,NOW()),('gift','admin_balance',100,'used',$1,NOW()),
  ('unused','balance',100,'unused',$1,NULL)`, uid)
 	require.NoError(t, err)
-	e, err := rechargeEligibility(ctx, db, uid, false)
-	require.NoError(t, err)
-	require.Equal(t, "133", e.Total.String())
-	require.Equal(t, "31", e.Last30d.String())
+	for _, tc := range []struct {
+		days   int
+		recent string
+	}{{0, "41"}, {1, "31"}, {7, "31"}, {30, "41"}, {60, "143"}, {3650, "143"}} {
+		e, err := (RechargeRequirement{RechargeWindowDays: tc.days}).eligibility(ctx, db, uid, false)
+		require.NoError(t, err)
+		require.Equal(t, "143", e.Total.String())
+		require.Equal(t, tc.recent, e.Recent.String(), "window: %d days", tc.days)
+	}
 }
 
 func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
@@ -81,7 +93,7 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	db := testDB(t)
 	s := savedBot(t, db)
 	cfg := InviteConfig{InviteReward: 1.25, InviteDailyLimit: 10,
-		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 50, MinRecharge30d: 10}}
+		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 50, MinRecharge30d: 10, RechargeWindowDays: 60}}
 	require.NoError(t, s.SaveInviteConfig(ctx, cfg))
 	c, err := s.Config(ctx)
 	require.NoError(t, err)
@@ -106,15 +118,26 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	require.Equal(t, "recharge_required", page.Items[0].Status)
 	info, err := s.inviteInfo(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
-	require.Contains(t, info, "累计有效充值满 $50.00 或 近 30 天有效充值满 $10.00")
+	require.Contains(t, info, "累计有效充值满 $50.00 或 近 60 天有效充值满 $10.00")
 	require.Contains(t, info, "按邀请人账号计算")
 	require.Contains(t, info, "充值资格：未满足")
 	info, err = s.inviteInfo(ctx, c, Job{MemberID: "unbound"})
 	require.NoError(t, err)
 	require.Contains(t, info, "累计有效充值满 $50.00")
 	require.Contains(t, info, "请先使用 /绑定")
-	_, err = db.Exec(`INSERT INTO redeem_codes(code,type,value,status,used_by,used_at) VALUES('qualified','balance',10,'used',$1,NOW())`, inviter)
+	require.Contains(t, info, "近 60 天有效充值满 $10.00")
+	_, err = db.Exec(`INSERT INTO redeem_codes(code,type,value,status,used_by,used_at) VALUES('qualified','balance',10,'used',$1,NOW()-INTERVAL '45 days')`, inviter)
 	require.NoError(t, err)
+	page, err = s.ListActivityRecords(ctx, "invite", "", 1, 20)
+	require.NoError(t, err)
+	require.Equal(t, "pending_reward", page.Items[0].Status, "admin records use the configured 60-day window")
+	cfg.RechargeWindowDays = 7
+	require.NoError(t, s.SaveInviteConfig(ctx, cfg))
+	page, err = s.ListActivityRecords(ctx, "invite", "", 1, 20)
+	require.NoError(t, err)
+	require.Equal(t, "recharge_required", page.Items[0].Status, "shortening the window updates the qualification status")
+	cfg.RechargeWindowDays = 60
+	require.NoError(t, s.SaveInviteConfig(ctx, cfg))
 	for range 2 {
 		require.NoError(t, s.SettleInvites(ctx, "inviter"))
 	}
@@ -126,6 +149,7 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	info, err = s.inviteInfo(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
 	require.Contains(t, info, "充值资格：已满足")
+	require.Contains(t, info, "近 60 天有效充值：$10.00")
 	require.Contains(t, info, "今日已奖励：1 人")
 }
 
@@ -171,4 +195,30 @@ func TestCheckinRechargeEligibilityWaitsForRefund(t *testing.T) {
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
 	require.Zero(t, balance)
+}
+
+func TestLegacyRechargeWindowsAndIndependentActivitySettings(t *testing.T) {
+	ctx := context.Background()
+	db := testDB(t)
+	s := savedBot(t, db)
+	_, err := db.Exec("UPDATE settings SET value=(value::jsonb - 'invite_recharge_window_days')::text WHERE key=$1", configKey)
+	require.NoError(t, err)
+	require.NoError(t, s.saveActivityConfig(ctx, checkinConfigKey, checkinConfigLock, json.RawMessage("{\"enabled\":true,\"min_amount\":0.1,\"max_amount\":0.1,\"min_recharge_30d\":5}")))
+	checkin, err := s.CheckinConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 30, checkin.RechargeWindowDays)
+	require.Equal(t, float64(5), checkin.MinRecharge30d)
+	invite, err := s.InviteConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 30, invite.RechargeWindowDays)
+	checkin.RechargeWindowDays = 7
+	invite.RechargeWindowDays = 60
+	require.NoError(t, s.SaveCheckinConfig(ctx, checkin))
+	require.NoError(t, s.SaveInviteConfig(ctx, invite))
+	gotCheckin, err := s.CheckinConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, checkin, gotCheckin)
+	gotInvite, err := s.InviteConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, invite, gotInvite)
 }

@@ -335,7 +335,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 			return "邀请奖励未开启。", nil
 		}
 		amount = c.InviteReward
-		requirement = RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d}
+		requirement = c.inviteRechargeRequirement()
 	}
 	// Serialize reward eligibility and balance writes, including across replicas.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {
@@ -387,7 +387,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		return "该邀请奖励已发放。", nil
 	}
 	if kind == "checkin" && requirement.enabled() {
-		eligibility, eligibilityErr := rechargeEligibility(ctx, tx, userID, true)
+		eligibility, eligibilityErr := requirement.eligibility(ctx, tx, userID, true)
 		if eligibilityErr != nil {
 			return "", eligibilityErr
 		}
@@ -414,7 +414,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 			return "本人邀请不计奖励。", nil
 		}
 		if requirement.enabled() {
-			eligibility, eligibilityErr := rechargeEligibility(ctx, tx, userID, true)
+			eligibility, eligibilityErr := requirement.eligibility(ctx, tx, userID, true)
 			if eligibilityErr != nil {
 				return "", eligibilityErr
 			}

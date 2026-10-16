@@ -12,9 +12,10 @@
       <div class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
         <h2 class="font-medium">{{ t('qqbot.rechargeEligibility') }}</h2>
         <p class="text-sm text-gray-500">{{ t('qqbot.rechargeEligibilityHelp') }}</p>
+        <label class="block space-y-1">{{ t('qqbot.rechargeWindowDays') }}<input v-model.number="form.recharge_window_days" data-testid="recharge-window-days" type="number" min="1" max="3650" step="1" required class="input" /></label>
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="space-y-1">{{ t('qqbot.minimumLifetimeRecharge') }}<input v-model.number="form.min_recharge_total" data-testid="min-recharge-total" type="number" min="0" max="1000000000" step="0.01" required class="input" /></label>
-          <label class="space-y-1">{{ t('qqbot.minimum30dRecharge') }}<input v-model.number="form.min_recharge_30d" data-testid="min-recharge-30d" type="number" min="0" max="1000000000" step="0.01" required class="input" /></label>
+          <label class="space-y-1">{{ t('qqbot.minimumRecentRecharge', { days: form.recharge_window_days }) }}<input v-model.number="form.min_recharge_30d" data-testid="min-recharge-30d" type="number" min="0" max="1000000000" step="0.01" required class="input" /></label>
         </div>
       </div>
       <p class="rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-800">{{ t('qqbot.checkinRangeHelp') }}</p>
@@ -38,13 +39,17 @@ async function save() {
   error.value = ''; notice.value = ''
   if (!Number.isFinite(form.value.min_amount) || !Number.isFinite(form.value.max_amount) || form.value.min_amount > form.value.max_amount) { error.value = t('qqbot.invalidRange'); return }
   if (![form.value.min_recharge_total, form.value.min_recharge_30d].every(n => Number.isFinite(n) && n >= 0 && n <= 1_000_000_000 && Number(n.toFixed(2)) === n)) { error.value = t('qqbot.invalidRechargeThreshold'); return }
+  if (!Number.isInteger(form.value.recharge_window_days) || form.value.recharge_window_days < 1 || form.value.recharge_window_days > 3650) { error.value = t('qqbot.invalidRechargeWindow'); return }
   busy.value = true
   try { form.value = await qqbotAPI.saveCheckin({ ...form.value }); notice.value = t('common.saved') }
   catch (e) { error.value = (e as Error).message || t('common.error') }
   finally { busy.value = false }
 }
 onMounted(async () => {
-  try { form.value = await qqbotAPI.checkinConfig() }
+  try {
+    const config = await qqbotAPI.checkinConfig()
+    form.value = { ...config, recharge_window_days: config.recharge_window_days || 30 }
+  }
   catch (e) { error.value = (e as Error).message || t('common.error') }
 })
 </script>

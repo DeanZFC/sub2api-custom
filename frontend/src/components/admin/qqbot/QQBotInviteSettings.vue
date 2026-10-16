@@ -18,13 +18,14 @@
       <div class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
         <h3 class="font-medium">{{ t('qqbot.rechargeEligibility') }}</h3>
         <p class="text-sm text-gray-500">{{ t('qqbot.inviteRechargeEligibilityHelp') }}</p>
+        <label class="block space-y-1">{{ t('qqbot.rechargeWindowDays') }}<input v-model.number="form.recharge_window_days" data-testid="invite-recharge-window-days" type="number" min="1" max="3650" step="1" required class="input" /></label>
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="space-y-1">
             {{ t('qqbot.minimumLifetimeRecharge') }}
             <input v-model.number="form.min_recharge_total" data-testid="invite-min-recharge-total" class="input" type="number" min="0" max="1000000000" step="0.01" required />
           </label>
           <label class="space-y-1">
-            {{ t('qqbot.minimum30dRecharge') }}
+            {{ t('qqbot.minimumRecentRecharge', { days: form.recharge_window_days }) }}
             <input v-model.number="form.min_recharge_30d" data-testid="invite-min-recharge-30d" class="input" type="number" min="0" max="1000000000" step="0.01" required />
           </label>
         </div>
@@ -55,6 +56,11 @@ async function save() {
     busy.value = false
     return
   }
+  if (!Number.isInteger(form.value.recharge_window_days) || form.value.recharge_window_days < 1 || form.value.recharge_window_days > 3650) {
+    error.value = t('qqbot.invalidRechargeWindow')
+    busy.value = false
+    return
+  }
   try {
     form.value = await qqbotAPI.saveInvite({ ...form.value })
     notice.value = t('common.saved')
@@ -65,7 +71,10 @@ async function save() {
   }
 }
 onMounted(async () => {
-  try { form.value = await qqbotAPI.inviteConfig() }
+  try {
+    const config = await qqbotAPI.inviteConfig()
+    form.value = { ...config, recharge_window_days: config.recharge_window_days || 30 }
+  }
   catch (e) { error.value = (e as Error).message || t('common.error') }
 })
 </script>

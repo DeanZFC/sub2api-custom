@@ -18,7 +18,7 @@ func TestActivityAndBasicConfigSavesPreserveEachOther(t *testing.T) {
 	// An already-open basic form contains invitation settings from before the activity edit.
 	staleBasic := original.Public()
 	invite := InviteConfig{InviteReward: 2.5, InviteDailyLimit: 8,
-		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 20, MinRecharge30d: 5}}
+		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 20, MinRecharge30d: 5, RechargeWindowDays: 7}}
 	require.NoError(t, s.SaveInviteConfig(ctx, invite))
 	staleBasic.ChatModel = "updated-model"
 	_, err = s.SaveBasicConfig(ctx, staleBasic)
@@ -34,6 +34,7 @@ func TestActivityAndBasicConfigSavesPreserveEachOther(t *testing.T) {
 	require.Equal(t, invite.InviteReward, got.InviteReward)
 	require.Equal(t, invite.MinRechargeTotal, got.InviteMinRechargeTotal)
 	require.Equal(t, invite.MinRecharge30d, got.InviteMinRecharge30d)
+	require.Equal(t, invite.RechargeWindowDays, got.InviteRechargeWindowDays)
 	require.Equal(t, original.AppSecret, got.AppSecret)
 	require.Equal(t, original.APIKey, got.APIKey)
 	require.Equal(t, original.AllowedGroups, got.AllowedGroups)
@@ -44,7 +45,7 @@ func TestActivityAndBasicConfigSavesPreserveEachOther(t *testing.T) {
 		basic := got.Public()
 		basic.ChatModel = fmt.Sprintf("concurrent-model-%d", i)
 		nextInvite := InviteConfig{InviteReward: float64(i), InviteDailyLimit: i,
-			RechargeRequirement: RechargeRequirement{MinRechargeTotal: float64(i), MinRecharge30d: float64(i) + .5}}
+			RechargeRequirement: RechargeRequirement{MinRechargeTotal: float64(i), MinRecharge30d: float64(i) + .5, RechargeWindowDays: i}}
 		errors := make(chan error, 2)
 		go func() { _, err := s.SaveBasicConfig(ctx, basic); errors <- err }()
 		go func() { errors <- s.SaveInviteConfig(ctx, nextInvite) }()
@@ -57,6 +58,7 @@ func TestActivityAndBasicConfigSavesPreserveEachOther(t *testing.T) {
 		require.Equal(t, nextInvite.InviteDailyLimit, got.InviteDailyLimit)
 		require.Equal(t, nextInvite.MinRechargeTotal, got.InviteMinRechargeTotal)
 		require.Equal(t, nextInvite.MinRecharge30d, got.InviteMinRecharge30d)
+		require.Equal(t, nextInvite.RechargeWindowDays, got.InviteRechargeWindowDays)
 		require.Equal(t, original.AppSecret, got.AppSecret)
 		require.Equal(t, original.APIKey, got.APIKey)
 	}

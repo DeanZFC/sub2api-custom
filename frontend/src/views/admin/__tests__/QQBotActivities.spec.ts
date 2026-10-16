@@ -44,9 +44,11 @@ describe('QQ activity pages with real translations', () => {
     expect(w.get('[role="alert"]').text()).toBe(translation.global.t('qqbot.invalidRechargeThreshold'))
     await w.get('[data-testid="min-recharge-total"]').setValue('12')
     await w.get('[data-testid="min-recharge-30d"]').setValue('5.25')
+    await w.get('[data-testid="recharge-window-days"]').setValue('7')
+    expect(w.text()).toContain(translation.global.t('qqbot.minimumRecentRecharge', { days: 7 }))
     await w.get('form').trigger('submit')
     await flushPromises()
-    expect(api.saveCheckin).toHaveBeenCalledWith({ enabled: true, min_amount: 0.7, max_amount: 0.9, min_recharge_total: 12, min_recharge_30d: 5.25 })
+    expect(api.saveCheckin).toHaveBeenCalledWith({ enabled: true, min_amount: 0.7, max_amount: 0.9, min_recharge_total: 12, min_recharge_30d: 5.25, recharge_window_days: 7 })
     expect(w.get('[role="status"]').text()).toBe(translation.global.t('common.saved'))
   })
   it.each(['zh', 'en'] as const)('%s validates prize probability totals and saves the cumulative rule', async locale => {
@@ -93,8 +95,9 @@ describe('QQ activity pages with real translations', () => {
     await w.get('[data-testid="invite-daily-limit"]').setValue('8')
     await w.get('[data-testid="invite-min-recharge-total"]').setValue('20')
     await w.get('[data-testid="invite-min-recharge-30d"]').setValue('10')
+    await w.get('[data-testid="invite-recharge-window-days"]').setValue('60')
     await w.get('form').trigger('submit'); await flushPromises()
-    expect(api.saveInvite).toHaveBeenCalledWith({ invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10 })
+    expect(api.saveInvite).toHaveBeenCalledWith({ invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 })
     expect(api.saveCheckin).not.toHaveBeenCalled()
     expect(api.saveLottery).not.toHaveBeenCalled()
     await w.get('#qqbot-tab-checkin').trigger('click'); await flushPromises()
@@ -105,6 +108,30 @@ describe('QQ activity pages with real translations', () => {
     expect(api.lotteryConfig).toHaveBeenCalledTimes(1)
     expect(api.checkinConfig).toHaveBeenCalledTimes(1)
     w.unmount()
+  })
+  it.each(['zh', 'en'] as const)('%s validates custom windows and defaults old settings to 30 days', async locale => {
+    for (const kind of ['checkin', 'invite'] as const) {
+      const translation = i18n(locale)
+      const isInvite = kind === 'invite'
+      const save = isInvite ? api.saveInvite : api.saveCheckin
+      const w = mount(isInvite ? QQBotInviteSettings : QQBotCheckinSettings, { global: { plugins: [translation] } })
+      await flushPromises()
+      const input = w.get(isInvite ? '[data-testid="invite-recharge-window-days"]' : '[data-testid="recharge-window-days"]')
+      expect((input.element as HTMLInputElement).value).toBe('30')
+      for (const invalid of ['', '0', '-1', '1.5', '3651']) {
+        await input.setValue(invalid)
+        await w.get('form').trigger('submit')
+        expect(save).not.toHaveBeenCalled()
+        expect(w.get('[role="alert"]').text()).toBe(translation.global.t('qqbot.invalidRechargeWindow'))
+      }
+      for (const days of [1, 3650]) {
+        await input.setValue(String(days))
+        await w.get('form').trigger('submit')
+        await flushPromises()
+        expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ recharge_window_days: days }))
+      }
+      w.unmount()
+    }
   })
   it('opens the linked tab and falls back to check-in for unknown tabs', async () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/qqbot/activities', component: QQBotActivitiesView }] })

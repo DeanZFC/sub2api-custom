@@ -26,7 +26,7 @@ func (h *QQBotHandler) SaveInviteConfig(c *gin.Context) {
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
-	var cfg qqbot.InviteConfig
+	cfg := qqbot.InviteConfig{RechargeRequirement: qqbot.RechargeRequirement{RechargeWindowDays: qqbot.DefaultRechargeWindowDays}}
 	if c.ShouldBindJSON(&cfg) != nil {
 		response.BadRequest(c, "邀请奖励配置格式不正确")
 		return
@@ -53,7 +53,7 @@ func (h *QQBotHandler) SaveCheckinConfig(c *gin.Context) {
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
-	var cfg qqbot.CheckinConfig
+	cfg := qqbot.CheckinConfig{RechargeRequirement: qqbot.RechargeRequirement{RechargeWindowDays: qqbot.DefaultRechargeWindowDays}}
 	if c.ShouldBindJSON(&cfg) != nil {
 		response.BadRequest(c, "签到配置格式不正确")
 		return

@@ -60,8 +60,10 @@ func readActivityConfig(ctx context.Context, db queryRower, key string, dst any)
 	return true, json.Unmarshal([]byte(raw), dst)
 }
 func loadCheckinConfig(ctx context.Context, db queryRower, legacy float64) (CheckinConfig, error) {
-	c := CheckinConfig{Enabled: legacy > 0, MinAmount: legacy, MaxAmount: legacy}
+	c := CheckinConfig{Enabled: legacy > 0, MinAmount: legacy, MaxAmount: legacy,
+		RechargeRequirement: RechargeRequirement{RechargeWindowDays: DefaultRechargeWindowDays}}
 	_, err := readActivityConfig(ctx, db, checkinConfigKey, &c)
+	c.RechargeWindowDays = c.windowDays()
 	return c, err
 }
 func (s *Service) CheckinConfig(ctx context.Context) (CheckinConfig, error) {
@@ -84,9 +86,11 @@ func validRewardAmount(n float64) bool {
 }
 func (s *Service) InviteConfig(ctx context.Context) (InviteConfig, error) {
 	c, err := s.Config(ctx)
+	requirement := c.inviteRechargeRequirement()
+	requirement.RechargeWindowDays = requirement.windowDays()
 	return InviteConfig{
 		InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit,
-		RechargeRequirement: RechargeRequirement{MinRechargeTotal: c.InviteMinRechargeTotal, MinRecharge30d: c.InviteMinRecharge30d},
+		RechargeRequirement: requirement,
 	}, err
 }
 func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
@@ -104,6 +108,7 @@ func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 		old.InviteDailyLimit = c.InviteDailyLimit
 		old.InviteMinRechargeTotal = c.MinRechargeTotal
 		old.InviteMinRecharge30d = c.MinRecharge30d
+		old.InviteRechargeWindowDays = c.windowDays()
 		return old
 	})
 	return err
@@ -161,6 +166,7 @@ func (s *Service) SaveCheckinConfig(ctx context.Context, c CheckinConfig) error 
 	if err := validateCheckin(c); err != nil {
 		return err
 	}
+	c.RechargeWindowDays = c.windowDays()
 	return s.saveActivityConfig(ctx, checkinConfigKey, checkinConfigLock, c)
 }
 func (s *Service) SaveLotteryConfig(ctx context.Context, c LotteryConfig) error {
