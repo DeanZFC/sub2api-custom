@@ -32,6 +32,21 @@ func unmentionedGroupCommand(e Event, customCommands ...CustomCommand) bool {
 	return ok
 }
 
+// isBuiltinOrCustomCommand reports whether the event content, after stripping
+// any leading mention, is a slash command the bot knows about. Used to route
+// "@bot /cmd" messages to the command handler rather than the AI chat path.
+func isBuiltinOrCustomCommand(e Event, customCommands []CustomCommand) bool {
+	cmd, arg := command(e.Content)
+	if cmd == "" {
+		return false
+	}
+	if isBuiltinCommand(cmd) {
+		return true
+	}
+	_, ok := customCommandReply(customCommands, cmd, arg)
+	return ok
+}
+
 func groupMentionIDs(e Event) []string {
 	ids := make([]string, 0, len(e.Mentions)*2+1)
 	for _, mention := range e.Mentions {

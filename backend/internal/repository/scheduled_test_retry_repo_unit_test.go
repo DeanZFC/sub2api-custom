@@ -25,6 +25,10 @@ func TestScheduledTestResultRepositoryGetByIDLoadsActualTestedAccount(t *testing
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "account_name", "run_id",
 		}).AddRow(9, 3, "group test", "Pelican", 0, "Group", 7, "all_accounts", "failed", "", "html", "", nil, 12, "gpt-6-astra", "high", 7, "upstream error", 20, now, now, now, 1, "Private Account Twelve", "round-9"))
+	mock.ExpectQuery(`(?s)SELECT id, protection_decision, execution_info.*FROM scheduled_test_results`).
+		WithArgs("{9}").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision", "execution_info"}).
+			AddRow(9, nil, `{"input_tokens":17,"failure_kind":"server","attempts":[{"http_status":503}]}`))
 	result, err := repo.GetByID(context.Background(), 9)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), result.PlanID)
@@ -34,6 +38,12 @@ func TestScheduledTestResultRepositoryGetByIDLoadsActualTestedAccount(t *testing
 	require.Equal(t, "all_accounts", result.TargetMode)
 	require.Equal(t, "Private Account Twelve", result.AccountName)
 	require.Equal(t, "round-9", result.RunID)
+	require.NotNil(t, result.ExecutionInfo)
+	require.NotNil(t, result.ExecutionInfo.InputTokens)
+	require.EqualValues(t, 17, *result.ExecutionInfo.InputTokens)
+	require.Equal(t, "server", result.ExecutionInfo.FailureKind)
+	require.Len(t, result.ExecutionInfo.Attempts, 1)
+	require.Equal(t, 503, result.ExecutionInfo.Attempts[0].HTTPStatus)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -355,7 +355,11 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if err != nil {
 			return err
 		}
-		if !addressed && (ref == nil || len(groupMentionIDs(e)) > 0) {
+		// When the bot is @-mentioned and the content is a slash command, treat it
+		// as a command rather than routing to the AI chat path.
+		if addressed && isBuiltinOrCustomCommand(e, c.CustomCommands) {
+			// Fall through to command handling below.
+		} else if !addressed && (ref == nil || len(groupMentionIDs(e)) > 0) {
 			return nil
 		}
 	}

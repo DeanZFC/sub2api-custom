@@ -57,7 +57,7 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt, 2, "Account Seven"))
 	mock.ExpectQuery(`(?s)SELECT id, protection_decision.*FROM scheduled_test_results`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision", "execution_info"}))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestScheduledTestResultRepositoryPersistsReasoningEffort(t *testing.T) {
 		GroupID: &groupID, ModelID: "gpt-6-astra", ReasoningEffort: "ultra", StartedAt: now, FinishedAt: now,
 	}
 	mock.ExpectQuery(`(?s)INSERT INTO scheduled_test_results .*reasoning_effort.*RETURNING .*reasoning_effort`).
-		WithArgs(int64(10), "running", "", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", int64(0), now, now, nil, "", "").
+		WithArgs(int64(10), "running", "", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", int64(0), now, now, nil, "", "", []byte("null")).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "plan_id", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "target_mode",
 		}).AddRow(1, 10, "running", "", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", 0, now, now, now, nil, ""))
@@ -95,7 +95,7 @@ func TestScheduledTestResultRepositoryPersistsReasoningEffort(t *testing.T) {
 	created.Status = "success"
 	created.ResponseText = "done"
 	mock.ExpectExec(`(?s)UPDATE scheduled_test_results .*reasoning_effort = \$9`).
-		WithArgs(int64(1), "success", "done", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", int64(0), now, now).
+		WithArgs(int64(1), "success", "done", "text", "", nil, accountID, "gpt-6-astra", "ultra", groupID, "", int64(0), now, now, []byte("null")).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.Update(context.Background(), created))
 	require.NoError(t, mock.ExpectationsWereMet())
