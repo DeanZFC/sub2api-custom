@@ -202,8 +202,8 @@
       >
         <MetricCell
           :label="t('channelMonitorV2.metrics.successRate')"
-          :value="formatPercent(1 - snapshot.metrics.error_rate)"
-          :detail="t('channelMonitorV2.metrics.errorRateValue', { value: formatPercent(snapshot.metrics.error_rate) })"
+          :value="formatMonitorSuccessRateFromError(snapshot.metrics.error_rate, snapshot.health.error_rate)"
+          :detail="snapshot.health.error_rate === 'unknown' ? t('channelMonitorV2.matrix.unknownLegend') : t('channelMonitorV2.metrics.errorRateValue', { value: formatMonitorErrorRate(snapshot.metrics.error_rate, snapshot.health.error_rate) })"
           :state="snapshot.health.error_rate"
         />
         <MetricCell
@@ -318,8 +318,8 @@
                     </div>
                   </td>
                   <td>
-                    <span class="block">{{ formatPercent(1 - row.metrics.error_rate) }}</span>
-                    <small class="text-xs text-gray-400">{{ t('channelMonitorV2.metrics.errorRateValue', { value: formatPercent(row.metrics.error_rate) }) }}</small>
+                    <span class="block">{{ formatMonitorSuccessRateFromError(row.metrics.error_rate, row.health.error_rate) }}</span>
+                    <small class="text-xs text-gray-400">{{ t('channelMonitorV2.metrics.errorRateValue', { value: formatMonitorErrorRate(row.metrics.error_rate, row.health.error_rate) }) }}</small>
                   </td>
                   <td>
                     <span class="block">{{ formatMs(row.metrics.ttft.p50_ms) }}</span>
@@ -492,6 +492,8 @@ import {
   formatLatencyKpiSecondary,
   formatLatencyPrivacy,
   formatMonitorMs,
+  formatMonitorErrorRate,
+  formatMonitorSuccessRateFromError,
   formatMonitorPercent,
   formatMonitorThroughput,
   formatMonitorTokensPerSecond,

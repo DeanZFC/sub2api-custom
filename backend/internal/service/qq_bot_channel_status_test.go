@@ -107,6 +107,7 @@ func TestQQBotChannelStatusUsesMonitorAggregatesAndConfiguredGroups(t *testing.T
 	require.Equal(t, ChannelMonitorV2GroupByPlatformGroup, repo.groupBy)
 	require.Equal(t, repo.snapshot.Coverage.DataThrough, report.UpdatedAt)
 	require.True(t, report.Overall.HasRequests)
+	require.False(t, report.Overall.InsufficientSamples)
 	require.InDelta(t, .0032, report.Overall.ErrorRate, 1e-9)
 	require.InDelta(t, .7625, *report.Overall.CacheRate, 1e-9)
 	require.EqualValues(t, 1280, *report.Overall.TTFTP50Ms)
@@ -115,6 +116,7 @@ func TestQQBotChannelStatusUsesMonitorAggregatesAndConfiguredGroups(t *testing.T
 	require.Zero(t, report.Overall.TokensPerSecond)
 	require.Len(t, report.Groups, 1)
 	require.Equal(t, "公开分组", report.Groups[0].Name)
+	require.True(t, report.Groups[0].Metrics.InsufficientSamples)
 	// Overall must use the original weighted snapshot, not average group rates.
 	require.NotEqual(t, report.Overall.ErrorRate, report.Groups[0].Metrics.ErrorRate)
 	require.Nil(t, report.Groups[0].Metrics.CacheRate)
@@ -149,9 +151,28 @@ func TestQQBotChannelStatusNoTrafficAndMixedPlatforms(t *testing.T) {
 	require.Equal(t, repo.matrix.Coverage.DataThrough, report.UpdatedAt)
 	require.True(t, report.PartialCoverage)
 	require.True(t, report.Backfilling)
-	metric := qqBotChannelStatusMetric(ChannelMonitorV2Metric{RequestCount: 1, CacheRateDenominator: 5}, false)
+	metric := qqBotChannelStatusMetric(ChannelMonitorV2Metric{RequestCount: 1, CacheRateDenominator: 5}, false, 50)
 	require.NotNil(t, metric.CacheRate)
 	require.Zero(t, *metric.CacheRate)
+}
+
+func TestQQBotChannelStatusRespectsConfiguredMinimumSamples(t *testing.T) {
+	for _, threshold := range []int64{1, 5, 50} {
+		for _, count := range []int64{0, threshold - 1, threshold, threshold + 1} {
+			p, repo, _ := qqStatusAdapterFixture()
+			repo.config.HealthThresholds.MinimumSample = threshold
+			metric := ChannelMonitorV2Metric{RequestCount: count, ErrorRequests: count, ErrorRate: 1}
+			repo.snapshot.Metrics = metric
+			repo.matrix.Items[0].Metrics = metric
+			report, err := p.ChannelStatus(context.Background())
+			require.NoError(t, err)
+			for _, got := range []qqbot.ChannelStatusMetric{report.Overall, report.Groups[0].Metrics} {
+				require.Equal(t, count > 0, got.HasRequests)
+				require.Equal(t, count > 0 && count < threshold, got.InsufficientSamples)
+				require.Equal(t, 1.0, got.ErrorRate) // Preserve the raw statistic.
+			}
+		}
+	}
 }
 
 func TestQQBotChannelStatusIncludesAllMonitoredGroupTypes(t *testing.T) {

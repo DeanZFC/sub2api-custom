@@ -80,7 +80,8 @@ func (p *qqBotChannelStatus) ChannelStatus(ctx context.Context) (*qqbot.ChannelS
 	report.PartialCoverage = !snapshot.Coverage.CoverageComplete || !matrix.Coverage.CoverageComplete
 	report.Backfilling = (snapshot.Coverage.Bootstrap != nil && snapshot.Coverage.Bootstrap.Active) ||
 		(matrix.Coverage.Bootstrap != nil && matrix.Coverage.Bootstrap.Active)
-	report.Overall = qqBotChannelStatusMetric(snapshot.Metrics, report.ShowThroughput)
+	minimumSample := NormalizeChannelMonitorV2HealthThresholds(cfg.HealthThresholds).MinimumSample
+	report.Overall = qqBotChannelStatusMetric(snapshot.Metrics, report.ShowThroughput, minimumSample)
 	counts := make(map[int64]int, len(matrix.Items))
 	for _, row := range matrix.Items {
 		if row.GroupID != nil {
@@ -103,13 +104,18 @@ func (p *qqBotChannelStatus) ChannelStatus(ctx context.Context) (*qqbot.ChannelS
 		if counts[*row.GroupID] > 1 {
 			name += "（" + row.Platform + "）"
 		}
-		report.Groups = append(report.Groups, qqbot.ChannelStatusGroup{Name: name, Metrics: qqBotChannelStatusMetric(row.Metrics, report.ShowThroughput)})
+		report.Groups = append(report.Groups, qqbot.ChannelStatusGroup{Name: name, Metrics: qqBotChannelStatusMetric(row.Metrics, report.ShowThroughput, minimumSample)})
 	}
 	return report, nil
 }
 
-func qqBotChannelStatusMetric(metric ChannelMonitorV2Metric, throughput bool) qqbot.ChannelStatusMetric {
-	result := qqbot.ChannelStatusMetric{HasRequests: metric.RequestCount > 0, ErrorRate: metric.ErrorRate, TTFTP50Ms: metric.TTFT.P50Ms}
+func qqBotChannelStatusMetric(metric ChannelMonitorV2Metric, throughput bool, minimumSample int64) qqbot.ChannelStatusMetric {
+	result := qqbot.ChannelStatusMetric{
+		HasRequests:         metric.RequestCount > 0,
+		InsufficientSamples: metric.RequestCount > 0 && metric.RequestCount < minimumSample,
+		ErrorRate:           metric.ErrorRate,
+		TTFTP50Ms:           metric.TTFT.P50Ms,
+	}
 	if metric.CacheRateDenominator > 0 {
 		rate := metric.CacheRate
 		result.CacheRate = &rate

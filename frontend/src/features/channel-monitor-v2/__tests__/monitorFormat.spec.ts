@@ -3,6 +3,7 @@ import {
   formatLatencyKpiSecondary,
   formatLatencyPrivacy,
   formatMonitorMs,
+  formatMonitorErrorRate,
   formatMonitorNumber,
   formatMonitorPercent,
   formatMonitorRate,
@@ -75,6 +76,17 @@ describe('monitorFormat accuracy', () => {
   it('derives success rate from error_rate without absolute counts', () => {
     expect(formatMonitorSuccessRateFromError(0.1)).toBe('90.0%')
     expect(formatMonitorSuccessRateFromError(0)).toBe('100.0%')
+  })
+
+  it('suppresses success and error percentages when request samples are insufficient', () => {
+    for (const errorRate of [0, 0.5, 1]) {
+      expect(formatMonitorSuccessRateFromError(errorRate, 'unknown')).toBe('-')
+      expect(formatMonitorErrorRate(errorRate, 'unknown')).toBe('-')
+    }
+    expect(formatMonitorSuccessRateFromError(1, 'critical')).toBe('0.00%')
+    expect(formatMonitorErrorRate(1, 'critical')).toBe('100.0%')
+    expect(formatMonitorSuccessRateFromError(0, 'healthy')).toBe('100.0%')
+    expect(formatMonitorErrorRate(0, 'healthy')).toBe('0.00%')
   })
 
   it('maps continuous scores to multi-stop bands', () => {

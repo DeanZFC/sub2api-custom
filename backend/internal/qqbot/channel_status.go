@@ -20,12 +20,13 @@ type ChannelStatusProvider interface {
 }
 
 type ChannelStatusMetric struct {
-	HasRequests     bool
-	ErrorRate       float64
-	CacheRate       *float64
-	TTFTP50Ms       *int64
-	RPM             float64
-	TokensPerSecond float64
+	HasRequests         bool
+	InsufficientSamples bool
+	ErrorRate           float64
+	CacheRate           *float64
+	TTFTP50Ms           *int64
+	RPM                 float64
+	TokensPerSecond     float64
 }
 
 type ChannelStatusGroup struct {
@@ -133,8 +134,12 @@ func formatChannelStatusMetric(metric ChannelStatusMetric, throughput, compact b
 	if compact {
 		separator = " ｜ "
 	}
-	// Match the web dashboard's success KPI, including ignored error categories.
-	text := fmt.Sprintf("成功率：%.2f%%%s错误率：%.2f%%", (1-metric.ErrorRate)*100, separator, metric.ErrorRate*100)
+	// Do not present sparse traffic as a definitive outage (or perfect health).
+	text := "成功率：样本不足" + separator + "错误率：样本不足"
+	if !metric.InsufficientSamples {
+		// Match the web dashboard's success KPI, including ignored error categories.
+		text = fmt.Sprintf("成功率：%.2f%%%s错误率：%.2f%%", (1-metric.ErrorRate)*100, separator, metric.ErrorRate*100)
+	}
 	if metric.CacheRate == nil {
 		text += "\n缓存率：暂无数据"
 	} else {

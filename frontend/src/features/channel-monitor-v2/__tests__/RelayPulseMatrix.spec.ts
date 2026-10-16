@@ -11,6 +11,7 @@ const i18nT = (key: string, params?: Record<string, unknown>) => {
     'channelMonitorV2.metrics.tps': '每秒 Token',
     'channelMonitorV2.metrics.cacheRate': '缓存率',
     'channelMonitorV2.matrix.scoreLine': '评分 {score}',
+    'channelMonitorV2.matrix.unknownLegend': '无流量 / 样本不足',
     'channelMonitorV2.metrics.successRateValue': '成功率 {value}',
     'channelMonitorV2.metrics.errorRateValue': '错误率 {value}',
     'channelMonitorV2.metrics.rpmValue': 'RPM {value}',
@@ -27,7 +28,6 @@ const i18nT = (key: string, params?: Record<string, unknown>) => {
     'channelMonitorV2.matrix.healthyLegend': '健康',
     'channelMonitorV2.matrix.warningLegend': '警告',
     'channelMonitorV2.matrix.criticalLegend': '异常',
-    'channelMonitorV2.matrix.unknownLegend': '未知',
   }
   const template = map[key] || key
   return template.replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ''))
@@ -82,6 +82,41 @@ function metrics(requestCount: number): MonitorMetric {
 }
 
 describe('RelayPulseMatrix', () => {
+  it.each([true, false])('hides sparse failure rates in summaries and tooltips (throughput=%s)', async (showThroughput) => {
+    const sparseHealth: MonitorHealth = {
+      ...health, overall: 'unknown', error_rate: 'unknown', ttft: 'unknown', cache: 'unknown',
+      score: null, error_rate_score: null, ttft_score: null, cache_score: null,
+    }
+    const failed: MonitorMetric = {
+      ...metrics(1), request_count: 0, success_requests: 0, error_requests: 0,
+      error_rate: 1, rpm: showThroughput ? 1 / 90 : 0, tpm: 0,
+      ttft: { sample_count: 0, p50_ms: null, p95_ms: null, avg_ms: null },
+    }
+    const row = {
+      platform: 'grok', group_id: 7, group_name: 'Grok-Heavy', metrics: failed, health: sparseHealth,
+      buckets: [{ bucket_start: '2026-08-01T00:00:00Z', metrics: failed, health: sparseHealth }],
+    }
+    const wrapper = mount(RelayPulseMatrix, { props: {
+      rows: [row], healthMode: 'overall', showThroughput,
+      coverage: { requested_start: '2026-08-01T00:00:00Z', requested_end: '2026-08-01T00:01:00Z',
+        coverage_start: '2026-08-01T00:00:00Z', data_through: '2026-08-01T00:01:00Z',
+        computed_at: '2026-08-01T00:01:00Z', aggregation_lag_seconds: 0, coverage_complete: true, bucket_seconds: 60 },
+    } })
+    expect(wrapper.find('.summary-value').text()).toBe('-')
+    expect(wrapper.find('.summary-value').attributes('title')).toContain('样本不足')
+    const cell = wrapper.find('.pulse-cell')
+    expect(cell.text()).toContain('成功率 -')
+    expect(cell.text()).toContain('错误率 -')
+    expect(cell.attributes('title')).toContain('样本不足')
+    expect(cell.attributes('aria-label')).toContain('错误率 -')
+    expect(cell.text()).not.toContain('错误率 100')
+    // Once the backend has enough requests, the same all-failed rate is valid.
+    const critical = { ...sparseHealth, overall: 'critical' as const, error_rate: 'critical' as const, score: 0, error_rate_score: 0 }
+    await wrapper.setProps({ rows: [{ ...row, health: critical, buckets: [{ ...row.buckets[0], health: critical }] }] })
+    expect(wrapper.find('.summary-value').text()).toBe('0.00%')
+    expect(wrapper.find('.pulse-cell').text()).toContain('错误率 100.0%')
+  })
+
   it('shows privacy-safe hover tooltips and multi-band colors without click modal', async () => {
     const wrapper = mount(RelayPulseMatrix, {
       props: {

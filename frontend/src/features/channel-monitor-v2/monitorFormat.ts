@@ -73,8 +73,15 @@ export function formatMonitorSuccessRate(successRequests: number, requestCount: 
   return formatMonitorPercent(successRequests / requestCount)
 }
 
-export function formatMonitorSuccessRateFromError(errorRate: number): string {
+export function formatMonitorSuccessRateFromError(errorRate: number, state?: HealthState): string {
+  if (state === 'unknown') return '-'
   return formatMonitorPercent(1 - (errorRate || 0))
+}
+
+/** Unknown request health means no traffic or fewer than the configured minimum samples. */
+export function formatMonitorErrorRate(errorRate: number, state?: HealthState): string {
+  if (state === 'unknown') return '-'
+  return formatMonitorPercent(errorRate)
 }
 
 /**

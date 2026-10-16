@@ -60,8 +60,11 @@
               <span :class="['status-dot', cellClass(entry.row.health, entry.row.metrics.request_count)]"></span>
               <strong class="truncate text-xs font-semibold text-gray-800 dark:text-gray-100">{{ rowLabel(entry.row) }}</strong>
             </div>
-            <strong class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300">
-              {{ successRate(entry.row.metrics) }}
+            <strong
+              class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+              :title="entry.row.health.error_rate === 'unknown' ? t('channelMonitorV2.matrix.unknownLegend') : undefined"
+            >
+              {{ successRate(entry.row.metrics, entry.row.health) }}
             </strong>
             <strong
               class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300"
@@ -103,12 +106,13 @@
                 <span class="pulse-tooltip" role="tooltip">
                   <template v-if="slot.bucket">
                     <span class="pulse-tooltip-line pulse-tooltip-title">{{ formatBucketRange(slot.start) }}</span>
+                    <span v-if="slot.bucket.health.error_rate === 'unknown'" class="pulse-tooltip-line">{{ t('channelMonitorV2.matrix.unknownLegend') }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.matrix.scoreLine', { score: formatScore(slot.bucket.health) }) }}</span>
-                    <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.successRateValue', { value: successRate(slot.bucket.metrics) }) }}</span>
+                    <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.successRateValue', { value: successRate(slot.bucket.metrics, slot.bucket.health) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.ttftValue', { value: latencyPrivacy(slot.bucket.metrics.ttft) }) }}</span>
                     <span v-if="showThroughput" class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.tpsValue', { value: formatTps(slot.bucket.metrics.tpm) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.cacheRateValue', { value: formatPercent(slot.bucket.metrics.cache_rate) }) }}</span>
-                    <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.errorRateValue', { value: formatPercent(slot.bucket.metrics.error_rate) }) }}</span>
+                    <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.errorRateValue', { value: formatMonitorErrorRate(slot.bucket.metrics.error_rate, slot.bucket.health.error_rate) }) }}</span>
                     <span v-if="showThroughput" class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.rpmValue', { value: formatRate(slot.bucket.metrics.rpm) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.durationValue', { value: latencyPrivacy(slot.bucket.metrics.duration) }) }}</span>
                   </template>
@@ -180,6 +184,7 @@ import Icon from '@/components/icons/Icon.vue'
 import {
   formatLatencyPrivacy,
   formatMonitorMs,
+  formatMonitorErrorRate,
   formatMonitorPercent,
   formatMonitorSuccessRateFromError,
   formatMonitorThroughput,
@@ -358,13 +363,13 @@ function rowKey(row: MonitorMatrixRow): string {
   return [row.platform, row.group_id || 0, row.model || ''].join(':')
 }
 
-function successRate(metrics: MonitorMetric): string {
+function successRate(metrics: MonitorMetric, health: MonitorHealth): string {
   // Empty traffic: no request count and no throughput signal.
   // When throughput is hidden for privacy, still show success from error_rate.
   const noCount = metrics.request_count <= 0
   const noTP = (metrics.rpm || 0) <= 0 && (metrics.tpm || 0) <= 0
   if (noCount && noTP && props.showThroughput) return '-'
-  return formatMonitorSuccessRateFromError(metrics.error_rate)
+  return formatMonitorSuccessRateFromError(metrics.error_rate, health.error_rate)
 }
 
 function formatScore(health: MonitorHealth): string {
@@ -381,8 +386,9 @@ function bucketTooltipLines(bucket: MonitorMatrixBucket): string[] {
   const metrics = bucket.metrics
   const lines = [
     formatBucketRange(bucket.bucket_start),
+    ...(bucket.health.error_rate === 'unknown' ? [t('channelMonitorV2.matrix.unknownLegend')] : []),
     t('channelMonitorV2.matrix.scoreLine', { score: formatScore(bucket.health) }),
-    t('channelMonitorV2.metrics.successRateValue', { value: successRate(metrics) }),
+    t('channelMonitorV2.metrics.successRateValue', { value: successRate(metrics, bucket.health) }),
     t('channelMonitorV2.metrics.ttftValue', { value: latencyPrivacy(metrics.ttft) }),
   ]
   if (props.showThroughput) {
@@ -390,7 +396,7 @@ function bucketTooltipLines(bucket: MonitorMatrixBucket): string[] {
   }
   lines.push(
     t('channelMonitorV2.metrics.cacheRateValue', { value: formatPercent(metrics.cache_rate) }),
-    t('channelMonitorV2.metrics.errorRateValue', { value: formatPercent(metrics.error_rate) }),
+    t('channelMonitorV2.metrics.errorRateValue', { value: formatMonitorErrorRate(metrics.error_rate, bucket.health.error_rate) }),
   )
   if (props.showThroughput) {
     lines.push(t('channelMonitorV2.metrics.rpmValue', { value: formatRate(metrics.rpm) }))

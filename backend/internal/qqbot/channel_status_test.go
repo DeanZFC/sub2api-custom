@@ -79,6 +79,23 @@ func TestChannelStatusMissingSamplesAreNotZeroOrPerfectSuccess(t *testing.T) {
 	require.Contains(t, formatChannelStatus(report)[0], "缓存率：0.00%")
 }
 
+func TestChannelStatusInsufficientSamplesDoNotReportExtremeRates(t *testing.T) {
+	for _, errorRate := range []float64{0, 1} {
+		metric := ChannelStatusMetric{HasRequests: true, InsufficientSamples: true, ErrorRate: errorRate}
+		for _, compact := range []bool{false, true} {
+			text := formatChannelStatusMetric(metric, false, compact)
+			require.Contains(t, text, "成功率：样本不足")
+			require.Contains(t, text, "错误率：样本不足")
+			require.Contains(t, text, "缓存率：暂无数据")
+			require.NotContains(t, text, "0.00%")
+			require.NotContains(t, text, "暂无请求数据")
+		}
+	}
+	// Enough failed requests are a real outage and must remain visible.
+	text := formatChannelStatusMetric(ChannelStatusMetric{HasRequests: true, ErrorRate: 1}, false, true)
+	require.Contains(t, text, "成功率：0.00% ｜ 错误率：100.00%")
+}
+
 func TestChannelStatusSplitsWithoutLosingOrBreakingGroups(t *testing.T) {
 	report := channelStatusFixture()
 	report.ShowThroughput = true
