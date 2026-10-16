@@ -8,7 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/qqbot"
 )
 
-func ProvideQQBotService(db *sql.DB, encryptor SecretEncryptor, cfg *config.Config, invalidator APIKeyAuthCacheInvalidator, billing *BillingCacheService, email *EmailService, settings *SettingService, users UserRepository) *qqbot.Service {
+func ProvideQQBotService(db *sql.DB, encryptor SecretEncryptor, cfg *config.Config, invalidator APIKeyAuthCacheInvalidator, billing *BillingCacheService, email *EmailService, settings *SettingService, users UserRepository, monitor *ChannelMonitorV2Service, groups GroupRepository) *qqbot.Service {
 	s := qqbot.New(db, encryptor, cfg.Totp.EncryptionKeyConfigured, func(ctx context.Context, user int64) {
 		if invalidator != nil {
 			invalidator.InvalidateAuthCacheByUserID(ctx, user)
@@ -18,6 +18,7 @@ func ProvideQQBotService(db *sql.DB, encryptor SecretEncryptor, cfg *config.Conf
 		}
 	})
 	s.SetBindingEmailDelivery(&qqBotBindingEmail{email: email, settings: settings, users: users})
+	s.SetChannelStatusProvider(&qqBotChannelStatus{monitor: monitor, settings: settings, groups: groups})
 	s.Start()
 	return s
 }

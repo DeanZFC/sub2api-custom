@@ -77,6 +77,62 @@ describe('QQ activity pages with real translations', () => {
     expect(w.text()).not.toContain('$35.00000000')
     expect(w.text()).toContain('User not found')
   })
+  it.each(['zh', 'en'] as const)('%s configures an independent guaranteed pool and displays progress', async locale => {
+    const translation = i18n(locale)
+    const w = mount(QQBotLotterySettings, { global: { plugins: [translation] } })
+    await flushPromises()
+    expect((w.get('[data-testid="guarantee-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect(w.find('[data-testid="guarantee-every"]').exists()).toBe(false)
+    await w.get('[data-testid="guarantee-enabled"]').setValue(true)
+    expect(w.text()).toContain(translation.global.t('qqbot.guaranteeHelp'))
+    const form = w.findAll('form')[0]!
+    for (const invalid of ['', '0', '-1', '1.5', '1000001']) {
+      await w.get('[data-testid="guarantee-every"]').setValue(invalid)
+      await form.trigger('submit')
+      expect(api.saveLottery).not.toHaveBeenCalled()
+      expect(w.get('[role="alert"]').text()).toBe(translation.global.t('qqbot.invalidGuaranteeEvery'))
+    }
+    await w.get('[data-testid="guarantee-every"]').setValue('5')
+    await w.get('[data-testid="guarantee-name-0"]').setValue('Guaranteed credit')
+    for (const invalid of ['', '0', '-1', '1001', '0.000000001']) {
+      await w.get('[data-testid="guarantee-amount-0"]').setValue(invalid)
+      await form.trigger('submit')
+      expect(api.saveLottery).not.toHaveBeenCalled()
+      expect(w.get('[role="alert"]').text()).toBe(translation.global.t('qqbot.invalidGuaranteePrizes'))
+    }
+    await w.get('[data-testid="guarantee-amount-0"]').setValue('2.12345678')
+    await w.get('[data-testid="add-guarantee-prize"]').trigger('click')
+    await w.get('[data-testid="guarantee-name-1"]').setValue('Big guarantee')
+    await w.get('[data-testid="guarantee-amount-1"]').setValue('10')
+    await w.get('[data-testid="guarantee-probability-0"]').setValue('75.25')
+    expect(form.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await form.trigger('submit')
+    expect(api.saveLottery).not.toHaveBeenCalled()
+    await w.get('[data-testid="guarantee-probability-1"]').setValue('24.75')
+    expect(form.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    api.saveLottery.mockRejectedValueOnce(new Error('Save failed'))
+    await form.trigger('submit'); await flushPromises()
+    expect(w.get('[role="alert"]').text()).toBe('Save failed')
+    expect((w.get('[data-testid="guarantee-every"]').element as HTMLInputElement).value).toBe('5')
+    await form.trigger('submit'); await flushPromises()
+    expect(api.saveLottery).toHaveBeenLastCalledWith(expect.objectContaining({
+      guarantee_enabled: true, guarantee_every: 5,
+      guarantee_prizes: [{ name: 'Guaranteed credit', amount: 2.12345678, probability_bps: 7525 }, { name: 'Big guarantee', amount: 10, probability_bps: 2475 }],
+      prizes: [{ name: 'Win', amount: 1, probability_bps: 1000 }, { name: 'Thanks', amount: 0, probability_bps: 9000 }]
+    }))
+    api.lotteryState.mockResolvedValueOnce({ user_id: 7, recharge_total: 100, earned: 10, used: 3, remaining: 7, next_recharge: 10, guarantee_every: 5, draws_until_guarantee: 2 })
+    const lookup = w.findAll('form')[1]!
+    await lookup.get('input').setValue('7'); await lookup.trigger('submit'); await flushPromises()
+    expect(w.text()).toContain(translation.global.t('qqbot.guaranteeProgress', { every: 5, count: 2 }))
+    await w.get('[data-testid="guarantee-enabled"]').setValue(false)
+    await form.trigger('submit'); await flushPromises()
+    expect(api.saveLottery).toHaveBeenLastCalledWith(expect.objectContaining({ guarantee_enabled: false, guarantee_every: 5 }))
+    expect(w.find('[data-testid="guarantee-every"]').exists()).toBe(false)
+    expect(w.text()).not.toContain(translation.global.t('qqbot.guaranteeProgress', { every: 5, count: 2 }))
+    await w.get('[data-testid="guarantee-enabled"]').setValue(true)
+    expect((w.get('[data-testid="guarantee-every"]').element as HTMLInputElement).value).toBe('5')
+    w.unmount()
+  })
   it.each(['zh', 'en'] as const)('%s preserves drafts while switching tabs and saves invitations independently', async locale => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/qqbot/activities', component: QQBotActivitiesView }] })
     await router.push('/admin/qqbot/activities')

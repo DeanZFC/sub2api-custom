@@ -63,6 +63,9 @@ func validateURL(raw string) error {
 	return nil
 }
 func validateConfig(c Config) error {
+	if err := validateCustomCommands(c.CustomCommands); err != nil {
+		return err
+	}
 	if c.ChatProtocol != "responses" && c.ChatProtocol != "chat_completions" {
 		return errors.New("聊天接口模式不正确")
 	}
@@ -143,6 +146,7 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 		return c, err
 	}
 	c = update(old)
+	c.CustomCommands = normalizeCustomCommands(c.CustomCommands)
 	c.AppID = strings.TrimSpace(c.AppID)
 	c.BaseURL = strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	c.ImageBaseURL = strings.TrimRight(strings.TrimSpace(c.ImageBaseURL), "/")

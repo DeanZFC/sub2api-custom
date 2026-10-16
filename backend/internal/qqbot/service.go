@@ -22,6 +22,7 @@ type Service struct {
 	encryptionReady bool
 	invalidate      func(context.Context, int64)
 	bindingEmail    BindingEmailDelivery
+	channelStatus   ChannelStatusProvider
 	http            *http.Client
 	tokenURL        string
 	qqURL           string
@@ -342,7 +343,7 @@ func command(content string) (string, string) {
 	return fields[0], arg
 }
 func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error {
-	if j.EventType == groupMessageCreate && !unmentionedGroupCommand(e) {
+	if j.EventType == groupMessageCreate && !unmentionedGroupCommand(e, c.CustomCommands...) {
 		addressed, err := s.groupMessageMentionsBot(ctx, c, e)
 		if err != nil {
 			return err
@@ -374,6 +375,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 指令：/我的奖励
 说明：查询各项累计奖励
 
+指令：/渠道状态
+说明：查询整体及各分组的成功率、缓存率和首 Token
+
 指令：/绑定 邮箱或绑定码
 说明：绑定账号
 
@@ -394,6 +398,13 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 
 指令：/生图 图片描述
 说明：生成图片`
+		for _, custom := range c.CustomCommands {
+			if custom.Enabled {
+				text += "\n\n指令：" + custom.Command + "\n说明：自定义回复"
+			}
+		}
+	case "渠道状态":
+		return s.sendChannelStatus(ctx, c, *j, arg)
 	case "绑定":
 		if arg == "" {
 			text = "用法：/绑定 邮箱或绑定码"
@@ -466,6 +477,10 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			text = fmt.Sprintf("账户额度：$%.2f", balance)
 		}
 	default:
+		if reply, ok := customCommandReply(c.CustomCommands, cmd, arg); ok {
+			text = reply
+			break
+		}
 		if cmd != "" && cmd != "生图" && cmd != "画图" {
 			text = "未知指令，请发送 /帮助。"
 			break

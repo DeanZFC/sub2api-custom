@@ -73,7 +73,7 @@ func (h *QQBotHandler) GetConfig(c *gin.Context) {
 	response.Success(c, cfg.Public())
 }
 func (h *QQBotHandler) SaveConfig(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<10)
 	var cfg qqbot.Config
 	if c.ShouldBindJSON(&cfg) != nil {
 		response.BadRequest(c, "配置格式不正确")

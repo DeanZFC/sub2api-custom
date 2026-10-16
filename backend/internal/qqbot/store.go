@@ -129,7 +129,7 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		return nil
 	}
 	// Ignore ambient full-stream messages before touching the queue or database.
-	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e)) {
+	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e, c.CustomCommands...)) {
 		outcome, reason = "ignored", "bot_or_ambient_message"
 		return nil
 	}

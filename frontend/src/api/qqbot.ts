@@ -1,8 +1,10 @@
 import { apiClient } from './client'
 
+export interface QQBotCustomCommand { command: string; reply: string; enabled: boolean }
 export interface QQBotConfig {
   enabled: boolean; app_id: string; app_secret: string; app_secret_set: boolean; sandbox: boolean
   allowed_groups: string[]; base_url: string; api_key: string; api_key_set: boolean
+  custom_commands: QQBotCustomCommand[]
   chat_model: string; chat_protocol: 'chat_completions' | 'responses'
   image_enabled: boolean; image_base_url: string; image_api_key: string; image_api_key_set: boolean
   image_model: string; image_size: string; system_prompt: string; max_output_tokens: number
@@ -39,9 +41,12 @@ export interface QQInviteConfig {
   min_recharge_total: number; min_recharge_30d: number; recharge_window_days: number
 }
 export interface QQLotteryPrize { name: string; amount: number; probability_bps: number }
-export interface QQLotteryConfig { enabled: boolean; title: string; recharge_step: number; chances_per_step: number; prizes: QQLotteryPrize[] }
-export interface QQLotteryState { user_id: number; recharge_total: number; earned: number; used: number; remaining: number; next_recharge: number }
-export interface QQLotteryDraw { id: number; user_id: number; email: string; member_id: string; prize_name: string; amount: number; remaining: number; created_at: string }
+export interface QQLotteryConfig {
+  enabled: boolean; title: string; recharge_step: number; chances_per_step: number; prizes: QQLotteryPrize[]
+  guarantee_enabled: boolean; guarantee_every: number; guarantee_prizes: QQLotteryPrize[]
+}
+export interface QQLotteryState { user_id: number; recharge_total: number; earned: number; used: number; remaining: number; next_recharge: number; guarantee_every: number; draws_until_guarantee: number }
+export interface QQLotteryDraw { id: number; user_id: number; email: string; member_id: string; prize_name: string; amount: number; remaining: number; created_at: string; is_guaranteed: boolean }
 export interface QQLotteryDrawsPage { items: QQLotteryDraw[]; total: number; page: number; page_size: number }
 export type QQActivityKind = 'checkin' | 'lottery' | 'invite'
 export interface QQActivityParticipant {
@@ -50,7 +55,7 @@ export interface QQActivityParticipant {
 }
 export interface QQActivityRecord {
   id: string; group_id: string; participant: QQActivityParticipant; inviter?: QQActivityParticipant
-  status: string; amount: number; prize_name: string; remaining?: number; created_at: string
+  status: string; amount: number; prize_name: string; is_guaranteed?: boolean; remaining?: number; created_at: string
   invited_at?: string; joined_at?: string; left_at?: string; rewarded_at?: string
   reward_user_id: number; reward_email: string
 }

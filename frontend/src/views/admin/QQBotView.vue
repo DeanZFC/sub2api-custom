@@ -32,6 +32,23 @@
             </div>
           </div>
         </section>
+        <section class="card space-y-4 p-6" :aria-label="t('qqbot.customCommands')">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold">{{ t('qqbot.customCommands') }}</h2>
+            <button type="button" class="btn btn-secondary" :disabled="busy || form.custom_commands.length >= 20" @click="addCustomCommand">{{ t('qqbot.addCustomCommand') }}</button>
+          </div>
+          <p class="text-sm text-gray-500">{{ t('qqbot.customCommandsHelp') }}</p>
+          <p v-if="!form.custom_commands.length" class="text-sm text-gray-500">{{ t('qqbot.noCustomCommands') }}</p>
+          <fieldset v-for="(custom, index) in form.custom_commands" :key="index" :disabled="busy" class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
+            <legend class="px-1 text-sm font-medium">{{ t('qqbot.customCommandEntry', { index: index + 1 }) }}</legend>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <label class="flex items-center gap-2"><input v-model="custom.enabled" type="checkbox" />{{ t('common.enabled') }}</label>
+              <button type="button" class="btn btn-secondary text-sm" @click="form.custom_commands.splice(index, 1)">{{ t('common.delete') }}</button>
+            </div>
+            <label class="block space-y-1">{{ t('qqbot.customCommandName') }}<input v-model.trim="custom.command" class="input font-mono" placeholder="/a" required maxlength="33" /></label>
+            <label class="block space-y-1">{{ t('qqbot.customCommandReply') }}<textarea v-model="custom.reply" rows="4" class="input" :placeholder="t('qqbot.customReplyPlaceholder')" required /></label>
+          </fieldset>
+        </section>
         <section class="card space-y-4 p-6">
           <h2 class="text-lg font-semibold">{{ t('qqbot.ai') }}</h2>
           <div class="grid gap-4 md:grid-cols-2">
@@ -97,7 +114,11 @@ const dirty = computed(() => snapshot.value !== savedSnapshot.value)
 const webhookURL = computed(() => `${window.location.origin}/api/v1/qqbot/webhook`)
 function secretHint(set: boolean) { return t(set ? 'qqbot.secretStored' : 'qqbot.secretEmpty') }
 function message(e: unknown) { return (e as {message?: string})?.message || t('common.error') }
-function apply(c: QQBotConfig) { form.value = c; groupsText.value = (c.allowed_groups || []).join('\n'); savedSnapshot.value = snapshot.value }
+function apply(c: QQBotConfig) { form.value = { ...c, custom_commands: c.custom_commands ?? [] }; groupsText.value = (c.allowed_groups || []).join('\n'); savedSnapshot.value = snapshot.value }
+function addCustomCommand() {
+  if (!form.value || busy.value || form.value.custom_commands.length >= 20) return
+  form.value.custom_commands.push({ command: '', reply: '', enabled: true })
+}
 async function refreshRuntime() {
   if (refreshingRuntime.value) return
   refreshingRuntime.value = true

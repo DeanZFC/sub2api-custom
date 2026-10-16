@@ -2,6 +2,7 @@ package qqbot
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 
@@ -55,4 +56,32 @@ func TestRechargeWindowValidationAndMessages(t *testing.T) {
 	require.Contains(t, custom.failure("签到", RechargeEligibility{Total: decimal.NewFromInt(5), Recent: decimal.NewFromInt(2)}), "近 7 天有效充值：$2.00")
 	require.Contains(t, custom.invite(), "近 7 天有效充值满 $10.00")
 	require.Error(t, json.Unmarshal([]byte("{\"recharge_window_days\":1.5}"), &custom))
+}
+
+func TestRechargeMessagesExplainAlternativeThresholds(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		requirement RechargeRequirement
+		want        string
+	}{
+		{"disabled", RechargeRequirement{}, "无需充值门槛"},
+		{"lifetime only", RechargeRequirement{MinRechargeTotal: 100}, "累计有效充值满 $100.00"},
+		{"recent only", RechargeRequirement{MinRecharge30d: 10, RechargeWindowDays: 7}, "近 7 天有效充值满 $10.00"},
+		{"either with default window", RechargeRequirement{MinRechargeTotal: 100, MinRecharge30d: 10}, "累计有效充值满 $100.00 或 近 30 天有效充值满 $10.00（满足任意一项即可，无需同时满足）"},
+		{"either with custom window", RechargeRequirement{MinRechargeTotal: 100, MinRecharge30d: 10, RechargeWindowDays: 7}, "累计有效充值满 $100.00 或 近 7 天有效充值满 $10.00（满足任意一项即可，无需同时满足）"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.requirement.describe())
+			require.Contains(t, tc.requirement.invite(), tc.want)
+			if tc.requirement.enabled() {
+				current := RechargeEligibility{Total: decimal.NewFromInt(20), Recent: decimal.NewFromInt(5)}
+				for _, activity := range []string{"签到", "邀请奖励"} {
+					message := tc.requirement.failure(activity, current)
+					require.Contains(t, message, "参与条件："+tc.want)
+					require.Contains(t, message, "当前累计有效充值：$20.00")
+					require.Contains(t, message, fmt.Sprintf("近 %d 天有效充值：$5.00", tc.requirement.windowDays()))
+				}
+			}
+		})
+	}
 }

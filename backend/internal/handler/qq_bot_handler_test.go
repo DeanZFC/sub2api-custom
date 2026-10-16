@@ -219,6 +219,42 @@ func TestQQBotConfigDoesNotReturnSecrets(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestQQBotSaveConfigAcceptsFullCustomCommandList(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	cfg := qqbot.DefaultConfig()
+	old, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	for i := 0; i < 20; i++ {
+		cfg.CustomCommands = append(cfg.CustomCommands, qqbot.CustomCommand{
+			Command: "/a" + strconv.Itoa(i), Reply: strings.Repeat("字", 2000), Enabled: true,
+		})
+	}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	require.Greater(t, len(raw), 64<<10, "full valid configurations exceed the previous body limit")
+	mock.ExpectBegin()
+	mock.ExpectExec("SELECT pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT value FROM settings").WithArgs("qq_bot_config").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(old)))
+	mock.ExpectExec("INSERT INTO settings").WithArgs("qq_bot_config", string(raw)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	h := NewQQBotHandler(qqbot.New(db, qqTestEncryptor{}, true, nil))
+	r := gin.New()
+	r.PUT("/config", h.SaveConfig)
+	req := httptest.NewRequest(http.MethodPut, "/config", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var result struct {
+		Data qqbot.Config `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	require.Equal(t, cfg.CustomCommands, result.Data.CustomCommands)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestQQBotEmailBindingPreviewWithoutLoginAndNoTokenEcho(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

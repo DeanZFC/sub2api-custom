@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"strings"
@@ -35,18 +36,26 @@ type LotteryPrize struct {
 	ProbabilityBPS int     `json:"probability_bps"`
 }
 type LotteryConfig struct {
-	Enabled        bool           `json:"enabled"`
-	Title          string         `json:"title"`
-	RechargeStep   float64        `json:"recharge_step"`
-	ChancesPerStep int64          `json:"chances_per_step"`
-	Prizes         []LotteryPrize `json:"prizes"`
+	Enabled          bool           `json:"enabled"`
+	Title            string         `json:"title"`
+	RechargeStep     float64        `json:"recharge_step"`
+	ChancesPerStep   int64          `json:"chances_per_step"`
+	Prizes           []LotteryPrize `json:"prizes"`
+	GuaranteeEnabled bool           `json:"guarantee_enabled"`
+	GuaranteeEvery   int64          `json:"guarantee_every"`
+	GuaranteePrizes  []LotteryPrize `json:"guarantee_prizes"`
 }
 
 func defaultLotteryConfig() LotteryConfig {
-	return LotteryConfig{Title: "幸运抽奖", RechargeStep: 10, ChancesPerStep: 1, Prizes: []LotteryPrize{
-		{Name: "额度奖励", Amount: 0.1, ProbabilityBPS: 1000},
-		{Name: "谢谢参与", Amount: 0, ProbabilityBPS: 9000},
-	}}
+	return LotteryConfig{
+		Title: "幸运抽奖", RechargeStep: 10, ChancesPerStep: 1,
+		GuaranteeEvery:  10,
+		GuaranteePrizes: []LotteryPrize{{Name: "保底奖励", Amount: 1, ProbabilityBPS: 10000}},
+		Prizes: []LotteryPrize{
+			{Name: "额度奖励", Amount: 0.1, ProbabilityBPS: 1000},
+			{Name: "谢谢参与", Amount: 0, ProbabilityBPS: 9000},
+		},
+	}
 }
 func readActivityConfig(ctx context.Context, db queryRower, key string, dst any) (bool, error) {
 	var raw string
@@ -129,18 +138,37 @@ func validateLottery(c LotteryConfig) error {
 	if c.ChancesPerStep < 1 || c.ChancesPerStep > 1000 {
 		return errors.New("每档赠送次数需在 1 到 1000 之间")
 	}
-	if len(c.Prizes) < 1 || len(c.Prizes) > 20 {
+	if err := validateLotteryPrizes(c.Prizes); err != nil {
+		return err
+	}
+	if c.GuaranteeEvery < 0 || c.GuaranteeEvery > 1000000 || (c.GuaranteeEnabled && c.GuaranteeEvery == 0) {
+		return errors.New("保底周期需为 1 到 1000000 次")
+	}
+	if c.GuaranteeEnabled {
+		if err := validateLotteryPrizes(c.GuaranteePrizes); err != nil {
+			return fmt.Errorf("保底奖池：%w", err)
+		}
+		for _, p := range c.GuaranteePrizes {
+			if p.Amount <= 0 {
+				return errors.New("保底奖项额度必须大于 0")
+			}
+		}
+	}
+	return nil
+}
+func validateLotteryPrizes(prizes []LotteryPrize) error {
+	if len(prizes) < 1 || len(prizes) > 20 {
 		return errors.New("请配置 1 到 20 个奖项")
 	}
 	sum := 0
-	for _, p := range c.Prizes {
+	for _, p := range prizes {
 		if strings.TrimSpace(p.Name) == "" || len([]rune(p.Name)) > 60 || !validRewardAmount(p.Amount) || p.ProbabilityBPS < 1 || p.ProbabilityBPS > 10000 {
 			return errors.New("奖项名称、金额或概率不正确；概率最小 0.01%，金额最多 1000 USD")
 		}
 		sum += p.ProbabilityBPS
 	}
 	if sum != 10000 {
-		return errors.New("所有奖项的中奖概率合计必须为 100%，可设置金额为 0 的谢谢参与奖项")
+		return errors.New("所有奖项的中奖概率合计必须为 100%")
 	}
 	return nil
 }
@@ -188,12 +216,20 @@ func randomCheckinAmount(c CheckinConfig) (float64, error) {
 	}
 	return float64(lo+n.Int64()) / 1e8, nil
 }
-func lotteryPrizeAt(c LotteryConfig, roll int64) LotteryPrize {
-	for _, p := range c.Prizes {
+func lotteryPrizeAt(prizes []LotteryPrize, roll int64) LotteryPrize {
+	for _, p := range prizes {
 		roll -= int64(p.ProbabilityBPS)
 		if roll < 0 {
 			return p
 		}
 	}
 	panic("lottery roll outside validated distribution")
+}
+
+// Lifetime usage includes ordinary wins and survives rebindings and config changes.
+func (c LotteryConfig) drawsUntilGuarantee(used int64) int64 {
+	if !c.GuaranteeEnabled || c.GuaranteeEvery <= 0 {
+		return 0
+	}
+	return c.GuaranteeEvery - used%c.GuaranteeEvery
 }

@@ -100,6 +100,15 @@ describe('QQ activity records', () => {
     w.unmount()
   })
 
+  it.each(['zh', 'en'] as const)('%s labels guaranteed lottery results on mobile and desktop', async locale => {
+    api.activityRecords.mockResolvedValue(page([{ ...invitation, inviter: undefined, status: 'credited', amount: 5, remaining: 2, prize_name: 'Guarantee', is_guaranteed: true }]))
+    const { wrapper: w, t } = await setup(locale, '?tab=lottery')
+    expect(w.get('article').text()).toContain(t('qqbot.guaranteedDraw'))
+    expect(w.get('tbody tr').text()).toContain(t('qqbot.guaranteedDraw'))
+    expect(w.text()).toContain('$5.00')
+    w.unmount()
+  })
+
   it('uses the linked tab, handles keyboard navigation and ignores responses from other tabs', async () => {
     let finish: (value: ReturnType<typeof page>) => void = () => {}
     api.activityRecords.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))

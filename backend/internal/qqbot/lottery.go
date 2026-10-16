@@ -16,22 +16,25 @@ import (
 )
 
 type LotteryState struct {
-	UserID        int64   `json:"user_id"`
-	RechargeTotal float64 `json:"recharge_total"`
-	Earned        int64   `json:"earned"`
-	Used          int64   `json:"used"`
-	Remaining     int64   `json:"remaining"`
-	NextRecharge  float64 `json:"next_recharge"`
+	UserID              int64   `json:"user_id"`
+	RechargeTotal       float64 `json:"recharge_total"`
+	Earned              int64   `json:"earned"`
+	Used                int64   `json:"used"`
+	Remaining           int64   `json:"remaining"`
+	NextRecharge        float64 `json:"next_recharge"`
+	GuaranteeEvery      int64   `json:"guarantee_every"`
+	DrawsUntilGuarantee int64   `json:"draws_until_guarantee"`
 }
 type LotteryDraw struct {
-	ID        int64     `json:"id"`
-	UserID    int64     `json:"user_id"`
-	Email     string    `json:"email"`
-	MemberID  string    `json:"member_id"`
-	PrizeName string    `json:"prize_name"`
-	Amount    float64   `json:"amount"`
-	Remaining int64     `json:"remaining"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           int64     `json:"id"`
+	UserID       int64     `json:"user_id"`
+	Email        string    `json:"email"`
+	MemberID     string    `json:"member_id"`
+	PrizeName    string    `json:"prize_name"`
+	IsGuaranteed bool      `json:"is_guaranteed"`
+	Amount       float64   `json:"amount"`
+	Remaining    int64     `json:"remaining"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 type LotteryDrawsPage struct {
 	Items    []LotteryDraw `json:"items"`
@@ -52,6 +55,10 @@ func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64
 	}
 	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_lottery_draws WHERE user_id=$1`, uid).Scan(&out.Used); err != nil {
 		return out, err
+	}
+	out.DrawsUntilGuarantee = c.drawsUntilGuarantee(out.Used)
+	if out.DrawsUntilGuarantee > 0 {
+		out.GuaranteeEvery = c.GuaranteeEvery
 	}
 	step := decimal.NewFromFloat(c.RechargeStep)
 	if step.LessThanOrEqual(decimal.Zero) || c.ChancesPerStep < 1 {
@@ -105,14 +112,14 @@ func (s *Service) ListLotteryDraws(ctx context.Context, search string, page, pag
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*)`+filter, search).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.user_id,u.email,d.member_id,d.prize_name,d.amount,d.remaining,d.created_at`+filter+` ORDER BY d.id DESC LIMIT $2 OFFSET $3`, search, pageSize, (page-1)*pageSize)
+	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.user_id,u.email,d.member_id,d.prize_name,d.amount,d.remaining,d.created_at,COALESCE(d.config_snapshot->'is_guaranteed'='true'::jsonb,false)`+filter+` ORDER BY d.id DESC LIMIT $2 OFFSET $3`, search, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return out, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var d LotteryDraw
-		if err = rows.Scan(&d.ID, &d.UserID, &d.Email, &d.MemberID, &d.PrizeName, &d.Amount, &d.Remaining, &d.CreatedAt); err != nil {
+		if err = rows.Scan(&d.ID, &d.UserID, &d.Email, &d.MemberID, &d.PrizeName, &d.Amount, &d.Remaining, &d.CreatedAt, &d.IsGuaranteed); err != nil {
 			return out, err
 		}
 		out.Items = append(out.Items, d)
@@ -149,13 +156,23 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 		for _, p := range cfg.Prizes {
 			fmt.Fprintf(&b, "\n%s：$%.2f，概率 %.2f%%", p.Name, p.Amount, float64(p.ProbabilityBPS)/100)
 		}
+		if cfg.GuaranteeEnabled {
+			fmt.Fprintf(&b, "\n保底规则：每个网站账号累计每抽 %d 次，当次改用保底奖池，仍消耗 1 次；包含历史抽奖，普通中奖不重置进度。\n保底奖池：", cfg.GuaranteeEvery)
+			for _, p := range cfg.GuaranteePrizes {
+				fmt.Fprintf(&b, "\n%s：$%.2f，概率 %.2f%%", p.Name, p.Amount, float64(p.ProbabilityBPS)/100)
+			}
+		}
 		return b.String(), tx.Commit()
 	}
 	state, err := lotteryState(ctx, tx, cfg, uid, false)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("剩余抽奖次数：%d 次\n下次赠送还需充值：$%.2f", state.Remaining, state.NextRecharge), tx.Commit()
+	result := fmt.Sprintf("剩余抽奖次数：%d 次\n下次赠送还需充值：$%.2f", state.Remaining, state.NextRecharge)
+	if state.DrawsUntilGuarantee > 0 {
+		result += fmt.Sprintf("\n距离下次保底：%d 次", state.DrawsUntilGuarantee)
+	}
+	return result, tx.Commit()
 }
 func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, error) {
 	if j.ID == "" {
@@ -231,9 +248,26 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 	if err != nil {
 		return "", err
 	}
-	prize := lotteryPrizeAt(cfg, n.Int64())
+	guaranteed := state.DrawsUntilGuarantee == 1
+	pool := cfg.Prizes
+	if guaranteed {
+		pool = cfg.GuaranteePrizes
+	}
+	prize := lotteryPrizeAt(pool, n.Int64())
 	result = fmt.Sprintf("抽奖结果：%s\n奖励额度：$%.2f\n剩余抽奖次数：%d 次", prize.Name, prize.Amount, state.Remaining-1)
-	snapshot, err := json.Marshal(cfg)
+	if guaranteed {
+		result = "本次触发保底抽奖！\n" + result
+	}
+	if cfg.GuaranteeEnabled {
+		result += fmt.Sprintf("\n距离下次保底：%d 次", cfg.drawsUntilGuarantee(state.Used+1))
+	}
+	// Keep the draw's classification alongside its immutable configuration snapshot.
+	// Older records without this field remain ordinary draws, without a migration.
+	snapshot, err := json.Marshal(struct {
+		LotteryConfig
+		IsGuaranteed bool  `json:"is_guaranteed"`
+		DrawNumber   int64 `json:"draw_number"`
+	}{cfg, guaranteed, state.Used + 1})
 	if err != nil {
 		return "", err
 	}

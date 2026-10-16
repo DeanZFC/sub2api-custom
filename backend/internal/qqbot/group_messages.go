@@ -19,17 +19,17 @@ func isGroupMessageEvent(eventType string) bool {
 	return eventType == groupAtMessageCreate || eventType == groupMessageCreate
 }
 
-func unmentionedGroupCommand(e Event) bool {
+func unmentionedGroupCommand(e Event, customCommands ...CustomCommand) bool {
 	// Commands addressed to someone else are not unmentioned commands.
 	if len(groupMentionIDs(e)) > 0 {
 		return false
 	}
-	cmd, _ := command(e.Content)
-	switch cmd {
-	case "帮助", "help", "绑定", "签到", "邀请奖励", "邀请活动", "我的邀请", "我的额度", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动", "生图", "画图":
+	cmd, arg := command(e.Content)
+	if isBuiltinCommand(cmd) {
 		return true
 	}
-	return false
+	_, ok := customCommandReply(customCommands, cmd, arg)
+	return ok
 }
 
 func groupMentionIDs(e Event) []string {
@@ -49,14 +49,14 @@ func groupMentionIDs(e Event) []string {
 	return ids
 }
 
-func shouldQueueGroupMessage(eventType string, e Event) bool {
+func shouldQueueGroupMessage(eventType string, e Event, customCommands ...CustomCommand) bool {
 	if e.Author.Bot {
 		return false
 	}
 	if eventType == groupAtMessageCreate {
 		return true
 	}
-	return eventType == groupMessageCreate && (unmentionedGroupCommand(e) || len(groupMentionIDs(e)) > 0)
+	return eventType == groupMessageCreate && (unmentionedGroupCommand(e, customCommands...) || len(groupMentionIDs(e)) > 0)
 }
 
 type groupBotIdentity struct {

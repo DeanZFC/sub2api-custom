@@ -86,6 +86,9 @@ func (r RechargeRequirement) describe() string {
 	if len(parts) == 0 {
 		return "无需充值门槛"
 	}
+	if len(parts) == 2 {
+		return strings.Join(parts, " 或 ") + "（满足任意一项即可，无需同时满足）"
+	}
 	return strings.Join(parts, " 或 ")
 }
 

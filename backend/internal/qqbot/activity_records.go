@@ -27,6 +27,7 @@ type ActivityRecord struct {
 	Status       string               `json:"status"`
 	Amount       float64              `json:"amount"`
 	PrizeName    string               `json:"prize_name"`
+	IsGuaranteed bool                 `json:"is_guaranteed"`
 	Remaining    *int64               `json:"remaining,omitempty"`
 	CreatedAt    time.Time            `json:"created_at"`
 	InvitedAt    *time.Time           `json:"invited_at,omitempty"`
@@ -81,8 +82,10 @@ func (s *Service) ListActivityRecords(ctx context.Context, kind, search string, 
 
 func listParticipationRecords(ctx context.Context, tx *sql.Tx, appID, kind, search string, out *ActivityRecordsPage) error {
 	table, extraFilter, prize, remaining := "qq_bot_rewards", " AND r.kind='checkin'", "''", "NULL::bigint"
+	guaranteed := "false"
 	if kind == "lottery" {
 		table, extraFilter, prize, remaining = "qq_bot_lottery_draws", "", "r.prize_name", "r.remaining"
+		guaranteed = "COALESCE(r.config_snapshot->'is_guaranteed'='true'::jsonb,false)"
 	}
 	from := ` FROM ` + table + ` r JOIN users u ON u.id=r.user_id
  LEFT JOIN qq_bot_bindings b ON b.app_id=r.app_id AND b.member_id=r.member_id AND b.user_id=r.user_id`
@@ -94,7 +97,7 @@ func listParticipationRecords(ctx context.Context, tx *sql.Tx, appID, kind, sear
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT r.id::text,r.group_id,r.member_id,r.user_id,u.email,
  COALESCE(b.nickname,''),b.user_id IS NOT NULL,u.status,u.deleted_at IS NOT NULL,
- r.amount,`+prize+`,`+remaining+`,r.created_at`+from+filter+` ORDER BY r.created_at DESC,r.id DESC LIMIT $3 OFFSET $4`, appID, search, out.PageSize, (out.Page-1)*out.PageSize)
+ r.amount,`+prize+`,`+remaining+`,r.created_at,`+guaranteed+from+filter+` ORDER BY r.created_at DESC,r.id DESC LIMIT $3 OFFSET $4`, appID, search, out.PageSize, (out.Page-1)*out.PageSize)
 	if err != nil {
 		return err
 	}
@@ -102,7 +105,7 @@ func listParticipationRecords(ctx context.Context, tx *sql.Tx, appID, kind, sear
 	for rows.Next() {
 		r := ActivityRecord{Status: "credited"}
 		targets := append([]any{&r.ID, &r.GroupID}, participantTargets(&r.Participant)...)
-		targets = append(targets, &r.Amount, &r.PrizeName, &r.Remaining, &r.CreatedAt)
+		targets = append(targets, &r.Amount, &r.PrizeName, &r.Remaining, &r.CreatedAt, &r.IsGuaranteed)
 		if err = rows.Scan(targets...); err != nil {
 			return err
 		}

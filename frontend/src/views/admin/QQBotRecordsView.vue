@@ -33,6 +33,7 @@
                 <span v-if="activeTab !== 'invite' || record.rewarded_at" class="font-semibold tabular-nums">${{ record.amount.toFixed(2) }}</span>
               </div>
               <p v-if="activeTab === 'lottery'" class="text-sm">{{ record.prize_name }} · {{ t('qqbot.remainingAtDraw') }} {{ record.remaining }}</p>
+              <p v-if="activeTab === 'lottery' && record.is_guaranteed" class="text-sm font-medium text-primary-600 dark:text-primary-400">{{ t('qqbot.guaranteedDraw') }}</p>
               <p v-if="record.rewarded_at" class="break-all text-xs text-gray-500">{{ t('qqbot.recordRewardAccount') }}：{{ record.reward_email || record.reward_user_id }} · ID: {{ record.reward_user_id }}</p>
               <dl class="space-y-1 text-xs text-gray-500">
                 <div class="break-all">{{ t('qqbot.group') }}：{{ record.group_id }}</div>
@@ -63,7 +64,7 @@
                 <td class="py-4 pr-5"><QQBotRecordParticipant :person="record.participant" /></td>
                 <td class="py-4 pr-5"><code class="block max-w-36 break-all text-xs text-gray-500">{{ record.group_id }}</code></td>
                 <td class="py-4 pr-5"><span class="inline-block whitespace-nowrap rounded-md bg-gray-100 px-2 py-1 text-xs dark:bg-dark-700">{{ t(`qqbot.recordStatus.${record.status}`) }}</span><p v-if="activeTab === 'invite'" class="mt-2 text-xs text-gray-500">{{ membership(record) }}</p></td>
-                <td v-if="activeTab === 'lottery'" class="py-4 pr-5"><p class="max-w-40 break-words">{{ record.prize_name }}</p><p class="mt-1 text-xs text-gray-500">{{ t('qqbot.remainingAtDraw') }}：{{ record.remaining }}</p></td>
+                <td v-if="activeTab === 'lottery'" class="py-4 pr-5"><p class="max-w-40 break-words">{{ record.prize_name }}</p><p v-if="record.is_guaranteed" class="mt-1 text-xs font-medium text-primary-600 dark:text-primary-400">{{ t('qqbot.guaranteedDraw') }}</p><p class="mt-1 text-xs text-gray-500">{{ t('qqbot.remainingAtDraw') }}：{{ record.remaining }}</p></td>
                 <td class="py-4 pr-5"><p class="font-medium tabular-nums">{{ activeTab === 'invite' && !record.rewarded_at ? '—' : `$${record.amount.toFixed(2)}` }}</p><p v-if="record.rewarded_at" class="mt-1 max-w-48 break-all text-xs text-gray-500">{{ t('qqbot.recordRewardAccount') }}：{{ record.reward_email || record.reward_user_id }} · ID: {{ record.reward_user_id }}</p></td>
                 <td class="space-y-1 whitespace-nowrap py-4 text-xs text-gray-500">
                   <template v-if="activeTab === 'invite'">
