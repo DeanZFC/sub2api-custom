@@ -65,9 +65,11 @@ func (p *scheduledTestAccountProgress) allowsNext(plan *ScheduledTestPlan, resul
 // scheduledTestResultSatisfies is the gate between two checks for one
 // account. A successful HTTP/upstream response is not enough when the plan
 // has a configured answer, threshold, or model-consistency rule: the quality
-// verdict must also be pass. Unknown, incomplete, and failed automatic
-// observations stop the account queue; display-only and manual-review checks
-// remain informational in the all-pass strategy.
+// verdict must also be pass. A completed statistics snapshot with insufficient
+// samples may continue the queue, but stays pending for quality actions.
+// Unknown model identity and failed automatic observations still stop the
+// account queue; display-only and manual-review checks remain informational
+// in the all-pass strategy.
 func scheduledTestResultSatisfies(plan *ScheduledTestPlan, result *ScheduledTestResult) bool {
 	if result == nil {
 		return false
@@ -102,7 +104,8 @@ func scheduledTestResultSatisfies(plan *ScheduledTestPlan, result *ScheduledTest
 	if probeVerdict, _, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
 		verdict = probeVerdict
 	}
-	return verdict == "pass"
+	return verdict == "pass" ||
+		(verdict == "pending" && result.OutputKind == "statistics" && result.OutputStatistics != nil)
 }
 
 func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, plan *ScheduledTestPlan, repo ScheduledTestRunRepository) {
