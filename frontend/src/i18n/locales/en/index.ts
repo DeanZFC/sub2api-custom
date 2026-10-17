@@ -1,3 +1,4 @@
+import gptDirect from './gptDirect'
 import qqbot from './qqbot'
 import landing from './landing'
 import common from './common'
@@ -8,6 +9,7 @@ import admin from './admin'
 import misc from './misc'
 
 export default {
+  gptDirect,
   ...qqbot,
   ...landing,
   ...common,

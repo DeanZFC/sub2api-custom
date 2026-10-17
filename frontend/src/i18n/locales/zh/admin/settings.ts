@@ -3,6 +3,7 @@ export default {
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {
+        gptDirect: 'GPT 直充',
         general: '通用设置',
         agreement: '登录条款',
         features: '功能开关',

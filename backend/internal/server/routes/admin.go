@@ -52,6 +52,10 @@ func RegisterAdminRoutes(
 			bot.DELETE("/bindings/:user_id", h.QQBot.Unbind)
 			bot.POST("/test/:kind", h.QQBot.Probe)
 		}
+		if h.GPTDirect != nil {
+			admin.GET("/gpt-direct/settings", h.GPTDirect.GetSettings)
+			admin.PUT("/gpt-direct/settings", h.GPTDirect.SaveSettings)
+		}
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
 

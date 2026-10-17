@@ -8931,13 +8931,17 @@
         </div>
         <!-- /Tab: Email -->
 
+        <div v-if="activeTab === 'gptDirect'">
+          <GPTDirectSettings />
+        </div>
+
         <!-- Tab: Backup -->
         <div v-show="activeTab === 'backup'">
           <BackupSettings />
         </div>
 
         <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <div v-show="activeTab !== 'backup' && activeTab !== 'gptDirect'" class="flex justify-end">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -9010,6 +9014,7 @@
 </template>
 
 <script setup lang="ts">
+import GPTDirectSettings from "@/components/admin/settings/GPTDirectSettings.vue";
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";
@@ -9126,6 +9131,7 @@ const paymentMethodsHref = computed(() =>
 );
 
 type SettingsTab =
+  | "gptDirect"
   | "general"
   | "agreement"
   | "features"
@@ -9137,6 +9143,7 @@ type SettingsTab =
   | "backup";
 const activeTab = ref<SettingsTab>("general");
 const settingsTabs = [
+  { key: "gptDirect" as SettingsTab, icon: "gift" as const },
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
   { key: "features" as SettingsTab, icon: "bolt" as const },

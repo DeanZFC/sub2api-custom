@@ -129,6 +129,15 @@ func RegisterUserRoutes(
 			announcements.POST("/:id/read", h.Announcement.MarkRead)
 		}
 
+		if h.GPTDirect != nil {
+			direct := authenticated.Group("/gpt-direct")
+			direct.GET("/config", h.GPTDirect.Config)
+			for _, operation := range []string{"verify", "query", "redeem", "subscription"} {
+				direct.POST("/"+operation, panelRateLimiter.Heavy(), h.GPTDirect.Operation(operation))
+			}
+			direct.POST("/task", h.GPTDirect.Operation("task"))
+		}
+
 		// 卡密兑换
 		redeem := authenticated.Group("/redeem")
 		{

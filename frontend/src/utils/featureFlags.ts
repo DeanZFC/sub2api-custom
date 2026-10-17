@@ -94,6 +94,7 @@ function defineFlag<K extends keyof PublicSettings>(
  * public-settings-driven switch; see the "Adding a new flag" checklist above.
  */
 export const FeatureFlags = {
+  gptDirect: defineFlag({ key: 'gpt_direct_enabled', mode: 'opt-in', label: 'GPT Direct' }),
   channelMonitor: defineFlag({
     key: 'channel_monitor_enabled',
     mode: 'opt-out',

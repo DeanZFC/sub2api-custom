@@ -24,6 +24,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
+	src/views/user/__tests__/GPTDirectView.spec.ts \
+	src/components/admin/settings/__tests__/GPTDirectSettings.spec.ts \
 	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/components/user/profile/__tests__/ProfileIdentityBindingsSection.spec.ts \
