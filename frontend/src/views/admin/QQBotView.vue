@@ -58,7 +58,11 @@
             <label class="space-y-1">{{ t('qqbot.protocol') }}<select v-model="form.chat_protocol" class="input"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
           </div>
           <label class="block space-y-1">{{ t('qqbot.systemPrompt') }}<textarea v-model="form.system_prompt" rows="3" class="input" /></label>
-          <div class="grid gap-4 md:grid-cols-2"><label class="space-y-1">{{ t('qqbot.maxTokens') }}<input v-model.number="form.max_output_tokens" class="input" type="number" min="64" max="8192" /></label><label class="space-y-1">{{ t('qqbot.history') }}<input v-model.number="form.history_turns" class="input" type="number" min="0" max="20" /></label></div>
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="space-y-1">{{ t('qqbot.maxTokens') }}<input v-model.number="form.max_output_tokens" class="input" type="number" min="64" max="8192" /></label>
+            <label class="space-y-1">{{ t('qqbot.history') }}<input v-model.number="form.history_messages" data-testid="history-messages" aria-describedby="qq-history-help" class="input" type="number" min="0" max="100" step="1" required /></label>
+          </div>
+          <p id="qq-history-help" class="text-xs text-gray-500">{{ t('qqbot.historyHelp') }}</p>
         </section>
         <section class="card space-y-4 p-6">
           <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">{{ t('qqbot.images') }}</h2><label class="flex items-center gap-2"><input v-model="form.image_enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>

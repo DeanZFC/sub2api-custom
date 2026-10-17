@@ -86,6 +86,12 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	_, err = db.Exec(`CREATE TABLE payment_orders(id BIGSERIAL PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id),order_type TEXT NOT NULL DEFAULT 'balance',amount NUMERIC(20,2) NOT NULL,bonus_amount NUMERIC(20,2) NOT NULL DEFAULT 0,refund_amount NUMERIC(20,2) NOT NULL DEFAULT 0,recharge_code VARCHAR(64) NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'COMPLETED',paid_at TIMESTAMPTZ DEFAULT NOW(),completed_at TIMESTAMPTZ DEFAULT NOW());`)
 	require.NoError(t, err)
+	raw, err = migrations.FS.ReadFile("278_qq_bot_group_history.sql")
+	require.NoError(t, err)
+	for i := 0; i < 2; i++ {
+		_, err = db.Exec(string(raw))
+		require.NoError(t, err)
+	}
 	return db
 }
 func savedBot(t *testing.T, db *sql.DB) *Service {
@@ -309,10 +315,19 @@ func TestQQBotSecretsAndConversationIsolation(t *testing.T) {
 	changed.BaseURL = "https://other.invalid/v1"
 	_, err = s.SaveConfig(ctx, changed)
 	require.Error(t, err)
-	s.saveHistory(ctx, c, Job{GroupID: "group", MemberID: "a"}, []Message{{Role: "user", Content: "private"}, {Role: "assistant", Content: "answer"}})
-	require.Len(t, s.history(ctx, c, Job{GroupID: "group", MemberID: "a"}), 3)
-	require.Len(t, s.history(ctx, c, Job{GroupID: "group", MemberID: "b"}), 1)
-	require.Len(t, s.history(ctx, c, Job{GroupID: "other-group", MemberID: "a"}), 1)
+	// Old personal conversations never become shared group context.
+	_, err = db.Exec(`INSERT INTO qq_bot_conversations(app_id,group_id,member_id,messages) VALUES($1,'group','a','[{"role":"user","content":"old-private"}]')`, c.AppID)
+	require.NoError(t, err)
+	e := Event{ID: "shared", GroupID: "group", Content: "new-shared"}
+	e.Author.MemberID = "a"
+	require.NoError(t, s.recordGroupEvent(ctx, c, e))
+	a := s.history(ctx, c, Job{GroupID: "group", MemberID: "a"})
+	b := s.history(ctx, c, Job{GroupID: "group", MemberID: "b"})
+	require.Equal(t, a, b)
+	require.Len(t, a, 3)
+	require.Contains(t, a[2].Content, "new-shared")
+	require.NotContains(t, a[2].Content, "old-private")
+	require.Len(t, s.history(ctx, c, Job{GroupID: "other-group", MemberID: "a"}), 2)
 }
 
 func TestQQBotMembershipEventsMayArriveOutOfOrder(t *testing.T) {
@@ -359,10 +374,12 @@ func TestQQBotWorkerChatAndImageDelivery(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/chat/completions":
 			chatCalls++
+			require.Zero(t, replies, "do not send a placeholder before generating the answer")
 			require.Equal(t, "Bearer operator-key", r.Header.Get("Authorization"))
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"free response"}}],"usage":{"prompt_tokens":4,"completion_tokens":2}}`))
 		case "/v1/images/generations":
 			imageCalls++
+			require.Equal(t, 1, replies, "image generation must not send a placeholder either")
 			require.Equal(t, "Bearer operator-key", r.Header.Get("Authorization"))
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]string{"b64_json": base64.StdEncoding.EncodeToString(picture.Bytes())}}})
 		case "/token":
@@ -370,6 +387,13 @@ func TestQQBotWorkerChatAndImageDelivery(t *testing.T) {
 		case "/v2/groups/group/files":
 			_, _ = w.Write([]byte(`{"file_info":"saved-image"}`))
 		case "/v2/groups/group/messages":
+			body := readQQTestReply(t, r)
+			if body.MsgType == 7 {
+				require.Equal(t, 2, body.Sequence)
+			} else {
+				require.Equal(t, 1, body.Sequence)
+				require.NotContains(t, body.text(), "正在思考")
+			}
 			replies++
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
@@ -412,7 +436,7 @@ func TestQQBotWorkerChatAndImageDelivery(t *testing.T) {
 	require.NoError(t, s.Enqueue(ctx, c, p))
 	s.runOne(ctx)
 	require.Equal(t, 1, imageCalls)
-	require.Equal(t, 5, replies)
+	require.Equal(t, 3, replies)
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
 	require.Zero(t, balance)

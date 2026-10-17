@@ -94,6 +94,7 @@ func (s *Service) maintenance(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_transfer_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_limits WHERE day<CURRENT_DATE-2`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_conversations WHERE updated_at<NOW()-INTERVAL '1 day'`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_group_messages h WHERE NOT EXISTS (SELECT 1 FROM qq_bot_group_messages recent WHERE recent.app_id=h.app_id AND recent.group_id=h.group_id AND recent.created_at>NOW()-INTERVAL '30 minutes')`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_message_references WHERE created_at<NOW()-INTERVAL '24 hours'`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_daily_usage WHERE day<CURRENT_DATE-32`)
 	// Keep small deduplication tombstones for the signed event replay lifetime.
@@ -531,10 +532,6 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			break
 		}
 		j.Kind = kind
-		if err := s.send(ctx, c, *j, "正在思考中", nil, seq); err != nil {
-			return err
-		}
-		seq++
 		var err error
 		if kind == "image" {
 			img, err = s.generateImage(ctx, c, prompt)
@@ -543,13 +540,11 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			var input Message
 			input, err = s.chatMessage(ctx, e, prompt, ref)
 			if err == nil {
-				messages = append(messages, input)
+				messages = append(messages, groupUserMessage(c, e, input))
+				j.ShareHistory = shareableGroupEvent(e, ref)
 				text, j.InputTokens, j.OutputTokens, err = s.chat(ctx, c, messages)
 			} else {
 				text = err.Error()
-			}
-			if err == nil {
-				s.saveHistory(ctx, c, *j, append(messages, Message{Role: "assistant", Content: text}))
 			}
 		}
 		if err != nil {
@@ -586,44 +581,4 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		seq++
 	}
 	return nil
-}
-func (s *Service) history(ctx context.Context, c Config, j Job) []Message {
-	messages := []Message{{Role: "system", Content: c.SystemPrompt}}
-	if c.HistoryTurns == 0 {
-		return messages
-	}
-	var raw []byte
-	if s.db.QueryRowContext(ctx, `SELECT messages FROM qq_bot_conversations WHERE app_id=$1 AND group_id=$2 AND member_id=$3 AND updated_at>NOW()-INTERVAL '30 minutes'`, c.AppID, j.GroupID, j.MemberID).Scan(&raw) != nil {
-		return messages
-	}
-	var old []Message
-	if json.Unmarshal(raw, &old) != nil {
-		return messages
-	}
-	if len(old) > c.HistoryTurns*2 {
-		old = old[len(old)-c.HistoryTurns*2:]
-	}
-	return append(messages, old...)
-}
-func (s *Service) saveHistory(ctx context.Context, c Config, j Job, messages []Message) {
-	if c.HistoryTurns == 0 {
-		return
-	}
-	var kept []Message
-	for _, m := range messages {
-		if m.Role == "user" || m.Role == "assistant" {
-			if len(m.Images) > 0 {
-				m.Content = limitText(m.Content, 2400)
-				m.Content += "\n（本条附带图片，历史记录不保存图片；需要复查细节时请重新发送。）"
-				m.Images = nil
-			}
-			m.Content = limitText(m.Content, 2500)
-			kept = append(kept, m)
-		}
-	}
-	if len(kept) > c.HistoryTurns*2 {
-		kept = kept[len(kept)-c.HistoryTurns*2:]
-	}
-	raw, _ := json.Marshal(kept)
-	_, _ = s.db.ExecContext(ctx, `INSERT INTO qq_bot_conversations(app_id,group_id,member_id,messages) VALUES($1,$2,$3,$4) ON CONFLICT(app_id,group_id,member_id) DO UPDATE SET messages=EXCLUDED.messages,updated_at=NOW()`, c.AppID, j.GroupID, j.MemberID, string(raw))
 }

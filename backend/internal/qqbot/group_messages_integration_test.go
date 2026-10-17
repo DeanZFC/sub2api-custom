@@ -102,7 +102,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "new-member", bound.MemberID)
 	require.Contains(t, lastReply.Load(), "<qqbot-at-user id=\"new-member\" />\n")
-	for _, content := range []string{"/帮助", "/我的额度", "/我的奖励", "/邀请活动", "/邀请奖励", "/我的邀请", "/抽奖次数", "/抽奖活动"} {
+	for _, content := range []string{"/帮助", "/我的余额", "/我的奖励", "/邀请活动", "/邀请奖励", "/我的邀请", "/抽奖次数", "/抽奖活动"} {
 		enqueue("command-"+content, content, "member", nil)
 		s.runOne(ctx)
 		var status string
@@ -135,11 +135,11 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	require.NoError(t, s.Enqueue(ctx, c, p))
 	s.runOne(ctx)
 	require.EqualValues(t, 1, chats.Load())
-	require.Equal(t, beforeModels+2, replies.Load())
+	require.Equal(t, beforeModels+1, replies.Load())
 	enqueue("image", "/生图 一只猫", "member", []Mention{{MemberID: "this-bot"}})
 	s.runOne(ctx)
 	require.EqualValues(t, 1, images.Load())
-	require.Equal(t, beforeModels+5, replies.Load())
+	require.Equal(t, beforeModels+3, replies.Load())
 	require.Equal(t, "<qqbot-at-user id=\"member\" />\n图片已生成。", lastReply.Load())
 
 	// The mention event can arrive first and omit mentions of the bot itself.
@@ -152,7 +152,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	enqueue(e.ID, e.Content, e.Author.MemberID, []Mention{{ID: "this-bot"}})
 	s.runOne(ctx)
 	require.EqualValues(t, 2, chats.Load())
-	require.Equal(t, beforeModels+7, replies.Load())
+	require.Equal(t, beforeModels+4, replies.Load())
 	require.Equal(t, "answer", lastReply.Load(), "QQ adds the mention for GROUP_AT_MESSAGE_CREATE replies")
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='mention-first'`).Scan(&count))
 	require.Equal(t, 1, count)
@@ -169,7 +169,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		require.NoError(t, s.Enqueue(ctx, c, p))
 		s.runOne(ctx)
 		require.Equal(t, beforeImages+1, images.Load())
-		require.Equal(t, beforeReplies+3, replies.Load())
+		require.Equal(t, beforeReplies+2, replies.Load())
 		require.Equal(t, "<qqbot-at-user id=\"image-member\" />\n图片已生成。", lastReply.Load())
 		var kind, status string
 		require.NoError(t, db.QueryRow(`SELECT kind,status FROM qq_bot_jobs WHERE message_id=$1`, id).Scan(&kind, &status))

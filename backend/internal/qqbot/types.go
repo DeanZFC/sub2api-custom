@@ -31,7 +31,7 @@ type Config struct {
 	ImageSize                string          `json:"image_size"`
 	SystemPrompt             string          `json:"system_prompt"`
 	MaxOutputTokens          int             `json:"max_output_tokens"`
-	HistoryTurns             int             `json:"history_turns"`
+	HistoryMessages          int             `json:"history_messages"`
 	DailyChatLimit           int             `json:"daily_chat_limit"`
 	DailyImageLimit          int             `json:"daily_image_limit"`
 	TotalDailyChatLimit      int             `json:"total_daily_chat_limit"`
@@ -55,7 +55,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{AllowedGroups: []string{}, CustomCommands: []CustomCommand{}, ChatProtocol: "chat_completions", ImageSize: "1024x1024",
 		SystemPrompt:    "你是 CTAV 群助手。用简洁、友好的中文回答。签到、绑定和奖励由固定指令处理，你不能修改账户或余额。",
-		MaxOutputTokens: 2048, HistoryTurns: 6, DailyChatLimit: 30, DailyImageLimit: 2,
+		MaxOutputTokens: 2048, HistoryMessages: 12, DailyChatLimit: 30, DailyImageLimit: 2,
 		TotalDailyChatLimit: 500, TotalDailyImageLimit: 20, CooldownSeconds: 5, InviteDailyLimit: 10,
 		InviteRechargeWindowDays: DefaultRechargeWindowDays}
 }
@@ -160,6 +160,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 }
 
 type Job struct {
+	ShareHistory   bool            `json:"-"`
 	ReplyReference string          `json:"-"`
 	ID             string          `json:"id"`
 	AppID          string          `json:"app_id"`

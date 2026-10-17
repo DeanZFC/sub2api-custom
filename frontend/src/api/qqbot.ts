@@ -8,7 +8,7 @@ export interface QQBotConfig {
   chat_model: string; chat_protocol: 'chat_completions' | 'responses'
   image_enabled: boolean; image_base_url: string; image_api_key: string; image_api_key_set: boolean
   image_model: string; image_size: string; system_prompt: string; max_output_tokens: number
-  history_turns: number; daily_chat_limit: number; daily_image_limit: number
+  history_messages: number; daily_chat_limit: number; daily_image_limit: number
   total_daily_chat_limit: number; total_daily_image_limit: number; cooldown_seconds: number
   checkin_reward: number; invite_reward: number; invite_daily_limit: number
   invite_min_recharge_total?: number; invite_min_recharge_30d?: number; invite_recharge_window_days?: number

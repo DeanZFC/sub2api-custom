@@ -55,6 +55,8 @@ func TestQQBotImagesAndExactReplyContext(t *testing.T) {
 					}
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 					require.True(t, strings.HasPrefix(body.Reference.ID, "incoming-"))
+					require.Equal(t, 1, body.Sequence, "the generated answer or error is the first reply")
+					require.NotContains(t, body.text(), "正在思考")
 					replies <- body.text()
 					n := sent.Add(1)
 					_ = json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("sent-%d", n), "ext_info": map[string]string{"ref_idx": fmt.Sprintf("REF-%d==", n)}})
@@ -87,29 +89,38 @@ func TestQQBotImagesAndExactReplyContext(t *testing.T) {
 			}
 			enqueue("image", " ", "alice", "group", groupAtMessageCreate, "", []Attachment{{URL: "https://image.example/secret-query", ContentType: "image/png"}})
 			require.EqualValues(t, 1, calls.Load(), "image-only messages must not return help")
+			require.EqualValues(t, 1, sent.Load(), "send only the generated answer")
 			firstInput := string(<-modelInputs)
 			require.Contains(t, firstInput, "data:image/png;base64,")
 			require.NotContains(t, firstInput, "secret-query")
 			require.NotContains(t, firstInput, "not-for-model")
 			var history string
-			require.NoError(t, db.QueryRow(`SELECT messages::text FROM qq_bot_conversations WHERE member_id='alice'`).Scan(&history))
+			require.NoError(t, db.QueryRow(`SELECT string_agg(content,'\n') FROM qq_bot_group_messages WHERE role='user'`).Scan(&history))
 			require.NotContains(t, history, "base64")
 			require.NotContains(t, history, "secret-query")
 			require.Contains(t, history, "历史记录不保存图片")
-			require.Len(t, s.history(ctx, c, Job{GroupID: "group", MemberID: "alice"}), 3)
+			require.Len(t, s.history(ctx, c, Job{GroupID: "group", MemberID: "alice"}), 4)
 			var originalRef string
 			require.NoError(t, db.QueryRow(`SELECT ref_idx FROM qq_bot_message_references WHERE content='answer-1'`).Scan(&originalRef))
 			require.NotEmpty(t, originalRef)
 
-			enqueue("later", "alice 的后续私有会话上下文", "alice", "group", groupAtMessageCreate, "", nil)
-			<-modelInputs
+			enqueue("ambient", "大家今晚一起吃火锅", "charlie", "group", groupMessageCreate, "", nil)
+			require.EqualValues(t, 1, calls.Load(), "ambient chatter never calls a model")
+			enqueue("later", "alice 的后续群聊上下文", "alice", "group", groupAtMessageCreate, "", nil)
+			laterInput := string(<-modelInputs)
+			require.Contains(t, laterInput, "大家今晚一起吃火锅")
+			require.Contains(t, laterInput, groupSpeaker(c.AppID, "group", "charlie"))
 			enqueue("quote", "解释这条回复", "bob", "group", groupMessageCreate, originalRef, nil)
 			require.EqualValues(t, 3, calls.Load())
 			quotedInput := string(<-modelInputs)
 			require.Contains(t, quotedInput, "answer-1")
 			require.Contains(t, quotedInput, "解释这条回复")
-			require.NotContains(t, quotedInput, "answer-2")
-			require.NotContains(t, quotedInput, "alice 的后续私有会话上下文")
+			require.Contains(t, quotedInput, "answer-2")
+			require.Contains(t, quotedInput, "alice 的后续群聊上下文")
+			var turns []json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(quotedInput), &turns))
+			require.Contains(t, string(turns[len(turns)-1]), "answer-1", "the explicit quote still targets the original message")
+			require.NotContains(t, string(turns[len(turns)-1]), "answer-2")
 			require.Zero(t, lookups.Load(), "quoting a known bot reply does not require bot_state")
 
 			enqueue("other-group", "解释这条回复", "bob", "other-group", groupMessageCreate, originalRef, nil)

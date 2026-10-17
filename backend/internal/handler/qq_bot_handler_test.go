@@ -231,6 +231,7 @@ func TestQQBotSaveConfigAcceptsFullCustomCommandList(t *testing.T) {
 	cfg := qqbot.DefaultConfig()
 	old, err := json.Marshal(cfg)
 	require.NoError(t, err)
+	cfg.HistoryMessages = 25
 	for i := 0; i < 20; i++ {
 		cfg.CustomCommands = append(cfg.CustomCommands, qqbot.CustomCommand{
 			Command: "/a" + strconv.Itoa(i), Reply: strings.Repeat("字", 2000), Enabled: true,
@@ -258,6 +259,7 @@ func TestQQBotSaveConfigAcceptsFullCustomCommandList(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
 	require.Equal(t, cfg.CustomCommands, result.Data.CustomCommands)
+	require.Equal(t, 25, result.Data.HistoryMessages)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

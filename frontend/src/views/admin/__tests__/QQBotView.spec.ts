@@ -14,7 +14,7 @@ describe('QQ bot settings', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    api.config.mockResolvedValue({ enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, allowed_groups: [], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_turns: 6 })
+    api.config.mockResolvedValue({ enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, allowed_groups: [], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_messages: 12 })
     api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
     api.save.mockImplementation(async (c) => c)
   })
@@ -44,8 +44,33 @@ describe('QQ bot settings', () => {
     expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ api_key: '', app_secret: '', base_url: 'https://other.invalid/v1' }))
   })
 
+  it.each(['zh', 'en'] as const)('%s saves and reloads the shared history count, including zero', async (locale) => {
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
+    const mountView = () => mount(QQBotView, { global: { plugins: [i18n] } })
+    let wrapper = mountView()
+    await flushPromises()
+    const input = () => wrapper.get('[data-testid="history-messages"]')
+    expect((input().element as HTMLInputElement).value).toBe('12')
+    expect(input().attributes('max')).toBe('100')
+    expect(wrapper.text()).toContain(i18n.global.t('qqbot.historyHelp'))
+    for (const count of [25, 0]) {
+      await input().setValue(count)
+      await wrapper.find('form').trigger('submit')
+      await flushPromises()
+      expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ history_messages: count, system_prompt: 'Helpful' }))
+      const saved = api.save.mock.calls.at(-1)![0]
+      expect(saved).not.toHaveProperty('history_turns')
+      api.config.mockResolvedValue(saved)
+      wrapper.unmount()
+      wrapper = mountView()
+      await flushPromises()
+      expect((input().element as HTMLInputElement).value).toBe(String(count))
+    }
+    wrapper.unmount()
+  })
+
   it('deletes an automatically discovered group without changing the allowed group input', async () => {
-    api.config.mockResolvedValue({ enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, allowed_groups: ['allowed-group'], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_turns: 6 })
+    api.config.mockResolvedValue({ enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, allowed_groups: ['allowed-group'], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_messages: 12 })
     api.runtime.mockResolvedValue({ groups: [{ id: 'discovered-group', last_event: 'GROUP_AT_MESSAGE_CREATE', last_seen_at: '2026-10-15T00:00:00Z' }], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
     api.deleteDiscoveredGroup.mockResolvedValue({ deleted: true })
     const i18n = createI18n({ legacy: false, locale: 'en', messages: { zh, en } })

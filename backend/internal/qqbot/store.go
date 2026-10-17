@@ -128,8 +128,9 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		outcome, reason = "ignored", "invalid_group"
 		return nil
 	}
-	// Ignore ambient full-stream messages before touching the queue or database.
-	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e, c.CustomCommands...)) {
+	// Disabled/unapproved ambient streams do not touch storage. Enabled groups
+	// record their bounded shared context below without creating model jobs.
+	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e, c.CustomCommands...) && (!c.Enabled || !c.allows(e.GroupID) || c.HistoryMessages == 0)) {
 		outcome, reason = "ignored", "bot_or_ambient_message"
 		return nil
 	}
@@ -144,16 +145,6 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	if !c.allows(e.GroupID) {
 		outcome, reason = "ignored", "group_not_allowed"
 		return nil
-	}
-	if p.Type == groupMessageCreate && !unmentionedGroupCommand(e, c.CustomCommands...) && len(groupMentionIDs(e)) == 0 {
-		ref, lookupErr := s.referencedMessage(ctx, c, e.GroupID, e.referenceID())
-		if lookupErr != nil {
-			return lookupErr
-		}
-		if ref == nil {
-			outcome, reason = "ignored", "bot_or_ambient_message"
-			return nil
-		}
 	}
 	switch p.Type {
 	case groupAtMessageCreate, groupMessageCreate, "GROUP_JOIN_REQUEST", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE":
@@ -177,6 +168,23 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		}
 		// Preserve existing keys and deduplicate delivery across both QQ events.
 		eventKey = groupAtMessageCreate + ":" + e.ID
+		if len(e.ID) > 1024 {
+			outcome, reason = "ignored", "invalid_message_id"
+			return nil
+		}
+		if err = s.recordGroupEvent(ctx, c, e); err != nil {
+			return err
+		}
+		if p.Type == groupMessageCreate && !unmentionedGroupCommand(e, c.CustomCommands...) && len(groupMentionIDs(e)) == 0 {
+			ref, lookupErr := s.referencedMessage(ctx, c, e.GroupID, e.referenceID())
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if ref == nil {
+				outcome, reason = "ignored", "ambient_message_recorded"
+				return nil
+			}
+		}
 	}
 	if eventKey == "" {
 		reason = "missing_event_id"
@@ -245,7 +253,7 @@ func (s *Service) claimJob(ctx context.Context) (Job, error) {
 	if n >= 2 {
 		return Job{}, sql.ErrNoRows
 	}
-	j, err := scanJob(tx.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM qq_bot_jobs q WHERE status='queued' AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id AND r.member_id=q.member_id) ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`))
+	j, err := scanJob(tx.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM qq_bot_jobs q WHERE status='queued' AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
 	if err != nil {
 		return j, err
 	}

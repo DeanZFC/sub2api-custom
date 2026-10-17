@@ -512,7 +512,8 @@ func (s *Service) sendFormatted(ctx context.Context, c Config, j Job, text strin
 	if err != nil {
 		return err
 	}
-	return s.rememberSentMessage(ctx, c, j.GroupID, raw, deliveredText, len(img) > 0)
+	shareable := j.Kind == "chat" && j.ShareHistory && j.Error == ""
+	return s.rememberSentMessage(ctx, c, j, raw, deliveredText, len(img) > 0, shareable)
 }
 
 func limitText(s string, n int) string {

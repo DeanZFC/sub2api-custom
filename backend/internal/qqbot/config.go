@@ -13,6 +13,37 @@ import (
 
 const configKey = "qq_bot_config"
 
+// Accept saved settings and older clients using turns without copying any old
+// per-member conversations into the new shared group history. Explicit zero
+// still disables history; the new message count takes precedence when present.
+func (c *Config) UnmarshalJSON(data []byte) error {
+	type configJSON Config
+	decoded := configJSON(*c)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var history struct {
+		Messages *int `json:"history_messages"`
+		Turns    *int `json:"history_turns"`
+	}
+	if err := json.Unmarshal(data, &history); err != nil {
+		return err
+	}
+	switch {
+	case history.Messages != nil:
+		decoded.HistoryMessages = *history.Messages
+	case history.Turns != nil:
+		if *history.Turns < 0 || *history.Turns > 20 {
+			return errors.New("历史轮数超出范围")
+		}
+		decoded.HistoryMessages = *history.Turns * 2
+	default:
+		decoded.HistoryMessages = 12
+	}
+	*c = Config(decoded)
+	return nil
+}
+
 type Encryptor interface {
 	Encrypt(string) (string, error)
 	Decrypt(string) (string, error)
@@ -81,8 +112,8 @@ func validateConfig(c Config) error {
 			return errors.New("每日次数必须在 0 到 100000 之间；0 表示禁止")
 		}
 	}
-	if c.MaxOutputTokens < 64 || c.MaxOutputTokens > 8192 || c.HistoryTurns < 0 || c.HistoryTurns > 20 || c.CooldownSeconds < 0 || c.CooldownSeconds > 3600 {
-		return errors.New("输出长度、历史轮数或冷却时间超出范围")
+	if c.MaxOutputTokens < 64 || c.MaxOutputTokens > 8192 || c.HistoryMessages < 0 || c.HistoryMessages > 100 || c.CooldownSeconds < 0 || c.CooldownSeconds > 3600 {
+		return errors.New("输出长度、历史消息条数（0～100）或冷却时间超出范围")
 	}
 	for _, n := range []float64{c.CheckinReward, c.InviteReward} {
 		if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n > 1000 || math.Abs(n*1e8-math.Round(n*1e8)) > 0.001 {
@@ -195,6 +226,11 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 	c.ClearImageAPIKey = false
 	if err = validateConfig(c); err != nil {
 		return c, err
+	}
+	if c.AppID != "" && (c.HistoryMessages == 0 || !c.Enabled) {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM qq_bot_group_messages WHERE app_id=$1`, c.AppID); err != nil {
+			return c, err
+		}
 	}
 	stored := c
 	for _, p := range []*string{&stored.AppSecret, &stored.APIKey, &stored.ImageAPIKey} {
