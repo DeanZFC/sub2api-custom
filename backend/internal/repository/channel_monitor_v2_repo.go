@@ -1217,15 +1217,6 @@ func intersectStrings(a, b []string) []string {
 	return out
 }
 
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
-}
-
 func intersectInt64(a, b []int64) []int64 {
 	set := map[int64]struct{}{}
 	for _, v := range b {

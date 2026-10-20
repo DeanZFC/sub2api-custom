@@ -80,7 +80,7 @@ func Fetch(ctx context.Context, version string) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("release manifest unavailable (HTTP %d); release may not be ready", resp.StatusCode)
 	}

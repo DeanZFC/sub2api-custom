@@ -361,7 +361,7 @@ func (u *Updater) workflow(ctx context.Context, jobID string) error {
 	if err != nil {
 		return fmt.Errorf("extract release updater: %w", err)
 	}
-	defer os.Remove(staged)
+	defer func() { _ = os.Remove(staged) }()
 	// Persist the rollback image before changing any deployment configuration.
 	if err = u.persistCurrentJob(jobID); err != nil {
 		return err
@@ -403,13 +403,13 @@ func (u *Updater) writeOverlay(image string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temp.Name())
+	defer func() { _ = os.Remove(temp.Name()) }()
 	if _, err = temp.Write(data); err != nil {
-		temp.Close()
+		_ = temp.Close()
 		return err
 	}
 	if err = temp.Sync(); err != nil {
-		temp.Close()
+		_ = temp.Close()
 		return err
 	}
 	if err = temp.Close(); err != nil {
@@ -450,17 +450,17 @@ func (u *Updater) stageUpdater(ctx context.Context, jobID, image string) (string
 	path := filepath.Join(u.cfg.StateDir, ".sub2api-updater-"+jobID)
 	_ = os.Remove(path)
 	if _, err = u.runOutput(ctx, "docker", "cp", id+":"+updatepolicy.UpdaterPath, path); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", err
 	}
 	if err = os.Chmod(path, 0755); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", err
 	}
 	// Execute the harmless flag parser before installing the host binary, catching
 	// a wrong architecture or missing dynamic loader before touching the app.
 	if _, err = u.runOutput(ctx, path, "--help"); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("release updater is not executable: %w", err)
 	}
 	return path, nil
