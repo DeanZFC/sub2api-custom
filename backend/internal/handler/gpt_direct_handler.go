@@ -17,8 +17,8 @@ type GPTDirectHandler struct {
 	client   *service.GPTDirectService
 }
 
-func NewGPTDirectHandler(settings *service.SettingService) *GPTDirectHandler {
-	return &GPTDirectHandler{settings: settings, client: service.NewGPTDirectService(settings)}
+func NewGPTDirectHandler(settings *service.SettingService, client *service.GPTDirectService) *GPTDirectHandler {
+	return &GPTDirectHandler{settings: settings, client: client}
 }
 
 func (h *GPTDirectHandler) GetSettings(c *gin.Context) {
@@ -34,6 +34,10 @@ func (h *GPTDirectHandler) GetSettings(c *gin.Context) {
 func (h *GPTDirectHandler) SaveSettings(c *gin.Context) {
 	var config service.GPTDirectConfig
 	if !bindGPTDirectJSON(c, &config) {
+		return
+	}
+	if config.LotteryRewardEnabled && !h.client.RewardsReady() {
+		response.ErrorWithDetails(c, 400, "Configure a persistent encryption key before enabling lottery rewards", "REWARD_UNAVAILABLE", nil)
 		return
 	}
 	saved, err := h.settings.SaveGPTDirectConfig(c.Request.Context(), config)

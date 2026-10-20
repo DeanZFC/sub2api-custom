@@ -4,12 +4,12 @@
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.activitiesTitle') }}</h1>
         <p class="mt-2 text-sm text-gray-500">{{ t('qqbot.activitiesHelp') }}</p></div>
-        <RouterLink class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
+        <RouterLink v-if="activeTab.key !== 'redemption'" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
       </div>
       <nav
         role="tablist"
         :aria-label="t('qqbot.activitiesTitle')"
-        class="flex gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-800"
+        class="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-800"
       >
         <button
           v-for="tab in tabs"
@@ -52,6 +52,7 @@ import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
 import QQBotInviteSettings from '@/components/admin/qqbot/QQBotInviteSettings.vue'
 import QQBotTransferSettings from '@/components/admin/qqbot/QQBotTransferSettings.vue'
+import QQBotRewardCodes from '@/components/admin/qqbot/QQBotRewardCodes.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -60,7 +61,8 @@ const tabs = [
   { key: 'checkin', label: 'qqbot.checkinTitle', component: QQBotCheckinSettings },
   { key: 'lottery', label: 'qqbot.lotteryTitle', component: QQBotLotterySettings },
   { key: 'invite', label: 'qqbot.inviteTitle', component: QQBotInviteSettings },
-  { key: 'transfer', label: 'qqbot.transferTitle', component: QQBotTransferSettings }
+  { key: 'transfer', label: 'qqbot.transferTitle', component: QQBotTransferSettings },
+  { key: 'redemption', label: 'qqbot.redemption.title', component: QQBotRewardCodes }
 ] as const
 type ActivityTab = (typeof tabs)[number]['key']
 const activeTab = computed(() => tabs.find(tab => tab.key === route.query.tab) ?? tabs[0])

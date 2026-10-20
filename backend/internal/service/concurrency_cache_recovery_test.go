@@ -26,7 +26,11 @@ func TestCacheRecoveryAdmissionChecksUnlimitedAndReleasesRejectedSlots(t *testin
 				return false, gateErr
 			}))
 			result, err := svc.AcquireAccountSlot(context.Background(), 7, limit)
-			require.ErrorIs(t, err, gateErr)
+			if gateErr != nil {
+				require.ErrorIs(t, err, gateErr)
+			} else {
+				require.ErrorIs(t, err, ErrAccountAdmissionDenied)
+			}
 			require.False(t, result.Acquired)
 			require.Nil(t, result.ReleaseFunc)
 			require.Equal(t, 1, calls)
@@ -72,7 +76,7 @@ func TestCacheRecoveryAdmissionChecksEachProxyAndWebSocketTurn(t *testing.T) {
 		first.ReleaseFunc()
 		cache.released = 0
 		second, err := svc.AcquireAccountRoute(context.Background(), &account, limit)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, ErrAccountAdmissionDenied)
 		require.False(t, second.Acquired)
 		require.Equal(t, 2, calls, "a pinned later turn still needs its own admission")
 		require.Equal(t, int64(22), cache.pinned)

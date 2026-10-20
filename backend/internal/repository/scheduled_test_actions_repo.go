@@ -18,8 +18,9 @@ var _ service.ScheduledTestActionRepository = (*scheduledTestResultRepository)(n
 var _ service.ScheduledTestActionRoundRepository = (*scheduledTestResultRepository)(nil)
 
 // New runs freeze targets once. A result remains authorized for that run after
-// its account moves, but old runs and newly joined accounts cannot participate.
-const protectionSourceMembershipSQL = `(r.run_id<>'' AND r.run_id=p.latest_run_id)`
+// automatic routing moves its account. Manual removal revokes that account's
+// results without invalidating the rest of the round.
+const protectionSourceMembershipSQL = `(r.run_id<>'' AND r.run_id=p.latest_run_id AND NOT r.protection_revoked)`
 
 func (r *scheduledTestResultRepository) listPlanAccountIDs(ctx context.Context, plan *service.ScheduledTestPlan, accountID *int64, eligibleOnly bool) ([]int64, error) {
 	if plan == nil {
@@ -27,10 +28,11 @@ func (r *scheduledTestResultRepository) listPlanAccountIDs(ctx context.Context, 
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT a.id FROM accounts a
  WHERE a.deleted_at IS NULL AND ($1::bigint IS NULL OR a.id=$1)
+ AND NOT (a.id = ANY(COALESCE($4::bigint[], '{}')))
  AND (NOT $3 OR (a.schedulable AND a.status IN ('active','quality_paused')))
  AND EXISTS (SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id
              WHERE ag.account_id=a.id AND ag.group_id=ANY($2) AND g.deleted_at IS NULL AND g.status='active')
- ORDER BY a.id`, accountID, pq.Array(plan.GroupIDs), eligibleOnly)
+ ORDER BY a.id`, accountID, pq.Array(plan.GroupIDs), eligibleOnly, pq.Array(plan.ExcludedAccountIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +64,7 @@ func (r *scheduledTestResultRepository) IsPlanRunAccountEligible(ctx context.Con
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM accounts a JOIN scheduled_test_plans p ON p.id=$1
  WHERE a.id=$3 AND a.deleted_at IS NULL AND a.schedulable AND a.status IN ('active','quality_paused')
  AND p.latest_run_id=$2 AND EXISTS(SELECT 1 FROM scheduled_test_results r
- WHERE r.plan_id=p.id AND r.run_id=$2 AND r.account_id=a.id) AND `+scheduledTestRuntimeOwnershipSQL+`)`, planID, runID, accountID).Scan(&eligible)
+ WHERE r.plan_id=p.id AND r.run_id=$2 AND r.account_id=a.id AND NOT r.protection_revoked) AND `+scheduledTestRuntimeOwnershipSQL+`)`, planID, runID, accountID).Scan(&eligible)
 	return eligible, err
 }
 
@@ -475,7 +477,7 @@ func (r *scheduledTestResultRepository) BeginProtectionRun(ctx context.Context, 
 		return err
 	}
 	defer tx.Rollback()
-	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
+	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
 	if err != nil {
 		return err
 	}
@@ -484,7 +486,7 @@ func (r *scheduledTestResultRepository) BeginProtectionRun(ctx context.Context, 
 	}
 	config := &current.Protection
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT r.account_id FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
- WHERE r.plan_id=$1 AND r.run_id=p.latest_run_id AND r.run_id<>'' AND r.account_id IS NOT NULL ORDER BY r.account_id`, plan.ID)
+ WHERE r.plan_id=$1 AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked AND r.account_id IS NOT NULL ORDER BY r.account_id`, plan.ID)
 	if err != nil {
 		return err
 	}

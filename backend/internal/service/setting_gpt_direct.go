@@ -15,22 +15,26 @@ const SettingKeyGPTDirectConfig = "gpt_direct_config"
 
 // GPTDirectConfig is administrator-owned. Only Public() may be sent to users.
 type GPTDirectConfig struct {
-	Enabled     bool   `json:"enabled"`
-	BaseURL     string `json:"base_url"`
-	TenantSlug  string `json:"tenant_slug"`
-	PurchaseURL string `json:"purchase_url"`
-	ButtonText  string `json:"button_text"`
-	Description string `json:"description"`
-	SupportURL  string `json:"support_url"`
+	Enabled              bool   `json:"enabled"`
+	BaseURL              string `json:"base_url"`
+	TenantSlug           string `json:"tenant_slug"`
+	PurchaseURL          string `json:"purchase_url"`
+	ButtonText           string `json:"button_text"`
+	Description          string `json:"description"`
+	SupportURL           string `json:"support_url"` // Legacy key; accepts contact text or an HTTP(S) link.
+	LotteryRewardEnabled bool   `json:"lottery_reward_enabled"`
+	LotteryChances       int    `json:"lottery_chances"`
 }
 
 type GPTDirectPublicConfig struct {
-	ReceiptScope string `json:"receipt_scope"`
-	Enabled      bool   `json:"enabled"`
-	PurchaseURL  string `json:"purchase_url"`
-	ButtonText   string `json:"button_text"`
-	Description  string `json:"description"`
-	SupportURL   string `json:"support_url"`
+	ReceiptScope         string `json:"receipt_scope"`
+	Enabled              bool   `json:"enabled"`
+	PurchaseURL          string `json:"purchase_url"`
+	ButtonText           string `json:"button_text"`
+	Description          string `json:"description"`
+	SupportURL           string `json:"support_url"`
+	LotteryRewardEnabled bool   `json:"lottery_reward_enabled"`
+	LotteryChances       int    `json:"lottery_chances"`
 }
 
 func (v GPTDirectConfig) Public() GPTDirectPublicConfig {
@@ -39,6 +43,7 @@ func (v GPTDirectConfig) Public() GPTDirectPublicConfig {
 		ReceiptScope: fmt.Sprintf("%x", scope[:12]),
 		Enabled:      v.Enabled && v.BaseURL != "", PurchaseURL: v.PurchaseURL,
 		ButtonText: v.ButtonText, Description: v.Description, SupportURL: v.SupportURL,
+		LotteryRewardEnabled: v.LotteryRewardEnabled, LotteryChances: v.LotteryChances,
 	}
 }
 
@@ -47,12 +52,13 @@ func parseGPTDirectConfig(raw string) (GPTDirectConfig, error) {
 	// including explicitly cleared links, always take precedence.
 	if raw == "" {
 		return GPTDirectConfig{
-			BaseURL:     "https://ctai.chengtingkj.org",
-			TenantSlug:  "ctai",
-			PurchaseURL: "https://wzyp.cn/shop/ctai/mgitov",
+			BaseURL:        "https://ctai.chengtingkj.org",
+			TenantSlug:     "ctai",
+			PurchaseURL:    "https://wzyp.cn/shop/ctai/mgitov",
+			LotteryChances: 1,
 		}, nil
 	}
-	v := GPTDirectConfig{TenantSlug: "ctai"}
+	v := GPTDirectConfig{TenantSlug: "ctai", LotteryChances: 1}
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
 		return GPTDirectConfig{}, errors.New("invalid GPT direct settings")
 	}
@@ -87,10 +93,16 @@ func (s *SettingService) SaveGPTDirectConfig(ctx context.Context, v GPTDirectCon
 	v.SupportURL = strings.TrimSpace(v.SupportURL)
 	v.ButtonText = strings.TrimSpace(v.ButtonText)
 	v.Description = strings.TrimSpace(v.Description)
+	if v.LotteryChances < 0 || v.LotteryChances > 1000 || (v.LotteryRewardEnabled && v.LotteryChances < 1) {
+		return v, errors.New("GPT direct lottery chances must be between 1 and 1000 when enabled")
+	}
 	if !gptDirectTenantPattern.MatchString(v.TenantSlug) || len([]rune(v.ButtonText)) > 40 || len([]rune(v.Description)) > 2000 {
 		return v, errors.New("invalid GPT direct settings")
 	}
-	for _, address := range []string{v.BaseURL, v.PurchaseURL, v.SupportURL} {
+	if len([]rune(v.SupportURL)) > 2048 {
+		return v, errors.New("GPT direct support content must not exceed 2048 characters")
+	}
+	for _, address := range []string{v.BaseURL, v.PurchaseURL} {
 		if address == "" {
 			continue
 		}

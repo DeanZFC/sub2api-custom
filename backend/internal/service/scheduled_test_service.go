@@ -82,6 +82,18 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 		}
 	}
 	plan.GroupIDs = groups
+	seenExcluded := make(map[int64]bool, len(plan.ExcludedAccountIDs))
+	excluded := make([]int64, 0, len(plan.ExcludedAccountIDs))
+	for _, id := range plan.ExcludedAccountIDs {
+		if id <= 0 {
+			return fmt.Errorf("excluded_account_ids must contain positive IDs")
+		}
+		if !seenExcluded[id] {
+			excluded = append(excluded, id)
+			seenExcluded[id] = true
+		}
+	}
+	plan.ExcludedAccountIDs = excluded
 	// These scalar columns are internal anchors for historical result joins.
 	// They no longer select an alternative execution mode.
 	plan.GroupID = &plan.GroupIDs[0]

@@ -1,0 +1,388 @@
+package qqbot
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+)
+
+const priceNotificationEvent = "PRICE_CHANGE_NOTIFICATION"
+
+// Disabled by default. Empty Groups means all AllowedGroups.
+type PriceNotificationConfig struct {
+	Enabled   bool     `json:"enabled"`
+	Scheduled bool     `json:"scheduled"`
+	Groups    []string `json:"groups"`
+}
+
+type PriceField struct {
+	Key       string `json:"key"`
+	Model     string `json:"model,omitempty"`
+	Label     string `json:"label"`
+	Value     string `json:"value"`
+	Unit      string `json:"unit,omitempty"`
+	Scheduled bool   `json:"scheduled,omitempty"`
+}
+
+type PriceState struct {
+	Key    string       `json:"key"`
+	Kind   string       `json:"kind"`
+	Name   string       `json:"name"`
+	Fields []PriceField `json:"fields"`
+}
+
+type PriceSnapshot struct {
+	States    []PriceState `json:"states"`
+	NextCheck time.Time    `json:"-"`
+}
+
+// The adapter exports customer-facing prices only, never account costs or keys.
+type PriceSnapshotProvider interface {
+	PriceSnapshot(context.Context, time.Time) (PriceSnapshot, error)
+}
+
+func (s *Service) SetPriceSnapshotProvider(source PriceSnapshotProvider) { s.priceSource = source }
+
+func validatePriceNotifications(c Config) error {
+	if len(c.PriceNotifications.Groups) > 100 {
+		return errors.New("价格通知群最多 100 个")
+	}
+	for _, group := range c.PriceNotifications.Groups {
+		if !c.allows(group) {
+			return errors.New("价格通知群必须在允许使用的群列表中")
+		}
+	}
+	return nil
+}
+
+func priceNotificationGroups(c Config) []string {
+	groups := c.PriceNotifications.Groups
+	if len(groups) == 0 {
+		groups = c.AllowedGroups
+	}
+	out := []string{}
+	seen := map[string]bool{}
+	for _, g := range groups {
+		if c.allows(g) && !seen[g] {
+			out = append(out, g)
+			seen[g] = true
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Service) resetPriceNotifications(ctx context.Context, tx *sql.Tx, old, current Config) error {
+	if !old.PriceNotifications.Enabled && !current.PriceNotifications.Enabled {
+		return nil
+	}
+	if old.Enabled == current.Enabled && old.AppID == current.AppID && old.Sandbox == current.Sandbox &&
+		old.PriceNotifications.Enabled == current.PriceNotifications.Enabled && old.PriceNotifications.Scheduled == current.PriceNotifications.Scheduled &&
+		slices.Equal(priceNotificationGroups(old), priceNotificationGroups(current)) {
+		return nil
+	}
+	// Configuration changes establish a new baseline; never broadcast changes made
+	// while disabled, or deliver old-environment messages to newly selected groups.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM qq_bot_price_snapshots WHERE app_id IN ($1,$2)`, old.AppID, current.AppID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='cancelled',error='通知设置已变更',finished_at=NOW(),payload='{}' WHERE app_id IN ($1,$2) AND event_type=$3 AND status='queued'`, old.AppID, current.AppID, priceNotificationEvent)
+	if err != nil || !current.Enabled || !current.PriceNotifications.Enabled || s.priceSource == nil {
+		return err
+	}
+	// Capture the baseline before enabling returns, so a price edit immediately
+	// after saving the toggle is not swallowed by the first background scan.
+	now := time.Now()
+	snapshot, err := s.priceSource.PriceSnapshot(ctx, now)
+	if err != nil {
+		return fmt.Errorf("初始化价格通知失败：%w", err)
+	}
+	next := now.Add(15 * time.Second)
+	if current.PriceNotifications.Scheduled && snapshot.NextCheck.After(now) && snapshot.NextCheck.Before(next) {
+		next = snapshot.NextCheck
+	}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_price_snapshots(app_id,snapshot,next_check_at) VALUES($1,$2,$3)`, current.AppID, string(raw), next)
+	return err
+}
+
+func (s *Service) startPriceMonitor(ctx context.Context) {
+	if s.priceSource == nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		next := time.Time{}
+		for {
+			now := time.Now()
+			if !now.Before(next) {
+				scanCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				var err error
+				next, err = s.checkPriceChanges(scanCtx, now)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					slog.Warn("qqbot price notification scan failed", "error", err)
+					next = now.Add(15 * time.Second)
+				}
+			}
+			// Wake at the actual boundary, including sub-second remainders. A
+			// fixed one-second tick can miss short periods after a slow scan.
+			delay := time.Until(next)
+			if delay < 10*time.Millisecond {
+				delay = 10 * time.Millisecond
+			}
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			case <-s.priceWake:
+				timer.Stop()
+				next = time.Time{}
+			}
+		}
+	}()
+}
+
+func (s *Service) wakePriceMonitor() {
+	select {
+	case s.priceWake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) checkPriceChanges(ctx context.Context, now time.Time) (time.Time, error) {
+	next := now.Add(15 * time.Second)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return next, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	c, err := s.lockConfig(ctx, tx)
+	if err != nil {
+		return next, err
+	}
+	if !c.Enabled || !c.PriceNotifications.Enabled || s.priceSource == nil || len(priceNotificationGroups(c)) == 0 {
+		return next, nil
+	}
+	var locked bool
+	if err = tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(71427107)`).Scan(&locked); err != nil || !locked {
+		return now.Add(time.Second), err
+	}
+	var raw []byte
+	var due time.Time
+	err = tx.QueryRowContext(ctx, `SELECT snapshot,next_check_at FROM qq_bot_price_snapshots WHERE app_id=$1`, c.AppID).Scan(&raw, &due)
+	initial := errors.Is(err, sql.ErrNoRows)
+	if err != nil && !initial {
+		return next, err
+	}
+	if !initial && now.Before(due) {
+		return due, nil
+	}
+	current, err := s.priceSource.PriceSnapshot(ctx, now)
+	if err != nil {
+		return next, err
+	}
+	if c.PriceNotifications.Scheduled && current.NextCheck.After(now) && current.NextCheck.Before(next) {
+		next = current.NextCheck
+	}
+	if !initial {
+		var previous PriceSnapshot
+		if err = json.Unmarshal(raw, &previous); err != nil {
+			return next, err
+		}
+		chunks := formatPriceChanges(previous, current, c.PriceNotifications.Scheduled, now)
+		batchID, sequence := randomID(), 0
+		for _, group := range priceNotificationGroups(c) {
+			for _, chunk := range chunks {
+				// created_at is the transaction timestamp. Ordered IDs preserve
+				// continuation order when several chunks share that timestamp.
+				id := fmt.Sprintf("%s-%08d", batchID, sequence)
+				sequence++
+				body, err := json.Marshal(map[string]any{"text": chunk, "sandbox": c.Sandbox})
+				if err != nil {
+					return next, err
+				}
+				if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,payload,kind) VALUES($1,$2,$1,$3,$4,$5,'price_notification')`, id, c.AppID, priceNotificationEvent, group, string(body)); err != nil {
+					return next, err
+				}
+			}
+		}
+	}
+	raw, err = json.Marshal(current)
+	if err != nil {
+		return next, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_price_snapshots(app_id,snapshot,next_check_at) VALUES($1,$2,$3) ON CONFLICT(app_id) DO UPDATE SET snapshot=EXCLUDED.snapshot,next_check_at=EXCLUDED.next_check_at,updated_at=NOW()`, c.AppID, string(raw), next)
+	if err != nil {
+		return next, err
+	}
+	return next, tx.Commit()
+}
+
+func formatPriceChanges(previous, current PriceSnapshot, scheduled bool, at time.Time) []string {
+	old := map[string]PriceState{}
+	for _, state := range previous.States {
+		old[state.Key] = state
+	}
+	states := append([]PriceState(nil), current.States...)
+	sort.Slice(states, func(i, j int) bool { return states[i].Key < states[j].Key })
+	var chunks []string
+	for _, state := range states {
+		before, ok := old[state.Key]
+		// Initial enable, newly created entities and activation are baselines, not
+		// price edits. Removed models inside an existing channel still produce diffs.
+		if !ok {
+			continue
+		}
+		prev := map[string]PriceField{}
+		fields := map[string]PriceField{}
+		for _, field := range before.Fields {
+			prev[field.Key] = field
+			fields[field.Key] = field
+		}
+		for _, field := range state.Fields {
+			fields[field.Key] = field
+		}
+		after := map[string]PriceField{}
+		for _, field := range state.Fields {
+			after[field.Key] = field
+		}
+		keys := make([]string, 0, len(fields))
+		for key := range fields {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		lines := []string{}
+		onlyScheduled := true
+		model := ""
+		for _, key := range keys {
+			field := fields[key]
+			if field.Scheduled && !scheduled {
+				continue
+			}
+			a, had := prev[key]
+			b, has := after[key]
+			if had && has && a.Value == b.Value && a.Unit == b.Unit {
+				continue
+			}
+			if !field.Scheduled {
+				onlyScheduled = false
+			}
+			if field.Model != "" && field.Model != model {
+				model = field.Model
+				lines = append(lines, "", "模型："+replyPlainLabel(limitText(model, 180)))
+			}
+			from, to := "未配置", "已移除"
+			if had {
+				from = a.Value
+			}
+			if has {
+				to = b.Value
+			}
+			line := replyPlainLabel(limitText(field.Label, 180)) + "：" + replyPlainLabel(limitText(from, 180)) + " → " + replyPlainLabel(limitText(to, 180))
+			if field.Unit != "" {
+				line += " / " + replyPlainLabel(field.Unit)
+			}
+			lines = append(lines, line)
+		}
+		if len(lines) == 0 {
+			continue
+		}
+		title, noun := "渠道价格变更", "渠道"
+		if state.Kind == "group" {
+			title, noun = "分组倍率变更", "分组"
+		}
+		if onlyScheduled {
+			title += "（定时切换）"
+		}
+		header := "**【" + title + "】**\n" + noun + "：" + replyPlainLabel(limitText(state.Name, 120)) + "\n"
+		footer := "\n\n检测时间：" + at.In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05") + "（北京时间）"
+		// Preserve every changed field; repeat the subject on continuation messages.
+		chunk := header
+		activeModel := ""
+		for _, line := range lines {
+			line = limitText(line, 900)
+			if strings.HasPrefix(line, "模型：") {
+				activeModel = line
+			}
+			if len([]rune(chunk+"\n"+line+footer)) > 1750 && chunk != header {
+				chunks = append(chunks, chunk+footer)
+				chunk = header
+				if activeModel != "" && line != activeModel {
+					chunk += "\n" + activeModel
+				}
+			}
+			chunk += "\n" + line
+		}
+		chunks = append(chunks, chunk+footer)
+	}
+	return chunks
+}
+
+func (s *Service) deliverPriceNotification(parent context.Context, c Config, j Job) {
+	if !c.PriceNotifications.Enabled || !containsPriceGroup(c, j.GroupID) {
+		s.finish(j, "cancelled", "价格通知已关闭或通知群已移除")
+		return
+	}
+	if time.Since(j.CreatedAt) > time.Hour {
+		s.finish(j, "expired", "价格通知排队超过 1 小时，未发送过期通知")
+		return
+	}
+	var body struct {
+		Text    string `json:"text"`
+		Sandbox bool   `json:"sandbox"`
+	}
+	if json.Unmarshal(j.Payload, &body) != nil || body.Text == "" || body.Sandbox != c.Sandbox {
+		s.finish(j, "cancelled", "通知内容无效或 QQ 环境已变更")
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
+	defer cancel()
+	err := s.sendPriceNotification(ctx, c, j, body.Text)
+	if err != nil {
+		s.finish(j, "delivery_failed", err.Error())
+		return
+	}
+	s.finish(j, "completed", "")
+}
+
+func containsPriceGroup(c Config, group string) bool {
+	for _, g := range priceNotificationGroups(c) {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) sendPriceNotification(ctx context.Context, c Config, j Job, text string) error {
+	if !c.Enabled || !c.PriceNotifications.Enabled || c.AppID != j.AppID || !containsPriceGroup(c, j.GroupID) || j.EventType != priceNotificationEvent {
+		return ErrDisabled
+	}
+	if len([]rune(text)) > 1800 {
+		return errors.New("价格通知内容过长")
+	}
+	// Deliberately separate from passive replies: no fabricated msg_id, event_id,
+	// user mention or AI call. Unknown delivery outcomes are never auto-replayed.
+	_, err := s.qqRequest(ctx, c, "/v2/groups/"+url.PathEscape(j.GroupID)+"/messages", map[string]any{
+		"msg_type": 2, "markdown": map[string]string{"content": text},
+	})
+	if err != nil {
+		return fmt.Errorf("价格通知发送失败：%w", err)
+	}
+	return nil
+}

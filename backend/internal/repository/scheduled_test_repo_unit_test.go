@@ -27,18 +27,19 @@ func TestScheduledTestPlanRepositoryCreatePersistsName(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`(?s)INSERT INTO scheduled_test_plans \(name, sort_order, account_id`).
-		WithArgs("nightly candy", 0, nil, groupID, nil, "candy", "all_accounts", "model", "", "*/5 * * * *", true, 20, false, nextRun, "{2}", sqlmock.AnyArg(), "{3}", "", sqlmock.AnyArg()).
+		WithArgs("nightly candy", 0, nil, groupID, nil, "candy", "all_accounts", "model", "", "*/5 * * * *", true, 20, false, nextRun, "{2}", sqlmock.AnyArg(), "{3}", "", sqlmock.AnyArg(), "{7}").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "sort_order", "account_id", "group_id", "test_definition_id", "test_type", "target_mode", "model_id", "reasoning_effort", "cron_expression", "enabled", "max_results", "auto_recover", "last_run_at", "next_run_at", "created_at", "updated_at", "test_definition_ids", "protection", "group_ids", "migration_note", "schedule_config",
-		}).AddRow(10, "nightly candy", 0, nil, groupID, nil, "candy", "all_accounts", "model", "", "*/5 * * * *", true, 20, false, nil, nextRun, createdAt, createdAt, "{2}", "{}", "{3}", "", nil))
+			"id", "name", "sort_order", "account_id", "group_id", "test_definition_id", "test_type", "target_mode", "model_id", "reasoning_effort", "cron_expression", "enabled", "max_results", "auto_recover", "last_run_at", "next_run_at", "created_at", "updated_at", "test_definition_ids", "protection", "group_ids", "migration_note", "schedule_config", "excluded_account_ids",
+		}).AddRow(10, "nightly candy", 0, nil, groupID, nil, "candy", "all_accounts", "model", "", "*/5 * * * *", true, 20, false, nil, nextRun, createdAt, createdAt, "{2}", "{}", "{3}", "", nil, "{7}"))
 	mock.ExpectCommit()
 
 	got, err := repo.Create(context.Background(), &service.ScheduledTestPlan{
-		Name: "nightly candy", GroupID: &groupID, GroupIDs: []int64{groupID}, TestDefinitionIDs: []int64{2}, TargetMode: "all_accounts", TestType: "candy", ModelID: "model", CronExpression: "*/5 * * * *", Enabled: true, MaxResults: 20, NextRunAt: &nextRun,
+		Name: "nightly candy", ExcludedAccountIDs: []int64{7}, GroupID: &groupID, GroupIDs: []int64{groupID}, TestDefinitionIDs: []int64{2}, TargetMode: "all_accounts", TestType: "candy", ModelID: "model", CronExpression: "*/5 * * * *", Enabled: true, MaxResults: 20, NextRunAt: &nextRun,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "nightly candy", got.Name)
 	require.Equal(t, []int64{3}, got.GroupIDs)
+	require.Equal(t, []int64{7}, got.ExcludedAccountIDs)
 	require.Equal(t, []int64{2}, got.TestDefinitionIDs)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -84,7 +84,8 @@ CREATE TABLE ops_error_logs (
 		"253_scheduled_test_plan_sort_order.sql", "256_scheduled_test_multiple_definitions.sql", "257_scheduled_test_hourly_statistics.sql",
 		"258_scheduled_test_protection.sql", "259_scheduled_test_outcome_actions.sql",
 		"260_scheduled_test_model_check.sql", "261_scheduled_test_admin_review.sql", "262_scheduled_test_execution_snapshot.sql",
-		"264_scheduled_test_cache_recovery.sql", "264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql", "276_scheduled_test_cost_control.sql",
+		"281_scheduled_test_membership_revocation.sql",
+		"264_scheduled_test_cache_recovery.sql", "264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql", "282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)

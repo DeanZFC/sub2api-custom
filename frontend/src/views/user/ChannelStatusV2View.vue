@@ -254,12 +254,14 @@
           :coverage="snapshot?.coverage || null"
           :loading="loading && !snapshot"
         />
-        <RelayPulseMatrix
+        <ChannelHealthCards
           v-else-if="matrix"
           :rows="matrixRows"
+          :model-rows="modelMatrix?.items || []"
           :coverage="matrix.coverage"
           :health-mode="healthMode"
-          :show-throughput="showThroughput"
+          :next-refresh-at="nextRefreshAt"
+          :refreshing="refreshing"
         />
         <div
           v-else-if="loading"
@@ -469,7 +471,7 @@ import FilterMultiSelect from '@/features/channel-monitor-v2/FilterMultiSelect.v
 import MetricCell from '@/features/channel-monitor-v2/MetricCell.vue'
 import MonitorRankBadge from '@/features/channel-monitor-v2/MonitorRankBadge.vue'
 import MonitorTrendChart from '@/features/channel-monitor-v2/MonitorTrendChart.vue'
-import RelayPulseMatrix from '@/features/channel-monitor-v2/RelayPulseMatrix.vue'
+import ChannelHealthCards from '@/features/channel-monitor-v2/ChannelHealthCards.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -537,8 +539,6 @@ const tabs = computed(() => {
 const matrixGroupOptions = computed(() => [
   { value: 'platform' as MonitorMatrixGroupBy, label: t('channelMonitorV2.groupBy.platform') },
   { value: 'platform_group' as MonitorMatrixGroupBy, label: t('channelMonitorV2.groupBy.platformGroup') },
-  { value: 'platform_model' as MonitorMatrixGroupBy, label: t('channelMonitorV2.groupBy.platformModel') },
-  { value: 'platform_group_model' as MonitorMatrixGroupBy, label: t('channelMonitorV2.groupBy.platformGroupModel') },
 ])
 const healthModeOptions = computed(() => [
   { value: 'overall' as HealthMode, label: t('channelMonitorV2.healthMode.overall') },
@@ -560,6 +560,8 @@ const trendView = ref<TrendView>(parseTrendView(route.query.trend_view))
 const dimensions = ref<MonitorDimensions>({ platforms: [], groups: [], models: [] })
 const snapshot = ref<MonitorSnapshot | null>(null)
 const matrix = ref<MonitorMatrixResponse | null>(null)
+const modelMatrix = ref<MonitorMatrixResponse | null>(null)
+const nextRefreshAt = ref(0)
 const modelRows = ref<MonitorModelRow[]>([])
 const errorRows = ref<MonitorErrorRow[]>([])
 const userRows = ref<MonitorUserRow[]>([])
@@ -670,15 +672,8 @@ function parseRange(value: unknown): MonitorRange {
   return ['90m', '24h', '7d', '30d'].includes(String(value)) ? (value as MonitorRange) : '90m'
 }
 function parseMatrixGroupBy(value: unknown): MonitorMatrixGroupBy {
-  const allowed: MonitorMatrixGroupBy[] = [
-    'platform',
-    'platform_group',
-    'platform_model',
-    'platform_group_model',
-  ]
-  return allowed.includes(value as MonitorMatrixGroupBy)
-    ? (value as MonitorMatrixGroupBy)
-    : 'platform_group'
+  if (value === 'platform' || value === 'platform_model') return 'platform'
+  return 'platform_group'
 }
 function parseTab(value: unknown, allowUsers: boolean): Tab {
   const allowed: Tab[] = allowUsers ? ['models', 'errors', 'users'] : ['models', 'errors']
@@ -719,13 +714,18 @@ async function loadDimensions(signal?: AbortSignal, id = sequence) {
 }
 
 async function loadMetrics(signal?: AbortSignal, id = sequence) {
-  const [nextSnapshot, nextMatrix] = await Promise.all([
+  const modelGroupBy = matrixGroupBy.value === 'platform' || matrixGroupBy.value === 'platform_model'
+    ? 'platform_model' : 'platform_group_model'
+  const matrixRequest = api.getMatrix(filter.value, matrixGroupBy.value, isAdmin.value, signal, true)
+  const [nextSnapshot, nextMatrix, nextModelMatrix] = await Promise.all([
     api.getSnapshot(filter.value, isAdmin.value, signal),
-    api.getMatrix(filter.value, matrixGroupBy.value, isAdmin.value, signal),
+    matrixRequest,
+    modelGroupBy === matrixGroupBy.value ? matrixRequest : api.getMatrix(filter.value, modelGroupBy, isAdmin.value, signal),
   ])
   if (id !== sequence) return
   snapshot.value = nextSnapshot
   matrix.value = nextMatrix
+  modelMatrix.value = nextModelMatrix
   scheduleAutoRefresh()
   await loadTab(signal, id)
 }
@@ -819,11 +819,14 @@ function scheduleAutoRefresh() {
   const seconds = bootstrapActive.value
     ? 10
     : snapshot.value?.config?.refresh_interval_seconds || 300
+  const intervalMs = Math.max(bootstrapActive.value ? 10 : 60, seconds) * 1000
+  nextRefreshAt.value = Date.now() + intervalMs
   autoRefreshTimer = window.setInterval(() => {
+    nextRefreshAt.value = Date.now() + intervalMs
     if (!loading.value && !refreshing.value) {
       void reload(true)
     }
-  }, Math.max(bootstrapActive.value ? 10 : 60, seconds) * 1000)
+  }, intervalMs)
 }
 function drillModel(row: MonitorModelRow) {
   filter.value.platforms = [row.platform]

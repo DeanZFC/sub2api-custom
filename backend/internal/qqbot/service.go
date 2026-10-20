@@ -23,6 +23,8 @@ type Service struct {
 	invalidate      func(context.Context, int64)
 	bindingEmail    BindingEmailDelivery
 	channelStatus   ChannelStatusProvider
+	priceSource     PriceSnapshotProvider
+	priceWake       chan struct{}
 	http            *http.Client
 	tokenURL        string
 	qqURL           string
@@ -41,11 +43,12 @@ func New(db *sql.DB, encryptor Encryptor, ready bool, invalidate func(context.Co
 	if invalidate == nil {
 		invalidate = func(context.Context, int64) {}
 	}
-	return &Service{db: db, encryptor: encryptor, encryptionReady: ready, invalidate: invalidate, http: &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect}, imageDownload: downloadImage, tokenURL: "https://bots.qq.com/app/getAppAccessToken", qqURL: "https://api.sgroup.qq.com"}
+	return &Service{db: db, encryptor: encryptor, encryptionReady: ready, invalidate: invalidate, priceWake: make(chan struct{}, 1), http: &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect}, imageDownload: downloadImage, tokenURL: "https://bots.qq.com/app/getAppAccessToken", qqURL: "https://api.sgroup.qq.com"}
 }
 func (s *Service) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
+	s.startPriceMonitor(ctx)
 	for i := 0; i < 2; i++ {
 		s.wg.Add(1)
 		go func() {
@@ -93,6 +96,8 @@ func (s *Service) maintenance(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_bind_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_transfer_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_limits WHERE day<CURRENT_DATE-2`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_reward_limits WHERE last_attempt_at<NOW()-INTERVAL '2 days' AND blocked_until<NOW()`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_reward_attempts WHERE failed AND created_at<NOW()-INTERVAL '30 days'`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_conversations WHERE updated_at<NOW()-INTERVAL '1 day'`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_group_messages h WHERE NOT EXISTS (SELECT 1 FROM qq_bot_group_messages recent WHERE recent.app_id=h.app_id AND recent.group_id=h.group_id AND recent.created_at>NOW()-INTERVAL '30 minutes')`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_message_references WHERE created_at<NOW()-INTERVAL '24 hours'`)
@@ -122,6 +127,10 @@ func (s *Service) runOne(parent context.Context) {
 		}
 		logMembershipEvent(ctx, j, nil, "process", "ignored", reason)
 		s.finish(j, "failed", ErrDisabled.Error())
+		return
+	}
+	if j.EventType == priceNotificationEvent {
+		s.deliverPriceNotification(ctx, c, j)
 		return
 	}
 	var e Event
@@ -383,6 +392,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			{"/签到", "每日签到"},
 			{"/我的余额", "查询账户余额"},
 			{"/我的奖励", "查询各项累计奖励"},
+			{"/奖励兑换 兑换码", "兑换额度、抽奖次数或奖品"},
 			{"/渠道状态", "查询整体及各分组的成功率、缓存率和首 Token"},
 			{"/绑定 邮箱或绑定码", "绑定账号"},
 			{"/邀请奖励", "查看邀请奖励规则、条件和今日进度"},
@@ -435,6 +445,23 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		text, err = s.reward(ctx, c, *j, "checkin")
 		if err != nil {
 			text = "签到失败，请稍后重试。"
+		}
+	case "奖励兑换":
+		j.Kind = "reward_redemption"
+		var err error
+		text, err = s.redeemReward(ctx, c, *j)
+		if err != nil {
+			text = "奖励兑换处理异常，请稍后重试或联系管理员。"
+			j.Error = "奖励兑换处理异常"
+		}
+		if _, saveErr := s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET kind=$2,result_text=$3 WHERE id=$1`, j.ID, j.Kind, text); saveErr != nil {
+			return errors.New("兑换结果记录失败，请通过兑换管理核对奖励状态")
+		}
+		if err != nil {
+			if sendErr := s.send(ctx, c, *j, text, nil, seq); sendErr != nil {
+				return sendErr
+			}
+			return errors.New(j.Error)
 		}
 	case "抽奖":
 		var err error

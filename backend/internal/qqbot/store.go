@@ -208,7 +208,16 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		return errors.New("机器人队列已满")
 	}
 	jobID := randomID()
-	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,event_key) DO NOTHING`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data))
+	var rewardHash string
+	if cmd, _ := command(e.Content); isGroupMessageEvent(p.Type) && cmd == "奖励兑换" {
+		clean, hash := redactRewardCommand(e)
+		rewardHash = hash
+		p.Data, err = json.Marshal(clean)
+		if err != nil {
+			return err
+		}
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,reward_code_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(app_id,event_key) DO NOTHING`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data), rewardHash)
 	if err != nil {
 		return err
 	}
@@ -228,13 +237,13 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	return nil
 }
 
-const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at`
+const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,reward_code_hash`
 
 type scanner interface{ Scan(...any) error }
 
 func scanJob(r scanner) (Job, error) {
 	var j Job
-	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt)
+	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.RewardCodeHash)
 	return j, err
 }
 func (s *Service) claimJob(ctx context.Context) (Job, error) {
@@ -253,7 +262,12 @@ func (s *Service) claimJob(ctx context.Context) (Job, error) {
 	if n >= 2 {
 		return Job{}, sql.ErrNoRows
 	}
-	j, err := scanJob(tx.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM qq_bot_jobs q WHERE status='queued' AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
+	j, err := scanJob(tx.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM qq_bot_jobs q WHERE status='queued'
+ AND (event_type <> 'PRICE_CHANGE_NOTIFICATION' OR (
+   NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type='PRICE_CHANGE_NOTIFICATION' AND p.status='running')
+   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type='PRICE_CHANGE_NOTIFICATION' AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
+ ))
+ AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
 	if err != nil {
 		return j, err
 	}

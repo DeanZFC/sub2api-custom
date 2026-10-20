@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -22,6 +25,15 @@ func TestConcurrencyErrorResponse(t *testing.T) {
 		wantCode    string
 		wantMessage string
 	}{
+		{
+			name:        "quality admission is not a concurrency timeout",
+			err:         fmt.Errorf("reserve account: %w", service.ErrAccountAdmissionDenied),
+			slotType:    "account",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantType:    "api_error",
+			wantCode:    gatewayAccountUnavailableCode,
+			wantMessage: "Account temporarily unavailable due to scheduling or quality protection, please retry later",
+		},
 		{
 			name:        "true concurrency timeout remains rate limit",
 			err:         &ConcurrencyError{SlotType: "account", IsTimeout: true},

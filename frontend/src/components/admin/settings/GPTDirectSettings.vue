@@ -37,10 +37,22 @@
           <textarea v-model="form.description" class="input" rows="3" maxlength="2000" :placeholder="t('gptDirect.purchaseHint')" />
         </label>
         <label class="block">
-          <span class="input-label">{{ t('gptDirect.admin.supportURL') }}</span>
-          <input v-model.trim="form.support_url" type="url" class="input" placeholder="https://support.example.com" />
+          <span class="input-label">{{ t('gptDirect.admin.supportContent') }}</span>
+          <textarea v-model="form.support_url" class="input" rows="3" maxlength="2048" :placeholder="t('gptDirect.admin.supportPlaceholder')" />
+          <span class="mt-1 block text-xs text-gray-500">{{ t('gptDirect.admin.supportHint') }}</span>
         </label>
         <p class="rounded-lg bg-gray-50 p-3 text-sm text-gray-500 dark:bg-dark-800">{{ t('gptDirect.admin.proxyHint') }}</p>
+        <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-600">
+          <label class="flex items-center justify-between gap-4">
+            <span class="font-medium">{{ t('gptDirect.admin.lotteryEnabled') }}</span>
+            <Toggle v-model="form.lottery_reward_enabled" :disabled="loading || saving || loadFailed" />
+          </label>
+          <label v-if="form.lottery_reward_enabled" class="block">
+            <span class="input-label">{{ t('gptDirect.admin.lotteryChances') }}</span>
+            <input v-model.number="form.lottery_chances" type="number" min="1" max="1000" step="1" class="input max-w-xs" />
+          </label>
+          <p class="text-xs leading-5 text-gray-500">{{ t('gptDirect.admin.lotteryHint') }}</p>
+        </div>
         <div class="flex items-center justify-end gap-3">
           <span v-if="saved" role="status" class="text-sm text-emerald-600">{{ t('gptDirect.admin.saved') }}</span>
           <button type="button" class="btn btn-primary" :disabled="loading || saving || loadFailed" @click="save">
@@ -66,7 +78,7 @@ const saving = ref(false)
 const loadFailed = ref(false)
 const saved = ref(false)
 const error = ref('')
-const form = reactive<GPTDirectSettings>({ enabled: false, base_url: '', tenant_slug: 'ctai', purchase_url: '', button_text: '', description: '', support_url: '' })
+const form = reactive<GPTDirectSettings>({ enabled: false, base_url: '', tenant_slug: 'ctai', purchase_url: '', button_text: '', description: '', support_url: '', lottery_reward_enabled: false, lottery_chances: 1 })
 
 async function load() {
   loading.value = true
@@ -85,7 +97,10 @@ async function save() {
     Object.assign(form, await gptDirectAPI.saveSettings({ ...form }))
     saved.value = true
     await app.fetchPublicSettings(true)
-  } catch { error.value = t('gptDirect.admin.saveFailed') }
+  } catch (failure) {
+    error.value = (failure as { reason?: string })?.reason === 'REWARD_UNAVAILABLE'
+      ? t('gptDirect.admin.rewardKeyRequired') : t('gptDirect.admin.saveFailed')
+  }
   finally { saving.value = false }
 }
 function submitOnEnter(event: KeyboardEvent) {

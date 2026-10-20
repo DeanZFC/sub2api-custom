@@ -30,7 +30,20 @@ export default {
     groupBy: {
       label: '展示维度', platform: '平台', platformGroup: '平台 / 分组', platformModel: '平台 / 模型', platformGroupModel: '平台 / 分组 / 模型'
     },
-    trendView: { label: '趋势视图', pulse: '色块矩阵', line: '折线图' },
+    trendView: { label: '趋势视图', pulse: '渠道卡片', line: '折线图' },
+    cards: {
+      title: '渠道健康', description: '基于真实调用的被动健康 · 悬停色块查看详情',
+      passive: '被动健康', availability: '可用率',
+      refreshIn: '{seconds}s 后刷新', past: '过去', now: '最近',
+      recentRequests: '近 20 次请求状态',
+      requestLegend: '绿：成功 · 黄：响应较慢 / 已忽略错误 · 红：失败 · 灰：暂无请求',
+      noRequest: '当前时间范围内暂无更多请求',
+      models: '模型状态', modelsHint: '仅展示当前时间范围内有调用的模型 · 被动健康',
+      noModels: '当前时间范围内暂无模型调用',
+      health: { healthy: '健康', warning: '需关注', critical: '异常', unknown: '暂无状态' },
+      legend: { healthy: '健康', warning: '需关注', critical: '异常', unknown: '无流量 / 样本不足' },
+      requests: { success: '请求成功', slow: '请求成功，首 Token 较慢', error: '请求失败', ignored: '已忽略的请求错误（不计入健康分）' },
+    },
     healthMode: { label: '健康显示', overall: '综合', success: '错误率', ttft: '首 Token', cache: '缓存率' },
     tabs: { aria: '明细维度', models: '模型', errors: '错误原因', users: '用户排行' },
     metrics: {

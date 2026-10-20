@@ -103,6 +103,32 @@ func TestGPTDirectSettingsValidationAndPublicProjection(t *testing.T) {
 	require.Empty(t, cleared.PurchaseURL)
 }
 
+func TestGPTDirectSupportContentRoundTrip(t *testing.T) {
+	settings := NewSettingService(&gptDirectSettingsRepo{values: map[string]string{}}, nil)
+	for _, content := range []string{"QQ：123456789\n微信：example-support", "https://support.example.com/contact", strings.Repeat("服", 2048), ""} {
+		config := GPTDirectConfig{
+			Enabled: true, BaseURL: "https://service.example.com", TenantSlug: "ctai",
+			PurchaseURL: "https://shop.example.com", SupportURL: "  " + content + "  ",
+		}
+		saved, err := settings.SaveGPTDirectConfig(context.Background(), config)
+		require.NoError(t, err)
+		require.Equal(t, content, saved.SupportURL)
+		loaded, err := settings.GetGPTDirectConfig(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, saved, loaded)
+		require.Equal(t, content, loaded.Public().SupportURL)
+	}
+	before, err := settings.GetGPTDirectConfig(context.Background())
+	require.NoError(t, err)
+	tooLong := before
+	tooLong.SupportURL = strings.Repeat("服", 2049)
+	_, err = settings.SaveGPTDirectConfig(context.Background(), tooLong)
+	require.Error(t, err)
+	after, err := settings.GetGPTDirectConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, before, after, "rejected content must not overwrite saved settings")
+}
+
 func TestGPTDirectRedemptionScopesAndSanitizes(t *testing.T) {
 	var keys []string
 	var bodies []map[string]string
@@ -224,4 +250,20 @@ func TestGPTDirectTaskLookupRequiresMatchingProductAndIdentity(t *testing.T) {
 	product, id = "gpt", "task_other"
 	_, failure = client.Call(context.Background(), "task", input, 1, "", "")
 	require.Equal(t, "INVALID_RESPONSE", failure.Reason)
+}
+
+func TestGPTDirectLotterySettings(t *testing.T) {
+	settings := NewSettingService(&gptDirectSettingsRepo{values: map[string]string{}}, nil)
+	initial, err := settings.GetGPTDirectConfig(context.Background())
+	require.NoError(t, err)
+	require.False(t, initial.LotteryRewardEnabled)
+	require.Equal(t, 1, initial.LotteryChances)
+	for _, n := range []int{-1, 0, 1001} {
+		_, err = settings.SaveGPTDirectConfig(context.Background(), GPTDirectConfig{LotteryRewardEnabled: true, LotteryChances: n})
+		require.Error(t, err)
+	}
+	cfg, err := settings.SaveGPTDirectConfig(context.Background(), GPTDirectConfig{LotteryRewardEnabled: true, LotteryChances: 3})
+	require.NoError(t, err)
+	require.Equal(t, 3, cfg.Public().LotteryChances)
+	require.True(t, cfg.Public().LotteryRewardEnabled)
 }

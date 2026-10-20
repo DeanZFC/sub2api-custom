@@ -22,6 +22,8 @@ import (
 type GPTDirectService struct {
 	settings *SettingService
 	client   *http.Client
+	rewards  *gptDirectRewardStore
+	worker   *gptDirectRewardWorker
 }
 
 func NewGPTDirectService(settings *SettingService) *GPTDirectService {
@@ -51,16 +53,17 @@ type GPTDirectCode struct {
 }
 
 type GPTDirectTask struct {
-	ID              string  `json:"id"`
-	Status          string  `json:"status"`
-	Progress        float64 `json:"progress"`
-	Email           string  `json:"email"`
-	Plan            string  `json:"plan"`
-	PlanName        string  `json:"planName"`
-	PlanKind        string  `json:"planKind"`
-	FulfillmentKind string  `json:"fulfillmentKind"`
-	Product         string  `json:"product"`
-	CreatedAt       string  `json:"createdAt"`
+	ID              string                  `json:"id"`
+	Status          string                  `json:"status"`
+	Progress        float64                 `json:"progress"`
+	Email           string                  `json:"email"`
+	Plan            string                  `json:"plan"`
+	PlanName        string                  `json:"planName"`
+	PlanKind        string                  `json:"planKind"`
+	FulfillmentKind string                  `json:"fulfillmentKind"`
+	Product         string                  `json:"product"`
+	CreatedAt       string                  `json:"createdAt"`
+	LotteryReward   *GPTDirectLotteryReward `json:"lottery_reward,omitempty"`
 }
 
 type GPTDirectReceipt struct {
@@ -102,6 +105,68 @@ func (s *GPTDirectService) Call(ctx context.Context, operation string, input GPT
 	if !config.Public().Enabled {
 		return nil, gptDirectError(404, "DISABLED")
 	}
+	input.Code = strings.ToUpper(strings.TrimSpace(input.Code))
+	var attempt gptDirectAttempt
+	if operation == "redeem" {
+		if len(input.Code) < 4 || len(input.Code) > 80 {
+			return nil, gptDirectError(400, "CODE_INVALID_INPUT")
+		}
+		if strings.TrimSpace(input.Session) == "" || len(input.Session) > 64*1024 {
+			return nil, gptDirectError(400, "SESSION_REQUIRED")
+		}
+		if userID <= 0 || !gptDirectKeyPattern.MatchString(idempotencyKey) {
+			return nil, gptDirectError(400, "IDEMPOTENCY_REQUIRED")
+		}
+		if config.LotteryRewardEnabled && !s.RewardsReady() {
+			return nil, gptDirectError(503, "REWARD_UNAVAILABLE")
+		}
+		if s.rewards != nil {
+			attempt, err = s.rewards.prepare(ctx, config, userID, input.Code, idempotencyKey)
+			if err != nil {
+				return nil, gptDirectError(503, "REWARD_TRACKING_UNAVAILABLE")
+			}
+			if attempt.Chances > 0 && !s.RewardsReady() {
+				return nil, gptDirectError(503, "REWARD_UNAVAILABLE")
+			}
+			// Keep accepting the upstream receipt after the browser closes. The
+			// bounded request never retries a recharge on its own.
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 50*time.Second)
+			defer cancel()
+		}
+	}
+	result, failure := s.call(ctx, config, operation, input, userID, clientIP, idempotencyKey)
+	// A lost receipt can leave the CDK processing or used. Only the original
+	// website account and persisted request key may proceed to an idempotent
+	// replay; querying a code alone cannot claim or restore its reward.
+	if operation == "verify" && failure != nil && s.rewards != nil &&
+		(failure.Reason == "CODE_PROCESSING" || failure.Reason == "CODE_USED") &&
+		s.rewards.canResume(ctx, config, userID, input.Code, idempotencyKey) {
+		return s.call(ctx, config, "query", input, userID, clientIP, "")
+	}
+	if failure != nil || s.rewards == nil {
+		return result, failure
+	}
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	switch value := result.(type) {
+	case GPTDirectReceipt:
+		if err = s.rewards.record(settleCtx, attempt, &value); err != nil {
+			return nil, gptDirectError(503, "REWARD_TRACKING_UNAVAILABLE")
+		}
+		value.Task.LotteryReward, err = s.rewards.observe(settleCtx, gptDirectScope(config), userID, value.Token, &value.Task)
+		result = value
+	case GPTDirectTask:
+		value.LotteryReward, err = s.rewards.observe(settleCtx, gptDirectScope(config), userID, input.Token, &value)
+		result = value
+	}
+	if err != nil {
+		return nil, gptDirectError(503, "REWARD_TRACKING_UNAVAILABLE")
+	}
+	return result, nil
+}
+
+func (s *GPTDirectService) call(ctx context.Context, config GPTDirectConfig, operation string, input GPTDirectInput, userID int64, clientIP, idempotencyKey string) (any, *GPTDirectError) {
 	input.Code = strings.ToUpper(strings.TrimSpace(input.Code))
 	input.Session = strings.TrimSpace(input.Session)
 	body := map[string]string{"product": "gpt", "tenantSlug": config.TenantSlug}
@@ -201,12 +266,14 @@ func (s *GPTDirectService) Call(ctx context.Context, operation string, input GPT
 		if json.Unmarshal(raw, &result) != nil || !validGPTDirectTask(&result.Task) || !gptDirectTokenPattern.MatchString(result.Token) {
 			return nil, invalid
 		}
+		result.Task.LotteryReward = nil
 		return result, nil
 	default:
 		var result GPTDirectTask
 		if json.Unmarshal(raw, &result) != nil || !validGPTDirectTask(&result) || result.ID != input.ID {
 			return nil, invalid
 		}
+		result.LotteryReward = nil
 		return result, nil
 	}
 }

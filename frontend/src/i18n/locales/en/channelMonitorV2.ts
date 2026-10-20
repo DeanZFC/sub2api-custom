@@ -30,7 +30,20 @@ export default {
     groupBy: {
       label: 'Group by', platform: 'Platform', platformGroup: 'Platform / Group', platformModel: 'Platform / Model', platformGroupModel: 'Platform / Group / Model'
     },
-    trendView: { label: 'Trend view', pulse: 'Pulse matrix', line: 'Line chart' },
+    trendView: { label: 'Trend view', pulse: 'Channel cards', line: 'Line chart' },
+    cards: {
+      title: 'Channel health', description: 'Passive health from real traffic · Hover for details',
+      passive: 'Passive health', availability: 'Availability',
+      refreshIn: 'Refresh in {seconds}s', past: 'Past', now: 'Latest',
+      recentRequests: 'Last 20 requests',
+      requestLegend: 'Green: success · Yellow: slow / ignored error · Red: failed · Gray: no request',
+      noRequest: 'No more requests in the selected time range',
+      models: 'Model status', modelsHint: 'Only models called in the selected time range · Passive health',
+      noModels: 'No model calls in the selected time range',
+      health: { healthy: 'Healthy', warning: 'Attention', critical: 'Unhealthy', unknown: 'Unknown' },
+      legend: { healthy: 'Healthy', warning: 'Attention', critical: 'Unhealthy', unknown: 'No traffic / insufficient samples' },
+      requests: { success: 'Request succeeded', slow: 'Request succeeded with slow first token', error: 'Request failed', ignored: 'Ignored request error (excluded from health score)' },
+    },
     healthMode: { label: 'Health display', overall: 'Overall', success: 'Error rate', ttft: 'First token', cache: 'Cache rate' },
     tabs: { aria: 'Detail dimension', models: 'Models', errors: 'Error reasons', users: 'User ranking' },
     metrics: {

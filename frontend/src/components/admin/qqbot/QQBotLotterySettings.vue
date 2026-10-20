@@ -53,6 +53,7 @@
       <dl v-if="state" class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
         <div><dt class="text-gray-500">{{ t('qqbot.eligibleRecharge') }}</dt><dd class="mt-1 font-semibold">${{ state.recharge_total.toFixed(2) }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.earnedChances') }}</dt><dd class="mt-1 font-semibold">{{ state.earned }}</dd></div>
+        <div><dt class="text-gray-500">{{ t('qqbot.directRechargeChances') }}</dt><dd class="mt-1 font-semibold">{{ state.bonus_chances || 0 }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.usedChances') }}</dt><dd class="mt-1 font-semibold">{{ state.used }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.remainingChances') }}</dt><dd class="mt-1 font-semibold">{{ state.remaining }}</dd></div>
       </dl>

@@ -1,8 +1,15 @@
 export default {
     tests: {
+      excludedAccounts: 'Excluded accounts',
+      excludedAccountsHint: 'Selected accounts skip manual and scheduled checks and quality actions for this strategy. Normal traffic scheduling is unaffected. Uncheck to include them in the next run.',
+      excludedAccountsCount: '{count} accounts excluded',
+      searchExcludedAccounts: 'Search account name or ID',
+      excludedAccountOutsideGroups: 'Outside selected groups or unavailable',
+      unavailableExcludedAccount: 'Unavailable account',
+      noExclusionAccounts: 'No matching accounts',
       strategyGroups: 'Strategy groups',
-      strategyGroupsHint: 'Select 1–100 active groups on the same platform. All schedulable accounts in these groups are tested. Move groups up or down to set their order in user results.',
-      strategyTarget: 'All accounts in the selected groups',
+      strategyGroupsHint: 'Select 1–100 active groups on the same platform. Schedulable accounts in these groups are tested unless excluded. Move groups up or down to set their order in user results.',
+      strategyTarget: 'Non-excluded accounts in selected groups',
       moveGroupUp: 'Move group up',
       moveGroupDown: 'Move group down',
       invalidStrategyGroups: 'Select 1–100 distinct, active, non-composite groups on the same platform.',

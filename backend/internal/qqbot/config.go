@@ -94,6 +94,9 @@ func validateURL(raw string) error {
 	return nil
 }
 func validateConfig(c Config) error {
+	if err := validatePriceNotifications(c); err != nil {
+		return err
+	}
 	if err := validateCustomCommands(c.CustomCommands); err != nil {
 		return err
 	}
@@ -227,6 +230,9 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 	if err = validateConfig(c); err != nil {
 		return c, err
 	}
+	if err = s.resetPriceNotifications(ctx, tx, old, c); err != nil {
+		return c, err
+	}
 	if c.AppID != "" && (c.HistoryMessages == 0 || !c.Enabled) {
 		if _, err = tx.ExecContext(ctx, `DELETE FROM qq_bot_group_messages WHERE app_id=$1`, c.AppID); err != nil {
 			return c, err
@@ -255,5 +261,6 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 	if err = tx.Commit(); err != nil {
 		return c, err
 	}
+	s.wakePriceMonitor()
 	return c.Public(), nil
 }

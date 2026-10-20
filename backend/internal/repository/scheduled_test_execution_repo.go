@@ -35,7 +35,7 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *serv
 	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
 		return nil, err
 	}
-	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
+	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +58,17 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *serv
 	for _, accountID := range sortedProtectionIDs(accountIDs) {
 		if _, err := lockProtectionAccount(ctx, tx, accountID); err != nil {
 			return nil, err
+		}
+		// Target discovery precedes this transaction. A manual edit can detach
+		// the account while the runner is waiting to freeze its target list.
+		var inScope bool
+		if err := tx.QueryRowContext(ctx, `SELECT cardinality(group_ids)=0 OR EXISTS(
+ SELECT 1 FROM account_groups ag WHERE ag.account_id=$2 AND ag.group_id=ANY(p.group_ids))
+ FROM scheduled_test_plans p WHERE p.id=$1`, planID, accountID).Scan(&inScope); err != nil {
+			return nil, err
+		}
+		if !inScope {
+			return nil, fmt.Errorf("account left test policy groups before execution")
 		}
 		owned, err := scheduledTestAccountOwnershipCurrent(ctx, tx, planID, accountID)
 		if err != nil {
@@ -94,7 +105,10 @@ func scheduledTestSameExecutionPolicy(a, b *service.ScheduledTestPlan) bool {
 	ag, bg := slices.Clone(a.GroupIDs), slices.Clone(b.GroupIDs)
 	slices.Sort(ag)
 	slices.Sort(bg)
-	return slices.Equal(ag, bg) && reflect.DeepEqual(a.AccountID, b.AccountID) &&
+	ae, be := slices.Clone(a.ExcludedAccountIDs), slices.Clone(b.ExcludedAccountIDs)
+	slices.Sort(ae)
+	slices.Sort(be)
+	return slices.Equal(ae, be) && slices.Equal(ag, bg) && reflect.DeepEqual(a.AccountID, b.AccountID) &&
 		reflect.DeepEqual(a.TestDefinitionIDs, b.TestDefinitionIDs) && reflect.DeepEqual(a.TestDefinitionID, b.TestDefinitionID) &&
 		a.TargetMode == b.TargetMode && a.TestType == b.TestType && a.ModelID == b.ModelID && a.ReasoningEffort == b.ReasoningEffort &&
 		a.Enabled == b.Enabled && a.AutoRecover == b.AutoRecover && protectionConfigSamePolicy(a.Protection, b.Protection)

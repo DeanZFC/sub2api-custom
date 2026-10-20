@@ -63,7 +63,7 @@ func (s *ScheduledTestRunnerService) runStatisticsDefinitionWithProgress(ctx con
 	} else {
 		err = fmt.Errorf("statistics account or group is required")
 	}
-	ids = scheduledTestUniqueAccountIDs(ids)
+	ids = scheduledTestUniqueAccountIDs(plan.FilterExcludedAccounts(ids))
 	if err != nil || len(ids) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no account belongs to the statistics group")

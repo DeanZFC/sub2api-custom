@@ -2,13 +2,42 @@ package handler
 
 import (
 	"context"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type denyAccountAdmission struct{ calls int }
+
+func (g *denyAccountAdmission) AcquireCacheRecoveryRequest(context.Context, int64) (bool, error) {
+	g.calls++
+	return false, nil
+}
+
+func TestConcurrencyHelper_AdmissionDenialDoesNotWait(t *testing.T) {
+	cache := &concurrencyCacheMock{acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }}
+	svc := service.NewConcurrencyService(cache)
+	gate := &denyAccountAdmission{}
+	svc.SetCacheRecoveryGate(gate)
+	helper := NewConcurrencyHelper(svc, SSEPingFormatNone, time.Second)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/images/generations", nil)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+	defer cancel()
+	c.Request = c.Request.WithContext(ctx)
+	streamStarted := false
+	release, err := helper.AcquireAccountSlotWithWaitTimeout(c, 2280, 50, 30*time.Second, false, &streamStarted)
+	require.ErrorIs(t, err, service.ErrAccountAdmissionDenied)
+	require.Nil(t, ctx.Err(), "admission denial must return before the request deadline")
+	require.Nil(t, release)
+	require.Equal(t, 1, gate.calls, "a policy rejection must not enter concurrency retry polling")
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseAccountCalled))
+}
 
 type concurrencyCacheMock struct {
 	acquireUserSlotFn     func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error)

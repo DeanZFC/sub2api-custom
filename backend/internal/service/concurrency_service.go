@@ -278,6 +278,10 @@ func (s *ConcurrencyService) SetCacheRecoveryGate(gate AccountCacheRecoveryGate)
 	s.cacheRecoveryGate = gate
 }
 
+// ErrAccountAdmissionDenied means the live account state rejected a reserved
+// slot. Retrying the concurrency queue cannot resolve a quality/manual hold.
+var ErrAccountAdmissionDenied = errors.New("account admission denied by live scheduling or quality protection state")
+
 // Only consume trial capacity after reserving a concurrency slot. Saturated
 // queues may retry this method many times without sending an upstream request.
 func (s *ConcurrencyService) admitCacheRecoveryRequest(ctx context.Context, accountID int64, result *AcquireResult) (*AcquireResult, error) {
@@ -288,6 +292,9 @@ func (s *ConcurrencyService) admitCacheRecoveryRequest(ctx context.Context, acco
 	if err != nil || !allowed {
 		if result.ReleaseFunc != nil {
 			result.ReleaseFunc()
+		}
+		if err == nil {
+			err = ErrAccountAdmissionDenied
 		}
 		return &AcquireResult{}, err
 	}

@@ -114,6 +114,7 @@ var auditSensitiveReads = map[string]string{
 	"GET /api/v1/admin/qqbot/lottery/draws":          "admin.qqbot.lottery.draws.read",
 	"GET /api/v1/admin/qqbot/lottery/users/:user_id": "admin.qqbot.lottery.chances.read",
 	"GET /api/v1/admin/qqbot/bindings":               "admin.qqbot.bindings.read",
+	"GET /api/v1/admin/qqbot/reward-codes":           "admin.qqbot.reward_codes.read",
 	"GET /api/v1/admin/accounts/data":                "admin.accounts.export",
 	"GET /api/v1/admin/proxies/data":                 "admin.proxies.export",
 	"GET /api/v1/admin/redeem-codes/export":          "admin.redeem_codes.export",

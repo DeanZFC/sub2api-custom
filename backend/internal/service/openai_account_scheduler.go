@@ -307,7 +307,26 @@ type openAISelectionProbeBudget struct {
 	acquires  int
 	rechecks  int
 	attempted map[int64]struct{}
+	denied    map[int64]struct{}
 	limited   bool
+}
+
+func (b *openAISelectionProbeBudget) admissionDenied(accountID int64) bool {
+	if b == nil {
+		return false
+	}
+	_, denied := b.denied[accountID]
+	return denied
+}
+
+func (b *openAISelectionProbeBudget) rejectAdmission(accountID int64) {
+	if b == nil {
+		return
+	}
+	if b.denied == nil {
+		b.denied = make(map[int64]struct{})
+	}
+	b.denied[accountID] = struct{}{}
 }
 
 func newOpenAISelectionProbeBudget() *openAISelectionProbeBudget {
@@ -575,6 +594,10 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, &account)
 	if acquireErr != nil && req.DisableStickyEscape {
 		return nil, false, acquireErr
+	}
+	if errors.Is(acquireErr, ErrAccountAdmissionDenied) {
+		clearBinding()
+		return nil, false, nil
 	}
 	if acquireErr == nil && result != nil && result.Acquired {
 		if !req.PreserveStickyBinding {
@@ -1183,7 +1206,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 	}
 	for i := 0; i < len(selectionOrder); i++ {
 		candidate := selectionOrder[i]
-		if candidate.account == nil {
+		if candidate.account == nil || budget.admissionDenied(candidate.account.ID) {
 			continue
 		}
 		if candidate.loadKnown && candidate.account.Concurrency > 0 &&
@@ -1196,6 +1219,10 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			break
 		}
 		if acquireErr != nil {
+			if errors.Is(acquireErr, ErrAccountAdmissionDenied) {
+				budget.rejectAdmission(candidate.account.ID)
+				continue
+			}
 			return nil, compactBlocked, acquireErr
 		}
 		if result == nil || !result.Acquired {
@@ -1229,6 +1256,10 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 				continue
 			}
 			if acquireErr != nil {
+				if errors.Is(acquireErr, ErrAccountAdmissionDenied) {
+					budget.rejectAdmission(fresh.ID)
+					continue
+				}
 				return nil, compactBlocked, acquireErr
 			}
 			if result == nil || !result.Acquired {
@@ -1283,12 +1314,13 @@ func (s *defaultOpenAIAccountScheduler) consumeOpenAISelectionDBRecheck(budget *
 func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
+	budget *openAISelectionProbeBudget,
 ) (*AccountSelectionResult, error) {
 	if !req.StickyWeighted {
 		return nil, nil
 	}
 	for _, accountID := range []int64{req.StickyPreviousAccountID, req.StickyAccountID} {
-		if accountID <= 0 {
+		if accountID <= 0 || budget.admissionDenied(accountID) {
 			continue
 		}
 		if req.ExcludedIDs != nil {
@@ -1336,6 +1368,10 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		}
 		result, acquireErr := s.service.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency, &account)
 		if acquireErr != nil {
+			if errors.Is(acquireErr, ErrAccountAdmissionDenied) {
+				budget.rejectAdmission(account.ID)
+				continue
+			}
 			return nil, acquireErr
 		}
 		if result != nil && result.Acquired {
@@ -1694,7 +1730,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 		return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, attempt.compactBlocked, filterStats.summary("selection_order_empty"))
 	}
 
-	if stickyFallback, stickyErr := s.tryFallbackToWeightedSticky(ctx, req); stickyErr != nil {
+	if stickyFallback, stickyErr := s.tryFallbackToWeightedSticky(ctx, req, budget); stickyErr != nil {
 		return nil, candidateCount, topK, loadSkew, stickyErr
 	} else if stickyFallback != nil {
 		return stickyFallback, candidateCount, topK, loadSkew, nil
@@ -1711,7 +1747,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 		wantAttempted := pass == 1 || pass == 3
 		wantKnownFull := pass >= 2
 		for _, candidate := range attempt.selectionOrder {
-			if candidate.account == nil {
+			if candidate.account == nil || budget.admissionDenied(candidate.account.ID) {
 				continue
 			}
 			if budget != nil && budget.limited {
@@ -1747,6 +1783,9 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 		}
 	}
 
+	if budget != nil && len(budget.denied) > 0 {
+		return nil, candidateCount, topK, loadSkew, ErrAccountAdmissionDenied
+	}
 	return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary("selection_order_exhausted"))
 }
 

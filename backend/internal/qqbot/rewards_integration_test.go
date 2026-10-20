@@ -23,7 +23,7 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 	job := Job{MemberID: "member"}
 	info, err := s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 0.00\n- 签到奖励：USD 0.00\n\n**合计：USD 0.00**", info)
+	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 0.00\n- 签到奖励：USD 0.00\n- 兑换奖励：USD 0.00\n\n**合计：USD 0.00**", info)
 	_, err = db.Exec(`INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount,created_at) VALUES
  ('lottery-1','app','group','member',$1,'lottery',2.50,NOW()-INTERVAL '60 days'),
  ('lottery-2','app','other-group','member',$1,'lottery',0.75,NOW()),
@@ -35,7 +35,7 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 	require.NoError(t, err)
 	info, err = s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 3.25\n- 邀请奖励：USD 2.50\n- 签到奖励：USD 0.30\n\n**合计：USD 6.05**", info)
+	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 3.25\n- 邀请奖励：USD 2.50\n- 签到奖励：USD 0.30\n- 兑换奖励：USD 0.00\n\n**合计：USD 6.05**", info)
 
 	info, err = s.myRewards(ctx, c, Job{MemberID: "unbound"})
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T
 	}
 	addInvite("group", "first-invitee")
 	query("invitee-query", "first-invitee")
-	require.Equal(t, "<qqbot-at-user id=\"first-invitee\" />\n🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 0.00\n- 签到奖励：USD 0.00\n\n**合计：USD 0.00**", reply)
+	require.Equal(t, "<qqbot-at-user id=\"first-invitee\" />\n🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 0.00\n- 签到奖励：USD 0.00\n- 兑换奖励：USD 0.00\n\n**合计：USD 0.00**", reply)
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, inviter).Scan(&balance))
 	require.Equal(t, c.InviteReward, balance)
@@ -99,7 +99,7 @@ func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T
 	addInvite("other-group", "second-invitee")
 	for _, id := range []string{"inviter-query", "repeat-query"} {
 		query(id, "inviter")
-		require.Equal(t, "<qqbot-at-user id=\"inviter\" />\n🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 2.00\n- 签到奖励：USD 0.00\n\n**合计：USD 2.00**", reply)
+		require.Equal(t, "<qqbot-at-user id=\"inviter\" />\n🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 2.00\n- 签到奖励：USD 0.00\n- 兑换奖励：USD 0.00\n\n**合计：USD 2.00**", reply)
 	}
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, inviter).Scan(&balance))
 	require.Equal(t, 2*c.InviteReward, balance)

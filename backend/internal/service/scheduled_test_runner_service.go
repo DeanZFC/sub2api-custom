@@ -468,6 +468,11 @@ func (s *ScheduledTestRunnerService) resolveDefinition(ctx context.Context, plan
 }
 
 func (s *ScheduledTestRunnerService) resolveTargetAccounts(ctx context.Context, plan *ScheduledTestPlan) ([]int64, error) {
+	ids, err := s.resolveTargetAccountsIncludingExcluded(ctx, plan)
+	return plan.FilterExcludedAccounts(ids), err
+}
+
+func (s *ScheduledTestRunnerService) resolveTargetAccountsIncludingExcluded(ctx context.Context, plan *ScheduledTestPlan) ([]int64, error) {
 	if s.scheduledSvc != nil {
 		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestTargetAccountRepository); ok {
 			return repo.ListPlanTargetAccountIDs(ctx, plan, plan.AccountID)
@@ -979,6 +984,9 @@ func (s *ScheduledTestRunnerService) RunPlanNow(ctx context.Context, plan *Sched
 func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *ScheduledTestPlan, previous *ScheduledTestResult) (*ScheduledTestResult, error) {
 	if plan == nil || plan.ID <= 0 || previous == nil || previous.ID <= 0 || previous.PlanID != plan.ID || previous.AccountID == nil || *previous.AccountID <= 0 {
 		return nil, fmt.Errorf("matching test plan, result and account are required")
+	}
+	if plan.ExcludesAccount(*previous.AccountID) {
+		return nil, fmt.Errorf("account is not enabled for detection")
 	}
 	if previous.Status != "failed" {
 		return nil, ErrScheduledTestResultNotFailed

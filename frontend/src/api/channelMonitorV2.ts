@@ -163,9 +163,20 @@ export interface MonitorMatrixRow {
   group_id?: number
   group_name?: string
   model?: string
+  /** Preserved when absolute request counts are redacted for ordinary users. */
+  has_traffic?: boolean
+  recent_requests?: MonitorRecentRequest[]
   metrics: MonitorMetric
   health: MonitorHealth
   buckets: MonitorMatrixBucket[]
+}
+
+export interface MonitorRecentRequest {
+  occurred_at: string
+  model: string
+  status: 'success' | 'slow' | 'error' | 'ignored'
+  ttft_ms?: number
+  error_category?: string
 }
 
 export interface MonitorMatrixResponse {
@@ -245,8 +256,8 @@ export async function getSnapshot(filter: MonitorFilter, admin = false, signal?:
   const { data } = await apiClient.get<MonitorSnapshot>(`${base(admin)}/snapshot`, requestConfig(filter, signal))
   return data
 }
-export async function getMatrix(filter: MonitorFilter, groupBy: MonitorMatrixGroupBy, admin = false, signal?: AbortSignal) {
-  const { data } = await apiClient.get<MonitorMatrixResponse>(`${base(admin)}/matrix`, requestConfig(filter, signal, { group_by: groupBy }))
+export async function getMatrix(filter: MonitorFilter, groupBy: MonitorMatrixGroupBy, admin = false, signal?: AbortSignal, includeRecentRequests = false) {
+  const { data } = await apiClient.get<MonitorMatrixResponse>(`${base(admin)}/matrix`, requestConfig(filter, signal, { group_by: groupBy, ...(includeRecentRequests ? { include_recent_requests: true } : {}) }))
   return data
 }
 export async function getModels(filter: MonitorFilter, admin = false, signal?: AbortSignal) {

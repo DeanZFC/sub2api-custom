@@ -2577,6 +2577,7 @@ export interface TestPlan {
   id: number
   /** Ordered strategy groups; this order is also used by the user result tabs. */
   group_ids: number[]
+  excluded_account_ids?: number[]
   migration_note?: string
   name?: string
   /** Controls the display order of this strategy. */
@@ -2785,6 +2786,7 @@ export interface CreateTestPlanRequest {
   name?: string
   sort_order?: number
   group_ids: number[]
+  excluded_account_ids?: number[]
   test_definition_ids: number[]
   model_id: string
   reasoning_effort?: string | null

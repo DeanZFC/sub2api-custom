@@ -32,6 +32,23 @@
             </div>
           </div>
         </section>
+        <section class="card space-y-4 p-6" :aria-label="t('qqbot.priceNotifications.title')">
+          <h2 class="text-lg font-semibold">{{ t('qqbot.priceNotifications.title') }}</h2>
+          <p class="text-sm text-gray-500">{{ t('qqbot.priceNotifications.help') }}</p>
+          <label class="flex items-center gap-2"><input v-model="priceNotifications.enabled" data-testid="price-notifications-enabled" type="checkbox" />{{ t('qqbot.priceNotifications.enabled') }}</label>
+          <label class="flex items-center gap-2"><input v-model="priceNotifications.scheduled" data-testid="price-notifications-scheduled" type="checkbox" />{{ t('qqbot.priceNotifications.scheduled') }}</label>
+          <label class="block space-y-1">{{ t('qqbot.priceNotifications.groups') }}<textarea v-model="notificationGroupsText" data-testid="price-notification-groups" rows="2" class="input font-mono" :placeholder="t('qqbot.priceNotifications.groupsPlaceholder')" /></label>
+          <p class="text-xs text-gray-500">{{ t('qqbot.priceNotifications.permission') }}</p>
+          <details>
+            <summary class="cursor-pointer text-sm font-medium">{{ t('qqbot.priceNotifications.records') }}</summary>
+            <p v-if="!notificationJobs.length" class="mt-3 text-sm text-gray-500">{{ t('qqbot.priceNotifications.empty') }}</p>
+            <div v-for="job in notificationJobs" :key="job.id" class="mt-3 space-y-1 rounded-lg border p-3 text-sm dark:border-dark-700">
+              <p class="break-all">{{ job.group_id }}</p>
+              <p>{{ new Date(job.created_at).toLocaleString() }} · {{ t(`qqbot.priceNotifications.status.${job.status}`, job.status) }}</p>
+              <p v-if="job.error" class="text-red-600 dark:text-red-400">{{ job.error }}</p>
+            </div>
+          </details>
+        </section>
         <section class="card space-y-4 p-6" :aria-label="t('qqbot.customCommands')">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-lg font-semibold">{{ t('qqbot.customCommands') }}</h2>
@@ -100,6 +117,9 @@ const { t } = useI18n()
 const form = ref<QQBotConfig | null>(null)
 const runtime = ref<QQBotRuntime | null>(null)
 const groupsText = ref('')
+const notificationGroupsText = ref('')
+const priceNotifications = ref({ enabled: false, scheduled: true, groups: [] as string[] })
+const notificationJobs = computed(() => runtime.value?.jobs.filter(job => job.kind === 'price_notification') ?? [])
 const savedSnapshot = ref('')
 const busy = ref(false)
 const refreshingRuntime = ref(false)
@@ -113,12 +133,18 @@ const limitFields = [
   { key: 'total_daily_image_limit', label: 'totalImage', max: 100000 },
   { key: 'cooldown_seconds', label: 'cooldown', max: 3600 }
 ] as const
-const snapshot = computed(() => JSON.stringify([form.value, groupsText.value]))
+const snapshot = computed(() => JSON.stringify([form.value, groupsText.value, priceNotifications.value, notificationGroupsText.value]))
 const dirty = computed(() => snapshot.value !== savedSnapshot.value)
 const webhookURL = computed(() => `${window.location.origin}/api/v1/qqbot/webhook`)
 function secretHint(set: boolean) { return t(set ? 'qqbot.secretStored' : 'qqbot.secretEmpty') }
 function message(e: unknown) { return (e as {message?: string})?.message || t('common.error') }
-function apply(c: QQBotConfig) { form.value = { ...c, custom_commands: c.custom_commands ?? [] }; groupsText.value = (c.allowed_groups || []).join('\n'); savedSnapshot.value = snapshot.value }
+function apply(c: QQBotConfig) {
+  form.value = { ...c, custom_commands: c.custom_commands ?? [] }
+  groupsText.value = (c.allowed_groups || []).join('\n')
+  priceNotifications.value = { enabled: false, scheduled: true, ...c.price_notifications, groups: c.price_notifications?.groups ?? [] }
+  notificationGroupsText.value = priceNotifications.value.groups.join('\n')
+  savedSnapshot.value = snapshot.value
+}
 function addCustomCommand() {
   if (!form.value || busy.value || form.value.custom_commands.length >= 20) return
   form.value.custom_commands.push({ command: '', reply: '', enabled: true })
@@ -140,7 +166,7 @@ async function deleteDiscoveredGroup(id: string) {
 async function save() {
   if (!form.value) return
   busy.value = true; error.value = ''; notice.value = ''
-  try { apply(await qqbotAPI.save({ ...form.value, allowed_groups: [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))] })); notice.value = t('common.saved'); await refreshRuntime() }
+  try { apply(await qqbotAPI.save({ ...form.value, price_notifications: { ...priceNotifications.value, groups: [...new Set(notificationGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, allowed_groups: [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))] })); notice.value = t('common.saved'); await refreshRuntime() }
   catch (e) { error.value = message(e) } finally { busy.value = false }
 }
 function addGroup(id: string) { groupsText.value = [...new Set([...groupsText.value.split(/[\s,，]+/).filter(Boolean), id])].join('\n') }

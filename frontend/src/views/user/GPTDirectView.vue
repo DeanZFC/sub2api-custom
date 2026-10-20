@@ -20,6 +20,7 @@
             </a>
           </div>
           <p class="border-t border-gray-100 px-6 py-3 text-xs text-gray-500 dark:border-dark-700 sm:px-8">{{ t('gptDirect.balanceHint') }}</p>
+          <p v-if="config.lottery_reward_enabled && config.lottery_chances > 0" class="px-6 pb-4 text-sm text-primary-600 sm:px-8">{{ t('gptDirect.lotteryOffer', { count: config.lottery_chances }) }}</p>
         </section>
 
         <section class="card p-6 sm:p-8">
@@ -40,6 +41,9 @@
               <div class="rounded-xl bg-gray-50 p-5 dark:bg-dark-700">
                 <p class="font-semibold" :class="receipt.task.status === 'success' ? 'text-emerald-600' : ''">{{ statusText(receipt.task.status, receipt.task.fulfillmentKind || receipt.task.planKind) }}</p>
                 <p v-if="!terminal" class="mt-2 text-sm text-gray-500">{{ t('gptDirect.processingHint') }}</p>
+                <p v-if="receipt.task.lottery_reward && receipt.task.lottery_reward.chances > 0" class="mt-3 text-sm text-primary-600">
+                  {{ t(`gptDirect.lotteryReward.${receipt.task.lottery_reward.status}`, { count: receipt.task.lottery_reward.chances }) }}
+                </p>
                 <dl class="mt-4 grid grid-cols-[auto_1fr] gap-x-5 gap-y-3 text-sm">
                   <dt class="text-gray-500">{{ t('gptDirect.plan') }}</dt><dd>{{ receipt.task.planName || receipt.task.plan }}</dd>
                   <dt class="text-gray-500">{{ t('gptDirect.email') }}</dt><dd class="break-all">{{ receipt.task.email || '—' }}</dd>
@@ -69,7 +73,12 @@
             </form>
             <form v-else-if="step === 1" class="space-y-4" @submit.prevent="checkAccount">
               <div class="rounded-lg bg-primary-50 p-3 text-sm text-primary-700 dark:bg-primary-950/30 dark:text-primary-300">{{ plan?.planName || plan?.plan }}</div>
-              <label class="block" for="gpt-session"><span class="input-label">{{ t('gptDirect.session') }}</span></label>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <label for="gpt-session" class="font-medium">{{ t('gptDirect.session') }}</label>
+                <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline">
+                  {{ t('gptDirect.getSession') }} <Icon name="externalLink" size="sm" />
+                </a>
+              </div>
               <textarea id="gpt-session" v-model="session" class="input font-mono text-xs" rows="7" autocomplete="off" :spellcheck="false" maxlength="65536" required :disabled="busy" :placeholder="t('gptDirect.sessionPlaceholder')" />
               <p class="text-xs leading-5 text-gray-500">{{ t('gptDirect.sessionPrivacy') }}</p>
               <div class="flex justify-between gap-3">
@@ -113,8 +122,12 @@
             <p v-if="queryResult.email" class="break-all">{{ queryResult.email }}</p>
           </div>
         </section>
-        <div v-if="safeURL(config.support_url)" class="text-center">
-          <a :href="safeURL(config.support_url)" target="_blank" rel="noopener noreferrer" class="text-sm text-gray-500 hover:text-primary-600">{{ t('gptDirect.support') }} ↗</a>
+        <div v-if="supportContent" class="text-center text-sm text-gray-500">
+          <a v-if="supportLink" :href="supportLink" target="_blank" rel="noopener noreferrer" class="hover:text-primary-600">{{ t('gptDirect.support') }} ↗</a>
+          <template v-else>
+            <p class="font-medium">{{ t('gptDirect.support') }}</p>
+            <p class="mt-2 whitespace-pre-wrap break-words">{{ supportContent }}</p>
+          </template>
         </div>
       </template>
     </div>
@@ -153,6 +166,8 @@ const queryCode = ref('')
 const queryResult = ref<GPTDirectCode | null>(null)
 const terminal = computed(() => !!receipt.value && ['success', 'failed', 'cancelled'].includes(receipt.value.task.status))
 const storageKey = computed(() => `gpt-direct:${auth.user?.id}:${config.value?.receipt_scope}`)
+const supportContent = computed(() => config.value?.support_url?.trim() || '')
+const supportLink = computed(() => /\s/.test(supportContent.value) ? undefined : safeURL(supportContent.value))
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let failures = 0
@@ -205,7 +220,9 @@ async function verify() {
   busy.value = true
   error.value = ''
   try {
-    plan.value = await gptDirectAPI.verify(code.value.trim())
+    let resumeKey: string | undefined
+    if (pending.value && pending.value.codeHash === await hashCode()) resumeKey = pending.value.key
+    plan.value = await gptDirectAPI.verify(code.value.trim(), resumeKey)
     subscription.value = null
     accepted.value = false
     step.value = 1
@@ -238,13 +255,16 @@ async function checkAccount() {
     step.value = 2
   } finally { busy.value = false }
 }
+async function hashCode() {
+  const bytes = new TextEncoder().encode(code.value.trim().toUpperCase())
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
+}
 async function redeem() {
   if (busy.value || !accepted.value || step.value !== 2) return
   busy.value = true
   error.value = ''
   try {
-    const bytes = new TextEncoder().encode(code.value.trim().toUpperCase())
-    const codeHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
+    const codeHash = await hashCode()
     if (pending.value?.codeHash !== codeHash) pending.value = { key: crypto.randomUUID(), codeHash }
     storeState()
     const result = await gptDirectAPI.redeem(code.value.trim(), session.value, pending.value!.key)

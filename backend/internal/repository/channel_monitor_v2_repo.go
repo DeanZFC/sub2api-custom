@@ -459,6 +459,8 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 		metrics := acc.total.metric(minutes, admin)
 		applyIgnoredErrors(&metrics, ignoredByDim[key])
 		row := service.ChannelMonitorV2MatrixRow{Platform: key.platform, GroupName: acc.groupName, Model: key.model, Metrics: metrics, Health: service.ChannelMonitorV2HealthForWithThresholds(metrics, cfg.HealthThresholds), Buckets: []service.ChannelMonitorV2TrendPoint{}}
+		// Preserve actual traffic before ignored errors and volume privacy redaction.
+		row.HasTraffic = acc.total.success+acc.total.errors > 0
 		if key.groupID > 0 {
 			groupID := key.groupID
 			row.GroupID = &groupID
@@ -492,6 +494,11 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 		}
 		return a.Model < b.Model
 	})
+	if filter.IncludeRecentRequests {
+		if err := r.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, result.Items); err != nil {
+			return nil, fmt.Errorf("load recent monitor requests: %w", err)
+		}
+	}
 	return result, nil
 }
 

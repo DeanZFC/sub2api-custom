@@ -7,7 +7,7 @@ vi.mock('@/api/gptDirect', () => ({ gptDirectAPI: mocks }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ fetchPublicSettings: mocks.fetchPublicSettings }) }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual('vue-i18n'), useI18n: () => ({ t: (key: string) => key }) }))
 
-const configured = { enabled: true, base_url: 'https://recharge.example.com', tenant_slug: 'ctai', purchase_url: 'https://shop.example.com', button_text: '', description: '', support_url: '' }
+const configured = { enabled: true, base_url: 'https://recharge.example.com', tenant_slug: 'ctai', purchase_url: 'https://shop.example.com', button_text: '', description: '', support_url: '', lottery_reward_enabled: false, lottery_chances: 1 }
 
 describe('GPT Direct settings', () => {
   beforeEach(() => {
@@ -35,6 +35,27 @@ describe('GPT Direct settings', () => {
     await wrapper.get('button.btn-primary').trigger('click')
     expect(mocks.saveSettings).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('gptDirect.loadFailed')
+    wrapper.unmount()
+  })
+  it('saves multiline support contact information without URL validation', async () => {
+    const wrapper = mount(GPTDirectSettings)
+    await flushPromises()
+    const content = 'QQ：123456789\n微信：example-support'
+    await wrapper.get('textarea[maxlength="2048"]').setValue(content)
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.saveSettings).toHaveBeenCalledWith({ ...configured, support_url: content })
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('saves the reward switch and number of chances separately from QQ prize rules', async () => {
+    const wrapper = mount(GPTDirectSettings)
+    await flushPromises()
+    await wrapper.findAll('[role="switch"]')[1]!.trigger('click')
+    await wrapper.get('input[type="number"]').setValue('3')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.saveSettings).toHaveBeenCalledWith({ ...configured, lottery_reward_enabled: true, lottery_chances: 3 })
     wrapper.unmount()
   })
   it('handles Enter in its own inputs without submitting the general settings form', async () => {

@@ -26,6 +26,22 @@ describe('QQ bot settings', () => {
       vi.restoreAllMocks()
     }
   })
+  it.each(['zh', 'en'] as const)('%s saves notification recipients and displays delivery failures', async (locale) => {
+    api.runtime.mockResolvedValue({ groups: [], jobs: [{ id: 'notice', kind: 'price_notification', group_id: 'target', created_at: '2026-10-20T01:00:00Z', status: 'delivery_failed', error: 'QQ HTTP 403 / code 40034105' }], rewards: [], bindings: 0, encryption_ready: true })
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
+    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    expect((wrapper.get('[data-testid="price-notifications-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-testid="price-notifications-scheduled"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-testid="price-notifications-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="price-notification-groups"]').setValue('target\ntarget')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ price_notifications: { enabled: true, scheduled: true, groups: ['target'] } }))
+    expect(wrapper.text()).toContain(i18n.global.t('qqbot.priceNotifications.status.delivery_failed'))
+    expect(wrapper.text()).toContain('40034105')
+    wrapper.unmount()
+  })
   it.each(['zh', 'en'] as const)('%s renders settings and disables probes until changes are saved', async (locale) => {
     const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
     const wrapper = mount(QQBotView, { global: { plugins: [i18n], stubs: { AppLayout: { template: '<main><slot /></main>' } } } })

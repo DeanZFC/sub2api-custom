@@ -33,7 +33,7 @@ func validateScheduledTestPlanConflicts(ctx context.Context, tx *sql.Tx, plan *s
 	if !enabledScheduledTestRoutingPlan(plan) {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,name,group_ids,protection FROM scheduled_test_plans WHERE enabled AND protection->>'enabled'='true' AND id<>$1 ORDER BY id`, plan.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT id,name,group_ids,protection,excluded_account_ids FROM scheduled_test_plans WHERE enabled AND protection->>'enabled'='true' AND id<>$1 ORDER BY id`, plan.ID)
 	if err != nil {
 		return err
 	}
@@ -41,7 +41,7 @@ func validateScheduledTestPlanConflicts(ctx context.Context, tx *sql.Tx, plan *s
 	for rows.Next() {
 		other := &service.ScheduledTestPlan{Enabled: true}
 		var raw []byte
-		if err := rows.Scan(&other.ID, &other.Name, pq.Array(&other.GroupIDs), &raw); err != nil {
+		if err := rows.Scan(&other.ID, &other.Name, pq.Array(&other.GroupIDs), &raw, pq.Array(&other.ExcludedAccountIDs)); err != nil {
 			rows.Close()
 			return err
 		}
@@ -63,8 +63,9 @@ func validateScheduledTestPlanConflicts(ctx context.Context, tx *sql.Tx, plan *s
 		var overlaps bool
 		err := tx.QueryRowContext(ctx, `SELECT $1::bigint[] && $2::bigint[] OR EXISTS(
  SELECT 1 FROM accounts a WHERE a.deleted_at IS NULL
+ AND NOT (a.id=ANY(COALESCE($3::bigint[], '{}'))) AND NOT (a.id=ANY(COALESCE($4::bigint[], '{}')))
  AND EXISTS(SELECT 1 FROM account_groups x WHERE x.account_id=a.id AND x.group_id=ANY($1))
- AND EXISTS(SELECT 1 FROM account_groups y WHERE y.account_id=a.id AND y.group_id=ANY($2)))`, pq.Array(scope), pq.Array(scheduledTestRoutingScope(other))).Scan(&overlaps)
+ AND EXISTS(SELECT 1 FROM account_groups y WHERE y.account_id=a.id AND y.group_id=ANY($2)))`, pq.Array(scope), pq.Array(scheduledTestRoutingScope(other)), pq.Array(plan.ExcludedAccountIDs), pq.Array(other.ExcludedAccountIDs)).Scan(&overlaps)
 		if err != nil {
 			return err
 		}
@@ -78,7 +79,7 @@ func validateScheduledTestPlanConflicts(ctx context.Context, tx *sql.Tx, plan *s
 // Recheck ownership on every frozen attempt and mutation: account edits can
 // introduce overlaps after two otherwise disjoint strategies were configured.
 // Caller SQL supplies the current plan alias p and account alias a.
-const scheduledTestRuntimeOwnershipSQL = `(
+const scheduledTestRuntimeOwnershipSQL = `(NOT (a.id = ANY(p.excluded_account_ids)) AND (
  NOT (p.enabled AND p.protection->>'enabled'='true' AND (CASE WHEN p.protection->>'mode'='all_pass'
   THEN jsonb_array_length(COALESCE(p.protection->'pass_group_ids','[]'::jsonb))>0 ELSE EXISTS(
   SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN p.protection->>'mode'='combined'
@@ -86,13 +87,13 @@ const scheduledTestRuntimeOwnershipSQL = `(
   WHERE CASE WHEN p.protection->>'mode'='combined' THEN rule->'action'->>'group_mode'='assign'
    ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END) END))
  OR NOT EXISTS(SELECT 1 FROM scheduled_test_plans other
-  WHERE other.id<>p.id AND other.enabled AND other.protection->>'enabled'='true'
+  WHERE other.id<>p.id AND NOT (a.id = ANY(other.excluded_account_ids)) AND other.enabled AND other.protection->>'enabled'='true'
   AND (CASE WHEN other.protection->>'mode'='all_pass'
    THEN jsonb_array_length(COALESCE(other.protection->'pass_group_ids','[]'::jsonb))>0 ELSE EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN other.protection->>'mode'='combined'
    THEN other.protection->'combinations' ELSE other.protection->'rules' END,'[]'::jsonb)) rule
    WHERE CASE WHEN other.protection->>'mode'='combined' THEN rule->'action'->>'group_mode'='assign'
     ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END) END)
-  AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=ANY(other.group_ids))))`
+  AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=ANY(other.group_ids)))))`
 
 func scheduledTestAccountOwnershipCurrent(ctx context.Context, tx *sql.Tx, planID, accountID int64) (bool, error) {
 	var current bool

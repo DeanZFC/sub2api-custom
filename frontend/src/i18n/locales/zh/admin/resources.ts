@@ -1,8 +1,15 @@
 export default {
     tests: {
+      excludedAccounts: '排除账号',
+      excludedAccountsHint: '勾选的账号不参与本策略的手动、定时检测及质量自动处理，不影响正常业务调度。取消勾选后从下次检测起参与。',
+      excludedAccountsCount: '已排除 {count} 个账号',
+      searchExcludedAccounts: '搜索账号名称或 ID',
+      excludedAccountOutsideGroups: '当前不在所选分组或已不可用',
+      unavailableExcludedAccount: '不可用账号',
+      noExclusionAccounts: '没有匹配的账号',
       strategyGroups: '策略分组',
-      strategyGroupsHint: '选择 1–100 个同平台的启用分组，检测这些分组内所有可调度账号。下方顺序同时用于用户端分组展示，可上下调整。',
-      strategyTarget: '所选分组内所有账号',
+      strategyGroupsHint: '选择 1–100 个同平台的启用分组，检测这些分组内未被排除的可调度账号。下方顺序同时用于用户端分组展示，可上下调整。',
+      strategyTarget: '所选分组内未排除账号',
       moveGroupUp: '分组上移',
       moveGroupDown: '分组下移',
       invalidStrategyGroups: '请选择 1–100 个互不重复、同平台且已启用的普通分组。',

@@ -278,10 +278,10 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	return recordProtectionAction(ctx, tx, state, before, verdict, reason)
 }
 
-func reconcileProtectionAccount(ctx context.Context, tx *sql.Tx, accountID int64) error {
+func reconcileProtectionAccount(ctx context.Context, tx sqlExecutor, accountID int64) error {
 	var reason string
 	var trial bool
-	err := tx.QueryRowContext(ctx, `WITH holds AS (
+	err := scanSingleRow(ctx, tx, `WITH holds AS (
  SELECT reason,updated_at,plan_id,test_definition_id,false AS combined FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked
  UNION ALL SELECT reason,updated_at,plan_id,0,true FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked
  ) SELECT reason,
@@ -290,7 +290,7 @@ func reconcileProtectionAccount(ctx context.Context, tx *sql.Tx, accountID int64
 		 AND (other.recovery_phase<>'trial' OR other.rule_config->'recovery'->>'enabled' IS DISTINCT FROM 'true'
 	 OR other.recovery_trial_started_at IS NULL OR other.recovery_trial_started_at>NOW()
 	 OR other.recovery_trial_ends_at IS NULL OR other.recovery_trial_ends_at<=NOW()))
-		FROM holds ORDER BY combined DESC,updated_at DESC,plan_id,test_definition_id LIMIT 1`, accountID).Scan(&reason, &trial)
+		FROM holds ORDER BY combined DESC,updated_at DESC,plan_id,test_definition_id LIMIT 1`, []any{accountID}, &reason, &trial)
 	blocked := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err

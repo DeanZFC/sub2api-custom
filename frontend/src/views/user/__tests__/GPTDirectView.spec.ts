@@ -24,6 +24,7 @@ async function confirmScreen(wrapper: VueWrapper) {
   await wrapper.get('#gpt-code').setValue(' CODE-123 ')
   await wrapper.findAll('form')[0]!.trigger('submit')
   await flushPromises()
+  await vi.waitFor(() => expect(wrapper.find('#gpt-session').exists()).toBe(true))
   await wrapper.get('#gpt-session').setValue(session)
   await wrapper.findAll('form')[0]!.trigger('submit')
   await flushPromises()
@@ -88,6 +89,7 @@ describe('GPT Direct redemption and recovery', () => {
     const second = await create()
     expect(second.text()).toContain('gptDirect.pendingHint')
     await confirmScreen(second)
+    expect(api.verify).toHaveBeenLastCalledWith('CODE-123', originalKey)
     await second.get('[data-testid="gpt-confirm"]').setValue(true)
     await second.get('[data-testid="gpt-submit"]').trigger('click')
     await finishAsync()
@@ -162,5 +164,35 @@ describe('GPT Direct redemption and recovery', () => {
     api.config.mockResolvedValueOnce({ enabled: true, receipt_scope: 'scope1', purchase_url: 'javascript:alert(1)' })
     const enabled = await create()
     expect(enabled.find('a[href^="javascript:"]').exists()).toBe(false)
+  })
+
+  it.each([
+    'QQ：123456789\n微信：example-support',
+    '<img src=x onerror=alert(1)>',
+    'javascript:alert(1)',
+    '客服说明\nhttps://support.example.com',
+  ])('renders support information as plain text: %s', async content => {
+    api.config.mockResolvedValueOnce({ enabled: true, support_url: content })
+    const wrapper = await create()
+    expect(wrapper.text()).toContain(content)
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.find('a').exists()).toBe(false)
+  })
+
+  it('keeps existing support URLs clickable', async () => {
+    api.config.mockResolvedValueOnce({ enabled: true, support_url: 'https://support.example.com/contact' })
+    const wrapper = await create()
+    const link = wrapper.get('a[href="https://support.example.com/contact"]')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toContain('noreferrer')
+  })
+  it('shows the configured offer and a server-confirmed grant without redeeming again', async () => {
+    api.config.mockResolvedValueOnce({ enabled: true, receipt_scope: 'scope1', lottery_reward_enabled: true, lottery_chances: 2 })
+    sessionStorage.setItem(storageKey, JSON.stringify({ task: { id: 'task_1', token } }))
+    api.task.mockResolvedValueOnce({ ...task, status: 'success', lottery_reward: { status: 'awarded', chances: 2 } })
+    const wrapper = await create()
+    expect(wrapper.text()).toContain('gptDirect.lotteryOffer')
+    expect(wrapper.text()).toContain('gptDirect.lotteryReward.awarded')
+    expect(api.redeem).not.toHaveBeenCalled()
   })
 })

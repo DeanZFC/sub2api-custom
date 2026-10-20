@@ -11,27 +11,28 @@ type ScheduledTestPlan struct {
 	Name string `json:"name"`
 	// SortOrder orders strategies; GroupIDs orders groups within a strategy.
 	// A round snapshots the union of these groups once, deduplicated by account.
-	GroupIDs          []int64                       `json:"group_ids"`
-	MigrationNote     string                        `json:"migration_note,omitempty"`
-	SortOrder         int                           `json:"sort_order"`
-	AccountID         *int64                        `json:"account_id,omitempty"`
-	GroupID           *int64                        `json:"group_id,omitempty"`
-	TestDefinitionID  *int64                        `json:"test_definition_id,omitempty"`
-	TestDefinitionIDs []int64                       `json:"test_definition_ids"`
-	TestType          string                        `json:"test_type"`
-	TargetMode        string                        `json:"target_mode"`
-	ModelID           string                        `json:"model_id"`
-	ReasoningEffort   string                        `json:"reasoning_effort,omitempty"`
-	CronExpression    string                        `json:"cron_expression"`
-	Schedule          *ScheduledTestSchedule        `json:"schedule,omitempty"`
-	Enabled           bool                          `json:"enabled"`
-	MaxResults        int                           `json:"max_results"`
-	AutoRecover       bool                          `json:"auto_recover"`
-	Protection        ScheduledTestProtectionConfig `json:"protection"`
-	LastRunAt         *time.Time                    `json:"last_run_at"`
-	NextRunAt         *time.Time                    `json:"next_run_at"`
-	CreatedAt         time.Time                     `json:"created_at"`
-	UpdatedAt         time.Time                     `json:"updated_at"`
+	GroupIDs           []int64                       `json:"group_ids"`
+	ExcludedAccountIDs []int64                       `json:"excluded_account_ids"`
+	MigrationNote      string                        `json:"migration_note,omitempty"`
+	SortOrder          int                           `json:"sort_order"`
+	AccountID          *int64                        `json:"account_id,omitempty"`
+	GroupID            *int64                        `json:"group_id,omitempty"`
+	TestDefinitionID   *int64                        `json:"test_definition_id,omitempty"`
+	TestDefinitionIDs  []int64                       `json:"test_definition_ids"`
+	TestType           string                        `json:"test_type"`
+	TargetMode         string                        `json:"target_mode"`
+	ModelID            string                        `json:"model_id"`
+	ReasoningEffort    string                        `json:"reasoning_effort,omitempty"`
+	CronExpression     string                        `json:"cron_expression"`
+	Schedule           *ScheduledTestSchedule        `json:"schedule,omitempty"`
+	Enabled            bool                          `json:"enabled"`
+	MaxResults         int                           `json:"max_results"`
+	AutoRecover        bool                          `json:"auto_recover"`
+	Protection         ScheduledTestProtectionConfig `json:"protection"`
+	LastRunAt          *time.Time                    `json:"last_run_at"`
+	NextRunAt          *time.Time                    `json:"next_run_at"`
+	CreatedAt          time.Time                     `json:"created_at"`
+	UpdatedAt          time.Time                     `json:"updated_at"`
 }
 
 // ScheduledTestResult represents a single test execution result.

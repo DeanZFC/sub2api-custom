@@ -74,9 +74,11 @@ var ChannelMonitorV2ErrorCategories = []string{
 }
 
 type ChannelMonitorV2Filter struct {
-	Range     string
-	Platforms []string
-	GroupIDs  []int64
+	// Only the card view needs raw, capped request history. Aggregation is unchanged.
+	IncludeRecentRequests bool
+	Range                 string
+	Platforms             []string
+	GroupIDs              []int64
 	// AllowedGroupIDs is the authenticated viewer's server-derived group scope.
 	// RestrictGroups distinguishes an ordinary user with no allowed groups from
 	// the unrestricted admin/configured scope represented by an empty slice.
@@ -247,13 +249,24 @@ type ChannelMonitorV2ModelRow struct {
 }
 
 type ChannelMonitorV2MatrixRow struct {
-	Platform  string                       `json:"platform"`
-	GroupID   *int64                       `json:"group_id,omitempty"`
-	GroupName string                       `json:"group_name,omitempty"`
-	Model     string                       `json:"model,omitempty"`
-	Metrics   ChannelMonitorV2Metric       `json:"metrics"`
-	Health    ChannelMonitorV2Health       `json:"health"`
-	Buckets   []ChannelMonitorV2TrendPoint `json:"buckets"`
+	HasTraffic     bool                            `json:"has_traffic"`
+	RecentRequests []ChannelMonitorV2RecentRequest `json:"recent_requests,omitempty"`
+	Platform       string                          `json:"platform"`
+	GroupID        *int64                          `json:"group_id,omitempty"`
+	GroupName      string                          `json:"group_name,omitempty"`
+	Model          string                          `json:"model,omitempty"`
+	Metrics        ChannelMonitorV2Metric          `json:"metrics"`
+	Health         ChannelMonitorV2Health          `json:"health"`
+	Buckets        []ChannelMonitorV2TrendPoint    `json:"buckets"`
+}
+
+// ChannelMonitorV2RecentRequest exposes no user/account IDs, request IDs or messages.
+type ChannelMonitorV2RecentRequest struct {
+	OccurredAt    time.Time `json:"occurred_at"`
+	Model         string    `json:"model"`
+	Status        string    `json:"status"`
+	TTFTMs        *int64    `json:"ttft_ms,omitempty"`
+	ErrorCategory string    `json:"error_category,omitempty"`
 }
 
 type ChannelMonitorV2Matrix struct {

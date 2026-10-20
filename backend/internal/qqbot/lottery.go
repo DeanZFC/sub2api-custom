@@ -19,6 +19,7 @@ type LotteryState struct {
 	UserID              int64   `json:"user_id"`
 	RechargeTotal       float64 `json:"recharge_total"`
 	Earned              int64   `json:"earned"`
+	BonusChances        int64   `json:"bonus_chances"`
 	Used                int64   `json:"used"`
 	Remaining           int64   `json:"remaining"`
 	NextRecharge        float64 `json:"next_recharge"`
@@ -56,6 +57,9 @@ func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64
 	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_lottery_draws WHERE user_id=$1`, uid).Scan(&out.Used); err != nil {
 		return out, err
 	}
+	if err = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(chances),0) FROM qq_bot_lottery_chance_grants WHERE user_id=$1`, uid).Scan(&out.BonusChances); err != nil {
+		return out, err
+	}
 	out.DrawsUntilGuarantee = c.drawsUntilGuarantee(out.Used)
 	if out.DrawsUntilGuarantee > 0 {
 		out.GuaranteeEvery = c.GuaranteeEvery
@@ -65,7 +69,7 @@ func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64
 		return out, errors.New("抽奖规则不正确")
 	}
 	quotient, _ := total.QuoRem(step, 0)
-	earned := quotient.Mul(decimal.NewFromInt(c.ChancesPerStep))
+	earned := quotient.Mul(decimal.NewFromInt(c.ChancesPerStep)).Add(decimal.NewFromInt(out.BonusChances))
 	if earned.GreaterThan(decimal.NewFromInt(1e12)) {
 		return out, errors.New("抽奖次数超出支持范围，请联系管理员")
 	}
@@ -74,7 +78,7 @@ func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64
 	out.Remaining = max(out.Earned-out.Used, 0)
 	// When refunds/rule changes put usage ahead of entitlement, new recharge
 	// must cover that deficit before another draw becomes available.
-	nextTier := max(quotient.IntPart()+1, out.Used/c.ChancesPerStep+1)
+	nextTier := max(quotient.IntPart()+1, max(out.Used-out.BonusChances, 0)/c.ChancesPerStep+1)
 	out.NextRecharge = decimal.NewFromInt(nextTier).Mul(step).Sub(total).InexactFloat64()
 	return out, nil
 }
