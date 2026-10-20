@@ -81,6 +81,7 @@
           </div>
           <p id="qq-history-help" class="text-xs text-gray-500">{{ t('qqbot.historyHelp') }}</p>
         </section>
+        <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" />
         <section class="card space-y-4 p-6">
           <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">{{ t('qqbot.images') }}</h2><label class="flex items-center gap-2"><input v-model="form.image_enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
           <div class="grid gap-4 md:grid-cols-2">
@@ -112,11 +113,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import QQBotAutonomousSettings from '@/components/admin/qqbot/QQBotAutonomousSettings.vue'
+import { defaultAutonomousConfig } from '@/api/qqbot'
 import { qqbotAPI, type QQBotConfig, type QQBotRuntime } from '@/api/qqbot'
 const { t } = useI18n()
 const form = ref<QQBotConfig | null>(null)
 const runtime = ref<QQBotRuntime | null>(null)
 const groupsText = ref('')
+const autonomous = ref(defaultAutonomousConfig())
 const notificationGroupsText = ref('')
 const priceNotifications = ref({ enabled: false, scheduled: true, groups: [] as string[] })
 const notificationJobs = computed(() => runtime.value?.jobs.filter(job => job.kind === 'price_notification') ?? [])
@@ -133,13 +137,14 @@ const limitFields = [
   { key: 'total_daily_image_limit', label: 'totalImage', max: 100000 },
   { key: 'cooldown_seconds', label: 'cooldown', max: 3600 }
 ] as const
-const snapshot = computed(() => JSON.stringify([form.value, groupsText.value, priceNotifications.value, notificationGroupsText.value]))
+const snapshot = computed(() => JSON.stringify([form.value, groupsText.value, priceNotifications.value, notificationGroupsText.value, autonomous.value]))
 const dirty = computed(() => snapshot.value !== savedSnapshot.value)
 const webhookURL = computed(() => `${window.location.origin}/api/v1/qqbot/webhook`)
 function secretHint(set: boolean) { return t(set ? 'qqbot.secretStored' : 'qqbot.secretEmpty') }
 function message(e: unknown) { return (e as {message?: string})?.message || t('common.error') }
 function apply(c: QQBotConfig) {
   form.value = { ...c, custom_commands: c.custom_commands ?? [] }
+  autonomous.value = { ...defaultAutonomousConfig(), ...c.autonomous }
   groupsText.value = (c.allowed_groups || []).join('\n')
   priceNotifications.value = { enabled: false, scheduled: true, ...c.price_notifications, groups: c.price_notifications?.groups ?? [] }
   notificationGroupsText.value = priceNotifications.value.groups.join('\n')
@@ -166,7 +171,7 @@ async function deleteDiscoveredGroup(id: string) {
 async function save() {
   if (!form.value) return
   busy.value = true; error.value = ''; notice.value = ''
-  try { apply(await qqbotAPI.save({ ...form.value, price_notifications: { ...priceNotifications.value, groups: [...new Set(notificationGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, allowed_groups: [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))] })); notice.value = t('common.saved'); await refreshRuntime() }
+  try { apply(await qqbotAPI.save({ ...form.value, autonomous: { ...autonomous.value }, price_notifications: { ...priceNotifications.value, groups: [...new Set(notificationGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, allowed_groups: [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))] })); notice.value = t('common.saved'); await refreshRuntime() }
   catch (e) { error.value = message(e) } finally { busy.value = false }
 }
 function addGroup(id: string) { groupsText.value = [...new Set([...groupsText.value.split(/[\s,，]+/).filter(Boolean), id])].join('\n') }

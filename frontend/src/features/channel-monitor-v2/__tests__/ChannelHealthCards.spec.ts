@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import ChannelHealthCards from '../ChannelHealthCards.vue'
 import { cardHealth, hasMonitorTraffic, recentRequestsForCard, requestHealth } from '../monitorCards'
 import zh from '@/i18n/locales/zh/channelMonitorV2'
@@ -26,7 +26,9 @@ const row: MonitorMatrixRow = {
 const request = (status: MonitorRecentRequest['status'], seconds = 0): MonitorRecentRequest => ({
   occurred_at: new Date(Date.parse(coverage.data_through) + seconds * 1000).toISOString(), model: 'gpt-test', status,
 })
-afterEach(() => vi.useRealTimers())
+const requestTime = (time: string) => new Intl.DateTimeFormat('zh', {
+  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+}).format(new Date(time))
 
 describe('channel health cards', () => {
   it('keeps passive health and traffic when counts are redacted', () => {
@@ -52,10 +54,9 @@ describe('channel health cards', () => {
   })
 
   it('renders compact channel cards and real request states without a per-model status section', async () => {
-    vi.useFakeTimers()
     const wrapper = mount(ChannelHealthCards, {
       props: { rows: [{ ...row, recent_requests: [request('success'), request('slow', 1), request('error', 2), request('ignored', 3)] }],
-        groupBy: 'platform_group', healthMode: 'overall', nextRefreshAt: Date.now() + 60000, refreshing: false },
+        groupBy: 'platform_group', healthMode: 'overall' },
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
     })
     expect(wrapper.findAll('[data-testid=channel-health-card]')).toHaveLength(1)
@@ -69,13 +70,37 @@ describe('channel health cards', () => {
     expect(requests).toHaveLength(20)
     expect(requests.slice(-4).map(slot => slot.attributes('data-state'))).toEqual(['healthy', 'warning', 'critical', 'warning'])
     expect(requests[0].attributes('data-state')).toBe('unknown')
-    expect(wrapper.text()).toContain('60s 后刷新')
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(wrapper.text()).toContain('59s 后刷新')
+    expect(wrapper.get('[data-testid=latest-request-time]').text()).toBe(`最近请求：${requestTime(request('ignored', 3).occurred_at)}`)
     await wrapper.setProps({ healthMode: 'ttft' })
     expect(requests.slice(-4).map(slot => slot.attributes('data-state'))).toEqual(['healthy', 'warning', 'critical', 'warning'])
     wrapper.unmount()
-    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('shows the latest actual request per card and complete hover metrics, preserving zero and missing values', async () => {
+    const latest = { ...request('success', 10), ttft_ms: 800, cache_rate: 0.8, duration_ms: 3500 }
+    const zero = { ...request('success', 1), ttft_ms: 0, cache_rate: 0, duration_ms: 0 }
+    const failed = { ...request('error'), error_category: 'upstream_5xx' }
+    const wrapper = mount(ChannelHealthCards, {
+      props: {
+        rows: [{ ...row, recent_requests: [latest, failed, zero] }, { ...row, group_id: 8, recent_requests: [] }],
+        groupBy: 'platform_group', healthMode: 'overall',
+      },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+    })
+    expect(wrapper.findAll('[data-testid=latest-request-time]').map(el => el.text())).toEqual([
+      `最近请求：${requestTime(latest.occurred_at)}`, '最近请求：-',
+    ])
+    const slots = wrapper.get('[data-testid=recent-requests]').findAll('[role=img]')
+    expect(slots[19].attributes('title')).toBe([
+      'gpt-test · 请求成功', `请求时间：${requestTime(latest.occurred_at)}`, '首字：800ms', '缓存率 80.0%', '总耗时：3.5s',
+    ].join('\n'))
+    expect(slots[19].attributes('aria-label')).toBe(slots[19].attributes('title'))
+    expect(slots[18].attributes('title')).toContain('首字：0ms\n缓存率 0.00%\n总耗时：0ms')
+    expect(slots[17].attributes('title')).toContain('首字：-\n缓存率 -\n总耗时：-\n上游 5xx')
+    expect(slots[0].attributes('title')).toBe('当前时间范围内暂无更多请求')
+    await wrapper.setProps({ rows: [{ ...row, recent_requests: [request('error', 20)] }] })
+    expect(wrapper.get('[data-testid=latest-request-time]').text()).toBe(`最近请求：${requestTime(request('error', 20).occurred_at)}`)
+    wrapper.unmount()
   })
 
   it('groups actual called models with newer versions first and no unused model placeholders', async () => {
@@ -86,7 +111,7 @@ describe('channel health cards', () => {
           { ...row, group_id: 8, model: 'gpt-5.4' },
           { ...row, model: 'unused-model', has_traffic: false },
         ],
-        groupBy: 'platform_group_model', healthMode: 'overall', nextRefreshAt: Date.now() + 60000, refreshing: false,
+        groupBy: 'platform_group_model', healthMode: 'overall',
       },
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
     })
@@ -106,7 +131,7 @@ describe('channel health cards', () => {
       { id: 3, group_id: 8, account_id: 12, model_id: 'private-model', test_key: 'pelican', output_kind: 'html', status: 'success', output_html: '<svg />' },
     ]
     const wrapper = mount(ChannelHealthCards, {
-      props: { rows: [{ ...row, model: 'model-a' }], groupBy: 'platform_group_model', healthMode: 'overall', nextRefreshAt: Date.now() + 60000, refreshing: false, testResults: tests },
+      props: { rows: [{ ...row, model: 'model-a' }], groupBy: 'platform_group_model', healthMode: 'overall', testResults: tests },
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: {
         ProviderIcon: true, TestResultOutput: true,
         BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },

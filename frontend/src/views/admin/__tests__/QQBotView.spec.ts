@@ -6,7 +6,7 @@ import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 
 const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), runtime: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn() }))
-vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
+vi.mock('@/api/qqbot', async (importOriginal) => ({ ...await importOriginal<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/QQBotBindings.vue', () => ({ default: { template: '<section />' } }))
 
@@ -25,6 +25,26 @@ describe('QQ bot settings', () => {
     } finally {
       vi.restoreAllMocks()
     }
+  })
+  it.each(['zh', 'en'] as const)('%s saves autonomous controls and shows decision reasons', async (locale) => {
+    api.runtime.mockResolvedValue({ groups: [], jobs: [{ id: 'auto', kind: 'ambient_chat', group_id: 'group', trigger_reason: 'question', decision_reason: 'model_skip', status: 'skipped', input_tokens: 25, output_tokens: 5, created_at: '2026-10-20T01:00:00Z' }], autonomous_stats: [{ group_id: 'group', reason: 'model_calls', count: 1 }], rewards: [], bindings: 0, encryption_ready: true })
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
+    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    expect((wrapper.get('[data-testid="autonomous-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-testid="autonomous-sample_percent"]').element as HTMLInputElement).value).toBe('15')
+    await wrapper.get('[data-testid="autonomous-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="autonomous-groups"]').setValue('group\ngroup')
+    await wrapper.get('[data-testid="autonomous-names"]').setValue('CTAV\n小助手')
+    await wrapper.get('[data-testid="autonomous-sample_percent"]').setValue(0)
+    await wrapper.get('[data-testid="autonomous-daily_calls"]').setValue(30)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ autonomous: expect.objectContaining({ enabled: true, groups: ['group'], names: ['CTAV', '小助手'], sample_percent: 0, daily_calls: 30, mention_user: false }) }))
+    expect(wrapper.text()).toContain(i18n.global.t('qqbot.autonomous.reasons.model_skip'))
+    expect(wrapper.text()).toContain(i18n.global.t('qqbot.autonomous.reasons.model_calls'))
+    expect((wrapper.get('[data-testid="autonomous-daily_calls"]').element as HTMLInputElement).value).toBe('30')
+    wrapper.unmount()
   })
   it.each(['zh', 'en'] as const)('%s saves notification recipients and displays delivery failures', async (locale) => {
     api.runtime.mockResolvedValue({ groups: [], jobs: [{ id: 'notice', kind: 'price_notification', group_id: 'target', created_at: '2026-10-20T01:00:00Z', status: 'delivery_failed', error: 'QQ HTTP 403 / code 40034105' }], rewards: [], bindings: 0, encryption_ready: true })

@@ -42,11 +42,11 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 	require.NoError(t, err)
 	defer db.Close()
 	now := time.Now().UTC()
-	rows := sqlmock.NewRows([]string{"idx", "created_at", "model", "is_error", "ttft", "type", "owner", "source", "status", "upstream_status", "message"}).
-		AddRow(0, now, "gpt-test", false, 1000, "", "", "", 0, 0, "").
-		AddRow(0, now.Add(time.Second), "gpt-test", false, 15000, "", "", "", 0, 0, "").
-		AddRow(0, now.Add(2*time.Second), "gpt-test", true, nil, "upstream", "provider", "", 503, 503, "private message body").
-		AddRow(1, now, "grok-test", true, nil, "authentication", "client", "", 401, 0, "private API key text")
+	rows := sqlmock.NewRows([]string{"idx", "created_at", "model", "is_error", "ttft", "duration", "cache_rate", "type", "owner", "source", "status", "upstream_status", "message"}).
+		AddRow(0, now, "gpt-test", false, 1000, 3500, 0.8, "", "", "", 0, 0, "").
+		AddRow(0, now.Add(time.Second), "gpt-test", false, 15000, 0, 0.0, "", "", "", 0, 0, "").
+		AddRow(0, now.Add(2*time.Second), "gpt-test", true, nil, 5000, nil, "upstream", "provider", "", 503, 503, "private message body").
+		AddRow(1, now, "grok-test", true, -1, -1, nil, "authentication", "client", "", 401, 0, "private API key text")
 	mock.ExpectQuery("SELECT d.idx, recent.created_at").WillReturnRows(rows)
 	cfg := service.ChannelMonitorV2Config{HealthThresholds: service.ChannelMonitorV2HealthThresholds{WarningTTFTMs: 10000}, IgnoredErrorCategories: []string{"authentication"}}
 	items := []service.ChannelMonitorV2MatrixRow{{Platform: "openai"}, {Platform: "grok"}}
@@ -59,10 +59,20 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 	require.Equal(t, "upstream_5xx", items[0].RecentRequests[2].ErrorCategory)
 	require.Equal(t, "ignored", items[1].RecentRequests[0].Status)
 	require.Nil(t, items[0].RecentRequests[2].TTFTMs)
+	require.EqualValues(t, 3500, *items[0].RecentRequests[0].DurationMs)
+	require.Equal(t, 0.8, *items[0].RecentRequests[0].CacheRate)
+	require.EqualValues(t, 0, *items[0].RecentRequests[1].DurationMs)
+	require.Zero(t, *items[0].RecentRequests[1].CacheRate)
+	require.EqualValues(t, 5000, *items[0].RecentRequests[2].DurationMs)
+	require.Nil(t, items[0].RecentRequests[2].CacheRate)
+	require.Nil(t, items[1].RecentRequests[0].TTFTMs)
+	require.Nil(t, items[1].RecentRequests[0].DurationMs)
 	encoded, err := json.Marshal(items)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "private")
 	require.NotContains(t, string(encoded), "request_id")
+	require.Contains(t, string(encoded), `"cache_rate":0`)
+	require.Contains(t, string(encoded), `"duration_ms":0`)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

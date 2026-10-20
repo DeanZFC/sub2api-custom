@@ -16,7 +16,11 @@
       <div v-if="allPass" class="space-y-3" data-all-pass-policy>
         <p class="rounded-lg bg-blue-50 p-3 text-sm leading-relaxed text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">{{ t('admin.tests.protection.allPass.modeHint') }}</p>
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.allPass.newChecksHint') }}</p>
-        <TestOutcomeActionEditor :model-value="allPassAction" outcome="pass" :groups="groups" :hide-scheduling="true" :title="t('admin.tests.protection.allPass.groups')" @update:model-value="setPassGroups" />
+        <div class="grid gap-3 lg:grid-cols-2">
+          <TestOutcomeActionEditor :model-value="allPassAction" outcome="pass" :groups="groups" :title="t('admin.tests.protection.allPass.groups')" @update:model-value="setAllPassAction('pass', $event)" />
+          <TestOutcomeActionEditor :model-value="allFailAction" outcome="fail" :groups="groups" :title="t('admin.tests.protection.allPass.failure')" @update:model-value="setAllPassAction('fail', $event)" />
+        </div>
+        <p v-if="allPassAction.group_mode === 'assign' || allFailAction.group_mode === 'assign'" class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.actions.routingHint') }}</p>
       </div>
       <p v-if="combined" class="rounded-lg bg-blue-50 p-3 text-xs text-blue-800 dark:bg-blue-950/30 dark:text-blue-200" data-combined-mode-hint>{{ t('admin.tests.protection.combined.modeHint') }}</p>
       <section v-for="type in types" :key="type.id" class="space-y-3 rounded-md bg-gray-50 p-3 dark:bg-dark-800" :data-protection-type="type.id">
@@ -97,7 +101,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminGroup, TestCombinationRule, TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRule, TestProtectionThreshold, TestType } from '@/types'
-import { canEnableStatisticsRecovery, copyTestCombination, copyTestProtection, defaultProtectionRule, newTestCombinationID, normalizeAllPassProtection, protectionMetrics, validTestProtection } from '@/utils/testProtection'
+import { allPassOutcomeAction, canEnableStatisticsRecovery, copyTestCombination, copyTestProtection, defaultProtectionRule, newTestCombinationID, normalizeAllPassProtection, protectionMetrics, validTestProtection } from '@/utils/testProtection'
 import TestOutcomeActionEditor from './TestOutcomeActionEditor.vue'
 import TestStatisticsRecoveryEditor from './TestStatisticsRecoveryEditor.vue'
 import TestCombinationRulesEditor from './TestCombinationRulesEditor.vue'
@@ -106,10 +110,11 @@ const props = withDefaults(defineProps<{ modelValue: TestProtectionConfig; types
 const emit = defineEmits<{ 'update:modelValue': [value: TestProtectionConfig] }>()
 const { t } = useI18n()
 const allPass = computed(() => props.modelValue.mode === 'all_pass')
-const allPassAction = computed<TestOutcomeAction>(() => ({ scheduling: 'resume', group_mode: props.modelValue.pass_group_ids !== undefined ? 'assign' : 'keep', group_ids: props.modelValue.pass_group_ids }))
-const setPassGroups = (action: TestOutcomeAction) => update(next => {
-  if (action.group_mode === 'assign') next.pass_group_ids = action.group_ids || []
-  else delete next.pass_group_ids
+const allPassAction = computed(() => allPassOutcomeAction(props.modelValue, 'pass'))
+const allFailAction = computed(() => allPassOutcomeAction(props.modelValue, 'fail'))
+const setAllPassAction = (outcome: 'pass' | 'fail', action: TestOutcomeAction) => update(next => {
+  if (outcome === 'pass') next.on_pass = action
+  else next.on_fail = action
 })
 const combined = computed(() => props.modelValue.mode === 'combined')
 const combinationTypes = computed(() => props.types.filter(type => type.enabled && ruleFor(type.id)))
@@ -156,7 +161,11 @@ const setMode = (mode: NonNullable<TestProtectionConfig['mode']>) => update(next
     combinationDraft.value = next.combinations?.map(copyTestCombination)
     delete next.combinations
   }
-  if (mode !== 'all_pass') delete next.pass_group_ids
+  if (mode !== 'all_pass') {
+    delete next.pass_group_ids
+    delete next.on_pass
+    delete next.on_fail
+  }
   next.mode = mode
 })
 const prepareRecovery = (id: number) => update(next => {

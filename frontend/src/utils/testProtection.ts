@@ -10,8 +10,21 @@ export const defaultTestOutcomeAction = (outcome: 'pass' | 'fail'): TestOutcomeA
   scheduling: outcome === 'pass' ? 'resume' : 'pause', group_mode: 'keep',
 })
 
+export function allPassOutcomeAction(value: TestProtectionConfig, outcome: 'pass' | 'fail'): TestOutcomeAction {
+  const configured = copyAction(outcome === 'pass' ? value.on_pass : value.on_fail)
+  if (configured) return configured
+  const action = defaultTestOutcomeAction(outcome)
+  if (outcome === 'pass' && value.pass_group_ids !== undefined) {
+    action.group_mode = 'assign'
+    action.group_ids = [...value.pass_group_ids]
+  }
+  return action
+}
+
 export const copyTestProtection = (value?: TestProtectionConfig): TestProtectionConfig => value
-  ? { enabled: value.enabled, ...(value.mode ? { mode: value.mode } : {}), ...(value.pass_group_ids ? { pass_group_ids: [...value.pass_group_ids] } : {}), ...(value.combinations ? { combinations: value.combinations.map(copyTestCombination) } : {}), rules: (value.rules || []).map(rule => ({ ...rule, priority: rule.priority ?? 0, required_pass: rule.required_pass ?? false, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })) }
+  ? { enabled: value.enabled, ...(value.mode ? { mode: value.mode } : {}), ...(value.pass_group_ids ? { pass_group_ids: [...value.pass_group_ids] } : {}),
+    ...(value.on_pass ? { on_pass: copyAction(value.on_pass) } : {}), ...(value.on_fail ? { on_fail: copyAction(value.on_fail) } : {}),
+    ...(value.combinations ? { combinations: value.combinations.map(copyTestCombination) } : {}), rules: (value.rules || []).map(rule => ({ ...rule, priority: rule.priority ?? 0, required_pass: rule.required_pass ?? false, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })) }
   : { enabled: false, rules: [] }
 
 export const copyTestCombinationCondition = (condition: TestCombinationCondition): TestCombinationCondition => ({
@@ -127,7 +140,10 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
   if (!value?.enabled) return true
   const combined = value.mode === 'combined'
   const allPass = value.mode === 'all_pass'
-  if (value.pass_group_ids !== undefined && (!allPass || !validAction({ scheduling: 'resume', group_mode: 'assign', group_ids: value.pass_group_ids }, groups))) return false
+  if (!allPass && (value.pass_group_ids !== undefined || value.on_pass || value.on_fail)) return false
+  if (allPass && (!validAction(allPassOutcomeAction(value, 'pass'), groups) || !validAction(allPassOutcomeAction(value, 'fail'), groups))) return false
+  if (allPass && value.rules.some(rule => rule.recovery?.enabled)
+    && (allPassOutcomeAction(value, 'pass').scheduling !== 'resume' || allPassOutcomeAction(value, 'fail').scheduling !== 'pause')) return false
   if (allPass && (!value.rules.some(rule => !rule.vote?.enabled) || value.rules.some(rule => rule.vote?.public_enabled))) return false
   if (combined ? !validTestCombinations(value, groups) : !!value.combinations?.length) return false
   if (!value.rules.length || value.rules.length > 32) return false
@@ -159,16 +175,19 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
   })
 }
 
-// Apply the fixed scheduling policy without changing thresholds or answers.
+// Only the aggregate policy executes actions; recovery retains its independent hold.
 export function normalizeAllPassProtection(value: TestProtectionConfig): void {
   if (value.mode !== 'all_pass') return
   delete value.combinations
+  if (value.on_pass) delete value.pass_group_ids
+  const pass = allPassOutcomeAction(value, 'pass')
+  const fail = allPassOutcomeAction(value, 'fail')
   for (const rule of value.rules) {
     rule.priority = 0
     rule.required_pass = false
     rule.pause_on_failure = true
-    rule.on_pass = defaultTestOutcomeAction('pass')
-    rule.on_fail = defaultTestOutcomeAction('fail')
+    rule.on_pass = { scheduling: pass.scheduling, group_mode: 'keep' }
+    rule.on_fail = { scheduling: fail.scheduling, group_mode: 'keep' }
     if (rule.vote) rule.vote.public_enabled = false
   }
 }

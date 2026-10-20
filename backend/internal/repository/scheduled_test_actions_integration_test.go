@@ -95,6 +95,14 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		reset(t)
 		testScheduledTestAllPassLifecycle(t, ctx, db, plans, repo)
 	})
+	t.Run("all pass custom actions", func(t *testing.T) {
+		reset(t)
+		testScheduledTestAllPassCustomActions(t, ctx, db, plans, repo)
+	})
+	t.Run("all pass custom recovery groups", func(t *testing.T) {
+		reset(t)
+		testScheduledTestAllPassCustomRecoveryGroups(t, ctx, db, plans, repo)
+	})
 	t.Run("excluded accounts and policy edits", func(t *testing.T) {
 		reset(t)
 		testScheduledTestExcludedAccounts(t, ctx, db, plans, repo, candyID)

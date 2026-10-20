@@ -176,6 +176,8 @@ export interface MonitorRecentRequest {
   model: string
   status: 'success' | 'slow' | 'error' | 'ignored'
   ttft_ms?: number
+  duration_ms?: number
+  cache_rate?: number
   error_category?: string
 }
 

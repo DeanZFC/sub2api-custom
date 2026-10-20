@@ -68,7 +68,12 @@ func (p *ScheduledTestPlan) ProtectionActionGroupIDs() []int64 {
 	}
 	var ids []int64
 	if p.Protection.UsesAllPass() {
-		ids = slices.Clone(p.Protection.PassGroupIDs)
+		for _, verdict := range []string{"pass", "fail"} {
+			action := p.Protection.AllPassOutcomeAction(verdict)
+			if action.GroupMode == "assign" {
+				ids = append(ids, action.GroupIDs...)
+			}
+		}
 	} else if p.Protection.UsesCombinations() {
 		for _, rule := range p.Protection.Combinations {
 			if rule.Action.GroupMode == "assign" {

@@ -11,6 +11,7 @@ import (
 var ErrDisabled = errors.New("QQ 机器人尚未启用")
 
 type Config struct {
+	Autonomous               AutonomousConfig        `json:"autonomous"`
 	Enabled                  bool                    `json:"enabled"`
 	AppID                    string                  `json:"app_id"`
 	AppSecret                string                  `json:"app_secret"`
@@ -54,7 +55,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	return Config{PriceNotifications: PriceNotificationConfig{Scheduled: true, Groups: []string{}}, AllowedGroups: []string{}, CustomCommands: []CustomCommand{}, ChatProtocol: "chat_completions", ImageSize: "1024x1024",
+	return Config{Autonomous: DefaultAutonomousConfig(), PriceNotifications: PriceNotificationConfig{Scheduled: true, Groups: []string{}}, AllowedGroups: []string{}, CustomCommands: []CustomCommand{}, ChatProtocol: "chat_completions", ImageSize: "1024x1024",
 		SystemPrompt:    "你是 CTAV 群助手。用简洁、友好的中文回答。签到、绑定和奖励由固定指令处理，你不能修改账户或余额。",
 		MaxOutputTokens: 2048, HistoryMessages: 12, DailyChatLimit: 30, DailyImageLimit: 2,
 		TotalDailyChatLimit: 500, TotalDailyImageLimit: 20, CooldownSeconds: 5, InviteDailyLimit: 10,
@@ -161,26 +162,29 @@ func (m Message) MarshalJSON() ([]byte, error) {
 }
 
 type Job struct {
-	RewardCodeHash string          `json:"-"`
-	ShareHistory   bool            `json:"-"`
-	ReplyReference string          `json:"-"`
-	ID             string          `json:"id"`
-	AppID          string          `json:"app_id"`
-	EventType      string          `json:"event_type"`
-	GroupID        string          `json:"group_id"`
-	MemberID       string          `json:"member_id"`
-	MessageID      string          `json:"-"`
-	Payload        json.RawMessage `json:"-"`
-	Kind           string          `json:"kind"`
-	Status         string          `json:"status"`
-	ResultText     string          `json:"-"`
-	Image          []byte          `json:"-"`
-	ImageType      string          `json:"-"`
-	Error          string          `json:"error"`
-	InputTokens    int64           `json:"input_tokens"`
-	OutputTokens   int64           `json:"output_tokens"`
-	CreatedAt      time.Time       `json:"created_at"`
-	FinishedAt     *time.Time      `json:"finished_at"`
+	TriggerReason   string          `json:"trigger_reason"`
+	DecisionReason  string          `json:"decision_reason"`
+	SuppressMention bool            `json:"-"`
+	RewardCodeHash  string          `json:"-"`
+	ShareHistory    bool            `json:"-"`
+	ReplyReference  string          `json:"-"`
+	ID              string          `json:"id"`
+	AppID           string          `json:"app_id"`
+	EventType       string          `json:"event_type"`
+	GroupID         string          `json:"group_id"`
+	MemberID        string          `json:"member_id"`
+	MessageID       string          `json:"-"`
+	Payload         json.RawMessage `json:"-"`
+	Kind            string          `json:"kind"`
+	Status          string          `json:"status"`
+	ResultText      string          `json:"-"`
+	Image           []byte          `json:"-"`
+	ImageType       string          `json:"-"`
+	Error           string          `json:"error"`
+	InputTokens     int64           `json:"input_tokens"`
+	OutputTokens    int64           `json:"output_tokens"`
+	CreatedAt       time.Time       `json:"created_at"`
+	FinishedAt      *time.Time      `json:"finished_at"`
 }
 type Binding struct {
 	AppID     string    `json:"app_id"`
@@ -210,9 +214,10 @@ type Group struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 type Runtime struct {
-	Groups          []Group  `json:"groups"`
-	Jobs            []Job    `json:"jobs"`
-	Rewards         []Reward `json:"rewards"`
-	Bindings        int      `json:"bindings"`
-	EncryptionReady bool     `json:"encryption_ready"`
+	AutonomousStats []AutonomousStat `json:"autonomous_stats"`
+	Groups          []Group          `json:"groups"`
+	Jobs            []Job            `json:"jobs"`
+	Rewards         []Reward         `json:"rewards"`
+	Bindings        int              `json:"bindings"`
+	EncryptionReady bool             `json:"encryption_ready"`
 }

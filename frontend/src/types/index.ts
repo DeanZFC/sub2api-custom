@@ -2650,6 +2650,8 @@ export interface TestProtectionConfig {
   enabled: boolean
   mode?: 'per_test' | 'combined' | 'all_pass'
   pass_group_ids?: number[]
+  on_pass?: TestOutcomeAction
+  on_fail?: TestOutcomeAction
   rules: TestProtectionRule[]
   combinations?: TestCombinationRule[]
 }

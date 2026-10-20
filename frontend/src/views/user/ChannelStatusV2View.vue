@@ -259,8 +259,6 @@
           :rows="matrixRows"
           :group-by="matrixGroupBy"
           :health-mode="healthMode"
-          :next-refresh-at="nextRefreshAt"
-          :refreshing="refreshing"
           :test-results="testResults"
           :test-results-state="testResultsState"
         />
@@ -568,7 +566,6 @@ const testResults = ref<TestResult[]>([])
 const testResultsState = ref<TestResultsState>('loading')
 const snapshot = ref<MonitorSnapshot | null>(null)
 const matrix = ref<MonitorMatrixResponse | null>(null)
-const nextRefreshAt = ref(0)
 const modelRows = ref<MonitorModelRow[]>([])
 const errorRows = ref<MonitorErrorRow[]>([])
 const userRows = ref<MonitorUserRow[]>([])
@@ -826,9 +823,7 @@ function scheduleAutoRefresh() {
     ? 10
     : snapshot.value?.config?.refresh_interval_seconds || 300
   const intervalMs = Math.max(bootstrapActive.value ? 10 : 60, seconds) * 1000
-  nextRefreshAt.value = Date.now() + intervalMs
   autoRefreshTimer = window.setInterval(() => {
-    nextRefreshAt.value = Date.now() + intervalMs
     if (!loading.value && !refreshing.value) {
       void reload(true)
     }

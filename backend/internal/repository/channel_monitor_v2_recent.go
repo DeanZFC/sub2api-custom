@@ -76,11 +76,13 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
 	}
 	// Each branch is capped per visible card before UNION; no global truncation
 	// can starve quiet channels. Correlated lookups use source time/group indexes.
-	query := `SELECT d.idx, recent.created_at, recent.model, recent.is_error, recent.first_token_ms,
+	query := `SELECT d.idx, recent.created_at, recent.model, recent.is_error, recent.first_token_ms, recent.duration_ms, recent.cache_rate,
     recent.error_type, recent.error_owner, recent.error_source, recent.status_code, recent.upstream_status_code, recent.message
   FROM jsonb_to_recordset($4::jsonb) AS d(idx integer, platform text, group_id bigint, model text)
   CROSS JOIN LATERAL (
-    (SELECT ul.created_at, ul.id, ` + usageModel + ` AS model, FALSE AS is_error, ul.first_token_ms::bigint,
+    (SELECT ul.created_at, ul.id, ` + usageModel + ` AS model, FALSE AS is_error, ul.first_token_ms::bigint, ul.duration_ms::bigint,
+      CASE WHEN ` + channelMonitorV2CacheEligibleUL + ` THEN ul.cache_read_tokens::double precision /
+        NULLIF(ul.input_tokens::bigint + ul.cache_creation_tokens::bigint + ul.cache_read_tokens::bigint, 0) END AS cache_rate,
       ''::text AS error_type, ''::text AS error_owner, ''::text AS error_source, 0 AS status_code, 0 AS upstream_status_code, ''::text AS message
     FROM usage_logs ul
     LEFT JOIN groups g ON g.id = ul.group_id
@@ -94,7 +96,8 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
           AND (newer.created_at, newer.id) > (ul.created_at, ul.id)))
     ORDER BY ul.created_at DESC, ul.id DESC LIMIT 20)
     UNION ALL
-    (SELECT current_error.created_at, current_error.id, ` + errorModel + ` AS model, TRUE AS is_error, NULL::bigint AS first_token_ms,
+    (SELECT current_error.created_at, current_error.id, ` + errorModel + ` AS model, TRUE AS is_error, current_error.time_to_first_token_ms AS first_token_ms,
+      current_error.duration_ms::bigint, NULL::double precision AS cache_rate,
       COALESCE(current_error.error_type, ''), COALESCE(current_error.error_owner, ''), COALESCE(current_error.error_source, ''),
       COALESCE(current_error.status_code, 0), COALESCE(current_error.upstream_status_code, 0),
       CONCAT_WS(' ', current_error.error_message, current_error.upstream_error_message, current_error.upstream_error_detail, current_error.error_body)
@@ -140,15 +143,24 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2RecentRequests(ctx cont
 		var index int
 		var request service.ChannelMonitorV2RecentRequest
 		var isError bool
-		var ttft sql.NullInt64
+		var ttft, duration sql.NullInt64
+		var cacheRate sql.NullFloat64
 		var input service.ChannelMonitorV2ErrorInput
-		if err := rows.Scan(&index, &request.OccurredAt, &request.Model, &isError, &ttft, &input.ErrorType, &input.ErrorOwner, &input.ErrorSource, &input.StatusCode, &input.UpstreamStatusCode, &input.Message); err != nil {
+		if err := rows.Scan(&index, &request.OccurredAt, &request.Model, &isError, &ttft, &duration, &cacheRate, &input.ErrorType, &input.ErrorOwner, &input.ErrorSource, &input.StatusCode, &input.UpstreamStatusCode, &input.Message); err != nil {
 			return err
 		}
 		if index < 0 || index >= len(items) {
 			return fmt.Errorf("invalid recent request dimension %d", index)
 		}
 		request.Status = "success"
+		if duration.Valid && duration.Int64 >= 0 {
+			value := duration.Int64
+			request.DurationMs = &value
+		}
+		if cacheRate.Valid && cacheRate.Float64 >= 0 && cacheRate.Float64 <= 1 {
+			value := cacheRate.Float64
+			request.CacheRate = &value
+		}
 		if ttft.Valid && ttft.Int64 >= 0 {
 			value := ttft.Int64
 			request.TTFTMs = &value

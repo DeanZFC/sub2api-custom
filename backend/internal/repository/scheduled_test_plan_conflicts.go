@@ -81,7 +81,10 @@ func validateScheduledTestPlanConflicts(ctx context.Context, tx *sql.Tx, plan *s
 // Caller SQL supplies the current plan alias p and account alias a.
 const scheduledTestRuntimeOwnershipSQL = `(NOT (a.id = ANY(p.excluded_account_ids)) AND (
  NOT (p.enabled AND p.protection->>'enabled'='true' AND (CASE WHEN p.protection->>'mode'='all_pass'
-  THEN jsonb_array_length(COALESCE(p.protection->'pass_group_ids','[]'::jsonb))>0 ELSE EXISTS(
+  THEN (COALESCE(p.protection->'on_pass'->>'group_mode','keep')='assign'
+   OR COALESCE(p.protection->'on_fail'->>'group_mode','keep')='assign'
+   OR (COALESCE(p.protection->'on_pass','null'::jsonb)='null'::jsonb
+    AND jsonb_array_length(COALESCE(p.protection->'pass_group_ids','[]'::jsonb))>0)) ELSE EXISTS(
   SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN p.protection->>'mode'='combined'
    THEN p.protection->'combinations' ELSE p.protection->'rules' END,'[]'::jsonb)) rule
   WHERE CASE WHEN p.protection->>'mode'='combined' THEN rule->'action'->>'group_mode'='assign'
@@ -89,7 +92,10 @@ const scheduledTestRuntimeOwnershipSQL = `(NOT (a.id = ANY(p.excluded_account_id
  OR NOT EXISTS(SELECT 1 FROM scheduled_test_plans other
   WHERE other.id<>p.id AND NOT (a.id = ANY(other.excluded_account_ids)) AND other.enabled AND other.protection->>'enabled'='true'
   AND (CASE WHEN other.protection->>'mode'='all_pass'
-   THEN jsonb_array_length(COALESCE(other.protection->'pass_group_ids','[]'::jsonb))>0 ELSE EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN other.protection->>'mode'='combined'
+   THEN (COALESCE(other.protection->'on_pass'->>'group_mode','keep')='assign'
+    OR COALESCE(other.protection->'on_fail'->>'group_mode','keep')='assign'
+    OR (COALESCE(other.protection->'on_pass','null'::jsonb)='null'::jsonb
+     AND jsonb_array_length(COALESCE(other.protection->'pass_group_ids','[]'::jsonb))>0)) ELSE EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(CASE WHEN other.protection->>'mode'='combined'
    THEN other.protection->'combinations' ELSE other.protection->'rules' END,'[]'::jsonb)) rule
    WHERE CASE WHEN other.protection->>'mode'='combined' THEN rule->'action'->>'group_mode'='assign'
     ELSE rule->'on_pass'->>'group_mode'='assign' OR rule->'on_fail'->>'group_mode'='assign' END) END)

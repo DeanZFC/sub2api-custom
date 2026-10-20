@@ -44,8 +44,10 @@ func TestChannelMonitorV2RecentRequestsIntegration(t *testing.T) {
 	_, err = db.ExecContext(ctx, `
 CREATE TABLE groups (id bigint PRIMARY KEY, platform text);
 CREATE TABLE accounts (id bigint PRIMARY KEY, platform text);
-CREATE TABLE usage_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, request_id text, model text, requested_model text, request_type int DEFAULT 2, actual_cost numeric DEFAULT 1, first_token_ms int DEFAULT 1000);
-CREATE TABLE ops_error_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, request_id text, platform text DEFAULT 'openai', model text DEFAULT 'gpt-named', requested_model text, is_count_tokens boolean DEFAULT false, status_code int DEFAULT 503, upstream_status_code int, error_type text DEFAULT 'upstream', error_owner text, error_source text, error_message text, upstream_error_message text, upstream_error_detail text, error_body text);
+CREATE TABLE usage_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, request_id text, model text, requested_model text, request_type int DEFAULT 2, actual_cost numeric DEFAULT 1, first_token_ms int DEFAULT 1000,
+ duration_ms int DEFAULT 3500, input_tokens int DEFAULT 100, cache_creation_tokens int DEFAULT 100, cache_read_tokens int DEFAULT 800, stream boolean DEFAULT true, openai_ws_mode boolean DEFAULT false);
+CREATE TABLE ops_error_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, request_id text, platform text DEFAULT 'openai', model text DEFAULT 'gpt-named', requested_model text, is_count_tokens boolean DEFAULT false, status_code int DEFAULT 503, upstream_status_code int, error_type text DEFAULT 'upstream', error_owner text, error_source text, error_message text, upstream_error_message text, upstream_error_detail text, error_body text,
+ duration_ms int, time_to_first_token_ms bigint);
 INSERT INTO groups VALUES(7,'openai'),(8,'openai'),(9,'composite');
 INSERT INTO accounts VALUES(1,'openai');
 INSERT INTO usage_logs(created_at,group_id,request_id,model) SELECT '2026-10-20T00:00:00Z'::timestamptz + n*interval '1 minute',7,'seven-'||n,'gpt-named' FROM generate_series(1,25) n;
@@ -64,6 +66,13 @@ INSERT INTO ops_error_logs(created_at,group_id,request_id,status_code,error_type
  ('2026-10-20T00:34:00Z',9,'composite-error',503,'composite-error');
 UPDATE ops_error_logs SET platform='composite' WHERE group_id=9;
 INSERT INTO ops_error_logs(created_at,group_id,request_id,is_count_tokens,error_type) VALUES('2026-10-20T00:54:00Z',7,'token-count',true,'count-token-error');
+UPDATE usage_logs SET input_tokens=0, cache_creation_tokens=0, cache_read_tokens=0 WHERE request_id='seven-20';
+UPDATE usage_logs SET cache_read_tokens=0, first_token_ms=0, duration_ms=0 WHERE request_id='seven-21';
+UPDATE usage_logs SET request_type=1, stream=false WHERE request_id='seven-22';
+UPDATE usage_logs SET request_type=0, stream=false WHERE request_id='seven-23';
+UPDATE usage_logs SET request_type=3, stream=false, openai_ws_mode=true WHERE request_id='seven-24';
+UPDATE usage_logs SET first_token_ms=NULL, duration_ms=NULL WHERE request_id='seven-25';
+UPDATE ops_error_logs SET duration_ms=5000, time_to_first_token_ms=400 WHERE request_id='final-error';
 `)
 	require.NoError(t, err)
 	start := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
@@ -85,9 +94,31 @@ INSERT INTO ops_error_logs(created_at,group_id,request_id,is_count_tokens,error_
 			if request.Status == "error" {
 				errors++
 				require.Equal(t, start.Add(32*time.Minute), request.OccurredAt)
+				require.EqualValues(t, 5000, *request.DurationMs)
+				require.EqualValues(t, 400, *request.TTFTMs)
+				require.Nil(t, request.CacheRate)
 			}
 			if request.Status == "ignored" {
 				ignored++
+				require.Nil(t, request.DurationMs)
+				require.Nil(t, request.TTFTMs)
+				require.Nil(t, request.CacheRate)
+			}
+			if request.Status == "success" {
+				switch request.OccurredAt.Sub(start) {
+				case 20 * time.Minute, 22 * time.Minute, 23 * time.Minute:
+					require.Nil(t, request.CacheRate) // absent input or synchronous cache telemetry
+				case 21 * time.Minute:
+					require.Zero(t, *request.CacheRate) // known zero is distinct from missing data
+					require.Zero(t, *request.TTFTMs)
+					require.Zero(t, *request.DurationMs)
+				default:
+					require.InDelta(t, 0.8, *request.CacheRate, 0.00001)
+				}
+				if request.OccurredAt.Equal(start.Add(25 * time.Minute)) {
+					require.Nil(t, request.TTFTMs)
+					require.Nil(t, request.DurationMs)
+				}
 			}
 			if request.Model == "actual-unnamed" {
 				unnamed++

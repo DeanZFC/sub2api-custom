@@ -102,6 +102,8 @@ func (s *Service) maintenance(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_group_messages h WHERE NOT EXISTS (SELECT 1 FROM qq_bot_group_messages recent WHERE recent.app_id=h.app_id AND recent.group_id=h.group_id AND recent.created_at>NOW()-INTERVAL '30 minutes')`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_message_references WHERE created_at<NOW()-INTERVAL '24 hours'`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_daily_usage WHERE day<CURRENT_DATE-32`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_autonomous_seen WHERE created_at<NOW()-INTERVAL '1 day'`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_autonomous_decisions WHERE day<CURRENT_DATE-32`)
 	// Keep small deduplication tombstones for the signed event replay lifetime.
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_jobs WHERE created_at<NOW()-INTERVAL '30 days' AND status NOT IN ('queued','running')`)
 }
@@ -152,7 +154,11 @@ func (s *Service) runOne(parent context.Context) {
 		s.finish(j, "expired", "排队超过回复时限，请重新发送")
 		return
 	}
-	err = s.message(ctx, c, &j, e)
+	if j.Kind == "ambient_chat" {
+		err = s.autonomousMessage(ctx, c, &j, e)
+	} else {
+		err = s.message(ctx, c, &j, e)
+	}
 	if err != nil {
 		status := "delivery_failed"
 		if j.Error != "" {
@@ -160,7 +166,11 @@ func (s *Service) runOne(parent context.Context) {
 		}
 		s.finish(j, status, err.Error())
 	} else {
-		s.finish(j, "completed", "")
+		status := "completed"
+		if j.Status == "skipped" {
+			status = "skipped"
+		}
+		s.finish(j, status, "")
 	}
 }
 func (s *Service) finish(j Job, status, detail string) {
@@ -360,7 +370,8 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	if err != nil {
 		return err
 	}
-	if j.EventType == groupMessageCreate && !unmentionedGroupCommand(e, c.CustomCommands...) {
+	named := j.TriggerReason == "name" && c.autonomousGroup(j.GroupID) && directBotName(c.Autonomous, e.Content)
+	if j.EventType == groupMessageCreate && !named && !unmentionedGroupCommand(e, c.CustomCommands...) {
 		addressed, err := s.groupMessageMentionsBot(ctx, c, e)
 		if err != nil {
 			return err

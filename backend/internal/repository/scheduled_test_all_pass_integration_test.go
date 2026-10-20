@@ -148,6 +148,77 @@ func testScheduledTestAllPassLifecycle(t *testing.T, ctx context.Context, db *sq
 	require.ErrorContains(t, repo.CompleteProtection(ctx, third[0], "fail", ""), "conflicting enabled test strategies")
 }
 
+func testScheduledTestAllPassCustomActions(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository) {
+	t.Helper()
+	f := newAllPassFixture(t, ctx, db, plans, repo, false)
+	f.plan.Protection.OnPass = &service.ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "assign", GroupIDs: []int64{10}}
+	f.plan.Protection.OnFail = &service.ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{8}}
+	updated, err := plans.Update(ctx, f.plan)
+	require.NoError(t, err)
+	require.Equal(t, f.plan.Protection.OnPass, updated.Protection.OnPass)
+	require.Equal(t, f.plan.Protection.OnFail, updated.Protection.OnFail)
+	f.plan = updated
+
+	started := time.Now().UTC().Truncate(time.Microsecond)
+	failed := f.round("allpass-custom-fail", started)
+	f.complete(failed[0], "fail")
+	f.check("active", false, 8) // A configured keep action leaves scheduling active and assigns failure groups.
+
+	passed := f.round("allpass-custom-pass", started.Add(time.Minute))
+	for i := 0; i < 3; i++ {
+		f.complete(passed[i], "pass")
+	}
+	f.check("quality_paused", false, 10) // A configured pause action and independent pass groups take effect together.
+	f.complete(passed[3], "pass")
+	f.review(passed[3], "fail")
+	f.check("quality_paused", false, 8) // Keep scheduling preserves the policy's existing hold.
+
+	// Both sides of runtime ownership must recognize the new outcome actions,
+	// including a strategy with group routing only on failure.
+	other := genericRoutingPlan(*passed[0].TestDefinitionID, 12, 13)
+	other.Protection.Mode = "all_pass"
+	other.Protection.OnPass = &service.ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "keep"}
+	other.Protection.OnFail = &service.ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{13}}
+	_, err = plans.Create(ctx, other)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id) VALUES(62,12)`)
+	require.NoError(t, err)
+	eligible, err := repo.IsPlanRunAccountEligible(ctx, f.plan.ID, "allpass-custom-pass", 62)
+	require.NoError(t, err)
+	require.False(t, eligible)
+	require.ErrorContains(t, repo.CompleteProtection(ctx, passed[0], "fail", ""), "conflicting enabled test strategies")
+}
+
+func testScheduledTestAllPassCustomRecoveryGroups(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository) {
+	t.Helper()
+	exec := func(query string, args ...any) {
+		t.Helper()
+		_, err := db.ExecContext(ctx, query, args...)
+		require.NoError(t, err)
+	}
+	exec(allPassStatisticsFixture)
+	t.Cleanup(func() { exec(`DROP TABLE usage_logs,ops_error_logs`) })
+	f := newAllPassFixture(t, ctx, db, plans, repo, true)
+	f.plan.Protection.OnPass = &service.ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "assign", GroupIDs: []int64{10}}
+	f.plan.Protection.OnFail = &service.ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "assign", GroupIDs: []int64{8}}
+	_, err := plans.Update(ctx, f.plan)
+	require.NoError(t, err)
+	now := time.Now().UTC().Add(-10 * time.Second).Truncate(time.Microsecond)
+	rows := f.round("allpass-custom-recovery", now.Add(-time.Minute))
+	f.complete(rows[2], "fail")
+	f.check("quality_paused", false, 8)
+	exec(`UPDATE scheduled_test_protection_states SET recovery_cooldown_until=$2 WHERE plan_id=$1 AND recovery_phase='cooldown'`, f.plan.ID, now.Add(-time.Second))
+	require.NoError(t, repo.AdvanceCacheRecovery(ctx, now))
+	f.check("quality_paused", false, 8)
+	f.complete(rows[0], "pass")
+	f.complete(rows[1], "pass")
+	require.NoError(t, repo.AdvanceCacheRecovery(ctx, now))
+	f.check("active", true, 8)
+	exec(`INSERT INTO usage_logs(created_at,input_tokens,cache_read_tokens) VALUES($1,10,90),($1,5,95)`, now.Add(time.Second))
+	require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
+	f.check("active", false, 10)
+}
+
 func testScheduledTestAllPassRecovery(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, threshold service.ScheduledTestThreshold) {
 	exec := func(query string, args ...any) {
 		t.Helper()

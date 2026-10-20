@@ -50,7 +50,7 @@
             <div class="border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="recent-requests">
               <div class="mb-2 flex items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                 <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('channelMonitorV2.cards.recentRequests') }}</span>
-                <span>{{ refreshing ? t('channelMonitorV2.updating') : t('channelMonitorV2.cards.refreshIn', { seconds: refreshSeconds }) }}</span>
+                <span class="shrink-0" data-testid="latest-request-time">{{ t('channelMonitorV2.cards.latestRequest', { time: latestRequestTime(row) }) }}</span>
               </div>
               <MonitorStatusStrip :slots="requestSlots(row)" :label="t('channelMonitorV2.cards.recentRequests')" compact />
               <div class="mt-1 flex justify-between text-[10px] uppercase tracking-widest text-gray-400">
@@ -87,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { HealthState, MonitorMatrixGroupBy, MonitorMatrixRow } from '@/api/channelMonitorV2'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -104,7 +104,7 @@ import { formatLatencyPrivacy, formatMonitorMs, formatMonitorPercent, formatMoni
 
 const props = withDefaults(defineProps<{
   rows: MonitorMatrixRow[]; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode
-  nextRefreshAt: number; refreshing: boolean; testResults?: TestResult[]; testResultsState?: TestResultsState
+  testResults?: TestResult[]; testResultsState?: TestResultsState
 }>(), { testResults: () => [], testResultsState: 'ready' })
 const testsByGroup = computed(() => indexGroupTestResults(props.testResults))
 const previewGroup = ref<{ id: number; name: string } | null>(null)
@@ -126,11 +126,6 @@ const sections = computed(() => {
   return [...groups.values()].sort((a, b) => a.platform.localeCompare(b.platform)
     || compareMonitorModels(a.model || '', b.model || ''))
 })
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
-const refreshSeconds = computed(() => Math.max(0, Math.ceil((props.nextRefreshAt - now.value) / 1000)))
 const states: HealthState[] = ['healthy', 'warning', 'critical', 'unknown']
 const textClass = { healthy: 'text-emerald-600 dark:text-emerald-400', warning: 'text-amber-600 dark:text-amber-400', critical: 'text-rose-500 dark:text-rose-400', unknown: 'text-gray-400' }
 const badgeClass = { healthy: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', warning: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300', critical: 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300', unknown: 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400' }
@@ -140,10 +135,21 @@ function modelName(model?: string) { return model || '-' }
 function cardTitle(row: MonitorMatrixRow) { return row.group_name || (row.group_id ? `#${row.group_id}` : platformDisplayName(row.platform)) }
 function latencyDetail(row: MonitorMatrixRow) { const m = row.metrics.ttft; return formatLatencyPrivacy(m.p50_ms, m.p90_ms, m.avg_ms, m.p95_ms) }
 function timeLabel(time: number | string) { return new Intl.DateTimeFormat(locale.value || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(time)) }
+function latestRequestTime(row: MonitorMatrixRow) {
+  const latest = recentRequestsForCard(row.recent_requests)[19]
+  return latest ? timeLabel(latest.occurred_at) : '-'
+}
 function requestSlots(row: MonitorMatrixRow) {
   return recentRequestsForCard(row.recent_requests).map(request => ({
     state: requestHealth(request),
-    label: request ? [timeLabel(request.occurred_at), modelName(request.model), t(`channelMonitorV2.cards.requests.${request.status}`), request.ttft_ms != null ? t('channelMonitorV2.metrics.ttftValue', { value: formatMonitorMs(request.ttft_ms) }) : '', request.error_category ? t(`channelMonitorV2.errorCategories.${request.error_category}`) : ''].filter(Boolean).join(' · ') : t('channelMonitorV2.cards.noRequest'),
+    label: request ? [
+      `${modelName(request.model)} · ${t(`channelMonitorV2.cards.requests.${request.status}`)}`,
+      t('channelMonitorV2.cards.requestTime', { value: timeLabel(request.occurred_at) }),
+      t('channelMonitorV2.cards.requestTTFT', { value: formatMonitorMs(request.ttft_ms) }),
+      t('channelMonitorV2.metrics.cacheRateValue', { value: request.cache_rate == null ? '-' : formatMonitorPercent(request.cache_rate) }),
+      t('channelMonitorV2.cards.requestDuration', { value: formatMonitorMs(request.duration_ms) }),
+      request.error_category ? t(`channelMonitorV2.errorCategories.${request.error_category}`) : '',
+    ].filter(Boolean).join('\n') : t('channelMonitorV2.cards.noRequest'),
   }))
 }
 </script>

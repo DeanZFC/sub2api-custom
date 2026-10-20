@@ -34,7 +34,8 @@ export default {
     cards: {
       title: 'Channel health', description: 'Passive health from real traffic · Hover for details',
       passive: 'Passive health', availability: 'Availability',
-      refreshIn: 'Refresh in {seconds}s', past: 'Past', now: 'Latest',
+      latestRequest: 'Latest request: {time}', past: 'Past', now: 'Latest',
+      requestTime: 'Request time: {value}', requestTTFT: 'First token: {value}', requestDuration: 'Total duration: {value}',
       recentRequests: 'Last 20 requests',
       requestLegend: 'Green: success · Yellow: slow / ignored error · Red: failed · Gray: no request',
       noRequest: 'No more requests in the selected time range',

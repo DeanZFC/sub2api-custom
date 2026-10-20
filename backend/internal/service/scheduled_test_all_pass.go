@@ -7,22 +7,57 @@ import (
 
 func (c ScheduledTestProtectionConfig) UsesAllPass() bool { return c.Mode == "all_pass" }
 
-// This mode has one fixed policy, rather than separately configurable actions
-// that can accidentally resume before another required check has completed.
+// AllPassOutcomeAction preserves the defaults and group targets of older plans.
+// Explicit outcome actions take precedence over the legacy pass_group_ids field.
+func (c ScheduledTestProtectionConfig) AllPassOutcomeAction(verdict string) ScheduledTestOutcomeAction {
+	rule := ScheduledTestProtectionRule{OnPass: c.OnPass, OnFail: c.OnFail}
+	if rule.OnPass == nil {
+		rule.OnPass = &ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "keep"}
+		if len(c.PassGroupIDs) > 0 {
+			rule.OnPass.GroupMode, rule.OnPass.GroupIDs = "assign", c.PassGroupIDs
+		}
+	}
+	if rule.OnFail == nil {
+		rule.OnFail = &ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "keep"}
+	}
+	return rule.OutcomeAction(verdict)
+}
+
+// Actions are evaluated once for the whole policy, after its requirements resolve.
 func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 	c := &plan.Protection
 	if !c.UsesAllPass() {
-		if len(c.PassGroupIDs) > 0 {
-			return fmt.Errorf("pass_group_ids require all_pass protection mode")
+		if len(c.PassGroupIDs) > 0 || c.OnPass != nil || c.OnFail != nil {
+			return fmt.Errorf("policy outcome actions require all_pass protection mode")
 		}
 		return nil
+	}
+	if err := validateScheduledTestActions(&ScheduledTestProtectionRule{OnPass: c.OnPass, OnFail: c.OnFail}); err != nil {
+		return err
+	}
+	if c.OnPass != nil {
+		c.PassGroupIDs = nil
+	}
+	pass, fail := c.AllPassOutcomeAction("pass"), c.AllPassOutcomeAction("fail")
+	if err := validateScheduledTestActions(&ScheduledTestProtectionRule{OnPass: &pass, OnFail: &fail}); err != nil {
+		return err
+	}
+	for _, action := range []ScheduledTestOutcomeAction{pass, fail} {
+		for _, id := range action.GroupIDs {
+			if !slices.Contains(plan.GroupIDs, id) {
+				return fmt.Errorf("action group %d must be selected in group_ids", id)
+			}
+		}
+	}
+	if c.OnPass == nil {
+		c.PassGroupIDs = slices.Clone(pass.GroupIDs)
 	}
 	automatic := 0
 	for i := range c.Rules {
 		r := &c.Rules[i]
 		r.Priority, r.RequiredPass, r.PauseOnFailure = 0, false, true
-		r.OnPass = &ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "keep"}
-		r.OnFail = &ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "keep"}
+		r.OnPass = &ScheduledTestOutcomeAction{Scheduling: pass.Scheduling, GroupMode: "keep"}
+		r.OnFail = &ScheduledTestOutcomeAction{Scheduling: fail.Scheduling, GroupMode: "keep"}
 		if r.Vote == nil || !r.Vote.Enabled {
 			automatic++
 		} else if r.Vote.PublicEnabled {
@@ -31,18 +66,6 @@ func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 	}
 	if automatic == 0 {
 		return fmt.Errorf("all_pass requires at least one automatic check")
-	}
-	if len(c.PassGroupIDs) > 0 {
-		action := ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "assign", GroupIDs: c.PassGroupIDs}
-		if err := validateScheduledTestActions(&ScheduledTestProtectionRule{OnPass: &action}); err != nil {
-			return err
-		}
-		for _, id := range action.GroupIDs {
-			if !slices.Contains(plan.GroupIDs, id) {
-				return fmt.Errorf("pass group %d must be selected in group_ids", id)
-			}
-		}
-		c.PassGroupIDs = action.GroupIDs
 	}
 	return nil
 }
@@ -56,16 +79,22 @@ func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts
 	if !config.Enabled || !config.UsesAllPass() {
 		return decision, ""
 	}
+	// Recovery may temporarily release scheduling for bounded trial traffic, but
+	// an unresolved statistics failure must still use the configured fail groups.
+	failure := config.AllPassOutcomeAction("fail")
+	recoveryFailed := false
 	pending, trial, automatic := false, false, 0
 	for _, rule := range config.Rules {
 		id := rule.TestDefinitionID
 		if rule.Recovery != nil && rule.Recovery.Enabled && recovering[id] {
 			trial = true
+			recoveryFailed = recoveryFailed || verdicts[id] == "fail"
 			continue
 		}
 		if verdicts[id] == "fail" {
-			decision.Action.Scheduling = "pause"
-			return decision, "自动检测或人工评审不通过，暂停调用"
+			action := config.AllPassOutcomeAction("fail")
+			decision.Action = &action
+			return decision, "自动检测或人工评审不通过，执行不通过动作"
 		}
 		if rule.Vote == nil || !rule.Vote.Enabled {
 			automatic++
@@ -73,18 +102,19 @@ func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts
 		}
 	}
 	if pending || (automatic == 0 && !trial) {
+		if recoveryFailed {
+			decision.Action.GroupMode, decision.Action.GroupIDs = failure.GroupMode, failure.GroupIDs
+		}
 		if held {
 			decision.Action.Scheduling = "pause"
 		}
 		return decision, "等待本轮全部自动检测通过，保留已有暂停"
 	}
-	decision.Action.Scheduling = "resume"
+	action := config.AllPassOutcomeAction("pass")
+	decision.Action = &action
 	if trial {
+		decision.Action.GroupMode, decision.Action.GroupIDs = failure.GroupMode, failure.GroupIDs
 		return decision, "其他自动检测已通过，等待统计限量试运行达标"
-	}
-	if len(config.PassGroupIDs) > 0 {
-		decision.Action.GroupMode = "assign"
-		decision.Action.GroupIDs = slices.Clone(config.PassGroupIDs)
 	}
 	return decision, "全部自动检测通过，且无本轮人工否决"
 }

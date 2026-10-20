@@ -127,3 +127,95 @@ func TestScheduledTestAllPassValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduledTestAllPassOutcomeActions(t *testing.T) {
+	for _, passScheduling := range []string{"keep", "pause", "resume"} {
+		for _, failScheduling := range []string{"keep", "pause", "resume"} {
+			t.Run(passScheduling+"/"+failScheduling, func(t *testing.T) {
+				p := allPassTestPlan()
+				p.Protection.OnPass = &ScheduledTestOutcomeAction{Scheduling: passScheduling, GroupMode: "assign", GroupIDs: []int64{10}}
+				p.Protection.OnFail = &ScheduledTestOutcomeAction{Scheduling: failScheduling, GroupMode: "assign", GroupIDs: []int64{20}}
+				require.NoError(t, validateScheduledTestProtection(p))
+				require.Empty(t, p.Protection.PassGroupIDs)
+				require.Equal(t, []int64{10, 20}, p.ProtectionActionGroupIDs())
+				verdicts := map[int64]string{1: "pass", 2: "pass", 3: "pass"}
+				decision, _ := EvaluateScheduledTestAllPass(p.Protection, verdicts, nil, true)
+				require.Equal(t, p.Protection.OnPass, decision.Action)
+				decision.Action.GroupIDs[0] = 999
+				require.Equal(t, []int64{10}, p.Protection.OnPass.GroupIDs)
+				verdicts[2], verdicts[3] = "fail", "pending"
+				decision, _ = EvaluateScheduledTestAllPass(p.Protection, verdicts, nil, false)
+				require.Equal(t, p.Protection.OnFail, decision.Action)
+				verdicts[2], verdicts[3], verdicts[4] = "pass", "pass", "fail"
+				decision, _ = EvaluateScheduledTestAllPass(p.Protection, verdicts, nil, false)
+				require.Equal(t, p.Protection.OnFail, decision.Action, "administrator veto uses the failure action")
+				delete(verdicts, 4)
+				verdicts[3] = "pending"
+				for _, held := range []bool{false, true} {
+					decision, _ = EvaluateScheduledTestAllPass(p.Protection, verdicts, nil, held)
+					want := "keep"
+					if held {
+						want = "pause"
+					}
+					require.Equal(t, &ScheduledTestOutcomeAction{Scheduling: want, GroupMode: "keep"}, decision.Action)
+				}
+			})
+		}
+	}
+}
+
+func TestScheduledTestAllPassOutcomeActionValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*ScheduledTestPlan)
+	}{
+		{"invalid scheduling", func(p *ScheduledTestPlan) { p.Protection.OnFail = &ScheduledTestOutcomeAction{Scheduling: "invalid"} }},
+		{"invalid group mode", func(p *ScheduledTestPlan) { p.Protection.OnPass = &ScheduledTestOutcomeAction{GroupMode: "invalid"} }},
+		{"empty failure assignment", func(p *ScheduledTestPlan) { p.Protection.OnFail = &ScheduledTestOutcomeAction{GroupMode: "assign"} }},
+		{"unselected failure group", func(p *ScheduledTestPlan) {
+			p.Protection.OnFail = &ScheduledTestOutcomeAction{GroupMode: "assign", GroupIDs: []int64{999}}
+		}},
+		{"keep with groups", func(p *ScheduledTestPlan) {
+			p.Protection.OnPass = &ScheduledTestOutcomeAction{GroupMode: "keep", GroupIDs: []int64{10}}
+		}},
+		{"actions outside mode", func(p *ScheduledTestPlan) {
+			p.Protection.PassGroupIDs = nil
+			p.Protection.Mode = "per_test"
+			p.Protection.OnFail = &ScheduledTestOutcomeAction{Scheduling: "keep"}
+		}},
+		{"recovery with keep on fail", func(p *ScheduledTestPlan) {
+			p.Protection.OnFail = &ScheduledTestOutcomeAction{Scheduling: "keep"}
+			p.Protection.Rules[2].Recovery = &ScheduledTestCacheRecoveryConfig{Enabled: true}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := allPassTestPlan()
+			tc.change(p)
+			require.Error(t, validateScheduledTestProtection(p))
+		})
+	}
+	p := allPassTestPlan()
+	p.Protection.OnPass = &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "keep"}
+	p.Protection.OnFail = &ScheduledTestOutcomeAction{GroupMode: "assign", GroupIDs: []int64{10, 20, 10}}
+	require.NoError(t, validateScheduledTestProtection(p))
+	require.Empty(t, p.Protection.PassGroupIDs, "explicit keep overrides legacy group assignment")
+	require.Equal(t, []int64{10, 20}, p.Protection.OnFail.GroupIDs)
+	require.Equal(t, "keep", p.Protection.OnFail.Scheduling)
+}
+
+func TestScheduledTestAllPassRecoveryFailureGroups(t *testing.T) {
+	p := allPassTestPlan()
+	p.Protection.OnFail = &ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "assign", GroupIDs: []int64{20}}
+	p.Protection.Rules[2].Recovery = &ScheduledTestCacheRecoveryConfig{Enabled: true}
+	recovering := map[int64]bool{3: true}
+	verdicts := map[int64]string{1: "pass", 2: "pending", 3: "fail"}
+	decision, _ := EvaluateScheduledTestAllPass(p.Protection, verdicts, recovering, true)
+	require.Equal(t, p.Protection.OnFail, decision.Action)
+	verdicts[2] = "pass"
+	decision, _ = EvaluateScheduledTestAllPass(p.Protection, verdicts, recovering, true)
+	require.Equal(t, "resume", decision.Action.Scheduling)
+	require.Equal(t, []int64{20}, decision.Action.GroupIDs, "trial traffic uses failure groups until statistics recover")
+	verdicts[3] = "pass"
+	decision, _ = EvaluateScheduledTestAllPass(p.Protection, verdicts, nil, true)
+	require.Equal(t, []int64{10}, decision.Action.GroupIDs)
+}

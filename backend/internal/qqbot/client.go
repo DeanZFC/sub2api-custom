@@ -493,7 +493,7 @@ func (s *Service) sendFormatted(ctx context.Context, c Config, j Job, text strin
 		// All text replies use QQ's custom Markdown. A mention tag in plain
 		// content is displayed literally; content/ark must be absent with markdown.
 		prefix := ""
-		if j.EventType == groupMessageCreate && j.MemberID != "" {
+		if j.EventType == groupMessageCreate && j.MemberID != "" && !j.SuppressMention {
 			prefix = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n"
 			text = strings.TrimLeft(text, "\n")
 		}
@@ -512,7 +512,10 @@ func (s *Service) sendFormatted(ctx context.Context, c Config, j Job, text strin
 	if err != nil {
 		return err
 	}
-	shareable := j.Kind == "chat" && j.ShareHistory && j.Error == ""
+	if err := s.recordAutonomousReply(ctx, c, j); err != nil {
+		return errors.New("消息已发送，但自主接话状态保存失败")
+	}
+	shareable := (j.Kind == "chat" || j.Kind == "ambient_chat") && j.ShareHistory && j.Error == ""
 	return s.rememberSentMessage(ctx, c, j, raw, deliveredText, len(img) > 0, shareable)
 }
 

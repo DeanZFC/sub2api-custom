@@ -130,7 +130,7 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	}
 	// Disabled/unapproved ambient streams do not touch storage. Enabled groups
 	// record their bounded shared context below without creating model jobs.
-	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e, c.CustomCommands...) && (!c.Enabled || !c.allows(e.GroupID) || c.HistoryMessages == 0)) {
+	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e, c.CustomCommands...) && (!c.Enabled || !c.allows(e.GroupID) || (c.HistoryMessages == 0 && !c.autonomousGroup(e.GroupID)))) {
 		outcome, reason = "ignored", "bot_or_ambient_message"
 		return nil
 	}
@@ -181,8 +181,16 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 				return lookupErr
 			}
 			if ref == nil {
+				if c.autonomousGroup(e.GroupID) {
+					return s.routeAutonomous(ctx, c, p, e, true)
+				}
 				outcome, reason = "ignored", "ambient_message_recorded"
 				return nil
+			}
+		}
+		if c.autonomousGroup(e.GroupID) {
+			if err := s.routeAutonomous(ctx, c, p, e, false); err != nil {
+				return err
 			}
 		}
 	}
@@ -217,7 +225,8 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 			return err
 		}
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,reward_code_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(app_id,event_key) DO NOTHING`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data), rewardHash)
+	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,reward_code_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(app_id,event_key) DO UPDATE SET event_type=EXCLUDED.event_type,payload=EXCLUDED.payload,kind='event',trigger_reason='',decision_reason=''
+ WHERE EXCLUDED.event_type='GROUP_AT_MESSAGE_CREATE' AND qq_bot_jobs.kind='ambient_chat' AND qq_bot_jobs.status='queued' AND qq_bot_jobs.model_reserved_at IS NULL`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data), rewardHash)
 	if err != nil {
 		return err
 	}
@@ -237,13 +246,13 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	return nil
 }
 
-const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,reward_code_hash`
+const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,reward_code_hash,trigger_reason,decision_reason`
 
 type scanner interface{ Scan(...any) error }
 
 func scanJob(r scanner) (Job, error) {
 	var j Job
-	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.RewardCodeHash)
+	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.RewardCodeHash, &j.TriggerReason, &j.DecisionReason)
 	return j, err
 }
 func (s *Service) claimJob(ctx context.Context) (Job, error) {
@@ -267,7 +276,7 @@ func (s *Service) claimJob(ctx context.Context) (Job, error) {
    NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type='PRICE_CHANGE_NOTIFICATION' AND p.status='running')
    AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type='PRICE_CHANGE_NOTIFICATION' AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
  ))
- AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
+ AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id) ORDER BY (kind='ambient_chat'),created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
 	if err != nil {
 		return j, err
 	}
@@ -299,6 +308,9 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 		return errFeatureUnavailable
 	}
 	c = current
+	if j.TriggerReason == "name" && !c.autonomousGroup(j.GroupID) {
+		return errFeatureUnavailable
+	}
 	per, total := c.DailyChatLimit, c.TotalDailyChatLimit
 	if kind == "image" {
 		if !c.ImageEnabled {
@@ -516,13 +528,13 @@ func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {
 	if err != nil {
 		return out, err
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT id,app_id,event_type,group_id,member_id,kind,status,error,input_tokens,output_tokens,created_at,finished_at FROM qq_bot_jobs WHERE app_id=$1 ORDER BY created_at DESC LIMIT 50`, c.AppID)
+	rows, err = s.db.QueryContext(ctx, `SELECT id,app_id,event_type,group_id,member_id,kind,status,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason FROM qq_bot_jobs WHERE app_id=$1 ORDER BY created_at DESC LIMIT 50`, c.AppID)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
 		var j Job
-		if err = rows.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.Kind, &j.Status, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt); err != nil {
+		if err = rows.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.Kind, &j.Status, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason); err != nil {
 			_ = rows.Close()
 			return out, err
 		}
@@ -547,6 +559,10 @@ func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {
 	}
 	err = rows.Err()
 	_ = rows.Close()
+	if err != nil {
+		return out, err
+	}
+	out.AutonomousStats, err = s.autonomousStats(ctx, c)
 	if err != nil {
 		return out, err
 	}

@@ -19,6 +19,7 @@ const configKey = "qq_bot_config"
 func (c *Config) UnmarshalJSON(data []byte) error {
 	type configJSON Config
 	decoded := configJSON(*c)
+	decoded.Autonomous = DefaultAutonomousConfig()
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
@@ -94,6 +95,9 @@ func validateURL(raw string) error {
 	return nil
 }
 func validateConfig(c Config) error {
+	if err := validateAutonomous(c); err != nil {
+		return err
+	}
 	if err := validatePriceNotifications(c); err != nil {
 		return err
 	}
@@ -228,6 +232,9 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 	c.ClearAPIKey = false
 	c.ClearImageAPIKey = false
 	if err = validateConfig(c); err != nil {
+		return c, err
+	}
+	if err = resetAutonomous(ctx, tx, old, c); err != nil {
 		return c, err
 	}
 	if err = s.resetPriceNotifications(ctx, tx, old, c); err != nil {

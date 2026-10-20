@@ -1,7 +1,19 @@
 import { apiClient } from './client'
 
 export interface QQBotCustomCommand { command: string; reply: string; enabled: boolean }
+export interface QQAutonomousConfig {
+  enabled: boolean; groups: string[]; names: string[]; topics: string[]
+  sample_percent: number; cooldown_seconds: number; min_messages: number
+  member_cooldown_seconds: number; hourly_replies: number; daily_replies: number; daily_calls: number
+  start_hour: number; end_hour: number; followup_seconds: number; max_chars: number; mention_user: boolean
+}
+export function defaultAutonomousConfig(): QQAutonomousConfig {
+  return { enabled: false, groups: [], names: ['CTAV'], topics: [], sample_percent: 15, cooldown_seconds: 120,
+    min_messages: 6, member_cooldown_seconds: 600, hourly_replies: 3, daily_replies: 20, daily_calls: 40,
+    start_hour: 9, end_hour: 23, followup_seconds: 60, max_chars: 100, mention_user: false }
+}
 export interface QQBotConfig {
+  autonomous?: QQAutonomousConfig
   enabled: boolean; app_id: string; app_secret: string; app_secret_set: boolean; sandbox: boolean
   allowed_groups: string[]; base_url: string; api_key: string; api_key_set: boolean
   custom_commands: QQBotCustomCommand[]
@@ -16,9 +28,10 @@ export interface QQBotConfig {
   clear_app_secret?: boolean; clear_api_key?: boolean; clear_image_api_key?: boolean
 }
 export interface QQBotRuntime {
+  autonomous_stats?: { group_id: string; reason: string; count: number }[]
   encryption_ready: boolean; bindings: number
   groups: { id: string; last_event: string; last_seen_at: string }[]
-  jobs: { id: string; group_id: string; member_id: string; kind: string; status: string; error: string; input_tokens: number; output_tokens: number; created_at: string }[]
+  jobs: { trigger_reason?: string; decision_reason?: string; id: string; group_id: string; member_id: string; kind: string; status: string; error: string; input_tokens: number; output_tokens: number; created_at: string }[]
   rewards: { id: number; user_id: number; kind: string; amount: number; created_at: string }[]
 }
 export interface QQBindingRequest { code?: string; member_id: string; group_id: string; nickname: string; expires_at: string }

@@ -34,7 +34,8 @@ export default {
     cards: {
       title: '渠道健康', description: '基于真实调用的被动健康 · 悬停色块查看详情',
       passive: '被动健康', availability: '可用率',
-      refreshIn: '{seconds}s 后刷新', past: '过去', now: '最近',
+      latestRequest: '最近请求：{time}', past: '过去', now: '最近',
+      requestTime: '请求时间：{value}', requestTTFT: '首字：{value}', requestDuration: '总耗时：{value}',
       recentRequests: '近 20 次请求状态',
       requestLegend: '绿：成功 · 黄：响应较慢 / 已忽略错误 · 红：失败 · 灰：暂无请求',
       noRequest: '当前时间范围内暂无更多请求',

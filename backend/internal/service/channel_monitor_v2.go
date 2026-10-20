@@ -267,6 +267,8 @@ type ChannelMonitorV2RecentRequest struct {
 	Model         string    `json:"model"`
 	Status        string    `json:"status"`
 	TTFTMs        *int64    `json:"ttft_ms,omitempty"`
+	DurationMs    *int64    `json:"duration_ms,omitempty"`
+	CacheRate     *float64  `json:"cache_rate,omitempty"`
 	ErrorCategory string    `json:"error_category,omitempty"`
 }
 
