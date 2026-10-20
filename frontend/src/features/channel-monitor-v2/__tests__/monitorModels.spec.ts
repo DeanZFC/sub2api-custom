@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compareMonitorModels } from '../monitorModels'
+import { compareMonitorModels, monitorModelOptions } from '../monitorModels'
 
 describe('monitor model ordering', () => {
   it.each([
@@ -14,5 +14,21 @@ describe('monitor model ordering', () => {
   it('keeps a deterministic order for unrelated or unknown models', () => {
     const names = ['custom', 'gpt-5.4', 'gpt-5', 'another', 'claude-opus-4-6', 'gpt-5.4-20261001']
     expect([...names].reverse().sort(compareMonitorModels)).toEqual([...names].sort(compareMonitorModels))
+  })
+
+  it('offers each actual model once across platforms and preserves platform filtering', () => {
+    const models = [
+      { value: 'gpt-5.3', label: 'gpt-5.3', platform: 'openai' },
+      { value: 'gpt-5.4', label: 'gpt-5.4', platform: 'openai' },
+      { value: 'gpt-5.4', label: 'gpt-5.4', platform: 'anthropic' },
+      { value: 'claude-opus-4-6', label: 'claude-opus-4-6', platform: 'anthropic' },
+    ]
+    expect(monitorModelOptions(models, [])).toEqual([
+      { value: 'claude-opus-4-6', label: 'claude-opus-4-6' },
+      { value: 'gpt-5.4', label: 'gpt-5.4' },
+      { value: 'gpt-5.3', label: 'gpt-5.3' },
+    ])
+    expect(monitorModelOptions(models, ['openai']).map(option => option.value)).toEqual(['gpt-5.4', 'gpt-5.3'])
+    expect(monitorModelOptions(models, ['anthropic']).map(option => option.value)).toEqual(['claude-opus-4-6', 'gpt-5.4'])
   })
 })

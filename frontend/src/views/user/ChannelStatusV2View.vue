@@ -471,7 +471,7 @@ import MetricCell from '@/features/channel-monitor-v2/MetricCell.vue'
 import MonitorRankBadge from '@/features/channel-monitor-v2/MonitorRankBadge.vue'
 import MonitorTrendChart from '@/features/channel-monitor-v2/MonitorTrendChart.vue'
 import ChannelHealthCards from '@/features/channel-monitor-v2/ChannelHealthCards.vue'
-import { compareMonitorModels } from '@/features/channel-monitor-v2/monitorModels'
+import { compareMonitorModels, monitorModelOptions } from '@/features/channel-monitor-v2/monitorModels'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -599,21 +599,7 @@ const groupOptions = computed(() =>
     }))
 )
 const modelOptions = computed(() =>
-  (dimensions.value.models || [])
-    .filter(
-      (item) =>
-        selectedPlatforms.value.size === 0 ||
-        !item.platform ||
-        selectedPlatforms.value.has(item.platform),
-    )
-    .slice().sort((a, b) => compareMonitorModels(a.value, b.value))
-    .map((item) => ({
-      value: item.value,
-      label:
-        item.platform && !item.label.includes(item.platform)
-          ? `${item.platform} / ${item.label}`
-          : item.label,
-    }))
+  monitorModelOptions(dimensions.value.models || [], filter.value.platforms)
 )
 const selectedGroupIds = computed({
   get: () => filter.value.groupIds.map(String),

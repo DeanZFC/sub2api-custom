@@ -36,3 +36,16 @@ export function compareMonitorModels(a: string, b: string): number {
   }
   return a.localeCompare(b, undefined, { numeric: true })
 }
+
+export function monitorModelOptions(
+  models: readonly { value: string; label: string; platform?: string }[],
+  platforms: readonly string[],
+): { value: string; label: string }[] {
+  const selected = new Set(platforms)
+  const options = new Map<string, { value: string; label: string }>()
+  for (const model of models) {
+    if (selected.size && model.platform && !selected.has(model.platform)) continue
+    options.set(model.value, { value: model.value, label: model.label || model.value })
+  }
+  return [...options.values()].sort((a, b) => compareMonitorModels(a.value, b.value))
+}
