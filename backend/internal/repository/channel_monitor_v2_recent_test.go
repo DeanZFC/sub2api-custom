@@ -15,18 +15,20 @@ import (
 func TestChannelMonitorV2RecentRequestsScopeAndModelMapping(t *testing.T) {
 	groupID := int64(7)
 	start := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
-	filter := service.ChannelMonitorV2Filter{Start: start, End: start.Add(time.Hour), RestrictGroups: true, AllowedGroupIDs: []int64{7}, GroupIDs: []int64{7, 9}, Models: []string{"__other__"}}
+	filter := service.ChannelMonitorV2Filter{Start: start, End: start.Add(time.Hour), RestrictGroups: true, AllowedGroupIDs: []int64{7}, GroupIDs: []int64{7, 9}, Models: []string{"actual-unlisted"}}
 	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true, Models: []string{"gpt-named"}}}}
 	query, args, err := channelMonitorV2RecentQuery(filter, cfg, []service.ChannelMonitorV2MatrixRow{{Platform: "openai", GroupID: &groupID}})
 	require.NoError(t, err)
 	// The same server-derived scope applies to BOTH sources, including platform views.
-	require.Contains(t, query, "ul.group_id = ANY($9)")
-	require.Contains(t, query, "current_error.group_id = ANY($9)")
+	require.Contains(t, query, "ul.group_id = ANY($5)")
+	require.Contains(t, query, "current_error.group_id = ANY($5)")
 	require.Contains(t, query, "ul.actual_cost > 0")
 	require.Contains(t, query, "NOT current_error.is_count_tokens")
 	require.Equal(t, 3, strings.Count(query, "LIMIT 20"))
 	require.Contains(t, query, "succeeded.request_id = current_error.request_id")
-	require.Contains(t, query, "THEN '__other__'")
+	require.NotContains(t, query, "__other__")
+	require.Contains(t, query, "ANY($6)")
+	require.Contains(t, query, channelMonitorV2ModelSQL)
 	require.NotContains(t, query, "gpt-named") // model names must be bound, never interpolated
 	require.Equal(t, start, args[0])
 	var dimensions []channelMonitorV2RecentDimension

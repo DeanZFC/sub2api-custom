@@ -134,6 +134,16 @@ def verify(args):
         raise ValueError('missing or unexpected release artifacts')
 
 
+def collect_updater(args):
+    binary = Path(args.input)
+    dest = Path(args.output)
+    dest.mkdir(parents=True, exist_ok=True)
+    name = f'updater-linux-{args.goarch}'
+    shutil.copy2(binary, dest / name)
+    (dest / (name + '.json')).write_text(json.dumps(dict(
+        version=args.version, sha=args.sha, arch=args.goarch, sha256=sha256(binary))))
+
+
 def contexts(args):
     verify(args)
     for target in targets(args.simple):
@@ -148,7 +158,17 @@ def contexts(args):
             with archive.extractfile(members[0]) as source, (dest / 'sub2api').open('wb') as output:
                 shutil.copyfileobj(source, output)
         (dest / 'sub2api').chmod(0o755)
-        shutil.copy2('Dockerfile.goreleaser', dest / 'Dockerfile')
+        updater = Path(args.updater_input) / f"updater-linux-{target['goarch']}"
+        metadata = json.loads(updater.with_suffix('.json').read_text())
+        expected = dict(version=args.version, sha=args.sha, arch=target['goarch'], sha256=sha256(updater))
+        if metadata != expected:
+            raise ValueError('updater source or checksum mismatch')
+        shutil.copy2(updater, dest / 'sub2api-updater')
+        (dest / 'sub2api-updater').chmod(0o755)
+        # Keep legacy GoReleaser Docker contexts compatible; only the matrix
+        # workflow includes and validates the host updater binary.
+        (dest / 'Dockerfile').write_text(Path('Dockerfile.goreleaser').read_text() +
+            '\nCOPY sub2api-updater /usr/local/libexec/sub2api-updater\n')
         (dest / 'deploy').mkdir(exist_ok=True)
         shutil.copy2('deploy/docker-entrypoint.sh', dest / 'deploy/docker-entrypoint.sh')
         shutil.copytree('backend/resources', dest / 'backend/resources', dirs_exist_ok=True)
@@ -173,6 +193,10 @@ def main():
     for arg in ('version', 'sha', 'goos', 'goarch', 'output'):
         p.add_argument('--' + arg, required=True)
     p.set_defaults(run=collect)
+    p = commands.add_parser('collect-updater')
+    for arg in ('version', 'sha', 'goarch', 'input', 'output'):
+        p.add_argument('--' + arg, required=True)
+    p.set_defaults(run=collect_updater)
     for command, handler in [('verify', verify), ('contexts', contexts)]:
         p = commands.add_parser(command)
         for arg in ('version', 'sha', 'input'):
@@ -180,6 +204,7 @@ def main():
         p.add_argument('--simple', action='store_true')
         if command == 'contexts':
             p.add_argument('--output', required=True)
+            p.add_argument('--updater-input', required=True)
         p.set_defaults(run=handler)
     args = parser.parse_args()
     args.run(args)

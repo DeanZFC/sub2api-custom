@@ -89,7 +89,7 @@ INSERT INTO ops_error_logs(created_at,group_id,request_id,is_count_tokens,error_
 			if request.Status == "ignored" {
 				ignored++
 			}
-			if request.Model == "__other__" {
+			if request.Model == "actual-unnamed" {
 				unnamed++
 			}
 		}
@@ -106,9 +106,9 @@ INSERT INTO ops_error_logs(created_at,group_id,request_id,is_count_tokens,error_
 	require.Len(t, items[2].RecentRequests, 2)
 	require.Equal(t, "error", items[2].RecentRequests[1].Status)
 	filter.RestrictGroups = true
-	filter.Models = []string{"__other__"}
+	filter.Models = []string{"actual-unnamed"}
 	items = []service.ChannelMonitorV2MatrixRow{{Platform: "openai", GroupID: &seven}}
 	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items))
 	require.Len(t, items[0].RecentRequests, 1)
-	require.Equal(t, "__other__", items[0].RecentRequests[0].Model)
+	require.Equal(t, "actual-unnamed", items[0].RecentRequests[0].Model)
 }

@@ -1,7 +1,7 @@
 export default { qqbot: {
   priceNotifications: {
-    "title": "Price and rate change notifications",
-    "help": "Notify changes to model prices on all active channels and text, image and video rates in all active groups, including exclusive and subscription groups. Edits are usually detected within 15 seconds; adjacent edits are combined. Enabling starts with the current prices as a baseline.",
+    "title": "Price and status notifications",
+    "help": "Notify channel prices, group rates, activation, deactivation and deletion, including exclusive and subscription groups. Usually detected within 15 seconds. Enabling records a baseline.",
     "enabled": "Enable automatic group notifications",
     "scheduled": "Also notify scheduled peak and discount period transitions",
     "groups": "Recipient group OpenIDs",

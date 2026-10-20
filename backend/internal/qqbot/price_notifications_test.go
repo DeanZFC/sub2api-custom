@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -20,25 +19,59 @@ func priceTestSnapshot(value string) PriceSnapshot {
 }
 
 func TestPriceNotificationDiff(t *testing.T) {
-	at := time.Date(2026, 10, 20, 1, 0, 0, 0, time.UTC)
 	before, after := priceTestSnapshot("USD 2"), priceTestSnapshot("USD 1.5")
-	chunks := formatPriceChanges(before, after, true, at)
+	chunks := formatPriceChanges(before, after, true)
 	require.Len(t, chunks, 1)
-	require.Contains(t, chunks[0], "渠道：示例渠道")
-	require.Contains(t, chunks[0], "模型：示例模型")
-	require.Contains(t, chunks[0], "输入：USD 2 → USD 1.5 / 百万 Token")
-	require.Contains(t, chunks[0], "2026-10-20 09:00:00（北京时间）")
+	require.Equal(t, "渠道：示例渠道\n模型：示例模型\n输入：USD 2 → USD 1.5 / 百万 Token", chunks[0])
 	require.NotContains(t, chunks[0], "当前分时倍率")
-	require.Empty(t, formatPriceChanges(before, before, true, at))
+	require.Empty(t, formatPriceChanges(before, before, true))
 	after = priceTestSnapshot("USD 2")
 	after.States[0].Name = "只改名称"
-	require.Empty(t, formatPriceChanges(before, after, true, at))
+	require.Empty(t, formatPriceChanges(before, after, true))
 	after.States[0].Fields[1].Value = "0.5×"
-	require.Empty(t, formatPriceChanges(before, after, false, at))
-	require.Contains(t, formatPriceChanges(before, after, true, at)[0], "定时切换")
-	require.Contains(t, formatPriceChanges(before, after, true, at)[0], "1× → 0.5×")
-	require.Contains(t, formatPriceChanges(after, before, true, at)[0], "0.5× → 1×")
-	require.Empty(t, formatPriceChanges(PriceSnapshot{}, after, true, at))
+	require.Empty(t, formatPriceChanges(before, after, false))
+	require.Contains(t, formatPriceChanges(before, after, true)[0], "定时切换")
+	require.Contains(t, formatPriceChanges(before, after, true)[0], "1× → 0.5×")
+	require.Contains(t, formatPriceChanges(after, before, true)[0], "0.5× → 1×")
+	require.Empty(t, formatPriceChanges(PriceSnapshot{}, after, true))
+}
+
+func TestPriceNotificationGroupRateReportedOnce(t *testing.T) {
+	snapshot := func(base, current string) PriceSnapshot {
+		return PriceSnapshot{States: []PriceState{{Key: "group:1", Kind: "group", Name: "DeepSeek", Fields: []PriceField{
+			{Key: "01_text", Label: "倍率", Value: base},
+			{Key: "05_current", Label: "当前倍率", Value: current, Scheduled: true},
+		}}}}
+	}
+	for _, tc := range []struct {
+		name                        string
+		baseBefore, baseAfter       string
+		currentBefore, currentAfter string
+		scheduled                   bool
+		want                        string
+		timed                       bool
+	}{
+		{name: "base edit", baseBefore: "0.16×", baseAfter: "0.14×", currentBefore: "0.16×", currentAfter: "0.14×", scheduled: true, want: "倍率：0.16× → 0.14×"},
+		{name: "base edit during peak", baseBefore: "0.16×", baseAfter: "0.14×", currentBefore: "0.32×", currentAfter: "0.28×", scheduled: true, want: "倍率：0.16× → 0.14×"},
+		{name: "base edit without scheduled notices", baseBefore: "0.16×", baseAfter: "0.14×", currentBefore: "0.16×", currentAfter: "0.14×", want: "倍率：0.16× → 0.14×"},
+		{name: "peak starts", baseBefore: "0.16×", baseAfter: "0.16×", currentBefore: "0.16×", currentAfter: "0.32×", scheduled: true, want: "倍率：0.16× → 0.32×", timed: true},
+		{name: "peak ends", baseBefore: "0.16×", baseAfter: "0.16×", currentBefore: "0.32×", currentAfter: "0.16×", scheduled: true, want: "倍率：0.32× → 0.16×", timed: true},
+		{name: "peak ignored when disabled", baseBefore: "0.16×", baseAfter: "0.16×", currentBefore: "0.16×", currentAfter: "0.32×"},
+		{name: "unchanged", baseBefore: "0.16×", baseAfter: "0.16×", currentBefore: "0.16×", currentAfter: "0.16×", scheduled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chunks := formatPriceChanges(snapshot(tc.baseBefore, tc.currentBefore), snapshot(tc.baseAfter, tc.currentAfter), tc.scheduled)
+			if tc.want == "" {
+				require.Empty(t, chunks)
+				return
+			}
+			require.Len(t, chunks, 1)
+			require.Contains(t, chunks[0], tc.want)
+			require.Equal(t, 1, strings.Count(chunks[0], " → "))
+			require.NotContains(t, chunks[0], "当前倍率")
+			require.Equal(t, tc.timed, strings.Contains(chunks[0], "定时切换"))
+		})
+	}
 }
 
 func TestPriceNotificationModelRemovalAndBoundedChunks(t *testing.T) {
@@ -50,7 +83,7 @@ func TestPriceNotificationModelRemovalAndBoundedChunks(t *testing.T) {
 		before.States[0].Fields = append(before.States[0].Fields, PriceField{Key: key, Model: key, Label: "输出", Value: "USD 8"})
 		after.States[0].Fields = append(after.States[0].Fields, PriceField{Key: key, Model: key, Label: "输出", Value: "USD 4"})
 	}
-	chunks := formatPriceChanges(before, after, true, time.Now())
+	chunks := formatPriceChanges(before, after, true)
 	require.Greater(t, len(chunks), 1)
 	for _, chunk := range chunks {
 		require.LessOrEqual(t, len([]rune(chunk)), 1800)
@@ -61,11 +94,107 @@ func TestPriceNotificationModelRemovalAndBoundedChunks(t *testing.T) {
 	after.States[0].Name = before.States[0].Name
 	after.States[0].Fields[0].Model = strings.Repeat("*", 1000)
 	after.States[0].Fields[0].Label = strings.Repeat("*", 1000)
-	for _, chunk := range formatPriceChanges(before, after, true, time.Now()) {
+	for _, chunk := range formatPriceChanges(before, after, true) {
 		require.LessOrEqual(t, len([]rune(chunk)), 1800)
 	}
 	after.States[0].Fields = after.States[0].Fields[1:]
-	require.Contains(t, strings.Join(formatPriceChanges(before, after, true, time.Now()), ""), "USD 2 → 已移除")
+	require.Contains(t, strings.Join(formatPriceChanges(before, after, true), ""), "USD 2 → 已移除")
+}
+
+func TestPriceNotificationLifecycle(t *testing.T) {
+	for _, kind := range []string{"group", "channel"} {
+		t.Run(kind, func(t *testing.T) {
+			snapshot := func(status, rate string) PriceSnapshot {
+				return PriceSnapshot{States: []PriceState{{Key: kind + ":1", Kind: kind, Name: "DeepSeek", Status: status, Fields: []PriceField{
+					{Key: "01_text", Label: "倍率", Value: rate},
+					{Key: "05_current", Label: "倍率", Value: rate, Scheduled: true},
+				}}}}
+			}
+			noun := "分组"
+			if kind == "channel" {
+				noun = "渠道"
+			}
+			active := snapshot("active", "0.16×")
+			disabled := snapshot("disabled", "0.16×")
+			legacy := snapshot("", "0.16×")
+			for _, tc := range []struct {
+				name          string
+				before, after PriceSnapshot
+				want          string
+			}{
+				{name: "delete active", before: active, want: "已删除"},
+				{name: "delete disabled", before: disabled, want: "已删除"},
+				{name: "delete legacy", before: legacy, want: "已删除"},
+				{name: "disable", before: active, after: disabled, want: "状态：启用 → 停用"},
+				{name: "enable", before: disabled, after: active, want: "状态：停用 → 启用"},
+				{name: "disable legacy", before: legacy, after: disabled, want: "状态：启用 → 停用"},
+				{name: "legacy upgrade", before: legacy, after: active},
+				{name: "new active baseline", after: active},
+				{name: "new disabled baseline", after: disabled},
+				{name: "unchanged active", before: active, after: active},
+				{name: "unchanged disabled", before: disabled, after: disabled},
+				{name: "inactive price edit", before: disabled, after: snapshot("disabled", "0.14×")},
+				{name: "enable after price edit", before: disabled, after: snapshot("active", "0.14×"), want: "状态：停用 → 启用"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					for _, scheduled := range []bool{false, true} {
+						chunks := formatPriceChanges(tc.before, tc.after, scheduled)
+						if tc.want == "" {
+							require.Empty(t, chunks)
+						} else {
+							require.Equal(t, []string{noun + "：DeepSeek\n" + tc.want}, chunks)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestPriceNotificationConciseGroupAndDefaultValues(t *testing.T) {
+	before := PriceSnapshot{States: []PriceState{{Key: "group:1", Kind: "group", Name: "DeepSeek", Fields: []PriceField{
+		{Key: "01_text", Label: "倍率", Value: "0.16×"},
+		{Key: "02_image", Label: "图片倍率", Value: "跟随基础倍率"},
+	}}}}
+	after := PriceSnapshot{States: []PriceState{{Key: "group:1", Kind: "group", Name: "DeepSeek", Fields: []PriceField{
+		{Key: "01_text", Label: "倍率", Value: "0.14×"},
+		{Key: "02_image", Label: "图片倍率", Value: "0.5×"},
+	}}}}
+	require.Equal(t, []string{"分组：DeepSeek\n倍率：0.16× → 0.14×\n图片倍率：跟随倍率 → 0.5×"}, formatPriceChanges(before, after, true))
+	before = priceTestSnapshot("未设置（沿用计费默认值）")
+	after = priceTestSnapshot("USD 1.5")
+	require.Equal(t, []string{"渠道：示例渠道\n模型：示例模型\n输入：默认 → USD 1.5 / 百万 Token"}, formatPriceChanges(before, after, true))
+}
+
+func TestPriceNotificationLifecyclePersistedBaseline(t *testing.T) {
+	var baseline PriceSnapshot
+	// Existing snapshots have no status field. They represent active entities.
+	require.NoError(t, json.Unmarshal([]byte(`{"states":[{"key":"group:1","kind":"group","name":"DeepSeek","fields":[]}]}`), &baseline))
+	for _, step := range []struct {
+		status string
+		want   string
+	}{
+		{status: "disabled", want: "状态：启用 → 停用"},
+		{status: "disabled"},
+		{status: "active", want: "状态：停用 → 启用"},
+		{want: "已删除"},
+		{},
+	} {
+		current := PriceSnapshot{}
+		if step.status != "" {
+			current.States = []PriceState{{Key: "group:1", Kind: "group", Name: "DeepSeek", Status: step.status}}
+		}
+		chunks := formatPriceChanges(baseline, current, false)
+		if step.want == "" {
+			require.Empty(t, chunks)
+		} else {
+			require.Equal(t, []string{"分组：DeepSeek\n" + step.want}, chunks)
+		}
+		raw, err := json.Marshal(current)
+		require.NoError(t, err)
+		baseline = PriceSnapshot{}
+		require.NoError(t, json.Unmarshal(raw, &baseline))
+	}
 }
 
 func TestPriceNotificationConfigAndProactiveDelivery(t *testing.T) {

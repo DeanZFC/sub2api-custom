@@ -28,7 +28,7 @@ export default {
       empty: 'No options', selectedCount: '{count}', labelValue: '{label}: {value}'
     },
     groupBy: {
-      label: 'Group by', platform: 'Platform', platformGroup: 'Platform / Group', platformModel: 'Platform / Model', platformGroupModel: 'Platform / Group / Model'
+      label: 'Group by', platform: 'By platform', platformGroup: 'By channel', platformModel: 'Platform / Model', platformGroupModel: 'By model'
     },
     trendView: { label: 'Trend view', pulse: 'Channel cards', line: 'Line chart' },
     cards: {
@@ -38,8 +38,6 @@ export default {
       recentRequests: 'Last 20 requests',
       requestLegend: 'Green: success · Yellow: slow / ignored error · Red: failed · Gray: no request',
       noRequest: 'No more requests in the selected time range',
-      models: 'Model status', modelsHint: 'Only models called in the selected time range · Passive health',
-      noModels: 'No model calls in the selected time range',
       health: { healthy: 'Healthy', warning: 'Attention', critical: 'Unhealthy', unknown: 'Unknown' },
       legend: { healthy: 'Healthy', warning: 'Attention', critical: 'Unhealthy', unknown: 'No traffic / insufficient samples' },
       requests: { success: 'Request succeeded', slow: 'Request succeeded with slow first token', error: 'Request failed', ignored: 'Ignored request error (excluded from health score)' },
@@ -111,12 +109,10 @@ export default {
       refreshAria: 'Aggregation interval',
       selectPlatform: 'Select a platform',
       addPlatform: 'Add platform',
-      platformsTitle: 'Platforms and models',
+      platformsTitle: 'Monitored platforms',
       platformsHint:
-        'Leave empty = show all real model names; when filled, only listed models get their own rows and the rest roll into “Other”',
-      modelsPlaceholder: 'Empty = all real models; or list popular models (rest → Other)',
+        'Show models actually called on selected platforms, preserving their real names',
       badgeAllModels: 'All models',
-      badgeOther: '+ Other',
       groupsTitle: 'Monitored groups',
       groupsSelected: '{count} groups selected',
       groupsAll: 'All groups',
@@ -138,14 +134,13 @@ export default {
         warningCache: 'Cache rate watch %',
         criticalCache: 'Cache rate critical %',
       },
-      namedModelsEmpty: 'Platform model lists are empty: every real model name will be shown (not folded into “Other”).',
-      namedModelsCount: 'Showing {count} named model dimensions; unlisted models fold into per-platform “Other”.',
+      namedModelsEmpty: 'Only models called in the selected range are shown, with newer versions first when recognizable.',
       userContractTitle: 'User-facing display contract',
       userContract: {
         health: 'Health color weights: error rate 60% + first-token P50 20% + cache rate 20% (thresholds configurable above)',
         trend: 'Trend can switch between pulse matrix and line chart (error · cache · first token)',
         latency: 'Latency shows AVG · P50 · P90; absolute request / error counts are not shown',
-        models: 'Empty model lists show real names and never dump everything into “Other”',
+        models: 'Show actual called model names without folding them into Other models',
       },
     },
     admin: {

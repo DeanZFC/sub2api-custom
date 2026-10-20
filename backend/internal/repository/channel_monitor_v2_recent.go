@@ -44,22 +44,9 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
 	}
 	args := []any{filter.Start, filter.End, pq.Array(platforms), string(encoded)}
 	bind := func(value any) string { args = append(args, value); return fmt.Sprintf("$%d", len(args)) }
-	// Use the same named-model / __other__ mapping as the aggregate matrix.
-	displayModel := func(platform, model string) string {
-		clauses := []string{}
-		for _, p := range cfg.Platforms {
-			if len(p.Models) == 0 {
-				continue
-			}
-			clauses = append(clauses, "WHEN "+platform+" = "+bind(p.Platform)+" AND NOT ("+model+" = ANY("+bind(pq.Array(p.Models))+")) THEN '__other__'")
-		}
-		if len(clauses) == 0 {
-			return model
-		}
-		return "CASE " + strings.Join(clauses, " ") + " ELSE " + model + " END"
-	}
-	usageModel := displayModel(channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL)
-	errorModel := displayModel(channelMonitorV2RecentErrorPlatform, channelMonitorV2RecentErrorModel)
+	// Preserve the same observed identities as the aggregate matrix.
+	usageModel := channelMonitorV2ModelSQL
+	errorModel := channelMonitorV2RecentErrorModel
 	groups, empty := channelMonitorV2ScopedGroupIDs(filter, cfg)
 	groupParam := ""
 	if len(groups) > 0 {

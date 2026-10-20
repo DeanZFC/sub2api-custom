@@ -2,7 +2,8 @@
 set -euo pipefail
 : "${RELEASE_VERSION:?}" "${RELEASE_SHA:?}" "${GITHUB_REPOSITORY:?}" "${RUNNER_TEMP:?}"
 owner=${GITHUB_REPOSITORY%%/*}
-registries=("ghcr.io/${owner,,}/sub2api")
+owner_lower=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+registries=("ghcr.io/$owner_lower/sub2api")
 if [[ ${SIMPLE_RELEASE:-false} != true && ${DOCKERHUB_USERNAME:-skip} != skip ]]; then
   registries+=("${DOCKERHUB_USERNAME}/sub2api")
 fi
@@ -22,7 +23,7 @@ for arch in "${arches[@]}"; do
   if [[ ${DRY_RUN:-false} == true ]]; then
     args+=(--output "type=oci,dest=$RUNNER_TEMP/sub2api-$arch.oci.tar")
   else
-    args+=(--push)
+    args+=(--push --metadata-file "$RUNNER_TEMP/image-$arch.json")
   fi
   docker buildx build "${args[@]}" ".release-context/$arch"
 done

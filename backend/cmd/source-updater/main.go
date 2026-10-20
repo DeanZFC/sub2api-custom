@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -56,8 +57,8 @@ func main() {
 	if !filepath.IsAbs(path) {
 		log.Fatal("socket path must be absolute")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		log.Fatalf("create socket directory: %v", err)
+	if err := prepareSocketDirectory(filepath.Dir(path)); err != nil {
+		log.Fatal(err)
 	}
 	if info, statErr := os.Lstat(path); statErr == nil {
 		if info.Mode()&os.ModeSocket == 0 {
@@ -100,6 +101,19 @@ func main() {
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("serve updater API: %v", err)
 	}
+}
+
+func prepareSocketDirectory(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create socket directory: %w", err)
+	}
+	// MkdirAll preserves existing permissions and respects the service's 0077
+	// umask. The application's UID must be able to traverse this directory;
+	// requests remain authenticated by the token stored outside it.
+	if err := os.Chmod(dir, 0o755); err != nil {
+		return fmt.Errorf("set socket directory permissions: %w", err)
+	}
+	return nil
 }
 
 func splitNonEmpty(value string) []string {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/qqbot"
 )
@@ -17,7 +18,33 @@ type qqBotPriceSource struct {
 		ListAll(context.Context) ([]Channel, error)
 	}
 	groups interface {
-		ListActive(context.Context) ([]Group, error)
+		List(context.Context, pagination.PaginationParams) ([]Group, *pagination.PaginationResult, error)
+	}
+}
+
+func (p *qqBotPriceSource) listGroups(ctx context.Context) ([]Group, error) {
+	var groups []Group
+	var total int64
+	for page := 1; ; page++ {
+		batch, result, err := p.groups.List(ctx, pagination.PaginationParams{Page: page, PageSize: 1000, SortBy: "id", SortOrder: pagination.SortOrderAsc})
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return nil, fmt.Errorf("missing group pagination")
+		}
+		if page == 1 {
+			total = result.Total
+		} else if result.Total != total {
+			return nil, fmt.Errorf("group list changed during scan")
+		}
+		groups = append(groups, batch...)
+		if int64(len(groups)) == total {
+			return groups, nil
+		}
+		if len(batch) == 0 || int64(len(groups)) > total {
+			return nil, fmt.Errorf("incomplete group list")
+		}
 	}
 }
 
@@ -27,15 +54,12 @@ func (p *qqBotPriceSource) PriceSnapshot(ctx context.Context, now time.Time) (qq
 	if err != nil {
 		return out, err
 	}
-	groups, err := p.groups.ListActive(ctx)
+	groups, err := p.listGroups(ctx)
 	if err != nil {
 		return out, err
 	}
 	for _, ch := range channels {
-		if !ch.IsActive() {
-			continue
-		}
-		state := qqbot.PriceState{Key: fmt.Sprintf("channel:%d", ch.ID), Kind: "channel", Name: ch.Name}
+		state := qqbot.PriceState{Key: fmt.Sprintf("channel:%d", ch.ID), Kind: "channel", Name: ch.Name, Status: ch.Status}
 		// IDs and timestamps are deliberately excluded: channel saves replace pricing
 		// rows even when only a name or description changed.
 		for _, pricing := range ch.ModelPricing {
@@ -49,7 +73,7 @@ func (p *qqBotPriceSource) PriceSnapshot(ctx context.Context, now time.Time) (qq
 					state.Fields = append(state.Fields, f)
 				}
 			}
-			if pricing.TimePricing != nil && validateChannelTimePricing(pricing.TimePricing) == nil {
+			if ch.IsActive() && pricing.TimePricing != nil && validateChannelTimePricing(pricing.TimePricing) == nil {
 				loc, err := loadChannelTimePricingLocation(pricing.TimePricing.Timezone)
 				if err == nil {
 					for _, period := range pricing.TimePricing.Periods {
@@ -63,18 +87,15 @@ func (p *qqBotPriceSource) PriceSnapshot(ctx context.Context, now time.Time) (qq
 		out.States = append(out.States, state)
 	}
 	for _, g := range groups {
-		if !g.IsActive() {
-			continue
-		}
-		state := qqbot.PriceState{Key: fmt.Sprintf("group:%d", g.ID), Kind: "group", Name: g.Name}
+		state := qqbot.PriceState{Key: fmt.Sprintf("group:%d", g.ID), Kind: "group", Name: g.Name, Status: g.Status}
 		state.Fields = []qqbot.PriceField{
-			{Key: "01_text", Label: "文字倍率", Value: qqMultiplier(g.RateMultiplier)},
+			{Key: "01_text", Label: "倍率", Value: qqMultiplier(g.RateMultiplier)},
 			{Key: "02_image", Label: "图片倍率", Value: qqIndependentRate(g.ImageRateIndependent, g.ImageRateMultiplier)},
 			{Key: "03_video", Label: "视频倍率", Value: qqIndependentRate(g.VideoRateIndependent, g.VideoRateMultiplier)},
 			{Key: "04_peak", Label: "高峰规则", Value: qqPeakRule(g)},
-			{Key: "05_current", Label: "当前文字倍率", Value: qqMultiplier(g.RateMultiplier * g.PeakMultiplierAt(now)), Scheduled: true},
+			{Key: "05_current", Label: "倍率", Value: qqMultiplier(g.RateMultiplier * g.PeakMultiplierAt(now)), Scheduled: true},
 		}
-		if g.IsSubscriptionType() && g.PeakRateEnabled {
+		if g.IsActive() && g.IsSubscriptionType() && g.PeakRateEnabled {
 			out.NextCheck = qqNextBoundary(now, out.NextCheck, timezone.Location(), g.PeakStart, g.PeakEnd)
 		}
 		out.States = append(out.States, state)
@@ -86,7 +107,7 @@ func qqNumber(n float64) string     { return strconv.FormatFloat(n, 'f', -1, 64)
 func qqMultiplier(n float64) string { return qqNumber(n) + "×" }
 func qqIndependentRate(independent bool, n float64) string {
 	if !independent {
-		return "跟随文字基础倍率"
+		return "跟随基础倍率"
 	}
 	return qqMultiplier(n)
 }

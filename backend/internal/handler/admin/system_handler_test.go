@@ -161,6 +161,37 @@ func TestSystemHandlerStartsSourceUpdateAndReturnsJob(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"job_id":"upd-1"`)
 }
 
+func TestSystemHandlerStartsReleaseContainerUpdate(t *testing.T) {
+	updateSvc := &systemHandlerSourceUpdateStub{}
+	updateSvc.updateInfo = &service.UpdateInfo{BuildType: "release", HostUpdateManaged: true, SourceUpdateEnabled: true, HasUpdate: true, LatestVersion: "0.2.0-custom.2"}
+	updateSvc.startJob = service.SourceUpdateJob{JobID: "upd-1", Status: service.SourceUpdateStatusQueued}
+	repo := newMemoryIdempotencyRepoStub()
+	router := newSystemHandlerSourceRouter(t, updateSvc, repo)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/update", nil)
+	req.Header.Set("Idempotency-Key", "source-update-1")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, updateSvc.startCall)
+	require.Equal(t, "0.2.0-custom.2", updateSvc.startVersion)
+	require.Contains(t, rec.Body.String(), `"source_update":true`)
+	require.Contains(t, rec.Body.String(), `"job_id":"upd-1"`)
+}
+
+func TestSystemHandlerOfflineHostDoesNotInvokeBinaryUpdater(t *testing.T) {
+	svc := &systemHandlerSourceUpdateStub{}
+	svc.updateInfo = &service.UpdateInfo{BuildType: "release", HostUpdateManaged: true, HasUpdate: true}
+	router := newSystemHandlerSourceRouter(t, svc, newMemoryIdempotencyRepoStub())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/update", nil)
+	req.Header.Set("Idempotency-Key", "offline-host")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Zero(t, svc.performCall)
+	require.Zero(t, svc.startCall)
+}
+
 func TestSystemHandlerReturnsSourceUpdateStatus(t *testing.T) {
 	updateSvc := &systemHandlerSourceUpdateStub{}
 	updateSvc.statusJob = service.SourceUpdateJob{JobID: "upd-1", Status: service.SourceUpdateStatusSucceeded}

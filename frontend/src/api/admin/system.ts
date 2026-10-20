@@ -16,6 +16,7 @@ export interface VersionInfo {
   latest_version: string
   has_update: boolean
   source_update_enabled?: boolean
+  host_update_managed?: boolean
   release_info?: ReleaseInfo
   cached: boolean
   warning?: string
@@ -96,7 +97,7 @@ export async function performUpdate(): Promise<UpdateResult> {
   return data
 }
 
-/** Get the state of an asynchronous source-build update. */
+/** Get the persisted state of an asynchronous host image update. */
 export async function getSourceUpdateStatus(jobID: string): Promise<SourceUpdateJob> {
   const { data } = await apiClient.get<SourceUpdateJob>(
     `/admin/system/update-status/${encodeURIComponent(jobID)}`

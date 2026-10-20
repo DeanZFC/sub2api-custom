@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ChannelHealthCards from '../ChannelHealthCards.vue'
-import { cardHealth, hasMonitorTraffic, modelsForCard, recentRequestsForCard, requestHealth, timelineForCard } from '../monitorCards'
+import { cardHealth, hasMonitorTraffic, recentRequestsForCard, requestHealth } from '../monitorCards'
 import zh from '@/i18n/locales/zh/channelMonitorV2'
 import type { MonitorCoverage, MonitorHealth, MonitorMatrixRow, MonitorMetric, MonitorRecentRequest } from '@/api/channelMonitorV2'
 
@@ -28,31 +28,10 @@ const request = (status: MonitorRecentRequest['status'], seconds = 0): MonitorRe
 afterEach(() => vi.useRealTimers())
 
 describe('channel health cards', () => {
-  it('shows called models in the matching platform/group despite redacted request counts', () => {
-    const called = { ...row, model: 'called-model' }
-    const inactive = { ...row, model: 'unused-model', has_traffic: false }
-    const otherGroup = { ...called, group_id: 8 }
-    const otherPlatform = { ...called, platform: 'grok' }
-    expect(modelsForCard(row, [called, inactive, otherGroup, otherPlatform])).toEqual([called])
-    expect(hasMonitorTraffic(called)).toBe(true)
-    expect(hasMonitorTraffic(inactive)).toBe(false)
-    expect(modelsForCard({ ...row, model: 'different' }, [called])).toEqual([])
-  })
-
-  it('keeps sparse and ignored-error-only traffic without inventing health', () => {
-    const sparse = { ...row, model: 'sparse-model', health: { ...health, overall: 'unknown' as const } }
-    expect(modelsForCard(row, [sparse])).toEqual([sparse])
-    expect(cardHealth(sparse.health, 'overall')).toBe('unknown')
+  it('keeps passive health and traffic when counts are redacted', () => {
+    expect(hasMonitorTraffic(row)).toBe(true)
+    expect(hasMonitorTraffic({ ...row, has_traffic: false })).toBe(false)
     expect(cardHealth(health, 'ttft')).toBe('warning')
-  })
-
-  it('aligns intervals over the selected range, including gaps and aggregation lag', () => {
-    const slots = timelineForCard(row, coverage)
-    expect(slots).toHaveLength(18)
-    expect(slots[0].bucket).toBeUndefined()
-    expect(slots[2].bucket).toEqual(row.buckets[0])
-    expect(slots[17].bucket).toBeUndefined()
-    expect(slots[17].end).toBe(Date.parse(coverage.requested_end!))
   })
 
   it('sorts and caps actual requests at 20, with gray placeholders before sparse history', () => {
@@ -71,18 +50,18 @@ describe('channel health cards', () => {
     expect(requestHealth(null)).toBe('unknown')
   })
 
-  it('renders channel cards, a real 20-request strip, and only active models without a quality-test section', async () => {
+  it('renders compact channel cards and real request states without a per-model status section', async () => {
     vi.useFakeTimers()
     const wrapper = mount(ChannelHealthCards, {
       props: { rows: [{ ...row, recent_requests: [request('success'), request('slow', 1), request('error', 2), request('ignored', 3)] }],
-        modelRows: [{ ...row, model: 'called-model' }, { ...row, model: 'unused-model', has_traffic: false }],
-        coverage, healthMode: 'overall', nextRefreshAt: Date.now() + 60000, refreshing: false },
+        groupBy: 'platform_group', healthMode: 'overall', nextRefreshAt: Date.now() + 60000, refreshing: false },
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
     })
     expect(wrapper.findAll('[data-testid=channel-health-card]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-testid=model-health]')).toHaveLength(1)
-    expect(wrapper.text()).toContain('called-model')
-    expect(wrapper.text()).not.toContain('unused-model')
+    expect(wrapper.findAll('[data-testid=model-health]')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('模型状态')
+    expect(wrapper.get('[data-testid=channel-section-title]').text()).toContain('OpenAI')
+    expect(wrapper.get('[data-testid=channel-section-title]').text()).toContain('1')
     expect(wrapper.text()).not.toContain('降智状态')
     expect(wrapper.text()).toContain('被动健康')
     const requests = wrapper.get('[data-testid=recent-requests]').findAll('[role=img]')
@@ -93,8 +72,30 @@ describe('channel health cards', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('59s 后刷新')
     await wrapper.setProps({ healthMode: 'ttft' })
-    expect(wrapper.findAll('[data-testid=model-health] [data-state=warning]')).toHaveLength(1)
+    expect(requests.slice(-4).map(slot => slot.attributes('data-state'))).toEqual(['healthy', 'warning', 'critical', 'warning'])
     wrapper.unmount()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('groups actual called models with newer versions first and no unused model placeholders', async () => {
+    const wrapper = mount(ChannelHealthCards, {
+      props: {
+        rows: [
+          { ...row, model: 'gpt-5.3' }, { ...row, model: 'gpt-5.4' },
+          { ...row, group_id: 8, model: 'gpt-5.4' },
+          { ...row, model: 'unused-model', has_traffic: false },
+        ],
+        groupBy: 'platform_group_model', healthMode: 'overall', nextRefreshAt: Date.now() + 60000, refreshing: false,
+      },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+    })
+    expect(wrapper.findAll('[data-testid=channel-section-title]').map(el => el.text())).toEqual(['gpt-5.42', 'gpt-5.31'])
+    expect(wrapper.findAll('[data-testid=channel-health-card]')).toHaveLength(3)
+    expect(wrapper.text()).not.toContain('unused-model')
+    expect(wrapper.text()).not.toContain('其他模型')
+    await wrapper.setProps({ groupBy: 'platform_group', rows: [row, { ...row, group_id: 8 }] })
+    expect(wrapper.findAll('[data-testid=channel-section-title]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid=channel-section-title]').text()).toContain('OpenAI')
+    wrapper.unmount()
   })
 })

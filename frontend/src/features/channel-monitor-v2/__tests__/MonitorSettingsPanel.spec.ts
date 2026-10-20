@@ -75,7 +75,7 @@ beforeEach(() => {
 })
 
 describe('MonitorSettingsPanel platform configuration', () => {
-  it('adds a missing provider and saves its models without changing existing settings', async () => {
+  it('adds a missing provider for automatic called-model discovery without changing existing settings', async () => {
     const original = config()
     const wrapper = await panel(original)
     expect(button(wrapper, 'save').attributes('disabled')).toBeDefined()
@@ -89,15 +89,13 @@ describe('MonitorSettingsPanel platform configuration', () => {
     expect(wrapper.findComponent(Select).props('options')).not.toContainEqual(
       expect.objectContaining({ value: 'deepseek' })
     )
-    const models = wrapper.findAll('input[type="text"]').at(-1)!
-    await models.setValue(' deepseek-chat, deepseek-reasoner, deepseek-chat ')
     await button(wrapper, 'save').trigger('click')
     await flushPromises()
 
     expect(mocks.updateConfig).toHaveBeenCalledWith({
       ...original,
       platforms: [...original.platforms, {
-        platform: 'deepseek', enabled: true, models: ['deepseek-chat', 'deepseek-reasoner'],
+        platform: 'deepseek', enabled: true, models: [],
       }],
     })
     expect(button(wrapper, 'save').attributes('disabled')).toBeDefined()
@@ -106,7 +104,7 @@ describe('MonitorSettingsPanel platform configuration', () => {
     const persisted = mocks.updateConfig.mock.results[0].value
     wrapper.unmount()
     const reloaded = await panel(await persisted)
-    expect((reloaded.findAll('input[type="text"]').at(-1)!.element as HTMLInputElement).value).toBe('deepseek-chat, deepseek-reasoner')
+    expect(reloaded.findAll('input[type="text"]')).toHaveLength(0)
     expect(reloaded.findComponent(Select).props('options')).not.toContainEqual(
       expect.objectContaining({ value: 'deepseek' })
     )
@@ -136,7 +134,7 @@ describe('MonitorSettingsPanel platform configuration', () => {
     expect(wrapper.findComponent(Select).props('options')).toContainEqual(
       expect.objectContaining({ value: 'minimax' })
     )
-    expect(wrapper.findAll('input[type="text"]')).toHaveLength(2)
+    expect(wrapper.findAll('input[type="text"]')).toHaveLength(0)
     expect(button(wrapper, 'save').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })

@@ -3,220 +3,309 @@ package sourceupdater
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/updatepolicy"
 	"github.com/stretchr/testify/require"
 )
 
+var oldID = "sha256:" + strings.Repeat("1", 64)
+var newID = "sha256:" + strings.Repeat("2", 64)
+var pinnedImage = updatepolicy.ImageRepository + "@sha256:" + strings.Repeat("3", 64)
+
+const targetVersion = "0.2.17-custom.13"
+
+var revision = strings.Repeat("a", 40)
+
 type fakeRunner struct {
-	mu      sync.Mutex
-	calls   []string
-	outputs map[string]string
-	errors  map[string]error
+	mu             sync.Mutex
+	calls          []string
+	outputs        map[string]string
+	errors         map[string]error
+	image          string
+	newHealth      string
+	rollbackHealth string
+	recreateCount  int
+	wrongImage     bool
 }
 
 func (r *fakeRunner) Run(_ context.Context, _ string, stdout, _ io.Writer, name string, args ...string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	key := commandKey(name, args...)
-	r.record(key)
+	r.calls = append(r.calls, key)
 	if err := r.errors[key]; err != nil {
 		return err
 	}
+	result, override := r.outputs[key]
+	if !override {
+		switch {
+		case name == "docker" && len(args) > 0 && args[0] == "compose":
+			if strings.Contains(key, " ps -q ") {
+				result = "sub2api-app"
+			}
+			if strings.Contains(key, " up ") {
+				r.recreateCount++
+				if r.recreateCount == 1 {
+					r.image = newID
+				} else {
+					r.image = oldID
+				}
+			}
+		case strings.HasPrefix(key, "docker image inspect "):
+			result = newID + "|" + targetVersion + "|" + revision
+		case strings.HasPrefix(key, "docker inspect --format {{.Image}}|"):
+			health := "healthy"
+			if r.image == newID && r.newHealth != "" {
+				health = r.newHealth
+			}
+			if r.image == oldID && r.rollbackHealth != "" {
+				health = r.rollbackHealth
+			}
+			actual := r.image
+			if r.wrongImage && actual == newID {
+				actual = oldID
+			}
+			result = actual + "|" + health
+		case strings.HasPrefix(key, "docker inspect --format {{.Image}} "):
+			result = r.image
+		case strings.HasPrefix(key, "docker create "):
+			result = "extract-container"
+		}
+	}
 	if name == "docker" && len(args) == 3 && args[0] == "cp" {
-		return os.WriteFile(args[2], []byte("new updater"), 0o755)
+		return os.WriteFile(args[2], []byte("new updater"), 0755)
 	}
 	if stdout != nil {
-		_, _ = io.WriteString(stdout, r.outputs[key])
+		_, _ = io.WriteString(stdout, result)
 	}
 	return nil
 }
-
 func (r *fakeRunner) Output(ctx context.Context, dir, name string, args ...string) (string, error) {
-	var output bytes.Buffer
-	err := r.Run(ctx, dir, &output, &output, name, args...)
-	return strings.TrimSpace(output.String()), err
+	var out bytes.Buffer
+	err := r.Run(ctx, dir, &out, &out, name, args...)
+	return strings.TrimSpace(out.String()), err
 }
-
-func (r *fakeRunner) record(call string) {
-	r.mu.Lock()
-	r.calls = append(r.calls, call)
-	r.mu.Unlock()
-}
-
 func (r *fakeRunner) callList() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.calls...)
 }
-
-func commandKey(name string, args ...string) string {
-	return name + " " + strings.Join(args, " ")
-}
-
-func newTestUpdater(t *testing.T, runner *fakeRunner) *Updater {
+func commandKey(name string, args ...string) string { return name + " " + strings.Join(args, " ") }
+func newTestUpdater(t *testing.T, r *fakeRunner) *Updater {
 	t.Helper()
-	repoDir := t.TempDir()
-	deployDir := filepath.Join(repoDir, "deploy")
-	require.NoError(t, os.MkdirAll(deployDir, 0o755))
-	composeFile := filepath.Join(deployDir, "docker-compose.yml")
-	require.NoError(t, os.WriteFile(composeFile, []byte("services: {}\n"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "FORK_VERSION"), []byte("0.2.0-custom.1\n"), 0o600))
-
-	if runner.outputs == nil {
-		runner.outputs = make(map[string]string)
+	repo := t.TempDir()
+	deploy := filepath.Join(repo, "deploy")
+	require.NoError(t, os.MkdirAll(deploy, 0755))
+	compose := filepath.Join(deploy, "docker-compose.yml")
+	require.NoError(t, os.WriteFile(compose, []byte("services: {}\n"), 0600))
+	if r.outputs == nil {
+		r.outputs = map[string]string{}
 	}
-	if runner.errors == nil {
-		runner.errors = make(map[string]error)
+	if r.errors == nil {
+		r.errors = map[string]error{}
 	}
-	runner.outputs[commandKey("git", "remote", "get-url", "origin")] = ExpectedRemoteURL
-	runner.outputs[commandKey("git", "branch", "--show-current")] = ExpectedBranch
-	runner.outputs[commandKey("git", "rev-parse", "HEAD")] = "old-commit"
-	runner.outputs[commandKey("docker", "inspect", "--format", "{{.Image}}", "sub2api-app")] = "sha256:old"
-	runner.outputs[commandKey("docker", "inspect", "--format", "{{.Config.Image}}", "sub2api-app")] = "sub2api-custom:test"
-	runner.outputs[commandKey("docker", "compose", "-p", "test-project", "-f", composeFile, "ps", "-q", "sub2api")] = "sub2api-app"
-	runner.outputs[commandKey("docker", "create", "sub2api-source-updater-builder:test-job")] = "builder-container"
-	runner.outputs[commandKey("docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", "sub2api-app")] = "healthy"
-
-	updater, err := NewWithRunner(Config{
-		Token:           strings.Repeat("a", 32),
-		RepoDir:         repoDir,
-		StateDir:        filepath.Join(repoDir, ".state"),
-		UpdaterBinary:   filepath.Join(repoDir, "bin", "sub2api-updater"),
-		ComposeProject:  "test-project",
-		ComposeFiles:    []string{composeFile},
-		AppService:      "sub2api",
-		PostgresService: "postgres",
-		AppContainer:    "sub2api-app",
-		HealthTimeout:   time.Millisecond,
-	}, runner)
+	r.image = oldID
+	u, err := NewWithRunner(Config{Token: strings.Repeat("a", 32), RepoDir: repo, StateDir: filepath.Join(repo, ".state"), UpdaterBinary: filepath.Join(repo, "bin/updater"), ComposeProject: "test-project", ComposeFiles: []string{compose}, AppService: "sub2api", PostgresService: "postgres", AppContainer: "sub2api-app", HealthTimeout: time.Millisecond,
+		ResolveManifest: func(_ context.Context, version string) (*updatepolicy.Manifest, error) {
+			require.Equal(t, targetVersion, version)
+			return &updatepolicy.Manifest{SchemaVersion: 1, Version: targetVersion, Revision: revision, Images: map[string]string{runtime.GOARCH: pinnedImage}}, nil
+		}}, r)
 	require.NoError(t, err)
-	return updater
+	return u
 }
-
+func queue(u *Updater) {
+	u.jobs["test-job"] = Job{JobID: "test-job", TargetVersion: targetVersion, Status: "queued"}
+}
 func TestUpdaterRejectsUnauthorizedRequests(t *testing.T) {
-	updater := newTestUpdater(t, &fakeRunner{})
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/health", nil)
-
-	updater.Handler().ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	u := newTestUpdater(t, &fakeRunner{})
+	rec := httptest.NewRecorder()
+	u.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	require.Equal(t, 401, rec.Code)
 }
-
-func TestUpdaterReturnsExistingJobForDuplicateRequestAndRejectsConcurrentRequest(t *testing.T) {
-	updater := newTestUpdater(t, &fakeRunner{})
-	existing := Job{JobID: "existing-job", RequestID: "same-request", Status: "running"}
-	updater.jobs[existing.JobID] = existing
-	updater.activeID = existing.JobID
-
-	request := func(requestID string) *httptest.ResponseRecorder {
-		recorder := httptest.NewRecorder()
-		body := strings.NewReader(`{"request_id":"` + requestID + `","expected_version":"0.2.0-custom.2"}`)
-		req := httptest.NewRequest(http.MethodPost, "/v1/update", body)
-		req.Header.Set("X-Sub2API-Updater-Token", updater.cfg.Token)
-		updater.Handler().ServeHTTP(recorder, req)
-		return recorder
+func TestUpdaterDuplicateAndConcurrentRequests(t *testing.T) {
+	u := newTestUpdater(t, &fakeRunner{})
+	u.jobs["existing"] = Job{JobID: "existing", RequestID: "same", Status: "running"}
+	u.activeID = "existing"
+	request := func(id, version string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/update", strings.NewReader(`{"request_id":"`+id+`","expected_version":"`+version+`"}`))
+		req.Header.Set("X-Sub2API-Updater-Token", u.cfg.Token)
+		u.Handler().ServeHTTP(rec, req)
+		return rec.Code
 	}
-
-	require.Equal(t, http.StatusAccepted, request("same-request").Code)
-	require.Equal(t, http.StatusConflict, request("another-request").Code)
+	require.Equal(t, 202, request("same", targetVersion))
+	require.Equal(t, 409, request("different", targetVersion))
+	require.Equal(t, 400, request("bad", "latest"))
 }
-
-func TestUpdaterValidateDeploymentRejectsDirtyWrongRemoteAndWrongBranch(t *testing.T) {
-	tests := []struct {
-		name    string
-		key     string
-		value   string
-		wantErr string
-	}{
-		{name: "dirty", key: commandKey("git", "status", "--porcelain", "--untracked-files=no"), value: " M backend/main.go", wantErr: "tracked local changes"},
-		{name: "remote", key: commandKey("git", "remote", "get-url", "origin"), value: "https://example.com/other.git", wantErr: "origin must be"},
-		{name: "branch", key: commandKey("git", "branch", "--show-current"), value: "main", wantErr: "deployed branch must be"},
+func TestImageWorkflowPinsReleasePreservesConfigAndReplacesUpdater(t *testing.T) {
+	r := &fakeRunner{}
+	u := newTestUpdater(t, r)
+	queue(u)
+	require.NoError(t, os.WriteFile(filepath.Join(u.cfg.RepoDir, "FORK_VERSION"), []byte("unrelated source"), 0600))
+	original, err := os.ReadFile(u.cfg.ComposeFiles[0])
+	require.NoError(t, err)
+	require.NoError(t, u.workflow(context.Background(), "test-job"))
+	binary, err := os.ReadFile(u.cfg.UpdaterBinary)
+	require.NoError(t, err)
+	require.Equal(t, "new updater", string(binary))
+	after, err := os.ReadFile(u.cfg.ComposeFiles[0])
+	require.NoError(t, err)
+	require.Equal(t, original, after)
+	overlay, err := os.ReadFile(u.overlayPath())
+	require.NoError(t, err)
+	require.Contains(t, string(overlay), pinnedImage)
+	calls := strings.Join(r.callList(), "\n")
+	require.Contains(t, calls, "docker pull "+pinnedImage)
+	require.Contains(t, calls, "--no-deps --no-build --pull never sub2api")
+	require.Contains(t, calls, updatepolicy.UpdaterPath)
+	require.NotContains(t, calls, "git ")
+	require.NotContains(t, calls, "docker build")
+	require.Equal(t, 1, r.recreateCount)
+	require.Equal(t, oldID, u.jobs["test-job"].PreviousImage)
+}
+func TestPullFailureLeavesExistingDeploymentAndOverlayUntouched(t *testing.T) {
+	r := &fakeRunner{}
+	u := newTestUpdater(t, r)
+	queue(u)
+	require.NoError(t, u.writeOverlay(oldID))
+	before, err := os.ReadFile(u.overlayPath())
+	require.NoError(t, err)
+	r.errors["docker pull "+pinnedImage] = errors.New("registry offline")
+	require.ErrorContains(t, u.workflow(context.Background(), "test-job"), "image pull failed")
+	after, err := os.ReadFile(u.overlayPath())
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	require.Zero(t, r.recreateCount)
+}
+func TestManifestMustMatchRequestedVersion(t *testing.T) {
+	r := &fakeRunner{}
+	u := newTestUpdater(t, r)
+	queue(u)
+	u.cfg.ResolveManifest = func(context.Context, string) (*updatepolicy.Manifest, error) {
+		return &updatepolicy.Manifest{SchemaVersion: 1, Version: "0.2.17-custom.14", Revision: revision, Images: map[string]string{runtime.GOARCH: pinnedImage}}, nil
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runner := &fakeRunner{}
-			updater := newTestUpdater(t, runner)
-			runner.outputs[tt.key] = tt.value
-
-			_, _, _, _, err := updater.validateDeployment(context.Background())
-
-			require.ErrorContains(t, err, tt.wantErr)
+	require.ErrorContains(t, u.workflow(context.Background(), "test-job"), "mismatch")
+	require.NotContains(t, strings.Join(r.callList(), "\n"), "docker pull")
+}
+func TestUnhealthyOrWrongImageRestoresVerifiedOldImage(t *testing.T) {
+	for _, wrong := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unhealthy", true: "wrong identity"}[wrong], func(t *testing.T) {
+			r := &fakeRunner{newHealth: "unhealthy", wrongImage: wrong}
+			if wrong {
+				r.newHealth = "healthy"
+			}
+			u := newTestUpdater(t, r)
+			queue(u)
+			require.ErrorContains(t, u.workflow(context.Background(), "test-job"), "previous application image restored and healthy")
+			require.Equal(t, 2, r.recreateCount)
+			overlay, err := os.ReadFile(u.overlayPath())
+			require.NoError(t, err)
+			require.Contains(t, string(overlay), oldID)
+			_, err = os.Stat(u.cfg.UpdaterBinary)
+			require.True(t, os.IsNotExist(err))
 		})
 	}
 }
-
-func TestUpdaterWorkflowRunsBuildDeployHealthAndSelfUpdate(t *testing.T) {
-	runner := &fakeRunner{}
-	updater := newTestUpdater(t, runner)
-	job := Job{JobID: "test-job", Status: "queued"}
-	updater.jobs[job.JobID] = job
-
-	err := updater.workflow(context.Background(), job.JobID)
-
-	require.NoError(t, err)
-	binary, err := os.ReadFile(updater.cfg.UpdaterBinary)
-	require.NoError(t, err)
-	require.Equal(t, "new updater", string(binary))
-	requireCallsInOrder(t, runner.callList(),
-		"git status --porcelain --untracked-files=no",
-		"git fetch --prune origin "+ExpectedBranch,
-		"git merge --ff-only origin/"+ExpectedBranch,
-		"docker build --pull -f "+filepath.Join(updater.cfg.RepoDir, "deploy", "Dockerfile.updater"),
-		"docker compose -p test-project -f "+updater.cfg.ComposeFiles[0]+" build --pull sub2api",
-		"docker compose -p test-project -f "+updater.cfg.ComposeFiles[0]+" up -d --force-recreate --no-deps sub2api",
-		"docker inspect --format {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} sub2api-app",
-	)
+func TestRollbackFailureIsReported(t *testing.T) {
+	r := &fakeRunner{newHealth: "unhealthy", rollbackHealth: "unhealthy"}
+	u := newTestUpdater(t, r)
+	queue(u)
+	require.ErrorContains(t, u.workflow(context.Background(), "test-job"), "automatic rollback incomplete")
+}
+func TestImageRevisionMismatchDoesNotDeploy(t *testing.T) {
+	r := &fakeRunner{}
+	u := newTestUpdater(t, r)
+	queue(u)
+	key := commandKey("docker", "image", "inspect", "--format", `{{.Id}}|{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}`, pinnedImage)
+	r.outputs[key] = newID + "|" + targetVersion + "|wrong"
+	require.ErrorContains(t, u.workflow(context.Background(), "test-job"), "does not match")
+	require.Zero(t, r.recreateCount)
 }
 
-func TestUpdaterWorkflowRestoresSourceWhenApplicationBuildFails(t *testing.T) {
-	runner := &fakeRunner{}
-	updater := newTestUpdater(t, runner)
-	updater.jobs["test-job"] = Job{JobID: "test-job"}
-	buildKey := commandKey("docker", "compose", "-p", "test-project", "-f", updater.cfg.ComposeFiles[0], "build", "--pull", "sub2api")
-	runner.errors[buildKey] = errors.New("build failed")
-
-	err := updater.workflow(context.Background(), "test-job")
-
-	require.ErrorContains(t, err, "image build failed")
-	require.Contains(t, runner.callList(), "git reset --hard old-commit")
+type pausedDeployRunner struct {
+	*fakeRunner
+	started chan struct{}
+	resume  chan struct{}
 }
 
-func TestUpdaterWorkflowRollsBackImageWhenHealthCheckFails(t *testing.T) {
-	runner := &fakeRunner{}
-	updater := newTestUpdater(t, runner)
-	updater.jobs["test-job"] = Job{JobID: "test-job"}
-	healthKey := commandKey("docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", "sub2api-app")
-	runner.outputs[healthKey] = "unhealthy"
-
-	err := updater.workflow(context.Background(), "test-job")
-
-	require.ErrorContains(t, err, "previous application image restored")
-	calls := runner.callList()
-	require.Contains(t, calls, "git reset --hard old-commit")
-	require.Contains(t, calls, "docker image tag sha256:old sub2api-custom:test")
-	require.Contains(t, calls, "docker compose -p test-project -f "+updater.cfg.ComposeFiles[0]+" up -d --force-recreate --no-deps --no-build sub2api")
-}
-
-func requireCallsInOrder(t *testing.T, calls []string, fragments ...string) {
-	t.Helper()
-	index := 0
-	for _, call := range calls {
-		if index < len(fragments) && strings.Contains(call, fragments[index]) {
-			index++
+func (r *pausedDeployRunner) Output(ctx context.Context, dir, name string, args ...string) (string, error) {
+	if name == "docker" && strings.Contains(commandKey(name, args...), " up ") {
+		close(r.started)
+		select {
+		case <-r.resume:
+		case <-ctx.Done():
+			return "", ctx.Err()
 		}
 	}
-	missing := "<none>"
-	if index < len(fragments) {
-		missing = fragments[index]
+	return r.fakeRunner.Output(ctx, dir, name, args...)
+}
+
+func TestRestartRecoversInterruptedDeploymentBeforeAcceptingAnotherUpdate(t *testing.T) {
+	r := &fakeRunner{}
+	u := newTestUpdater(t, r)
+	queue(u)
+	u.jobs["test-job"] = Job{JobID: "test-job", Status: "running", Stage: "health_check", PreviousImage: oldID, TargetImage: pinnedImage}
+	require.NoError(t, u.persistCurrentJob("test-job"))
+	require.NoError(t, u.writeOverlay(pinnedImage))
+	r.image, r.recreateCount = newID, 1
+	paused := &pausedDeployRunner{fakeRunner: r, started: make(chan struct{}), resume: make(chan struct{})}
+	recovered, err := NewWithRunner(u.cfg, paused)
+	require.NoError(t, err)
+	// Always unblock the recovery goroutine even if an assertion fails.
+	t.Cleanup(func() {
+		select {
+		case <-paused.resume:
+		default:
+			close(paused.resume)
+		}
+	})
+	select {
+	case <-paused.started:
+	case <-time.After(time.Second):
+		t.Fatal("interrupted update did not attempt recovery")
 	}
-	require.Equalf(t, len(fragments), index, "missing ordered fragment %q in calls:\n%s", missing, strings.Join(calls, "\n"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/update", strings.NewReader(`{"request_id":"new-request","expected_version":"`+targetVersion+`"}`))
+	req.Header.Set("X-Sub2API-Updater-Token", u.cfg.Token)
+	rec := httptest.NewRecorder()
+	recovered.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusConflict, rec.Code)
+	close(paused.resume)
+	require.Eventually(t, func() bool {
+		recovered.mu.RLock()
+		defer recovered.mu.RUnlock()
+		return recovered.jobs["test-job"].Status == "failed" && recovered.activeID == ""
+	}, time.Second, time.Millisecond)
+	data, err := os.ReadFile(filepath.Join(u.cfg.StateDir, "test-job.json"))
+	require.NoError(t, err)
+	var job Job
+	require.NoError(t, json.Unmarshal(data, &job))
+	require.Contains(t, job.Error, "previous application image restored and healthy")
+	require.NotEmpty(t, job.FinishedAt)
+	// Recovery must restore the old image and must not pull or run a new update.
+	require.NotContains(t, strings.Join(r.callList(), "\n"), "docker pull")
+	require.Equal(t, oldID, r.image)
+}
+
+func TestRestartDuringPullDoesNotRecreateApplication(t *testing.T) {
+	r := &fakeRunner{}
+	u := newTestUpdater(t, r)
+	u.jobs["test-job"] = Job{JobID: "test-job", Status: "running", Stage: "pulling", PreviousImage: oldID, TargetImage: pinnedImage}
+	require.NoError(t, u.persistCurrentJob("test-job"))
+	recovered, err := NewWithRunner(u.cfg, r)
+	require.NoError(t, err)
+	require.Equal(t, "failed", recovered.jobs["test-job"].Status)
+	require.Empty(t, recovered.activeID)
+	require.Empty(t, r.callList())
 }

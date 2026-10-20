@@ -49,7 +49,13 @@ class ReleaseMatrixTest(unittest.TestCase):
             metadata = {'version': '9.8.7', 'sha': 'a' * 40, 'target': target,
                         'archive': name, 'sha256': release.sha256(archive)}
             (directory / f"manifest-{target['goos']}-{target['goarch']}.json").write_text(json.dumps(metadata))
-        return argparse.Namespace(input='release-input', version='9.8.7', sha='a' * 40, simple=simple, output='contexts')
+        updaters = Path('updater-input')
+        updaters.mkdir(exist_ok=True)
+        for arch in (['amd64'] if simple else ['amd64', 'arm64']):
+            binary = updaters / f'updater-linux-{arch}'
+            binary.write_bytes(b'host updater')
+            binary.with_suffix('.json').write_text(json.dumps(dict(version='9.8.7', sha='a' * 40, arch=arch, sha256=release.sha256(binary))))
+        return argparse.Namespace(updater_input=str(updaters), input='release-input', version='9.8.7', sha='a' * 40, simple=simple, output='contexts')
 
     def test_full_and_simple_matrix_match_existing_targets(self):
         full = release.targets()
@@ -120,6 +126,11 @@ class ReleaseMatrixTest(unittest.TestCase):
             binary = Path('contexts') / arch / 'sub2api'
             self.assertEqual(binary.read_bytes(), b'fixture')
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
+            self.assertEqual((binary.parent / 'sub2api-updater').read_bytes(), b'host updater')
+            self.assertIn('COPY sub2api-updater', (binary.parent / 'Dockerfile').read_text())
+        Path('updater-input/updater-linux-amd64').write_bytes(b'corrupted')
+        with self.assertRaisesRegex(ValueError, 'updater source or checksum mismatch'):
+            release.contexts(args)
 
     def test_plan_requires_a_tag_for_publication(self):
         args = argparse.Namespace(ref='main', dry_run=False, simple=False)
@@ -175,6 +186,9 @@ class ReleaseMatrixTest(unittest.TestCase):
                 subprocess.run(['bash', str(ROOT / '.github/release-tools/release-images.sh')], env=env, check=True)
                 log = log_path.read_text()
                 self.assertIn('--push', log)
+                self.assertIn(f'--metadata-file {self.temp.name}/image-amd64.json', log)
+                if not simple:
+                    self.assertIn(f'--metadata-file {self.temp.name}/image-arm64.json', log)
                 self.assertEqual(log.count('buildx build'), 1 if simple else 2)
                 if simple:
                     self.assertNotIn('fixturehub', log)

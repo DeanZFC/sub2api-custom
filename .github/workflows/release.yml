@@ -181,6 +181,22 @@ jobs:
           path: matrix-output/
           if-no-files-found: error
           retention-days: 1
+      - name: Build host updater from the same release commit
+        if: ${{ matrix.goos == 'linux' }}
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          GOOS: linux
+          CGO_ENABLED: '0'
+        run: |
+          (cd backend && go build -trimpath -o "$RUNNER_TEMP/sub2api-updater" ./cmd/source-updater)
+          python "$RUNNER_TEMP/release-tools/release_matrix.py" collect-updater --version "$RELEASE_VERSION" --sha "${{ needs.prepare.outputs.sha }}" --goarch "$GOARCH" --input "$RUNNER_TEMP/sub2api-updater" --output updater-output
+      - uses: actions/upload-artifact@v7
+        if: ${{ matrix.goos == 'linux' }}
+        with:
+          name: release-updater-${{ matrix.goarch }}
+          path: updater-output/
+          if-no-files-found: error
+          retention-days: 1
       - name: Save updated target cache
         if: ${{ steps.go-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -220,9 +236,14 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r "$RUNNER_TEMP/release-tools/requirements-release.txt"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-updater-*
+          path: updater-input
+          merge-multiple: true
       - name: Verify complete matrix and prepare Docker contexts
         run: |
-          args=(--version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --input release-input --output .release-context)
+          args=(--version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --input release-input --updater-input updater-input --output .release-context)
           if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
           python "$RUNNER_TEMP/release-tools/release_matrix.py" contexts "${args[@]}"
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0; v6.5.0 archive is unavailable
@@ -280,6 +301,17 @@ jobs:
           GITHUB_REPO_NAME: ${{ github.event.repository.name }}
           GITHUB_REPO_OWNER_LOWER: ${{ needs.prepare.outputs.owner_lower }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || 'skip' }}
+      # This is the readiness marker consumed by the web UI. Upload it only
+      # after all archives and immutable images have finished publishing.
+      - name: Publish web update readiness manifest
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          args=(--version "$RELEASE_VERSION" --revision "$RELEASE_SHA" --metadata-dir "$RUNNER_TEMP" --output "$RUNNER_TEMP/update-manifest.json")
+          if [[ "$SIMPLE_RELEASE" == true ]]; then args+=(--simple); fi
+          python "$RUNNER_TEMP/release-tools/update_manifest.py" "${args[@]}"
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/update-manifest.json" --repo "$GITHUB_REPOSITORY" --clobber
       - name: Upload dry-run checksums and metadata
         if: ${{ env.DRY_RUN == 'true' }}
         uses: actions/upload-artifact@v7

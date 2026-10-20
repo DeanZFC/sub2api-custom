@@ -129,7 +129,7 @@ func (r *channelMonitorV2Repository) GetDimensions(ctx context.Context, filter s
 	// Catalog dimensions must stay independent of the currently selected
 	// platform/group/model multi-select filters so pickers keep their full option set.
 	// Time/coverage still come from the request filter; config scope (enabled platforms,
-	// group allow-list, display-model collapse) still applies.
+	// group allow-list) still applies.
 	catalogFilter := channelMonitorV2CatalogFilter(channelMonitorV2CommonCoverageFilter(filter, *coverage))
 	where, args, _ := channelMonitorV2WhereWithRollup(catalogFilter, cfg, "m")
 	query := `SELECT m.platform, COALESCE(g.name, ''), lower(COALESCE(NULLIF(TRIM(g.platform), ''), 'unknown')), m.group_id, m.model,
@@ -158,14 +158,6 @@ func (r *channelMonitorV2Repository) GetDimensions(ctx context.Context, filter s
 	groupCounts := map[int64]groupValue{}
 	for _, platform := range channelMonitorV2EnabledPlatforms(cfg) {
 		platformCounts[platform] += 0
-		for _, p := range cfg.Platforms {
-			if p.Platform != platform || len(p.Models) == 0 {
-				continue
-			}
-			for _, model := range p.Models {
-				modelCounts[platform+"\x00"+model] = modelValue{platform: platform, count: 0}
-			}
-		}
 	}
 	groupInfo, err := r.loadChannelMonitorV2GroupInfo(ctx, configuredChannelMonitorV2GroupIDs(catalogFilter, cfg))
 	if err != nil {
@@ -205,8 +197,9 @@ func (r *channelMonitorV2Repository) GetDimensions(ctx context.Context, filter s
 	for value, count := range platformCounts {
 		result.Platforms = append(result.Platforms, service.ChannelMonitorV2Dimension{Value: value, Label: value, RequestCount: count})
 	}
-	for value, meta := range modelCounts {
-		result.Models = append(result.Models, service.ChannelMonitorV2Dimension{Value: value, Label: channelMonitorV2ModelLabel(value), Platform: meta.platform, RequestCount: meta.count})
+	for key, meta := range modelCounts {
+		model := strings.SplitN(key, "\x00", 2)[1]
+		result.Models = append(result.Models, service.ChannelMonitorV2Dimension{Value: model, Label: channelMonitorV2ModelLabel(model), Platform: meta.platform, RequestCount: meta.count})
 	}
 	for id, value := range groupCounts {
 		result.Groups = append(result.Groups, service.ChannelMonitorV2GroupDimension{ID: id, Name: value.name, Platform: value.platform, RequestCount: value.count})
@@ -302,21 +295,6 @@ func (r *channelMonitorV2Repository) GetModels(ctx context.Context, filter servi
 		return nil, err
 	}
 	accs := map[string]*metricAccumulator{}
-	for _, platform := range channelMonitorV2EnabledPlatforms(cfg) {
-		if len(filter.Platforms) > 0 && !containsString(filter.Platforms, platform) {
-			continue
-		}
-		models := configuredChannelMonitorV2Models(cfg, platform, filter)
-		for _, model := range models {
-			if model == "" {
-				continue
-			}
-			key := platform + "\x00" + model
-			if accs[key] == nil {
-				accs[key] = newMetricAccumulator()
-			}
-		}
-	}
 	for _, fact := range facts {
 		if !channelMonitorV2ModelSelected(filter, cfg, fact.Platform, fact.Model) {
 			continue
@@ -515,6 +493,9 @@ func channelMonitorV2MatrixDimensionKey(groupBy service.ChannelMonitorV2GroupBy,
 
 func seedChannelMonitorV2MatrixAccumulators(filter service.ChannelMonitorV2Filter, cfg service.ChannelMonitorV2Config, groupBy service.ChannelMonitorV2GroupBy, groupInfo map[int64]channelMonitorV2GroupInfo) map[channelMonitorV2MatrixKey]*channelMonitorV2MatrixAccumulator {
 	accs := map[channelMonitorV2MatrixKey]*channelMonitorV2MatrixAccumulator{}
+	if groupBy == service.ChannelMonitorV2GroupByPlatformModel || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel {
+		return accs
+	}
 	platforms := channelMonitorV2EnabledPlatforms(cfg)
 	if len(filter.Platforms) > 0 {
 		platforms = intersectStrings(platforms, filter.Platforms)
@@ -539,13 +520,6 @@ func seedChannelMonitorV2MatrixAccumulators(filter service.ChannelMonitorV2Filte
 		}
 	}
 	for _, platform := range platforms {
-		models := []string{""}
-		if groupBy == service.ChannelMonitorV2GroupByPlatformModel || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel {
-			models = configuredChannelMonitorV2Models(cfg, platform, filter)
-			if len(models) == 0 {
-				models = []string{""}
-			}
-		}
 		for _, groupID := range groupIDs {
 			info := groupInfo[groupID]
 			if needsGroup {
@@ -556,40 +530,16 @@ func seedChannelMonitorV2MatrixAccumulators(filter service.ChannelMonitorV2Filte
 					continue
 				}
 			}
-			for _, model := range models {
-				key := channelMonitorV2MatrixKey{platform: platform}
-				if needsGroup {
-					key.groupID = groupID
-				}
-				if groupBy == service.ChannelMonitorV2GroupByPlatformModel || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel {
-					key.model = model
-				}
-				if accs[key] == nil {
-					accs[key] = &channelMonitorV2MatrixAccumulator{groupName: info.name, total: newMetricAccumulator(), buckets: make(map[string]*metricAccumulator)}
-				}
+			key := channelMonitorV2MatrixKey{platform: platform}
+			if needsGroup {
+				key.groupID = groupID
+			}
+			if accs[key] == nil {
+				accs[key] = &channelMonitorV2MatrixAccumulator{groupName: info.name, total: newMetricAccumulator(), buckets: make(map[string]*metricAccumulator)}
 			}
 		}
 	}
 	return accs
-}
-
-func configuredChannelMonitorV2Models(cfg service.ChannelMonitorV2Config, platform string, filter service.ChannelMonitorV2Filter) []string {
-	models := []string{}
-	for _, p := range cfg.Platforms {
-		if p.Platform != platform {
-			continue
-		}
-		models = append(models, p.Models...)
-		break
-	}
-	if len(filter.Models) > 0 {
-		if len(models) == 0 {
-			models = append(models, filter.Models...)
-		} else {
-			models = intersectStrings(models, filter.Models)
-		}
-	}
-	return models
 }
 
 // channelMonitorV2CatalogFilter clears multi-select dimensions so catalog endpoints
@@ -1199,33 +1149,12 @@ func channelMonitorV2EnabledPlatforms(cfg service.ChannelMonitorV2Config) []stri
 	return out
 }
 
-// channelMonitorV2DisplayModel maps a raw model name for presentation.
-// Semantics (parallel to empty group_ids = all groups):
-//   - platform not in config / disabled → keep raw model (still collected)
-//   - models list empty → show the real model name (no collapsing)
-//   - models list non-empty → selected keep identity; everything else → __other__
-func channelMonitorV2DisplayModel(cfg service.ChannelMonitorV2Config, platform, model string) string {
+// Keep observed model identities even when an older config contains a named-model list.
+func channelMonitorV2DisplayModel(_ service.ChannelMonitorV2Config, _, model string) string {
 	model = strings.TrimSpace(model)
 	if model == "" {
-		return service.ChannelMonitorV2OtherModel
+		return "unknown"
 	}
-	for _, p := range cfg.Platforms {
-		if p.Platform != platform {
-			continue
-		}
-		// Empty allow-list: surface every real model instead of dumping into __other__.
-		// Operators opt into the named + __other__ split only by listing models.
-		if len(p.Models) == 0 {
-			return model
-		}
-		for _, selected := range p.Models {
-			if selected == model {
-				return model
-			}
-		}
-		return service.ChannelMonitorV2OtherModel
-	}
-	// Platform not configured: still show the real model so traffic is visible.
 	return model
 }
 func channelMonitorV2ModelSelected(filter service.ChannelMonitorV2Filter, cfg service.ChannelMonitorV2Config, platform, model string) bool {

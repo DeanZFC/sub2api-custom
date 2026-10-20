@@ -258,6 +258,16 @@ func (s *GitHubReleaseServiceSuite) TestFetchChecksumFile_Non200() {
 	require.Error(s.T(), err, "expected error for non-200")
 }
 
+func TestGitHubReleaseMetadataSizeLimit(t *testing.T) {
+	client := newTestGitHubReleaseClient()
+	client.httpClient.Transport = githubReleaseRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Request: req,
+			Body: io.NopCloser(strings.NewReader(strings.Repeat("x", (1<<20)+1)))}, nil
+	})
+	_, err := client.FetchChecksumFile(context.Background(), "https://github.com/test/repo/releases/download/v1/update-manifest.json")
+	require.ErrorContains(t, err, "exceeds 1 MiB")
+}
+
 func (s *GitHubReleaseServiceSuite) TestDownloadFile_ContextCancel() {
 	s.srv = newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()

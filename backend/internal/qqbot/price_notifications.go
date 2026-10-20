@@ -36,6 +36,7 @@ type PriceState struct {
 	Key    string       `json:"key"`
 	Kind   string       `json:"kind"`
 	Name   string       `json:"name"`
+	Status string       `json:"status,omitempty"`
 	Fields []PriceField `json:"fields"`
 }
 
@@ -204,7 +205,7 @@ func (s *Service) checkPriceChanges(ctx context.Context, now time.Time) (time.Ti
 		if err = json.Unmarshal(raw, &previous); err != nil {
 			return next, err
 		}
-		chunks := formatPriceChanges(previous, current, c.PriceNotifications.Scheduled, now)
+		chunks := formatPriceChanges(previous, current, c.PriceNotifications.Scheduled)
 		batchID, sequence := randomID(), 0
 		for _, group := range priceNotificationGroups(c) {
 			for _, chunk := range chunks {
@@ -233,103 +234,179 @@ func (s *Service) checkPriceChanges(ctx context.Context, now time.Time) (time.Ti
 	return next, tx.Commit()
 }
 
-func formatPriceChanges(previous, current PriceSnapshot, scheduled bool, at time.Time) []string {
+func formatPriceChanges(previous, current PriceSnapshot, scheduled bool) []string {
 	old := map[string]PriceState{}
 	for _, state := range previous.States {
 		old[state.Key] = state
 	}
 	states := append([]PriceState(nil), current.States...)
+	present := map[string]bool{}
+	for _, state := range current.States {
+		present[state.Key] = true
+	}
+	for _, state := range previous.States {
+		if !present[state.Key] {
+			states = append(states, state)
+		}
+	}
 	sort.Slice(states, func(i, j int) bool { return states[i].Key < states[j].Key })
 	var chunks []string
 	for _, state := range states {
 		before, ok := old[state.Key]
-		// Initial enable, newly created entities and activation are baselines, not
-		// price edits. Removed models inside an existing channel still produce diffs.
+		// New entities establish a baseline; existing entities include disabled
+		// ones so deactivation cannot be mistaken for deletion.
 		if !ok {
 			continue
 		}
-		prev := map[string]PriceField{}
-		fields := map[string]PriceField{}
-		for _, field := range before.Fields {
-			prev[field.Key] = field
-			fields[field.Key] = field
-		}
-		for _, field := range state.Fields {
-			fields[field.Key] = field
-		}
-		after := map[string]PriceField{}
-		for _, field := range state.Fields {
-			after[field.Key] = field
-		}
-		keys := make([]string, 0, len(fields))
-		for key := range fields {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
 		lines := []string{}
-		onlyScheduled := true
-		model := ""
-		for _, key := range keys {
-			field := fields[key]
-			if field.Scheduled && !scheduled {
-				continue
+		onlyScheduled := false
+		if !present[state.Key] {
+			lines = append(lines, "已删除")
+		} else {
+			from, to := priceStateStatus(before), priceStateStatus(state)
+			if from != to {
+				lines = append(lines, "状态："+priceStatusLabel(from)+" → "+priceStatusLabel(to))
 			}
-			a, had := prev[key]
-			b, has := after[key]
-			if had && has && a.Value == b.Value && a.Unit == b.Unit {
-				continue
+			// Keep inactive prices as a baseline. Re-enabling reports the status
+			// once rather than replaying price edits made while disabled.
+			if from == "active" && to == "active" {
+				changes, timed := priceFieldChanges(before, state, scheduled)
+				onlyScheduled = len(lines) == 0 && timed
+				lines = append(lines, changes...)
 			}
-			if !field.Scheduled {
-				onlyScheduled = false
-			}
-			if field.Model != "" && field.Model != model {
-				model = field.Model
-				lines = append(lines, "", "模型："+replyPlainLabel(limitText(model, 180)))
-			}
-			from, to := "未配置", "已移除"
-			if had {
-				from = a.Value
-			}
-			if has {
-				to = b.Value
-			}
-			line := replyPlainLabel(limitText(field.Label, 180)) + "：" + replyPlainLabel(limitText(from, 180)) + " → " + replyPlainLabel(limitText(to, 180))
-			if field.Unit != "" {
-				line += " / " + replyPlainLabel(field.Unit)
-			}
-			lines = append(lines, line)
 		}
 		if len(lines) == 0 {
 			continue
 		}
-		title, noun := "渠道价格变更", "渠道"
-		if state.Kind == "group" {
-			title, noun = "分组倍率变更", "分组"
-		}
-		if onlyScheduled {
-			title += "（定时切换）"
-		}
-		header := "**【" + title + "】**\n" + noun + "：" + replyPlainLabel(limitText(state.Name, 120)) + "\n"
-		footer := "\n\n检测时间：" + at.In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05") + "（北京时间）"
-		// Preserve every changed field; repeat the subject on continuation messages.
-		chunk := header
-		activeModel := ""
-		for _, line := range lines {
-			line = limitText(line, 900)
-			if strings.HasPrefix(line, "模型：") {
-				activeModel = line
-			}
-			if len([]rune(chunk+"\n"+line+footer)) > 1750 && chunk != header {
-				chunks = append(chunks, chunk+footer)
-				chunk = header
-				if activeModel != "" && line != activeModel {
-					chunk += "\n" + activeModel
-				}
-			}
-			chunk += "\n" + line
-		}
-		chunks = append(chunks, chunk+footer)
+		chunks = append(chunks, formatPriceNotification(state, lines, onlyScheduled)...)
 	}
+	return chunks
+}
+
+func priceStateStatus(state PriceState) string {
+	// Snapshots written before status tracking contained active entities only.
+	if state.Status == "" {
+		return "active"
+	}
+	return state.Status
+}
+
+func priceStatusLabel(status string) string {
+	switch status {
+	case "active":
+		return "启用"
+	case "disabled":
+		return "停用"
+	default:
+		return replyPlainLabel(limitText(status, 80))
+	}
+}
+
+func priceFieldChanges(before, state PriceState, scheduled bool) ([]string, bool) {
+	prev := map[string]PriceField{}
+	fields := map[string]PriceField{}
+	for _, field := range before.Fields {
+		prev[field.Key] = field
+		fields[field.Key] = field
+	}
+	for _, field := range state.Fields {
+		fields[field.Key] = field
+	}
+	after := map[string]PriceField{}
+	for _, field := range state.Fields {
+		after[field.Key] = field
+	}
+	baseBefore, hadBase := prev["01_text"]
+	baseAfter, hasBase := after["01_text"]
+	baseRateChanged := hadBase != hasBase || baseBefore.Value != baseAfter.Value || baseBefore.Unit != baseAfter.Unit
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := []string{}
+	onlyScheduled := true
+	model := ""
+	for _, key := range keys {
+		field := fields[key]
+		if field.Scheduled && !scheduled {
+			continue
+		}
+		a, had := prev[key]
+		b, has := after[key]
+		if had && has && a.Value == b.Value && a.Unit == b.Unit {
+			continue
+		}
+		if state.Kind == "group" && key == "05_current" {
+			// A base-rate edit also changes the derived rate. Report it once;
+			// keep derived-only changes for scheduled peak transitions.
+			if baseRateChanged {
+				continue
+			}
+			field.Label = "倍率"
+		}
+		if !field.Scheduled {
+			onlyScheduled = false
+		}
+		if field.Model != "" && field.Model != model {
+			model = field.Model
+			lines = append(lines, "模型："+replyPlainLabel(limitText(model, 180)))
+		}
+		from, to := "未配置", "已移除"
+		if had {
+			from = a.Value
+		}
+		if has {
+			to = b.Value
+		}
+		line := replyPlainLabel(limitText(field.Label, 180)) + "：" + replyPlainLabel(limitText(priceNotificationValue(from), 180)) + " → " + replyPlainLabel(limitText(priceNotificationValue(to), 180))
+		if field.Unit != "" {
+			line += " / " + replyPlainLabel(field.Unit)
+		}
+		lines = append(lines, line)
+	}
+	return lines, onlyScheduled
+}
+
+func priceNotificationValue(value string) string {
+	switch value {
+	case "未设置（沿用计费默认值）":
+		return "默认"
+	case "跟随文字基础倍率", "跟随基础倍率":
+		return "跟随倍率"
+	default:
+		return value
+	}
+}
+
+func formatPriceNotification(state PriceState, lines []string, onlyScheduled bool) []string {
+	noun := "渠道"
+	if state.Kind == "group" {
+		noun = "分组"
+	}
+	header := noun + "：" + replyPlainLabel(limitText(state.Name, 120))
+	if onlyScheduled {
+		header += "（定时切换）"
+	}
+	// Preserve every changed field; repeat the subject on continuation messages.
+	var chunks []string
+	chunk := header
+	activeModel := ""
+	for _, line := range lines {
+		line = limitText(line, 900)
+		if strings.HasPrefix(line, "模型：") {
+			activeModel = line
+		}
+		if len([]rune(chunk+"\n"+line)) > 1750 && chunk != header {
+			chunks = append(chunks, chunk)
+			chunk = header
+			if activeModel != "" && line != activeModel {
+				chunk += "\n" + activeModel
+			}
+		}
+		chunk += "\n" + line
+	}
+	chunks = append(chunks, chunk)
 	return chunks
 }
 

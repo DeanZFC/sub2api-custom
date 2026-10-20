@@ -28,7 +28,7 @@ export default {
       empty: '暂无可选项', selectedCount: '{count} 项', labelValue: '{label}：{value}'
     },
     groupBy: {
-      label: '展示维度', platform: '平台', platformGroup: '平台 / 分组', platformModel: '平台 / 模型', platformGroupModel: '平台 / 分组 / 模型'
+      label: '展示维度', platform: '按平台显示', platformGroup: '按渠道显示', platformModel: '平台 / 模型', platformGroupModel: '按模型显示'
     },
     trendView: { label: '趋势视图', pulse: '渠道卡片', line: '折线图' },
     cards: {
@@ -38,8 +38,6 @@ export default {
       recentRequests: '近 20 次请求状态',
       requestLegend: '绿：成功 · 黄：响应较慢 / 已忽略错误 · 红：失败 · 灰：暂无请求',
       noRequest: '当前时间范围内暂无更多请求',
-      models: '模型状态', modelsHint: '仅展示当前时间范围内有调用的模型 · 被动健康',
-      noModels: '当前时间范围内暂无模型调用',
       health: { healthy: '健康', warning: '需关注', critical: '异常', unknown: '暂无状态' },
       legend: { healthy: '健康', warning: '需关注', critical: '异常', unknown: '无流量 / 样本不足' },
       requests: { success: '请求成功', slow: '请求成功，首 Token 较慢', error: '请求失败', ignored: '已忽略的请求错误（不计入健康分）' },
@@ -110,11 +108,9 @@ export default {
       refreshAria: '汇总频率',
       selectPlatform: '选择平台',
       addPlatform: '添加平台',
-      platformsTitle: '平台与模型',
-      platformsHint: '留空 = 展示全部真实模型名；填写后仅名单内单独成行，其余归入「其他」',
-      modelsPlaceholder: '留空=全部真实模型；或填写主流模型名单（其余归其他）',
+      platformsTitle: '监控平台',
+      platformsHint: '展示所选平台实际调用的模型，保留真实名称',
       badgeAllModels: '全部模型',
-      badgeOther: '+ 其他',
       groupsTitle: '监控分组',
       groupsSelected: '已选择 {count} 个分组',
       groupsAll: '全部分组',
@@ -135,14 +131,13 @@ export default {
         warningCache: '缓存率关注 %',
         criticalCache: '缓存率异常 %',
       },
-      namedModelsEmpty: '各平台模型列表为空：将展示全部真实模型名（不归入「其他」）。',
-      namedModelsCount: '将展示 {count} 个命名模型维度；名单外模型归入各平台「其他」。',
+      namedModelsEmpty: '仅展示当前时间范围内有调用的模型，尽量按版本从新到旧排列。',
       userContractTitle: '用户端展示约定',
       userContract: {
         health: '健康色三指标：错误率 60% + 首 Token P50 20% + 缓存率 20%（阈值可在上方配置）',
         trend: '趋势可切换色块矩阵 / 折线图（错误率 · 缓存率 · 首 Token）',
         latency: '延迟展示 AVG · P50 · P90；不展示绝对请求数 / 错误数',
-        models: '模型列表留空时展示真实模型名，不会全部归入「其他」',
+        models: '仅显示实际调用的模型名称，不合并为「其他模型」',
       },
     },
     admin: {

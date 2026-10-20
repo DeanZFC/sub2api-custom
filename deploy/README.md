@@ -18,7 +18,7 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 | `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
 | `docker-compose.custom.yml` | Generic source-build overlay with the `sub2api-custom` image |
 | `install-custom-docker.sh` | One-command custom Docker deployment plus host updater installation |
-| `install-source-updater.sh` | Installs the restricted systemd updater for an existing Compose instance |
+| `install-source-updater.sh` | Installs the restricted host image updater for an existing Compose instance |
 | `Dockerfile.updater` | Reproducible builder image for the host updater binary |
 | `docker-deploy.sh` | Legacy upstream preparation script |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
@@ -73,12 +73,37 @@ sudo ./deploy/install-source-updater.sh \
   --container "$(docker compose -f deploy/docker-compose.local.yml -f deploy/docker-compose.custom.yml ps -q sub2api)"
 ```
 
-安装器会读取容器 Compose labels，固定更新 `origin/sub2api-custom`，然后构建、重建应用容器并执行
-健康检查。管理员在页面版本菜单点击“立即更新”即可。更新流程默认不执行 PostgreSQL 备份，
-PostgreSQL、Redis、`.env`、`data/` 和数据库目录不会被删除；更新失败时会尝试恢复源码和旧应用镜像。
-数据库迁移是前向变更，生产环境请在更新前自行保留可恢复的数据库备份或快照。
+安装器从当前发布镜像提取宿主机更新器；旧源码实例首次安装可加 `--build-from-source`，
+也可用 `--updater-image ghcr.io/deanzfc/sub2api@sha256:...` 从已发布镜像引导安装。
+已配置 Socket 和令牌的实例升级更新器可加 `--no-recreate`，不重建应用。
 
+管理员在页面版本菜单点击“立即更新”后，宿主机更新器将：
+
+1. 获取所选版本的 `update-manifest.json`，校验版本、源码提交和可信镜像仓库。
+2. 拉取该架构的固定摘要镜像，从同一个镜像提取下次使用的更新器，无需服务器编译。
+3. 在 `deploy/docker-compose.updater.json` 写入应用镜像覆盖，保留实例原有 Compose 配置，
+   仅以 `--no-deps --no-build --pull never` 重建应用服务。
+4. 检查新容器的镜像身份和 Docker 健康状态。失败自动恢复旧镜像，并验证恢复后的健康状态；
+   恢复不成功会明确报告，任务记录保留在宿主机状态目录中。
+
+发布工作流只有在镜像和归档全部就绪后才上传更新清单。没有清单的旧版本、分支提交、
+尚未完成的发布不会出现在新页面的更新提示中。Release 构建的容器同样走宿主机镜像更新，
+更新器暂时不可用时不执行容器内二进制替换。任务在应用重建时继续运行，刷新网页可恢复进度。
+
+更新不执行数据库备份或数据库回退。数据库迁移属于前向变更，**镜像回退不等于数据库回退**，
+更新前需保留数据库备份/快照，并确认新旧版本的数据库兼容性。应用切换会短暂中断服务，
+不保证进行中的请求不中断。PostgreSQL、Redis、端口、卷和密钥沿用现有配置。
+
+后续手动执行 Compose 时也要把 `-f deploy/docker-compose.updater.json` 放在配置文件列表最后，
+避免重新选择基础配置中的旧镜像；不要删除更新器保留的旧镜像，直到更新完成并确认稳定。
+迁移实例若 Compose labels 指向仓库外路径，应沿用其已有更新器 unit 的文件参数升级宿主机二进制，
+不要用通用安装器覆盖迁移配置。
 同一台服务器上的多实例需要为每个实例单独安装更新器，并分别传入各自的仓库目录和应用容器 ID。Compose 会按项目名自动隔离应用、PostgreSQL 和 Redis 容器；已有固定容器名的部署也可以直接安装，更新时会自动重新解析新容器。
+
+如果更新器服务正常，但页面仍显示“源码构建请使用 git pull 更新”，还需检查应用容器内的
+`SUB2API_UPDATER_SOCKET`、令牌及目录挂载。Socket 父目录（默认 `/run/sub2api-updater`）必须为
+`0755`，Socket 为 `0666`，应用的 UID 1000 才能访问；令牌文件仍保留在 `/etc/sub2api-updater`
+下，权限为 `0600`。安装器和更新器启动时会修正 Socket 父目录权限，兼容 `UMask=0077`。
 
 ### 与现有脚本版共存（Fork）
 

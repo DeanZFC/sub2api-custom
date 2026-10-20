@@ -4,7 +4,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/updatepolicy"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +32,7 @@ func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, data string, _
 }
 
 type updateServiceGitHubClientStub struct {
+	manifests         map[string][]byte
 	release           *GitHubRelease
 	recentReleases    []*GitHubRelease
 	recentErr         error
@@ -61,8 +66,12 @@ func (s *updateServiceGitHubClientStub) DownloadFile(context.Context, string, st
 	panic("DownloadFile should not be called when no update is available")
 }
 
-func (s *updateServiceGitHubClientStub) FetchChecksumFile(context.Context, string) ([]byte, error) {
-	panic("FetchChecksumFile should not be called when no update is available")
+func (s *updateServiceGitHubClientStub) FetchChecksumFile(_ context.Context, url string) ([]byte, error) {
+	data, ok := s.manifests[url]
+	if !ok {
+		return nil, errors.New("manifest missing")
+	}
+	return data, nil
 }
 
 func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
@@ -85,68 +94,67 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
 
-func TestUpdateServiceSourceBuildTracksForkVersionFile(t *testing.T) {
-	client := &updateServiceGitHubClientStub{repositoryFile: []byte("0.1.176-overdraft.2\n")}
-	svc := NewUpdateService(
-		&updateServiceCacheStub{},
-		client,
-		"0.1.176-overdraft.1",
-		"source",
-	)
-
-	info, err := svc.CheckUpdate(context.Background(), true)
-
-	require.NoError(t, err)
-	require.Equal(t, "0.1.176-overdraft.1", info.CurrentVersion)
-	require.Equal(t, "0.1.176-overdraft.2", info.LatestVersion)
-	require.True(t, info.HasUpdate)
-	require.Equal(t, "source", info.BuildType)
-	require.Equal(t, githubSourceUpdateURL, info.ReleaseInfo.HTMLURL)
-	require.Equal(t, githubRepo, client.fileRepo)
-	require.Equal(t, githubSourceBranch, client.fileRef)
-	require.Equal(t, githubForkVersionFile, client.filePath)
-	require.Empty(t, client.latestRepo, "源码构建不能查询官方或 Fork 的二进制 Release")
+func publishedFixture(version string) (*GitHubRelease, []byte) {
+	url, _ := updatepolicy.AssetURL(version)
+	raw, _ := json.Marshal(updatepolicy.Manifest{SchemaVersion: 1, Version: version, Revision: strings.Repeat("a", 40), Images: map[string]string{runtime.GOARCH: updatepolicy.ImageRepository + "@sha256:" + strings.Repeat("b", 64)}})
+	return &GitHubRelease{TagName: "v" + version, Prerelease: true, HTMLURL: "https://github.com/" + githubRepo + "/releases/tag/v" + version, Assets: []GitHubAsset{{Name: updatepolicy.AssetName, BrowserDownloadURL: url, Size: int64(len(raw))}}}, raw
 }
-
-func TestUpdateServiceSourceBuildIgnoresLegacyOfficialCache(t *testing.T) {
-	cache := &updateServiceCacheStub{data: `{"latest":"0.1.176","timestamp":4102444800}`}
-	client := &updateServiceGitHubClientStub{repositoryFile: []byte("0.1.176-overdraft.1\n")}
-	svc := NewUpdateService(cache, client, "0.1.176-overdraft.1", "source")
-
+func TestUpdateServiceAdvertisesOnlyReadyPublishedReleases(t *testing.T) {
+	ready, raw := publishedFixture("0.2.17-custom.13")
+	client := &updateServiceGitHubClientStub{recentReleases: []*GitHubRelease{{TagName: "v0.2.17-custom.14"}, ready}, manifests: map[string][]byte{ready.Assets[0].BrowserDownloadURL: raw}}
+	for _, build := range []string{"source", "release"} {
+		svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.2.17-custom.12", build)
+		info, err := svc.CheckUpdate(context.Background(), true)
+		require.NoError(t, err)
+		require.True(t, info.HasUpdate)
+		require.Equal(t, "0.2.17-custom.13", info.LatestVersion)
+		require.Equal(t, ready.HTMLURL, info.ReleaseInfo.HTMLURL)
+		require.Zero(t, client.fileCalls)
+	}
+}
+func TestUpdateServiceIgnoresLegacyBranchCache(t *testing.T) {
+	cache := &updateServiceCacheStub{data: `{"latest":"0.2.17-custom.99","timestamp":4102444800,"repository":"DeanZFC/sub2api-custom","build_type":"release"}`}
+	client := &updateServiceGitHubClientStub{repositoryFile: []byte("v0.2.17-custom.99")}
+	svc := NewUpdateService(cache, client, "0.2.17-custom.12", "release")
 	info, err := svc.CheckUpdate(context.Background(), false)
-
 	require.NoError(t, err)
 	require.False(t, info.HasUpdate)
-	require.Equal(t, "0.1.176-overdraft.1", info.LatestVersion)
-	require.Equal(t, 1, client.fileCalls)
+	require.Equal(t, "0.2.17-custom.12", info.LatestVersion)
+	require.Zero(t, client.fileCalls)
 }
-
-func TestUpdateServiceSourceBuildRejectsBinaryUpdate(t *testing.T) {
-	svc := NewUpdateService(
-		&updateServiceCacheStub{},
-		&updateServiceGitHubClientStub{},
-		"0.1.176-overdraft.1",
-		"source",
-	)
-
-	err := svc.PerformUpdate(context.Background())
-
-	require.ErrorIs(t, err, ErrSourceBuildUpdateRequired)
-}
-
-func TestUpdateServiceCustomBuildTracksSourceBranchWithoutRelease(t *testing.T) {
-	client := &updateServiceGitHubClientStub{repositoryFile: []byte("v0.2.7-custom.1\n")}
-	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.2.5-custom.12", "release")
-
+func TestUpdateServiceManifestMismatchDoesNotAdvertiseUpdate(t *testing.T) {
+	ready, raw := publishedFixture("0.2.17-custom.13")
+	client := &updateServiceGitHubClientStub{recentReleases: []*GitHubRelease{ready}, manifests: map[string][]byte{ready.Assets[0].BrowserDownloadURL: []byte(strings.ReplaceAll(string(raw), "custom.13", "custom.14"))}}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.2.17-custom.12", "release")
 	info, err := svc.CheckUpdate(context.Background(), true)
-
 	require.NoError(t, err)
-	require.True(t, info.HasUpdate)
-	require.Equal(t, "v0.2.7-custom.1", info.LatestVersion)
-	require.Equal(t, githubRepo, client.fileRepo)
-	require.Equal(t, githubSourceBranch, client.fileRef)
-	require.Equal(t, githubForkVersionFile, client.filePath)
-	require.Empty(t, client.latestRepo)
+	require.False(t, info.HasUpdate)
+	require.Contains(t, info.Warning, "mismatch")
+}
+func TestUpdateServiceSourceBuildRejectsBinaryUpdate(t *testing.T) {
+	svc := NewUpdateService(&updateServiceCacheStub{}, &updateServiceGitHubClientStub{}, "0.2.17-custom.12", "source")
+	require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrSourceBuildUpdateRequired)
+}
+
+type offlineUpdateAgent struct{}
+
+func (offlineUpdateAgent) Health(context.Context) error { return errors.New("offline") }
+func (offlineUpdateAgent) Start(context.Context, string, string) (SourceUpdateJob, error) {
+	return SourceUpdateJob{}, ErrSourceUpdaterUnavailable
+}
+func (offlineUpdateAgent) Status(context.Context, string) (SourceUpdateJob, error) {
+	return SourceUpdateJob{}, ErrSourceUpdaterUnavailable
+}
+func TestManagedReleaseNeverFallsBackToBinaryMutation(t *testing.T) {
+	svc := NewUpdateService(&updateServiceCacheStub{}, &updateServiceGitHubClientStub{}, "0.2.17-custom.12", "release")
+	svc.SetSourceUpdateAgent(offlineUpdateAgent{})
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.True(t, info.HostUpdateManaged)
+	require.False(t, info.SourceUpdateEnabled)
+	require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrSourceUpdaterUnavailable)
+	require.Error(t, svc.Rollback())
+	require.Error(t, svc.RollbackToVersion(context.Background(), "0.2.17-custom.11"))
 }
 
 func TestCompareVersionsSupportsForkPrereleaseRevisions(t *testing.T) {

@@ -95,15 +95,21 @@ COMPOSE_ARGS=(
   -f docker-compose.local.yml
   -f docker-compose.custom.yml
 )
-docker compose -p "$PROJECT" "${COMPOSE_ARGS[@]}" \
-  up -d --build
+if [[ -f docker-compose.updater.json ]]; then
+  COMPOSE_ARGS+=(-f docker-compose.updater.json)
+  docker compose -p "$PROJECT" "${COMPOSE_ARGS[@]}" up -d --no-build --pull never
+else
+  docker compose -p "$PROJECT" "${COMPOSE_ARGS[@]}" up -d --build
+fi
 
 APP_CONTAINER="$(docker compose -p "$PROJECT" "${COMPOSE_ARGS[@]}" ps -q sub2api)"
 [[ -n "$APP_CONTAINER" ]] || { echo "无法找到已启动的 sub2api 容器。" >&2; exit 1; }
 
-"$DEPLOY_DIR/install-source-updater.sh" \
-  --repo-dir "$INSTALL_DIR" \
-  --container "$APP_CONTAINER"
+UPDATER_INSTALL_ARGS=(--repo-dir "$INSTALL_DIR" --container "$APP_CONTAINER")
+if [[ ! -f "$DEPLOY_DIR/docker-compose.updater.json" ]]; then
+  UPDATER_INSTALL_ARGS+=(--build-from-source)
+fi
+"$DEPLOY_DIR/install-source-updater.sh" "${UPDATER_INSTALL_ARGS[@]}"
 
 echo "sub2api-custom 部署完成。"
 echo "访问地址：http://服务器IP:${SERVER_PORT}"

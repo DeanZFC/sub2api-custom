@@ -107,7 +107,7 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 		updateCtx, cancel := systemUpdateContext(ctx)
 		defer cancel()
 
-		// Source builds are rebuilt by a preconfigured host updater. The updater
+		// Container images are switched by a preconfigured host updater. The updater
 		// runs asynchronously because it recreates this application container;
 		// the returned job can be polled through GetSourceUpdateStatus.
 		if sourceOps, ok := h.updateSvc.(sourceUpdateOperations); ok {
@@ -116,7 +116,10 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 				releaseReason = "SYSTEM_UPDATE_CHECK_FAILED"
 				return nil, checkErr
 			}
-			if info != nil && info.BuildType == "source" && info.SourceUpdateEnabled {
+			if info != nil && info.HostUpdateManaged && !info.SourceUpdateEnabled {
+				return nil, service.ErrSourceUpdaterUnavailable
+			}
+			if info != nil && info.SourceUpdateEnabled {
 				if !info.HasUpdate {
 					succeeded = true
 					return gin.H{
@@ -134,7 +137,7 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 				}
 				succeeded = true
 				return gin.H{
-					"message":       "Source update started",
+					"message":       "Image update started",
 					"need_restart":  false,
 					"source_update": true,
 					"job":           job,
@@ -172,9 +175,9 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 	})
 }
 
-// GetSourceUpdateStatus returns the persisted status of a host-side source
+// GetSourceUpdateStatus returns the persisted status of a host-side image
 // update job. The job remains available while the application container is
-// being rebuilt and after it starts again.
+// being recreated and after it starts again.
 // GET /api/v1/admin/system/update-status/:job_id
 func (h *SystemHandler) GetSourceUpdateStatus(c *gin.Context) {
 	sourceOps, ok := h.updateSvc.(sourceUpdateOperations)

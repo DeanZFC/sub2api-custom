@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAppStore } from '@/stores/app'
 import { getPublicSettings } from '@/api/auth'
+import { checkUpdates } from '@/api/admin/system'
 import type { PublicSettings } from '@/types'
 
 function createDeferred<T>() {
@@ -81,6 +82,7 @@ describe('useAppStore', () => {
     vi.useFakeTimers()
     localStorage.clear()
     vi.mocked(getPublicSettings).mockReset()
+    vi.mocked(checkUpdates).mockReset()
     // 清除 window.__APP_CONFIG__
     delete (window as any).__APP_CONFIG__
   })
@@ -91,6 +93,23 @@ describe('useAppStore', () => {
   })
 
   // --- Toast 消息管理 ---
+
+  it('retains host update ownership when returning cached release version data', async () => {
+    vi.mocked(checkUpdates).mockResolvedValue({
+      current_version: '0.2.17-custom.12', latest_version: '0.2.17-custom.13',
+      has_update: true, host_update_managed: true, source_update_enabled: false,
+      cached: false, build_type: 'release'
+    })
+    const store = useAppStore()
+    await store.fetchVersion()
+    const cached = await store.fetchVersion()
+    expect(checkUpdates).toHaveBeenCalledOnce()
+    expect(cached?.host_update_managed).toBe(true)
+    expect(cached?.source_update_enabled).toBe(false)
+    expect(store.hostUpdateManaged).toBe(true)
+    store.clearVersionCache()
+    expect(store.hostUpdateManaged).toBe(false)
+  })
 
   describe('Toast 消息管理', () => {
     it('showSuccess 创建 success 类型 toast', () => {

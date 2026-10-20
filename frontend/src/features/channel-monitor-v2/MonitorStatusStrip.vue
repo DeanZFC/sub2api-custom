@@ -1,5 +1,5 @@
 <template>
-  <div class="monitor-status-strip flex h-9 min-w-0 items-end gap-1" :aria-label="label">
+  <div class="monitor-status-strip flex min-w-0 items-end gap-1" :class="compact ? 'h-6' : 'h-9'" :aria-label="label">
     <span
       v-for="(slot, index) in slots"
       :key="index"

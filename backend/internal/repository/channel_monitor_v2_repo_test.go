@@ -28,7 +28,7 @@ func TestChannelMonitorV2DateBinOriginIsUTC(t *testing.T) {
 	}
 }
 
-func TestChannelMonitorV2DisplayModelIsPlatformScoped(t *testing.T) {
+func TestChannelMonitorV2DisplayModelPreservesObservedNames(t *testing.T) {
 	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{
 		{Platform: "openai", Enabled: true, Models: []string{"shared", "gpt-5"}},
 		{Platform: "grok", Enabled: true, Models: []string{"grok-4"}},
@@ -36,11 +36,11 @@ func TestChannelMonitorV2DisplayModelIsPlatformScoped(t *testing.T) {
 		{Platform: "anthropic", Enabled: true, Models: []string{}},
 	}}
 	require.Equal(t, "shared", channelMonitorV2DisplayModel(cfg, "openai", "shared"))
-	require.Equal(t, service.ChannelMonitorV2OtherModel, channelMonitorV2DisplayModel(cfg, "grok", "shared"))
+	require.Equal(t, "shared", channelMonitorV2DisplayModel(cfg, "grok", "shared"))
 	require.Equal(t, "claude-sonnet-4", channelMonitorV2DisplayModel(cfg, "anthropic", "claude-sonnet-4"))
 	// Unconfigured platform still surfaces the real model name.
 	require.Equal(t, "gemini-2.5-pro", channelMonitorV2DisplayModel(cfg, "gemini", "gemini-2.5-pro"))
-	require.True(t, channelMonitorV2ModelSelected(service.ChannelMonitorV2Filter{Models: []string{service.ChannelMonitorV2OtherModel}}, cfg, "grok", "shared"))
+	require.True(t, channelMonitorV2ModelSelected(service.ChannelMonitorV2Filter{Models: []string{"shared"}}, cfg, "grok", "shared"))
 }
 
 func TestChannelMonitorV2MatrixDimensionKey(t *testing.T) {
@@ -48,9 +48,38 @@ func TestChannelMonitorV2MatrixDimensionKey(t *testing.T) {
 	key := channelMonitorV2MatrixDimensionKey(service.ChannelMonitorV2GroupByPlatformGroupModel, cfg, "openai", 7, "gpt-5")
 	require.Equal(t, channelMonitorV2MatrixKey{platform: "openai", groupID: 7, model: "gpt-5"}, key)
 	key = channelMonitorV2MatrixDimensionKey(service.ChannelMonitorV2GroupByPlatformModel, cfg, "openai", 7, "unlisted")
-	require.Equal(t, channelMonitorV2MatrixKey{platform: "openai", model: service.ChannelMonitorV2OtherModel}, key)
+	require.Equal(t, channelMonitorV2MatrixKey{platform: "openai", model: "unlisted"}, key)
 	key = channelMonitorV2MatrixDimensionKey(service.ChannelMonitorV2GroupByPlatform, cfg, "openai", 7, "gpt-5")
 	require.Equal(t, channelMonitorV2MatrixKey{platform: "openai"}, key)
+}
+
+func TestChannelMonitorV2ModelDimensionsAreObservedAndFilterable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	start := time.Now().UTC().Truncate(time.Hour)
+	filter := service.ChannelMonitorV2Filter{Start: start, End: start.Add(time.Hour), Bucket: 5 * time.Minute}
+	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{
+		{Platform: "openai", Enabled: true, Models: []string{"unused-model"}},
+		{Platform: "grok", Enabled: true},
+	}}
+	mock.ExpectQuery("SELECT usage_coverage_start").WillReturnRows(sqlmock.NewRows([]string{"usage", "error", "through", "computed", "backfill"}).AddRow(start, start, filter.End, filter.End, start))
+	mock.ExpectQuery("SELECT m.platform").WillReturnRows(sqlmock.NewRows([]string{"platform", "group_name", "group_platform", "group_id", "model", "count"}).
+		AddRow("openai", "A", "openai", 7, "called-model", 2).
+		AddRow("grok", "B", "grok", 8, "called-model", 3))
+	repo := &channelMonitorV2Repository{db: db}
+	dimensions, err := repo.GetDimensions(context.Background(), filter, cfg)
+	require.NoError(t, err)
+	require.Len(t, dimensions.Models, 2)
+	for _, model := range dimensions.Models {
+		require.Equal(t, "called-model", model.Value)
+		require.Equal(t, "called-model", model.Label)
+		require.True(t, channelMonitorV2ModelSelected(service.ChannelMonitorV2Filter{Models: []string{model.Value}}, cfg, model.Platform, "called-model"))
+	}
+	for _, grouping := range []service.ChannelMonitorV2GroupBy{service.ChannelMonitorV2GroupByPlatformModel, service.ChannelMonitorV2GroupByPlatformGroupModel} {
+		require.Empty(t, seedChannelMonitorV2MatrixAccumulators(filter, cfg, grouping, nil))
+	}
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestChannelMonitorV2HistogramPercentilesAreMergedFromCounts(t *testing.T) {

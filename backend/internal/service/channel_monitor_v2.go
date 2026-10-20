@@ -31,9 +31,10 @@ const (
 )
 
 type ChannelMonitorV2PlatformConfig struct {
-	Platform string   `json:"platform"`
-	Enabled  bool     `json:"enabled"`
-	Models   []string `json:"models"`
+	Platform string `json:"platform"`
+	Enabled  bool   `json:"enabled"`
+	// Models is retained for old configuration compatibility; observed names are always shown.
+	Models []string `json:"models"`
 }
 
 type ChannelMonitorV2Config struct {

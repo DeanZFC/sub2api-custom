@@ -14,17 +14,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/updatepolicy"
 )
 
 const (
-	ExpectedRemoteURL = "https://github.com/DeanZFC/sub2api-custom.git"
-	ExpectedBranch    = "sub2api-custom"
-	maxRequestBody    = 16 << 10
-	maxCommandOutput  = 16 << 10
+	maxRequestBody   = 16 << 10
+	maxCommandOutput = 16 << 10
 )
 
 var safeNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
@@ -42,13 +43,14 @@ type Config struct {
 	PostgresService string
 	AppContainer    string
 	HealthTimeout   time.Duration
+	ResolveManifest func(context.Context, string) (*updatepolicy.Manifest, error)
 }
 
 func (c *Config) Validate() error {
 	c.Token = strings.TrimSpace(c.Token)
 	c.RepoDir = filepath.Clean(strings.TrimSpace(c.RepoDir))
 	c.StateDir = filepath.Clean(strings.TrimSpace(c.StateDir))
-	c.UpdaterBinary = filepath.Clean(strings.TrimSpace(c.UpdaterBinary))
+	c.UpdaterBinary = strings.TrimSpace(c.UpdaterBinary)
 	c.ComposeProject = strings.TrimSpace(c.ComposeProject)
 	c.AppService = strings.TrimSpace(c.AppService)
 	c.PostgresService = strings.TrimSpace(c.PostgresService)
@@ -60,8 +62,9 @@ func (c *Config) Validate() error {
 		return errors.New("repository and state directories must be absolute paths")
 	}
 	if c.UpdaterBinary == "" {
-		c.UpdaterBinary = "/usr/local/libexec/sub2api-updater"
+		c.UpdaterBinary = updatepolicy.UpdaterPath
 	}
+	c.UpdaterBinary = filepath.Clean(c.UpdaterBinary)
 	if !filepath.IsAbs(c.UpdaterBinary) {
 		return errors.New("updater binary path must be absolute")
 	}
@@ -104,6 +107,8 @@ type Job struct {
 	TargetVersion  string `json:"target_version,omitempty"`
 	StartedAt      string `json:"started_at,omitempty"`
 	FinishedAt     string `json:"finished_at,omitempty"`
+	PreviousImage  string `json:"previous_image,omitempty"`
+	TargetImage    string `json:"target_image,omitempty"`
 }
 
 type Runner interface {
@@ -118,11 +123,6 @@ func (commandRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writ
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Env = append(os.Environ(),
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=safe.directory",
-		"GIT_CONFIG_VALUE_0="+dir,
-	)
 	return cmd.Run()
 }
 
@@ -172,6 +172,21 @@ func NewWithRunner(cfg Config, runner Runner) (*Updater, error) {
 	if err := u.loadJobs(); err != nil {
 		return nil, err
 	}
+	// Recover an interrupted container switch before accepting another update.
+	var interrupted *Job
+	for _, job := range u.jobs {
+		if job.Status == "recovering" {
+			u.activeID = job.JobID
+			interrupted = &job
+			break
+		}
+	}
+	if interrupted != nil {
+		go func(job Job) {
+			err := u.rollbackImage(job.JobID, job.PreviousImage, errors.New("updater restarted during deployment"))
+			u.finish(job.JobID, "failed", "failed", "update interrupted", sanitizeError(err))
+		}(*interrupted)
+	}
 	return u, nil
 }
 
@@ -210,7 +225,7 @@ func (u *Updater) startUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	req.RequestID = strings.TrimSpace(req.RequestID)
 	req.ExpectedVersion = strings.TrimSpace(req.ExpectedVersion)
-	if !safeNamePattern.MatchString(req.RequestID) || len(req.ExpectedVersion) > 64 || strings.ContainsAny(req.ExpectedVersion, "\r\n\x00") {
+	if !safeNamePattern.MatchString(req.RequestID) || len(req.ExpectedVersion) > 64 || !updatepolicy.ValidVersion(req.ExpectedVersion) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid update request"})
 		return
 	}
@@ -296,81 +311,159 @@ func (u *Updater) run(jobID string) {
 
 func (u *Updater) workflow(ctx context.Context, jobID string) error {
 	u.update(jobID, "running", "validating", "validating deployment")
-	currentVersion, oldCommit, oldImageID, imageName, err := u.validateDeployment(ctx)
+	oldTarget, err := u.currentAppTarget(ctx)
 	if err != nil {
 		return err
 	}
-	u.mutate(jobID, func(job *Job) { job.CurrentVersion = currentVersion })
-
-	u.update(jobID, "running", "fetching", "fetching source update")
-	if _, err := u.runOutput(ctx, "git", "fetch", "--prune", "origin", ExpectedBranch); err != nil {
-		return fmt.Errorf("git fetch failed: %w", err)
+	oldImage, err := u.runOutput(ctx, "docker", "inspect", "--format", "{{.Image}}", oldTarget)
+	if err != nil || !strings.HasPrefix(oldImage, "sha256:") {
+		return errors.New("cannot identify current application image")
 	}
-	if _, err := u.runOutput(ctx, "git", "merge-base", "--is-ancestor", "HEAD", "origin/"+ExpectedBranch); err != nil {
-		return errors.New("remote update is not a fast-forward of the deployed commit")
+	u.mu.RLock()
+	version := u.jobs[jobID].TargetVersion
+	u.mu.RUnlock()
+	u.update(jobID, "running", "resolving", "verifying published release manifest")
+	resolve := u.cfg.ResolveManifest
+	if resolve == nil {
+		resolve = updatepolicy.Fetch
 	}
-	if _, err := u.runOutput(ctx, "git", "merge", "--ff-only", "origin/"+ExpectedBranch); err != nil {
-		return fmt.Errorf("git fast-forward failed: %w", err)
-	}
-	targetVersion, err := readVersion(filepath.Join(u.cfg.RepoDir, "FORK_VERSION"))
+	manifest, err := resolve(ctx, version)
 	if err != nil {
-		return u.restoreSource(oldCommit, err)
+		return err
 	}
-	u.mutate(jobID, func(job *Job) { job.TargetVersion = targetVersion })
-
-	u.update(jobID, "running", "building", "building application image")
-	stagedUpdater, err := u.buildUpdater(ctx, jobID)
+	// Apply the same policy even to injected resolvers.
+	data, err := json.Marshal(manifest)
 	if err != nil {
-		return u.restoreSource(oldCommit, fmt.Errorf("updater build failed: %w", err))
+		return err
 	}
-	defer func() { _ = os.Remove(stagedUpdater) }()
-
-	if _, err := u.runOutput(ctx, "docker", append(u.composeArgs(), "build", "--pull", u.cfg.AppService)...); err != nil {
-		return u.restoreSource(oldCommit, fmt.Errorf("image build failed: %w", err))
+	manifest, err = updatepolicy.Parse(data, version)
+	if err != nil {
+		return err
 	}
-
+	image, ok := manifest.Images[runtime.GOARCH]
+	if !ok {
+		return errors.New("release does not support host architecture")
+	}
+	u.mutate(jobID, func(job *Job) { job.PreviousImage = oldImage; job.TargetImage = image })
+	u.update(jobID, "running", "pulling", "pulling immutable release image")
+	if _, err = u.runOutput(ctx, "docker", "pull", image); err != nil {
+		return fmt.Errorf("image pull failed: %w", err)
+	}
+	metadata, err := u.runOutput(ctx, "docker", "image", "inspect", "--format", `{{.Id}}|{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}`, image)
+	if err != nil {
+		return fmt.Errorf("inspect release image: %w", err)
+	}
+	fields := strings.Split(metadata, "|")
+	if len(fields) != 3 || !strings.HasPrefix(fields[0], "sha256:") || strings.TrimPrefix(fields[1], "v") != strings.TrimPrefix(manifest.Version, "v") || fields[2] != manifest.Revision {
+		return errors.New("pulled image does not match release version and revision")
+	}
+	staged, err := u.stageUpdater(ctx, jobID, image)
+	if err != nil {
+		return fmt.Errorf("extract release updater: %w", err)
+	}
+	defer os.Remove(staged)
+	// Persist the rollback image before changing any deployment configuration.
+	if err = u.persistCurrentJob(jobID); err != nil {
+		return err
+	}
 	u.update(jobID, "running", "deploying", "recreating application container")
-	if _, err := u.runOutput(ctx, "docker", append(u.composeArgs(), "up", "-d", "--force-recreate", "--no-deps", u.cfg.AppService)...); err != nil {
-		return u.rollback(ctx, jobID, oldCommit, oldImageID, imageName, fmt.Errorf("container recreation failed: %w", err))
+	if err = u.persistCurrentJob(jobID); err != nil {
+		return err
 	}
-
-	u.update(jobID, "running", "health_check", "waiting for application health check")
-	if err := u.waitHealthy(ctx); err != nil {
-		return u.rollback(ctx, jobID, oldCommit, oldImageID, imageName, err)
+	if err = u.writeOverlay(image); err != nil {
+		return err
 	}
-	if err := u.installUpdater(stagedUpdater); err != nil {
-		return u.rollback(ctx, jobID, oldCommit, oldImageID, imageName, fmt.Errorf("updater replacement failed: %w", err))
+	if err = u.recreate(ctx); err != nil {
+		return u.rollbackImage(jobID, oldImage, fmt.Errorf("container recreation failed: %w", err))
+	}
+	u.update(jobID, "running", "health_check", "checking release image and application health")
+	if err = u.waitHealthy(ctx, fields[0]); err != nil {
+		return u.rollbackImage(jobID, oldImage, err)
+	}
+	if err = u.installUpdater(staged); err != nil {
+		return u.rollbackImage(jobID, oldImage, fmt.Errorf("updater replacement failed: %w", err))
 	}
 	return nil
 }
 
-func (u *Updater) buildUpdater(ctx context.Context, jobID string) (string, error) {
-	imageTag := "sub2api-source-updater-builder:" + jobID
-	if _, err := u.runOutput(ctx, "docker", "build", "--pull", "-f", filepath.Join(u.cfg.RepoDir, "deploy", "Dockerfile.updater"), "-t", imageTag, u.cfg.RepoDir); err != nil {
+func (u *Updater) persistCurrentJob(id string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.persistLocked(u.jobs[id])
+}
+func (u *Updater) overlayPath() string {
+	return filepath.Join(u.cfg.RepoDir, "deploy", "docker-compose.updater.json")
+}
+func (u *Updater) writeOverlay(image string) error {
+	data, err := json.Marshal(map[string]any{"services": map[string]any{u.cfg.AppService: map[string]any{"image": image, "pull_policy": "never"}}})
+	if err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(u.overlayPath()), ".updater-compose-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temp.Name())
+	if _, err = temp.Write(data); err != nil {
+		temp.Close()
+		return err
+	}
+	if err = temp.Sync(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err = temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temp.Name(), u.overlayPath())
+}
+func (u *Updater) recreate(ctx context.Context) error {
+	_, err := u.runOutput(ctx, "docker", append(u.composeArgs(), "up", "-d", "--force-recreate", "--no-deps", "--no-build", "--pull", "never", u.cfg.AppService)...)
+	return err
+}
+func (u *Updater) rollbackImage(jobID, oldImage string, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	u.update(jobID, "running", "rolling_back", "restoring previous application image")
+	err := u.writeOverlay(oldImage)
+	if err == nil {
+		err = u.recreate(ctx)
+	}
+	if err == nil {
+		err = u.waitHealthy(ctx, oldImage)
+	}
+	if err != nil {
+		return fmt.Errorf("%w; automatic rollback incomplete: %v", cause, err)
+	}
+	return fmt.Errorf("%w; previous application image restored and healthy", cause)
+}
+func (u *Updater) stageUpdater(ctx context.Context, jobID, image string) (string, error) {
+	id, err := u.runOutput(ctx, "docker", "create", "--entrypoint", "/bin/true", image)
+	if err != nil || id == "" {
+		return "", fmt.Errorf("cannot create release extraction container: %v", err)
+	}
+	defer func() {
+		clean, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, _ = u.runOutput(clean, "docker", "rm", "-f", id)
+	}()
+	path := filepath.Join(u.cfg.StateDir, ".sub2api-updater-"+jobID)
+	_ = os.Remove(path)
+	if _, err = u.runOutput(ctx, "docker", "cp", id+":"+updatepolicy.UpdaterPath, path); err != nil {
+		os.Remove(path)
 		return "", err
 	}
-	defer func() { _, _ = u.runOutput(context.Background(), "docker", "image", "rm", imageTag) }()
-	containerID, err := u.runOutput(ctx, "docker", "create", imageTag)
-	if err != nil || strings.TrimSpace(containerID) == "" {
-		return "", fmt.Errorf("create updater builder container: %w", err)
-	}
-	containerID = strings.TrimSpace(containerID)
-	defer func() { _, _ = u.runOutput(context.Background(), "docker", "rm", "-f", containerID) }()
-
-	// Keep the destination absent: docker cp reliably creates a file when the
-	// target does not already exist, while behavior for an existing file differs
-	// between Docker versions.
-	stagedPath := filepath.Join(u.cfg.StateDir, ".sub2api-updater-"+jobID)
-	_ = os.Remove(stagedPath)
-	if _, err := u.runOutput(ctx, "docker", "cp", containerID+":/sub2api-updater", stagedPath); err != nil {
-		_ = os.Remove(stagedPath)
+	if err = os.Chmod(path, 0755); err != nil {
+		os.Remove(path)
 		return "", err
 	}
-	if err := os.Chmod(stagedPath, 0o755); err != nil {
-		_ = os.Remove(stagedPath)
-		return "", err
+	// Execute the harmless flag parser before installing the host binary, catching
+	// a wrong architecture or missing dynamic loader before touching the app.
+	if _, err = u.runOutput(ctx, path, "--help"); err != nil {
+		os.Remove(path)
+		return "", fmt.Errorf("release updater is not executable: %w", err)
 	}
-	return stagedPath, nil
+	return path, nil
 }
 
 func (u *Updater) installUpdater(stagedPath string) error {
@@ -416,91 +509,25 @@ func (u *Updater) installUpdater(stagedPath string) error {
 	return os.Rename(tempPath, u.cfg.UpdaterBinary)
 }
 
-func (u *Updater) validateDeployment(ctx context.Context) (version, commit, imageID, imageName string, err error) {
-	if dirty, runErr := u.runOutput(ctx, "git", "status", "--porcelain", "--untracked-files=no"); runErr != nil {
-		return "", "", "", "", fmt.Errorf("git status failed: %w", runErr)
-	} else if dirty != "" {
-		return "", "", "", "", errors.New("repository has tracked local changes; automatic update refused")
-	}
-	remote, err := u.runOutput(ctx, "git", "remote", "get-url", "origin")
-	if err != nil || normalizeRemote(remote) != ExpectedRemoteURL {
-		return "", "", "", "", fmt.Errorf("origin must be %s", ExpectedRemoteURL)
-	}
-	branch, err := u.runOutput(ctx, "git", "branch", "--show-current")
-	if err != nil || branch != ExpectedBranch {
-		return "", "", "", "", fmt.Errorf("deployed branch must be %s", ExpectedBranch)
-	}
-	commit, err = u.runOutput(ctx, "git", "rev-parse", "HEAD")
-	if err != nil {
-		return "", "", "", "", fmt.Errorf("read deployed commit: %w", err)
-	}
-	version, err = readVersion(filepath.Join(u.cfg.RepoDir, "FORK_VERSION"))
-	if err != nil {
-		return "", "", "", "", err
-	}
-	appTarget, targetErr := u.currentAppTarget(ctx)
-	if targetErr != nil {
-		return "", "", "", "", targetErr
-	}
-	imageID, err = u.runner.Output(ctx, u.cfg.RepoDir, "docker", "inspect", "--format", "{{.Image}}", appTarget)
-	if err != nil || imageID == "" {
-		return "", "", "", "", fmt.Errorf("inspect current container image: %w", err)
-	}
-	imageName, err = u.runner.Output(ctx, u.cfg.RepoDir, "docker", "inspect", "--format", "{{.Config.Image}}", appTarget)
-	if err != nil || imageName == "" {
-		return "", "", "", "", fmt.Errorf("inspect current container image name: %w", err)
-	}
-	return version, commit, imageID, imageName, nil
-}
-
-func (u *Updater) rollback(ctx context.Context, jobID, oldCommit, oldImageID, imageName string, cause error) error {
-	_ = ctx
-	rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+func (u *Updater) waitHealthy(ctx context.Context, imageID string) error {
+	healthCtx, cancel := context.WithTimeout(ctx, u.cfg.HealthTimeout)
 	defer cancel()
-	u.update(jobID, "running", "rolling_back", "health check failed; restoring previous image")
-	var failures []string
-	if _, err := u.runOutput(rollbackCtx, "git", "reset", "--hard", oldCommit); err != nil {
-		failures = append(failures, "source restore: "+err.Error())
-	}
-	if output, err := u.runner.Output(rollbackCtx, u.cfg.RepoDir, "docker", "image", "tag", oldImageID, imageName); err != nil {
-		failures = append(failures, "image restore: "+output)
-	}
-	if _, err := u.runOutput(rollbackCtx, "docker", append(u.composeArgs(), "up", "-d", "--force-recreate", "--no-deps", "--no-build", u.cfg.AppService)...); err != nil {
-		failures = append(failures, "container restore: "+err.Error())
-	}
-	if len(failures) > 0 {
-		return fmt.Errorf("%w; automatic rollback incomplete: %s", cause, strings.Join(failures, "; "))
-	}
-	return fmt.Errorf("%w; previous application image restored", cause)
-}
-
-func (u *Updater) restoreSource(oldCommit string, cause error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	if _, err := u.runOutput(ctx, "git", "reset", "--hard", oldCommit); err != nil {
-		return fmt.Errorf("%w; source restore failed: %v", cause, err)
-	}
-	return cause
-}
-
-func (u *Updater) waitHealthy(ctx context.Context) error {
-	deadline := time.Now().Add(u.cfg.HealthTimeout)
-	for time.Now().Before(deadline) {
-		appTarget, targetErr := u.currentAppTarget(ctx)
-		status, err := "", targetErr
-		if targetErr == nil {
-			status, err = u.runner.Output(ctx, u.cfg.RepoDir, "docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", appTarget)
-		}
-		if err == nil && (status == "healthy" || status == "running") {
-			return nil
+	for {
+		// Never fall back to a legacy container here: only the Compose service that
+		// was just recreated can satisfy the update's health check.
+		target, err := u.runOutput(healthCtx, "docker", append(u.composeArgs(), "ps", "-q", u.cfg.AppService)...)
+		if err == nil && target != "" && !strings.Contains(target, "\n") {
+			state, inspectErr := u.runOutput(healthCtx, "docker", "inspect", "--format", "{{.Image}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}", target)
+			if inspectErr == nil && state == imageID+"|healthy" {
+				return nil
+			}
 		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-healthCtx.Done():
+			return errors.New("application did not become healthy with the expected image before timeout")
 		case <-time.After(2 * time.Second):
 		}
 	}
-	return errors.New("new application container did not become healthy before timeout")
 }
 
 // Compose may replace a legacy fixed-name container with a project-scoped
@@ -525,16 +552,18 @@ func (u *Updater) currentAppTarget(ctx context.Context) (string, error) {
 func (u *Updater) composeArgs() []string {
 	args := []string{"compose", "-p", u.cfg.ComposeProject}
 	for _, file := range u.cfg.ComposeFiles {
-		args = append(args, "-f", file)
+		if file != u.overlayPath() {
+			args = append(args, "-f", file)
+		}
+	}
+	if _, err := os.Stat(u.overlayPath()); err == nil {
+		args = append(args, "-f", u.overlayPath())
 	}
 	return args
 }
 
 func (u *Updater) runOutput(ctx context.Context, name string, args ...string) (string, error) {
 	dir := filepath.Join(u.cfg.RepoDir, "deploy")
-	if name == "git" {
-		dir = u.cfg.RepoDir
-	}
 	output, err := u.runner.Output(ctx, dir, name, args...)
 	if err != nil {
 		return output, fmt.Errorf("%s: %w", output, err)
@@ -595,6 +624,10 @@ func (u *Updater) persistLocked(job Job) error {
 		_ = temp.Close()
 		return err
 	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
 	if err := temp.Close(); err != nil {
 		return err
 	}
@@ -617,11 +650,15 @@ func (u *Updater) loadJobs() error {
 		}
 		var job Job
 		if json.Unmarshal(data, &job) == nil && safeNamePattern.MatchString(job.JobID) {
-			if job.Status == "queued" || job.Status == "running" {
-				job.Status = "failed"
-				job.Stage = "failed"
-				job.Error = "updater restarted before the job completed"
-				job.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			if job.Status == "queued" || job.Status == "running" || job.Status == "recovering" {
+				if job.PreviousImage != "" && (job.Stage == "deploying" || job.Stage == "health_check" || job.Stage == "rolling_back" || job.Status == "recovering") {
+					job.Status = "recovering"
+				} else {
+					job.Status = "failed"
+					job.Stage = "failed"
+					job.Error = "updater restarted before update completion; check application status"
+					job.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+				}
 			}
 			jobs = append(jobs, job)
 		}
@@ -643,26 +680,6 @@ func newJobID() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("upd-%d-%s", time.Now().UTC().Unix(), hex.EncodeToString(random[:])), nil
-}
-
-func readVersion(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read FORK_VERSION: %w", err)
-	}
-	version := strings.TrimSpace(string(data))
-	if version == "" || len(version) > 64 || strings.ContainsAny(version, "\r\n\x00") {
-		return "", errors.New("FORK_VERSION is invalid")
-	}
-	return version, nil
-}
-
-func normalizeRemote(remote string) string {
-	remote = strings.TrimSpace(remote)
-	if remote == "git@github.com:DeanZFC/sub2api-custom.git" {
-		return ExpectedRemoteURL
-	}
-	return strings.TrimSuffix(remote, "/")
 }
 
 func sanitizeError(err error) string {

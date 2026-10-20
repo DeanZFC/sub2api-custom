@@ -112,22 +112,12 @@
           <div
             v-for="platform in draft.platforms"
             :key="platform.platform"
-            class="grid grid-cols-1 items-center gap-3 px-5 py-3 sm:grid-cols-[auto_7rem_minmax(0,1fr)_auto]"
+            class="grid grid-cols-1 items-center gap-3 px-5 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
           >
             <Toggle v-model="platform.enabled" />
             <strong class="text-sm font-medium text-gray-900 dark:text-white">{{ platformLabel(platform.platform) }}</strong>
-            <input
-              class="input"
-              :value="platform.models.join(', ')"
-              type="text"
-              :placeholder="t('channelMonitorV2.settings.modelsPlaceholder')"
-              @change="setModels(platform, $event)"
-            />
-            <span
-              class="badge justify-self-start sm:justify-self-end"
-              :class="platform.models.length ? 'badge-gray' : 'badge badge-primary'"
-            >
-              {{ platform.models.length ? t('channelMonitorV2.settings.badgeOther') : t('channelMonitorV2.settings.badgeAllModels') }}
+            <span class="badge badge-primary justify-self-start sm:justify-self-end">
+              {{ t('channelMonitorV2.settings.badgeAllModels') }}
             </span>
           </div>
         </div>
@@ -257,12 +247,7 @@
 
       <div class="space-y-2">
         <div class="rounded-2xl border border-primary-200 bg-primary-50/80 px-4 py-3 text-sm text-primary-900 dark:border-primary-800/50 dark:bg-primary-900/20 dark:text-primary-100">
-          <template v-if="namedModelCount === 0">
-            {{ t('channelMonitorV2.settings.namedModelsEmpty') }}
-          </template>
-          <template v-else>
-            {{ t('channelMonitorV2.settings.namedModelsCount', { count: namedModelCount }) }}
-          </template>
+          {{ t('channelMonitorV2.settings.namedModelsEmpty') }}
         </div>
         <div class="rounded-2xl border border-gray-200 bg-gray-50/80 px-4 py-3 text-xs text-gray-600 dark:border-dark-600 dark:bg-dark-800/50 dark:text-gray-300">
           <p class="font-medium text-gray-800 dark:text-gray-100">{{ t('channelMonitorV2.settings.userContractTitle') }}</p>
@@ -318,9 +303,7 @@ function addPlatform() {
 }
 
 const dirty = computed(() => (draft.value ? JSON.stringify(draft.value) !== original.value : false))
-const namedModelCount = computed(
-  () => draft.value?.platforms.filter((p) => p.enabled).reduce((sum, p) => sum + p.models.length, 0) || 0
-)
+
 const errorCategories = MONITOR_ERROR_CATEGORIES
 const countedErrorCategoryCount = computed(
   () => errorCategories.length - (draft.value?.ignored_error_categories?.length || 0)
@@ -374,17 +357,6 @@ const warningErrorPercent = percentModel('warning_error_rate')
 const criticalErrorPercent = percentModel('critical_error_rate')
 const warningCachePercent = percentModel('warning_cache_rate')
 const criticalCachePercent = percentModel('critical_cache_rate')
-
-function setModels(platform: MonitorConfig['platforms'][number], event: Event) {
-  platform.models = [
-    ...new Set(
-      (event.target as HTMLInputElement).value
-        .split(',')
-        .map((v) => v.trim())
-        .filter(Boolean)
-    ),
-  ].sort()
-}
 
 function toggleGroup(id: number) {
   if (!draft.value) return

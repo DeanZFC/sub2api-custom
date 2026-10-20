@@ -44,7 +44,7 @@
             <button
               @click="refreshVersion(true)"
               class="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 dark:hover:text-dark-200"
-              :disabled="loading"
+              :disabled="loading || updating"
               :title="t('version.refresh')"
             >
               <Icon
@@ -133,7 +133,7 @@
                     <p class="text-sm font-medium text-red-700 dark:text-red-300">
                       {{ t('version.updateFailed') }}
                     </p>
-                    <p class="truncate text-xs text-red-600/70 dark:text-red-400/70">
+                    <p class="break-words text-xs text-red-600/70 dark:text-red-400/70">
                       {{ updateError }}
                     </p>
                   </div>
@@ -231,8 +231,8 @@
                 </button>
               </div>
 
-              <!-- Priority 3: Source builds use the host updater when installed. -->
-              <div v-else-if="hasUpdate && !isReleaseBuild" class="space-y-2">
+              <!-- Priority 3: Compose deployments use the host image updater. -->
+              <div v-else-if="(hasUpdate || updating) && (!isReleaseBuild || hostUpdateManaged)" class="space-y-2">
                 <a
                   v-if="releaseInfo?.html_url && releaseInfo.html_url !== '#'"
                   :href="releaseInfo.html_url"
@@ -268,7 +268,7 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </a>
-                <!-- Source updater status -->
+                <!-- Host updater status -->
                 <div
                   class="flex items-center gap-2 rounded-lg border p-2"
                   :class="sourceUpdateEnabled
@@ -292,7 +292,7 @@
                     class="text-xs"
                     :class="sourceUpdateEnabled ? 'text-green-700 dark:text-green-300' : 'text-blue-600 dark:text-blue-400'"
                   >
-                    {{ sourceUpdateEnabled ? t('version.sourceUpdaterReady') : t('version.sourceModeHint') }}
+                    {{ sourceUpdateEnabled ? t('version.sourceUpdaterReady') : t(hostUpdateManaged ? 'version.hostUpdaterUnavailable' : 'version.sourceModeHint') }}
                   </p>
                 </div>
 
@@ -405,7 +405,7 @@
                 </a>
 
                 <!-- Version rollback entry -->
-                <div class="border-t border-gray-100 pt-2 dark:border-dark-700">
+                <div v-if="!hostUpdateManaged" class="border-t border-gray-100 pt-2 dark:border-dark-700">
                   <button
                     @click="toggleRollbackPanel"
                     class="group flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-xs text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600 dark:text-dark-500 dark:hover:bg-dark-700/50 dark:hover:text-dark-300"
@@ -685,8 +685,8 @@ import Icon from '@/components/icons/Icon.vue'
 
 const GITHUB_REPO = 'DeanZFC/sub2api-custom'
 const SOURCE_UPDATE_JOB_KEY = 'sub2api-source-update-job'
-// Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
-const DOCKER_IMAGE = 'weishaw/sub2api'
+// Fork image published by CI; tags carry no "v" prefix.
+const DOCKER_IMAGE = 'ghcr.io/deanzfc/sub2api'
 
 const { t } = useI18n()
 
@@ -709,6 +709,7 @@ const currentVersion = computed(() => displayVersion(appStore.currentVersion || 
 const latestVersion = computed(() => displayVersion(appStore.latestVersion))
 const hasUpdate = computed(() => appStore.hasUpdate)
 const sourceUpdateEnabled = computed(() => appStore.sourceUpdateEnabled)
+const hostUpdateManaged = computed(() => appStore.hostUpdateManaged)
 const releaseInfo = computed(() => appStore.releaseInfo)
 const buildType = computed(() => appStore.buildType)
 
@@ -721,12 +722,16 @@ const updateSuccess = ref(false)
 const restartCountdown = ref(0)
 const sourceUpdateJob = ref<SourceUpdateJob | null>(null)
 let sourcePollingTimer: ReturnType<typeof setTimeout> | null = null
+let resolvePollingDelay: (() => void) | null = null
+let disposed = false
 const sourceStageLabel = computed(() => {
   const stage = sourceUpdateJob.value?.stage || sourceUpdateJob.value?.status || ''
   const knownStages = new Set([
     'queued',
     'validating',
     'backing_up',
+    'resolving',
+    'pulling',
     'fetching',
     'building',
     'deploying',
@@ -781,8 +786,8 @@ const activeManualCommand = computed(() =>
   manualTab.value === 'docker' ? dockerRollbackCommand.value : scriptRollbackCommand.value
 )
 
-// Only show update check for release builds (binary/docker deployment)
-const isReleaseBuild = computed(() => buildType.value === 'release')
+// Binary replacement and manual rollback apply only without a host updater.
+const isReleaseBuild = computed(() => buildType.value === 'release' && !hostUpdateManaged.value)
 
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
@@ -838,16 +843,20 @@ async function handleUpdate() {
 }
 
 async function pollSourceUpdate(jobID: string): Promise<void> {
-  const deadline = Date.now() + 15 * 60 * 1000
+  const deadline = Date.now() + 50 * 60 * 1000
 
-  while (Date.now() < deadline) {
+  while (!disposed && Date.now() < deadline) {
     try {
       const job = await getSourceUpdateStatus(jobID)
+      if (disposed) return
       sourceUpdateJob.value = job
       if (job.status === 'succeeded') {
         localStorage.removeItem(SOURCE_UPDATE_JOB_KEY)
-        await new Promise((resolve) => setTimeout(resolve, 1500))
+        await waitForNextPoll(1500)
+        if (disposed) return
         await refreshVersion(true)
+        // Load the frontend shipped in the new image as well as its version.
+        if (!disposed) window.location.reload()
         return
       }
       if (job.status === 'failed') {
@@ -859,13 +868,23 @@ async function pollSourceUpdate(jobID: string): Promise<void> {
       // The app is briefly unavailable while its container is recreated.
     }
 
-    await new Promise<void>((resolve) => {
-      sourcePollingTimer = setTimeout(resolve, 2000)
-    })
-    sourcePollingTimer = null
+    await waitForNextPoll(2000)
   }
 
-  updateError.value = t('version.sourceUpdateTimeout')
+  if (!disposed) updateError.value = t('version.sourceUpdateTimeout')
+}
+
+function waitForNextPoll(delay: number): Promise<void> {
+  if (disposed) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    resolvePollingDelay = () => {
+      if (sourcePollingTimer) clearTimeout(sourcePollingTimer)
+      sourcePollingTimer = null
+      resolvePollingDelay = null
+      resolve()
+    }
+    sourcePollingTimer = setTimeout(resolvePollingDelay, delay)
+  })
 }
 
 function resetRollbackState() {
@@ -1020,10 +1039,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (sourcePollingTimer) {
-    clearTimeout(sourcePollingTimer)
-    sourcePollingTimer = null
-  }
+  disposed = true
+  resolvePollingDelay?.()
   document.removeEventListener('click', handleClickOutside)
 })
 </script>

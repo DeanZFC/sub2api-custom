@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the source-build updater for one already-running Compose instance.
+# Install the image updater for one already-running Compose instance.
 # Compose labels preserve custom project, file, and container configuration.
 
 set -euo pipefail
@@ -9,7 +9,10 @@ usage() {
 用法：
   sudo ./deploy/install-source-updater.sh --repo-dir /opt/sub2api-custom --container sub2api-custom
 
-要求：目标源码已经通过 Docker Compose 启动。
+要求：目标实例已经通过 Docker Compose 启动。
+  --updater-image ghcr.io/deanzfc/sub2api@sha256:...  从固定摘要镜像提取更新器
+  --build-from-source  首次从源码部署时显式构建更新器
+  --no-recreate       仅升级已配置的宿主机更新器，不重建应用容器
 EOF
 }
 
@@ -20,6 +23,9 @@ fi
 
 REPO_DIR=""
 CONTAINER=""
+UPDATER_IMAGE=""
+BUILD_FROM_SOURCE=false
+NO_RECREATE=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo-dir)
@@ -32,6 +38,11 @@ while [[ $# -gt 0 ]]; do
       CONTAINER="$2"
       shift 2
       ;;
+    --updater-image)
+      [[ $# -ge 2 ]] || { usage; exit 2; }
+      UPDATER_IMAGE="$2"; shift 2 ;;
+    --build-from-source) BUILD_FROM_SOURCE=true; shift ;;
+    --no-recreate) NO_RECREATE=true; shift ;;
     -h|--help)
       usage
       exit 0
@@ -69,64 +80,6 @@ APP_IMAGE_REF="$(docker inspect "$CONTAINER" --format '{{.Config.Image}}')"
 [[ -n "$FILES" ]] || { echo "无法读取容器的 Compose 配置文件。" >&2; exit 1; }
 [[ -n "$APP_IMAGE_REF" ]] || { echo "无法读取当前应用镜像。" >&2; exit 1; }
 
-ENV_FILE="$WORKDIR/.env"
-[[ -f "$ENV_FILE" ]] || { echo "缺少环境文件：$ENV_FILE" >&2; exit 1; }
-IMAGE_PROJECT="$(printf '%s' "$PROJECT" | tr '[:upper:]' '[:lower:]')"
-
-upsert_env() {
-  local key="$1" value="$2"
-  if grep -qE "^${key}=" "$ENV_FILE"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
-  else
-    printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-  fi
-}
-
-TOKEN="$(sed -n 's/^SUB2API_UPDATER_TOKEN=//p' "$ENV_FILE" | tail -n 1)"
-if [[ ! "$TOKEN" =~ ^[A-Za-z0-9_-]{32,256}$ ]]; then
-  TOKEN="$(openssl rand -hex 32)"
-fi
-SOCKET_DIR="/run/sub2api-updater"
-SOCKET_PATH="$SOCKET_DIR/$PROJECT.sock"
-STATE_DIR="/var/lib/sub2api-updater/$PROJECT"
-DOCKER_CONFIG_DIR="$STATE_DIR/docker"
-TOKEN_DIR="/etc/sub2api-updater"
-TOKEN_FILE="$TOKEN_DIR/$PROJECT.token"
-SERVICE_NAME="sub2api-updater-$PROJECT"
-SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-INSTALL_DIR="/usr/local/libexec"
-INSTALL_BIN="$INSTALL_DIR/sub2api-updater-$PROJECT"
-
-mkdir -p "$TOKEN_DIR" "$STATE_DIR" "$DOCKER_CONFIG_DIR" "$SOCKET_DIR" "$INSTALL_DIR"
-chmod 700 "$DOCKER_CONFIG_DIR"
-printf '%s\n' "$TOKEN" > "$TOKEN_FILE"
-chmod 600 "$TOKEN_FILE"
-upsert_env SUB2API_UPDATER_TOKEN "$TOKEN"
-upsert_env SUB2API_UPDATER_DIR "$SOCKET_DIR"
-upsert_env SUB2API_UPDATER_SOCKET "$SOCKET_PATH"
-upsert_env SUB2API_IMAGE "${IMAGE_PROJECT}:local"
-chmod 600 "$ENV_FILE"
-docker image tag "$APP_IMAGE_REF" "${IMAGE_PROJECT}:local"
-
-TEMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TEMP_DIR"' EXIT
-echo "使用 Docker 构建宿主机更新器。"
-BUILDER_IMAGE="sub2api-source-updater-builder:$PROJECT"
-BUILDER_CONTAINER=""
-cleanup_builder() {
-  if [[ -n "$BUILDER_CONTAINER" ]]; then
-    docker rm -f "$BUILDER_CONTAINER" >/dev/null 2>&1 || true
-  fi
-  rm -rf "$TEMP_DIR"
-}
-trap cleanup_builder EXIT
-docker build -f "$REPO_DIR/deploy/Dockerfile.updater" -t "$BUILDER_IMAGE" "$REPO_DIR"
-BUILDER_CONTAINER="$(docker create "$BUILDER_IMAGE")"
-docker cp "$BUILDER_CONTAINER:/sub2api-updater" "$TEMP_DIR/sub2api-updater"
-docker rm "$BUILDER_CONTAINER" >/dev/null
-BUILDER_CONTAINER=""
-install -m 0755 "$TEMP_DIR/sub2api-updater" "$INSTALL_BIN"
-
 IFS=',' read -r -a FILE_LIST <<< "$FILES"
 COMPOSE_FILES=""
 for file in "${FILE_LIST[@]}"; do
@@ -141,6 +94,93 @@ for file in "${FILE_LIST[@]}"; do
   COMPOSE_FILES+="$file"
 done
 
+ENV_FILE="$WORKDIR/.env"
+[[ -f "$ENV_FILE" ]] || { echo "缺少环境文件：$ENV_FILE" >&2; exit 1; }
+
+upsert_env() {
+  local key="$1" value="$2"
+  if grep -qE "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
+TOKEN="$(sed -n 's/^SUB2API_UPDATER_TOKEN=//p' "$ENV_FILE" | tail -n 1)"
+if [[ ! "$TOKEN" =~ ^[A-Za-z0-9_-]{32,256}$ ]]; then
+  [[ "$NO_RECREATE" != true ]] || { echo "--no-recreate 只适用于已经配置更新器的容器。" >&2; exit 1; }
+  TOKEN="$(openssl rand -hex 32)"
+fi
+SOCKET_DIR="/run/sub2api-updater"
+SOCKET_PATH="$SOCKET_DIR/$PROJECT.sock"
+STATE_DIR="/var/lib/sub2api-updater/$PROJECT"
+DOCKER_CONFIG_DIR="$STATE_DIR/docker"
+TOKEN_DIR="/etc/sub2api-updater"
+TOKEN_FILE="$TOKEN_DIR/$PROJECT.token"
+SERVICE_NAME="sub2api-updater-$PROJECT"
+SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+INSTALL_DIR="/usr/local/libexec"
+INSTALL_BIN="$INSTALL_DIR/sub2api-updater-$PROJECT"
+
+if [[ "$NO_RECREATE" == true ]]; then
+  # Do not rotate credentials or paths behind an already-running container.
+  RUNNING_TOKEN="$(docker inspect "$CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SUB2API_UPDATER_TOKEN=//p')"
+  RUNNING_SOCKET="$(docker inspect "$CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SUB2API_UPDATER_SOCKET=//p')"
+  RUNNING_MOUNT="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/run/sub2api-updater"}}{{.Source}}{{end}}{{end}}')"
+  [[ "$RUNNING_TOKEN" == "$TOKEN" && "$RUNNING_SOCKET" == "$SOCKET_PATH" && "$RUNNING_MOUNT" == "$SOCKET_DIR" ]] || {
+    echo "现有容器的更新器配置不匹配；请去掉 --no-recreate 以同步配置。" >&2
+    exit 1
+  }
+fi
+
+TEMP_DIR="$(mktemp -d)"
+
+BUILDER_IMAGE="sub2api-source-updater-builder:$PROJECT"
+BUILDER_CONTAINER=""
+cleanup_builder() {
+  if [[ -n "$BUILDER_CONTAINER" ]]; then
+    docker rm -f "$BUILDER_CONTAINER" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$TEMP_DIR"
+}
+trap cleanup_builder EXIT
+if [[ "$BUILD_FROM_SOURCE" == true ]]; then
+  [[ -z "$UPDATER_IMAGE" ]] || { echo "不能同时指定镜像和源码构建。" >&2; exit 2; }
+  echo "首次安装：构建宿主机更新器。"
+  docker build -f "$REPO_DIR/deploy/Dockerfile.updater" -t "$BUILDER_IMAGE" "$REPO_DIR"
+  UPDATER_PATH=/sub2api-updater
+else
+  if [[ -n "$UPDATER_IMAGE" ]]; then
+    [[ "$UPDATER_IMAGE" =~ ^ghcr\.io/deanzfc/sub2api@sha256:[a-f0-9]{64}$ ]] || { echo "必须使用 Fork 镜像的固定摘要。" >&2; exit 2; }
+    docker pull "$UPDATER_IMAGE"
+  else
+    UPDATER_IMAGE="$(docker inspect "$CONTAINER" --format '{{.Image}}')"
+  fi
+  BUILDER_IMAGE="$UPDATER_IMAGE"
+  UPDATER_PATH=/usr/local/libexec/sub2api-updater
+fi
+BUILDER_CONTAINER="$(docker create --entrypoint /bin/true "$BUILDER_IMAGE")"
+docker cp "$BUILDER_CONTAINER:$UPDATER_PATH" "$TEMP_DIR/sub2api-updater"
+chmod 755 "$TEMP_DIR/sub2api-updater"
+"$TEMP_DIR/sub2api-updater" --help >/dev/null 2>&1
+docker rm "$BUILDER_CONTAINER" >/dev/null
+BUILDER_CONTAINER=""
+mkdir -p "$TOKEN_DIR" "$STATE_DIR" "$DOCKER_CONFIG_DIR" "$SOCKET_DIR" "$INSTALL_DIR"
+# The application runs as UID 1000. Repair existing directories too, since a
+# restrictive installer/service umask can leave the socket parent at 0700.
+chmod 755 "$SOCKET_DIR"
+chmod 700 "$DOCKER_CONFIG_DIR"
+printf '%s\n' "$TOKEN" > "$TOKEN_FILE"
+chmod 600 "$TOKEN_FILE"
+upsert_env SUB2API_UPDATER_TOKEN "$TOKEN"
+upsert_env SUB2API_UPDATER_DIR "$SOCKET_DIR"
+upsert_env SUB2API_UPDATER_SOCKET "$SOCKET_PATH"
+
+chmod 600 "$ENV_FILE"
+
+install -m 0755 "$TEMP_DIR/sub2api-updater" "$INSTALL_BIN.new"
+mv -f "$INSTALL_BIN.new" "$INSTALL_BIN"
+
 systemd_quote() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -150,7 +190,7 @@ systemd_quote() {
 
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Sub2API source updater ($PROJECT)
+Description=Sub2API image updater ($PROJECT)
 After=docker.service
 Requires=docker.service
 
@@ -195,11 +235,18 @@ done
 }
 
 COMPOSE_ARGS=()
+MANAGED_OVERLAY="$REPO_DIR/deploy/docker-compose.updater.json"
 for file in "${FILE_LIST[@]}"; do
   file="$(printf '%s' "$file" | xargs)"
+  [[ "$file" != "$MANAGED_OVERLAY" ]] || continue
   COMPOSE_ARGS+=(-f "$file")
 done
-docker compose -p "$PROJECT" "${COMPOSE_ARGS[@]}" up -d --force-recreate --no-deps sub2api
+if [[ -f "$MANAGED_OVERLAY" ]]; then
+  COMPOSE_ARGS+=(-f "$MANAGED_OVERLAY")
+fi
+if [[ "$NO_RECREATE" != true ]]; then
+  docker compose -p "$PROJECT" "${COMPOSE_ARGS[@]}" up -d --force-recreate --no-deps --no-build --pull never sub2api
+fi
 
 echo "宿主机更新器已安装：$SERVICE_NAME"
 echo "Socket：$SOCKET_PATH"
