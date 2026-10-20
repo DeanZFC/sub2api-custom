@@ -186,7 +186,7 @@ func (s *Service) routeAutonomous(ctx context.Context, c Config, p Payload, e Ev
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	current, err := s.lockConfig(ctx, tx)
 	if err != nil {
 		return err
@@ -343,7 +343,7 @@ func (s *Service) reserveAutonomous(ctx context.Context, c Config, j Job, sendin
 	if err != nil {
 		return c, "", err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	current, err := s.lockConfig(ctx, tx)
 	if err != nil {
 		return c, "", err
@@ -539,7 +539,7 @@ func (s *Service) recordAutonomousReply(ctx context.Context, c Config, j Job) er
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err = lockAutonomous(ctx, tx, c.AppID, j.GroupID); err != nil {
 		return err
 	}
@@ -567,7 +567,7 @@ func (s *Service) autonomousStats(ctx context.Context, c Config) ([]AutonomousSt
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []AutonomousStat{}
 	for rows.Next() {
 		var st AutonomousStat
