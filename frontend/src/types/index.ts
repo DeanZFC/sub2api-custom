@@ -2554,6 +2554,8 @@ export interface TestType {
   key: string
   description?: string | null
   output_kind: 'html' | 'number' | 'text' | 'statistics' | 'model_check' | string
+  /** 0 keeps the default budget for this protocol. */
+  max_output_tokens?: number
   prompt: string
   enabled: boolean
   /** Controls the order of detection types in each account's quality results. */
@@ -2730,6 +2732,9 @@ export interface TestProtectionDecision {
 }
 
 export interface TestResult {
+  test_key?: string
+  /** Saved quality verdict; transport success does not imply a pass. */
+  quality_verdict?: 'pass' | 'fail' | 'pending' | ''
   execution_info?: TestExecutionInfo | null
   /** Current account status and scheduling switch; absent for account-free results. */
   account_schedulable?: boolean | null
@@ -2775,6 +2780,8 @@ export interface CreateTestTypeRequest {
   key: string
   description?: string
   output_kind: string
+  /** 0 keeps the default budget for this protocol. */
+  max_output_tokens?: number
   prompt: string
   enabled?: boolean
   sort_order?: number

@@ -312,7 +312,7 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 	var local, upstream []*ScheduledTestPlan
 	for _, execution := range executions {
 		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
-		_, kind, err := s.resolveDefinition(queryCtx, execution)
+		_, kind, _, err := s.resolveDefinition(queryCtx, execution)
 		cancel()
 		if err == nil && kind == "statistics" {
 			local = append(local, execution)
@@ -365,7 +365,8 @@ func (s *ScheduledTestRunnerService) runPlanDefinitionWithProgress(ctx context.C
 		return
 	}
 	queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
-	prompt, outputKind, definitionErr := s.resolveDefinition(queryCtx, plan)
+	prompt, outputKind, maxOutputTokens, definitionErr := s.resolveDefinition(queryCtx, plan)
+	ctx = withAccountTestMaxOutputTokens(ctx, maxOutputTokens)
 	if definitionErr != nil {
 		cancel()
 		if ctx.Err() != nil {
@@ -441,30 +442,30 @@ dispatchAccounts:
 	wg.Wait()
 }
 
-func (s *ScheduledTestRunnerService) resolveDefinition(ctx context.Context, plan *ScheduledTestPlan) (string, string, error) {
+func (s *ScheduledTestRunnerService) resolveDefinition(ctx context.Context, plan *ScheduledTestPlan) (string, string, int, error) {
 	// Legacy account plans predate configurable definitions and intentionally use
 	// the existing account probe when no definition is attached.
 	if plan.TestDefinitionID == nil {
-		return "", "text", nil
+		return "", "text", 0, nil
 	}
 	if s.scheduledSvc == nil {
-		return "", "", fmt.Errorf("scheduled test service unavailable")
+		return "", "", 0, fmt.Errorf("scheduled test service unavailable")
 	}
 	d, err := s.scheduledSvc.GetDefinition(ctx, *plan.TestDefinitionID)
 	if err != nil {
-		return "", "", fmt.Errorf("test definition unavailable: %w", err)
+		return "", "", 0, fmt.Errorf("test definition unavailable: %w", err)
 	}
 	if d == nil || !d.Enabled {
-		return "", "", fmt.Errorf("test definition is disabled")
+		return "", "", 0, fmt.Errorf("test definition is disabled")
 	}
 	outputKind := strings.ToLower(strings.TrimSpace(d.OutputKind))
 	if outputKind == "" {
 		outputKind = "text"
 	}
 	if outputKind == "model_check" {
-		return scheduledTestModelCheckPrompt, outputKind, nil
+		return scheduledTestModelCheckPrompt, outputKind, d.MaxOutputTokens, nil
 	}
-	return d.Prompt, outputKind, nil
+	return d.Prompt, outputKind, d.MaxOutputTokens, nil
 }
 
 func (s *ScheduledTestRunnerService) resolveTargetAccounts(ctx context.Context, plan *ScheduledTestPlan) ([]int64, error) {
@@ -1063,7 +1064,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 			return nil, fmt.Errorf("account %d is no longer assigned to group %d", accountID, *plan.GroupID)
 		}
 	}
-	prompt, outputKind, err := s.resolveDefinition(ctx, plan)
+	prompt, outputKind, maxOutputTokens, err := s.resolveDefinition(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
@@ -1099,7 +1100,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	go func() {
 		defer finish()
 		defer s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID)
-		s.runAccountWithResult(bg, plan, accountID, prompt, outputKind, pending)
+		s.runAccountWithResult(withAccountTestMaxOutputTokens(bg, maxOutputTokens), plan, accountID, prompt, outputKind, pending)
 	}()
 	return &response, nil
 }

@@ -11,11 +11,12 @@ import (
 )
 
 type scheduledTestExecutionTarget struct {
-	plan         *ScheduledTestPlan
-	prompt, kind string
-	accountID    *int64
-	pending      *ScheduledTestResult
-	err          error
+	plan            *ScheduledTestPlan
+	prompt, kind    string
+	maxOutputTokens int
+	accountID       *int64
+	pending         *ScheduledTestResult
+	err             error
 }
 
 type scheduledTestAccountProgress struct {
@@ -119,7 +120,7 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 	var local, upstream []*scheduledTestExecutionTarget
 	for _, execution := range scheduledTestExecutionPlans(plan) {
 		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
-		prompt, kind, definitionErr := s.resolveDefinition(queryCtx, execution)
+		prompt, kind, maxOutputTokens, definitionErr := s.resolveDefinition(queryCtx, execution)
 		cancel()
 		if kind == "" {
 			kind = "text"
@@ -144,7 +145,7 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 			}
 		}
 		for _, id := range accountTargets {
-			target := &scheduledTestExecutionTarget{plan: execution, prompt: prompt, kind: kind, accountID: id, err: definitionErr}
+			target := &scheduledTestExecutionTarget{plan: execution, prompt: prompt, kind: kind, maxOutputTokens: maxOutputTokens, accountID: id, err: definitionErr}
 			target.pending = &ScheduledTestResult{
 				PlanID: plan.ID, TestDefinitionID: execution.TestDefinitionID, TargetMode: plan.TargetMode,
 				AccountID: id, GroupID: plan.GroupID, ModelID: plan.ModelID, ReasoningEffort: execution.ReasoningEffort,
@@ -358,7 +359,7 @@ func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, tar
 	if target.kind == "statistics" {
 		result = s.runStatisticsResult(ctx, target.plan, target.accountID, target.pending, windowEnd)
 	} else if target.accountID != nil {
-		result = s.runAccountWithResult(ctx, target.plan, id, target.prompt, target.kind, target.pending)
+		result = s.runAccountWithResult(withAccountTestMaxOutputTokens(ctx, target.maxOutputTokens), target.plan, id, target.prompt, target.kind, target.pending)
 	} else {
 		s.failExecutionTarget(target, fmt.Errorf("test account is unavailable"))
 		return nil, false

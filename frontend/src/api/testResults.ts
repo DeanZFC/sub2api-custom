@@ -30,3 +30,11 @@ export async function vote(id: number, vote: TestVote): Promise<TestVoteResult> 
 
 export const testResultsAPI = { list, history, votes, vote }
 export default testResultsAPI
+
+/** All completed checks in each authorized current group, without a preview limit. */
+export async function listForMonitor(signal?: AbortSignal): Promise<TestResult[]> {
+  const { data } = await apiClient.get<TestResult[]>('/user/test-results', {
+    params: { group_view: 'all' }, signal,
+  })
+  return data ?? []
+}

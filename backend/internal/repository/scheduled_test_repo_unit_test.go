@@ -112,12 +112,14 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 	mock.ExpectQuery(`(?s)WITH projected_results AS .*ranked_results AS.*PARTITION BY vr.group_id, vr.result_target_key, vr.test_definition_id, vr.model_id, vr.reasoning_effort.*WHERE execution.run_id = plan.latest_run_id.*WHERE history_rank = 1 AND status IN \('success', 'passed', 'failed', 'error'\).*ORDER BY vr.account_schedulable DESC NULLS LAST.*vr.started_at DESC, vr.id DESC`).
 		WithArgs(int64(5)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "group_order", "account_schedulable",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now, 2, 0, true))
+			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "group_order", "account_schedulable", "test_key", "quality_verdict",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now, 2, 0, true, "candy", "fail"))
 	results, err := repo.ListVisible(context.Background(), 5, 20)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, "medium", results[0].ReasoningEffort)
+	require.Equal(t, "candy", results[0].TestKey)
+	require.Equal(t, "fail", results[0].QualityVerdict)
 	require.NotNil(t, results[0].GroupOrder)
 	require.Zero(t, *results[0].GroupOrder)
 	require.NotNil(t, results[0].AccountSchedulable)

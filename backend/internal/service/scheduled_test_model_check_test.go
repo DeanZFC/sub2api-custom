@@ -172,7 +172,7 @@ func TestScheduledTestModelCheckRunnerPersistsVerdictAndRunsActions(t *testing.T
 			accountTests := &AccountTestService{accountRepo: accounts, httpUpstream: &modelIdentityHTTPUpstream{body: tc.body}, cfg: &config.Config{}}
 			runner := NewScheduledTestRunnerService(nil, svc, accountTests, accounts, nil, nil)
 			runner.automaticRetryBaseDelay = time.Millisecond
-			prompt, kind, err := runner.resolveDefinition(context.Background(), plan)
+			prompt, kind, _, err := runner.resolveDefinition(context.Background(), plan)
 			require.NoError(t, err)
 			require.Equal(t, scheduledTestModelCheckPrompt, prompt)
 			runner.runOneAccount(context.Background(), plan, 42, prompt, kind)

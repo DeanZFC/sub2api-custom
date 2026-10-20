@@ -44,8 +44,11 @@ type ScheduledTestResult struct {
 	TestDefinitionID *int64                      `json:"test_definition_id,omitempty"`
 	PlanName         string                      `json:"plan_name"`
 	TestName         string                      `json:"test_name"`
-	TestOrder        int                         `json:"test_order"`
-	GroupName        string                      `json:"group_name"`
+	TestKey          string                      `json:"test_key,omitempty"`
+	// QualityVerdict is the saved check verdict, without private action details.
+	QualityVerdict string `json:"quality_verdict,omitempty"`
+	TestOrder      int    `json:"test_order"`
+	GroupName      string `json:"group_name"`
 	// PlanOrder belongs to the rule that produced the result. GroupOrder is
 	// resolved from the displayed group's current rules, so moving an account
 	// does not carry its source rule's display position into the new group.
@@ -145,16 +148,17 @@ type ScheduledTestResultHistory struct {
 }
 
 type ScheduledTestDefinition struct {
-	ID          int64     `json:"id"`
-	Key         string    `json:"key"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Prompt      string    `json:"prompt"`
-	OutputKind  string    `json:"output_kind"`
-	Enabled     bool      `json:"enabled"`
-	SortOrder   int       `json:"sort_order"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              int64     `json:"id"`
+	Key             string    `json:"key"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	Prompt          string    `json:"prompt"`
+	OutputKind      string    `json:"output_kind"`
+	MaxOutputTokens int       `json:"max_output_tokens"`
+	Enabled         bool      `json:"enabled"`
+	SortOrder       int       `json:"sort_order"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // ScheduledTestPlanRepository defines the data access interface for test plans.

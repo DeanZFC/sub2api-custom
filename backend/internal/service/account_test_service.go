@@ -74,6 +74,28 @@ type AccountTestOptions struct {
 
 type accountTestReasoningEffortContextKey struct{}
 
+type accountTestMaxOutputTokensContextKey struct{}
+
+// Carry a definition's budget with the execution, including retries. Never
+// store it on the shared service: different test definitions run concurrently.
+func withAccountTestMaxOutputTokens(ctx context.Context, tokens int) context.Context {
+	return context.WithValue(ctx, accountTestMaxOutputTokensContextKey{}, tokens)
+}
+
+func accountTestOutputTokenLimit(ctx context.Context) int {
+	if ctx == nil {
+		return 0
+	}
+	tokens, _ := ctx.Value(accountTestMaxOutputTokensContextKey{}).(int)
+	return tokens
+}
+
+func applyAccountTestOutputTokenLimit(ctx context.Context, payload map[string]any, field string) {
+	if tokens := accountTestOutputTokenLimit(ctx); tokens > 0 {
+		payload[field] = tokens
+	}
+}
+
 func withAccountTestReasoningEffort(ctx context.Context, effort string) context.Context {
 	return context.WithValue(ctx, accountTestReasoningEffortContextKey{}, strings.ToLower(strings.TrimSpace(effort)))
 }
@@ -130,7 +152,10 @@ const (
 // prompts are the legacy connectivity probe and retain the caller's existing
 // budget; a configured prompt is a real test and needs a larger budget to
 // avoid treating a model-length truncation as a successful result.
-func accountTestMaxOutputTokens(prompt string, legacy int) int {
+func accountTestMaxOutputTokens(prompt string, legacy int, configured ...int) int {
+	if len(configured) > 0 && configured[0] > 0 {
+		return configured[0]
+	}
 	if strings.TrimSpace(prompt) == "" {
 		return legacy
 	}
@@ -603,6 +628,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
+	applyAccountTestOutputTokenLimit(ctx, payload, "max_tokens")
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event
@@ -686,6 +712,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
+	applyAccountTestOutputTokenLimit(ctx, payload, "max_tokens")
 	payloadBytes, _ := json.Marshal(payload)
 	vertexBody, err := buildVertexAnthropicRequestBody(payloadBytes)
 	if err != nil {
@@ -773,7 +800,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 				},
 			},
 		},
-		"max_tokens":  accountTestMaxOutputTokens(prompt, 256),
+		"max_tokens":  accountTestMaxOutputTokens(prompt, 256, accountTestOutputTokenLimit(ctx)),
 		"temperature": 1,
 	}
 	bedrockBody, _ := json.Marshal(bedrockPayload)
@@ -941,6 +968,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt)
+	applyAccountTestOutputTokenLimit(ctx, payload, "max_output_tokens")
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
 	applyCodexFingerprintTestPayload(c, account, payload)
 	payloadBytes, _ := json.Marshal(payload)
@@ -1016,10 +1044,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}()
 
 	// Some ChatGPT/Codex-compatible upstreams reject max_output_tokens even
-	// though it is valid for the public Responses API. Configurable tests add
-	// this budget automatically, so retry once without it just like the normal
-	// gateway compatibility path does.
-	if resp.StatusCode == http.StatusBadRequest && payload["max_output_tokens"] != nil {
+	// though it is valid for the public Responses API. Only the implicit legacy
+	// budget may be removed for compatibility; never silently discard an
+	// administrator's explicit output limit.
+	if resp.StatusCode == http.StatusBadRequest && payload["max_output_tokens"] != nil && accountTestOutputTokenLimit(ctx) == 0 {
 		probeBody, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if readErr == nil && isUnsupportedMaxOutputTokensError(probeBody) {
@@ -2228,6 +2256,14 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	c.Writer.Flush()
 
 	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
+	// OpenAI reasoning models require max_completion_tokens; compatible
+	// providers generally expose the traditional max_tokens parameter.
+	limitField := "max_tokens"
+	model := strings.ToLower(testModelID)
+	if strings.HasPrefix(model, "gpt-5") || strings.HasPrefix(model, "gpt-6") || strings.HasPrefix(model, "o1") || strings.HasPrefix(model, "o3") || strings.HasPrefix(model, "o4") {
+		limitField = "max_completion_tokens"
+	}
+	applyAccountTestOutputTokenLimit(ctx, payload, limitField)
 	if ctx.Value(accountTestUsageKey{}) != nil {
 		payload["stream_options"] = map[string]any{"include_usage": true}
 	}
@@ -2545,7 +2581,7 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 	c.Writer.Flush()
 
 	// Create test payload (Gemini format)
-	payload := createGeminiTestPayload(testModelID, prompt)
+	payload := createGeminiTestPayload(testModelID, prompt, accountTestOutputTokenLimit(ctx))
 
 	// Build request based on account type
 	var req *http.Request
@@ -2777,7 +2813,7 @@ func (s *AccountTestService) buildCodeAssistRequest(ctx context.Context, accessT
 
 // createGeminiTestPayload creates a minimal test payload for Gemini API.
 // Image models use the image-generation path so the frontend can preview the returned image.
-func createGeminiTestPayload(modelID string, prompt string) []byte {
+func createGeminiTestPayload(modelID string, prompt string, maxOutputTokens ...int) []byte {
 	if isImageGenerationModel(modelID) {
 		imagePrompt := strings.TrimSpace(prompt)
 		if imagePrompt == "" {
@@ -2823,6 +2859,9 @@ func createGeminiTestPayload(modelID string, prompt string) []byte {
 				{"text": "You are a helpful AI assistant."},
 			},
 		},
+	}
+	if len(maxOutputTokens) > 0 && maxOutputTokens[0] > 0 {
+		payload["generationConfig"] = map[string]any{"maxOutputTokens": maxOutputTokens[0]}
 	}
 	bytes, _ := json.Marshal(payload)
 	return bytes
@@ -2893,6 +2932,9 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 
 				// Check for completion after extracting content
 				if finishReason, ok := candidate["finishReason"].(string); ok && finishReason != "" {
+					if isAccountTestTruncationFinishReason(finishReason) {
+						return s.sendErrorAndEnd(c, fmt.Sprintf("Gemini response truncated (finishReason=%s)", finishReason))
+					}
 					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 					return nil
 				}

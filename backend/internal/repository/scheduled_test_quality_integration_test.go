@@ -97,12 +97,43 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	applyMigration("276_scheduled_test_cost_control.sql")
 	applyMigration("282_scheduled_test_excluded_accounts.sql")
 	applyMigration("282_scheduled_test_excluded_accounts.sql")
+	applyMigration("284_scheduled_test_output_tokens.sql")
 	var statisticsCount int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))
 	require.Equal(t, 1, statisticsCount, "the local statistics definition is seeded idempotently")
 	plans := NewScheduledTestPlanRepository(db)
 	results := &scheduledTestResultRepository{db: db}
 	definitions := NewScheduledTestDefinitionRepository(db)
+	pelican, err := definitions.GetByKey(ctx, "pelican")
+	require.NoError(t, err)
+	require.Equal(t, 32768, pelican.MaxOutputTokens)
+	candy, err := definitions.GetByID(ctx, candyID)
+	require.NoError(t, err)
+	require.Zero(t, candy.MaxOutputTokens, "other definitions retain their legacy budget")
+	pelican.MaxOutputTokens = 49152
+	pelican, err = definitions.Update(ctx, pelican)
+	require.NoError(t, err)
+	require.Equal(t, 49152, pelican.MaxOutputTokens)
+	applyMigration("284_scheduled_test_output_tokens.sql")
+	pelican, err = definitions.GetByID(ctx, htmlID)
+	require.NoError(t, err)
+	require.Equal(t, 49152, pelican.MaxOutputTokens, "migration must preserve a configured budget")
+	custom, err := definitions.Create(ctx, &service.ScheduledTestDefinition{Key: "budget-test", Name: "Budget", Prompt: "OK", OutputKind: "text", Enabled: true, MaxOutputTokens: 12345})
+	require.NoError(t, err)
+	require.Equal(t, 12345, custom.MaxOutputTokens)
+	allDefinitions, err := definitions.List(ctx, false)
+	require.NoError(t, err)
+	foundCustom := false
+	for _, definition := range allDefinitions {
+		if definition.ID == custom.ID {
+			foundCustom = true
+			require.Equal(t, 12345, definition.MaxOutputTokens)
+		}
+	}
+	require.True(t, foundCustom)
+	_, err = db.ExecContext(ctx, "UPDATE scheduled_test_definitions SET max_output_tokens=-1 WHERE id=$1", custom.ID)
+	require.Error(t, err, "database rejects invalid budgets")
+	require.NoError(t, definitions.Delete(ctx, custom.ID))
 	legacy, err := plans.GetByID(ctx, legacyPlanID)
 	require.NoError(t, err)
 	require.Nil(t, legacy.Schedule, "existing plans retain cron after the migration")
@@ -393,6 +424,10 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 
 	t.Run("public list shows successful and failed latest-run results", func(t *testing.T) {
 		testScheduledTestLatestPublicRun(t, ctx, db, plans, results, candyID, htmlID)
+	})
+
+	t.Run("monitor group memberships and quality verdict", func(t *testing.T) {
+		testScheduledTestMonitorGroups(t, ctx, db, plans, results, candyID)
 	})
 
 	t.Run("latest execution excludes removed accounts and types and retains queued targets", func(t *testing.T) {

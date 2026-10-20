@@ -261,16 +261,16 @@ func NewScheduledTestDefinitionRepository(db *sql.DB) service.ScheduledTestDefin
 	return &scheduledTestDefinitionRepository{db: db}
 }
 func (r *scheduledTestDefinitionRepository) Create(ctx context.Context, d *service.ScheduledTestDefinition) (*service.ScheduledTestDefinition, error) {
-	return r.scan(r.db.QueryRowContext(ctx, `INSERT INTO scheduled_test_definitions (key,name,description,prompt,output_kind,enabled,sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,created_at,updated_at`, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder))
+	return r.scan(r.db.QueryRowContext(ctx, `INSERT INTO scheduled_test_definitions (key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at`, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder, d.MaxOutputTokens))
 }
 func (r *scheduledTestDefinitionRepository) GetByID(ctx context.Context, id int64) (*service.ScheduledTestDefinition, error) {
-	return r.scan(r.db.QueryRowContext(ctx, `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,created_at,updated_at FROM scheduled_test_definitions WHERE id=$1`, id))
+	return r.scan(r.db.QueryRowContext(ctx, `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions WHERE id=$1`, id))
 }
 func (r *scheduledTestDefinitionRepository) GetByKey(ctx context.Context, key string) (*service.ScheduledTestDefinition, error) {
-	return r.scan(r.db.QueryRowContext(ctx, `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,created_at,updated_at FROM scheduled_test_definitions WHERE key=$1`, key))
+	return r.scan(r.db.QueryRowContext(ctx, `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions WHERE key=$1`, key))
 }
 func (r *scheduledTestDefinitionRepository) List(ctx context.Context, enabledOnly bool) ([]*service.ScheduledTestDefinition, error) {
-	q := `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,created_at,updated_at FROM scheduled_test_definitions`
+	q := `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions`
 	if enabledOnly {
 		q += ` WHERE enabled=true`
 	}
@@ -291,7 +291,7 @@ func (r *scheduledTestDefinitionRepository) List(ctx context.Context, enabledOnl
 	return out, rows.Err()
 }
 func (r *scheduledTestDefinitionRepository) Update(ctx context.Context, d *service.ScheduledTestDefinition) (*service.ScheduledTestDefinition, error) {
-	return r.scan(r.db.QueryRowContext(ctx, `UPDATE scheduled_test_definitions SET key=$2,name=$3,description=$4,prompt=$5,output_kind=$6,enabled=$7,sort_order=$8,updated_at=NOW() WHERE id=$1 RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,created_at,updated_at`, d.ID, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder))
+	return r.scan(r.db.QueryRowContext(ctx, `UPDATE scheduled_test_definitions SET key=$2,name=$3,description=$4,prompt=$5,output_kind=$6,enabled=$7,sort_order=$8,max_output_tokens=$9,updated_at=NOW() WHERE id=$1 RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at`, d.ID, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder, d.MaxOutputTokens))
 }
 func (r *scheduledTestDefinitionRepository) Delete(ctx context.Context, id int64) error {
 	result, e := r.db.ExecContext(ctx, `DELETE FROM scheduled_test_definitions
@@ -314,7 +314,7 @@ func (r *scheduledTestDefinitionRepository) Delete(ctx context.Context, id int64
 }
 func (r *scheduledTestDefinitionRepository) scan(row scannable) (*service.ScheduledTestDefinition, error) {
 	d := &service.ScheduledTestDefinition{}
-	e := row.Scan(&d.ID, &d.Key, &d.Name, &d.Description, &d.Prompt, &d.OutputKind, &d.Enabled, &d.SortOrder, &d.CreatedAt, &d.UpdatedAt)
+	e := row.Scan(&d.ID, &d.Key, &d.Name, &d.Description, &d.Prompt, &d.OutputKind, &d.Enabled, &d.SortOrder, &d.MaxOutputTokens, &d.CreatedAt, &d.UpdatedAt)
 	return d, e
 }
 
@@ -529,10 +529,13 @@ const scheduledTestGroupDisplayOrdersSQL = `SELECT group_id,
 // Read its current status and scheduling switch, even for group-mode model
 // tests whose executing account ID is hidden. Account-free group statistics
 // remain visible; orphaned account results do not.
-const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZED (
+const scheduledTestVisibleProjectionCTE = `WITH projected_results AS NOT MATERIALIZED (
     SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,
            COALESCE(projected_group.name, source_group.name, '') AS group_name,COALESCE(p.sort_order, 2147483647) AS plan_order,r.target_mode,r.status,
            r.response_text,r.output_kind,r.output_html,r.output_numeric,
+           COALESCE(d.key, '') AS test_key,
+           CASE WHEN r.protection_decision->>'verdict' IN ('pass', 'fail', 'pending')
+                THEN r.protection_decision->>'verdict' ELSE '' END AS quality_verdict,
            CASE WHEN r.target_mode IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END AS visible_account_id,
            r.model_id,r.reasoning_effort,
            CASE WHEN r.account_id IS NULL THEN r.group_id ELSE projected_group.group_id END AS group_id,
@@ -563,14 +566,15 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
           AND cg.deleted_at IS NULL
           AND cg.status = 'active'
         ORDER BY CASE WHEN ag.group_id = r.group_id THEN 0 ELSE 1 END, ag.group_id
-        LIMIT 1
-    ) projected_group ON TRUE
+`
+
+const scheduledTestVisibleAccessCTE = `    ) projected_group ON TRUE
     LEFT JOIN (` + scheduledTestGroupDisplayOrdersSQL + `) group_display_order
       ON group_display_order.group_id = CASE WHEN r.account_id IS NULL THEN r.group_id ELSE projected_group.group_id END
 ), visible_results AS NOT MATERIALIZED (
     SELECT r.id,r.plan_id,r.plan_name,r.test_name,r.test_order,r.group_name,r.plan_order,r.target_mode,r.status,
            r.response_text,r.output_kind,r.output_html,r.output_numeric,r.visible_account_id,r.model_id,r.reasoning_effort,
-           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key,r.group_order,r.account_schedulable
+           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key,r.group_order,r.account_schedulable,r.test_key,r.quality_verdict
     FROM projected_results r
     WHERE (
         (r.account_id IS NULL AND r.target_mode = 'group')
@@ -605,13 +609,25 @@ const scheduledTestVisibleResultsCTE = `WITH projected_results AS NOT MATERIALIZ
     )
 )`
 
-const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id,vr.group_order,vr.account_schedulable`
+const scheduledTestVisibleResultsCTE = scheduledTestVisibleProjectionCTE + "        LIMIT 1\n" + scheduledTestVisibleAccessCTE
+
+const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id,vr.group_order,vr.account_schedulable,vr.test_key,vr.quality_verdict`
 
 // The user list shows completed results, including failures, from each plan's
 // current execution. Rank first so a failed or running check cannot fall back
 // to an older success. History uses its own query.
 func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID int64, _ int) ([]*service.ScheduledTestResult, error) {
-	rows, err := r.db.QueryContext(ctx, scheduledTestVisibleResultsCTE+`, ranked_results AS (
+	return r.listVisible(ctx, userID, scheduledTestVisibleResultsCTE)
+}
+
+// Monitor cards need every current group membership, with the same per-group
+// entitlement checks. The ordinary result list keeps its single-group layout.
+func (r *scheduledTestResultRepository) ListVisibleByGroup(ctx context.Context, userID int64) ([]*service.ScheduledTestResult, error) {
+	return r.listVisible(ctx, userID, scheduledTestVisibleProjectionCTE+scheduledTestVisibleAccessCTE)
+}
+
+func (r *scheduledTestResultRepository) listVisible(ctx context.Context, userID int64, visibilityCTE string) ([]*service.ScheduledTestResult, error) {
+	rows, err := r.db.QueryContext(ctx, visibilityCTE+`, ranked_results AS (
     SELECT vr.*, row_number() OVER (
         PARTITION BY vr.group_id, vr.result_target_key, vr.test_definition_id, vr.model_id, vr.reasoning_effort
         ORDER BY vr.started_at DESC, vr.id DESC
@@ -682,7 +698,7 @@ func scanVisibleTestResults(rows *sql.Rows) ([]*service.ScheduledTestResult, err
 	var out []*service.ScheduledTestResult
 	for rows.Next() {
 		v := &service.ScheduledTestResult{}
-		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID, &v.GroupOrder, &v.AccountSchedulable); err != nil {
+		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID, &v.GroupOrder, &v.AccountSchedulable, &v.TestKey, &v.QualityVerdict); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

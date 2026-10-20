@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import ChannelHealthCards from '../ChannelHealthCards.vue'
 import { cardHealth, hasMonitorTraffic, recentRequestsForCard, requestHealth } from '../monitorCards'
 import zh from '@/i18n/locales/zh/channelMonitorV2'
+import type { TestResult } from '@/types'
 import type { MonitorCoverage, MonitorHealth, MonitorMatrixRow, MonitorMetric, MonitorRecentRequest } from '@/api/channelMonitorV2'
 
 const metrics: MonitorMetric = {
@@ -98,4 +99,24 @@ describe('channel health cards', () => {
     expect(wrapper.get('[data-testid=channel-section-title]').text()).toContain('OpenAI')
     wrapper.unmount()
   })
+  it('opens all group accounts from a model card without mixing other groups', async () => {
+    const tests: TestResult[] = [
+      { id: 1, group_id: 7, account_id: 10, model_id: 'model-a', test_key: 'pelican', output_kind: 'html', status: 'success', output_html: '<svg />' },
+      { id: 2, group_id: 7, account_id: 11, model_id: 'model-b', test_key: 'pelican', output_kind: 'html', status: 'success', output_html: '<svg />' },
+      { id: 3, group_id: 8, account_id: 12, model_id: 'private-model', test_key: 'pelican', output_kind: 'html', status: 'success', output_html: '<svg />' },
+    ]
+    const wrapper = mount(ChannelHealthCards, {
+      props: { rows: [{ ...row, model: 'model-a' }], groupBy: 'platform_group_model', healthMode: 'overall', nextRefreshAt: Date.now() + 60000, refreshing: false, testResults: tests },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: {
+        ProviderIcon: true, TestResultOutput: true,
+        BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
+      } },
+    })
+    await wrapper.get('[data-testid=pelican-gallery-open]').trigger('click')
+    expect(wrapper.findAll('[data-testid=pelican-account]')).toHaveLength(2)
+    expect(wrapper.get('[data-testid=pelican-accounts]').text()).toContain('model-b')
+    expect(wrapper.get('[data-testid=pelican-accounts]').text()).not.toContain('private-model')
+    wrapper.unmount()
+  })
+
 })

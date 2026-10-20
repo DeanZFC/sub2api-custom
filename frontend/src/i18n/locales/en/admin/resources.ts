@@ -141,6 +141,7 @@ export default {
       },
       statistics: 'Last-hour statistics', statisticsHint: 'Aggregates local request records from the last hour without calling an upstream model. The rule schedule refreshes the snapshot; the selected model filters the requests.',
       modelCheck: 'Returned model consistency', modelCheckHint: 'Sends a short request and compares the actual upstream request model with the response model field. No prompt is required. Quality automation settings select the match mode; strict matching is the default. This check cannot verify the actual model identity or capabilities.',
+      maxOutputTokens: 'Output limit (tokens)', maxOutputTokensHint: 'Applies only to this test. 0 keeps the existing default; 32768 is recommended for Pelican. Range: 0–131072, subject to the upstream model limit.',
       searchResultsAccount: 'Search account name or ID',
       testUsage: 'Test usage', usageUnknown: 'Unknown', usageRequests: '{count} requests',
       usageInput: 'Input', usageOutput: 'Output', usageReasoning: 'Reasoning (included in output)', usageCacheRead: 'Cache read', usageCacheWrite: 'Cache write',

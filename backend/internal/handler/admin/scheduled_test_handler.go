@@ -25,9 +25,10 @@ type testDefinitionRequest struct {
 	Prompt      string  `json:"prompt"`
 	OutputKind  string  `json:"output_kind"`
 	// Kind is accepted as a frontend-friendly alias for output_kind.
-	Kind      string `json:"kind"`
-	Enabled   *bool  `json:"enabled"`
-	SortOrder *int   `json:"sort_order"`
+	Kind            string `json:"kind"`
+	Enabled         *bool  `json:"enabled"`
+	SortOrder       *int   `json:"sort_order"`
+	MaxOutputTokens *int   `json:"max_output_tokens"`
 }
 
 func (h *ScheduledTestHandler) ListDefinitions(c *gin.Context) {
@@ -55,6 +56,9 @@ func (h *ScheduledTestHandler) CreateDefinition(c *gin.Context) {
 		description = *req.Description
 	}
 	d := &service.ScheduledTestDefinition{Key: req.Key, Name: req.Name, Description: description, Prompt: req.Prompt, OutputKind: outputKind, Enabled: true}
+	if req.MaxOutputTokens != nil {
+		d.MaxOutputTokens = *req.MaxOutputTokens
+	}
 	if req.SortOrder != nil {
 		if *req.SortOrder < 0 {
 			response.BadRequest(c, "sort_order must be non-negative")
@@ -101,6 +105,9 @@ func (h *ScheduledTestHandler) UpdateDefinition(c *gin.Context) {
 	}
 	if req.Prompt != "" {
 		d.Prompt = req.Prompt
+	}
+	if req.MaxOutputTokens != nil {
+		d.MaxOutputTokens = *req.MaxOutputTokens
 	}
 	if req.OutputKind != "" {
 		d.OutputKind = req.OutputKind

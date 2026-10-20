@@ -58,6 +58,13 @@
               </div>
               <p class="mt-1 truncate text-[10px] leading-4 text-gray-400" :title="t('channelMonitorV2.cards.requestLegend')">{{ t('channelMonitorV2.cards.requestLegend') }}</p>
             </div>
+            <GroupTestFooter
+              v-if="row.group_id"
+              :results="testsByGroup.get(row.group_id) || emptyGroupTests"
+              :state="testResultsState"
+              :group-name="cardTitle(row)"
+              @open="previewGroup = { id: row.group_id, name: cardTitle(row) }"
+            />
           </article>
         </div>
       </section>
@@ -70,6 +77,12 @@
         <i class="h-2 w-2 rounded-full" :class="dotClass[state]" />{{ t(`channelMonitorV2.cards.legend.${state}`) }}
       </span>
     </div>
+    <GroupPelicanGallery
+      :show="previewGroup != null"
+      :group-name="previewGroup?.name || ''"
+      :results="previewGroup ? testsByGroup.get(previewGroup.id)?.pelican || [] : []"
+      @close="previewGroup = null"
+    />
   </section>
 </template>
 
@@ -81,11 +94,20 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { platformDisplayName } from '@/constants/platformCatalog'
 import MonitorStatusStrip from './MonitorStatusStrip.vue'
+import GroupTestFooter from './GroupTestFooter.vue'
+import GroupPelicanGallery from './GroupPelicanGallery.vue'
+import { emptyGroupTests, indexGroupTestResults, type TestResultsState } from './monitorTestResults'
+import type { TestResult } from '@/types'
 import { cardHealth, hasMonitorTraffic, recentRequestsForCard, requestHealth } from './monitorCards'
 import { compareMonitorModels } from './monitorModels'
 import { formatLatencyPrivacy, formatMonitorMs, formatMonitorPercent, formatMonitorSuccessRateFromError, type HealthDisplayMode } from './monitorFormat'
 
-const props = defineProps<{ rows: MonitorMatrixRow[]; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode; nextRefreshAt: number; refreshing: boolean }>()
+const props = withDefaults(defineProps<{
+  rows: MonitorMatrixRow[]; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode
+  nextRefreshAt: number; refreshing: boolean; testResults?: TestResult[]; testResultsState?: TestResultsState
+}>(), { testResults: () => [], testResultsState: 'ready' })
+const testsByGroup = computed(() => indexGroupTestResults(props.testResults))
+const previewGroup = ref<{ id: number; name: string } | null>(null)
 const { t, locale } = useI18n()
 const sections = computed(() => {
   const byModel = props.groupBy === 'platform_model' || props.groupBy === 'platform_group_model'

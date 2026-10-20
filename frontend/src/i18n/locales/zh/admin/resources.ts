@@ -141,6 +141,7 @@ export default {
       },
       statistics: '近一小时统计', statisticsHint: '统计本地最近一小时的请求记录，不调用上游模型。按检测规则的定时计划更新快照，所选模型用于筛选请求。',
       modelCheck: '返回模型一致性', modelCheckHint: '发送一次简短请求，比较上游实际请求模型与响应中的模型字段。无需填写提示词；匹配方式可在检测规则的质量自动化中设置，默认严格匹配。此检测不能证明实际模型身份或能力。',
+      maxOutputTokens: '输出上限（Token）', maxOutputTokensHint: '仅影响当前测试。0 表示使用原默认值，鹈鹕建议 32768；范围 0–131072，实际受上游模型限制。',
       searchResultsAccount: '搜索账号名称或 ID',
       testUsage: '检测用量', usageUnknown: '未知', usageRequests: '{count} 次请求',
       usageInput: '输入', usageOutput: '输出', usageReasoning: '推理（包含于输出）', usageCacheRead: '缓存读取', usageCacheWrite: '缓存写入',

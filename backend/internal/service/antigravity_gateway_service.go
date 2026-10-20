@@ -396,9 +396,9 @@ func (s *AntigravityGatewayService) TestConnectionWithPrompt(ctx context.Context
 	// 构建请求体
 	var requestBody []byte
 	if shouldUseAntigravityGeminiTestRequest(modelID, mappedModel) {
-		requestBody, err = s.buildGeminiTestRequestWithPrompt(projectID, mappedModel, prompt)
+		requestBody, err = s.buildGeminiTestRequestWithPrompt(projectID, mappedModel, prompt, accountTestOutputTokenLimit(ctx))
 	} else {
-		requestBody, err = s.buildClaudeTestRequest(projectID, mappedModel, prompt)
+		requestBody, err = s.buildClaudeTestRequest(projectID, mappedModel, prompt, accountTestOutputTokenLimit(ctx))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("构建请求失败: %w", err)
@@ -474,7 +474,7 @@ func testConnectionHandleError(
 
 // buildGeminiTestRequestWithPrompt 构建 Gemini 格式测试请求
 // 文本模型使用最小 token 消耗：输入 "." + maxOutputTokens: 1；图片模型使用图片生成配置
-func (s *AntigravityGatewayService) buildGeminiTestRequestWithPrompt(projectID, model, prompt string) ([]byte, error) {
+func (s *AntigravityGatewayService) buildGeminiTestRequestWithPrompt(projectID, model, prompt string, maxOutputTokens ...int) ([]byte, error) {
 	if isImageGenerationModel(model) {
 		imagePrompt := strings.TrimSpace(prompt)
 		if imagePrompt == "" {
@@ -526,7 +526,7 @@ func (s *AntigravityGatewayService) buildGeminiTestRequestWithPrompt(projectID, 
 		},
 		"generationConfig": map[string]any{
 			"maxOutputTokens": func() int {
-				return accountTestMaxOutputTokens(prompt, 1)
+				return accountTestMaxOutputTokens(prompt, 1, maxOutputTokens...)
 			}(),
 		},
 		"toolConfig": map[string]any{
@@ -546,12 +546,12 @@ func (s *AntigravityGatewayService) buildGeminiTestRequest(projectID, model, pro
 // buildClaudeTestRequest 构建 Claude 格式测试请求并转换为 Gemini 格式
 // 使用最小 token 消耗：输入 "." + MaxTokens: 1
 
-func (s *AntigravityGatewayService) buildClaudeTestRequest(projectID, mappedModel, prompt string) ([]byte, error) {
+func (s *AntigravityGatewayService) buildClaudeTestRequest(projectID, mappedModel, prompt string, maxOutputTokens ...int) ([]byte, error) {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
 		testPrompt = "."
 	}
-	maxTokens := accountTestMaxOutputTokens(prompt, 1)
+	maxTokens := accountTestMaxOutputTokens(prompt, 1, maxOutputTokens...)
 	promptJSON, err := json.Marshal(testPrompt)
 	if err != nil {
 		return nil, err

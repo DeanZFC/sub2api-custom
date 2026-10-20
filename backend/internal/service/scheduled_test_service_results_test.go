@@ -151,3 +151,20 @@ func TestScheduledTestListRepairsLegacyHTMLDisplay(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduledTestPublicQualityVerdictIsNotTransportStatus(t *testing.T) {
+	rows := []*ScheduledTestResult{
+		{Status: "success", QualityVerdict: "pass", ProtectionDecision: &ScheduledTestProtectionDecision{Reason: "private"}},
+		{Status: "success", QualityVerdict: "fail"},
+		{Status: "success"},
+		{Status: "failed", QualityVerdict: "pass"},
+		{Status: "success", QualityVerdict: "private-value"},
+	}
+	normalizePublicTestResults(rows)
+	require.Equal(t, "pass", rows[0].QualityVerdict)
+	require.Nil(t, rows[0].ProtectionDecision)
+	require.Equal(t, "fail", rows[1].QualityVerdict)
+	require.Empty(t, rows[2].QualityVerdict)
+	require.Equal(t, "fail", rows[3].QualityVerdict)
+	require.Empty(t, rows[4].QualityVerdict)
+}

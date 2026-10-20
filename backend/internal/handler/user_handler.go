@@ -46,7 +46,13 @@ func (h *UserHandler) ListTestResults(c *gin.Context) {
 	if n, err := strconv.Atoi(c.Query("limit")); err == nil && n > 0 && n <= 3 {
 		limit = n
 	}
-	rows, err := h.scheduledTestSvc.ListVisibleResults(c.Request.Context(), subject.UserID, limit)
+	var rows []*service.ScheduledTestResult
+	var err error
+	if c.Query("group_view") == "all" {
+		rows, err = h.scheduledTestSvc.ListVisibleGroupResults(c.Request.Context(), subject.UserID)
+	} else {
+		rows, err = h.scheduledTestSvc.ListVisibleResults(c.Request.Context(), subject.UserID, limit)
+	}
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
