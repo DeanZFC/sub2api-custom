@@ -55,11 +55,21 @@ export interface QQBindingState {
   binding: { member_id: string; group_id: string; nickname: string; created_at: string } | null
   pending: QQBindingRequest | null
 }
-export type QQGrowthTaskKind = 'binding' | 'usage_count' | 'checkin_total' | 'checkin_streak' | 'recharge_total'
+export type QQGrowthTaskKind = 'binding' | 'usage_count' | 'checkin_total' | 'checkin_streak' | 'recharge_total' | 'usage_tokens' | 'usage_amount'
+export interface QQGrowthReward {
+  type: QQRewardType; amount: number; quantity: number; prize_name: string; claim_instructions: string
+}
 export interface QQGrowthTask {
+  reward: QQGrowthReward
   id: string; name: string; kind: QQGrowthTaskKind; target: number; chances: number; enabled: boolean
 }
+export interface QQRankingPrize { rank: number; reward: QQGrowthReward }
+export interface QQRankingConfig {
+  enabled: boolean; rewards_enabled: boolean; effective_day: string
+  token_rewards: QQRankingPrize[]; amount_rewards: QQRankingPrize[]
+}
 export interface QQCheckinConfig {
+  streak_reward: QQGrowthReward
   streak_days: number
   streak_chances: number
   growth: { binding_chances: number; first_usage_chances: number; checkin_30_chances: number; tasks: QQGrowthTask[] }
@@ -105,12 +115,15 @@ export interface QQRewardCodeCreate {
 }
 export interface QQGeneratedRewardCode { id: number; code: string }
 export interface QQRewardCode extends Omit<QQRewardCodeCreate, 'count'> {
+  source_kind?: 'code' | 'growth' | 'streak' | 'ranking'
   id: number; app_id: string; code_hint: string; status: 'unused' | 'disabled' | 'expired' | 'pending' | 'fulfilled'
   user_id: number | null; email: string; member_id: string; redeemed_at: string | null
   fulfilled_at: string | null; fulfillment_note: string; created_at: string
 }
 export interface QQRewardCodesPage { items: QQRewardCode[]; total: number; page: number; page_size: number }
 export const qqbotAPI = {
+  rankingConfig: async () => (await apiClient.get<QQRankingConfig>('/admin/qqbot/rankings')).data,
+  saveRankings: async (config: QQRankingConfig) => (await apiClient.put<QQRankingConfig>('/admin/qqbot/rankings', config)).data,
   rewardCodes: async (search: string, status: string, page: number) => (await apiClient.get<QQRewardCodesPage>('/admin/qqbot/reward-codes', { params: { search, status, page } })).data,
   createRewardCodes: async (data: QQRewardCodeCreate) => (await apiClient.post<QQGeneratedRewardCode[]>('/admin/qqbot/reward-codes', data)).data,
   updateRewardCode: async (id: number, action: 'disable' | 'fulfill', note = '') => (await apiClient.patch(`/admin/qqbot/reward-codes/${id}`, { action, note })).data,

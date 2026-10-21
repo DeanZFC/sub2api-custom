@@ -52,6 +52,7 @@ func (s *Service) Start() {
 	s.cancel = cancel
 	s.startPriceMonitor(ctx)
 	s.startHealthMonitor(ctx)
+	s.startRankingMonitor(ctx)
 	for i := 0; i < 2; i++ {
 		s.wg.Add(1)
 		go func() {
@@ -407,29 +408,31 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	var img []byte
 	seq := 1
 	switch cmd {
-	case "帮助", "help":
+	case "帮助":
 		return s.sendHelp(ctx, c, *j, arg)
 	case "价格":
 		return s.sendModelPrice(ctx, c, *j, arg)
-	case "今日用量":
-		var err error
-		text, err = s.todayUsage(ctx, c, *j, time.Now())
-		if err != nil {
-			text = "用量查询失败，请稍后重试。"
-		}
-	case "成长任务", "领取任务":
-		if cmd == "领取任务" && arg == "" {
-			text = "用法：/领取任务 任务编号；/成长任务 查看进度。"
+	case "我的":
+		if arg != "" {
+			text = "用法：/我的，查看账户、今日用量和奖励。"
 			break
 		}
-		claim := ""
-		if cmd == "领取任务" {
-			claim = arg
+		var err error
+		text, err = s.accountOverview(ctx, c, *j, time.Now())
+		if err != nil {
+			text = "账户查询失败，请稍后重试。"
+		}
+	case "福利":
+		return s.handleWelfare(ctx, c, j, arg)
+	case "今日排行榜", "今日排行版":
+		if arg != "" {
+			text = "用法：/今日排行榜，同时查看 Token 与消费金额前 10 名。"
+			break
 		}
 		var err error
-		text, err = s.growthTasks(ctx, c, *j, claim)
+		text, err = s.todayRankings(ctx, c, time.Now())
 		if err != nil {
-			text = "成长任务处理失败，请稍后重试。"
+			text = "排行榜查询失败，请稍后重试。"
 		}
 	case "渠道状态":
 		return s.sendChannelStatus(ctx, c, *j, arg)
@@ -464,53 +467,6 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if err != nil {
 			text = "签到失败，请稍后重试。"
 		}
-	case "奖励兑换":
-		j.Kind = "reward_redemption"
-		var err error
-		text, err = s.redeemReward(ctx, c, *j)
-		if err != nil {
-			text = "奖励兑换处理异常，请稍后重试或联系管理员。"
-			j.Error = "奖励兑换处理异常"
-		}
-		if _, saveErr := s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET kind=$2,result_text=$3 WHERE id=$1`, j.ID, j.Kind, text); saveErr != nil {
-			return errors.New("兑换结果记录失败，请通过兑换管理核对奖励状态")
-		}
-		if err != nil {
-			if sendErr := s.send(ctx, c, *j, text, nil, seq); sendErr != nil {
-				return sendErr
-			}
-			return errors.New(j.Error)
-		}
-	case "抽奖":
-		var err error
-		text, err = s.drawLottery(ctx, c, *j)
-		if err != nil {
-			text = "抽奖处理异常，请查询 /抽奖次数。"
-		}
-	case "抽奖次数", "我的抽奖", "抽奖活动":
-		var err error
-		text, err = s.lotteryInfo(ctx, c, *j, cmd == "抽奖活动")
-		if err != nil {
-			text = "抽奖信息查询失败，请稍后重试。"
-		}
-	case "邀请奖励", "邀请活动":
-		var err error
-		text, err = s.inviteInfo(ctx, c, *j)
-		if err != nil {
-			text = "邀请活动查询失败，请稍后重试。"
-		}
-	case "我的邀请":
-		var err error
-		text, err = s.myInvites(ctx, c, *j)
-		if err != nil {
-			text = "邀请信息查询失败，请稍后重试。"
-		}
-	case "我的奖励":
-		var err error
-		text, err = s.myRewards(ctx, c, *j)
-		if err != nil {
-			text = "奖励信息查询失败，请稍后重试。"
-		}
 	case "转账":
 		if arg == "" {
 			text = transferUsage
@@ -528,22 +484,12 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			s.deliverTransferEmail(ctx, pending)
 			return nil
 		}
-	case "我的余额":
-		var balance float64
-		err := s.db.QueryRowContext(ctx, `SELECT u.balance FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.deleted_at IS NULL AND u.status='active'`, c.AppID, j.MemberID).Scan(&balance)
-		if errors.Is(err, sql.ErrNoRows) {
-			text = "请先使用 /绑定 绑定网站账号。"
-		} else if err != nil {
-			text = "账户信息查询失败，请稍后重试。"
-		} else {
-			text = fmt.Sprintf("💳 **账户额度**\n\n**USD %.2f**", balance)
-		}
 	default:
 		if reply, ok := customCommandReply(c.CustomCommands, cmd, arg); ok {
 			text = reply
 			break
 		}
-		if cmd != "" && cmd != "生图" && cmd != "画图" {
+		if cmd != "" && cmd != "生图" {
 			text = "未知指令，请发送 /帮助。"
 			break
 		}
@@ -552,7 +498,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if prompt == "" && (hasImages || parts != "" || e.referenceID() != "") {
 			prompt = "请分析这条消息的内容。"
 		}
-		if cmd == "生图" || cmd == "画图" {
+		if cmd == "生图" {
 			kind = "image"
 			prompt = arg
 			if !c.ImageEnabled {
@@ -617,6 +563,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			return err
 		}
 		return s.send(ctx, c, *j, text, img, seq+1)
+	}
+	if isBuiltinCommand(cmd) {
+		text = commandReplyHeading(text)
 	}
 	chunks := splitReply(normalizeReplyLineBreaks(text), 5-seq+1)
 	for _, chunk := range chunks {

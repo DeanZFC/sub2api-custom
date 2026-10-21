@@ -89,7 +89,7 @@ func TestGrowthCustomTargetsAndRetainedClaims(t *testing.T) {
 	require.Empty(t, loaded.Growth.Tasks)
 	text, err = s.growthTasks(ctx, c, j, "")
 	require.NoError(t, err)
-	require.Contains(t, text, "当前暂无成长任务")
+	require.Contains(t, text, "当前暂无一次性成长任务")
 }
 
 func TestGrowthCustomStreakInterval(t *testing.T) {

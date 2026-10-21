@@ -20,12 +20,13 @@ const (
 )
 
 type CheckinConfig struct {
-	StreakDays    int          `json:"streak_days"`
-	StreakChances int          `json:"streak_chances"`
-	Growth        GrowthConfig `json:"growth"`
-	Enabled       bool         `json:"enabled"`
-	MinAmount     float64      `json:"min_amount"`
-	MaxAmount     float64      `json:"max_amount"`
+	StreakReward  *GrowthReward `json:"streak_reward,omitempty"`
+	StreakDays    int           `json:"streak_days"`
+	StreakChances int           `json:"streak_chances"`
+	Growth        GrowthConfig  `json:"growth"`
+	Enabled       bool          `json:"enabled"`
+	MinAmount     float64       `json:"min_amount"`
+	MaxAmount     float64       `json:"max_amount"`
 	RechargeRequirement
 }
 type InviteConfig struct {

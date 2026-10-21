@@ -45,7 +45,7 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 		require.NoError(t, s.Enqueue(context.Background(), c, Payload{Type: groupMessageCreate, Data: raw}))
 	}
 	require.Zero(t, calls.Load())
-	require.True(t, shouldQueueGroupMessage(groupMessageCreate, Event{Content: "/邀请奖励"}))
+	require.True(t, shouldQueueGroupMessage(groupMessageCreate, Event{Content: "/福利"}))
 }
 
 func TestFullGroupCommandsWithoutMention(t *testing.T) {
@@ -66,7 +66,7 @@ func TestFullGroupCommandsWithoutMention(t *testing.T) {
 	s := New(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
-	for i, content := range []string{"/帮助", "/help", "/绑定", "/生图", "/画图"} {
+	for i, content := range []string{"/帮助", "/绑定", "/生图", "/福利 错误", "/我的 多余参数"} {
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, Event{GroupID: "group", Content: content}))
 	}
@@ -82,11 +82,8 @@ func TestMentionWithoutContentRepliesWithHelp(t *testing.T) {
 		case "/v2/groups/group/bot_state":
 			_, _ = w.Write([]byte(`{"member_openid":"this-bot"}`))
 		case "/v2/groups/group/messages":
-			var body struct {
-				Content string `json:"content"`
-			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			replies = append(replies, body.Content)
+			reply := readQQTestReply(t, r)
+			replies = append(replies, reply.text())
 			_, _ = w.Write([]byte(`{"id":"sent"}`))
 		default:
 			t.Errorf("empty mention called unexpected endpoint: %s", r.URL.Path)
@@ -101,7 +98,7 @@ func TestMentionWithoutContentRepliesWithHelp(t *testing.T) {
 	j := Job{EventType: groupAtMessageCreate, GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	require.Len(t, replies, 1)
-	help := replies[0]
+	help := append([]string(nil), replies...)
 	for _, content := range []string{"<@this-bot>", "  <@!this-bot> \t\n\u3000", "", " \t\n\u3000"} {
 		for _, eventType := range []string{groupAtMessageCreate, groupMessageCreate} {
 			t.Run(eventType+"/"+content, func(t *testing.T) {
@@ -109,8 +106,8 @@ func TestMentionWithoutContentRepliesWithHelp(t *testing.T) {
 				j := Job{EventType: eventType, GroupID: "group", MessageID: "empty-mention", CreatedAt: time.Now()}
 				before := len(replies)
 				require.NoError(t, s.message(context.Background(), c, &j, e))
-				require.Len(t, replies, before+1)
-				require.Equal(t, help, replies[len(replies)-1])
+				require.Len(t, replies, before+len(help))
+				require.Equal(t, help, replies[before:])
 			})
 		}
 	}

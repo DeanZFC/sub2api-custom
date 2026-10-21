@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.activitiesTitle') }}</h1>
         <p class="mt-2 text-sm text-gray-500">{{ t('qqbot.activitiesHelp') }}</p></div>
-        <RouterLink v-if="activeTab.key !== 'redemption' && activeTab.key !== 'growth'" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
+        <RouterLink v-if="!['redemption', 'growth'].includes(activeTab.key)" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
       </div>
       <nav
         role="tablist"
@@ -67,7 +67,7 @@ const tabs = [
   { key: 'redemption', label: 'qqbot.redemption.title', component: QQBotRewardCodes }
 ] as const
 type ActivityTab = (typeof tabs)[number]['key']
-const activeTab = computed(() => tabs.find(tab => tab.key === route.query.tab) ?? tabs[0])
+const activeTab = computed(() => tabs.find(tab => tab.key === (route.query.tab === 'rankings' ? 'growth' : route.query.tab)) ?? tabs[0])
 
 async function selectTab(tab: ActivityTab) {
   if (activeTab.value.key !== tab) {

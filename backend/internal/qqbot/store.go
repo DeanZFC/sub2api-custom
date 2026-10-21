@@ -220,7 +220,7 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	}
 	jobID := randomID()
 	var rewardHash string
-	if cmd, _ := command(e.Content); isGroupMessageEvent(p.Type) && cmd == "奖励兑换" {
+	if isGroupMessageEvent(p.Type) && containsRewardCode(e.Content) {
 		clean, hash := redactRewardCommand(e)
 		rewardHash = hash
 		p.Data, err = json.Marshal(clean)
@@ -377,7 +377,8 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	c = current
 	amount := c.CheckinReward
 	var requirement RechargeRequirement
-	var streakChances, streakDays int
+	var streakDays int
+	var streakReward GrowthReward
 	if kind == "invite" {
 		if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 			return "邀请奖励未开启。", nil
@@ -405,7 +406,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 			return "签到活动未开启。", nil
 		}
 		requirement = cfg.RechargeRequirement
-		streakChances = cfg.StreakChances
+		streakReward = cfg.streakReward()
 		streakDays = cfg.streakDays()
 		amount, err = randomCheckinAmount(cfg)
 		if err != nil {
@@ -505,9 +506,10 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if err != nil {
 		return "", err
 	}
-	var streak, bonus int
+	var streak int
+	var bonus bool
 	if kind == "checkin" {
-		streak, bonus, err = grantStreak(ctx, tx, userID, rewardAt, streakChances, streakDays)
+		streak, bonus, err = grantStreak(ctx, tx, c, j, userID, rewardAt, streakReward, streakDays)
 		if err != nil {
 			return "", err
 		}
@@ -520,10 +522,10 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		return fmt.Sprintf("🎁 **邀请奖励已发放**\n\n邀请人到账额度：USD %.2f", amount), nil
 	}
 	text := fmt.Sprintf("✅ **签到成功**\n\n到账额度：USD %.2f\n连续签到：%d 天", amount, streak)
-	if bonus > 0 {
-		text += fmt.Sprintf("\n连签奖励：%d 次抽奖机会", bonus)
+	if bonus {
+		text += "\n连签奖励：" + streakReward.description() + "\n" + streakReward.deliveryNote()
 	}
-	if streakChances > 0 {
+	if streakReward.enabled() {
 		text += fmt.Sprintf("\n距离下次连签奖励：%d 天", streakDays-streak%streakDays)
 	}
 	return text, nil

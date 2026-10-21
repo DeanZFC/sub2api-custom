@@ -284,6 +284,7 @@ func TestLotteryWaitsForRefundBeforeEligibility(t *testing.T) {
 func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 	ctx := context.Background()
 	s, db, c, uid, _ := lotteryFixture(t, 20)
+	insightsUsageTable(t, db)
 	var replies []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -310,7 +311,7 @@ func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 		require.NoError(t, s.Enqueue(ctx, c, p))
 		return p
 	}
-	p := enqueue(groupMessageCreate, "draw", "/抽奖")
+	p := enqueue(groupMessageCreate, "draw", "/福利 抽奖")
 	s.runOne(ctx)
 	require.NotEmpty(t, replies)
 	require.Contains(t, replies[0], "奖励额度：USD 1.")
@@ -322,18 +323,18 @@ func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 	var kind string
 	require.NoError(t, db.QueryRow(`SELECT kind FROM qq_bot_jobs WHERE message_id='draw'`).Scan(&kind))
 	require.Equal(t, "lottery", kind)
-	enqueue(groupMessageCreate, "chances", "/抽奖次数")
+	enqueue(groupMessageCreate, "chances", "/我的")
 	s.runOne(ctx)
 	chancesReply := replies[len(replies)-1]
 	require.Contains(t, chancesReply, "剩余抽奖次数：1 次")
 	require.Contains(t, chancesReply, "下次赠送还需充值：USD 10.00")
 	require.NotContains(t, chancesReply, "概率")
-	enqueue(groupAtMessageCreate, "rules", "/抽奖活动")
+	enqueue(groupAtMessageCreate, "rules", "/福利")
 	s.runOne(ctx)
 	rulesReply := replies[len(replies)-1]
 	require.Contains(t, rulesReply, "每累计有效充值 USD 10.00 赠送 1 次")
 	require.Contains(t, rulesReply, "概率 100.00%")
-	require.NotContains(t, rulesReply, "剩余抽奖次数")
+	require.Contains(t, rulesReply, "剩余抽奖次数：1 次")
 	// Durable message deduplication also survives pruning the job tombstone.
 	_, err := db.Exec(`DELETE FROM qq_bot_jobs WHERE message_id='draw'`)
 	require.NoError(t, err)
@@ -344,7 +345,7 @@ func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Used)
 	// @ commands remain supported, with the full event arriving afterward.
-	legacy := enqueue(groupAtMessageCreate, "mention-first-draw", "/抽奖")
+	legacy := enqueue(groupAtMessageCreate, "mention-first-draw", "/福利 抽奖")
 	s.runOne(ctx)
 	legacy.Type = groupMessageCreate
 	require.NoError(t, s.Enqueue(ctx, c, legacy))

@@ -27,7 +27,7 @@ func TestRewardCodeEntropyNormalizationAndRedaction(t *testing.T) {
 	}
 	code, err := generateRewardCode()
 	require.NoError(t, err)
-	e := Event{ID: "m", GroupID: "g", Content: "<@bot> /奖励兑换 " + code, MsgElements: []MessageElement{{Content: code}}, Attachments: []Attachment{{URL: code}}, MessageScene: MessageScene{Ext: []string{code}}}
+	e := Event{ID: "m", GroupID: "g", Content: "<@bot> /福利 兑换 " + code, MsgElements: []MessageElement{{Content: code}}, Attachments: []Attachment{{URL: code}}, MessageScene: MessageScene{Ext: []string{code}}}
 	e.Author.MemberID = "member"
 	clean, hash := redactRewardCommand(e)
 	data, err := json.Marshal(clean)
@@ -36,7 +36,7 @@ func TestRewardCodeEntropyNormalizationAndRedaction(t *testing.T) {
 	require.Equal(t, rewardCodeHash(code), hash)
 	require.Equal(t, []string{"bot"}, groupMentionIDs(clean))
 	require.True(t, isBuiltinOrCustomCommand(clean, nil))
-	require.Error(t, validateCustomCommands([]CustomCommand{{Command: "/奖励兑换", Reply: "override"}}))
+	require.Error(t, validateCustomCommands([]CustomCommand{{Command: "/福利 兑换", Reply: "override"}}))
 }
 
 func TestRewardCodeValidation(t *testing.T) {

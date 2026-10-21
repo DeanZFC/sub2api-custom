@@ -23,7 +23,16 @@ var customCommandPattern = regexp.MustCompile(`^/[\p{L}\p{N}_-]{1,32}$`)
 
 func isBuiltinCommand(cmd string) bool {
 	switch cmd {
-	case "价格", "今日用量", "成长任务", "领取任务", "帮助", "help", "渠道状态", "绑定", "签到", "邀请奖励", "邀请活动", "我的邀请", "我的余额", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动", "生图", "画图", "转账", "奖励兑换":
+	case "帮助", "签到", "我的", "福利", "渠道状态", "生图", "价格", "绑定", "转账", "今日排行榜", "今日排行版":
+		return true
+	}
+	return false
+}
+
+// Removed built-ins cannot be revived accidentally by stored custom replies.
+func isRetiredCommand(cmd string) bool {
+	switch cmd {
+	case "help", "今日用量", "成长任务", "领取任务", "邀请奖励", "邀请活动", "我的邀请", "我的余额", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动", "画图", "奖励兑换":
 		return true
 	}
 	return false
@@ -51,7 +60,7 @@ func validateCustomCommands(commands []CustomCommand) error {
 		if !customCommandPattern.MatchString(cmd.Command) {
 			return fmt.Errorf("第 %d 条自定义指令须以 / 开头，后接 1～32 个中文、字母、数字、下划线或短横线", i+1)
 		}
-		if isBuiltinCommand(strings.TrimPrefix(cmd.Command, "/")) {
+		if isBuiltinCommand(strings.TrimPrefix(cmd.Command, "/")) || isRetiredCommand(strings.TrimPrefix(cmd.Command, "/")) {
 			return fmt.Errorf("自定义指令 %s 与内置指令重名", cmd.Command)
 		}
 		if seen[cmd.Command] {
@@ -66,7 +75,7 @@ func validateCustomCommands(commands []CustomCommand) error {
 }
 
 func customCommandReply(commands []CustomCommand, cmd, arg string) (string, bool) {
-	if cmd == "" || arg != "" || isBuiltinCommand(cmd) {
+	if cmd == "" || arg != "" || isBuiltinCommand(cmd) || isRetiredCommand(cmd) {
 		return "", false
 	}
 	for _, custom := range commands {

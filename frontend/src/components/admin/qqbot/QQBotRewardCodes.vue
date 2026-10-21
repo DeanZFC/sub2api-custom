@@ -44,8 +44,8 @@
         <table class="w-full text-left text-sm">
           <thead><tr class="border-b dark:border-dark-700"><th class="p-2">{{ t('qqbot.redemption.code') }}</th><th class="p-2">{{ t('qqbot.redemption.reward') }}</th><th class="p-2">{{ t('qqbot.redemption.status') }}</th><th class="p-2">{{ t('qqbot.redemption.recipient') }}</th><th class="p-2">{{ t('qqbot.redemption.actions') }}</th></tr></thead>
           <tbody><tr v-for="row in items" :key="row.id" class="border-b align-top dark:border-dark-700">
-            <td class="space-y-1 p-2"><div>#{{ row.id }} · …{{ row.code_hint }}</div><div>{{ row.batch_name }}</div><div class="text-xs text-gray-500">AppID: {{ row.app_id }}</div><div class="text-xs text-gray-500">{{ t('qqbot.redemption.expiry') }}: {{ date(row.expires_at) }}</div></td>
-            <td class="space-y-1 p-2"><div>{{ t(`qqbot.redemption.types.${row.reward_type}`) }}</div><div>{{ row.reward_type === 'balance' ? `USD ${row.amount.toFixed(2)}` : `${row.prize_name || t('qqbot.redemption.types.chances')} × ${row.quantity}` }}</div><div v-if="row.claim_instructions" class="max-w-xs whitespace-pre-wrap text-xs text-gray-500">{{ row.claim_instructions }}</div></td>
+            <td class="space-y-1 p-2"><div>#{{ row.id }} · {{ row.source_kind && row.source_kind !== 'code' ? t('qqbot.growth.sources.' + row.source_kind) : '…' + row.code_hint }}</div><div>{{ row.batch_name }}</div><div class="text-xs text-gray-500">AppID: {{ row.app_id }}</div><div class="text-xs text-gray-500">{{ t('qqbot.redemption.expiry') }}: {{ date(row.expires_at) }}</div></td>
+            <td class="space-y-1 p-2"><div>{{ t(`qqbot.redemption.types.${row.reward_type}`) }}</div><div>{{ row.reward_type === 'balance' ? `USD ${balanceAmount(row.amount)}` : `${row.prize_name || t('qqbot.redemption.types.chances')} × ${row.quantity}` }}</div><div v-if="row.claim_instructions" class="max-w-xs whitespace-pre-wrap text-xs text-gray-500">{{ row.claim_instructions }}</div></td>
             <td class="space-y-1 p-2"><div>{{ t(`qqbot.redemption.statuses.${row.status}`) }}</div><div v-if="row.redeemed_at" class="text-xs text-gray-500">{{ t('qqbot.redemption.redeemed') }}: {{ date(row.redeemed_at) }}</div><div v-if="row.fulfilled_at" class="text-xs text-gray-500">{{ t('qqbot.redemption.fulfilled') }}: {{ date(row.fulfilled_at) }}</div><div v-if="row.fulfillment_note" class="max-w-xs whitespace-pre-wrap text-xs text-gray-500">{{ row.fulfillment_note }}</div></td>
             <td class="space-y-1 p-2"><div>{{ row.email || (row.user_id ? `#${row.user_id}` : '—') }}</div><div v-if="row.member_id" class="max-w-[12rem] break-all text-xs text-gray-500">{{ row.member_id }}</div><div v-if="row.target_user_id" class="text-xs text-gray-500">{{ t('qqbot.redemption.target') }}: #{{ row.target_user_id }}</div></td>
             <td class="p-2"><button v-if="row.status === 'unused' || row.status === 'expired' || row.status === 'pending'" class="btn btn-secondary whitespace-nowrap" :disabled="busy" type="button" @click="selected = row; note = ''">{{ t(row.status === 'pending' ? 'qqbot.redemption.fulfill' : 'qqbot.redemption.disable') }}</button></td>
@@ -79,6 +79,7 @@ const items = ref<QQRewardCode[]>([]), selected = ref<QQRewardCode | null>(null)
 const total = ref(0), page = ref(1), search = ref(''), status = ref('')
 let loadVersion = 0
 const date = (value: string | null) => value ? new Date(value).toLocaleString() : '—'
+const balanceAmount = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8, useGrouping: false })
 const message = (e: unknown) => (e as Error)?.message || t('common.error')
 
 async function load() {

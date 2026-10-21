@@ -3,15 +3,7 @@
     <p class="text-sm text-gray-500">{{ t('qqbot.growth.help') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
-    <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
-      <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
-        <legend class="font-medium">{{ t('qqbot.growth.streakTitle') }}</legend>
-        <p class="text-sm text-gray-500">{{ t('qqbot.growth.streakHelp') }}</p>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <label class="block space-y-1">{{ t('qqbot.growth.streakDays') }}<input v-model.number="form.streak_days" data-testid="streak-days" type="number" min="1" max="3650" step="1" required class="input" /></label>
-          <label class="block space-y-1">{{ t('qqbot.growth.chances') }}<input v-model.number="form.streak_chances" data-testid="streak-chances" type="number" min="0" max="1000" step="1" required class="input" /></label>
-        </div>
-      </fieldset>
+    <form v-if="form" data-testid="one-time-growth-form" class="card space-y-5 p-6" @submit.prevent="save">
       <fieldset class="min-w-0 space-y-4" :disabled="busy">
         <legend class="mb-2 font-medium">{{ t('qqbot.growth.tasksTitle') }}</legend>
         <p class="text-sm text-gray-500">{{ t('qqbot.growth.taskSummary', { total: form.growth.tasks.length, enabled: enabledTasks }) }}</p>
@@ -31,9 +23,9 @@
                 <option v-for="kind in kinds" :key="kind" :value="kind">{{ t('qqbot.growth.kinds.' + kind) }}</option>
               </select>
             </label>
-            <label class="block space-y-1">{{ t('qqbot.growth.targets.' + task.kind) }}<input v-model.number="task.target" :data-testid="'task-target-' + index" type="number" :min="task.kind === 'recharge_total' ? 0.01 : 1" :max="targetLimit(task.kind)" :step="task.kind === 'recharge_total' ? 0.01 : 1" :readonly="task.kind === 'binding'" required class="input" /></label>
-            <label class="block space-y-1">{{ t('qqbot.growth.chances') }}<input v-model.number="task.chances" :data-testid="'task-chances-' + index" type="number" min="0" max="1000" step="1" required class="input" /></label>
+            <label class="block space-y-1">{{ t('qqbot.growth.targets.' + task.kind) }}<input v-model.number="task.target" :data-testid="'task-target-' + index" type="number" :min="isAmountKind(task.kind) ? 0.01 : 1" :max="targetLimit(task.kind)" :step="isAmountKind(task.kind) ? 0.01 : 1" :readonly="task.kind === 'binding'" required class="input" /></label>
           </div>
+          <QQBotGrowthRewardFields v-model="task.reward" prefix="task" :index="index" />
           <p class="text-sm text-gray-500">{{ t('qqbot.growth.typeHelp.' + task.kind) }}</p>
           <p class="text-sm text-gray-500">{{ t('qqbot.growth.claimCommand', { number: index + 1 }) }}</p>
         </article>
@@ -52,6 +44,11 @@
       <button type="submit" class="btn btn-primary" :disabled="busy">{{ t('common.save') }}</button>
     </form>
     <p v-else-if="!error">{{ t('common.loading') }}</p>
+    <section class="space-y-4" data-testid="periodic-growth-tasks">
+      <h2 class="text-lg font-semibold">{{ t('qqbot.growth.periodicTitle') }}</h2>
+      <p class="text-sm text-gray-500">{{ t('qqbot.growth.periodicHelp') }}</p>
+      <QQBotRankingSettings />
+    </section>
   </div>
 </template>
 
@@ -60,47 +57,44 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { QQCheckinConfig, QQGrowthTask, QQGrowthTaskKind } from '@/api/qqbot'
 import { loadCheckinConfig, saveGrowthSettings } from './checkinSettings'
+import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
+import QQBotRankingSettings from './QQBotRankingSettings.vue'
+import { normalizeGrowthReward, rewardEnabled, validGrowthReward } from './growthReward'
 
 const { t } = useI18n()
-const kinds: QQGrowthTaskKind[] = ['binding', 'usage_count', 'checkin_total', 'checkin_streak', 'recharge_total']
-const targets: Record<QQGrowthTaskKind, number> = { binding: 1, usage_count: 10, checkin_total: 7, checkin_streak: 7, recharge_total: 10 }
+const kinds: QQGrowthTaskKind[] = ['binding', 'usage_count', 'checkin_total', 'checkin_streak', 'recharge_total', 'usage_tokens', 'usage_amount']
+const targets: Record<QQGrowthTaskKind, number> = { binding: 1, usage_count: 10, checkin_total: 7, checkin_streak: 7, recharge_total: 10, usage_tokens: 1_000_000, usage_amount: 10 }
 const maxTasks = 12
 const newTaskKind = ref<QQGrowthTaskKind>('checkin_total')
 const form = ref<QQCheckinConfig | null>(null)
-const enabledTasks = computed(() => form.value?.growth.tasks.filter(task => task.enabled && task.chances > 0).length ?? 0)
+const enabledTasks = computed(() => form.value?.growth.tasks.filter(task => task.enabled && rewardEnabled(task.reward)).length ?? 0)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 
+function isAmountKind(kind: QQGrowthTaskKind) { return kind === 'recharge_total' || kind === 'usage_amount' }
+
 function targetLimit(kind: QQGrowthTaskKind) {
-  return kind === 'binding' ? 1 : kind === 'usage_count' ? 1_000_000 : kind === 'recharge_total' ? 1_000_000_000 : 3650
+  return kind === 'binding' ? 1 : kind === 'usage_count' ? 1_000_000 : kind === 'usage_tokens' ? 1_000_000_000_000_000 : isAmountKind(kind) ? 1_000_000_000 : 3650
 }
 
 function addTask() {
   if (!form.value || busy.value || form.value.growth.tasks.length >= maxTasks) return
   const kind = newTaskKind.value
-  form.value.growth.tasks.push({ id: 'task_' + crypto.randomUUID().replace(/-/g, ''), name: t('qqbot.growth.kinds.' + kind), kind, target: targets[kind], chances: 1, enabled: false })
+  form.value.growth.tasks.push({ id: 'task_' + crypto.randomUUID().replace(/-/g, ''), name: t('qqbot.growth.kinds.' + kind), kind, target: targets[kind], chances: 1, reward: normalizeGrowthReward(undefined, 1), enabled: false })
 }
 
 function validTask(task: QQGrowthTask) {
   return task.name.trim().length > 0 && Array.from(task.name).length <= 40 && !/[\r\n\t]/.test(task.name)
-    && kinds.includes(task.kind) && Number.isFinite(task.target) && task.target >= (task.kind === 'recharge_total' ? 0.01 : 1)
+    && kinds.includes(task.kind) && Number.isFinite(task.target) && task.target >= (isAmountKind(task.kind) ? 0.01 : 1)
     && task.target <= targetLimit(task.kind)
-    && (task.kind === 'recharge_total' ? Number(task.target.toFixed(2)) === task.target : Number.isInteger(task.target))
-    && Number.isInteger(task.chances) && task.chances >= 0 && task.chances <= 1000
+    && (isAmountKind(task.kind) ? Number(task.target.toFixed(2)) === task.target : Number.isInteger(task.target))
+    && validGrowthReward(task.reward)
 }
 
 async function save() {
   if (!form.value || busy.value) return
   error.value = ''; notice.value = ''
-  if (!Number.isInteger(form.value.streak_days) || form.value.streak_days < 1 || form.value.streak_days > 3650) {
-    error.value = t('qqbot.growth.invalidStreakDays')
-    return
-  }
-  if (!Number.isInteger(form.value.streak_chances) || form.value.streak_chances < 0 || form.value.streak_chances > 1000) {
-    error.value = t('qqbot.growth.invalid')
-    return
-  }
   if (form.value.growth.tasks.length > maxTasks || !form.value.growth.tasks.every(validTask)) {
     error.value = t('qqbot.growth.invalidTask')
     return

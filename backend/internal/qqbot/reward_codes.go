@@ -59,6 +59,7 @@ type GeneratedRewardCode struct {
 	Code string `json:"code"`
 }
 type RewardCode struct {
+	SourceKind        string     `json:"source_kind"`
 	ID                int64      `json:"id"`
 	AppID             string     `json:"app_id"`
 	CodeHint          string     `json:"code_hint"`
@@ -118,14 +119,26 @@ func rewardCodeHash(raw string) string {
 // Build a minimal event before persistence, dropping all alternate copies of
 // content (elements, attachments, quoted payloads and unknown JSON properties).
 func redactRewardCommand(e Event) (Event, string) {
-	_, arg := command(e.Content)
+	cmd, arg := command(e.Content)
+	cleanCommand := "/奖励兑换"
+	if cmd == "福利" {
+		_, arg = command("/" + arg)
+		cleanCommand = "/福利 兑换"
+	}
 	hash := ""
-	if arg != "" {
+	if arg != "" && cmd == "福利" {
 		hash = rewardCodeHash(arg)
 	}
 	clean := Event{ID: e.ID, GroupID: e.GroupID, Author: e.Author, Mentions: e.Mentions,
-		Content: mentionPrefix.FindString(strings.TrimSpace(e.Content)) + "/奖励兑换"}
+		Content: mentionPrefix.FindString(strings.TrimSpace(e.Content)) + cleanCommand}
 	return clean, hash
+}
+
+// Sanitize retired redemption messages too, without executing them.
+func containsRewardCode(content string) bool {
+	cmd, arg := command(content)
+	action, _ := command("/" + arg)
+	return cmd == "奖励兑换" || (cmd == "福利" && action == "兑换")
 }
 
 func (s *Service) CreateRewardCodes(ctx context.Context, r RewardCodeCreate) ([]GeneratedRewardCode, error) {
@@ -193,14 +206,14 @@ func (s *Service) ListRewardCodes(ctx context.Context, search, status string, pa
 		return out, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.app_id,r.code_hint,r.batch_name,r.reward_type,r.amount,r.quantity,r.prize_name,r.claim_instructions,r.target_user_id,r.expires_at,
- CASE WHEN r.status='unused' AND r.expires_at<=NOW() THEN 'expired' ELSE r.status END,r.user_id,COALESCE(u.email,''),r.member_id,r.redeemed_at,r.fulfilled_at,r.fulfillment_note,r.created_at`+from+` ORDER BY r.id DESC LIMIT 20 OFFSET $3`, search, status, (page-1)*20)
+ CASE WHEN r.status='unused' AND r.expires_at<=NOW() THEN 'expired' ELSE r.status END,r.user_id,COALESCE(u.email,''),r.member_id,r.redeemed_at,r.fulfilled_at,r.fulfillment_note,r.created_at,r.source_kind`+from+` ORDER BY r.id DESC LIMIT 20 OFFSET $3`, search, status, (page-1)*20)
 	if err != nil {
 		return out, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var r RewardCode
-		if err = rows.Scan(&r.ID, &r.AppID, &r.CodeHint, &r.BatchName, &r.RewardType, &r.Amount, &r.Quantity, &r.PrizeName, &r.ClaimInstructions, &r.TargetUserID, &r.ExpiresAt, &r.Status, &r.UserID, &r.Email, &r.MemberID, &r.RedeemedAt, &r.FulfilledAt, &r.FulfillmentNote, &r.CreatedAt); err != nil {
+		if err = rows.Scan(&r.ID, &r.AppID, &r.CodeHint, &r.BatchName, &r.RewardType, &r.Amount, &r.Quantity, &r.PrizeName, &r.ClaimInstructions, &r.TargetUserID, &r.ExpiresAt, &r.Status, &r.UserID, &r.Email, &r.MemberID, &r.RedeemedAt, &r.FulfilledAt, &r.FulfillmentNote, &r.CreatedAt, &r.SourceKind); err != nil {
 			return out, err
 		}
 		out.Items = append(out.Items, r)
@@ -247,7 +260,7 @@ func rewardRedemptionReply(r RewardCode) string {
 	case "balance":
 		return fmt.Sprintf("✅ **奖励兑换成功**\n\n奖励：USD %.2f\n已存入绑定账号。", r.Amount)
 	case "chances":
-		return fmt.Sprintf("✅ **奖励兑换成功**\n\n奖励：抽奖次数 × %d\n发送 /抽奖 即可使用。", r.Quantity)
+		return fmt.Sprintf("✅ **奖励兑换成功**\n\n奖励：抽奖次数 × %d\n发送 /福利 抽奖 即可使用。", r.Quantity)
 	default:
 		instruction := r.ClaimInstructions
 		if instruction == "" {
@@ -259,7 +272,7 @@ func rewardRedemptionReply(r RewardCode) string {
 
 func (s *Service) redeemReward(ctx context.Context, c Config, j Job) (string, error) {
 	if j.RewardCodeHash == "" {
-		return "用法：/奖励兑换 兑换码", nil
+		return "用法：/福利 兑换 兑换码", nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

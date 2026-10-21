@@ -5,6 +5,7 @@ package qqbot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -114,28 +115,25 @@ func TestHelpInteractionClickerIdentityAndConcurrentDeduplication(t *testing.T) 
 	require.Contains(t, recorder.replies[0].text(), "签到成功")
 }
 
-func TestHelpInteractionLotteryAndAcknowledgementFailureDoNotReplay(t *testing.T) {
+func TestRetiredLotteryCallbackCannotSpend(t *testing.T) {
 	s, db, c, uid, _ := lotteryFixture(t, 20)
-	recorder := mockHelpInteractions(t, s, true)
+	recorder := mockHelpInteractions(t, s, false)
 	ctx := context.Background()
-	p := helpInteractionPayload(t, testHelpInteraction("lottery-click", "lottery", "member"))
-	require.Error(t, s.Enqueue(ctx, c, p), "QQ acknowledgement failure is reported after durable enqueue")
-	require.NoError(t, s.Enqueue(ctx, c, p))
-	s.runOne(ctx)
-	require.NoError(t, s.Enqueue(ctx, c, p))
+	old := testHelpInteraction("lottery-click", "lottery", "member")
+	old.Data.Resolved.ButtonData = "qqhelp:v1:lottery"
+	require.NoError(t, s.Enqueue(ctx, c, helpInteractionPayload(t, old)))
 	s.runOne(ctx)
 	state, err := s.LotteryState(ctx, uid)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), state.Used)
-	require.Equal(t, int64(1), state.Remaining)
+	require.Zero(t, state.Used)
+	require.EqualValues(t, 2, state.Remaining)
 	var count int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs`).Scan(&count))
-	require.Equal(t, 1, count)
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM qq_bot_jobs").Scan(&count))
+	require.Zero(t, count)
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
-	require.Equal(t, []int{0}, recorder.codes)
-	require.Len(t, recorder.replies, 1)
-	require.Contains(t, recorder.replies[0].text(), "奖励额度：USD 1.00")
+	require.Equal(t, []int{1}, recorder.codes)
+	require.Empty(t, recorder.replies)
 }
 
 func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
@@ -146,13 +144,25 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 			ctx := context.Background()
 			c, err := s.Config(ctx)
 			require.NoError(t, err)
-			c.CustomCommands = []CustomCommand{{Command: "/custom", Reply: "custom reply", Enabled: true}}
+			c.CustomCommands = []CustomCommand{
+				{Command: "/first", Reply: "first reply", Enabled: true},
+				{Command: "/second", Reply: "second reply", Enabled: true},
+				{Command: "/custom", Reply: "custom reply", Enabled: true},
+			}
+			if change == "page removed" {
+				for i := 0; i < 5; i++ {
+					c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: fmt.Sprintf("/extra%d", i), Reply: "extra", Enabled: true})
+				}
+			}
 			_, err = s.SaveConfig(ctx, c)
 			require.NoError(t, err)
 			recorder := mockHelpInteractions(t, s, false)
 			action := "custom:/custom"
 			if change == "page" || change == "page removed" {
 				action = "page:2"
+			}
+			if change == "page removed" {
+				action = "page:3"
 			}
 			i := testHelpInteraction("action", action, "clicker")
 			i.Data.Resolved.ButtonID = "" // QQ's documented group example omits this field.
@@ -162,7 +172,7 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 			case "custom reordered":
 				c.CustomCommands = []CustomCommand{{Command: "/other", Reply: "wrong reply", Enabled: true}, {Command: "/custom", Reply: "updated reply", Enabled: true}}
 			case "custom disabled", "page removed":
-				c.CustomCommands[0].Enabled = false
+				c.CustomCommands[len(c.CustomCommands)-1].Enabled = false
 			case "group removed":
 				c.AllowedGroups = []string{"other-group"}
 			case "bot disabled":
@@ -179,7 +189,7 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 			if change == "page" {
 				require.Len(t, recorder.replies, 1)
 				require.Contains(t, recorder.replies[0].text(), "第 2/2 页")
-				require.Contains(t, recorder.replies[0].text(), "指令帮助 · 自定义指令")
+				require.Contains(t, recorder.replies[0].text(), "指令帮助 · 更多服务")
 				require.Contains(t, recorder.replies[0].text(), "**/custom**")
 				require.NotContains(t, recorder.replies[0].text(), "**/今日用量**")
 				require.NotNil(t, recorder.replies[0].Keyboard)

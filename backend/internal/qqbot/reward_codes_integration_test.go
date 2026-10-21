@@ -290,7 +290,7 @@ func TestRewardCodeWebhookRedactionDedupAndDelivery(t *testing.T) {
 	ctx := context.Background()
 	s, db, c, _ := rewardCodeFixture(t)
 	code := createTestRewardCode(t, s, "balance")
-	e := Event{ID: "message", GroupID: "group", Content: "/奖励兑换 " + code.Code, MsgElements: []MessageElement{{Content: code.Code}}}
+	e := Event{ID: "message", GroupID: "group", Content: "/福利 兑换 " + code.Code, MsgElements: []MessageElement{{Content: code.Code}}}
 	e.Author.MemberID = "member"
 	raw, err := json.Marshal(e)
 	require.NoError(t, err)

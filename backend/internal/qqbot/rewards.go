@@ -20,16 +20,19 @@ func (s *Service) myRewards(ctx context.Context, c Config, j Job) (string, error
 	if err = s.settleInvites(ctx, c, j.MemberID); err != nil {
 		return "", err
 	}
-	var lottery, invite, checkin, redemption, total float64
+	var lottery, invite, checkin, redemption, growth, streak, ranking, total float64
 	err = s.db.QueryRowContext(ctx, `SELECT
  COALESCE(SUM(amount) FILTER (WHERE kind='lottery'),0),
  COALESCE(SUM(amount) FILTER (WHERE kind='invite'),0),
  COALESCE(SUM(amount) FILTER (WHERE kind='checkin'),0),
  COALESCE(SUM(amount) FILTER (WHERE kind='redemption'),0),
+ COALESCE(SUM(amount) FILTER (WHERE kind='growth'),0),
+ COALESCE(SUM(amount) FILTER (WHERE kind='streak'),0),
+ COALESCE(SUM(amount) FILTER (WHERE kind='ranking'),0),
  COALESCE(SUM(amount),0)
- FROM qq_bot_rewards WHERE user_id=$1`, uid).Scan(&lottery, &invite, &checkin, &redemption, &total)
+ FROM qq_bot_rewards WHERE user_id=$1`, uid).Scan(&lottery, &invite, &checkin, &redemption, &growth, &streak, &ranking, &total)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("🎁 **累计奖励**\n\n- 抽奖奖励：USD %.2f\n- 邀请奖励：USD %.2f\n- 签到奖励：USD %.2f\n- 兑换奖励：USD %.2f\n\n**合计：USD %.2f**", lottery, invite, checkin, redemption, total), nil
+	return fmt.Sprintf("🎁 **累计奖励**\n\n- 抽奖奖励：USD %.2f\n- 邀请奖励：USD %.2f\n- 签到奖励：USD %.2f\n- 兑换奖励：USD %.2f\n- 成长奖励：USD %.2f\n- 连签奖励：USD %.2f\n- 排行奖励：USD %.2f\n\n**合计：USD %.2f**", lottery, invite, checkin, redemption, growth, streak, ranking, total), nil
 }

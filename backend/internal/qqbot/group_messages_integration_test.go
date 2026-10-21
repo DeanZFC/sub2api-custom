@@ -20,6 +20,7 @@ import (
 
 func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	db := testDB(t)
+	insightsUsageTable(t, db)
 	s := savedBot(t, db)
 	ctx := context.Background()
 	c, err := s.Config(ctx)
@@ -89,7 +90,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='checkin'`).Scan(&count))
 	require.Equal(t, 1, count)
 	require.EqualValues(t, 1, replies.Load())
-	require.Contains(t, lastReply.Load(), "<qqbot-at-user id=\"member\" />\n✅ **签到成功**")
+	require.Contains(t, lastReply.Load(), "<qqbot-at-user id=\"member\" />\n# ✅ 签到成功")
 
 	// The binding-code flow also works without a mention.
 	secondUser := user(t, db)
@@ -102,23 +103,16 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "new-member", bound.MemberID)
 	require.Contains(t, lastReply.Load(), "<qqbot-at-user id=\"new-member\" />\n")
-	for _, content := range []string{"/帮助", "/我的余额", "/我的奖励", "/邀请活动", "/邀请奖励", "/我的邀请", "/抽奖次数", "/抽奖活动"} {
+	for _, content := range []string{"/帮助", "/我的", "/福利"} {
 		enqueue("command-"+content, content, "member", nil)
 		s.runOne(ctx)
 		var status string
-		require.NoError(t, db.QueryRow(`SELECT status FROM qq_bot_jobs WHERE message_id=$1`, "command-"+content).Scan(&status))
+		require.NoError(t, db.QueryRow("SELECT status FROM qq_bot_jobs WHERE message_id=$1", "command-"+content).Scan(&status))
 		require.Equal(t, "completed", status)
-		if content == "/我的邀请" {
-			require.Equal(t, "<qqbot-at-user id=\"member\" />\n👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：0 人\n- 已奖励：0 人\n- 已退群：0 人", lastReply.Load())
-		}
-		if content == "/邀请奖励" {
-			require.Contains(t, lastReply.Load(), "参与条件：")
-			require.Contains(t, lastReply.Load(), "邀请奖励参与条件：")
-		}
 	}
-	enqueue("unbound-invites", "/我的邀请", "unbound-member", nil)
+	enqueue("unbound-account", "/我的", "unbound-member", nil)
 	s.runOne(ctx)
-	require.Equal(t, "<qqbot-at-user id=\"unbound-member\" />\n👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：0 人\n- 已奖励：0 人\n- 已退群：0 人", lastReply.Load())
+	require.Contains(t, lastReply.Load(), "请先使用 /绑定")
 	require.Zero(t, chats.Load())
 	require.Zero(t, images.Load())
 	beforeModels := replies.Load()
@@ -157,10 +151,10 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='mention-first'`).Scan(&count))
 	require.Equal(t, 1, count)
 
-	// Both image commands work without a mention or a bot identity lookup.
+	// Image requests work without a mention or a bot identity lookup.
 	// Receiving the same message through both events must only generate once.
 	beforeLookups := lookups.Load()
-	for i, content := range []string{"/生图 一只猫", "/画图 一只狗"} {
+	for i, content := range []string{"/生图 一只猫", "/生图 一只狗"} {
 		beforeImages, beforeReplies := images.Load(), replies.Load()
 		id := fmt.Sprintf("unmentioned-image-%d", i)
 		p := enqueue(id, content, "image-member", nil)

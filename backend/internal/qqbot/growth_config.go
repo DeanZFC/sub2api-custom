@@ -16,12 +16,13 @@ const maxGrowthTasks = 12
 var growthTaskIDPattern = regexp.MustCompile("^[a-z][a-z0-9_-]{0,63}$")
 
 type GrowthTask struct {
-	ID      string  `json:"id"`
-	Name    string  `json:"name"`
-	Kind    string  `json:"kind"`
-	Target  float64 `json:"target"`
-	Chances int     `json:"chances"`
-	Enabled bool    `json:"enabled"`
+	Reward  *GrowthReward `json:"reward,omitempty"`
+	ID      string        `json:"id"`
+	Name    string        `json:"name"`
+	Kind    string        `json:"kind"`
+	Target  float64       `json:"target"`
+	Chances int           `json:"chances"`
+	Enabled bool          `json:"enabled"`
 }
 
 func (g GrowthConfig) tasks() []GrowthTask {
@@ -44,6 +45,9 @@ func (c CheckinConfig) streakDays() int {
 }
 
 func validateGrowth(c CheckinConfig) error {
+	if err := c.streakReward().validate(); err != nil {
+		return err
+	}
 	if c.streakDays() < 1 || c.streakDays() > 3650 {
 		return errors.New("连签奖励周期须为 1～3650 天")
 	}
@@ -68,6 +72,9 @@ func validateGrowth(c CheckinConfig) error {
 		if task.Chances < 0 || task.Chances > 1000 {
 			return errors.New("成长任务奖励次数须为 0～1000 的整数")
 		}
+		if err := task.reward().validate(); err != nil {
+			return err
+		}
 		if math.IsNaN(task.Target) || math.IsInf(task.Target, 0) {
 			return errors.New("成长任务目标不正确")
 		}
@@ -84,9 +91,13 @@ func validateGrowth(c CheckinConfig) error {
 			if task.Target < 1 || task.Target > limit || math.Trunc(task.Target) != task.Target {
 				return errors.New("调用目标须为 1～1000000 的整数，签到目标须为 1～3650 的整数")
 			}
-		case "recharge_total":
+		case "usage_tokens":
+			if task.Target < 1 || task.Target > 1e15 || math.Trunc(task.Target) != task.Target {
+				return errors.New("Token 目标须为 1～1000000000000000 的整数")
+			}
+		case "recharge_total", "usage_amount":
 			if task.Target < .01 || !validRechargeThreshold(task.Target) {
-				return errors.New("累计有效充值目标须为 0.01～1000000000 USD，最多两位小数")
+				return errors.New("累计金额目标须为 0.01～1000000000 USD，最多两位小数")
 			}
 		default:
 			return errors.New("成长任务类型不支持")
@@ -98,6 +109,7 @@ func validateGrowth(c CheckinConfig) error {
 type growthProgress struct {
 	total, streak, usage int
 	recharge             decimal.Decimal
+	tokens, spent        decimal.Decimal
 }
 
 func (p growthProgress) task(task GrowthTask) (bool, string) {
@@ -112,6 +124,10 @@ func (p growthProgress) task(task GrowthTask) (bool, string) {
 		current = float64(p.total)
 	case "checkin_streak":
 		current = float64(p.streak)
+	case "usage_tokens":
+		return p.tokens.GreaterThanOrEqual(decimal.NewFromFloat(task.Target)), fmt.Sprintf("%s/%.0f Token", p.tokens.StringFixed(0), task.Target)
+	case "usage_amount":
+		return p.spent.GreaterThanOrEqual(decimal.NewFromFloat(task.Target)), fmt.Sprintf("USD %s/%.2f", p.spent.Truncate(2).StringFixed(2), task.Target)
 	case "recharge_total":
 		return p.recharge.GreaterThanOrEqual(decimal.NewFromFloat(task.Target)), fmt.Sprintf("USD %s/%.2f", p.recharge.Truncate(2).StringFixed(2), task.Target)
 	default:

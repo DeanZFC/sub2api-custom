@@ -26,23 +26,16 @@ SELECT COUNT(*),COUNT(*) FILTER(WHERE last_day >= $3::date-1 AND d=last_day-(n-1
 	return
 }
 
-func grantStreak(ctx context.Context, tx *sql.Tx, uid int64, at time.Time, chances, interval int) (int, int, error) {
+func grantStreak(ctx context.Context, tx *sql.Tx, c Config, j Job, uid int64, at time.Time, reward GrowthReward, interval int) (int, bool, error) {
 	_, streak, err := checkinProgress(ctx, tx, uid, at)
-	if err != nil || chances == 0 || streak == 0 || interval < 1 || streak%interval != 0 {
-		return streak, 0, err
+	if err != nil || !reward.enabled() || streak == 0 || interval < 1 || streak%interval != 0 {
+		return streak, false, err
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES($1,$2,$3) ON CONFLICT(source_key) DO NOTHING`, fmt.Sprintf("qq-streak:%d:%s", uid, day(at)), uid, chances)
-	if err != nil {
-		return 0, 0, err
-	}
-	n, err := result.RowsAffected()
-	if n == 0 {
-		chances = 0
-	}
-	return streak, chances, err
+	granted, err := grantActivityReward(ctx, tx, c, j, uid, fmt.Sprintf("qq-streak:%d:%s", uid, day(at)), "streak", fmt.Sprintf("连续签到 %d 天奖励", interval), reward, at)
+	return streak, granted, err
 }
 
-func (s *Service) growthTasks(ctx context.Context, c Config, j Job, claim string) (string, error) {
+func (s *Service) growthTasks(ctx context.Context, c Config, j Job, claim string, actions ...*[]keyboardButton) (string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
@@ -74,6 +67,9 @@ func (s *Service) growthTasks(ctx context.Context, c Config, j Job, claim string
 	if err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL FOR UPDATE`, uid).Scan(&active); err != nil {
 		return "", err
 	}
+	if id, ok := rankingClaimID(claim); ok {
+		return s.claimRankingReward(ctx, tx, current, j, uid, id, time.Now())
+	}
 	cfg, err := loadCheckinConfig(ctx, tx, current.CheckinReward)
 	if err != nil {
 		return "", err
@@ -88,21 +84,21 @@ func (s *Service) growthTasks(ctx context.Context, c Config, j Job, claim string
 	if claim != "" {
 		n, e := strconv.Atoi(claim)
 		if e != nil || n < 1 || n > len(tasks) {
-			return "任务编号不正确，请发送 /成长任务 查看当前任务，再使用 /领取任务 任务编号。", nil
+			return "任务编号不正确，请发送 /福利 查看当前任务，再使用 /福利 领取 任务编号。", nil
 		}
 		claimIndex = n - 1
 	}
 	progress := growthProgress{total: total, streak: streak}
 	var needUsage, needRecharge bool
 	for i, task := range tasks {
-		if !task.Enabled || task.Chances == 0 || (claimIndex >= 0 && i != claimIndex) {
+		if !task.Enabled || !task.reward().enabled() || (claimIndex >= 0 && i != claimIndex) {
 			continue
 		}
-		needUsage = needUsage || task.Kind == "usage_count"
+		needUsage = needUsage || task.Kind == "usage_count" || task.Kind == "usage_tokens" || task.Kind == "usage_amount"
 		needRecharge = needRecharge || task.Kind == "recharge_total"
 	}
 	if needUsage {
-		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_logs WHERE user_id=$1 AND created_at <= $2`, uid, at).Scan(&progress.usage); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(COALESCE(input_tokens,0)::numeric+COALESCE(output_tokens,0)::numeric+COALESCE(cache_creation_tokens,0)::numeric+COALESCE(cache_read_tokens,0)::numeric),0),COALESCE(SUM(actual_cost),0) FROM usage_logs WHERE user_id=$1 AND created_at <= $2`, uid, at).Scan(&progress.usage, &progress.tokens, &progress.spent); err != nil {
 			return "", err
 		}
 	}
@@ -113,54 +109,62 @@ func (s *Service) growthTasks(ctx context.Context, c Config, j Job, claim string
 		}
 	}
 	text := fmt.Sprintf("🌱 **成长任务**\n\n当前连续签到：%d 天\n累计签到：%d 天", streak, total)
-	if cfg.StreakChances > 0 {
-		text += fmt.Sprintf("\n每连续签到满 %d 天自动赠送 %d 次抽奖机会。", cfg.streakDays(), cfg.StreakChances)
+	if reward := cfg.streakReward(); reward.enabled() {
+		text += fmt.Sprintf("\n每连续签到满 %d 天自动获得：%s。", cfg.streakDays(), reward.description())
 	}
+	text += "\n\n### 一次性成长任务"
 	if len(tasks) == 0 {
-		text += "\n\n当前暂无成长任务。"
+		text += "\n\n当前暂无一次性成长任务。"
 	}
 	for i, task := range tasks {
 		eligible, status := progress.task(task)
 		key := fmt.Sprintf("qq-growth:%d:%s", uid, task.ID)
-		var claimed bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_bot_lottery_chance_grants WHERE source_key=$1)`, key).Scan(&claimed); err != nil {
-			return "", err
+		claimed, claimErr := activityRewardClaimed(ctx, tx, key)
+		if claimErr != nil {
+			return "", claimErr
 		}
 		if i == claimIndex {
 			if claimed {
 				return "该成长任务奖励已领取。", nil
 			}
-			if !task.Enabled || task.Chances == 0 {
+			if !task.Enabled || !task.reward().enabled() {
 				return "该成长任务奖励未开启。", nil
 			}
 			if !eligible {
-				return "尚未完成该任务，请发送 /成长任务 查看进度。", nil
+				return "尚未完成该任务，请发送 /福利 查看进度。", nil
 			}
-			res, e := tx.ExecContext(ctx, `INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES($1,$2,$3) ON CONFLICT(source_key) DO NOTHING`, key, uid, task.Chances)
-			if e != nil {
-				return "", e
+			reward := task.reward()
+			granted, grantErr := grantActivityReward(ctx, tx, current, j, uid, key, "growth", "成长任务："+task.Name, reward, at)
+			if grantErr != nil {
+				return "", grantErr
 			}
-			n, e := res.RowsAffected()
-			if e != nil {
-				return "", e
-			}
-			if n == 0 {
+			if !granted {
 				return "该成长任务奖励已领取。", nil
 			}
 			if err = tx.Commit(); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("✅ **成长奖励已领取**\n\n%s\n赠送抽奖次数：%d 次\n发送 /抽奖次数 查看余额。", task.Name, task.Chances), nil
+			if reward.Type == "balance" {
+				s.invalidate(ctx, uid)
+			}
+			return fmt.Sprintf("✅ **成长奖励已领取**\n\n%s\n奖励：%s\n%s", replyPlainLabel(task.Name), reward.description(), reward.deliveryNote()), nil
 		}
 		switch {
 		case claimed:
 			status = "已领取"
-		case !task.Enabled || task.Chances == 0:
+		case !task.Enabled || !task.reward().enabled():
 			status = "未开启"
 		case eligible:
-			status = fmt.Sprintf("可领取 · /领取任务 %d", i+1)
+			status = fmt.Sprintf("可领取 · /福利 领取 %d", i+1)
+			if len(actions) > 0 && actions[0] != nil {
+				*actions[0] = append(*actions[0], helpCommandButton(fmt.Sprintf("领取任务%d", i+1), "welfare:claim:"+task.ID, fmt.Sprintf("/福利 领取 %d", i+1)))
+			}
 		}
-		text += fmt.Sprintf("\n\n**%d. %s**\n奖励：%d 次抽奖 · %s", i+1, task.Name, task.Chances, status)
+		text += fmt.Sprintf("\n\n**%d. %s**\n奖励：%s · %s", i+1, replyPlainLabel(task.Name), task.reward().description(), status)
 	}
-	return text + "\n\n每项任务每个网站账号限领一次；历史完成记录也可参与。抽奖须由管理员开启。", nil
+	periodic, err := rankingGrowthTasks(ctx, tx, current.AppID, uid, actions...)
+	if err != nil {
+		return "", err
+	}
+	return text + "\n\n以上为一次性任务，每项每个网站账号限领一次；历史完成记录也可参与。领取后余额和抽奖次数到账，实物与自定义奖品由管理员发放。\n\n" + periodic, nil
 }

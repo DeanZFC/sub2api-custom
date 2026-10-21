@@ -21,6 +21,8 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 		r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), role); c.Next() })
 		r.GET("/checkin", h.GetCheckinConfig)
 		r.PUT("/checkin", h.SaveCheckinConfig)
+		r.GET("/rankings", h.GetRankingConfig)
+		r.PUT("/rankings", h.SaveRankingConfig)
 		r.GET("/invite", h.GetInviteConfig)
 		r.PUT("/invite", h.SaveInviteConfig)
 		r.GET("/lottery", h.GetLotteryConfig)
@@ -28,6 +30,12 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 		r.GET("/lottery/draws", h.ListLotteryDraws)
 		r.GET("/lottery/users/:user_id", h.LotteryState)
 		for _, tc := range []struct{ method, path, body string }{
+			{"PUT", "/rankings", `{"rewards_enabled":true,"token_rewards":[],"amount_rewards":[]}`},
+			{"PUT", "/rankings", `{"token_rewards":[{"rank":11,"reward":{"type":"chances","quantity":1}}]}`},
+			{"PUT", "/rankings", `{"token_rewards":[{"rank":1.5,"reward":{"type":"chances","quantity":1}}]}`},
+			{"PUT", "/rankings", `{"token_rewards":[{"rank":1,"reward":{"type":"chances","quantity":1}},{"rank":1,"reward":{"type":"balance","amount":1}}]}`},
+			{"PUT", "/rankings", `{"amount_rewards":[{"rank":1,"reward":{"type":"physical","quantity":1}}]}`},
+			{"PUT", "/rankings", `{"amount_rewards":[{"rank":1,"reward":{"type":"balance","amount":1001}}]}`},
 			{"PUT", "/checkin", `{"min_amount":2,"max_amount":1}`},
 			{"PUT", "/checkin", `{"streak_days":-1}`},
 			{"PUT", "/checkin", `{"growth":{"tasks":[{"id":"bad","name":"Invalid task","kind":"usage_count","target":1.5,"chances":1,"enabled":true}]}}`},
@@ -66,7 +74,7 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 			require.Equal(t, want, w.Code)
 		}
 		if role != "admin" {
-			for _, path := range []string{"/checkin", "/lottery", "/invite"} {
+			for _, path := range []string{"/checkin", "/lottery", "/invite", "/rankings"} {
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 				require.Equal(t, 403, w.Code)
