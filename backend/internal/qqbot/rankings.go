@@ -113,7 +113,7 @@ func (s *Service) todayRankings(ctx context.Context, c Config, now time.Time) (s
 			text += "\n暂无上榜账号。"
 		}
 	}
-	return text + "\n\n仅展示匿名代号和名次，不公开账号信息及具体消耗。当前为实时榜，次日北京时间 00:10 结算已开启的奖励资格；绑定后发送 /福利 查看，通过 /福利 领取 任务编号 领取。", nil
+	return text + "\n\n仅展示匿名代号和名次，不公开账号信息及具体消耗。当前为实时榜，次日北京时间 00:10 结算并自动发放已开启的奖励，无需领取。", nil
 }
 
 func (s *Service) startRankingMonitor(ctx context.Context) {
@@ -178,7 +178,7 @@ func (s *Service) settleDueRankings(ctx context.Context, now time.Time) error {
 			return err
 		}
 	}
-	return nil
+	return s.settlePendingRankingRewards(ctx, c, now)
 }
 
 func (s *Service) settleRankingDay(ctx context.Context, appID, date string, now time.Time) error {
@@ -249,6 +249,7 @@ func (s *Service) settleRankingDay(ctx context.Context, appID, date string, now 
 	// Lock accounts in a fixed order even if the two boards have different winners.
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].UserID < entries[j].UserID })
 	grants := 0
+	var invalidations []int64
 	for _, entry := range entries {
 		reward := prizeFor(entry)
 		if !reward.enabled() {
@@ -263,14 +264,6 @@ func (s *Service) settleRankingDay(ctx context.Context, appID, date string, now 
 			return err
 		}
 		key := fmt.Sprintf("qq-ranking:%s:%s:%s:%d", appID, date, entry.Kind, uid)
-		// Preserve rewards paid by the former automatic settlement implementation.
-		claimed, claimErr := activityRewardClaimed(ctx, tx, key)
-		if claimErr != nil {
-			return claimErr
-		}
-		if claimed {
-			continue
-		}
 		if err = reward.validate(); err != nil {
 			return err
 		}
@@ -278,8 +271,8 @@ func (s *Service) settleRankingDay(ctx context.Context, appID, date string, now 
 		if marshalErr != nil {
 			return marshalErr
 		}
-		result, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_ranking_claims(app_id,ranking_day,ranking_kind,rank,user_id,source_key,reward,created_at)
- VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8) ON CONFLICT DO NOTHING`, appID, date, entry.Kind, entry.Rank, uid, key, string(rewardJSON), now)
+		result, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_ranking_claims(app_id,ranking_day,ranking_kind,rank,user_id,source_key,reward,created_at,claimed_at)
+ VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$8) ON CONFLICT DO NOTHING`, appID, date, entry.Kind, entry.Rank, uid, key, string(rewardJSON), now)
 		if err != nil {
 			return err
 		}
@@ -287,10 +280,27 @@ func (s *Service) settleRankingDay(ctx context.Context, appID, date string, now 
 		if err != nil {
 			return err
 		}
+		job, jobErr := rankingRewardJob(ctx, tx, appID, uid)
+		if jobErr != nil {
+			return jobErr
+		}
+		granted, grantErr := grantActivityReward(ctx, tx, c, job, uid, key, "ranking", rankingClaimName(date, entry.Kind, entry.Rank), reward, now)
+		if grantErr != nil {
+			return grantErr
+		}
+		if granted && reward.Type == "balance" {
+			invalidations = append(invalidations, uid)
+		}
 		grants += int(count)
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_ranking_settlements SET reward_count=$3 WHERE app_id=$1 AND ranking_day=$2`, appID, date, grants); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	for _, uid := range invalidations {
+		s.invalidate(ctx, uid)
+	}
+	return nil
 }

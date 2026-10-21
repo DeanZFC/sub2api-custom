@@ -79,7 +79,7 @@ func (r GrowthReward) deliveryNote() string {
 	case "balance":
 		return "已存入绑定账号。"
 	case "chances":
-		return "发送 /我的 查看剩余次数；抽奖须由管理员开启。"
+		return "发送 /抽奖次数 查看剩余次数；抽奖须由管理员开启。"
 	default:
 		instructions := strings.TrimSpace(r.ClaimInstructions)
 		if instructions == "" {
@@ -145,4 +145,21 @@ func grantActivityReward(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 		_, err = tx.ExecContext(ctx, `INSERT INTO redeem_codes(code,type,value,status,used_by,used_at,notes) VALUES($1,'admin_balance',$2,'used',$3,$4,$5)`, "QQ"+randomID(), reward.Amount, uid, at, fmt.Sprintf("QQ %s reward #%d", source, id))
 	}
 	return err == nil, err
+}
+
+// Completed tasks display the immutable award and current fulfillment state,
+// even if an administrator has since changed that task's configured reward.
+func activityRewardSnapshot(ctx context.Context, tx *sql.Tx, key string) (GrowthReward, string, error) {
+	var reward GrowthReward
+	var status string
+	err := tx.QueryRowContext(ctx, `SELECT reward_type,amount,quantity,prize_name,claim_instructions,status FROM qq_bot_reward_codes WHERE source_key=$1`, key).Scan(&reward.Type, &reward.Amount, &reward.Quantity, &reward.PrizeName, &reward.ClaimInstructions, &status)
+	if !errors.Is(err, sql.ErrNoRows) {
+		return reward, status, err
+	}
+	reward = GrowthReward{Type: "chances"}
+	err = tx.QueryRowContext(ctx, `SELECT chances FROM qq_bot_lottery_chance_grants WHERE source_key=$1`, key).Scan(&reward.Quantity)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GrowthReward{}, "", nil
+	}
+	return reward, "fulfilled", err
 }

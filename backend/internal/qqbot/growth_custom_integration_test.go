@@ -21,7 +21,7 @@ func TestGrowthCustomTargetsAndRetainedClaims(t *testing.T) {
 	require.NoError(t, err)
 	j := Job{GroupID: "group", MemberID: "member"}
 	require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{Growth: GrowthConfig{BindingChances: 2}}))
-	text, err := s.growthTasks(ctx, c, j, "1")
+	text, err := s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
 	require.Contains(t, text, "2 次")
 	cfg, err := s.CheckinConfig(ctx)
@@ -47,30 +47,19 @@ func TestGrowthCustomTargetsAndRetainedClaims(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO redeem_codes(code,type,value,status,used_by,used_at) VALUES('order-linked','balance',40,'used',$1,NOW()),('offline','balance',5,'used',$1,NOW()),('admin','admin_balance',100,'used',$1,NOW())`, uid)
 	require.NoError(t, err)
-	text, err = s.growthTasks(ctx, c, j, "")
+	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
 	require.Contains(t, text, "2/3 次")
 	require.Contains(t, text, "USD 20.00/25.00")
-	for _, index := range []string{"4", "7"} {
-		text, err = s.growthTasks(ctx, c, j, index)
-		require.NoError(t, err)
-		require.Contains(t, text, "尚未完成")
-	}
-	text, err = s.growthTasks(ctx, c, j, "1")
-	require.NoError(t, err)
-	require.Contains(t, text, "已领取")
-	text, err = s.growthTasks(ctx, c, j, "8")
-	require.NoError(t, err)
+	require.Contains(t, text, "已发放")
 	require.Contains(t, text, "未开启")
 	_, err = db.Exec(`INSERT INTO usage_logs(user_id,model,created_at) VALUES($1,'test',NOW())`, uid)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO redeem_codes(code,type,value,status,used_by,used_at) VALUES('extra','balance',5,'used',$1,NOW())`, uid)
 	require.NoError(t, err)
-	for _, index := range []string{"4", "5", "6", "7"} {
-		text, err = s.growthTasks(ctx, c, j, index)
-		require.NoError(t, err)
-		require.Contains(t, text, "成长奖励已领取")
-	}
+	text, err = s.growthTasks(ctx, c, j)
+	require.NoError(t, err)
+	require.Contains(t, text, "已自动发放")
 	var granted int
 	require.NoError(t, db.QueryRow(`SELECT SUM(chances) FROM qq_bot_lottery_chance_grants WHERE user_id=$1`, uid).Scan(&granted))
 	require.Equal(t, 20, granted)
@@ -79,15 +68,15 @@ func TestGrowthCustomTargetsAndRetainedClaims(t *testing.T) {
 	claimed.Name, claimed.Target, claimed.Chances = "Edited milestone", 1, 1000
 	cfg.Growth.Tasks = []GrowthTask{claimed}
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
-	text, err = s.growthTasks(ctx, c, j, "1")
+	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "已领取")
+	require.Contains(t, text, "已发放")
 	cfg.Growth.Tasks = []GrowthTask{}
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
 	loaded, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
 	require.Empty(t, loaded.Growth.Tasks)
-	text, err = s.growthTasks(ctx, c, j, "")
+	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
 	require.Contains(t, text, "当前暂无一次性成长任务")
 }

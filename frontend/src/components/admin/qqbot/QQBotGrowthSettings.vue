@@ -27,7 +27,6 @@
           </div>
           <QQBotGrowthRewardFields v-model="task.reward" prefix="task" :index="index" />
           <p class="text-sm text-gray-500">{{ t('qqbot.growth.typeHelp.' + task.kind) }}</p>
-          <p class="text-sm text-gray-500">{{ t('qqbot.growth.claimCommand', { number: index + 1 }) }}</p>
         </article>
         <p v-if="!form.growth.tasks.length" class="rounded-lg border border-dashed p-6 text-center text-sm text-gray-500 dark:border-dark-700">{{ t('qqbot.growth.empty') }}</p>
         <div class="flex flex-wrap items-end gap-3">

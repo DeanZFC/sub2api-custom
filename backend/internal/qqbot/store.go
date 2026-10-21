@@ -219,17 +219,15 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		return errors.New("机器人队列已满")
 	}
 	jobID := randomID()
-	var rewardHash string
 	if isGroupMessageEvent(p.Type) && containsRewardCode(e.Content) {
-		clean, hash := redactRewardCommand(e)
-		rewardHash = hash
+		clean := redactRewardCommand(e)
 		p.Data, err = json.Marshal(clean)
 		if err != nil {
 			return err
 		}
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,reward_code_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(app_id,event_key) DO UPDATE SET event_type=EXCLUDED.event_type,payload=EXCLUDED.payload,kind='event',trigger_reason='',decision_reason=''
- WHERE EXCLUDED.event_type='GROUP_AT_MESSAGE_CREATE' AND qq_bot_jobs.kind='ambient_chat' AND qq_bot_jobs.status='queued' AND qq_bot_jobs.model_reserved_at IS NULL`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data), rewardHash)
+	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,event_key) DO UPDATE SET event_type=EXCLUDED.event_type,payload=EXCLUDED.payload,kind='event',trigger_reason='',decision_reason=''
+ WHERE EXCLUDED.event_type='GROUP_AT_MESSAGE_CREATE' AND qq_bot_jobs.kind='ambient_chat' AND qq_bot_jobs.status='queued' AND qq_bot_jobs.model_reserved_at IS NULL`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data))
 	if err != nil {
 		return err
 	}
@@ -249,13 +247,13 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	return nil
 }
 
-const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,reward_code_hash,trigger_reason,decision_reason`
+const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason`
 
 type scanner interface{ Scan(...any) error }
 
 func scanJob(r scanner) (Job, error) {
 	var j Job
-	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.RewardCodeHash, &j.TriggerReason, &j.DecisionReason)
+	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason)
 	return j, err
 }
 func (s *Service) claimJob(ctx context.Context) (Job, error) {
@@ -511,6 +509,13 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if kind == "checkin" {
 		streak, bonus, err = grantStreak(ctx, tx, c, j, userID, rewardAt, streakReward, streakDays)
 		if err != nil {
+			return "", err
+		}
+		cfg, configErr := loadCheckinConfig(ctx, tx, c.CheckinReward)
+		if configErr != nil {
+			return "", configErr
+		}
+		if _, _, _, err = settleGrowthForUser(ctx, tx, c, j, userID, cfg, rewardAt); err != nil {
 			return "", err
 		}
 	}

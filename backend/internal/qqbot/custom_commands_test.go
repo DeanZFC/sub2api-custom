@@ -136,9 +136,9 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 
 	j.MessageID = "help"
 	before = len(replies)
-	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助 2"}))
+	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := strings.Join(replies[before:], "")
-	require.Contains(t, help, "- **/a**：自定义回复")
-	require.Contains(t, help, "- **/长回复**：自定义回复")
+	require.Contains(t, help, "- **/a**")
+	require.Contains(t, help, "- **/长回复**")
 	require.NotContains(t, help, "/停用")
 }

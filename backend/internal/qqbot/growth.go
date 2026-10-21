@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 )
 
@@ -35,77 +34,111 @@ func grantStreak(ctx context.Context, tx *sql.Tx, c Config, j Job, uid int64, at
 	return streak, granted, err
 }
 
-func (s *Service) growthTasks(ctx context.Context, c Config, j Job, claim string, actions ...*[]keyboardButton) (string, error) {
+// Queries and the background worker share the same transaction and account key.
+// No command or task number is required to receive an eligible reward.
+func (s *Service) growthTasks(ctx context.Context, c Config, j Job) (string, error) {
+	text, _, err := s.processGrowthTasks(ctx, c, j, time.Now(), true)
+	return text, err
+}
+
+func (s *Service) processGrowthTasks(ctx context.Context, c Config, j Job, at time.Time, render bool) (string, int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	current, err := s.lockConfig(ctx, tx)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if !current.Enabled || current.AppID != c.AppID || !current.allows(j.GroupID) {
-		return "当前群未启用机器人。", nil
+		return "当前群未启用机器人。", 0, nil
 	}
-	// Match reward and unbinding lock order.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, checkinConfigLock); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	uid, err := boundUser(ctx, tx, c.AppID, j.MemberID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return bindFirst, nil
+		return bindFirst, 0, nil
 	}
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	// Keep the account active through settlement and serialize grants with account changes.
 	var active int64
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL FOR UPDATE`, uid).Scan(&active); err != nil {
-		return "", err
+	err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL FOR UPDATE`, uid).Scan(&active)
+	if errors.Is(err, sql.ErrNoRows) {
+		return bindFirst, 0, nil
 	}
-	if id, ok := rankingClaimID(claim); ok {
-		return s.claimRankingReward(ctx, tx, current, j, uid, id, time.Now())
+	if err != nil {
+		return "", 0, err
 	}
 	cfg, err := loadCheckinConfig(ctx, tx, current.CheckinReward)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	at := time.Now()
+	text, grants, balanceChanged, err := settleGrowthForUser(ctx, tx, current, j, uid, cfg, at)
+	if err != nil {
+		return "", 0, err
+	}
+	if render {
+		periodic, e := rankingGrowthTasks(ctx, tx, current.AppID, uid)
+		if e != nil {
+			return "", 0, e
+		}
+		text += "\n\n" + periodic
+	}
+	if err = tx.Commit(); err != nil {
+		return "", 0, err
+	}
+	if balanceChanged {
+		s.invalidate(ctx, uid)
+	}
+	return text, grants, nil
+}
+
+// Caller locks the active user row and check-in configuration before granting.
+func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid int64, cfg CheckinConfig, at time.Time) (string, int, bool, error) {
 	total, streak, err := checkinProgress(ctx, tx, uid, at)
 	if err != nil {
-		return "", err
+		return "", 0, false, err
 	}
 	tasks := cfg.Growth.tasks()
-	claimIndex := -1
-	if claim != "" {
-		n, e := strconv.Atoi(claim)
-		if e != nil || n < 1 || n > len(tasks) {
-			return "任务编号不正确，请发送 /福利 查看当前任务，再使用 /福利 领取 任务编号。", nil
-		}
-		claimIndex = n - 1
-	}
+	claimed := make([]bool, len(tasks))
+	rewards := make([]GrowthReward, len(tasks))
+	statuses := make([]string, len(tasks))
 	progress := growthProgress{total: total, streak: streak}
 	var needUsage, needRecharge bool
 	for i, task := range tasks {
-		if !task.Enabled || !task.reward().enabled() || (claimIndex >= 0 && i != claimIndex) {
+		key := fmt.Sprintf("qq-growth:%d:%s", uid, task.ID)
+		rewards[i] = task.reward()
+		snapshot, status, e := activityRewardSnapshot(ctx, tx, key)
+		err = e
+		claimed[i] = status != ""
+		if claimed[i] {
+			rewards[i], statuses[i] = snapshot, status
+		}
+		if err != nil {
+			return "", 0, false, err
+		}
+		if claimed[i] || !task.Enabled || !task.reward().enabled() {
 			continue
 		}
 		needUsage = needUsage || task.Kind == "usage_count" || task.Kind == "usage_tokens" || task.Kind == "usage_amount"
 		needRecharge = needRecharge || task.Kind == "recharge_total"
 	}
 	if needUsage {
-		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(COALESCE(input_tokens,0)::numeric+COALESCE(output_tokens,0)::numeric+COALESCE(cache_creation_tokens,0)::numeric+COALESCE(cache_read_tokens,0)::numeric),0),COALESCE(SUM(actual_cost),0) FROM usage_logs WHERE user_id=$1 AND created_at <= $2`, uid, at).Scan(&progress.usage, &progress.tokens, &progress.spent); err != nil {
-			return "", err
+		err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(COALESCE(input_tokens,0)::numeric+COALESCE(output_tokens,0)::numeric+COALESCE(cache_creation_tokens,0)::numeric+COALESCE(cache_read_tokens,0)::numeric),0),COALESCE(SUM(actual_cost),0) FROM usage_logs WHERE user_id=$1 AND created_at <= $2`, uid, at).Scan(&progress.usage, &progress.tokens, &progress.spent)
+		if err != nil {
+			return "", 0, false, err
 		}
 	}
 	if needRecharge {
-		progress.recharge, err = rechargeSum(ctx, tx, uid, nil, claimIndex >= 0)
+		progress.recharge, err = rechargeSum(ctx, tx, uid, nil, true)
 		if err != nil {
-			return "", err
+			return "", 0, false, err
 		}
 	}
 	text := fmt.Sprintf("🌱 **成长任务**\n\n当前连续签到：%d 天\n累计签到：%d 天", streak, total)
@@ -116,55 +149,35 @@ func (s *Service) growthTasks(ctx context.Context, c Config, j Job, claim string
 	if len(tasks) == 0 {
 		text += "\n\n当前暂无一次性成长任务。"
 	}
+	grants := 0
+	balanceChanged := false
 	for i, task := range tasks {
 		eligible, status := progress.task(task)
-		key := fmt.Sprintf("qq-growth:%d:%s", uid, task.ID)
-		claimed, claimErr := activityRewardClaimed(ctx, tx, key)
-		if claimErr != nil {
-			return "", claimErr
-		}
-		if i == claimIndex {
-			if claimed {
-				return "该成长任务奖励已领取。", nil
-			}
-			if !task.Enabled || !task.reward().enabled() {
-				return "该成长任务奖励未开启。", nil
-			}
-			if !eligible {
-				return "尚未完成该任务，请发送 /福利 查看进度。", nil
-			}
-			reward := task.reward()
-			granted, grantErr := grantActivityReward(ctx, tx, current, j, uid, key, "growth", "成长任务："+task.Name, reward, at)
-			if grantErr != nil {
-				return "", grantErr
-			}
-			if !granted {
-				return "该成长任务奖励已领取。", nil
-			}
-			if err = tx.Commit(); err != nil {
-				return "", err
-			}
-			if reward.Type == "balance" {
-				s.invalidate(ctx, uid)
-			}
-			return fmt.Sprintf("✅ **成长奖励已领取**\n\n%s\n奖励：%s\n%s", replyPlainLabel(task.Name), reward.description(), reward.deliveryNote()), nil
-		}
 		switch {
-		case claimed:
-			status = "已领取"
+		case claimed[i]:
+			status = "已发放"
+			if statuses[i] == "pending" {
+				status = "已登记，待管理员发放"
+			}
 		case !task.Enabled || !task.reward().enabled():
 			status = "未开启"
 		case eligible:
-			status = fmt.Sprintf("可领取 · /福利 领取 %d", i+1)
-			if len(actions) > 0 && actions[0] != nil {
-				*actions[0] = append(*actions[0], helpCommandButton(fmt.Sprintf("领取任务%d", i+1), "welfare:claim:"+task.ID, fmt.Sprintf("/福利 领取 %d", i+1)))
+			reward := task.reward()
+			granted, e := grantActivityReward(ctx, tx, c, j, uid, fmt.Sprintf("qq-growth:%d:%s", uid, task.ID), "growth", "成长任务："+task.Name, reward, at)
+			if e != nil {
+				return "", 0, false, e
+			}
+			status = "已发放"
+			if granted {
+				grants++
+				balanceChanged = balanceChanged || reward.Type == "balance"
+				status = "已自动发放"
+			}
+			if reward.Type == "physical" || reward.Type == "other" {
+				status = "已登记，待管理员发放"
 			}
 		}
-		text += fmt.Sprintf("\n\n**%d. %s**\n奖励：%s · %s", i+1, replyPlainLabel(task.Name), task.reward().description(), status)
+		text += fmt.Sprintf("\n\n**%d. %s**\n奖励：%s · %s", i+1, replyPlainLabel(task.Name), rewards[i].description(), status)
 	}
-	periodic, err := rankingGrowthTasks(ctx, tx, current.AppID, uid, actions...)
-	if err != nil {
-		return "", err
-	}
-	return text + "\n\n以上为一次性任务，每项每个网站账号限领一次；历史完成记录也可参与。领取后余额和抽奖次数到账，实物与自定义奖品由管理员发放。\n\n" + periodic, nil
+	return text + "\n\n达标奖励自动发放，无需领取。每项任务每个网站账号仅奖励一次；历史完成记录也可参与。余额与抽奖次数直接到账，实物及自定义奖品由管理员发放。", grants, balanceChanged, nil
 }

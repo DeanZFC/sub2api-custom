@@ -51,7 +51,6 @@ func RegisterAdminRoutes(
 			bot.GET("/lottery/draws", h.QQBot.ListLotteryDraws)
 			bot.GET("/lottery/users/:user_id", h.QQBot.LotteryState)
 			bot.GET("/reward-codes", h.QQBot.ListRewardCodes)
-			bot.POST("/reward-codes", h.QQBot.CreateRewardCodes)
 			bot.PATCH("/reward-codes/:id", h.QQBot.UpdateRewardCode)
 			bot.GET("/bindings", h.QQBot.ListBindings)
 			bot.DELETE("/bindings/:user_id", h.QQBot.Unbind)

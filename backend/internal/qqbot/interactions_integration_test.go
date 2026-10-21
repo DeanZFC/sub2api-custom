@@ -5,7 +5,6 @@ package qqbot
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -136,8 +135,8 @@ func TestRetiredLotteryCallbackCannotSpend(t *testing.T) {
 	require.Empty(t, recorder.replies)
 }
 
-func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
-	for _, change := range []string{"page", "page removed", "custom reordered", "custom disabled", "group removed", "bot disabled", "expired"} {
+func TestHelpInteractionUsesFreshConfiguration(t *testing.T) {
+	for _, change := range []string{"custom reordered", "custom disabled", "group removed", "bot disabled", "expired"} {
 		t.Run(change, func(t *testing.T) {
 			db := testDB(t)
 			s := savedBot(t, db)
@@ -149,21 +148,10 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 				{Command: "/second", Reply: "second reply", Enabled: true},
 				{Command: "/custom", Reply: "custom reply", Enabled: true},
 			}
-			if change == "page removed" {
-				for i := 0; i < 5; i++ {
-					c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: fmt.Sprintf("/extra%d", i), Reply: "extra", Enabled: true})
-				}
-			}
 			_, err = s.SaveConfig(ctx, c)
 			require.NoError(t, err)
 			recorder := mockHelpInteractions(t, s, false)
 			action := "custom:/custom"
-			if change == "page" || change == "page removed" {
-				action = "page:2"
-			}
-			if change == "page removed" {
-				action = "page:3"
-			}
 			i := testHelpInteraction("action", action, "clicker")
 			i.Data.Resolved.ButtonID = "" // QQ's documented group example omits this field.
 			i.Scene = ""                  // Older payloads identify the scene using chat_type.
@@ -171,7 +159,7 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 			switch change {
 			case "custom reordered":
 				c.CustomCommands = []CustomCommand{{Command: "/other", Reply: "wrong reply", Enabled: true}, {Command: "/custom", Reply: "updated reply", Enabled: true}}
-			case "custom disabled", "page removed":
+			case "custom disabled":
 				c.CustomCommands[len(c.CustomCommands)-1].Enabled = false
 			case "group removed":
 				c.AllowedGroups = []string{"other-group"}
@@ -186,20 +174,7 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 			s.runOne(ctx)
 			recorder.mu.Lock()
 			defer recorder.mu.Unlock()
-			if change == "page" {
-				require.Len(t, recorder.replies, 1)
-				require.Contains(t, recorder.replies[0].text(), "第 2/2 页")
-				require.Contains(t, recorder.replies[0].text(), "指令帮助 · 更多服务")
-				require.Contains(t, recorder.replies[0].text(), "**/custom**")
-				require.NotContains(t, recorder.replies[0].text(), "**/今日用量**")
-				require.NotNil(t, recorder.replies[0].Keyboard)
-				for _, row := range recorder.replies[0].Keyboard.Content.Rows {
-					for _, button := range row.Buttons {
-						require.Equal(t, 2, button.Action.Type, "old callbacks must return the new command menu")
-						require.Equal(t, button.RenderData.Label, button.RenderData.VisitedLabel)
-					}
-				}
-			} else if change == "custom reordered" {
+			if change == "custom reordered" {
 				require.Len(t, recorder.replies, 1)
 				require.Contains(t, recorder.replies[0].text(), "updated reply")
 				require.NotContains(t, recorder.replies[0].text(), "wrong reply")

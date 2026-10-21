@@ -20,12 +20,9 @@ func TestQQRewardCodesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 		r := gin.New()
 		r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), role); c.Next() })
 		r.GET("/codes", h.ListRewardCodes)
-		r.POST("/codes", h.CreateRewardCodes)
 		r.PATCH("/codes/:id", h.UpdateRewardCode)
 		for _, tc := range []struct{ method, path, body string }{
 			{"GET", "/codes?page=0", ""}, {"GET", "/codes?status=anything", ""},
-			{"POST", "/codes", `{"batch_name":"test","reward_type":"balance","amount":-1,"count":1}`},
-			{"POST", "/codes", `{"batch_name":"test","reward_type":"chances","quantity":1,"count":201}`},
 			{"PATCH", "/codes/0", `{"action":"disable"}`}, {"PATCH", "/codes/1", `{"action":"delete"}`},
 		} {
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))

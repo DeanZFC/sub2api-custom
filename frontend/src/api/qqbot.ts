@@ -109,12 +109,9 @@ export interface QQActivityRecord {
 }
 export interface QQActivityRecordsPage { items: QQActivityRecord[]; total: number; page: number; page_size: number }
 export type QQRewardType = 'balance' | 'chances' | 'physical' | 'other'
-export interface QQRewardCodeCreate {
-  batch_name: string; reward_type: QQRewardType; count: number; amount: number; quantity: number
+export interface QQRewardCode {
+  batch_name: string; reward_type: QQRewardType; amount: number; quantity: number
   prize_name: string; claim_instructions: string; target_user_id: number | null; expires_at: string | null
-}
-export interface QQGeneratedRewardCode { id: number; code: string }
-export interface QQRewardCode extends Omit<QQRewardCodeCreate, 'count'> {
   source_kind?: 'code' | 'growth' | 'streak' | 'ranking'
   id: number; app_id: string; code_hint: string; status: 'unused' | 'disabled' | 'expired' | 'pending' | 'fulfilled'
   user_id: number | null; email: string; member_id: string; redeemed_at: string | null
@@ -125,7 +122,6 @@ export const qqbotAPI = {
   rankingConfig: async () => (await apiClient.get<QQRankingConfig>('/admin/qqbot/rankings')).data,
   saveRankings: async (config: QQRankingConfig) => (await apiClient.put<QQRankingConfig>('/admin/qqbot/rankings', config)).data,
   rewardCodes: async (search: string, status: string, page: number) => (await apiClient.get<QQRewardCodesPage>('/admin/qqbot/reward-codes', { params: { search, status, page } })).data,
-  createRewardCodes: async (data: QQRewardCodeCreate) => (await apiClient.post<QQGeneratedRewardCode[]>('/admin/qqbot/reward-codes', data)).data,
   updateRewardCode: async (id: number, action: 'disable' | 'fulfill', note = '') => (await apiClient.patch(`/admin/qqbot/reward-codes/${id}`, { action, note })).data,
   activityRecords: async (kind: QQActivityKind, search: string, page: number) => (await apiClient.get<QQActivityRecordsPage>(`/admin/qqbot/records/${kind}`, { params: { search, page, page_size: 20 } })).data,
   inviteConfig: async () => (await apiClient.get<QQInviteConfig>('/admin/qqbot/invite')).data,

@@ -5,7 +5,6 @@ package qqbot
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -42,11 +41,11 @@ func TestGrowthTypedRewardsAtomicAndConcurrent(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					reply, e := s.growthTasks(ctx, c, Job{GroupID: "group", MemberID: "member"}, "1")
+					_, grants, e := s.processGrowthTasks(ctx, c, Job{GroupID: "group", MemberID: "member"}, time.Now(), true)
 					if e != nil {
 						failures.Add(1)
 					}
-					if strings.Contains(reply, "成长奖励已领取") {
+					if grants == 1 {
 						wins.Add(1)
 					}
 				}()
@@ -81,6 +80,9 @@ func TestGrowthTypedRewardsAtomicAndConcurrent(t *testing.T) {
 				require.Zero(t, balance)
 				require.Zero(t, chances)
 				require.Equal(t, "pending", row.Status)
+				reply, err := s.growthTasks(ctx, c, Job{GroupID: "group", MemberID: "member"})
+				require.NoError(t, err)
+				require.Contains(t, reply, "已登记，待管理员发放")
 				require.NoError(t, s.UpdateRewardCode(ctx, row.ID, "fulfill", "Delivered"))
 				require.ErrorIs(t, s.UpdateRewardCode(ctx, row.ID, "fulfill", "again"), ErrRewardCodeRequest)
 			}
@@ -89,9 +91,11 @@ func TestGrowthTypedRewardsAtomicAndConcurrent(t *testing.T) {
 			require.NoError(t, err)
 			cfg.Growth.Tasks[0].Reward = &GrowthReward{Type: "balance", Amount: 10}
 			require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
-			reply, err := s.growthTasks(ctx, c, Job{GroupID: "other-group", MemberID: "rebound"}, "1")
+			reply, err := s.growthTasks(ctx, c, Job{GroupID: "other-group", MemberID: "rebound"})
 			require.NoError(t, err)
-			require.Contains(t, reply, "已领取")
+			require.Contains(t, reply, "已发放")
+			require.Contains(t, reply, reward.description())
+			require.NotContains(t, reply, "余额 USD 10")
 			raw, err := migrations.FS.ReadFile("287_qq_bot_growth_rewards.sql")
 			require.NoError(t, err)
 			_, err = db.Exec(string(raw))
@@ -118,22 +122,20 @@ func TestGrowthUsageTokensAndActualSpending(t *testing.T) {
 	_, err = db.Exec(`INSERT INTO usage_logs(user_id,model,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,actual_cost,billing_type,created_at) VALUES($1,'past',600,200,100,99,9.9999999999,1,NOW()),($1,'future',10000,0,0,0,100,0,NOW()+INTERVAL '1 day'),($2,'other',10000,0,0,0,100,0,NOW())`, uid, other)
 	require.NoError(t, err)
 	j := Job{GroupID: "group", MemberID: "member"}
-	text, err := s.growthTasks(ctx, c, j, "")
+	text, err := s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
 	require.Contains(t, text, "999/1000 Token")
 	require.Contains(t, text, "USD 9.99/10.00")
-	for _, index := range []string{"1", "2"} {
-		text, err = s.growthTasks(ctx, c, j, index)
-		require.NoError(t, err)
-		require.Contains(t, text, "尚未完成")
-	}
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_reward_codes`).Scan(&count))
+	require.Zero(t, count)
 	_, err = db.Exec(`INSERT INTO usage_logs(user_id,model,cache_read_tokens,actual_cost,billing_type,created_at) VALUES($1,'new',1,0.0000000001,0,NOW())`, uid)
 	require.NoError(t, err)
-	for _, index := range []string{"1", "2"} {
-		text, err = s.growthTasks(ctx, c, j, index)
-		require.NoError(t, err)
-		require.Contains(t, text, "成长奖励已领取")
-	}
+	text, err = s.growthTasks(ctx, c, j)
+	require.NoError(t, err)
+	require.Contains(t, text, "已自动发放")
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_reward_codes`).Scan(&count))
+	require.Equal(t, 2, count)
 	text, err = s.myRewards(ctx, c, j)
 	require.NoError(t, err)
 	require.Contains(t, text, "成长奖励：USD 1.25")
@@ -181,9 +183,9 @@ func TestStreakTypedRewardsAndLegacyClaims(t *testing.T) {
 			_, err = db.Exec(`INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES($1,$2,2)`, fmt.Sprintf("qq-growth:%d:legacy", uid), uid)
 			require.NoError(t, err)
 			require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{Growth: GrowthConfig{Tasks: []GrowthTask{{ID: "legacy", Name: "Legacy", Kind: "binding", Target: 1, Enabled: true, Reward: &reward}}}}))
-			reply, err = s.growthTasks(ctx, c, j, "1")
+			reply, err = s.growthTasks(ctx, c, j)
 			require.NoError(t, err)
-			require.Contains(t, reply, "已领取")
+			require.Contains(t, reply, "已发放")
 		})
 	}
 }
@@ -200,7 +202,7 @@ func TestGrowthBalanceFailureRollsBackEntitlement(t *testing.T) {
 	_, err = db.Exec(`ALTER TABLE redeem_codes ADD CONSTRAINT reject_growth CHECK(value<>2)`)
 	require.NoError(t, err)
 	j := Job{GroupID: "group", MemberID: "member"}
-	_, err = s.growthTasks(ctx, c, j, "1")
+	_, err = s.growthTasks(ctx, c, j)
 	require.Error(t, err)
 	var count int
 	var balance float64
@@ -210,7 +212,7 @@ func TestGrowthBalanceFailureRollsBackEntitlement(t *testing.T) {
 	require.Zero(t, balance)
 	_, err = db.Exec(`ALTER TABLE redeem_codes DROP CONSTRAINT reject_growth`)
 	require.NoError(t, err)
-	reply, err := s.growthTasks(ctx, c, j, "1")
+	reply, err := s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, reply, "成长奖励已领取")
+	require.Contains(t, reply, "已自动发放")
 }

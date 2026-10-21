@@ -23,7 +23,7 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 	job := Job{MemberID: "member"}
 	info, err := s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 0.00\n- 签到奖励：USD 0.00\n- 兑换奖励：USD 0.00\n- 成长奖励：USD 0.00\n- 连签奖励：USD 0.00\n- 排行奖励：USD 0.00\n\n**合计：USD 0.00**", info)
+	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 0.00\n- 签到奖励：USD 0.00\n- 成长奖励：USD 0.00\n- 连签奖励：USD 0.00\n- 排行奖励：USD 0.00\n\n**合计：USD 0.00**", info)
 	_, err = db.Exec(`INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount,created_at) VALUES
  ('lottery-1','app','group','member',$1,'lottery',2.50,NOW()-INTERVAL '60 days'),
  ('lottery-2','app','other-group','member',$1,'lottery',0.75,NOW()),
@@ -38,7 +38,14 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 	require.NoError(t, err)
 	info, err = s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 3.25\n- 邀请奖励：USD 2.50\n- 签到奖励：USD 0.30\n- 兑换奖励：USD 0.00\n- 成长奖励：USD 1.25\n- 连签奖励：USD 0.50\n- 排行奖励：USD 0.75\n\n**合计：USD 8.55**", info)
+	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 3.25\n- 邀请奖励：USD 2.50\n- 签到奖励：USD 0.30\n- 成长奖励：USD 1.25\n- 连签奖励：USD 0.50\n- 排行奖励：USD 0.75\n\n**合计：USD 8.55**", info)
+
+	_, err = db.Exec(`INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount) VALUES('historical','app','group','member',$1,'redemption',2)`, uid)
+	require.NoError(t, err)
+	info, err = s.myRewards(ctx, c, job)
+	require.NoError(t, err)
+	require.Contains(t, info, "历史奖励：USD 2.00（已计入合计）")
+	require.Contains(t, info, "合计：USD 10.55")
 
 	info, err = s.myRewards(ctx, c, Job{MemberID: "unbound"})
 	require.NoError(t, err)
@@ -80,15 +87,15 @@ func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	query := func(id, member string) {
 		t.Helper()
-		e := Event{ID: id, GroupID: "group", Content: "/我的"}
+		e := Event{ID: id, GroupID: "group", Content: "/我的奖励"}
 		e.Author.MemberID = member
 		raw, marshalErr := json.Marshal(e)
 		require.NoError(t, marshalErr)
 		require.NoError(t, s.Enqueue(ctx, c, Payload{ID: id, Type: groupMessageCreate, Data: raw}))
 		s.runOne(ctx)
-		require.Contains(t, reply, "<qqbot-at-user id=\""+member+"\" />\n# 👤 我的账户")
-		require.Contains(t, reply, "## 累计奖励")
-		for _, category := range []string{"抽奖", "签到", "兑换", "成长", "连签", "排行"} {
+		require.Contains(t, reply, "<qqbot-at-user id=\""+member+"\" />\n# 🎁 累计奖励")
+		require.Contains(t, reply, "# 🎁 累计奖励")
+		for _, category := range []string{"抽奖", "签到", "成长", "连签", "排行"} {
 			require.Contains(t, reply, "- "+category+"奖励：USD 0.00")
 		}
 	}

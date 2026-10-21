@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,7 +26,7 @@ func seedCheckin(t *testing.T, db *sql.DB, uid int64, at time.Time) {
 	require.NoError(t, err)
 }
 
-func TestGrowthConcurrentClaimsRebindingAndProgress(t *testing.T) {
+func TestGrowthAutomaticGrantsRebindingAndProgress(t *testing.T) {
 	ctx := context.Background()
 	db := testDB(t)
 	s := savedBot(t, db)
@@ -38,13 +37,13 @@ func TestGrowthConcurrentClaimsRebindingAndProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{Enabled: true, StreakChances: 2, Growth: GrowthConfig{BindingChances: 2, FirstUsageChances: 3, Checkin30Chances: 4}}))
 	j := Job{GroupID: "group", MemberID: "member"}
-	text, err := s.growthTasks(ctx, c, j, "")
+	text, err := s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "可领取")
+	require.Contains(t, text, "已自动发放")
 	require.Contains(t, text, "0/30 天")
-	text, err = s.growthTasks(ctx, c, j, "2")
+	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "尚未完成")
+	require.Contains(t, text, "0/1 次")
 	var won, failed atomic.Int32
 	var wg sync.WaitGroup
 	for range 12 {
@@ -52,34 +51,34 @@ func TestGrowthConcurrentClaimsRebindingAndProgress(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			bot := New(db, testEncryptor{}, true, nil)
-			text, err := bot.growthTasks(ctx, c, j, "1")
+			_, grants, err := bot.processGrowthTasks(ctx, c, j, time.Now(), true)
 			if err != nil {
 				failed.Add(1)
 			}
-			if strings.Contains(text, "成长奖励已领取") {
+			if grants > 0 {
 				won.Add(1)
 			}
 		}()
 	}
 	wg.Wait()
 	require.Zero(t, failed.Load())
-	require.Equal(t, int32(1), won.Load())
+	require.Zero(t, won.Load(), "query already granted the binding task")
 	_, err = db.Exec(`UPDATE qq_bot_bindings SET member_id='rebound' WHERE user_id=$1`, uid)
 	require.NoError(t, err)
 	j.MemberID = "rebound"
 	j.GroupID = "other-group"
-	text, err = s.growthTasks(ctx, c, j, "1")
+	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "已领取")
+	require.Contains(t, text, "已发放")
 	_, err = db.Exec(`INSERT INTO usage_logs(user_id,model,created_at) VALUES($1,'test',NOW())`, uid)
 	require.NoError(t, err)
-	text, err = s.growthTasks(ctx, c, j, "2")
+	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
 	require.Contains(t, text, "3 次")
 	for i := 1; i <= 30; i++ {
 		seedCheckin(t, db, uid, time.Now().AddDate(0, 0, -i))
 	}
-	text, err = s.growthTasks(ctx, c, j, "3")
+	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
 	require.Contains(t, text, "4 次")
 	var total int
@@ -87,7 +86,7 @@ func TestGrowthConcurrentClaimsRebindingAndProgress(t *testing.T) {
 	require.Equal(t, 9, total)
 	_, err = db.Exec(`UPDATE users SET status='disabled' WHERE id=$1`, uid)
 	require.NoError(t, err)
-	text, err = s.growthTasks(ctx, c, j, "")
+	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
 	require.Equal(t, bindFirst, text)
 }

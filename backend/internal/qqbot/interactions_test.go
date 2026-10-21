@@ -68,6 +68,10 @@ func TestHelpInteractionRejectsUnsupportedOrUnauthorizedActions(t *testing.T) {
 		{"private chat", func(i *buttonInteraction, _ *Config) { i.Scene = "c2c" }, 4},
 		{"contradictory scene", func(i *buttonInteraction, _ *Config) { *i.ChatType = 2 }, 4},
 		{"missing scene", func(i *buttonInteraction, _ *Config) { i.Scene = ""; i.ChatType = nil }, 4},
+		{"retired pagination", func(i *buttonInteraction, _ *Config) {
+			i.Data.Resolved.ButtonData = helpActionPrefix + "page:2"
+			i.Data.Resolved.ButtonID = helpButtonID("page:2")
+		}, 1},
 		{"arbitrary command", func(i *buttonInteraction, _ *Config) { i.Data.Resolved.ButtonData = "/签到" }, 1},
 		{"unsafe parameter action", func(i *buttonInteraction, _ *Config) {
 			i.Data.Resolved.ButtonData = helpActionPrefix + "transfer"

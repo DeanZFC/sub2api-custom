@@ -45,7 +45,7 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 		require.NoError(t, s.Enqueue(context.Background(), c, Payload{Type: groupMessageCreate, Data: raw}))
 	}
 	require.Zero(t, calls.Load())
-	require.True(t, shouldQueueGroupMessage(groupMessageCreate, Event{Content: "/福利"}))
+	require.True(t, shouldQueueGroupMessage(groupMessageCreate, Event{Content: "/成长任务"}))
 }
 
 func TestFullGroupCommandsWithoutMention(t *testing.T) {
@@ -66,7 +66,7 @@ func TestFullGroupCommandsWithoutMention(t *testing.T) {
 	s := New(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
-	for i, content := range []string{"/帮助", "/绑定", "/生图", "/福利 错误", "/我的 多余参数"} {
+	for i, content := range []string{"/帮助", "/绑定", "/生图", "/抽奖 错误", "/我的余额 多余参数"} {
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, Event{GroupID: "group", Content: content}))
 	}

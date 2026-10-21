@@ -4,59 +4,34 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestRewardCodeEntropyNormalizationAndRedaction(t *testing.T) {
-	seen := map[string]bool{}
-	for range 100 {
-		code, err := generateRewardCode()
+func TestRetiredRedemptionRedactsAllPayloadCopies(t *testing.T) {
+	code := "ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ23-4567"
+	for _, prefix := range []string{"/福利 兑换 ", "<@bot> /福利\t兑换\n", "/奖励兑换 "} {
+		e := Event{Content: prefix + code, MsgElements: []MessageElement{{Content: code}}, Attachments: []Attachment{{URL: code}}, MessageScene: MessageScene{Ext: []string{code}}}
+		require.True(t, containsRewardCode(e.Content))
+		clean := redactRewardCommand(e)
+		raw, err := json.Marshal(clean)
 		require.NoError(t, err)
-		require.Len(t, strings.ReplaceAll(code, "-", ""), 32)
-		hash := rewardCodeHash(code)
-		require.Len(t, hash, 64)
-		require.False(t, seen[hash])
-		seen[hash] = true
-		require.Equal(t, hash, rewardCodeHash("  "+strings.ToLower(code)+"  "))
-		require.Equal(t, hash, rewardCodeHash(strings.ReplaceAll(code, "-", "")))
+		require.NotContains(t, string(raw), code)
+		require.False(t, isBuiltinOrCustomCommand(clean, nil))
 	}
-	for _, raw := range []string{"", "1234", "00000000000000000000000000000000", strings.Repeat("A", 65)} {
-		require.Equal(t, "invalid", rewardCodeHash(raw))
-	}
-	code, err := generateRewardCode()
-	require.NoError(t, err)
-	e := Event{ID: "m", GroupID: "g", Content: "<@bot> /福利 兑换 " + code, MsgElements: []MessageElement{{Content: code}}, Attachments: []Attachment{{URL: code}}, MessageScene: MessageScene{Ext: []string{code}}}
-	e.Author.MemberID = "member"
-	clean, hash := redactRewardCommand(e)
-	data, err := json.Marshal(clean)
-	require.NoError(t, err)
-	require.NotContains(t, string(data), code)
-	require.Equal(t, rewardCodeHash(code), hash)
-	require.Equal(t, []string{"bot"}, groupMentionIDs(clean))
-	require.True(t, isBuiltinOrCustomCommand(clean, nil))
-	require.Error(t, validateCustomCommands([]CustomCommand{{Command: "/福利 兑换", Reply: "override"}}))
 }
 
-func TestRewardCodeValidation(t *testing.T) {
-	base := RewardCodeCreate{BatchName: "launch", RewardType: "balance", Count: 1, Amount: 10}
-	require.NoError(t, base.Validate())
-	for _, edit := range []func(*RewardCodeCreate){
-		func(r *RewardCodeCreate) { r.Count = 201 }, func(r *RewardCodeCreate) { r.Count = 0 },
-		func(r *RewardCodeCreate) { r.Amount = 0.001 }, func(r *RewardCodeCreate) { r.Amount = -1 },
-		func(r *RewardCodeCreate) { r.Quantity = 1 }, func(r *RewardCodeCreate) { r.RewardType = "admin_balance" },
-		func(r *RewardCodeCreate) { past := time.Now().Add(-time.Second); r.ExpiresAt = &past },
-		func(r *RewardCodeCreate) { r.BatchName = " " },
-	} {
-		r := base
-		edit(&r)
-		require.ErrorIs(t, r.Validate(), ErrRewardCodeRequest)
+func TestCommandPaginationPreservesLongRules(t *testing.T) {
+	paragraphs := make([]string, 30)
+	for i := range paragraphs {
+		paragraphs[i] = strings.Repeat("成长任务", 50)
 	}
-	for _, kind := range []string{"chances", "physical", "other"} {
-		r := RewardCodeCreate{BatchName: "prize", RewardType: kind, Count: 1, Quantity: 3, PrizeName: "cup"}
-		require.NoError(t, r.Validate())
-		r.Quantity = 1001
-		require.Error(t, r.Validate())
+	body := strings.Join(paragraphs, "\n\n")
+	pages := paginateCommand(body)
+	require.Equal(t, body, strings.Join(pages, "\n\n"))
+	for _, page := range pages {
+		require.LessOrEqual(t, len([]rune(page)), 1300)
 	}
+	long := strings.Repeat("规则\n", 1800)
+	require.Equal(t, long, strings.Join(paginateCommand(long), ""))
 }

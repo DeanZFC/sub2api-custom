@@ -6,110 +6,140 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 )
-
-// R-prefixed persistent IDs cannot shift when tasks are reordered, another
-// reward is claimed, or a new daily settlement is added. IDs are not secrets;
-// both listing and claiming are scoped to the current AppID and bound user.
-func rankingClaimID(value string) (int64, bool) {
-	if !strings.HasPrefix(value, "R") {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(strings.TrimPrefix(value, "R"), 10, 64)
-	return id, err == nil && id > 0 && value == "R"+strconv.FormatInt(id, 10)
-}
 
 func rankingClaimName(date, kind string, rank int) string {
 	return fmt.Sprintf("%s %s 第 %d 名", date, rankingTitle(kind), rank)
 }
 
-func rankingGrowthTasks(ctx context.Context, tx *sql.Tx, appID string, uid int64, actions ...*[]keyboardButton) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,ranking_day::text,ranking_kind,rank,reward,claimed_at
- FROM qq_bot_ranking_claims WHERE app_id=$1 AND user_id=$2
- AND (claimed_at IS NULL OR id IN (SELECT id FROM qq_bot_ranking_claims
- WHERE app_id=$1 AND user_id=$2 AND claimed_at IS NOT NULL ORDER BY ranking_day DESC,id DESC LIMIT 10))
- ORDER BY (claimed_at IS NOT NULL),ranking_day DESC,id DESC`, appID, uid)
+func rankingGrowthTasks(ctx context.Context, tx *sql.Tx, appID string, uid int64) (string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT r.ranking_day::text,r.ranking_kind,r.rank,r.reward,r.claimed_at,COALESCE(a.status,'') FROM qq_bot_ranking_claims r LEFT JOIN qq_bot_reward_codes a ON a.source_key=r.source_key WHERE r.app_id=$1 AND r.user_id=$2 ORDER BY r.ranking_day DESC,r.id DESC LIMIT 10`, appID, uid)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = rows.Close() }()
-	text := "## 周期性成长任务\n\n每日排行奖励 · 北京时间次日 00:10 结算资格。发送 /今日排行榜 查看实时名次。"
+	text := "## 周期性成长任务\n\n每日排行奖励 · 北京时间次日 00:10 自动结算发放。发送 /今日排行榜 查看实时名次。"
 	count := 0
 	for rows.Next() {
-		var id int64
-		var date, kind string
+		var date, kind, fulfillment string
 		var rank int
 		var raw []byte
 		var claimed sql.NullTime
-		if err = rows.Scan(&id, &date, &kind, &rank, &raw, &claimed); err != nil {
+		if err = rows.Scan(&date, &kind, &rank, &raw, &claimed, &fulfillment); err != nil {
 			return "", err
 		}
 		var reward GrowthReward
 		if err = json.Unmarshal(raw, &reward); err != nil {
 			return "", err
 		}
-		number := "R" + strconv.FormatInt(id, 10)
-		status := "已领取"
+		status := "已自动发放"
 		if !claimed.Valid {
-			command := "/福利 领取 " + number
-			status = "可领取 · " + command
-			if len(actions) > 0 && actions[0] != nil {
-				*actions[0] = append(*actions[0], helpCommandButton("领取 "+number, "welfare:ranking:"+number, command))
+			status = "等待自动发放"
+		} else if reward.Type == "physical" || reward.Type == "other" {
+			status = "已发放"
+			if fulfillment == "pending" {
+				status = "已登记，待管理员发放"
 			}
 		}
-		text += fmt.Sprintf("\n\n**%s. %s**\n奖励：%s · %s", number, rankingClaimName(date, kind, rank), reward.description(), status)
+		text += fmt.Sprintf("\n\n**%s**\n奖励：%s · %s", rankingClaimName(date, kind, rank), reward.description(), status)
 		count++
 	}
 	if err = rows.Err(); err != nil {
 		return "", err
 	}
 	if count == 0 {
-		text += "\n\n暂无排行奖励记录；奖励开启且达到指定名次后，次日结算生成待领取任务。"
+		text += "\n\n暂无排行奖励记录。"
 	}
-	return text + "\n\n每天每榜分别领取，两个榜可同时获奖。待领取奖励长期保留，已领取仅展示最近 10 项；R 编号固定不变。领取后余额与次数到账，实物及自定义奖品由管理员发放。", nil
+	return text + "\n\n两个榜可同时获奖，展示最近 10 项记录。余额与抽奖次数直接到账，实物及自定义奖品由管理员发放。", nil
 }
 
-// growthTasks holds the config, binding and active-user locks. Granting and
-// consuming the frozen entitlement share one transaction, including rollback.
-func (s *Service) claimRankingReward(ctx context.Context, tx *sql.Tx, c Config, j Job, uid, id int64, at time.Time) (string, error) {
-	var date, kind, key string
-	var rank int
-	var raw []byte
-	var claimed sql.NullTime
-	err := tx.QueryRowContext(ctx, `SELECT ranking_day::text,ranking_kind,rank,source_key,reward,claimed_at
- FROM qq_bot_ranking_claims WHERE id=$1 AND app_id=$2 AND user_id=$3 FOR UPDATE`, id, c.AppID, uid).Scan(&date, &kind, &rank, &key, &raw, &claimed)
+func rankingRewardJob(ctx context.Context, tx *sql.Tx, appID string, uid int64) (Job, error) {
+	j := Job{}
+	err := tx.QueryRowContext(ctx, `SELECT member_id,group_id FROM qq_bot_bindings WHERE app_id=$1 AND user_id=$2`, appID, uid).Scan(&j.MemberID, &j.GroupID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "任务不存在或不属于当前账号，请发送 /福利 查看自己的任务。", nil
+		err = nil
 	}
+	return j, err
+}
+
+// Drain frozen rewards created by the former manual-claim workflow. The old
+// source key also detects rewards already paid before the claim table existed.
+// Unbound winners receive their reward on their website account as well.
+func (s *Service) settlePendingRankingRewards(ctx context.Context, c Config, at time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if claimed.Valid {
-		return "该周期性成长任务奖励已领取。", nil
-	}
-	var reward GrowthReward
-	if err = json.Unmarshal(raw, &reward); err != nil {
-		return "", err
-	}
-	name := rankingClaimName(date, kind, rank)
-	granted, err := grantActivityReward(ctx, tx, c, j, uid, key, "ranking", name, reward, at)
+	defer func() { _ = tx.Rollback() }()
+	current, err := s.lockConfig(ctx, tx)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_ranking_claims SET claimed_at=$2 WHERE id=$1`, id, at); err != nil {
-		return "", err
+	if !current.Enabled || current.AppID != c.AppID {
+		return nil
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.user_id,r.ranking_day::text,r.ranking_kind,r.rank,r.source_key,r.reward
+ FROM qq_bot_ranking_claims r JOIN users u ON u.id=r.user_id AND u.status='active' AND u.deleted_at IS NULL
+ WHERE r.app_id=$1 AND r.claimed_at IS NULL ORDER BY r.user_id,r.id LIMIT 100`, c.AppID)
+	if err != nil {
+		return err
+	}
+	type pendingReward struct {
+		id, uid         int64
+		date, kind, key string
+		rank            int
+		raw             []byte
+	}
+	var pending []pendingReward
+	for rows.Next() {
+		var r pendingReward
+		if err = rows.Scan(&r.id, &r.uid, &r.date, &r.kind, &r.rank, &r.key, &r.raw); err != nil {
+			break
+		}
+		pending = append(pending, r)
+	}
+	err = errors.Join(err, rows.Err(), rows.Close())
+	if err != nil {
+		return err
+	}
+	var invalidations []int64
+	for _, r := range pending {
+		var uid int64
+		err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL FOR UPDATE`, r.uid).Scan(&uid)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		var reward GrowthReward
+		if err = json.Unmarshal(r.raw, &reward); err != nil {
+			return err
+		}
+		j, e := rankingRewardJob(ctx, tx, c.AppID, uid)
+		if e != nil {
+			return e
+		}
+		granted, e := grantActivityReward(ctx, tx, current, j, uid, r.key, "ranking", rankingClaimName(r.date, r.kind, r.rank), reward, at)
+		if e != nil {
+			return e
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_ranking_claims SET claimed_at=$2 WHERE id=$1`, r.id, at); err != nil {
+			return err
+		}
+		if granted && reward.Type == "balance" {
+			invalidations = append(invalidations, uid)
+		}
 	}
 	if err = tx.Commit(); err != nil {
-		return "", err
+		return err
 	}
-	if !granted {
-		return "该周期性成长任务奖励已领取。", nil
-	}
-	if reward.Type == "balance" {
+	for _, uid := range invalidations {
 		s.invalidate(ctx, uid)
 	}
-	return fmt.Sprintf("✅ **周期性成长奖励已领取**\n\n%s\n奖励：%s\n%s", name, reward.description(), reward.deliveryNote()), nil
+	return nil
 }

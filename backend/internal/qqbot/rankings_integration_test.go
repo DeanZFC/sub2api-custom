@@ -130,18 +130,18 @@ func TestRankingSettlementCreatesUnboundEntitlementsAndDeduplicates(t *testing.T
 	}
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, a).Scan(&balance))
-	require.Zero(t, balance)
+	require.Equal(t, 1.25, balance)
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT reward_count FROM qq_bot_ranking_settlements WHERE ranking_day='2026-10-21'`).Scan(&count))
 	require.Equal(t, 5, count)
-	require.Zero(t, invalidated.Load())
+	require.EqualValues(t, 1, invalidated.Load())
 	var chances int
 	require.NoError(t, db.QueryRow(`SELECT COALESCE(SUM(chances),0) FROM qq_bot_lottery_chance_grants WHERE user_id=$1`, c).Scan(&chances))
-	require.Zero(t, chances)
+	require.Equal(t, 2, chances)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_reward_codes WHERE source_kind='ranking' AND code_hash IS NULL`).Scan(&count))
-	require.Zero(t, count)
+	require.Equal(t, 5, count)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_reward_codes WHERE status='pending'`).Scan(&count))
-	require.Zero(t, count)
+	require.Equal(t, 2, count)
 	// Finalized awards stay unchanged when late usage changes the live ordering.
 	rankingUsage(t, db, c, 9999999, "9999999", dayStart.Add(3*time.Hour))
 	require.NoError(t, s.settleDueRankings(ctx, now.Add(time.Hour)))
@@ -150,18 +150,6 @@ func TestRankingSettlementCreatesUnboundEntitlementsAndDeduplicates(t *testing.T
 	bind(t, db, a, "newly-bound")
 	bot, err := s.Config(ctx)
 	require.NoError(t, err)
-	bind(t, db, c, "third-member")
-	for uid, member := range map[int64]string{a: "newly-bound", b: "bound-member", c: "third-member"} {
-		for _, kind := range []string{"tokens", "amount"} {
-			if uid == c && kind == "amount" {
-				continue
-			}
-			number := rankingClaimNumber(t, db, uid, "2026-10-21", kind)
-			text, claimErr := s.growthTasks(ctx, bot, Job{MemberID: member, GroupID: "group"}, number)
-			require.NoError(t, claimErr)
-			require.Contains(t, text, "周期性成长奖励已领取")
-		}
-	}
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, a).Scan(&balance))
 	require.Equal(t, 1.25, balance)
 	require.EqualValues(t, 1, invalidated.Load())
@@ -215,25 +203,17 @@ func TestRankingSettlementUsesDatedRulesAndCatchesUp(t *testing.T) {
 	require.NoError(t, s.settleDueRankings(ctx, early.Add(time.Second)))
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
-	require.Zero(t, balance)
+	require.Equal(t, 10., balance)
 	require.NoError(t, s.settleDueRankings(ctx, rankingTime(t, "2026-10-22T00:10:00+08:00")))
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
-	require.Zero(t, balance)
+	require.Equal(t, 15., balance)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_ranking_settlements`).Scan(&count))
 	require.Equal(t, 3, count)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_ranking_claims`).Scan(&count))
 	require.Equal(t, 2, count)
 	require.NoError(t, s.settleDueRankings(ctx, rankingTime(t, "2026-10-22T00:20:00+08:00")))
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
-	require.Zero(t, balance)
-	bind(t, db, uid, "late-binding")
-	bot, err := s.Config(ctx)
-	require.NoError(t, err)
-	for date, amount := range map[string]string{"2026-10-19": "10", "2026-10-20": "5"} {
-		text, err := s.growthTasks(ctx, bot, Job{MemberID: "late-binding", GroupID: "group"}, rankingClaimNumber(t, db, uid, date, "tokens"))
-		require.NoError(t, err)
-		require.Contains(t, text, "奖励：余额 USD "+amount)
-	}
+	require.Equal(t, 15., balance)
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
 	require.Equal(t, 15., balance)
 }
@@ -269,7 +249,7 @@ CREATE TRIGGER reject_ranking_ledger BEFORE INSERT ON qq_bot_ranking_claims FOR 
 	require.NoError(t, err)
 	require.NoError(t, s.settleDueRankings(ctx, now))
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
-	require.Zero(t, balance)
+	require.Equal(t, 2., balance)
 }
 
 func TestRankingTiesPrecisionCacheTokensAndDayBoundary(t *testing.T) {

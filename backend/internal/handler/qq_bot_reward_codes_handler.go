@@ -16,25 +16,7 @@ func rewardCodeError(c *gin.Context, err error) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	response.InternalError(c, "奖励兑换操作失败，请稍后重试")
-}
-func (h *QQBotHandler) CreateRewardCodes(c *gin.Context) {
-	if !requireQQBotAdmin(c) {
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
-	var req qqbot.RewardCodeCreate
-	if c.ShouldBindJSON(&req) != nil {
-		response.BadRequest(c, "奖励兑换参数格式不正确")
-		return
-	}
-	out, err := h.bot.CreateRewardCodes(c.Request.Context(), req)
-	if err != nil {
-		rewardCodeError(c, err)
-		return
-	}
-	response.Success(c, out)
+	response.InternalError(c, "奖励管理操作失败，请稍后重试")
 }
 func (h *QQBotHandler) ListRewardCodes(c *gin.Context) {
 	if !requireQQBotAdmin(c) {
@@ -60,7 +42,7 @@ func (h *QQBotHandler) UpdateRewardCode(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id < 1 {
-		response.BadRequest(c, "兑换记录 ID 不正确")
+		response.BadRequest(c, "奖励记录 ID 不正确")
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)

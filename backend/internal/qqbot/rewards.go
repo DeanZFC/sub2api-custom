@@ -34,5 +34,9 @@ func (s *Service) myRewards(ctx context.Context, c Config, j Job) (string, error
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("🎁 **累计奖励**\n\n- 抽奖奖励：USD %.2f\n- 邀请奖励：USD %.2f\n- 签到奖励：USD %.2f\n- 兑换奖励：USD %.2f\n- 成长奖励：USD %.2f\n- 连签奖励：USD %.2f\n- 排行奖励：USD %.2f\n\n**合计：USD %.2f**", lottery, invite, checkin, redemption, growth, streak, ranking, total), nil
+	text := fmt.Sprintf("🎁 **累计奖励**\n\n- 抽奖奖励：USD %.2f\n- 邀请奖励：USD %.2f\n- 签到奖励：USD %.2f\n- 成长奖励：USD %.2f\n- 连签奖励：USD %.2f\n- 排行奖励：USD %.2f\n\n**合计：USD %.2f**", lottery, invite, checkin, growth, streak, ranking, total)
+	if redemption > 0 {
+		text += fmt.Sprintf("\n历史奖励：USD %.2f（已计入合计）", redemption)
+	}
+	return text, nil
 }

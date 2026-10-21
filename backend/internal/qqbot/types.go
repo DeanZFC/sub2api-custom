@@ -167,7 +167,6 @@ type Job struct {
 	TriggerReason   string          `json:"trigger_reason"`
 	DecisionReason  string          `json:"decision_reason"`
 	SuppressMention bool            `json:"-"`
-	RewardCodeHash  string          `json:"-"`
 	ShareHistory    bool            `json:"-"`
 	ReplyReference  string          `json:"-"`
 	ID              string          `json:"id"`

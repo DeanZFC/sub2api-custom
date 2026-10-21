@@ -53,6 +53,7 @@ func (s *Service) Start() {
 	s.startPriceMonitor(ctx)
 	s.startHealthMonitor(ctx)
 	s.startRankingMonitor(ctx)
+	s.startGrowthMonitor(ctx)
 	for i := 0; i < 2; i++ {
 		s.wg.Add(1)
 		go func() {
@@ -404,6 +405,17 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	if strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(e.Content), "")) == "" && !hasImages && parts == "" && e.referenceID() == "" {
 		cmd = "帮助"
 	}
+	if arg != "" {
+		switch cmd {
+		case "签到", "我的余额", "今日用量", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "邀请奖励", "邀请活动", "我的邀请":
+			return s.send(ctx, c, *j, "用法：/"+cmd+"。", nil, 1)
+		}
+	}
+	if cmd == "成长任务" || cmd == "抽奖活动" {
+		if _, ok := commandPageNumber(arg); !ok {
+			return s.send(ctx, c, *j, "用法：/"+cmd+"；翻页：/"+cmd+" 页码。", nil, 1)
+		}
+	}
 	text := ""
 	var img []byte
 	seq := 1
@@ -412,18 +424,62 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		return s.sendHelp(ctx, c, *j, arg)
 	case "价格":
 		return s.sendModelPrice(ctx, c, *j, arg)
-	case "我的":
-		if arg != "" {
-			text = "用法：/我的，查看账户、今日用量和奖励。"
-			break
+	case "我的余额":
+		var balance float64
+		err := s.db.QueryRowContext(ctx, `SELECT u.balance FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.deleted_at IS NULL AND u.status='active'`, c.AppID, j.MemberID).Scan(&balance)
+		if errors.Is(err, sql.ErrNoRows) {
+			text = bindFirst
+		} else if err != nil {
+			text = "账户信息查询失败，请稍后重试。"
+		} else {
+			text = fmt.Sprintf("💳 **账户额度**\n\n**USD %.2f**", balance)
 		}
+	case "今日用量":
 		var err error
-		text, err = s.accountOverview(ctx, c, *j, time.Now())
+		text, err = s.todayUsage(ctx, c, *j, time.Now())
 		if err != nil {
-			text = "账户查询失败，请稍后重试。"
+			text = "用量查询失败，请稍后重试。"
 		}
-	case "福利":
-		return s.handleWelfare(ctx, c, j, arg)
+	case "我的奖励":
+		var err error
+		text, err = s.myRewards(ctx, c, *j)
+		if err != nil {
+			text = "奖励信息查询失败，请稍后重试。"
+		}
+	case "成长任务":
+		var err error
+		text, err = s.growthTasks(ctx, c, *j)
+		if err != nil {
+			text = "成长任务查询失败，请稍后重试。"
+		}
+		return s.sendCommandPage(ctx, c, *j, cmd, text, arg)
+	case "抽奖":
+		var err error
+		text, err = s.drawLottery(ctx, c, *j)
+		if err != nil {
+			text = "抽奖处理异常，请发送 /抽奖次数 查询剩余次数。"
+		}
+	case "抽奖次数", "我的抽奖", "抽奖活动":
+		var err error
+		text, err = s.lotteryInfo(ctx, c, *j, cmd == "抽奖活动")
+		if err != nil {
+			text = "抽奖信息查询失败，请稍后重试。"
+		}
+		if cmd == "抽奖活动" {
+			return s.sendCommandPage(ctx, c, *j, cmd, text, arg)
+		}
+	case "邀请奖励", "邀请活动":
+		var err error
+		text, err = s.inviteInfo(ctx, c, *j)
+		if err != nil {
+			text = "邀请活动查询失败，请稍后重试。"
+		}
+	case "我的邀请":
+		var err error
+		text, err = s.myInvites(ctx, c, *j)
+		if err != nil {
+			text = "邀请信息查询失败，请稍后重试。"
+		}
 	case "今日排行榜", "今日排行版":
 		if arg != "" {
 			text = "用法：/今日排行榜，同时查看 Token 与消费金额前 10 名。"
