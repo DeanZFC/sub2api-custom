@@ -55,13 +55,22 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 			require.Equal(t, j.MessageID, reply.MsgID)
 			require.Empty(t, reply.EventID)
 			require.Contains(t, reply.text(), j.MemberID)
+			displayed := map[string]int{}
+			for _, line := range strings.Split(reply.text(), "\n") {
+				for _, command := range strings.Split(line, " · ") {
+					command = strings.TrimSpace(command)
+					if strings.HasPrefix(command, "/") {
+						displayed[command]++
+					}
+				}
+			}
 			for _, cmd := range want {
-				require.Equal(t, 1, strings.Count(reply.text(), "**"+cmd+"**"), cmd)
+				require.Equal(t, 1, displayed[replyPlainLabel(cmd)], cmd)
 			}
 			for _, absent := range []string{"/disabled", "/福利", "兑换", "翻页", "下一页", "上一页", "更多服务", "第 1/"} {
 				require.NotContains(t, reply.text(), absent)
 			}
-			require.Contains(t, reply.text(), "聊天：@机器人 + 问题。", "the final line must not be truncated")
+			require.Contains(t, reply.text(), "聊天请 @机器人 + 问题。", "the final line must not be truncated")
 			require.LessOrEqual(t, utf8.RuneCountInString(reply.text()), 1800)
 			require.NotNil(t, reply.Keyboard)
 			require.Len(t, reply.Keyboard.Content.Rows, 4)
@@ -91,7 +100,7 @@ func TestHelpRejectsArgumentsAndPageCallbacks(t *testing.T) {
 		j := Job{GroupID: "group", MessageID: "invalid", CreatedAt: time.Now()}
 		require.NoError(t, s.sendHelp(context.Background(), c, j, arg))
 		require.Nil(t, (*replies)[len(*replies)-1].Keyboard)
-		require.Contains(t, (*replies)[len(*replies)-1].text(), "用法：/帮助，查看全部指令。")
+		require.Equal(t, "用法：/帮助", (*replies)[len(*replies)-1].text())
 	}
 	for _, action := range []string{"", "checkin\n/抽奖", "bind", "redeem", "image", "transfer", "custom:/disabled", "custom:/签到", "page:0", "page:01", "page:1", "page:2", "page:4", "prices", "growth_claim", "/转账 1 someone@example.com"} {
 		_, ok := helpActionCommand(c, action)

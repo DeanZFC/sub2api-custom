@@ -13,6 +13,7 @@ export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
       binding_chances: config.growth?.binding_chances ?? 0,
       first_usage_chances: config.growth?.first_usage_chances ?? 0,
       checkin_30_chances: config.growth?.checkin_30_chances ?? 0,
+      periodic_tasks: (config.growth?.periodic_tasks ?? []).map(task => ({ ...task, reward: normalizeGrowthReward(task.reward, task.chances) })),
       tasks: (config.growth?.tasks ?? [
         { id: 'binding', name: '完成账号绑定', kind: 'binding', target: 1, chances: config.growth?.binding_chances ?? 0, enabled: (config.growth?.binding_chances ?? 0) > 0 },
         { id: 'first_usage', name: '首次成功 API 调用', kind: 'usage_count', target: 1, chances: config.growth?.first_usage_chances ?? 0, enabled: (config.growth?.first_usage_chances ?? 0) > 0 },
@@ -25,10 +26,10 @@ export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
 // Both tabs use the same full-config endpoint. Serialize saves and refresh the
 // other tab's fields so cached drafts and overlapping saves cannot undo them.
 let pendingSave = Promise.resolve()
-function saveConfigPatch(patch: Partial<QQCheckinConfig>): Promise<QQCheckinConfig> {
+function saveConfigPatch(patch: Partial<QQCheckinConfig> | ((current: QQCheckinConfig) => Partial<QQCheckinConfig>)): Promise<QQCheckinConfig> {
   const saved = pendingSave.then(async () => {
     const current = await loadCheckinConfig()
-    return qqbotAPI.saveCheckin({ ...current, ...patch })
+    return qqbotAPI.saveCheckin({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) })
   })
   pendingSave = saved.then(() => undefined, () => undefined)
   return saved
@@ -48,8 +49,7 @@ export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinC
   })
 }
 
-export function saveGrowthSettings(config: QQCheckinConfig): Promise<QQCheckinConfig> {
-  return saveConfigPatch({
-    growth: { ...config.growth, tasks: config.growth.tasks.map(task => ({ ...task, reward: { ...task.reward }, chances: task.reward.type === 'chances' ? task.reward.quantity : 0 })) }
-  })
+export function saveGrowthSettings(config: QQCheckinConfig, section: 'tasks' | 'periodic_tasks' = 'tasks'): Promise<QQCheckinConfig> {
+  const tasks = config.growth[section].map(task => ({ ...task, reward: { ...task.reward }, chances: task.reward.type === 'chances' ? task.reward.quantity : 0 }))
+  return saveConfigPatch(current => ({ growth: { ...current.growth, [section]: tasks } }))
 }

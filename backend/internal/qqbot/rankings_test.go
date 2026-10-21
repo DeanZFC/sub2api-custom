@@ -1,9 +1,12 @@
 package qqbot
 
 import (
-	"github.com/stretchr/testify/require"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRankingConfigValidation(t *testing.T) {
@@ -38,16 +41,70 @@ func TestRankingConfigValidation(t *testing.T) {
 	require.NotNil(t, cfg.AmountRewards)
 }
 
-func TestRankingAliasIsPrivateAndChangesEachDay(t *testing.T) {
-	c := Config{AppID: "test-app", AppSecret: "test-only-secret"}
-	alias := rankingAlias(c, "2026-10-21", 123456789)
-	require.Regexp(t, `^用户 \*{4}[A-F0-9]{8}$`, alias)
-	require.NotContains(t, alias, "123456789")
-	require.Equal(t, alias, rankingAlias(c, "2026-10-21", 123456789))
-	require.NotEqual(t, alias, rankingAlias(c, "2026-10-22", 123456789))
-	require.NotEqual(t, alias, rankingAlias(c, "2026-10-21", 123456790))
-	c.AppSecret = "different-test-secret"
-	require.NotEqual(t, alias, rankingAlias(c, "2026-10-21", 123456789))
+func TestMaskRankingEmail(t *testing.T) {
+	for _, tc := range []struct {
+		email string
+		want  string
+	}{
+		{"123456789@qq.com", "123****89@qq.com"},
+		{"abcdef@example.com", "abc****ef@example.com"},
+		{"abcde@example.com", "a****e@example.com"},
+		{"abcd@example.com", "a****d@example.com"},
+		{"abc@example.com", "a****c@example.com"},
+		{"ab@example.com", "****@example.com"},
+		{"a@example.com", "****@example.com"},
+		{"用户测试邮箱@example.com", "用户测****邮箱@example.com"},
+		{" 123456789@qq.com ", "123****89@qq.com"},
+		{"", "邮箱不可用"},
+		{"private-address", "邮箱不可用"},
+		{"@example.com", "邮箱不可用"},
+		{"private@", "邮箱不可用"},
+		{"private@example.com@other.com", "邮箱不可用"},
+		{"private@example.com\n**second row**", "邮箱不可用"},
+	} {
+		t.Run(tc.email, func(t *testing.T) {
+			require.Equal(t, tc.want, maskRankingEmail(tc.email))
+			if tc.want != "邮箱不可用" {
+				require.NotEqual(t, strings.TrimSpace(tc.email), tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatTodayRankingsUsesUniformLiteralEmailRows(t *testing.T) {
+	var entries []rankingEntry
+	var wantRows []string
+	for _, kind := range []string{"tokens", "amount"} {
+		for rank := 1; rank <= rankingTopN; rank++ {
+			email, label := "123456789@qq.com", `123\*\*\*\*89@qq.com`
+			if rank%2 == 0 {
+				email, label = "a_b_private_cd@example.com", `a\_b\*\*\*\*cd@example.com`
+			}
+			entries = append(entries, rankingEntry{Kind: kind, Rank: rank, UserID: int64(rank), Email: email})
+			wantRows = append(wantRows, fmt.Sprintf("第 %d 名 · %s", rank, label))
+		}
+	}
+	text := formatTodayRankings("2026-10-21", entries)
+	require.Contains(t, text, "**Token 消耗榜**")
+	require.Contains(t, text, "**消费金额榜**")
+	require.Contains(t, text, "仅展示脱敏邮箱和名次")
+	require.NotContains(t, text, "123456789")
+	require.NotContains(t, text, "private")
+	var rows []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "第 ") {
+			rows = append(rows, line)
+			// No unescaped emphasis markers can change a row or its neighbors.
+			literal := strings.ReplaceAll(strings.ReplaceAll(line, `\*`, ""), `\_`, "")
+			require.NotContains(t, literal, "*")
+			require.NotContains(t, literal, "_")
+		}
+	}
+	require.Equal(t, wantRows, rows)
+	require.Equal(t, 2, strings.Count(formatTodayRankings("2026-10-21", nil), "暂无上榜账号。"))
+}
+
+func TestRankingBeijingDayAndCommands(t *testing.T) {
 	at, err := time.Parse(time.RFC3339, "2026-10-21T16:00:00Z")
 	require.NoError(t, err)
 	require.Equal(t, "2026-10-22T00:00:00+08:00", beijingDayStart(at).Format(time.RFC3339))

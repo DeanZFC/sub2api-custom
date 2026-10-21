@@ -53,7 +53,7 @@ func (s *Service) sendChannelStatus(ctx context.Context, c Config, j Job, arg st
 		var err error
 		page, err = strconv.Atoi(arg)
 		if err != nil || page < 1 {
-			return s.send(ctx, c, j, "用法：/渠道状态；分组较多时可发送 /渠道状态 页码。", nil, 1)
+			return s.send(ctx, c, j, "用法：/渠道状态 [页码]", nil, 1)
 		}
 	}
 	if s.channelStatus == nil {
@@ -68,7 +68,7 @@ func (s *Service) sendChannelStatus(ctx context.Context, c Config, j Job, arg st
 		case errors.Is(err, ErrChannelStatusDisabled):
 			text = "渠道监控未开启。"
 		case errors.Is(err, ErrChannelStatusUnsupported):
-			text = "当前未启用被动监控，暂无法提供成功率和缓存率。"
+			text = "被动监控未开启。"
 		}
 		return s.send(ctx, c, j, text, nil, 1)
 	}
@@ -78,15 +78,15 @@ func (s *Service) sendChannelStatus(ctx context.Context, c Config, j Job, arg st
 	const perPage = 5
 	pages := (len(chunks) + perPage - 1) / perPage
 	if page > pages {
-		return s.send(ctx, c, j, fmt.Sprintf("渠道状态共 %d 页，请发送 /渠道状态 1 至 /渠道状态 %d。", pages, pages), nil, 1)
+		return s.send(ctx, c, j, fmt.Sprintf("共 %d 页 · /渠道状态 [页码]", pages), nil, 1)
 	}
 	start, end := (page-1)*perPage, min(page*perPage, len(chunks))
 	for i := start; i < end; i++ {
 		text := chunks[i]
 		if pages > 1 && i == end-1 {
-			text += fmt.Sprintf("\n\n第 %d/%d 页", page, pages)
+			text += fmt.Sprintf("\n第 %d/%d 页", page, pages)
 			if page < pages {
-				text += fmt.Sprintf("，继续查看：/渠道状态 %d", page+1)
+				text += fmt.Sprintf(" · /渠道状态 %d", page+1)
 			}
 		}
 		if err := s.send(ctx, c, j, text, nil, i-start+1); err != nil {
@@ -101,55 +101,54 @@ func formatChannelStatus(report *ChannelStatusReport) []string {
 	if !report.UpdatedAt.IsZero() {
 		updated = report.UpdatedAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02 15:04") + "（北京时间）"
 	}
-	header := "📊 **渠道状态**\n\n统计范围：最近 90 分钟\n数据更新：" + updated
+	header := "📊 **渠道状态 · 近 90 分钟**\n更新：" + updated
 	if report.Backfilling {
-		header += "\n提示：正在补齐历史监控数据"
+		header += " · 正在补齐数据"
 	} else if report.PartialCoverage {
-		header += "\n提示：当前仅覆盖部分统计时段"
+		header += " · 部分时段"
 	}
-	text := header + "\n\n**整体汇总**\n\n" + formatChannelStatusMetric(report.Overall, report.ShowThroughput, false) + "\n\n**各分组**"
+	text := header + "\n整体：" + formatChannelStatusMetric(report.Overall, report.ShowThroughput)
 	if len(report.Groups) == 0 {
-		return []string{text + "\n暂无可展示的分组"}
+		return []string{text + "\n分组：暂无可展示项"}
 	}
 	var chunks []string
 	for i, group := range report.Groups {
 		// Names stay on one line and cannot introduce Markdown markup.
-		block := fmt.Sprintf("**%d. %s**\n\n%s", i+1, replyPlainLabel(group.Name), formatChannelStatusMetric(group.Metrics, report.ShowThroughput, true))
+		block := fmt.Sprintf("%d. %s · %s", i+1, replyPlainLabel(group.Name), formatChannelStatusMetric(group.Metrics, report.ShowThroughput))
 		if utf8.RuneCountInString(text)+utf8.RuneCountInString(block)+2 > 1400 {
 			chunks = append(chunks, text)
-			text = header + "\n\n**各分组（续）**"
+			text = header + "\n分组（续）"
 		}
-		text += "\n\n" + block
+		text += "\n" + block
 	}
 	return append(chunks, text)
 }
 
-func formatChannelStatusMetric(metric ChannelStatusMetric, throughput, compact bool) string {
+func formatChannelStatusMetric(metric ChannelStatusMetric, throughput bool) string {
 	if !metric.HasRequests {
 		return "暂无请求数据"
 	}
-	separator := "\n"
-	if compact {
-		separator = " ｜ "
-	}
+	separator := " ｜ "
 	// Do not present sparse traffic as a definitive outage (or perfect health).
-	text := "成功率：样本不足" + separator + "错误率：样本不足"
+	var text string
 	if !metric.InsufficientSamples {
 		// Match the web dashboard's success KPI, including ignored error categories.
-		text = fmt.Sprintf("成功率：%.2f%%%s错误率：%.2f%%", (1-metric.ErrorRate)*100, separator, metric.ErrorRate*100)
+		text = fmt.Sprintf("成功 %.2f%%%s错误 %.2f%%", (1-metric.ErrorRate)*100, separator, metric.ErrorRate*100)
+	} else {
+		text = "成功率样本不足" + separator + "错误率样本不足"
 	}
 	if metric.CacheRate == nil {
-		text += "\n缓存率：暂无数据"
+		text += " ｜ 缓存暂无数据"
 	} else {
-		text += fmt.Sprintf("\n缓存率：%.2f%%", *metric.CacheRate*100)
+		text += fmt.Sprintf(" ｜ 缓存 %.2f%%", *metric.CacheRate*100)
 	}
 	if metric.TTFTP50Ms == nil {
-		text += "\n首 Token：暂无数据"
+		text += " ｜ 首 Token 暂无数据"
 	} else {
-		text += fmt.Sprintf("\n首 Token：%.2f 秒（P50）", float64(*metric.TTFTP50Ms)/1000)
+		text += fmt.Sprintf(" ｜ 首 Token P50 %.2f 秒", float64(*metric.TTFTP50Ms)/1000)
 	}
 	if throughput {
-		text += fmt.Sprintf("\n每分钟请求数：%.2f\n每秒 Token：%.2f", metric.RPM, metric.TokensPerSecond)
+		text += fmt.Sprintf(" ｜ RPM %.2f · TPS %.2f", metric.RPM, metric.TokensPerSecond)
 	}
 	return text
 }

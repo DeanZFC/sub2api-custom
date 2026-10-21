@@ -72,7 +72,7 @@ func TestQQBotMyInvitesCountsStatesAndDeduplicatesAcrossGroups(t *testing.T) {
 	for range 2 {
 		info, readErr := s.myInvites(ctx, c, Job{MemberID: "inviter"})
 		require.NoError(t, readErr)
-		require.Equal(t, "👥 **我的邀请**\n\n- 待进群：1 人\n- 待绑定：1 人\n- 已奖励：1 人\n- 已退群：1 人", info)
+		require.Equal(t, "👥 **我的邀请**\n待进群 1 · 待绑定 1 · 已奖励 1 · 已退群 1", info)
 	}
 	var rewards, history int
 	var balance float64
@@ -100,17 +100,17 @@ func TestQQBotMyInvitesTracksRequestThroughJoinAndLeave(t *testing.T) {
 		require.NoError(t, readErr)
 		return info
 	}
-	require.Equal(t, "👥 **我的邀请**\n\n- 待进群：1 人\n- 待绑定：0 人\n- 已奖励：0 人\n- 已退群：0 人", read())
+	require.Equal(t, "👥 **我的邀请**\n待进群 1 · 待绑定 0 · 已奖励 0 · 已退群 0", read())
 
 	e.Timestamp = json.RawMessage(strconv.FormatInt(now.Unix(), 10))
 	j.EventType = "GROUP_MEMBER_ADD"
 	require.NoError(t, s.memberEvent(ctx, c, j, e))
-	require.Equal(t, "👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：1 人\n- 已奖励：0 人\n- 已退群：0 人", read())
+	require.Equal(t, "👥 **我的邀请**\n待进群 0 · 待绑定 1 · 已奖励 0 · 已退群 0", read())
 
 	e.Timestamp = json.RawMessage(strconv.FormatInt(now.Add(time.Second).Unix(), 10))
 	j.EventType = "GROUP_MEMBER_REMOVE"
 	require.NoError(t, s.memberEvent(ctx, c, j, e))
-	require.Equal(t, "👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：0 人\n- 已奖励：0 人\n- 已退群：1 人", read())
+	require.Equal(t, "👥 **我的邀请**\n待进群 0 · 待绑定 0 · 已奖励 0 · 已退群 1", read())
 }
 
 func TestQQBotMyInvitesOmitsOtherStatesAndKeepsHistoricalRewards(t *testing.T) {
@@ -128,9 +128,9 @@ func TestQQBotMyInvitesOmitsOtherStatesAndKeepsHistoricalRewards(t *testing.T) {
 		require.NoError(t, readErr)
 		return info
 	}
-	zero := "👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：0 人\n- 已奖励：0 人\n- 已退群：0 人"
-	unbound := "👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：1 人\n- 已奖励：0 人\n- 已退群：0 人"
-	paid := "👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：0 人\n- 已奖励：1 人\n- 已退群：0 人"
+	zero := "👥 **我的邀请**\n待进群 0 · 待绑定 0 · 已奖励 0 · 已退群 0"
+	unbound := "👥 **我的邀请**\n待进群 0 · 待绑定 1 · 已奖励 0 · 已退群 0"
+	paid := "👥 **我的邀请**\n待进群 0 · 待绑定 0 · 已奖励 1 · 已退群 0"
 	require.Equal(t, unbound, read(c), "both users can be unbound")
 	invitee := user(t, db)
 	bind(t, db, invitee, "invitee")
@@ -189,7 +189,7 @@ func TestQQBotMyInvitesHasNoPaginationLimitAndDoesNotGuessRelationships(t *testi
 	ctx := context.Background()
 	c, err := s.Config(ctx)
 	require.NoError(t, err)
-	zero := "👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：0 人\n- 已奖励：0 人\n- 已退群：0 人"
+	zero := "👥 **我的邀请**\n待进群 0 · 待绑定 0 · 已奖励 0 · 已退群 0"
 	info, err := s.myInvites(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
 	require.Equal(t, zero, info)
@@ -199,7 +199,7 @@ func TestQQBotMyInvitesHasNoPaginationLimitAndDoesNotGuessRelationships(t *testi
 	require.NoError(t, err)
 	info, err = s.myInvites(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
-	require.Equal(t, "👥 **我的邀请**\n\n- 待进群：0 人\n- 待绑定：150 人\n- 已奖励：0 人\n- 已退群：0 人", info)
+	require.Equal(t, "👥 **我的邀请**\n待进群 0 · 待绑定 150 · 已奖励 0 · 已退群 0", info)
 	// A member with no attributed invitations must never inherit another QQ's
 	// results, even if it sees the same group or passes a search-like identifier.
 	for _, member := range []string{"new-member", "inviter' OR true --", ""} {

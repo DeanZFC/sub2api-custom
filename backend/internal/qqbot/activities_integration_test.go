@@ -327,13 +327,13 @@ func TestQQWorkerLotteryCommandsAndMessageDedup(t *testing.T) {
 	s.runOne(ctx)
 	chancesReply := replies[len(replies)-1]
 	require.Contains(t, chancesReply, "剩余抽奖次数：1 次")
-	require.Contains(t, chancesReply, "下次赠送还需充值：USD 10.00")
+	require.Contains(t, chancesReply, "再充值 USD 10.00 获赠")
 	require.NotContains(t, chancesReply, "概率")
 	enqueue(groupAtMessageCreate, "rules", "/抽奖活动")
 	s.runOne(ctx)
 	rulesReply := replies[len(replies)-1]
-	require.Contains(t, rulesReply, "每累计有效充值 USD 10.00 赠送 1 次")
-	require.Contains(t, rulesReply, "概率 100.00%")
+	require.Contains(t, rulesReply, "累计有效充值每满 USD 10.00 送 1 次")
+	require.Contains(t, rulesReply, "· 100.00%")
 	require.NotContains(t, rulesReply, "剩余抽奖次数")
 	// Durable message deduplication also survives pruning the job tombstone.
 	_, err := db.Exec(`DELETE FROM qq_bot_jobs WHERE message_id='draw'`)

@@ -60,6 +60,17 @@ func validateGrowth(c CheckinConfig) error {
 	if len(tasks) > maxGrowthTasks {
 		return fmt.Errorf("最多配置 %d 项成长任务", maxGrowthTasks)
 	}
+	if len(c.Growth.PeriodicTasks) > maxGrowthTasks {
+		return fmt.Errorf("最多配置 %d 项周期任务", maxGrowthTasks)
+	}
+	for _, task := range c.Growth.PeriodicTasks {
+		switch task.Kind {
+		case "usage_count", "usage_tokens", "usage_amount", "recharge_total", "checkin_total":
+		default:
+			return errors.New("周期任务仅支持累计消费、Token、调用、充值或签到")
+		}
+	}
+	tasks = append(append([]GrowthTask(nil), tasks...), c.Growth.PeriodicTasks...)
 	ids := make(map[string]bool, len(tasks))
 	for _, task := range tasks {
 		if !growthTaskIDPattern.MatchString(task.ID) || ids[task.ID] {

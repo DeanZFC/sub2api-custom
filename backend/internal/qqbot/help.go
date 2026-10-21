@@ -41,28 +41,28 @@ type keyboardPermission struct {
 }
 
 type helpItem struct {
-	action, label, command, usage, description string
-	input                                      bool
+	action, label, command, usage string
+	input                         bool
 }
 
 func helpSystemItems() []helpItem {
 	return []helpItem{
-		{action: "checkin", label: "每日签到", command: "/签到", description: "每日签到"},
-		{action: "balance", label: "我的余额", command: "/我的余额", description: "查询账户余额"},
-		{action: "today_usage", label: "今日用量", command: "/今日用量", description: "查询本人今日 API 用量与计费"},
-		{action: "rewards", label: "我的奖励", command: "/我的奖励", description: "查询各项累计余额奖励"},
-		{action: "lottery", label: "抽奖一次", command: "/抽奖", description: "消耗一次抽奖次数，参与抽奖"},
-		{action: "lottery_count", label: "抽奖次数", command: "/抽奖次数", description: "查询剩余次数"},
-		{action: "lottery_info", label: "抽奖活动", command: "/抽奖活动", description: "查看活动规则和奖品"},
-		{action: "growth", label: "成长任务", command: "/成长任务", description: "查看任务进度，达标奖励自动发放"},
-		{action: "invite_rewards", label: "邀请奖励", command: "/邀请奖励", description: "查看邀请规则、条件和今日进度"},
-		{action: "invites", label: "我的邀请", command: "/我的邀请", description: "查询邀请状态和人数"},
-		{action: "rankings", label: "今日排行榜", command: "/今日排行榜", description: "匿名查看 Token 与消费金额前 10 名"},
-		{action: "channels", label: "渠道状态", command: "/渠道状态", description: "查询整体及各分组的成功率、缓存率和首 Token"},
-		{action: "image", label: "生成图片", command: "/生图", usage: "/生图 图片描述", description: "描述你想生成的图片", input: true},
-		{action: "prices", label: "模型价格", command: "/价格", usage: "/价格 模型名", description: "查询当前价格", input: true},
-		{action: "bind", label: "绑定账号", command: "/绑定", usage: "/绑定 邮箱或绑定码", description: "绑定账号", input: true},
-		{action: "transfer", label: "余额转账", command: "/转账", usage: "/转账 金额 邮箱", description: "向其他账号转账余额", input: true},
+		{action: "checkin", label: "每日签到", command: "/签到"},
+		{action: "balance", label: "我的余额", command: "/我的余额"},
+		{action: "today_usage", label: "今日用量", command: "/今日用量"},
+		{action: "rewards", label: "我的奖励", command: "/我的奖励"},
+		{action: "lottery", label: "抽奖一次", command: "/抽奖"},
+		{action: "lottery_count", label: "抽奖次数", command: "/抽奖次数"},
+		{action: "lottery_info", label: "抽奖活动", command: "/抽奖活动"},
+		{action: "growth", label: "成长任务", command: "/成长任务"},
+		{action: "invite_rewards", label: "邀请奖励", command: "/邀请奖励"},
+		{action: "invites", label: "我的邀请", command: "/我的邀请"},
+		{action: "rankings", label: "今日排行榜", command: "/今日排行榜"},
+		{action: "channels", label: "渠道状态", command: "/渠道状态"},
+		{action: "image", label: "生成图片", command: "/生图", usage: "/生图 图片描述", input: true},
+		{action: "prices", label: "模型价格", command: "/价格", usage: "/价格 模型名", input: true},
+		{action: "bind", label: "绑定账号", command: "/绑定", usage: "/绑定 邮箱或绑定码", input: true},
+		{action: "transfer", label: "余额转账", command: "/转账", usage: "/转账 金额 邮箱", input: true},
 	}
 }
 
@@ -103,24 +103,29 @@ func helpActionCommand(c Config, action string) (string, bool) {
 
 func (s *Service) sendHelp(ctx context.Context, c Config, j Job, arg string) error {
 	if arg != "" {
-		return s.send(ctx, c, j, "用法：/帮助，查看全部指令。", nil, 1)
+		return s.send(ctx, c, j, "用法：/帮助", nil, 1)
 	}
-	text := "# 📖 指令帮助\n\n"
+	text := "📖 **指令帮助**"
 	keyboard := &messageKeyboard{}
 	customHeading := false
 	for i, item := range helpItems(c) {
 		if strings.HasPrefix(item.action, "custom:") {
 			if !customHeading {
-				text += "\n**自定义指令**\n\n"
+				text += "\n\n**自定义指令**"
 				customHeading = true
 			}
-			text += "- **" + replyPlainLabel(item.command) + "**\n"
+			text += "\n" + replyPlainLabel(item.command)
 		} else {
 			usage := item.command
 			if item.usage != "" {
 				usage = item.usage
 			}
-			text += "- **" + replyPlainLabel(usage) + "**：" + item.description + "\n"
+			if i%helpColumns == 0 {
+				text += "\n"
+			} else {
+				text += " · "
+			}
+			text += replyPlainLabel(usage)
 		}
 		if i < helpQuickActions {
 			button := helpCommandButton(item.label, item.action, item.command)
@@ -131,6 +136,6 @@ func (s *Service) sendHelp(ctx context.Context, c Config, j Job, arg string) err
 			row.Buttons = append(row.Buttons, button)
 		}
 	}
-	text += "\n> 下方为常用指令按钮，其他指令可直接发送。\n> 点击按钮填入指令，再点发送；需要参数时请先补全。\n> 聊天：@机器人 + 问题。"
+	text += "\n\n按钮填入指令后发送；聊天请 @机器人 + 问题。"
 	return s.sendFormattedWithKeyboard(ctx, c, j, text, nil, 1, keyboard)
 }

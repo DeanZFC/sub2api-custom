@@ -60,16 +60,20 @@ func (s *Service) settleGrowthBatch(ctx context.Context, c Config, after int64) 
 			ids = append(ids, task.ID)
 		}
 	}
-	if len(ids) == 0 {
+	periodic := false
+	for _, task := range cfg.Growth.PeriodicTasks {
+		periodic = periodic || (task.Enabled && task.reward().enabled())
+	}
+	if len(ids) == 0 && !periodic {
 		return 0, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT b.user_id,b.member_id,b.group_id FROM qq_bot_bindings b
  JOIN users u ON u.id=b.user_id AND u.status='active' AND u.deleted_at IS NULL
  WHERE b.app_id=$1 AND b.user_id>$2 AND b.group_id=ANY($3)
- AND EXISTS(SELECT 1 FROM unnest($4::text[]) task_id
+ AND ($5 OR EXISTS(SELECT 1 FROM unnest($4::text[]) task_id
  WHERE NOT EXISTS(SELECT 1 FROM qq_bot_reward_codes r WHERE r.source_key='qq-growth:'||b.user_id::text||':'||task_id)
- AND NOT EXISTS(SELECT 1 FROM qq_bot_lottery_chance_grants g WHERE g.source_key='qq-growth:'||b.user_id::text||':'||task_id))
- ORDER BY b.user_id LIMIT 100`, c.AppID, after, pq.Array(c.AllowedGroups), pq.Array(ids))
+ AND NOT EXISTS(SELECT 1 FROM qq_bot_lottery_chance_grants g WHERE g.source_key='qq-growth:'||b.user_id::text||':'||task_id)))
+ ORDER BY b.user_id LIMIT 100`, c.AppID, after, pq.Array(c.AllowedGroups), pq.Array(ids), periodic)
 	if err != nil {
 		return after, err
 	}

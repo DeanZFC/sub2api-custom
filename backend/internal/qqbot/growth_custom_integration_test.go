@@ -78,7 +78,7 @@ func TestGrowthCustomTargetsAndRetainedClaims(t *testing.T) {
 	require.Empty(t, loaded.Growth.Tasks)
 	text, err = s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "当前暂无一次性成长任务")
+	require.Contains(t, text, "暂无任务")
 }
 
 func TestGrowthCustomStreakInterval(t *testing.T) {
@@ -95,7 +95,7 @@ func TestGrowthCustomStreakInterval(t *testing.T) {
 	}
 	text, err := s.reward(ctx, c, Job{GroupID: "group", MemberID: "member"}, "checkin")
 	require.NoError(t, err)
-	require.Contains(t, text, "连续签到：3 天")
+	require.Contains(t, text, "连签 3 天")
 	require.Contains(t, text, "连签奖励：2 次")
-	require.Contains(t, text, "距离下次连签奖励：3 天")
+	require.Contains(t, text, "距下次奖励 3 天")
 }

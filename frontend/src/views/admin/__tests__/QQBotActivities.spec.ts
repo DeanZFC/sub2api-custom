@@ -17,7 +17,7 @@ vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<mai
 function i18n(locale: 'zh' | 'en') { return createI18n({ legacy: false, locale, messages: { zh, en } }) }
 function rewardConfig(quantity = 0) { return { type: 'chances', amount: 0, quantity, prize_name: '', claim_instructions: '' } }
 function growthConfig(chances = [0, 0, 0]) {
-  return { binding_chances: 0, first_usage_chances: 0, checkin_30_chances: 0, tasks: [
+  return { binding_chances: 0, first_usage_chances: 0, checkin_30_chances: 0, periodic_tasks: [], tasks: [
     { id: 'binding', name: '完成账号绑定', kind: 'binding', target: 1, chances: chances[0], enabled: chances[0]! > 0 },
     { id: 'first_usage', name: '首次成功 API 调用', kind: 'usage_count', target: 1, chances: chances[1], enabled: chances[1]! > 0 },
     { id: 'checkin_30', name: '累计签到 30 天', kind: 'checkin_total', target: 30, chances: chances[2], enabled: chances[2]! > 0 }
@@ -227,6 +227,71 @@ describe('QQ activity pages with real translations', () => {
     expect(saved.growth.tasks[2]).toEqual(expect.objectContaining({ kind: 'usage_amount', target: 25.5, chances: 0, reward: expect.objectContaining({ type: 'other', quantity: 1, prize_name: 'VIP service' }) }))
     expect(w.find('[data-testid="streak-days"]').exists()).toBe(false)
     expect(w.text()).not.toMatch(/qqbot\./)
+    w.unmount()
+  })
+  it.each(['zh', 'en'] as const)('%s configures repeating thresholds and preserves independent drafts', async locale => {
+    const translation = i18n(locale)
+    const w = mount(QQBotGrowthSettings, { global: { plugins: [translation] } })
+    await flushPromises()
+    expect(w.find('form form').exists()).toBe(false)
+    expect(w.get('[data-testid="periodic-preset"]').findAll('option').map(option => option.attributes('value'))).toEqual(['usage_amount', 'usage_tokens', 'usage_count', 'recharge_total', 'checkin_total'])
+    await w.get('[data-testid="add-periodic-task"]').trigger('click')
+    expect((w.get('[data-testid="periodic-enabled-0"]').element as HTMLInputElement).checked).toBe(false)
+    await w.get('[data-testid="periodic-name-0"]').setValue('Every USD 10')
+    await w.get('[data-testid="periodic-target-0"]').setValue('10')
+    await w.get('[data-testid="periodic-chances-0"]').setValue('2')
+    await w.get('[data-testid="periodic-enabled-0"]').setValue(true)
+    // An invalid one-time draft cannot block or be overwritten by periodic saves.
+    await w.get('[data-testid="task-name-0"]').setValue('')
+    await w.get('[data-testid="periodic-growth-form"]').trigger('submit'); await flushPromises()
+    let saved = api.saveCheckin.mock.lastCall![0]
+    expect(saved.growth.tasks[0].name).toBe('完成账号绑定')
+    expect(saved.growth.periodic_tasks).toEqual([expect.objectContaining({ name: 'Every USD 10', kind: 'usage_amount', target: 10, chances: 2, enabled: true })])
+    const taskID = saved.growth.periodic_tasks[0].id
+    expect((w.get('[data-testid="task-name-0"]').element as HTMLInputElement).value).toBe('')
+    await w.get('[data-testid="periodic-target-0"]').setValue('20')
+    await w.get('[data-testid="task-name-0"]').setValue('Binding draft')
+    await w.get('[data-testid="one-time-growth-form"]').trigger('submit'); await flushPromises()
+    saved = api.saveCheckin.mock.lastCall![0]
+    expect(saved.growth.tasks[0].name).toBe('Binding draft')
+    expect(saved.growth.periodic_tasks[0].target).toBe(10)
+    expect((w.get('[data-testid="periodic-target-0"]').element as HTMLInputElement).value).toBe('20')
+    await w.get('[data-testid="periodic-reward-type-0"]').setValue('balance')
+    await w.get('[data-testid="periodic-reward-amount-0"]').setValue('1.25')
+    await w.get('[data-testid="periodic-growth-form"]').trigger('submit'); await flushPromises()
+    expect(api.saveCheckin.mock.lastCall![0].growth.periodic_tasks[0]).toEqual(expect.objectContaining({ id: taskID, target: 20, chances: 0, reward: expect.objectContaining({ type: 'balance', amount: 1.25 }) }))
+    expect(w.text()).toContain(translation.global.t('qqbot.growth.periodicIdentityHelp'))
+    expect(w.text()).not.toMatch(/qqbot\./)
+    w.unmount()
+    const reopened = mount(QQBotGrowthSettings, { global: { plugins: [i18n(locale)] } })
+    await flushPromises()
+    expect((reopened.get('[data-testid="periodic-target-0"]').element as HTMLInputElement).value).toBe('20')
+    await reopened.get('[data-testid="periodic-remove-0"]').trigger('click')
+    await reopened.get('[data-testid="periodic-growth-form"]').trigger('submit'); await flushPromises()
+    expect(api.saveCheckin.mock.lastCall![0].growth.periodic_tasks).toEqual([])
+    reopened.unmount()
+  })
+  it('validates recurring intervals and limits without saving invalid tasks', async () => {
+    const w = mount(QQBotGrowthSettings, { global: { plugins: [i18n('zh')] } })
+    await flushPromises()
+    await w.get('[data-testid="add-periodic-task"]').trigger('click')
+    for (const [kind, invalid, valid] of [
+      ['usage_amount', '0', '10'], ['usage_amount', '10.001', '10.01'],
+      ['usage_tokens', '1.5', '1000000'], ['usage_count', '1000001', '100'],
+      ['recharge_total', '1000000001', '10'], ['checkin_total', '3651', '7']
+    ]) {
+      await w.get('[data-testid="periodic-kind-0"]').setValue(kind)
+      await w.get('[data-testid="periodic-target-0"]').setValue(invalid)
+      await w.get('[data-testid="periodic-growth-form"]').trigger('submit')
+      expect(api.saveCheckin).not.toHaveBeenCalled()
+      expect(w.get('[role="alert"]').exists()).toBe(true)
+      await w.get('[data-testid="periodic-target-0"]').setValue(valid)
+    }
+    for (let i = 1; i < 12; i++) await w.get('[data-testid="add-periodic-task"]').trigger('click')
+    expect(w.findAll('[data-testid="periodic-task"]')).toHaveLength(12)
+    expect(w.get('[data-testid="add-periodic-task"]').attributes('disabled')).toBeDefined()
+    await w.get('[data-testid="periodic-growth-form"]').trigger('submit'); await flushPromises()
+    expect(api.saveCheckin.mock.lastCall![0].growth.periodic_tasks).toHaveLength(12)
     w.unmount()
   })
   it.each(['zh', 'en'] as const)('%s validates prize probability totals and saves the cumulative rule', async locale => {

@@ -432,7 +432,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		} else if err != nil {
 			text = "账户信息查询失败，请稍后重试。"
 		} else {
-			text = fmt.Sprintf("💳 **账户额度**\n\n**USD %.2f**", balance)
+			text = fmt.Sprintf("💳 余额：USD %.2f", balance)
 		}
 	case "今日用量":
 		var err error
@@ -482,7 +482,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		}
 	case "今日排行榜", "今日排行版":
 		if arg != "" {
-			text = "用法：/今日排行榜，同时查看 Token 与消费金额前 10 名。"
+			text = "用法：/今日排行榜"
 			break
 		}
 		var err error
@@ -527,7 +527,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if arg == "" {
 			text = transferUsage
 			if c.TransferFeePercent > 0 {
-				text += fmt.Sprintf("\n\n手续费：%.2f%%", c.TransferFeePercent)
+				text += fmt.Sprintf("（手续费 %.2f%%）", c.TransferFeePercent)
 			}
 			break
 		}
@@ -619,9 +619,6 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			return err
 		}
 		return s.send(ctx, c, *j, text, img, seq+1)
-	}
-	if isBuiltinCommand(cmd) {
-		text = commandReplyHeading(text)
 	}
 	chunks := splitReply(normalizeReplyLineBreaks(text), 5-seq+1)
 	for _, chunk := range chunks {

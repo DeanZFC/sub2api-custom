@@ -92,3 +92,24 @@ func TestGrowthProgressThresholds(t *testing.T) {
 		require.Equal(t, tc.eligible, eligible, "%s %.2f", tc.kind, tc.target)
 	}
 }
+
+func TestPeriodicGrowthValidation(t *testing.T) {
+	task := GrowthTask{ID: "repeat", Name: "Repeat", Kind: "usage_amount", Target: 10, Chances: 1, Enabled: true}
+	for _, kind := range []string{"usage_amount", "usage_tokens", "usage_count", "recharge_total", "checkin_total"} {
+		task.Kind = kind
+		require.NoError(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{PeriodicTasks: []GrowthTask{task}}}))
+	}
+	for _, kind := range []string{"binding", "checkin_streak", "unknown"} {
+		task.Kind = kind
+		require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{PeriodicTasks: []GrowthTask{task}}}))
+	}
+	task.Kind = "usage_amount"
+	for _, target := range []float64{0, -1, 0.001, 1.001, 1e9 + 1, math.Inf(1), math.NaN()} {
+		task.Target = target
+		require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{PeriodicTasks: []GrowthTask{task}}}))
+	}
+	task.Target = 10
+	require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{Tasks: []GrowthTask{task}, PeriodicTasks: []GrowthTask{task}}}))
+	require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{PeriodicTasks: []GrowthTask{task, task}}}))
+	require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{PeriodicTasks: make([]GrowthTask, maxGrowthTasks+1)}}))
+}

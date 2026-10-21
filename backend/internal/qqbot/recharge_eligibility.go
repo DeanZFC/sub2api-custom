@@ -87,18 +87,15 @@ func (r RechargeRequirement) describe() string {
 	if len(parts) == 0 {
 		return "无需充值门槛"
 	}
-	if len(parts) == 2 {
-		return strings.Join(parts, " 或 ") + "（满足任意一项即可，无需同时满足）"
-	}
 	return strings.Join(parts, " 或 ")
 }
 
 func (r RechargeRequirement) failure(activity string, e RechargeEligibility) string {
-	return fmt.Sprintf("**暂不满足%s参与条件。**\n\n参与条件：%s。\n\n- 当前累计有效充值：USD %s\n- 近 %d 天有效充值：USD %s", activity, r.describe(), e.Total.StringFixed(2), r.windowDays(), e.Recent.StringFixed(2))
+	return fmt.Sprintf("%s暂不满足：%s；当前累计 USD %s，近 %d 天 USD %s。", activity, r.describe(), e.Total.StringFixed(2), r.windowDays(), e.Recent.StringFixed(2))
 }
 
 func (r RechargeRequirement) invite() string {
-	return "邀请奖励参与条件：" + r.describe() + "（按邀请人账号计算）。"
+	return "充值门槛（邀请人账号）：" + r.describe() + "。"
 }
 
 func rechargeSum(ctx context.Context, db queryRower, uid int64, since *time.Time, lockSources bool) (decimal.Decimal, error) {

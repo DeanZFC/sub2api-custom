@@ -82,7 +82,7 @@ func TestGrowthTypedRewardsAtomicAndConcurrent(t *testing.T) {
 				require.Equal(t, "pending", row.Status)
 				reply, err := s.growthTasks(ctx, c, Job{GroupID: "group", MemberID: "member"})
 				require.NoError(t, err)
-				require.Contains(t, reply, "已登记，待管理员发放")
+				require.Contains(t, reply, "待管理员发放")
 				require.NoError(t, s.UpdateRewardCode(ctx, row.ID, "fulfill", "Delivered"))
 				require.ErrorIs(t, s.UpdateRewardCode(ctx, row.ID, "fulfill", "again"), ErrRewardCodeRequest)
 			}
@@ -138,7 +138,7 @@ func TestGrowthUsageTokensAndActualSpending(t *testing.T) {
 	require.Equal(t, 2, count)
 	text, err = s.myRewards(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "成长奖励：USD 1.25")
+	require.Contains(t, text, "成长 1.25")
 }
 
 func TestStreakTypedRewardsAndLegacyClaims(t *testing.T) {
@@ -151,7 +151,7 @@ func TestStreakTypedRewardsAndLegacyClaims(t *testing.T) {
 			bind(t, db, uid, "member")
 			c, err := s.Config(ctx)
 			require.NoError(t, err)
-			reward := GrowthReward{Type: kind, Quantity: 1, PrizeName: "cup"}
+			reward := GrowthReward{Type: kind, Quantity: 1, PrizeName: "cup", ClaimInstructions: "联系管理员领取奖品"}
 			if kind == "balance" {
 				reward.Amount = 2
 				reward.Quantity = 0
@@ -163,8 +163,11 @@ func TestStreakTypedRewardsAndLegacyClaims(t *testing.T) {
 			j := Job{GroupID: "group", MemberID: "member"}
 			reply, err := s.reward(ctx, c, j, "checkin")
 			require.NoError(t, err)
-			require.Contains(t, reply, "连续签到：7 天")
+			require.Contains(t, reply, "连签 7 天")
 			require.Contains(t, reply, "连签奖励：")
+			if kind == "physical" || kind == "other" {
+				require.Contains(t, reply, "待管理员发放：联系管理员领取奖品")
+			}
 			reply, err = s.reward(ctx, c, j, "checkin")
 			require.NoError(t, err)
 			require.Contains(t, reply, "今日已签到")

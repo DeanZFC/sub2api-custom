@@ -19,7 +19,7 @@ func rankingGrowthTasks(ctx context.Context, tx *sql.Tx, appID string, uid int64
 		return "", err
 	}
 	defer func() { _ = rows.Close() }()
-	text := "## 周期性成长任务\n\n每日排行奖励 · 北京时间次日 00:10 自动结算发放。发送 /今日排行榜 查看实时名次。"
+	text := "**排行奖励（最近 10 项）**"
 	count := 0
 	for rows.Next() {
 		var date, kind, fulfillment string
@@ -35,23 +35,23 @@ func rankingGrowthTasks(ctx context.Context, tx *sql.Tx, appID string, uid int64
 		}
 		status := "已自动发放"
 		if !claimed.Valid {
-			status = "等待自动发放"
+			status = "待结算"
 		} else if reward.Type == "physical" || reward.Type == "other" {
 			status = "已发放"
 			if fulfillment == "pending" {
-				status = "已登记，待管理员发放"
+				status = "待管理员发放"
 			}
 		}
-		text += fmt.Sprintf("\n\n**%s**\n奖励：%s · %s", rankingClaimName(date, kind, rank), reward.description(), status)
+		text += fmt.Sprintf("\n%s · %s · %s", rankingClaimName(date, kind, rank), reward.description(), status)
 		count++
 	}
 	if err = rows.Err(); err != nil {
 		return "", err
 	}
 	if count == 0 {
-		text += "\n\n暂无排行奖励记录。"
+		return "排行奖励：暂无记录 · /今日排行榜", nil
 	}
-	return text + "\n\n两个榜可同时获奖，展示最近 10 项记录。余额与抽奖次数直接到账，实物及自定义奖品由管理员发放。", nil
+	return text, nil
 }
 
 func rankingRewardJob(ctx context.Context, tx *sql.Tx, appID string, uid int64) (Job, error) {

@@ -33,10 +33,10 @@ func TestLotteryGuaranteeUsesLifetimeCountAndKeepsHistoricalResults(t *testing.T
 	reply, err := s.lotteryInfo(ctx, c, Job{MemberID: "member"}, true)
 	require.NoError(t, err)
 	require.Contains(t, reply, "每抽 3 次")
-	require.Contains(t, reply, "guaranteed：USD 5.00，概率 100.00%")
+	require.Contains(t, reply, "guaranteed：USD 5.00 · 100.00%")
 	reply, err = s.lotteryInfo(ctx, c, Job{MemberID: "member"}, false)
 	require.NoError(t, err)
-	require.Contains(t, reply, "距离下次保底：1 次")
+	require.Contains(t, reply, "距保底 1 次")
 
 	// Other website accounts have their own progress, even in the same group.
 	other := user(t, db)
@@ -54,7 +54,7 @@ func TestLotteryGuaranteeUsesLifetimeCountAndKeepsHistoricalResults(t *testing.T
 	require.Contains(t, original, "本次触发保底抽奖")
 	require.Contains(t, original, "奖励额度：USD 5.00")
 	require.Contains(t, original, "剩余抽奖次数：3 次")
-	require.Contains(t, original, "距离下次保底：3 次")
+	require.Contains(t, original, "距保底 3 次")
 
 	cfg.GuaranteeEnabled = false
 	require.NoError(t, s.SaveLotteryConfig(ctx, cfg))
@@ -72,7 +72,7 @@ func TestLotteryGuaranteeUsesLifetimeCountAndKeepsHistoricalResults(t *testing.T
 	reply, err = s.drawLottery(ctx, c, Job{ID: "5", GroupID: "group", MemberID: "member"})
 	require.NoError(t, err)
 	require.NotContains(t, reply, "触发保底")
-	require.Contains(t, reply, "距离下次保底：1 次")
+	require.Contains(t, reply, "距保底 1 次")
 
 	var req UnbindRequest
 	require.NoError(t, db.QueryRow(`SELECT app_id,member_id,created_at FROM qq_bot_bindings WHERE user_id=$1`, uid).Scan(&req.AppID, &req.MemberID, &req.CreatedAt))

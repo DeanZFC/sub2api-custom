@@ -1,7 +1,7 @@
 export default { qqbot: {
   rankings: {
     tab: '每日排行', title: '每日排行榜与名次奖励',
-    help: '发送 /今日排行榜，同时查看全站有效账号的 Token 消耗榜和消费金额榜，各显示前 10 名，未绑定 QQ 的账号也参与。仅展示每日匿名代号和名次，不公开昵称、邮箱、QQ、账号 ID 或具体消耗。',
+    help: '发送 /今日排行榜，同时查看全站有效账号的 Token 消耗榜和消费金额榜，各显示前 10 名，未绑定 QQ 的账号也参与。仅展示脱敏邮箱和名次，邮箱用户名中间统一用 **** 隐藏，不公开完整邮箱、昵称、QQ、账号 ID 或具体消耗。',
     enabled: '开启排行榜查询', rewardsEnabled: '开启每日名次奖励',
     settlement: '奖励默认关闭。保存后从北京时间次日生效，每天 00:10 结算前一日并自动发放到获奖网站账号，无需绑定 QQ 或手动领取。两个榜可分别获奖；已有待领取奖励按原快照自动补发，修改规则不影响已结算奖励。未配置或为 0 的名次不发奖。',
     effective: '最近保存的奖励规则生效日期：{day}',
@@ -22,7 +22,16 @@ export default { qqbot: {
   "chances": "奖励抽奖次数（0 表示关闭）",
   "tasksTitle": "一次性成长任务",
   "periodicTitle": "周期性成长任务",
-  "periodicHelp": "每日 Token 消耗榜和消费金额榜自动结算发奖，未绑定 QQ 的获奖账号也直接到账，无需领取。",
+  "periodicHelp": "可按消费额度、Token、调用、充值或累计签到设置重复奖励，也可配置每日排行榜奖励。各区分别保存。",
+  "repeatTitle": "每达标一次，奖励一次",
+  "periodicIdentityHelp": "例如每消费 10 USD 奖励 1 次抽奖，消费 25 USD 可获 2 次，余下 5 USD 结转。现存历史记录也计入，达标后自动分批发放。修改门槛仅作用于未奖励的进度；关闭后重新开启不重置记录。切换条件分别记账，删除后重新添加视为新任务。",
+  "periodicTargets": {
+    "usage_amount": "每消费多少额度（USD）",
+    "usage_tokens": "每消耗多少 Token",
+    "usage_count": "每成功调用多少次",
+    "recharge_total": "每有效充值多少金额（USD）",
+    "checkin_total": "每累计签到多少天"
+  },
   "taskSummary": "共 {total} 项任务，已开启 {enabled} 项",
   "identityHelp": "每项任务每个网站账号仅奖励一次。后台每分钟分批检查已绑定账号，签到达标时立即发放。修改名称、条件或奖励不重置发放记录；删除后重新添加会视为新任务。",
   "taskNumber": "任务 {number}",

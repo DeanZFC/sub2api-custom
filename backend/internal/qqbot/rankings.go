@@ -2,10 +2,7 @@ package qqbot
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,10 +21,11 @@ type rankingEntry struct {
 	Kind   string
 	Rank   int
 	UserID int64
+	Email  string
 }
 
-// Compute both rankings in a single database snapshot. No identifying or usage
-// values leave this query: only internal account keys and ordinal positions.
+// Compute both rankings in a single database snapshot. Fetch emails only for
+// the winners; callers must mask them before displaying them in group replies.
 func dailyRankingEntries(ctx context.Context, tx *sql.Tx, start, end time.Time) ([]rankingEntry, error) {
 	rows, err := tx.QueryContext(ctx, `WITH daily AS (
  SELECT l.user_id,
@@ -43,8 +41,11 @@ func dailyRankingEntries(ctx context.Context, tx *sql.Tx, start, end time.Time) 
 ), amount AS (
  SELECT user_id,ROW_NUMBER() OVER(ORDER BY amount DESC,amount_at ASC,user_id ASC) AS position FROM daily WHERE amount>0
 )
-SELECT 'tokens',position,user_id FROM tokens WHERE position <= $3
-UNION ALL SELECT 'amount',position,user_id FROM amount WHERE position <= $3
+SELECT ranked.kind,ranked.position,ranked.user_id,u.email
+FROM (
+ SELECT 'tokens' AS kind,position,user_id FROM tokens WHERE position <= $3
+ UNION ALL SELECT 'amount',position,user_id FROM amount WHERE position <= $3
+) ranked JOIN users u ON u.id=ranked.user_id
 ORDER BY 1,2`, start, end, rankingTopN)
 	if err != nil {
 		return nil, err
@@ -53,7 +54,7 @@ ORDER BY 1,2`, start, end, rankingTopN)
 	var entries []rankingEntry
 	for rows.Next() {
 		var entry rankingEntry
-		if err = rows.Scan(&entry.Kind, &entry.Rank, &entry.UserID); err != nil {
+		if err = rows.Scan(&entry.Kind, &entry.Rank, &entry.UserID, &entry.Email); err != nil {
 			return nil, err
 		}
 		entries = append(entries, entry)
@@ -61,10 +62,23 @@ ORDER BY 1,2`, start, end, rankingTopN)
 	return entries, rows.Err()
 }
 
-func rankingAlias(c Config, date string, uid int64) string {
-	mac := hmac.New(sha256.New, []byte(c.AppSecret))
-	_, _ = fmt.Fprintf(mac, "qq-ranking-alias:%s:%s:%d", c.AppID, date, uid)
-	return "用户 ****" + strings.ToUpper(hex.EncodeToString(mac.Sum(nil)[:4]))
+func maskRankingEmail(email string) string {
+	email = strings.TrimSpace(email)
+	local, domain, ok := strings.Cut(email, "@")
+	if !ok || local == "" || domain == "" || strings.Contains(domain, "@") || strings.ContainsAny(email, "\r\n\t ") {
+		return "邮箱不可用"
+	}
+	name := []rune(local)
+	// Short names must still hide at least one character. Names of one or two
+	// characters are hidden completely rather than exposing the whole address.
+	if len(name) <= 2 {
+		return "****@" + domain
+	}
+	prefix, suffix := 1, 1
+	if len(name) > 5 {
+		prefix, suffix = 3, 2
+	}
+	return string(name[:prefix]) + "****" + string(name[len(name)-suffix:]) + "@" + domain
 }
 
 func rankingTitle(kind string) string {
@@ -84,9 +98,6 @@ func (s *Service) todayRankings(ctx context.Context, c Config, now time.Time) (s
 	if !cfg.Enabled {
 		return "今日排行榜暂未开启。", nil
 	}
-	if c.AppSecret == "" {
-		return "", errors.New("ranking alias secret unavailable")
-	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return "", err
@@ -97,8 +108,11 @@ func (s *Service) todayRankings(ctx context.Context, c Config, now time.Time) (s
 	if err != nil {
 		return "", err
 	}
-	date := start.Format("2006-01-02")
-	text := fmt.Sprintf("🏆 **今日排行榜**\n\n%s（北京时间）· 全站有效账号 · 各取前 10 名", date)
+	return formatTodayRankings(start.Format("2006-01-02"), entries), nil
+}
+
+func formatTodayRankings(date string, entries []rankingEntry) string {
+	text := fmt.Sprintf("🏆 **今日排行榜**\n%s（北京时间）· 各前 10 名", date)
 	for _, kind := range []string{"tokens", "amount"} {
 		text += "\n\n**" + rankingTitle(kind) + "**"
 		found := false
@@ -107,13 +121,15 @@ func (s *Service) todayRankings(ctx context.Context, c Config, now time.Time) (s
 				continue
 			}
 			found = true
-			text += fmt.Sprintf("\n第 %d 名 · %s", entry.Rank, rankingAlias(c, date, entry.UserID))
+			// Masking stars and email punctuation are literal text, never Markdown
+			// emphasis delimiters that can span neighboring leaderboard rows.
+			text += fmt.Sprintf("\n第 %d 名 · %s", entry.Rank, replyPlainLabel(maskRankingEmail(entry.Email)))
 		}
 		if !found {
 			text += "\n暂无上榜账号。"
 		}
 	}
-	return text + "\n\n仅展示匿名代号和名次，不公开账号信息及具体消耗。当前为实时榜，次日北京时间 00:10 结算并自动发放已开启的奖励，无需领取。", nil
+	return text + "\n\n仅展示脱敏邮箱和名次；已开启的奖励次日 00:10（北京时间）自动发放。"
 }
 
 func (s *Service) startRankingMonitor(ctx context.Context) {

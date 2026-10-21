@@ -72,7 +72,7 @@ export interface QQCheckinConfig {
   streak_reward: QQGrowthReward
   streak_days: number
   streak_chances: number
-  growth: { binding_chances: number; first_usage_chances: number; checkin_30_chances: number; tasks: QQGrowthTask[] }
+  growth: { binding_chances: number; first_usage_chances: number; checkin_30_chances: number; tasks: QQGrowthTask[]; periodic_tasks: QQGrowthTask[] }
   enabled: boolean; min_amount: number; max_amount: number
   min_recharge_total: number; min_recharge_30d: number; recharge_window_days: number
 }

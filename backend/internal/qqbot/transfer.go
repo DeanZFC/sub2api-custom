@@ -17,7 +17,7 @@ var ErrTransferInvalid = errors.New("转账链接无效、已过期或已使用�
 
 const transferExpiry = 15 * time.Minute
 
-const transferUsage = "💸 **余额转账**\n\n用法：`/转账 金额 收款方邮箱`\n\n例如：`/转账 5.00 user@example.com`"
+const transferUsage = "用法：/转账 金额 收款方邮箱"
 
 type preparedTransferEmail struct {
 	recipient string // sender's email — they must click to confirm
@@ -199,7 +199,7 @@ func (s *Service) prepareTransfer(ctx context.Context, c Config, e Event, arg st
 	}
 	balance, _ := decimal.NewFromString(balanceStr)
 	if balance.LessThan(amount) {
-		return fmt.Sprintf("**余额不足**\n\n- 当前余额：USD %s\n- 转账所需：USD %s",
+		return fmt.Sprintf("余额不足：当前 USD %s，需 USD %s",
 			balance.StringFixed(4), amount.StringFixed(4)), nil
 	}
 
@@ -237,7 +237,7 @@ func (s *Service) prepareTransfer(ctx context.Context, c Config, e Event, arg st
 		return "转账申请失败，请稍后重试。", nil
 	}
 
-	message := fmt.Sprintf("✉️ **转账申请已受理**\n\n- 转出金额：USD %s\n- 手续费（%s%%）：USD %s\n- 收款方到账：USD %s\n\n手续费从转出金额中扣除，不会额外扣款。\n请查收邮件并在 **15 分钟内**确认，确认后才会扣款。",
+	message := fmt.Sprintf("✉️ 转账申请已受理：USD %s · 手续费 %s%%（USD %s）· 对方到账 USD %s\n15 分钟内邮件确认后扣款，手续费从转账金额中扣除。",
 		amount.StringFixed(4), decimal.NewFromFloat(c.TransferFeePercent).String(), fee.StringFixed(4), netAmount.StringFixed(4))
 	return message, &preparedTransferEmail{
 		recipient: fromEmail,

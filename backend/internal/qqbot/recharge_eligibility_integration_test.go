@@ -38,9 +38,9 @@ func TestCheckinRechargeThresholdsRejectWithoutConsumingDay(t *testing.T) {
 	j := Job{GroupID: "group", MemberID: "recent"}
 	text, err = s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
-	require.Contains(t, text, "暂不满足签到参与条件")
+	require.Contains(t, text, "签到暂不满足：")
 	require.Contains(t, text, "累计有效充值满 USD 100.00 或 近 7 天有效充值满 USD 10.00")
-	require.Contains(t, text, "当前累计有效充值：USD 20.00\n- 近 7 天有效充值：USD 0.00")
+	require.Contains(t, text, "当前累计 USD 20.00，近 7 天 USD 0.00")
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_rewards WHERE user_id=$1`, recent).Scan(&count))
 	require.Zero(t, count)
@@ -48,7 +48,7 @@ func TestCheckinRechargeThresholdsRejectWithoutConsumingDay(t *testing.T) {
 	require.NoError(t, err)
 	text, err = s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
-	require.Contains(t, text, "暂不满足签到参与条件", "an eight-day-old recharge does not qualify for a seven-day window")
+	require.Contains(t, text, "签到暂不满足：", "an eight-day-old recharge does not qualify for a seven-day window")
 	cfg.RechargeWindowDays = 10
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
 	text, err = s.reward(ctx, c, j, "checkin")
@@ -107,7 +107,7 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	require.NoError(t, err)
 	text, err := s.reward(ctx, c, Job{GroupID: "group", MemberID: "invitee"}, "invite")
 	require.NoError(t, err)
-	require.Contains(t, text, "暂不满足邀请奖励参与条件", "invitee recharge must not qualify the inviter")
+	require.Contains(t, text, "邀请奖励暂不满足：", "invitee recharge must not qualify the inviter")
 	require.NoError(t, s.SettleInvites(ctx, "inviter"))
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_rewards`).Scan(&count))
@@ -119,12 +119,12 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	info, err := s.inviteInfo(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
 	require.Contains(t, info, "累计有效充值满 USD 50.00 或 近 60 天有效充值满 USD 10.00")
-	require.Contains(t, info, "按邀请人账号计算")
-	require.Contains(t, info, "充值资格：未满足")
+	require.Contains(t, info, "邀请人账号")
+	require.Contains(t, info, "充值资格未满足")
 	info, err = s.inviteInfo(ctx, c, Job{MemberID: "unbound"})
 	require.NoError(t, err)
 	require.Contains(t, info, "累计有效充值满 USD 50.00")
-	require.Contains(t, info, "请先使用 /绑定")
+	require.Contains(t, info, "请先 /绑定")
 	require.Contains(t, info, "近 60 天有效充值满 USD 10.00")
 	_, err = db.Exec(`INSERT INTO redeem_codes(code,type,value,status,used_by,used_at) VALUES('qualified','balance',10,'used',$1,NOW()-INTERVAL '45 days')`, inviter)
 	require.NoError(t, err)
@@ -148,9 +148,9 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	require.Equal(t, "rewarded", page.Items[0].Status)
 	info, err = s.inviteInfo(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
-	require.Contains(t, info, "充值资格：已满足")
-	require.Contains(t, info, "近 60 天有效充值：USD 10.00")
-	require.Contains(t, info, "今日已奖励：1 人")
+	require.Contains(t, info, "充值资格已满足")
+	require.Contains(t, info, "近 60 天 USD 10.00")
+	require.Contains(t, info, "已奖 1/10")
 }
 
 func TestCheckinRechargeEligibilityWaitsForRefund(t *testing.T) {
@@ -188,7 +188,7 @@ func TestCheckinRechargeEligibilityWaitsForRefund(t *testing.T) {
 	select {
 	case r := <-done:
 		require.NoError(t, r.err)
-		require.Contains(t, r.text, "暂不满足签到参与条件")
+		require.Contains(t, r.text, "签到暂不满足：")
 	case <-time.After(5 * time.Second):
 		t.Fatal("reward did not resume")
 	}

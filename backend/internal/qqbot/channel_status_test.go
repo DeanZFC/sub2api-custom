@@ -34,70 +34,50 @@ func channelStatusFixture() *ChannelStatusReport {
 func TestFormatChannelStatus(t *testing.T) {
 	report := channelStatusFixture()
 	chunks := formatChannelStatus(report)
-	require.Equal(t, []string{`📊 **渠道状态**
-
-统计范围：最近 90 分钟
-数据更新：2026-10-16 14:30（北京时间）
-
-**整体汇总**
-
-成功率：99.68%
-错误率：0.32%
-缓存率：76.25%
-首 Token：1.28 秒（P50）
-
-**各分组**
-
-**1. OpenAI 标准组**
-
-成功率：99.68% ｜ 错误率：0.32%
-缓存率：76.25%
-首 Token：1.28 秒（P50）
-
-**2. Gemini 分组**
-
-暂无请求数据`}, chunks)
-	require.NotContains(t, chunks[0], "每分钟请求数")
-	require.NotContains(t, chunks[0], "每秒 Token")
+	require.Equal(t, []string{`📊 **渠道状态 · 近 90 分钟**
+更新：2026-10-16 14:30（北京时间）
+整体：成功 99.68% ｜ 错误 0.32% ｜ 缓存 76.25% ｜ 首 Token P50 1.28 秒
+1. OpenAI 标准组 · 成功 99.68% ｜ 错误 0.32% ｜ 缓存 76.25% ｜ 首 Token P50 1.28 秒
+2. Gemini 分组 · 暂无请求数据`}, chunks)
+	require.NotContains(t, chunks[0], "RPM")
+	require.NotContains(t, chunks[0], "TPS")
 	report.ShowThroughput = true
 	text := strings.Join(formatChannelStatus(report), "")
-	require.Equal(t, 2, strings.Count(text, "每分钟请求数：12.34\n每秒 Token：56.78"))
+	require.Equal(t, 2, strings.Count(text, "RPM 12.34 · TPS 56.78"))
 }
 
 func TestChannelStatusMissingSamplesAreNotZeroOrPerfectSuccess(t *testing.T) {
 	report := &ChannelStatusReport{PartialCoverage: true}
 	text := formatChannelStatus(report)[0]
-	require.Contains(t, text, "数据更新：暂无数据")
+	require.Contains(t, text, "更新：暂无数据")
 	require.Contains(t, text, "暂无请求数据")
-	require.Contains(t, text, "暂无可展示的分组")
-	require.Contains(t, text, "当前仅覆盖部分统计时段")
+	require.Contains(t, text, "分组：暂无可展示项")
+	require.Contains(t, text, "部分时段")
 	require.NotContains(t, text, "100.00%")
 	report.Backfilling = true
-	require.Contains(t, formatChannelStatus(report)[0], "正在补齐历史监控数据")
+	require.Contains(t, formatChannelStatus(report)[0], "正在补齐数据")
 	report.Overall = ChannelStatusMetric{HasRequests: true, ErrorRate: 1}
 	text = formatChannelStatus(report)[0]
-	require.Contains(t, text, "成功率：0.00%\n错误率：100.00%")
-	require.Contains(t, text, "缓存率：暂无数据\n首 Token：暂无数据")
+	require.Contains(t, text, "成功 0.00% ｜ 错误 100.00%")
+	require.Contains(t, text, "缓存暂无数据 ｜ 首 Token 暂无数据")
 	zero := 0.0
 	report.Overall.CacheRate = &zero
-	require.Contains(t, formatChannelStatus(report)[0], "缓存率：0.00%")
+	require.Contains(t, formatChannelStatus(report)[0], "缓存 0.00%")
 }
 
 func TestChannelStatusInsufficientSamplesDoNotReportExtremeRates(t *testing.T) {
 	for _, errorRate := range []float64{0, 1} {
 		metric := ChannelStatusMetric{HasRequests: true, InsufficientSamples: true, ErrorRate: errorRate}
-		for _, compact := range []bool{false, true} {
-			text := formatChannelStatusMetric(metric, false, compact)
-			require.Contains(t, text, "成功率：样本不足")
-			require.Contains(t, text, "错误率：样本不足")
-			require.Contains(t, text, "缓存率：暂无数据")
-			require.NotContains(t, text, "0.00%")
-			require.NotContains(t, text, "暂无请求数据")
-		}
+		text := formatChannelStatusMetric(metric, false)
+		require.Contains(t, text, "成功率样本不足")
+		require.Contains(t, text, "错误率样本不足")
+		require.Contains(t, text, "缓存暂无数据")
+		require.NotContains(t, text, "0.00%")
+		require.NotContains(t, text, "暂无请求数据")
 	}
 	// Enough failed requests are a real outage and must remain visible.
-	text := formatChannelStatusMetric(ChannelStatusMetric{HasRequests: true, ErrorRate: 1}, false, true)
-	require.Contains(t, text, "成功率：0.00% ｜ 错误率：100.00%")
+	text := formatChannelStatusMetric(ChannelStatusMetric{HasRequests: true, ErrorRate: 1}, false)
+	require.Contains(t, text, "成功 0.00% ｜ 错误 100.00%")
 }
 
 func TestChannelStatusSplitsWithoutLosingOrBreakingGroups(t *testing.T) {
@@ -115,7 +95,7 @@ func TestChannelStatusSplitsWithoutLosingOrBreakingGroups(t *testing.T) {
 		require.NotContains(t, chunk, "截断")
 	}
 	for i, group := range report.Groups {
-		block := fmt.Sprintf("**%d. %s**\n\n%s", i+1, group.Name, formatChannelStatusMetric(group.Metrics, true, true))
+		block := fmt.Sprintf("%d. %s · %s", i+1, group.Name, formatChannelStatusMetric(group.Metrics, true))
 		count := 0
 		for _, chunk := range chunks {
 			count += strings.Count(chunk, block)
@@ -181,7 +161,7 @@ func TestChannelStatusCommandMentionModesAndHelp(t *testing.T) {
 	require.False(t, unmentionedGroupCommand(Event{Content: "<@other> /渠道状态"}))
 	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
 	require.NoError(t, s.message(context.Background(), DefaultConfig(), &j, Event{Content: "/帮助"}))
-	require.Contains(t, (*replies)[2].Content, "- **/渠道状态**：查询整体及各分组的成功率、缓存率和首 Token")
+	require.Contains(t, (*replies)[2].Content, "/渠道状态")
 }
 
 func TestChannelStatusCommandFailures(t *testing.T) {
@@ -194,12 +174,12 @@ func TestChannelStatusCommandFailures(t *testing.T) {
 		{name: "invalid argument", arg: "24h", want: "用法：/渠道状态"},
 		{name: "overflow", arg: strings.Repeat("9", 30), want: "用法：/渠道状态"},
 		{name: "disabled", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return nil, ErrChannelStatusDisabled }), want: "渠道监控未开启"},
-		{name: "v1", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return nil, ErrChannelStatusUnsupported }), want: "当前未启用被动监控"},
+		{name: "v1", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return nil, ErrChannelStatusUnsupported }), want: "被动监控未开启"},
 		{name: "query failed", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) {
 			return nil, errors.New("internal database detail")
 		}), want: "渠道状态查询失败"},
 		{name: "nil report", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return nil, nil }), want: "渠道状态查询失败"},
-		{name: "page out of range", arg: "99", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return channelStatusFixture(), nil }), want: "渠道状态共 1 页"},
+		{name: "page out of range", arg: "99", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return channelStatusFixture(), nil }), want: "共 1 页"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			s, replies := channelStatusSender(t, 0)
@@ -237,7 +217,7 @@ func TestChannelStatusCommandPaginationAndDeliveryFailure(t *testing.T) {
 			require.Contains(t, reply.Content, chunks[(page-1)*5+i])
 		}
 		if page < pages {
-			require.Contains(t, batch[len(batch)-1].Content, fmt.Sprintf("继续查看：/渠道状态 %d", page+1))
+			require.Contains(t, batch[len(batch)-1].Content, fmt.Sprintf("/渠道状态 %d", page+1))
 		}
 	}
 	require.Len(t, *replies, len(chunks))

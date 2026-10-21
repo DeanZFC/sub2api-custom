@@ -115,7 +115,7 @@ func TestGrowthStreakAtomicBonusAndGap(t *testing.T) {
 	require.NoError(t, err)
 	text, err := s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
-	require.Contains(t, text, "连续签到：7 天")
+	require.Contains(t, text, "连签 7 天")
 	require.Contains(t, text, "连签奖励：2 次")
 	text, err = s.reward(ctx, c, j, "checkin")
 	require.NoError(t, err)
@@ -154,12 +154,28 @@ func TestTodayUsageBeijingBoundaryAndAccountIsolation(t *testing.T) {
 	require.NoError(t, err)
 	text, err := s.todayUsage(ctx, c, Job{MemberID: "member"}, at)
 	require.NoError(t, err)
-	require.Contains(t, text, "已记录请求：2 次")
-	require.Contains(t, text, "实际计费：USD 3.7500")
-	require.Contains(t, text, "余额扣费：USD 1.2500")
-	require.Contains(t, text, "套餐消耗：USD 2.5000")
+	require.Contains(t, text, "已记录 2 次")
+	require.Contains(t, text, "Token 入/出 30/0 · 缓存读/写 0/0")
+	require.Contains(t, text, "费用 USD 3.7500")
+	require.Contains(t, text, "余额扣费 1.2500")
+	require.Contains(t, text, "套餐消耗 2.5000")
 	for _, hidden := range []string{"yesterday", "future", "someone-else", "999"} {
 		require.NotContains(t, text, hidden)
+	}
+	for _, tc := range []struct {
+		input, output, read, write int64
+		want                       string
+	}{
+		{19_384_764, 1_047_414, 105_056_040, 578_253, "Token 入/出 19.38M/1.05M · 缓存读/写 105.06M/578.25K"},
+		{1_000_000_000, 2_345_678_901, 1_000_000, 1_000, "Token 入/出 1.00B/2.35B · 缓存读/写 1.00M/1.00K"},
+	} {
+		_, err = db.Exec(`UPDATE usage_logs SET input_tokens=$2,output_tokens=$3,cache_read_tokens=$4,cache_creation_tokens=$5 WHERE user_id=$1 AND model='wallet-model'`, uid, tc.input-20, tc.output, tc.read, tc.write)
+		require.NoError(t, err)
+		text, err = s.todayUsage(ctx, c, Job{MemberID: "member"}, at)
+		require.NoError(t, err)
+		require.Contains(t, text, tc.want)
+		require.Contains(t, text, "已记录 2 次")
+		require.Contains(t, text, "费用 USD 3.7500")
 	}
 	text, err = s.todayUsage(ctx, c, Job{MemberID: "unbound"}, at)
 	require.NoError(t, err)
@@ -190,9 +206,12 @@ func TestModelPriceCommandPaginationAndBoundIdentity(t *testing.T) {
 	require.NoError(t, s.sendModelPrice(context.Background(), c, j, "gpt-5"))
 	require.Equal(t, uid, received)
 	require.Len(t, *replies, 5)
+	require.Contains(t, (*replies)[4].text(), "/价格 gpt-5 2")
 	require.NoError(t, s.sendModelPrice(context.Background(), c, j, "gpt-5 2"))
 	require.Len(t, *replies, 6)
 	require.Contains(t, (*replies)[5].text(), "group6")
+	require.Contains(t, (*replies)[5].text(), "第 2/2 页")
+	require.NotContains(t, (*replies)[5].text(), "/价格 gpt-5 3")
 	j.MemberID = "unbound"
 	require.NoError(t, s.sendModelPrice(context.Background(), c, j, "gpt-5 2"))
 	require.Zero(t, received)

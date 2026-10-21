@@ -12,6 +12,19 @@ import (
 
 const bindFirst = "请先使用 /绑定 绑定网站账号。"
 
+func formatUsageTokens(tokens int64) string {
+	switch {
+	case tokens >= 1_000_000_000:
+		return fmt.Sprintf("%.2fB", float64(tokens)/1_000_000_000)
+	case tokens >= 1_000_000:
+		return fmt.Sprintf("%.2fM", float64(tokens)/1_000_000)
+	case tokens >= 1_000:
+		return fmt.Sprintf("%.2fK", float64(tokens)/1_000)
+	default:
+		return strconv.FormatInt(tokens, 10)
+	}
+}
+
 func boundUser(ctx context.Context, db queryRower, app, member string) (int64, error) {
 	var id int64
 	err := db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, app, member).Scan(&id)
@@ -41,16 +54,16 @@ func (s *Service) todayUsage(ctx context.Context, c Config, j Job, now time.Time
 	if err != nil {
 		return "", err
 	}
-	text := fmt.Sprintf("📊 **今日用量**\n\n%s 00:00—%s（北京时间）\n- 已记录请求：%d 次\n- 输入 / 输出 Token：%d / %d\n- 缓存写入 / 读取 Token：%d / %d\n- **实际计费：USD %.4f**\n- 余额扣费：USD %.4f\n- 套餐消耗：USD %.4f", local.Format("2006-01-02"), local.Format("15:04"), count, input, output, write, read, cost, wallet, subscription)
+	text := fmt.Sprintf("📊 **今日用量 · %s（北京时间）**\n已记录 %d 次 · Token 入/出 %s/%s · 缓存读/写 %s/%s\n费用 USD %.4f（余额扣费 %.4f · 套餐消耗 %.4f）", local.Format("2006-01-02"), count, formatUsageTokens(input), formatUsageTokens(output), formatUsageTokens(read), formatUsageTokens(write), cost, wallet, subscription)
 	if count == 0 {
-		return text + "\n\n今日暂无使用记录。", nil
+		return text, nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT model,COUNT(*),SUM(actual_cost) FROM usage_logs WHERE user_id=$1 AND created_at >= $2 AND created_at <= $3 GROUP BY model ORDER BY SUM(actual_cost) DESC,COUNT(*) DESC,model LIMIT 5`, uid, start, now)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = rows.Close() }()
-	text += "\n\n**主要模型（按费用，最多 5 个）**"
+	text += "\n费用前 5 模型："
 	for rows.Next() {
 		var model string
 		var requests int64
@@ -58,9 +71,9 @@ func (s *Service) todayUsage(ctx context.Context, c Config, j Job, now time.Time
 		if err = rows.Scan(&model, &requests, &amount); err != nil {
 			return "", err
 		}
-		text += fmt.Sprintf("\n- %s：%d 次 · USD %.4f", replyPlainLabel(limitText(model, 100)), requests, amount)
+		text += fmt.Sprintf("\n%s · %d 次 · USD %.4f", replyPlainLabel(limitText(model, 100)), requests, amount)
 	}
-	return text + "\n\n按已入库的使用记录统计；不含尚未结束或尚未入库的请求。", rows.Err()
+	return text, rows.Err()
 }
 
 type ModelPriceProvider interface {
@@ -72,7 +85,7 @@ func (s *Service) SetModelPriceProvider(p ModelPriceProvider) { s.modelPrices = 
 func (s *Service) sendModelPrice(ctx context.Context, c Config, j Job, arg string) error {
 	parts := strings.Fields(arg)
 	if len(parts) < 1 || len(parts) > 2 || len(parts[0]) > 200 {
-		return s.send(ctx, c, j, "用法：/价格 模型名；翻页：/价格 模型名 页码。", nil, 1)
+		return s.send(ctx, c, j, "用法：/价格 模型名 [页码]", nil, 1)
 	}
 	page := 1
 	if len(parts) == 2 {
@@ -96,7 +109,7 @@ func (s *Service) sendModelPrice(ctx context.Context, c Config, j Job, arg strin
 		return s.send(ctx, c, j, "价格查询失败，请稍后重试。", nil, 1)
 	}
 	if len(blocks) == 0 {
-		return s.send(ctx, c, j, "未找到该模型的可展示价格，请核对完整模型名或到网站查看。", nil, 1)
+		return s.send(ctx, c, j, "未找到该模型价格，请核对名称或查看网站。", nil, 1)
 	}
 	// One complete group per message; do not truncate pricing tiers.
 	pages := (len(blocks) + 4) / 5
@@ -106,7 +119,10 @@ func (s *Service) sendModelPrice(ctx context.Context, c Config, j Job, arg strin
 	for i := (page - 1) * 5; i < min(page*5, len(blocks)); i++ {
 		body := blocks[i]
 		if pages > 1 {
-			body += fmt.Sprintf("\n\n第 %d/%d 页 · /价格 %s 页码", page, pages, replyPlainLabel(parts[0]))
+			body += fmt.Sprintf("\n第 %d/%d 页", page, pages)
+			if page < pages {
+				body += fmt.Sprintf(" · /价格 %s %d", replyPlainLabel(parts[0]), page+1)
+			}
 		}
 		if err = s.send(ctx, c, j, body, nil, i-(page-1)*5+1); err != nil {
 			return err

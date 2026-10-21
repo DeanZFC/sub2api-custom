@@ -1,7 +1,7 @@
 export default { qqbot: {
   rankings: {
     tab: 'Daily rankings', title: 'Daily rankings and prizes',
-    help: 'Send /今日排行榜 to view the top 10 token users and spenders across all active site accounts, including accounts without QQ bindings. Only daily anonymous aliases and positions are shown; names, email, QQ, account IDs and usage values stay private.',
+    help: 'Send /今日排行榜 to view the top 10 token users and spenders across all active site accounts, including accounts without QQ bindings. Only masked emails and positions are shown, with **** hiding the middle of each email username. Full emails, names, QQ, account IDs and usage values stay private.',
     enabled: 'Enable ranking queries', rewardsEnabled: 'Enable daily ranking prizes',
     settlement: 'Prizes are off by default. Rules take effect the next Beijing day. At 00:10, rewards for the previous day are credited automatically to winning site accounts, without QQ binding or manual claims. Both boards can award prizes. Previously unclaimed rewards are granted from saved snapshots. Missing or zero prizes are skipped.',
     effective: 'Latest saved prize rules take effect on: {day}',
@@ -22,7 +22,16 @@ export default { qqbot: {
   "chances": "Lottery chances (0 disables)",
   "tasksTitle": "One-time growth tasks",
   "periodicTitle": "Recurring growth tasks",
-  "periodicHelp": "Daily token and spending rankings automatically grant prizes to winning site accounts, including accounts without QQ bindings.",
+  "periodicHelp": "Repeat rewards for each spending, token, request, recharge or total check-in threshold, or configure daily ranking prizes. Each section saves independently.",
+  "repeatTitle": "One reward for each completed interval",
+  "periodicIdentityHelp": "For example, one chance per USD 10 spent gives two chances at USD 25, with USD 5 carried forward. Retained historical records count and rewards are granted automatically in batches. Interval edits apply to unredeemed progress. Disabling and re-enabling preserves records. Metrics keep separate ledgers; deleting and adding creates a new task.",
+  "periodicTargets": {
+    "usage_amount": "Reward for every amount spent (USD)",
+    "usage_tokens": "Reward for every number of tokens",
+    "usage_count": "Reward for every number of requests",
+    "recharge_total": "Reward for every eligible recharge amount (USD)",
+    "checkin_total": "Reward for every total check-in days"
+  },
   "taskSummary": "{total} tasks, {enabled} enabled",
   "identityHelp": "Each task rewards a site account once. Bound accounts are checked in batches every minute; check-in milestones are granted immediately. Editing preserves grants. Deleting and adding a task creates a new entitlement.",
   "taskNumber": "Task {number}",

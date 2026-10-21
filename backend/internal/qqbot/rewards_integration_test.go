@@ -23,7 +23,7 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 	job := Job{MemberID: "member"}
 	info, err := s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 0.00\n- 邀请奖励：USD 0.00\n- 签到奖励：USD 0.00\n- 成长奖励：USD 0.00\n- 连签奖励：USD 0.00\n- 排行奖励：USD 0.00\n\n**合计：USD 0.00**", info)
+	require.Equal(t, "🎁 **累计奖励**\n抽奖 0.00 · 邀请 0.00 · 签到 0.00\n成长 0.00 · 连签 0.00 · 排行 0.00\n合计 USD 0.00", info)
 	_, err = db.Exec(`INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount,created_at) VALUES
  ('lottery-1','app','group','member',$1,'lottery',2.50,NOW()-INTERVAL '60 days'),
  ('lottery-2','app','other-group','member',$1,'lottery',0.75,NOW()),
@@ -38,14 +38,14 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 	require.NoError(t, err)
 	info, err = s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "🎁 **累计奖励**\n\n- 抽奖奖励：USD 3.25\n- 邀请奖励：USD 2.50\n- 签到奖励：USD 0.30\n- 成长奖励：USD 1.25\n- 连签奖励：USD 0.50\n- 排行奖励：USD 0.75\n\n**合计：USD 8.55**", info)
+	require.Equal(t, "🎁 **累计奖励**\n抽奖 3.25 · 邀请 2.50 · 签到 0.30\n成长 1.25 · 连签 0.50 · 排行 0.75\n合计 USD 8.55", info)
 
 	_, err = db.Exec(`INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount) VALUES('historical','app','group','member',$1,'redemption',2)`, uid)
 	require.NoError(t, err)
 	info, err = s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Contains(t, info, "历史奖励：USD 2.00（已计入合计）")
-	require.Contains(t, info, "合计：USD 10.55")
+	require.Contains(t, info, "含历史奖励 2.00")
+	require.Contains(t, info, "合计 USD 10.55")
 
 	info, err = s.myRewards(ctx, c, Job{MemberID: "unbound"})
 	require.NoError(t, err)
@@ -93,10 +93,10 @@ func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T
 		require.NoError(t, marshalErr)
 		require.NoError(t, s.Enqueue(ctx, c, Payload{ID: id, Type: groupMessageCreate, Data: raw}))
 		s.runOne(ctx)
-		require.Contains(t, reply, "<qqbot-at-user id=\""+member+"\" />\n# 🎁 累计奖励")
-		require.Contains(t, reply, "# 🎁 累计奖励")
+		require.Contains(t, reply, "<qqbot-at-user id=\""+member+"\" />\n🎁 **累计奖励**")
+		require.Contains(t, reply, "🎁 **累计奖励**")
 		for _, category := range []string{"抽奖", "签到", "成长", "连签", "排行"} {
-			require.Contains(t, reply, "- "+category+"奖励：USD 0.00")
+			require.Contains(t, reply, category+" 0.00")
 		}
 	}
 	addInvite := func(group, member string) {
@@ -106,8 +106,8 @@ func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T
 	}
 	addInvite("group", "first-invitee")
 	query("invitee-query", "first-invitee")
-	require.Contains(t, reply, "- 邀请奖励：USD 0.00")
-	require.Contains(t, reply, "**合计：USD 0.00**")
+	require.Contains(t, reply, "邀请 0.00")
+	require.Contains(t, reply, "合计 USD 0.00")
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, inviter).Scan(&balance))
 	require.Equal(t, c.InviteReward, balance)
@@ -116,8 +116,8 @@ func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T
 	addInvite("other-group", "second-invitee")
 	for _, id := range []string{"inviter-query", "repeat-query"} {
 		query(id, "inviter")
-		require.Contains(t, reply, "- 邀请奖励：USD 2.00")
-		require.Contains(t, reply, "**合计：USD 2.00**")
+		require.Contains(t, reply, "邀请 2.00")
+		require.Contains(t, reply, "合计 USD 2.00")
 	}
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, inviter).Scan(&balance))
 	require.Equal(t, 2*c.InviteReward, balance)

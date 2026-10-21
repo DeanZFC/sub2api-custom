@@ -7,17 +7,6 @@ import (
 	"strings"
 )
 
-func commandReplyHeading(body string) string {
-	first, rest, found := strings.Cut(body, "\n")
-	if !strings.HasPrefix(first, "#") && strings.Count(first, "**") == 2 {
-		first = "# " + strings.ReplaceAll(first, "**", "")
-	}
-	if found {
-		return first + "\n" + rest
-	}
-	return first
-}
-
 func paginateCommand(body string) []string {
 	var pages []string
 	current := ""
@@ -63,7 +52,7 @@ func (s *Service) sendCommandPage(ctx context.Context, c Config, j Job, cmd, bod
 	if !ok {
 		return s.send(ctx, c, j, "用法：/"+cmd+"；翻页：/"+cmd+" 页码。", nil, 1)
 	}
-	pages := paginateCommand(commandReplyHeading(body))
+	pages := paginateCommand(body)
 	if len(pages) == 0 {
 		return s.send(ctx, c, j, "暂无内容。", nil, 1)
 	}

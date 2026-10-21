@@ -12,6 +12,7 @@ import (
 // account, so rebinding, multiple groups and process restarts cannot reset them.
 type GrowthConfig struct {
 	Tasks             []GrowthTask `json:"tasks"`
+	PeriodicTasks     []GrowthTask `json:"periodic_tasks,omitempty"`
 	BindingChances    int          `json:"binding_chances"`
 	FirstUsageChances int          `json:"first_usage_chances"`
 	Checkin30Chances  int          `json:"checkin_30_chances"`
@@ -129,6 +130,12 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 		needUsage = needUsage || task.Kind == "usage_count" || task.Kind == "usage_tokens" || task.Kind == "usage_amount"
 		needRecharge = needRecharge || task.Kind == "recharge_total"
 	}
+	for _, task := range cfg.Growth.PeriodicTasks {
+		if task.Enabled && task.reward().enabled() {
+			needUsage = needUsage || task.Kind == "usage_count" || task.Kind == "usage_tokens" || task.Kind == "usage_amount"
+			needRecharge = needRecharge || task.Kind == "recharge_total"
+		}
+	}
 	if needUsage {
 		err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(COALESCE(input_tokens,0)::numeric+COALESCE(output_tokens,0)::numeric+COALESCE(cache_creation_tokens,0)::numeric+COALESCE(cache_read_tokens,0)::numeric),0),COALESCE(SUM(actual_cost),0) FROM usage_logs WHERE user_id=$1 AND created_at <= $2`, uid, at).Scan(&progress.usage, &progress.tokens, &progress.spent)
 		if err != nil {
@@ -141,13 +148,13 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 			return "", 0, false, err
 		}
 	}
-	text := fmt.Sprintf("🌱 **成长任务**\n\n当前连续签到：%d 天\n累计签到：%d 天", streak, total)
+	text := fmt.Sprintf("🌱 **成长任务**\n连续签到：%d 天 · 累计签到：%d 天", streak, total)
 	if reward := cfg.streakReward(); reward.enabled() {
-		text += fmt.Sprintf("\n每连续签到满 %d 天自动获得：%s。", cfg.streakDays(), reward.description())
+		text += fmt.Sprintf("\n连签 %d 天奖励：%s", cfg.streakDays(), reward.description())
 	}
-	text += "\n\n### 一次性成长任务"
+	text += "\n\n**一次性成长任务**"
 	if len(tasks) == 0 {
-		text += "\n\n当前暂无一次性成长任务。"
+		text += "\n暂无任务。"
 	}
 	grants := 0
 	balanceChanged := false
@@ -157,7 +164,7 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 		case claimed[i]:
 			status = "已发放"
 			if statuses[i] == "pending" {
-				status = "已登记，待管理员发放"
+				status = "待管理员发放"
 			}
 		case !task.Enabled || !task.reward().enabled():
 			status = "未开启"
@@ -174,10 +181,20 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 				status = "已自动发放"
 			}
 			if reward.Type == "physical" || reward.Type == "other" {
-				status = "已登记，待管理员发放"
+				status = "待管理员发放"
 			}
 		}
-		text += fmt.Sprintf("\n\n**%d. %s**\n奖励：%s · %s", i+1, replyPlainLabel(task.Name), rewards[i].description(), status)
+		text += fmt.Sprintf("\n%d. %s · %s · 奖励：%s", i+1, replyPlainLabel(task.Name), status, rewards[i].description())
 	}
-	return text + "\n\n达标奖励自动发放，无需领取。每项任务每个网站账号仅奖励一次；历史完成记录也可参与。余额与抽奖次数直接到账，实物及自定义奖品由管理员发放。", grants, balanceChanged, nil
+	text += "\n达标自动发放，每项每账号限一次。"
+	if len(cfg.Growth.PeriodicTasks) > 0 {
+		periodic, n, changed, e := settlePeriodicGrowth(ctx, tx, c, j, uid, cfg.Growth.PeriodicTasks, progress, at)
+		if e != nil {
+			return "", 0, false, e
+		}
+		text += "\n\n" + periodic
+		grants += n
+		balanceChanged = balanceChanged || changed
+	}
+	return text, grants, balanceChanged, nil
 }

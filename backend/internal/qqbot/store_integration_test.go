@@ -140,6 +140,12 @@ func testDB(t *testing.T) *sql.DB {
 		_, err = db.Exec(string(raw))
 		require.NoError(t, err)
 	}
+	raw, err = migrations.FS.ReadFile("290_qq_bot_periodic_growth.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(raw))
+		require.NoError(t, err)
+	}
 	return db
 }
 func savedBot(t *testing.T, db *sql.DB) *Service {

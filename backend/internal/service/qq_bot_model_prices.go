@@ -67,7 +67,7 @@ func (p *qqBotModelPrices) ModelPrice(ctx context.Context, model string, uid int
 				billingModel = mapping.MappedModel
 			}
 			if mapping.BillingModelSource == BillingModelSourceUpstream || mapping.BillingModelSource == BillingModelSourceResponse {
-				note = "\n此渠道按最终上游/响应模型计费，下列为请求模型参考价。"
+				note = "\n参考价：渠道按最终模型计费。"
 			}
 			if checkRestricted(lookup, g.ID, billingModel) {
 				continue
@@ -105,18 +105,18 @@ func (p *qqBotModelPrices) ModelPrice(ctx context.Context, model string, uid int
 		} else if resolved.Mode == BillingModeVideo && g.VideoRateIndependent {
 			rate = g.VideoRateMultiplier
 		}
-		header := fmt.Sprintf("💰 **模型价格 · %s**\n\n模型：%s\n分组：%s\n当前分组倍率：%g×", kind, qqPriceLabel(model), qqPriceLabel(g.Name), rate)
+		header := fmt.Sprintf("💰 **%s · %s**\n分组：%s · 倍率 %g×", kind, qqPriceLabel(model), qqPriceLabel(g.Name), rate)
 		if billingModel != model {
 			header += "\n计费模型：" + qqPriceLabel(billingModel)
 		}
 		if g.IsSubscriptionType() {
-			header += "\n套餐分组，使用资格以有效订阅为准。"
+			header += "\n使用需有效订阅。"
 		}
 		lines, err := p.quotePriceLines(ctx, &g, billingModel, resolved, rate, at)
 		if err != nil {
 			return nil, err
 		}
-		footer := "\n\n当前时点、标准服务层级、默认推理等级报价；按当前计费规则计算。图片/音频、工具调用等附加费用另计，模型可用性以实际路由为准。" + note + "\n查询时间：" + at.In(time.FixedZone("Asia/Shanghai", 8*3600)).Format("01-02 15:04") + "（北京时间）"
+		footer := "\n标准服务层级、默认推理等级；图片/音频及工具费另计 · " + at.In(time.FixedZone("Asia/Shanghai", 8*3600)).Format("01-02 15:04 北京时间") + note
 		chunk := header
 		for _, line := range lines {
 			if len([]rune(chunk+line+footer)) > 1450 && chunk != header {
@@ -215,7 +215,7 @@ func (p *qqBotModelPrices) quotePriceLines(ctx context.Context, g *Group, model 
 		if n > 1 {
 			label = fmt.Sprintf("上下文 %d Token 起", n)
 		}
-		lines = append(lines, fmt.Sprintf("**%s · USD / 百万 Token**\n输入：%.6f\n输出：%.6f\n缓存读取：%.6f\n缓存写入（默认时长）：%.6f", label, values[0], values[1], values[2], values[3]))
+		lines = append(lines, fmt.Sprintf("**%s · USD / 百万 Token**\n输入：%.6f · 输出：%.6f\n缓存读取：%.6f · 写入（默认时长）：%.6f", label, values[0], values[1], values[2], values[3]))
 	}
 	return lines, nil
 }

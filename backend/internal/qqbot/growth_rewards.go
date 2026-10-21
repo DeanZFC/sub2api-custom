@@ -77,15 +77,15 @@ func (r GrowthReward) description() string {
 func (r GrowthReward) deliveryNote() string {
 	switch r.Type {
 	case "balance":
-		return "已存入绑定账号。"
+		return "已到账"
 	case "chances":
-		return "发送 /抽奖次数 查看剩余次数；抽奖须由管理员开启。"
+		return "已到账"
 	default:
 		instructions := strings.TrimSpace(r.ClaimInstructions)
 		if instructions == "" {
 			instructions = "请联系管理员领取。"
 		}
-		return "状态：待发放\n" + replyPlainLabel(instructions)
+		return "待管理员发放：" + replyPlainLabel(instructions)
 	}
 }
 

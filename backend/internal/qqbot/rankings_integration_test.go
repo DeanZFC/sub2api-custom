@@ -67,8 +67,8 @@ func TestTodayRankingsAllAccountsPrivateTopTen(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Rollback())
 	require.Len(t, entries, 20)
-	require.Equal(t, rankingEntry{Kind: "amount", Rank: 1, UserID: users[0]}, entries[0])
-	require.Equal(t, rankingEntry{Kind: "tokens", Rank: 1, UserID: users[11]}, entries[10])
+	require.Equal(t, rankingEntry{Kind: "amount", Rank: 1, UserID: users[0], Email: "private-0@example.com"}, entries[0])
+	require.Equal(t, rankingEntry{Kind: "tokens", Rank: 1, UserID: users[11], Email: "private-11@example.com"}, entries[10])
 	text, err := s.todayRankings(ctx, c, now)
 	require.NoError(t, err)
 	require.Contains(t, text, "**Token 消耗榜**")
@@ -77,13 +77,16 @@ func TestTodayRankingsAllAccountsPrivateTopTen(t *testing.T) {
 	require.NotContains(t, text, "第 11 名")
 	require.NotContains(t, text, "USD")
 	require.NotContains(t, text, "private-")
-	require.NotContains(t, text, "@example.com")
+	require.NotContains(t, text, "private-nickname")
+	require.NotContains(t, text, "private-qq-member")
+	require.Equal(t, 20, strings.Count(text, "@example.com"))
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, "第 ") {
-			require.Regexp(t, `^第 (?:[1-9]|10) 名 · 用户 \*{4}[A-F0-9]{8}$`, line)
+			require.Regexp(t, `^第 (?:[1-9]|10) 名 · pri(?:\\\*){4}(?:-[0-9]|1[01])@example\.com$`, line)
 		}
 	}
-	require.Contains(t, text, rankingAlias(c, "2026-10-21", users[11]))
+	require.Contains(t, text, `第 1 名 · pri\*\*\*\*11@example.com`)
+	require.Contains(t, text, `第 1 名 · pri\*\*\*\*-0@example.com`)
 	empty, err := s.todayRankings(ctx, c, start)
 	require.NoError(t, err)
 	require.Equal(t, 2, strings.Count(empty, "暂无上榜账号"))
@@ -157,7 +160,7 @@ func TestRankingSettlementCreatesUnboundEntitlementsAndDeduplicates(t *testing.T
 	require.Equal(t, 2, chances)
 	summary, err := s.myRewards(ctx, bot, Job{MemberID: "newly-bound"})
 	require.NoError(t, err)
-	require.Contains(t, summary, "排行奖励：USD 1.25")
+	require.Contains(t, summary, "排行 1.25")
 	codes, err := s.ListRewardCodes(ctx, "", "pending", 1)
 	require.NoError(t, err)
 	require.Len(t, codes.Items, 2)
@@ -270,7 +273,10 @@ func TestRankingTiesPrecisionCacheTokensAndDayBoundary(t *testing.T) {
 	entries, err := dailyRankingEntries(ctx, tx, start, start.AddDate(0, 0, 1))
 	require.NoError(t, err)
 	require.NoError(t, tx.Rollback())
-	require.Equal(t, []rankingEntry{{"amount", 1, b}, {"amount", 2, c}, {"amount", 3, a}, {"tokens", 1, a}, {"tokens", 2, b}, {"tokens", 3, c}}, entries)
+	require.Equal(t, []rankingEntry{
+		{Kind: "amount", Rank: 1, UserID: b}, {Kind: "amount", Rank: 2, UserID: c}, {Kind: "amount", Rank: 3, UserID: a},
+		{Kind: "tokens", Rank: 1, UserID: a}, {Kind: "tokens", Rank: 2, UserID: b}, {Kind: "tokens", Rank: 3, UserID: c},
+	}, entries)
 }
 
 func TestRankingCommandSendsBothBoardsWithoutBindingOrModelCalls(t *testing.T) {
@@ -280,6 +286,12 @@ func TestRankingCommandSendsBothBoardsWithoutBindingOrModelCalls(t *testing.T) {
 	insightsUsageTable(t, db)
 	bot, err := s.Config(ctx)
 	require.NoError(t, err)
+	for i, email := range []string{"123456789@qq.com", "second_person@example.com"} {
+		uid := user(t, db)
+		_, err = db.Exec(`UPDATE users SET email=$2 WHERE id=$1`, uid, email)
+		require.NoError(t, err)
+		rankingUsage(t, db, uid, int64(100-i), fmt.Sprint(2-i), beijingDayStart(time.Now()))
+	}
 	recorder := mockHelpInteractions(t, s, false)
 	for i, command := range []string{"/今日排行榜", "/今日排行版"} {
 		id := fmt.Sprintf("ranking-query-%d", i)
@@ -296,6 +308,10 @@ func TestRankingCommandSendsBothBoardsWithoutBindingOrModelCalls(t *testing.T) {
 		require.Contains(t, reply.text(), "**Token 消耗榜**")
 		require.Contains(t, reply.text(), "**消费金额榜**")
 		require.NotContains(t, reply.text(), bindFirst)
+		require.Equal(t, 2, strings.Count(reply.text(), `第 1 名 · 123\*\*\*\*89@qq.com`))
+		require.Equal(t, 2, strings.Count(reply.text(), `第 2 名 · sec\*\*\*\*on@example.com`))
+		require.NotContains(t, reply.text(), "123456789")
+		require.NotContains(t, reply.text(), "second_person")
 	}
 	recorder.mu.Unlock()
 	var count int
