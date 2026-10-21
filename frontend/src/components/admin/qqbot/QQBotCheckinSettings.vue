@@ -18,6 +18,13 @@
           <label class="space-y-1">{{ t('qqbot.minimumRecentRecharge', { days: form.recharge_window_days }) }}<input v-model.number="form.min_recharge_30d" data-testid="min-recharge-30d" type="number" min="0" max="1000000000" step="0.01" required class="input" /></label>
         </div>
       </div>
+      <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
+        <legend class="font-medium">{{ t('qqbot.growth.title') }}</legend>
+        <p class="text-sm text-gray-500">{{ t('qqbot.growth.help') }}</p>
+        <label class="block space-y-1">{{ t('qqbot.growth.streak') }}<input v-model.number="form.streak_chances" data-testid="streak-chances" type="number" min="0" max="1000" step="1" required class="input" /></label>
+        <label v-for="field in growthFields" :key="field" class="block space-y-1">{{ t(`qqbot.growth.${field}`) }}<input v-model.number="form.growth[field]" :data-testid="field" type="number" min="0" max="1000" step="1" required class="input" /></label>
+        <p class="text-sm text-gray-500">{{ t('qqbot.growth.commands') }}</p>
+      </fieldset>
       <p class="rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-800">{{ t('qqbot.checkinRangeHelp') }}</p>
       <p class="text-sm text-gray-500">{{ t('qqbot.checkinCommand') }}</p>
       <button type="submit" class="btn btn-primary" :disabled="busy">{{ t('common.save') }}</button>
@@ -30,6 +37,7 @@ import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { qqbotAPI, type QQCheckinConfig } from '@/api/qqbot'
 const { t } = useI18n()
+const growthFields = ['binding_chances', 'first_usage_chances', 'checkin_30_chances'] as const
 const form = ref<QQCheckinConfig | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -40,6 +48,7 @@ async function save() {
   if (!Number.isFinite(form.value.min_amount) || !Number.isFinite(form.value.max_amount) || form.value.min_amount > form.value.max_amount) { error.value = t('qqbot.invalidRange'); return }
   if (![form.value.min_recharge_total, form.value.min_recharge_30d].every(n => Number.isFinite(n) && n >= 0 && n <= 1_000_000_000 && Number(n.toFixed(2)) === n)) { error.value = t('qqbot.invalidRechargeThreshold'); return }
   if (!Number.isInteger(form.value.recharge_window_days) || form.value.recharge_window_days < 1 || form.value.recharge_window_days > 3650) { error.value = t('qqbot.invalidRechargeWindow'); return }
+  if (![form.value.streak_chances, ...Object.values(form.value.growth)].every(n => Number.isInteger(n) && n >= 0 && n <= 1000)) { error.value = t('qqbot.growth.invalid'); return }
   busy.value = true
   try { form.value = await qqbotAPI.saveCheckin({ ...form.value }); notice.value = t('common.saved') }
   catch (e) { error.value = (e as Error).message || t('common.error') }
@@ -48,7 +57,7 @@ async function save() {
 onMounted(async () => {
   try {
     const config = await qqbotAPI.checkinConfig()
-    form.value = { ...config, recharge_window_days: config.recharge_window_days || 30 }
+    form.value = { ...config, recharge_window_days: config.recharge_window_days || 30, streak_chances: config.streak_chances ?? 0, growth: config.growth ?? { binding_chances: 0, first_usage_chances: 0, checkin_30_chances: 0 } }
   }
   catch (e) { error.value = (e as Error).message || t('common.error') }
 })

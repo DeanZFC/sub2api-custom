@@ -11,10 +11,12 @@ import (
 // Decode the wire payload and reject combinations QQ does not render as intended.
 // In particular, accepting a mention tag in plain content hid the original bug.
 type qqTestReply struct {
-	MsgType  int    `json:"msg_type"`
-	Content  string `json:"content"`
-	MsgID    string `json:"msg_id"`
-	Sequence int    `json:"msg_seq"`
+	MsgType  int              `json:"msg_type"`
+	Content  string           `json:"content"`
+	MsgID    string           `json:"msg_id"`
+	EventID  string           `json:"event_id"`
+	Sequence int              `json:"msg_seq"`
+	Keyboard *messageKeyboard `json:"keyboard"`
 	Markdown *struct {
 		Content string `json:"content"`
 	} `json:"markdown"`
@@ -31,6 +33,9 @@ func readQQTestReply(t *testing.T, r *http.Request) qqTestReply {
 	require.NoError(t, err)
 	var reply qqTestReply
 	require.NoError(t, json.Unmarshal(data, &reply))
+	if reply.EventID != "" {
+		require.NotContains(t, raw, "msg_id")
+	}
 	switch reply.MsgType {
 	case 0:
 		require.Contains(t, raw, "content")

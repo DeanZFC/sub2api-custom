@@ -75,6 +75,7 @@ func (s *AccountTestService) testCNProviderAdaptiveAnthropicConnection(c *gin.Co
 		return s.sendErrorAndEnd(c, "Failed to create adaptive Anthropic test payload")
 	}
 	applyAccountTestOutputTokenLimit(ctx, payload, "max_tokens")
+	applyScheduledTestContentInstructions(ctx, payload, APIProtocolAnthropic)
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过原生 /v1/messages 测试自适应 Anthropic 端点"})
@@ -177,6 +178,7 @@ func (s *AccountTestService) testCNProviderAdaptiveResponsesConnection(c *gin.Co
 	// DeepSeek / Kimi native Responses endpoints are stateless and do not need
 	// the OpenAI probe's synthetic instructions.
 	delete(payload, "instructions")
+	applyScheduledTestContentInstructions(ctx, payload, APIProtocolResponses)
 	payloadBytes, _ := json.Marshal(payload)
 	payloadBytes = normalizeDeepSeekResponsesRequestBody(account, payloadBytes)
 
@@ -264,6 +266,7 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 		return s.sendErrorAndEnd(c, "Failed to create Anthropic test payload")
 	}
 	applyAccountTestOutputTokenLimit(ctx, payload, "max_tokens")
+	applyScheduledTestContentInstructions(ctx, payload, APIProtocolAnthropic)
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})

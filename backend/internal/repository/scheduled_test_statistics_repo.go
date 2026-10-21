@@ -12,7 +12,8 @@ import (
 func (r *scheduledTestResultRepository) ListStatisticsAccountIDs(ctx context.Context, groupID int64) ([]int64, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT a.id FROM accounts a
 JOIN account_groups ag ON ag.account_id=a.id
-WHERE ag.group_id=$1 AND a.deleted_at IS NULL ORDER BY a.id`, groupID)
+WHERE ag.group_id=$1 AND a.deleted_at IS NULL
+ AND a.schedulable AND a.status IN ('active','quality_paused') ORDER BY a.id`, groupID)
 	if err != nil {
 		return nil, err
 	}

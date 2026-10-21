@@ -12,7 +12,16 @@ export function defaultAutonomousConfig(): QQAutonomousConfig {
     min_messages: 6, member_cooldown_seconds: 600, hourly_replies: 3, daily_replies: 20, daily_calls: 40,
     start_hour: 9, end_hour: 23, followup_seconds: 60, max_chars: 100, mention_user: false }
 }
+export interface QQHealthNotificationConfig {
+  enabled: boolean; groups: string[]; minimum_samples: number; error_percent: number
+  recovery_percent: number; ttft_seconds: number; failure_minutes: number; recovery_minutes: number; cooldown_minutes: number
+}
+export function defaultHealthNotificationConfig(): QQHealthNotificationConfig {
+  return { enabled: false, groups: [], minimum_samples: 50, error_percent: 20, recovery_percent: 5,
+    ttft_seconds: 10, failure_minutes: 3, recovery_minutes: 2, cooldown_minutes: 30 }
+}
 export interface QQBotConfig {
+  health_notifications?: QQHealthNotificationConfig
   autonomous?: QQAutonomousConfig
   enabled: boolean; app_id: string; app_secret: string; app_secret_set: boolean; sandbox: boolean
   allowed_groups: string[]; base_url: string; api_key: string; api_key_set: boolean
@@ -47,6 +56,8 @@ export interface QQBindingState {
   pending: QQBindingRequest | null
 }
 export interface QQCheckinConfig {
+  streak_chances: number
+  growth: { binding_chances: number; first_usage_chances: number; checkin_30_chances: number }
   enabled: boolean; min_amount: number; max_amount: number
   min_recharge_total: number; min_recharge_30d: number; recharge_window_days: number
 }

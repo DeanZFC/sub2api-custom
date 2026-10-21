@@ -411,12 +411,12 @@ func formatPriceNotification(state PriceState, lines []string, onlyScheduled boo
 }
 
 func (s *Service) deliverPriceNotification(parent context.Context, c Config, j Job) {
-	if !c.PriceNotifications.Enabled || !containsPriceGroup(c, j.GroupID) {
-		s.finish(j, "cancelled", "价格通知已关闭或通知群已移除")
+	if !allowsNotification(c, j) {
+		s.finish(j, "cancelled", "通知已关闭或通知群已移除")
 		return
 	}
 	if time.Since(j.CreatedAt) > time.Hour {
-		s.finish(j, "expired", "价格通知排队超过 1 小时，未发送过期通知")
+		s.finish(j, "expired", "通知排队超过 1 小时，未发送过期通知")
 		return
 	}
 	var body struct {
@@ -447,11 +447,11 @@ func containsPriceGroup(c Config, group string) bool {
 }
 
 func (s *Service) sendPriceNotification(ctx context.Context, c Config, j Job, text string) error {
-	if !c.Enabled || !c.PriceNotifications.Enabled || c.AppID != j.AppID || !containsPriceGroup(c, j.GroupID) || j.EventType != priceNotificationEvent {
+	if !c.Enabled || c.AppID != j.AppID || !allowsNotification(c, j) {
 		return ErrDisabled
 	}
 	if len([]rune(text)) > 1800 {
-		return errors.New("价格通知内容过长")
+		return errors.New("通知内容过长")
 	}
 	// Deliberately separate from passive replies: no fabricated msg_id, event_id,
 	// user mention or AI call. Unknown delivery outcomes are never auto-replayed.
@@ -459,7 +459,20 @@ func (s *Service) sendPriceNotification(ctx context.Context, c Config, j Job, te
 		"msg_type": 2, "markdown": map[string]string{"content": text},
 	})
 	if err != nil {
-		return fmt.Errorf("价格通知发送失败：%w", err)
+		return fmt.Errorf("通知发送失败：%w", err)
 	}
 	return nil
+}
+
+func allowsNotification(c Config, j Job) bool {
+	if !c.allows(j.GroupID) {
+		return false
+	}
+	switch j.EventType {
+	case priceNotificationEvent:
+		return c.PriceNotifications.Enabled && containsPriceGroup(c, j.GroupID)
+	case healthNotificationEvent:
+		return c.HealthNotifications.Enabled && slices.Contains(healthNotificationGroups(c), j.GroupID)
+	}
+	return false
 }

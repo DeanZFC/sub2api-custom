@@ -131,6 +131,25 @@ func TestQQBotChannelStatusUsesMonitorAggregatesAndConfiguredGroups(t *testing.T
 	require.Equal(t, 60.0, report.Overall.TokensPerSecond)
 }
 
+func TestQQBotHealthUsesFiveCompleteMinutesAndMonitorPolicy(t *testing.T) {
+	p, repo, _ := qqStatusAdapterFixture()
+	at := time.Date(2026, 10, 21, 3, 10, 29, 0, time.UTC)
+	report, err := p.HealthSnapshot(context.Background(), at)
+	require.NoError(t, err)
+	require.Len(t, repo.filters, 1)
+	f := repo.filters[0]
+	require.Equal(t, 5*time.Minute, f.End.Sub(f.Start))
+	require.Equal(t, 0, f.End.Second())
+	require.Equal(t, time.Minute, f.Bucket)
+	require.Equal(t, []int64{1, 2, 3, 5}, f.AllowedGroupIDs)
+	require.Equal(t, *repo.config, repo.configs[0])
+	require.True(t, report.Complete)
+	require.Len(t, report.Groups, 1)
+	require.Equal(t, "1:openai", report.Groups[0].Key)
+	require.EqualValues(t, 2, report.Groups[0].Requests)
+	require.Equal(t, .5, report.Groups[0].ErrorRate)
+}
+
 func TestQQBotChannelStatusNoTrafficAndMixedPlatforms(t *testing.T) {
 	p, repo, _ := qqStatusAdapterFixture()
 	id, disabledID := int64(5), int64(4)

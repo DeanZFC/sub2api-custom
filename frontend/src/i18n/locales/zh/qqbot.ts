@@ -1,4 +1,28 @@
 export default { qqbot: {
+  growth: {
+  "title": "连续签到与成长任务",
+  "help": "奖励单位为抽奖次数，0 表示关闭，每项最多 1000 次。连签按北京时间每天一次，每连续 7 天自动发放；成长任务按网站账号限领一次，历史记录也可完成任务。",
+  "streak": "连续签到每满 7 天奖励次数",
+  "binding_chances": "任务 1：完成账号绑定",
+  "first_usage_chances": "任务 2：首次成功 API 调用",
+  "checkin_30_chances": "任务 3：累计签到 30 天",
+  "commands": "群内发送 /成长任务 查看进度，/领取任务 任务编号 领取。抽奖仍需单独开启。",
+  "invalid": "奖励次数须为 0～1000 的整数。"
+},
+  health: {
+  "title": "故障与恢复通知",
+  "help": "使用最近 5 分钟被动监控数据，每 30 秒检查一次，不发起测试请求。错误率或首 Token 延迟达到阈值并持续满足条件时通知；样本不足、数据过期或回填时不判断。需开启 V2 被动监控和 QQ 主动群消息权限。",
+  "enabled": "开启故障与恢复通知",
+  "groups": "接收群 OpenID（每行一个，留空为所有允许群）",
+  "minimum_samples": "最小请求样本数",
+  "error_percent": "故障错误率阈值（%）",
+  "recovery_percent": "恢复错误率上限（%）",
+  "ttft_seconds": "首 Token P50 故障阈值（秒，0 不检查延迟）",
+  "failure_minutes": "故障持续确认（分钟）",
+  "recovery_minutes": "恢复持续确认（分钟）",
+  "cooldown_minutes": "再次故障通知冷却（分钟）",
+  "recoveryHelp": "恢复需错误率不高于恢复上限，且首 Token 低于故障阈值的 80%。恢复通知不受冷却限制；同一故障只通知一次。修改设置会重新观察并取消排队通知。"
+},
   autonomous: {
   "title": "群聊自主回复",
   "help": "无需 {'@'} 也能择机接话。默认关闭，必须指定允许群；直接呼叫昵称按正常聊天处理，普通消息先筛选，少量候选才调用模型。需要 QQ 接收所有消息权限。",
@@ -297,7 +321,7 @@ export default { qqbot: {
   "clearSecret": "清除已保存密钥",
   "sandbox": "使用 QQ 沙箱环境",
   "webhook": "QQ 开放平台 HTTPS 回调地址",
-  "eventsHelp": "接入 GROUP_AT_MESSAGE_CREATE 和 GROUP_MESSAGE_CREATE，并由群主在 QQ 中开启“接收所有消息”。活动指令和生图无需 {'@'}，普通聊天需 {'@'} 机器人（指定群可开启自主回复）；全量模式识别 {'@'} 需 bot_state 接口权限。邀请奖励还需群成员加入、退出和申请事件，申请事件要求群管理员身份。",
+  "eventsHelp": "接入 GROUP_AT_MESSAGE_CREATE 和 GROUP_MESSAGE_CREATE，并由群主在 QQ 中开启“接收所有消息”。帮助按钮直接执行和翻页还需订阅 INTERACTION_CREATE，并开通互动回应接口权限。活动指令和生图无需 {'@'}，普通聊天需 {'@'} 机器人（指定群可开启自主回复）；全量模式识别 {'@'} 需 bot_state 接口权限。邀请奖励还需群成员加入、退出和申请事件，申请事件要求群管理员身份。",
   "allowedGroups": "允许使用的群 OpenID",
   "groupsPlaceholder": "每行一个群 OpenID（不是 QQ 群号）",
   "groupsHelp": "先保存 QQ 凭据并配置回调，将机器人加入群；刷新后可从发现的群中添加。没有允许的群时不能启用。",

@@ -465,7 +465,7 @@ func parseAutonomousReply(raw string, maxChars int) (string, error) {
 	if out.Action == "skip" {
 		return "", nil
 	}
-	out.Text = strings.TrimSpace(out.Text)
+	out.Text = strings.TrimSpace(normalizeChatReply(out.Text))
 	if out.Action != "reply" || out.Text == "" || len([]rune(out.Text)) > maxChars || strings.ContainsAny(out.Text, "<>@") || strings.Contains(out.Text, "http://") || strings.Contains(out.Text, "https://") {
 		return "", errors.New("自主接话回复未通过格式或长度检查")
 	}

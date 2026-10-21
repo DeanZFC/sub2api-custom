@@ -90,6 +90,7 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		"262_scheduled_test_execution_snapshot.sql",
 		"281_scheduled_test_membership_revocation.sql",
 		"264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql", "282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql",
+		"284_scheduled_test_output_tokens.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)

@@ -20,9 +20,11 @@ const (
 )
 
 type CheckinConfig struct {
-	Enabled   bool    `json:"enabled"`
-	MinAmount float64 `json:"min_amount"`
-	MaxAmount float64 `json:"max_amount"`
+	StreakChances int          `json:"streak_chances"`
+	Growth        GrowthConfig `json:"growth"`
+	Enabled       bool         `json:"enabled"`
+	MinAmount     float64      `json:"min_amount"`
+	MaxAmount     float64      `json:"max_amount"`
 	RechargeRequirement
 }
 type InviteConfig struct {
@@ -123,6 +125,11 @@ func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 	return err
 }
 func validateCheckin(c CheckinConfig) error {
+	for _, n := range []int{c.StreakChances, c.Growth.BindingChances, c.Growth.FirstUsageChances, c.Growth.Checkin30Chances} {
+		if n < 0 || n > 1000 {
+			return errors.New("连签与成长奖励次数须在 0 到 1000 之间；0 表示关闭")
+		}
+	}
 	if !validRewardAmount(c.MinAmount) || !validRewardAmount(c.MaxAmount) || c.MinAmount > c.MaxAmount {
 		return errors.New("签到金额需在 0 到 1000 USD 之间，最多 8 位小数，最低金额不能高于最高金额")
 	}

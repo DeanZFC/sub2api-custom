@@ -555,7 +555,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.JSONEq(t, string(encoded), stored.ResponseText, "read normalization must never overwrite stored statistics")
 	})
 
-	t.Run("public results retain paused accounts and report current scheduling", func(t *testing.T) {
+	t.Run("public results hide disabled accounts but retain automatic pauses", func(t *testing.T) {
 		const unavailableID, availableID = int64(70), int64(71)
 		execSQL(`INSERT INTO accounts (id,name) VALUES (70,'Visibility changing account'),(71,'Visibility control account');
 INSERT INTO account_groups VALUES (70,8),(71,8)`)
@@ -626,11 +626,14 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 					status      string
 					schedulable bool
 					deleted     any
+					visible     bool
 				}{
 					{name: "error", status: "error", schedulable: true},
 					{name: "inactive", status: "inactive", schedulable: true},
+					{name: "disabled", status: "disabled", schedulable: true},
 					{name: "unschedulable", status: "active", schedulable: false},
-					{name: "quality paused", status: "quality_paused", schedulable: true},
+					{name: "quality paused", status: "quality_paused", schedulable: true, visible: true},
+					{name: "quality paused manually disabled", status: "quality_paused", schedulable: false},
 					{name: "soft deleted", status: "active", schedulable: true, deleted: started},
 				} {
 					t.Run(state.name, func(t *testing.T) {
@@ -638,7 +641,7 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 						public, err := results.ListVisible(ctx, 100, 3)
 						require.NoError(t, err)
 						require.False(t, containsID(public, older.ID))
-						require.Equal(t, state.deleted == nil && control == nil, containsID(public, latest.ID))
+						require.Equal(t, state.visible && control == nil, containsID(public, latest.ID))
 						for _, row := range public {
 							if row.ID == latest.ID {
 								require.NotNil(t, row.AccountSchedulable)
@@ -648,8 +651,8 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 						require.True(t, containsID(public, groupStatistics.ID), "a group-only statistics snapshot does not depend on an executing account")
 						for _, beforeID := range []int64{0, older.ID} {
 							_, err = results.ListVisibleHistory(ctx, 100, latest.ID, beforeID, 20)
-							if state.deleted != nil {
-								require.ErrorIs(t, err, sql.ErrNoRows, "deleted accounts remain hidden")
+							if !state.visible {
+								require.ErrorIs(t, err, sql.ErrNoRows, "disabled accounts remain hidden")
 							} else {
 								require.NoError(t, err, "paused account history remains available")
 							}
@@ -658,7 +661,7 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 							require.True(t, containsID(public, control.ID), "another active group-test account stays visible")
 							history, err := results.ListVisibleHistory(ctx, 100, control.ID, 0, 20)
 							require.NoError(t, err)
-							if state.deleted != nil {
+							if !state.visible {
 								require.Len(t, history, 1)
 							} else {
 								require.Len(t, history, 3)
@@ -666,7 +669,7 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 							require.Equal(t, control.ID, history[0].ID)
 							require.Nil(t, history[0].AccountID)
 							_, err = results.ListVisibleHistory(ctx, 100, control.ID, older.ID, 20)
-							if state.deleted != nil {
+							if !state.visible {
 								require.ErrorIs(t, err, sql.ErrNoRows)
 							} else {
 								require.NoError(t, err)
@@ -785,5 +788,9 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 
 	t.Run("pause details keep holds but discard obsolete evidence", func(t *testing.T) {
 		testScheduledTestProtectionDetails(t, ctx, db, results, candyID)
+	})
+
+	t.Run("group targets exclude disabled accounts before freezing a run", func(t *testing.T) {
+		testScheduledTestEnabledTargets(t, ctx, db, plans, results, candyID, htmlID)
 	})
 }

@@ -49,10 +49,12 @@ describe('QQ activity pages with real translations', () => {
     await w.get('[data-testid="min-recharge-total"]').setValue('12')
     await w.get('[data-testid="min-recharge-30d"]').setValue('5.25')
     await w.get('[data-testid="recharge-window-days"]').setValue('7')
+    await w.get('[data-testid="streak-chances"]').setValue('2')
+    await w.get('[data-testid="binding_chances"]').setValue('1')
     expect(w.text()).toContain(translation.global.t('qqbot.minimumRecentRecharge', { days: 7 }))
     await w.get('form').trigger('submit')
     await flushPromises()
-    expect(api.saveCheckin).toHaveBeenCalledWith({ enabled: true, min_amount: 0.7, max_amount: 0.9, min_recharge_total: 12, min_recharge_30d: 5.25, recharge_window_days: 7 })
+    expect(api.saveCheckin).toHaveBeenCalledWith({ enabled: true, min_amount: 0.7, max_amount: 0.9, min_recharge_total: 12, min_recharge_30d: 5.25, recharge_window_days: 7, streak_chances: 2, growth: { binding_chances: 1, first_usage_chances: 0, checkin_30_chances: 0 } })
     expect(w.get('[role="status"]').text()).toBe(translation.global.t('common.saved'))
   })
   it.each(['zh', 'en'] as const)('%s validates prize probability totals and saves the cumulative rule', async locale => {

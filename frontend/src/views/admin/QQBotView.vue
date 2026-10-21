@@ -8,8 +8,32 @@
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
       <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
       <p v-if="!form" class="text-gray-500">{{ t('common.loading') }}</p>
-      <form v-else class="space-y-6" @submit.prevent="save">
-        <section class="card space-y-4 p-6">
+      <form v-else ref="settingsForm" class="space-y-6" novalidate @submit.prevent="save">
+        <nav
+          role="tablist"
+          :aria-label="t('qqbot.basicConfig')"
+          class="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-800"
+        >
+          <button
+            v-for="tab in tabs"
+            :id="`qqbot-settings-tab-${tab.key}`"
+            :key="tab.key"
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === tab.key"
+            :aria-controls="`qqbot-settings-panel-${tab.key}`"
+            :tabindex="activeTab === tab.key ? 0 : -1"
+            class="min-h-[44px] flex-auto whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+            :class="activeTab === tab.key
+              ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300'
+              : 'text-gray-600 hover:bg-white/60 dark:text-gray-300 dark:hover:bg-dark-700/60'"
+            @click="activeTab = tab.key"
+            @keydown="handleTabKeydown($event, tab.key)"
+          >
+            {{ t(tab.label) }}
+          </button>
+        </nav>
+        <section v-show="activeTab === 'connection'" id="qqbot-settings-panel-connection" role="tabpanel" aria-labelledby="qqbot-settings-tab-connection" class="card space-y-4 p-6">
           <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">{{ t('qqbot.connection') }}</h2><label class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
           <p v-if="runtime && !runtime.encryption_ready" class="text-sm text-amber-700">{{ t('qqbot.encryptionRequired') }}</p>
           <div class="grid gap-4 md:grid-cols-2">
@@ -32,13 +56,23 @@
             </div>
           </div>
         </section>
-        <section class="card space-y-4 p-6" :aria-label="t('qqbot.priceNotifications.title')">
+        <section v-show="activeTab === 'notifications'" id="qqbot-settings-panel-notifications" role="tabpanel" aria-labelledby="qqbot-settings-tab-notifications" class="card space-y-4 p-6" :aria-label="t('qqbot.priceNotifications.title')">
           <h2 class="text-lg font-semibold">{{ t('qqbot.priceNotifications.title') }}</h2>
           <p class="text-sm text-gray-500">{{ t('qqbot.priceNotifications.help') }}</p>
           <label class="flex items-center gap-2"><input v-model="priceNotifications.enabled" data-testid="price-notifications-enabled" type="checkbox" />{{ t('qqbot.priceNotifications.enabled') }}</label>
           <label class="flex items-center gap-2"><input v-model="priceNotifications.scheduled" data-testid="price-notifications-scheduled" type="checkbox" />{{ t('qqbot.priceNotifications.scheduled') }}</label>
           <label class="block space-y-1">{{ t('qqbot.priceNotifications.groups') }}<textarea v-model="notificationGroupsText" data-testid="price-notification-groups" rows="2" class="input font-mono" :placeholder="t('qqbot.priceNotifications.groupsPlaceholder')" /></label>
           <p class="text-xs text-gray-500">{{ t('qqbot.priceNotifications.permission') }}</p>
+          <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
+            <legend class="font-medium">{{ t('qqbot.health.title') }}</legend>
+            <p class="text-sm text-gray-500">{{ t('qqbot.health.help') }}</p>
+            <label class="flex items-center gap-2"><input v-model="healthNotifications.enabled" data-testid="health-enabled" type="checkbox" />{{ t('qqbot.health.enabled') }}</label>
+            <label class="block space-y-1">{{ t('qqbot.health.groups') }}<textarea v-model="healthGroupsText" data-testid="health-groups" rows="2" class="input font-mono" /></label>
+            <div class="grid gap-4 md:grid-cols-2">
+              <label v-for="field in healthFields" :key="field.key" class="space-y-1">{{ t(`qqbot.health.${field.key}`) }}<input v-model.number="healthNotifications[field.key]" :data-testid="`health-${field.key}`" type="number" :min="field.min" :max="field.max" :step="field.step" required class="input" /></label>
+            </div>
+            <p class="text-xs text-gray-500">{{ t('qqbot.health.recoveryHelp') }}</p>
+          </fieldset>
           <details>
             <summary class="cursor-pointer text-sm font-medium">{{ t('qqbot.priceNotifications.records') }}</summary>
             <p v-if="!notificationJobs.length" class="mt-3 text-sm text-gray-500">{{ t('qqbot.priceNotifications.empty') }}</p>
@@ -49,7 +83,7 @@
             </div>
           </details>
         </section>
-        <section class="card space-y-4 p-6" :aria-label="t('qqbot.customCommands')">
+        <section v-show="activeTab === 'commands'" id="qqbot-settings-panel-commands" role="tabpanel" aria-labelledby="qqbot-settings-tab-commands" class="card space-y-4 p-6" :aria-label="t('qqbot.customCommands')">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-lg font-semibold">{{ t('qqbot.customCommands') }}</h2>
             <button type="button" class="btn btn-secondary" :disabled="busy || form.custom_commands.length >= 20" @click="addCustomCommand">{{ t('qqbot.addCustomCommand') }}</button>
@@ -66,7 +100,7 @@
             <label class="block space-y-1">{{ t('qqbot.customCommandReply') }}<textarea v-model="custom.reply" rows="4" class="input" :placeholder="t('qqbot.customReplyPlaceholder')" required /></label>
           </fieldset>
         </section>
-        <section class="card space-y-4 p-6">
+        <section v-show="activeTab === 'chat'" id="qqbot-settings-panel-chat" role="tabpanel" aria-labelledby="qqbot-settings-tab-chat" class="card space-y-4 p-6">
           <h2 class="text-lg font-semibold">{{ t('qqbot.ai') }}</h2>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="space-y-1">Base URL<input v-model.trim="form.base_url" class="input" placeholder="https://api.example.com/v1" /><span class="text-xs text-gray-500">{{ t('qqbot.baseHelp') }}</span></label>
@@ -81,8 +115,10 @@
           </div>
           <p id="qq-history-help" class="text-xs text-gray-500">{{ t('qqbot.historyHelp') }}</p>
         </section>
-        <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" />
-        <section class="card space-y-4 p-6">
+        <div v-show="activeTab === 'autonomous'" id="qqbot-settings-panel-autonomous" role="tabpanel" aria-labelledby="qqbot-settings-tab-autonomous">
+          <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" />
+        </div>
+        <section v-show="activeTab === 'images'" id="qqbot-settings-panel-images" role="tabpanel" aria-labelledby="qqbot-settings-tab-images" class="card space-y-4 p-6">
           <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">{{ t('qqbot.images') }}</h2><label class="flex items-center gap-2"><input v-model="form.image_enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="space-y-1">{{ t('qqbot.imageModel') }}<input v-model.trim="form.image_model" class="input" /></label>
@@ -92,7 +128,7 @@
           </div>
           <p class="text-sm text-gray-500">{{ t('qqbot.imageHelp') }}</p>
         </section>
-        <section class="card space-y-4 p-6">
+        <section v-show="activeTab === 'limits'" id="qqbot-settings-panel-limits" role="tabpanel" aria-labelledby="qqbot-settings-tab-limits" class="card space-y-4 p-6">
           <h2 class="text-lg font-semibold">{{ t('qqbot.limits') }}</h2><p class="text-sm text-gray-500">{{ t('qqbot.limitsHelp') }}</p>
           <div class="grid gap-4 md:grid-cols-2">
             <label v-for="field in limitFields" :key="field.key" class="space-y-1">{{ t(`qqbot.${field.label}`) }}<input v-model.number="form[field.key]" type="number" min="0" :max="field.max" class="input" /></label>
@@ -110,20 +146,43 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import QQBotAutonomousSettings from '@/components/admin/qqbot/QQBotAutonomousSettings.vue'
 import { defaultAutonomousConfig } from '@/api/qqbot'
-import { qqbotAPI, type QQBotConfig, type QQBotRuntime } from '@/api/qqbot'
+import { defaultHealthNotificationConfig, qqbotAPI, type QQBotConfig, type QQBotRuntime } from '@/api/qqbot'
 const { t } = useI18n()
+const tabs = [
+  { key: 'connection', label: 'qqbot.connection' },
+  { key: 'chat', label: 'qqbot.ai' },
+  { key: 'autonomous', label: 'qqbot.autonomous.title' },
+  { key: 'images', label: 'qqbot.images' },
+  { key: 'commands', label: 'qqbot.customCommands' },
+  { key: 'notifications', label: 'qqbot.priceNotifications.title' },
+  { key: 'limits', label: 'qqbot.limits' }
+] as const
+type SettingsTab = (typeof tabs)[number]['key']
+const activeTab = ref<SettingsTab>('connection')
+const settingsForm = ref<HTMLFormElement | null>(null)
 const form = ref<QQBotConfig | null>(null)
 const runtime = ref<QQBotRuntime | null>(null)
 const groupsText = ref('')
 const autonomous = ref(defaultAutonomousConfig())
+const healthNotifications = ref(defaultHealthNotificationConfig())
+const healthGroupsText = ref('')
+const healthFields = [
+  { key: 'minimum_samples', min: 1, max: 1000000, step: 1 },
+  { key: 'error_percent', min: 0.01, max: 100, step: 0.01 },
+  { key: 'recovery_percent', min: 0, max: 99.99, step: 0.01 },
+  { key: 'ttft_seconds', min: 0, max: 3600, step: 1 },
+  { key: 'failure_minutes', min: 1, max: 60, step: 1 },
+  { key: 'recovery_minutes', min: 1, max: 60, step: 1 },
+  { key: 'cooldown_minutes', min: 0, max: 1440, step: 1 }
+] as const
 const notificationGroupsText = ref('')
 const priceNotifications = ref({ enabled: false, scheduled: true, groups: [] as string[] })
-const notificationJobs = computed(() => runtime.value?.jobs.filter(job => job.kind === 'price_notification') ?? [])
+const notificationJobs = computed(() => runtime.value?.jobs.filter(job => job.kind === 'price_notification' || job.kind === 'health_notification') ?? [])
 const savedSnapshot = ref('')
 const busy = ref(false)
 const refreshingRuntime = ref(false)
@@ -137,14 +196,31 @@ const limitFields = [
   { key: 'total_daily_image_limit', label: 'totalImage', max: 100000 },
   { key: 'cooldown_seconds', label: 'cooldown', max: 3600 }
 ] as const
-const snapshot = computed(() => JSON.stringify([form.value, groupsText.value, priceNotifications.value, notificationGroupsText.value, autonomous.value]))
+const snapshot = computed(() => JSON.stringify([form.value, groupsText.value, priceNotifications.value, notificationGroupsText.value, autonomous.value, healthNotifications.value, healthGroupsText.value]))
 const dirty = computed(() => snapshot.value !== savedSnapshot.value)
 const webhookURL = computed(() => `${window.location.origin}/api/v1/qqbot/webhook`)
+async function handleTabKeydown(event: KeyboardEvent, tab: SettingsTab) {
+  const index = tabs.findIndex(item => item.key === tab)
+  let next: number
+  switch (event.key) {
+    case 'ArrowRight': next = (index + 1) % tabs.length; break
+    case 'ArrowLeft': next = (index + tabs.length - 1) % tabs.length; break
+    case 'Home': next = 0; break
+    case 'End': next = tabs.length - 1; break
+    default: return
+  }
+  event.preventDefault()
+  activeTab.value = tabs[next]!.key
+  await nextTick()
+  document.getElementById(`qqbot-settings-tab-${activeTab.value}`)?.focus()
+}
 function secretHint(set: boolean) { return t(set ? 'qqbot.secretStored' : 'qqbot.secretEmpty') }
 function message(e: unknown) { return (e as {message?: string})?.message || t('common.error') }
 function apply(c: QQBotConfig) {
   form.value = { ...c, custom_commands: c.custom_commands ?? [] }
   autonomous.value = { ...defaultAutonomousConfig(), ...c.autonomous }
+  healthNotifications.value = { ...defaultHealthNotificationConfig(), ...c.health_notifications }
+  healthGroupsText.value = healthNotifications.value.groups.join('\n')
   groupsText.value = (c.allowed_groups || []).join('\n')
   priceNotifications.value = { enabled: false, scheduled: true, ...c.price_notifications, groups: c.price_notifications?.groups ?? [] }
   notificationGroupsText.value = priceNotifications.value.groups.join('\n')
@@ -169,9 +245,19 @@ async function deleteDiscoveredGroup(id: string) {
   } catch (e) { error.value = message(e) } finally { busy.value = false }
 }
 async function save() {
-  if (!form.value) return
+  if (!form.value || busy.value) return
+  // Reveal invalid fields before native validation tries to focus a hidden tab.
+  const invalidField = settingsForm.value?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input:invalid, select:invalid, textarea:invalid')
+  if (invalidField) {
+    const panel = invalidField.closest('[role="tabpanel"]')
+    const tab = tabs.find(item => panel?.id === `qqbot-settings-panel-${item.key}`)
+    if (tab) activeTab.value = tab.key
+    await nextTick()
+    invalidField.reportValidity()
+    return
+  }
   busy.value = true; error.value = ''; notice.value = ''
-  try { apply(await qqbotAPI.save({ ...form.value, autonomous: { ...autonomous.value }, price_notifications: { ...priceNotifications.value, groups: [...new Set(notificationGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, allowed_groups: [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))] })); notice.value = t('common.saved'); await refreshRuntime() }
+  try { apply(await qqbotAPI.save({ ...form.value, health_notifications: { ...healthNotifications.value, groups: [...new Set(healthGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, autonomous: { ...autonomous.value }, price_notifications: { ...priceNotifications.value, groups: [...new Set(notificationGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, allowed_groups: [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))] })); notice.value = t('common.saved'); await refreshRuntime() }
   catch (e) { error.value = message(e) } finally { busy.value = false }
 }
 function addGroup(id: string) { groupsText.value = [...new Set([...groupsText.value.split(/[\s,，]+/).filter(Boolean), id])].join('\n') }

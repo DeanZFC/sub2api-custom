@@ -403,6 +403,10 @@ func (s *AntigravityGatewayService) TestConnectionWithPrompt(ctx context.Context
 	if err != nil {
 		return nil, fmt.Errorf("构建请求失败: %w", err)
 	}
+	requestBody, err = applyScheduledTestGeminiContentInstructions(ctx, requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("构建内容检测请求失败: %w", err)
+	}
 
 	// 代理 URL
 	proxyURL := ""

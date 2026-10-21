@@ -115,6 +115,9 @@ FOR UPDATE OF r FOR NO KEY UPDATE OF u`, user, c.AppID).Scan(&r.MemberID, &r.Gro
 }
 
 func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) {
+	if p.Type == interactionCreate {
+		return s.enqueueInteraction(ctx, c, p)
+	}
 	var e Event
 	j := Job{AppID: c.AppID, EventType: p.Type}
 	outcome, reason := "failed", "database_error"
@@ -272,9 +275,9 @@ func (s *Service) claimJob(ctx context.Context) (Job, error) {
 		return Job{}, sql.ErrNoRows
 	}
 	j, err := scanJob(tx.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM qq_bot_jobs q WHERE status='queued'
- AND (event_type <> 'PRICE_CHANGE_NOTIFICATION' OR (
-   NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type='PRICE_CHANGE_NOTIFICATION' AND p.status='running')
-   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type='PRICE_CHANGE_NOTIFICATION' AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
+ AND (event_type NOT IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION') OR (
+   NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION') AND p.status='running')
+   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION') AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
  ))
  AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id) ORDER BY (kind='ambient_chat'),created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
 	if err != nil {
@@ -374,6 +377,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	c = current
 	amount := c.CheckinReward
 	var requirement RechargeRequirement
+	var streakChances int
 	if kind == "invite" {
 		if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 			return "邀请奖励未开启。", nil
@@ -401,6 +405,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 			return "签到活动未开启。", nil
 		}
 		requirement = cfg.RechargeRequirement
+		streakChances = cfg.StreakChances
 		amount, err = randomCheckinAmount(cfg)
 		if err != nil {
 			return "", err
@@ -499,6 +504,13 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if err != nil {
 		return "", err
 	}
+	var streak, bonus int
+	if kind == "checkin" {
+		streak, bonus, err = grantStreak(ctx, tx, userID, rewardAt, streakChances)
+		if err != nil {
+			return "", err
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return "", err
 	}
@@ -506,7 +518,14 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if kind == "invite" {
 		return fmt.Sprintf("🎁 **邀请奖励已发放**\n\n邀请人到账额度：USD %.2f", amount), nil
 	}
-	return fmt.Sprintf("✅ **签到成功**\n\n到账额度：USD %.2f", amount), nil
+	text := fmt.Sprintf("✅ **签到成功**\n\n到账额度：USD %.2f\n连续签到：%d 天", amount, streak)
+	if bonus > 0 {
+		text += fmt.Sprintf("\n连签奖励：%d 次抽奖机会", bonus)
+	}
+	if streakChances > 0 {
+		text += fmt.Sprintf("\n距离下次连签奖励：%d 天", 7-streak%7)
+	}
+	return text, nil
 }
 
 func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {

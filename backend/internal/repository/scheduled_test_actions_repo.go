@@ -53,7 +53,10 @@ func (r *scheduledTestResultRepository) ListPlanDetectionAccountIDs(ctx context.
 }
 
 func (r *scheduledTestResultRepository) ListPlanTargetAccountIDs(ctx context.Context, plan *service.ScheduledTestPlan, accountID *int64) ([]int64, error) {
-	return r.listPlanAccountIDs(ctx, plan, accountID, false)
+	// Freeze only enabled detection targets. Manually disabled accounts must
+	// not create queued/skipped results; quality-paused accounts still need
+	// detection so their automatic protection can recover.
+	return r.listPlanAccountIDs(ctx, plan, accountID, true)
 }
 
 func (r *scheduledTestResultRepository) IsPlanRunAccountEligible(ctx context.Context, planID int64, runID string, accountID int64) (bool, error) {

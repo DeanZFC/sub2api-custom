@@ -23,12 +23,14 @@ type Service struct {
 	invalidate      func(context.Context, int64)
 	bindingEmail    BindingEmailDelivery
 	channelStatus   ChannelStatusProvider
+	modelPrices     ModelPriceProvider
+	healthSource    HealthSnapshotProvider
 	priceSource     PriceSnapshotProvider
 	priceWake       chan struct{}
 	http            *http.Client
 	tokenURL        string
 	qqURL           string
-	tokenMu         sync.Mutex
+	tokenGate       chan struct{}
 	accessToken     string
 	tokenKey        string
 	tokenExpires    time.Time
@@ -43,12 +45,13 @@ func New(db *sql.DB, encryptor Encryptor, ready bool, invalidate func(context.Co
 	if invalidate == nil {
 		invalidate = func(context.Context, int64) {}
 	}
-	return &Service{db: db, encryptor: encryptor, encryptionReady: ready, invalidate: invalidate, priceWake: make(chan struct{}, 1), http: &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect}, imageDownload: downloadImage, tokenURL: "https://bots.qq.com/app/getAppAccessToken", qqURL: "https://api.sgroup.qq.com"}
+	return &Service{db: db, encryptor: encryptor, encryptionReady: ready, invalidate: invalidate, priceWake: make(chan struct{}, 1), tokenGate: make(chan struct{}, 1), http: &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect}, imageDownload: downloadImage, tokenURL: "https://bots.qq.com/app/getAppAccessToken", qqURL: "https://api.sgroup.qq.com"}
 }
 func (s *Service) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.startPriceMonitor(ctx)
+	s.startHealthMonitor(ctx)
 	for i := 0; i < 2; i++ {
 		s.wg.Add(1)
 		go func() {
@@ -90,7 +93,7 @@ func (s *Service) maintenance(ctx context.Context) {
 	// An interrupted model request may already have cost money. Preserve its
 	// status for inspection and never replay it after a process crash.
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='interrupted',error='处理进程中断，未自动重试；请检查调用用量',finished_at=NOW(),payload='{}' WHERE status='running' AND started_at<NOW()-INTERVAL '10 minutes'`)
-	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='expired',error='排队超过回复时限，请重新发送',finished_at=NOW(),payload='{}' WHERE status='queued' AND created_at<NOW()-INTERVAL '5 minutes' AND event_type IN ('GROUP_AT_MESSAGE_CREATE','GROUP_MESSAGE_CREATE')`)
+	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='expired',error='排队超过回复时限，请重新发送',finished_at=NOW(),payload='{}' WHERE status='queued' AND created_at<NOW()-INTERVAL '5 minutes' AND event_type IN ('GROUP_AT_MESSAGE_CREATE','GROUP_MESSAGE_CREATE','INTERACTION_CREATE')`)
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_image=NULL,result_text='',payload='{}' WHERE created_at<NOW()-INTERVAL '24 hours' AND (result_image IS NOT NULL OR result_text<>'' OR payload<>'{}'::jsonb)`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_bind_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_bind_requests WHERE expires_at<NOW()`)
@@ -131,7 +134,7 @@ func (s *Service) runOne(parent context.Context) {
 		s.finish(j, "failed", ErrDisabled.Error())
 		return
 	}
-	if j.EventType == priceNotificationEvent {
+	if j.EventType == priceNotificationEvent || j.EventType == healthNotificationEvent {
 		s.deliverPriceNotification(ctx, c, j)
 		return
 	}
@@ -141,7 +144,7 @@ func (s *Service) runOne(parent context.Context) {
 		s.finish(j, "failed", "事件格式不正确")
 		return
 	}
-	if !isGroupMessageEvent(j.EventType) {
+	if !isGroupMessageEvent(j.EventType) && j.EventType != interactionCreate {
 		err = s.memberEvent(ctx, c, j, e)
 		if err != nil {
 			s.finish(j, "failed", "群成员事件处理失败")
@@ -153,6 +156,15 @@ func (s *Service) runOne(parent context.Context) {
 	if time.Since(j.CreatedAt) > 240*time.Second {
 		s.finish(j, "expired", "排队超过回复时限，请重新发送")
 		return
+	}
+	if j.EventType == interactionCreate {
+		cmd, valid := helpActionCommand(c, e.HelpAction)
+		if !valid {
+			s.finish(j, "skipped", "帮助按钮已失效，请重新发送 /帮助")
+			return
+		}
+		e.Content = cmd
+		e.Author.MemberID = j.MemberID
 	}
 	if j.Kind == "ambient_chat" {
 		err = s.autonomousMessage(ctx, c, &j, e)
@@ -396,33 +408,28 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	seq := 1
 	switch cmd {
 	case "帮助", "help":
-		// Keep QQ's automatic reply mention above a compact Markdown command list.
-		text = "📖 **指令帮助**\n\n"
-		for i, item := range []struct{ command, description string }{
-			{"/帮助", "查看帮助"},
-			{"/签到", "每日签到"},
-			{"/我的余额", "查询账户余额"},
-			{"/我的奖励", "查询各项累计奖励"},
-			{"/奖励兑换 兑换码", "兑换额度、抽奖次数或奖品"},
-			{"/渠道状态", "查询整体及各分组的成功率、缓存率和首 Token"},
-			{"/绑定 邮箱或绑定码", "绑定账号"},
-			{"/邀请奖励", "查看邀请奖励规则、条件和今日进度"},
-			{"/我的邀请", "查询邀请状态和人数"},
-			{"/抽奖", "参与抽奖"},
-			{"/抽奖次数", "查询剩余次数"},
-			{"/抽奖活动", "查看活动规则和奖品"},
-			{"/生图 图片描述", "生成图片"},
-			{"/转账 金额 邮箱", "向其他账号转账余额"},
-		} {
-			if i > 0 {
-				text += "\n"
-			}
-			text += "- **" + item.command + "**：" + item.description
+		return s.sendHelp(ctx, c, *j, arg)
+	case "价格":
+		return s.sendModelPrice(ctx, c, *j, arg)
+	case "今日用量":
+		var err error
+		text, err = s.todayUsage(ctx, c, *j, time.Now())
+		if err != nil {
+			text = "用量查询失败，请稍后重试。"
 		}
-		for _, custom := range c.CustomCommands {
-			if custom.Enabled {
-				text += "\n- **" + replyPlainLabel(custom.Command) + "**：自定义回复"
-			}
+	case "成长任务", "领取任务":
+		if cmd == "领取任务" && arg == "" {
+			text = "用法：/领取任务 任务编号；/成长任务 查看进度。"
+			break
+		}
+		claim := ""
+		if cmd == "领取任务" {
+			claim = arg
+		}
+		var err error
+		text, err = s.growthTasks(ctx, c, *j, claim)
+		if err != nil {
+			text = "成长任务处理失败，请稍后重试。"
 		}
 	case "渠道状态":
 		return s.sendChannelStatus(ctx, c, *j, arg)
@@ -580,7 +587,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			if err == nil {
 				messages = append(messages, groupUserMessage(c, e, input))
 				j.ShareHistory = shareableGroupEvent(e, ref)
-				text, j.InputTokens, j.OutputTokens, err = s.chat(ctx, c, messages)
+				text, j.InputTokens, j.OutputTokens, err = s.chatReply(ctx, c, messages)
 			} else {
 				text = err.Error()
 			}

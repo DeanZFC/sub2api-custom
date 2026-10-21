@@ -295,13 +295,14 @@ CREATE TABLE ops_error_logs (
 		require.False(t, result.RecentRequests[1].Success)
 		require.True(t, result.RecentRequests[2].Success)
 	})
-	t.Run("all account snapshots include disabled and unschedulable accounts", func(t *testing.T) {
+	t.Run("account snapshots exclude disabled accounts but retain automatic pauses", func(t *testing.T) {
 		execSQL(`INSERT INTO accounts (id,status,schedulable,deleted_at) VALUES
- (62,'active',true,NULL), (63,'disabled',false,NULL), (64,'active',false,NULL), (65,'active',true,NOW()), (66,'active',true,NULL);
-INSERT INTO account_groups VALUES (62,8),(63,8),(64,8),(65,8),(66,9)`)
+ (62,'active',true,NULL), (63,'disabled',false,NULL), (64,'active',false,NULL), (65,'active',true,NOW()), (66,'active',true,NULL),
+ (67,'quality_paused',true,NULL), (68,'inactive',true,NULL), (69,'error',true,NULL), (70,'quality_paused',false,NULL);
+INSERT INTO account_groups VALUES (62,8),(63,8),(64,8),(65,8),(66,9),(67,8),(68,8),(69,8),(70,8)`)
 		ids, err := repo.ListStatisticsAccountIDs(ctx, groupID)
 		require.NoError(t, err)
-		require.Equal(t, []int64{62, 63, 64}, ids)
+		require.Equal(t, []int64{62, 67}, ids)
 	})
 	t.Run("unbounded or unscoped query is rejected", func(t *testing.T) {
 		for _, invalid := range []service.ScheduledTestStatisticsFilter{

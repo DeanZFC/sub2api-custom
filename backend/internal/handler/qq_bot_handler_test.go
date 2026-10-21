@@ -135,8 +135,10 @@ func TestQQBotWebhookRejectsUnsignedAndAlteredEvents(t *testing.T) {
 		valid     bool
 		alter     bool
 		want      int
+		eventType string
 	}{
-		{"unsigned", "app", false, false, 401}, {"wrong app", "wrong", true, false, 401}, {"altered", "app", true, true, 401}, {"valid ignored event", "app", true, false, 200},
+		{"unsigned", "app", false, false, 401, "UNUSED"}, {"wrong app", "wrong", true, false, 401, "UNUSED"}, {"altered", "app", true, true, 401, "UNUSED"}, {"valid ignored event", "app", true, false, 200, "UNUSED"},
+		{"unsigned button", "app", false, false, 401, "INTERACTION_CREATE"}, {"wrong button app", "wrong", true, false, 401, "INTERACTION_CREATE"}, {"altered button", "app", true, true, 401, "INTERACTION_CREATE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
@@ -151,7 +153,7 @@ func TestQQBotWebhookRejectsUnsignedAndAlteredEvents(t *testing.T) {
 			h := NewQQBotHandler(qqbot.New(db, qqTestEncryptor{}, true, nil))
 			r := gin.New()
 			r.POST("/hook", h.Webhook)
-			raw := []byte(`{"op":0,"t":"UNUSED","d":{}}`)
+			raw := []byte(strings.Replace(`{"op":0,"t":"UNUSED","d":{}}`, "UNUSED", tc.eventType, 1))
 			ts := strconv.FormatInt(time.Now().Unix(), 10)
 			seed := "test-secret"
 			for len(seed) < 32 {

@@ -16,7 +16,7 @@ import (
 func testScheduledTestMonitorGroups(t *testing.T, ctx context.Context, db *sql.DB, plans service.ScheduledTestPlanRepository, results *scheduledTestResultRepository, candyID int64) {
 	_, err := db.ExecContext(ctx, `INSERT INTO groups(id,name,is_exclusive) VALUES
 (99011,'Monitor public',false),(99012,'Monitor private',true),(99013,'Monitor allowed',true);
-INSERT INTO accounts(id,name,schedulable) VALUES (99001,'Private account name',false);
+INSERT INTO accounts(id,name,status,schedulable) VALUES (99001,'Private account name','quality_paused',true);
 INSERT INTO account_groups(account_id,group_id) VALUES (99001,99011),(99001,99012),(99001,99013);
 INSERT INTO user_allowed_groups(user_id,group_id) VALUES (100,99013)`)
 	require.NoError(t, err)
@@ -59,6 +59,19 @@ INSERT INTO user_allowed_groups(user_id,group_id) VALUES (100,99013)`)
 		}
 		require.ElementsMatch(t, want, groups)
 	}
+	assertGroups([]int64{99011, 99013})
+	for _, state := range []struct {
+		status      string
+		schedulable bool
+	}{
+		{"inactive", true}, {"disabled", true}, {"active", false}, {"quality_paused", false},
+	} {
+		_, err = db.ExecContext(ctx, `UPDATE accounts SET status=$1,schedulable=$2 WHERE id=$3`, state.status, state.schedulable, accountID)
+		require.NoError(t, err)
+		assertGroups(nil)
+	}
+	_, err = db.ExecContext(ctx, `UPDATE accounts SET status='quality_paused',schedulable=true WHERE id=$1`, accountID)
+	require.NoError(t, err)
 	assertGroups([]int64{99011, 99013})
 	ordinary, err := results.ListVisible(ctx, 100, 3)
 	require.NoError(t, err)

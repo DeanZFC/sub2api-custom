@@ -528,7 +528,8 @@ const scheduledTestGroupDisplayOrdersSQL = `SELECT group_id,
 // projected only as an ID and hidden for group tests.
 // Read its current status and scheduling switch, even for group-mode model
 // tests whose executing account ID is hidden. Account-free group statistics
-// remain visible; orphaned account results do not.
+// remain visible; orphaned or manually disabled account results do not.
+// Quality-paused accounts remain visible while automatic recovery is pending.
 const scheduledTestVisibleProjectionCTE = `WITH projected_results AS NOT MATERIALIZED (
     SELECT r.id,r.plan_id,p.name AS plan_name,COALESCE(d.name, '') AS test_name,COALESCE(d.sort_order, 2147483647) AS test_order,
            COALESCE(projected_group.name, source_group.name, '') AS group_name,COALESCE(p.sort_order, 2147483647) AS plan_order,r.target_mode,r.status,
@@ -547,7 +548,8 @@ const scheduledTestVisibleProjectionCTE = `WITH projected_results AS NOT MATERIA
            END AS result_target_key,
            r.account_id,
            CASE WHEN r.account_id IS NOT NULL THEN COALESCE(visible_account.status = 'active' AND visible_account.schedulable, FALSE) END AS account_schedulable,
-           visible_account.id IS NOT NULL AND visible_account.deleted_at IS NULL AS account_exists
+           visible_account.id IS NOT NULL AND visible_account.deleted_at IS NULL
+               AND visible_account.schedulable AND visible_account.status IN ('active','quality_paused') AS account_enabled
     FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
     LEFT JOIN accounts visible_account ON visible_account.id=r.account_id
     LEFT JOIN scheduled_test_definitions d ON d.id=r.test_definition_id
@@ -581,7 +583,7 @@ const scheduledTestVisibleAccessCTE = `    ) projected_group ON TRUE
         OR (
             r.account_id IS NOT NULL
             AND r.group_id IS NOT NULL
-            AND r.account_exists
+            AND r.account_enabled
         )
     ) AND EXISTS (
         SELECT 1

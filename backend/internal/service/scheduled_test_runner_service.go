@@ -603,6 +603,7 @@ func (s *ScheduledTestRunnerService) startAccountResult(ctx context.Context, pla
 }
 
 func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, plan *ScheduledTestPlan, accountID int64, prompt, outputKind string, pending *ScheduledTestResult) *ScheduledTestResult {
+	ctx = withScheduledTestOutputKind(ctx, outputKind)
 	if outputKind == "statistics" {
 		return s.runStatisticsResult(ctx, plan, &accountID, pending, time.Now().UTC())
 	}

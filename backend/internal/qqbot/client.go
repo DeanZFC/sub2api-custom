@@ -384,8 +384,14 @@ func normalizeImage(data []byte) ([]byte, error) {
 }
 
 func (s *Service) token(ctx context.Context, c Config) (string, error) {
-	s.tokenMu.Lock()
-	defer s.tokenMu.Unlock()
+	// Interaction acknowledgements have a short deadline. Waiting behind an
+	// in-flight token refresh must honor that deadline as well as the HTTP call.
+	select {
+	case s.tokenGate <- struct{}{}:
+		defer func() { <-s.tokenGate }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 	identity := codeHash(c.AppID + ":" + c.AppSecret)
 	if s.tokenKey == identity && time.Now().Before(s.tokenExpires) {
 		return s.accessToken, nil
@@ -466,12 +472,20 @@ func (s *Service) send(ctx context.Context, c Config, j Job, text string, img []
 // those again would change HTML code in a chunk whose opening fence was in the
 // previous message.
 func (s *Service) sendFormatted(ctx context.Context, c Config, j Job, text string, img []byte, seq int) error {
+	return s.sendFormattedWithKeyboard(ctx, c, j, text, img, seq, nil)
+}
+
+func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job, text string, img []byte, seq int, keyboard *messageKeyboard) error {
 	// Only passive replies: no accidental proactive notification or expired retry.
 	if j.MessageID == "" || time.Since(j.CreatedAt) > 280*time.Second {
 		return errors.New("回复窗口已过期")
 	}
 	base := "/v2/groups/" + url.PathEscape(j.GroupID)
 	body := map[string]any{"msg_id": j.MessageID, "msg_seq": seq}
+	if j.EventType == interactionCreate {
+		delete(body, "msg_id")
+		body["event_id"] = j.MessageID
+	}
 	if j.ReplyReference != "" {
 		body["message_reference"] = map[string]string{"message_id": j.ReplyReference}
 	}
@@ -493,7 +507,7 @@ func (s *Service) sendFormatted(ctx context.Context, c Config, j Job, text strin
 		// All text replies use QQ's custom Markdown. A mention tag in plain
 		// content is displayed literally; content/ark must be absent with markdown.
 		prefix := ""
-		if j.EventType == groupMessageCreate && j.MemberID != "" && !j.SuppressMention {
+		if (j.EventType == groupMessageCreate || j.EventType == interactionCreate) && j.MemberID != "" && !j.SuppressMention {
 			prefix = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n"
 			text = strings.TrimLeft(text, "\n")
 		}
@@ -507,6 +521,9 @@ func (s *Service) sendFormatted(ctx context.Context, c Config, j Job, text strin
 		}
 		body["msg_type"] = 2
 		body["markdown"] = map[string]string{"content": prefix + deliveredText}
+		if keyboard != nil {
+			body["keyboard"] = keyboard
+		}
 	}
 	raw, err := s.qqRequest(ctx, c, base+"/messages", body)
 	if err != nil {

@@ -1,4 +1,28 @@
 export default { qqbot: {
+  growth: {
+  "title": "Check-in streaks and growth tasks",
+  "help": "Rewards grant lottery chances. Zero disables each reward; maximum 1000. Every 7 consecutive Beijing-day check-ins grants a bonus automatically. Growth tasks are claimable once per website account and include historical progress.",
+  "streak": "Chances per 7 consecutive check-ins",
+  "binding_chances": "Task 1: Bind an account",
+  "first_usage_chances": "Task 2: First successful API request",
+  "checkin_30_chances": "Task 3: Check in on 30 days",
+  "commands": "Use /成长任务 for progress and /领取任务 task-number to claim. The lottery must be enabled separately.",
+  "invalid": "Reward chances must be integers from 0 to 1000."
+},
+  health: {
+  "title": "Failure and recovery notifications",
+  "help": "Checks the last 5 minutes of passive monitoring every 30 seconds without test requests. Sustained errors or first-token latency trigger an alert. Insufficient samples, stale data and backfills do not establish health. Requires V2 passive monitoring and QQ proactive group-message permission.",
+  "enabled": "Enable failure and recovery notifications",
+  "groups": "Recipient group OpenIDs (one per line; empty means all allowed groups)",
+  "minimum_samples": "Minimum request samples",
+  "error_percent": "Failure error rate (%)",
+  "recovery_percent": "Maximum recovery error rate (%)",
+  "ttft_seconds": "First-token P50 failure threshold (seconds; 0 disables latency checks)",
+  "failure_minutes": "Failure confirmation (minutes)",
+  "recovery_minutes": "Recovery confirmation (minutes)",
+  "cooldown_minutes": "Cooldown before another failure alert (minutes)",
+  "recoveryHelp": "Recovery requires errors at or below the recovery threshold and first-token latency below 80% of the failure threshold. Recovery bypasses cooldown. Each incident alerts once. Settings changes restart observation and cancel queued notices."
+},
   autonomous: {
   "title": "Autonomous group replies",
   "help": "Occasionally join conversations without a mention. Disabled by default; select allowed groups explicitly. Direct name calls use normal chat quotas. Local filters select a few candidates for the model. QQ Receive all messages permission is required.",
@@ -297,7 +321,7 @@ export default { qqbot: {
   "clearSecret": "Clear stored secret",
   "sandbox": "Use QQ sandbox",
   "webhook": "HTTPS callback for QQ Open Platform",
-  "eventsHelp": "Handle GROUP_AT_MESSAGE_CREATE and GROUP_MESSAGE_CREATE. The group owner must enable QQ Receive all messages. Activity commands and image generation work without a mention; chat requires mentioning the bot unless autonomous replies are enabled for that group. Identifying mentions in full-message mode requires bot_state API access. Invitation rewards also require join, leave and join request events; join requests require group administrator permissions.",
+  "eventsHelp": "Handle GROUP_AT_MESSAGE_CREATE and GROUP_MESSAGE_CREATE. The group owner must enable QQ Receive all messages. Help buttons and pagination also require INTERACTION_CREATE and interaction response API access. Activity commands and image generation work without a mention; chat requires mentioning the bot unless autonomous replies are enabled for that group. Identifying mentions in full-message mode requires bot_state API access. Invitation rewards also require join, leave and join request events; join requests require group administrator permissions.",
   "allowedGroups": "Allowed group OpenIDs",
   "groupsPlaceholder": "One group OpenID per line (not the QQ group number)",
   "groupsHelp": "Save QQ credentials, configure the callback and add the bot to a group. Refresh to discover groups, then allow them before enabling the bot.",

@@ -629,6 +629,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
 	applyAccountTestOutputTokenLimit(ctx, payload, "max_tokens")
+	applyScheduledTestContentInstructions(ctx, payload, APIProtocolAnthropic)
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event
@@ -713,6 +714,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
 	applyAccountTestOutputTokenLimit(ctx, payload, "max_tokens")
+	applyScheduledTestContentInstructions(ctx, payload, APIProtocolAnthropic)
 	payloadBytes, _ := json.Marshal(payload)
 	vertexBody, err := buildVertexAnthropicRequestBody(payloadBytes)
 	if err != nil {
@@ -803,6 +805,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 		"max_tokens":  accountTestMaxOutputTokens(prompt, 256, accountTestOutputTokenLimit(ctx)),
 		"temperature": 1,
 	}
+	applyScheduledTestContentInstructions(ctx, bedrockPayload, APIProtocolAnthropic)
 	bedrockBody, _ := json.Marshal(bedrockPayload)
 
 	// Use non-streaming endpoint (response is standard Claude JSON)
@@ -971,6 +974,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	applyAccountTestOutputTokenLimit(ctx, payload, "max_output_tokens")
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
 	applyCodexFingerprintTestPayload(c, account, payload)
+	applyScheduledTestContentInstructions(ctx, payload, APIProtocolResponses)
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -1163,7 +1167,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		if mapped := strings.TrimSpace(account.GetMappedModel(testModelID)); mapped != "" {
 			testModelID = mapped
 		}
-		return s.testGrokResponsesConnection(c, ctx, account, authToken, testModelID)
+		return s.testGrokResponsesConnection(c, ctx, account, authToken, testModelID, prompt)
 	}
 
 	// mode == default: infer from model family (legacy UI / API clients).
@@ -1181,7 +1185,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 	case isGrokVideoGenerationModel(testModelID):
 		return s.testGrokVideoGeneration(c, ctx, account, authToken, testModelID, resolveGrokVideoPrompt(prompt), opts)
 	default:
-		return s.testGrokResponsesConnection(c, ctx, account, authToken, testModelID)
+		return s.testGrokResponsesConnection(c, ctx, account, authToken, testModelID, prompt)
 	}
 }
 
@@ -1367,7 +1371,7 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 	}
 }
 
-func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx context.Context, account *Account, authToken, testModelID string) error {
+func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx context.Context, account *Account, authToken, testModelID, prompt string) error {
 	apiURL, err := buildGrokResponsesURL(account, s.cfg, s.settingService)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Grok base URL: %s", err.Error()))
@@ -1375,7 +1379,16 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 
 	s.prepareGrokTestSSE(c)
 
-	payloadBytes, err := buildGrokQuotaProbeBody(testModelID)
+	var payloadBytes []byte
+	if scheduledTestContentInstructions(ctx) != "" {
+		payload := createOpenAITestPayload(testModelID, false, prompt)
+		applyScheduledTestContentInstructions(ctx, payload, APIProtocolResponses)
+		applyAccountTestOutputTokenLimit(ctx, payload, "max_output_tokens")
+		applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
+		payloadBytes, err = json.Marshal(payload)
+	} else {
+		payloadBytes, err = buildGrokQuotaProbeBody(testModelID)
+	}
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok test payload")
 	}
@@ -2268,6 +2281,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		payload["stream_options"] = map[string]any{"include_usage": true}
 	}
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
+	applyScheduledTestContentInstructions(ctx, payload, APIProtocolChatCompletions)
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
@@ -2582,10 +2596,13 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 
 	// Create test payload (Gemini format)
 	payload := createGeminiTestPayload(testModelID, prompt, accountTestOutputTokenLimit(ctx))
+	payload, err := applyScheduledTestGeminiContentInstructions(ctx, payload)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create Gemini content test payload")
+	}
 
 	// Build request based on account type
 	var req *http.Request
-	var err error
 
 	switch account.Type {
 	case AccountTypeAPIKey:
