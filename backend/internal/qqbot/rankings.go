@@ -112,7 +112,7 @@ func (s *Service) todayRankings(ctx context.Context, c Config, now time.Time) (s
 }
 
 func formatTodayRankings(date string, entries []rankingEntry) string {
-	text := fmt.Sprintf("🏆 **今日排行榜**\n%s（北京时间）· 各前 10 名", date)
+	text := fmt.Sprintf("🏆 **今日排行榜**\n%s（北京时间）\n各榜前 10 名", date)
 	for _, kind := range []string{"tokens", "amount"} {
 		text += "\n\n**" + rankingTitle(kind) + "**"
 		found := false
@@ -123,7 +123,7 @@ func formatTodayRankings(date string, entries []rankingEntry) string {
 			found = true
 			// Masking stars and email punctuation are literal text, never Markdown
 			// emphasis delimiters that can span neighboring leaderboard rows.
-			text += fmt.Sprintf("\n第 %d 名 · %s", entry.Rank, replyPlainLabel(maskRankingEmail(entry.Email)))
+			text += fmt.Sprintf("\n%d. %s", entry.Rank, replyPlainLabel(maskRankingEmail(entry.Email)))
 		}
 		if !found {
 			text += "\n暂无上榜账号。"

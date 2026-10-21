@@ -78,15 +78,15 @@ func (s *Service) sendChannelStatus(ctx context.Context, c Config, j Job, arg st
 	const perPage = 5
 	pages := (len(chunks) + perPage - 1) / perPage
 	if page > pages {
-		return s.send(ctx, c, j, fmt.Sprintf("共 %d 页 · /渠道状态 [页码]", pages), nil, 1)
+		return s.send(ctx, c, j, fmt.Sprintf("共 %d 页\n翻页：/渠道状态 [页码]", pages), nil, 1)
 	}
 	start, end := (page-1)*perPage, min(page*perPage, len(chunks))
 	for i := start; i < end; i++ {
 		text := chunks[i]
 		if pages > 1 && i == end-1 {
-			text += fmt.Sprintf("\n第 %d/%d 页", page, pages)
+			text += fmt.Sprintf("\n\n第 %d/%d 页", page, pages)
 			if page < pages {
-				text += fmt.Sprintf(" · /渠道状态 %d", page+1)
+				text += fmt.Sprintf("\n下一页：/渠道状态 %d", page+1)
 			}
 		}
 		if err := s.send(ctx, c, j, text, nil, i-start+1); err != nil {
@@ -101,25 +101,25 @@ func formatChannelStatus(report *ChannelStatusReport) []string {
 	if !report.UpdatedAt.IsZero() {
 		updated = report.UpdatedAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02 15:04") + "（北京时间）"
 	}
-	header := "📊 **渠道状态 · 近 90 分钟**\n更新：" + updated
+	header := "📊 **渠道状态**\n近 90 分钟\n更新：" + updated
 	if report.Backfilling {
-		header += " · 正在补齐数据"
+		header += "\n正在补齐数据"
 	} else if report.PartialCoverage {
-		header += " · 部分时段"
+		header += "\n仅覆盖部分时段"
 	}
-	text := header + "\n整体：" + formatChannelStatusMetric(report.Overall, report.ShowThroughput)
+	text := header + "\n\n**整体**\n" + formatChannelStatusMetric(report.Overall, report.ShowThroughput)
 	if len(report.Groups) == 0 {
-		return []string{text + "\n分组：暂无可展示项"}
+		return []string{text + "\n\n分组：暂无可展示项"}
 	}
 	var chunks []string
 	for i, group := range report.Groups {
 		// Names stay on one line and cannot introduce Markdown markup.
-		block := fmt.Sprintf("%d. %s · %s", i+1, replyPlainLabel(group.Name), formatChannelStatusMetric(group.Metrics, report.ShowThroughput))
+		block := fmt.Sprintf("**%d. %s**\n%s", i+1, replyPlainLabel(group.Name), formatChannelStatusMetric(group.Metrics, report.ShowThroughput))
 		if utf8.RuneCountInString(text)+utf8.RuneCountInString(block)+2 > 1400 {
 			chunks = append(chunks, text)
 			text = header + "\n分组（续）"
 		}
-		text += "\n" + block
+		text += "\n\n" + block
 	}
 	return append(chunks, text)
 }
@@ -128,27 +128,26 @@ func formatChannelStatusMetric(metric ChannelStatusMetric, throughput bool) stri
 	if !metric.HasRequests {
 		return "暂无请求数据"
 	}
-	separator := " ｜ "
 	// Do not present sparse traffic as a definitive outage (or perfect health).
 	var text string
 	if !metric.InsufficientSamples {
 		// Match the web dashboard's success KPI, including ignored error categories.
-		text = fmt.Sprintf("成功 %.2f%%%s错误 %.2f%%", (1-metric.ErrorRate)*100, separator, metric.ErrorRate*100)
+		text = fmt.Sprintf("成功率：%.2f%%\n错误率：%.2f%%", (1-metric.ErrorRate)*100, metric.ErrorRate*100)
 	} else {
-		text = "成功率样本不足" + separator + "错误率样本不足"
+		text = "成功率样本不足\n错误率样本不足"
 	}
 	if metric.CacheRate == nil {
-		text += " ｜ 缓存暂无数据"
+		text += "\n缓存暂无数据"
 	} else {
-		text += fmt.Sprintf(" ｜ 缓存 %.2f%%", *metric.CacheRate*100)
+		text += fmt.Sprintf("\n缓存率：%.2f%%", *metric.CacheRate*100)
 	}
 	if metric.TTFTP50Ms == nil {
-		text += " ｜ 首 Token 暂无数据"
+		text += "\n首 Token 暂无数据"
 	} else {
-		text += fmt.Sprintf(" ｜ 首 Token P50 %.2f 秒", float64(*metric.TTFTP50Ms)/1000)
+		text += fmt.Sprintf("\n首 Token P50：%.2f 秒", float64(*metric.TTFTP50Ms)/1000)
 	}
 	if throughput {
-		text += fmt.Sprintf(" ｜ RPM %.2f · TPS %.2f", metric.RPM, metric.TokensPerSecond)
+		text += fmt.Sprintf("\nRPM：%.2f\nTPS：%.2f", metric.RPM, metric.TokensPerSecond)
 	}
 	return text
 }

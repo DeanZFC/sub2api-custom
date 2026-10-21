@@ -154,11 +154,11 @@ func TestTodayUsageBeijingBoundaryAndAccountIsolation(t *testing.T) {
 	require.NoError(t, err)
 	text, err := s.todayUsage(ctx, c, Job{MemberID: "member"}, at)
 	require.NoError(t, err)
-	require.Contains(t, text, "已记录 2 次")
-	require.Contains(t, text, "Token 入/出 30/0 · 缓存读/写 0/0")
-	require.Contains(t, text, "费用 USD 3.7500")
-	require.Contains(t, text, "余额扣费 1.2500")
-	require.Contains(t, text, "套餐消耗 2.5000")
+	require.Contains(t, text, "请求：2 次")
+	require.Contains(t, text, "输入：30\n输出：0\n缓存读取：0\n缓存写入：0")
+	require.Contains(t, text, "费用：USD 3.7500")
+	require.Contains(t, text, "余额扣费：USD 1.2500")
+	require.Contains(t, text, "套餐消耗：USD 2.5000")
 	for _, hidden := range []string{"yesterday", "future", "someone-else", "999"} {
 		require.NotContains(t, text, hidden)
 	}
@@ -166,16 +166,16 @@ func TestTodayUsageBeijingBoundaryAndAccountIsolation(t *testing.T) {
 		input, output, read, write int64
 		want                       string
 	}{
-		{19_384_764, 1_047_414, 105_056_040, 578_253, "Token 入/出 19.38M/1.05M · 缓存读/写 105.06M/578.25K"},
-		{1_000_000_000, 2_345_678_901, 1_000_000, 1_000, "Token 入/出 1.00B/2.35B · 缓存读/写 1.00M/1.00K"},
+		{19_384_764, 1_047_414, 105_056_040, 578_253, "输入：19.38M\n输出：1.05M\n缓存读取：105.06M\n缓存写入：578.25K"},
+		{1_000_000_000, 2_345_678_901, 1_000_000, 1_000, "输入：1.00B\n输出：2.35B\n缓存读取：1.00M\n缓存写入：1.00K"},
 	} {
 		_, err = db.Exec(`UPDATE usage_logs SET input_tokens=$2,output_tokens=$3,cache_read_tokens=$4,cache_creation_tokens=$5 WHERE user_id=$1 AND model='wallet-model'`, uid, tc.input-20, tc.output, tc.read, tc.write)
 		require.NoError(t, err)
 		text, err = s.todayUsage(ctx, c, Job{MemberID: "member"}, at)
 		require.NoError(t, err)
 		require.Contains(t, text, tc.want)
-		require.Contains(t, text, "已记录 2 次")
-		require.Contains(t, text, "费用 USD 3.7500")
+		require.Contains(t, text, "请求：2 次")
+		require.Contains(t, text, "费用：USD 3.7500")
 	}
 	text, err = s.todayUsage(ctx, c, Job{MemberID: "unbound"}, at)
 	require.NoError(t, err)

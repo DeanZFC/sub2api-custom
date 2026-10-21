@@ -42,14 +42,14 @@ func rankingGrowthTasks(ctx context.Context, tx *sql.Tx, appID string, uid int64
 				status = "待管理员发放"
 			}
 		}
-		text += fmt.Sprintf("\n%s · %s · %s", rankingClaimName(date, kind, rank), reward.description(), status)
+		text += fmt.Sprintf("\n\n**%s**\n奖励：%s\n状态：%s", rankingClaimName(date, kind, rank), reward.description(), status)
 		count++
 	}
 	if err = rows.Err(); err != nil {
 		return "", err
 	}
 	if count == 0 {
-		return "排行奖励：暂无记录 · /今日排行榜", nil
+		return "排行奖励：暂无记录\n查看榜单：/今日排行榜", nil
 	}
 	return text, nil
 }

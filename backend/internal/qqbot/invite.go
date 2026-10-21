@@ -34,7 +34,7 @@ func (s *Service) myInvites(ctx context.Context, c Config, j Job) (string, error
 	for _, status := range byMember {
 		counts[status]++
 	}
-	return fmt.Sprintf("👥 **我的邀请**\n待进群 %d · 待绑定 %d · 已奖励 %d · 已退群 %d",
+	return fmt.Sprintf("👥 **我的邀请**\n待进群：%d 人\n待绑定：%d 人\n已奖励：%d 人\n已退群：%d 人",
 		counts["pending_join"],
 		counts["both_unbound"]+counts["inviter_unbound"]+counts["invitee_unbound"],
 		counts["rewarded"], counts["left_group"]), nil
@@ -77,12 +77,12 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 		return "邀请活动未开启。", nil
 	}
 	requirement := c.inviteRechargeRequirement()
-	conditions := "官方邀请；7 天内入群并留群，双方绑定账号；每位受邀账号限奖一次。"
+	conditions := "**参与条件**\n通过官方邀请，7 天内入群并留群。\n双方绑定账号，每位受邀账号限奖一次。"
 	var userID int64
 	err := s.db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
  WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Sprintf("🎁 邀请奖励 USD %.2f/人 · 每日上限 %d 人\n%s\n%s\n请先 /绑定。",
+		return fmt.Sprintf("🎁 **邀请奖励**\n每人奖励：USD %.2f\n每日上限：%d 人\n\n%s\n%s\n\n请先 /绑定。",
 			c.InviteReward, c.InviteDailyLimit, conditions, requirement.invite()), nil
 	}
 	if err != nil {
@@ -101,7 +101,7 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 	if err != nil {
 		return "", err
 	}
-	info := fmt.Sprintf("🎁 邀请奖励 USD %.2f/人 · 今日入群 %d · 已奖 %d/%d（北京时间）\n%s\n%s",
+	info := fmt.Sprintf("🎁 **邀请奖励**\n每人奖励：USD %.2f\n今日入群：%d 人\n今日已奖励：%d/%d 人（北京时间）\n\n%s\n%s",
 		c.InviteReward, joined, rewarded, c.InviteDailyLimit, conditions, requirement.invite())
 	if requirement.enabled() {
 		eligibility, eligibilityErr := requirement.eligibility(ctx, s.db, userID, false)
@@ -112,7 +112,7 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 		if !requirement.satisfied(eligibility) {
 			status = "未满足"
 		}
-		info += fmt.Sprintf("\n充值资格%s：累计 USD %s · 近 %d 天 USD %s", status, eligibility.Total.StringFixed(2), requirement.windowDays(), eligibility.Recent.StringFixed(2))
+		info += fmt.Sprintf("\n\n充值资格：%s\n累计充值：USD %s\n近 %d 天充值：USD %s", status, eligibility.Total.StringFixed(2), requirement.windowDays(), eligibility.Recent.StringFixed(2))
 	}
 	return info, nil
 }

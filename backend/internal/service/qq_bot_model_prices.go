@@ -105,7 +105,7 @@ func (p *qqBotModelPrices) ModelPrice(ctx context.Context, model string, uid int
 		} else if resolved.Mode == BillingModeVideo && g.VideoRateIndependent {
 			rate = g.VideoRateMultiplier
 		}
-		header := fmt.Sprintf("💰 **%s · %s**\n分组：%s · 倍率 %g×", kind, qqPriceLabel(model), qqPriceLabel(g.Name), rate)
+		header := fmt.Sprintf("💰 **%s**\n模型：%s\n分组：%s\n倍率：%g×", kind, qqPriceLabel(model), qqPriceLabel(g.Name), rate)
 		if billingModel != model {
 			header += "\n计费模型：" + qqPriceLabel(billingModel)
 		}
@@ -116,7 +116,7 @@ func (p *qqBotModelPrices) ModelPrice(ctx context.Context, model string, uid int
 		if err != nil {
 			return nil, err
 		}
-		footer := "\n标准服务层级、默认推理等级；图片/音频及工具费另计 · " + at.In(time.FixedZone("Asia/Shanghai", 8*3600)).Format("01-02 15:04 北京时间") + note
+		footer := "\n\n标准服务层级、默认推理等级\n图片/音频及工具费另计\n更新：" + at.In(time.FixedZone("Asia/Shanghai", 8*3600)).Format("01-02 15:04（北京时间）") + note
 		chunk := header
 		for _, line := range lines {
 			if len([]rune(chunk+line+footer)) > 1450 && chunk != header {
@@ -215,7 +215,7 @@ func (p *qqBotModelPrices) quotePriceLines(ctx context.Context, g *Group, model 
 		if n > 1 {
 			label = fmt.Sprintf("上下文 %d Token 起", n)
 		}
-		lines = append(lines, fmt.Sprintf("**%s · USD / 百万 Token**\n输入：%.6f · 输出：%.6f\n缓存读取：%.6f · 写入（默认时长）：%.6f", label, values[0], values[1], values[2], values[3]))
+		lines = append(lines, fmt.Sprintf("**%s**\n单位：USD / 百万 Token\n输入：%.6f\n输出：%.6f\n缓存读取：%.6f\n缓存写入（默认时长）：%.6f", label, values[0], values[1], values[2], values[3]))
 	}
 	return lines, nil
 }

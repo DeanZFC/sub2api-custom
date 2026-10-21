@@ -86,15 +86,15 @@ func settlePeriodicGrowth(ctx context.Context, tx *sql.Tx, c Config, j Job, uid 
 					return "", 0, false, err
 				}
 			}
-			status = fmt.Sprintf("已结算 %d 轮 · %s", cycles, periodicProgressText(task.Kind, remaining, target))
+			status = fmt.Sprintf("已结算 %d 轮\n本轮进度：%s", cycles, periodicProgressText(task.Kind, remaining, target))
 			if remaining.GreaterThanOrEqual(target) {
-				status += " · 待继续结算"
+				status += "\n待继续结算"
 			}
 			if reward.Type == "physical" || reward.Type == "other" {
-				status += " · 奖品由管理员发放"
+				status += "\n奖品由管理员发放"
 			}
 		}
-		text += fmt.Sprintf("\n%d. %s · %s · 每轮：%s", i+1, replyPlainLabel(task.Name), status, reward.description())
+		text += fmt.Sprintf("\n\n**%d. %s**\n状态：%s\n每轮奖励：%s", i+1, replyPlainLabel(task.Name), status, reward.description())
 	}
 	return text, grants, balanceChanged, nil
 }

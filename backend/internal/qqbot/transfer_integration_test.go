@@ -20,9 +20,9 @@ func TestTransferAcknowledgementShowsPendingAmounts(t *testing.T) {
 		fee        string
 		netAmount  string
 	}{
-		{"with_fee", "5.0000", 1, "手续费 1%（USD 0.0500）", "0.0500", "4.9500"},
-		{"without_fee", "5.0000", 0, "手续费 0%（USD 0.0000）", "0.0000", "5.0000"},
-		{"fractional_fee_truncated", "1.2345", 2.5, "手续费 2.5%（USD 0.0308）", "0.0308", "1.2037"},
+		{"with_fee", "5.0000", 1, "手续费：1%（USD 0.0500）", "0.0500", "4.9500"},
+		{"without_fee", "5.0000", 0, "手续费：0%（USD 0.0000）", "0.0000", "5.0000"},
+		{"fractional_fee_truncated", "1.2345", 2.5, "手续费：2.5%（USD 0.0308）", "0.0308", "1.2037"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -42,9 +42,9 @@ func TestTransferAcknowledgementShowsPendingAmounts(t *testing.T) {
 			reply, pending := s.prepareTransfer(ctx, c, e, tc.amount+" recipient@example.com")
 			require.NotNil(t, pending, reply)
 			require.Contains(t, reply, "转账申请已受理")
-			require.Contains(t, reply, "转账申请已受理：USD "+tc.amount)
+			require.Contains(t, reply, "转账金额：USD "+tc.amount)
 			require.Contains(t, reply, tc.feeLine)
-			require.Contains(t, reply, "对方到账 USD "+tc.netAmount)
+			require.Contains(t, reply, "对方到账：USD "+tc.netAmount)
 			require.Contains(t, reply, "手续费从转账金额中扣除")
 			require.Contains(t, reply, "15 分钟内邮件确认后扣款")
 			require.NotContains(t, reply, pending.token)

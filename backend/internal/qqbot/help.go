@@ -41,28 +41,28 @@ type keyboardPermission struct {
 }
 
 type helpItem struct {
-	action, label, command, usage string
-	input                         bool
+	action, label, description, command, usage string
+	input                                      bool
 }
 
 func helpSystemItems() []helpItem {
 	return []helpItem{
-		{action: "checkin", label: "每日签到", command: "/签到"},
-		{action: "balance", label: "我的余额", command: "/我的余额"},
-		{action: "today_usage", label: "今日用量", command: "/今日用量"},
-		{action: "rewards", label: "我的奖励", command: "/我的奖励"},
-		{action: "lottery", label: "抽奖一次", command: "/抽奖"},
-		{action: "lottery_count", label: "抽奖次数", command: "/抽奖次数"},
-		{action: "lottery_info", label: "抽奖活动", command: "/抽奖活动"},
-		{action: "growth", label: "成长任务", command: "/成长任务"},
-		{action: "invite_rewards", label: "邀请奖励", command: "/邀请奖励"},
-		{action: "invites", label: "我的邀请", command: "/我的邀请"},
-		{action: "rankings", label: "今日排行榜", command: "/今日排行榜"},
-		{action: "channels", label: "渠道状态", command: "/渠道状态"},
-		{action: "image", label: "生成图片", command: "/生图", usage: "/生图 图片描述", input: true},
-		{action: "prices", label: "模型价格", command: "/价格", usage: "/价格 模型名", input: true},
-		{action: "bind", label: "绑定账号", command: "/绑定", usage: "/绑定 邮箱或绑定码", input: true},
-		{action: "transfer", label: "余额转账", command: "/转账", usage: "/转账 金额 邮箱", input: true},
+		{action: "checkin", label: "每日签到", description: "每日签到", command: "/签到"},
+		{action: "balance", label: "我的余额", description: "查询账户余额", command: "/我的余额"},
+		{action: "today_usage", label: "今日用量", description: "查看今日用量", command: "/今日用量"},
+		{action: "rewards", label: "我的奖励", description: "查看累计奖励", command: "/我的奖励"},
+		{action: "lottery", label: "抽奖一次", description: "消耗一次抽奖次数", command: "/抽奖"},
+		{action: "lottery_count", label: "抽奖次数", description: "查询剩余抽奖次数", command: "/抽奖次数"},
+		{action: "lottery_info", label: "抽奖活动", description: "查看抽奖活动规则", command: "/抽奖活动"},
+		{action: "growth", label: "成长任务", description: "查看成长进度和奖励", command: "/成长任务"},
+		{action: "invite_rewards", label: "邀请奖励", description: "查看邀请奖励规则", command: "/邀请奖励"},
+		{action: "invites", label: "我的邀请", description: "查看邀请状态", command: "/我的邀请"},
+		{action: "rankings", label: "今日排行榜", description: "查看今日排行榜", command: "/今日排行榜"},
+		{action: "channels", label: "渠道状态", description: "查看渠道状态", command: "/渠道状态"},
+		{action: "image", label: "生成图片", description: "根据描述生成图片", command: "/生图", usage: "/生图 图片描述", input: true},
+		{action: "prices", label: "模型价格", description: "查询模型价格", command: "/价格", usage: "/价格 模型名", input: true},
+		{action: "bind", label: "绑定账号", description: "绑定网站账号", command: "/绑定", usage: "/绑定 邮箱或绑定码", input: true},
+		{action: "transfer", label: "余额转账", description: "申请余额转账", command: "/转账", usage: "/转账 金额 邮箱", input: true},
 	}
 }
 
@@ -70,7 +70,7 @@ func helpItems(c Config) []helpItem {
 	items := helpSystemItems()
 	for _, custom := range c.CustomCommands {
 		if custom.Enabled && !isBuiltinCommand(strings.TrimPrefix(custom.Command, "/")) && !isRetiredCommand(strings.TrimPrefix(custom.Command, "/")) {
-			items = append(items, helpItem{action: "custom:" + custom.Command, label: custom.Command, command: custom.Command})
+			items = append(items, helpItem{action: "custom:" + custom.Command, label: custom.Command, description: "自定义回复", command: custom.Command})
 		}
 	}
 	return items
@@ -114,18 +114,13 @@ func (s *Service) sendHelp(ctx context.Context, c Config, j Job, arg string) err
 				text += "\n\n**自定义指令**"
 				customHeading = true
 			}
-			text += "\n" + replyPlainLabel(item.command)
+			text += "\n" + replyPlainLabel(item.command) + "：" + replyPlainLabel(item.description)
 		} else {
 			usage := item.command
 			if item.usage != "" {
 				usage = item.usage
 			}
-			if i%helpColumns == 0 {
-				text += "\n"
-			} else {
-				text += " · "
-			}
-			text += replyPlainLabel(usage)
+			text += "\n" + replyPlainLabel(usage) + "：" + replyPlainLabel(item.description)
 		}
 		if i < helpQuickActions {
 			button := helpCommandButton(item.label, item.action, item.command)

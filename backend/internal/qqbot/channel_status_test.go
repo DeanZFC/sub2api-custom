@@ -34,16 +34,29 @@ func channelStatusFixture() *ChannelStatusReport {
 func TestFormatChannelStatus(t *testing.T) {
 	report := channelStatusFixture()
 	chunks := formatChannelStatus(report)
-	require.Equal(t, []string{`📊 **渠道状态 · 近 90 分钟**
+	require.Equal(t, []string{`📊 **渠道状态**
+近 90 分钟
 更新：2026-10-16 14:30（北京时间）
-整体：成功 99.68% ｜ 错误 0.32% ｜ 缓存 76.25% ｜ 首 Token P50 1.28 秒
-1. OpenAI 标准组 · 成功 99.68% ｜ 错误 0.32% ｜ 缓存 76.25% ｜ 首 Token P50 1.28 秒
-2. Gemini 分组 · 暂无请求数据`}, chunks)
+
+**整体**
+成功率：99.68%
+错误率：0.32%
+缓存率：76.25%
+首 Token P50：1.28 秒
+
+**1. OpenAI 标准组**
+成功率：99.68%
+错误率：0.32%
+缓存率：76.25%
+首 Token P50：1.28 秒
+
+**2. Gemini 分组**
+暂无请求数据`}, chunks)
 	require.NotContains(t, chunks[0], "RPM")
 	require.NotContains(t, chunks[0], "TPS")
 	report.ShowThroughput = true
 	text := strings.Join(formatChannelStatus(report), "")
-	require.Equal(t, 2, strings.Count(text, "RPM 12.34 · TPS 56.78"))
+	require.Equal(t, 2, strings.Count(text, "RPM：12.34\nTPS：56.78"))
 }
 
 func TestChannelStatusMissingSamplesAreNotZeroOrPerfectSuccess(t *testing.T) {
@@ -58,11 +71,11 @@ func TestChannelStatusMissingSamplesAreNotZeroOrPerfectSuccess(t *testing.T) {
 	require.Contains(t, formatChannelStatus(report)[0], "正在补齐数据")
 	report.Overall = ChannelStatusMetric{HasRequests: true, ErrorRate: 1}
 	text = formatChannelStatus(report)[0]
-	require.Contains(t, text, "成功 0.00% ｜ 错误 100.00%")
-	require.Contains(t, text, "缓存暂无数据 ｜ 首 Token 暂无数据")
+	require.Contains(t, text, "成功率：0.00%\n错误率：100.00%")
+	require.Contains(t, text, "缓存暂无数据\n首 Token 暂无数据")
 	zero := 0.0
 	report.Overall.CacheRate = &zero
-	require.Contains(t, formatChannelStatus(report)[0], "缓存 0.00%")
+	require.Contains(t, formatChannelStatus(report)[0], "缓存率：0.00%")
 }
 
 func TestChannelStatusInsufficientSamplesDoNotReportExtremeRates(t *testing.T) {
@@ -77,7 +90,7 @@ func TestChannelStatusInsufficientSamplesDoNotReportExtremeRates(t *testing.T) {
 	}
 	// Enough failed requests are a real outage and must remain visible.
 	text := formatChannelStatusMetric(ChannelStatusMetric{HasRequests: true, ErrorRate: 1}, false)
-	require.Contains(t, text, "成功 0.00% ｜ 错误 100.00%")
+	require.Contains(t, text, "成功率：0.00%\n错误率：100.00%")
 }
 
 func TestChannelStatusSplitsWithoutLosingOrBreakingGroups(t *testing.T) {
@@ -95,7 +108,7 @@ func TestChannelStatusSplitsWithoutLosingOrBreakingGroups(t *testing.T) {
 		require.NotContains(t, chunk, "截断")
 	}
 	for i, group := range report.Groups {
-		block := fmt.Sprintf("%d. %s · %s", i+1, group.Name, formatChannelStatusMetric(group.Metrics, true))
+		block := fmt.Sprintf("**%d. %s**\n%s", i+1, group.Name, formatChannelStatusMetric(group.Metrics, true))
 		count := 0
 		for _, chunk := range chunks {
 			count += strings.Count(chunk, block)

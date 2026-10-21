@@ -156,14 +156,14 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 	}
 	if showRules {
 		var b strings.Builder
-		fmt.Fprintf(&b, "🎉 **%s**\n累计有效充值每满 USD %.2f 送 %d 次 · 每次消耗 1 次\n普通奖池", replyPlainLabel(cfg.Title), cfg.RechargeStep, cfg.ChancesPerStep)
+		fmt.Fprintf(&b, "🎉 **%s**\n累计有效充值每满 USD %.2f 送 %d 次\n每次抽奖消耗 1 次\n\n**普通奖池**", replyPlainLabel(cfg.Title), cfg.RechargeStep, cfg.ChancesPerStep)
 		for _, p := range cfg.Prizes {
-			fmt.Fprintf(&b, "\n%s：USD %.2f · %.2f%%", replyPlainLabel(p.Name), p.Amount, float64(p.ProbabilityBPS)/100)
+			fmt.Fprintf(&b, "\n\n%s\nUSD %.2f（概率 %.2f%%）", replyPlainLabel(p.Name), p.Amount, float64(p.ProbabilityBPS)/100)
 		}
 		if cfg.GuaranteeEnabled {
-			fmt.Fprintf(&b, "\n保底奖池（累计每抽 %d 次，含历史；普通中奖不重置）", cfg.GuaranteeEvery)
+			fmt.Fprintf(&b, "\n\n**保底奖池**\n累计每抽 %d 次触发（含历史）\n普通中奖不重置保底进度", cfg.GuaranteeEvery)
 			for _, p := range cfg.GuaranteePrizes {
-				fmt.Fprintf(&b, "\n%s：USD %.2f · %.2f%%", replyPlainLabel(p.Name), p.Amount, float64(p.ProbabilityBPS)/100)
+				fmt.Fprintf(&b, "\n\n%s\nUSD %.2f（概率 %.2f%%）", replyPlainLabel(p.Name), p.Amount, float64(p.ProbabilityBPS)/100)
 			}
 		}
 		return b.String(), tx.Commit()
@@ -172,9 +172,9 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 	if err != nil {
 		return "", err
 	}
-	result := fmt.Sprintf("🎟 剩余抽奖次数：%d 次 · 再充值 USD %.2f 获赠", state.Remaining, state.NextRecharge)
+	result := fmt.Sprintf("🎟 **抽奖次数**\n剩余抽奖次数：%d 次\n再充值 USD %.2f 获赠", state.Remaining, state.NextRecharge)
 	if state.DrawsUntilGuarantee > 0 {
-		result += fmt.Sprintf(" · 距保底 %d 次", state.DrawsUntilGuarantee)
+		result += fmt.Sprintf("\n距保底 %d 次", state.DrawsUntilGuarantee)
 	}
 	return result, tx.Commit()
 }
@@ -246,7 +246,7 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 		return "", err
 	}
 	if state.Remaining < 1 {
-		return fmt.Sprintf("抽奖次数不足 · 再充值 USD %.2f 获赠", state.NextRecharge), nil
+		return fmt.Sprintf("抽奖次数不足\n再充值 USD %.2f 获赠", state.NextRecharge), nil
 	}
 	n, err := rand.Int(rand.Reader, big.NewInt(10000))
 	if err != nil {
@@ -258,9 +258,9 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 		pool = cfg.GuaranteePrizes
 	}
 	prize := lotteryPrizeAt(pool, n.Int64())
-	result = fmt.Sprintf("🎉 抽奖结果：%s · 奖励额度：USD %.2f · 剩余抽奖次数：%d 次", replyPlainLabel(prize.Name), prize.Amount, state.Remaining-1)
+	result = fmt.Sprintf("🎉 **抽奖结果**\n奖品：%s\n奖励额度：USD %.2f\n剩余抽奖次数：%d 次", replyPlainLabel(prize.Name), prize.Amount, state.Remaining-1)
 	if guaranteed {
-		result += " · 本次触发保底抽奖"
+		result += "\n本次触发保底抽奖"
 	}
 	if cfg.GuaranteeEnabled {
 		result += fmt.Sprintf("\n距保底 %d 次", cfg.drawsUntilGuarantee(state.Used+1))

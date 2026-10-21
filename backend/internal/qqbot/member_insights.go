@@ -54,7 +54,7 @@ func (s *Service) todayUsage(ctx context.Context, c Config, j Job, now time.Time
 	if err != nil {
 		return "", err
 	}
-	text := fmt.Sprintf("📊 **今日用量 · %s（北京时间）**\n已记录 %d 次 · Token 入/出 %s/%s · 缓存读/写 %s/%s\n费用 USD %.4f（余额扣费 %.4f · 套餐消耗 %.4f）", local.Format("2006-01-02"), count, formatUsageTokens(input), formatUsageTokens(output), formatUsageTokens(read), formatUsageTokens(write), cost, wallet, subscription)
+	text := fmt.Sprintf("📊 **今日用量**\n%s（北京时间）\n\n请求：%d 次\n费用：USD %.4f\n余额扣费：USD %.4f\n套餐消耗：USD %.4f\n\n**Token 明细**\n输入：%s\n输出：%s\n缓存读取：%s\n缓存写入：%s", local.Format("2006-01-02"), count, cost, wallet, subscription, formatUsageTokens(input), formatUsageTokens(output), formatUsageTokens(read), formatUsageTokens(write))
 	if count == 0 {
 		return text, nil
 	}
@@ -63,7 +63,8 @@ func (s *Service) todayUsage(ctx context.Context, c Config, j Job, now time.Time
 		return "", err
 	}
 	defer func() { _ = rows.Close() }()
-	text += "\n费用前 5 模型："
+	text += "\n\n**费用前 5 模型**"
+	rank := 0
 	for rows.Next() {
 		var model string
 		var requests int64
@@ -71,7 +72,8 @@ func (s *Service) todayUsage(ctx context.Context, c Config, j Job, now time.Time
 		if err = rows.Scan(&model, &requests, &amount); err != nil {
 			return "", err
 		}
-		text += fmt.Sprintf("\n%s · %d 次 · USD %.4f", replyPlainLabel(limitText(model, 100)), requests, amount)
+		rank++
+		text += fmt.Sprintf("\n\n**%d. %s**\nUSD %.4f（%d 次）", rank, replyPlainLabel(limitText(model, 100)), amount, requests)
 	}
 	return text, rows.Err()
 }
@@ -119,9 +121,9 @@ func (s *Service) sendModelPrice(ctx context.Context, c Config, j Job, arg strin
 	for i := (page - 1) * 5; i < min(page*5, len(blocks)); i++ {
 		body := blocks[i]
 		if pages > 1 {
-			body += fmt.Sprintf("\n第 %d/%d 页", page, pages)
+			body += fmt.Sprintf("\n\n第 %d/%d 页", page, pages)
 			if page < pages {
-				body += fmt.Sprintf(" · /价格 %s %d", replyPlainLabel(parts[0]), page+1)
+				body += fmt.Sprintf("\n下一页：/价格 %s %d", replyPlainLabel(parts[0]), page+1)
 			}
 		}
 		if err = s.send(ctx, c, j, body, nil, i-(page-1)*5+1); err != nil {

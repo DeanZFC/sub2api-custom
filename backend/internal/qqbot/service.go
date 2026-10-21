@@ -432,7 +432,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		} else if err != nil {
 			text = "账户信息查询失败，请稍后重试。"
 		} else {
-			text = fmt.Sprintf("💳 余额：USD %.2f", balance)
+			text = fmt.Sprintf("💳 **我的余额**\n余额：USD %.2f", balance)
 		}
 	case "今日用量":
 		var err error
@@ -527,7 +527,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if arg == "" {
 			text = transferUsage
 			if c.TransferFeePercent > 0 {
-				text += fmt.Sprintf("（手续费 %.2f%%）", c.TransferFeePercent)
+				text += fmt.Sprintf("\n手续费：%.2f%%", c.TransferFeePercent)
 			}
 			break
 		}

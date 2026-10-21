@@ -90,7 +90,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='checkin'`).Scan(&count))
 	require.Equal(t, 1, count)
 	require.EqualValues(t, 1, replies.Load())
-	require.Contains(t, lastReply.Load(), "<qqbot-at-user id=\"member\" />\n✅ 签到成功")
+	require.Contains(t, lastReply.Load(), "<qqbot-at-user id=\"member\" />\n✅ **签到成功**")
 
 	// The binding-code flow also works without a mention.
 	secondUser := user(t, db)

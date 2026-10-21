@@ -45,9 +45,9 @@ func TestQQBotInviteActivityCountsJoinsAndRewardLimit(t *testing.T) {
 	job := Job{AppID: "app", GroupID: "group", MemberID: "inviter"}
 	info, err := s.inviteInfo(ctx, c, job)
 	require.NoError(t, err)
-	require.Contains(t, info, "邀请奖励 USD 1.25/人")
-	require.Contains(t, info, "今日入群 2")
-	require.Contains(t, info, "已奖 0/2")
+	require.Contains(t, info, "每人奖励：USD 1.25")
+	require.Contains(t, info, "今日入群：2 人")
+	require.Contains(t, info, "今日已奖励：0/2 人")
 
 	// Yesterday's join can be paid today; queries must use the actual payout day.
 	for _, invitee := range []Job{
@@ -60,8 +60,8 @@ func TestQQBotInviteActivityCountsJoinsAndRewardLimit(t *testing.T) {
 	}
 	info, err = s.inviteInfo(ctx, c, job)
 	require.NoError(t, err)
-	require.Contains(t, info, "今日入群 2")
-	require.Contains(t, info, "已奖 2/2")
+	require.Contains(t, info, "今日入群：2 人")
+	require.Contains(t, info, "今日已奖励：2/2 人")
 
 	// History, other reward types and other recipients must not consume today's limit.
 	_, err = db.Exec(`INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount,created_at) VALUES
@@ -76,7 +76,7 @@ func TestQQBotInviteActivityCountsJoinsAndRewardLimit(t *testing.T) {
 	for range 2 {
 		info, err = s.inviteInfo(ctx, c, job)
 		require.NoError(t, err)
-		require.Contains(t, info, "已奖 2/2")
+		require.Contains(t, info, "今日已奖励：2/2 人")
 	}
 	var balance float64
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, inviter).Scan(&balance))
@@ -92,7 +92,7 @@ func TestQQBotInviteActivityUnavailableStates(t *testing.T) {
 	job := Job{MemberID: "member"}
 	info, err := s.inviteInfo(ctx, c, job)
 	require.NoError(t, err)
-	require.Contains(t, info, "官方邀请；")
+	require.Contains(t, info, "通过官方邀请")
 	require.Contains(t, info, "请先 /绑定。")
 	uid := user(t, db)
 	bind(t, db, uid, "member")
@@ -105,7 +105,7 @@ func TestQQBotInviteActivityUnavailableStates(t *testing.T) {
 		require.NoError(t, err)
 		info, err = s.inviteInfo(ctx, c, job)
 		require.NoError(t, err)
-		require.Contains(t, info, "官方邀请；")
+		require.Contains(t, info, "通过官方邀请")
 		require.Contains(t, info, "请先 /绑定。")
 	}
 	for _, disabled := range []Config{

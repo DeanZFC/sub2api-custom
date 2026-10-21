@@ -526,12 +526,12 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if kind == "invite" {
 		return fmt.Sprintf("🎁 邀请奖励已发放：USD %.2f", amount), nil
 	}
-	text := fmt.Sprintf("✅ 签到成功 · 到账 USD %.2f · 连签 %d 天", amount, streak)
+	text := fmt.Sprintf("✅ **签到成功**\n到账：USD %.2f\n连签 %d 天", amount, streak)
 	if bonus {
-		text += " · 连签奖励：" + streakReward.description() + " · " + streakReward.deliveryNote()
+		text += "\n\n连签奖励：" + streakReward.description() + "\n" + streakReward.deliveryNote()
 	}
 	if streakReward.enabled() {
-		text += fmt.Sprintf(" · 距下次奖励 %d 天", streakDays-streak%streakDays)
+		text += fmt.Sprintf("\n距下次奖励 %d 天", streakDays-streak%streakDays)
 	}
 	return text, nil
 }

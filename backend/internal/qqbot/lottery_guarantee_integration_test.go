@@ -33,7 +33,7 @@ func TestLotteryGuaranteeUsesLifetimeCountAndKeepsHistoricalResults(t *testing.T
 	reply, err := s.lotteryInfo(ctx, c, Job{MemberID: "member"}, true)
 	require.NoError(t, err)
 	require.Contains(t, reply, "每抽 3 次")
-	require.Contains(t, reply, "guaranteed：USD 5.00 · 100.00%")
+	require.Contains(t, reply, "guaranteed\nUSD 5.00（概率 100.00%）")
 	reply, err = s.lotteryInfo(ctx, c, Job{MemberID: "member"}, false)
 	require.NoError(t, err)
 	require.Contains(t, reply, "距保底 1 次")
@@ -45,7 +45,7 @@ func TestLotteryGuaranteeUsesLifetimeCountAndKeepsHistoricalResults(t *testing.T
 	require.NoError(t, err)
 	reply, err = s.drawLottery(ctx, c, Job{ID: "other", GroupID: "group", MemberID: "other-member"})
 	require.NoError(t, err)
-	require.Contains(t, reply, "抽奖结果：win")
+	require.Contains(t, reply, "奖品：win")
 	require.NotContains(t, reply, "触发保底")
 
 	third := Job{ID: "3", GroupID: "group", MemberID: "member"}

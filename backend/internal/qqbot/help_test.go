@@ -57,15 +57,36 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 			require.Contains(t, reply.text(), j.MemberID)
 			displayed := map[string]int{}
 			for _, line := range strings.Split(reply.text(), "\n") {
-				for _, command := range strings.Split(line, " · ") {
-					command = strings.TrimSpace(command)
-					if strings.HasPrefix(command, "/") {
-						displayed[command]++
-					}
+				line = strings.TrimSpace(line)
+				if !strings.HasPrefix(line, "/") {
+					continue
 				}
+				command, _, ok := strings.Cut(line, "：")
+				require.True(t, ok, "help entries must include a description: %q", line)
+				displayed[command]++
+				require.NotContains(t, line, " · ", "help entries must use one command per line")
 			}
 			for _, cmd := range want {
-				require.Equal(t, 1, displayed[replyPlainLabel(cmd)], cmd)
+				usage := cmd
+				for _, item := range helpSystemItems() {
+					if item.command == cmd && item.usage != "" {
+						usage = item.usage
+						break
+					}
+				}
+				require.Equal(t, 1, displayed[replyPlainLabel(usage)], cmd)
+			}
+			for _, item := range helpSystemItems() {
+				description := replyPlainLabel(item.description)
+				usage := item.command
+				if item.usage != "" {
+					usage = item.usage
+				}
+				require.Contains(t, reply.text(), replyPlainLabel(usage)+"："+description)
+			}
+			for i := 0; i < count; i++ {
+				name := "/" + strings.Repeat("长", 30) + fmt.Sprintf("%02d", i)
+				require.Contains(t, reply.text(), replyPlainLabel(name)+"：自定义回复")
 			}
 			for _, absent := range []string{"/disabled", "/福利", "兑换", "翻页", "下一页", "上一页", "更多服务", "第 1/"} {
 				require.NotContains(t, reply.text(), absent)

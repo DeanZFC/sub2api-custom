@@ -73,20 +73,20 @@ func TestTodayRankingsAllAccountsPrivateTopTen(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, text, "**Token 消耗榜**")
 	require.Contains(t, text, "**消费金额榜**")
-	require.Equal(t, 2, strings.Count(text, "第 10 名"))
-	require.NotContains(t, text, "第 11 名")
+	require.Equal(t, 2, strings.Count(text, "\n10. "))
+	require.NotContains(t, text, "\n11. ")
 	require.NotContains(t, text, "USD")
 	require.NotContains(t, text, "private-")
 	require.NotContains(t, text, "private-nickname")
 	require.NotContains(t, text, "private-qq-member")
 	require.Equal(t, 20, strings.Count(text, "@example.com"))
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "第 ") {
-			require.Regexp(t, `^第 (?:[1-9]|10) 名 · pri(?:\\\*){4}(?:-[0-9]|1[01])@example\.com$`, line)
+		if strings.Contains(line, "@example.com") {
+			require.Regexp(t, `^(?:[1-9]|10)\. pri(?:\\\*){4}(?:-[0-9]|1[01])@example\.com$`, line)
 		}
 	}
-	require.Contains(t, text, `第 1 名 · pri\*\*\*\*11@example.com`)
-	require.Contains(t, text, `第 1 名 · pri\*\*\*\*-0@example.com`)
+	require.Contains(t, text, `1. pri\*\*\*\*11@example.com`)
+	require.Contains(t, text, `1. pri\*\*\*\*-0@example.com`)
 	empty, err := s.todayRankings(ctx, c, start)
 	require.NoError(t, err)
 	require.Equal(t, 2, strings.Count(empty, "暂无上榜账号"))
@@ -160,7 +160,7 @@ func TestRankingSettlementCreatesUnboundEntitlementsAndDeduplicates(t *testing.T
 	require.Equal(t, 2, chances)
 	summary, err := s.myRewards(ctx, bot, Job{MemberID: "newly-bound"})
 	require.NoError(t, err)
-	require.Contains(t, summary, "排行 1.25")
+	require.Contains(t, summary, "排行：USD 1.25")
 	codes, err := s.ListRewardCodes(ctx, "", "pending", 1)
 	require.NoError(t, err)
 	require.Len(t, codes.Items, 2)
@@ -308,8 +308,8 @@ func TestRankingCommandSendsBothBoardsWithoutBindingOrModelCalls(t *testing.T) {
 		require.Contains(t, reply.text(), "**Token 消耗榜**")
 		require.Contains(t, reply.text(), "**消费金额榜**")
 		require.NotContains(t, reply.text(), bindFirst)
-		require.Equal(t, 2, strings.Count(reply.text(), `第 1 名 · 123\*\*\*\*89@qq.com`))
-		require.Equal(t, 2, strings.Count(reply.text(), `第 2 名 · sec\*\*\*\*on@example.com`))
+		require.Equal(t, 2, strings.Count(reply.text(), `1. 123\*\*\*\*89@qq.com`))
+		require.Equal(t, 2, strings.Count(reply.text(), `2. sec\*\*\*\*on@example.com`))
 		require.NotContains(t, reply.text(), "123456789")
 		require.NotContains(t, reply.text(), "second_person")
 	}

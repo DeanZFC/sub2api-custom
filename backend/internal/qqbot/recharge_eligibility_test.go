@@ -53,7 +53,7 @@ func TestRechargeWindowValidationAndMessages(t *testing.T) {
 	require.Equal(t, "近 30 天有效充值满 USD 10.00", legacy.describe())
 	custom := RechargeRequirement{MinRecharge30d: 10, RechargeWindowDays: 7}
 	require.Equal(t, "近 7 天有效充值满 USD 10.00", custom.describe())
-	require.Contains(t, custom.failure("签到", RechargeEligibility{Total: decimal.NewFromInt(5), Recent: decimal.NewFromInt(2)}), "近 7 天 USD 2.00")
+	require.Contains(t, custom.failure("签到", RechargeEligibility{Total: decimal.NewFromInt(5), Recent: decimal.NewFromInt(2)}), "近 7 天充值：USD 2.00")
 	require.Contains(t, custom.invite(), "近 7 天有效充值满 USD 10.00")
 	require.Error(t, json.Unmarshal([]byte("{\"recharge_window_days\":1.5}"), &custom))
 }
@@ -77,9 +77,9 @@ func TestRechargeMessagesExplainAlternativeThresholds(t *testing.T) {
 				current := RechargeEligibility{Total: decimal.NewFromInt(20), Recent: decimal.NewFromInt(5)}
 				for _, activity := range []string{"签到", "邀请奖励"} {
 					message := tc.requirement.failure(activity, current)
-					require.Contains(t, message, "暂不满足："+tc.want)
-					require.Contains(t, message, "当前累计 USD 20.00")
-					require.Contains(t, message, fmt.Sprintf("近 %d 天 USD 5.00", tc.requirement.windowDays()))
+					require.Contains(t, message, "暂不满足：\n"+tc.want)
+					require.Contains(t, message, "累计充值：USD 20.00")
+					require.Contains(t, message, fmt.Sprintf("近 %d 天充值：USD 5.00", tc.requirement.windowDays()))
 				}
 			}
 		})

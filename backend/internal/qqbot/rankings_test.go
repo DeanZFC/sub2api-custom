@@ -81,7 +81,7 @@ func TestFormatTodayRankingsUsesUniformLiteralEmailRows(t *testing.T) {
 				email, label = "a_b_private_cd@example.com", `a\_b\*\*\*\*cd@example.com`
 			}
 			entries = append(entries, rankingEntry{Kind: kind, Rank: rank, UserID: int64(rank), Email: email})
-			wantRows = append(wantRows, fmt.Sprintf("第 %d 名 · %s", rank, label))
+			wantRows = append(wantRows, fmt.Sprintf("%d. %s", rank, label))
 		}
 	}
 	text := formatTodayRankings("2026-10-21", entries)
@@ -92,7 +92,7 @@ func TestFormatTodayRankingsUsesUniformLiteralEmailRows(t *testing.T) {
 	require.NotContains(t, text, "private")
 	var rows []string
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "第 ") {
+		if strings.Contains(line, "@") {
 			rows = append(rows, line)
 			// No unescaped emphasis markers can change a row or its neighbors.
 			literal := strings.ReplaceAll(strings.ReplaceAll(line, `\*`, ""), `\_`, "")

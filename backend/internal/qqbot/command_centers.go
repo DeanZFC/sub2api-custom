@@ -75,7 +75,7 @@ func (s *Service) sendCommandPage(ctx context.Context, c Config, j Job, cmd, bod
 			row.Buttons = append(row.Buttons, helpCommandButton(label, command, command))
 		}
 		keyboard = &messageKeyboard{Content: keyboardContent{Rows: []keyboardRow{row}}}
-		text += fmt.Sprintf("\n\n第 %d/%d 页 · /%s 页码 可翻页", page, len(pages), cmd)
+		text += fmt.Sprintf("\n\n第 %d/%d 页\n翻页：/%s 页码", page, len(pages), cmd)
 	}
 	return s.sendFormattedWithKeyboard(ctx, c, j, normalizeReplyLineBreaks(text), nil, 1, keyboard)
 }

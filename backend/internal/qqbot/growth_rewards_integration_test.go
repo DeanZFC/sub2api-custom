@@ -138,7 +138,7 @@ func TestGrowthUsageTokensAndActualSpending(t *testing.T) {
 	require.Equal(t, 2, count)
 	text, err = s.myRewards(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "成长 1.25")
+	require.Contains(t, text, "成长：USD 1.25")
 }
 
 func TestStreakTypedRewardsAndLegacyClaims(t *testing.T) {

@@ -113,7 +113,7 @@ func TestPeriodicGrowthConcurrentMonitorRebindAndRuleEdits(t *testing.T) {
 	j := Job{GroupID: "other-group", MemberID: "rebound"}
 	text, err := s.growthTasks(ctx, c, j)
 	require.NoError(t, err)
-	require.Contains(t, text, "已结算 2 轮 · USD 5.00/10.00")
+	require.Contains(t, text, "已结算 2 轮\n本轮进度：USD 5.00/10.00")
 	// Editing the interval spends only the remainder; past rewards retain snapshots.
 	task := &cfg.Growth.PeriodicTasks[0]
 	task.Target, task.Name = 5, "Edited"
@@ -147,7 +147,7 @@ func TestPeriodicGrowthConcurrentMonitorRebindAndRuleEdits(t *testing.T) {
 	text, n, err = s.processGrowthTasks(ctx, c, j, time.Now(), true)
 	require.NoError(t, err)
 	require.Zero(t, n)
-	require.Contains(t, text, "已结算 4 轮 · USD 0.00/5.00")
+	require.Contains(t, text, "已结算 4 轮\n本轮进度：USD 0.00/5.00")
 	// Retention or refunds may reduce totals, but cannot reset paid progress.
 	_, err = db.Exec(`UPDATE usage_logs SET actual_cost=0 WHERE user_id=$1`, uid)
 	require.NoError(t, err)
@@ -195,7 +195,7 @@ func TestPeriodicGrowthCatchupAndEligibility(t *testing.T) {
 	text, n, err = s.processGrowthTasks(ctx, c, Job{GroupID: "group", MemberID: "member"}, time.Now(), true)
 	require.NoError(t, err)
 	require.Zero(t, n)
-	require.Contains(t, text, "已结算 60 轮 · USD 0.50/1.00")
+	require.Contains(t, text, "已结算 60 轮\n本轮进度：USD 0.50/1.00")
 	require.NotContains(t, text, "待继续结算")
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_reward_codes`).Scan(&count))
 	require.Equal(t, 60, count)

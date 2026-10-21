@@ -40,7 +40,7 @@ func TestCheckinRechargeThresholdsRejectWithoutConsumingDay(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, text, "签到暂不满足：")
 	require.Contains(t, text, "累计有效充值满 USD 100.00 或 近 7 天有效充值满 USD 10.00")
-	require.Contains(t, text, "当前累计 USD 20.00，近 7 天 USD 0.00")
+	require.Contains(t, text, "累计充值：USD 20.00\n近 7 天充值：USD 0.00")
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_rewards WHERE user_id=$1`, recent).Scan(&count))
 	require.Zero(t, count)
@@ -120,7 +120,7 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, info, "累计有效充值满 USD 50.00 或 近 60 天有效充值满 USD 10.00")
 	require.Contains(t, info, "邀请人账号")
-	require.Contains(t, info, "充值资格未满足")
+	require.Contains(t, info, "充值资格：未满足")
 	info, err = s.inviteInfo(ctx, c, Job{MemberID: "unbound"})
 	require.NoError(t, err)
 	require.Contains(t, info, "累计有效充值满 USD 50.00")
@@ -148,9 +148,9 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	require.Equal(t, "rewarded", page.Items[0].Status)
 	info, err = s.inviteInfo(ctx, c, Job{MemberID: "inviter"})
 	require.NoError(t, err)
-	require.Contains(t, info, "充值资格已满足")
-	require.Contains(t, info, "近 60 天 USD 10.00")
-	require.Contains(t, info, "已奖 1/10")
+	require.Contains(t, info, "充值资格：已满足")
+	require.Contains(t, info, "近 60 天充值：USD 10.00")
+	require.Contains(t, info, "今日已奖励：1/10 人")
 }
 
 func TestCheckinRechargeEligibilityWaitsForRefund(t *testing.T) {

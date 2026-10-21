@@ -91,7 +91,7 @@ func (r RechargeRequirement) describe() string {
 }
 
 func (r RechargeRequirement) failure(activity string, e RechargeEligibility) string {
-	return fmt.Sprintf("%s暂不满足：%s；当前累计 USD %s，近 %d 天 USD %s。", activity, r.describe(), e.Total.StringFixed(2), r.windowDays(), e.Recent.StringFixed(2))
+	return fmt.Sprintf("%s暂不满足：\n%s\n\n累计充值：USD %s\n近 %d 天充值：USD %s", activity, r.describe(), e.Total.StringFixed(2), r.windowDays(), e.Recent.StringFixed(2))
 }
 
 func (r RechargeRequirement) invite() string {

@@ -148,7 +148,7 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 			return "", 0, false, err
 		}
 	}
-	text := fmt.Sprintf("🌱 **成长任务**\n连续签到：%d 天 · 累计签到：%d 天", streak, total)
+	text := fmt.Sprintf("🌱 **成长任务**\n连续签到：%d 天\n累计签到：%d 天", streak, total)
 	if reward := cfg.streakReward(); reward.enabled() {
 		text += fmt.Sprintf("\n连签 %d 天奖励：%s", cfg.streakDays(), reward.description())
 	}
@@ -184,9 +184,9 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 				status = "待管理员发放"
 			}
 		}
-		text += fmt.Sprintf("\n%d. %s · %s · 奖励：%s", i+1, replyPlainLabel(task.Name), status, rewards[i].description())
+		text += fmt.Sprintf("\n\n**%d. %s**\n状态：%s\n奖励：%s", i+1, replyPlainLabel(task.Name), status, rewards[i].description())
 	}
-	text += "\n达标自动发放，每项每账号限一次。"
+	text += "\n\n达标自动发放，每项每账号限一次。"
 	if len(cfg.Growth.PeriodicTasks) > 0 {
 		periodic, n, changed, e := settlePeriodicGrowth(ctx, tx, c, j, uid, cfg.Growth.PeriodicTasks, progress, at)
 		if e != nil {
