@@ -52,7 +52,7 @@ func (h *QQBotHandler) SaveCheckinConfig(c *gin.Context) {
 	if !requireQQBotAdmin(c) {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16384)
 	cfg := qqbot.CheckinConfig{RechargeRequirement: qqbot.RechargeRequirement{RechargeWindowDays: qqbot.DefaultRechargeWindowDays}}
 	if c.ShouldBindJSON(&cfg) != nil {
 		response.BadRequest(c, "签到配置格式不正确")

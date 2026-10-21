@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.activitiesTitle') }}</h1>
         <p class="mt-2 text-sm text-gray-500">{{ t('qqbot.activitiesHelp') }}</p></div>
-        <RouterLink v-if="activeTab.key !== 'redemption'" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
+        <RouterLink v-if="activeTab.key !== 'redemption' && activeTab.key !== 'growth'" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
       </div>
       <nav
         role="tablist"
@@ -20,7 +20,7 @@
           :aria-selected="activeTab.key === tab.key"
           :aria-controls="`qqbot-panel-${tab.key}`"
           :tabindex="activeTab.key === tab.key ? 0 : -1"
-          class="min-h-[44px] min-w-0 flex-1 rounded-lg px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          class="min-h-[44px] min-w-[100px] flex-1 rounded-lg px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
           :class="activeTab.key === tab.key
             ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300'
             : 'text-gray-600 hover:bg-white/60 dark:text-gray-300 dark:hover:bg-dark-700/60'"
@@ -49,6 +49,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.vue'
+import QQBotGrowthSettings from '@/components/admin/qqbot/QQBotGrowthSettings.vue'
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
 import QQBotInviteSettings from '@/components/admin/qqbot/QQBotInviteSettings.vue'
 import QQBotTransferSettings from '@/components/admin/qqbot/QQBotTransferSettings.vue'
@@ -59,6 +60,7 @@ const route = useRoute()
 const router = useRouter()
 const tabs = [
   { key: 'checkin', label: 'qqbot.checkinTitle', component: QQBotCheckinSettings },
+  { key: 'growth', label: 'qqbot.growth.tab', component: QQBotGrowthSettings },
   { key: 'lottery', label: 'qqbot.lotteryTitle', component: QQBotLotterySettings },
   { key: 'invite', label: 'qqbot.inviteTitle', component: QQBotInviteSettings },
   { key: 'transfer', label: 'qqbot.transferTitle', component: QQBotTransferSettings },

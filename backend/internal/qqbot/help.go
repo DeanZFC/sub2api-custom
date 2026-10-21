@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	helpPageSize     = 8 // Four rows of two commands, plus one navigation row.
-	helpActionPrefix = "qqhelp:v1:"
+	helpRowsPerPage   = 4 // Reserve the fifth row for navigation.
+	helpPageSize      = helpRowsPerPage * 2
+	helpSystemColumns = 5
+	helpActionPrefix  = "qqhelp:v1:"
 )
 
 type messageKeyboard struct {
@@ -27,8 +29,9 @@ type keyboardButton struct {
 	Action     keyboardAction     `json:"action"`
 }
 type keyboardRenderData struct {
-	Label string `json:"label"`
-	Style int    `json:"style"`
+	Label        string `json:"label"`
+	VisitedLabel string `json:"visited_label"`
+	Style        int    `json:"style"`
 }
 type keyboardAction struct {
 	Type            int                `json:"type"`
@@ -45,7 +48,13 @@ type helpItem struct {
 	input                                      bool
 }
 
-func helpItems(c Config) []helpItem {
+type helpPage struct {
+	title   string
+	items   []helpItem
+	columns int
+}
+
+func helpSystemItems() []helpItem {
 	items := []helpItem{
 		{action: "checkin", label: "每日签到", command: "/签到", description: "每日签到"},
 		{action: "balance", label: "我的余额", command: "/我的余额", description: "查询账户余额"},
@@ -67,21 +76,40 @@ func helpItems(c Config) []helpItem {
 		helpItem{action: "growth", label: "成长任务", command: "/成长任务", description: "查看连签与成长任务进度"},
 		helpItem{action: "growth_claim", label: "领取任务", command: "/领取任务", usage: "/领取任务 任务编号", description: "领取成长任务抽奖次数", input: true},
 	)
+	return items
+}
+
+func helpPages(c Config) []helpPage {
+	var customItems []helpItem
 	for _, custom := range c.CustomCommands {
 		if custom.Enabled {
-			items = append(items, helpItem{action: "custom:" + custom.Command, label: custom.Command, command: custom.Command, description: "自定义回复"})
+			customItems = append(customItems, helpItem{action: "custom:" + custom.Command, label: custom.Command, command: custom.Command, description: "自定义回复"})
 		}
 	}
-	return items
+	var pages []helpPage
+	// QQ supports five buttons per row. Keep the built-ins together at the start
+	// while retaining a navigation row and handling future additional commands.
+	items := helpSystemItems()
+	pageSize := helpRowsPerPage * helpSystemColumns
+	for start := 0; start < len(items); start += pageSize {
+		pages = append(pages, helpPage{title: "系统指令", items: items[start:min(start+pageSize, len(items))], columns: helpSystemColumns})
+	}
+	for start := 0; start < len(customItems); start += helpPageSize {
+		pages = append(pages, helpPage{title: "自定义指令", items: customItems[start:min(start+helpPageSize, len(customItems))], columns: 2})
+	}
+	return pages
 }
 
 func helpButtonID(action string) string { return "help_" + codeHash(action)[:16] }
 
-func helpCallbackButton(label, action string) keyboardButton {
+func helpCommandButton(label, action, command string) keyboardButton {
+	label = limitText(label, 9)
 	return keyboardButton{
 		ID:         helpButtonID(action),
-		RenderData: keyboardRenderData{Label: limitText(label, 9), Style: 1},
-		Action:     keyboardAction{Type: 1, Permission: keyboardPermission{Type: 2}, Data: helpActionPrefix + action, UnsupportedTips: "请升级 QQ，或手动发送对应指令"},
+		RenderData: keyboardRenderData{Label: label, VisitedLabel: label, Style: 1},
+		// Group callbacks always show QQ's result toast. Command buttons avoid
+		// that callback; group clients require the user to send the filled command.
+		Action: keyboardAction{Type: 2, Permission: keyboardPermission{Type: 2}, Data: command, UnsupportedTips: "请升级 QQ，或手动发送对应指令"},
 	}
 }
 
@@ -91,14 +119,16 @@ func helpCallbackButton(label, action string) keyboardButton {
 func helpActionCommand(c Config, action string) (string, bool) {
 	if raw, ok := strings.CutPrefix(action, "page:"); ok {
 		page, err := strconv.Atoi(raw)
-		if err != nil || page < 1 || page > (len(helpItems(c))+helpPageSize-1)/helpPageSize || raw != strconv.Itoa(page) {
+		if err != nil || page < 1 || page > len(helpPages(c)) || raw != strconv.Itoa(page) {
 			return "", false
 		}
 		return "/帮助 " + raw, true
 	}
-	for _, item := range helpItems(c) {
-		if !item.input && item.action == action {
-			return item.command, true
+	for _, page := range helpPages(c) {
+		for _, item := range page.items {
+			if !item.input && item.action == action {
+				return item.command, true
+			}
 		}
 	}
 	return "", false
@@ -113,28 +143,26 @@ func (s *Service) sendHelp(ctx context.Context, c Config, j Job, arg string) err
 			return s.send(ctx, c, j, "用法：/帮助；翻页可发送 /帮助 页码。", nil, 1)
 		}
 	}
-	items := helpItems(c)
-	pages := (len(items) + helpPageSize - 1) / helpPageSize
+	menu := helpPages(c)
+	pages := len(menu)
 	if page > pages {
 		return s.send(ctx, c, j, fmt.Sprintf("帮助共 %d 页，请发送 /帮助 1 至 /帮助 %d。", pages, pages), nil, 1)
 	}
-	text := "# 📖 指令帮助\n\n点击下方按钮使用功能；需要参数的指令，请补全后发送。\n\n"
+	current := menu[page-1]
+	text := "# 📖 指令帮助 · " + current.title + "\n\n点击按钮填入指令，再点发送；需要参数的指令，请补全后发送。\n\n"
 	keyboard := &messageKeyboard{}
-	start, end := (page-1)*helpPageSize, min(page*helpPageSize, len(items))
-	for i, item := range items[start:end] {
+	for i, item := range current.items {
 		usage := item.command
 		if item.usage != "" {
 			usage = item.usage
 		}
 		text += "- **" + replyPlainLabel(usage) + "**：" + item.description + "\n"
-		button := helpCallbackButton(item.label, item.action)
+		button := helpCommandButton(item.label, item.action, item.command)
 		if item.input {
-			// QQ group command buttons support prefill; enter=true is C2C-only.
-			button.Action.Type = 2
 			button.Action.Data = item.command + " "
 			button.RenderData.Style = 0
 		}
-		if i%2 == 0 {
+		if i%current.columns == 0 {
 			keyboard.Content.Rows = append(keyboard.Content.Rows, keyboardRow{})
 		}
 		row := &keyboard.Content.Rows[len(keyboard.Content.Rows)-1]
@@ -142,10 +170,10 @@ func (s *Service) sendHelp(ctx context.Context, c Config, j Job, arg string) err
 	}
 	navigation := keyboardRow{}
 	if page > 1 {
-		navigation.Buttons = append(navigation.Buttons, helpCallbackButton("上一页", fmt.Sprintf("page:%d", page-1)))
+		navigation.Buttons = append(navigation.Buttons, helpCommandButton("上一页", fmt.Sprintf("page:%d", page-1), fmt.Sprintf("/帮助 %d", page-1)))
 	}
 	if page < pages {
-		navigation.Buttons = append(navigation.Buttons, helpCallbackButton("下一页", fmt.Sprintf("page:%d", page+1)))
+		navigation.Buttons = append(navigation.Buttons, helpCommandButton("下一页", fmt.Sprintf("page:%d", page+1), fmt.Sprintf("/帮助 %d", page+1)))
 	}
 	if len(navigation.Buttons) > 0 {
 		keyboard.Content.Rows = append(keyboard.Content.Rows, navigation)

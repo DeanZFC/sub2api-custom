@@ -40,7 +40,7 @@ func TestCheckinRandomRangeLegacyAndZeroDedup(t *testing.T) {
 	s := savedBot(t, db)
 	cfg, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, CheckinConfig{Enabled: true, MinAmount: .1, MaxAmount: .1, RechargeRequirement: RechargeRequirement{RechargeWindowDays: 30}}, cfg)
+	require.Equal(t, CheckinConfig{Enabled: true, MinAmount: .1, MaxAmount: .1, StreakDays: 7, Growth: GrowthConfig{Tasks: (GrowthConfig{}).tasks()}, RechargeRequirement: RechargeRequirement{RechargeWindowDays: 30}}, cfg)
 	require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{Enabled: true, MinAmount: .12345678, MaxAmount: .22345678}))
 	c, err := s.Config(ctx)
 	require.NoError(t, err)

@@ -377,7 +377,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	c = current
 	amount := c.CheckinReward
 	var requirement RechargeRequirement
-	var streakChances int
+	var streakChances, streakDays int
 	if kind == "invite" {
 		if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 			return "邀请奖励未开启。", nil
@@ -406,6 +406,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		}
 		requirement = cfg.RechargeRequirement
 		streakChances = cfg.StreakChances
+		streakDays = cfg.streakDays()
 		amount, err = randomCheckinAmount(cfg)
 		if err != nil {
 			return "", err
@@ -506,7 +507,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	}
 	var streak, bonus int
 	if kind == "checkin" {
-		streak, bonus, err = grantStreak(ctx, tx, userID, rewardAt, streakChances)
+		streak, bonus, err = grantStreak(ctx, tx, userID, rewardAt, streakChances, streakDays)
 		if err != nil {
 			return "", err
 		}
@@ -523,7 +524,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		text += fmt.Sprintf("\n连签奖励：%d 次抽奖机会", bonus)
 	}
 	if streakChances > 0 {
-		text += fmt.Sprintf("\n距离下次连签奖励：%d 天", 7-streak%7)
+		text += fmt.Sprintf("\n距离下次连签奖励：%d 天", streakDays-streak%streakDays)
 	}
 	return text, nil
 }

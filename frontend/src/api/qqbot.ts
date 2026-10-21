@@ -55,9 +55,14 @@ export interface QQBindingState {
   binding: { member_id: string; group_id: string; nickname: string; created_at: string } | null
   pending: QQBindingRequest | null
 }
+export type QQGrowthTaskKind = 'binding' | 'usage_count' | 'checkin_total' | 'checkin_streak' | 'recharge_total'
+export interface QQGrowthTask {
+  id: string; name: string; kind: QQGrowthTaskKind; target: number; chances: number; enabled: boolean
+}
 export interface QQCheckinConfig {
+  streak_days: number
   streak_chances: number
-  growth: { binding_chances: number; first_usage_chances: number; checkin_30_chances: number }
+  growth: { binding_chances: number; first_usage_chances: number; checkin_30_chances: number; tasks: QQGrowthTask[] }
   enabled: boolean; min_amount: number; max_amount: number
   min_recharge_total: number; min_recharge_30d: number; recharge_window_days: number
 }

@@ -29,6 +29,9 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 		r.GET("/lottery/users/:user_id", h.LotteryState)
 		for _, tc := range []struct{ method, path, body string }{
 			{"PUT", "/checkin", `{"min_amount":2,"max_amount":1}`},
+			{"PUT", "/checkin", `{"streak_days":-1}`},
+			{"PUT", "/checkin", `{"growth":{"tasks":[{"id":"bad","name":"Invalid task","kind":"usage_count","target":1.5,"chances":1,"enabled":true}]}}`},
+			{"PUT", "/checkin", `{"growth":{"tasks":[{"id":"bad","name":"Invalid task","kind":"recharge_total","target":1.001,"chances":1,"enabled":true}]}}`},
 			{"PUT", "/checkin", `{"min_amount":0.1,"max_amount":0.5,"min_recharge_30d":0.001}`},
 			{"PUT", "/lottery", `{"enabled":true,"recharge_step":0}`},
 			{"PUT", "/lottery", `{"title":"test","recharge_step":10,"chances_per_step":1,"prizes":[{"name":"normal","amount":0,"probability_bps":10000}],"guarantee_enabled":true,"guarantee_every":0}`},

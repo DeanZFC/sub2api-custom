@@ -139,7 +139,7 @@ func TestHelpInteractionLotteryAndAcknowledgementFailureDoNotReplay(t *testing.T
 }
 
 func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
-	for _, change := range []string{"page", "custom reordered", "custom disabled", "group removed", "bot disabled", "expired"} {
+	for _, change := range []string{"page", "page removed", "custom reordered", "custom disabled", "group removed", "bot disabled", "expired"} {
 		t.Run(change, func(t *testing.T) {
 			db := testDB(t)
 			s := savedBot(t, db)
@@ -151,7 +151,7 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 			require.NoError(t, err)
 			recorder := mockHelpInteractions(t, s, false)
 			action := "custom:/custom"
-			if change == "page" {
+			if change == "page" || change == "page removed" {
 				action = "page:2"
 			}
 			i := testHelpInteraction("action", action, "clicker")
@@ -161,7 +161,7 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 			switch change {
 			case "custom reordered":
 				c.CustomCommands = []CustomCommand{{Command: "/other", Reply: "wrong reply", Enabled: true}, {Command: "/custom", Reply: "updated reply", Enabled: true}}
-			case "custom disabled":
+			case "custom disabled", "page removed":
 				c.CustomCommands[0].Enabled = false
 			case "group removed":
 				c.AllowedGroups = []string{"other-group"}
@@ -178,9 +178,17 @@ func TestHelpInteractionPagesAndFreshConfiguration(t *testing.T) {
 			defer recorder.mu.Unlock()
 			if change == "page" {
 				require.Len(t, recorder.replies, 1)
-				require.Contains(t, recorder.replies[0].text(), "第 2/3 页")
-				require.Contains(t, recorder.replies[0].text(), "**/今日用量**")
+				require.Contains(t, recorder.replies[0].text(), "第 2/2 页")
+				require.Contains(t, recorder.replies[0].text(), "指令帮助 · 自定义指令")
+				require.Contains(t, recorder.replies[0].text(), "**/custom**")
+				require.NotContains(t, recorder.replies[0].text(), "**/今日用量**")
 				require.NotNil(t, recorder.replies[0].Keyboard)
+				for _, row := range recorder.replies[0].Keyboard.Content.Rows {
+					for _, button := range row.Buttons {
+						require.Equal(t, 2, button.Action.Type, "old callbacks must return the new command menu")
+						require.Equal(t, button.RenderData.Label, button.RenderData.VisitedLabel)
+					}
+				}
 			} else if change == "custom reordered" {
 				require.Len(t, recorder.replies, 1)
 				require.Contains(t, recorder.replies[0].text(), "updated reply")

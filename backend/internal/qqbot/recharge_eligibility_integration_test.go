@@ -17,7 +17,7 @@ func TestCheckinRechargeThresholdsRejectWithoutConsumingDay(t *testing.T) {
 	s := savedBot(t, db)
 	c, err := s.Config(ctx)
 	require.NoError(t, err)
-	cfg := CheckinConfig{Enabled: true, MinAmount: .1, MaxAmount: .1,
+	cfg := CheckinConfig{Enabled: true, MinAmount: .1, MaxAmount: .1, StreakDays: 7, Growth: GrowthConfig{Tasks: (GrowthConfig{}).tasks()},
 		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 25, MinRecharge30d: 10, RechargeWindowDays: 7}}
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
 	got, err := s.CheckinConfig(ctx)
