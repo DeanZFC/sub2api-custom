@@ -35,7 +35,7 @@ func rankingGrowthTasks(ctx context.Context, tx *sql.Tx, appID string, uid int64
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	text := "## 周期性成长任务\n\n每日排行奖励 · 北京时间次日 00:10 结算资格。发送 /今日排行榜 查看实时名次。"
 	count := 0
 	for rows.Next() {

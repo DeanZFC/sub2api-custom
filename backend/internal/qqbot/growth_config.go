@@ -93,7 +93,7 @@ func validateGrowth(c CheckinConfig) error {
 			}
 		case "usage_tokens":
 			if task.Target < 1 || task.Target > 1e15 || math.Trunc(task.Target) != task.Target {
-				return errors.New("Token 目标须为 1～1000000000000000 的整数")
+				return errors.New("累计 Token 目标须为 1～1000000000000000 的整数")
 			}
 		case "recharge_total", "usage_amount":
 			if task.Target < .01 || !validRechargeThreshold(task.Target) {

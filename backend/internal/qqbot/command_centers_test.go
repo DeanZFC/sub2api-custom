@@ -97,7 +97,7 @@ func TestWelfarePaginationPreservesAllTasksAndKeyboardCapacity(t *testing.T) {
 	var rebuilt strings.Builder
 	for _, page := range pages {
 		require.LessOrEqual(t, len([]rune(page.text)), 1300)
-		rebuilt.WriteString(page.text)
+		_, _ = rebuilt.WriteString(page.text)
 	}
 	require.Equal(t, long, rebuilt.String())
 }

@@ -49,7 +49,7 @@ ORDER BY 1,2`, start, end, rankingTopN)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var entries []rankingEntry
 	for rows.Next() {
 		var entry rankingEntry
