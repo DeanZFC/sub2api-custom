@@ -58,9 +58,10 @@ func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 		r.Priority, r.RequiredPass, r.PauseOnFailure = 0, false, true
 		r.OnPass = &ScheduledTestOutcomeAction{Scheduling: pass.Scheduling, GroupMode: "keep"}
 		r.OnFail = &ScheduledTestOutcomeAction{Scheduling: fail.Scheduling, GroupMode: "keep"}
-		if r.Vote == nil || !r.Vote.Enabled {
+		if r.Vote == nil || !r.Vote.Enabled || r.HasDurationThreshold() {
 			automatic++
-		} else if r.Vote.PublicEnabled {
+		}
+		if r.Vote != nil && r.Vote.Enabled && r.Vote.PublicEnabled {
 			return fmt.Errorf("all_pass review is administrator-only")
 		}
 	}
@@ -73,7 +74,7 @@ func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 // Recovering checks retain their independent hold and request budget. Releasing
 // the policy hold only permits a bounded trial; it never grants full recovery.
 // Pending checks preserve active accounts, but cannot release an existing pause.
-// For review rules, verdicts contains only the current administrator decision.
+// Review verdicts also include any explicitly configured duration condition.
 func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts map[int64]string, recovering map[int64]bool, held bool) (ScheduledTestCombinationDecision, string) {
 	decision := ScheduledTestCombinationDecision{Action: &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "keep"}}
 	if !config.Enabled || !config.UsesAllPass() {
@@ -96,7 +97,7 @@ func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts
 			decision.Action = &action
 			return decision, "自动检测或人工评审不通过，执行不通过动作"
 		}
-		if rule.Vote == nil || !rule.Vote.Enabled {
+		if rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold() {
 			automatic++
 			pending = pending || verdicts[id] != "pass"
 		}

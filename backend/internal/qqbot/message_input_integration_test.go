@@ -55,7 +55,11 @@ func TestQQBotImagesAndExactReplyContext(t *testing.T) {
 					}
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 					require.True(t, strings.HasPrefix(body.Reference.ID, "incoming-"))
-					require.Equal(t, 1, body.Sequence, "the generated answer or error is the first reply")
+					wantSequence := 1
+					if (body.MsgID == "image" || body.MsgID == "broken") && body.text() != "正在处理图片，请稍候。" {
+						wantSequence = 2
+					}
+					require.Equal(t, wantSequence, body.Sequence)
 					require.NotContains(t, body.text(), "正在思考")
 					replies <- body.text()
 					n := sent.Add(1)
@@ -89,7 +93,7 @@ func TestQQBotImagesAndExactReplyContext(t *testing.T) {
 			}
 			enqueue("image", " ", "alice", "group", groupAtMessageCreate, "", []Attachment{{URL: "https://image.example/secret-query", ContentType: "image/png"}})
 			require.EqualValues(t, 1, calls.Load(), "image-only messages must not return help")
-			require.EqualValues(t, 1, sent.Load(), "send only the generated answer")
+			require.EqualValues(t, 2, sent.Load(), "image input gets a processing notice before the answer")
 			firstInput := string(<-modelInputs)
 			require.Contains(t, firstInput, "data:image/png;base64,")
 			require.NotContains(t, firstInput, "secret-query")

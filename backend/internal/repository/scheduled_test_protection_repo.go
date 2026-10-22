@@ -155,6 +155,8 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 }
 
 type protectionState struct {
+	latencyMs                                                      sql.NullInt64
+	resultStatus                                                   sql.NullString
 	recoveryPhase                                                  string
 	recoveryCooldownUntil, recoveryTrialStarted, recoveryTrialEnds sql.NullTime
 	recoveryTrialRequests                                          int64
@@ -173,10 +175,12 @@ func loadProtectionState(ctx context.Context, tx *sql.Tx, resultID int64) (*prot
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT plan_id,account_id,test_definition_id,result_id,generation,result_started_at,
 		automated_verdict,verdict,reason,blocked,completed,rule_config,round_started_at,admin_verdict,
-		recovery_phase,recovery_cooldown_until,recovery_trial_started_at,recovery_trial_ends_at,recovery_trial_requests
+		recovery_phase,recovery_cooldown_until,recovery_trial_started_at,recovery_trial_ends_at,recovery_trial_requests,
+		(SELECT latency_ms FROM scheduled_test_results WHERE id=$1),
+		(SELECT status FROM scheduled_test_results WHERE id=$1)
 		FROM scheduled_test_protection_states WHERE result_id=$1 FOR UPDATE`, resultID).Scan(
 		&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started, &s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw, &s.roundStarted, &s.adminVerdict,
-		&s.recoveryPhase, &s.recoveryCooldownUntil, &s.recoveryTrialStarted, &s.recoveryTrialEnds, &s.recoveryTrialRequests)
+		&s.recoveryPhase, &s.recoveryCooldownUntil, &s.recoveryTrialStarted, &s.recoveryTrialEnds, &s.recoveryTrialRequests, &s.latencyMs, &s.resultStatus)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +198,16 @@ func protectionVoteCounts(ctx context.Context, tx *sql.Tx, state *protectionStat
 }
 
 func combineProtectionVerdict(state *protectionState, pass, fail int) (string, bool, string) {
+	if state.completed && state.rule.HasDurationThreshold() {
+		latency := int64(-1)
+		if state.latencyMs.Valid {
+			latency = state.latencyMs.Int64
+		}
+		verdict, reason := service.EvaluateScheduledTestDuration(state.rule, &service.ScheduledTestResult{Status: state.resultStatus.String, LatencyMs: latency})
+		if verdict == "fail" || (verdict == "pending" && state.adminVerdict != "fail") {
+			return verdict, verdict == "fail" || state.blocked, reason
+		}
+	}
 	if state.adminVerdict == "pass" || state.adminVerdict == "fail" {
 		return state.adminVerdict, state.adminVerdict == "fail", "管理员判定渠道质量检测结果"
 	}

@@ -421,6 +421,21 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	var img []byte
 	imageEdited := false
 	seq := 1
+	progressAttempted := false
+	sendImageProgress := func(notice string) {
+		if progressAttempted {
+			return
+		}
+		progressAttempted = true
+		progressJob := *j
+		progressJob.TransientReply = true
+		progressCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		// A failed/uncertain notice must neither stop paid work nor be retried.
+		// Consume its sequence even on failure to avoid reusing a QQ message ID.
+		_ = s.send(progressCtx, c, progressJob, notice, nil, seq)
+		seq++
+	}
 	switch cmd {
 	case "帮助":
 		return s.sendHelp(ctx, c, *j, arg)
@@ -583,11 +598,14 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		j.Kind = kind
 		var err error
 		if kind == "image" {
+			sendImageProgress("正在生成图片，请稍候。")
 			img, err = s.generateImage(ctx, c, prompt)
 		} else {
 			messages := s.history(ctx, c, *j)
 			var input Message
-			input, err = s.chatMessage(ctx, c, e, prompt, ref)
+			input, err = s.chatMessageWithImageProgress(ctx, c, e, prompt, ref, func() {
+				sendImageProgress("正在处理图片，请稍候。")
+			})
 			if err == nil {
 				messages = append(messages, groupUserMessage(c, e, input))
 				j.ShareHistory = shareableGroupEvent(e, ref)
@@ -606,8 +624,10 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 						kind, j.Kind = "image", "image"
 						if turn.EditImageIndex > 0 {
 							imageEdited = true
+							sendImageProgress("正在修改图片，请稍候。")
 							img, err = s.editImage(ctx, c, turn.ImagePrompt, input.Images[turn.EditImageIndex-1])
 						} else {
+							sendImageProgress("正在生成图片，请稍候。")
 							img, err = s.generateImage(ctx, c, turn.ImagePrompt)
 						}
 						if err == nil {

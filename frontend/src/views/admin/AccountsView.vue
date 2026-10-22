@@ -10,12 +10,18 @@
           @update:model-value="handlePlatformChange"
           @retry="refreshPlatformCounts"
         />
+        <AccountGroupTabs
+          :model-value="params.group"
+          :groups="filterGroups"
+          @update:model-value="handleGroupChange"
+        />
         <div class="flex flex-wrap-reverse items-start justify-between gap-3">
           <AccountTableFilters
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
             hide-platform
+            hide-group
             @update:filters="(newFilters) => Object.assign(params, newFilters)"
             @change="debouncedReload"
             @update:searchQuery="debouncedReload"
@@ -225,6 +231,12 @@
           ref="accountTableRef"
           role="tabpanel"
           :aria-labelledby="`account-platform-tab-${params.platform || 'all'}`"
+          class="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
+        <div
+          id="account-group-panel"
+          role="tabpanel"
+          :aria-labelledby="`account-group-tab-${params.group || 'all'}`"
           class="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
         <DataTable
@@ -494,6 +506,7 @@
           </template>
         </DataTable>
         </div>
+        </div>
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
@@ -541,6 +554,7 @@ import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import type { AccountPlatformCount, BatchSyncUpstreamModelsResult, UpstreamModelSyncWarning } from '@/api/admin/accounts'
 import AccountPlatformTabs from '@/components/admin/account/AccountPlatformTabs.vue'
+import AccountGroupTabs from '@/components/admin/account/AccountGroupTabs.vue'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -1438,9 +1452,30 @@ const debouncedReload = () => {
   baseDebouncedReload()
 }
 
+// Composite groups accept every platform; Antigravity may also be bound to
+// Anthropic/Gemini groups through mixed scheduling. Match the group selector.
+const filterGroups = computed(() => groups.value
+  .filter(group => !params.platform || group.platform === params.platform || group.platform === 'composite' ||
+    (params.platform === 'antigravity' && ['anthropic', 'gemini'].includes(group.platform)))
+  .slice()
+  .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id))
+
 const handlePlatformChange = async (platform: string) => {
   if (params.platform === platform) return
   params.platform = platform
+  if (params.group && params.group !== 'ungrouped' &&
+      !filterGroups.value.some(group => String(group.id) === params.group)) {
+    params.group = ''
+  }
+  pagination.page = 1
+  clearSelection()
+  menu.show = false
+  await load()
+}
+
+const handleGroupChange = async (group: string) => {
+  if (params.group === group) return
+  params.group = group
   pagination.page = 1
   clearSelection()
   menu.show = false

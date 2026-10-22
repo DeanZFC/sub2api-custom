@@ -257,6 +257,7 @@
         <ChannelHealthCards
           v-else-if="matrix"
           :rows="matrixRows"
+          :coverage="matrix.coverage"
           :group-by="matrixGroupBy"
           :health-mode="healthMode"
           :test-results="testResults"

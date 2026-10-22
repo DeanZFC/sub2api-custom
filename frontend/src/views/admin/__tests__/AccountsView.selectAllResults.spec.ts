@@ -103,7 +103,7 @@ const AccountBulkActionsBarStub = {
 }
 
 const AccountTableFiltersStub = {
-  props: { filters: Object, hidePlatform: Boolean },
+  props: { filters: Object, hidePlatform: Boolean, hideGroup: Boolean },
   emits: ['change', 'update:filters'],
   template: '<button data-test="change-filter" @click="$emit(\'change\')">change filter</button>'
 }
@@ -262,6 +262,7 @@ describe('admin AccountsView select all filtered results', () => {
   it('loads global platform tabs and switches server filters while clearing selection and pagination', async () => {
     const counts = [{ platform: 'grok', count: 45 }, { platform: 'openai', count: 1001 }]
     getPlatformCounts.mockResolvedValue(counts)
+    getAllGroups.mockResolvedValue([{ id: 7, name: 'Codex', platform: 'openai', sort_order: 0 }])
     listAccounts.mockResolvedValue({ items: makeAccounts(20), total: 1046, page: 1, page_size: 20, pages: 53 })
     const wrapper = mountView()
     await flushPromises()
@@ -270,6 +271,7 @@ describe('admin AccountsView select all filtered results', () => {
     expect(wrapper.get('[role="tab"][data-platform=""]').text()).toContain('1046')
     expect(wrapper.find('[role="tab"][data-platform="anthropic"]').exists()).toBe(false)
     expect(wrapper.getComponent(AccountTableFiltersStub).props('hidePlatform')).toBe(true)
+    expect(wrapper.getComponent(AccountTableFiltersStub).props('hideGroup')).toBe(true)
 
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
@@ -286,6 +288,99 @@ describe('admin AccountsView select all filtered results', () => {
     await wrapper.get('[role="tab"][data-platform=""]').trigger('click')
     await flushPromises()
     expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: '', search: 'team' }), expect.any(Object))
+    wrapper.unmount()
+  })
+
+  it('filters groups by platform and resets pagination and selection when changing groups', async () => {
+    getPlatformCounts.mockResolvedValue([{ platform: 'openai', count: 30 }, { platform: 'grok', count: 2 }])
+    getAllGroups.mockResolvedValue([
+      { id: 7, name: 'Codex Pro', platform: 'openai', sort_order: 20 },
+      { id: 8, name: 'Grok', platform: 'grok', sort_order: 10 },
+      { id: 9, name: 'Codex Plus', platform: 'openai', sort_order: 10 },
+      { id: 10, name: 'Composite', platform: 'composite', sort_order: 30 }
+    ])
+    listAccounts.mockResolvedValue({ items: makeAccounts(20), total: 32, page: 1, page_size: 20, pages: 2 })
+    const wrapper = mountView()
+    await flushPromises()
+    const groupValues = () => wrapper.findAll('[role="tab"][data-group]').map(tab => tab.attributes('data-group'))
+    expect(groupValues()).toEqual(['', 'ungrouped', '8', '9', '7', '10'])
+
+    await wrapper.get('[data-platform="openai"]').trigger('click')
+    await flushPromises()
+    expect(groupValues()).toEqual(['', 'ungrouped', '9', '7', '10'])
+    await wrapper.get('[data-test="next-page"]').trigger('click')
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(2, 20, expect.any(Object), expect.any(Object))
+    await wrapper.get('[data-test="select-page"]').trigger('click')
+    expect(wrapper.get('[data-test="selected-count"]').text()).toBe('20')
+    wrapper.getComponent(AccountTableFiltersStub).vm.$emit('update:filters', { search: 'team', status: 'active' })
+
+    await wrapper.get('[data-group="9"]').trigger('click')
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'openai', group: '9', search: 'team', status: 'active' }), expect.any(Object))
+    expect(wrapper.get('[data-test="selected-count"]').text()).toBe('0')
+    expect(wrapper.get('[data-group="9"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#account-group-panel').attributes('aria-labelledby')).toBe('account-group-tab-9')
+    const requests = listAccounts.mock.calls.length
+    await wrapper.get('[data-group="9"]').trigger('click')
+    await flushPromises()
+    expect(listAccounts).toHaveBeenCalledTimes(requests)
+
+    await wrapper.get('[data-platform="grok"]').trigger('click')
+    await flushPromises()
+    expect(groupValues()).toEqual(['', 'ungrouped', '8', '10'])
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'grok', group: '', search: 'team', status: 'active' }), expect.any(Object))
+    expect(wrapper.get('[data-group=""]').attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('supports ungrouped and all-group keyboard navigation without changing the platform', async () => {
+    getPlatformCounts.mockResolvedValue([{ platform: 'openai', count: 1 }])
+    getAllGroups.mockResolvedValue([{ id: 7, name: 'Codex', platform: 'openai', sort_order: 0 }])
+    listAccounts.mockResolvedValue({ items: makeAccounts(1), total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-platform="openai"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-group=""]').trigger('keydown', { key: 'ArrowRight' })
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'openai', group: 'ungrouped' }), expect.any(Object))
+    expect(wrapper.get('[data-group="ungrouped"]').attributes('tabindex')).toBe('0')
+    expect(wrapper.get('[data-group=""]').attributes('tabindex')).toBe('-1')
+    await wrapper.get('[data-platform=""]').trigger('click')
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: '', group: 'ungrouped' }), expect.any(Object))
+    await wrapper.get('[data-group="ungrouped"]').trigger('keydown', { key: 'End' })
+    await flushPromises()
+    expect(wrapper.get('[data-group="7"]').attributes('aria-selected')).toBe('true')
+    await wrapper.get('[data-group="7"]').trigger('keydown', { key: 'Home' })
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: '', group: '' }), expect.any(Object))
+    wrapper.unmount()
+  })
+
+  it('retains composite groups across platforms and includes Antigravity mixed-scheduling groups', async () => {
+    getPlatformCounts.mockResolvedValue([{ platform: 'openai', count: 1 }, { platform: 'antigravity', count: 1 }])
+    getAllGroups.mockResolvedValue([
+      { id: 1, name: 'OpenAI', platform: 'openai', sort_order: 0 },
+      { id: 2, name: 'Anthropic', platform: 'anthropic', sort_order: 1 },
+      { id: 3, name: 'Gemini', platform: 'gemini', sort_order: 2 },
+      { id: 4, name: 'Antigravity', platform: 'antigravity', sort_order: 3 },
+      { id: 5, name: 'Composite', platform: 'composite', sort_order: 4 }
+    ])
+    listAccounts.mockResolvedValue({ items: makeAccounts(1), total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-group="5"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-platform="openai"]').trigger('click')
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'openai', group: '5' }), expect.any(Object))
+    await wrapper.get('[data-platform="antigravity"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[role="tab"][data-group]').map(tab => tab.attributes('data-group'))).toEqual(['', 'ungrouped', '2', '3', '4', '5'])
+    expect(wrapper.get('[data-group="5"]').attributes('aria-selected')).toBe('true')
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'antigravity', group: '5' }), expect.any(Object))
     wrapper.unmount()
   })
 

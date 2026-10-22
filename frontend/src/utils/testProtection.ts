@@ -144,7 +144,7 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
   if (allPass && (!validAction(allPassOutcomeAction(value, 'pass'), groups) || !validAction(allPassOutcomeAction(value, 'fail'), groups))) return false
   if (allPass && value.rules.some(rule => rule.recovery?.enabled)
     && (allPassOutcomeAction(value, 'pass').scheduling !== 'resume' || allPassOutcomeAction(value, 'fail').scheduling !== 'pause')) return false
-  if (allPass && (!value.rules.some(rule => !rule.vote?.enabled) || value.rules.some(rule => rule.vote?.public_enabled))) return false
+  if (allPass && (!value.rules.some(rule => !rule.vote?.enabled || rule.thresholds?.some(item => item.metric === 'latency_ms')) || value.rules.some(rule => rule.vote?.public_enabled))) return false
   if (combined ? !validTestCombinations(value, groups) : !!value.combinations?.length) return false
   if (!value.rules.length || value.rules.length > 32) return false
   if (new Set(value.rules.map(rule => rule.test_definition_id)).size !== value.rules.length) return false

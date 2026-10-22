@@ -164,6 +164,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 }
 
 type Job struct {
+	TransientReply  bool            `json:"-"`
 	TriggerReason   string          `json:"trigger_reason"`
 	DecisionReason  string          `json:"decision_reason"`
 	SuppressMention bool            `json:"-"`

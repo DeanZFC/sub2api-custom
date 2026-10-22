@@ -26,7 +26,7 @@ func (r *channelQualityRepository) ListQualityAccounts(ctx context.Context, f se
  SELECT a.* FROM accounts a WHERE a.deleted_at IS NULL AND a.id>$1
  AND ($2=0 OR a.id=$2) AND ($3='' OR a.name ILIKE '%'||$3||'%' OR a.id::text=$3)
  AND ($4=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=$4))
- AND ($5='' OR EXISTS(SELECT 1 FROM passive_quality_states s WHERE s.account_id=a.id AND s.data->>'model'=$5)
+ AND ($5='' OR EXISTS(SELECT 1 FROM passive_quality_states s WHERE s.account_id=a.id AND s.data->>'model' IN ('',$5))
  OR EXISTS(SELECT 1 FROM scheduled_test_plans p JOIN account_groups ag ON ag.group_id=ANY(p.group_ids) WHERE ag.account_id=a.id AND p.enabled AND p.model_id=$5))
  AND (NOT $6 OR a.status<>'active' OR NOT a.schedulable OR a.rate_limit_reset_at>now() OR a.temp_unschedulable_until>now() OR a.overload_until>now()
  OR EXISTS(SELECT 1 FROM passive_quality_states s WHERE s.account_id=a.id AND s.data->>'phase' IN ('limited','paused','probing','trial','suspect','observed'))

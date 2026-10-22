@@ -4,6 +4,7 @@
       <button v-if="selected" type="button" class="btn btn-secondary mb-4" data-testid="pelican-back" @click="selectedId = null">{{ t('channelMonitorV2.tests.backToAll') }}</button>
       <div v-if="selected" data-testid="pelican-expanded">
         <p class="mb-3 text-sm text-gray-500">{{ accountLabel(selected.account_id) }} · {{ selected.model_id || '—' }}</p>
+        <p v-if="selected.latency_ms != null && selected.latency_ms >= 0" class="mb-3 text-xs text-gray-500">{{ t('admin.tests.totalDuration', { seconds: Number((selected.latency_ms / 1000).toFixed(3)) }) }}</p>
         <TestResultOutput :result="selected" />
       </div>
       <div v-else class="space-y-5" data-testid="pelican-accounts">
@@ -24,6 +25,7 @@
               </div>
               <div class="relative min-h-24 overflow-hidden rounded-lg bg-gray-50 dark:bg-dark-900/30">
                 <div class="pointer-events-none max-h-48 overflow-hidden" aria-hidden="true" inert>
+                  <p v-if="result.latency_ms != null && result.latency_ms >= 0" class="mb-2 text-xs text-gray-500" data-test-duration>{{ t('admin.tests.totalDuration', { seconds: Number((result.latency_ms / 1000).toFixed(3)) }) }}</p>
                   <TestResultOutput :result="result" compact :max-preview-height="190" />
                 </div>
                 <button type="button" class="absolute inset-0 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500" :aria-label="t('channelMonitorV2.tests.enlarge', { account: accountLabel(account.id), model: result.model_id || '—' })" data-testid="pelican-enlarge" @click="selectedId = result.id" />

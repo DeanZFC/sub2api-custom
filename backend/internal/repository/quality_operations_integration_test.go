@@ -250,6 +250,36 @@ func TestQualityOperationsReplayReadOnlyAndFreshEvidenceIntegration(t *testing.T
 	require.Error(t, err)
 }
 
+func TestQualityOperationsReplayAllModelsIntegration(t *testing.T) {
+	ctx, db, r, passive := qualityOperationsDB(t)
+	from := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	for i := 0; i < 7; i++ {
+		at := from.Add(-time.Second)
+		if i >= 5 {
+			at = from.Add(30 * time.Second)
+		}
+		require.NoError(t, passive.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: 62, Model: fmt.Sprintf("model-%d", i%2), RequestKey: fmt.Sprintf("mixed-%d", i), StartedAt: at, At: at}}, nil))
+	}
+	p := newPassivePolicy()
+	p.Model = ""
+	req := service.QualityReplayRequest{Config: p.PassiveQualityConfig, AccountIDs: []int64{62}, From: from, To: from.Add(time.Minute), StepSeconds: 15}
+	result, err := r.ReplayQualityPolicy(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Triggers)
+	require.Equal(t, 5, result.Points[0].Evidence.Samples)
+	require.Equal(t, "would_pause", result.Points[2].Action)
+	req.Config.Model = "model-0"
+	filtered, err := r.ReplayQualityPolicy(ctx, req)
+	require.NoError(t, err)
+	require.Zero(t, filtered.Triggers, "each model alone has insufficient samples")
+	require.Equal(t, 3, filtered.Points[0].Evidence.Samples)
+	for _, table := range []string{"passive_quality_states", "passive_quality_events", "passive_quality_policies", "quality_probe_attempts", "quality_budget_days"} {
+		var count int
+		require.NoError(t, db.QueryRow(`SELECT count(*) FROM `+table).Scan(&count))
+		require.Zero(t, count, table)
+	}
+}
+
 func TestQualityOperationsDeferredPassiveProbeKeepsHoldAndBackoffIntegration(t *testing.T) {
 	ctx, _, _, r := qualityOperationsDB(t)
 	p := newPassivePolicy()

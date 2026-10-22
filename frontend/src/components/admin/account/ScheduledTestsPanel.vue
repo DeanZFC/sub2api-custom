@@ -390,7 +390,7 @@
 
                     <!-- Latency -->
                     <span v-if="result.latency_ms > 0" class="text-xs text-gray-500 dark:text-gray-400">
-                      {{ result.latency_ms }}ms
+                      {{ t('admin.tests.totalDuration', { seconds: Number((result.latency_ms / 1000).toFixed(3)) }) }}
                     </span>
                   </div>
 

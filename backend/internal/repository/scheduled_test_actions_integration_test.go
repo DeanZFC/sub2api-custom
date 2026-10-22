@@ -95,6 +95,10 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		reset(t)
 		testScheduledTestAllPassLifecycle(t, ctx, db, plans, repo)
 	})
+	t.Run("pelican duration limits coexist with review", func(t *testing.T) {
+		reset(t)
+		testScheduledTestPelicanDuration(t, ctx, db, plans, repo)
+	})
 	t.Run("all pass custom actions", func(t *testing.T) {
 		reset(t)
 		testScheduledTestAllPassCustomActions(t, ctx, db, plans, repo)

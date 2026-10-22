@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { describe, expect, it } from 'vitest'
 import ChannelHealthCards from '../ChannelHealthCards.vue'
-import { cardHealth, hasMonitorTraffic, recentRequestsForCard, requestHealth } from '../monitorCards'
+import { cardHealth, hasMonitorTraffic, historyBucketsForCard, recentRequestsForCard, requestHealth } from '../monitorCards'
 import zh from '@/i18n/locales/zh/channelMonitorV2'
 import type { TestResult } from '@/types'
 import type { MonitorCoverage, MonitorHealth, MonitorMatrixRow, MonitorMetric, MonitorRecentRequest } from '@/api/channelMonitorV2'
@@ -37,6 +37,34 @@ describe('channel health cards', () => {
     expect(cardHealth(health, 'ttft')).toBe('warning')
   })
 
+  it.each([
+    ['90m', 90 * 60, 300, 2],
+    ['24h', 24 * 3600, 3600, 0],
+    ['7d', 7 * 86400, 12 * 3600, 6],
+    ['30d', 30 * 86400, 86400, 0],
+  ] as const)('shows 20 slots with real aggregate intervals for %s', (_, seconds, bucketSeconds, padding) => {
+    const end = Date.parse('2026-10-22T00:00:00Z')
+    const selected = { ...coverage, requested_start: new Date(end - seconds * 1000).toISOString(), requested_end: new Date(end).toISOString(), bucket_seconds: bucketSeconds }
+    const slots = historyBucketsForCard([], selected)
+    expect(slots).toHaveLength(20)
+    expect(slots.filter(slot => slot === null)).toHaveLength(padding)
+    expect(slots[padding]?.start).toBe(end - Math.min(20, seconds / bucketSeconds) * bucketSeconds * 1000)
+    expect(slots[19]?.end).toBe(end)
+    expect(slots[19]!.end - slots[19]!.start).toBe(bucketSeconds * 1000)
+  })
+
+  it('preserves gaps and the selected range during partial aggregation, regardless of bucket order', () => {
+    const lastBucket = { ...row.buckets[0], bucket_start: '2026-10-20T01:20:00Z' }
+    const outside = { ...row.buckets[0], bucket_start: coverage.requested_end! }
+    const slots = historyBucketsForCard([outside, lastBucket, row.buckets[0]], coverage)
+    expect(slots[4]?.bucket).toBe(row.buckets[0])
+    expect(slots[5]?.bucket).toBeUndefined()
+    expect(slots[18]?.bucket).toBe(lastBucket)
+    expect(slots[19]).toEqual({ start: Date.parse(coverage.data_through), end: Date.parse(coverage.requested_end!), bucket: undefined })
+    expect(slots.flatMap(slot => slot?.bucket ? [slot.bucket] : [])).toHaveLength(2)
+    expect(historyBucketsForCard([], { ...coverage, requested_end: undefined })[19]?.end).toBe(Date.parse(coverage.data_through))
+  })
+
   it('sorts and caps actual requests at 20, with gray placeholders before sparse history', () => {
     const requests = Array.from({ length: 25 }, (_, index) => request('success', index)).reverse()
     const slots = recentRequestsForCard(requests)
@@ -56,7 +84,7 @@ describe('channel health cards', () => {
   it('renders compact channel cards and real request states without a per-model status section', async () => {
     const wrapper = mount(ChannelHealthCards, {
       props: { rows: [{ ...row, recent_requests: [request('success'), request('slow', 1), request('error', 2), request('ignored', 3)] }],
-        groupBy: 'platform_group', healthMode: 'overall' },
+        coverage, groupBy: 'platform_group', healthMode: 'overall' },
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
     })
     expect(wrapper.findAll('[data-testid=channel-health-card]')).toHaveLength(1)
@@ -76,6 +104,36 @@ describe('channel health cards', () => {
     wrapper.unmount()
   })
 
+  it('renders interval statistics above requests with the original score colors and mode-specific metrics', async () => {
+    const scoredHealth = { ...health, score: 96, ttft_score: 65, error_rate_score: 100, cache_score: 30, cache: 'critical' as const }
+    const wrapper = mount(ChannelHealthCards, {
+      props: { coverage, rows: [{ ...row, buckets: [{ ...row.buckets[0], health: scoredHealth }], recent_requests: [request('success')] }], groupBy: 'platform_group', healthMode: 'overall' },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+    })
+    const history = wrapper.get('[data-testid=health-history]')
+    expect(history.text()).toContain('近 20 个时段统计')
+    expect(history.text()).toContain('综合 · 5 分钟粒度')
+    expect(wrapper.html().indexOf('data-testid="health-history"')).toBeLessThan(wrapper.html().indexOf('data-testid="recent-requests"'))
+    const slots = history.findAll('[role=img]')
+    expect(slots).toHaveLength(20)
+    expect(slots[0].attributes('title')).toBe('当前时间范围内暂无更多统计时段')
+    expect(slots[3].attributes('title')).toContain('该时段暂无统计数据')
+    expect(slots[4].classes()).toContain('health-score10')
+    expect(slots[4].attributes('title')).toContain('健康分 96\n成功率 96.0%\n首 Token AVG 9.0s · P50 8.0s · P95 12.0s\n缓存率 70.0%\n请求时长 -')
+    expect(slots[4].attributes('aria-label')).toBe(slots[4].attributes('title'))
+    for (const [healthMode, color] of [['ttft', 'health-score7'], ['cache', 'health-score3'], ['success', 'health-score10']] as const) {
+      await wrapper.setProps({ healthMode })
+      expect(slots[4].classes()).toContain(color)
+      expect(wrapper.get('[data-testid=recent-requests]').findAll('[role=img]')[19].attributes('data-state')).toBe('healthy')
+    }
+    const unknownHealth: MonitorHealth = { ...health, overall: 'unknown', error_rate: 'unknown', ttft: 'unknown', cache: 'unknown' }
+    await wrapper.setProps({ rows: [{ ...row, buckets: [{ ...row.buckets[0], health: unknownHealth }] }] })
+    expect(slots[4].classes()).toContain('health-unknown')
+    expect(slots[4].attributes('title')).toContain('成功率 -')
+    expect(slots[4].attributes('title')).toContain('缓存率 -')
+    wrapper.unmount()
+  })
+
   it('shows the latest actual request per card and complete hover metrics, preserving zero and missing values', async () => {
     const latest = { ...request('success', 10), ttft_ms: 800, cache_rate: 0.8, duration_ms: 3500 }
     const zero = { ...request('success', 1), ttft_ms: 0, cache_rate: 0, duration_ms: 0 }
@@ -83,7 +141,7 @@ describe('channel health cards', () => {
     const wrapper = mount(ChannelHealthCards, {
       props: {
         rows: [{ ...row, recent_requests: [latest, failed, zero] }, { ...row, group_id: 8, recent_requests: [] }],
-        groupBy: 'platform_group', healthMode: 'overall',
+        coverage, groupBy: 'platform_group', healthMode: 'overall',
       },
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
     })
@@ -111,7 +169,7 @@ describe('channel health cards', () => {
           { ...row, group_id: 8, model: 'gpt-5.4' },
           { ...row, model: 'unused-model', has_traffic: false },
         ],
-        groupBy: 'platform_group_model', healthMode: 'overall',
+        coverage, groupBy: 'platform_group_model', healthMode: 'overall',
       },
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
     })
@@ -131,7 +189,7 @@ describe('channel health cards', () => {
       { id: 3, group_id: 8, account_id: 12, model_id: 'private-model', test_key: 'pelican', output_kind: 'html', status: 'success', output_html: '<svg />' },
     ]
     const wrapper = mount(ChannelHealthCards, {
-      props: { rows: [{ ...row, model: 'model-a' }], groupBy: 'platform_group_model', healthMode: 'overall', testResults: tests },
+      props: { coverage, rows: [{ ...row, model: 'model-a' }], groupBy: 'platform_group_model', healthMode: 'overall', testResults: tests },
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: {
         ProviderIcon: true, TestResultOutput: true,
         BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },

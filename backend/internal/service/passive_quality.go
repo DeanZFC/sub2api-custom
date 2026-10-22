@@ -50,6 +50,7 @@ type PassiveQualityPolicy struct {
 }
 type PassiveQualitySample struct {
 	Key        string    `json:"key"`
+	Model      string    `json:"model"`
 	At         time.Time `json:"at"`
 	Failed     bool      `json:"failed"`
 	TTFT       *float64  `json:"ttft"`
@@ -57,6 +58,7 @@ type PassiveQualitySample struct {
 	CacheInput int64     `json:"cache_input"`
 }
 type PassiveQualityEvidence struct {
+	ProbeModel          string    `json:"probe_model,omitempty"`
 	Samples             int       `json:"samples"`
 	Failures            int       `json:"failures"`
 	ConsecutiveFailures int       `json:"consecutive_failures"`
@@ -75,6 +77,7 @@ type PassiveQualityState struct {
 	AccountID      int64                  `json:"account_id"`
 	AccountName    string                 `json:"account_name,omitempty"`
 	Model          string                 `json:"model"`
+	ProbeModel     string                 `json:"probe_model,omitempty"`
 	Scope          string                 `json:"scope"`
 	Mode           string                 `json:"mode"`
 	Version        int64                  `json:"version"`
@@ -146,14 +149,18 @@ func (c *PassiveQualityConfig) Validate() error {
 	}
 	c.Name = strings.TrimSpace(c.Name)
 	c.Model = strings.TrimSpace(c.Model)
-	if c.Name == "" || len(c.Name) > 160 || c.Model == "" || len(c.Model) > 200 {
-		return fmt.Errorf("name and model are required (max 160/200 characters)")
+	if c.Name == "" || len(c.Name) > 160 || len(c.Model) > 200 {
+		return fmt.Errorf("name is required (max 160 characters); optional model must be at most 200 characters")
 	}
 	if c.Mode != "observe" && c.Mode != "enforce" {
 		return fmt.Errorf("mode must be observe or enforce")
 	}
-	if c.Scope != "model" && c.Scope != "account" {
+	if c.Scope != "" && c.Scope != "model" && c.Scope != "account" {
 		return fmt.Errorf("scope must be model or account")
+	}
+	// An unfiltered window always protects the account as a whole.
+	if c.Model == "" || c.Scope == "" {
+		c.Scope = "account"
 	}
 	validIDs := func(ids []int64, max int) bool {
 		seen := map[int64]bool{}
@@ -210,8 +217,15 @@ func PassiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 	var ttft []float64
 	var read, input int64
 	consecutive := true
+	failureProbe := false
 	// Repository supplies newest first, with a deterministic tie break.
 	for _, s := range samples {
+		// Prefer the newest failed request's model; otherwise use the newest
+		// observed model. The caller retains it across cooldown and empty trials.
+		if model := strings.TrimSpace(s.Model); model != "" && (e.ProbeModel == "" || (s.Failed && !failureProbe)) {
+			e.ProbeModel = model
+			failureProbe = s.Failed
+		}
 		if s.At.After(e.Latest) {
 			e.Latest = s.At
 		}
@@ -356,15 +370,15 @@ func (a *Account) PassiveQualityBlocked(model string) bool {
 		if err != nil || !time.Now().Before(end) {
 			return true
 		}
-		if scope == "account" {
+		if scope == "account" && m != "" {
 			accountTrial = true
 		}
 		// Generic account eligibility cannot consume or apply a model's budget.
 		// With overlapping account-wide holds, each model trials its own policy.
-		if model == "" || model != m {
+		if model == "" || (m != "" && model != m) {
 			continue
 		}
-		matchingTrial = true
+		matchingTrial = matchingTrial || m != ""
 		used, _ := v["used"].(float64)
 		budget, _ := v["max_requests"].(float64)
 		if budget > 0 && used >= budget {

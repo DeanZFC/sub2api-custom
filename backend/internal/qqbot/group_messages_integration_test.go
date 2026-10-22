@@ -40,7 +40,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 			_, _ = w.Write([]byte(`{"member_openid":"this-bot"}`))
 		case "/v1/chat/completions":
 			chats.Add(1)
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"answer"}}]}`))
+			_, _ = w.Write(textToolTestJSON(t, "chat_completions", "answer"))
 		case "/v1/images/generations":
 			images.Add(1)
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]string{"b64_json": base64.StdEncoding.EncodeToString(picture.Bytes())}}})
@@ -133,7 +133,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	enqueue("image", "/生图 一只猫", "member", []Mention{{MemberID: "this-bot"}})
 	s.runOne(ctx)
 	require.EqualValues(t, 1, images.Load())
-	require.Equal(t, beforeModels+3, replies.Load())
+	require.Equal(t, beforeModels+4, replies.Load())
 	require.Equal(t, "<qqbot-at-user id=\"member\" />\n图片已生成。", lastReply.Load())
 
 	// The mention event can arrive first and omit mentions of the bot itself.
@@ -146,7 +146,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	enqueue(e.ID, e.Content, e.Author.MemberID, []Mention{{ID: "this-bot"}})
 	s.runOne(ctx)
 	require.EqualValues(t, 2, chats.Load())
-	require.Equal(t, beforeModels+4, replies.Load())
+	require.Equal(t, beforeModels+5, replies.Load())
 	require.Equal(t, "answer", lastReply.Load(), "QQ adds the mention for GROUP_AT_MESSAGE_CREATE replies")
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='mention-first'`).Scan(&count))
 	require.Equal(t, 1, count)
@@ -163,7 +163,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		require.NoError(t, s.Enqueue(ctx, c, p))
 		s.runOne(ctx)
 		require.Equal(t, beforeImages+1, images.Load())
-		require.Equal(t, beforeReplies+2, replies.Load())
+		require.Equal(t, beforeReplies+3, replies.Load())
 		require.Equal(t, "<qqbot-at-user id=\"image-member\" />\n图片已生成。", lastReply.Load())
 		var kind, status string
 		require.NoError(t, db.QueryRow(`SELECT kind,status FROM qq_bot_jobs WHERE message_id=$1`, id).Scan(&kind, &status))

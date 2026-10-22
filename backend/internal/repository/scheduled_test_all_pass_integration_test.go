@@ -21,6 +21,58 @@ type allPassFixture struct {
 	review   func(*service.ScheduledTestResult, string)
 }
 
+func testScheduledTestPelicanDuration(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository) {
+	f := newAllPassFixture(t, ctx, db, plans, repo, false)
+	f.plan.Protection.Rules[3].Thresholds = []service.ScheduledTestThreshold{{Metric: "latency_ms", Operator: "gt", Value: 60000}}
+	_, err := plans.Update(ctx, f.plan)
+	require.NoError(t, err)
+	started := time.Now().UTC().Truncate(time.Microsecond)
+	rows := f.round("duration-slow", started)
+	for i := 0; i < 3; i++ {
+		f.complete(rows[i], "pass")
+	}
+	rows[3].LatencyMs = 60001
+	f.complete(rows[3], "fail")
+	f.check("quality_paused", false, 8, 9)
+	stored, err := repo.GetByID(ctx, rows[3].ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 60001, stored.LatencyMs)
+	require.Equal(t, "<svg/>", stored.OutputHTML)
+	f.review(rows[3], "pass")
+	f.check("quality_paused", false, 8, 9)
+	var verdict, reason string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT verdict,reason FROM scheduled_test_protection_states WHERE result_id=$1`, rows[3].ID).Scan(&verdict, &reason))
+	require.Equal(t, "fail", verdict)
+	require.Contains(t, reason, "60001")
+	next := f.round("duration-healthy", started.Add(time.Minute))
+	for i := 0; i < 3; i++ {
+		f.complete(next[i], "pass")
+	}
+	f.check("quality_paused", false, 8, 9)
+	next[3].LatencyMs = 60000
+	f.complete(next[3], "pass")
+	f.check("active", false, 10)
+	f.review(next[3], "fail")
+	f.check("quality_paused", false, 10)
+	f.review(next[3], "pass")
+	f.check("active", false, 10)
+
+	// A fast upstream error did not complete generation within the limit.
+	// It must not satisfy the duration gate or recover via an admin approval.
+	failed := f.round("duration-failed", started.Add(2*time.Minute))
+	for i := 0; i < 3; i++ {
+		f.complete(failed[i], "pass")
+	}
+	failed[3].Status, failed[3].LatencyMs = "failed", 100
+	require.NoError(t, repo.Update(ctx, failed[3]))
+	require.NoError(t, repo.CompleteProtection(ctx, failed[3], "fail", "execution failed"))
+	f.check("quality_paused", false, 10)
+	var generation int64
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT generation FROM scheduled_test_protection_states WHERE result_id=$1`, failed[3].ID).Scan(&generation))
+	require.ErrorIs(t, repo.DecideTestResult(ctx, 1, failed[3].ID, generation, "pass"), service.ErrScheduledTestVoteUnavailable)
+	f.check("quality_paused", false, 10)
+}
+
 func newAllPassFixture(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, recovery bool, thresholds ...service.ScheduledTestThreshold) allPassFixture {
 	t.Helper()
 	ids := make([]int64, 4)

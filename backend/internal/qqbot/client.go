@@ -137,8 +137,9 @@ func (s *Service) chatRequest(ctx context.Context, c Config, messages []Message,
 		if len(currentChatImages(messages)) > 0 {
 			imageTools = append(imageTools, chatEditImageTool(c.ChatProtocol))
 		}
+		imageTools = append(imageTools, chatTextTool(c.ChatProtocol))
 		body["tools"] = imageTools
-		body["tool_choice"] = "auto"
+		body["tool_choice"] = "required"
 		body["parallel_tool_calls"] = false
 	}
 	return s.request(ctx, "POST", endpoint(c.BaseURL, path), c.APIKey, body, 4<<20)
@@ -555,6 +556,10 @@ func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job
 	raw, err := s.qqRequest(ctx, c, base+"/messages", body)
 	if err != nil {
 		return err
+	}
+	if j.TransientReply {
+		// Processing notices are not answers or quotable conversation context.
+		return nil
 	}
 	if err := s.recordAutonomousReply(ctx, c, j); err != nil {
 		return errors.New("消息已发送，但自主接话状态保存失败")

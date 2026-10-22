@@ -310,7 +310,9 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
  s.completed AND s.result_started_at>=s.round_started_at AND EXISTS (
  SELECT 1 FROM scheduled_test_results evidence WHERE evidence.id=s.result_id
  AND evidence.started_at=s.result_started_at AND evidence.run_id<>'' AND evidence.run_id=p.latest_run_id),
- s.blocked AND s.recovery_phase<>''
+ s.blocked AND s.recovery_phase<>'',
+ (SELECT latency_ms FROM scheduled_test_results WHERE id=s.result_id),
+ (SELECT status FROM scheduled_test_results WHERE id=s.result_id)
  FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
  WHERE s.plan_id=$1 AND s.account_id=$2 AND s.round_started_at=$3
  AND p.enabled AND p.protection->>'enabled'='true'
@@ -326,7 +328,9 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		var raw, configRaw []byte
 		var evidenceCurrent bool
 		var inRecovery bool
-		if err := rows.Scan(&raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &configRaw, &evidenceCurrent, &inRecovery); err != nil {
+		var latency sql.NullInt64
+		var resultStatus sql.NullString
+		if err := rows.Scan(&raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &configRaw, &evidenceCurrent, &inRecovery, &latency, &resultStatus); err != nil {
 			rows.Close()
 			return err
 		}
@@ -346,6 +350,16 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 				if config.UsesAllPass() && entry.rule.Vote != nil && entry.rule.Vote.Enabled {
 					// Reviews are a manual veto, separate from the automatic checks.
 					verdicts[entry.rule.TestDefinitionID] = entry.adminVerdict
+					if entry.rule.HasDurationThreshold() {
+						ms := int64(-1)
+						if latency.Valid {
+							ms = latency.Int64
+						}
+						verdict, _ := service.EvaluateScheduledTestDuration(entry.rule, &service.ScheduledTestResult{Status: resultStatus.String, LatencyMs: ms})
+						if entry.adminVerdict != "fail" {
+							verdicts[entry.rule.TestDefinitionID] = verdict
+						}
+					}
 				}
 			}
 		}

@@ -3,13 +3,15 @@
 package repository
 
 import (
+	"testing"
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
-	ctx, db, _ := passiveDB(t)
+	ctx, db, passive := passiveDB(t)
 	_, err := db.Exec(`ALTER TABLE accounts ADD COLUMN platform TEXT DEFAULT 'openai',ADD COLUMN overload_until TIMESTAMPTZ;
  CREATE TABLE scheduled_test_plans(id BIGINT PRIMARY KEY,name TEXT,model_id TEXT,enabled BOOLEAN,group_ids BIGINT[],excluded_account_ids BIGINT[] DEFAULT '{}',next_run_at TIMESTAMPTZ);
  CREATE TABLE scheduled_test_protection_states(plan_id BIGINT,account_id BIGINT,reason TEXT,updated_at TIMESTAMPTZ DEFAULT now(),blocked BOOLEAN,completed BOOLEAN,result_id BIGINT,result_started_at TIMESTAMPTZ DEFAULT now(),round_started_at TIMESTAMPTZ DEFAULT now(),verdict TEXT);
@@ -47,4 +49,13 @@ func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page.Items, 1)
 	require.Equal(t, "observed", page.Items[0].Controls[0].Phase)
+	p := newPassivePolicy()
+	p.Model = ""
+	require.NoError(t, passive.SavePolicy(ctx, &p))
+	_, err = passive.advance(ctx, p.ID, 62, time.Now(), false)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{Model: "another-model"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1, "all-model policies remain visible with a model filter")
+	require.EqualValues(t, 62, page.Items[0].ID)
 }

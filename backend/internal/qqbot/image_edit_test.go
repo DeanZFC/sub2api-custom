@@ -90,7 +90,7 @@ func TestChatEditToolSelectionAndImageBounds(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]any
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			require.Len(t, body["tools"], 1, "old history images cannot become editable current input")
+			require.Len(t, body["tools"], 2, "old history images cannot become editable current input")
 			_, _ = w.Write(editToolTestJSON(t, protocol, `{"prompt":"make it blue","image_index":1}`))
 		}))
 		c := DefaultConfig()

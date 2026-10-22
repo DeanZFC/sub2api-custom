@@ -126,13 +126,13 @@ func TestQQBotEditsExactReferencedImage(t *testing.T) {
 				require.Equal(t, "image", kind)
 				require.EqualValues(t, 1, chats.Load())
 				require.EqualValues(t, 1, edits.Load())
-				require.EqualValues(t, 2, sends.Load())
-				ref, err := s.referencedMessage(ctx, c, "group", "edited-ref-2")
+				require.EqualValues(t, 3, sends.Load())
+				ref, err := s.referencedMessage(ctx, c, "group", "edited-ref-3")
 				require.NoError(t, err)
 				require.NotNil(t, ref)
 				require.NotEmpty(t, ref.ImageJobID, "the edited result can be quoted for a subsequent edit")
 				require.Equal(t, "图片已修改。", ref.Content)
-				e.MessageScene.Ext = []string{"ref_msg_idx=edited-ref-2"}
+				e.MessageScene.Ext = []string{"ref_msg_idx=edited-ref-3"}
 				data, _, err := s.referencedImageSources(ctx, c, e, ref)
 				require.NoError(t, err)
 				require.Equal(t, "image/jpeg", http.DetectContentType(data))

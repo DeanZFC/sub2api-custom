@@ -47,6 +47,17 @@
                 <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl" :title="latencyDetail(row)">{{ formatMonitorMs(row.metrics.ttft.p50_ms) }}</dd>
               </div>
             </dl>
+            <div class="mb-3 border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="health-history">
+              <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('channelMonitorV2.cards.healthHistory') }}</span>
+                <span>{{ t(`channelMonitorV2.healthMode.${healthMode}`) }} · {{ historyIntervalLabel }}</span>
+              </div>
+              <MonitorStatusStrip :slots="historySlots(row)" :label="t('channelMonitorV2.cards.healthHistory')" compact />
+              <div class="mt-1 flex justify-between text-[10px] uppercase tracking-widest text-gray-400">
+                <span>{{ t('channelMonitorV2.cards.past') }}</span><span>{{ t('channelMonitorV2.cards.now') }}</span>
+              </div>
+              <p class="mt-1 text-[10px] leading-4 text-gray-400">{{ t('channelMonitorV2.cards.historyLegend') }}</p>
+            </div>
             <div class="border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="recent-requests">
               <div class="mb-2 flex items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                 <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('channelMonitorV2.cards.recentRequests') }}</span>
@@ -89,7 +100,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { HealthState, MonitorMatrixGroupBy, MonitorMatrixRow } from '@/api/channelMonitorV2'
+import type { HealthState, MonitorCoverage, MonitorMatrixGroupBy, MonitorMatrixRow } from '@/api/channelMonitorV2'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { platformDisplayName } from '@/constants/platformCatalog'
@@ -98,17 +109,23 @@ import GroupTestFooter from './GroupTestFooter.vue'
 import GroupPelicanGallery from './GroupPelicanGallery.vue'
 import { emptyGroupTests, indexGroupTestResults, type TestResultsState } from './monitorTestResults'
 import type { TestResult } from '@/types'
-import { cardHealth, hasMonitorTraffic, recentRequestsForCard, requestHealth } from './monitorCards'
+import { cardHealth, hasMonitorTraffic, historyBucketsForCard, recentRequestsForCard, requestHealth } from './monitorCards'
 import { compareMonitorModels } from './monitorModels'
-import { formatLatencyPrivacy, formatMonitorMs, formatMonitorPercent, formatMonitorSuccessRateFromError, type HealthDisplayMode } from './monitorFormat'
+import { formatLatencyPrivacy, formatMonitorMs, formatMonitorPercent, formatMonitorSuccessRateFromError, healthModeScore, healthScoreClass, type HealthDisplayMode } from './monitorFormat'
 
 const props = withDefaults(defineProps<{
-  rows: MonitorMatrixRow[]; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode
+  rows: MonitorMatrixRow[]; coverage: MonitorCoverage; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode
   testResults?: TestResult[]; testResultsState?: TestResultsState
 }>(), { testResults: () => [], testResultsState: 'ready' })
 const testsByGroup = computed(() => indexGroupTestResults(props.testResults))
 const previewGroup = ref<{ id: number; name: string } | null>(null)
 const { t, locale } = useI18n()
+const historyIntervalLabel = computed(() => {
+  const minutes = props.coverage.bucket_seconds / 60
+  if (minutes < 60) return t('channelMonitorV2.bucket.minutes', { count: minutes })
+  if (minutes < 1440) return t('channelMonitorV2.bucket.hours', { count: minutes / 60 })
+  return t('channelMonitorV2.bucket.days', { count: minutes / 1440 })
+})
 const sections = computed(() => {
   const byModel = props.groupBy === 'platform_model' || props.groupBy === 'platform_group_model'
   const groups = new Map<string, { key: string; platform: string; model?: string; title: string; rows: MonitorMatrixRow[] }>()
@@ -138,6 +155,31 @@ function timeLabel(time: number | string) { return new Intl.DateTimeFormat(local
 function latestRequestTime(row: MonitorMatrixRow) {
   const latest = recentRequestsForCard(row.recent_requests)[19]
   return latest ? timeLabel(latest.occurred_at) : '-'
+}
+function historySlots(row: MonitorMatrixRow) {
+  return historyBucketsForCard(row.buckets, props.coverage).map(slot => {
+    if (!slot) return { state: 'unknown' as const, label: t('channelMonitorV2.cards.noHistory') }
+    const range = `${timeLabel(slot.start)} – ${timeLabel(slot.end)}`
+    if (!slot.bucket) return { state: 'unknown' as const, label: `${range}\n${t('channelMonitorV2.cards.noIntervalData')}` }
+
+    const { metrics, health } = slot.bucket
+    const score = healthModeScore(health, props.healthMode)
+    // A returned bucket is evidence of traffic, even when its count is redacted.
+    const colorClass = healthScoreClass(health, props.healthMode, 1)
+    const state = colorClass === 'health-unknown' ? 'unknown' : cardHealth(health, props.healthMode)
+    return {
+      state, colorClass,
+      label: [
+        range,
+        `${t(`channelMonitorV2.healthMode.${props.healthMode}`)} · ${healthLabel(state)}`,
+        t('channelMonitorV2.matrix.scoreLine', { score: score == null ? '-' : Math.round(score) }),
+        t('channelMonitorV2.metrics.successRateValue', { value: formatMonitorSuccessRateFromError(metrics.error_rate, health.error_rate) }),
+        t('channelMonitorV2.metrics.ttftValue', { value: formatLatencyPrivacy(metrics.ttft.p50_ms, metrics.ttft.p90_ms, metrics.ttft.avg_ms, metrics.ttft.p95_ms) }),
+        t('channelMonitorV2.metrics.cacheRateValue', { value: health.cache === 'unknown' ? '-' : formatMonitorPercent(metrics.cache_rate) }),
+        t('channelMonitorV2.metrics.durationValue', { value: formatLatencyPrivacy(metrics.duration.p50_ms, metrics.duration.p90_ms, metrics.duration.avg_ms, metrics.duration.p95_ms) }),
+      ].join('\n'),
+    }
+  })
 }
 function requestSlots(row: MonitorMatrixRow) {
   return recentRequestsForCard(row.recent_requests).map(request => ({

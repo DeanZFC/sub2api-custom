@@ -51,15 +51,15 @@ func passiveSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPol
 	// Limit both indexed input branches before the final merge. Failure wins for
 	// the same account/request, even when a retry subsequently succeeds.
 	rows, err := tx.QueryContext(ctx, `WITH failed AS MATERIALIZED (
- SELECT request_key,created_at FROM passive_quality_failures WHERE account_id=$1 AND model=$2 AND created_at>=$3 AND created_at<=$4 AND started_at>=$5 ORDER BY created_at DESC,id DESC LIMIT $6
+ SELECT request_key,created_at,model FROM passive_quality_failures WHERE account_id=$1 AND ($2='' OR model=$2) AND created_at>=$3 AND created_at<=$4 AND started_at>=$5 ORDER BY created_at DESC,id DESC LIMIT $6
  ), succeeded AS (
  SELECT COALESCE(NULLIF(cr.attempt_key,''),ul.request_id) AS request_id,ul.id,ul.created_at,CASE WHEN ul.stream OR ul.openai_ws_mode THEN ul.first_token_ms END AS first_token_ms,
  CASE WHEN `+channelMonitorV2CacheEligibleUL+` AND (ul.cache_read_tokens>0 OR cr.cache_reported) AND NOT COALESCE(ul.native_compaction_v2,false)
  AND COALESCE(ul.inbound_endpoint,'') NOT LIKE '%/compact%' AND COALESCE(ul.upstream_endpoint,'') NOT LIKE '%/compact%'
  THEN GREATEST(ul.input_tokens-ul.image_input_tokens,0)::bigint+GREATEST(ul.cache_creation_tokens,0)+GREATEST(ul.cache_read_tokens,0) ELSE 0 END AS cache_input,
- GREATEST(ul.cache_read_tokens,0)::bigint AS cache_read
+ GREATEST(ul.cache_read_tokens,0)::bigint AS cache_read,COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model) AS model
  FROM usage_logs ul LEFT JOIN passive_quality_cache_reports cr ON cr.account_id=ul.account_id AND cr.request_key=ul.request_id
- WHERE ul.account_id=$1 AND COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model)=$2
+ WHERE ul.account_id=$1 AND ($2='' OR COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model)=$2)
  AND ul.created_at>=$3 AND ul.created_at<=$4 AND ul.duration_ms IS NOT NULL
  AND ul.created_at-GREATEST(ul.duration_ms,0)*INTERVAL '1 millisecond'>=$5
  AND COALESCE(ul.request_type,0) NOT IN (4,6)
@@ -67,9 +67,9 @@ func passiveSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPol
  AND NOT EXISTS(SELECT 1 FROM failed f WHERE f.request_key=COALESCE(NULLIF(cr.attempt_key,''),ul.request_id))
  ORDER BY ul.created_at DESC,ul.id DESC LIMIT $6
  ), outcomes AS (
- SELECT DISTINCT ON (COALESCE(NULLIF(request_id,''),'usage:'||id)) COALESCE(NULLIF(request_id,''),'usage:'||id) AS key,created_at,false AS failed,first_token_ms::float8,cache_input,cache_read FROM succeeded ORDER BY COALESCE(NULLIF(request_id,''),'usage:'||id),created_at DESC
- ) SELECT key,created_at,failed,first_token_ms,cache_input,cache_read FROM (
- SELECT * FROM outcomes UNION ALL SELECT request_key,created_at,true,NULL::float8,0,0 FROM failed
+ SELECT DISTINCT ON (COALESCE(NULLIF(request_id,''),'usage:'||id)) COALESCE(NULLIF(request_id,''),'usage:'||id) AS key,created_at,false AS failed,first_token_ms::float8,cache_input,cache_read,model FROM succeeded ORDER BY COALESCE(NULLIF(request_id,''),'usage:'||id),created_at DESC
+ ) SELECT key,created_at,failed,first_token_ms,cache_input,cache_read,COALESCE(model,'') FROM (
+ SELECT * FROM outcomes UNION ALL SELECT request_key,created_at,true,NULL::float8,0,0,model FROM failed
  ) combined ORDER BY created_at DESC,key DESC LIMIT $6`, s.AccountID, p.Model, from, now, started, p.MaxSamples)
 	if err != nil {
 		return service.PassiveQualityEvidence{}, err
@@ -77,7 +77,7 @@ func passiveSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPol
 	samples := []service.PassiveQualitySample{}
 	for rows.Next() {
 		var v service.PassiveQualitySample
-		if err = rows.Scan(&v.Key, &v.At, &v.Failed, &v.TTFT, &v.CacheInput, &v.CacheRead); err != nil {
+		if err = rows.Scan(&v.Key, &v.At, &v.Failed, &v.TTFT, &v.CacheInput, &v.CacheRead, &v.Model); err != nil {
 			_ = rows.Close()
 			return service.PassiveQualityEvidence{}, err
 		}
@@ -237,6 +237,14 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 		}
 	case "paused":
 		if !now.Before(s.NextAt) && canProbe && !s.OtherHold {
+			if p.Model != "" {
+				s.ProbeModel = p.Model
+			}
+			if s.ProbeModel == "" {
+				s.Reason = "probe_model_unavailable"
+				s.NextAt = now.Add(time.Minute)
+				break
+			}
 			s.Phase = "probing"
 			s.Reason = "probing"
 			s.Generation++
@@ -248,6 +256,9 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 			return nil, err
 		}
 		s.Evidence = e
+		if e.ProbeModel != "" {
+			s.ProbeModel = e.ProbeModel
+		}
 		trial := s.Phase == "trial"
 		limited := s.Phase == "limited"
 		verdict, reason := service.EvaluatePassiveQuality(p.PassiveQualityConfig, e, trial || limited)
@@ -417,6 +428,7 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 	var states []service.PassiveQualityState
 	allowed := true
 	matched := false
+	filteredTrial, matchedFilter := false, false
 	now := time.Now()
 	for rows.Next() {
 		var raw, cfg []byte
@@ -435,12 +447,15 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 			_ = rows.Close()
 			return false, false, err
 		}
-		// An account-wide pause still trials only the affected model, otherwise a
-		// healthy unrelated model could consume the budget and falsely recover it.
-		if s.Phase != "trial" || now.Before(s.TrialStartedAt) || !now.Before(s.TrialEndsAt) || (model == c.Model && (s.Used >= c.TrialRequests || inflight >= c.TrialConcurrency)) {
+		// Unfiltered policies share one trial budget across models. A filtered
+		// hold still needs its own affected traffic, even beside an all-model hold.
+		matches := model != "" && (c.Model == "" || model == c.Model)
+		filteredTrial = filteredTrial || c.Model != ""
+		matchedFilter = matchedFilter || (c.Model != "" && matches)
+		if s.Phase != "trial" || now.Before(s.TrialStartedAt) || !now.Before(s.TrialEndsAt) || (matches && (s.Used >= c.TrialRequests || inflight >= c.TrialConcurrency)) {
 			allowed = false
 		}
-		if model != c.Model {
+		if !matches {
 			continue
 		}
 		matched = true
@@ -450,7 +465,7 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 	}
 	err = rows.Err()
 	_ = rows.Close()
-	if err != nil || !allowed || !matched {
+	if err != nil || !allowed || !matched || (filteredTrial && !matchedFilter) {
 		return false, false, err
 	}
 	for _, s := range states {

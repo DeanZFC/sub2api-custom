@@ -24,6 +24,49 @@ const mountEditor = (config: TestProtectionConfig = { enabled: false, rules: [] 
 }
 
 describe('quality protection settings', () => {
+  it.each(['per_test', 'all_pass'] as const)('configures an independent pelican duration limit alongside review in %s mode', async mode => {
+    const config: TestProtectionConfig = { enabled: true, mode, rules: [{
+      test_definition_id: 2, priority: 0, required_pass: false, pause_on_failure: true,
+      vote: { enabled: true, reject_above: 0, pass_at_least: 1 },
+    }] }
+    const wrapper = mountEditor(config)
+    const html = wrapper.get('[data-protection-type="2"]')
+    expect(html.find('[data-duration-limit]').exists()).toBe(false)
+    await html.get('[data-duration-enabled]').setValue(true)
+    expect(html.get<HTMLInputElement>('[data-duration-limit]').element.value).toBe('60')
+    expect(wrapper.props('modelValue').rules[0].thresholds).toEqual([{ metric: 'latency_ms', operator: 'gt', value: 60000 }])
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
+    // Millisecond boundaries must survive seconds conversion without rounding below equality.
+    await html.get('[data-duration-limit]').setValue('1.001')
+    expect(wrapper.props('modelValue').rules[0].thresholds?.[0].value).toBe(1001)
+    await html.get('[data-duration-limit]').setValue('-1')
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(false)
+    await html.get('[data-duration-limit]').setValue('')
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(false)
+    await html.get('[data-duration-limit]').setValue('90')
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
+    await html.get('[data-duration-enabled]').setValue(false)
+    expect(wrapper.props('modelValue').rules[0].thresholds).toEqual([])
+    expect(wrapper.props('modelValue').rules[0].vote?.enabled).toBe(true)
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(mode !== 'all_pass')
+    expect(config.rules[0].thresholds).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('loads existing millisecond limits in seconds without changing the saved policy', async () => {
+    const config: TestProtectionConfig = { enabled: true, mode: 'all_pass', rules: [{
+      test_definition_id: 2, priority: 0, required_pass: false, pause_on_failure: true,
+      vote: { enabled: true, reject_above: 0, pass_at_least: 1 },
+      thresholds: [{ metric: 'latency_ms', operator: 'gt', value: 90000 }],
+    }] }
+    const wrapper = mountEditor(config)
+    expect(wrapper.get<HTMLInputElement>('[data-duration-enabled]').element.checked).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-duration-limit]').element.value).toBe('90')
+    expect(wrapper.find('[data-threshold]').exists()).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('shows execution failure as mandatory when a fail action is configured', async () => {
     const wrapper = mountEditor({ enabled: true, rules: [{
       test_definition_id: 3, priority: 0, required_pass: false, pause_on_failure: false,

@@ -21,7 +21,7 @@ import (
 
 func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 	for _, protocol := range []string{"chat_completions", "responses"} {
-		for _, scenario := range []string{"image", "text", "disabled", "limit", "disable-during-chat", "image-failure", "invalid-tool", "delivery-failure"} {
+		for _, scenario := range []string{"image", "text", "disabled", "limit", "disable-during-chat", "image-failure", "invalid-tool", "delivery-failure", "empty-promise"} {
 			t.Run(protocol+"/"+scenario, func(t *testing.T) {
 				db := testDB(t)
 				s := savedBot(t, db)
@@ -46,9 +46,21 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 						if scenario == "disabled" {
 							require.NotContains(t, request, "tools")
 						} else {
-							require.Equal(t, "auto", request["tool_choice"])
+							require.Equal(t, "required", request["tool_choice"])
 						}
-						if scenario == "disabled" || scenario == "text" {
+						if scenario == "text" {
+							_, _ = w.Write(textToolTestJSON(t, protocol, "还需要确定尺寸吗？"))
+							return
+						}
+						if scenario == "empty-promise" {
+							if protocol == "responses" {
+								_, _ = w.Write([]byte(`{"status":"completed","output_text":"我给你安排一张。","usage":{"input_tokens":11,"output_tokens":7}}`))
+							} else {
+								_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"我给你安排一张。"}}],"usage":{"prompt_tokens":11,"completion_tokens":7}}`))
+							}
+							return
+						}
+						if scenario == "disabled" {
 							// The same words can be a text turn; only the model decides.
 							if protocol == "responses" {
 								_, _ = w.Write([]byte(`{"status":"completed","output_text":"还需要确定尺寸吗？","usage":{"input_tokens":11,"output_tokens":7}}`))
@@ -97,6 +109,7 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 								return
 							}
 						} else {
+							require.NotContains(t, body.text(), "我给你安排一张")
 							require.NotContains(t, body.text(), chatImageToolName)
 							require.NotContains(t, body.text(), "separate-image-key")
 						}
@@ -143,7 +156,7 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 					if scenario == "delivery-failure" {
 						wantStatus = "delivery_failed"
 					}
-				case "invalid-tool":
+				case "invalid-tool", "empty-promise":
 					wantStatus = "failed"
 				case "limit":
 					require.Contains(t, text, "今日使用次数已达上限")
@@ -156,8 +169,8 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 				require.EqualValues(t, wantImages, images.Load())
 				require.Equal(t, wantImages, imageCount)
 				if scenario == "image" {
-					require.EqualValues(t, 2, deliveries.Load())
-					ref, refErr := s.referencedMessage(ctx, c, "group", "sent-index-2")
+					require.EqualValues(t, 3, deliveries.Load())
+					ref, refErr := s.referencedMessage(ctx, c, "group", "sent-index-3")
 					require.NoError(t, refErr)
 					require.NotNil(t, ref)
 					require.True(t, ref.Image)

@@ -114,7 +114,11 @@ func (s *PassiveQualityService) probe(p PassiveQualityState) {
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 60*time.Second)
 	defer cancel()
-	result, err := s.test.RunTestBackground(context.WithValue(ctx, passiveQualityProbeKey{}, true), p.AccountID, p.Model)
+	model := p.Model
+	if model == "" {
+		model = p.ProbeModel
+	}
+	result, err := s.test.RunTestBackground(context.WithValue(ctx, passiveQualityProbeKey{}, true), p.AccountID, model)
 	if s.ctx.Err() != nil {
 		return
 	}

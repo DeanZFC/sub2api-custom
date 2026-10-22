@@ -3,6 +3,7 @@
     <summary class="cursor-pointer font-semibold">{{ tr('title') }}</summary>
     <div class="mt-4 space-y-4">
       <p class="text-sm text-gray-500">{{ tr('intro') }}</p>
+      <p class="text-xs text-gray-500">{{ t('admin.tests.passive.modelFilter') }}: {{ policy.model || t('admin.tests.passive.allModels') }} · {{ t(`admin.tests.passive.${policy.scope === 'account' ? 'accountScope' : 'modelScope'}`) }}</p>
       <div class="grid gap-3 sm:grid-cols-3"><label class="input-label">{{ tr('from') }}<input v-model="from" type="datetime-local" class="input mt-1 w-full" /></label><label class="input-label">{{ tr('to') }}<input v-model="to" type="datetime-local" class="input mt-1 w-full" /></label><label class="input-label">{{ tr('step') }}<input v-model.number="step" type="number" min="15" max="3600" step="1" class="input mt-1 w-full" /></label></div>
       <p class="text-xs text-gray-500">{{ tr('limits') }}</p>
       <div class="max-h-36 space-y-2 overflow-auto"><label v-for="a in choices" :key="a.id" class="flex items-center gap-2 text-sm"><input v-model="selected" type="checkbox" :value="a.id" :disabled="selected.length >= 10 && !selected.includes(a.id)" />{{ a.name }} #{{ a.id }}</label></div>

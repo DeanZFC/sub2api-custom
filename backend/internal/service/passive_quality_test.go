@@ -63,6 +63,47 @@ func TestPassiveQualityValidation(t *testing.T) {
 		require.Error(t, c.Validate())
 	}
 }
+
+func TestPassiveQualityOptionalModel(t *testing.T) {
+	for _, scope := range []string{"", "model", "account"} {
+		c := passiveTestConfig()
+		c.Model, c.Scope = "  ", scope
+		require.NoError(t, c.Validate())
+		require.Empty(t, c.Model)
+		require.Equal(t, "account", c.Scope)
+	}
+	c := passiveTestConfig()
+	c.Model = " public-model "
+	require.NoError(t, c.Validate())
+	require.Equal(t, "public-model", c.Model)
+	require.Equal(t, "model", c.Scope)
+	c.Model, c.Scope = "", "invalid"
+	require.Error(t, c.Validate())
+}
+
+func TestPassiveQualityProbeModelFromEvidence(t *testing.T) {
+	samples := []PassiveQualitySample{{Model: "newest-success"}, {Model: "failed-model", Failed: true}, {Model: "older-failure", Failed: true}}
+	require.Equal(t, "failed-model", PassiveQualitySummarize(samples, time.Time{}, true).ProbeModel)
+	require.Equal(t, "newest-success", PassiveQualitySummarize(samples[:1], time.Time{}, true).ProbeModel)
+}
+
+func TestPassiveQualityAllModelTrialPrefilter(t *testing.T) {
+	all := map[string]any{"scope": "account", "model": "", "phase": "trial", "used": float64(0), "max_requests": float64(5), "trial_ends_at": time.Now().Add(time.Minute).Format(time.RFC3339Nano)}
+	a := &Account{Status: StatusActive, Schedulable: true, Extra: map[string]any{"passive_quality": []any{all}}}
+	require.False(t, a.PassiveQualityBlocked("A"))
+	require.False(t, a.PassiveQualityBlocked("B"))
+	all["used"] = float64(5)
+	require.True(t, a.PassiveQualityBlocked("A"))
+	require.True(t, a.PassiveQualityBlocked("B"))
+	all["used"] = float64(0)
+	filtered := map[string]any{"scope": "account", "model": "A", "phase": "trial", "trial_ends_at": all["trial_ends_at"]}
+	a.Extra["passive_quality"] = []any{all, filtered}
+	require.False(t, a.PassiveQualityBlocked("A"))
+	require.True(t, a.PassiveQualityBlocked("B"), "an unfiltered trial cannot bypass a filtered hold")
+	all["phase"] = "paused"
+	require.True(t, a.PassiveQualityBlocked("A"))
+	require.True(t, a.PassiveQualityBlocked("B"))
+}
 func TestPassiveQualityBackoffAndModelGate(t *testing.T) {
 	c := passiveTestConfig()
 	s := PassiveQualityState{AccountID: 12}

@@ -13,6 +13,15 @@ const output: QualityReplayResult = { points: [], evaluations: 61, triggers: 2, 
 const mountPanel = () => mount(QualityReplayPanel, { props: { policy: policy(), accounts: [{ id: 62, name: 'A', group_ids: [8] }, { id: 63, name: 'B', group_ids: [9] }] as AccountListItem[] }, global: { plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: resources } } })] } })
 beforeEach(() => { vi.clearAllMocks(); api.replay.mockResolvedValue(output) })
 describe('draft policy replay', () => {
+  it('replays an all-model account policy without inventing a model filter', async () => {
+    const wrapper = mountPanel()
+    await wrapper.setProps({ policy: { ...policy(), model: '', scope: 'account' } })
+    expect(wrapper.text()).toContain('All models')
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    await wrapper.get('[data-run-replay]').trigger('click'); await flushPromises()
+    expect(api.replay).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ model: '', scope: 'account' }) }), expect.any(AbortSignal))
+    wrapper.unmount()
+  })
   it('only submits selected in-scope accounts with an unsaved draft', async () => {
     const wrapper = mountPanel()
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(1)

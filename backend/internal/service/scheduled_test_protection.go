@@ -250,6 +250,9 @@ func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *S
 	if result == nil || result.Status == "pending" || result.Status == "running" {
 		return "pending", "检测未完成，等待下一轮"
 	}
+	if verdict, reason := EvaluateScheduledTestDuration(rule, result); verdict != "pass" {
+		return verdict, reason
+	}
 	if result.Status != "success" && result.Status != "passed" {
 		// A configured failure action is an explicit request to resolve an
 		// unsuccessful execution as a failed quality check.  This lets rules
@@ -278,6 +281,9 @@ func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *S
 		missing = check == nil || check.Verdict != "pass"
 	}
 	for _, threshold := range rule.Thresholds {
+		if threshold.Metric == "latency_ms" {
+			continue // Checked independently, including on administrator-reviewed results.
+		}
 		value, ok := scheduledTestMetric(result, threshold.Metric, rule.MinSamples)
 		if !ok {
 			missing = true
@@ -335,6 +341,39 @@ func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *S
 	return "pass", ""
 }
 
+func (r ScheduledTestProtectionRule) HasDurationThreshold() bool {
+	for _, threshold := range r.Thresholds {
+		if threshold.Metric == "latency_ms" {
+			return true
+		}
+	}
+	return false
+}
+
+// A configured duration condition is independent of content review. Missing or
+// unfinished timing cannot release a hold; a human approval cannot erase it.
+func EvaluateScheduledTestDuration(rule ScheduledTestProtectionRule, result *ScheduledTestResult) (string, string) {
+	if !rule.HasDurationThreshold() {
+		return "pass", ""
+	}
+	if result == nil || QualityResultDeferred(result) || result.Status == "" || result.Status == "pending" || result.Status == "running" || result.LatencyMs < 0 {
+		return "pending", "等待完整检测耗时"
+	}
+	if result.Status != "success" && result.Status != "passed" {
+		return "fail", "检测执行失败"
+	}
+	for _, threshold := range rule.Thresholds {
+		if threshold.Metric != "latency_ms" {
+			continue
+		}
+		value := float64(result.LatencyMs)
+		if (threshold.Operator == "gt" && value > threshold.Value) || (threshold.Operator == "lt" && value < threshold.Value) {
+			return "fail", scheduledTestThresholdReason(threshold, value)
+		}
+	}
+	return "pass", ""
+}
+
 func scheduledTestThresholdReason(threshold ScheduledTestThreshold, observed float64) string {
 	label, unit := threshold.Metric, ""
 	switch threshold.Metric {
@@ -345,7 +384,7 @@ func scheduledTestThresholdReason(threshold ScheduledTestThreshold, observed flo
 	case "avg_first_token_ms":
 		label, unit = "平均首字延迟", "ms"
 	case "latency_ms":
-		label, unit = "检测耗时", "ms"
+		label, unit = "检测总耗时", "ms"
 	case "output_numeric":
 		label = "输出数值"
 	}

@@ -83,6 +83,10 @@ func scheduledTestResultSatisfies(plan *ScheduledTestPlan, result *ScheduledTest
 		}
 		if rule := plan.ProtectionRule(plan.TestDefinitionID); rule == nil ||
 			(plan.Protection.UsesAllPass() && rule.Vote != nil && rule.Vote.Enabled) {
+			if rule != nil && rule.HasDurationThreshold() {
+				verdict, _ := EvaluateScheduledTestDuration(*rule, result)
+				return verdict == "pass"
+			}
 			// A successfully executed display-only or administrator-review
 			// check is not an automatic quality gate in the all-pass strategy.
 			return true

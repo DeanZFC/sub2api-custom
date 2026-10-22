@@ -59,6 +59,14 @@ func TestPassiveQualityAdminValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 200, request("/policies", string(raw), http.MethodPost).Code)
 	require.Equal(t, 1, repo.saved)
+	cfg.Model = " "
+	raw, err = json.Marshal(cfg)
+	require.NoError(t, err)
+	response := request("/policies", string(raw), http.MethodPost)
+	require.Equal(t, 200, response.Code)
+	require.Contains(t, response.Body.String(), `"model":""`)
+	require.Contains(t, response.Body.String(), `"scope":"account"`)
+	require.Equal(t, 2, repo.saved)
 	repo.conflict = true
 	require.Equal(t, 409, request("/policies/5", string(raw), http.MethodPut).Code)
 	for _, body := range []string{`{"action":"resume"}`, `{"action":"exempt","seconds":0}`, `{"action":"exempt","seconds":86401}`} {

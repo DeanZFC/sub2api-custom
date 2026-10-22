@@ -18,6 +18,36 @@ const makeWrapper = (tab = 'passive') => mount(PassiveQualityPanel, { props: { t
 } })
 beforeEach(() => { vi.resetAllMocks(); api.policies.mockResolvedValue([]); api.states.mockResolvedValue([]); api.events.mockResolvedValue([]); api.models.mockResolvedValue(['model']); api.save.mockResolvedValue({}) })
 describe('passive quality management', () => {
+  it('saves all models by default without requiring a model', async () => {
+    const wrapper = makeWrapper(); await flushPromises(); await wrapper.get('[data-passive-create]').trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    await dialog.findAll('input:not([type]), input[type="text"]')[0].setValue('Account protection')
+    await dialog.findAll('label').find(l => l.text() === 'Group')!.get('input').setValue(true)
+    const model = dialog.get('input[list="passive-models"]')
+    expect(model.attributes('required')).toBeUndefined()
+    expect(model.attributes('placeholder')).toBe('All models')
+    const scope = dialog.findAll('select').find(s => s.find('option[value="account"]').exists())!
+    expect((scope.element as HTMLSelectElement).value).toBe('account')
+    expect(scope.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Account protection', model: '', scope: 'account', mode: 'observe' }))
+    wrapper.unmount()
+  })
+  it('preserves an existing model scope until the model filter is cleared', async () => {
+    api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 1, version: 2, name: 'Policy', model: 'model', scope: 'model', group_ids: [8] }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    const dialog = wrapper.get('[data-dialog]')
+    const scope = dialog.findAll('select').find(s => s.find('option[value="account"]').exists())!
+    expect((scope.element as HTMLSelectElement).value).toBe('model')
+    expect(scope.attributes('disabled')).toBeUndefined()
+    await dialog.get('input[list="passive-models"]').setValue('  ')
+    expect((scope.element as HTMLSelectElement).value).toBe('account')
+    expect(scope.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ id: 1, version: 2, model: '', scope: 'account' }))
+    wrapper.unmount()
+  })
   it('starts in observe mode and saves a bounded recovery policy', async () => {
     const wrapper = makeWrapper(); await flushPromises(); await wrapper.get('[data-passive-create]').trigger('click')
     const dialog = wrapper.get('[data-dialog]')
@@ -41,9 +71,11 @@ describe('passive quality management', () => {
     wrapper.unmount()
   })
   it('shows missing metrics and keeps verify distinct from temporary exemption', async () => {
-    const state = { policy_id: 1, policy_name: 'Policy', account_id: 62, model: 'model', scope: 'model', mode: 'enforce', phase: 'paused', reason: 'insufficient_metric_samples', used: 0, inflight: 0, other_hold: true, evidence: { samples: 10, failures: 2, error_rate: 20, ttft: null, ttft_samples: 0, cache_rate: null, cache_samples: 0, complete: true } }
+    const state = { policy_id: 1, policy_name: 'Policy', account_id: 62, model: '', probe_model: 'observed-model', scope: 'account', mode: 'enforce', phase: 'paused', reason: 'insufficient_metric_samples', used: 0, inflight: 0, other_hold: true, evidence: { samples: 10, failures: 2, error_rate: 20, ttft: null, ttft_samples: 0, cache_rate: null, cache_samples: 0, complete: true } }
     api.states.mockResolvedValue([state]);const wrapper = makeWrapper('records');await flushPromises()
     expect(wrapper.text()).toContain('Another manual, active quality or rate limit hold exists');expect(wrapper.text()).toContain('—')
+    expect(wrapper.text()).toContain('All models')
+    expect(wrapper.text()).toContain('Recovery probe model: observed-model')
     await wrapper.findAll('button').find(b => b.text() === 'Verify now')!.trigger('click');await flushPromises()
     expect(api.act).toHaveBeenCalledWith(state, 'verify', 0)
     await wrapper.findAll('button').find(b => b.text() === 'Temporary exemption')!.trigger('click')

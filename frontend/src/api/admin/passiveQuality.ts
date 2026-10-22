@@ -15,7 +15,7 @@ export interface PassiveEvidence {
   ttft_samples: number; cache_rate: number | null; cache_samples: number; fresh: number; complete: boolean; latest: string
 }
 export interface PassiveState {
-  policy_id: number; policy_name: string; account_id: number; account_name?: string; model: string; scope: string; mode: string
+  policy_id: number; policy_name: string; account_id: number; account_name?: string; model: string; probe_model?: string; scope: string; mode: string
   phase: string; reason: string; hits: number; backoff: number; used: number; inflight: number; generation: number
   next_at: string; trial_started_at: string; trial_ends_at: string; updated_at: string; evidence: PassiveEvidence; other_hold: boolean
 }
@@ -31,7 +31,7 @@ export const passiveQualityAPI = {
   act: async (s: PassiveState, action: string, seconds = 0) => { await apiClient.post(`/admin/passive-quality-policies/${s.policy_id}/accounts/${s.account_id}/action`, { action, seconds }) },
 }
 export function defaultPassivePolicy(): PassivePolicy {
-  return { id: 0, version: 0, name: '', enabled: true, mode: 'observe', group_ids: [], excluded_account_ids: [], model: '', scope: 'model', action: 'pause', concurrency_limit: 2, priority_penalty: 10,
+  return { id: 0, version: 0, name: '', enabled: true, mode: 'observe', group_ids: [], excluded_account_ids: [], model: '', scope: 'account', action: 'pause', concurrency_limit: 2, priority_penalty: 10,
     window_seconds: 600, max_samples: 100, min_samples: 30, confirmations: 2, new_samples: 5,
     error_rate: { enabled: true, pause: 20, recover: 5 }, ttft: { enabled: false, pause: 10000, recover: 5000 },
     cache_rate: { enabled: false, pause: 10, recover: 20 }, consecutive_failures: 0,

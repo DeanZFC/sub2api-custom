@@ -55,10 +55,20 @@ func imageAttachments(attachments []Attachment) []Attachment {
 }
 
 func (s *Service) chatMessage(ctx context.Context, c Config, e Event, prompt string, ref *botMessageReference) (Message, error) {
+	return s.chatMessageWithImageProgress(ctx, c, e, prompt, ref, nil)
+}
+
+func (s *Service) chatMessageWithImageProgress(ctx context.Context, c Config, e Event, prompt string, ref *botMessageReference, imageProgress func()) (Message, error) {
 	parts, attachments := eventParts(e)
+	if imageProgress != nil && (len(imageAttachments(attachments)) > 0 || (ref != nil && ref.Image)) {
+		imageProgress()
+	}
 	storedImage, storedAttachments, err := s.referencedImageSources(ctx, c, e, ref)
 	if err != nil {
 		return Message{}, err
+	}
+	if imageProgress != nil && (len(storedImage) > 0 || len(storedAttachments) > 0) {
+		imageProgress()
 	}
 	quotedAttachments := quotedImageAttachments(e)
 	if len(quotedAttachments) > 0 {

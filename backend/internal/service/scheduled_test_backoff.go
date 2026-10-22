@@ -129,8 +129,11 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 			plan := queue[i].plan
 			if plan.Protection.Enabled {
 				if rule := plan.ProtectionRule(plan.TestDefinitionID); rule != nil &&
-					(!plan.Protection.UsesAllPass() || rule.Vote == nil || !rule.Vote.Enabled) {
+					(!plan.Protection.UsesAllPass() || rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold()) {
 					verdict, _ := evaluateScheduledTestProtection(*rule, result)
+					if plan.Protection.UsesAllPass() && rule.Vote != nil && rule.Vote.Enabled {
+						verdict, _ = EvaluateScheduledTestDuration(*rule, result)
+					}
 					if probeVerdict, _, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
 						verdict = probeVerdict
 					}

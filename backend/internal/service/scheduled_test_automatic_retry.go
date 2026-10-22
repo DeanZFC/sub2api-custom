@@ -95,9 +95,11 @@ func (s *ScheduledTestRunnerService) runWithAutomaticRetries(ctx context.Context
 		delay = time.Second
 	}
 	started := time.Now()
+	var totalMs int64
 	var history *ScheduledTestExecutionInfo
 	finishCanceled := func() *ScheduledTestResult {
 		r := scheduledTestFailedAttempt(started, ctx.Err())
+		r.LatencyMs = totalMs
 		r.ExecutionInfo = history
 		if r.ExecutionInfo != nil {
 			r.ExecutionInfo.FailureKind = "canceled"
@@ -108,10 +110,20 @@ func (s *ScheduledTestRunnerService) runWithAutomaticRetries(ctx context.Context
 		if ctx.Err() != nil {
 			return finishCanceled()
 		}
+		attemptStarted := time.Now()
 		result := execute(ctx)
 		if result == nil {
-			result = scheduledTestFailedAttempt(started, fmt.Errorf("test returned no result"))
+			result = scheduledTestFailedAttempt(attemptStarted, fmt.Errorf("test returned no result"))
 		}
+		// Each attempt measures execution after obtaining a worker. Include all
+		// attempts and retry backoff, but never charge local worker queues to the
+		// upstream. Manual retries start a new measurement, even when reusing a row.
+		if result.LatencyMs < 0 {
+			totalMs = -1 // Missing timing must not turn into a passing zero duration.
+		} else if totalMs >= 0 {
+			totalMs += result.LatencyMs
+		}
+		result.LatencyMs = totalMs
 		kind := scheduledTestFailureKind(result)
 		if result.ExecutionInfo == nil {
 			result.ExecutionInfo = newScheduledTestExecutionInfo()
@@ -132,12 +144,19 @@ func (s *ScheduledTestRunnerService) runWithAutomaticRetries(ctx context.Context
 			return result // The next automatic round will respect the upstream deadline.
 		}
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d automatic_retry=1/1 kind=%s", plan.ID, kind)
+		waitStarted := time.Now()
 		timer := time.NewTimer(delay)
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
 			timer.Stop()
+			if totalMs >= 0 {
+				totalMs += time.Since(waitStarted).Milliseconds()
+			}
 			return finishCanceled()
+		}
+		if totalMs >= 0 {
+			totalMs += time.Since(waitStarted).Milliseconds()
 		}
 	}
 }

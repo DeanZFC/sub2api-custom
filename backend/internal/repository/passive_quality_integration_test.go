@@ -55,6 +55,9 @@ func passiveDB(t *testing.T) (context.Context, *sql.DB, *passiveQualityRepositor
 	migration, err := os.ReadFile("../../migrations/291_passive_quality.sql")
 	require.NoError(t, err)
 	exec(string(migration))
+	migration, err = os.ReadFile("../../migrations/295_passive_quality_account_window.sql")
+	require.NoError(t, err)
+	exec(string(migration))
 	return ctx, db, &passiveQualityRepository{db: db}
 }
 func newPassivePolicy() service.PassiveQualityPolicy {

@@ -26,6 +26,13 @@ func imageToolTestJSON(t *testing.T, protocol, args string) []byte {
 	return raw
 }
 
+func textToolTestJSON(t *testing.T, protocol, text string) []byte {
+	t.Helper()
+	args, err := json.Marshal(map[string]string{"text": text})
+	require.NoError(t, err)
+	return []byte(strings.ReplaceAll(string(imageToolTestJSON(t, protocol, string(args))), `"name":"generate_image"`, `"name":"reply_text"`))
+}
+
 func imageToolTestStream(t *testing.T, protocol, args string) []byte {
 	t.Helper()
 	if protocol == "responses" {
@@ -55,12 +62,12 @@ func TestChatTurnModelChoosesImageAcrossProtocols(t *testing.T) {
 					require.Equal(t, "Bearer chat-key", r.Header.Get("Authorization"))
 					var body map[string]any
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-					require.Equal(t, "auto", body["tool_choice"])
+					require.Equal(t, "required", body["tool_choice"])
 					require.Equal(t, false, body["parallel_tool_calls"])
 					require.Equal(t, false, body["stream"])
 					tools, ok := body["tools"].([]any)
 					require.True(t, ok)
-					require.Len(t, tools, 2)
+					require.Len(t, tools, 3)
 					tool, ok := tools[0].(map[string]any)
 					require.True(t, ok)
 					require.Equal(t, "function", tool["type"])
@@ -141,8 +148,8 @@ func TestChatTurnTextIsNeverExecutedAsTool(t *testing.T) {
 	raw, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": text}}}})
 	require.NoError(t, err)
 	got, err := parseChatTurn(raw, "application/json")
-	require.NoError(t, err)
-	require.Equal(t, text, got.Text)
+	require.ErrorIs(t, err, errChatActionMissing)
+	require.Empty(t, got.Text)
 	require.Empty(t, got.ImagePrompt)
 }
 
@@ -164,4 +171,111 @@ func TestChatTurnDisabledAndAutonomousHaveNoTools(t *testing.T) {
 	c.ImageEnabled = true
 	_, _, _, err = s.chat(context.Background(), c, []Message{{Role: "user", Content: "来张图"}})
 	require.NoError(t, err)
+}
+
+func TestChatTurnExplicitTextChoiceAndPersonaOrder(t *testing.T) {
+	for _, protocol := range []string{"chat_completions", "responses"} {
+		for _, text := range []string{"你好！", "你想修改图片的哪个部分？", "这是图片里的内容。", "这个请求我无法处理。", "今天只聊聊图片构图，不生成。"} {
+			t.Run(protocol+"/"+text, func(t *testing.T) {
+				calls := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					var body map[string]any
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+					require.Equal(t, "required", body["tool_choice"])
+					key := "messages"
+					if protocol == "responses" {
+						key = "input"
+					}
+					rawMessages, ok := body[key].([]any)
+					require.True(t, ok)
+					require.Len(t, rawMessages, 4)
+					messages := make([]map[string]any, 0, len(rawMessages))
+					for _, item := range rawMessages {
+						message, ok := item.(map[string]any)
+						require.True(t, ok)
+						messages = append(messages, message)
+					}
+					require.Equal(t, "你只能聊天", messages[0]["content"])
+					require.Equal(t, groupHistoryInstructions, messages[1]["content"])
+					contract := messages[2]
+					require.Equal(t, "system", contract["role"])
+					require.Contains(t, contract["content"], chatActionInstructions)
+					require.Equal(t, "user", messages[3]["role"])
+					toolNames := make([]string, 0, 2)
+					tools, ok := body["tools"].([]any)
+					require.True(t, ok)
+					for _, item := range tools {
+						tool, ok := item.(map[string]any)
+						require.True(t, ok)
+						if protocol == "chat_completions" {
+							tool, ok = tool["function"].(map[string]any)
+							require.True(t, ok)
+						}
+						name, ok := tool["name"].(string)
+						require.True(t, ok)
+						toolNames = append(toolNames, name)
+					}
+					require.ElementsMatch(t, []string{chatTextToolName, chatImageToolName}, toolNames)
+					_, _ = w.Write(textToolTestJSON(t, protocol, text))
+				}))
+				defer server.Close()
+				s := New(nil, nil, false, nil)
+				c := DefaultConfig()
+				c.BaseURL, c.ImageEnabled, c.ChatProtocol = server.URL, true, protocol
+				got, err := s.chatTurn(context.Background(), c, []Message{
+					{Role: "system", Content: "你只能聊天"},
+					{Role: "system", Content: groupHistoryInstructions},
+					{Role: "user", Content: "你好"},
+				})
+				require.NoError(t, err)
+				require.Equal(t, text, got.Text)
+				require.Empty(t, got.ImagePrompt)
+				require.Zero(t, got.EditImageIndex)
+				require.Equal(t, 1, calls, "normal chat needs only one model request")
+			})
+		}
+	}
+}
+
+func TestChatTextChoiceValidationAndStreams(t *testing.T) {
+	for _, protocol := range []string{"chat_completions", "responses"} {
+		for _, stream := range []bool{false, true} {
+			for _, args := range []string{`{"text":"正常回答"}`, `{}`, `{"text":null}`, `{"text":" "}`, `{"text":123}`, `{"text":"hi","prompt":"cat"}`, `{"text":"hi"}{}`, `{"text":"` + strings.Repeat("字", 32001) + `"}`} {
+				raw, ct := imageToolTestJSON(t, protocol, args), "application/json"
+				if stream {
+					raw, ct = imageToolTestStream(t, protocol, args), "text/event-stream"
+				}
+				raw = []byte(strings.ReplaceAll(string(raw), chatImageToolName, chatTextToolName))
+				got, err := parseChatTurn(raw, ct)
+				if args == `{"text":"正常回答"}` {
+					require.NoError(t, err)
+					require.Equal(t, "正常回答", got.Text)
+				} else {
+					require.Error(t, err)
+					require.Empty(t, got.Text)
+				}
+				require.Empty(t, got.ImagePrompt)
+				require.Zero(t, got.EditImageIndex)
+				require.EqualValues(t, 11, got.InputTokens)
+				require.EqualValues(t, 7, got.OutputTokens)
+			}
+		}
+	}
+}
+
+func TestChatTurnRejectsUnstructuredPromises(t *testing.T) {
+	for _, tc := range []struct{ ct, raw string }{
+		{"application/json", `{"choices":[{"finish_reason":"stop","message":{"content":"我给你安排一张。"}}],"usage":{"prompt_tokens":11,"completion_tokens":7}}`},
+		{"application/json", `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"我给你安排一张。"}]}],"usage":{"input_tokens":11,"output_tokens":7}}`},
+		{"text/event-stream", "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"我给你安排一张。\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n\ndata: [DONE]\n\n"},
+		{"text/event-stream", "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output_text\":\"我给你安排一张。\",\"usage\":{\"input_tokens\":11,\"output_tokens\":7}}}\n\n"},
+	} {
+		got, err := parseChatTurn([]byte(tc.raw), tc.ct)
+		require.ErrorIs(t, err, errChatActionMissing)
+		require.Empty(t, got.Text)
+		require.Empty(t, got.ImagePrompt)
+		require.EqualValues(t, 11, got.InputTokens)
+		require.EqualValues(t, 7, got.OutputTokens)
+	}
 }
