@@ -1203,6 +1203,7 @@ func (s *GatewayService) parseSSEUsage(data string, usage *ClaudeUsage) {
 }
 
 type sseUsagePatch struct {
+	cacheReported            bool
 	inputTokens              int
 	hasInputTokens           bool
 	outputTokens             int
@@ -1232,6 +1233,9 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		}
 
 		patch := &sseUsagePatch{}
+		if v, ok := parseSSEUsageInt(usageObj["cache_read_input_tokens"]); ok && v >= 0 {
+			patch.cacheReported = true
+		}
 		patch.hasInputTokens = true
 		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok {
 			patch.inputTokens = v
@@ -1263,6 +1267,9 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		}
 
 		patch := &sseUsagePatch{}
+		if v, ok := parseSSEUsageInt(usageObj["cache_read_input_tokens"]); ok && v >= 0 {
+			patch.cacheReported = true
+		}
 		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok && v > 0 {
 			patch.inputTokens = v
 			patch.hasInputTokens = true
@@ -1300,6 +1307,7 @@ func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 		return
 	}
 
+	usage.CacheUsageReported = usage.CacheUsageReported || patch.cacheReported
 	if patch.hasInputTokens {
 		usage.InputTokens = patch.inputTokens
 	}

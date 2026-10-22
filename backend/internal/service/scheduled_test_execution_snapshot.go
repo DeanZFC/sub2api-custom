@@ -94,6 +94,9 @@ func scheduledTestResultSatisfies(plan *ScheduledTestPlan, result *ScheduledTest
 	if result.OutputKind == "model_check" && (result.OutputModelCheck == nil || result.OutputModelCheck.Verdict != "pass") {
 		return false
 	}
+	if result.OutputKind == "capability" && (result.ExecutionInfo == nil || result.ExecutionInfo.Capability == nil || result.ExecutionInfo.Capability.Verdict != "pass") {
+		return false
+	}
 	if plan == nil {
 		return true
 	}
@@ -232,6 +235,7 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 		}
 		wg.Add(1)
 		go func(queue []*scheduledTestExecutionTarget) {
+			ctx := context.WithValue(ctx, qualityRunKey{}, uuid.NewString())
 			defer wg.Done()
 			defer func() { <-sem }()
 			var accountID int64
@@ -261,9 +265,28 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 			defer func() {
 				s.recordAccountQueueBackoff(ctx, queue, policy, observations, accountProgress.stopped, complete)
 			}()
+			dynamicChecked := false
 			for targetIndex, target := range queue {
+				if target.kind != "statistics" && !dynamicChecked {
+					dynamicChecked = true
+					localHealthy := true
+					for i, observation := range observations {
+						if !scheduledTestResultSatisfies(queue[i].plan, observation) {
+							localHealthy = false
+						}
+					}
+					if localHealthy && s.deferHealthyAccountQueue(ctx, queue[targetIndex:], policy) {
+						return
+					}
+				}
 				result, ignoreGate := s.runExecutionTarget(ctx, target, started)
 				observations = append(observations, result)
+				if QualityResultDeferred(result) {
+					for _, remaining := range queue[targetIndex+1:] {
+						s.failExecutionTarget(remaining, fmt.Errorf("检测跳过：本轮检测暂缓"))
+					}
+					return
+				}
 				if ctx.Err() != nil {
 					for _, remaining := range queue[targetIndex+1:] {
 						s.failExecutionTarget(remaining, ctx.Err())

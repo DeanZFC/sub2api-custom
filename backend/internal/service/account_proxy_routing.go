@@ -24,7 +24,26 @@ func (s *ConcurrencyService) acquireAccountProxyPoolSlot(ctx context.Context, ac
 		seen[id] = true
 	}
 	requestID := generateRequestID()
-	proxyID, err := cache.AcquireAccountProxyPoolSlot(ctx, accountID, ids, limit, requestID, pinnedProxyIDs...)
+	var proxyID int64
+	var err error
+	qualityLimit := 0
+	if gate, ok := s.passiveQualityGate.(PassiveQualityConcurrencyGate); ok {
+		qualityLimit, err = gate.PassiveQualityConcurrencyLimit(ctx, accountID, qualityRequestModel(ctx))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if qualityLimit > 0 {
+		limited, ok := cache.(interface {
+			AcquireAccountProxyPoolSlotLimited(context.Context, int64, []int64, int, string, int, ...int64) (int64, error)
+		})
+		if !ok {
+			return nil, fmt.Errorf("quality-aware proxy concurrency unavailable")
+		}
+		proxyID, err = limited.AcquireAccountProxyPoolSlotLimited(ctx, accountID, ids, limit, requestID, qualityLimit, pinnedProxyIDs...)
+	} else {
+		proxyID, err = cache.AcquireAccountProxyPoolSlot(ctx, accountID, ids, limit, requestID, pinnedProxyIDs...)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +137,11 @@ func (a *Account) TotalConcurrency() int {
 		return 0
 	}
 	if len(a.ProxyIDs) > 1 && a.Concurrency > 0 {
-		return a.Concurrency * len(a.ProxyIDs)
+		total := a.Concurrency * len(a.ProxyIDs)
+		if a.qualityConcurrencyLimit > 0 {
+			total = min(total, a.qualityConcurrencyLimit)
+		}
+		return total
 	}
 	return a.Concurrency
 }
@@ -131,7 +154,11 @@ func (a *Account) TotalLoadFactor() int {
 	if n < 2 {
 		n = 1
 	}
-	return a.EffectiveLoadFactor() * n
+	total := a.EffectiveLoadFactor() * n
+	if a.qualityConcurrencyLimit > 0 {
+		total = min(total, a.qualityConcurrencyLimit)
+	}
+	return total
 }
 
 // ProxyPoolUsage exposes only names and counts, never proxy credentials.

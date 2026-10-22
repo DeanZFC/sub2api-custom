@@ -167,11 +167,11 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
     const answer = rule.expected_answer?.trim()
     if (answer && [...answer].length > 10000) return false
     if (rule.answer_match && !['exact', 'contains', 'numeric'].includes(rule.answer_match)) return false
-    if (['statistics', 'model_check'].includes(type.output_kind) && (voting || answer)) return false
+    if (['statistics', 'model_check', 'capability'].includes(type.output_kind) && (voting || answer)) return false
     if (rule.model_match && (type.output_kind !== 'model_check' || !['exact', 'snapshot'].includes(rule.model_match))) return false
     if (!voting && answer && rule.answer_match === 'numeric'
       && (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(answer) || !Number.isFinite(Number(answer)))) return false
-    return Boolean(type.output_kind === 'model_check' || rule.pause_on_failure || thresholds.length || voting || answer || rule.on_fail)
+    return Boolean(['model_check', 'capability'].includes(type.output_kind) || rule.pause_on_failure || thresholds.length || voting || answer || rule.on_fail)
   })
 }
 

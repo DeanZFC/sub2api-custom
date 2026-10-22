@@ -17,11 +17,11 @@ describe('statistics recovery evidence', () => {
       global: { plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: {} } })] },
     })
     expect(wrapper.find('[data-statistics-recovery-probe]').exists()).toBe(false)
-    for (const status of ['success', 'failed'] as const) {
+    for (const status of ['success', 'failed', 'deferred'] as const) {
       await wrapper.setProps({ statistics: { ...statistics, recovery_probe: {
         status, started_at: '2026-10-14T06:00:00Z', finished_at: '2026-10-14T06:00:01Z', latency_ms: 1000,
       } } })
-      expect(wrapper.get('[data-statistics-recovery-probe]').text()).toContain(status === 'success' ? 'tests.statisticsProbeSuccess' : 'tests.statisticsProbeFailed')
+      expect(wrapper.get('[data-statistics-recovery-probe]').text()).toContain(status === 'success' ? 'tests.statisticsProbeSuccess' : status === 'deferred' ? 'tests.statisticsProbeDeferred' : 'tests.statisticsProbeFailed')
       expect(wrapper.get('[data-success-rate]').text()).toBe('—')
       expect(wrapper.get('[data-cache-rate]').text()).toBe('—')
       expect(wrapper.get('[data-first-token]').text()).toBe('—')

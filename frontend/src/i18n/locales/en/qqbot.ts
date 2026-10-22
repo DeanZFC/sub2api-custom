@@ -401,6 +401,7 @@ export default { qqbot: {
   "historyHelp": "Default 12, range 0–100; 0 disables and clears history. Each group has separate history with speaker identities, counting member and bot messages. Resets after 30 idle minutes. Historical input is capped at approximately 1,500 tokens, so fewer messages may fit; this excludes the system prompt, current message, explicit quotes and images. Ordinary messages are stored without model calls; chat runs only on a mention or reply to the bot. No model-generated summaries. Account commands and results stay out of shared history. Enable Receive all messages in QQ.",
   "images": "Image generation",
   "imageModel": "Image model",
+  "chatImageHelp": "When enabled, AI decides whether to generate a new image or edit a quoted or attached original, without fixed commands. The chat model must support vision and tool calling, and the image provider must support editing. Generation or editing triggered by chat uses one chat request and one image request.",
   "imageSize": "Image size",
   "imageBase": "Separate image Base URL (optional)",
   "imageKey": "Separate image API key (optional)",

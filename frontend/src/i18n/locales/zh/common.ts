@@ -254,6 +254,7 @@ export default {
     statisticsRequestSamples: '{success} / {total} 次成功', statisticsTokenSamples: '{cached} / {input} 输入 Token 命中缓存', statisticsFirstTokenSamples: '{count} 次有效计时',
     statisticsWindow: '统计时间', statisticsUpdated: '更新时间',
     statisticsProbeSuccess: '样本不足，主动探测成功；恢复仍受其他检测条件限制',
+    statisticsProbeDeferred: '主动探测因检测预算或供应商复测间隔暂缓，保留已有保护状态',
     statisticsProbeFailed: '样本不足，主动探测失败，继续暂停',
     statisticsSourceHint: '根据最近一小时已记录的请求统计。缓存率按输入 Token 加权；首字为有效计时样本的平均值。',
     statisticsRecentRequests: '最近请求', statisticsRecentRequestsHint: '最近 10 次请求，从左到右由旧到新', statisticsRequestSuccess: '成功', statisticsRequestFailure: '失败',

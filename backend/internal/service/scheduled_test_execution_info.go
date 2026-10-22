@@ -12,6 +12,8 @@ type ScheduledTestTokenUsage struct {
 	CacheCreationTokens *int64 `json:"cache_creation_tokens"`
 }
 type ScheduledTestRequestAttempt struct {
+	qualityCacheExclusive bool
+	qualityUsageFinal     bool
 	ScheduledTestTokenUsage
 	StartedAt   time.Time  `json:"started_at"`
 	HTTPStatus  int        `json:"http_status,omitempty"`
@@ -19,6 +21,7 @@ type ScheduledTestRequestAttempt struct {
 	RetryAfter  *time.Time `json:"retry_after,omitempty"`
 }
 type ScheduledTestExecutionInfo struct {
+	Capability *QualityCapabilityResult `json:"capability,omitempty"`
 	ScheduledTestTokenUsage
 	Attempts            []ScheduledTestRequestAttempt `json:"attempts"`
 	FailureKind         string                        `json:"failure_kind,omitempty"`

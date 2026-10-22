@@ -29,7 +29,7 @@ func TestChatImageWireProtocols(t *testing.T) {
 				require.Equal(t, "https://image.example/picture", url)
 				return testInputPNG(t), nil
 			}
-			input, err := s.chatMessage(context.Background(), Event{Attachments: []Attachment{{URL: "//image.example/picture", ContentType: "image/png"}}}, "看图", nil)
+			input, err := s.chatMessage(context.Background(), DefaultConfig(), Event{Attachments: []Attachment{{URL: "//image.example/picture", ContentType: "image/png"}}}, "看图", nil)
 			require.NoError(t, err)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Equal(t, "Bearer test-only", r.Header.Get("Authorization"))
@@ -93,7 +93,7 @@ func TestChatImageValidationAndNestedQuotes(t *testing.T) {
 		return testInputPNG(t), nil
 	}
 	e := Event{MessageType: 103, MessageScene: MessageScene{Ext: []string{"ref_msg_idx=REF==", "auth_token=private"}}, MsgElements: []MessageElement{{Content: "被引用的原文", MsgElements: []MessageElement{{Attachments: []Attachment{{URL: "https://image.example/ok", ContentType: "image/png"}}}}}}}
-	input, err := s.chatMessage(context.Background(), e, "解释一下", &botMessageReference{Content: "确切的机器人回复"})
+	input, err := s.chatMessage(context.Background(), DefaultConfig(), e, "解释一下", &botMessageReference{Content: "确切的机器人回复"})
 	require.NoError(t, err)
 	require.Len(t, input.Images, 1)
 	require.Contains(t, input.Content, "确切的机器人回复")
@@ -110,16 +110,16 @@ func TestChatImageValidationAndNestedQuotes(t *testing.T) {
 		{"https://image.example/invalid", 0, "图片格式不受支持"},
 		{"https://image.example/ok", 11 << 20, "10 MB"},
 	} {
-		_, err := s.chatMessage(context.Background(), Event{Attachments: []Attachment{{URL: tc.url, Size: tc.size, ContentType: "image/png"}}}, "看图", nil)
+		_, err := s.chatMessage(context.Background(), DefaultConfig(), Event{Attachments: []Attachment{{URL: tc.url, Size: tc.size, ContentType: "image/png"}}}, "看图", nil)
 		require.ErrorContains(t, err, tc.want)
 	}
 	before := downloads
-	_, err = s.chatMessage(context.Background(), Event{Attachments: []Attachment{
+	_, err = s.chatMessage(context.Background(), DefaultConfig(), Event{Attachments: []Attachment{
 		{ContentType: "image/png"}, {ContentType: "image/png"}, {ContentType: "image/png"}, {ContentType: "image/png"}, {ContentType: "image/png"},
 	}}, "看图", nil)
 	require.ErrorContains(t, err, "4 张")
 	require.Equal(t, before, downloads)
-	input, err = s.chatMessage(context.Background(), Event{MessageScene: e.MessageScene}, "解释一下", nil)
+	input, err = s.chatMessage(context.Background(), DefaultConfig(), Event{MessageScene: e.MessageScene}, "解释一下", nil)
 	require.NoError(t, err)
 	require.Contains(t, input.Content, "未找到被引用消息")
 }

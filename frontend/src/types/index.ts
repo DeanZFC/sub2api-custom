@@ -2510,6 +2510,7 @@ export interface TestRequestAttempt extends TestTokenUsage {
   retry_after?: string | null
 }
 export interface TestExecutionInfo extends TestTokenUsage {
+  capability?: import('@/utils/qualityCapability').CapabilityResult
   attempts: TestRequestAttempt[]
   failure_kind?: string
   retry_after?: string | null
@@ -2707,7 +2708,7 @@ export interface TestOutputStatistics {
   recent_requests?: TestStatisticsRecentRequest[] | null
   /** Connectivity evidence kept separate from real usage statistics. */
   recovery_probe?: {
-    status: 'success' | 'failed'
+    status: 'success' | 'failed' | 'deferred'
     started_at: string
     finished_at: string
     latency_ms: number

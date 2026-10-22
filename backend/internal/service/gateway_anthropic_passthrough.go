@@ -708,6 +708,7 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	}
 
 	parsed := gjson.Parse(data)
+	usage.CacheUsageReported = usage.CacheUsageReported || passiveCacheUsageReported(parsed.Get("message.usage")) || passiveCacheUsageReported(parsed.Get("usage"))
 	switch parsed.Get("type").String() {
 	case "message_start":
 		msgUsage := parsed.Get("message.usage")

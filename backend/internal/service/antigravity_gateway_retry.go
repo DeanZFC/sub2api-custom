@@ -536,19 +536,20 @@ urlFallbackLoop:
 				return nil, err
 			}
 
-			attemptStarted := time.Now().UTC()
-			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
-			if err == nil && resp == nil {
-				err = errors.New("upstream returned nil response")
-			}
 			if p.ctx.Value(accountTestUsageKey{}) != nil {
-				// Scheduled probes own their retry budget; avoid nested gateway retries.
-				resp, err = observeAccountTestResponse(p.ctx, attemptStarted, resp, err)
+				resp, err = executeQualityTestHTTP(upstreamReq, p.account.ID, func(req *http.Request) (*http.Response, error) {
+					return p.httpUpstream.Do(req, p.proxyURL, p.account.ID, p.account.Concurrency)
+				})
 				if err != nil {
 					return nil, err
 				}
 				return &antigravityRetryLoopResult{resp: resp}, nil
 			}
+			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			if err == nil && resp == nil {
+				err = errors.New("upstream returned nil response")
+			}
+
 			if err != nil {
 				safeErr := sanitizeUpstreamErrorMessage(err.Error())
 				appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{

@@ -220,11 +220,11 @@ const filteredVotes = computed(() => projectedVotes.value.filter(item => groupKe
 const filteredResults = computed(() => sortResults(regularResults.value.filter(result => groupKey(result) === activeGroup.value && (!modelFilter.value || result.model_id === modelFilter.value))))
 const schedulingState = (result: TestResult) => result.account_schedulable
   ?? (isHiddenPausedAccount(result) ? false : undefined)
-const isSkippedResult = (result: TestResult) => result.status === 'failed' && (result.error_message || '').startsWith('检测跳过：')
+const isSkippedResult = (result: TestResult) => result.execution_info?.failure_kind === 'quality_deferred' || (result.status === 'failed' && (result.error_message || '').startsWith('检测跳过：'))
 const resultRank = (result: TestResult) => {
   if (isSkippedResult(result)) return 1
-  if (['failed', 'error'].includes(result.status) || result.output_model_check?.verdict === 'fail') return 2
-  if (!isSuccessful(result) || (result.output_kind === 'model_check' && result.output_model_check?.verdict !== 'pass')) return 1
+  if (['failed', 'error'].includes(result.status) || result.output_model_check?.verdict === 'fail' || result.execution_info?.capability?.verdict === 'fail') return 2
+  if (!isSuccessful(result) || (result.output_kind === 'model_check' && result.output_model_check?.verdict !== 'pass') || (result.output_kind === 'capability' && result.execution_info?.capability?.verdict !== 'pass')) return 1
   return 0
 }
 const accountResults = computed(() => {
@@ -309,10 +309,12 @@ const openHistory = (series: TestSeries) => {
 }
 const statusClass = (result: TestResult) => result.status === 'running' || result.status === 'pending' || isSkippedResult(result) ? 'badge badge-warning'
   : !isSuccessful(result) ? 'badge badge-danger'
+  : result.output_kind === 'capability' ? result.execution_info?.capability?.verdict === 'pass' ? 'badge badge-success' : result.execution_info?.capability?.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning'
   : result.output_kind === 'model_check' ? result.output_model_check?.verdict === 'pass' ? 'badge badge-success' : result.output_model_check?.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning' : 'badge badge-success'
 const statusLabel = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? t('tests.running')
   : isSkippedResult(result) ? t('tests.skipped')
   : !isSuccessful(result) ? t('tests.failed')
+  : result.output_kind === 'capability' ? t(`admin.tests.capability.verdicts.${result.execution_info?.capability?.verdict || 'pending'}`)
   : result.output_kind === 'model_check' ? t(`tests.modelCheck.${result.output_model_check?.verdict || 'unknown'}`) : t('tests.completed')
 const modelLabel = (result: TestResult) => `${result.model_id || '-'}${result.reasoning_effort ? ` · ${t('tests.reasoningEffort')}: ${result.reasoning_effort}` : ''}`
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '-'

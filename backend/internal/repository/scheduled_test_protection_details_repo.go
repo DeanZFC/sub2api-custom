@@ -27,7 +27,7 @@ func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context,
  'reason',s.reason,'rule_config',s.rule_config,
  'result',CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object(
  'id',r.id,'started_at',r.started_at,'status',r.status,'output_kind',r.output_kind,'model_id',r.model_id,
- 'response_text',r.response_text,
+ 'response_text',r.response_text,'execution_info',r.execution_info,
  'output_numeric',r.output_numeric,'latency_ms',r.latency_ms) END,
  'pass_count',(SELECT COUNT(*) FROM scheduled_test_votes v WHERE v.result_id=s.result_id AND v.generation=s.generation AND v.vote='pass'),
  'fail_count',(SELECT COUNT(*) FROM scheduled_test_votes v WHERE v.result_id=s.result_id AND v.generation=s.generation AND v.vote='fail')

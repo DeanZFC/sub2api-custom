@@ -1492,7 +1492,12 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	filtered := make([]*Account, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
 	for i := range accounts {
-		account := &accounts[i]
+		model := req.RequestedModel
+		if public, ok := RequestedPublicModelFromContext(ctx); ok && public != "" {
+			model = public
+		}
+		adjusted := qualitySchedulingAccount(accounts[i], model)
+		account := &adjusted
 		if req.ExcludedIDs != nil {
 			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
 				filterStats.exclude("excluded")
@@ -1827,6 +1832,13 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (bool, string) {
 	if account == nil {
 		return false, "account_nil"
+	}
+	passiveModel := req.RequestedModel
+	if public, ok := RequestedPublicModelFromContext(ctx); ok && public != "" {
+		passiveModel = public
+	}
+	if account.PassiveQualityBlocked(passiveModel) {
+		return false, "passive_quality"
 	}
 	if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {
 		if publicModel, modelOK := RequestedPublicModelFromContext(ctx); modelOK && !explicitModelMappingClaims(*account, publicModel) {

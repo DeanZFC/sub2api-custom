@@ -22,8 +22,8 @@
         <dd v-else class="mt-1 text-2xl font-semibold text-gray-400">—</dd>
       </div>
     </dl>
-    <p v-if="statistics.recovery_probe" class="mt-2 text-xs" :class="statistics.recovery_probe.status === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'" data-statistics-recovery-probe>
-      {{ t(statistics.recovery_probe.status === 'success' ? 'tests.statisticsProbeSuccess' : 'tests.statisticsProbeFailed') }}
+    <p v-if="statistics.recovery_probe" class="mt-2 text-xs" :class="statistics.recovery_probe.status === 'success' ? 'text-emerald-600 dark:text-emerald-400' : statistics.recovery_probe.status === 'deferred' ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'" data-statistics-recovery-probe>
+      {{ t(statistics.recovery_probe.status === 'success' ? 'tests.statisticsProbeSuccess' : statistics.recovery_probe.status === 'deferred' ? 'tests.statisticsProbeDeferred' : 'tests.statisticsProbeFailed') }}
       · {{ formatTime(statistics.recovery_probe.finished_at) }}
     </p>
     <div class="flex flex-wrap gap-x-4 gap-y-1 border-t border-gray-100 pt-2 text-xs text-gray-500 dark:border-dark-800 dark:text-gray-400" :class="compact ? 'mt-2' : 'mt-4'">

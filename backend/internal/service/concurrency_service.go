@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
@@ -249,8 +250,9 @@ const (
 
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
-	cache             ConcurrencyCache
-	cacheRecoveryGate AccountCacheRecoveryGate
+	cache              ConcurrencyCache
+	cacheRecoveryGate  AccountCacheRecoveryGate
+	passiveQualityGate PassiveQualityRepository
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -285,18 +287,58 @@ var ErrAccountAdmissionDenied = errors.New("account admission denied by live sch
 // Only consume trial capacity after reserving a concurrency slot. Saturated
 // queues may retry this method many times without sending an upstream request.
 func (s *ConcurrencyService) admitCacheRecoveryRequest(ctx context.Context, accountID int64, result *AcquireResult) (*AcquireResult, error) {
-	if result == nil || !result.Acquired || s.cacheRecoveryGate == nil {
+	if result == nil || !result.Acquired {
 		return result, nil
 	}
-	allowed, err := s.cacheRecoveryGate.AcquireCacheRecoveryRequest(ctx, accountID)
+	allowed := true
+	var err error
+	lease := ""
+	if s.passiveQualityGate != nil {
+		model, _ := ctx.Value(ctxkey.Model).(string)
+		if public, ok := RequestedPublicModelFromContext(ctx); ok && public != "" {
+			model = public
+		}
+		lease = generateRequestID()
+		var reserved bool
+		allowed, reserved, err = s.passiveQualityGate.AcquirePassiveQuality(ctx, accountID, model, lease)
+		if !reserved && err == nil {
+			lease = ""
+		}
+	}
+	if err == nil && allowed && s.cacheRecoveryGate != nil {
+		allowed, err = s.cacheRecoveryGate.AcquireCacheRecoveryRequest(ctx, accountID)
+	}
+	releasePassive := func(unused bool) {
+		if lease == "" {
+			return
+		}
+		release, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if e := s.passiveQualityGate.ReleasePassiveQuality(release, lease, unused); e != nil {
+			logger.LegacyPrintf("service.passive_quality", "release lease failed: %v", e)
+		}
+	}
 	if err != nil || !allowed {
 		if result.ReleaseFunc != nil {
 			result.ReleaseFunc()
 		}
+		releasePassive(true)
 		if err == nil {
 			err = ErrAccountAdmissionDenied
 		}
 		return &AcquireResult{}, err
+	}
+	if lease != "" {
+		previous := result.ReleaseFunc
+		var once sync.Once
+		result.ReleaseFunc = func() {
+			once.Do(func() {
+				if previous != nil {
+					previous()
+				}
+				releasePassive(false)
+			})
+		}
 	}
 	return result, nil
 }
@@ -392,6 +434,15 @@ type UserLoadInfo struct {
 func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, proxyIDs ...int64) (*AcquireResult, error) {
 	if len(proxyIDs) > 1 {
 		return s.acquireAccountProxyPoolSlot(ctx, accountID, maxConcurrency, proxyIDs)
+	}
+	if gate, ok := s.passiveQualityGate.(PassiveQualityConcurrencyGate); ok {
+		limit, err := gate.PassiveQualityConcurrencyLimit(ctx, accountID, qualityRequestModel(ctx))
+		if err != nil {
+			return nil, err
+		}
+		if limit > 0 && (maxConcurrency <= 0 || limit < maxConcurrency) {
+			maxConcurrency = limit
+		}
 	}
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {

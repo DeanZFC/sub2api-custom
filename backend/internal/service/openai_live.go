@@ -330,6 +330,17 @@ func (s *OpenAIGatewayService) acquireLiveLease(
 	leaseID string,
 	replacingRegularSlots bool,
 ) (bool, error) {
+	if s.concurrencyService != nil {
+		if gate, ok := s.concurrencyService.passiveQualityGate.(PassiveQualityConcurrencyGate); ok {
+			limit, err := gate.PassiveQualityConcurrencyLimit(ctx, accountID, qualityRequestModel(ctx))
+			if err != nil {
+				return false, err
+			}
+			if limit > 0 && (accountMax <= 0 || limit < accountMax) {
+				accountMax = limit
+			}
+		}
+	}
 	groupID := liveGroupID(identity.GroupID)
 	if groupID > 0 && groupMax > 0 {
 		if grouped, ok := cache.(LiveUserGroupConcurrencyCache); ok {

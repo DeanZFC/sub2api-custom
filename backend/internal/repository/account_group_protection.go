@@ -45,6 +45,9 @@ func lockAccountMembershipProtection(ctx context.Context, tx sqlExecutor, accoun
 // Only administrator membership edits call this helper. Automatic routing
 // retains its frozen round, including moves made by another rule in that round.
 func releaseDetachedAccountProtection(ctx context.Context, tx sqlExecutor, accountID int64, planIDs []int64) error {
+	if err := releaseDetachedPassiveProtection(ctx, tx, accountID); err != nil {
+		return err
+	}
 	if len(planIDs) == 0 {
 		return nil
 	}

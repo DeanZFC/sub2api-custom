@@ -91,12 +91,17 @@ func (s *ScheduledTestRunnerService) probeStatisticsRecovery(ctx context.Context
 	if response != nil {
 		result.ExecutionInfo = mergeScheduledTestExecution(result.ExecutionInfo, response.ExecutionInfo)
 	}
+	if QualityResultDeferred(response) {
+		probe.Status = "deferred"
+	}
 	probe.FinishedAt = time.Now().UTC()
 	probe.LatencyMs = probe.FinishedAt.Sub(probe.StartedAt).Milliseconds()
 	if ctx.Err() != nil {
 		return // Shutdown is not evidence about account quality.
 	}
-	if err == nil && probeCtx.Err() == nil && response != nil && response.Status == "success" && strings.TrimSpace(response.ResponseText) != "" {
+	deadline, _ := probeCtx.Deadline()
+	finishedBeforeDeadline := response != nil && !response.FinishedAt.IsZero() && response.FinishedAt.Before(deadline)
+	if err == nil && (probeCtx.Err() == nil || finishedBeforeDeadline) && response != nil && response.Status == "success" && strings.TrimSpace(response.ResponseText) != "" {
 		probe.Status = "success"
 	}
 	result.OutputStatistics.RecoveryProbe = probe

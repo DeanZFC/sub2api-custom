@@ -29,9 +29,10 @@ func (e Event) referenceID() string {
 }
 
 type botMessageReference struct {
-	Content   string
-	Image     bool
-	Shareable bool
+	Content    string
+	Image      bool
+	Shareable  bool
+	ImageJobID string
 }
 
 func (s *Service) referencedMessage(ctx context.Context, c Config, group, id string) (*botMessageReference, error) {
@@ -39,9 +40,9 @@ func (s *Service) referencedMessage(ctx context.Context, c Config, group, id str
 		return nil, nil
 	}
 	var ref botMessageReference
-	err := s.db.QueryRowContext(ctx, `SELECT content,is_image,shareable FROM qq_bot_message_references
+	err := s.db.QueryRowContext(ctx, `SELECT content,is_image,shareable,image_job_id FROM qq_bot_message_references
  WHERE app_id=$1 AND group_id=$2 AND (ref_idx=$3 OR message_id=$3)
- AND created_at>NOW()-INTERVAL '24 hours' ORDER BY created_at DESC LIMIT 1`, c.AppID, group, id).Scan(&ref.Content, &ref.Image, &ref.Shareable)
+	AND created_at>NOW()-INTERVAL '24 hours' ORDER BY created_at DESC LIMIT 1`, c.AppID, group, id).Scan(&ref.Content, &ref.Image, &ref.Shareable, &ref.ImageJobID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -70,10 +71,14 @@ func (s *Service) rememberSentMessage(ctx context.Context, c Config, j Job, raw 
 	if sent.ID == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_message_references(app_id,group_id,message_id,ref_idx,content,is_image,shareable)
- VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(app_id,group_id,message_id)
- DO UPDATE SET ref_idx=EXCLUDED.ref_idx,content=EXCLUDED.content,is_image=EXCLUDED.is_image,shareable=EXCLUDED.shareable,created_at=NOW()`,
-		c.AppID, j.GroupID, sent.ID, sent.Ext.Reference, content, image, shareable)
+	imageJobID := ""
+	if image {
+		imageJobID = j.ID
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_message_references(app_id,group_id,message_id,ref_idx,content,is_image,shareable,image_job_id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,group_id,message_id)
+ DO UPDATE SET ref_idx=EXCLUDED.ref_idx,content=EXCLUDED.content,is_image=EXCLUDED.is_image,shareable=EXCLUDED.shareable,image_job_id=EXCLUDED.image_job_id,created_at=NOW()`,
+		c.AppID, j.GroupID, sent.ID, sent.Ext.Reference, content, image, shareable, imageJobID)
 	if err != nil {
 		return errors.New("消息已发送，但引用记录保存失败")
 	}

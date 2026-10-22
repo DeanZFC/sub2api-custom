@@ -933,3 +933,11 @@ describe('current scheduling and passing result order', () => {
     wrapper.unmount()
   })
 })
+
+it('reports capability failure even when the upstream request succeeded', async () => {
+ api.list.mockResolvedValue([{ ...baseResult, id: 1, output_kind: 'capability', execution_info: { attempts: [], capability: { verdict: 'fail' } } }])
+ const w = mountResults(); await flushPromises()
+ expect(w.get('[data-test-section] .badge').text()).toBe('admin.tests.capability.verdicts.fail')
+ expect(w.get('[data-test-section] .badge').classes()).toContain('badge-danger')
+ w.unmount()
+})

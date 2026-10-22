@@ -17,6 +17,7 @@
               : t('channelMonitorV2.admin.descriptionV2')
           }}
         </p>
+        <RouterLink to="/admin/tests?tab=overview" class="mt-3 inline-block text-sm text-primary-600 hover:underline dark:text-primary-400">{{ t('admin.tests.quality.overview') }}</RouterLink>
         <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
           <div
             class="tabs inline-flex w-full max-w-xl flex-wrap sm:w-auto"
@@ -169,6 +170,7 @@
 </template>
 
 <script setup lang="ts">
+import { RouterLink } from 'vue-router'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

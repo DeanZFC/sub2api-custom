@@ -107,7 +107,7 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 	var last *ScheduledTestResult
 	verdicts := make(map[int64]string)
 	for i, result := range observations {
-		if result == nil {
+		if result == nil || QualityResultDeferred(result) {
 			return
 		}
 		last = result
@@ -180,5 +180,38 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 	defer cancel()
 	if err := repo.RecordTestBackoff(persistCtx, queue[0].plan, last, policy, failed, retryAfter); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d backoff persistence error: %v", queue[0].plan.ID, *queue[0].accountID, err)
+		return
 	}
+	if s.accountTestSvc != nil && s.accountTestSvc.qualityOperations != nil {
+		if err := s.accountTestSvc.qualityOperations.RecordQualityFrequency(persistCtx, queue[0].plan, last, policy, !failed && conclusive); err != nil {
+			logger.LegacyPrintf("service.quality_operations", "frequency persistence failed: %v", err)
+		}
+	}
+}
+
+func (s *ScheduledTestRunnerService) deferHealthyAccountQueue(ctx context.Context, queue []*scheduledTestExecutionTarget, policy string) bool {
+	automatic, _ := ctx.Value(scheduledTestAutomaticRunKey{}).(bool)
+	if !automatic || len(queue) == 0 || queue[0].accountID == nil {
+		return false
+	}
+	if s.accountTestSvc == nil || s.accountTestSvc.qualityOperations == nil {
+		return false
+	}
+	query, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
+	defer cancel()
+	next, err := s.accountTestSvc.qualityOperations.QualityFrequencyDue(query, queue[0].plan.ID, *queue[0].accountID, policy)
+	if next == nil && err == nil {
+		return false
+	}
+	for _, target := range queue {
+		reason := "检测跳过：无法检查动态检测频率"
+		if next != nil {
+			reason = fmt.Sprintf("检测跳过：连续健康，复测等待至 %s", next.Format(time.RFC3339))
+			info := newScheduledTestExecutionInfo()
+			info.NextCheckAt = next
+			target.pending.ExecutionInfo = info
+		}
+		s.failExecutionTarget(target, fmt.Errorf("%s", reason))
+	}
+	return true
 }

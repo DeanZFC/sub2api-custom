@@ -19,26 +19,28 @@ import (
 
 type accountTestUsageKey struct{}
 type accountTestUsageCollector struct {
-	mu       sync.Mutex
-	attempts []*ScheduledTestRequestAttempt
+	mu                 sync.Mutex
+	attempts           []*ScheduledTestRequestAttempt
+	deferred           *QualityDeferredError
+	qualitySettlements []qualityProbeSettlement
 }
 
 func (s *AccountTestService) doAccountTestHTTP(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
-	started := time.Now().UTC()
-	resp, err := s.httpUpstream.Do(req, proxy, id, concurrency)
-	return observeAccountTestResponse(req.Context(), started, resp, err)
+	return executeQualityTestHTTP(req, id, func(r *http.Request) (*http.Response, error) { return s.httpUpstream.Do(r, proxy, id, concurrency) })
 }
 func (s *AccountTestService) doAccountTestHTTPWithTLS(req *http.Request, proxy string, id int64, concurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
-	started := time.Now().UTC()
-	resp, err := s.httpUpstream.DoWithTLS(req, proxy, id, concurrency, profile)
-	return observeAccountTestResponse(req.Context(), started, resp, err)
+	return executeQualityTestHTTP(req, id, func(r *http.Request) (*http.Response, error) {
+		return s.httpUpstream.DoWithTLS(r, proxy, id, concurrency, profile)
+	})
 }
+
 func observeAccountTestResponse(ctx context.Context, started time.Time, resp *http.Response, err error) (*http.Response, error) {
 	collector, _ := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector)
 	if collector == nil {
 		return resp, err
 	}
 	attempt := &ScheduledTestRequestAttempt{StartedAt: started}
+	settle, _ := ctx.Value(qualitySettlementKey{}).(func(*ScheduledTestRequestAttempt))
 	if err != nil {
 		var netErr net.Error
 		switch {
@@ -61,8 +63,11 @@ func observeAccountTestResponse(ctx context.Context, started time.Time, resp *ht
 			}
 		}
 		if resp.Body != nil {
-			resp.Body = &accountTestUsageBody{ReadCloser: resp.Body, attempt: attempt}
+			resp.Body = &accountTestUsageBody{ReadCloser: resp.Body, attempt: attempt, settle: settle}
 		}
+	}
+	if (resp == nil || resp.Body == nil) && settle != nil {
+		settle(attempt)
 	}
 	collector.mu.Lock()
 	collector.attempts = append(collector.attempts, attempt)
@@ -97,14 +102,18 @@ func (c *accountTestUsageCollector) snapshot() *ScheduledTestExecutionInfo {
 // Parsing is bounded and does not drain a response or alter the caller's reads.
 type accountTestUsageBody struct {
 	io.ReadCloser
-	attempt  *ScheduledTestRequestAttempt
-	buffer   []byte
-	sse      bool
-	overflow bool
+	attempt    *ScheduledTestRequestAttempt
+	buffer     []byte
+	sse        bool
+	overflow   bool
+	settle     func(*ScheduledTestRequestAttempt)
+	settleOnce sync.Once
+	eventKind  string
 }
 
 func (b *accountTestUsageBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
+	qualityUsageReadError(b.attempt, err)
 	if !b.overflow {
 		b.buffer = append(b.buffer, p[:n]...)
 		if len(b.buffer) > 2<<20 {
@@ -143,10 +152,22 @@ func (b *accountTestUsageBody) Close() error {
 		b.captureJSON(b.buffer)
 	}
 	b.buffer = nil
-	return b.ReadCloser.Close()
+	err := b.ReadCloser.Close()
+	b.settleOnce.Do(func() {
+		if b.settle != nil {
+			b.settle(b.attempt)
+		}
+	})
+	return err
 }
 func (b *accountTestUsageBody) captureLine(line []byte) {
 	line = bytes.TrimSpace(line)
+	if len(line) == 0 {
+		b.eventKind = ""
+	}
+	if bytes.HasPrefix(line, []byte("event:")) {
+		b.eventKind = strings.TrimSpace(string(bytes.TrimPrefix(line, []byte("event:"))))
+	}
 	if bytes.HasPrefix(line, []byte("data:")) {
 		b.captureJSON(bytes.TrimSpace(line[5:]))
 	}
@@ -157,6 +178,18 @@ func (b *accountTestUsageBody) captureJSON(raw []byte) {
 		return
 	}
 	captureAccountTestUsageMetadata(b.attempt, data)
+	// Anthropic message_start contains an initial output count, not final usage.
+	// Responses created/in-progress events are likewise not settlements.
+	kind, _ := data["type"].(string)
+	if kind == "" {
+		kind = b.eventKind
+	}
+	final := !b.sse || (kind != "message_start" && (!strings.HasPrefix(kind, "response.") || kind == "response.completed" || kind == "response.failed" || kind == "response.incomplete"))
+	current := &ScheduledTestRequestAttempt{}
+	captureAccountTestUsageMetadata(current, data)
+	if final && b.attempt.InputTokens != nil && current.OutputTokens != nil {
+		b.attempt.qualityUsageFinal = true
+	}
 }
 func captureAccountTestUsageMetadata(a *ScheduledTestRequestAttempt, data map[string]any) {
 	captureAccountTestUsageEnvelope(a, data, 0)
@@ -183,6 +216,12 @@ func captureAccountTestUsageEnvelope(a *ScheduledTestRequestAttempt, data map[st
 		}
 	}
 	if usage, ok := data["usage"].(map[string]any); ok {
+		if _, ok := usage["cache_read_input_tokens"]; ok {
+			a.qualityCacheExclusive = true
+		}
+		if _, ok := usage["cache_creation_input_tokens"]; ok {
+			a.qualityCacheExclusive = true
+		}
 		set(&a.InputTokens, usage["input_tokens"])
 		set(&a.InputTokens, usage["prompt_tokens"])
 		set(&a.OutputTokens, usage["output_tokens"])

@@ -1422,6 +1422,7 @@ func (s *GatewayService) buildRecordUsageLog(
 			"selected_response_model", strings.TrimSpace(result.UpstreamResponseModel),
 		)
 	}
+	recordPassiveQualityCache(ctx, account.ID, requestID, result.Usage.CacheUsageReported || result.Usage.CacheReadInputTokens > 0)
 	usageLog := &UsageLog{
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,

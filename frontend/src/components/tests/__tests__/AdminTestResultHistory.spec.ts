@@ -278,3 +278,12 @@ describe('admin result account history', () => {
     expect(wrapper.find('[data-output]').exists()).toBe(false)
   })
 })
+
+it('opens the linked account and distinguishes failed capability from HTTP success', async () => {
+ const w = mountHistory([result(1), result(2, { account_id: 20, output_kind: 'capability', execution_info: { attempts: [], capability: { version: 1, seed: 'a', samples: 3, required_passes: 2, passed: 0, verdict: 'fail', answers: [] } } })], { initialAccountId: 20 })
+ await flushPromises()
+ expect(w.get('[data-selected-account] h3').text()).toBe('Team Beta #20')
+ expect(w.get('[data-result-id="2"] .badge').text()).toBe('Failed')
+ expect(w.get('[data-result-id="2"] .badge').classes()).toContain('badge-danger')
+ w.unmount()
+})

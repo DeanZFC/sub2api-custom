@@ -22,6 +22,9 @@ func scheduledTestFailureKind(result *ScheduledTestResult) string {
 	if result == nil {
 		return "unknown"
 	}
+	if QualityResultDeferred(result) {
+		return "quality_deferred"
+	}
 	if result.Status == "success" || result.Status == "passed" {
 		return ""
 	}

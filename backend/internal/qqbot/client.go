@@ -86,6 +86,10 @@ func (s *Service) request(ctx context.Context, method, endpoint, key string, bod
 		}
 		reader = bytes.NewReader(raw)
 	}
+	return s.requestBody(ctx, method, endpoint, key, reader, "application/json", limit)
+}
+
+func (s *Service) requestBody(ctx context.Context, method, endpoint, key string, reader io.Reader, contentType string, limit int64) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
 		return nil, "", errors.New("请求地址无效")
@@ -93,7 +97,7 @@ func (s *Service) request(ctx context.Context, method, endpoint, key string, bod
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return nil, "", errors.New("服务连接失败或超时；未自动重试，请查看用量后再操作")
@@ -114,17 +118,30 @@ func (s *Service) request(ctx context.Context, method, endpoint, key string, bod
 func endpoint(base, path string) string { return strings.TrimRight(base, "/") + path }
 
 func (s *Service) chat(ctx context.Context, c Config, messages []Message) (string, int64, int64, error) {
+	raw, ct, err := s.chatRequest(ctx, c, messages, false)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return parseChat(raw, ct)
+}
+
+func (s *Service) chatRequest(ctx context.Context, c Config, messages []Message, imageTool bool) ([]byte, string, error) {
 	path := "/chat/completions"
 	body := map[string]any{"model": c.ChatModel, "messages": messages, "stream": false, "max_completion_tokens": c.MaxOutputTokens}
 	if c.ChatProtocol == "responses" {
 		path = "/responses"
 		body = map[string]any{"model": c.ChatModel, "input": responsesMessages(messages), "stream": false, "store": false, "max_output_tokens": c.MaxOutputTokens}
 	}
-	raw, ct, err := s.request(ctx, "POST", endpoint(c.BaseURL, path), c.APIKey, body, 4<<20)
-	if err != nil {
-		return "", 0, 0, err
+	if imageTool {
+		imageTools := []any{chatImageTool(c.ChatProtocol)}
+		if len(currentChatImages(messages)) > 0 {
+			imageTools = append(imageTools, chatEditImageTool(c.ChatProtocol))
+		}
+		body["tools"] = imageTools
+		body["tool_choice"] = "auto"
+		body["parallel_tool_calls"] = false
 	}
-	return parseChat(raw, ct)
+	return s.request(ctx, "POST", endpoint(c.BaseURL, path), c.APIKey, body, 4<<20)
 }
 
 func responsesMessages(messages []Message) []map[string]any {
@@ -266,6 +283,15 @@ func parseChat(raw []byte, ct string) (string, int64, int64, error) {
 }
 
 func (s *Service) generateImage(ctx context.Context, c Config, prompt string) ([]byte, error) {
+	base, key := imageConnection(c)
+	raw, _, err := s.request(ctx, "POST", endpoint(base, "/images/generations"), key, map[string]any{"model": c.ImageModel, "prompt": prompt, "n": 1, "size": c.ImageSize}, 32<<20)
+	if err != nil {
+		return nil, err
+	}
+	return imageResult(ctx, raw)
+}
+
+func imageConnection(c Config) (string, string) {
 	base, key := c.BaseURL, c.APIKey
 	if c.ImageBaseURL != "" {
 		base = c.ImageBaseURL
@@ -273,10 +299,10 @@ func (s *Service) generateImage(ctx context.Context, c Config, prompt string) ([
 	} else if c.ImageAPIKey != "" {
 		key = c.ImageAPIKey
 	}
-	raw, _, err := s.request(ctx, "POST", endpoint(base, "/images/generations"), key, map[string]any{"model": c.ImageModel, "prompt": prompt, "n": 1, "size": c.ImageSize}, 32<<20)
-	if err != nil {
-		return nil, err
-	}
+	return base, key
+}
+
+func imageResult(ctx context.Context, raw []byte) ([]byte, error) {
 	var v struct {
 		Data []struct {
 			B64 string `json:"b64_json"`
@@ -287,6 +313,7 @@ func (s *Service) generateImage(ctx context.Context, c Config, prompt string) ([
 		return nil, errors.New("生图接口没有返回图片")
 	}
 	var data []byte
+	var err error
 	if v.Data[0].B64 != "" {
 		data, err = base64.StdEncoding.DecodeString(v.Data[0].B64)
 	} else if v.Data[0].URL != "" {
@@ -532,7 +559,7 @@ func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job
 	if err := s.recordAutonomousReply(ctx, c, j); err != nil {
 		return errors.New("消息已发送，但自主接话状态保存失败")
 	}
-	shareable := (j.Kind == "chat" || j.Kind == "ambient_chat") && j.ShareHistory && j.Error == ""
+	shareable := (j.Kind == "chat" || j.Kind == "ambient_chat" || j.Kind == "image") && j.ShareHistory && j.Error == ""
 	return s.rememberSentMessage(ctx, c, j, raw, deliveredText, len(img) > 0, shareable)
 }
 

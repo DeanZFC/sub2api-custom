@@ -930,6 +930,10 @@ func preserveLockedAccountSchedulingState(account *service.Account, current acco
 	// Enabling scheduling is an explicit SetSchedulable operation, never a side
 	// effect of saving an account snapshot loaded before a manual pause.
 	account.Schedulable = account.Schedulable && current.schedulable
+	delete(extra, "passive_quality")
+	if value, ok := currentExtra["passive_quality"]; ok {
+		extra["passive_quality"] = value
+	}
 	delete(extra, qualityReasonKey)
 	if !(account.StatusChanged && account.Status != service.StatusQualityPaused) && currentHasQualityReason {
 		extra[qualityReasonKey] = currentExtra[qualityReasonKey]

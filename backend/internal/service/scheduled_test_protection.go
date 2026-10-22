@@ -215,12 +215,12 @@ func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string
 		if rule.ModelMatch != "" {
 			return fmt.Errorf("model_match requires a model_check test")
 		}
-		if (rule.Vote == nil || !rule.Vote.Enabled) && !rule.PauseOnFailure && rule.ExpectedAnswer == "" && len(rule.Thresholds) == 0 && rule.OnFail == nil {
+		if kind != "capability" && (rule.Vote == nil || !rule.Vote.Enabled) && !rule.PauseOnFailure && rule.ExpectedAnswer == "" && len(rule.Thresholds) == 0 && rule.OnFail == nil {
 			return fmt.Errorf("each protection rule needs a threshold, answer, voting, or failure check")
 		}
 	}
-	if kind == "statistics" && ((rule.Vote != nil && rule.Vote.Enabled) || rule.ExpectedAnswer != "") {
-		return fmt.Errorf("statistics cannot use answer comparison or voting")
+	if (kind == "statistics" || kind == "capability") && ((rule.Vote != nil && rule.Vote.Enabled) || rule.ExpectedAnswer != "") {
+		return fmt.Errorf("%s cannot use answer comparison or voting", kind)
 	}
 	for _, threshold := range rule.Thresholds {
 		switch threshold.Metric {
@@ -244,6 +244,9 @@ func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string
 // Missing observations are inconclusive, never a synthetic zero or a pass that
 // could release an existing suspension. Any observed violation wins.
 func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *ScheduledTestResult) (string, string) {
+	if QualityResultDeferred(result) {
+		return "pending", result.ErrorMessage
+	}
 	if result == nil || result.Status == "pending" || result.Status == "running" {
 		return "pending", "检测未完成，等待下一轮"
 	}
@@ -259,6 +262,14 @@ func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *S
 		return "pending", "检测未完成，等待下一轮"
 	}
 	missing := false
+	if result.OutputKind == "capability" {
+		if result.ExecutionInfo == nil || result.ExecutionInfo.Capability == nil || result.ExecutionInfo.Capability.Verdict == "pending" {
+			return "pending", "能力检测未完成，等待复测"
+		}
+		if result.ExecutionInfo.Capability.Verdict != "pass" {
+			return "fail", "随机能力检测未达到通过标准"
+		}
+	}
 	if result.OutputKind == "model_check" {
 		check := result.OutputModelCheck
 		if check != nil && check.Verdict == "fail" {

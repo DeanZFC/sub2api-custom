@@ -46,6 +46,7 @@
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.required_pass || false" :disabled="ruleFor(type.id)?.vote?.enabled" type="checkbox" data-rule-required-pass @change="patchRule(type.id, { required_pass: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.requiredPass') }}</label>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.requiredPassHint') }}</p>
           </template>
+          <p v-if="type.output_kind === 'capability'" class="text-sm text-gray-500">{{ t('admin.tests.capability.protectionHint') }}</p>
           <h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.conditions') }}</h4>
           <label v-if="!allPass" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.pause_on_failure || !!ruleFor(type.id)?.on_fail" :disabled="!!ruleFor(type.id)?.on_fail" type="checkbox" data-rule-failure @change="patchRule(type.id, { pause_on_failure: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.pauseOnFailure') }}</label>
           <p v-if="!allPass && ruleFor(type.id)?.on_fail" class="text-xs text-gray-500 dark:text-gray-400" data-rule-failure-action-hint>{{ t(combined ? 'admin.tests.protection.combined.failureActionHint' : 'admin.tests.protection.failureActionHint') }}</p>
@@ -63,7 +64,7 @@
             </div>
             <button type="button" class="text-xs font-medium text-primary-600 dark:text-primary-400" :disabled="(ruleFor(type.id)?.thresholds?.length || 0) >= 20" data-add-threshold @click="addThreshold(type)">+ {{ t('admin.tests.protection.addThreshold') }}</button>
           </template>
-          <template v-if="!['statistics', 'model_check'].includes(type.output_kind)">
+          <template v-if="!['statistics', 'model_check', 'capability'].includes(type.output_kind)">
             <label v-if="!allPass" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.vote?.enabled || false" type="checkbox" data-rule-vote @change="toggleVote(type.id, ($event.target as HTMLInputElement).checked)" />{{ t('admin.tests.protection.vote') }}</label>
             <template v-if="!allPass && ruleFor(type.id)?.vote?.enabled">
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.vote?.public_enabled === true" type="checkbox" data-rule-public-vote @change="patchVote(type.id, { public_enabled: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.publicVote') }}</label>
@@ -127,7 +128,7 @@ const update = (change: (value: TestProtectionConfig) => void) => {
   emit('update:modelValue', next)
 }
 type AllPassRole = 'automatic' | 'review' | 'observe'
-const canReview = (type: TestType) => !['statistics', 'model_check'].includes(type.output_kind)
+const canReview = (type: TestType) => !['statistics', 'model_check', 'capability'].includes(type.output_kind)
 const ruleRole = (id: number): AllPassRole => !ruleFor(id) ? 'observe' : ruleFor(id)?.vote?.enabled ? 'review' : 'automatic'
 // Keep edits when switching to display-only and back within this editor.
 const roleDrafts = new Map<number, TestProtectionRule>()

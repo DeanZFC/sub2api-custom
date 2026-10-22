@@ -1581,7 +1581,7 @@ func (s *GatewayService) filterAccountsBySchedulingThreshold(ctx context.Context
 		if s.isAccountBlockedBySchedulingThreshold(ctx, &accounts[i]) {
 			continue
 		}
-		filtered = append(filtered, accounts[i])
+		filtered = append(filtered, qualitySchedulingAccount(accounts[i], qualityRequestModel(ctx)))
 	}
 	return filtered
 }

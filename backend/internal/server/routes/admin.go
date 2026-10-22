@@ -758,6 +758,27 @@ func registerUserAttributeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h.Admin.ChannelQuality != nil {
+		admin.GET("/channel-quality", h.Admin.ChannelQuality.Overview)
+		q := h.Admin.ChannelQuality
+		admin.GET("/channel-quality/operations", q.Operations)
+		admin.PUT("/channel-quality/operations", q.SaveOperations)
+		admin.POST("/channel-quality/suppliers", q.SaveSupplier)
+		admin.PUT("/channel-quality/suppliers/:id", q.SaveSupplier)
+		admin.DELETE("/channel-quality/suppliers/:id", q.DeleteSupplier)
+		admin.POST("/channel-quality/replay", q.Replay)
+	}
+	if h.Admin.PassiveQuality != nil {
+		q := h.Admin.PassiveQuality
+		admin.GET("/passive-quality-policies", q.Policies)
+		admin.POST("/passive-quality-policies", q.Save)
+		admin.PUT("/passive-quality-policies/:id", q.Save)
+		admin.DELETE("/passive-quality-policies/:id", q.Delete)
+		admin.GET("/passive-quality-states", q.States)
+		admin.GET("/passive-quality-events", q.Events)
+		admin.POST("/passive-quality-policies/:id/accounts/:account/action", q.Act)
+	}
+
 	defs := admin.Group("/scheduled-test-definitions")
 	{
 		defs.GET("", h.Admin.ScheduledTest.ListDefinitions)

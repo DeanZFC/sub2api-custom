@@ -1,7 +1,7 @@
 <template>
   <div v-if="info" class="text-xs text-gray-500 dark:text-gray-400" data-test-usage>
     <p v-if="info.next_check_at" class="mb-1 text-amber-700 dark:text-amber-300" data-next-check>
-      {{ t('admin.tests.nextCheck', { time: new Date(info.next_check_at).toLocaleString(), count: info.consecutive_failures || 0 }) }}
+      {{ t(info.consecutive_failures ? 'admin.tests.nextCheck' : 'admin.tests.nextCheckDeferred', { time: new Date(info.next_check_at).toLocaleString(), count: info.consecutive_failures || 0 }) }}
     </p>
     <details>
       <summary class="cursor-pointer">

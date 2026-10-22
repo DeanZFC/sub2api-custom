@@ -222,6 +222,10 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 	if c == nil || turn <= 0 {
 		return
 	}
+	if c.GetInt("passive_quality_turn_number") != turn {
+		PassiveQualityBeginTurn(c)
+		c.Set("passive_quality_turn_number", turn)
+	}
 	c.Set(OpsStreamTurnKey, turn)
 	// Rule and attempt state is turn-scoped on a long-lived WS connection.
 	c.Set(OpsSkipPassthroughKey, false)
@@ -276,6 +280,14 @@ func markOpsStreamError(c *gin.Context, streamErr OpsStreamError) {
 		streamErr.SkipMonitoring = currentOpsFailureSkipMonitoring(c)
 	}
 	snapshotOpsStreamErrorContext(c, &streamErr)
+	if !streamErr.RequestScoped && streamErr.CountTowardsSLA && streamErr.AccountID > 0 {
+		code := streamErr.UpstreamStatus
+		if code == 0 {
+			code = streamErr.IntendedStatus
+		}
+		RecordPassiveQualityAttempt(c, OpsUpstreamErrorEvent{AccountID: streamErr.AccountID, UpstreamStatusCode: code, Kind: "http_error"})
+	}
+
 	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		if value, ok := c.Get(OpsStreamTurnKey); ok {
 			streamErr.Turn, _ = value.(int)
@@ -510,6 +522,7 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 		}
 	}
 
+	RecordPassiveQualityAttempt(c, ev)
 	evCopy := ev
 	existing = append(existing, &evCopy)
 	c.Set(OpsUpstreamErrorsKey, existing)

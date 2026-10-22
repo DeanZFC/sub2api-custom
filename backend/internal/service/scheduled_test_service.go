@@ -35,6 +35,17 @@ func ValidateScheduledTestDefinitionInput(d *ScheduledTestDefinition) error {
 	if d.OutputKind == "model_check" {
 		d.Prompt = scheduledTestModelCheckPrompt
 	}
+	if d.OutputKind == "capability" {
+		config, err := ParseQualityCapabilityConfig(d.Prompt)
+		if err != nil {
+			return err
+		}
+		raw, _ := json.Marshal(config)
+		d.Prompt = string(raw)
+		if d.MaxOutputTokens == 0 {
+			d.MaxOutputTokens = 4096
+		}
+	}
 	if d.SortOrder < 0 {
 		return fmt.Errorf("sort_order must be non-negative")
 	}

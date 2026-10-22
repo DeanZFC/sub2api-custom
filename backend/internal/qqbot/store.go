@@ -133,7 +133,7 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	}
 	// Disabled/unapproved ambient streams do not touch storage. Enabled groups
 	// record their bounded shared context below without creating model jobs.
-	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e, c.CustomCommands...) && (!c.Enabled || !c.allows(e.GroupID) || (c.HistoryMessages == 0 && !c.autonomousGroup(e.GroupID)))) {
+	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e, c.CustomCommands...) && (!c.Enabled || !c.allows(e.GroupID) || (c.HistoryMessages == 0 && !c.autonomousGroup(e.GroupID) && !c.ImageEnabled))) {
 		outcome, reason = "ignored", "bot_or_ambient_message"
 		return nil
 	}
@@ -176,6 +176,9 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 			return nil
 		}
 		if err = s.recordGroupEvent(ctx, c, e); err != nil {
+			return err
+		}
+		if err = s.rememberIncomingImages(ctx, c, e); err != nil {
 			return err
 		}
 		if p.Type == groupMessageCreate && !unmentionedGroupCommand(e, c.CustomCommands...) && len(groupMentionIDs(e)) == 0 {

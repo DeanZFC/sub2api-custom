@@ -195,6 +195,7 @@ func normalizeGrokAccountTestMode(mode string) string {
 
 // AccountTestService handles account testing operations
 type AccountTestService struct {
+	qualityOperations         QualityOperationsRepository
 	accountRepo               AccountRepository
 	geminiTokenProvider       *GeminiTokenProvider
 	claudeTokenProvider       *ClaudeTokenProvider
@@ -2558,7 +2559,7 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 	account.RateLimitedAt = &now
 	account.RateLimitResetAt = resetAt
 
-	if account.Status == StatusError {
+	if account.Status == StatusError && ctx.Value(passiveQualityProbeKey{}) != true {
 		if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
 			return
 		}
@@ -3706,6 +3707,12 @@ func (s *AccountTestService) RunTestBackgroundWithPrompt(ctx context.Context, ac
 // that forwards an explicitly selected Codex-style reasoning effort.
 func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context.Context, accountID int64, modelID, prompt, reasoningEffort string) (*ScheduledTestResult, error) {
 	startedAt := time.Now()
+	if s.qualityOperations != nil {
+		ctx = context.WithValue(ctx, qualityOperationsKey{}, s.qualityOperations)
+	}
+	if ctx.Value(qualityRunKey{}) == nil {
+		ctx = context.WithValue(ctx, qualityRunKey{}, uuid.NewString())
+	}
 	ctx, modelIdentity := newAccountTestModelIdentity(ctx)
 	usage := &accountTestUsageCollector{}
 	ctx = context.WithValue(ctx, accountTestUsageKey{}, usage)
@@ -3742,10 +3749,18 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 		StartedAt:            startedAt,
 		FinishedAt:           finishedAt,
 	}
+	if usage.deferred != nil {
+		usage.finishQualitySettlements("")
+		result.ExecutionInfo.FailureKind = "quality_deferred"
+		result.ExecutionInfo.NextCheckAt = &usage.deferred.Until
+		result.ErrorMessage = usage.deferred.Error()
+		return result, nil
+	}
 	result.ExecutionInfo.FailureKind = scheduledTestFailureKind(result)
 	if n := len(result.ExecutionInfo.Attempts); n > 0 {
 		result.ExecutionInfo.Attempts[n-1].FailureKind = result.ExecutionInfo.FailureKind
 	}
+	usage.finishQualitySettlements(result.ExecutionInfo.FailureKind)
 	return result, nil
 }
 

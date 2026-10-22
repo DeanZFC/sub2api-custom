@@ -614,7 +614,7 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	if pending != nil {
 		started = pending.StartedAt
 	}
-	result := s.runWithAutomaticRetries(ctx, plan, &accountID, func(attemptCtx context.Context) *ScheduledTestResult {
+	execute := func(attemptCtx context.Context, prompt string) *ScheduledTestResult {
 		if !s.acquireWorker(attemptCtx) {
 			return scheduledTestFailedAttempt(started, attemptCtx.Err())
 		}
@@ -642,7 +642,11 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 			return scheduledTestFailedAttempt(attemptStarted, fmt.Errorf("account test service unavailable"))
 		}
 		result, err := s.accountTestSvc.RunTestBackgroundWithPromptAndReasoning(executionCtx, accountID, plan.ModelID, prompt, plan.ReasoningEffort)
-		if deadlineErr := executionCtx.Err(); deadlineErr != nil {
+		// Budget settlement is separate from upstream execution. A result that
+		// finished before the deadline remains valid if settlement consumed the
+		// final milliseconds of this attempt's context.
+		deadline, _ := executionCtx.Deadline()
+		if deadlineErr := executionCtx.Err(); deadlineErr != nil && (result == nil || result.FinishedAt.IsZero() || !result.FinishedAt.Before(deadline)) {
 			failed := scheduledTestFailedAttempt(attemptStarted, deadlineErr)
 			if result != nil {
 				failed.ExecutionInfo = result.ExecutionInfo
@@ -663,7 +667,13 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 		// Go error. Output validation can also turn a response into a failure.
 		s.applyOutputContract(result, outputKind)
 		return result
-	})
+	}
+	var result *ScheduledTestResult
+	if outputKind == "capability" {
+		result = s.runCapabilitySuite(ctx, plan, accountID, prompt, execute)
+	} else {
+		result = s.runWithAutomaticRetries(ctx, plan, &accountID, func(attemptCtx context.Context) *ScheduledTestResult { return execute(attemptCtx, prompt) })
+	}
 	result.AccountID = &accountID
 	result.PlanID = plan.ID
 	if pending != nil {
@@ -702,6 +712,9 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 		s.completeResultProtection(persistCtx, plan, result)
 	}
 	modelCheckPassed := outputKind != "model_check" || (result.OutputModelCheck != nil && result.OutputModelCheck.Verdict == "pass")
+	if outputKind == "capability" {
+		modelCheckPassed = result.ExecutionInfo != nil && result.ExecutionInfo.Capability != nil && result.ExecutionInfo.Capability.Verdict == "pass"
+	}
 	if result.Status == "success" && modelCheckPassed && plan.AutoRecover && !plan.Protection.Enabled {
 		recoveryCtx, cancelRecovery := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 		// A configuration edit while the upstream was answering invalidates

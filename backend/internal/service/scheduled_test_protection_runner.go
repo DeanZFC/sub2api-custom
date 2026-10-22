@@ -56,6 +56,10 @@ func (s *ScheduledTestRunnerService) beginResultProtection(ctx context.Context, 
 
 func (s *ScheduledTestRunnerService) completeResultProtection(ctx context.Context, plan *ScheduledTestPlan, result *ScheduledTestResult) {
 	rule := plan.ProtectionRule(plan.TestDefinitionID)
+	if QualityResultDeferred(result) {
+		s.recordResultDecision(ctx, result, ScheduledTestProtectionDecision{Status: "skipped", Reason: result.ErrorMessage})
+		return
+	}
 	if result == nil || result.ID <= 0 {
 		return
 	}
