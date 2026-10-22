@@ -1223,3 +1223,26 @@ func TestBuildSchedulerMetadataAccount_KeepsRPMFieldsForRPMGate(t *testing.T) {
 			"投影裁掉 rpm_strategy 会让粘性豁免账号退回三区判定")
 	})
 }
+
+func TestSchedulerCachePreservesPassiveQualityProtection(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	account := service.Account{
+		ID: 9951, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true,
+		Extra: map[string]any{"passive_quality": []any{map[string]any{"scope": "account", "phase": "paused"}}},
+	}
+	bucket := service.SchedulerBucket{GroupID: 99, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, []service.Account{account}))
+	accounts, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, accounts, 1)
+	require.False(t, accounts[0].IsSchedulable(), "metadata must retain passive protection")
+	full, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, full)
+	require.False(t, full.IsSchedulable(), "full account and metadata must agree")
+}

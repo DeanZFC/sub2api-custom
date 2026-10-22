@@ -541,7 +541,6 @@ func (c *schedulerCache) activateSnapshotVersion(ctx context.Context, bucket ser
 	snapshotKeyPrefix := fmt.Sprintf("%s%d:%s:%s:v", schedulerSnapshotPrefix, bucket.GroupID, bucket.Platform, bucket.Mode)
 
 	keys := []string{
-		"passive_quality",
 		activeKey,
 		readyKey,
 		schedulerBucketSetKey,
@@ -983,6 +982,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	keys := []string{
+		"passive_quality",
 		// Anthropic shared-window and Fable-only threshold checks run on this
 		// projection. UpdateExtra refreshes both payloads without a bucket rebuild.
 		"session_window_utilization",
