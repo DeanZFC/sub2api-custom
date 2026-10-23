@@ -291,6 +291,26 @@ describe('admin AccountsView select all filtered results', () => {
     wrapper.unmount()
   })
 
+  it('restores saved filters and persists custom platform tab changes across remounts', async () => {
+    localStorage.setItem('account-filter-values', JSON.stringify({ platform: 'grok', status: 'active' }))
+    getPlatformCounts.mockResolvedValue([{ platform: 'grok', count: 1 }, { platform: 'openai', count: 1 }])
+    listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'grok', status: 'active' }), expect.any(Object))
+
+    await wrapper.get('[data-platform="openai"]').trigger('click')
+    await flushPromises()
+    expect(JSON.parse(localStorage.getItem('account-filter-values') || '{}')).toEqual({ platform: 'openai', status: 'active' })
+    wrapper.unmount()
+
+    const restored = mountView()
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'openai', status: 'active' }), expect.any(Object))
+    expect(restored.get('[data-platform="openai"]').attributes('aria-selected')).toBe('true')
+    restored.unmount()
+  })
+
   it('filters groups by platform and resets pagination and selection when changing groups', async () => {
     getPlatformCounts.mockResolvedValue([{ platform: 'openai', count: 30 }, { platform: 'grok', count: 2 }])
     getAllGroups.mockResolvedValue([

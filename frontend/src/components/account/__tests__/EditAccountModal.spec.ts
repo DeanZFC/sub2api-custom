@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import {
   BUILTIN_PLATFORM_CATALOG,
   resetPlatformCatalog,
@@ -1826,6 +1826,26 @@ describe('EditAccountModal', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows quota limit card for Vertex SA account and keeps quota limits on save', async () => {
+    const account = buildVertexAccount()
+    account.extra = { quota_limit: 200, quota_daily_limit: 20, quota_used: 35.5 }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect(wrapper.findComponent({ name: 'QuotaLimitCard' }).exists()).toBe(true)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra?.quota_limit).toBe(200)
+    expect(extra?.quota_daily_limit).toBe(20)
+    expect(extra?.quota_weekly_limit).toBeUndefined()
   })
 
   it('blocks Vertex SA save when neither credentials_status nor legacy json indicates existence', async () => {
