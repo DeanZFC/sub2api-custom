@@ -3,11 +3,12 @@
     <div class="mx-auto max-w-7xl space-y-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.workspace.records') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('qqbot.recordsHelp') }}</p></div>
-        <RouterLink class="btn btn-secondary" :to="{ path: '/admin/qqbot/activities', query: { tab: activeTab } }">{{ t('qqbot.activitiesTitle') }}</RouterLink>
+        <div class="flex gap-2"><button v-if="recordMode !== 'activities'" class="btn btn-secondary" :disabled="appLoading" data-testid="qq-records-refresh-app" @click="loadApp">{{ t('common.refresh') }}</button><RouterLink class="btn btn-secondary" :to="{ path: '/admin/qqbot/activities', query: { tab: activeTab } }">{{ t('qqbot.activitiesTitle') }}</RouterLink></div>
       </div>
       <div class="flex flex-wrap gap-2"><RouterLink v-for="mode in recordModes" :key="mode" :to="{ query: { tab: mode } }" class="btn" :class="recordMode === mode ? 'btn-primary' : 'btn-secondary'">{{ t(`qqbot.workspace.${mode}`) }}</RouterLink></div>
-      <QQJobRecords v-if="recordMode === 'tasks' || recordMode === 'notifications'" :notifications="recordMode === 'notifications'" />
-      <QQModerationRecords v-else-if="recordMode === 'moderation'" />
+      <p v-if="appError && recordMode !== 'activities'" role="alert" class="text-red-600">{{ appError }}</p>
+      <QQJobRecords v-if="recordMode === 'tasks' || recordMode === 'notifications'" :notifications="recordMode === 'notifications'" :app-id="appId" />
+      <QQModerationRecords v-else-if="recordMode === 'moderation'" :app-id="appId" />
       <template v-else>
       <nav role="tablist" :aria-label="t('qqbot.recordsTitle')" class="flex gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-800">
         <button v-for="tab in tabs" :id="`records-tab-${tab.key}`" :key="tab.key" type="button" role="tab"
@@ -95,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -109,6 +110,19 @@ const route = useRoute()
 const router = useRouter()
 const recordModes = ['tasks', 'notifications', 'moderation', 'activities'] as const
 const recordMode = computed(() => ['tasks', 'notifications', 'moderation'].includes(String(route.query.tab || 'tasks')) ? String(route.query.tab || 'tasks') : 'activities')
+const appId = ref(''), appLoading = ref(false), appError = ref('')
+let appRequest = 0
+async function loadApp() {
+  const seq = ++appRequest
+  // Reload both the identity scope and its records, even when AppID is unchanged.
+  appId.value = ''
+  appLoading.value = true; appError.value = ''
+  try { const config = await qqbotAPI.config(); if (seq === appRequest) appId.value = config.app_id }
+  catch (e) { if (seq === appRequest) { appId.value = ''; appError.value = (e as Error).message } }
+  finally { if (seq === appRequest) appLoading.value = false }
+}
+watch(recordMode, mode => { if (mode !== 'activities') void loadApp() }, { immediate: true })
+onBeforeUnmount(() => { ++appRequest })
 const tabs = [
   { key: 'checkin', label: 'qqbot.checkinRecords' },
   { key: 'lottery', label: 'qqbot.drawRecords' },

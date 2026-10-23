@@ -4,32 +4,52 @@
     <p class="text-sm text-gray-500">{{ t('qqbot.moderation.help') }}</p>
     <p class="text-sm text-gray-500">{{ t('qqbot.moderation.permission') }}</p>
     <fieldset :disabled="disabled" class="space-y-4">
-      <label class="flex items-center gap-2"><input v-model="value.enabled" data-testid="moderation-enabled" type="checkbox" />{{ t('qqbot.moderation.enabled') }}</label>
-      <fieldset class="space-y-2 rounded-lg border p-3 dark:border-dark-700">
+      <div class="space-y-3 rounded-lg border p-3 dark:border-dark-700">
+        <label class="flex items-center gap-2 font-medium"><input v-model="value.enabled" data-testid="moderation-enabled" type="checkbox" />{{ t('qqbot.moderation.enabled') }}</label>
+        <p class="text-sm text-gray-500">{{ t('qqbot.moderation.floodHelp') }}</p>
+        <fieldset :disabled="!value.enabled" class="grid gap-4 md:grid-cols-2" data-testid="moderation-flood-fields">
+          <label v-for="field in fields" :key="field.key" class="space-y-1">
+            {{ t('qqbot.moderation.' + field.key) }}
+            <input v-model.number="value[field.key]" :data-testid="'moderation-' + field.key" type="number" :min="field.key === 'escalated_mute_minutes' ? value.mute_minutes : field.min" :max="field.max" step="1" required class="input" />
+          </label>
+        </fieldset>
+        <p class="text-sm text-gray-500">{{ t('qqbot.moderation.ruleHelp') }}</p>
+      </div>
+      <div class="space-y-3 rounded-lg border p-3 dark:border-dark-700">
+        <label class="flex items-center gap-2 font-medium"><input v-model="value.report_enabled" data-testid="moderation-report-enabled" type="checkbox" />{{ t('qqbot.moderation.reportEnabled') }}</label>
+        <p class="text-sm text-gray-500">{{ t('qqbot.moderation.reportCommandHelp') }}</p>
+        <p class="text-sm text-gray-500">{{ t('qqbot.moderation.reportSafetyHelp') }}</p>
+        <label class="block space-y-1">
+          {{ t('qqbot.moderation.report_mute_minutes') }}
+          <input v-model.number="value.report_mute_minutes" :disabled="!value.report_enabled" data-testid="moderation-report-mute-minutes" type="number" min="1" max="60" step="1" required class="input" />
+        </label>
+        <p class="text-xs text-gray-500">{{ t('qqbot.moderation.reportLimitsHelp') }}</p>
+        <p class="text-xs text-gray-500">{{ t('qqbot.moderation.reportCostHelp') }}</p>
+      </div>
+      <fieldset :disabled="!moderationEnabled" class="space-y-2 rounded-lg border p-3 dark:border-dark-700" data-testid="moderation-shared-groups">
         <legend class="px-1 text-sm font-medium">{{ t('qqbot.moderation.groups') }}</legend>
+        <p class="text-xs text-gray-500">{{ t('qqbot.moderation.sharedHelp') }}</p>
         <p v-if="!groups.length" class="text-sm text-gray-500">{{ t('qqbot.moderation.noGroups') }}</p>
         <label v-for="group in allGroups" :key="group" class="flex items-start gap-2 break-all text-sm">
           <input v-model="value.groups" :value="group" type="checkbox" data-testid="moderation-group" class="mt-1" />
-          <span>{{ group }}<span v-if="!groups.includes(group)" class="ml-2 text-red-600">{{ t('qqbot.moderation.removedGroup') }}</span></span>
+          <span>{{ groupLabels?.[group] || group }}<span v-if="!groups.includes(group)" class="ml-2 text-red-600">{{ t('qqbot.moderation.removedGroup') }}</span></span>
         </label>
       </fieldset>
-      <div class="grid gap-4 md:grid-cols-2">
-        <label v-for="field in fields" :key="field.key" class="space-y-1">
-          {{ t('qqbot.moderation.' + field.key) }}
-          <input v-model.number="value[field.key]" :data-testid="'moderation-' + field.key" type="number" :min="field.key === 'escalated_mute_minutes' ? value.mute_minutes : field.min" :max="field.max" step="1" required class="input" />
-        </label>
-      </div>
-      <p class="text-sm text-gray-500">{{ t('qqbot.moderation.ruleHelp') }}</p>
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <h3 class="font-medium">{{ t('qqbot.moderation.exemptions') }}</h3>
-        <button type="button" class="btn btn-secondary" data-testid="moderation-add-exemption" :disabled="!value.groups.length || value.exemptions.length >= 100" @click="addExemption">{{ t('common.add') }}</button>
-      </div>
-      <p class="text-xs text-gray-500">{{ t('qqbot.moderation.exemptionsHelp') }}</p>
-      <div v-for="(exemption, index) in value.exemptions" :key="index" class="grid items-end gap-3 rounded-lg border p-3 md:grid-cols-[1fr_1fr_auto] dark:border-dark-700">
-        <label class="min-w-0 space-y-1 text-sm">{{ t('qqbot.groupAdmins.group') }}<select v-model="exemption.group_id" required class="input" data-testid="moderation-exempt-group"><option v-for="group in [...new Set([...value.groups, exemption.group_id])]" :key="group" :value="group">{{ group }}</option></select></label>
-        <label class="min-w-0 space-y-1 text-sm">{{ t('qqbot.groupAdmins.member') }}<input v-model.trim="exemption.member_id" required maxlength="128" class="input font-mono" data-testid="moderation-exempt-member" /></label>
-        <button type="button" class="btn btn-secondary" :aria-label="t('qqbot.moderation.removeExemption', { index: index + 1 })" @click="value.exemptions.splice(index, 1)">{{ t('common.delete') }}</button>
-      </div>
+      <fieldset :disabled="!moderationEnabled" class="space-y-3" data-testid="moderation-shared-exemptions">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h3 class="font-medium">{{ t('qqbot.moderation.exemptions') }}</h3>
+          <button type="button" class="btn btn-secondary" data-testid="moderation-add-exemption" :disabled="!value.groups.length || value.exemptions.length >= 100" @click="addExemption">{{ t('common.add') }}</button>
+        </div>
+        <p class="text-xs text-gray-500">{{ t('qqbot.moderation.exemptionsHelp') }}</p>
+        <div v-for="(exemption, index) in value.exemptions" :key="index" class="grid items-end gap-3 rounded-lg border p-3 md:grid-cols-[1fr_1fr_auto] dark:border-dark-700" data-testid="moderation-exemption-entry">
+          <label class="min-w-0 space-y-1 text-sm">{{ t('qqbot.groupAdmins.group') }}<select :value="exemption.group_id" required class="input" data-testid="moderation-exempt-group" @change="changeExemptionGroup(index, $event)"><option v-for="group in [...new Set([...value.groups, exemption.group_id])]" :key="group" :value="group">{{ groupLabels?.[group] || group }}</option></select></label>
+          <div class="min-w-0 space-y-3" data-testid="moderation-exempt-member">
+            <QQMemberPicker :key="JSON.stringify([appId, exemption.group_id])" :model-value="exemption.member_id" :group-id="exemption.group_id" :app-id="appId" :selected-label="exemption.nickname" :disabled="disabled || !moderationEnabled" required @update:model-value="updateExemptionMember(index, $event)" @select="selectExemption(index, $event)" />
+            <label class="block space-y-1 text-sm">{{ t('qqbot.groupAdmins.nickname') }}<input v-model.trim="exemption.nickname" class="input" maxlength="100" data-testid="moderation-exempt-nickname" /></label>
+          </div>
+          <button type="button" class="btn btn-secondary" :aria-label="t('qqbot.moderation.removeExemption', { index: index + 1 })" @click="value.exemptions.splice(index, 1)">{{ t('common.delete') }}</button>
+        </div>
+      </fieldset>
     </fieldset>
     <div class="space-y-3 border-t pt-4 dark:border-dark-700">
       <h3 class="font-medium">{{ t('qqbot.moderation.records') }}</h3>
@@ -48,17 +68,41 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { QQModerationConfig, QQBotRuntime } from '@/api/qqbot'
+import type { QQModerationConfig, QQBotRuntime, QQMemberOption } from '@/api/qqbot'
+import QQMemberPicker from './QQMemberPicker.vue'
 const value = defineModel<QQModerationConfig>({ required: true })
-const props = defineProps<{ groups: string[]; runtime: QQBotRuntime | null; disabled: boolean }>()
+const props = defineProps<{ groups: string[]; groupLabels?: Record<string, string>; appId?: string; runtime: QQBotRuntime | null; disabled: boolean }>()
 const { t, te } = useI18n()
 const allGroups = computed(() => [...new Set([...props.groups, ...value.value.groups])])
+const moderationEnabled = computed(() => value.value.enabled || value.value.report_enabled)
 function addExemption() {
   const group = value.value.groups[0]
   if (group && value.value.exemptions.length < 100) value.value.exemptions.push({ group_id: group, member_id: '' })
 }
+function changeExemptionGroup(index: number, event: Event) {
+  const exemption = value.value.exemptions[index]
+  if (!exemption || props.disabled) return
+  exemption.group_id = (event.target as HTMLSelectElement).value
+  exemption.member_id = ''; exemption.nickname = ''
+}
+function selectExemption(index: number, member: QQMemberOption) {
+  const exemption = value.value.exemptions[index]
+  if (!exemption || props.disabled || exemption.group_id !== member.group_id) return
+  exemption.member_id = member.member_id
+  exemption.nickname = Array.from(member.nickname || member.email).slice(0, 100).join('')
+}
+function updateExemptionMember(index: number, member: string) {
+  const exemption = value.value.exemptions[index]
+  if (!exemption || props.disabled) return
+  exemption.member_id = member
+  if (!member) exemption.nickname = ''
+}
+watch(() => props.appId, (current, previous) => {
+  if (current === previous) return
+  for (const exemption of value.value.exemptions) { exemption.member_id = ''; exemption.nickname = '' }
+})
 function label(kind: string, code: string) { const key = `qqbot.moderation.${kind}.${code}`; return te(key) ? t(key) : code }
 const fields = [
   { key: 'repeat_window_seconds', min: 1, max: 60 }, { key: 'repeat_count', min: 2, max: 100 },

@@ -40,7 +40,7 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			s, replies := helpTestSender(t)
 			c := DefaultConfig()
-			want := []string{"/签到", "/我的余额", "/今日用量", "/我的奖励", "/抽奖", "/抽奖次数", "/抽奖活动", "/成长任务", "/邀请奖励", "/我的邀请", "/今日排行榜", "/渠道状态", "/生图 图片描述", "/价格 模型名", "/绑定 邮箱或绑定码", "/转账 金额 邮箱"}
+			want := []string{"/签到", "/我的余额", "/今日用量", "/我的奖励", "/抽奖", "/抽奖次数", "/抽奖活动", "/成长任务", "/邀请奖励", "/我的邀请", "/今日排行榜", "/渠道状态", "/生图 图片描述", "/价格 模型名", "/绑定 邮箱或绑定码", "/转账 金额 邮箱", "/举报垃圾信息"}
 			for i := 0; i < count; i++ {
 				name := "/" + strings.Repeat("长", 30) + fmt.Sprintf("%02d", i)
 				c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: name, Reply: "reply", Enabled: true})

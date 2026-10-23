@@ -246,8 +246,15 @@ func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Co
 	c.CustomCommands = normalizeCustomCommands(c.CustomCommands)
 	c.AppID = strings.TrimSpace(c.AppID)
 	c.GroupAdmins = normalizeGroupAdmins(c.GroupAdmins)
+	c.Moderation.Exemptions = normalizeModerationExemptions(c.Moderation.Exemptions)
 	c.BaseURL = strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	c.ImageBaseURL = strings.TrimRight(strings.TrimSpace(c.ImageBaseURL), "/")
+	// Exemptions predate per-entry AppID fields. Never reinterpret an existing
+	// member OpenID under a different application, including an unassigned legacy
+	// config. The operator must explicitly clear and then reselect identities.
+	if old.AppID != c.AppID && len(c.Moderation.Exemptions) > 0 {
+		return c, errors.New("更换机器人 AppID 前请先清空消息治理白名单，保存后再更换机器人并重新选择成员")
+	}
 	if old.AppID != "" && old.AppID != c.AppID {
 		var n int
 		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_bindings WHERE app_id=$1`, old.AppID).Scan(&n); err != nil {
@@ -280,6 +287,9 @@ func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Co
 	c.ClearAPIKey = false
 	c.ClearImageAPIKey = false
 	if err = validateConfig(c); err != nil {
+		return c, err
+	}
+	if err = resetSpamReports(ctx, tx, old, c); err != nil {
 		return c, err
 	}
 	if (old.Moderation.Enabled || c.Moderation.Enabled) && moderationPolicy(old) != moderationPolicy(c) {

@@ -132,6 +132,10 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		return nil
 	}
 	if isGroupMessageEvent(p.Type) {
+		// Report evidence is independent of AI chat and shared-history settings.
+		if err = s.rememberSpamReportSource(ctx, c, e); err != nil {
+			return err
+		}
 		blocked, moderationErr := s.moderateIncoming(ctx, c, e)
 		if moderationErr != nil {
 			return moderationErr

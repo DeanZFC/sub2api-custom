@@ -460,6 +460,11 @@ func (s *Service) qqRequestMethod(ctx context.Context, c Config, method, path st
 	if err != nil {
 		return nil, err
 	}
+	return s.qqRequestMethodWithToken(ctx, c, token, method, path, body)
+}
+
+// The caller may prepare credentials before acquiring a final authorization lock.
+func (s *Service) qqRequestMethodWithToken(ctx context.Context, c Config, token, method, path string, body any) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)

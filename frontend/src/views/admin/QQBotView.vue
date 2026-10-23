@@ -129,10 +129,10 @@
           <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" :groups="allowedGroups" :policies="groupPolicies" />
         </div>
         <div v-show="activeTab === 'moderation'" id="qqbot-settings-panel-moderation" role="tabpanel" aria-labelledby="qqbot-settings-tab-moderation">
-          <QQBotModerationSettings v-model="moderation" :groups="allowedGroups" :runtime="form.app_id === savedAppId ? runtime : null" :disabled="busy" />
+          <QQBotModerationSettings v-model="moderation" :app-id="form.app_id" :group-labels="groupLabels" :groups="allowedGroups" :runtime="form.app_id === savedAppId ? runtime : null" :disabled="busy" />
         </div>
         <div v-show="activeTab === 'group-admins'" id="qqbot-settings-panel-group-admins" role="tabpanel" aria-labelledby="qqbot-settings-tab-group-admins">
-          <QQBotGroupAdminSettings v-model="groupAdmins" :app-id="form.app_id" :groups="allowedGroups" :runtime="form.app_id === savedAppId ? runtime : null" :disabled="busy" />
+          <QQBotGroupAdminSettings v-model="groupAdmins" :app-id="form.app_id" :group-labels="groupLabels" :groups="allowedGroups" :runtime="form.app_id === savedAppId ? runtime : null" :disabled="busy" />
         </div>
         <section v-show="activeTab === 'images'" id="qqbot-settings-panel-images" role="tabpanel" aria-labelledby="qqbot-settings-tab-images" class="card space-y-4 p-6">
           <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">{{ t('qqbot.images') }}</h2><label class="flex items-center gap-2"><input v-model="form.image_enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
@@ -225,6 +225,7 @@ const runtime = ref<QQBotRuntime | null>(null)
 const savedAppId = ref('')
 const groupsText = ref('')
 const allowedGroups = computed(() => [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))])
+const groupLabels = computed(() => Object.fromEntries((form.value?.group_policies ?? []).filter(policy => policy.label).map(policy => [policy.group_id, policy.label])))
 const autonomous = ref(defaultAutonomousConfig())
 const moderation = ref(defaultModerationConfig())
 const healthNotifications = ref(defaultHealthNotificationConfig())

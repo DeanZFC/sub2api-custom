@@ -14,12 +14,14 @@ export interface QQModerationConfig {
   enabled: boolean; groups: string[]; repeat_window_seconds: number; repeat_count: number
   burst_window_seconds: number; burst_count: number; mute_minutes: number
   repeat_offense_minutes: number; escalated_mute_minutes: number
-  exemptions: { group_id: string; member_id: string }[]
+  report_enabled: boolean; report_mute_minutes: number
+  exemptions: { group_id: string; member_id: string; nickname?: string }[]
 }
 export function defaultModerationConfig(): QQModerationConfig {
   return { enabled: false, groups: [], repeat_window_seconds: 15, repeat_count: 4,
     burst_window_seconds: 10, burst_count: 10, mute_minutes: 5,
-    repeat_offense_minutes: 30, escalated_mute_minutes: 30, exemptions: [] }
+    repeat_offense_minutes: 30, escalated_mute_minutes: 30,
+    report_enabled: false, report_mute_minutes: 5, exemptions: [] }
 }
 export interface QQModerationRecord {
   id: string; group_id: string; member_id: string; reason: string; mute_seconds: number
@@ -76,6 +78,8 @@ export interface QQRecentMember {
   group_id: string; member_id: string; nickname: string; email: string
   message_preview: string; last_seen_at: string
 }
+export interface QQMemberOption extends QQRecentMember { group_label: string }
+export interface QQMemberPage { app_id: string; items: QQMemberOption[]; total: number; page: number; page_size: number }
 export interface QQBotRuntime {
   recent_members?: QQRecentMember[]
   moderation_records?: QQModerationRecord[]
@@ -184,6 +188,7 @@ export interface QQActivityPreview {
 }
 export interface QQTransferHistory { items: { id: number; from_user_id: number; to_user_id: number; from_email: string; to_email: string; amount: string; fee: string; net_amount: string; created_at: string }[]; total: number; page: number; page_size: number }
 export const qqbotAPI = {
+ members: async (params: { app_id?: string; group_id?: string; member_id?: string; search?: string; page?: number; page_size?: number }) => (await apiClient.get<QQMemberPage>('/admin/qqbot/members', { params })).data,
  moderationRecords: async (params: Record<string, string | number>) => (await apiClient.get<{ items: QQModerationRecord[]; total: number; page: number; page_size: number }>('/admin/qqbot/moderation-records', { params })).data,
  transferHistory: async (search: string, page: number) => (await apiClient.get<QQTransferHistory>('/admin/qqbot/transfers', { params: { search, page } })).data,
  activityPreview: async (user_id: number) => (await apiClient.get<QQActivityPreview>('/admin/qqbot/activity-preview', { params: { user_id } })).data,

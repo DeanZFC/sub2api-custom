@@ -63,6 +63,7 @@ func helpSystemItems() []helpItem {
 		{action: "prices", label: "模型价格", description: "查询模型价格", command: "/价格", usage: "/价格 模型名", input: true},
 		{action: "bind", label: "绑定账号", description: "绑定网站账号", command: "/绑定", usage: "/绑定 邮箱或绑定码", input: true},
 		{action: "transfer", label: "余额转账", description: "申请余额转账", command: "/转账", usage: "/转账 金额 邮箱", input: true},
+		{action: "report_spam", label: "举报垃圾信息", description: "引用原消息后举报；证据不足不处罚", command: "/举报垃圾信息", input: true},
 	}
 }
 

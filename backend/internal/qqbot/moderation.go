@@ -19,10 +19,25 @@ import (
 type ModerationExemption struct {
 	GroupID  string `json:"group_id"`
 	MemberID string `json:"member_id"`
+	Nickname string `json:"nickname,omitempty"`
+}
+
+// Display labels never participate in member identity or exemption checks.
+func normalizeModerationExemptions(exemptions []ModerationExemption) []ModerationExemption {
+	out := make([]ModerationExemption, 0, len(exemptions))
+	for _, exemption := range exemptions {
+		exemption.GroupID = strings.TrimSpace(exemption.GroupID)
+		exemption.MemberID = strings.TrimSpace(exemption.MemberID)
+		exemption.Nickname = strings.TrimSpace(exemption.Nickname)
+		out = append(out, exemption)
+	}
+	return out
 }
 
 type ModerationConfig struct {
 	Enabled              bool                  `json:"enabled"`
+	ReportEnabled        bool                  `json:"report_enabled"`
+	ReportMuteMinutes    int                   `json:"report_mute_minutes"`
 	Groups               []string              `json:"groups"`
 	RepeatWindowSeconds  int                   `json:"repeat_window_seconds"`
 	RepeatCount          int                   `json:"repeat_count"`
@@ -35,13 +50,19 @@ type ModerationConfig struct {
 }
 
 func DefaultModerationConfig() ModerationConfig {
-	return ModerationConfig{Groups: []string{}, RepeatWindowSeconds: 15, RepeatCount: 4,
+	return ModerationConfig{Groups: []string{}, ReportMuteMinutes: 5, RepeatWindowSeconds: 15, RepeatCount: 4,
 		BurstWindowSeconds: 10, BurstCount: 10, MuteMinutes: 5, RepeatOffenseMinutes: 30,
 		EscalatedMuteMinutes: 30, Exemptions: []ModerationExemption{}}
 }
 
 func validateModeration(c Config) error {
 	m := c.Moderation
+	if m.ReportMuteMinutes < 1 || m.ReportMuteMinutes > 60 {
+		return errors.New("举报确认后的禁言须为 1～60 分钟")
+	}
+	if m.ReportEnabled && (c.BaseURL == "" || c.APIKey == "" || c.ChatModel == "") {
+		return errors.New("启用垃圾信息举报前，请先配置聊天接口、API Key 和审核使用的模型")
+	}
 	if m.RepeatWindowSeconds < 1 || m.RepeatWindowSeconds > 60 || m.BurstWindowSeconds < 1 || m.BurstWindowSeconds > 60 ||
 		m.RepeatCount < 2 || m.RepeatCount > 100 || m.BurstCount < 2 || m.BurstCount > 100 {
 		return errors.New("防刷屏统计窗口须为 1～60 秒，条数须为 2～100")
@@ -49,8 +70,8 @@ func validateModeration(c Config) error {
 	if m.MuteMinutes < 1 || m.MuteMinutes > 43200 || m.EscalatedMuteMinutes < m.MuteMinutes || m.EscalatedMuteMinutes > 43200 || m.RepeatOffenseMinutes < 1 || m.RepeatOffenseMinutes > 1440 {
 		return errors.New("禁言须为 1～43200 分钟，再犯禁言不能短于首次禁言，再犯窗口须为 1～1440 分钟")
 	}
-	if len(m.Groups) > 100 || len(m.Exemptions) > 100 || (m.Enabled && (c.AppID == "" || len(m.Groups) == 0)) {
-		return errors.New("请填写机器人 AppID 和防刷屏群；群与白名单各最多 100 条")
+	if len(m.Groups) > 100 || len(m.Exemptions) > 100 || ((m.Enabled || m.ReportEnabled) && (c.AppID == "" || len(m.Groups) == 0)) {
+		return errors.New("请填写机器人 AppID 和消息治理群；群与白名单各最多 100 条")
 	}
 	groups := make(map[string]bool)
 	for _, g := range m.Groups {
@@ -59,12 +80,16 @@ func validateModeration(c Config) error {
 		}
 		groups[g] = true
 	}
-	seen := make(map[ModerationExemption]bool)
+	seen := make(map[[2]string]bool)
 	for _, e := range m.Exemptions {
-		if !groups[e.GroupID] || len(e.MemberID) == 0 || len(e.MemberID) > 128 || strings.ContainsFunc(e.MemberID, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) || seen[e] {
+		key := [2]string{e.GroupID, e.MemberID}
+		if !groups[e.GroupID] || len(e.MemberID) == 0 || len(e.MemberID) > 128 || strings.ContainsFunc(e.MemberID, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) || seen[key] {
 			return errors.New("防刷屏白名单须填写已选择的群及有效成员 OpenID，且不能重复")
 		}
-		seen[e] = true
+		if len([]rune(e.Nickname)) > 100 || strings.ContainsFunc(e.Nickname, unicode.IsControl) {
+			return errors.New("消息治理白名单备注最多 100 字且不能含控制字符")
+		}
+		seen[key] = true
 	}
 	return nil
 }
@@ -373,22 +398,50 @@ func (s *Service) runModeration(parent context.Context) {
 		return
 	}
 	var id int64
-	var incident, group, member, policy, kind, message string
+	var incident, group, member, policy, kind, message, reason string
 	var seconds int
 	var expires time.Time
-	err = tx.QueryRowContext(ctx, `SELECT o.id,o.incident_id,i.group_id,i.member_id,i.policy_hash,o.kind,o.message_id,i.mute_seconds,o.expires_at
+	err = tx.QueryRowContext(ctx, `SELECT o.id,o.incident_id,i.group_id,i.member_id,i.policy_hash,o.kind,o.message_id,i.mute_seconds,o.expires_at,i.reason
  FROM qq_bot_moderation_operations o JOIN qq_bot_moderation_incidents i ON i.id=o.incident_id
  LEFT JOIN qq_bot_moderation_rates r ON r.app_id=i.app_id AND r.sandbox=i.sandbox AND r.kind=o.kind
  WHERE o.status='queued' AND i.app_id=$1 AND i.sandbox=$2 AND (r.next_at IS NULL OR r.next_at<=clock_timestamp())
- ORDER BY CASE o.kind WHEN 'mute' THEN 0 ELSE 1 END,o.id LIMIT 1 FOR UPDATE OF o SKIP LOCKED`, c.AppID, c.Sandbox).Scan(&id, &incident, &group, &member, &policy, &kind, &message, &seconds, &expires)
+ AND (i.reason NOT IN ('spam_advertising','spam_phishing','spam_scam') OR o.kind<>'mute'
+ OR NOT EXISTS(SELECT 1 FROM qq_bot_moderation_operations recall WHERE recall.incident_id=i.id
+ AND recall.kind='recall' AND recall.status IN ('queued','started')))
+ ORDER BY CASE o.kind WHEN 'mute' THEN 0 ELSE 1 END,o.id LIMIT 1 FOR UPDATE OF o SKIP LOCKED`, c.AppID, c.Sandbox).Scan(&id, &incident, &group, &member, &policy, &kind, &message, &seconds, &expires, &reason)
 	if err != nil {
 		return
 	}
 	status, detail := "started", ""
-	if !c.moderates(group) || c.moderationExempt(group, member) || policy != moderationPolicy(c) {
+	report := reason == "spam_advertising" || reason == "spam_phishing" || reason == "spam_scam"
+	allowed, expectedPolicy := c.moderates(group), moderationPolicy(c)
+	if report {
+		allowed, expectedPolicy = c.reportsSpam(group), spamReportPolicy(c)
+	}
+	if !allowed || c.moderationExempt(group, member) || policy != expectedPolicy {
 		status, detail = "cancelled", "配置或白名单已变更，取消处罚"
 	} else if !expires.After(time.Now()) {
 		status, detail = "expired", "已超过处罚时限"
+	}
+	if report && status == "started" {
+		var target, targetMember, reportPolicy string
+		var recallSucceeded bool
+		err = tx.QueryRowContext(ctx, `SELECT r.message_id,r.member_id,r.policy_hash,
+ EXISTS(SELECT 1 FROM qq_bot_moderation_operations o WHERE o.incident_id=r.incident_id AND o.kind='recall' AND o.status='succeeded')
+ FROM qq_bot_spam_reports r WHERE r.incident_id=$1 AND r.app_id=$2 AND r.sandbox=$3 AND r.group_id=$4 AND r.status='queued'`, incident, c.AppID, c.Sandbox, group).Scan(&target, &targetMember, &reportPolicy, &recallSucceeded)
+		if err != nil {
+			status, detail = "cancelled", "举报依据不可核验，取消处罚"
+		} else {
+			source, sourceErr := s.loadSpamReportSource(ctx, tx, c, group, target)
+			if sourceErr != nil {
+				return // Database errors must never authorize an external operation.
+			}
+			if source == nil || source.MemberID != member || targetMember != member || reportPolicy != policy || (kind == "recall" && message != source.MessageID) {
+				status, detail = "cancelled", "举报原文、身份或权限已失效，取消处罚"
+			} else if kind == "mute" && !recallSucceeded {
+				status, detail = "cancelled", "原消息撤回未确认成功，未执行禁言"
+			}
+		}
 	}
 	if status != "started" {
 		if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_moderation_operations SET status=$2,error=$3,finished_at=NOW() WHERE id=$1`, id, status, detail); err == nil {
@@ -423,7 +476,9 @@ func (s *Service) runModeration(parent context.Context) {
 	defer requestCancel()
 	base := "/v2/groups/" + url.PathEscape(group)
 	muteUntil := now.Add(time.Duration(seconds) * time.Second)
-	if kind == "mute" {
+	if report {
+		err = s.executeSpamReportOperation(requestCtx, c, id)
+	} else if kind == "mute" {
 		_, err = s.qqRequestMethod(requestCtx, c, http.MethodPost, base+"/restrict_chat_setting", map[string]any{"members": []any{map[string]string{"op": "add", "member_openid": member, "mute_expire_at": muteUntil.Format(time.RFC3339)}}})
 	} else {
 		_, err = s.qqRequestMethod(requestCtx, c, http.MethodDelete, base+"/messages/"+url.PathEscape(message), nil)
@@ -432,6 +487,9 @@ func (s *Service) runModeration(parent context.Context) {
 	if err != nil {
 		status, detail = "unconfirmed", limitText(err.Error()+"；操作未确认成功，未自动重试", 250)
 	}
+	if errors.Is(err, errSpamReportRevoked) {
+		status, detail = "cancelled", "发送前核验未通过，举报处罚已取消"
+	}
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finishCancel()
 	finishTx, saveErr := s.db.BeginTx(finishCtx, nil)
@@ -439,7 +497,7 @@ func (s *Service) runModeration(parent context.Context) {
 		return
 	}
 	defer func() { _ = finishTx.Rollback() }()
-	if kind == "mute" && err == nil {
+	if kind == "mute" && err == nil && !report {
 		if _, saveErr = finishTx.ExecContext(finishCtx, `UPDATE qq_bot_moderation_members SET last_muted_at=GREATEST(last_muted_at,$5),cooldown_until=GREATEST(cooldown_until,$6),updated_at=$5 WHERE app_id=$1 AND sandbox=$2 AND group_id=$3 AND member_id=$4`, c.AppID, c.Sandbox, group, member, now, muteUntil); saveErr != nil {
 			return
 		}

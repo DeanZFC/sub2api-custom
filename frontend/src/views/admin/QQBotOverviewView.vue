@@ -19,7 +19,11 @@
         <section class="card space-y-4 p-5">
           <h2 class="text-lg font-semibold">{{ t('qqbot.workspace.diagnose') }}</h2>
           <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('qqbot.workspace.diagnoseHelp') }}</p>
-          <form class="flex flex-wrap gap-3" @submit.prevent="diagnose"><select v-model="group" class="input min-w-0 flex-1" required :aria-label="t('qqbot.group')"><option value="">{{ t('qqbot.workspace.chooseGroup') }}</option><option v-for="id in groups" :key="id" :value="id">{{ config.group_policies?.find(p => p.group_id === id)?.label || id }}</option></select><input v-model.trim="member" class="input min-w-0 flex-1" maxlength="128" :placeholder="t('qqbot.workspace.optionalMember')" :aria-label="t('qqbot.workspace.memberID')" /><button class="btn btn-primary" :disabled="diagnosing">{{ t('qqbot.workspace.diagnoseAction') }}</button></form>
+          <form class="grid items-end gap-3 md:grid-cols-[1fr_2fr_auto]" @submit.prevent="diagnose">
+            <select v-model="group" class="input" required :aria-label="t('qqbot.group')" data-testid="qq-diagnose-group"><option value="">{{ t('qqbot.workspace.chooseGroup') }}</option><option v-for="id in groups" :key="id" :value="id">{{ config.group_policies?.find(p => p.group_id === id)?.label || id }}</option></select>
+            <QQMemberPicker v-model="member" :group-id="group" :app-id="config.app_id" :disabled="diagnosing" @select="selectMember" />
+            <button class="btn btn-primary" :disabled="diagnosing">{{ t('qqbot.workspace.diagnoseAction') }}</button>
+          </form>
           <template v-if="diagnosis"><ul class="space-y-2 text-sm"><li v-for="check in diagnosis.checks" :key="check.code">{{ check.ok ? '✓' : '○' }} {{ check.message }}</li></ul><article v-for="job in diagnosis.jobs" :key="job.id" class="rounded border p-3 text-sm dark:border-dark-700"><p>{{ new Date(job.created_at).toLocaleString() }} · {{ job.kind }} · {{ job.status }}</p><p class="break-words [overflow-wrap:anywhere]">{{ job.decision_reason || job.error || job.trigger_reason }}</p></article><p v-if="!diagnosis.jobs.length" class="text-sm text-gray-500 dark:text-gray-400">{{ t('qqbot.workspace.noJobs') }}</p></template>
         </section>
       </template>
@@ -27,14 +31,22 @@
   </AppLayout>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { qqbotAPI, type QQBotConfig, type QQBotRuntime, type QQOverview, type QQDiagnosticCheck } from '@/api/qqbot'
+import { qqbotAPI, type QQBotConfig, type QQBotRuntime, type QQOverview, type QQDiagnosticCheck, type QQMemberOption } from '@/api/qqbot'
+import QQMemberPicker from '@/components/admin/qqbot/QQMemberPicker.vue'
 const { t } = useI18n()
 const config = ref<QQBotConfig>(), overview = ref<QQOverview>(), runtime = ref<QQBotRuntime>()
 const loading = ref(false), error = ref(''), diagnosing = ref(false), group = ref(''), member = ref('')
 const diagnosis = ref<{ checks: QQDiagnosticCheck[]; jobs: QQBotRuntime['jobs'] }>()
+let diagnosisRequest = 0
+watch([() => config.value?.app_id, group, member], () => { ++diagnosisRequest; diagnosis.value = undefined; diagnosing.value = false }, { flush: 'sync' })
+watch(group, () => { member.value = ''; diagnosis.value = undefined }, { flush: 'sync' })
+watch(() => config.value?.app_id, (current, previous) => {
+ if (previous && current !== previous) { group.value = ''; member.value = ''; diagnosis.value = undefined }
+})
+function selectMember(selected: QQMemberOption) { group.value = selected.group_id; member.value = selected.member_id }
 const groups = computed(() => [...new Set([...(config.value?.allowed_groups || []), ...(runtime.value?.groups.map(g => g.id) || [])])])
 const stats = computed(() => overview.value ? [
  { label: 'qqbot.workspace.chatRemaining', value: `${overview.value.chat_remaining} / ${config.value?.total_daily_chat_limit}` },
@@ -47,6 +59,16 @@ const stats = computed(() => overview.value ? [
  { label: 'qqbot.workspace.imageUsed', value: overview.value.image_used }
 ] : [])
 async function load() { loading.value = true; error.value = ''; try { [config.value, overview.value, runtime.value] = await Promise.all([qqbotAPI.config(), qqbotAPI.overview(), qqbotAPI.runtime()]) } catch (e) { error.value = (e as Error).message } finally { loading.value = false } }
-async function diagnose() { diagnosing.value = true; error.value = ''; diagnosis.value = undefined; try { diagnosis.value = await qqbotAPI.diagnose(group.value, member.value) } catch (e) { error.value = (e as Error).message } finally { diagnosing.value = false } }
+async function diagnose() {
+ const appId = config.value?.app_id, selectedGroup = group.value, selectedMember = member.value
+ if (!appId || !selectedGroup) return
+ const seq = ++diagnosisRequest
+ const current = () => seq === diagnosisRequest && config.value?.app_id === appId && group.value === selectedGroup && member.value === selectedMember
+ diagnosing.value = true; error.value = ''; diagnosis.value = undefined
+ try { const result = await qqbotAPI.diagnose(selectedGroup, selectedMember); if (current()) diagnosis.value = result }
+ catch (e) { if (current()) error.value = (e as Error).message }
+ finally { if (current()) diagnosing.value = false }
+}
+onBeforeUnmount(() => { ++diagnosisRequest })
 onMounted(load)
 </script>
