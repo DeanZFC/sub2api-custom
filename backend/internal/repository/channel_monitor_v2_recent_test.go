@@ -42,22 +42,22 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 	require.NoError(t, err)
 	defer db.Close()
 	now := time.Now().UTC()
-	rows := sqlmock.NewRows([]string{"idx", "created_at", "model", "is_error", "ttft", "duration", "cache_rate", "type", "owner", "source", "status", "upstream_status", "message"}).
-		AddRow(0, now, "gpt-test", false, 1000, 3500, 0.8, "", "", "", 0, 0, "").
-		AddRow(0, now.Add(time.Second), "gpt-test", false, 15000, 0, 0.0, "", "", "", 0, 0, "").
-		AddRow(0, now.Add(2*time.Second), "gpt-test", true, nil, 5000, nil, "upstream", "provider", "", 503, 503, "private message body").
-		AddRow(1, now, "grok-test", true, -1, -1, nil, "authentication", "client", "", 401, 0, "private API key text")
-	mock.ExpectQuery("SELECT d.idx, recent.created_at").WillReturnRows(rows)
+	rows := sqlmock.NewRows([]string{"idx", "id", "created_at", "model", "is_error", "ttft", "duration", "cache_rate", "type", "owner", "source", "status", "upstream_status", "message", "error_summary"}).
+		AddRow(0, 1, now, "gpt-test", false, 1000, 3500, 0.8, "", "", "", 0, 0, "", "").
+		AddRow(0, 2, now.Add(time.Second), "gpt-test", false, 15000, 0, 0.0, "", "", "", 0, 0, "", "").
+		AddRow(0, 3, now.Add(2*time.Second), "gpt-test", true, nil, 5000, nil, "upstream", "provider", "", 503, 503, "private message body", "private summary").
+		AddRow(1, 4, now, "grok-test", true, -1, -1, nil, "authentication", "client", "", 401, 0, "private API key text", "private summary")
+	mock.ExpectQuery("SELECT d.idx, recent.id, recent.created_at").WillReturnRows(rows)
 	cfg := service.ChannelMonitorV2Config{HealthThresholds: service.ChannelMonitorV2HealthThresholds{WarningTTFTMs: 10000}, IgnoredErrorCategories: []string{"authentication"}}
 	items := []service.ChannelMonitorV2MatrixRow{{Platform: "openai"}, {Platform: "grok"}}
 	repo := &channelMonitorV2Repository{db: db}
-	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(context.Background(), service.ChannelMonitorV2Filter{}, cfg, items))
+	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(context.Background(), service.ChannelMonitorV2Filter{}, cfg, items, false))
 	require.Len(t, items[0].RecentRequests, 3)
 	require.Equal(t, "success", items[0].RecentRequests[0].Status)
 	require.Equal(t, "slow", items[0].RecentRequests[1].Status)
 	require.Equal(t, "error", items[0].RecentRequests[2].Status)
-	require.Equal(t, "upstream_5xx", items[0].RecentRequests[2].ErrorCategory)
-	require.Equal(t, "ignored", items[1].RecentRequests[0].Status)
+	require.Empty(t, items[0].RecentRequests[2].ErrorCategory)
+	require.Equal(t, "error", items[1].RecentRequests[0].Status)
 	require.Nil(t, items[0].RecentRequests[2].TTFTMs)
 	require.EqualValues(t, 3500, *items[0].RecentRequests[0].DurationMs)
 	require.Equal(t, 0.8, *items[0].RecentRequests[0].CacheRate)
@@ -71,6 +71,8 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "private")
 	require.NotContains(t, string(encoded), "request_id")
+	require.NotContains(t, string(encoded), "log_id")
+	require.NotContains(t, string(encoded), "error_category")
 	require.Contains(t, string(encoded), `"cache_rate":0`)
 	require.Contains(t, string(encoded), `"duration_ms":0`)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -78,5 +80,5 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 
 func TestChannelMonitorV2RecentRequestsEmptyViewerDoesNotReadLogs(t *testing.T) {
 	repo := &channelMonitorV2Repository{}
-	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(context.Background(), service.ChannelMonitorV2Filter{RestrictGroups: true}, service.ChannelMonitorV2Config{}, []service.ChannelMonitorV2MatrixRow{{Platform: "openai"}}))
+	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(context.Background(), service.ChannelMonitorV2Filter{RestrictGroups: true}, service.ChannelMonitorV2Config{}, []service.ChannelMonitorV2MatrixRow{{Platform: "openai"}}, false))
 }

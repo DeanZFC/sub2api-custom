@@ -569,7 +569,17 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/admin/qqbot',
-    redirect: '/admin/qqbot/config'
+    redirect: '/admin/qqbot/overview'
+  },
+  {
+    path: '/admin/qqbot/overview', name: 'AdminQQBotOverview',
+    component: () => import('@/views/admin/QQBotOverviewView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Bot Overview', titleKey: 'qqbot.workspace.overview' }
+  },
+  {
+    path: '/admin/qqbot/groups', name: 'AdminQQBotGroups',
+    component: () => import('@/views/admin/QQBotView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Group Management', titleKey: 'qqbot.workspace.groups' }
   },
   {
     path: '/admin/qqbot/config',

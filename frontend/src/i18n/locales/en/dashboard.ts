@@ -66,6 +66,14 @@ export default {
 
   // API Keys
   keys: {
+    regenerate: "Regenerate",
+    regenerateConfirm: "Regenerate “{name}”? The old key will stop working immediately. Update your clients with the new key. Settings, usage and history will be preserved.",
+    secretTitle: "Save your API key",
+    secretHint: "The full key is shown only this time. Copy it to a safe place before closing. If lost, you must regenerate it.",
+    secretSaved: "Saved, close",
+    secretUnavailable: "This request already completed. The secret cannot be returned again. Regenerate if you did not save it.",
+    guideSecretHint: "Replace YOUR_API_KEY in the configuration with the full key you saved. Full keys are shown only on creation or regeneration.",
+
     groupChannelStatus: {
       recent: 'Recent channel health; newest interval on the right',
       composite: 'Each interval shows the worst known health across platforms',

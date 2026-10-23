@@ -1,4 +1,5 @@
 import qualityExperience from './qualityExperience'
+import passiveQualityV2 from './passiveQualityV2'
 
 export default {
     tests: {
@@ -89,6 +90,18 @@ export default {
     "pending": "Insufficient evidence"
   },
   "actions": {
+    "would_cache_watch": "Quick cache anomaly observed",
+    "would_cache_reduced": "New-session allocation reduced",
+    "would_cache_recovery_step": "New-session allocation recovery step",
+    "would_cache_recovered": "Cache allocation recovered",
+    "would_cache_watch_cleared": "Observed cache anomaly cleared",
+    "would_cache_reduced_again": "Cache allocation reduced again",
+    "would_cache_recovery_relapsed": "Cache recovery relapsed",
+    "would_cache_pool_guard": "Pool cascade guard activated",
+    "would_ttft_limited": "Latency limited independently",
+    "would_ttft_watch": "Latency degradation observed",
+    "would_ttft_recovered": "Latency protection recovered",
+    "would_ttft_watch_cleared": "Observed latency anomaly cleared",
     "would_observe": "Record anomaly (observe mode)",
     "would_pause": "Pause triggered",
     "would_limit": "Limit triggered",
@@ -96,6 +109,9 @@ export default {
     "recovery_requires_probe": "Recovery after pause requires a real probe"
   },
   "warnings": {
+    "no_recorded_request_models": "Some selected accounts have no identifiable requested models recorded within the replay and sampling period, so no evaluation points were generated for them. Missing records do not establish model health.",
+    "cache_pool_guard_not_simulated": "Replay does not simulate pool capacity or session routing after restrictions. Cache reduction is a local-evidence projection; the live cascade guard may prevent it.",
+    "cache_reuse_history_unavailable": "Old history lacks pre-response reuse evidence. Cache protection cannot be replayed and is neither zero nor healthy.",
     "policy_disabled": "This draft is disabled: metrics are evaluated without projecting any action.",
     "recorded_traffic_only": "Uses recorded traffic only. Enforced policies change traffic, so this cannot predict exact downtime or savings.",
     "current_membership": "Uses current account groups and exclusions without reconstructing historical membership.",
@@ -116,6 +132,8 @@ export default {
         "coverage": "{active} active policies · {passive} passive policies",
         "restricted": "Scheduling restricted",
         "limited": "Concurrency and priority reduced",
+        "cacheLimited": "New-session allocation reduced",
+        metrics: { availability: "Availability", latency: "First-token latency", cache: "Cache reuse" },
         "noHold": "No quality hold found",
         "noEvidence": "No quality evidence yet. Configure active checks and passive protection.",
         "allModels": "All models",
@@ -135,6 +153,7 @@ export default {
                 "scheduled_tests": "Retest on the policy schedule",
 
                 "active_tests": "Waiting for the corresponding check or review",
+                "cache_reuse_samples": "Wait for fresh reusable traffic and restore new-session allocation in steps",
                 "production_samples": "Waiting for sustained healthy production samples",
                 "probe_then_trial": "Cooldown, probe, then bounded trial",
                 "exemption_expiry": "Collect new samples after exemption expires",
@@ -177,6 +196,7 @@ export default {
         }
 },
       passive: {
+        v2: passiveQualityV2,
         "enablePolicy": "Enable",
         "disablePolicy": "Disable",
         "limitedAccounts": "Limited accounts",
@@ -268,6 +288,7 @@ export default {
         "deleteConfirm": "Delete “{name}” and release its holds? Historical records will remain.",
         "loadFailed": "Unable to load passive protection",
         "phases": {
+          "cache_limited": "New-session cache reduction",
           "limited": "Limited concurrency",
                 "healthy": "Healthy",
                 "insufficient": "Insufficient samples",

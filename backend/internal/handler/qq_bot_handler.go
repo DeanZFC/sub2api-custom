@@ -73,6 +73,8 @@ func (h *QQBotHandler) GetConfig(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("ETag", `"`+qqbot.ConfigVersion(cfg)+`"`)
 	response.Success(c, cfg.Public())
 }
 func (h *QQBotHandler) SaveConfig(c *gin.Context) {
@@ -85,11 +87,12 @@ func (h *QQBotHandler) SaveConfig(c *gin.Context) {
 		response.BadRequest(c, "配置格式不正确")
 		return
 	}
-	saved, err := h.bot.SaveBasicConfig(c.Request.Context(), cfg)
+	saved, err := h.bot.SaveBasicConfig(qqbot.WithConfigVersion(c.Request.Context(), c.GetHeader("If-Match")), cfg)
 	if err != nil {
-		response.BadRequest(c, err.Error())
+		qqBotConfigError(c, err)
 		return
 	}
+	c.Header("Cache-Control", "no-store")
 	response.Success(c, saved)
 }
 func (h *QQBotHandler) Runtime(c *gin.Context) {

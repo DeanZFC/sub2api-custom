@@ -262,15 +262,24 @@ type ChannelMonitorV2MatrixRow struct {
 	Buckets        []ChannelMonitorV2TrendPoint    `json:"buckets"`
 }
 
-// ChannelMonitorV2RecentRequest exposes no user/account IDs, request IDs or messages.
+// ChannelMonitorV2RecentRequest exposes diagnostics only to administrators.
 type ChannelMonitorV2RecentRequest struct {
-	OccurredAt    time.Time `json:"occurred_at"`
-	Model         string    `json:"model"`
-	Status        string    `json:"status"`
-	TTFTMs        *int64    `json:"ttft_ms,omitempty"`
-	DurationMs    *int64    `json:"duration_ms,omitempty"`
-	CacheRate     *float64  `json:"cache_rate,omitempty"`
-	ErrorCategory string    `json:"error_category,omitempty"`
+	OccurredAt    time.Time                    `json:"occurred_at"`
+	Model         string                       `json:"model"`
+	Status        string                       `json:"status"`
+	TTFTMs        *int64                       `json:"ttft_ms,omitempty"`
+	DurationMs    *int64                       `json:"duration_ms,omitempty"`
+	CacheRate     *float64                     `json:"cache_rate,omitempty"`
+	ErrorCategory string                       `json:"error_category,omitempty"`
+	Error         *ChannelMonitorV2RecentError `json:"error,omitempty"`
+}
+
+type ChannelMonitorV2RecentError struct {
+	LogID              int64  `json:"log_id"`
+	ErrorType          string `json:"error_type,omitempty"`
+	StatusCode         int    `json:"status_code,omitempty"`
+	UpstreamStatusCode int    `json:"upstream_status_code,omitempty"`
+	Message            string `json:"message,omitempty"`
 }
 
 type ChannelMonitorV2Matrix struct {
@@ -553,6 +562,10 @@ func (s *ChannelMonitorV2Service) Matrix(ctx context.Context, filter ChannelMoni
 		hideTP := s.hideThroughputForViewer(ctx, admin)
 		for i := range matrix.Items {
 			redactChannelMonitorV2Metric(&matrix.Items[i].Metrics, hideTP)
+			for j := range matrix.Items[i].RecentRequests {
+				matrix.Items[i].RecentRequests[j].ErrorCategory = ""
+				matrix.Items[i].RecentRequests[j].Error = nil
+			}
 			for j := range matrix.Items[i].Buckets {
 				redactChannelMonitorV2Metric(&matrix.Items[i].Buckets[j].Metrics, hideTP)
 			}
@@ -586,25 +599,17 @@ func (s *ChannelMonitorV2Service) Errors(ctx context.Context, filter ChannelMoni
 	return s.ErrorsForViewer(ctx, filter, false)
 }
 
-// ErrorsForViewer returns the error breakdown.
-// Non-admin callers receive category rates + ignored flags only: absolute Count
-// is zeroed and Details (upstream messages / status codes / volume) are omitted.
+// ErrorsForViewer returns the error breakdown only to administrators.
+// Public callers receive no categories, messages, status codes or log identifiers.
 func (s *ChannelMonitorV2Service) ErrorsForViewer(ctx context.Context, filter ChannelMonitorV2Filter, admin bool) (*ChannelMonitorV2List[ChannelMonitorV2ErrorRow], error) {
 	cfg, err := s.getEnabledConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.repo.GetErrors(ctx, filter, *cfg, admin)
-	if err != nil {
-		return nil, err
+	if !admin {
+		return &ChannelMonitorV2List[ChannelMonitorV2ErrorRow]{Items: []ChannelMonitorV2ErrorRow{}}, nil
 	}
-	if !admin && list != nil {
-		for i := range list.Items {
-			list.Items[i].Count = 0
-			list.Items[i].Details = nil
-		}
-	}
-	return list, nil
+	return s.repo.GetErrors(ctx, filter, *cfg, true)
 }
 
 // RedactChannelMonitorV2Dimensions clears absolute request counts on filter chips.

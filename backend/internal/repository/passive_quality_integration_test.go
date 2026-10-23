@@ -20,6 +20,9 @@ import (
 )
 
 func passiveDB(t *testing.T) (context.Context, *sql.DB, *passiveQualityRepository) {
+	return passiveDBSchema(t, true)
+}
+func passiveDBSchema(t *testing.T, modelStates bool) (context.Context, *sql.DB, *passiveQualityRepository) {
 	t.Helper()
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -50,7 +53,7 @@ func passiveDB(t *testing.T) (context.Context, *sql.DB, *passiveQualityRepositor
  CREATE TABLE account_groups(account_id BIGINT,group_id BIGINT);
  CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT now());
  CREATE UNIQUE INDEX outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL;
- CREATE TABLE usage_logs(id BIGSERIAL PRIMARY KEY,account_id BIGINT,request_id TEXT,created_at TIMESTAMPTZ,model TEXT DEFAULT 'model',requested_model TEXT,duration_ms BIGINT DEFAULT 0,request_type SMALLINT DEFAULT 2,stream BOOLEAN DEFAULT true,openai_ws_mode BOOLEAN DEFAULT false,first_token_ms BIGINT,input_tokens BIGINT DEFAULT 100,output_tokens BIGINT DEFAULT 1,cache_creation_tokens BIGINT DEFAULT 0,cache_read_tokens BIGINT DEFAULT 0,image_input_tokens BIGINT DEFAULT 0,image_output_tokens BIGINT DEFAULT 0,image_count INT DEFAULT 0,video_count INT DEFAULT 0,actual_cost NUMERIC DEFAULT 0,total_cost NUMERIC DEFAULT 0,native_compaction_v2 BOOLEAN DEFAULT false,inbound_endpoint TEXT,upstream_endpoint TEXT);
+ CREATE TABLE usage_logs(id BIGSERIAL PRIMARY KEY,account_id BIGINT,request_id TEXT,created_at TIMESTAMPTZ,model TEXT DEFAULT 'model',requested_model TEXT,duration_ms BIGINT DEFAULT 0,request_type SMALLINT DEFAULT 2,stream BOOLEAN DEFAULT true,openai_ws_mode BOOLEAN DEFAULT false,first_token_ms BIGINT,input_tokens BIGINT DEFAULT 100,output_tokens BIGINT DEFAULT 1,cache_creation_tokens BIGINT DEFAULT 0,cache_read_tokens BIGINT DEFAULT 0,image_input_tokens BIGINT DEFAULT 0,image_output_tokens BIGINT DEFAULT 0,image_count INT DEFAULT 0,video_count INT DEFAULT 0,actual_cost NUMERIC DEFAULT 0,total_cost NUMERIC DEFAULT 0,input_cost NUMERIC DEFAULT 0,cache_creation_cost NUMERIC DEFAULT 0,cache_read_cost NUMERIC DEFAULT 0,native_compaction_v2 BOOLEAN DEFAULT false,inbound_endpoint TEXT,upstream_endpoint TEXT);
  INSERT INTO accounts(id,name) VALUES(62,'A'),(63,'B');INSERT INTO groups(id)VALUES(8),(9);INSERT INTO account_groups VALUES(62,8),(63,8);`)
 	migration, err := os.ReadFile("../../migrations/291_passive_quality.sql")
 	require.NoError(t, err)
@@ -58,6 +61,14 @@ func passiveDB(t *testing.T) (context.Context, *sql.DB, *passiveQualityRepositor
 	migration, err = os.ReadFile("../../migrations/295_passive_quality_account_window.sql")
 	require.NoError(t, err)
 	exec(string(migration))
+	migration, err = os.ReadFile("../../migrations/301_passive_quality_reuse_evidence.sql")
+	require.NoError(t, err)
+	exec(string(migration))
+	if modelStates {
+		migration, err = os.ReadFile("../../migrations/303_passive_quality_model_states.sql")
+		require.NoError(t, err)
+		exec(string(migration))
+	}
 	return ctx, db, &passiveQualityRepository{db: db}
 }
 func newPassivePolicy() service.PassiveQualityPolicy {

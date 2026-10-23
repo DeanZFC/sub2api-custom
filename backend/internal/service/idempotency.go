@@ -513,6 +513,10 @@ func (c *IdempotencyCoordinator) conflictWithRetryAfter(base *infraerrors.Applic
 }
 
 func (c *IdempotencyCoordinator) marshalStoredResponse(data any) (string, error) {
+	// One-time credentials may be returned to the caller, but never persisted or replayed.
+	if safe, ok := data.(interface{ IdempotencyStoredResponse() any }); ok {
+		data = safe.IdempotencyStoredResponse()
+	}
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return "", err

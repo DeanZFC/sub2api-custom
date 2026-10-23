@@ -815,10 +815,12 @@ const adminNavItems = computed((): NavItem[] => {
     {
       path: '/admin/qqbot', label: t('qqbot.title'), icon: BellIcon, expandOnly: true,
       children: [
+        { path: '/admin/qqbot/overview', label: t('qqbot.workspace.overview'), icon: BellIcon },
+        { path: '/admin/qqbot/groups', label: t('qqbot.workspace.groups'), icon: UsersIcon },
         { path: '/admin/qqbot/config', label: t('qqbot.basicConfig'), icon: BellIcon },
-        { path: '/admin/qqbot/bindings', label: t('qqbot.bindingsTitle'), icon: UsersIcon },
-        { path: '/admin/qqbot/records', label: t('qqbot.recordsTitle'), icon: OrderIcon },
         { path: '/admin/qqbot/activities', label: t('qqbot.activitiesTitle'), icon: GiftIcon },
+        { path: '/admin/qqbot/bindings', label: t('qqbot.workspace.members'), icon: UsersIcon },
+        { path: '/admin/qqbot/records', label: t('qqbot.workspace.records'), icon: OrderIcon },
       ],
     },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },

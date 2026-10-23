@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -58,4 +59,45 @@ func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page.Items, 1, "all-model policies remain visible with a model filter")
 	require.EqualValues(t, 62, page.Items[0].ID)
+	// Healthy availability cannot hide cache restrictions from problems-only.
+	_, err = db.Exec("UPDATE scheduled_test_protection_states SET verdict='pass' WHERE account_id=62")
+	require.NoError(t, err)
+	state := service.PassiveQualityState{PolicyID: p.ID, PolicyName: p.Name, AccountID: 62, Scope: "account", Mode: "enforce", Phase: "healthy", Cache: map[string]service.PassiveQualityCacheState{"model": {Phase: "reduced", AllocationPercent: 25}}}
+	raw, err := json.Marshal(state)
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE passive_quality_states SET data=$1 WHERE policy_id=$2 AND account_id=62", string(raw), p.ID)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{ProblemsOnly: true, AccountID: 62, Model: "model"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "cache_limited", page.Items[0].Controls[len(page.Items[0].Controls)-1].Phase)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{ProblemsOnly: true, AccountID: 62, Model: "another-model"})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
+	state.Phase = "exempt"
+	raw, err = json.Marshal(state)
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE passive_quality_states SET data=$1 WHERE policy_id=$2 AND account_id=62", string(raw), p.ID)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{ProblemsOnly: true, AccountID: 62})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
+	// Explicit account scope impacts every model even when its evidence filter
+	// is a single model; model scope must stay absent from other-model pages.
+	state.Phase, state.Model, state.Scope = "paused", "A", "account"
+	raw, err = json.Marshal(state)
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE passive_quality_states SET data=$1 WHERE policy_id=$2 AND account_id=62", string(raw), p.ID)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{ProblemsOnly: true, AccountID: 62, Model: "B"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	state.Scope = "model"
+	raw, err = json.Marshal(state)
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE passive_quality_states SET data=$1 WHERE policy_id=$2 AND account_id=62", string(raw), p.ID)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{ProblemsOnly: true, AccountID: 62, Model: "B"})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
 }

@@ -38,10 +38,7 @@ func (a *Account) IsSchedulableForModelWithContext(ctx context.Context, requeste
 	if a == nil {
 		return false
 	}
-	passiveModel := requestedModel
-	if public, ok := RequestedPublicModelFromContext(ctx); ok && public != "" {
-		passiveModel = public
-	}
+	passiveModel := passiveQualityRoutingModel(ctx, requestedModel)
 	if !a.IsSchedulable() || a.PassiveQualityBlocked(passiveModel) {
 		return false
 	}

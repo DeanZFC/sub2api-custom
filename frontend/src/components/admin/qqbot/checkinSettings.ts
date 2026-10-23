@@ -23,20 +23,20 @@ export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
   }
 }
 
-// Both tabs use the same full-config endpoint. Serialize saves and refresh the
-// other tab's fields so cached drafts and overlapping saves cannot undo them.
+// Refresh unrelated fields, but always retain the draft's original revision.
+// A missing draft revision must not inherit one from this refresh.
 let pendingSave = Promise.resolve()
-function saveConfigPatch(patch: Partial<QQCheckinConfig> | ((current: QQCheckinConfig) => Partial<QQCheckinConfig>)): Promise<QQCheckinConfig> {
+function saveConfigPatch(version: string | undefined, section: string, patch: Partial<QQCheckinConfig> | ((current: QQCheckinConfig) => Partial<QQCheckinConfig>)): Promise<QQCheckinConfig> {
   const saved = pendingSave.then(async () => {
     const current = await loadCheckinConfig()
-    return qqbotAPI.saveCheckin({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) })
+    return qqbotAPI.saveCheckin({ ...current, ...(typeof patch === 'function' ? patch(current) : patch), _version: version, _section: version ? section : undefined })
   })
   pendingSave = saved.then(() => undefined, () => undefined)
   return saved
 }
 
 export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinConfig> {
-  return saveConfigPatch({
+  return saveConfigPatch(config._sections?.checkin || config._version, 'checkin', {
     enabled: config.enabled,
     min_amount: config.min_amount,
     max_amount: config.max_amount,
@@ -51,5 +51,5 @@ export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinC
 
 export function saveGrowthSettings(config: QQCheckinConfig, section: 'tasks' | 'periodic_tasks' = 'tasks'): Promise<QQCheckinConfig> {
   const tasks = config.growth[section].map(task => ({ ...task, reward: { ...task.reward }, chances: task.reward.type === 'chances' ? task.reward.quantity : 0 }))
-  return saveConfigPatch(current => ({ growth: { ...current.growth, [section]: tasks } }))
+  return saveConfigPatch(config._sections?.[section] || config._version, section, current => ({ growth: { ...current.growth, [section]: tasks } }))
 }

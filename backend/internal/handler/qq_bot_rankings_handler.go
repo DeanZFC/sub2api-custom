@@ -16,6 +16,8 @@ func (h *QQBotHandler) GetRankingConfig(c *gin.Context) {
 		response.InternalError(c, "读取排行榜配置失败")
 		return
 	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(cfg)+`"`)
+	c.Header("Cache-Control", "no-store")
 	response.Success(c, cfg)
 }
 
@@ -29,10 +31,12 @@ func (h *QQBotHandler) SaveRankingConfig(c *gin.Context) {
 		response.BadRequest(c, "排行榜配置格式不正确")
 		return
 	}
-	saved, err := h.bot.SaveRankingConfig(c.Request.Context(), cfg)
+	saved, err := h.bot.SaveRankingConfig(qqbot.WithConfigVersion(c.Request.Context(), c.GetHeader("If-Match")), cfg)
 	if err != nil {
-		response.BadRequest(c, err.Error())
+		qqBotConfigError(c, err)
 		return
 	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(saved)+`"`)
+	c.Header("Cache-Control", "no-store")
 	response.Success(c, saved)
 }

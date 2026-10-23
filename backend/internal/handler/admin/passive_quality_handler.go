@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -20,6 +21,10 @@ func NewPassiveQualityHandler(svc *service.PassiveQualityService) *PassiveQualit
 }
 func (h *PassiveQualityHandler) Capture() gin.HandlerFunc { return h.svc.Capture() }
 func passiveError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrPassiveQualityModelRequired) {
+		response.BadRequest(c, err.Error())
+		return
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		response.NotFound(c, "passive quality policy or state not found")
 		return
@@ -141,6 +146,7 @@ func (h *PassiveQualityHandler) Act(c *gin.Context) {
 	var req struct {
 		Action  string `json:"action"`
 		Seconds int    `json:"seconds"`
+		Model   string `json:"model"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "invalid action JSON")
@@ -150,11 +156,16 @@ func (h *PassiveQualityHandler) Act(c *gin.Context) {
 		response.BadRequest(c, "unsupported action")
 		return
 	}
+	req.Model = strings.TrimSpace(req.Model)
+	if len(req.Model) > 200 {
+		response.BadRequest(c, "model must be at most 200 characters")
+		return
+	}
 	if req.Action == "exempt" && (req.Seconds < 60 || req.Seconds > 86400) {
 		response.BadRequest(c, "exemption must last 60..86400 seconds")
 		return
 	}
-	if err := h.svc.Repo.Act(c.Request.Context(), pid, aid, req.Action, req.Seconds); err != nil {
+	if err := h.svc.Repo.Act(c.Request.Context(), pid, aid, req.Action, req.Seconds, req.Model); err != nil {
 		passiveError(c, err)
 		return
 	}

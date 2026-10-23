@@ -16,6 +16,7 @@ import (
 )
 
 var ErrPassiveQualityConflict = errors.New("passive quality configuration or state changed; refresh and retry")
+var ErrPassiveQualityModelRequired = errors.New("select a model for this model-isolated protection operation")
 
 const passiveQualityCaptureKey = "passive_quality_capture"
 const passiveQualityStartedKey = "passive_quality_started"
@@ -214,6 +215,7 @@ func (s *PassiveQualityService) flushLoop() {
 // a failed turn becomes visible to the quality evaluator.
 func (s *PassiveQualityService) Capture() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityCacheCaptureEnabledKey{}, s.cacheEnabled.Load))
 		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityCacheSinkKey{}, func(f PassiveQualityFailure) {
 			if f.AttemptKey != "" || s.cacheEnabled.Load() {
 				s.enqueue(f)
@@ -257,6 +259,9 @@ func PassiveQualityBeginTurn(c *gin.Context) {
 		key := uuid.NewString()
 		c.Set(passiveQualityStartedKey, time.Now())
 		c.Set(passiveQualityTurnKey, key)
+		if c.Request != nil {
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityCacheMetadataKey{}, (*PassiveQualityCacheMetadata)(nil)))
+		}
 		if c.Request != nil && strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityUsageTurnKey{}, "ws:"+key))
 		}
@@ -294,7 +299,7 @@ func PassiveQualityUsageContext(parent, base context.Context) context.Context {
 	if parent == nil {
 		return base
 	}
-	for _, key := range []any{passiveQualityCacheSinkKey{}, passiveQualityUsageTurnKey{}} {
+	for _, key := range []any{passiveQualityCacheSinkKey{}, passiveQualityUsageTurnKey{}, passiveQualityCacheMetadataKey{}} {
 		if value := parent.Value(key); value != nil {
 			base = context.WithValue(base, key, value)
 		}
@@ -309,11 +314,15 @@ func recordPassiveQualityCache(ctx context.Context, accountID int64, requestKey 
 		return
 	}
 	attemptKey, _ := ctx.Value(passiveQualityUsageTurnKey{}).(string)
-	if !reported && attemptKey == "" {
+	metadata, _ := ctx.Value(passiveQualityCacheMetadataKey{}).(*PassiveQualityCacheMetadata)
+	if metadata != nil && metadata.AccountID != accountID {
+		metadata = nil
+	}
+	if !reported && attemptKey == "" && metadata == nil {
 		return
 	}
 	if sink, ok := ctx.Value(passiveQualityCacheSinkKey{}).(func(PassiveQualityFailure)); ok {
-		sink(PassiveQualityFailure{AccountID: accountID, RequestKey: requestKey, AttemptKey: attemptKey, At: time.Now(), CacheReported: reported})
+		sink(PassiveQualityFailure{AccountID: accountID, RequestKey: requestKey, AttemptKey: attemptKey, At: time.Now(), CacheReported: reported, CacheMetadata: metadata})
 	}
 }
 

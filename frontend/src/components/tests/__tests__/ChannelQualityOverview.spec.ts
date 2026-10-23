@@ -33,4 +33,16 @@ describe('quality overview', () => {
     await w.findAll('button').find(b => b.text() === 'Inspect and manage')!.trigger('click')
     expect(w.emitted('navigate')).toEqual([['records', 5, 1]]); w.unmount()
   })
+  it('shows cache-only reduction without claiming concurrency or availability failure', async () => {
+    const evidence = { cache_rate: 5, protection_rate: null, total_samples: 40, reusable_samples: 0, cold_samples: 30, unknown_samples: 10, missing_telemetry_samples: 0 }
+    api.overview.mockResolvedValue({ ...page([]), items: [{ ...account(1), controls: [{ source: 'passive', id: 5, metric: 'cache', name: 'Cache policy', model: 'A', scope: 'model', phase: 'cache_limited', reason: 'cache_minimum_hold', recovery: 'cache_reuse_samples', blocking: false, allocation_percent: 25, cache: { model: 'A', action: evidence, quick: evidence } }] }] })
+    const w = mountView(); await flushPromises()
+    expect(w.text()).toContain('New-session allocation reduced')
+    expect(w.get('[data-overview-cache]').text()).toContain('New-session allocation 25%')
+    expect(w.get('[data-overview-cache]').text()).toContain('Reusable-request protection rate: —')
+    expect(w.text()).not.toContain('Concurrency and priority reduced')
+    expect(w.text()).not.toContain('Scheduling restricted')
+    w.unmount()
+  })
+
 })

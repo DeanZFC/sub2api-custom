@@ -202,6 +202,7 @@ func (h *APIKeyHandler) GetByID(c *gin.Context) {
 // Create handles creating a new API key
 // POST /api/v1/api-keys
 func (h *APIKeyHandler) Create(c *gin.Context) {
+	apiKeyNoStore(c)
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		response.Unauthorized(c, "User not authenticated")
@@ -245,7 +246,35 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
 		if err != nil {
 			return nil, err
 		}
-		return dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")), nil
+		return &dto.APIKeySecret{APIKey: *dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")), Key: key.Key, SecretAvailable: true}, nil
+	})
+}
+
+func apiKeyNoStore(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.Header("Referrer-Policy", "no-referrer")
+}
+
+// Regenerate replaces only the credential, preserving configuration and usage.
+func (h *APIKeyHandler) Regenerate(c *gin.Context) {
+	apiKeyNoStore(c)
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+	executeUserIdempotentJSON(c, "user.api_keys.regenerate", gin.H{"id": id}, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		key, err := h.apiKeyService.Regenerate(ctx, id, subject.UserID)
+		if err != nil {
+			return nil, err
+		}
+		return &dto.APIKeySecret{APIKey: *dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")), Key: key.Key, SecretAvailable: true}, nil
 	})
 }
 

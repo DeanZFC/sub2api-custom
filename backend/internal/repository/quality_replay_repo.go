@@ -34,6 +34,9 @@ func (r *qualityOperationsRepository) ReplayQualityPolicy(ctx context.Context, r
 	if !req.Config.Enabled {
 		out.Warnings = append(out.Warnings, "policy_disabled")
 	}
+	if req.Config.IsolatedMetrics() {
+		out.Warnings = append(out.Warnings, "cache_pool_guard_not_simulated")
+	}
 	for _, id := range req.AccountIDs {
 		if slices.Contains(req.Config.ExcludedAccountIDs, id) {
 			return nil, fmt.Errorf("account %d is excluded by the draft policy", id)
@@ -45,70 +48,104 @@ func (r *qualityOperationsRepository) ReplayQualityPolicy(ctx context.Context, r
 		if !eligible {
 			return nil, fmt.Errorf("account %d does not belong to this draft policy", id)
 		}
-		state := service.PassiveQualityState{AccountID: id, Phase: "healthy"}
 		policy := service.PassiveQualityPolicy{PassiveQualityConfig: req.Config}
-		triggered := false
-		for at := req.From; !at.After(req.To); at = at.Add(time.Duration(req.StepSeconds) * time.Second) {
-			evidence, e := passiveSamples(ctx, tx, policy, state, at)
-			if e != nil {
-				return nil, e
-			}
-			// The failure/cache-presence collector retains 48 hours. An older leading
-			// window cannot be treated as complete even if usage logs survive longer.
-			if at.Add(-time.Duration(req.Config.WindowSeconds) * time.Second).Before(now.Add(-48 * time.Hour)) {
-				evidence.Complete = false
-			}
-			verdict, reason := service.EvaluatePassiveQuality(req.Config, evidence, state.Phase == "limited")
-			point := service.QualityReplayPoint{At: at, AccountID: id, Verdict: verdict, Reason: reason, Evidence: evidence}
-			if req.Config.Enabled && evidence.Fresh >= req.Config.NewSamples {
-				state.LastEvidenceAt = evidence.Latest
-				if state.Phase == "limited" {
-					if verdict == "pass" {
-						state.Hits++
-					} else {
-						state.Hits = 0
+		window := req.Config.WindowSeconds
+		if req.Config.CacheProtection != nil {
+			window = max(window, req.Config.CacheProtection.Quick.WindowSeconds, req.Config.CacheProtection.ActionWindow.WindowSeconds)
+		}
+		models, e := passiveReplayModels(ctx, tx, policy, id, req.From.Add(-time.Duration(window)*time.Second), req.To)
+		if e != nil {
+			return nil, e
+		}
+		steps := int(req.To.Sub(req.From).Seconds())/req.StepSeconds + 1
+		if len(models) > 128 || out.Evaluations+len(models)*steps > 2000 {
+			return nil, fmt.Errorf("replay exceeds 2000 model evaluations; select a model or shorten the time range")
+		}
+		if len(models) == 0 && !slices.Contains(out.Warnings, "no_recorded_request_models") {
+			out.Warnings = append(out.Warnings, "no_recorded_request_models")
+		}
+		for _, model := range models {
+			policy.Model = model
+			state := service.PassiveQualityState{AccountID: id, Model: model, Scope: policy.Scope, Phase: "healthy"}
+			triggered := false
+			for at := req.From; !at.After(req.To); at = at.Add(time.Duration(req.StepSeconds) * time.Second) {
+				if req.Config.IsolatedMetrics() {
+					point, events, missing, e := replayPassiveMetrics(ctx, tx, policy, &state, at, now)
+					if e != nil {
+						return nil, e
 					}
-					if state.Hits >= req.Config.Confirmations {
-						point.Action = "would_resume"
-						state.Phase = "healthy"
-						state.Hits = 0
-						triggered = false
+					if missing && !slices.Contains(out.Warnings, "cache_reuse_history_unavailable") {
+						out.Warnings = append(out.Warnings, "cache_reuse_history_unavailable")
 					}
-				} else if !triggered || req.Config.Mode == "observe" {
-					if verdict == "fail" {
-						state.Hits++
-					} else {
-						state.Hits = 0
-						triggered = false
+					out.Triggers += events
+					out.Evaluations++
+					if point.Verdict == "pending" {
+						out.Pending++
 					}
-					if state.Hits >= req.Config.Confirmations && !triggered {
-						triggered = true
-						out.Triggers++
-						if req.Config.Mode == "observe" {
-							point.Action = "would_observe"
-						} else if req.Config.Action == "limit" {
-							point.Action = "would_limit"
-							state.Phase = "limited"
-							state.Hits = 0
+					out.Points = append(out.Points, point)
+					continue
+				}
+				evidence, e := passiveSamples(ctx, tx, policy, state, at)
+				if e != nil {
+					return nil, e
+				}
+				// The failure/cache-presence collector retains 48 hours. An older leading
+				// window cannot be treated as complete even if usage logs survive longer.
+				if at.Add(-time.Duration(req.Config.WindowSeconds) * time.Second).Before(now.Add(-48 * time.Hour)) {
+					evidence.Complete = false
+				}
+				verdict, reason := service.EvaluatePassiveQuality(req.Config, evidence, state.Phase == "limited")
+				point := service.QualityReplayPoint{At: at, AccountID: id, Model: model, Verdict: verdict, Reason: reason, Evidence: evidence}
+				if req.Config.Enabled && evidence.Fresh >= req.Config.NewSamples {
+					state.LastEvidenceAt = evidence.Latest
+					if state.Phase == "limited" {
+						if verdict == "pass" {
+							state.Hits++
 						} else {
-							point.Action = "would_pause"
-							state.Phase = "paused"
+							state.Hits = 0
+						}
+						if state.Hits >= req.Config.Confirmations {
+							point.Action = "would_resume"
+							state.Phase = "healthy"
+							state.Hits = 0
+							triggered = false
+						}
+					} else if !triggered || req.Config.Mode == "observe" {
+						if verdict == "fail" {
+							state.Hits++
+						} else {
+							state.Hits = 0
+							triggered = false
+						}
+						if state.Hits >= req.Config.Confirmations && !triggered {
+							triggered = true
+							out.Triggers++
+							if req.Config.Mode == "observe" {
+								point.Action = "would_observe"
+							} else if req.Config.Action == "limit" {
+								point.Action = "would_limit"
+								state.Phase = "limited"
+								state.Hits = 0
+							} else {
+								point.Action = "would_pause"
+								state.Phase = "paused"
+							}
 						}
 					}
+				} else if state.Phase != "limited" && state.Phase != "paused" && evidence.Samples < req.Config.MinSamples {
+					state.Hits = 0
+					triggered = false
 				}
-			} else if state.Phase != "limited" && state.Phase != "paused" && evidence.Samples < req.Config.MinSamples {
-				state.Hits = 0
-				triggered = false
+				if state.Phase == "paused" && point.Action == "" {
+					point.Action = "recovery_requires_probe"
+				}
+				point.Hits = state.Hits
+				out.Evaluations++
+				if verdict == "pending" {
+					out.Pending++
+				}
+				out.Points = append(out.Points, point)
 			}
-			if state.Phase == "paused" && point.Action == "" {
-				point.Action = "recovery_requires_probe"
-			}
-			point.Hits = state.Hits
-			out.Evaluations++
-			if verdict == "pending" {
-				out.Pending++
-			}
-			out.Points = append(out.Points, point)
 		}
 	}
 	return out, tx.Commit()

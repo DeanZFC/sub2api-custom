@@ -181,13 +181,16 @@ func (r QualityReplayRequest) Validate(now time.Time) error {
 }
 
 type QualityReplayPoint struct {
-	At        time.Time              `json:"at"`
-	AccountID int64                  `json:"account_id"`
-	Verdict   string                 `json:"verdict"`
-	Reason    string                 `json:"reason"`
-	Action    string                 `json:"action"`
-	Hits      int                    `json:"hits"`
-	Evidence  PassiveQualityEvidence `json:"evidence"`
+	Model     string                              `json:"model,omitempty"`
+	Latency   *PassiveQualityMetricState          `json:"latency,omitempty"`
+	Cache     map[string]PassiveQualityCacheState `json:"cache,omitempty"`
+	At        time.Time                           `json:"at"`
+	AccountID int64                               `json:"account_id"`
+	Verdict   string                              `json:"verdict"`
+	Reason    string                              `json:"reason"`
+	Action    string                              `json:"action"`
+	Hits      int                                 `json:"hits"`
+	Evidence  PassiveQualityEvidence              `json:"evidence"`
 }
 type QualityReplayResult struct {
 	Points      []QualityReplayPoint `json:"points"`

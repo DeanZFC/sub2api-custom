@@ -1,4 +1,4 @@
-import { buildGatewayUrl } from './client'
+import { apiClient } from './client'
 
 export type BatchImageStatus =
   | 'queued'
@@ -127,39 +127,44 @@ async function parseBatchImageError(response: Response): Promise<Error> {
   }
 }
 
-function authHeaders(apiKey: string, extra?: HeadersInit): HeadersInit {
-  return {
-    Authorization: `Bearer ${apiKey}`,
-    ...extra,
-  }
+// Panel requests use the login session and an owned key ID; no API secret is
+// downloaded from the key list or persisted in the browser.
+async function panelBatchRequest(apiKey: number, suffix = '', options: RequestInit = {}): Promise<Response> {
+  const result = await apiClient.request({
+    url: `/key-image-batches/${apiKey}${suffix}`,
+    method: options.method || 'GET',
+    headers: options.headers as Record<string, string>,
+    data: options.body ? JSON.parse(String(options.body)) : undefined,
+    responseType: 'blob',
+    validateStatus: (status) => status !== 401,
+  })
+  const response = new Response(result.status === 204 ? null : result.data, { status: result.status, headers: result.headers as HeadersInit })
+  if (!response.ok) throw await parseBatchImageError(response)
+  return response
 }
 
 export async function submitBatchImageJob(
-  apiKey: string,
+  apiKey: number,
   payload: BatchImageSubmitRequest,
   idempotencyKey: string,
 ): Promise<BatchImageJob> {
-  const response = await fetch(buildGatewayUrl('/v1/images/batches'), {
+  const response = await panelBatchRequest(apiKey, '', {
     method: 'POST',
-    headers: authHeaders(apiKey, {
+    headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': idempotencyKey,
-    }),
+    },
     body: JSON.stringify(payload),
   })
-  if (!response.ok) throw await parseBatchImageError(response)
   return response.json()
 }
 
-export async function getBatchImageJob(apiKey: string, batchId: string): Promise<BatchImageJob> {
-  const response = await fetch(buildGatewayUrl(`/v1/images/batches/${encodeURIComponent(batchId)}`), {
-    headers: authHeaders(apiKey),
-  })
-  if (!response.ok) throw await parseBatchImageError(response)
+export async function getBatchImageJob(apiKey: number, batchId: string): Promise<BatchImageJob> {
+  const response = await panelBatchRequest(apiKey, `/${encodeURIComponent(batchId)}`)
   return response.json()
 }
 
-export async function listBatchImageJobs(apiKey: string, options: number | BatchImageJobsListOptions = 20): Promise<BatchImageJobsResponse> {
+export async function listBatchImageJobs(apiKey: number, options: number | BatchImageJobsListOptions = 20): Promise<BatchImageJobsResponse> {
   const params = new URLSearchParams()
   if (typeof options === 'number') {
     params.set('limit', String(options))
@@ -172,65 +177,46 @@ export async function listBatchImageJobs(apiKey: string, options: number | Batch
     if (options.from) params.set('from', options.from)
     if (options.to) params.set('to', options.to)
   }
-  const response = await fetch(buildGatewayUrl(`/v1/images/batches?${params.toString()}`), {
-    headers: authHeaders(apiKey),
-  })
-  if (!response.ok) throw await parseBatchImageError(response)
+  const response = await panelBatchRequest(apiKey, `?${params.toString()}`)
   return response.json()
 }
 
-export async function listBatchImageModels(apiKey: string): Promise<BatchImageModelsResponse> {
-  const response = await fetch(buildGatewayUrl('/v1/images/batches/models'), {
-    headers: authHeaders(apiKey),
-  })
-  if (!response.ok) throw await parseBatchImageError(response)
+export async function listBatchImageModels(apiKey: number): Promise<BatchImageModelsResponse> {
+  const response = await panelBatchRequest(apiKey, '/models')
   return response.json()
 }
 
 export async function listBatchImageItems(
-  apiKey: string,
+  apiKey: number,
   batchId: string,
   status = '',
 ): Promise<BatchImageItemsResponse> {
   const query = status ? `?status=${encodeURIComponent(status)}` : ''
-  const response = await fetch(buildGatewayUrl(`/v1/images/batches/${encodeURIComponent(batchId)}/items${query}`), {
-    headers: authHeaders(apiKey),
-  })
-  if (!response.ok) throw await parseBatchImageError(response)
+  const response = await panelBatchRequest(apiKey, `/${encodeURIComponent(batchId)}/items${query}`)
   return response.json()
 }
 
-export async function cancelBatchImageJob(apiKey: string, batchId: string): Promise<BatchImageJob> {
-  const response = await fetch(buildGatewayUrl(`/v1/images/batches/${encodeURIComponent(batchId)}/cancel`), {
+export async function cancelBatchImageJob(apiKey: number, batchId: string): Promise<BatchImageJob> {
+  const response = await panelBatchRequest(apiKey, `/${encodeURIComponent(batchId)}/cancel`, {
     method: 'POST',
-    headers: authHeaders(apiKey),
   })
-  if (!response.ok) throw await parseBatchImageError(response)
   return response.json()
 }
 
-export async function downloadBatchImageZip(apiKey: string, batchId: string): Promise<Blob> {
-  const response = await fetch(buildGatewayUrl(`/v1/images/batches/${encodeURIComponent(batchId)}/download`), {
-    headers: authHeaders(apiKey),
-  })
-  if (!response.ok) throw await parseBatchImageError(response)
+export async function downloadBatchImageZip(apiKey: number, batchId: string): Promise<Blob> {
+  const response = await panelBatchRequest(apiKey, `/${encodeURIComponent(batchId)}/download`)
   return response.blob()
 }
 
-export async function getBatchImageItemContent(apiKey: string, batchId: string, customId: string, imageIndex = 0): Promise<Blob> {
-  const response = await fetch(buildGatewayUrl(`/v1/images/batches/${encodeURIComponent(batchId)}/items/${encodeURIComponent(customId)}/content?image_index=${encodeURIComponent(String(imageIndex))}`), {
-    headers: authHeaders(apiKey),
-  })
-  if (!response.ok) throw await parseBatchImageError(response)
+export async function getBatchImageItemContent(apiKey: number, batchId: string, customId: string, imageIndex = 0): Promise<Blob> {
+  const response = await panelBatchRequest(apiKey, `/${encodeURIComponent(batchId)}/items/${encodeURIComponent(customId)}/content?image_index=${encodeURIComponent(String(imageIndex))}`)
   return response.blob()
 }
 
-export async function deleteBatchImageJobRecord(apiKey: string, batchId: string): Promise<void> {
-  const response = await fetch(buildGatewayUrl(`/v1/images/batches/${encodeURIComponent(batchId)}`), {
+export async function deleteBatchImageJobRecord(apiKey: number, batchId: string): Promise<void> {
+  await panelBatchRequest(apiKey, `/${encodeURIComponent(batchId)}`, {
     method: 'DELETE',
-    headers: authHeaders(apiKey),
   })
-  if (!response.ok) throw await parseBatchImageError(response)
 }
 
 export function saveBlob(blob: Blob, filename: string) {

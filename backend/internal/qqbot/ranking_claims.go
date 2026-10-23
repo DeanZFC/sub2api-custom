@@ -131,6 +131,11 @@ func (s *Service) settlePendingRankingRewards(ctx context.Context, c Config, at 
 		if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_ranking_claims SET claimed_at=$2 WHERE id=$1`, r.id, at); err != nil {
 			return err
 		}
+		if granted {
+			if err = enqueueRankingRewardNotification(ctx, tx, current, j, r.key, r.date, r.kind, r.rank, reward); err != nil {
+				return err
+			}
+		}
 		if granted && reward.Type == "balance" {
 			invalidations = append(invalidations, uid)
 		}

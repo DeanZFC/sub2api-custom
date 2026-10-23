@@ -70,6 +70,7 @@ vi.mock('@/api', () => ({
   keysAPI: {
     list: listKeys,
     create: vi.fn(),
+    regenerate: vi.fn(),
     update: updateKey,
     delete: vi.fn(),
     toggleStatus: vi.fn(),
@@ -125,7 +126,7 @@ vi.mock('vue-i18n', async () => {
 const createApiKey = (): ApiKey => ({
   id: 1,
   user_id: 1,
-  key: 'sk-test-key',
+  key: 'sk-tes...1234',
   name: 'test-key',
   group_id: null,
   fallback_group_id: null,
@@ -202,6 +203,7 @@ const DataTableStub = {
         >
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
+        <div data-test="key-mask"><slot name="cell-key" :value="row.key" :row="row" /></div>
         <slot name="cell-name" :value="row.name" :row="row" />
         <div data-test="group-cell">
           <slot name="cell-group" :value="row.group" :row="row" />
@@ -277,6 +279,7 @@ const mountView = async () => {
           template: '<div v-if="show" role="dialog"><button data-test="close-dialog" @click="$emit(\'close\')">Close</button><slot /><slot name="footer" /></div>',
         },
         ConfirmDialog: true,
+        TotpStepUpDialog: true,
         EmptyState: true,
         Select: SelectStub,
         SearchInput: SearchInputStub,
@@ -320,6 +323,7 @@ describe('user KeysView', () => {
     listKeys.mockReset()
     updateKey.mockReset()
     vi.mocked(keysAPI.create).mockReset()
+    vi.mocked(keysAPI.regenerate).mockReset()
     getPublicSettings.mockReset()
     getDashboardApiKeysUsage.mockReset()
     getAvailableGroups.mockReset()
@@ -381,6 +385,45 @@ describe('user KeysView', () => {
     await wrapper.get('#key-form').trigger('submit')
     await flushPromises()
     expect(updateKey).toHaveBeenNthCalledWith(2, key.id, expect.objectContaining({ name: 'Unsaved name', status: formStatus }))
+    wrapper.unmount()
+  })
+
+
+  it('shows a regenerated secret once and removes it when closed', async () => {
+    const secret = 'sk-new-once-123456789abcdef'
+    vi.mocked(keysAPI.regenerate).mockResolvedValue({ ...createApiKey(), key: secret, secret_available: true })
+    copyToClipboard.mockResolvedValue(true)
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-test="key-mask"]').text()).toBe('sk-tes...1234')
+    expect(wrapper.get('[data-test="key-mask"]').find('button').exists()).toBe(false)
+    await getButtonByText(wrapper, 'keys.regenerate').trigger('click')
+    expect(keysAPI.regenerate).not.toHaveBeenCalled()
+    const confirm = wrapper.findAllComponents({ name: 'ConfirmDialog' }).find(dialog => dialog.props('title') === 'keys.regenerate')!
+    expect(confirm.props('show')).toBe(true)
+    confirm.vm.$emit('confirm')
+    await flushPromises()
+    expect(keysAPI.regenerate).toHaveBeenCalledWith(1)
+    expect(wrapper.get('[data-testid="one-time-key"]').text()).toBe(secret)
+    await getButtonByText(wrapper, 'keys.copyToClipboard').trigger('click')
+    expect(copyToClipboard).toHaveBeenCalledWith(secret, 'keys.copied')
+    await getButtonByText(wrapper, 'keys.secretSaved').trigger('click')
+    expect(wrapper.find('[data-testid="one-time-key"]').exists()).toBe(false)
+    await getButtonByText(wrapper, 'keys.useKey').trigger('click')
+    expect(wrapper.findComponent({ name: 'UseKeyModal' }).props('apiKey')).toBe('')
+    expect(wrapper.html()).not.toContain(secret)
+    expect(JSON.stringify(localStorage)).not.toContain(secret)
+    wrapper.unmount()
+  })
+
+  it('does not treat an idempotent replay as a revealed secret', async () => {
+    vi.mocked(keysAPI.regenerate).mockResolvedValue(createApiKey())
+    const wrapper = await mountView()
+    await getButtonByText(wrapper, 'keys.regenerate').trigger('click')
+    const confirm = wrapper.findAllComponents({ name: 'ConfirmDialog' }).find(dialog => dialog.props('title') === 'keys.regenerate')!
+    confirm.vm.$emit('confirm')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="one-time-key"]').exists()).toBe(false)
+    expect(showError).toHaveBeenCalledWith('keys.secretUnavailable')
     wrapper.unmount()
   })
 
@@ -834,11 +877,14 @@ describe('user KeysView', () => {
       expect(showError).toHaveBeenCalledWith('keys.groupRequired')
 
       await groupSelect(wrapper).vm.$emit('update:modelValue', 5)
-      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), group_id: 5 })
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), group_id: 5, key: 'sk-created-once-123456789', secret_available: true })
       await wrapper.get('#key-form').trigger('submit')
       await flushPromises()
       expect(keysAPI.create).toHaveBeenCalledOnce()
       expect(vi.mocked(keysAPI.create).mock.calls[0].slice(0, 2)).toEqual(['My key', 5])
+      expect(wrapper.get('[data-testid="one-time-key"]').text()).toBe('sk-created-once-123456789')
+      await getButtonByText(wrapper, 'keys.secretSaved').trigger('click')
+      expect(wrapper.html()).not.toContain('sk-created-once-123456789')
     })
 
     it('defaults to a provider with available groups and disables empty categories', async () => {

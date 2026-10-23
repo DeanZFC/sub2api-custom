@@ -3,6 +3,7 @@
     <p class="text-sm text-gray-500">{{ t('qqbot.checkinHelp') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
+    <p v-if="dirty" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
       <label class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" />{{ t('qqbot.enableCheckin') }}</label>
       <div class="grid gap-4 sm:grid-cols-2">
@@ -34,6 +35,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import { useQQDraft } from './useQQDraft'
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { QQCheckinConfig } from '@/api/qqbot'
@@ -42,6 +44,7 @@ import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
 import { validGrowthReward } from './growthReward'
 const { t } = useI18n()
 const form = ref<QQCheckinConfig | null>(null)
+const { dirty, markSaved } = useQQDraft(form)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -60,7 +63,7 @@ async function save() {
     return
   }
   busy.value = true
-  try { form.value = await saveCheckinSettings(form.value); notice.value = t('common.saved') }
+  try { form.value = await saveCheckinSettings(form.value); markSaved(); notice.value = t('common.saved') }
   catch (e) { error.value = (e as Error).message || t('common.error') }
   finally { busy.value = false }
 }

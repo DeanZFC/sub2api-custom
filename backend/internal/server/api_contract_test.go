@@ -228,6 +228,7 @@ func TestAPIContracts(t *testing.T) {
 					"id": 100,
 					"user_id": 1,
 					"key": "sk_custom_1234567890",
+                    "secret_available": true,
 					"name": "Key One",
 					"group_id": null,
 					"fallback_group_id": null,
@@ -279,7 +280,7 @@ func TestAPIContracts(t *testing.T) {
 						{
 							"id": 100,
 							"user_id": 1,
-							"key": "sk_custom_1234567890",
+							"key": "sk_cus...7890",
 							"name": "Key One",
 							"group_id": null,
 							"fallback_group_id": null,

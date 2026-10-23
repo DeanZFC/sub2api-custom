@@ -13,6 +13,38 @@ type TotpHandler struct {
 	totpService *service.TotpService
 }
 
+// RequireKeyStepUp protects credential issuance for users with TOTP enabled.
+func (h *TotpHandler) RequireKeyStepUp(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		c.Abort()
+		return
+	}
+	if h == nil || h.totpService == nil {
+		middleware2.AbortWithError(c, 503, "STEP_UP_UNAVAILABLE", "Verification service unavailable")
+		return
+	}
+	enabled, err := h.totpService.IsTotpEnabledForUser(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		c.Abort()
+		return
+	}
+	if enabled {
+		granted, err := h.totpService.HasStepUpGrant(c.Request.Context(), subject.UserID, middleware2.StepUpSessionKey(c, subject.UserID))
+		if err != nil {
+			middleware2.AbortWithError(c, 503, "STEP_UP_UNAVAILABLE", "Verification service unavailable")
+			return
+		}
+		if !granted {
+			middleware2.AbortWithError(c, 403, "STEP_UP_REQUIRED", "This operation requires recent two-factor verification")
+			return
+		}
+	}
+	c.Next()
+}
+
 // NewTotpHandler creates a new TotpHandler
 func NewTotpHandler(totpService *service.TotpService) *TotpHandler {
 	return &TotpHandler{

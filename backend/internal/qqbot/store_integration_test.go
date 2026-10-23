@@ -60,6 +60,18 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	_, err = db.Exec(string(raw))
 	require.NoError(t, err)
+	historySQL, err := migrations.FS.ReadFile("299_qq_bot_transfer_history.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(historySQL))
+		require.NoError(t, err)
+	}
+	memberHintsSQL, err := migrations.FS.ReadFile("298_qq_bot_member_hints.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(memberHintsSQL))
+		require.NoError(t, err)
+	}
 	moderationSQL, err := migrations.FS.ReadFile("297_qq_bot_moderation.sql")
 	require.NoError(t, err)
 	for range 2 {
@@ -156,6 +168,18 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	for range 2 {
 		_, err = db.Exec(string(raw))
+		require.NoError(t, err)
+	}
+	intentSQL, err := migrations.FS.ReadFile("302_qq_bot_image_intent.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(intentSQL))
+		require.NoError(t, err)
+	}
+	memberSQL, err := migrations.FS.ReadFile("304_qq_bot_member_context.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(memberSQL))
 		require.NoError(t, err)
 	}
 	return db
@@ -389,7 +413,7 @@ func TestQQBotSecretsAndConversationIsolation(t *testing.T) {
 	require.NoError(t, s.recordGroupEvent(ctx, c, e))
 	a := s.history(ctx, c, Job{GroupID: "group", MemberID: "a"})
 	b := s.history(ctx, c, Job{GroupID: "group", MemberID: "b"})
-	require.Equal(t, a, b)
+	require.Len(t, b, 2)
 	require.Len(t, a, 3)
 	require.Contains(t, a[2].Content, "new-shared")
 	require.NotContains(t, a[2].Content, "old-private")

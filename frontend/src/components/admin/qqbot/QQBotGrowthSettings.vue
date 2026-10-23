@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6">
+  <div class="space-y-6"><p v-if="tasksDraft.dirty.value || periodicDraft.dirty.value" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <p class="text-sm text-gray-500">{{ t('qqbot.growth.help') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
@@ -83,18 +83,19 @@
         </fieldset>
         <button type="submit" class="btn btn-primary" :disabled="busy">{{ t('common.save') }}</button>
       </form>
-      <QQBotRankingSettings />
+
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useQQDraft } from './useQQDraft'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { QQCheckinConfig, QQGrowthTask, QQGrowthTaskKind } from '@/api/qqbot'
 import { loadCheckinConfig, saveGrowthSettings } from './checkinSettings'
 import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
-import QQBotRankingSettings from './QQBotRankingSettings.vue'
+
 import { normalizeGrowthReward, rewardEnabled, validGrowthReward } from './growthReward'
 
 const { t } = useI18n()
@@ -105,6 +106,8 @@ const maxTasks = 12
 const newTaskKind = ref<QQGrowthTaskKind>('checkin_total')
 const newPeriodicKind = ref<QQGrowthTaskKind>('usage_amount')
 const form = ref<QQCheckinConfig | null>(null)
+const tasksDraft = useQQDraft(() => form.value?.growth.tasks)
+const periodicDraft = useQQDraft(() => form.value?.growth.periodic_tasks)
 const enabledTasks = computed(() => form.value?.growth.tasks.filter(task => task.enabled && rewardEnabled(task.reward)).length ?? 0)
 const busy = ref(false)
 const error = ref('')
@@ -142,6 +145,9 @@ async function save(section: 'tasks' | 'periodic_tasks') {
   try {
     const saved = await saveGrowthSettings(form.value, section)
     form.value.growth[section] = saved.growth[section] ?? []
+    form.value._version = saved._version
+    if (saved._sections) form.value._sections = { ...form.value._sections, [section]: saved._sections[section]! }
+    ;(section === 'tasks' ? tasksDraft : periodicDraft).markSaved()
     notice.value = t('common.saved')
   }
   catch (e) { error.value = (e as Error).message || t('common.error') }

@@ -3,6 +3,7 @@
     <p class="text-sm text-gray-500">{{ t('qqbot.transferHelp') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
+    <p v-if="dirty" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
       <label class="flex items-center gap-2">
         <input v-model="form.transfer_enabled" type="checkbox" />
@@ -55,12 +56,14 @@
   </div>
 </template>
 <script setup lang="ts">
+import { useQQDraft } from './useQQDraft'
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { qqbotAPI, type QQTransferConfig } from '@/api/qqbot'
 
 const { t } = useI18n()
 const form = ref<QQTransferConfig | null>(null)
+const { dirty, markSaved } = useQQDraft(form)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -84,7 +87,7 @@ async function save() {
   busy.value = true
   try {
     form.value = await qqbotAPI.saveTransfer({ ...form.value })
-    notice.value = t('common.saved')
+    markSaved(); notice.value = t('common.saved')
   } catch (e) {
     error.value = (e as Error).message || t('common.error')
   } finally {

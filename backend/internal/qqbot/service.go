@@ -93,12 +93,13 @@ func (s *Service) Stop() {
 	s.wg.Wait()
 }
 func (s *Service) maintenance(ctx context.Context) {
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_pending_image_plans WHERE expires_at<NOW() OR EXISTS(SELECT 1 FROM qq_bot_jobs j WHERE j.id=job_id AND j.status NOT IN ('running','completed'))`)
 	s.maintainModeration(ctx)
 	// An interrupted model request may already have cost money. Preserve its
 	// status for inspection and never replay it after a process crash.
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='interrupted',error='处理进程中断，未自动重试；请检查调用用量',finished_at=NOW(),payload='{}' WHERE status='running' AND started_at<NOW()-INTERVAL '10 minutes'`)
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='expired',error='排队超过回复时限，请重新发送',finished_at=NOW(),payload='{}' WHERE status='queued' AND created_at<NOW()-INTERVAL '5 minutes' AND event_type IN ('GROUP_AT_MESSAGE_CREATE','GROUP_MESSAGE_CREATE','INTERACTION_CREATE')`)
-	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_image=NULL,result_text='',payload='{}' WHERE created_at<NOW()-INTERVAL '24 hours' AND (result_image IS NOT NULL OR result_text<>'' OR payload<>'{}'::jsonb)`)
+	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_image=NULL,result_text='',payload='{}',member_nickname='',message_preview='' WHERE created_at<NOW()-INTERVAL '24 hours' AND (result_image IS NOT NULL OR result_text<>'' OR payload<>'{}'::jsonb OR member_nickname<>'' OR message_preview<>'')`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_bind_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_email_bind_requests WHERE expires_at<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_transfer_requests WHERE expires_at<NOW()`)
@@ -137,6 +138,10 @@ func (s *Service) runOne(parent context.Context) {
 		}
 		logMembershipEvent(ctx, j, nil, "process", "ignored", reason)
 		s.finish(j, "failed", ErrDisabled.Error())
+		return
+	}
+	if j.EventType == rankingNotificationEvent {
+		s.deliverRankingNotification(ctx, c, j)
 		return
 	}
 	if j.EventType == priceNotificationEvent || j.EventType == healthNotificationEvent {
@@ -612,8 +617,21 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		j.Kind = kind
 		var err error
 		if kind == "image" {
-			sendImageProgress("正在生成图片，请稍候。")
-			img, err = s.generateImage(ctx, c, prompt)
+			err = s.clearPendingImagePlan(ctx, c, *j)
+			if err == nil {
+				err = s.saveImageDecision(ctx, j, imageDecision{Tool: chatImageToolName, Review: "command", Basis: "explicit", Reason: "slash_command", Execution: "started", MessageRef: groupHistoryID(c.AppID, j.GroupID, e.ID)})
+			}
+			if err == nil {
+				sendImageProgress("正在生成图片，请稍候。")
+				img, err = s.generateImage(ctx, c, prompt)
+				status := "succeeded"
+				if err != nil {
+					status = "failed"
+				}
+				if recordErr := s.imageExecution(ctx, j, status); err == nil {
+					err = recordErr
+				}
+			}
 		} else {
 			messages := s.history(ctx, c, *j)
 			messages = withGroupAdminChatInstructions(messages, c, *j, addressed)
@@ -622,28 +640,53 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 				sendImageProgress("正在处理图片，请稍候。")
 			})
 			if err == nil {
+				var pending *pendingImagePlan
+				if c.ImageEnabled && !c.groupPolicy(j.GroupID).DisableImages {
+					pending, err = s.pendingImagePlan(ctx, c, *j)
+				}
+				messages = withPendingImagePlan(messages, pending)
 				messages = append(messages, groupUserMessage(c, e, input))
 				j.ShareHistory = shareableGroupEvent(e, ref)
 				var turn chatTurnResult
-				turn, err = s.chatTurn(ctx, c, messages)
+				turnConfig := c
+				turnConfig.ImageEnabled = c.ImageEnabled && !c.groupPolicy(j.GroupID).DisableImages
+				if err == nil {
+					turn, err = s.chatTurn(ctx, turnConfig, messages)
+				}
+				if err == nil && (turn.ImagePrompt != "" || turn.ImagePlan != nil) {
+					turn, err = s.reviewImageTurn(ctx, turnConfig, j, e, prompt, input, ref, pending, turn)
+				} else if err == nil {
+					// Ordinary chat/cancellation invalidates an old plan even while
+					// images are disabled and the plan was not loaded into context.
+					err = s.clearPendingImagePlan(ctx, c, *j)
+				}
 				text, j.InputTokens, j.OutputTokens = turn.Text, turn.InputTokens, turn.OutputTokens
 				if err == nil && turn.ImagePrompt != "" {
-					// The model chose the tool; validate current policy and reserve
-					// image usage separately from the already-paid chat request.
+					// The independent review approved; recheck policy and reserve
+					// image usage separately from chat and review token usage.
 					if usageErr := s.reserveUsage(ctx, c, *j, "image"); usageErr != nil {
+						err = s.imageExecution(ctx, j, "quota_blocked")
 						text = "生图服务暂时不可用，请稍后重试。"
 						if errors.Is(usageErr, errFeatureUnavailable) || errors.Is(usageErr, errUsageCooldown) || errors.Is(usageErr, errUsageLimit) {
 							text = "无法生成图片：" + usageErr.Error()
 						}
 					} else {
 						kind, j.Kind = "image", "image"
-						if turn.EditImageIndex > 0 {
+						err = s.imageExecution(ctx, j, "started")
+						if err == nil && turn.EditImageIndex > 0 {
 							imageEdited = true
 							sendImageProgress("正在修改图片，请稍候。")
 							img, err = s.editImage(ctx, c, turn.ImagePrompt, input.Images[turn.EditImageIndex-1])
-						} else {
+						} else if err == nil {
 							sendImageProgress("正在生成图片，请稍候。")
 							img, err = s.generateImage(ctx, c, turn.ImagePrompt)
+						}
+						status := "succeeded"
+						if err != nil {
+							status = "failed"
+						}
+						if recordErr := s.imageExecution(ctx, j, status); err == nil {
+							err = recordErr
 						}
 						if err == nil {
 							text = "图片已生成。"

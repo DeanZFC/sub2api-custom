@@ -18,7 +18,7 @@ const invitation: QQActivityRecord = {
   invited_at: '2026-10-15T08:00:00Z', joined_at: '2026-10-15T08:01:00Z', reward_user_id: 0, reward_email: ''
 }
 function page(items: QQActivityRecord[] = [], total = items.length, current = 1) { return { items, total, page: current, page_size: 20 } }
-async function setup(locale: 'zh' | 'en' = 'zh', query = '') {
+async function setup(locale: 'zh' | 'en' = 'zh', query = '?tab=checkin') {
   const router = createRouter({ history: createMemoryHistory(), routes: [
     { path: '/admin/qqbot/records', component: QQBotRecordsView },
     { path: '/admin/qqbot/activities', component: { template: '<div />' } }

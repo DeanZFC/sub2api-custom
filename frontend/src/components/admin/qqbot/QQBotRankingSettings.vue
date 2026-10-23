@@ -3,6 +3,7 @@
     <p class="text-sm text-gray-500">{{ t('qqbot.rankings.help') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
+    <p v-if="dirty" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <form v-if="form" data-testid="ranking-settings-form" class="card space-y-6 p-6" @submit.prevent="save">
       <fieldset class="space-y-4" :disabled="busy">
         <legend class="mb-2 font-medium">{{ t('qqbot.rankings.title') }}</legend>
@@ -36,6 +37,7 @@
 </template>
 
 <script setup lang="ts">
+import { useQQDraft } from './useQQDraft'
 import { onMounted, ref, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { qqbotAPI, type QQRankingConfig, type QQRankingPrize } from '@/api/qqbot'
@@ -49,6 +51,7 @@ const boards = [
 ] as const
 type Board = typeof boards[number]['key']
 const form = ref<QQRankingConfig | null>(null)
+const { dirty, markSaved } = useQQDraft(form)
 const busy = ref(false), error = ref(''), notice = ref('')
 
 function addPrize(board: Board) {
@@ -69,7 +72,7 @@ async function save() {
     error.value = t('qqbot.rankings.invalid'); return
   }
   busy.value = true
-  try { form.value = await qqbotAPI.saveRankings(structuredClone(toRaw(form.value))); notice.value = t('common.saved') }
+  try { form.value = await qqbotAPI.saveRankings(structuredClone(toRaw(form.value))); markSaved(); notice.value = t('common.saved') }
   catch (e) { error.value = (e as Error).message || t('common.error') }
   finally { busy.value = false }
 }

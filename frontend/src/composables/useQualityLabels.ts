@@ -4,6 +4,7 @@ export function useQualityLabels() {
   const { t, te } = useI18n()
   const passive = (key: string, args: Record<string, unknown> = {}) => t(`admin.tests.passive.${key}`, args)
   function reason(value: string): string {
+    if (te('admin.tests.passive.v2.reasons.' + value)) return passive('v2.reasons.' + value)
     if (te(`admin.tests.passive.reasons.${value}`)) return passive(`reasons.${value}`)
     if (te(`admin.tests.quality.reasons.${value}`)) return t(`admin.tests.quality.reasons.${value}`)
     for (const prefix of ['trial_expired', 'trial_failed', 'waiting_for_recovery']) {

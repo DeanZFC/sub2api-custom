@@ -108,6 +108,13 @@ func (s *Service) saveRankingConfigAt(ctx context.Context, c RankingConfig, now 
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,288))`, bot.AppID); err != nil {
 		return c, err
 	}
+	current, err := loadRankingConfig(ctx, tx, bot.AppID)
+	if err != nil {
+		return c, err
+	}
+	if err = checkConfigVersion(ctx, current); err != nil {
+		return c, err
+	}
 	c.EffectiveDay = beijingDayStart(now).AddDate(0, 0, 1).Format("2006-01-02")
 	raw, err := json.Marshal(c)
 	if err != nil {

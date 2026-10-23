@@ -39,6 +39,9 @@ func TestQQBotChatEnvelopeDeliveryAndHistory(t *testing.T) {
 					if protocol == "responses" {
 						messages = request.Input
 					}
+					require.NotContains(t, sharedHistoryText(messages), "触发生图了")
+					require.NotContains(t, sharedHistoryText(messages), "锦")
+					require.NotContains(t, sharedHistoryText(messages), "legacy mixed reply")
 					var assistantTexts []string
 					for _, m := range messages {
 						if m.Role == "assistant" {
@@ -73,8 +76,14 @@ func TestQQBotChatEnvelopeDeliveryAndHistory(t *testing.T) {
 			s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 			// Simulate a wrapped reply saved by an older version. The next request
 			// must see its body rather than copying the leaked envelope again.
-			previous := Job{GroupID: "group", MessageID: "previous-question", CreatedAt: time.Now().Add(-time.Minute)}
+			previous := Job{GroupID: "group", MemberID: "member", MessageID: "previous-question", CreatedAt: time.Now().Add(-time.Minute)}
 			require.NoError(t, s.rememberSentMessage(ctx, c, previous, []byte(`{"id":"old-answer"}`), testChatEnvelope("之前的正文"), false, true))
+			other := sharedTestEvent("another-question", "group", "another-member", "触发生图了")
+			other.Author.Username = "锦"
+			enqueueSharedTestEvent(t, s, c, other, groupMessageCreate)
+			require.NoError(t, s.rememberSentMessage(ctx, c, Job{GroupID: "group", MemberID: "another-member", MessageID: other.ID}, []byte(`{"id":"another-answer"}`), "锦，你那句触发生图了是什么意思？", false, true))
+			_, err = db.Exec(`INSERT INTO qq_bot_group_messages(app_id,group_id,message_key,role,content) VALUES($1,'group','legacy-mixed','assistant',$2)`, c.AppID, testChatEnvelope("legacy mixed reply"))
+			require.NoError(t, err)
 			enqueueSharedTestEvent(t, s, c, sharedTestEvent("current-question", "group", "member", "请继续回复"), groupAtMessageCreate)
 			s.runOne(ctx)
 			var status, result string

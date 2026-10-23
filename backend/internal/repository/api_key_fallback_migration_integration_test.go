@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"testing"
 
 	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
@@ -33,7 +34,7 @@ func TestMigration267APIKeyFallbackGroup(t *testing.T) {
 			require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO users (email, password_hash) VALUES ('migration-fallback@test.com', 'test-only') RETURNING id`).Scan(&userID))
 			require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO groups (name) VALUES ('migration-primary') RETURNING id`).Scan(&primaryID))
 			require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO groups (name) VALUES ('migration-fallback') RETURNING id`).Scan(&fallbackID))
-			require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO api_keys (user_id, key, name, group_id) VALUES ($1, 'sk-migration-fallback', 'Migration key', $2) RETURNING id`, userID, primaryID).Scan(&keyID))
+			require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO api_keys (user_id, key, name, group_id) VALUES ($1, $3, 'Migration key', $2) RETURNING id`, userID, primaryID, service.APIKeyStoredValue("sk-migration-fallback")).Scan(&keyID))
 
 			if existingColumn {
 				_, err := tx.ExecContext(ctx, `UPDATE api_keys SET fallback_group_id = $1 WHERE id = $2`, fallbackID, keyID)

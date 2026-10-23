@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	mathrand "math/rand"
@@ -127,6 +128,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 }
 
 func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
+	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
+	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
 	// 调试日志：记录调度入口参数
 	excludedIDsList := make([]int64, 0, len(excludedIDs))
 	for id := range excludedIDs {
@@ -212,6 +215,13 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 					continue                               // 重新选择
 				}
 				return s.newSelectionResult(ctx, account, true, result.ReleaseFunc, nil)
+			}
+
+			if account.ID != stickyAccountID {
+				fallback, fallbackErr := s.tryAcquirePassiveCacheFallback(ctx, groupID, group, sessionHash, requestedModel, localExcluded, account.ID)
+				if fallbackErr != nil || fallback != nil {
+					return fallback, fallbackErr
+				}
 			}
 
 			// 对于等待计划的情况，也需要先检查会话限制
@@ -506,6 +516,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 					}
 				})
 				shuffleWithinSortGroups(routingAvailable)
+				passiveQualityOrderNewSessionLoads(ctx, routingAvailable, requestedModel, stickyAccountID)
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
@@ -556,7 +567,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 			account, ok := accountByID[accountID]
 			if ok {
 				// 检查账户是否需要清理粘性会话绑定
-				clearSticky := shouldClearStickySession(account, requestedModel)
+				clearSticky := shouldClearStickySessionWithContext(ctx, account, requestedModel)
 				if clearSticky {
 					slog.Debug("sticky.layer1_5_no_routing_clear",
 						"account_id", accountID,
@@ -744,7 +755,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
 	if err != nil {
-		if result, ok, legacyErr := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, preferOAuth); legacyErr != nil {
+		if result, ok, legacyErr := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, preferOAuth, requestedModel, stickyAccountID); legacyErr != nil {
 			return nil, legacyErr
 		} else if ok {
 			return result, nil
@@ -767,7 +778,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 		// 分层过滤选择：优先级 →（可选）最早重置 → 负载率 → LRU
 		for len(available) > 0 {
 			// 1. 取优先级最小的集合
-			candidates := filterByMinPriority(available)
+			candidates := filterByMinPriority(passiveQualityPreferredNewSessionLoads(ctx, available, requestedModel, stickyAccountID))
 			// 2. （可选）use-it-or-lose-it：优先选用会话窗口最早重置的账号
 			if cfg.PreferSoonestReset {
 				candidates = filterBySoonestReset(candidates)
@@ -807,6 +818,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 
 	// ============ Layer 3: 兜底排队 ============
 	s.sortCandidatesForFallback(candidates, preferOAuth, cfg.FallbackSelectionMode)
+	passiveQualityOrderNewSessionCandidates(ctx, candidates, requestedModel, stickyAccountID)
 	for _, acc := range candidates {
 		// 会话数量限制检查（等待计划也需要占用会话配额）
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
@@ -822,9 +834,61 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 	return nil, ErrNoAvailableAccounts
 }
 
-func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
+func (s *GatewayService) tryAcquirePassiveCacheFallback(ctx context.Context, groupID *int64, group *Group, sessionHash, model string, excludedIDs map[int64]struct{}, attemptedID int64) (*AccountSelectionResult, error) {
+	platform, forced, err := s.resolvePlatform(ctx, groupID, group, model)
+	if err != nil {
+		return nil, err
+	}
+	accounts, _, err := s.listSchedulableAccounts(ctx, groupID, platform, forced)
+	if err != nil {
+		return nil, nil
+	}
+	excluded := make(map[int64]struct{}, len(accounts)+len(excludedIDs))
+	for id := range excludedIDs {
+		excluded[id] = struct{}{}
+	}
+	excluded[attemptedID] = struct{}{}
+	fallbackCount := 0
+	for _, account := range accounts {
+		if passiveQualityAllowsNewSession(ctx, &account, model) {
+			excluded[account.ID] = struct{}{}
+		} else {
+			fallbackCount++
+		}
+	}
+	for attempts := 0; attempts < fallbackCount; attempts++ {
+		account, err := s.SelectAccountForModelWithExclusions(ctx, groupID, "", model, excluded)
+		if err != nil {
+			if errors.Is(err, ErrNoAvailableAccounts) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		excluded[account.ID] = struct{}{}
+		slot, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency, &account)
+		if err != nil || slot == nil || !slot.Acquired {
+			continue
+		}
+		if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+			slot.ReleaseFunc()
+			continue
+		}
+		selected, err := s.newSelectionResult(ctx, account, true, slot.ReleaseFunc, nil)
+		if err != nil {
+			return nil, err
+		}
+		if sessionHash != "" && s.cache != nil {
+			_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, account.ID)
+		}
+		return selected, nil
+	}
+	return nil, nil
+}
+
+func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash string, preferOAuth bool, requestedModel string, existingIDs ...int64) (*AccountSelectionResult, bool, error) {
 	ordered := append([]*Account(nil), candidates...)
 	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
+	passiveQualityOrderNewSessionCandidates(ctx, ordered, requestedModel, existingIDs...)
 
 	for _, acc := range ordered {
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency, &acc)
@@ -1580,7 +1644,7 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 			return nil, nil
 		}
 	}
-	return account, nil
+	return passiveQualitySchedulingAccount(ctx, account, ""), nil
 }
 
 func (s *GatewayService) filterAccountsBySchedulingThreshold(ctx context.Context, accounts []Account) []Account {
@@ -1953,6 +2017,8 @@ func shuffleWithinPriority(accounts []*Account) {
 
 // selectAccountForModelWithPlatform 选择单平台账户（完全隔离）
 func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, platform string) (*Account, error) {
+	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
+	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
 	preferOAuth := platform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, platform)
 
@@ -1981,7 +2047,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 					account, err := s.getSchedulableAccount(ctx, accountID)
 					// 检查账号分组归属和平台匹配（确保粘性会话不会跨分组或跨平台）
 					if err == nil {
-						clearSticky := shouldClearStickySession(account, requestedModel)
+						clearSticky := shouldClearStickySessionWithContext(ctx, account, requestedModel)
 						if clearSticky {
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
@@ -2057,6 +2123,12 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 				continue
 			}
+			if prefer, decided := passiveQualityPreferNewSession(ctx, acc, selected, requestedModel); decided {
+				if prefer {
+					selected = acc
+				}
+				continue
+			}
 			if selected == nil {
 				selected = acc
 				continue
@@ -2103,7 +2175,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 				account, err := s.getSchedulableAccount(ctx, accountID)
 				// 检查账号分组归属和平台匹配（确保粘性会话不会跨分组或跨平台）
 				if err == nil {
-					clearSticky := shouldClearStickySession(account, requestedModel)
+					clearSticky := shouldClearStickySessionWithContext(ctx, account, requestedModel)
 					if clearSticky {
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
@@ -2174,6 +2246,12 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 			continue
 		}
+		if prefer, decided := passiveQualityPreferNewSession(ctx, acc, selected, requestedModel); decided {
+			if prefer {
+				selected = acc
+			}
+			continue
+		}
 		if selected == nil {
 			selected = acc
 			continue
@@ -2219,6 +2297,8 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 // selectAccountWithMixedScheduling 选择账户（支持混合调度）
 // 查询原生平台账户 + 启用 mixed_scheduling 的 antigravity 账户
 func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, nativePlatform string) (*Account, error) {
+	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
+	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
 	preferOAuth := nativePlatform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, nativePlatform)
 
@@ -2245,7 +2325,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 					account, err := s.getSchedulableAccount(ctx, accountID)
 					// 检查账号分组归属和有效性：原生平台直接匹配，antigravity 需要启用混合调度
 					if err == nil {
-						clearSticky := shouldClearStickySession(account, requestedModel)
+						clearSticky := shouldClearStickySessionWithContext(ctx, account, requestedModel)
 						if clearSticky {
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
@@ -2323,6 +2403,12 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 				continue
 			}
+			if prefer, decided := passiveQualityPreferNewSession(ctx, acc, selected, requestedModel); decided {
+				if prefer {
+					selected = acc
+				}
+				continue
+			}
 			if selected == nil {
 				selected = acc
 				continue
@@ -2369,7 +2455,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 				account, err := s.getSchedulableAccount(ctx, accountID)
 				// 检查账号分组归属和有效性：原生平台直接匹配，antigravity 需要启用混合调度
 				if err == nil {
-					clearSticky := shouldClearStickySession(account, requestedModel)
+					clearSticky := shouldClearStickySessionWithContext(ctx, account, requestedModel)
 					if clearSticky {
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
@@ -2439,6 +2525,12 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			continue
 		}
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+			continue
+		}
+		if prefer, decided := passiveQualityPreferNewSession(ctx, acc, selected, requestedModel); decided {
+			if prefer {
+				selected = acc
+			}
 			continue
 		}
 		if selected == nil {

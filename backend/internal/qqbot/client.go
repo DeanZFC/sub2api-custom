@@ -12,8 +12,9 @@ import (
 	"fmt"
 	"html"
 	"image"
+	"image/color"
 	"image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"net"
 	"net/http"
@@ -126,19 +127,26 @@ func (s *Service) chat(ctx context.Context, c Config, messages []Message) (strin
 }
 
 func (s *Service) chatRequest(ctx context.Context, c Config, messages []Message, imageTool bool) ([]byte, string, error) {
+	var tools []any
+	if imageTool {
+		tools = []any{chatImageTool(c.ChatProtocol)}
+		if len(currentChatImages(messages)) > 0 {
+			tools = append(tools, chatEditImageTool(c.ChatProtocol))
+		}
+		tools = append(tools, chatTextTool(c.ChatProtocol))
+	}
+	return s.chatRequestWithTools(ctx, c, messages, tools)
+}
+
+func (s *Service) chatRequestWithTools(ctx context.Context, c Config, messages []Message, tools []any) ([]byte, string, error) {
 	path := "/chat/completions"
 	body := map[string]any{"model": c.ChatModel, "messages": messages, "stream": false, "max_completion_tokens": c.MaxOutputTokens}
 	if c.ChatProtocol == "responses" {
 		path = "/responses"
 		body = map[string]any{"model": c.ChatModel, "input": responsesMessages(messages), "stream": false, "store": false, "max_output_tokens": c.MaxOutputTokens}
 	}
-	if imageTool {
-		imageTools := []any{chatImageTool(c.ChatProtocol)}
-		if len(currentChatImages(messages)) > 0 {
-			imageTools = append(imageTools, chatEditImageTool(c.ChatProtocol))
-		}
-		imageTools = append(imageTools, chatTextTool(c.ChatProtocol))
-		body["tools"] = imageTools
+	if len(tools) > 0 {
+		body["tools"] = tools
 		body["tool_choice"] = "required"
 		body["parallel_tool_calls"] = false
 	}
@@ -590,8 +598,29 @@ func (s *Service) Probe(ctx context.Context, kind string) (string, error) {
 		_, err = s.token(ctx, c)
 		return "QQ 凭据有效；请在测试群验证事件和消息权限。", err
 	}
-	if c.BaseURL == "" || c.APIKey == "" {
-		return "", errors.New("请先保存中转地址和 API Key")
+	if kind == "image" || kind == "image_edit" {
+		base, key := imageConnection(c)
+		if base == "" || key == "" || c.ImageModel == "" {
+			return "", errors.New("请先保存生图连接和模型")
+		}
+	} else if c.BaseURL == "" || c.APIKey == "" || c.ChatModel == "" {
+		return "", errors.New("请先保存聊天连接和模型")
+	}
+	if kind == "image_edit" {
+		_, err = s.editImage(ctx, c, "Change this blue square to red; retain its dimensions.", probeImage())
+		return "图片编辑接口测试成功（已调用付费接口，不发送到群）。", err
+	}
+	if kind == "vision" {
+		result, _, _, err := s.chat(ctx, c, []Message{{Role: "user", Content: "Describe the color and shape in this image in one short sentence.", Images: []string{probeImage()}}})
+		return "视觉请求已完成，请核对回答是否识别蓝色方块：" + limitText(result, 250), err
+	}
+	if kind == "tools" {
+		c.ImageEnabled = true
+		result, err := s.chatTurn(ctx, c, []Message{{Role: "user", Content: "Call reply_text with the text OK. Do not generate or edit any image."}})
+		if err == nil && result.Text == "" {
+			err = errors.New("工具测试未返回 reply_text 操作")
+		}
+		return "工具调用测试成功（仅验证工具协议，不执行生图）。", err
 	}
 	if kind == "image" {
 		_, err = s.generateImage(ctx, c, "A small blue circle on a white background, minimal illustration.")
@@ -602,4 +631,16 @@ func (s *Service) Probe(ctx context.Context, kind string) (string, error) {
 	}
 	result, _, _, err := s.chat(ctx, c, []Message{{Role: "user", Content: "Reply with OK."}})
 	return limitText(result, 300), err
+}
+
+func probeImage() string {
+	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for y := 0; y < 64; y++ {
+		for x := 0; x < 64; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 30, G: 90, B: 240, A: 255})
+		}
+	}
+	var buffer bytes.Buffer
+	_ = png.Encode(&buffer, img)
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buffer.Bytes())
 }

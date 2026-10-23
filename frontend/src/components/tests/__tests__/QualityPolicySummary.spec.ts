@@ -38,7 +38,7 @@ describe('policy behavior preview', () => {
 
   it('detects overlapping account scope across groups while excluding itself and disabled policies', async () => {
     const policy = { ...defaultPassivePolicy(), id: 1, group_ids: [8], model: 'A', scope: 'model' as const }
-    const other = { ...defaultPassivePolicy(), id: 2, name: 'Account wide', group_ids: [9], model: 'B' }
+    const other = { ...defaultPassivePolicy(), id: 2, name: 'Account wide', group_ids: [9], model: 'B', scope: 'account' as const }
     const w = render(policy, [policy, other, { ...other, id: 3, name: 'Disabled', enabled: false }])
     expect(w.get('[data-policy-overlap]').text()).toContain('Account wide')
     expect(w.get('[data-policy-overlap]').text()).not.toContain('Disabled')
@@ -48,4 +48,15 @@ describe('policy behavior preview', () => {
     expect(w.find('[data-policy-overlap]').exists()).toBe(false)
     w.unmount()
   })
+  it('previews empty-filter independent models separately from explicit account aggregation', async () => {
+    const policy = { ...defaultPassivePolicy(), group_ids: [8], model: '' }
+    const w = render(policy)
+    expect(w.text()).toContain('All models evaluated independently')
+    expect(w.text()).toContain('other models on the account keep serving')
+    await w.setProps({ policy: { ...policy, scope: 'account' } })
+    expect(w.text()).toContain('All models aggregated (entire account)')
+    expect(w.text()).toContain('Entire-account scope is selected explicitly')
+    w.unmount()
+  })
+
 })

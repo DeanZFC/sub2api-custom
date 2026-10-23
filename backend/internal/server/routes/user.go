@@ -16,6 +16,7 @@ func RegisterUserRoutes(
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
+	panelKeyAuth ...gin.HandlerFunc,
 ) {
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
@@ -87,9 +88,25 @@ func RegisterUserRoutes(
 		{
 			keys.GET("", h.APIKey.List)
 			keys.GET("/:id", h.APIKey.GetByID)
-			keys.POST("", h.APIKey.Create)
+			keys.POST("", panelRateLimiter.Heavy(), h.Totp.RequireKeyStepUp, h.APIKey.Create)
+			keys.POST("/:id/regenerate", panelRateLimiter.Heavy(), h.Totp.RequireKeyStepUp, h.APIKey.Regenerate)
 			keys.PUT("/:id", h.APIKey.Update)
 			keys.DELETE("/:id", h.APIKey.Delete)
+		}
+
+		if h.BatchImage != nil && len(panelKeyAuth) > 0 {
+			batches := authenticated.Group("/key-image-batches/:key_id")
+			batches.Use(panelKeyAuth[0])
+			batches.POST("", panelRateLimiter.Heavy(), h.BatchImage.Submit)
+			batches.GET("", h.BatchImage.List)
+			batches.GET("/models", h.BatchImage.Models)
+			batches.GET("/:id", h.BatchImage.Get)
+			batches.GET("/:id/items", h.BatchImage.Items)
+			batches.GET("/:id/items/:custom_id/content", h.BatchImage.ItemContent)
+			batches.GET("/:id/download", h.BatchImage.Download)
+			batches.POST("/:id/cancel", h.BatchImage.Cancel)
+			batches.DELETE("/:id", h.BatchImage.DeleteRecord)
+			batches.DELETE("/:id/outputs", h.BatchImage.DeleteOutputs)
 		}
 
 		// 用户可用分组（非管理员接口）

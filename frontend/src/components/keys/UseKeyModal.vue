@@ -6,6 +6,7 @@
     @close="emit('close')"
   >
     <div class="space-y-4">
+      <p v-if="!apiKey" class="text-sm text-amber-700 dark:text-amber-300">{{ t('keys.guideSecretHint') }}</p>
       <!-- No Group Assigned Warning -->
       <div v-if="!platform" class="flex items-start gap-3 p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
         <svg class="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -737,7 +738,7 @@ const comment = (value: string) => wrapToken('text-slate-500', value)
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
   const baseUrl = props.baseUrl || window.location.origin
-  const apiKey = props.apiKey
+  const apiKey = props.apiKey || "YOUR_API_KEY"
   const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
   const ensureV1 = (value: string) => {
     const trimmed = value.replace(/\/+$/, '')

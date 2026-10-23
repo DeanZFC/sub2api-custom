@@ -396,17 +396,26 @@ func (s *APIKeyService) GenerateKey() (string, error) {
 	}
 
 	// 转换为十六进制字符串并添加前缀
-	prefix := s.cfg.Default.APIKeyPrefix
+	prefix := ""
+	if s.cfg != nil {
+		prefix = s.cfg.Default.APIKeyPrefix
+	}
 	if prefix == "" {
 		prefix = "sk-"
 	}
 
 	key := prefix + hex.EncodeToString(bytes)
+	if len(key) > MaxAPIKeyCredentialBytes || strings.HasPrefix(key, apiKeyDigestPrefix) {
+		return "", fmt.Errorf("invalid API key prefix configuration")
+	}
 	return key, nil
 }
 
 // ValidateCustomKey 验证自定义API Key格式
 func (s *APIKeyService) ValidateCustomKey(key string) error {
+	if len(key) > MaxAPIKeyCredentialBytes {
+		return infraerrors.BadRequest("API_KEY_TOO_LONG", "API key must not exceed 128 bytes")
+	}
 	// 检查长度
 	if len(key) < 16 {
 		return ErrAPIKeyTooShort
@@ -778,7 +787,7 @@ func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) 
 
 // GetByKey 根据Key字符串获取API Key（用于认证）
 func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, error) {
-	if len(key) == 0 || len(key) > MaxAPIKeyCredentialBytes {
+	if len(key) == 0 || len(key) > MaxAPIKeyCredentialBytes || strings.HasPrefix(key, apiKeyDigestPrefix) {
 		return nil, ErrAPIKeyNotFound
 	}
 	cacheKey := s.authCacheKey(key)
@@ -787,6 +796,9 @@ func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, erro
 		if apiKey, used, err := s.applyAuthCacheEntry(key, entry); used {
 			if err != nil {
 				return nil, fmt.Errorf("get api key: %w", err)
+			}
+			if err := s.validateCachedCredential(ctx, apiKey.ID, key); err != nil {
+				return nil, err
 			}
 			s.compileAPIKeyIPRules(apiKey)
 			return apiKey, nil
@@ -805,6 +817,9 @@ func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, erro
 			if err != nil {
 				return nil, fmt.Errorf("get api key: %w", err)
 			}
+			if err := s.validateCachedCredential(ctx, apiKey.ID, key); err != nil {
+				return nil, err
+			}
 			s.compileAPIKeyIPRules(apiKey)
 			return apiKey, nil
 		}
@@ -816,6 +831,9 @@ func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, erro
 		if apiKey, used, err := s.applyAuthCacheEntry(key, entry); used {
 			if err != nil {
 				return nil, fmt.Errorf("get api key: %w", err)
+			}
+			if err := s.validateCachedCredential(ctx, apiKey.ID, key); err != nil {
+				return nil, err
 			}
 			s.compileAPIKeyIPRules(apiKey)
 			return apiKey, nil

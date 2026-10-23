@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 	"github.com/lib/pq"
 )
 
@@ -473,7 +475,7 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 		return a.Model < b.Model
 	})
 	if filter.IncludeRecentRequests {
-		if err := r.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, result.Items); err != nil {
+		if err := r.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, result.Items, admin); err != nil {
 			return nil, fmt.Errorf("load recent monitor requests: %w", err)
 		}
 	}
@@ -789,20 +791,15 @@ func (r *channelMonitorV2Repository) loadErrorDetails(ctx context.Context, filte
 	return out, rows.Err()
 }
 
+var channelMonitorV2CredentialPattern = regexp.MustCompile(`(?i)\b(bearer\s+|sk-)[^\s,"'<>]+`)
+
 func sanitizeChannelMonitorV2ErrorDetail(message string) string {
+	message = channelMonitorV2CredentialPattern.ReplaceAllString(message, "${1}****")
+	message = logredact.RedactText(message, "authorization", "api_key", "api-key", "key", "token", "secret")
 	message = strings.Join(strings.Fields(message), " ")
-	replacements := []string{"Bearer ", "bearer ", "sk-", "sk-proj-"}
-	for _, marker := range replacements {
-		if idx := strings.Index(message, marker); idx >= 0 {
-			end := idx + len(marker)
-			for end < len(message) && message[end] != ' ' && message[end] != ',' && message[end] != '"' {
-				end++
-			}
-			message = message[:idx] + marker + "****" + message[end:]
-		}
-	}
-	if len(message) > 240 {
-		message = message[:240] + "…"
+	runes := []rune(message)
+	if len(runes) > 240 {
+		message = string(runes[:240]) + "…"
 	}
 	return message
 }

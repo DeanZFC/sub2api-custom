@@ -147,36 +147,9 @@
             >
           </template>
 
-          <template #cell-key="{ value, row }">
-            <div class="flex items-center gap-2">
-              <code class="code text-xs">
-                {{ maskApiKey(value) }}
-              </code>
-              <button
-                @click="copyToClipboard(value, row.id)"
-                class="rounded-lg p-1 transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
-                :class="
-                  copiedKeyId === row.id
-                    ? 'text-green-500'
-                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-                "
-                :title="
-                  copiedKeyId === row.id
-                    ? t('keys.copied')
-                    : t('keys.copyToClipboard')
-                "
-              >
-                <Icon
-                  v-if="copiedKeyId === row.id"
-                  name="check"
-                  size="sm"
-                  :stroke-width="2"
-                />
-                <Icon v-else name="clipboard" size="sm" />
-              </button>
-            </div>
+          <template #cell-key="{ value }">
+            <code class="code text-xs">{{ value }}</code>
           </template>
-
           <template #cell-name="{ value, row }">
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-gray-900 dark:text-white">{{
@@ -608,14 +581,12 @@
                 <Icon name="terminal" size="sm" />
                 <span class="text-xs">{{ t("keys.useKey") }}</span>
               </button>
-              <!-- Import to CC Switch Button -->
               <button
-                v-if="!publicSettings?.hide_ccs_import_button"
-                @click="importToCcswitch(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                @click="selectedKey = row; showRegenerateDialog = true"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-yellow-50 hover:text-yellow-600"
               >
-                <Icon name="upload" size="sm" />
-                <span class="text-xs">{{ t("keys.importToCcSwitch") }}</span>
+                <Icon name="refresh" size="sm" />
+                <span class="text-xs">{{ t('keys.regenerate') }}</span>
               </button>
               <!-- Toggle Status Button -->
               <button
@@ -1553,10 +1524,33 @@
       @cancel="showResetRateLimitDialog = false"
     />
 
+    <ConfirmDialog
+      :show="showRegenerateDialog"
+      :title="t('keys.regenerate')"
+      :message="t('keys.regenerateConfirm', { name: selectedKey?.name })"
+      :confirm-text="t('keys.regenerate')"
+      :danger="true"
+      @confirm="regenerateKey"
+      @cancel="!regenerating && (showRegenerateDialog = false)"
+    />
+    <BaseDialog :show="!!oneTimeKey" :title="t('keys.secretTitle')" @close="closeOneTimeKey">
+      <div v-if="oneTimeKey" class="space-y-4">
+        <p class="text-sm text-amber-700 dark:text-amber-300">{{ t('keys.secretHint') }}</p>
+        <code class="block break-all rounded-lg bg-gray-100 p-3 dark:bg-dark-700" data-testid="one-time-key">{{ oneTimeKey.key }}</code>
+        <div class="flex flex-wrap gap-2">
+          <button class="btn btn-primary" @click="copyToClipboard(oneTimeKey.key, oneTimeKey.id)">{{ copiedKeyId === oneTimeKey.id ? t('keys.copied') : t('keys.copyToClipboard') }}</button>
+          <button class="btn btn-secondary" @click="openUseKeyModal(oneTimeKey)">{{ t('keys.useKey') }}</button>
+          <button v-if="!publicSettings?.hide_ccs_import_button" class="btn btn-secondary" @click="importToCcswitch(oneTimeKey)">{{ t('keys.importToCcSwitch') }}</button>
+          <button class="btn btn-secondary" @click="closeOneTimeKey">{{ t('keys.secretSaved') }}</button>
+        </div>
+      </div>
+    </BaseDialog>
+
+    <TotpStepUpDialog :controller="stepUp" />
     <!-- Use Key Modal -->
     <UseKeyModal
       :show="showUseKeyModal"
-      :api-key="selectedKey?.key || ''"
+      :api-key="oneTimeKey && selectedKey?.id === oneTimeKey.id ? oneTimeKey.key : ''"
       :base-url="publicSettings?.api_base_url || ''"
       :platform="selectedKey?.group?.platform || null"
       :claude-code-only="selectedKey?.group?.claude_code_only || false"
@@ -1784,7 +1778,8 @@ import type {
 import type { Column } from "@/components/common/types";
 import type { BatchApiKeyUsageStats } from "@/api/usage";
 import { formatDateTime } from "@/utils/format";
-import { maskApiKey } from "@/utils/maskApiKey";
+import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
+import { useStepUp, isStepUpCancelled } from "@/composables/useStepUp";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import { platformBadgeLightClass } from "@/utils/platformColors";
 import {
@@ -1990,6 +1985,32 @@ const filterSearch = ref("");
 const filterStatus = ref("");
 const filterGroupId = ref<string | number>("");
 
+const stepUp = useStepUp();
+const oneTimeKey = ref<ApiKey | null>(null);
+const showRegenerateDialog = ref(false);
+const regenerating = ref(false);
+const closeOneTimeKey = () => {
+  oneTimeKey.value = null;
+  selectedKey.value = null;
+  pendingCcsRow.value = null;
+  showUseKeyModal.value = false;
+  showCcsClientSelect.value = false;
+  copiedKeyId.value = null;
+};
+const regenerateKey = async () => {
+  if (!selectedKey.value || regenerating.value) return;
+  regenerating.value = true;
+  try {
+    const keyID = selectedKey.value.id;
+    const key = await stepUp.run(() => keysAPI.regenerate(keyID));
+    showRegenerateDialog.value = false;
+    oneTimeKey.value = key?.secret_available ? key : null;
+    if (!oneTimeKey.value) appStore.showError(t('keys.secretUnavailable'));
+    await loadApiKeys();
+  } catch (error: any) {
+    if (!isStepUpCancelled(error)) appStore.showError(error?.message || t('keys.failedToSave'));
+  } finally { regenerating.value = false; }
+};
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
 const showDeleteDialog = ref(false);
@@ -2687,7 +2708,7 @@ const handleSubmit = async () => {
       const customKey = formData.value.use_custom_key
         ? formData.value.custom_key
         : undefined;
-      await keysAPI.create(
+      const createdKey = await stepUp.run(() => keysAPI.create(
         formData.value.name,
         formData.value.group_id,
         formData.value.fallback_group_id,
@@ -2697,7 +2718,11 @@ const handleSubmit = async () => {
         quota,
         expiresInDays,
         rateLimitData,
-      );
+      ));
+      oneTimeKey.value = createdKey?.secret_available
+        ? { ...createdKey, group: groups.value.find(group => group.id === createdKey.group_id) }
+        : null;
+      if (!oneTimeKey.value) appStore.showError(t('keys.secretUnavailable'));
       appStore.showSuccess(t("keys.keyCreatedSuccess"));
       // Only advance tour if active, on submit step, and creation succeeded
       if (onboardingStore.isCurrentStep('[data-tour="key-form-submit"]')) {
@@ -2708,7 +2733,7 @@ const handleSubmit = async () => {
     loadApiKeys();
   } catch (error: any) {
     const errorMsg = error.response?.data?.detail || t("keys.failedToSave");
-    appStore.showError(errorMsg);
+    if (!isStepUpCancelled(error)) appStore.showError(errorMsg);
     // Don't advance tour on error
   } finally {
     submitting.value = false;
@@ -2915,6 +2940,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  closeOneTimeKey();
+  stepUp.onCancel();
   document.removeEventListener("click", closeGroupSelector);
   if (resetTimer) clearInterval(resetTimer);
 });

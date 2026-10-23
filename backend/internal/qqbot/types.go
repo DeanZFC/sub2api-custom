@@ -11,6 +11,11 @@ import (
 var ErrDisabled = errors.New("QQ 机器人尚未启用")
 
 type Config struct {
+	NotificationQuietHours   QuietHours               `json:"notification_quiet_hours"`
+	SectionVersions          map[string]string        `json:"section_versions,omitempty"`
+	ChatDisabled             bool                     `json:"chat_disabled"`
+	GroupPolicies            []GroupPolicy            `json:"group_policies"`
+	RewardAlertDaily         float64                  `json:"reward_alert_daily"`
 	Moderation               ModerationConfig         `json:"moderation"`
 	HealthNotifications      HealthNotificationConfig `json:"health_notifications"`
 	Autonomous               AutonomousConfig         `json:"autonomous"`
@@ -58,7 +63,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	return Config{Moderation: DefaultModerationConfig(), HealthNotifications: DefaultHealthNotificationConfig(), Autonomous: DefaultAutonomousConfig(), PriceNotifications: PriceNotificationConfig{Scheduled: true, Groups: []string{}}, AllowedGroups: []string{}, CustomCommands: []CustomCommand{}, GroupAdmins: []GroupAdmin{}, ChatProtocol: "chat_completions", ImageSize: "1024x1024",
+	return Config{NotificationQuietHours: QuietHours{StartHour: 23, EndHour: 8}, Moderation: DefaultModerationConfig(), HealthNotifications: DefaultHealthNotificationConfig(), Autonomous: DefaultAutonomousConfig(), PriceNotifications: PriceNotificationConfig{Scheduled: true, Groups: []string{}}, AllowedGroups: []string{}, CustomCommands: []CustomCommand{}, GroupAdmins: []GroupAdmin{}, ChatProtocol: "chat_completions", ImageSize: "1024x1024",
 		SystemPrompt:    "你是 CTAV 群助手。用简洁、友好的中文回答。签到、绑定和奖励由固定指令处理，你不能修改账户或余额。",
 		MaxOutputTokens: 2048, HistoryMessages: 12, DailyChatLimit: 30, DailyImageLimit: 2,
 		TotalDailyChatLimit: 500, TotalDailyImageLimit: 20, CooldownSeconds: 5, InviteDailyLimit: 10,
@@ -66,6 +71,7 @@ func DefaultConfig() Config {
 }
 
 func (c Config) Public() Config {
+	c.SectionVersions = configVersions(c)
 	c.AppSecretSet = c.AppSecret != ""
 	c.APIKeySet = c.APIKey != ""
 	c.ImageAPIKeySet = c.ImageAPIKey != ""
@@ -167,6 +173,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 }
 
 type Job struct {
+	ImageDecision   json.RawMessage `json:"image_decision,omitempty"`
 	TransientReply  bool            `json:"-"`
 	TriggerReason   string          `json:"trigger_reason"`
 	DecisionReason  string          `json:"decision_reason"`
@@ -219,6 +226,7 @@ type Group struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 type Runtime struct {
+	RecentMembers     []RecentMember     `json:"recent_members"`
 	ModerationRecords []ModerationRecord `json:"moderation_records"`
 	AutonomousStats   []AutonomousStat   `json:"autonomous_stats"`
 	Groups            []Group            `json:"groups"`

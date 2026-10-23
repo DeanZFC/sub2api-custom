@@ -304,6 +304,11 @@ func (s *Service) settleRankingDay(ctx context.Context, appID, date string, now 
 		if grantErr != nil {
 			return grantErr
 		}
+		if granted {
+			if err = enqueueRankingRewardNotification(ctx, tx, c, job, key, date, entry.Kind, entry.Rank, reward); err != nil {
+				return err
+			}
+		}
 		if granted && reward.Type == "balance" {
 			invalidations = append(invalidations, uid)
 		}

@@ -2,9 +2,13 @@
   <AppLayout>
     <div class="mx-auto max-w-7xl space-y-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <div><h1 class="text-2xl font-semibold">{{ t('qqbot.recordsTitle') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('qqbot.recordsHelp') }}</p></div>
+        <div><h1 class="text-2xl font-semibold">{{ t('qqbot.workspace.records') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('qqbot.recordsHelp') }}</p></div>
         <RouterLink class="btn btn-secondary" :to="{ path: '/admin/qqbot/activities', query: { tab: activeTab } }">{{ t('qqbot.activitiesTitle') }}</RouterLink>
       </div>
+      <div class="flex flex-wrap gap-2"><RouterLink v-for="mode in recordModes" :key="mode" :to="{ query: { tab: mode } }" class="btn" :class="recordMode === mode ? 'btn-primary' : 'btn-secondary'">{{ t(`qqbot.workspace.${mode}`) }}</RouterLink></div>
+      <QQJobRecords v-if="recordMode === 'tasks' || recordMode === 'notifications'" :notifications="recordMode === 'notifications'" />
+      <QQModerationRecords v-else-if="recordMode === 'moderation'" />
+      <template v-else>
       <nav role="tablist" :aria-label="t('qqbot.recordsTitle')" class="flex gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-800">
         <button v-for="tab in tabs" :id="`records-tab-${tab.key}`" :key="tab.key" type="button" role="tab"
           :aria-selected="activeTab === tab.key" :aria-controls="`records-panel-${tab.key}`" :tabindex="activeTab === tab.key ? 0 : -1"
@@ -85,6 +89,7 @@
           <div class="flex gap-2"><button type="button" class="btn btn-secondary" :disabled="state.loading || !!state.error || state.data.page <= 1" @click="load(activeTab, state.data.page - 1)">{{ t('qqbot.previousPage') }}</button><button type="button" class="btn btn-secondary" :disabled="state.loading || !!state.error || state.data.page >= pages" @click="load(activeTab, state.data.page + 1)">{{ t('qqbot.nextPage') }}</button></div>
         </div>
       </section>
+      </template>
     </div>
   </AppLayout>
 </template>
@@ -94,12 +99,16 @@ import { computed, nextTick, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import QQJobRecords from '@/components/admin/qqbot/QQJobRecords.vue'
+import QQModerationRecords from '@/components/admin/qqbot/QQModerationRecords.vue'
 import QQBotRecordParticipant from '@/components/admin/qqbot/QQBotRecordParticipant.vue'
 import { qqbotAPI, type QQActivityKind, type QQActivityRecord, type QQActivityRecordsPage } from '@/api/qqbot'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const recordModes = ['tasks', 'notifications', 'moderation', 'activities'] as const
+const recordMode = computed(() => ['tasks', 'notifications', 'moderation'].includes(String(route.query.tab || 'tasks')) ? String(route.query.tab || 'tasks') : 'activities')
 const tabs = [
   { key: 'checkin', label: 'qqbot.checkinRecords' },
   { key: 'lottery', label: 'qqbot.drawRecords' },
@@ -146,5 +155,5 @@ async function handleKeydown(event: KeyboardEvent, tab: QQActivityKind) {
   await nextTick()
   document.getElementById(`records-tab-${target.key}`)?.focus()
 }
-watch(activeTab, tab => { if (!states[tab].loaded) void load(tab, 1) }, { immediate: true })
+watch([activeTab, recordMode], ([tab, mode]) => { if (mode === 'activities' && !states[tab].loaded) void load(tab, 1) }, { immediate: true })
 </script>

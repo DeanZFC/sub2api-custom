@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 func (r *passiveQualityRepository) RecordFailures(ctx context.Context, items []service.PassiveQualityFailure, gap *time.Time) error {
@@ -19,10 +18,18 @@ func (r *passiveQualityRepository) RecordFailures(ctx context.Context, items []s
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, f := range items {
-		if f.CacheReported || f.AttemptKey != "" {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_cache_reports(account_id,request_key,created_at,attempt_key,cache_reported) SELECT $1,$2,$3,$4,$5 WHERE EXISTS(SELECT 1 FROM accounts WHERE id=$1)
+		if f.CacheReported || f.AttemptKey != "" || f.CacheMetadata != nil {
+			metadata, marshalErr := json.Marshal(f.CacheMetadata)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if f.CacheMetadata == nil {
+				metadata = []byte(`{}`)
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_cache_reports(account_id,request_key,created_at,attempt_key,cache_reported,cache_metadata) SELECT $1,$2,$3,$4,$5,$6 WHERE EXISTS(SELECT 1 FROM accounts WHERE id=$1)
  ON CONFLICT(account_id,request_key) DO UPDATE SET cache_reported=passive_quality_cache_reports.cache_reported OR excluded.cache_reported,
- attempt_key=COALESCE(NULLIF(passive_quality_cache_reports.attempt_key,''),excluded.attempt_key)`, f.AccountID, f.RequestKey, f.At, f.AttemptKey, f.CacheReported); err != nil {
+ attempt_key=COALESCE(NULLIF(passive_quality_cache_reports.attempt_key,''),excluded.attempt_key),
+ cache_metadata=CASE WHEN passive_quality_cache_reports.cache_metadata='{}'::jsonb THEN excluded.cache_metadata ELSE passive_quality_cache_reports.cache_metadata END`, f.AccountID, f.RequestKey, f.At, f.AttemptKey, f.CacheReported, metadata); err != nil {
 				return err
 			}
 			continue
@@ -136,23 +143,7 @@ func (r *passiveQualityRepository) Sweep(ctx context.Context, now time.Time, pro
 		if !p.Enabled {
 			continue
 		}
-		rows, err := r.db.QueryContext(ctx, `SELECT a.id FROM accounts a LEFT JOIN passive_quality_states s ON s.account_id=a.id AND s.policy_id=$2
- WHERE a.deleted_at IS NULL AND ((NOT(a.id=ANY($3)) AND EXISTS(SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=a.id AND ag.group_id=ANY($1) AND g.status='active' AND g.deleted_at IS NULL)) OR s.account_id IS NOT NULL)
- ORDER BY s.data->>'updated_at' ASC NULLS FIRST,a.id LIMIT 128`, pq.Array(p.GroupIDs), p.ID, pq.Array(p.ExcludedAccountIDs))
-		if err != nil {
-			return probes, err
-		}
-		var ids []int64
-		for rows.Next() {
-			var id int64
-			if err = rows.Scan(&id); err != nil {
-				_ = rows.Close()
-				return probes, err
-			}
-			ids = append(ids, id)
-		}
-		err = rows.Err()
-		_ = rows.Close()
+		targets, err := r.modelTargets(ctx, p, now)
 		if err != nil {
 			return probes, err
 		}
@@ -161,8 +152,8 @@ func (r *passiveQualityRepository) Sweep(ctx context.Context, now time.Time, pro
 		if _, err = r.db.ExecContext(ctx, `UPDATE passive_quality_policies SET last_scanned_at=clock_timestamp() WHERE id=$1`, p.ID); err != nil {
 			return probes, err
 		}
-		for _, id := range ids {
-			s, err := r.advance(ctx, p.ID, id, now, len(probes) < probeLimit)
+		for _, target := range targets {
+			s, err := r.advance(ctx, p.ID, target.account, now, len(probes) < probeLimit, target.model)
 			if err != nil {
 				return probes, err
 			}
@@ -177,7 +168,7 @@ func (r *passiveQualityRepository) Sweep(ctx context.Context, now time.Time, pro
 		`DELETE FROM passive_quality_events WHERE id IN (SELECT id FROM passive_quality_events WHERE created_at<now()-INTERVAL '30 days' LIMIT 1000)`,
 		`DELETE FROM passive_quality_telemetry_gaps WHERE created_at<now()-INTERVAL '2 days'`,
 		`DELETE FROM passive_quality_cache_reports WHERE (account_id,request_key) IN (SELECT account_id,request_key FROM passive_quality_cache_reports WHERE created_at<now()-INTERVAL '2 days' LIMIT 5000)`,
-		`DELETE FROM passive_quality_leases l USING passive_quality_states s WHERE l.policy_id=s.policy_id AND l.account_id=s.account_id AND (s.data->>'generation')::bigint<>l.generation`,
+		`DELETE FROM passive_quality_leases l USING passive_quality_states s WHERE l.policy_id=s.policy_id AND l.account_id=s.account_id AND l.model_key=s.model_key AND (s.data->>'generation')::bigint<>l.generation`,
 	} {
 		if _, err = r.db.ExecContext(ctx, q); err != nil {
 			return probes, err
@@ -185,13 +176,17 @@ func (r *passiveQualityRepository) Sweep(ctx context.Context, now time.Time, pro
 	}
 	return probes, nil
 }
-func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, now time.Time, canProbe bool) (*service.PassiveQualityState, error) {
+func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, now time.Time, canProbe bool, models ...string) (*service.PassiveQualityState, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	p, s, err := r.lockedState(ctx, tx, pid, aid)
+	// Serialize pool-wide expansion before policy/account locks across instances.
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(1937006961,3)`); err != nil {
+		return nil, err
+	}
+	p, s, err := r.lockedState(ctx, tx, pid, aid, models...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -206,7 +201,7 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 		if s.UpdatedAt.IsZero() {
 			return nil, nil
 		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM passive_quality_states WHERE policy_id=$1 AND account_id=$2`, pid, aid); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM passive_quality_states WHERE policy_id=$1 AND account_id=$2 AND model_key=$3`, pid, aid, passiveModelKey(p, s)); err != nil {
 			return nil, err
 		}
 		if err = passiveEvent(ctx, tx, s, "scope_removed"); err != nil {
@@ -222,12 +217,20 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 	if s.UpdatedAt.IsZero() {
 		s.ObserveAfter = p.UpdatedAt
 	}
+	metricEvents := []string{}
+	metricPolicy := p
+	if p.IsolatedMetrics() && s.Phase != "exempt" {
+		p.PassiveQualityConfig = service.PassiveQualityMetricConfig(p.PassiveQualityConfig, "availability")
+	}
 	switch s.Phase {
 	case "exempt":
 		if !now.Before(s.NextAt) {
 			s.Phase = "insufficient"
 			s.Reason = "exemption_ended"
 			s.ObserveAfter = now
+			s.CacheObserveAfter = now
+			s.Latency = nil
+			s.Cache = nil
 			s.Hits = 0
 			s.Generation++
 		}
@@ -255,89 +258,29 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 		if err != nil {
 			return nil, err
 		}
-		s.Evidence = e
-		if e.ProbeModel != "" {
-			s.ProbeModel = e.ProbeModel
+		if p.IsolatedMetrics() && !p.ErrorRate.Enabled && p.ConsecutiveFailures == 0 {
+			s.Evidence = e
+			s.Phase, s.Reason = "healthy", "availability_not_enabled"
+			break
 		}
-		trial := s.Phase == "trial"
-		limited := s.Phase == "limited"
-		verdict, reason := service.EvaluatePassiveQuality(p.PassiveQualityConfig, e, trial || limited)
-		if limited {
-			// Keep serving bounded traffic while checking the healthier recovery
-			// thresholds. Re-reading the same window cannot advance recovery.
-			if e.Fresh >= p.NewSamples {
-				s.LastEvidenceAt = e.Latest
-				if verdict == "pass" {
-					s.Hits++
-				} else {
-					s.Hits = 0
-				}
-				if s.Hits >= p.Confirmations {
-					s.Phase, s.Reason = "healthy", "recovered"
-					s.Hits = 0
-					s.Generation++
-				} else {
-					s.Reason = "waiting_for_recovery: " + reason
-				}
-			}
-		} else if trial {
-			if verdict == "pass" && e.Latest.After(s.TrialStartedAt) {
-				s.Phase = "healthy"
-				s.Reason = "recovered"
-				s.Backoff = 0
-				s.Generation++
-				s.Hits = 0
-				// Preserve late completions from the successful trial. Resetting
-				// to recovery time would hide failures still in flight.
-				s.ObserveAfter = s.TrialStartedAt
-				s.LastEvidenceAt = e.Latest
-			} else if !now.Before(s.TrialEndsAt) {
-				service.PassiveQualityPause(p.PassiveQualityConfig, &s, now, "trial_expired: "+reason)
-			} else if verdict == "fail" {
-				c := p.PassiveQualityConfig
-				c.MinSamples = c.RecoverySamples
-				if bad, _ := service.EvaluatePassiveQuality(c, e, false); bad == "fail" {
-					service.PassiveQualityPause(c, &s, now, "trial_failed: "+reason)
-				} else {
-					s.Reason = "waiting_for_recovery: " + reason
-				}
-			}
-		} else if e.Fresh >= p.NewSamples {
-			s.LastEvidenceAt = e.Latest
-			if verdict == "fail" {
-				s.Hits++
-				s.Phase = "suspect"
-				s.Reason = reason
-				if s.Hits >= p.Confirmations {
-					if p.Mode == "enforce" {
-						if p.Action == "limit" {
-							s.Phase, s.Reason, s.Hits = "limited", reason, 0
-							s.Generation++
-						} else {
-							service.PassiveQualityPause(p.PassiveQualityConfig, &s, now, reason)
-						}
-					} else {
-						s.Phase = "observed"
-					}
-				}
-			} else {
-				s.Hits = 0
-				s.Reason = reason
-				if verdict == "pass" {
-					s.Phase = "healthy"
-				} else {
-					s.Phase = "insufficient"
-				}
-			}
-		} else if e.Samples < p.MinSamples {
-			s.Phase = "insufficient"
-			s.Reason = "insufficient_samples"
-			s.Hits = 0
+		advancePassiveObserved(p, &s, e, now)
+	}
+	// Apply availability first so a new hard pause cannot simultaneously expand
+	// cache restrictions. Replay uses the same order and transition helpers.
+	if metricPolicy.IsolatedMetrics() && oldPhase != "exempt" {
+		metricEvents, err = advancePassiveMetrics(ctx, tx, metricPolicy, &s, now)
+		if err != nil {
+			return nil, err
 		}
 	}
 	s.UpdatedAt = now
 	if err = savePassiveState(ctx, tx, s); err != nil {
 		return nil, err
+	}
+	for _, kind := range metricEvents {
+		if err = passiveEvent(ctx, tx, s, kind); err != nil {
+			return nil, err
+		}
 	}
 	if oldPhase != s.Phase || (s.Phase == "paused" && oldReason != s.Reason) {
 		if err = passiveEvent(ctx, tx, s, s.Phase); err != nil {
@@ -361,7 +304,7 @@ func (r *passiveQualityRepository) FinishProbe(ctx context.Context, probe servic
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	p, s, err := r.lockedState(ctx, tx, probe.PolicyID, probe.AccountID)
+	p, s, err := r.lockedState(ctx, tx, probe.PolicyID, probe.AccountID, probe.Model)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -405,7 +348,7 @@ func (r *passiveQualityRepository) FinishProbe(ctx context.Context, probe servic
 // all gateway instances, membership edits, and trial lease reservations.
 func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, aid int64, model, lease string) (bool, bool, error) {
 	var held bool
-	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR p.config->>'model'=$2 OR $2=''))`, aid, model).Scan(&held); err != nil || !held {
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2 OR $2=''))`, aid, model).Scan(&held); err != nil || !held {
 		return !held, false, err
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -420,8 +363,8 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 	if err != nil || other {
 		return false, false, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT s.data,p.config,(SELECT count(*) FROM passive_quality_leases l WHERE l.policy_id=s.policy_id AND l.account_id=s.account_id AND l.generation=(s.data->>'generation')::bigint)
- FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR p.config->>'model'=$2 OR $2='') ORDER BY s.policy_id FOR UPDATE OF s`, aid, model)
+	rows, err := tx.QueryContext(ctx, `SELECT s.data,p.config,(SELECT count(*) FROM passive_quality_leases l WHERE l.policy_id=s.policy_id AND l.account_id=s.account_id AND l.model_key=s.model_key AND l.generation=(s.data->>'generation')::bigint)
+ FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2 OR $2='') ORDER BY s.policy_id,s.model_key FOR UPDATE OF s`, aid, model)
 	if err != nil {
 		return false, false, err
 	}
@@ -449,6 +392,9 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 		}
 		// Unfiltered policies share one trial budget across models. A filtered
 		// hold still needs its own affected traffic, even beside an all-model hold.
+		if c.PerModel() {
+			c.Model = s.Model
+		}
 		matches := model != "" && (c.Model == "" || model == c.Model)
 		filteredTrial = filteredTrial || c.Model != ""
 		matchedFilter = matchedFilter || (c.Model != "" && matches)
@@ -472,7 +418,7 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 		if err = savePassiveState(ctx, tx, s); err != nil {
 			return false, false, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_leases(id,policy_id,account_id,generation) VALUES($1,$2,$3,$4)`, lease, s.PolicyID, aid, s.Generation); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_leases(id,policy_id,account_id,model_key,generation) SELECT $1,$2,$3,model_key,$4 FROM passive_quality_states WHERE policy_id=$2 AND account_id=$3 AND data->>'model'=$5`, lease, s.PolicyID, aid, s.Generation, s.Model); err != nil {
 			return false, false, err
 		}
 	}
@@ -507,7 +453,7 @@ func (r *passiveQualityRepository) ReleasePassiveQuality(ctx context.Context, le
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE passive_quality_states s SET data=jsonb_set(data,'{used}',to_jsonb(GREATEST((data->>'used')::int-1,0)))
- FROM passive_quality_leases l WHERE l.id=$1 AND l.policy_id=s.policy_id AND l.account_id=s.account_id AND l.generation=(s.data->>'generation')::bigint`, lease)
+ FROM passive_quality_leases l WHERE l.id=$1 AND l.policy_id=s.policy_id AND l.account_id=s.account_id AND l.model_key=s.model_key AND l.generation=(s.data->>'generation')::bigint`, lease)
 	if err != nil {
 		return err
 	}
@@ -524,10 +470,15 @@ func (r *passiveQualityRepository) ReleasePassiveQuality(ctx context.Context, le
 // cleanup, instead of introducing permanent leases for soft limitations.
 func (r *passiveQualityRepository) PassiveQualityConcurrencyLimit(ctx context.Context, aid int64, model string) (int, error) {
 	var limit int
-	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(min((p.config->>'concurrency_limit')::int),0)
+	err := r.db.QueryRowContext(ctx, `WITH active AS (SELECT p.config,s.data
  FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id
  WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce'
- AND s.data->>'phase'='limited' AND (p.config->>'scope'='account' OR p.config->>'model'=$2 OR $2='') AND `+passiveMembership, aid, model).Scan(&limit)
+ AND s.data->>'phase'<>'exempt' AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2 OR $2='') AND `+passiveMembership+`
+ ), limits AS (
+ SELECT (config->>'concurrency_limit')::int AS value FROM active WHERE data->>'phase'='limited'
+ UNION ALL SELECT (config->>'ttft_concurrency_limit')::int FROM active
+ WHERE config->>'schema_version'='2' AND data->'latency'->>'phase'='limited'
+ ) SELECT COALESCE(min(value) FILTER(WHERE value>0),0) FROM limits`, aid, model).Scan(&limit)
 	return limit, err
 }
 
@@ -550,7 +501,7 @@ func (r *passiveQualityRepository) PostponePassiveProbe(ctx context.Context, pro
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, s, err := r.lockedState(ctx, tx, probe.PolicyID, probe.AccountID)
+	_, s, err := r.lockedState(ctx, tx, probe.PolicyID, probe.AccountID, probe.Model)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

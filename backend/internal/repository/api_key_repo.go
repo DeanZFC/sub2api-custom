@@ -45,7 +45,7 @@ func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
 	builder := r.client.APIKey.Create().
 		SetUserID(key.UserID).
-		SetKey(key.Key).
+		SetKey(service.APIKeyStoredValue(key.Key)).
 		SetName(key.Name).
 		SetStatus(key.Status).
 		SetNillableGroupID(key.GroupID).
@@ -112,7 +112,7 @@ func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (stri
 
 func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
 	m, err := r.activeQuery().
-		Where(apikey.KeyEQ(key)).
+		Where(apikey.KeyEQ(service.APIKeyStoredValue(key))).
 		WithUser(func(q *dbent.UserQuery) {
 			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
 				gq.Select(group.FieldID)
@@ -131,24 +131,30 @@ func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.A
 }
 
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.activeQuery().
-		Where(apikey.KeyEQ(key)).
-		Select(
-			apikey.FieldID,
-			apikey.FieldUserID,
-			apikey.FieldGroupID,
-			apikey.FieldFallbackGroupID,
-			apikey.FieldName,
-			apikey.FieldStatus,
-			apikey.FieldIPWhitelist,
-			apikey.FieldIPBlacklist,
-			apikey.FieldQuota,
-			apikey.FieldQuotaUsed,
-			apikey.FieldExpiresAt,
-			apikey.FieldRateLimit5h,
-			apikey.FieldRateLimit1d,
-			apikey.FieldRateLimit7d,
-		).
+	return r.getForAuth(ctx, r.activeQuery().Where(apikey.KeyEQ(service.APIKeyStoredValue(key))))
+}
+
+func (r *apiKeyRepository) GetByIDForAuth(ctx context.Context, id int64) (*service.APIKey, error) {
+	return r.getForAuth(ctx, r.activeQuery().Where(apikey.IDEQ(id)))
+}
+
+func (r *apiKeyRepository) getForAuth(ctx context.Context, query *dbent.APIKeyQuery) (*service.APIKey, error) {
+	m, err := query.Select(
+		apikey.FieldID,
+		apikey.FieldUserID,
+		apikey.FieldGroupID,
+		apikey.FieldFallbackGroupID,
+		apikey.FieldName,
+		apikey.FieldStatus,
+		apikey.FieldIPWhitelist,
+		apikey.FieldIPBlacklist,
+		apikey.FieldQuota,
+		apikey.FieldQuotaUsed,
+		apikey.FieldExpiresAt,
+		apikey.FieldRateLimit5h,
+		apikey.FieldRateLimit1d,
+		apikey.FieldRateLimit7d,
+	).
 		WithUser(func(q *dbent.UserQuery) {
 			q.Select(
 				user.FieldID,
@@ -454,7 +460,13 @@ func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service
 	if filters.Search != "" {
 		q = q.Where(apikey.Or(
 			apikey.NameContainsFold(filters.Search),
-			apikey.KeyContainsFold(filters.Search),
+			func(s *entsql.Selector) {
+				// Only the public display mask is searchable, never the stored digest.
+				term := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(strings.ToLower(filters.Search))
+				s.Where(entsql.P(func(b *entsql.Builder) {
+					b.WriteString("LOWER(SUBSTR(").Ident(s.C(apikey.FieldKey)).WriteString(", 74)) LIKE ").Arg("%" + term + "%").WriteString(" ESCAPE '!'")
+				}))
+			},
 		))
 	}
 	if filters.Status != "" {
@@ -633,7 +645,7 @@ func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int
 }
 
 func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, error) {
-	count, err := r.activeQuery().Where(apikey.KeyEQ(key)).Count(ctx)
+	count, err := r.activeQuery().Where(apikey.KeyEQ(service.APIKeyStoredValue(key))).Count(ctx)
 	return count > 0, err
 }
 

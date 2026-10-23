@@ -19,6 +19,7 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	ctx = CapturePassiveQualityCacheRequest(ctx, c, account, body, passiveQualityRequestSession(c, body), gjson.GetBytes(body, "model").String())
 	defer releaseStagedCodexFingerprintLease(c)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
@@ -1530,6 +1531,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err
 	}
+	capturePassiveQualityCacheHTTPRequest(c, account, req)
 	return req, nil
 }
 

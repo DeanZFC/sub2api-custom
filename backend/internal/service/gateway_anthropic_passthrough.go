@@ -384,6 +384,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	account.ApplyHeaderOverrides(req.Header)
 	filterSonnet55ToolsetBetaHeader(req.Header, body, gjson.GetBytes(body, "model").String())
 
+	capturePassiveQualityCacheHTTPRequest(c, account, req)
 	return req, body, nil
 }
 

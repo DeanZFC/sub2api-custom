@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/url"
 	"slices"
@@ -72,7 +73,7 @@ func priceNotificationGroups(c Config) []string {
 	out := []string{}
 	seen := map[string]bool{}
 	for _, g := range groups {
-		if c.allows(g) && !seen[g] {
+		if c.allows(g) && !c.groupPolicy(g).DisableNotifications && !seen[g] {
 			out = append(out, g)
 			seen[g] = true
 		}
@@ -411,6 +412,10 @@ func formatPriceNotification(state PriceState, lines []string, onlyScheduled boo
 }
 
 func (s *Service) deliverPriceNotification(parent context.Context, c Config, j Job) {
+	if c.NotificationQuietHours.active(time.Now()) {
+		s.finish(j, "skipped", "通知静默时段，跳过且不补发")
+		return
+	}
 	if !allowsNotification(c, j) {
 		s.finish(j, "cancelled", "通知已关闭或通知群已移除")
 		return
@@ -447,14 +452,17 @@ func containsPriceGroup(c Config, group string) bool {
 }
 
 func (s *Service) sendPriceNotification(ctx context.Context, c Config, j Job, text string) error {
-	if !c.Enabled || c.AppID != j.AppID || !allowsNotification(c, j) {
+	if !c.Enabled || c.AppID != j.AppID || !allowsNotification(c, j) || c.NotificationQuietHours.active(time.Now()) {
 		return ErrDisabled
+	}
+	if j.EventType == rankingNotificationEvent {
+		text = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n" + text
 	}
 	if len([]rune(text)) > 1800 {
 		return errors.New("通知内容过长")
 	}
-	// Deliberately separate from passive replies: no fabricated msg_id, event_id,
-	// user mention or AI call. Unknown delivery outcomes are never auto-replayed.
+	// Deliberately separate from passive replies: no fabricated msg_id, event_id
+	// or AI call. Unknown delivery outcomes are never auto-replayed.
 	_, err := s.qqRequest(ctx, c, "/v2/groups/"+url.PathEscape(j.GroupID)+"/messages", map[string]any{
 		"msg_type": 2, "markdown": map[string]string{"content": text},
 	})
@@ -473,6 +481,8 @@ func allowsNotification(c Config, j Job) bool {
 		return c.PriceNotifications.Enabled && containsPriceGroup(c, j.GroupID)
 	case healthNotificationEvent:
 		return c.HealthNotifications.Enabled && slices.Contains(healthNotificationGroups(c), j.GroupID)
+	case rankingNotificationEvent:
+		return j.MemberID != "" && !c.groupPolicy(j.GroupID).DisableNotifications
 	}
 	return false
 }

@@ -3,6 +3,7 @@
     <p class="text-sm text-gray-500">{{ t('qqbot.lotteryHelp') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
+    <p v-if="dirty" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
       <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('qqbot.lotteryRules') }}</h2><label class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
       <label class="block space-y-1">{{ t('qqbot.activityName') }}<input v-model.trim="form.title" class="input" maxlength="60" required /></label>
@@ -43,6 +44,7 @@
         </template>
       </section>
       <p class="text-sm text-gray-500">{{ t('qqbot.lotteryCommand') }}</p>
+      <p class="rounded-lg bg-blue-50 p-3 text-sm text-blue-800 dark:bg-blue-950 dark:text-blue-200">{{ t('qqbot.workspace.lotteryCost', { amount: expectedCost.toFixed(6), draws: 1000, cost: (expectedCost * 1000).toFixed(2) }) }}</p>
       <button type="submit" class="btn btn-primary" :disabled="saving || probabilityTotal !== 10000 || (form.guarantee_enabled && guaranteeProbabilityTotal !== 10000)">{{ t('common.save') }}</button>
     </form>
     <p v-else-if="!error">{{ t('common.loading') }}</p>
@@ -64,14 +66,22 @@
   </div>
 </template>
 <script setup lang="ts">
+import { useQQDraft } from './useQQDraft'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { qqbotAPI, type QQLotteryConfig, type QQLotteryState } from '@/api/qqbot'
 const { t } = useI18n()
 const form = ref<QQLotteryConfig | null>(null)
+const { dirty, markSaved } = useQQDraft(form)
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
+const expectedCost = computed(() => {
+  if (!form.value) return 0
+  const mean = (pool: QQLotteryConfig['prizes']) => pool.reduce((sum, p) => sum + p.amount * p.probability_bps / 10000, 0)
+  const normal = mean(form.value.prizes)
+  return form.value.guarantee_enabled && form.value.guarantee_every > 0 ? (normal * (form.value.guarantee_every - 1) + mean(form.value.guarantee_prizes)) / form.value.guarantee_every : normal
+})
 const probabilityTotal = computed(() => form.value?.prizes.reduce((sum, p) => sum + p.probability_bps, 0) ?? 0)
 const guaranteeProbabilityTotal = computed(() => form.value?.guarantee_prizes.reduce((sum, p) => sum + p.probability_bps, 0) ?? 0)
 const userID = ref('')
@@ -116,7 +126,7 @@ async function save() {
       prizes: form.value.prizes.map(p => ({ ...p })),
       guarantee_prizes: form.value.guarantee_prizes.map(p => ({ ...p }))
     })
-    form.value = normalizeConfig(config); notice.value = t('common.saved'); state.value = null
+    form.value = normalizeConfig(config); markSaved(); notice.value = t('common.saved'); state.value = null
   }
   catch (e) { error.value = message(e) }
   finally { saving.value = false }

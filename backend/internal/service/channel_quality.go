@@ -20,19 +20,22 @@ type ChannelQualityFilter struct {
 }
 
 type ChannelQualityControl struct {
-	Source    string                  `json:"source"`
-	ID        int64                   `json:"id"`
-	Name      string                  `json:"name"`
-	Model     string                  `json:"model"`
-	Scope     string                  `json:"scope"`
-	Phase     string                  `json:"phase"`
-	Reason    string                  `json:"reason"`
-	Recovery  string                  `json:"recovery"`
-	NextAt    *time.Time              `json:"next_at,omitempty"`
-	UpdatedAt time.Time               `json:"updated_at"`
-	Blocking  bool                    `json:"blocking"`
-	ResultID  int64                   `json:"result_id,omitempty"`
-	Evidence  *PassiveQualityEvidence `json:"evidence,omitempty"`
+	Metric            string                              `json:"metric,omitempty"`
+	AllocationPercent int                                 `json:"allocation_percent,omitempty"`
+	Cache             *PassiveQualityCacheWindowsEvidence `json:"cache,omitempty"`
+	Source            string                              `json:"source"`
+	ID                int64                               `json:"id"`
+	Name              string                              `json:"name"`
+	Model             string                              `json:"model"`
+	Scope             string                              `json:"scope"`
+	Phase             string                              `json:"phase"`
+	Reason            string                              `json:"reason"`
+	Recovery          string                              `json:"recovery"`
+	NextAt            *time.Time                          `json:"next_at,omitempty"`
+	UpdatedAt         time.Time                           `json:"updated_at"`
+	Blocking          bool                                `json:"blocking"`
+	ResultID          int64                               `json:"result_id,omitempty"`
+	Evidence          *PassiveQualityEvidence             `json:"evidence,omitempty"`
 }
 
 type ChannelQualityAccount struct {

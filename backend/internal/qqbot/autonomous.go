@@ -64,6 +64,9 @@ func validateAutonomous(c Config) error {
 	return nil
 }
 func (c Config) autonomousGroup(group string) bool {
+	if c.groupLimit(group, "chat") == 0 {
+		return false
+	}
 	if !c.Enabled || !c.Autonomous.Enabled || !c.allows(group) {
 		return false
 	}
@@ -306,7 +309,8 @@ func (s *Service) routeAutonomous(ctx context.Context, c Config, p Payload, e Ev
 	if trigger == "name" {
 		kind = "event"
 	}
-	res, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,kind,trigger_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(app_id,event_key) DO NOTHING`, randomID(), c.AppID, groupAtMessageCreate+":"+e.ID, p.Type, e.GroupID, e.Author.MemberID, e.ID, string(p.Data), kind, trigger)
+	nickname, preview := groupMemberHint(e)
+	res, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,kind,trigger_reason,member_nickname,message_preview) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(app_id,event_key) DO NOTHING`, randomID(), c.AppID, groupAtMessageCreate+":"+e.ID, p.Type, e.GroupID, e.Author.MemberID, e.ID, string(p.Data), kind, trigger, nickname, preview)
 	if err != nil {
 		return err
 	}
@@ -437,6 +441,12 @@ func (s *Service) reserveAutonomous(ctx context.Context, c Config, j Job, sendin
 			}
 			return c, "", err
 		}
+		if err = reserveCounter(ctx, tx, c.AppID, "group:"+j.GroupID, "chat", c.groupLimit(j.GroupID, "chat")); err != nil {
+			if errors.Is(err, errUsageLimit) {
+				return c, "group_limit", nil
+			}
+			return c, "", err
+		}
 		if followup {
 			if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_autonomous_state SET last_reply_trigger='followup_claimed' WHERE app_id=$1 AND group_id=$2`, c.AppID, j.GroupID); err != nil {
 				return c, "", err
@@ -486,7 +496,12 @@ func (s *Service) autonomousMessage(ctx context.Context, c Config, j *Job, e Eve
 		j.Status = "skipped"
 		return s.autonomousDecision(ctx, j, reason)
 	}
-	msgs := s.history(ctx, c, *j)
+	var msgs []Message
+	if j.TriggerReason == "followup" {
+		msgs = s.history(ctx, c, *j)
+	} else {
+		msgs = s.sharedHistory(ctx, c, *j)
+	}
 	msgs = append(msgs, Message{Role: "system", Content: autonomousInstructions + fmt.Sprintf("回复不超过 %d 字。话题偏好仅作为参考：%s。", c.Autonomous.MaxChars, strings.Join(c.Autonomous.Topics, "、"))}, groupUserMessage(c, e, Message{Content: e.Content}))
 	modelCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()

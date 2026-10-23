@@ -94,7 +94,7 @@ describe('channel health cards', () => {
     expect(wrapper.get('[data-testid=channel-section-title]').text()).toContain('1')
     expect(wrapper.text()).not.toContain('降智状态')
     expect(wrapper.text()).toContain('被动健康')
-    const requests = wrapper.get('[data-testid=recent-requests]').findAll('[role=img]')
+    const requests = wrapper.get('[data-testid=recent-requests]').findAll('button[data-state]')
     expect(requests).toHaveLength(20)
     expect(requests.slice(-4).map(slot => slot.attributes('data-state'))).toEqual(['healthy', 'warning', 'critical', 'warning'])
     expect(requests[0].attributes('data-state')).toBe('unknown')
@@ -114,23 +114,23 @@ describe('channel health cards', () => {
     expect(history.text()).toContain('近 20 个时段统计')
     expect(history.text()).toContain('综合 · 5 分钟粒度')
     expect(wrapper.html().indexOf('data-testid="health-history"')).toBeLessThan(wrapper.html().indexOf('data-testid="recent-requests"'))
-    const slots = history.findAll('[role=img]')
+    const slots = history.findAll('button[data-state]')
     expect(slots).toHaveLength(20)
-    expect(slots[0].attributes('title')).toBe('当前时间范围内暂无更多统计时段')
-    expect(slots[3].attributes('title')).toContain('该时段暂无统计数据')
-    expect(slots[4].classes()).toContain('health-score10')
-    expect(slots[4].attributes('title')).toContain('健康分 96\n成功率 96.0%\n首 Token AVG 9.0s · P50 8.0s · P95 12.0s\n缓存率 70.0%\n请求时长 -')
-    expect(slots[4].attributes('aria-label')).toBe(slots[4].attributes('title'))
+    expect(slots[0].attributes('aria-label')).toBe('当前时间范围内暂无更多统计时段')
+    expect(slots[3].attributes('aria-label')).toContain('该时段暂无统计数据')
+    expect(slots[4].get('span').classes()).toContain('health-score10')
+    expect(slots[4].attributes('aria-label')).toContain('健康分 96\n成功率 96.0%\n首 Token AVG 9.0s · P50 8.0s · P95 12.0s\n缓存率 70.0%\n请求时长 -')
+    expect(slots[4].attributes('title')).toBeUndefined()
     for (const [healthMode, color] of [['ttft', 'health-score7'], ['cache', 'health-score3'], ['success', 'health-score10']] as const) {
       await wrapper.setProps({ healthMode })
-      expect(slots[4].classes()).toContain(color)
-      expect(wrapper.get('[data-testid=recent-requests]').findAll('[role=img]')[19].attributes('data-state')).toBe('healthy')
+      expect(slots[4].get('span').classes()).toContain(color)
+      expect(wrapper.get('[data-testid=recent-requests]').findAll('button[data-state]')[19].attributes('data-state')).toBe('healthy')
     }
     const unknownHealth: MonitorHealth = { ...health, overall: 'unknown', error_rate: 'unknown', ttft: 'unknown', cache: 'unknown' }
     await wrapper.setProps({ rows: [{ ...row, buckets: [{ ...row.buckets[0], metrics: { ...metrics, has_cache_samples: false }, health: unknownHealth }] }] })
-    expect(slots[4].classes()).toContain('health-unknown')
-    expect(slots[4].attributes('title')).toContain('成功率 -')
-    expect(slots[4].attributes('title')).toContain('缓存率 -')
+    expect(slots[4].get('span').classes()).toContain('health-unknown')
+    expect(slots[4].attributes('aria-label')).toContain('成功率 -')
+    expect(slots[4].attributes('aria-label')).toContain('缓存率 -')
     wrapper.unmount()
   })
 
@@ -148,16 +148,61 @@ describe('channel health cards', () => {
     expect(wrapper.findAll('[data-testid=latest-request-time]').map(el => el.text())).toEqual([
       `最近请求：${requestTime(latest.occurred_at)}`, '最近请求：-',
     ])
-    const slots = wrapper.get('[data-testid=recent-requests]').findAll('[role=img]')
-    expect(slots[19].attributes('title')).toBe([
+    const slots = wrapper.get('[data-testid=recent-requests]').findAll('button[data-state]')
+    expect(slots[19].attributes('aria-label')).toBe([
       'gpt-test · 请求成功', `请求时间：${requestTime(latest.occurred_at)}`, '首字：800ms', '缓存率 80.0%', '总耗时：3.5s',
     ].join('\n'))
-    expect(slots[19].attributes('aria-label')).toBe(slots[19].attributes('title'))
-    expect(slots[18].attributes('title')).toContain('首字：0ms\n缓存率 0.00%\n总耗时：0ms')
-    expect(slots[17].attributes('title')).toContain('首字：-\n缓存率 -\n总耗时：-\n上游 5xx')
-    expect(slots[0].attributes('title')).toBe('当前时间范围内暂无更多请求')
+    expect(slots[19].attributes('title')).toBeUndefined()
+    expect(slots[18].attributes('aria-label')).toContain('首字：0ms\n缓存率 0.00%\n总耗时：0ms')
+    expect(slots[17].attributes('aria-label')).toContain('首字：-\n缓存率 -\n总耗时：-')
+    expect(slots[17].attributes('aria-label')).not.toContain('上游 5xx')
+    expect(slots[0].attributes('aria-label')).toBe('当前时间范围内暂无更多请求')
     await wrapper.setProps({ rows: [{ ...row, recent_requests: [request('error', 20)] }] })
     expect(wrapper.get('[data-testid=latest-request-time]').text()).toBe(`最近请求：${requestTime(request('error', 20).occurred_at)}`)
+    wrapper.unmount()
+  })
+
+  it.each(['error', 'ignored'] as const)('shows admin diagnostics and opens the exact %s log from the tooltip', async (status) => {
+    const failed = { ...request(status), error_category: 'internal', error: {
+      log_id: 42, status_code: 500, upstream_status_code: 502, error_type: 'upstream_error',
+      message: 'Upstream worker failed: trace=test-trace',
+    } }
+    const wrapper = mount(ChannelHealthCards, {
+      attachTo: document.body,
+      props: { rows: [{ ...row, recent_requests: [failed] }], coverage, groupBy: 'platform_group', healthMode: 'overall', admin: true },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+    })
+    try {
+      const trigger = wrapper.get('[data-testid=recent-requests]').findAll('button[data-state]')[19]
+      await trigger.trigger('click')
+      const tooltip = document.querySelector<HTMLElement>('[role=tooltip]')!
+      expect(tooltip.textContent).toContain('内部错误\nHTTP 500\n上游 502\n错误类型：upstream_error\n具体错误：Upstream worker failed: trace=test-trace')
+      const action = tooltip.querySelector('button')!
+      expect(action.textContent).toBe('查看完整错误日志')
+      action.click()
+      expect(wrapper.emitted('open-error')).toEqual([[42]])
+      await wrapper.setProps({ admin: false })
+      expect(trigger.attributes('aria-label')).not.toContain('内部错误')
+      expect(trigger.attributes('aria-label')).not.toContain('错误类型')
+      expect(trigger.attributes('aria-label')).not.toContain('具体错误')
+      expect(trigger.attributes('aria-label')).not.toContain('test-trace')
+      expect(trigger.attributes('aria-label')).not.toContain('HTTP 500')
+      await trigger.trigger('click')
+      expect(document.querySelector('[role=tooltip]')?.textContent).not.toContain('内部错误')
+      expect(document.querySelector('[role=tooltip] button')).toBeNull()
+      expect(wrapper.emitted('open-error')).toEqual([[42]])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('keeps a log entry accessible when the recorded error message is empty', async () => {
+    const wrapper = mount(ChannelHealthCards, {
+      props: { rows: [{ ...row, recent_requests: [{ ...request('error'), error_category: 'internal', error: { log_id: 43 } }] }],
+        coverage, groupBy: 'platform_group', healthMode: 'overall', admin: true },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+    })
+    expect(wrapper.get('[data-testid=recent-requests]').findAll('button[data-state]')[19].attributes('aria-label')).toContain('具体错误：无错误消息')
     wrapper.unmount()
   })
 

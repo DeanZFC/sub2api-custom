@@ -75,10 +75,10 @@ func (s *Service) rememberSentMessage(ctx context.Context, c Config, j Job, raw 
 	if image {
 		imageJobID = j.ID
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_message_references(app_id,group_id,message_id,ref_idx,content,is_image,shareable,image_job_id)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,group_id,message_id)
- DO UPDATE SET ref_idx=EXCLUDED.ref_idx,content=EXCLUDED.content,is_image=EXCLUDED.is_image,shareable=EXCLUDED.shareable,image_job_id=EXCLUDED.image_job_id,created_at=NOW()`,
-		c.AppID, j.GroupID, sent.ID, sent.Ext.Reference, content, image, shareable, imageJobID)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO qq_bot_message_references(app_id,group_id,message_id,ref_idx,content,is_image,shareable,image_job_id,source_job_id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(app_id,group_id,message_id)
+ DO UPDATE SET ref_idx=EXCLUDED.ref_idx,content=EXCLUDED.content,is_image=EXCLUDED.is_image,shareable=EXCLUDED.shareable,image_job_id=EXCLUDED.image_job_id,source_job_id=EXCLUDED.source_job_id,created_at=NOW()`,
+		c.AppID, j.GroupID, sent.ID, sent.Ext.Reference, content, image, shareable, imageJobID, j.ID)
 	if err != nil {
 		return errors.New("消息已发送，但引用记录保存失败")
 	}
@@ -88,7 +88,13 @@ func (s *Service) rememberSentMessage(ctx context.Context, c Config, j Job, raw 
 			id = sent.Ext.Reference
 		}
 		entry := groupHistoryEntry{Speaker: "机器人", ID: groupHistoryID(c.AppID, j.GroupID, id), ReplyTo: groupHistoryID(c.AppID, j.GroupID, j.MessageID), Text: limitText(content, 1200)}
-		if err := s.appendGroupHistory(ctx, c, j.GroupID, "assistant:"+sent.ID, entry.message("assistant"), j.CreatedAt, j.MessageID); err != nil {
+		member := j.MemberID
+		if j.Kind == "ambient_chat" && j.TriggerReason != "followup" {
+			// Shared ambient answers can mention other participants. Never reuse
+			// those answers as personal conversation history.
+			member = ""
+		}
+		if err := s.appendGroupHistory(ctx, c, j.GroupID, member, "assistant:"+sent.ID, entry.message("assistant"), j.CreatedAt, j.MessageID); err != nil {
 			return errors.New("消息已发送，但群历史保存失败")
 		}
 	}

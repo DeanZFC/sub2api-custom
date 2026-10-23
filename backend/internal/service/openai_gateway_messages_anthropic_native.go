@@ -224,6 +224,7 @@ func (s *OpenAIGatewayService) buildNativeAnthropicUpstreamRequest(
 	payloads := append([][]byte{body}, sessionBodies...)
 	applyOpenCodeSessionHeader(c, account, targetURL, req.Header, payloads...)
 
+	capturePassiveQualityCacheHTTPRequest(c, account, req)
 	return req, body, nil
 }
 

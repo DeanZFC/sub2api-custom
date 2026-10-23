@@ -40,7 +40,7 @@ func TestOpsRequestDetails_UsageAndIdentity(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users (email, password_hash) VALUES ($1, 'test-only') RETURNING id`, user.Email).Scan(&user.ID))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups (name) VALUES ($1) RETURNING id`, group.Name).Scan(&group.ID))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts (name, platform, type) VALUES ($1, 'openai', 'oauth') RETURNING id`, account.Name).Scan(&account.ID))
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO api_keys (user_id, key, name) VALUES ($1, $2, $3) RETURNING id`, user.ID, "sk-"+uuid.NewString(), key.Name).Scan(&key.ID))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO api_keys (user_id, key, name) VALUES ($1, $2, $3) RETURNING id`, user.ID, service.APIKeyStoredValue("sk-"+uuid.NewString()), key.Name).Scan(&key.ID))
 	start := time.Now().UTC().Add(-time.Minute)
 	end := start.Add(time.Hour)
 	firstToken, duration := 3060, 38660

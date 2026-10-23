@@ -19,6 +19,8 @@ func (h *QQBotHandler) GetInviteConfig(c *gin.Context) {
 		response.InternalError(c, "读取邀请奖励配置失败")
 		return
 	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(cfg)+`"`)
+	c.Header("Cache-Control", "no-store")
 	response.Success(c, cfg)
 }
 func (h *QQBotHandler) SaveInviteConfig(c *gin.Context) {
@@ -31,11 +33,18 @@ func (h *QQBotHandler) SaveInviteConfig(c *gin.Context) {
 		response.BadRequest(c, "邀请奖励配置格式不正确")
 		return
 	}
-	if err := h.bot.SaveInviteConfig(c.Request.Context(), cfg); err != nil {
-		response.BadRequest(c, err.Error())
+	if err := h.bot.SaveInviteConfig(qqbot.WithConfigVersion(c.Request.Context(), c.GetHeader("If-Match")), cfg); err != nil {
+		qqBotConfigError(c, err)
 		return
 	}
-	response.Success(c, cfg)
+	saved, readErr := h.bot.InviteConfig(c.Request.Context())
+	if readErr != nil {
+		response.InternalError(c, "配置已保存，重新加载失败")
+		return
+	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(saved)+`"`)
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, saved)
 }
 func (h *QQBotHandler) GetCheckinConfig(c *gin.Context) {
 	if !requireQQBotAdmin(c) {
@@ -46,6 +55,11 @@ func (h *QQBotHandler) GetCheckinConfig(c *gin.Context) {
 		response.InternalError(c, "读取签到配置失败")
 		return
 	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(cfg)+`"`)
+	for _, section := range []string{"checkin", "tasks", "periodic_tasks"} {
+		c.Header("X-QQBot-"+section+"-Version", qqbot.CheckinSectionVersion(cfg, section))
+	}
+	c.Header("Cache-Control", "no-store")
 	response.Success(c, cfg)
 }
 func (h *QQBotHandler) SaveCheckinConfig(c *gin.Context) {
@@ -58,11 +72,21 @@ func (h *QQBotHandler) SaveCheckinConfig(c *gin.Context) {
 		response.BadRequest(c, "签到配置格式不正确")
 		return
 	}
-	if err := h.bot.SaveCheckinConfig(c.Request.Context(), cfg); err != nil {
-		response.BadRequest(c, err.Error())
+	if err := h.bot.SaveCheckinConfig(qqbot.WithCheckinSection(qqbot.WithConfigVersion(c.Request.Context(), c.GetHeader("If-Match")), c.GetHeader("X-QQBot-Section")), cfg); err != nil {
+		qqBotConfigError(c, err)
 		return
 	}
-	response.Success(c, cfg)
+	saved, readErr := h.bot.CheckinConfig(c.Request.Context())
+	if readErr != nil {
+		response.InternalError(c, "配置已保存，重新加载失败")
+		return
+	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(saved)+`"`)
+	for _, section := range []string{"checkin", "tasks", "periodic_tasks"} {
+		c.Header("X-QQBot-"+section+"-Version", qqbot.CheckinSectionVersion(saved, section))
+	}
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, saved)
 }
 func (h *QQBotHandler) GetTransferConfig(c *gin.Context) {
 	if !requireQQBotAdmin(c) {
@@ -73,6 +97,8 @@ func (h *QQBotHandler) GetTransferConfig(c *gin.Context) {
 		response.InternalError(c, "读取转账配置失败")
 		return
 	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(cfg)+`"`)
+	c.Header("Cache-Control", "no-store")
 	response.Success(c, cfg)
 }
 func (h *QQBotHandler) SaveTransferConfig(c *gin.Context) {
@@ -85,11 +111,18 @@ func (h *QQBotHandler) SaveTransferConfig(c *gin.Context) {
 		response.BadRequest(c, "转账配置格式不正确")
 		return
 	}
-	if err := h.bot.SaveTransferConfig(c.Request.Context(), cfg); err != nil {
-		response.BadRequest(c, err.Error())
+	if err := h.bot.SaveTransferConfig(qqbot.WithConfigVersion(c.Request.Context(), c.GetHeader("If-Match")), cfg); err != nil {
+		qqBotConfigError(c, err)
 		return
 	}
-	response.Success(c, cfg)
+	saved, readErr := h.bot.TransferConfig(c.Request.Context())
+	if readErr != nil {
+		response.InternalError(c, "配置已保存，重新加载失败")
+		return
+	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(saved)+`"`)
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, saved)
 }
 
 func (h *QQBotHandler) GetLotteryConfig(c *gin.Context) {
@@ -101,6 +134,8 @@ func (h *QQBotHandler) GetLotteryConfig(c *gin.Context) {
 		response.InternalError(c, "读取抽奖配置失败")
 		return
 	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(cfg)+`"`)
+	c.Header("Cache-Control", "no-store")
 	response.Success(c, cfg)
 }
 func (h *QQBotHandler) SaveLotteryConfig(c *gin.Context) {
@@ -113,11 +148,18 @@ func (h *QQBotHandler) SaveLotteryConfig(c *gin.Context) {
 		response.BadRequest(c, "抽奖配置格式不正确")
 		return
 	}
-	if err := h.bot.SaveLotteryConfig(c.Request.Context(), cfg); err != nil {
-		response.BadRequest(c, err.Error())
+	if err := h.bot.SaveLotteryConfig(qqbot.WithConfigVersion(c.Request.Context(), c.GetHeader("If-Match")), cfg); err != nil {
+		qqBotConfigError(c, err)
 		return
 	}
-	response.Success(c, cfg)
+	saved, readErr := h.bot.LotteryConfig(c.Request.Context())
+	if readErr != nil {
+		response.InternalError(c, "配置已保存，重新加载失败")
+		return
+	}
+	c.Header("ETag", `"`+qqbot.ConfigVersion(saved)+`"`)
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, saved)
 }
 func (h *QQBotHandler) LotteryState(c *gin.Context) {
 	if !requireQQBotAdmin(c) {

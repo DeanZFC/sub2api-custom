@@ -375,6 +375,11 @@ func (s *Service) ConfirmTransfer(ctx context.Context, token string) error {
 		return err
 	}
 
+	// Receipt and balances commit atomically. No token or token hash enters history.
+	if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_transfer_history(app_id,from_member_id,from_user_id,to_user_id,from_email,to_email,amount,fee,net_amount)
+ SELECT app_id,from_member_id,from_user_id,to_user_id,from_email,to_email,amount,fee,net_amount FROM qq_bot_transfer_requests WHERE token_hash=$1`, codeHash(token)); err != nil {
+		return err
+	}
 	// Delete the token — single use.
 	if _, err = tx.ExecContext(ctx,
 		`DELETE FROM qq_bot_transfer_requests WHERE token_hash=$1`, codeHash(token)); err != nil {

@@ -73,6 +73,10 @@ UPDATE usage_logs SET request_type=0, stream=false WHERE request_id='seven-23';
 UPDATE usage_logs SET request_type=3, stream=false, openai_ws_mode=true WHERE request_id='seven-24';
 UPDATE usage_logs SET first_token_ms=NULL, duration_ms=NULL WHERE request_id='seven-25';
 UPDATE ops_error_logs SET duration_ms=5000, time_to_first_token_ms=400 WHERE request_id='final-error';
+UPDATE ops_error_logs SET error_message='Internal server error', upstream_status_code=502,
+ upstream_error_message='Upstream worker failed: trace=test-trace Bearer private-token', upstream_error_detail='fallback detail'
+ WHERE error_type='latest-error';
+UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_message='Request failed' WHERE request_id='ignored';
 `)
 	require.NoError(t, err)
 	start := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
@@ -82,23 +86,24 @@ UPDATE ops_error_logs SET duration_ms=5000, time_to_first_token_ms=400 WHERE req
 	repo := &channelMonitorV2Repository{db: db}
 	for _, groupID := range []*int64{&seven, nil} {
 		items := []service.ChannelMonitorV2MatrixRow{{Platform: "openai", GroupID: groupID}}
-		require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items))
+		require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items, false))
 		recent := items[0].RecentRequests
 		require.Len(t, recent, 20)
 		errors, ignored, unnamed := 0, 0, 0
 		for i, request := range recent {
+			require.Nil(t, request.Error)
+			require.Empty(t, request.ErrorCategory)
 			if i > 0 {
 				require.False(t, request.OccurredAt.Before(recent[i-1].OccurredAt))
 			}
 			require.NotEqual(t, start.Add(26*time.Minute), request.OccurredAt) // duplicate source row
-			if request.Status == "error" {
+			if request.Status == "error" && request.OccurredAt.Equal(start.Add(32*time.Minute)) {
 				errors++
-				require.Equal(t, start.Add(32*time.Minute), request.OccurredAt)
 				require.EqualValues(t, 5000, *request.DurationMs)
 				require.EqualValues(t, 400, *request.TTFTMs)
 				require.Nil(t, request.CacheRate)
 			}
-			if request.Status == "ignored" {
+			if request.Status == "error" && request.OccurredAt.Equal(start.Add(33*time.Minute)) {
 				ignored++
 				require.Nil(t, request.DurationMs)
 				require.Nil(t, request.TTFTMs)
@@ -125,21 +130,42 @@ UPDATE ops_error_logs SET duration_ms=5000, time_to_first_token_ms=400 WHERE req
 			}
 		}
 		require.Equal(t, 1, errors)
-		require.Equal(t, 1, ignored)
+		require.Equal(t, 1, ignored) // ignored categories are indistinguishable from generic failures to users
 		require.Equal(t, 1, unnamed) // unauthorized group's 45 requests do not leak into platform view
 		require.Equal(t, start.Add(33*time.Minute), recent[19].OccurredAt)
 	}
 	filter.RestrictGroups = false
 	items := []service.ChannelMonitorV2MatrixRow{{Platform: "openai", GroupID: &seven}, {Platform: "openai", GroupID: &eight}, {Platform: "openai", GroupID: &nine}}
-	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items))
+	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items, true))
 	require.Len(t, items[0].RecentRequests, 20)
 	require.Len(t, items[1].RecentRequests, 20)
 	require.Len(t, items[2].RecentRequests, 2)
 	require.Equal(t, "error", items[2].RecentRequests[1].Status)
+	for _, request := range items[0].RecentRequests {
+		switch request.Status {
+		case "error":
+			require.NotNil(t, request.Error)
+			require.Equal(t, "upstream_5xx", request.ErrorCategory)
+			require.Equal(t, "latest-error", request.Error.ErrorType)
+			require.Equal(t, 503, request.Error.StatusCode)
+			require.Equal(t, 502, request.Error.UpstreamStatusCode)
+			require.Equal(t, "Upstream worker failed: trace=test-trace Bearer ****", request.Error.Message)
+			var errorType string
+			require.NoError(t, db.QueryRowContext(ctx, "SELECT error_type FROM ops_error_logs WHERE id=$1", request.Error.LogID).Scan(&errorType))
+			require.Equal(t, "latest-error", errorType)
+		case "ignored":
+			require.NotNil(t, request.Error)
+			require.Equal(t, "authentication", request.ErrorCategory)
+			require.Equal(t, "Credential expired", request.Error.Message)
+		default:
+			require.Nil(t, request.Error)
+		}
+	}
+	require.Empty(t, items[2].RecentRequests[1].Error.Message) // No invented cause for a missing message.
 	filter.RestrictGroups = true
 	filter.Models = []string{"actual-unnamed"}
 	items = []service.ChannelMonitorV2MatrixRow{{Platform: "openai", GroupID: &seven}}
-	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items))
+	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items, false))
 	require.Len(t, items[0].RecentRequests, 1)
 	require.Equal(t, "actual-unnamed", items[0].RecentRequests[0].Model)
 }

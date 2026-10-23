@@ -62,7 +62,7 @@ func (s *UserRepoAPIKeyGroupFilterSuite) mustCreateAPIKey(userID int64, key, nam
 	s.T().Helper()
 	create := s.client.APIKey.Create().
 		SetUserID(userID).
-		SetKey(key).
+		SetKey(service.APIKeyStoredValue(key)).
 		SetName(name)
 	if groupID != nil {
 		create = create.SetGroupID(*groupID)

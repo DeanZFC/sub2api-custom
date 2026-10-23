@@ -63,7 +63,7 @@
                 <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('channelMonitorV2.cards.recentRequests') }}</span>
                 <span class="shrink-0" data-testid="latest-request-time">{{ t('channelMonitorV2.cards.latestRequest', { time: latestRequestTime(row) }) }}</span>
               </div>
-              <MonitorStatusStrip :slots="requestSlots(row)" :label="t('channelMonitorV2.cards.recentRequests')" compact />
+              <MonitorStatusStrip :slots="requestSlots(row)" :label="t('channelMonitorV2.cards.recentRequests')" compact @select="openRequestError(row, $event)" />
               <div class="mt-1 flex justify-between text-[10px] uppercase tracking-widest text-gray-400">
                 <span>{{ t('channelMonitorV2.cards.past') }}</span><span>{{ t('channelMonitorV2.cards.now') }}</span>
               </div>
@@ -101,7 +101,7 @@
 import { formatMonitorCacheRate } from '@/features/channel-monitor-v2/monitorFormat'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { HealthState, MonitorCoverage, MonitorMatrixGroupBy, MonitorMatrixRow } from '@/api/channelMonitorV2'
+import type { HealthState, MonitorCoverage, MonitorMatrixGroupBy, MonitorMatrixRow, MonitorRecentRequest } from '@/api/channelMonitorV2'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { platformDisplayName } from '@/constants/platformCatalog'
@@ -117,7 +117,9 @@ import { formatLatencyPrivacy, formatMonitorMs, formatMonitorPercent, formatMoni
 const props = withDefaults(defineProps<{
   rows: MonitorMatrixRow[]; coverage: MonitorCoverage; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode
   testResults?: TestResult[]; testResultsState?: TestResultsState
-}>(), { testResults: () => [], testResultsState: 'ready' })
+  admin?: boolean
+}>(), { testResults: () => [], testResultsState: 'ready', admin: false })
+const emit = defineEmits<{ 'open-error': [id: number] }>()
 const testsByGroup = computed(() => indexGroupTestResults(props.testResults))
 const previewGroup = ref<{ id: number; name: string } | null>(null)
 const { t, locale } = useI18n()
@@ -185,14 +187,33 @@ function historySlots(row: MonitorMatrixRow) {
 function requestSlots(row: MonitorMatrixRow) {
   return recentRequestsForCard(row.recent_requests).map(request => ({
     state: requestHealth(request),
+    actionLabel: requestError(request)?.log_id ? t('channelMonitorV2.cards.viewErrorLog') : undefined,
     label: request ? [
       `${modelName(request.model)} · ${t(`channelMonitorV2.cards.requests.${request.status}`)}`,
       t('channelMonitorV2.cards.requestTime', { value: timeLabel(request.occurred_at) }),
       t('channelMonitorV2.cards.requestTTFT', { value: formatMonitorMs(request.ttft_ms) }),
       t('channelMonitorV2.metrics.cacheRateValue', { value: request.cache_rate == null ? '-' : formatMonitorPercent(request.cache_rate) }),
       t('channelMonitorV2.cards.requestDuration', { value: formatMonitorMs(request.duration_ms) }),
-      request.error_category ? t(`channelMonitorV2.errorCategories.${request.error_category}`) : '',
+      props.admin && request.error_category ? t(`channelMonitorV2.errorCategories.${request.error_category}`) : '',
+      ...requestErrorLines(request),
     ].filter(Boolean).join('\n') : t('channelMonitorV2.cards.noRequest'),
   }))
+}
+function requestError(request: MonitorRecentRequest | null) {
+  return props.admin && (request?.status === 'error' || request?.status === 'ignored') ? request.error : undefined
+}
+function requestErrorLines(request: MonitorRecentRequest) {
+  const error = requestError(request)
+  if (!error) return []
+  return [
+    error.status_code ? t('channelMonitorV2.errorDetail.http', { code: error.status_code }) : '',
+    error.upstream_status_code ? t('channelMonitorV2.errorDetail.upstream', { code: error.upstream_status_code }) : '',
+    error.error_type ? t('channelMonitorV2.cards.requestErrorType', { value: error.error_type }) : '',
+    t('channelMonitorV2.cards.requestErrorMessage', { value: error.message || t('channelMonitorV2.errorDetail.noMessage') }),
+  ]
+}
+function openRequestError(row: MonitorMatrixRow, index: number) {
+  const error = requestError(recentRequestsForCard(row.recent_requests)[index] ?? null)
+  if (error?.log_id) emit('open-error', error.log_id)
 }
 </script>

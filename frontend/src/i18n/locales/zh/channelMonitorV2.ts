@@ -36,6 +36,7 @@ export default {
       passive: '被动健康', availability: '可用率',
       latestRequest: '最近请求：{time}', past: '过去', now: '最近',
       requestTime: '请求时间：{value}', requestTTFT: '首字：{value}', requestDuration: '总耗时：{value}',
+      requestErrorType: '错误类型：{value}', requestErrorMessage: '具体错误：{value}', viewErrorLog: '查看完整错误日志',
       recentRequests: '近 20 次请求状态',
       healthHistory: '近 20 个时段统计',
       historyLegend: '绿 → 黄 → 红：健康分由高到低 · 灰：无数据 / 样本不足',

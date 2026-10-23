@@ -73,6 +73,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	ctx = CapturePassiveQualityCacheRequest(ctx, c, account, body, passiveQualityRequestSession(c, body), gjson.GetBytes(body, "model").String())
 	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
@@ -396,7 +397,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			openai_compat.NormalizeResponsesSupportMode(responsesMode) == openai_compat.ResponsesSupportModeAuto &&
 			openai_compat.ResolveResponsesSupport(account.Extra) == openai_compat.ResponsesSupportYes &&
 			!isResponsesShape &&
-			(ctx == nil || ctx.Err() == nil) &&
+			ctx.Err() == nil &&
 			(c.Request == nil || c.Request.Context().Err() == nil) &&
 			!IsResponseCommitted(c) &&
 			!c.Writer.Written() &&

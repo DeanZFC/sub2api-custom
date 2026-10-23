@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.activitiesTitle') }}</h1>
         <p class="mt-2 text-sm text-gray-500">{{ t('qqbot.activitiesHelp') }}</p></div>
-        <RouterLink v-if="!['rewards', 'growth'].includes(activeTab.key)" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
+        <RouterLink v-if="!['rewards', 'growth', 'rankings', 'preview'].includes(activeTab.key)" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
       </div>
       <nav
         role="tablist"
@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick } from 'vue'
+import { computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -52,22 +52,25 @@ import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.
 import QQBotGrowthSettings from '@/components/admin/qqbot/QQBotGrowthSettings.vue'
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
 import QQBotInviteSettings from '@/components/admin/qqbot/QQBotInviteSettings.vue'
-import QQBotTransferSettings from '@/components/admin/qqbot/QQBotTransferSettings.vue'
+import QQBotRankingSettings from '@/components/admin/qqbot/QQBotRankingSettings.vue'
+import QQActivityPreview from '@/components/admin/qqbot/QQActivityPreview.vue'
 import QQBotRewardCodes from '@/components/admin/qqbot/QQBotRewardCodes.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+onMounted(() => { if (route.query.tab === 'transfer') void router.replace({ path: '/admin/qqbot/bindings', query: { tab: 'transfer' } }) })
 const tabs = [
   { key: 'checkin', label: 'qqbot.checkinTitle', component: QQBotCheckinSettings },
   { key: 'growth', label: 'qqbot.growth.tab', component: QQBotGrowthSettings },
+  { key: 'rankings', label: 'qqbot.rankings.tab', component: QQBotRankingSettings },
   { key: 'lottery', label: 'qqbot.lotteryTitle', component: QQBotLotterySettings },
   { key: 'invite', label: 'qqbot.inviteTitle', component: QQBotInviteSettings },
-  { key: 'transfer', label: 'qqbot.transferTitle', component: QQBotTransferSettings },
+  { key: 'preview', label: 'qqbot.workspace.preview', component: QQActivityPreview },
   { key: 'rewards', label: 'qqbot.redemption.title', component: QQBotRewardCodes }
 ] as const
 type ActivityTab = (typeof tabs)[number]['key']
-const activeTab = computed(() => tabs.find(tab => tab.key === (route.query.tab === 'rankings' ? 'growth' : route.query.tab === 'redemption' ? 'rewards' : route.query.tab)) ?? tabs[0])
+const activeTab = computed(() => tabs.find(tab => tab.key === (route.query.tab === 'redemption' ? 'rewards' : route.query.tab)) ?? tabs[0])
 
 async function selectTab(tab: ActivityTab) {
   if (activeTab.value.key !== tab) {

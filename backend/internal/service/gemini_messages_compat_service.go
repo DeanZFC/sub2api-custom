@@ -115,6 +115,8 @@ func (s *GeminiMessagesCompatService) SelectAccountForModel(ctx context.Context,
 }
 
 func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
+	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
 	// 1. 确定目标平台和调度模式
 	// Determine target platform and scheduling mode
 	platform, useMixedScheduling, hasForcePlatform, err := s.resolvePlatformAndSchedulingMode(ctx, groupID)
@@ -228,7 +230,7 @@ func (s *GeminiMessagesCompatService) tryStickySessionHit(
 
 	// 检查账号是否需要清理粘性会话
 	// Check if sticky session should be cleared
-	if shouldClearStickySession(account, requestedModel) {
+	if shouldClearStickySessionWithContext(ctx, account, requestedModel) {
 		_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), cacheKey)
 		return nil
 	}
@@ -343,7 +345,7 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 	precheckResult := s.buildPreCheckUsageResultMap(ctx, accounts, requestedModel)
 
 	for i := range accounts {
-		acc := &accounts[i]
+		acc := passiveQualitySchedulingAccount(ctx, &accounts[i], requestedModel)
 
 		// 跳过被排除的账号
 		if _, excluded := excludedIDs[acc.ID]; excluded {
@@ -356,6 +358,12 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 		}
 
 		// 选择最佳账号
+		if prefer, decided := passiveQualityPreferNewSession(ctx, acc, selected, requestedModel); decided {
+			if prefer {
+				selected = acc
+			}
+			continue
+		}
 		if selected == nil {
 			selected = acc
 			continue

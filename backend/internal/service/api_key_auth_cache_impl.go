@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,7 +12,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 26 // v26: reload authorization after legacy shared-pool keys are retired.
+const apiKeyAuthSnapshotVersion = 27 // v27: digest-only credential storage.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -192,8 +190,7 @@ func (s *APIKeyService) StopAuthCacheInvalidationSubscriber() {
 }
 
 func (s *APIKeyService) authCacheKey(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(sum[:])
+	return APIKeyCacheDigest(key)
 }
 
 func (s *APIKeyService) getAuthCacheEntry(ctx context.Context, cacheKey string) (*APIKeyAuthCacheEntry, bool) {

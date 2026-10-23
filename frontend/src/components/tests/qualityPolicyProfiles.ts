@@ -2,7 +2,8 @@ import type { PassivePolicy } from '@/api/admin/passiveQuality'
 
 // Profiles only tune sampling and recovery. Targets, metrics and enforcement
 // always remain an explicit administrator choice. Existing policies are read
-// as-is; matching a profile never writes or normalizes their values.
+// as-is; matching a profile never writes or normalizes their values. V2 cache
+// windows and per-metric actions intentionally remain independent of profiles.
 export const qualityProfileKeys = ['responsive', 'balanced', 'steady'] as const
 export type QualityProfile = typeof qualityProfileKeys[number]
 const profiles = {

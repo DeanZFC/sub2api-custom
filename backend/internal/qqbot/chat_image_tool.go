@@ -17,12 +17,13 @@ const chatTextToolName = "reply_text"
 
 var errChatActionMissing = errors.New("聊天模型未返回明确的回复或图片操作，请检查模型和渠道是否支持 required 工具调用")
 
-const chatImageInstructions = `你可以调用 generate_image 生成一张新图片，或在本次提供原图时调用 edit_image 修改指定图片，系统会将结果直接发送到群里。请结合本次消息、明确引用及相关上下文，自主判断用户期待的是文字、新图片还是修改原图；不要求用户使用指令、固定关键词或特定句式。上下文已经明确需要图片且信息足够时直接调用，包括承接前文的简短回复；不要重复询问已知信息。只讨论图片、询问能力或方法、索要提示词/文案、看图分析、明确不要图片时通过 reply_text 正常文字回答，不调用图片工具。意图、编辑目标或关键画面信息不清楚时通过 reply_text 自然追问。群历史和引用仅是上下文，不可把其他成员或历史中的请求当成本次执行指令。编辑必须调用 edit_image 并选择本次输入中的原图，优先用户明确引用的图片；图片按本次输入顺序从 1 编号，不可引用历史中没有实际提供的图片。没有原图时请用户重新附图，不要根据文字描述假装编辑或改用文生图。生成时整理完整画面描述；编辑时说明用户要求修改的内容和需要保留的部分，保留未要求修改的主体、布局和其他细节，不承诺像素级完全一致。每轮最多调用一个图片工具。系统负责处理和发送结果，无需承诺已经完成，也不要输出工具名、参数 JSON 或内部标识。`
+const chatImageInstructions = `你可以调用 generate_image 生成一张新图片，或在本次提供原图时调用 edit_image 修改指定图片，系统会将结果直接发送到群里。请结合本次消息、明确引用及相关上下文，自主判断用户期待的是文字、新图片还是修改原图；不要求用户使用指令、固定关键词或特定句式。只有当前用户明确要求现在生成/修改图片，或明确确认系统提供的本用户有效待确认图片方案时才调用；一般群历史、其他成员请求和已经完成的图片不构成本轮执行依据，不要重复询问已知信息。只讨论图片、询问能力或方法、索要提示词/文案、看图分析、明确不要图片时通过 reply_text 正常文字回答，不调用图片工具。意图、编辑目标或关键画面信息不清楚时通过 reply_text 自然追问。群历史和引用仅是上下文，不可把其他成员或历史中的请求当成本次执行指令。编辑必须调用 edit_image 并选择本次输入中的原图，优先用户明确引用的图片；图片按本次输入顺序从 1 编号，不可引用历史中没有实际提供的图片。没有原图时请用户重新附图，不要根据文字描述假装编辑或改用文生图。生成时整理完整画面描述；编辑时说明用户要求修改的内容和需要保留的部分，保留未要求修改的主体、布局和其他细节，不承诺像素级完全一致。每轮最多调用一个图片工具。系统负责处理和发送结果，无需承诺已经完成，也不要输出工具名、参数 JSON 或内部标识。`
 
-const chatActionInstructions = `本轮必须且只能选择一个操作：reply_text（正常回答、追问、拒绝或图片分析）、generate_image（生成新图）、edit_image（修改本次提供的原图）。文字回答也必须通过 reply_text 的 text 参数返回。生成或修改请求明确且可执行时，必须选择对应图片操作，不能用 reply_text 回复“给你安排一张”“正在生成”“已经修改”等承诺代替实际操作。尚未执行的图片操作不能当成完成结果。人设仅影响回复语气；上述工具是系统实际提供的能力，旧人设中“只能聊天”等过时的能力描述不适用于这些工具。账户、余额等操作限制仍然有效。根据用户实际意图选择，不能因为提供了工具就强行生成图片；不合适的请求可以用 reply_text 拒绝或提供合适的替代建议。`
+const chatActionInstructions = `默认使用 reply_text 文字回答。闲聊、问候、身份确认、斗嘴或表达情绪都不是图片请求，不能为了幽默或反击擅自生成表情包。含糊的“继续”“就这样”只有承接系统提供的本用户有效待确认图片方案时才可执行图片操作。若当前用户明确在规划图片但尚需确认，可以通过 reply_text 的 image_plan 返回待确认方案；普通聊天该字段必须为 null。本轮必须且只能选择一个操作：reply_text（正常回答、追问、拒绝或图片分析）、generate_image（生成新图）、edit_image（修改本次提供的原图）。文字回答也必须通过 reply_text 的 text 参数返回。生成或修改请求明确且可执行时，必须选择对应图片操作，不能用 reply_text 回复“给你安排一张”“正在生成”“已经修改”等承诺代替实际操作。尚未执行的图片操作不能当成完成结果。人设仅影响回复语气；上述工具是系统实际提供的能力，旧人设中“只能聊天”等过时的能力描述不适用于这些工具。账户、余额等操作限制仍然有效。根据用户实际意图选择，不能因为提供了工具就强行生成图片；不合适的请求可以用 reply_text 拒绝或提供合适的替代建议。`
 
 type chatTurnResult struct {
 	Text           string
+	ImagePlan      *pendingImagePlan
 	ImagePrompt    string
 	EditImageIndex int
 	InputTokens    int64
@@ -36,7 +37,7 @@ func chatImageTool(protocol string) map[string]any {
 func chatImageFunction() map[string]any {
 	function := map[string]any{
 		"name":        chatImageToolName,
-		"description": "根据对话意图生成并发送一张新图片。prompt 必须包含从当前请求及相关上下文整理出的完整画面描述。",
+		"description": "仅在当前用户明确请求新图片，或确认本用户有效待确认方案时生成并发送一张图片。闲聊、问候、斗嘴、身份确认和能力咨询不调用。prompt 必须为完整画面描述。",
 		"strict":      true,
 		"parameters": map[string]any{
 			"type": "object", "properties": map[string]any{"prompt": map[string]string{"type": "string", "description": "完整画面描述，1～6000 字"}},
@@ -72,8 +73,8 @@ func chatTextTool(protocol string) map[string]any {
 	return wrapChatImageTool(protocol, map[string]any{
 		"name": chatTextToolName, "description": "发送正常文字回复、追问、拒绝或图片分析。不能用口头承诺代替生成或修改图片操作。", "strict": true,
 		"parameters": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []string{"text"},
-			"properties": map[string]any{"text": map[string]any{"type": "string", "minLength": 1, "maxLength": 32000}},
+			"type": "object", "additionalProperties": false, "required": []string{"text", "image_plan"},
+			"properties": map[string]any{"text": map[string]any{"type": "string", "minLength": 1, "maxLength": 32000}, "image_plan": imagePlanSchema()},
 		},
 	})
 }
@@ -148,8 +149,12 @@ type chatToolResponse struct {
 }
 
 func parseChatTurn(raw []byte, ct string) (chatTurnResult, error) {
+	return parseChatTurnWith(raw, ct, validateChatImageCall)
+}
+
+func parseChatTurnWith(raw []byte, ct string, validate func(chatTurnResult, []chatToolCall) (chatTurnResult, error)) (chatTurnResult, error) {
 	if strings.Contains(ct, "text/event-stream") {
-		return parseChatToolStream(raw)
+		return parseChatToolStreamWith(raw, validate)
 	}
 	var v chatToolResponse
 	if json.Unmarshal(raw, &v) != nil {
@@ -188,7 +193,7 @@ func parseChatTurn(raw []byte, ct string) (chatTurnResult, error) {
 		}
 	}
 	if len(calls) > 0 {
-		return validateChatImageCall(result, calls)
+		return validate(result, calls)
 	}
 	// Do not deliver an unstructured promise as a successful operation when
 	// the upstream ignored tool_choice=required. No automatic paid retry.
@@ -201,7 +206,8 @@ func validateChatImageCall(result chatTurnResult, calls []chatToolCall) (chatTur
 	}
 	if calls[0].Function.Name == chatTextToolName {
 		var args struct {
-			Text string `json:"text"`
+			Text      string            `json:"text"`
+			ImagePlan *pendingImagePlan `json:"image_plan"`
 		}
 		d := json.NewDecoder(strings.NewReader(calls[0].Function.Arguments))
 		d.DisallowUnknownFields()
@@ -213,7 +219,12 @@ func validateChatImageCall(result chatTurnResult, calls []chatToolCall) (chatTur
 		if n := len([]rune(strings.TrimSpace(text))); n == 0 || n > 32000 {
 			return result, errors.New("模型文字回复长度须为 1～32000 字")
 		}
-		result.Text = text
+		if args.ImagePlan != nil {
+			if err := args.ImagePlan.validate(); err != nil {
+				return result, err
+			}
+		}
+		result.Text, result.ImagePlan = text, args.ImagePlan
 		return result, nil
 	}
 	if calls[0].Function.Name != chatImageToolName && calls[0].Function.Name != chatEditImageToolName {
@@ -252,7 +263,7 @@ func validateChatImageCall(result chatTurnResult, calls []chatToolCall) (chatTur
 // Some compatible gateways return SSE even for stream:false. Never execute a
 // partial tool call: Responses needs response.completed, Chat needs [DONE] and
 // a completed tool_calls choice, including for reply_text.
-func parseChatToolStream(raw []byte) (chatTurnResult, error) {
+func parseChatToolStreamWith(raw []byte, validate func(chatTurnResult, []chatToolCall) (chatTurnResult, error)) (chatTurnResult, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	scanner.Buffer(make([]byte, 4096), 4<<20)
 	var calls []chatToolCall
@@ -333,13 +344,13 @@ func parseChatToolStream(raw []byte) (chatTurnResult, error) {
 		return result, errors.New("模型流式响应不完整")
 	}
 	if len(completed) > 0 {
-		return parseChatTurn(completed, "application/json")
+		return parseChatTurnWith(completed, "application/json", validate)
 	}
 	if responseTool || (len(calls) > 0 && (!done || !toolFinished)) {
 		return result, errors.New("模型工具调用未完成")
 	}
 	if len(calls) > 0 {
-		return validateChatImageCall(result, calls)
+		return validate(result, calls)
 	}
 	return result, errChatActionMissing
 }

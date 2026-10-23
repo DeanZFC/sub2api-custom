@@ -2,8 +2,8 @@
   <details class="rounded-lg border border-gray-200 p-4 dark:border-dark-700" data-quality-replay>
     <summary class="cursor-pointer font-semibold">{{ tr('title') }}</summary>
     <div class="mt-4 space-y-4">
-      <p class="text-sm text-gray-500">{{ tr('intro') }}</p>
-      <p class="text-xs text-gray-500">{{ t('admin.tests.passive.modelFilter') }}: {{ policy.model || t('admin.tests.passive.allModels') }} · {{ t(`admin.tests.passive.${policy.scope === 'account' ? 'accountScope' : 'modelScope'}`) }}</p>
+      <p class="text-sm text-gray-500">{{ tr('intro') }}</p><p v-if="policy.schema_version === 2" class="text-xs text-amber-700 dark:text-amber-300" data-cache-replay-limit>{{ t('admin.tests.passive.v2.replayHint') }}</p>
+      <p class="text-xs text-gray-500">{{ t('admin.tests.passive.modelFilter') }}: {{ policy.model || t('admin.tests.passive.' + (policy.schema_version === 2 ? policy.scope === 'model' ? 'v2.allModelsIndependent' : 'v2.allModelsAggregated' : 'allModels')) }} · {{ t(`admin.tests.passive.${policy.scope === 'account' ? 'accountScope' : 'modelScope'}`) }}</p>
       <div class="grid gap-3 sm:grid-cols-3"><label class="input-label">{{ tr('from') }}<input v-model="from" type="datetime-local" class="input mt-1 w-full" /></label><label class="input-label">{{ tr('to') }}<input v-model="to" type="datetime-local" class="input mt-1 w-full" /></label><label class="input-label">{{ tr('step') }}<input v-model.number="step" type="number" min="15" max="3600" step="1" class="input mt-1 w-full" /></label></div>
       <p class="text-xs text-gray-500">{{ tr('limits') }}</p>
       <div class="max-h-36 space-y-2 overflow-auto"><label v-for="a in choices" :key="a.id" class="flex items-center gap-2 text-sm"><input v-model="selected" type="checkbox" :value="a.id" :disabled="selected.length >= 10 && !selected.includes(a.id)" />{{ a.name }} #{{ a.id }}</label></div>
@@ -13,7 +13,7 @@
         <p class="text-sm font-medium" role="status">{{ tr('summary', { evaluations: result.evaluations, triggers: result.triggers, pending: result.pending }) }}</p>
         <ul class="list-inside list-disc space-y-1 text-xs text-amber-700 dark:text-amber-400"><li v-for="warning in result.warnings" :key="warning">{{ tr(`warnings.${warning}`) }}</li></ul>
         <label class="flex items-center gap-2 text-sm"><input v-model="changesOnly" type="checkbox" />{{ tr('changesOnly') }}</label>
-        <div class="max-h-96 overflow-auto"><table class="w-full text-left text-xs"><thead><tr><th class="p-2">{{ tr('timeAccount') }}</th><th class="p-2">{{ tr('verdict') }}</th><th class="p-2">{{ tr('metrics') }}</th><th class="p-2">{{ tr('action') }}</th></tr></thead><tbody><tr v-for="p in points" :key="`${p.account_id}-${p.at}`" class="border-t border-gray-100 dark:border-dark-800"><td class="p-2">{{ date(p.at) }}<br />#{{ p.account_id }}</td><td class="p-2">{{ tr(`verdicts.${p.verdict}`) }}<br />{{ reason(p.reason) }}</td><td class="p-2">{{ p.evidence.samples }} · {{ metric(p.evidence.error_rate, '%') }} · {{ metric(p.evidence.cache_rate, '%') }} · {{ metric(p.evidence.ttft, ' ms') }}</td><td class="p-2">{{ p.action ? tr(`actions.${p.action}`) : '—' }}<br />{{ tr('hits', { count: p.hits }) }}</td></tr><tr v-if="!points.length"><td colspan="4" class="p-4 text-center text-gray-500">{{ tr('noChanges') }}</td></tr></tbody></table></div>
+        <div class="max-h-96 overflow-auto"><table class="w-full text-left text-xs"><thead><tr><th class="p-2">{{ tr('timeAccount') }}</th><th class="p-2">{{ tr('verdict') }}</th><th class="p-2">{{ tr('metrics') }}</th><th class="p-2">{{ tr('action') }}</th></tr></thead><tbody><tr v-for="p in points" :key="`${p.account_id}-${p.model || ''}-${p.at}`" class="border-t border-gray-100 dark:border-dark-800"><td class="p-2">{{ date(p.at) }}<br />#{{ p.account_id }}<p>{{ p.model || policy.model || (policy.scope === 'account' ? t('admin.tests.passive.v2.allModelsAggregated') : '—') }}</p></td><td class="p-2">{{ tr(`verdicts.${p.verdict}`) }}<br />{{ reason(p.reason) }}</td><td class="p-2">{{ p.evidence.samples }} · {{ metric(p.evidence.error_rate, '%') }} · {{ metric(p.evidence.cache_rate, '%') }} · {{ metric(p.evidence.ttft, ' ms') }}<p v-if="p.latency">{{ t('admin.tests.passive.v2.latencyState') }}: {{ t('admin.tests.passive.v2.phases.' + p.latency.phase) }} · {{ reason(p.latency.reason) }}</p><PassiveCacheEvidence v-if="p.cache" :cache="p.cache" :config="policy.cache_protection" /></td><td class="p-2">{{ actionLabel(p.action) }}<br />{{ tr('hits', { count: p.hits }) }}</td></tr><tr v-if="!points.length"><td colspan="4" class="p-4 text-center text-gray-500">{{ tr('noChanges') }}</td></tr></tbody></table></div>
       </template>
     </div>
   </details>
@@ -22,12 +22,13 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { qualityOperationsAPI as api, type QualityReplayResult } from '@/api/admin/qualityOperations'
+import PassiveCacheEvidence from './PassiveCacheEvidence.vue'
 import type { PassivePolicy } from '@/api/admin/passiveQuality'
 import type { AccountListItem } from '@/types'
 import { useQualityLabels } from '@/composables/useQualityLabels'
 import { extractApiErrorMessage } from '@/utils/apiError'
 const props = defineProps<{ policy: PassivePolicy; accounts: AccountListItem[]; disabled?: boolean }>()
-const { t } = useI18n(), { date, reason } = useQualityLabels()
+const { t, te } = useI18n(), { date, reason } = useQualityLabels()
 const tr = (key: string, args: Record<string, unknown> = {}) => t(`admin.tests.replay.${key}`, args)
 function localTime(ms: number) { const d = new Date(ms); return new Date(ms - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 const from = ref(localTime(Date.now() - 3600000)), to = ref(localTime(Date.now())), step = ref(60), selected = ref<number[]>([])
@@ -41,6 +42,7 @@ const validation = computed(() => {
   return ''
 })
 const points = computed(() => result.value?.points.filter(p => !changesOnly.value || (p.action && p.action !== 'recovery_requires_probe')) || [])
+function actionLabel(value: string) { return value ? value.split(',').map(action => te('admin.tests.replay.actions.' + action) ? tr('actions.' + action) : action).join(' · ') : '—' }
 function metric(n: number | null, unit: string) { return n == null ? '—' : `${Math.round(n * 100) / 100}${unit}` }
 function invalidate() { generation++; controller?.abort(); controller = null; running.value = false; result.value = null; error.value = '' }
 async function run() {

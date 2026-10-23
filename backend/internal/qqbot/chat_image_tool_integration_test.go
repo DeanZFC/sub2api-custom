@@ -39,6 +39,13 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 						chats.Add(1)
 						var request map[string]any
 						require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+						var reviewBody map[string]json.RawMessage
+						encoded, _ := json.Marshal(request)
+						require.NoError(t, json.Unmarshal(encoded, &reviewBody))
+						if replyImageReviewTest(t, w, protocol, reviewBody) {
+							chats.Add(-1)
+							return
+						}
 						input, marshalErr := json.Marshal(request)
 						require.NoError(t, marshalErr)
 						require.Contains(t, string(input), "蓝紫色霓虹的猫咪海报")
@@ -127,8 +134,12 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 				_, err = s.SaveConfig(ctx, c)
 				require.NoError(t, err)
 				s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
-				previous := Job{GroupID: "group", MessageID: "previous", CreatedAt: time.Now().Add(-time.Minute)}
+				previous := Job{ID: "pending-plan", GroupID: "group", MessageID: "previous", CreatedAt: time.Now().Add(-time.Minute)}
 				require.NoError(t, s.rememberSentMessage(ctx, c, previous, []byte(`{"id":"plan","ext_info":{"ref_idx":"plan-index"}}`), "可以做一张蓝紫色霓虹的猫咪海报。", false, true))
+				_, err = db.Exec(`INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,status) VALUES('pending-plan','app','pending-plan','GROUP_AT_MESSAGE_CREATE','group','member','plan-request','{}','completed')`)
+				require.NoError(t, err)
+				_, err = db.Exec(`INSERT INTO qq_bot_pending_image_plans(app_id,group_id,member_id,job_id,source_message_id,action,prompt,request_quote,expires_at) VALUES('app','group','member','pending-plan','plan-request','generate_image','蓝紫色霓虹的猫咪海报','帮我设计猫咪海报',NOW()+INTERVAL '10 minutes')`)
+				require.NoError(t, err)
 				if scenario == "limit" {
 					_, err = db.Exec(`INSERT INTO qq_bot_daily_usage(app_id,scope,day,kind,count) VALUES('app','member:member',$1,'image',$2)`, day(time.Now()), c.DailyImageLimit)
 					require.NoError(t, err)
@@ -140,8 +151,12 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 				var kind, status, text string
 				var in, out int64
 				require.NoError(t, db.QueryRow(`SELECT kind,status,result_text,input_tokens,output_tokens FROM qq_bot_jobs WHERE message_id='current'`).Scan(&kind, &status, &text, &in, &out))
-				require.EqualValues(t, 11, in)
-				require.EqualValues(t, 7, out)
+				wantIn, wantOut := int64(11), int64(7)
+				if scenario != "text" && scenario != "disabled" && scenario != "invalid-tool" && scenario != "empty-promise" {
+					wantIn, wantOut = 22, 14
+				}
+				require.Equal(t, wantIn, in)
+				require.Equal(t, wantOut, out)
 				var chatCount, imageCount int
 				require.NoError(t, db.QueryRow(`SELECT COALESCE(SUM(count) FILTER(WHERE kind='chat'),0),COALESCE(SUM(count) FILTER(WHERE kind='image'),0) FROM qq_bot_daily_usage WHERE scope='all'`).Scan(&chatCount, &imageCount))
 				require.Equal(t, 1, chatCount)

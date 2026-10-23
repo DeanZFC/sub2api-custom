@@ -25,15 +25,15 @@ func TestQQBotImageProgressOrderAndFailures(t *testing.T) {
 		{"text", []string{"chat", "answer"}},
 		{"text-reference", []string{"chat", "answer"}},
 		{"command", []string{"progress", "generate", "notice", "image"}},
-		{"tool", []string{"chat", "progress", "generate", "notice", "image"}},
+		{"tool", []string{"chat", "review", "progress", "generate", "notice", "image"}},
 		{"read", []string{"progress", "download", "chat", "answer"}},
 		{"long-read", []string{"progress", "download", "chat", "answer", "answer", "answer", "answer"}},
-		{"edit", []string{"progress", "download", "chat", "edit", "notice", "image"}},
+		{"edit", []string{"progress", "download", "chat", "review", "edit", "notice", "image"}},
 		{"member-reference", []string{"progress", "download", "chat", "answer"}},
 		{"read-failure", []string{"progress", "download", "answer"}},
-		{"progress-failure", []string{"chat", "progress", "generate", "notice", "image"}},
-		{"progress-timeout", []string{"chat", "progress", "generate", "notice", "image"}},
-		{"limit", []string{"chat", "answer"}},
+		{"progress-failure", []string{"chat", "review", "progress", "generate", "notice", "image"}},
+		{"progress-timeout", []string{"chat", "review", "progress", "generate", "notice", "image"}},
+		{"limit", []string{"chat", "review", "answer"}},
 		{"disabled-command", []string{"answer"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,9 +57,13 @@ func TestQQBotImageProgressOrderAndFailures(t *testing.T) {
 				case "/token":
 					_, _ = w.Write([]byte(`{"access_token":"test-token","expires_in":7200}`))
 				case "/v1/chat/completions":
-					events <- "chat"
 					var body map[string]json.RawMessage
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+					if replyImageReviewTest(t, w, "chat_completions", body) {
+						events <- "review"
+						return
+					}
+					events <- "chat"
 					require.NotContains(t, string(body["messages"]), "正在处理图片，请稍候。")
 					switch tc.name {
 					case "tool", "limit", "progress-failure", "progress-timeout":
@@ -121,7 +125,7 @@ func TestQQBotImageProgressOrderAndFailures(t *testing.T) {
 			_, err = s.SaveConfig(ctx, c)
 			require.NoError(t, err)
 			s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
-			e := sharedTestEvent("request", "group", "member", "请继续")
+			e := sharedTestEvent("request", "group", "member", "请生成一只猫的图片")
 			attachment := Attachment{URL: "https://image.example/picture", ContentType: "image/png"}
 			switch tc.name {
 			case "read", "long-read", "edit", "read-failure":

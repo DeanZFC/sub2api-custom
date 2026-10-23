@@ -51,7 +51,7 @@ func (s *APIKeyRepoSuite) TestCreate() {
 
 	got, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().NoError(err, "GetByID")
-	s.Require().Equal("sk-create-test", got.Key)
+	s.Require().Equal(service.APIKeyStoredValue("sk-create-test"), got.Key)
 }
 
 func (s *APIKeyRepoSuite) TestGetByID_NotFound() {
@@ -144,7 +144,7 @@ func (s *APIKeyRepoSuite) TestUpdate() {
 
 	got, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().NoError(err, "GetByID after update")
-	s.Require().Equal("sk-update", got.Key, "Update should not change key")
+	s.Require().Equal(service.APIKeyStoredValue("sk-update"), got.Key, "Update should not change key")
 	s.Require().Equal(user.ID, got.UserID, "Update should not change user_id")
 	s.Require().Equal("Renamed", got.Name)
 	s.Require().Equal(service.StatusDisabled, got.Status)
@@ -372,7 +372,7 @@ func (s *APIKeyRepoSuite) TestCRUD_Search_ClearGroupID() {
 
 	got2, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().NoError(err, "GetByID")
-	s.Require().Equal("sk-test-1", got2.Key, "Update should not change key")
+	s.Require().Equal(service.APIKeyStoredValue("sk-test-1"), got2.Key, "Update should not change key")
 	s.Require().Equal(user.ID, got2.UserID, "Update should not change user_id")
 	s.Require().Equal("Renamed", got2.Name)
 	s.Require().Equal(service.StatusDisabled, got2.Status)
@@ -498,7 +498,7 @@ func (s *APIKeyRepoSuite) TestIncrementQuotaUsedAndGetState() {
 	s.Require().Equal(3.5, state.QuotaUsed)
 	s.Require().Equal(3.0, state.Quota)
 	s.Require().Equal(service.StatusAPIKeyQuotaExhausted, state.Status)
-	s.Require().Equal(key.Key, state.Key)
+	s.Require().Equal(service.APIKeyStoredValue(key.Key), state.Key)
 
 	got, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().NoError(err, "GetByID")

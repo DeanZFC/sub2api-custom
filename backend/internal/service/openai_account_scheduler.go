@@ -403,10 +403,25 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	ctx = withPassiveQualityRoutingModel(ctx, req.RequestedModel)
 	if s != nil && s.service != nil && s.service.openAIGroupRequiresPrivacySet(ctx, req.GroupID) {
 		req.RequirePrivacySet = true
 	}
 	start := time.Now()
+	// Cache allocation governs only new placement. Weighted sticky scoring must
+	// not migrate a healthy owner merely because its new-session share decreased.
+	if req.StickyWeighted && s != nil && s.service != nil {
+		model := passiveQualityRoutingModel(ctx, req.RequestedModel)
+		for _, id := range []int64{req.StickyPreviousAccountID, req.StickyAccountID} {
+			if id <= 0 {
+				continue
+			}
+			if owner, e := s.service.getSchedulableAccount(ctx, id); e == nil && owner != nil && owner.PassiveQualityNewSessionPercent(model) < 100 {
+				req.StickyWeighted = false
+				break
+			}
+		}
+	}
 	// 命名返回值保证 defer 写入的耗时同时返回给调用方。
 	defer func() {
 		decision.LatencyMs = time.Since(start).Milliseconds()
@@ -548,7 +563,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		clearBinding()
 		return nil, false, nil
 	}
-	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
+	if shouldClearStickySessionWithContext(ctx, account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
 		clearBinding()
 		return nil, false, nil
 	}
@@ -1451,6 +1466,8 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, int, int, float64, error) {
+	ctx = withPassiveQualityRoutingModel(ctx, req.RequestedModel)
+	ctx = withPassiveQualityAllocationSeed(ctx, req.SessionHash)
 	budget := newOpenAISelectionProbeBudget()
 	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
 	if err != nil {
@@ -1492,10 +1509,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	filtered := make([]*Account, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
 	for i := range accounts {
-		model := req.RequestedModel
-		if public, ok := RequestedPublicModelFromContext(ctx); ok && public != "" {
-			model = public
-		}
+		model := passiveQualityRoutingModel(ctx, req.RequestedModel)
 		adjusted := qualitySchedulingAccount(accounts[i], model)
 		account := &adjusted
 		if req.ExcludedIDs != nil {
@@ -1541,6 +1555,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, filterStats.summary(""))
 	}
 
+	preferred, cacheFallback := passiveQualityNewSessionTiers(ctx, filtered, req.RequestedModel, req.StickyAccountID, req.StickyPreviousAccountID, req.GuardianParentAccountID)
 	loadMap := map[int64]*AccountLoadInfo{}
 	if s.service.concurrencyService != nil {
 		if batchLoad, loadErr := s.service.concurrencyService.GetAccountsLoadBatch(ctx, loadReq); loadErr == nil {
@@ -1548,6 +1563,26 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		}
 	}
 
+	result, count, topK, skew, selectErr := s.selectByLoadBalanceCandidates(ctx, req, preferred, loadMap, budget, filterStats)
+	if len(cacheFallback) == 0 || (result != nil && (result.Acquired || result.stickySessionHit || (result.Account != nil && (result.Account.ID == req.StickyAccountID || result.Account.ID == req.StickyPreviousAccountID || result.Account.ID == req.GuardianParentAccountID)))) {
+		return result, count, topK, skew, selectErr
+	}
+	if selectErr != nil && !errors.Is(selectErr, ErrNoAvailableAccounts) && !errors.Is(selectErr, ErrNoAvailableCompactAccounts) && !errors.Is(selectErr, ErrAccountAdmissionDenied) {
+		return result, count, topK, skew, selectErr
+	}
+	fallback, fallbackCount, fallbackTopK, fallbackSkew, fallbackErr := s.selectByLoadBalanceCandidates(ctx, req, cacheFallback, loadMap, budget, filterStats)
+	if fallback != nil && (fallback.Acquired || result == nil) {
+		return fallback, fallbackCount, fallbackTopK, fallbackSkew, fallbackErr
+	}
+	if result != nil {
+		return result, count, topK, skew, selectErr
+	}
+	return fallback, fallbackCount, fallbackTopK, fallbackSkew, fallbackErr
+}
+
+// Try admitted assignments first, then a fully rechecked cache fallback before
+// returning a wait plan. Cache controls alone must never erase live capacity.
+func (s *defaultOpenAIAccountScheduler) selectByLoadBalanceCandidates(ctx context.Context, req OpenAIAccountScheduleRequest, filtered []*Account, loadMap map[int64]*AccountLoadInfo, budget *openAISelectionProbeBudget, filterStats openAISelectionFilterStats) (*AccountSelectionResult, int, int, float64, error) {
 	if req.SubscriptionPriority {
 		subscriptionAccounts, regularAccounts := partitionOpenAIChatGPTSubscriptionAccounts(filtered)
 		if len(subscriptionAccounts) > 0 {
@@ -1833,10 +1868,7 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if account == nil {
 		return false, "account_nil"
 	}
-	passiveModel := req.RequestedModel
-	if public, ok := RequestedPublicModelFromContext(ctx); ok && public != "" {
-		passiveModel = public
-	}
+	passiveModel := passiveQualityRoutingModel(ctx, req.RequestedModel)
 	if account.PassiveQualityBlocked(passiveModel) {
 		return false, "passive_quality"
 	}

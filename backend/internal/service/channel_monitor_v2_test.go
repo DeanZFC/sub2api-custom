@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -10,13 +11,14 @@ import (
 )
 
 type channelMonitorV2RepoStub struct {
-	config serviceChannelMonitorV2ConfigAlias
-	users  *ChannelMonitorV2List[ChannelMonitorV2UserRow]
-	matrix *ChannelMonitorV2Matrix
-	errors *ChannelMonitorV2List[ChannelMonitorV2ErrorRow]
-	snap   *ChannelMonitorV2Snapshot
-	group  ChannelMonitorV2GroupBy
-	admin  bool
+	config     serviceChannelMonitorV2ConfigAlias
+	users      *ChannelMonitorV2List[ChannelMonitorV2UserRow]
+	matrix     *ChannelMonitorV2Matrix
+	errors     *ChannelMonitorV2List[ChannelMonitorV2ErrorRow]
+	snap       *ChannelMonitorV2Snapshot
+	group      ChannelMonitorV2GroupBy
+	admin      bool
+	errorCalls int
 }
 
 // Alias keeps composite literals readable without introducing another package.
@@ -57,6 +59,7 @@ func (s *channelMonitorV2RepoStub) GetMatrix(_ context.Context, _ ChannelMonitor
 	return s.matrix, nil
 }
 func (s *channelMonitorV2RepoStub) GetErrors(_ context.Context, _ ChannelMonitorV2Filter, _ ChannelMonitorV2Config, admin bool) (*ChannelMonitorV2List[ChannelMonitorV2ErrorRow], error) {
+	s.errorCalls++
 	s.admin = admin
 	if s.errors != nil {
 		// Return a shallow copy so service redaction does not mutate the fixture.
@@ -158,6 +161,34 @@ func TestChannelMonitorV2MatrixForwardsGroupingAndAdminScope(t *testing.T) {
 
 	_, err = NewChannelMonitorV2Service(repo).Matrix(context.Background(), ChannelMonitorV2Filter{}, "bad", false)
 	require.ErrorIs(t, err, ErrChannelMonitorV2InvalidGroupBy)
+}
+
+func TestChannelMonitorV2RecentErrorDiagnosticsAreAdminOnly(t *testing.T) {
+	for _, admin := range []bool{true, false} {
+		t.Run(fmt.Sprint(admin), func(t *testing.T) {
+			repo := &channelMonitorV2RepoStub{
+				config: ChannelMonitorV2Config{Enabled: true},
+				matrix: &ChannelMonitorV2Matrix{Items: []ChannelMonitorV2MatrixRow{{RecentRequests: []ChannelMonitorV2RecentRequest{{
+					Status: "error", ErrorCategory: "internal",
+					Error: &ChannelMonitorV2RecentError{LogID: 42, StatusCode: 500, Message: "private diagnostic"},
+				}}}}},
+			}
+			result, err := NewChannelMonitorV2Service(repo).Matrix(context.Background(), ChannelMonitorV2Filter{}, ChannelMonitorV2GroupByPlatformGroup, admin)
+			require.NoError(t, err)
+			encoded, err := json.Marshal(result)
+			require.NoError(t, err)
+			require.Contains(t, string(encoded), `"status":"error"`)
+			if admin {
+				require.Contains(t, string(encoded), `"error_category":"internal"`)
+				require.Contains(t, string(encoded), `"log_id":42`)
+				require.Contains(t, string(encoded), "private diagnostic")
+			} else {
+				require.NotContains(t, string(encoded), `"error_category"`)
+				require.NotContains(t, string(encoded), `"error":`)
+				require.NotContains(t, string(encoded), "private diagnostic")
+			}
+		})
+	}
 }
 
 func TestChannelMonitorV2ConfigValidation(t *testing.T) {
@@ -472,7 +503,7 @@ func TestApplyIgnoredErrorsAdjustsRateOnly(t *testing.T) {
 	require.Equal(t, int64(100), m.RequestCount)
 }
 
-func TestErrorsForViewerStripsDetailsAndCountsForNonAdmin(t *testing.T) {
+func TestErrorsForViewerHidesAllErrorInformationForNonAdmin(t *testing.T) {
 	fixture := &ChannelMonitorV2List[ChannelMonitorV2ErrorRow]{
 		Items: []ChannelMonitorV2ErrorRow{{
 			Category: "timeout",
@@ -495,10 +526,9 @@ func TestErrorsForViewerStripsDetailsAndCountsForNonAdmin(t *testing.T) {
 	userList, err := svc.ErrorsForViewer(context.Background(), ChannelMonitorV2Filter{}, false)
 	require.NoError(t, err)
 	require.False(t, repo.admin)
-	require.Len(t, userList.Items, 1)
-	require.Zero(t, userList.Items[0].Count)
-	require.Empty(t, userList.Items[0].Details)
-	require.InDelta(t, 0.4, userList.Items[0].Rate, 0.0001)
+	require.NotNil(t, userList.Items)
+	require.Empty(t, userList.Items)
+	require.Zero(t, repo.errorCalls)
 
 	adminList, err := svc.ErrorsForViewer(context.Background(), ChannelMonitorV2Filter{}, true)
 	require.NoError(t, err)
@@ -506,6 +536,11 @@ func TestErrorsForViewerStripsDetailsAndCountsForNonAdmin(t *testing.T) {
 	require.Equal(t, int64(42), adminList.Items[0].Count)
 	require.Len(t, adminList.Items[0].Details, 1)
 	require.Contains(t, adminList.Items[0].Details[0].Message, "gateway timeout")
+	require.Equal(t, 1, repo.errorCalls)
+	publicList, err := svc.Errors(context.Background(), ChannelMonitorV2Filter{})
+	require.NoError(t, err)
+	require.Empty(t, publicList.Items)
+	require.Equal(t, 1, repo.errorCalls)
 }
 
 func TestSnapshotRedactsPublicConfigPolicyFields(t *testing.T) {

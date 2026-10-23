@@ -76,14 +76,14 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
 	}
 	// Each branch is capped per visible card before UNION; no global truncation
 	// can starve quiet channels. Correlated lookups use source time/group indexes.
-	query := `SELECT d.idx, recent.created_at, recent.model, recent.is_error, recent.first_token_ms, recent.duration_ms, recent.cache_rate,
-    recent.error_type, recent.error_owner, recent.error_source, recent.status_code, recent.upstream_status_code, recent.message
+	query := `SELECT d.idx, recent.id, recent.created_at, recent.model, recent.is_error, recent.first_token_ms, recent.duration_ms, recent.cache_rate,
+    recent.error_type, recent.error_owner, recent.error_source, recent.status_code, recent.upstream_status_code, recent.message, recent.error_summary
   FROM jsonb_to_recordset($4::jsonb) AS d(idx integer, platform text, group_id bigint, model text)
   CROSS JOIN LATERAL (
     (SELECT ul.created_at, ul.id, ` + usageModel + ` AS model, FALSE AS is_error, ul.first_token_ms::bigint, ul.duration_ms::bigint,
       CASE WHEN ` + channelMonitorV2CacheEligibleUL + ` THEN ul.cache_read_tokens::double precision /
         NULLIF(ul.input_tokens::bigint + ul.cache_creation_tokens::bigint + ul.cache_read_tokens::bigint, 0) END AS cache_rate,
-      ''::text AS error_type, ''::text AS error_owner, ''::text AS error_source, 0 AS status_code, 0 AS upstream_status_code, ''::text AS message
+      ''::text AS error_type, ''::text AS error_owner, ''::text AS error_source, 0 AS status_code, 0 AS upstream_status_code, ''::text AS message, ''::text AS error_summary
     FROM usage_logs ul
     LEFT JOIN groups g ON g.id = ul.group_id
     LEFT JOIN accounts a ON a.id = ul.account_id
@@ -100,7 +100,9 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
       current_error.duration_ms::bigint, NULL::double precision AS cache_rate,
       COALESCE(current_error.error_type, ''), COALESCE(current_error.error_owner, ''), COALESCE(current_error.error_source, ''),
       COALESCE(current_error.status_code, 0), COALESCE(current_error.upstream_status_code, 0),
-      CONCAT_WS(' ', current_error.error_message, current_error.upstream_error_message, current_error.upstream_error_detail, current_error.error_body)
+      CONCAT_WS(' ', current_error.error_message, current_error.upstream_error_message, current_error.upstream_error_detail, current_error.error_body),
+      COALESCE(NULLIF(TRIM(current_error.upstream_error_message), ''), NULLIF(TRIM(current_error.upstream_error_detail), ''),
+        NULLIF(TRIM(current_error.error_message), ''), current_error.error_body, '')
     FROM ops_error_logs current_error
     LEFT JOIN groups g ON g.id = current_error.group_id
     LEFT JOIN accounts a ON a.id = current_error.account_id
@@ -122,7 +124,7 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
 	return query, args, nil
 }
 
-func (r *channelMonitorV2Repository) loadChannelMonitorV2RecentRequests(ctx context.Context, filter service.ChannelMonitorV2Filter, cfg service.ChannelMonitorV2Config, items []service.ChannelMonitorV2MatrixRow) error {
+func (r *channelMonitorV2Repository) loadChannelMonitorV2RecentRequests(ctx context.Context, filter service.ChannelMonitorV2Filter, cfg service.ChannelMonitorV2Config, items []service.ChannelMonitorV2MatrixRow, admin bool) error {
 	if len(items) == 0 || channelMonitorV2RestrictedGroupScopeEmpty(filter, cfg) {
 		return nil
 	}
@@ -141,12 +143,14 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2RecentRequests(ctx cont
 	}
 	for rows.Next() {
 		var index int
+		var logID int64
+		var summary string
 		var request service.ChannelMonitorV2RecentRequest
 		var isError bool
 		var ttft, duration sql.NullInt64
 		var cacheRate sql.NullFloat64
 		var input service.ChannelMonitorV2ErrorInput
-		if err := rows.Scan(&index, &request.OccurredAt, &request.Model, &isError, &ttft, &duration, &cacheRate, &input.ErrorType, &input.ErrorOwner, &input.ErrorSource, &input.StatusCode, &input.UpstreamStatusCode, &input.Message); err != nil {
+		if err := rows.Scan(&index, &logID, &request.OccurredAt, &request.Model, &isError, &ttft, &duration, &cacheRate, &input.ErrorType, &input.ErrorOwner, &input.ErrorSource, &input.StatusCode, &input.UpstreamStatusCode, &input.Message, &summary); err != nil {
 			return err
 		}
 		if index < 0 || index >= len(items) {
@@ -170,8 +174,16 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2RecentRequests(ctx cont
 		}
 		if isError {
 			request.Status = "error"
-			request.ErrorCategory = service.ClassifyChannelMonitorV2Error(input)
-			if ignored[request.ErrorCategory] {
+			category := service.ClassifyChannelMonitorV2Error(input)
+			if admin {
+				request.ErrorCategory = category
+				request.Error = &service.ChannelMonitorV2RecentError{
+					LogID: logID, ErrorType: input.ErrorType,
+					StatusCode: input.StatusCode, UpstreamStatusCode: input.UpstreamStatusCode,
+					Message: sanitizeChannelMonitorV2ErrorDetail(summary),
+				}
+			}
+			if admin && ignored[category] {
 				request.Status = "ignored"
 			}
 		}

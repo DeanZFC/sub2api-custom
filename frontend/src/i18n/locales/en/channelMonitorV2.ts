@@ -36,6 +36,7 @@ export default {
       passive: 'Passive health', availability: 'Availability',
       latestRequest: 'Latest request: {time}', past: 'Past', now: 'Latest',
       requestTime: 'Request time: {value}', requestTTFT: 'First token: {value}', requestDuration: 'Total duration: {value}',
+      requestErrorType: 'Error type: {value}', requestErrorMessage: 'Error message: {value}', viewErrorLog: 'View full error log',
       recentRequests: 'Last 20 requests',
       healthHistory: 'Last 20 statistical intervals',
       historyLegend: 'Green → yellow → red: high to low health score · Gray: no data / insufficient samples',

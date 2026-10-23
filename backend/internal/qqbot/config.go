@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const configKey = "qq_bot_config"
@@ -97,6 +98,22 @@ func validateURL(raw string) error {
 	return nil
 }
 func validateConfig(c Config) error {
+	q := c.NotificationQuietHours
+	if q.StartHour < 0 || q.StartHour > 23 || q.EndHour < 0 || q.EndHour > 23 || (q.Enabled && q.StartHour == q.EndHour) {
+		return errors.New("通知静默开始与结束小时须在 0～23 之间且不能相同")
+	}
+	if c.Enabled && c.ImageEnabled {
+		base, key := imageConnection(c)
+		if base == "" || key == "" {
+			return errors.New("启用生图须配置可用的生图地址和密钥（或复用聊天连接）")
+		}
+	}
+	if err := validateGroupPolicies(c); err != nil {
+		return err
+	}
+	if math.IsNaN(c.RewardAlertDaily) || math.IsInf(c.RewardAlertDaily, 0) || c.RewardAlertDaily < 0 || c.RewardAlertDaily > 1000000 {
+		return errors.New("每日奖励预警线须在 0 到 1000000 USD 之间")
+	}
 	if err := validateModeration(c); err != nil {
 		return err
 	}
@@ -164,8 +181,11 @@ func validateConfig(c Config) error {
 	if c.ImageSize != "1024x1024" && c.ImageSize != "1536x1024" && c.ImageSize != "1024x1536" && c.ImageSize != "auto" {
 		return errors.New("图片尺寸不正确")
 	}
-	if c.Enabled && (c.AppID == "" || c.AppSecret == "" || c.BaseURL == "" || c.APIKey == "" || c.ChatModel == "" || len(c.AllowedGroups) == 0) {
-		return errors.New("启用前请填写 QQ 凭据、中转地址、API Key、聊天模型和允许使用的群")
+	if c.Enabled && (c.AppID == "" || c.AppSecret == "" || len(c.AllowedGroups) == 0) {
+		return errors.New("启用前请填写 QQ 凭据和允许使用的群")
+	}
+	if c.Enabled && !c.ChatDisabled && (c.BaseURL == "" || c.APIKey == "" || c.ChatModel == "") {
+		return errors.New("启用 AI 聊天前请填写中转地址、API Key 和聊天模型；也可先关闭 AI 聊天")
 	}
 	if c.Enabled && c.ImageEnabled && c.ImageModel == "" {
 		return errors.New("请填写生图模型")
@@ -182,17 +202,29 @@ func (s *Service) SaveConfig(ctx context.Context, c Config) (Config, error) {
 
 // SaveBasicConfig preserves activity settings under the same lock as invitation edits.
 func (s *Service) SaveBasicConfig(ctx context.Context, c Config) (Config, error) {
-	return s.saveConfig(ctx, func(old Config) Config {
+	return s.saveConfigChecked(ctx, func(old Config) (Config, error) {
+		if err := checkConfigVersion(ctx, old); err != nil {
+			return old, err
+		}
 		c.InviteReward = old.InviteReward
 		c.InviteDailyLimit = old.InviteDailyLimit
 		c.InviteMinRechargeTotal = old.InviteMinRechargeTotal
 		c.InviteMinRecharge30d = old.InviteMinRecharge30d
 		c.InviteRechargeWindowDays = old.InviteRechargeWindowDays
-		return c
-	})
+		c.CheckinReward = old.CheckinReward
+		c.TransferEnabled = old.TransferEnabled
+		c.TransferFeePercent = old.TransferFeePercent
+		c.TransferMinAmount = old.TransferMinAmount
+		c.TransferMaxAmount = old.TransferMaxAmount
+		return c, nil
+	}, "")
 }
 
 func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (Config, error) {
+	return s.saveConfigChecked(ctx, func(c Config) (Config, error) { return update(c), nil }, "")
+}
+
+func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Config, error), section string) (Config, error) {
 	var c Config
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -206,7 +238,11 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 	if err != nil {
 		return c, err
 	}
-	c = update(old)
+	c, err = update(old)
+	if err != nil {
+		return c, err
+	}
+	c.SectionVersions = nil
 	c.CustomCommands = normalizeCustomCommands(c.CustomCommands)
 	c.AppID = strings.TrimSpace(c.AppID)
 	c.GroupAdmins = normalizeGroupAdmins(c.GroupAdmins)
@@ -270,6 +306,23 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 	}
 	if c.AppID != "" && (c.HistoryMessages == 0 || !c.Enabled) {
 		if _, err = tx.ExecContext(ctx, `DELETE FROM qq_bot_group_messages WHERE app_id=$1`, c.AppID); err != nil {
+			return c, err
+		}
+	}
+	if section != "" {
+		history := []ConfigChange{}
+		if _, err = readActivityConfig(ctx, tx, configHistoryKey, &history); err != nil {
+			return c, err
+		}
+		history = append([]ConfigChange{{At: time.Now(), Section: section, Before: publicSection(old, section), After: publicSection(c, section)}}, history...)
+		if len(history) > 30 {
+			history = history[:30]
+		}
+		rawHistory, marshalErr := json.Marshal(history)
+		if marshalErr != nil {
+			return c, marshalErr
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`, configHistoryKey, string(rawHistory)); err != nil {
 			return c, err
 		}
 	}

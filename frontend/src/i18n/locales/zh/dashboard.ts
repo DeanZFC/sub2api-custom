@@ -66,6 +66,14 @@ export default {
 
   // API Keys
   keys: {
+    regenerate: "重新生成",
+    regenerateConfirm: "确定重新生成“{name}”吗？旧 Key 将立即失效，现有客户端需要换成新 Key。配置、已用额度和使用记录会保留。",
+    secretTitle: "请保存您的 API Key",
+    secretHint: "完整 Key 仅在本次显示。关闭后无法再次查看，请立即复制到安全位置；丢失后只能重新生成。",
+    secretSaved: "已保存，关闭",
+    secretUnavailable: "此请求已完成，明文不会再次返回。如未保存，请重新生成。",
+    guideSecretHint: "配置中的 YOUR_API_KEY 请替换成您已保存的完整 Key。完整 Key 仅在创建或重新生成时显示。",
+
     groupChannelStatus: {
       recent: '最近渠道健康状态，右侧为最新区间',
       composite: '多个平台按每个区间中最差的已知健康状态显示',

@@ -911,6 +911,8 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 // selectAccountForModelWithExclusionsStickyHit 与 selectAccountForModelWithExclusions 相同，
 // 另返回账号是否来自粘性会话命中。
 func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, bool, error) {
+	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
+	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
@@ -986,7 +988,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 
 	// 检查账号是否需要清理粘性会话
 	// Check if sticky session should be cleared
-	if shouldClearStickySession(account, requestedModel) {
+	if shouldClearStickySessionWithContext(ctx, account, requestedModel) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -1083,6 +1085,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 	if len(eligible) == 0 {
 		return nil, compactBlocked, filterStats
 	}
+	eligible = passiveQualityNewSessionCandidates(ctx, eligible, requestedModel)
 	rateOrder := openAILegacyUpstreamRateOrder{}
 	if preferLowUpstreamRate {
 		rateOrder = newOpenAILegacyUpstreamRateOrder(eligible, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
@@ -1158,6 +1161,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwarenessForAPIKeyGroup(ctx 
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {
+	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
+	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
@@ -1197,6 +1202,12 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return markStickySessionHit(selection, stickyHit), selectErr
 			}
 		}
+		if !stickyHit {
+			fallback, fallbackErr := s.tryAcquirePassiveCacheFallback(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, account.ID, requireCompact, requiredCapability, preferLowUpstreamRate)
+			if fallbackErr != nil || fallback != nil {
+				return fallback, fallbackErr
+			}
+		}
 		selection, selectErr := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 			AccountID:      account.ID,
 			MaxConcurrency: account.Concurrency,
@@ -1233,7 +1244,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if accountID > 0 && !isExcluded(accountID) {
 			account, err := s.getSchedulableAccount(ctx, accountID)
 			if err == nil {
-				clearSticky := shouldClearStickySession(account, requestedModel)
+				clearSticky := shouldClearStickySessionWithContext(ctx, account, requestedModel)
 				if clearSticky {
 					_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 				}
@@ -1404,6 +1415,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			selectionOrder = append(selectionOrder, available...)
 		}
 
+		passiveQualityOrderNewSessionLoads(ctx, selectionOrder, requestedModel, stickyAccountID)
 		for _, item := range selectionOrder {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, platform, requestedModel, false, requiredCapability)
 			if fresh == nil {
@@ -1443,6 +1455,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if requireCompact {
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
+		passiveQualityOrderNewSessionCandidates(ctx, ordered, requestedModel, stickyAccountID)
 		for _, acc := range ordered {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
 			if fresh == nil {
@@ -1493,6 +1506,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if requireCompact {
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
+	passiveQualityOrderNewSessionCandidates(ctx, candidates, requestedModel, stickyAccountID)
 	for _, acc := range candidates {
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
 		if fresh == nil {
@@ -1551,6 +1565,47 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	return accounts, nil
 }
 
+// Nonbatch scheduling normally returns a wait plan after one acquisition. Cache
+// allocation may defer peers, so try that deferred tier before waiting on a new
+// placement. selectBestAccount retains all live eligibility and policy checks.
+func (s *OpenAIGatewayService) tryAcquirePassiveCacheFallback(ctx context.Context, groupID *int64, platform, sessionHash, model string, excludedIDs map[int64]struct{}, attemptedID int64, requireCompact bool, capability OpenAIEndpointCapability, preferLowRate bool) (*AccountSelectionResult, error) {
+	accounts, err := s.listSchedulableAccounts(ctx, groupID, platform)
+	if err != nil {
+		return nil, nil
+	}
+	fallback := make([]Account, 0, len(accounts))
+	excluded := make(map[int64]struct{}, len(excludedIDs)+1)
+	for id := range excludedIDs {
+		excluded[id] = struct{}{}
+	}
+	excluded[attemptedID] = struct{}{}
+	for _, account := range accounts {
+		if !passiveQualityAllowsNewSession(ctx, &account, model) {
+			fallback = append(fallback, account)
+		}
+	}
+	for attempts := 0; attempts < len(fallback); attempts++ {
+		account, _, _ := s.selectBestAccount(ctx, groupID, platform, fallback, model, excluded, requireCompact, capability, preferLowRate)
+		if account == nil {
+			return nil, nil
+		}
+		excluded[account.ID] = struct{}{}
+		slot, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency, &account)
+		if err != nil || slot == nil || !slot.Acquired {
+			continue
+		}
+		selected, err := s.newAcquiredSelectionResult(ctx, account, slot.ReleaseFunc)
+		if err != nil {
+			return nil, err
+		}
+		if sessionHash != "" && !gatewayProfitControlGateActive(ctx) {
+			_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, account.ID, openaiStickySessionTTL)
+		}
+		return selected, nil
+	}
+	return nil, nil
+}
+
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, accounts ...**Account) (*AcquireResult, error) {
 	if s.concurrencyService == nil {
 		if len(accounts) > 0 && accounts[0] != nil && *accounts[0] != nil && len((*accounts[0]).ProxyIDs) > 1 {
@@ -1605,7 +1660,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 	if s.isOpenAIProxyStreamQuarantined(ctx, fresh) {
 		return nil
 	}
-	return fresh
+	return passiveQualitySchedulingAccount(ctx, fresh, requestedModel)
 }
 
 // parentAccountLookup 返回供 parentHealthyForShadow 使用的母账号解析闭包:经 accountRepo
@@ -1654,7 +1709,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		if s.isOpenAIProxyStreamQuarantined(ctx, account) {
 			return nil
 		}
-		return account
+		return passiveQualitySchedulingAccount(ctx, account, requestedModel)
 	}
 
 	latest, err := s.accountRepo.GetByID(ctx, account.ID)
@@ -1682,7 +1737,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if s.isOpenAIProxyStreamQuarantined(ctx, latest) {
 		return nil
 	}
-	return latest
+	return passiveQualitySchedulingAccount(ctx, latest, requestedModel)
 }
 
 func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Account, groupID *int64) bool {
@@ -1714,7 +1769,7 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 			return nil, nil
 		}
 	}
-	return account, nil
+	return passiveQualitySchedulingAccount(ctx, account, ""), nil
 }
 
 // filterGrokFreeQuotaAccountsForOpenAI applies the same local free soft-gate as
@@ -1736,7 +1791,7 @@ func (s *OpenAIGatewayService) filterOpenAIAccountsBySchedulingThreshold(ctx con
 		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, &accounts[i]) {
 			continue
 		}
-		filtered = append(filtered, accounts[i])
+		filtered = append(filtered, qualitySchedulingAccount(accounts[i], qualityRequestModel(ctx)))
 	}
 	return filtered
 }

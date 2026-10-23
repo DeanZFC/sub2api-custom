@@ -4,7 +4,6 @@ package qqbot
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -203,7 +202,11 @@ func TestLegacyRechargeWindowsAndIndependentActivitySettings(t *testing.T) {
 	s := savedBot(t, db)
 	_, err := db.Exec("UPDATE settings SET value=(value::jsonb - 'invite_recharge_window_days')::text WHERE key=$1", configKey)
 	require.NoError(t, err)
-	require.NoError(t, s.saveActivityConfig(ctx, checkinConfigKey, checkinConfigLock, json.RawMessage("{\"enabled\":true,\"min_amount\":0.1,\"max_amount\":0.1,\"min_recharge_30d\":5}")))
+	// Seed the legacy persisted shape directly so omitted fields remain absent.
+	_, err = db.Exec(`INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW())
+ ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`, checkinConfigKey,
+		`{"enabled":true,"min_amount":0.1,"max_amount":0.1,"min_recharge_30d":5}`)
+	require.NoError(t, err)
 	checkin, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 30, checkin.RechargeWindowDays)

@@ -239,8 +239,12 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 			return err
 		}
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,event_key) DO UPDATE SET event_type=EXCLUDED.event_type,payload=EXCLUDED.payload,kind='event',trigger_reason='',decision_reason=''
- WHERE EXCLUDED.event_type='GROUP_AT_MESSAGE_CREATE' AND qq_bot_jobs.kind='ambient_chat' AND qq_bot_jobs.status='queued' AND qq_bot_jobs.model_reserved_at IS NULL`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data))
+	var nickname, preview string
+	if isGroupMessageEvent(p.Type) {
+		nickname, preview = groupMemberHint(e)
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,member_nickname,message_preview) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(app_id,event_key) DO UPDATE SET event_type=EXCLUDED.event_type,payload=EXCLUDED.payload,member_nickname=EXCLUDED.member_nickname,message_preview=EXCLUDED.message_preview,kind='event',trigger_reason='',decision_reason=''
+ WHERE EXCLUDED.event_type='GROUP_AT_MESSAGE_CREATE' AND qq_bot_jobs.kind='ambient_chat' AND qq_bot_jobs.status='queued' AND qq_bot_jobs.model_reserved_at IS NULL`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data), nickname, preview)
 	if err != nil {
 		return err
 	}
@@ -260,13 +264,13 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	return nil
 }
 
-const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason`
+const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason,image_decision`
 
 type scanner interface{ Scan(...any) error }
 
 func scanJob(r scanner) (Job, error) {
 	var j Job
-	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason)
+	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason, &j.ImageDecision)
 	return j, err
 }
 func (s *Service) claimJob(ctx context.Context) (Job, error) {
@@ -285,12 +289,15 @@ func (s *Service) claimJob(ctx context.Context) (Job, error) {
 	if n >= 2 {
 		return Job{}, sql.ErrNoRows
 	}
+	// Keep each member's turns ordered within a group without making other
+	// members wait for a slow model call. The transaction lock and global cap
+	// above apply across service instances; notification pacing stays separate.
 	j, err := scanJob(tx.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM qq_bot_jobs q WHERE status='queued'
- AND (event_type NOT IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION') OR (
-   NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION') AND p.status='running')
-   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION') AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
+ AND (event_type NOT IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION') OR (
+   NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION') AND p.status='running')
+   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION') AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
  ))
- AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id) ORDER BY (kind='ambient_chat'),created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
+ AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id AND r.member_id=q.member_id) ORDER BY (kind='ambient_chat'),created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
 	if err != nil {
 		return j, err
 	}
@@ -334,7 +341,7 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 	} else if kind != "chat" {
 		return errFeatureUnavailable
 	}
-	if per == 0 || total == 0 {
+	if per == 0 || total == 0 || c.groupLimit(j.GroupID, kind) == 0 {
 		return errFeatureUnavailable
 	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,271))`, c.AppID); err != nil {
@@ -348,10 +355,13 @@ func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string
 		return errUsageCooldown
 	}
 	usageDay := day(time.Now())
-	for i, scope := range []string{"all", "member:" + j.MemberID} {
+	for i, scope := range []string{"all", "member:" + j.MemberID, "group:" + j.GroupID} {
 		limit := total
 		if i == 1 {
 			limit = per
+		}
+		if i == 2 {
+			limit = c.groupLimit(j.GroupID, kind)
 		}
 		var count int
 		err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_daily_usage(app_id,scope,day,kind,count) VALUES($1,$2,$3,$4,1)
@@ -382,7 +392,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if err != nil {
 		return "", err
 	}
-	if !current.Enabled || current.AppID != c.AppID || !current.allows(j.GroupID) {
+	if !current.Enabled || current.AppID != c.AppID || (!current.allows(j.GroupID) || current.groupPolicy(j.GroupID).DisableActivities) {
 		return "当前群未启用机器人。", nil
 	}
 	c = current
@@ -551,6 +561,11 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 
 func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {
 	out := Runtime{Groups: []Group{}, Jobs: []Job{}, Rewards: []Reward{}, EncryptionReady: s.encryptionReady}
+	var err error
+	out.RecentMembers, err = s.recentMembers(ctx, c)
+	if err != nil {
+		return out, err
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT group_id,last_event,last_seen_at FROM qq_bot_groups WHERE app_id=$1 ORDER BY last_seen_at DESC LIMIT 100`, c.AppID)
 	if err != nil {
 		return out, err
@@ -568,13 +583,13 @@ func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {
 	if err != nil {
 		return out, err
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT id,app_id,event_type,group_id,member_id,kind,status,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason FROM qq_bot_jobs WHERE app_id=$1 ORDER BY created_at DESC LIMIT 50`, c.AppID)
+	rows, err = s.db.QueryContext(ctx, `SELECT id,app_id,event_type,group_id,member_id,kind,status,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason,image_decision FROM qq_bot_jobs WHERE app_id=$1 ORDER BY created_at DESC LIMIT 50`, c.AppID)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
 		var j Job
-		if err = rows.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.Kind, &j.Status, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason); err != nil {
+		if err = rows.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.Kind, &j.Status, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason, &j.ImageDecision); err != nil {
 			_ = rows.Close()
 			return out, err
 		}

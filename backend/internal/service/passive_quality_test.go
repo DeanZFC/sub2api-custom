@@ -87,6 +87,23 @@ func TestPassiveQualityProbeModelFromEvidence(t *testing.T) {
 	require.Equal(t, "newest-success", PassiveQualitySummarize(samples[:1], time.Time{}, true).ProbeModel)
 }
 
+func TestPassiveQualityV2ModelsAreIndependentByDefault(t *testing.T) {
+	for _, model := range []string{"", "model-a"} {
+		for _, scope := range []string{"", "model", "account"} {
+			c := passiveTestConfig()
+			c.SchemaVersion, c.Model, c.Scope = 2, model, scope
+			require.NoError(t, c.Validate())
+			if scope == "account" {
+				require.Equal(t, "account", c.Scope)
+				require.False(t, c.PerModel())
+			} else {
+				require.Equal(t, "model", c.Scope)
+				require.True(t, c.PerModel())
+			}
+		}
+	}
+}
+
 func TestPassiveQualityAllModelTrialPrefilter(t *testing.T) {
 	all := map[string]any{"scope": "account", "model": "", "phase": "trial", "used": float64(0), "max_requests": float64(5), "trial_ends_at": time.Now().Add(time.Minute).Format(time.RFC3339Nano)}
 	a := &Account{Status: StatusActive, Schedulable: true, Extra: map[string]any{"passive_quality": []any{all}}}

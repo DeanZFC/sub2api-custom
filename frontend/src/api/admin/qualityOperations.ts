@@ -1,5 +1,5 @@
 import apiClient from '../client'
-import type { PassivePolicy, PassiveEvidence } from './passiveQuality'
+import type { PassivePolicy, PassiveEvidence, PassiveMetricState, PassiveCacheState } from './passiveQuality'
 export interface QualityOperationsConfig {
   version: number; budget_enabled: boolean; daily_requests: number; daily_tokens: number
   account_daily_requests: number; account_daily_tokens: number; token_reservation: number
@@ -18,7 +18,7 @@ export interface QualityOperationsSnapshot {
 }
 export interface QualityReplayRequest { config: PassivePolicy; account_ids: number[]; from: string; to: string; step_seconds: number }
 export interface QualityReplayResult {
-  points: { at: string; account_id: number; verdict: string; reason: string; action: string; hits: number; evidence: PassiveEvidence }[]
+  points: { at: string; account_id: number; model?: string; verdict: string; reason: string; action: string; hits: number; evidence: PassiveEvidence; latency?: PassiveMetricState; cache?: Record<string, PassiveCacheState> }[]
   evaluations: number; triggers: number; pending: number; warnings: string[]
 }
 export const qualityOperationsAPI = {

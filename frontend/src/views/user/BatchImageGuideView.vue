@@ -1270,7 +1270,7 @@ async function loadAvailableModels() {
 
   loadingModels.value = true
   try {
-    const result = await listBatchImageModels(key.key)
+    const result = await listBatchImageModels(key.id)
     if (requestID !== modelRequestSeq) return
     const seen = new Set<string>()
     availableBatchImageModels.value = (result.data || [])
@@ -1506,7 +1506,7 @@ async function loadBatchJobs() {
   try {
     const options = listOptions()
     const results = await Promise.all(keys.map(async (key) => {
-      const result = await listBatchImageJobs(key.key, options)
+      const result = await listBatchImageJobs(key.id, options)
       return {
         hasMore: Boolean(result.has_more),
         rows: (result.data || []).map(job => toJobRow(job, key)),
@@ -1633,7 +1633,7 @@ async function submitJob() {
 	  submitting.value = true
 	  try {
 	    const job = await submitBatchImageJob(
-	      key.key,
+	      key.id,
 	      {
 	        model: form.model,
         task_name: form.taskName.trim() || defaultTaskName(),
@@ -1666,7 +1666,7 @@ async function refreshSelected() {
   if (!key) return
   refreshing.value = true
   try {
-    const job = await getBatchImageJob(key.key, selectedBatchId.value)
+    const job = await getBatchImageJob(key.id, selectedBatchId.value)
     currentJob.value = job
     upsertJob(job)
     if (TERMINAL_STATUSES.has(job.status)) stopPolling()
@@ -1774,7 +1774,7 @@ async function cancelSelected() {
   if (!window.confirm(batchImageText('cancelConfirm'))) return
   cancelling.value = true
   try {
-    const job = await cancelBatchImageJob(key.key, currentJob.value.id)
+    const job = await cancelBatchImageJob(key.id, currentJob.value.id)
     currentJob.value = job
     upsertJob(job)
     appStore.showSuccess(batchImageText('cancelled'))
@@ -1802,7 +1802,7 @@ async function retryFailedJob(job: BatchImageJobRow | BatchImageJob) {
   if (!key) return
   retryingBatchId.value = job.id
   try {
-    const sourceItems = await ensureItemsForRetry(key.key, job.id)
+    const sourceItems = await ensureItemsForRetry(key.id, job.id)
     const failedItems = sourceItems
       .filter(item => item.status === 'failed')
       .map(item => ({ custom_id: retryCustomID(item.custom_id), prompt: String(item.prompt_preview || '').trim() }))
@@ -1812,7 +1812,7 @@ async function retryFailedJob(job: BatchImageJobRow | BatchImageJob) {
       return
     }
     const retryJob = await submitBatchImageJob(
-      key.key,
+      key.id,
       {
         model: job.model,
         task_name: `${job.task_name || defaultTaskName()} ${t('batchImage.messages.retryTaskNameSuffix')}`,
@@ -1842,7 +1842,7 @@ async function retryFailedJob(job: BatchImageJobRow | BatchImageJob) {
   }
 }
 
-async function ensureItemsForRetry(apiKey: string, batchId: string) {
+async function ensureItemsForRetry(apiKey: number, batchId: string) {
   if (selectedBatchId.value === batchId && items.value.length > 0) {
     return items.value
   }
@@ -1868,7 +1868,7 @@ async function downloadJob(job: (BatchImageJobRow | Pick<BatchImageJob, 'id'>)) 
   downloading.value = true
   downloadingBatchId.value = job.id
   try {
-    const blob = await downloadBatchImageZip(key.key, job.id)
+    const blob = await downloadBatchImageZip(key.id, job.id)
     saveBlob(blob, `${job.id}.zip`)
     markJobDownloaded(job.id)
   } catch (error: any) {
@@ -1888,7 +1888,7 @@ async function downloadSelectedJobs() {
       if (!key) continue
       downloading.value = true
       downloadingBatchId.value = row.id
-      const blob = await downloadBatchImageZip(key.key, row.id)
+      const blob = await downloadBatchImageZip(key.id, row.id)
       saveBlob(blob, `${row.id}.zip`)
       markJobDownloaded(row.id)
     }
@@ -1910,7 +1910,7 @@ async function deleteJob(job: BatchImageJobRow) {
   if (!window.confirm(batchImageText('deleteConfirm'))) return
   deletingBatchId.value = job.id
   try {
-    await deleteBatchImageJobRecord(key.key, job.id)
+    await deleteBatchImageJobRecord(key.id, job.id)
     removeJobFromList(job.id)
     appStore.showSuccess(batchImageText('deleted'))
   } catch (error: any) {
@@ -1930,7 +1930,7 @@ async function deleteSelectedJobs() {
       const key = apiKeyForJob(row)
       if (!key) continue
       deletingBatchId.value = row.id
-      await deleteBatchImageJobRecord(key.key, row.id)
+      await deleteBatchImageJobRecord(key.id, row.id)
       removeJobFromList(row.id)
     }
     appStore.showSuccess(batchImageText('deleted'))
@@ -2197,7 +2197,7 @@ async function loadItems() {
     clearItemPreviews()
     const jobs = detailJobsForBatch(batchId)
     const results = await Promise.all(jobs.map(async (job) => {
-      const result = await listBatchImageItems(key.key, job.id)
+      const result = await listBatchImageItems(key.id, job.id)
       return (result.data || []).map(item => ({
         ...item,
         batch_id: job.id,
@@ -2247,7 +2247,7 @@ async function loadItemPreview(item: BatchImageItem) {
       itemPreviewUrls[previewKey] = URL.createObjectURL(cached)
       return
     }
-    const blob = await getBatchImageItemContent(key.key, batchId, item.custom_id, 0)
+    const blob = await getBatchImageItemContent(key.id, batchId, item.custom_id, 0)
     const thumbnail = await createThumbnailBlob(blob).catch(() => blob)
     itemPreviewUrls[previewKey] = URL.createObjectURL(thumbnail)
     if (thumbnail !== blob || thumbnail.size <= 1024 * 1024) {

@@ -1,4 +1,5 @@
 import qualityExperience from './qualityExperience'
+import passiveQualityV2 from './passiveQualityV2'
 
 export default {
     tests: {
@@ -89,6 +90,18 @@ export default {
     "pending": "证据不足"
   },
   "actions": {
+    "would_cache_watch": "快速观察到缓存异常",
+    "would_cache_reduced": "新会话分配已减少",
+    "would_cache_recovery_step": "新会话分配逐步恢复",
+    "would_cache_recovered": "缓存分配已恢复",
+    "would_cache_watch_cleared": "缓存观察异常已解除",
+    "would_cache_reduced_again": "缓存再次减量",
+    "would_cache_recovery_relapsed": "缓存恢复再次异常",
+    "would_cache_pool_guard": "触发账号池防连锁",
+    "would_ttft_limited": "首字独立限流",
+    "would_ttft_watch": "观察到首字异常",
+    "would_ttft_recovered": "首字保护已恢复",
+    "would_ttft_watch_cleared": "首字观察异常已解除",
     "would_observe": "记录异常（观察模式）",
     "would_pause": "触发暂停",
     "would_limit": "触发限流",
@@ -96,6 +109,9 @@ export default {
     "recovery_requires_probe": "暂停后的恢复需要实际探测"
   },
   "warnings": {
+    "no_recorded_request_models": "部分所选账号在回放及取样时间范围内没有可识别的实际请求模型，未生成对应判定点；无记录不代表模型健康。",
+    "cache_pool_guard_not_simulated": "回放不模拟限制后的账号池容量或会话路由，缓存减量为局部证据的预计动作；实际防连锁保护可能阻止它。",
+    "cache_reuse_history_unavailable": "旧历史缺少请求发送前的复用证据，缓存保护不可回放，不推断为零或健康。",
     "policy_disabled": "当前草稿已禁用：仅评估指标，不产生预计处置动作。",
     "recorded_traffic_only": "仅使用已记录的真实请求；策略生效后会改变流量，不能据此推算准确的暂停时长或成本节省。",
     "current_membership": "使用当前账号分组与排除名单，不重建历史成员关系。",
@@ -116,6 +132,8 @@ export default {
         "coverage": "主动策略 {active} 个 · 被动策略 {passive} 个",
         "restricted": "存在调度限制",
         "limited": "限流降权中",
+        "cacheLimited": "新会话分配减少",
+        metrics: { availability: "可用率", latency: "首字", cache: "缓存复用" },
         "noHold": "未发现保护限制",
         "noEvidence": "暂无质量判定证据，可配置主动检测和被动保护。",
         "allModels": "所有模型",
@@ -135,6 +153,7 @@ export default {
                 "scheduled_tests": "按策略计划复测",
 
                 "active_tests": "等待对应主动检测或评审通过",
+                "cache_reuse_samples": "等待新的可复用真实流量，按步骤恢复新会话分配",
                 "production_samples": "等待真实请求样本持续达标",
                 "probe_then_trial": "冷却后探测，再进行限量试运行",
                 "exemption_expiry": "豁免到期后重新积累样本",
@@ -177,6 +196,7 @@ export default {
         }
 },
       passive: {
+        v2: passiveQualityV2,
         "enablePolicy": "启用",
         "disablePolicy": "停用",
         "limitedAccounts": "限流账号",
@@ -268,6 +288,7 @@ export default {
         "deleteConfirm": "删除“{name}”并解除它的保护？历史记录将保留。",
         "loadFailed": "被动保护数据加载失败",
         "phases": {
+          "cache_limited": "缓存新会话减量",
           "limited": "限流降权",
                 "healthy": "正常",
                 "insufficient": "样本不足",

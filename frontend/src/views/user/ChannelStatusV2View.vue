@@ -262,6 +262,8 @@
           :health-mode="healthMode"
           :test-results="testResults"
           :test-results-state="testResultsState"
+          :admin="isAdmin"
+          @open-error="selectedErrorId = $event"
         />
         <div
           v-else-if="loading"
@@ -335,7 +337,7 @@
             </table>
           </div>
 
-          <div v-else-if="activeTab === 'errors'" class="space-y-3">
+          <div v-else-if="isAdmin && activeTab === 'errors'" class="space-y-3">
             <div
               v-for="row in errorRows"
               :key="row.category"
@@ -456,13 +458,20 @@
         </div>
       </section>
     </div>
+    <OpsErrorDetailModal
+      v-if="isAdmin && selectedErrorId !== null"
+      :show="true"
+      :error-id="selectedErrorId"
+      error-type="request"
+      @update:show="selectedErrorId = null"
+    />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { formatMonitorCacheRate } from '@/features/channel-monitor-v2/monitorFormat'
 import { useI18n } from 'vue-i18n'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -520,6 +529,8 @@ const authStore = useAuthStore()
 const appStore = useAppStore()
 const { t, te, locale } = useI18n()
 const isAdmin = computed(() => authStore.isAdmin)
+const OpsErrorDetailModal = defineAsyncComponent(() => import('@/views/admin/ops/components/OpsErrorDetailModal.vue'))
+const selectedErrorId = ref<number | null>(null)
 /** Admins always see RPM/TPM; users honor the hide-throughput system setting. */
 const showThroughput = computed(() => isAdmin.value || !isChannelMonitorThroughputHidden())
 /** Admins always see ranking; users honor the hide-user-ranking system setting. */
@@ -534,8 +545,10 @@ const ranges = computed(() => [
 const tabs = computed(() => {
   const items: Array<{ value: Tab; label: string }> = [
     { value: 'models', label: t('channelMonitorV2.tabs.models') },
-    { value: 'errors', label: t('channelMonitorV2.tabs.errors') },
   ]
+  if (isAdmin.value) {
+    items.push({ value: 'errors', label: t('channelMonitorV2.tabs.errors') })
+  }
   if (showUserRanking.value) {
     items.push({ value: 'users', label: t('channelMonitorV2.tabs.users') })
   }
@@ -559,7 +572,7 @@ const filter = ref<MonitorFilter>({
   groupIds: csv(route.query.group).map(Number).filter(Boolean),
   models: csv(route.query.model),
 })
-const activeTab = ref<Tab>(parseTab(route.query.tab, showUserRanking.value))
+const activeTab = ref<Tab>(parseTab(route.query.tab, showUserRanking.value, isAdmin.value))
 const matrixGroupBy = ref<MonitorMatrixGroupBy>(parseMatrixGroupBy(route.query.group_by))
 const healthMode = ref<HealthMode>(parseHealthMode(route.query.health_mode))
 const trendView = ref<TrendView>(parseTrendView(route.query.trend_view))
@@ -669,8 +682,10 @@ function parseMatrixGroupBy(value: unknown): MonitorMatrixGroupBy {
   if (value === 'platform' || value === 'platform_group_model') return value
   return 'platform_group'
 }
-function parseTab(value: unknown, allowUsers: boolean): Tab {
-  const allowed: Tab[] = allowUsers ? ['models', 'errors', 'users'] : ['models', 'errors']
+function parseTab(value: unknown, allowUsers: boolean, allowErrors: boolean): Tab {
+  const allowed: Tab[] = ['models']
+  if (allowUsers) allowed.push('users')
+  if (allowErrors) allowed.push('errors')
   return allowed.includes(value as Tab) ? (value as Tab) : 'models'
 }
 function parseHealthMode(value: unknown): HealthMode {
@@ -789,7 +804,12 @@ async function loadTab(signal?: AbortSignal, id = sequence) {
       modelRows.value = ((await api.getModels(filter.value, isAdmin.value, signal)).items || [])
         .sort((a, b) => a.platform.localeCompare(b.platform) || compareMonitorModels(a.model, b.model))
     } else if (activeTab.value === 'errors') {
-      errorRows.value = (await api.getErrors(filter.value, isAdmin.value, signal)).items || []
+      if (!isAdmin.value) {
+        errorRows.value = []
+        return
+      }
+      const response = await api.getErrors(filter.value, true, signal)
+      errorRows.value = isAdmin.value ? (response.items || []) : []
     } else if (showUserRanking.value) {
       userRows.value = (await api.getUsers(filter.value, isAdmin.value, signal)).items || []
     } else {
@@ -930,6 +950,14 @@ watch(activeTab, () => {
 watch(showUserRanking, (allowed) => {
   if (!allowed && activeTab.value === 'users') {
     activeTab.value = 'models'
+  }
+})
+watch(isAdmin, (admin) => {
+  if (!admin) {
+    errorRows.value = []
+    expandedErrors.value = new Set()
+    selectedErrorId.value = null
+    if (activeTab.value === 'errors') activeTab.value = 'models'
   }
 })
 onMounted(() => void reload(false))

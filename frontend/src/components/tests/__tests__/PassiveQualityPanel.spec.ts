@@ -18,22 +18,22 @@ const makeWrapper = (tab = 'passive') => mount(PassiveQualityPanel, { props: { t
 } })
 beforeEach(() => { vi.resetAllMocks(); api.policies.mockResolvedValue([]); api.states.mockResolvedValue([]); api.events.mockResolvedValue([]); api.models.mockResolvedValue(['model']); api.save.mockResolvedValue({}) })
 describe('passive quality management', () => {
-  it('saves all models by default without requiring a model', async () => {
+  it('saves all models independently by default without requiring a model', async () => {
     const wrapper = makeWrapper(); await flushPromises(); await wrapper.get('[data-passive-create]').trigger('click')
     const dialog = wrapper.get('[data-dialog]')
     await dialog.findAll('input:not([type]), input[type="text"]')[0].setValue('Account protection')
     await dialog.findAll('label').find(l => l.text() === 'Group')!.get('input').setValue(true)
     const model = dialog.get('input[list="passive-models"]')
     expect(model.attributes('required')).toBeUndefined()
-    expect(model.attributes('placeholder')).toBe('All models')
+    expect(model.attributes('placeholder')).toBe('All models evaluated independently')
     const scope = dialog.findAll('select').find(s => s.find('option[value="account"]').exists())!
-    expect((scope.element as HTMLSelectElement).value).toBe('account')
-    expect(scope.attributes('disabled')).toBeDefined()
+    expect((scope.element as HTMLSelectElement).value).toBe('model')
+    expect(scope.attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
-    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Account protection', model: '', scope: 'account', mode: 'observe' }))
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Account protection', model: '', scope: 'model', mode: 'observe' }))
     wrapper.unmount()
   })
-  it('preserves an existing model scope until the model filter is cleared', async () => {
+  it('preserves V2 model scope when the model filter is cleared', async () => {
     api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 1, version: 2, name: 'Policy', model: 'model', scope: 'model', group_ids: [8] }])
     const wrapper = makeWrapper(); await flushPromises()
     await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
@@ -42,10 +42,10 @@ describe('passive quality management', () => {
     expect((scope.element as HTMLSelectElement).value).toBe('model')
     expect(scope.attributes('disabled')).toBeUndefined()
     await dialog.get('input[list="passive-models"]').setValue('  ')
-    expect((scope.element as HTMLSelectElement).value).toBe('account')
-    expect(scope.attributes('disabled')).toBeDefined()
+    expect((scope.element as HTMLSelectElement).value).toBe('model')
+    expect(scope.attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
-    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ id: 1, version: 2, model: '', scope: 'account' }))
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ id: 1, version: 2, model: '', scope: 'model' }))
     wrapper.unmount()
   })
   it('starts in observe mode and saves a bounded recovery policy', async () => {
@@ -56,7 +56,7 @@ describe('passive quality management', () => {
     const groupLabel = dialog.findAll('label').find(l => l.text() === 'Group')!
     await groupLabel.get('input').setValue(true); await flushPromises()
     expect(wrapper.get('[data-passive-save]').attributes('disabled')).toBeUndefined()
-    expect(dialog.text()).toContain('Observation window')
+    expect(dialog.text()).toContain('Availability / latency observation window')
     await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
     expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Protect provider', mode: 'observe', group_ids: [8], model: 'model', trial_concurrency: 1, error_rate: { enabled: true, pause: 20, recover: 5 } }))
     wrapper.unmount()
@@ -111,9 +111,10 @@ describe('passive quality management', () => {
     const wrapper = makeWrapper(); await flushPromises()
     await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
     await wrapper.get('[data-quality-profile="steady"]').trigger('click')
-    expect(wrapper.get('[data-quality-response="observe"]').attributes('aria-pressed')).toBe('true')
+    expect((wrapper.get('[data-v2-mode]').element as HTMLSelectElement).value).toBe('observe')
     expect(wrapper.get('[data-policy-preview]').text()).toContain('No scheduling changes or recovery probes')
-    await wrapper.get('[data-quality-response="limit"]').trigger('click')
+    await wrapper.get('[data-v2-mode]').setValue('enforce')
+    await wrapper.get('[data-v2-availability-action]').setValue('limit')
     expect(wrapper.get('[data-policy-preview]').text()).toContain('Concurrency cap 2')
     await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
     expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ mode: 'enforce', action: 'limit', min_samples: 60, max_samples: 200, error_rate: policy.error_rate, group_ids: [8], version: 3 }))
@@ -133,6 +134,98 @@ describe('passive quality management', () => {
     inputs[0].value = '12.345'; inputs[0].dispatchEvent(new Event('input', { bubbles: true })); await flushPromises()
     await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
     expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ ttft: { enabled: true, pause: 12345, recover: 5001 } }))
+    wrapper.unmount()
+  })
+
+  it('keeps a legacy policy unchanged until an explicit upgrade and resets upgraded drafts to observation', async () => {
+    const policy = { ...defaultPassivePolicy(), schema_version: undefined, cache_protection: undefined, ttft_action: undefined, ttft_concurrency_limit: undefined, ttft_priority_penalty: undefined, id: 10, version: 3, name: 'Legacy', group_ids: [8], mode: 'enforce' as const, cache_rate: { enabled: true, pause: 10, recover: 20 } }
+    api.policies.mockResolvedValue([policy])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    expect(wrapper.get('[data-legacy-policy]').text()).toContain('Editing does not upgrade it automatically')
+    expect(wrapper.find('[data-passive-v2-settings]').exists()).toBe(false)
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    await wrapper.get('[data-upgrade-policy]').trigger('click')
+    expect(wrapper.find('[data-legacy-policy]').exists()).toBe(false)
+    expect((wrapper.get('[data-v2-mode]').element as HTMLSelectElement).value).toBe('observe')
+    expect(wrapper.get('[data-cache-action]').findAll('option').map(o => o.attributes('value'))).toEqual(['observe', 'reduce'])
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ id: 10, version: 3, schema_version: 2, mode: 'observe', scope: 'model', cache_rate: policy.cache_rate, cache_protection: expect.objectContaining({ action: 'reduce', allocation_percent: 25 }) }))
+    wrapper.unmount()
+  })
+
+  it('blocks invalid cache controls while keeping cache windows independent of sensitivity profiles', async () => {
+    const policy = { ...defaultPassivePolicy(), id: 7, version: 1, name: 'Cache', group_ids: [8], cache_rate: { enabled: true, pause: 10, recover: 20 } }
+    api.policies.mockResolvedValue([policy])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    await wrapper.get('[data-quality-profile="responsive"]').trigger('click')
+    expect((wrapper.get('[data-cache-field="action_window.window_seconds"]').element as HTMLInputElement).value).toBe('900')
+    await wrapper.get('[data-cache-field="allocation_percent"]').setValue(0)
+    expect(wrapper.get('[data-passive-save]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-cache-field="allocation_percent"]').setValue(25)
+    await wrapper.get('[data-cache-field="action_window.window_seconds"]').setValue(120)
+    expect(wrapper.text()).toContain('at least as conservative as quick observation')
+    await wrapper.get('[data-passive-save]').trigger('click')
+    expect(api.save).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('retains legacy action editing without introducing v2 fields on a renamed policy', async () => {
+    const policy = { ...defaultPassivePolicy(), schema_version: 1, cache_protection: undefined, ttft_action: undefined, ttft_concurrency_limit: undefined, ttft_priority_penalty: undefined, id: 10, version: 3, name: 'Legacy', group_ids: [8], mode: 'enforce' as const }
+    api.policies.mockResolvedValue([policy])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    await wrapper.get('[data-dialog] input:not([type])').setValue('Legacy renamed')
+    await wrapper.get('[data-quality-response="limit"]').trigger('click')
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ schema_version: 1, name: 'Legacy renamed', mode: 'enforce', action: 'limit' }))
+    expect(api.save.mock.calls[0][0]).not.toHaveProperty('cache_protection')
+    wrapper.unmount()
+  })
+
+  it('supports explicit account scope in V2 and preserves it on ordinary edits', async () => {
+    const policy = { ...defaultPassivePolicy(), id: 7, version: 1, name: 'Account-wide', group_ids: [8], scope: 'account' as const }
+    api.policies.mockResolvedValue([policy])
+    const wrapper = makeWrapper(); await flushPromises()
+    expect(wrapper.text()).toContain('All models aggregated (entire account)')
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    const scope = wrapper.get('[data-dialog]').findAll('select').find(s => s.find('option[value="account"]').exists())!
+    expect((scope.element as HTMLSelectElement).value).toBe('account')
+    expect(scope.attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-dialog] input:not([type])').setValue('Renamed account-wide')
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ model: '', scope: 'account', schema_version: 2 }))
+    wrapper.unmount()
+  })
+
+  it('keeps legacy clearing behavior and does not enable automatic model isolation', async () => {
+    api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 8, version: 1, name: 'Legacy', group_ids: [8], schema_version: 1, model: 'A', scope: 'model' }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    await wrapper.get('input[list="passive-models"]').setValue('')
+    const scope = wrapper.get('[data-dialog]').findAll('select').find(s => s.find('option[value="account"]').exists())!
+    expect((scope.element as HTMLSelectElement).value).toBe('account')
+    expect(scope.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('renders separate models on the same account and targets actions to the selected row', async () => {
+    const base = { policy_id: 1, policy_name: 'Models', account_id: 62, scope: 'model', mode: 'enforce', phase: 'paused', reason: 'insufficient_samples', used: 0, inflight: 0, other_hold: false, evidence: { samples: 10, failures: 2, error_rate: 20, ttft: null, ttft_samples: 0, cache_rate: null, cache_samples: 0, complete: true } }
+    const a = { ...base, model: 'model-a' }, b = { ...base, model: 'model-b' }
+    api.states.mockResolvedValue([a, b])
+    const wrapper = makeWrapper('records'); await flushPromises()
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('model-a'); expect(rows[1].text()).toContain('model-b')
+    await rows[1].findAll('button').find(button => button.text() === 'Verify now')!.trigger('click'); await flushPromises()
+    expect(api.act).toHaveBeenCalledWith(b, 'verify', 0)
+    await wrapper.findAll('tbody tr')[0].findAll('button').find(button => button.text() === 'Temporary exemption')!.trigger('click')
+    expect(wrapper.get('[data-dialog]').text()).toContain('only model “model-a”')
+    await wrapper.get('[data-dialog]').findAll('button').find(button => button.text() === 'common.confirm')!.trigger('click'); await flushPromises()
+    expect(api.act).toHaveBeenLastCalledWith(a, 'exempt', 1800)
     wrapper.unmount()
   })
 

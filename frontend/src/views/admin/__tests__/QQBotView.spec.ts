@@ -1,91 +1,149 @@
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import QQBotView from '../QQBotView.vue'
 import { createI18n } from 'vue-i18n'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import QQBotView from '../QQBotView.vue'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
-
-const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), runtime: vi.fn(), bindings: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn() }))
-vi.mock('@/api/qqbot', async (importOriginal) => ({ ...await importOriginal<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
+import { configSections, pickSection, cloneConfig } from '@/components/admin/qqbot/configSections'
+import type { QQBotConfig } from '@/api/qqbot'
+const api = vi.hoisted(() => ({ config: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), bindings: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn() }))
+vi.mock('@/api/qqbot', async original => ({ ...await original<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
-vi.mock('@/components/admin/QQBotBindings.vue', () => ({ default: { template: '<section />' } }))
+const wrappers: VueWrapper[] = []
+let server: QQBotConfig
+async function mountView(locale: 'zh' | 'en' = 'zh', path = '/admin/qqbot/config') {
+ const router = createRouter({ history: createMemoryHistory(), routes: [
+  { path: '/admin/qqbot/config', component: QQBotView }, { path: '/admin/qqbot/groups', component: QQBotView }, { path: '/other', component: { template: '<p>Other</p>' } }
+ ] })
+ await router.push(path)
+ const wrapper = mount({ template: '<RouterView />' }, { attachTo: document.body, global: { plugins: [createI18n({ legacy: false, locale, messages: { zh, en } }), router] } })
+ wrappers.push(wrapper); await flushPromises(); return wrapper
+}
+async function category(w: VueWrapper, text: string) { await w.findAll('button').find(button => button.text() === text)!.trigger('click') }
 
-describe('QQ bot settings', () => {
-  it.each(['zh', 'en'] as const)('%s configures anti-spam and shows actual operation results', async (locale) => {
-    const config = await api.config()
-    api.config.mockResolvedValue({ ...config, allowed_groups: ['group', 'other-group'] })
-    api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [], bindings: 0, encryption_ready: true,
-      moderation_records: [{ id: 'incident', group_id: 'group', member_id: 'spam-member', reason: 'repeat', mute_seconds: 300,
-        created_at: '2026-10-23T10:00:00+08:00', mute_status: 'unconfirmed', recall_total: 3, recall_succeeded: 2, pending: 0,
-        error: 'QQ HTTP 403 / code 40062003' }] })
-    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
-    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-moderation').trigger('click')
-    expect((wrapper.get('[data-testid="moderation-enabled"]').element as HTMLInputElement).checked).toBe(false)
-    expect(wrapper.get('[data-testid="moderation-record"]').text()).toContain('40062003')
-    expect(wrapper.get('[data-testid="moderation-record"]').text()).toContain('2/3')
-    await wrapper.get('[data-testid="moderation-enabled"]').setValue(true)
-    await wrapper.findAll('[data-testid="moderation-group"]')[0]!.setValue(true)
-    await wrapper.get('[data-testid="moderation-repeat_count"]').setValue(5)
-    await wrapper.get('[data-testid="moderation-add-exemption"]').trigger('click')
-    await wrapper.get('[data-testid="moderation-exempt-member"]').setValue('trusted-member')
-    await wrapper.get('#qqbot-settings-tab-chat').trigger('click')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ moderation: {
-      enabled: true, groups: ['group'], repeat_window_seconds: 15, repeat_count: 5,
-      burst_window_seconds: 10, burst_count: 10, mute_minutes: 5, repeat_offense_minutes: 30,
-      escalated_mute_minutes: 30, exemptions: [{ group_id: 'group', member_id: 'trusted-member' }]
-    } }))
-    wrapper.unmount()
-  })
-
-  it('reveals invalid anti-spam limits before saving another tab', async () => {
-    const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
-    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-moderation').trigger('click')
-    await wrapper.get('[data-testid="moderation-escalated_mute_minutes"]').setValue(1)
-    await wrapper.get('#qqbot-settings-tab-chat').trigger('click')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).not.toHaveBeenCalled()
-    expect(wrapper.get('#qqbot-settings-tab-moderation').attributes('aria-selected')).toBe('true')
-    wrapper.unmount()
-  })
-
-  beforeEach(() => {
-    vi.resetAllMocks()
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    api.config.mockResolvedValue({ enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, allowed_groups: [], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_messages: 12 })
-    api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
-    api.save.mockImplementation(async (c) => c)
-  })
-  afterEach(() => {
-    try {
-      // Development logs message errors instead of throwing as production does.
-      expect(console.error).not.toHaveBeenCalled()
-    } finally {
-      vi.restoreAllMocks()
-    }
-  })
+describe('QQ module settings', () => {
+ beforeEach(() => {
+  vi.resetAllMocks()
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  server = { enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, sandbox: false, allowed_groups: ['group', 'other-group'], group_policies: [], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_base_url: '', image_api_key: '', image_api_key_set: false, image_model: '', image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_messages: 12, daily_chat_limit: 30, daily_image_limit: 2, total_daily_chat_limit: 500, total_daily_image_limit: 20, cooldown_seconds: 5, checkin_reward: 0, invite_reward: 0, invite_daily_limit: 10, custom_commands: [], section_versions: Object.fromEntries(Object.keys(configSections).map(key => [key, `${key}-1`])) }
+  api.config.mockImplementation(async () => cloneConfig(server))
+  api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
+  api.commands.mockResolvedValue([]); api.configHistory.mockResolvedValue([])
+  api.saveSection.mockImplementation(async (section: keyof typeof configSections, _version: string, draft: QQBotConfig) => { Object.assign(server, pickSection(draft, section)); server.section_versions![section] += '-next'; return cloneConfig(server) })
+ })
+ afterEach(() => { wrappers.splice(0).forEach(w => w.unmount()); try { expect(console.error).not.toHaveBeenCalled() } finally { vi.restoreAllMocks() } })
+ it.each(['zh', 'en'] as const)('%s groups navigation and saves only the selected module', async locale => {
+  const w = await mountView(locale)
+  expect(w.findAll('[role="tab"]')).toHaveLength(3)
+  expect(w.get('#qqbot-settings-panel-connection').isVisible()).toBe(true)
+  await w.get('#qqbot-settings-panel-connection input[autocomplete="off"]').setValue('unsaved-app')
+  await w.get('#qqbot-settings-tab-chat').trigger('click')
+  await w.get('[data-testid="history-messages"]').setValue(25)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSection).toHaveBeenCalledWith('chat', 'chat-1', expect.objectContaining({ history_messages: 25 }))
+  expect(server.app_id).toBe('app')
+  await w.get('#qqbot-settings-tab-connection').trigger('click')
+  expect((w.get('#qqbot-settings-panel-connection input[autocomplete="off"]').element as HTMLInputElement).value).toBe('unsaved-app')
+  expect(w.get('#qqbot-settings-tab-connection').text()).toContain('•')
+ })
+ it('does not validate unrelated drafts and keeps original revisions for unsaved modules', async () => {
+  const w = await mountView()
+  await w.get('#qqbot-settings-tab-chat').trigger('click')
+  await w.get('[data-testid="history-messages"]').setValue(101)
+  server.chat_model = 'changed-elsewhere'; server.section_versions!.chat = 'chat-2'
+  await w.get('#qqbot-settings-tab-connection').trigger('click')
+  await w.get('#qqbot-settings-panel-connection input[type="checkbox"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSection).toHaveBeenCalledWith('connection', 'connection-1', expect.anything())
+  await w.get('#qqbot-settings-tab-chat').trigger('click')
+  await w.get('[data-testid="history-messages"]').setValue(30)
+  api.saveSection.mockRejectedValueOnce(new Error('此模块已被其他页面更新'))
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSection).toHaveBeenLastCalledWith('chat', 'chat-1', expect.objectContaining({ chat_model: 'model' }))
+  expect(w.get('[role="alert"]').text()).toContain('其他页面')
+  expect((w.get('[data-testid="history-messages"]').element as HTMLInputElement).value).toBe('30')
+ })
+ it('validates the active module and protects drafts on refresh and navigation', async () => {
+  const w = await mountView()
+  await w.get('#qqbot-settings-tab-chat').trigger('click')
+  await w.get('[data-testid="history-messages"]').setValue(101)
+  const input = w.get('[data-testid="history-messages"]').element as HTMLInputElement
+  const validity = vi.spyOn(input, 'reportValidity')
+  await w.get('form').trigger('submit'); expect(validity).toHaveBeenCalledOnce(); expect(api.saveSection).not.toHaveBeenCalled()
+  const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); expect(event.defaultPrevented).toBe(true)
+  vi.spyOn(window, 'confirm').mockReturnValue(false)
+  await w.findAll('button').find(b => b.text() === '重新加载本模块')!.trigger('click'); await flushPromises()
+  expect((input).value).toBe('101')
+  await w.vm.$router.push('/other'); expect(w.vm.$route.path).toBe('/admin/qqbot/config')
+ })
+ it('saves an independent chat switch and retains zero shared history', async () => {
+  const w = await mountView()
+  await w.get('#qqbot-settings-tab-chat').trigger('click')
+  await w.get('#qqbot-settings-panel-chat input[type="checkbox"]').setValue(true)
+  await w.get('[data-testid="history-messages"]').setValue(0)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.chat_disabled).toBe(true); expect(server.history_messages).toBe(0)
+ })
+ it('requires explicit all-groups selection and saves notification scope', async () => {
+  const w = await mountView(); await category(w, '通知与额度'); await w.get('#qqbot-settings-tab-notifications').trigger('click')
+  const pickers = w.get('#qqbot-settings-panel-notifications').findAllComponents({ name: 'QQGroupPicker' })
+  await pickers[0]!.findAll('input[type="checkbox"]')[1]!.setValue(true)
+  await w.get('[data-testid="price-notifications-enabled"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.price_notifications?.groups).toEqual(['group'])
+  await pickers[0]!.findAll('input[type="checkbox"]')[1]!.setValue(false)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.price_notifications?.groups).toEqual(['group'])
+ })
+ it('presets keep autonomous participation opt-in and bounded', async () => {
+  const w = await mountView(); await category(w, '对话与指令')
+  await w.findAll('button').find(b => b.text() === '安静')!.trigger('click')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.autonomous).toMatchObject({ enabled: false, groups: [], sample_percent: 5, daily_calls: 15, daily_replies: 8 })
+ })
+ it('saves custom replies and preserves drafts on validation failure', async () => {
+  const w = await mountView(); await category(w, '对话与指令'); await w.get('#qqbot-settings-tab-commands').trigger('click')
+  const panel = w.get('#qqbot-settings-panel-commands'); await panel.findAll('button')[0]!.trigger('click')
+  await panel.get('input[placeholder="/a"]').setValue('/签到'); await panel.get('textarea').setValue('固定回复')
+  api.saveSection.mockRejectedValueOnce(new Error('与内置指令重名'))
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toContain('重名')
+  await panel.get('input[placeholder="/a"]').setValue('/faq'); await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.custom_commands).toEqual([{ command: '/faq', reply: '固定回复', enabled: true }])
+ })
+ it('shows and saves moderation only on the group page', async () => {
+  const w = await mountView('zh', '/admin/qqbot/groups')
+  expect(w.findAll('[role="tab"]')).toHaveLength(3)
+  await w.get('#qqbot-settings-tab-moderation').trigger('click')
+  await w.get('[data-testid="moderation-enabled"]').setValue(true)
+  await w.findAll('[data-testid="moderation-group"]')[0]!.setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.moderation).toMatchObject({ enabled: true, groups: ['group'] })
+ })
   it.each(['zh', 'en'] as const)('%s saves group admin identities from recent speakers and bound accounts and supports removal', async (locale) => {
     const config = await api.config()
     api.config.mockResolvedValue({ ...config, allowed_groups: ['group', 'second-group'] })
-    api.runtime.mockResolvedValue({ groups: [], jobs: [
-      { id: 'recent', group_id: 'group', member_id: 'recent-member' },
-      { id: 'duplicate', group_id: 'group', member_id: 'recent-member' },
-      { id: 'outside', group_id: 'outside', member_id: 'outsider' }
+    api.runtime.mockResolvedValue({ groups: [], jobs: [], recent_members: [
+      { group_id: 'group', member_id: 'recent-member', nickname: '', email: '', message_preview: '我是小王，确认身份 4826', last_seen_at: '2026-10-23T10:30:00+08:00' },
+      { group_id: 'group', member_id: 'recent-member', nickname: 'old name', email: '', message_preview: 'old message', last_seen_at: '2026-10-23T10:00:00+08:00' },
+      { group_id: 'outside', member_id: 'outsider', nickname: 'outside', email: '', message_preview: 'outside', last_seen_at: '2026-10-23T10:30:00+08:00' }
     ], rewards: [], bindings: 1, encryption_ready: true })
     api.bindings.mockResolvedValue({ items: [{ app_id: 'app', group_id: 'second-group', member_id: 'bound-member', nickname: 'Alice', email: 'alice@example.com' }], total: 1, page: 1, page_size: 20 })
     const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
-    let wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
+    let wrapper = await mountView(locale, '/admin/qqbot/groups')
     await flushPromises()
     await wrapper.get('#qqbot-settings-tab-group-admins').trigger('click')
     expect(wrapper.text()).toContain(i18n.global.t('qqbot.groupAdmins.help'))
-    expect(wrapper.findAll('[data-testid="group-admin-recent"] option')).toHaveLength(2)
-    await wrapper.get('[data-testid="group-admin-recent"]').setValue(JSON.stringify({ group_id: 'group', member_id: 'recent-member' }))
+    expect(wrapper.findAll('[data-testid="group-admin-recent-member"]')).toHaveLength(1)
+    const candidate = wrapper.get('[data-testid="group-admin-recent-member"]')
+    expect(candidate.text()).toContain('我是小王，确认身份 4826')
+    expect(candidate.text()).toContain(i18n.global.t('qqbot.groupAdmins.unknownNickname'))
+    expect(candidate.text()).not.toContain('old message')
+    await wrapper.get('[data-testid="group-admin-recent-search"]').setValue('no match')
+    expect(wrapper.find('[data-testid="group-admin-recent-member"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="group-admin-recent-search"]').setValue('4826')
+    await wrapper.get('[data-testid="group-admin-select-recent"]').trigger('click')
     expect(wrapper.findAll('[data-testid="group-admin-entry"]')).toHaveLength(1)
     await wrapper.get('[data-testid="group-admin-search"]').setValue('alice')
     await wrapper.get('[data-testid="group-admin-search-button"]').trigger('click')
@@ -97,272 +155,23 @@ describe('QQ bot settings', () => {
     expect(selectButton.attributes('disabled')).toBeDefined()
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    const saved = api.save.mock.calls.at(-1)![0]
+    const saved = api.saveSection.mock.calls.at(-1)![2]
     expect(saved.group_admins).toEqual([
       { app_id: 'app', group_id: 'group', member_id: 'recent-member', nickname: '' },
       { app_id: 'app', group_id: 'second-group', member_id: 'bound-member', nickname: 'Alice' }
     ])
     api.config.mockResolvedValue(saved)
     wrapper.unmount()
-    wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
+    wrapper = await mountView(locale, '/admin/qqbot/groups')
     await flushPromises()
     await wrapper.get('#qqbot-settings-tab-group-admins').trigger('click')
     expect(wrapper.findAll('[data-testid="group-admin-entry"]')).toHaveLength(2)
     await wrapper.get('[data-testid="group-admin-entry"] button').trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(api.save.mock.calls.at(-1)![0].group_admins).toEqual([saved.group_admins[1]])
+    expect(api.saveSection.mock.calls.at(-1)![2].group_admins).toEqual([saved.group_admins[1]])
     wrapper.unmount()
   })
 
-  it('supports manual member entry and never transfers an existing binding to a changed bot AppID', async () => {
-    const i18n = createI18n({ legacy: false, locale: 'en', messages: { zh, en } })
-    const wrapper = mount(QQBotView, { attachTo: document.body, global: { plugins: [i18n] } })
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-group-admins').trigger('click')
-    await wrapper.get('[data-testid="add-group-admin"]').trigger('click')
-    await wrapper.get('[data-testid="group-admin-group"]').setValue('manual-group')
-    await wrapper.get('[data-testid="group-admin-member"]').setValue('manual-member')
-    await wrapper.get('[data-testid="group-admin-nickname"]').setValue('Label')
-    await wrapper.get('#qqbot-settings-tab-connection').trigger('click')
-    await wrapper.get('#qqbot-settings-panel-connection input[autocomplete="off"]').setValue('changed-app')
-    await wrapper.get('#qqbot-settings-tab-group-admins').trigger('click')
-    expect(wrapper.get('[data-testid="group-admin-entry"] [role="alert"]').text()).toContain(i18n.global.t('qqbot.groupAdmins.appChanged'))
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    expect(api.save.mock.calls.at(-1)![0].group_admins).toEqual([{ app_id: 'app', group_id: 'manual-group', member_id: 'manual-member', nickname: 'Label' }])
-    wrapper.unmount()
-  })
-  it('saves health thresholds and recipients independently of price alerts', async () => {
-    const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
-    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-notifications').trigger('click')
-    expect((wrapper.get('[data-testid="health-enabled"]').element as HTMLInputElement).checked).toBe(false)
-    await wrapper.get('[data-testid="health-enabled"]').setValue(true)
-    await wrapper.get('[data-testid="health-groups"]').setValue('group\ngroup')
-    await wrapper.get('[data-testid="health-minimum_samples"]').setValue(75)
-    await wrapper.get('[data-testid="health-ttft_seconds"]').setValue(0)
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({
-      health_notifications: expect.objectContaining({ enabled: true, groups: ['group'], minimum_samples: 75, ttft_seconds: 0 }),
-      price_notifications: expect.objectContaining({ enabled: false })
-    }))
-    wrapper.unmount()
-  })
-  it.each(['zh', 'en'] as const)('%s saves autonomous controls and shows decision reasons', async (locale) => {
-    api.runtime.mockResolvedValue({ groups: [], jobs: [{ id: 'auto', kind: 'ambient_chat', group_id: 'group', trigger_reason: 'question', decision_reason: 'model_skip', status: 'skipped', input_tokens: 25, output_tokens: 5, created_at: '2026-10-20T01:00:00Z' }], autonomous_stats: [{ group_id: 'group', reason: 'model_calls', count: 1 }], rewards: [], bindings: 0, encryption_ready: true })
-    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
-    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-autonomous').trigger('click')
-    expect((wrapper.get('[data-testid="autonomous-enabled"]').element as HTMLInputElement).checked).toBe(false)
-    expect((wrapper.get('[data-testid="autonomous-sample_percent"]').element as HTMLInputElement).value).toBe('15')
-    await wrapper.get('[data-testid="autonomous-enabled"]').setValue(true)
-    await wrapper.get('[data-testid="autonomous-groups"]').setValue('group\ngroup')
-    await wrapper.get('[data-testid="autonomous-names"]').setValue('CTAV\n小助手')
-    await wrapper.get('[data-testid="autonomous-sample_percent"]').setValue(0)
-    await wrapper.get('[data-testid="autonomous-daily_calls"]').setValue(30)
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ autonomous: expect.objectContaining({ enabled: true, groups: ['group'], names: ['CTAV', '小助手'], sample_percent: 0, daily_calls: 30, mention_user: false }) }))
-    expect(wrapper.text()).toContain(i18n.global.t('qqbot.autonomous.reasons.model_skip'))
-    expect(wrapper.text()).toContain(i18n.global.t('qqbot.autonomous.reasons.model_calls'))
-    expect((wrapper.get('[data-testid="autonomous-daily_calls"]').element as HTMLInputElement).value).toBe('30')
-    wrapper.unmount()
-  })
-  it.each(['zh', 'en'] as const)('%s saves notification recipients and displays delivery failures', async (locale) => {
-    api.runtime.mockResolvedValue({ groups: [], jobs: [{ id: 'notice', kind: 'price_notification', group_id: 'target', created_at: '2026-10-20T01:00:00Z', status: 'delivery_failed', error: 'QQ HTTP 403 / code 40034105' }], rewards: [], bindings: 0, encryption_ready: true })
-    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
-    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-notifications').trigger('click')
-    expect((wrapper.get('[data-testid="price-notifications-enabled"]').element as HTMLInputElement).checked).toBe(false)
-    expect((wrapper.get('[data-testid="price-notifications-scheduled"]').element as HTMLInputElement).checked).toBe(true)
-    await wrapper.get('[data-testid="price-notifications-enabled"]').setValue(true)
-    await wrapper.get('[data-testid="price-notification-groups"]').setValue('target\ntarget')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ price_notifications: { enabled: true, scheduled: true, groups: ['target'] } }))
-    expect(wrapper.text()).toContain(i18n.global.t('qqbot.priceNotifications.status.delivery_failed'))
-    expect(wrapper.text()).toContain('40034105')
-    wrapper.unmount()
-  })
-  it.each(['zh', 'en'] as const)('%s renders settings and disables probes until changes are saved', async (locale) => {
-    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
-    const wrapper = mount(QQBotView, { global: { plugins: [i18n], stubs: { AppLayout: { template: '<main><slot /></main>' } } } })
-    await flushPromises()
-    expect(wrapper.text()).toContain(i18n.global.t('qqbot.eventsHelp'))
-    expect(wrapper.findAll('h2').map(heading => heading.text())).not.toContain(i18n.global.t('qqbot.inviteSettings'))
-    expect(wrapper.text()).not.toContain('qqbot.eventsHelp')
-    if (locale === 'zh') expect(wrapper.text()).toContain('活动指令和生图无需 @，普通聊天需 @ 机器人')
-    expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe('')
-    const chatButton = () => wrapper.findAll('button').find(b => b.text() === i18n.global.t('qqbot.test_chat'))!
-    expect(chatButton().attributes('disabled')).toBeUndefined()
-    await wrapper.get('#qqbot-settings-tab-chat').trigger('click')
-    await wrapper.find('input[placeholder="https://api.example.com/v1"]').setValue('https://other.invalid/v1')
-    expect(chatButton().attributes('disabled')).toBeDefined()
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ api_key: '', app_secret: '', base_url: 'https://other.invalid/v1' }))
-  })
 
-  it.each(['zh', 'en'] as const)('%s saves and reloads the shared history count, including zero', async (locale) => {
-    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
-    const mountView = () => mount(QQBotView, { global: { plugins: [i18n] } })
-    let wrapper = mountView()
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-chat').trigger('click')
-    const input = () => wrapper.get('[data-testid="history-messages"]')
-    expect((input().element as HTMLInputElement).value).toBe('12')
-    expect(input().attributes('max')).toBe('100')
-    expect(wrapper.text()).toContain(i18n.global.t('qqbot.historyHelp'))
-    for (const count of [25, 0]) {
-      await input().setValue(count)
-      await wrapper.find('form').trigger('submit')
-      await flushPromises()
-      expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ history_messages: count, system_prompt: 'Helpful' }))
-      const saved = api.save.mock.calls.at(-1)![0]
-      expect(saved).not.toHaveProperty('history_turns')
-      api.config.mockResolvedValue(saved)
-      wrapper.unmount()
-      wrapper = mountView()
-      await flushPromises()
-      await wrapper.get('#qqbot-settings-tab-chat').trigger('click')
-      expect((input().element as HTMLInputElement).value).toBe(String(count))
-    }
-    wrapper.unmount()
-  })
-
-  it('deletes an automatically discovered group without changing the allowed group input', async () => {
-    api.config.mockResolvedValue({ enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, allowed_groups: ['allowed-group'], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_messages: 12 })
-    api.runtime.mockResolvedValue({ groups: [{ id: 'discovered-group', last_event: 'GROUP_AT_MESSAGE_CREATE', last_seen_at: '2026-10-15T00:00:00Z' }], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
-    api.deleteDiscoveredGroup.mockResolvedValue({ deleted: true })
-    const i18n = createI18n({ legacy: false, locale: 'en', messages: { zh, en } })
-    const wrapper = mount(QQBotView, { global: { plugins: [i18n], stubs: { AppLayout: { template: '<main><slot /></main>' } } } })
-    await flushPromises()
-
-    const deleteButton = wrapper.findAll('button').find(button => button.text() === i18n.global.t('common.delete'))!
-    await deleteButton.trigger('click')
-    await flushPromises()
-
-    expect(api.deleteDiscoveredGroup).toHaveBeenCalledWith('discovered-group')
-    expect(wrapper.text()).not.toContain('discovered-group')
-    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('allowed-group')
-    expect(wrapper.text()).toContain(i18n.global.t('qqbot.discoveredGroupDeleted'))
-  })
-
-  it.each(['zh', 'en'] as const)('%s adds, saves, reloads, disables and deletes custom commands', async (locale) => {
-    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
-    const mountView = () => mount(QQBotView, { global: { plugins: [i18n] } })
-    let wrapper = mountView()
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-commands').trigger('click')
-    const commands = () => wrapper.find(`section[aria-label="${i18n.global.t('qqbot.customCommands')}"]`)
-    expect(commands().text()).toContain(i18n.global.t('qqbot.noCustomCommands'))
-    await commands().find('button').trigger('click')
-    await commands().find('input[placeholder="/a"]').setValue('/a')
-    await commands().find('textarea').setValue('第一行\n第二行')
-    const probe = () => wrapper.findAll('button').find(button => button.text() === i18n.global.t('qqbot.test_chat'))!
-    expect(probe().attributes('disabled')).toBeDefined()
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({
-      custom_commands: [{ command: '/a', reply: '第一行\n第二行', enabled: true }]
-    }))
-    expect(probe().attributes('disabled')).toBeUndefined()
-
-    api.config.mockResolvedValue(api.save.mock.calls[0][0])
-    wrapper.unmount()
-    wrapper = mountView()
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-commands').trigger('click')
-    expect((commands().find('textarea').element as HTMLTextAreaElement).value).toBe('第一行\n第二行')
-    await commands().find('input[type="checkbox"]').setValue(false)
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({
-      custom_commands: [{ command: '/a', reply: '第一行\n第二行', enabled: false }]
-    }))
-    await commands().find('fieldset button').trigger('click')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ custom_commands: [] }))
-    expect(commands().findAll('fieldset')).toHaveLength(0)
-    wrapper.unmount()
-  })
-
-  it('keeps the custom command draft when the server rejects a conflicting name', async () => {
-    const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
-    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
-    await flushPromises()
-    await wrapper.get('#qqbot-settings-tab-commands').trigger('click')
-    const commands = wrapper.find(`section[aria-label="${i18n.global.t('qqbot.customCommands')}"]`)
-    await commands.find('button').trigger('click')
-    await commands.find('input[placeholder="/a"]').setValue('/签到')
-    await commands.find('textarea').setValue('固定回复')
-    api.save.mockRejectedValueOnce({ message: '自定义指令 /签到 与内置指令重名' })
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(wrapper.find('[role="alert"]').text()).toContain('与内置指令重名')
-    expect((commands.find('input[placeholder="/a"]').element as HTMLInputElement).value).toBe('/签到')
-    expect((commands.find('textarea').element as HTMLTextAreaElement).value).toBe('固定回复')
-    wrapper.unmount()
-  })
-
-  it('preserves edits across tabs and saves all categories together', async () => {
-    const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
-    const wrapper = mount(QQBotView, { attachTo: document.body, global: { plugins: [i18n] } })
-    await flushPromises()
-
-    expect(wrapper.findAll('[role="tabpanel"]').filter(panel => panel.isVisible()).map(panel => panel.attributes('id'))).toEqual(['qqbot-settings-panel-connection'])
-    await wrapper.get('#qqbot-settings-panel-connection input[autocomplete="off"]').setValue('updated-app')
-    for (const tab of wrapper.findAll('[role="tab"]')) {
-      await tab.trigger('click')
-      expect(tab.attributes('aria-selected')).toBe('true')
-      const visiblePanels = wrapper.findAll('[role="tabpanel"]').filter(panel => panel.isVisible())
-      expect(visiblePanels).toHaveLength(1)
-      expect(visiblePanels[0]!.attributes('id')).toBe(tab.attributes('aria-controls'))
-    }
-    await wrapper.get('#qqbot-settings-tab-autonomous').trigger('click')
-    await wrapper.get('[data-testid="autonomous-names"]').setValue('New bot name')
-    await wrapper.get('#qqbot-settings-tab-chat').trigger('click')
-    await wrapper.get('[data-testid="history-messages"]').setValue(25)
-    await wrapper.get('#qqbot-settings-tab-connection').trigger('click')
-    expect((wrapper.get('#qqbot-settings-panel-connection input[autocomplete="off"]').element as HTMLInputElement).value).toBe('updated-app')
-    expect(api.save).not.toHaveBeenCalled()
-    expect(api.probe).not.toHaveBeenCalled()
-
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ app_id: 'updated-app', history_messages: 25, autonomous: expect.objectContaining({ names: ['New bot name'] }) }))
-    expect(wrapper.get('#qqbot-settings-tab-connection').attributes('aria-selected')).toBe('true')
-    wrapper.unmount()
-  })
-
-  it.each(['chat', 'autonomous', 'commands', 'group-admins'] as const)('opens the %s tab when a hidden field is invalid before saving', async (tab) => {
-    const i18n = createI18n({ legacy: false, locale: 'en', messages: { zh, en } })
-    const wrapper = mount(QQBotView, { attachTo: document.body, global: { plugins: [i18n] } })
-    await flushPromises()
-    await wrapper.get(`#qqbot-settings-tab-${tab}`).trigger('click')
-    if (tab === 'chat') await wrapper.get('[data-testid="history-messages"]').setValue(101)
-    if (tab === 'autonomous') await wrapper.get('[data-testid="autonomous-enabled"]').setValue(true)
-    if (tab === 'commands') await wrapper.get('#qqbot-settings-panel-commands button').trigger('click')
-    if (tab === 'group-admins') await wrapper.get('[data-testid="add-group-admin"]').trigger('click')
-    const panel = wrapper.get(`#qqbot-settings-panel-${tab}`)
-    const input = panel.get('input:invalid, textarea:invalid').element as HTMLInputElement | HTMLTextAreaElement
-    const reportValidity = vi.spyOn(input, 'reportValidity')
-    await wrapper.get('#qqbot-settings-tab-connection').trigger('click')
-    expect(panel.isVisible()).toBe(false)
-
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
-    expect(api.save).not.toHaveBeenCalled()
-    expect(panel.isVisible()).toBe(true)
-    expect(wrapper.get(`#qqbot-settings-tab-${tab}`).attributes('aria-selected')).toBe('true')
-    expect(reportValidity).toHaveBeenCalledOnce()
-    wrapper.unmount()
-  })
 })

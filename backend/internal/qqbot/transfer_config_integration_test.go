@@ -43,3 +43,18 @@ func TestTransferConfigPreservesUnrelatedSettingsAndRejectsInvalidUpdates(t *tes
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
+
+func TestBasicConfigDoesNotOverwriteNewerTransferSettings(t *testing.T) {
+	ctx := context.Background()
+	s := savedBot(t, testDB(t))
+	stale, err := s.Config(ctx)
+	require.NoError(t, err)
+	want := TransferConfig{TransferEnabled: true, TransferFeePercent: 3, TransferMinAmount: 1, TransferMaxAmount: 50}
+	require.NoError(t, s.SaveTransferConfig(ctx, want))
+	stale.SystemPrompt = "updated prompt"
+	_, err = s.SaveBasicConfig(ctx, stale)
+	require.NoError(t, err)
+	got, err := s.TransferConfig(ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}

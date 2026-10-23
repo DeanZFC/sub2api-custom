@@ -233,6 +233,7 @@ func TestQQBotSaveConfigAcceptsFullCustomCommandList(t *testing.T) {
 	cfg := qqbot.DefaultConfig()
 	old, err := json.Marshal(cfg)
 	require.NoError(t, err)
+	version := qqbot.ConfigVersion(cfg)
 	cfg.HistoryMessages = 25
 	for i := 0; i < 20; i++ {
 		cfg.CustomCommands = append(cfg.CustomCommands, qqbot.CustomCommand{
@@ -253,6 +254,7 @@ func TestQQBotSaveConfigAcceptsFullCustomCommandList(t *testing.T) {
 	r.PUT("/config", h.SaveConfig)
 	req := httptest.NewRequest(http.MethodPut, "/config", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", "\""+version+"\"")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)

@@ -740,6 +740,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err
 	}
+	capturePassiveQualityCacheHTTPRequest(c, account, req)
 	return req, nil
 }
 

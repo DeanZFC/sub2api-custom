@@ -52,7 +52,7 @@ func (s *Service) processGrowthTasks(ctx context.Context, c Config, j Job, at ti
 	if err != nil {
 		return "", 0, err
 	}
-	if !current.Enabled || current.AppID != c.AppID || !current.allows(j.GroupID) {
+	if !current.Enabled || current.AppID != c.AppID || (!current.allows(j.GroupID) || current.groupPolicy(j.GroupID).DisableActivities) {
 		return "当前群未启用机器人。", 0, nil
 	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {

@@ -51,6 +51,10 @@ func TestQQBotEditsExactReferencedImage(t *testing.T) {
 						chats.Add(1)
 						var body map[string]json.RawMessage
 						require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+						if replyImageReviewTest(t, w, protocol, body) {
+							chats.Add(-1)
+							return
+						}
 						key := "messages"
 						if protocol == "responses" {
 							key = "input"

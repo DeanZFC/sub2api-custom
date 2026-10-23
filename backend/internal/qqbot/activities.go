@@ -118,14 +118,17 @@ func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 	if err := validateRechargeRequirement(c.RechargeRequirement); err != nil {
 		return err
 	}
-	_, err := s.saveConfig(ctx, func(old Config) Config {
+	_, err := s.saveConfigChecked(ctx, func(old Config) (Config, error) {
+		if err := checkConfigVersion(ctx, inviteConfigOf(old)); err != nil {
+			return old, err
+		}
 		old.InviteReward = c.InviteReward
 		old.InviteDailyLimit = c.InviteDailyLimit
 		old.InviteMinRechargeTotal = c.MinRechargeTotal
 		old.InviteMinRecharge30d = c.MinRecharge30d
 		old.InviteRechargeWindowDays = c.windowDays()
-		return old
-	})
+		return old, nil
+	}, "")
 	return err
 }
 func validateCheckin(c CheckinConfig) error {
@@ -182,16 +185,60 @@ func validateLotteryPrizes(prizes []LotteryPrize) error {
 	return nil
 }
 func (s *Service) saveActivityConfig(ctx context.Context, key string, lock int64, c any) error {
-	raw, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, lock); err != nil {
+		return err
+	}
+	switch key {
+	case checkinConfigKey:
+		bot, e := s.loadConfig(ctx, tx)
+		if e != nil {
+			return e
+		}
+		current, e := loadCheckinConfig(ctx, tx, bot.CheckinReward)
+		if e != nil {
+			return e
+		}
+		section, _ := ctx.Value(checkinSectionContextKey{}).(string)
+		if e = checkCheckinVersion(ctx, current, section); e != nil {
+			return e
+		}
+		next, ok := c.(CheckinConfig)
+		if !ok {
+			return errors.New("invalid checkin configuration")
+		}
+		switch section {
+		case "checkin":
+			next.Growth = current.Growth
+		case "tasks":
+			current.Growth.Tasks = next.Growth.Tasks
+			next = current
+		case "periodic_tasks":
+			current.Growth.PeriodicTasks = next.Growth.PeriodicTasks
+			next = current
+		case "":
+		default:
+			return errors.New("未知活动配置模块")
+		}
+		if e = validateCheckin(next); e != nil {
+			return e
+		}
+		c = next
+	case lotteryConfigKey:
+		current, e := loadLotteryConfig(ctx, tx)
+		if e != nil {
+			return e
+		}
+		if e = checkConfigVersion(ctx, current); e != nil {
+			return e
+		}
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`, key, string(raw)); err != nil {
@@ -267,12 +314,15 @@ func (s *Service) TransferConfig(ctx context.Context) (TransferConfig, error) {
 }
 
 func (s *Service) SaveTransferConfig(ctx context.Context, cfg TransferConfig) error {
-	_, err := s.saveConfig(ctx, func(old Config) Config {
+	_, err := s.saveConfigChecked(ctx, func(old Config) (Config, error) {
+		if err := checkConfigVersion(ctx, transferConfigOf(old)); err != nil {
+			return old, err
+		}
 		old.TransferEnabled = cfg.TransferEnabled
 		old.TransferFeePercent = cfg.TransferFeePercent
 		old.TransferMinAmount = cfg.TransferMinAmount
 		old.TransferMaxAmount = cfg.TransferMaxAmount
-		return old
-	})
+		return old, nil
+	}, "")
 	return err
 }

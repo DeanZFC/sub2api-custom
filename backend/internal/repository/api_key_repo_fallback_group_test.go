@@ -64,5 +64,5 @@ func TestAPIKeyRepository_GetByKeyForAuthLoadsFallbackGroup(t *testing.T) {
 
 	keys, err := repo.ListKeysByGroupID(ctx, fallback.ID)
 	require.NoError(t, err)
-	require.Equal(t, []string{key.Key}, keys)
+	require.Equal(t, []string{service.APIKeyStoredValue(key.Key)}, keys)
 }

@@ -201,7 +201,7 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 	if err != nil {
 		return "", err
 	}
-	if !current.Enabled || current.AppID != c.AppID || !current.allows(j.GroupID) {
+	if !current.Enabled || current.AppID != c.AppID || (!current.allows(j.GroupID) || current.groupPolicy(j.GroupID).DisableActivities) {
 		return "当前群未启用机器人。", nil
 	}
 	cfg, err := loadLotteryConfig(ctx, tx)

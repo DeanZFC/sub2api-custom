@@ -15,11 +15,13 @@ import (
 
 type passiveHandlerRepo struct {
 	service.PassiveQualityRepository
-	saved    int
-	actions  int
-	action   string
-	seconds  int
-	conflict bool
+	saved         int
+	actions       int
+	action        string
+	seconds       int
+	model         string
+	modelRequired bool
+	conflict      bool
 }
 
 func (r *passiveHandlerRepo) SavePolicy(_ context.Context, p *service.PassiveQualityPolicy) error {
@@ -30,10 +32,16 @@ func (r *passiveHandlerRepo) SavePolicy(_ context.Context, p *service.PassiveQua
 	p.ID = 5
 	return nil
 }
-func (r *passiveHandlerRepo) Act(_ context.Context, _, _ int64, action string, seconds int) error {
+func (r *passiveHandlerRepo) Act(_ context.Context, _, _ int64, action string, seconds int, models ...string) error {
+	if r.modelRequired && (len(models) == 0 || models[0] == "") {
+		return service.ErrPassiveQualityModelRequired
+	}
 	r.actions++
 	r.action = action
 	r.seconds = seconds
+	if len(models) > 0 {
+		r.model = models[0]
+	}
 	return nil
 }
 func TestPassiveQualityAdminValidation(t *testing.T) {
@@ -67,6 +75,14 @@ func TestPassiveQualityAdminValidation(t *testing.T) {
 	require.Contains(t, response.Body.String(), `"model":""`)
 	require.Contains(t, response.Body.String(), `"scope":"account"`)
 	require.Equal(t, 2, repo.saved)
+	cfg.SchemaVersion, cfg.Scope = 2, ""
+	raw, err = json.Marshal(cfg)
+	require.NoError(t, err)
+	response = request("/policies", string(raw), http.MethodPost)
+	require.Equal(t, 200, response.Code)
+	require.Contains(t, response.Body.String(), `"scope":"model"`)
+	require.Contains(t, response.Body.String(), `"model":""`)
+	require.Equal(t, 3, repo.saved)
 	repo.conflict = true
 	require.Equal(t, 409, request("/policies/5", string(raw), http.MethodPut).Code)
 	for _, body := range []string{`{"action":"resume"}`, `{"action":"exempt","seconds":0}`, `{"action":"exempt","seconds":86401}`} {
@@ -77,4 +93,8 @@ func TestPassiveQualityAdminValidation(t *testing.T) {
 	require.Equal(t, "verify", repo.action)
 	require.Equal(t, 204, request("/policies/5/accounts/62/action", `{"action":"exempt","seconds":900}`, http.MethodPost).Code)
 	require.Equal(t, 900, repo.seconds)
+	repo.modelRequired = true
+	require.Equal(t, 400, request("/policies/5/accounts/62/action", `{"action":"verify"}`, http.MethodPost).Code)
+	require.Equal(t, 204, request("/policies/5/accounts/62/action", `{"action":"exempt","seconds":900,"model":" model-b "}`, http.MethodPost).Code)
+	require.Equal(t, "model-b", repo.model)
 }
