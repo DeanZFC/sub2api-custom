@@ -539,6 +539,20 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	requestBody []byte,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
+	return s.handleErrorResponseWithHTTPObservation(ctx, resp, c, account, requestBody, true, requestedModel...)
+}
+
+// Compact SSE failures can be represented as synthetic HTTP responses. Keep
+// that provenance explicit when they share normal HTTP error handling.
+func (s *OpenAIGatewayService) handleErrorResponseWithHTTPObservation(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	requestBody []byte,
+	httpResponseObserved bool,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
@@ -593,6 +607,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		}
 		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, billingDetail)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			upstreamHTTPResponseObserved: httpResponseObserved,
+
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -631,6 +647,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 
 	if isOpenAIRequestBodyTooLargeError(resp.StatusCode, upstreamMsg, body) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			upstreamHTTPResponseObserved: httpResponseObserved,
+
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -680,6 +698,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	// Check custom error codes
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			upstreamHTTPResponseObserved: httpResponseObserved,
+
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -719,6 +739,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		kind = "failover"
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		upstreamHTTPResponseObserved: httpResponseObserved,
+
 		ProxyID:            opsUpstreamProxyID(account),
 		ProxyName:          opsUpstreamProxyName(account),
 		Platform:           account.Platform,
@@ -858,6 +880,8 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	if IsUpstreamBillingError(resp.StatusCode, body) {
 		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			upstreamHTTPResponseObserved: true,
+
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -902,6 +926,8 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	// return a generic error without exposing upstream details.
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			upstreamHTTPResponseObserved: true,
+
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -934,6 +960,8 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		kind = "failover"
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		upstreamHTTPResponseObserved: true,
+
 		ProxyID:            opsUpstreamProxyID(account),
 		ProxyName:          opsUpstreamProxyName(account),
 		Platform:           account.Platform,

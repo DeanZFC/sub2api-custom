@@ -460,6 +460,11 @@ type OpsUpstreamErrorEvent struct {
 	UpstreamStatusCode int    `json:"upstream_status_code,omitempty"`
 	UpstreamRequestID  string `json:"upstream_request_id,omitempty"`
 
+	// upstreamHTTPResponseObserved is set only where an actual HTTP error
+	// response was received. Logical SSE/WS statuses and local transport errors
+	// must not use it to survive downstream cancellation in passive capture.
+	upstreamHTTPResponseObserved bool
+
 	// UpstreamURL is the actual upstream URL that was called (host + path, query/fragment stripped).
 	// Helps debug 404/routing errors by showing which endpoint was targeted.
 	UpstreamURL string `json:"upstream_url,omitempty"`

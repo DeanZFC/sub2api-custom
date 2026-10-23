@@ -246,7 +246,13 @@ func (s *PassiveQualityService) Capture() gin.HandlerFunc {
 		}))
 		PassiveQualityBeginTurn(c)
 		c.Set(passiveQualityCaptureKey, func(ev OpsUpstreamErrorEvent) {
-			if !s.enabled.Load() || c.Request == nil || c.Request.Context().Err() != nil || ev.AccountID <= 0 || !PassiveQualityUpstreamFailure(ev) {
+			if !s.enabled.Load() || c.Request == nil || ev.AccountID <= 0 || !PassiveQualityUpstreamFailure(ev) {
+				return
+			}
+			// A detached upstream can return an HTTP failure after the client has
+			// disconnected. Keep that independent evidence, but continue rejecting
+			// cancellation-derived transport errors and logical stream statuses.
+			if c.Request.Context().Err() != nil && (!ev.upstreamHTTPResponseObserved || ev.UpstreamStatusCode == 0) {
 				return
 			}
 			if strings.Contains(c.Request.URL.Path, "count_tokens") {
