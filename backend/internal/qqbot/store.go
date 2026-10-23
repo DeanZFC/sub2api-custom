@@ -131,6 +131,16 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		outcome, reason = "ignored", "invalid_group"
 		return nil
 	}
+	if isGroupMessageEvent(p.Type) {
+		blocked, moderationErr := s.moderateIncoming(ctx, c, e)
+		if moderationErr != nil {
+			return moderationErr
+		}
+		if blocked {
+			outcome, reason = "ignored", "moderation_blocked"
+			return nil
+		}
+	}
 	// Disabled/unapproved ambient streams do not touch storage. Enabled groups
 	// record their bounded shared context below without creating model jobs.
 	if e.Author.Bot || (p.Type == groupMessageCreate && !shouldQueueGroupMessage(p.Type, e, c.CustomCommands...) && (!c.Enabled || !c.allows(e.GroupID) || (c.HistoryMessages == 0 && !c.autonomousGroup(e.GroupID) && !c.ImageEnabled))) {
@@ -593,6 +603,10 @@ func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {
 		return out, err
 	}
 	out.AutonomousStats, err = s.autonomousStats(ctx, c)
+	if err != nil {
+		return out, err
+	}
+	out.ModerationRecords, err = s.moderationRecords(ctx, c)
 	if err != nil {
 		return out, err
 	}

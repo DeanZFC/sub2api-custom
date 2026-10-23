@@ -7,10 +7,10 @@
     </div>
     <p v-if="loadError" role="alert" class="text-sm text-red-600">{{ loadError }} <button class="underline" @click="refresh">{{ t('common.retry') }}</button></p>
     <section v-if="tab === 'passive'" class="space-y-4">
-      <div class="flex flex-wrap items-center justify-between gap-3"><p class="max-w-3xl text-sm text-gray-500">{{ tr('intro') }}</p><button class="btn btn-primary" data-passive-create @click="edit()">{{ t('common.create') }}</button></div>
+      <div class="flex flex-wrap items-center justify-between gap-3"><p class="max-w-3xl text-sm text-gray-500">{{ tr('intro') }}</p><button class="btn btn-primary" data-passive-create @click="edit()">{{ q('createTraffic') }}</button></div>
       <div v-if="!policies.length && !loading" class="rounded-lg border border-dashed p-8 text-center text-gray-500">{{ tr('empty') }}</div>
       <article v-for="policy in policies" :key="policy.id" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
-        <div class="flex flex-wrap items-center justify-between gap-3"><div class="flex items-center gap-2"><strong>{{ policy.name }}</strong><span class="badge badge-gray">{{ tr(policy.mode) }}</span><span class="badge badge-gray">{{ tr(policy.action === 'limit' ? 'actionLimit' : 'actionPause') }}</span><span class="badge" :class="policy.enabled ? 'badge-success' : 'badge-gray'">{{ t(policy.enabled ? 'common.enabled' : 'common.disabled') }}</span></div><div class="flex gap-2"><button class="btn btn-secondary btn-sm" :disabled="busy" @click="toggle(policy)">{{ tr(policy.enabled ? 'disablePolicy' : 'enablePolicy') }}</button><button class="btn btn-secondary btn-sm" @click="edit(policy)">{{ t('common.edit') }}</button><button class="btn btn-secondary btn-sm" @click="showPolicy(policy)">{{ tr('records') }}</button><button class="btn btn-secondary btn-sm text-red-600" :disabled="busy" @click="remove(policy)">{{ t('common.delete') }}</button></div></div>
+        <div class="flex flex-wrap items-center justify-between gap-3"><div class="flex items-center gap-2"><strong>{{ policy.name }}</strong><span class="badge badge-gray">{{ tr(policy.mode) }}</span><span v-if="policy.mode === 'enforce'" class="badge badge-gray">{{ tr(policy.action === 'limit' ? 'actionLimit' : 'actionPause') }}</span><span class="badge" :class="policy.enabled ? 'badge-success' : 'badge-gray'">{{ t(policy.enabled ? 'common.enabled' : 'common.disabled') }}</span></div><div class="flex gap-2"><button class="btn btn-secondary btn-sm" :disabled="busy" @click="toggle(policy)">{{ tr(policy.enabled ? 'disablePolicy' : 'enablePolicy') }}</button><button class="btn btn-secondary btn-sm" @click="edit(policy)">{{ t('common.edit') }}</button><button class="btn btn-secondary btn-sm" @click="showPolicy(policy)">{{ tr('records') }}</button><button class="btn btn-secondary btn-sm text-red-600" :disabled="busy" @click="remove(policy)">{{ t('common.delete') }}</button></div></div>
         <p class="text-sm text-gray-600 dark:text-gray-300">{{ describe(policy) }}</p><p class="text-xs text-gray-500">{{ policy.group_ids.map(id => groups.find(g => g.id === id)?.name || `#${id}`).join(' / ') }} · {{ policy.model || tr('allModels') }} · {{ tr(policy.scope === 'account' ? 'accountScope' : 'modelScope') }}</p>
       </article>
     </section>
@@ -36,20 +36,44 @@
     </section>
 
     <BaseDialog :show="!!editing" :title="tr('editorTitle')" width="wide" @close="editing = null">
-      <form v-if="editing" class="space-y-5" @submit.prevent="save">
-        <div class="grid gap-4 sm:grid-cols-2"><label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editing.name" class="input mt-1 w-full" maxlength="160" required /></label><label class="input-label">{{ tr('mode') }}<select v-model="editing.mode" class="input mt-1 w-full"><option value="observe">{{ tr('observe') }}</option><option value="enforce">{{ tr('enforce') }}</option></select></label><label class="flex items-center gap-2 text-sm"><input v-model="editing.enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
-        <fieldset><legend class="mb-2 font-semibold">{{ tr('target') }}</legend><div class="flex max-h-40 flex-wrap gap-3 overflow-auto"><label v-for="group in groups.filter(g => g.status === 'active' && g.platform !== 'composite')" :key="group.id" class="flex items-center gap-2 text-sm"><input v-model="editing.group_ids" type="checkbox" :value="group.id" :disabled="!editing.group_ids.includes(group.id) && !groupCompatible(group)" />{{ group.name }}</label></div>
+      <form v-if="editing" class="space-y-6" @submit.prevent="save">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <label class="input-label min-w-0 flex-1">{{ t('admin.tests.name') }}<input v-model.trim="editing.name" class="input mt-1 w-full" maxlength="160" required /></label>
+          <label class="flex items-center gap-2 py-2 text-sm"><input v-model="editing.enabled" type="checkbox" />{{ t('common.enabled') }}</label>
+        </div>
+        <fieldset><legend class="mb-2 font-semibold">{{ q('scopeStep') }}</legend><div class="flex max-h-40 flex-wrap gap-3 overflow-auto"><label v-for="group in groups.filter(g => g.status === 'active' && g.platform !== 'composite')" :key="group.id" class="flex items-center gap-2 text-sm"><input v-model="editing.group_ids" type="checkbox" :value="group.id" :disabled="!editing.group_ids.includes(group.id) && !groupCompatible(group)" />{{ group.name }}</label></div>
+          <p class="mt-3 text-xs text-gray-500">{{ q('scopeEmpty') }}</p>
+          <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">{{ q('scopeSummary', { groups: editing.group_ids.length, accounts: coveredAccounts }) }}</p>
+          <details :open="!!editing.model || !!editing.excluded_account_ids.length" class="mt-3 rounded-lg border border-gray-200 p-3 dark:border-dark-700"><summary class="cursor-pointer text-sm font-medium">{{ q('scopeAdvanced') }}</summary>
           <div class="mt-3 grid gap-3 sm:grid-cols-2"><label class="input-label">{{ tr('modelFilter') }}<input v-model.trim="editing.model" list="passive-models" class="input mt-1 w-full" :placeholder="tr('allModels')" maxlength="200" /><datalist id="passive-models"><option v-for="model in modelChoices" :key="model" :value="model" /></datalist></label><label class="input-label">{{ tr('scope') }}<select v-model="editing.scope" :disabled="!editing.model" class="input mt-1 w-full"><option value="model" :disabled="!editing.model">{{ tr('modelScope') }}</option><option value="account">{{ tr('accountScope') }}</option></select></label></div>
           <p class="mt-2 text-xs text-gray-500">{{ tr('modelFilterHint') }}</p>
           <details class="mt-3 text-sm"><summary class="cursor-pointer">{{ t('admin.tests.excludedAccounts') }} ({{ editing.excluded_account_ids.length }})</summary><input v-model="accountSearch" type="search" class="input my-2 w-full" :placeholder="t('admin.tests.searchExcludedAccounts')" /><div class="max-h-40 space-y-2 overflow-auto"><label v-for="account in exclusionChoices" :key="account.id" class="flex items-center gap-2"><input v-model="editing.excluded_account_ids" type="checkbox" :value="account.id" />{{ account.name }} (#{{ account.id }})</label></div></details>
+          </details>
         </fieldset>
-        <fieldset class="rounded-lg border border-gray-200 p-4 dark:border-dark-700"><legend class="px-1 font-semibold">{{ tr('action') }}</legend><select v-model="editing.action" class="input w-full"><option value="pause">{{ tr('actionPause') }}</option><option value="limit">{{ tr('actionLimit') }}</option></select><div v-if="editing.action === 'limit'" class="mt-3 grid gap-3 sm:grid-cols-2"><label class="input-label">{{ tr('concurrencyLimit') }}<input v-model.number="editing.concurrency_limit" type="number" min="1" max="1000" class="input mt-1 w-full" /></label><label class="input-label">{{ tr('priorityPenalty') }}<input v-model.number="editing.priority_penalty" type="number" min="0" max="1000" class="input mt-1 w-full" /></label></div><p class="mt-2 text-xs text-gray-500">{{ tr('actionHint') }}</p></fieldset>
+        <section class="space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-dark-800">
+          <div class="flex flex-wrap justify-between gap-2"><h3 class="font-semibold">{{ q('sensitivity') }}</h3><span class="text-xs text-gray-500" data-current-profile>{{ q('profileCurrent', { profile: q('profiles.' + currentProfile) }) }}</span></div>
+          <div class="grid gap-2 sm:grid-cols-3" role="group" :aria-label="q('sensitivity')">
+            <button v-for="profile in qualityProfileKeys" :key="profile" type="button" :data-quality-profile="profile" :aria-pressed="currentProfile === profile" class="rounded-lg border p-3 text-left" :class="currentProfile === profile ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/30' : 'border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-900'" @click="applyProfile(profile)"><strong class="text-sm">{{ q('profiles.' + profile) }}</strong><span class="mt-1 block text-xs leading-5 text-gray-500">{{ q('profileDescriptions.' + profile) }}</span></button>
+          </div>
+          <p class="text-xs text-gray-500">{{ q('profileHint') }}</p>
+        </section>
+        <fieldset><legend class="mb-3 font-semibold">{{ q('signalsStep') }}</legend><div class="space-y-3"><div v-for="field in metricFields" :key="field.key" class="grid items-end gap-3 sm:grid-cols-3"><label class="flex items-center gap-2 text-sm"><input v-model="editing[field.key].enabled" type="checkbox" />{{ q(field.label) }}</label><label v-if="editing[field.key].enabled" class="input-label">{{ tr(field.key === 'cache_rate' ? 'pauseBelow' : 'pauseAbove') }}<input :value="editing[field.key].pause / field.divisor" @input="setMetric(field.key, 'pause', $event, field.divisor)" :disabled="!editing[field.key].enabled" type="number" min="0" :max="field.max / field.divisor" :step="field.divisor === 1000 ? 0.001 : 0.1" class="input mt-1 w-full" /></label><label v-if="editing[field.key].enabled" class="input-label">{{ tr(field.key === 'cache_rate' ? 'recoverAbove' : 'recoverBelow') }}<input :value="editing[field.key].recover / field.divisor" @input="setMetric(field.key, 'recover', $event, field.divisor)" :disabled="!editing[field.key].enabled" type="number" min="0" :max="field.max / field.divisor" :step="field.divisor === 1000 ? 0.001 : 0.1" class="input mt-1 w-full" /></label></div></div><p class="mt-3 text-xs text-gray-500">{{ q('metricHelp') }}</p><details class="mt-2 text-xs text-gray-500"><summary class="cursor-pointer">{{ tr('evidence') }}</summary><p class="mt-2">{{ tr('metricHint') }}</p></details><p v-if="!editing.model && (editing.ttft.enabled || editing.cache_rate.enabled)" class="mt-2 text-xs text-amber-600">{{ tr('mixedModelHint') }}</p></fieldset>
+        <fieldset class="space-y-3"><legend class="mb-3 font-semibold">{{ q('responseStep') }}</legend>
+          <div class="grid gap-2 sm:grid-cols-3" role="group" :aria-label="q('responseStep')"><button v-for="choice in responseChoices" :key="choice" type="button" :data-quality-response="choice" :aria-pressed="response === choice" class="rounded-lg border p-3 text-left" :class="response === choice ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/30' : 'border-gray-200 dark:border-dark-700'" @click="chooseResponse(choice)"><strong class="text-sm">{{ q('responses.' + choice) }}</strong><span class="mt-1 block text-xs leading-5 text-gray-500">{{ q('responseHints.' + choice) }}</span></button></div>
+        </fieldset>
+        <details class="rounded-xl border border-gray-200 p-4 dark:border-dark-700" :open="advancedInvalid" data-quality-advanced>
+          <summary class="cursor-pointer text-sm font-semibold">{{ q('advanced') }} · {{ q('profiles.' + currentProfile) }}</summary>
+          <p class="my-3 text-xs text-gray-500">{{ q('advancedHint') }}</p>
+          <div class="space-y-5">
         <fieldset><legend class="mb-3 font-semibold">{{ tr('window') }}</legend><div class="grid gap-3 sm:grid-cols-3"><label v-for="field in windowFields" :key="field.key" class="input-label">{{ tr(field.key) }}<input v-model.number="editing[field.key]" type="number" :min="field.min" :max="field.max" step="1" class="input mt-1 w-full" /></label></div><p class="mt-2 text-xs text-gray-500">{{ tr('windowHint') }}</p></fieldset>
-        <fieldset><legend class="mb-3 font-semibold">{{ tr('conditions') }}</legend><div class="space-y-3"><div v-for="field in metricFields" :key="field.key" class="grid items-end gap-3 sm:grid-cols-3"><label class="flex items-center gap-2 text-sm"><input v-model="editing[field.key].enabled" type="checkbox" />{{ tr(field.label) }}</label><label class="input-label">{{ tr(field.key === 'cache_rate' ? 'pauseBelow' : 'pauseAbove') }}<input v-model.number="editing[field.key].pause" :disabled="!editing[field.key].enabled" type="number" min="0" :max="field.max" class="input mt-1 w-full" /></label><label class="input-label">{{ tr(field.key === 'cache_rate' ? 'recoverAbove' : 'recoverBelow') }}<input v-model.number="editing[field.key].recover" :disabled="!editing[field.key].enabled" type="number" min="0" :max="field.max" class="input mt-1 w-full" /></label></div><label class="input-label block">{{ tr('consecutive_failures') }}<input v-model.number="editing.consecutive_failures" type="number" min="0" :max="editing.max_samples" class="input ml-3 w-24" /></label></div><p class="mt-3 text-xs text-gray-500">{{ tr('metricHint') }}</p><p v-if="!editing.model && (editing.ttft.enabled || editing.cache_rate.enabled)" class="mt-2 text-xs text-amber-600">{{ tr('mixedModelHint') }}</p></fieldset>
+<label class="input-label block">{{ tr('consecutive_failures') }}<input v-model.number="editing.consecutive_failures" type="number" min="0" :max="editing.max_samples" class="input ml-3 w-24" /></label>
         <fieldset><legend class="mb-3 font-semibold">{{ tr('recovery') }}</legend><div class="grid gap-3 sm:grid-cols-3"><label v-for="field in recoveryFields.filter(f => editing?.action !== 'limit' || f.key === 'recovery_samples')" :key="field.key" class="input-label">{{ tr(field.key) }}<input v-model.number="editing[field.key]" type="number" :min="field.min" :max="field.max" step="1" class="input mt-1 w-full" /></label></div><p class="mt-3 text-xs text-gray-500">{{ tr(editing.action === 'limit' ? 'limitedRecovery' : 'recoveryHint') }}</p></fieldset>
-        <p class="rounded-lg bg-primary-50 p-3 text-sm text-primary-800 dark:bg-primary-950/30 dark:text-primary-200">{{ describe(editing) }}</p>
+          <div v-if="editing.action === 'limit'" class="grid gap-3 sm:grid-cols-2"><label class="input-label">{{ tr('concurrencyLimit') }}<input v-model.number="editing.concurrency_limit" type="number" min="1" max="1000" class="input mt-1 w-full" /></label><label class="input-label">{{ tr('priorityPenalty') }}<input v-model.number="editing.priority_penalty" type="number" min="0" max="1000" class="input mt-1 w-full" /></label></div>
+          </div>
+        </details>
+        <QualityPolicySummary :policy="editing" :groups="groups" :accounts="accounts" :policies="policies" />
         <p v-if="validationError" role="alert" class="text-sm text-amber-600">{{ validationError }}</p>
-        <p v-if="editing.id" class="text-xs text-gray-500">{{ tr('editHint') }}</p>
+        <p v-if="editing.id" class="text-xs text-amber-700 dark:text-amber-300">{{ tr('editHint') }}</p>
         <QualityReplayPanel :policy="editing" :accounts="accounts" :disabled="!!validationError" />
       </form>
       <template #footer><button class="btn btn-secondary" @click="editing = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="busy || !!validationError" data-passive-save @click="save">{{ t('common.save') }}</button></template>
@@ -64,6 +88,8 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useQualityLabels } from '@/composables/useQualityLabels'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import QualityPolicySummary from './QualityPolicySummary.vue'
+import { applyQualityProfile, matchingQualityProfile, policyResponse, setPolicyResponse, qualityProfileKeys, type QualityProfile, type QualityResponse } from './qualityPolicyProfiles'
 import QualityReplayPanel from '@/components/tests/QualityReplayPanel.vue'
 import { passiveQualityAPI as api, defaultPassivePolicy, type PassivePolicy, type PassiveState, type PassiveEvent } from '@/api/admin/passiveQuality'
 import { adminAPI } from '@/api/admin'
@@ -76,11 +102,13 @@ const { t, te } = useI18n()
 const route = useRoute()
 const app = useAppStore()
 const tr = (key: string, args: Record<string, unknown> = {}) => t(`admin.tests.passive.${key}`, args)
+const q = (key: string, args: Record<string, unknown> = {}) => t('admin.tests.experience.' + key, args)
 const policies = ref<PassivePolicy[]>([]), states = ref<PassiveState[]>([]), events = ref<PassiveEvent[]>([])
 const loading = ref(false), loadingEvents = ref(false), busy = ref(false), loadError = ref(''), hasMore = ref(false)
 const editing = ref<PassivePolicy | null>(null), exemptState = ref<PassiveState | null>(null), exemptMinutes = ref(30)
 const phaseFilter = ref(''), policyFilter = ref(Number(route?.query.policy_id) || 0), accountFilter = ref(Number(route?.query.account_id) || 0), accountSearch = ref('')
 const modelChoices = ref<string[]>([])
+const editingBaseline = ref('')
 const phases = ['limited', 'healthy', 'insufficient', 'suspect', 'observed', 'paused', 'probing', 'trial', 'exempt']
 const summaryCards = computed(() => [
   { key: 'activePolicies', count: policies.value.filter(p => p.enabled).length },
@@ -93,7 +121,18 @@ const filteredStates = computed(() => states.value.filter(s => (!phaseFilter.val
 const filteredEvents = computed(() => events.value.filter(e => (!policyFilter.value || e.policy_id === policyFilter.value) && (!accountFilter.value || e.account_id === accountFilter.value)))
 const windowFields = [{ key: 'window_seconds', min: 60, max: 86400 }, { key: 'max_samples', min: 5, max: 2000 }, { key: 'min_samples', min: 5, max: 2000 }, { key: 'confirmations', min: 1, max: 10 }, { key: 'new_samples', min: 1, max: 2000 }] as const
 const recoveryFields = [{ key: 'cooldown_seconds', min: 30, max: 86400 }, { key: 'max_cooldown_seconds', min: 30, max: 86400 }, { key: 'trial_seconds', min: 60, max: 3600 }, { key: 'trial_requests', min: 5, max: 2000 }, { key: 'trial_concurrency', min: 1, max: 20 }, { key: 'recovery_samples', min: 5, max: 2000 }] as const
-const metricFields = [{ key: 'error_rate', label: 'errorRate', max: 100 }, { key: 'ttft', label: 'ttft', max: 600000 }, { key: 'cache_rate', label: 'cacheRate', max: 100 }] as const
+const metricFields = [{ key: 'error_rate', label: 'errorSignal', max: 100, divisor: 1 }, { key: 'ttft', label: 'ttftSeconds', max: 600000, divisor: 1000 }, { key: 'cache_rate', label: 'cacheSignal', max: 100, divisor: 1 }] as const
+const currentProfile = computed(() => editing.value ? matchingQualityProfile(editing.value) : 'balanced')
+const response = computed(() => editing.value ? policyResponse(editing.value) : 'observe')
+const responseChoices: QualityResponse[] = ['observe', 'limit', 'pause']
+const coveredAccounts = computed(() => props.accounts.filter(a => !editing.value?.excluded_account_ids.includes(a.id) && a.group_ids?.some(id => editing.value?.group_ids.includes(id))).length)
+function applyProfile(profile: QualityProfile) { if (editing.value) editing.value = applyQualityProfile(editing.value, profile) }
+function chooseResponse(choice: QualityResponse) { if (editing.value) editing.value = setPolicyResponse(editing.value, choice) }
+function setMetric(key: 'error_rate' | 'ttft' | 'cache_rate', threshold: 'pause' | 'recover', event: Event, divisor: number) {
+  if (!editing.value) return
+  const value = (event.target as HTMLInputElement).valueAsNumber
+  editing.value[key][threshold] = divisor === 1000 ? Math.round(value * divisor) : value
+}
 const validationError = computed(() => {
   const p = editing.value
   if (!p) return ''
@@ -102,11 +141,16 @@ const validationError = computed(() => {
   const groups = props.groups.filter(g => p.group_ids.includes(g.id))
   if (groups.length !== p.group_ids.length || groups.some(g => g.status !== 'active' || g.platform === 'composite' || g.platform !== groups[0].platform)) return t('admin.tests.invalidStrategyGroups')
   if ([...windowFields, ...recoveryFields.filter(f => p.action !== 'limit' || f.key === 'recovery_samples')].some(f => !Number.isInteger(p[f.key]) || p[f.key] < f.min || p[f.key] > f.max) || !Number.isInteger(p.consecutive_failures) || p.consecutive_failures < 0 || p.consecutive_failures > p.max_samples) return tr('invalidLimits')
-  if (p.min_samples > p.max_samples || p.new_samples > p.max_samples || p.recovery_samples > p.max_samples || (p.action !== 'limit' && (p.recovery_samples > p.trial_requests || p.trial_concurrency > p.trial_requests || p.max_cooldown_seconds < p.cooldown_seconds))) return tr('invalidLimits')
+  if (p.min_samples > p.max_samples) return q('minTooLarge')
+  if (p.new_samples > p.max_samples) return q('freshTooLarge')
+  if (p.recovery_samples > p.max_samples) return q('recoveryTooLarge')
+  if (p.action !== 'limit' && (p.recovery_samples > p.trial_requests || p.trial_concurrency > p.trial_requests)) return q('trialTooSmall')
+  if (p.action !== 'limit' && p.max_cooldown_seconds < p.cooldown_seconds) return q('cooldownTooSmall')
   if (!metricFields.some(f => p[f.key].enabled) && !p.consecutive_failures) return tr('selectMetric')
-  for (const f of metricFields) { const m = p[f.key]; if (m.enabled && (!Number.isFinite(m.pause) || !Number.isFinite(m.recover) || Math.min(m.pause, m.recover) < 0 || Math.max(m.pause, m.recover) > f.max || (f.key === 'cache_rate' ? m.recover <= m.pause : m.recover >= m.pause))) return tr('invalidThreshold') }
+  for (const f of metricFields) { const m = p[f.key]; if (m.enabled && (!Number.isFinite(m.pause) || !Number.isFinite(m.recover) || Math.min(m.pause, m.recover) < 0 || Math.max(m.pause, m.recover) > f.max || (f.key === 'cache_rate' ? m.recover <= m.pause : m.recover >= m.pause))) return q('thresholdInvalid', { metric: q(f.label) }) }
   return ''
 })
+const advancedInvalid = computed(() => [tr('invalidLimits'), ...['minTooLarge', 'freshTooLarge', 'recoveryTooLarge', 'trialTooSmall', 'cooldownTooSmall'].map(key => q(key))].includes(validationError.value))
 const exclusionChoices = computed(() => {
   const p = editing.value
   if (!p) return []
@@ -119,7 +163,7 @@ function metric(value: number | null | undefined, unit: string) { return value =
 function date(value: string) { return !value || value.startsWith('0001') ? '—' : new Date(value).toLocaleString() }
 const { reason: reasonText } = useQualityLabels()
 function eventText(value: string) { return te(`admin.tests.passive.phases.${value}`) ? tr(`phases.${value}`) : te(`admin.tests.passive.events.${value}`) ? tr(`events.${value}`) : value }
-function describe(p: PassivePolicy) { return tr(p.action === 'limit' ? 'summaryLimit' : 'summary', { cap: p.concurrency_limit, penalty: p.priority_penalty, seconds: p.window_seconds, max: p.max_samples, min: p.min_samples, confirmations: p.confirmations, fresh: p.new_samples, mode: tr(p.mode), cooldown: p.cooldown_seconds, requests: p.trial_requests, concurrency: p.trial_concurrency }) }
+function describe(p: PassivePolicy) { if (p.mode === 'observe') return q('windowPreview', { minutes: Number((p.window_seconds / 60).toFixed(2)), max: p.max_samples, min: p.min_samples, confirmations: p.confirmations, fresh: p.new_samples }) + ' ' + q('observeFlow'); return tr(p.action === 'limit' ? 'summaryLimit' : 'summary', { cap: p.concurrency_limit, penalty: p.priority_penalty, seconds: p.window_seconds, max: p.max_samples, min: p.min_samples, confirmations: p.confirmations, fresh: p.new_samples, mode: tr(p.mode), cooldown: p.cooldown_seconds, requests: p.trial_requests, concurrency: p.trial_concurrency }) }
 function report(error: unknown) { app.showError(extractApiErrorMessage(error, tr('loadFailed'))) }
 async function refresh() {
   if (loading.value) return
@@ -134,8 +178,23 @@ async function loadEvents(append = false) {
 }
 function selectSummary(key: string) { policyFilter.value = 0; accountFilter.value = 0; phaseFilter.value = key === 'limitedAccounts' ? 'limited' : key === 'trialAccounts' ? 'trial' : key === 'observedAccounts' ? 'observed' : key === 'pausedAccounts' ? 'paused' : ''; emit('tab', key === 'activePolicies' ? 'passive' : 'records') }
 function showPolicy(p: PassivePolicy) { policyFilter.value = p.id; phaseFilter.value = ''; accountFilter.value = 0; emit('tab', 'records') }
-function edit(p?: PassivePolicy) { editing.value = p ? { ...defaultPassivePolicy(), ...JSON.parse(JSON.stringify(p)) } : defaultPassivePolicy(); accountSearch.value = '' }
-async function save() { if (!editing.value || validationError.value || busy.value) return; busy.value = true; try { await api.save(editing.value); editing.value = null; await refresh(); app.showSuccess(t('common.saved')) } catch (e) { report(e) } finally { busy.value = false } }
+function edit(p?: PassivePolicy) { editing.value = p ? { ...defaultPassivePolicy(), ...JSON.parse(JSON.stringify(p)) } : defaultPassivePolicy(); editingBaseline.value = JSON.stringify(editing.value); accountSearch.value = '' }
+async function save() {
+  if (!editing.value || validationError.value || busy.value) return
+  // The API clears this policy's evidence and holds on every update.
+  // Closing an unchanged draft must not reset live protection.
+  if (editing.value.id && JSON.stringify(editing.value) === editingBaseline.value) {
+    editing.value = null
+    return
+  }
+  busy.value = true
+  try {
+    await api.save(editing.value)
+    editing.value = null
+    await refresh()
+    app.showSuccess(t('common.saved'))
+  } catch (e) { report(e) } finally { busy.value = false }
+}
 async function toggle(p: PassivePolicy) { busy.value = true; try { await api.save({ ...p, enabled: !p.enabled }); await refresh() } catch (e) { report(e) } finally { busy.value = false } }
 async function remove(p: PassivePolicy) { if (!window.confirm(tr('deleteConfirm', { name: p.name }))) return; busy.value = true; try { await api.remove(p.id); await refresh() } catch (e) { report(e) } finally { busy.value = false } }
 async function act(s: PassiveState, action: string, seconds = 0) { busy.value = true; try { await api.act(s, action, seconds); exemptState.value = null; await refresh(); await loadEvents() } catch (e) { report(e) } finally { busy.value = false } }

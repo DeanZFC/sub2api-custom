@@ -222,7 +222,7 @@
         />
         <MetricCell
           :label="t('channelMonitorV2.metrics.cacheRate')"
-          :value="formatPercent(snapshot.metrics.cache_rate)"
+          :value="formatMonitorCacheRate(snapshot.metrics)"
           :detail="t('channelMonitorV2.metrics.cacheDetail')"
           :state="snapshot.health.cache || snapshot.health.overall"
         />
@@ -328,7 +328,7 @@
                     <small class="text-xs text-gray-400">{{ latencyDetail(row.metrics.ttft) }}</small>
                   </td>
                   <td v-if="showThroughput" :title="exactTps(row.metrics.tpm)">{{ formatTps(row.metrics.tpm) }}</td>
-                  <td>{{ formatPercent(row.metrics.cache_rate) }}</td>
+                  <td>{{ formatMonitorCacheRate(row.metrics) }}</td>
                   <td v-if="showThroughput">{{ formatRate(row.metrics.rpm) }}</td>
                 </tr>
               </tbody>
@@ -429,7 +429,7 @@
                     <small class="text-xs text-gray-400">{{ latencyDetail(row.metrics.ttft) }}</small>
                   </td>
                   <td v-if="showThroughput" :title="exactTps(row.metrics.tpm)">{{ formatTps(row.metrics.tpm) }}</td>
-                  <td>{{ formatPercent(row.metrics.cache_rate) }}</td>
+                  <td>{{ formatMonitorCacheRate(row.metrics) }}</td>
                   <td v-if="showThroughput">{{ formatRate(row.metrics.rpm) }}</td>
                 </tr>
               </tbody>
@@ -460,6 +460,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatMonitorCacheRate } from '@/features/channel-monitor-v2/monitorFormat'
 import { useI18n } from 'vue-i18n'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

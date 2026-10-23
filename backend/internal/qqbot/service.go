@@ -50,6 +50,7 @@ func New(db *sql.DB, encryptor Encryptor, ready bool, invalidate func(context.Co
 func (s *Service) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
+	s.startModeration(ctx)
 	s.startPriceMonitor(ctx)
 	s.startHealthMonitor(ctx)
 	s.startRankingMonitor(ctx)
@@ -92,6 +93,7 @@ func (s *Service) Stop() {
 	s.wg.Wait()
 }
 func (s *Service) maintenance(ctx context.Context) {
+	s.maintainModeration(ctx)
 	// An interrupted model request may already have cost money. Preserve its
 	// status for inspection and never replay it after a process crash.
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET status='interrupted',error='处理进程中断，未自动重试；请检查调用用量',finished_at=NOW(),payload='{}' WHERE status='running' AND started_at<NOW()-INTERVAL '10 minutes'`)
@@ -159,6 +161,17 @@ func (s *Service) runOne(parent context.Context) {
 	if time.Since(j.CreatedAt) > 240*time.Second {
 		s.finish(j, "expired", "排队超过回复时限，请重新发送")
 		return
+	}
+	if isGroupMessageEvent(j.EventType) {
+		blocked, checkErr := s.moderationBlocked(ctx, c, j.GroupID, j.MessageID)
+		if checkErr != nil {
+			s.finish(j, "failed", "防刷屏状态读取失败")
+			return
+		}
+		if blocked {
+			s.finish(j, "skipped", "防刷屏拦截")
+			return
+		}
 	}
 	if j.EventType == interactionCreate {
 		cmd, valid := helpActionCommand(c, e.HelpAction)
@@ -386,8 +399,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		return err
 	}
 	named := j.TriggerReason == "name" && c.autonomousGroup(j.GroupID) && directBotName(c.Autonomous, e.Content)
+	addressed := j.EventType == groupAtMessageCreate
 	if j.EventType == groupMessageCreate && !named && !unmentionedGroupCommand(e, c.CustomCommands...) {
-		addressed, err := s.groupMessageMentionsBot(ctx, c, e)
+		addressed, err = s.groupMessageMentionsBot(ctx, c, e)
 		if err != nil {
 			return err
 		}
@@ -602,6 +616,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			img, err = s.generateImage(ctx, c, prompt)
 		} else {
 			messages := s.history(ctx, c, *j)
+			messages = withGroupAdminChatInstructions(messages, c, *j, addressed)
 			var input Message
 			input, err = s.chatMessageWithImageProgress(ctx, c, e, prompt, ref, func() {
 				sendImageProgress("正在处理图片，请稍候。")

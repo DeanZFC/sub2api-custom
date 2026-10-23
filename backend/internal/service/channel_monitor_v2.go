@@ -105,6 +105,7 @@ type ChannelMonitorV2Metric struct {
 	ErrorRate            float64 `json:"error_rate"`
 	SuccessRate          float64 `json:"success_rate"`
 	CacheRate            float64 `json:"cache_rate"`
+	HasCacheSamples      bool    `json:"has_cache_samples"`
 	CacheRateNumerator   int64   `json:"cache_rate_numerator"`
 	CacheRateDenominator int64   `json:"cache_rate_denominator"`
 	// CacheEligibleInputTokens excludes request types that do not expose

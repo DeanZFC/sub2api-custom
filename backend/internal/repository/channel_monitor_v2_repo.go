@@ -1283,6 +1283,7 @@ func (a *metricAccumulator) metric(minutes float64, admin bool) service.ChannelM
 		m.SuccessRate = float64(a.success) / float64(requests)
 	}
 	if denom > 0 {
+		m.HasCacheSamples = true
 		m.CacheRate = float64(a.cacheEligibleRead) / float64(denom)
 	}
 	if admin {

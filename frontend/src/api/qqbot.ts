@@ -1,6 +1,22 @@
 import { apiClient } from './client'
 
 export interface QQBotCustomCommand { command: string; reply: string; enabled: boolean }
+export interface QQGroupAdmin { app_id: string; group_id: string; member_id: string; nickname: string }
+export interface QQModerationConfig {
+  enabled: boolean; groups: string[]; repeat_window_seconds: number; repeat_count: number
+  burst_window_seconds: number; burst_count: number; mute_minutes: number
+  repeat_offense_minutes: number; escalated_mute_minutes: number
+  exemptions: { group_id: string; member_id: string }[]
+}
+export function defaultModerationConfig(): QQModerationConfig {
+  return { enabled: false, groups: [], repeat_window_seconds: 15, repeat_count: 4,
+    burst_window_seconds: 10, burst_count: 10, mute_minutes: 5,
+    repeat_offense_minutes: 30, escalated_mute_minutes: 30, exemptions: [] }
+}
+export interface QQModerationRecord {
+  id: string; group_id: string; member_id: string; reason: string; mute_seconds: number
+  created_at: string; mute_status: string; recall_total: number; recall_succeeded: number; pending: number; error: string
+}
 export interface QQAutonomousConfig {
   enabled: boolean; groups: string[]; names: string[]; topics: string[]
   sample_percent: number; cooldown_seconds: number; min_messages: number
@@ -21,11 +37,13 @@ export function defaultHealthNotificationConfig(): QQHealthNotificationConfig {
     ttft_seconds: 10, failure_minutes: 3, recovery_minutes: 2, cooldown_minutes: 30 }
 }
 export interface QQBotConfig {
+  moderation?: QQModerationConfig
   health_notifications?: QQHealthNotificationConfig
   autonomous?: QQAutonomousConfig
   enabled: boolean; app_id: string; app_secret: string; app_secret_set: boolean; sandbox: boolean
   allowed_groups: string[]; base_url: string; api_key: string; api_key_set: boolean
   custom_commands: QQBotCustomCommand[]
+  group_admins?: QQGroupAdmin[]
   price_notifications?: { enabled: boolean; scheduled: boolean; groups: string[] }
   chat_model: string; chat_protocol: 'chat_completions' | 'responses'
   image_enabled: boolean; image_base_url: string; image_api_key: string; image_api_key_set: boolean
@@ -37,6 +55,7 @@ export interface QQBotConfig {
   clear_app_secret?: boolean; clear_api_key?: boolean; clear_image_api_key?: boolean
 }
 export interface QQBotRuntime {
+  moderation_records?: QQModerationRecord[]
   autonomous_stats?: { group_id: string; reason: string; count: number }[]
   encryption_ready: boolean; bindings: number
   groups: { id: string; last_event: string; last_seen_at: string }[]

@@ -97,7 +97,7 @@ describe('RecentRequestsCell', () => {
     )
     expect(dialog()?.querySelector('script')).toBeNull()
     expect(dialog()?.querySelector('[data-testid="recent-request-tokens"]')?.textContent).toBe('——')
-    expect(dialog()?.querySelector('[data-testid="recent-request-cache-rate"]')?.textContent).toBe('—')
+    expect(dialog()?.querySelector('[data-testid="recent-request-cache-rate"]')?.textContent).toBe('-')
     expect(dialog()?.textContent).not.toContain('$0.000000')
   })
 
@@ -133,4 +133,15 @@ describe('RecentRequestsCell', () => {
     expect(dialog()).toBeNull()
     expect(wrapper.find('[aria-haspopup="dialog"]').exists()).toBe(false)
   })
+})
+
+it.each([
+  { request_type: 'sync', stream: false, cache_read_tokens: 0, expected: '-' },
+  { request_type: 'sync', stream: true, cache_read_tokens: 800, expected: '-' },
+  { request_type: 'stream', stream: true, cache_read_tokens: 0, expected: '0.00%' },
+  { request_type: 'ws_v2', stream: false, cache_read_tokens: 800, expected: '80.00%' },
+])('renders cache eligibility for $request_type', async ({ expected, ...request }) => {
+  await wrapper.setProps({ requests: [{ ...success, ...request }] })
+  await triggers()[0].trigger('mouseenter')
+  expect(dialog()?.querySelector('[data-testid="recent-request-cache-rate"]')?.textContent).toBe(expected)
 })

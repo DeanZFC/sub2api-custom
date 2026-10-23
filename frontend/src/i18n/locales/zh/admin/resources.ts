@@ -1,5 +1,8 @@
+import qualityExperience from './qualityExperience'
+
 export default {
     tests: {
+      experience: qualityExperience,
       operations: {
   "title": "预算与供应商",
   "budgetTitle": "检测预算",
@@ -104,8 +107,8 @@ export default {
         "overview": "健康总览",
         "subtitle": "统一查看可用性、性能与能力检测，按原因处理异常和恢复。",
         "intro": "先查看哪些上游受到限制、由哪项策略触发，再进入对应记录处理。主动能力检测、真实请求保护与人工停用分别保留自己的限制；一次恢复只解除对应原因。",
-        "active": "主动检测",
-        "passive": "被动保护",
+        "active": "定时能力检测",
+        "passive": "实时流量保护",
         "questionBank": "检测类型与题库",
         "search": "账号名称或 ID",
         "problemsOnly": "只看异常与受限账号",
@@ -123,8 +126,8 @@ export default {
         "inspect": "查看原因与处理",
         "loadFailed": "加载质量总览失败",
         "sources": {
-                "active": "主动检测",
-                "passive": "被动保护",
+                "active": "定时能力检测",
+                "passive": "实时流量保护",
                 "account": "账号限制"
         },
         "recovery": {
@@ -189,7 +192,7 @@ export default {
         "priorityPenalty": "优先级惩罚（越大越靠后）",
         "actionHint": "不可用问题适合暂停；性能或缓存异常可先限制并发。限流状态持续观察真实请求，连续达到恢复阈值后自动解除。",
 
-        "title": "被动保护",
+        "title": "实时流量保护",
         "records": "保护记录",
         "activePolicies": "已启用策略",
         "pausedAccounts": "暂停账号",
@@ -229,7 +232,7 @@ export default {
         "cancelExemption": "结束豁免",
         "history": "变更历史",
         "more": "加载更早记录",
-        "editorTitle": "被动保护策略",
+        "editorTitle": "实时流量保护策略",
         "mode": "处理方式",
         "target": "保护对象",
         "scope": "作用范围",

@@ -167,9 +167,8 @@
                   <span class="font-medium text-gray-900 dark:text-white">{{ row.output_tokens?.toLocaleString() || 0 }}</span>
                 </div>
               </div>
-              <div v-if="row.cache_read_tokens > 0 || row.cache_creation_tokens > 0" class="flex items-center gap-2">
+              <div class="flex items-center gap-2">
                 <div
-                  v-if="cacheHitRate(row) != null"
                   data-testid="cache-hit-rate-cell"
                   class="inline-flex cursor-help items-center gap-1"
                   :title="`${t('usage.cacheHitRate')}: ${formatRowCacheHitRate(row, 2)}`"
@@ -395,7 +394,7 @@
               <span class="font-medium text-white">{{ tokenTooltipData.cache_read_tokens.toLocaleString() }}</span>
             </div>
             <div
-              v-if="tokenTooltipData && (tokenTooltipData.cache_read_tokens > 0 || tokenTooltipData.cache_creation_tokens > 0) && cacheHitRate(tokenTooltipData) != null"
+              v-if="tokenTooltipData"
               data-testid="token-cache-hit-rate-tooltip"
               class="flex items-center justify-between gap-4"
             >
@@ -557,7 +556,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
-import { calculateCacheHitRate, formatCacheHitRate } from '@/utils/cacheHitRate'
+import { calculateCacheHitRate, formatCacheRate, isCacheEligibleRequest } from '@/utils/cacheHitRate'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
@@ -720,13 +719,13 @@ const tokenTooltipVisible = ref(false)
 const tokenTooltipPosition = ref({ x: 0, y: 0 })
 const tokenTooltipData = ref<AdminUsageLog | null>(null)
 
-const cacheHitRate = (row: Pick<AdminUsageLog, 'input_tokens' | 'cache_read_tokens' | 'cache_creation_tokens' | 'image_input_tokens'>): number | null =>
-  calculateCacheHitRate(textInputTokens(row), row.cache_read_tokens, row.cache_creation_tokens)
+const cacheHitRate = (row: AdminUsageLog): number | null =>
+  isCacheEligibleRequest(row) ? calculateCacheHitRate(textInputTokens(row), row.cache_read_tokens, row.cache_creation_tokens) : null
 
 const formatRowCacheHitRate = (
-  row: Pick<AdminUsageLog, 'input_tokens' | 'cache_read_tokens' | 'cache_creation_tokens' | 'image_input_tokens'>,
+  row: AdminUsageLog,
   fractionDigits = 1,
-): string => formatCacheHitRate(textInputTokens(row), row.cache_read_tokens, row.cache_creation_tokens, fractionDigits)
+): string => formatCacheRate(cacheHitRate(row), fractionDigits)
 
 const getRequestTypeLabel = (row: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(row)

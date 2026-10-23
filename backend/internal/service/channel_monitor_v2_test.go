@@ -550,7 +550,7 @@ func TestRedactChannelMonitorV2MetricKeepsRates(t *testing.T) {
 		SuccessRequests: 90, ErrorRequests: 10, RequestCount: 100,
 		InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4,
 		TokenCount: 10, RPM: 12, TPM: 34, ErrorRate: 0.1, SuccessRate: 0.9,
-		CacheRate: 0.5, CacheRateNumerator: 4, CacheRateDenominator: 8,
+		CacheRate: 0.5, HasCacheSamples: true, CacheRateNumerator: 4, CacheRateDenominator: 8,
 		TTFT: ChannelMonitorV2Latency{SampleCount: 50, P50Ms: &p50},
 	}
 	upstream := int64(3)
@@ -560,6 +560,7 @@ func TestRedactChannelMonitorV2MetricKeepsRates(t *testing.T) {
 	require.Zero(t, m.ErrorRequests)
 	require.Zero(t, m.TokenCount)
 	require.Zero(t, m.CacheRateNumerator)
+	require.True(t, m.HasCacheSamples)
 	require.Zero(t, m.TTFT.SampleCount)
 	require.Nil(t, m.UpstreamAffectedRequests)
 	require.InDelta(t, 0.1, m.ErrorRate, 0.0001)

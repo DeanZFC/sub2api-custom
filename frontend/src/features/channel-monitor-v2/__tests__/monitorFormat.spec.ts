@@ -3,6 +3,8 @@ import {
   formatLatencyKpiSecondary,
   formatLatencyPrivacy,
   formatMonitorMs,
+  formatMonitorCacheRate,
+  monitorCacheRate,
   formatMonitorErrorRate,
   formatMonitorNumber,
   formatMonitorPercent,
@@ -17,7 +19,7 @@ import {
   tokensPerSecondFromTpm,
   ttftDisplayState,
 } from '../monitorFormat'
-import type { MonitorHealth } from '@/api/channelMonitorV2'
+import type { MonitorHealth, MonitorMetric } from '@/api/channelMonitorV2'
 
 describe('monitorFormat accuracy', () => {
   it('converts backend TPM (per minute) to tokens/sec for display', () => {
@@ -146,4 +148,13 @@ describe('monitorFormat accuracy', () => {
     expect(formatLatencyPrivacy(100, null, null, 300)).toBe('P50 100ms · P95 300ms')
     expect(formatLatencyPrivacy(null, null)).toBe('-')
   })
+})
+
+it('distinguishes no cache samples from zero hits, even after counters are redacted', () => {
+  const metric = { cache_rate: 0, cache_rate_denominator: 0, has_cache_samples: false } as MonitorMetric
+  expect(formatMonitorCacheRate(metric)).toBe('-')
+  expect(monitorCacheRate(metric)).toBeNull()
+  expect(formatMonitorCacheRate({ ...metric, has_cache_samples: true })).toBe('0.00%')
+  expect(formatMonitorCacheRate({ ...metric, has_cache_samples: true, cache_rate: 0.9 })).toBe('90.0%')
+  expect(formatMonitorCacheRate({ ...metric, has_cache_samples: undefined, cache_rate_denominator: 100 })).toBe('0.00%')
 })

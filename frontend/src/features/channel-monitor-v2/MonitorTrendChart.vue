@@ -75,7 +75,7 @@ import { Line } from 'vue-chartjs'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { MonitorCoverage, MonitorMetric, MonitorHealth } from '@/api/channelMonitorV2'
-import { formatMonitorMs, formatMonitorPercent } from '@/features/channel-monitor-v2/monitorFormat'
+import { formatMonitorMs, formatMonitorPercent, monitorCacheRate } from '@/features/channel-monitor-v2/monitorFormat'
 import {
   applyWheelZoom,
   clientXRatio,
@@ -123,7 +123,10 @@ const chartData = computed(() => {
     }).format(new Date(p.bucket_start))
   )
   const errorRates = smoothTrend(points.map((p) => (p.metrics.error_rate || 0) * 100))
-  const cacheRates = smoothTrend(points.map((p) => (p.metrics.cache_rate || 0) * 100))
+  const cacheRates = points.map((p) => {
+    const rate = monitorCacheRate(p.metrics)
+    return rate == null ? null : rate * 100
+  })
   const ttftP50 = smoothTrend(points.map((p) => p.metrics.ttft?.p50_ms ?? null))
   return {
     labels,

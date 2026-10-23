@@ -6,7 +6,7 @@
  * request/error/token counts in user-facing surfaces.
  */
 
-import type { HealthScoreBand, HealthState, MonitorHealth } from '@/api/channelMonitorV2'
+import type { HealthScoreBand, HealthState, MonitorHealth, MonitorMetric } from '@/api/channelMonitorV2'
 import { formatCompactNumber } from '@/utils/format'
 
 export function monitorIntlLocale(): string {
@@ -191,4 +191,15 @@ export function formatLatencyKpiSecondary(
 /** Fallback when i18n key is missing; prefer `channelMonitorV2.errorCategories.*`. */
 export function monitorErrorCategoryLabel(category: string): string {
   return category
+}
+
+/** Availability survives public counter redaction; zero remains a measured miss. */
+export function monitorCacheRate(metric: Pick<MonitorMetric, 'has_cache_samples' | 'cache_rate' | 'cache_rate_denominator'>): number | null {
+  const available = metric.has_cache_samples ?? (metric.cache_rate_denominator > 0)
+  return available && Number.isFinite(metric.cache_rate) ? metric.cache_rate : null
+}
+
+export function formatMonitorCacheRate(metric: Pick<MonitorMetric, 'has_cache_samples' | 'cache_rate' | 'cache_rate_denominator'>): string {
+  const rate = monitorCacheRate(metric)
+  return rate == null ? '-' : formatMonitorPercent(rate)
 }

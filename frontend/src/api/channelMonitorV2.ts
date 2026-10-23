@@ -42,6 +42,7 @@ export interface MonitorMetric {
   tpm: number
   error_rate: number
   cache_rate: number
+  has_cache_samples?: boolean
   cache_rate_numerator: number
   cache_rate_denominator: number
   ttft: LatencyMetric

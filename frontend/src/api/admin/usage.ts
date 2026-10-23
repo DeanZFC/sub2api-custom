@@ -10,6 +10,7 @@ import type { EndpointStat } from '@/types'
 // ==================== Types ====================
 
 export interface AdminUsageStatsResponse {
+  cache_hit_rate?: number | null
   total_requests: number
   total_input_tokens: number
   total_output_tokens: number

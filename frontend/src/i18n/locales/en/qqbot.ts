@@ -1,4 +1,52 @@
 export default { qqbot: {
+  moderation: {
+    "title": "Anti-spam",
+    "enabled": "Enable automatic recall and mute",
+    "help": "Detect repeated text and rapid messages separately for each member and group, then recall spam and mute the sender. No AI calls. Disabled by default.",
+    "permission": "Make the bot a QQ group administrator, enable Receive all messages, and obtain the official API permissions first. Only ordinary members can be moderated. Messages older than 2 minutes cannot be recalled.",
+    "groups": "Enabled groups",
+    "noGroups": "Add allowed groups in Connection first.",
+    "removedGroup": "No longer allowed; deselect this group",
+    "repeat_window_seconds": "Repeated text window (seconds)",
+    "repeat_count": "Repeated text threshold",
+    "burst_window_seconds": "Rapid message window (seconds)",
+    "burst_count": "Rapid message threshold",
+    "mute_minutes": "First mute (minutes)",
+    "repeat_offense_minutes": "Repeat offense window (minutes)",
+    "escalated_mute_minutes": "Repeat offense mute (minutes)",
+    "ruleHelp": "Keep the first repeated text message. Rapid message counts include images and other message types. Escalation uses the last successful mute. Rule changes cancel pending operations. Existing mutes can be lifted manually in QQ.",
+    "exemptions": "Exempt members",
+    "exemptionsHelp": "QQ owners, administrators, bots, and group administrators bound on this site are exempt. Exemptions below apply to one group. Use member OpenIDs, not QQ numbers. Missing role information prevents automatic punishment.",
+    "removeExemption": "Remove exemption {index}",
+    "records": "Recent moderation records",
+    "recordsHelp": "Latest 50 incidents, retained for 30 days. Use Refresh at the top to update results. No additional group notifications are sent.",
+    "empty": "No moderation records yet.",
+    "muteResult": "Planned mute: {minutes} minutes · {status}",
+    "recallResult": "Recalled {succeeded}/{total} messages · {pending} operations pending",
+    "reasons": {
+        "repeat": "Repeated text",
+        "burst": "Rapid messages"
+    },
+    "statuses": {
+        "queued": "Queued",
+        "started": "Running",
+        "succeeded": "Muted",
+        "unconfirmed": "Success unconfirmed; no retry",
+        "cancelled": "Cancelled",
+        "expired": "Expired"
+    }
+},
+  groupAdmins: {
+    title: 'Group admins', add: 'Add admin', entry: 'Admin {index}', remove: 'Remove admin {index}',
+    help: 'When a bound admin directly {\'@\'} mentions the bot, it prioritizes their current chat task, tone, persona and response format. Bindings are per group and support multiple admins.',
+    appRequired: 'Enter the bot AppID under Connection first.',
+    appChanged: 'This binding belongs to another bot. Remove it and add it again.',
+    empty: 'No group admins bound yet.', group: 'Group OpenID', member: 'Member OpenID', nickname: 'Label / nickname (optional)',
+    recent: 'Add from recent speakers', choose: 'Choose group / member',
+    recentHelp: 'Ask the admin to {\'@\'} mention the bot in the target group, refresh this page, then select their member identity. This identity is not a QQ number.',
+    fromBindings: 'Choose from bound site accounts', search: 'Search email, nickname or member OpenID', noBindings: 'No matching account bindings.', select: 'Set as admin',
+    saveHelp: 'Use Save at the bottom to apply. Removing a binding restores ordinary identity for subsequent chats. The site operator must verify admins; labels and self-declared roles grant no authority. This affects chat only, without changing group settings or granting account or financial permissions.'
+  },
   rankings: {
     tab: 'Daily rankings', title: 'Daily rankings and prizes',
     help: 'Send /今日排行榜 to view the top 10 token users and spenders across all active site accounts, including accounts without QQ bindings. Only masked emails and positions are shown, with **** hiding the middle of each email username. Full emails, names, QQ, account IDs and usage values stay private.',

@@ -6,6 +6,8 @@
     </label>
     <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(allPass ? 'admin.tests.protection.allPass.description' : combined ? 'admin.tests.protection.combined.description' : 'admin.tests.protection.description') }}</p>
     <div v-if="modelValue.enabled" class="space-y-4">
+      <details :open="!allPass" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-decision-mode>
+        <summary class="cursor-pointer text-sm font-medium">{{ t('admin.tests.experience.modeAdvanced') }} · {{ t(allPass ? 'admin.tests.protection.allPass.title' : combined ? 'admin.tests.protection.combined.title' : 'admin.tests.protection.combined.perTest') }}</summary>
       <label class="input-label block">{{ t('admin.tests.protection.combined.mode') }}
         <select :value="modelValue.mode || 'per_test'" class="input mt-1 w-full" data-protection-mode @change="setMode(($event.target as HTMLSelectElement).value as NonNullable<TestProtectionConfig['mode']>)">
           <option value="all_pass">{{ t('admin.tests.protection.allPass.title') }}</option>
@@ -13,14 +15,19 @@
           <option value="combined">{{ t('admin.tests.protection.combined.title') }}</option>
         </select>
       </label>
+      </details>
       <div v-if="allPass" class="space-y-3" data-all-pass-policy>
         <p class="rounded-lg bg-blue-50 p-3 text-sm leading-relaxed text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">{{ t('admin.tests.protection.allPass.modeHint') }}</p>
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.allPass.newChecksHint') }}</p>
+        <p class="text-sm text-gray-600 dark:text-gray-300" data-all-pass-action-summary>{{ t(defaultActions ? 'admin.tests.experience.actionDefaults' : 'admin.tests.experience.customActions') }}</p>
+        <details :open="!defaultActions" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-all-pass-action-details><summary class="mb-3 cursor-pointer text-sm font-medium">{{ t('admin.tests.experience.actionAdvanced') }}</summary>
         <div class="grid gap-3 lg:grid-cols-2">
           <TestOutcomeActionEditor :model-value="allPassAction" outcome="pass" :groups="groups" :title="t('admin.tests.protection.allPass.groups')" @update:model-value="setAllPassAction('pass', $event)" />
           <TestOutcomeActionEditor :model-value="allFailAction" outcome="fail" :groups="groups" :title="t('admin.tests.protection.allPass.failure')" @update:model-value="setAllPassAction('fail', $event)" />
         </div>
         <p v-if="allPassAction.group_mode === 'assign' || allFailAction.group_mode === 'assign'" class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.actions.routingHint') }}</p>
+        </details>
+        <p class="text-xs text-gray-500">{{ t('admin.tests.experience.activeRecoveryHint') }}</p>
       </div>
       <p v-if="combined" class="rounded-lg bg-blue-50 p-3 text-xs text-blue-800 dark:bg-blue-950/30 dark:text-blue-200" data-combined-mode-hint>{{ t('admin.tests.protection.combined.modeHint') }}</p>
       <section v-for="type in types" :key="type.id" class="space-y-3 rounded-md bg-gray-50 p-3 dark:bg-dark-800" :data-protection-type="type.id">
@@ -118,6 +125,7 @@ const { t } = useI18n()
 const allPass = computed(() => props.modelValue.mode === 'all_pass')
 const allPassAction = computed(() => allPassOutcomeAction(props.modelValue, 'pass'))
 const allFailAction = computed(() => allPassOutcomeAction(props.modelValue, 'fail'))
+const defaultActions = computed(() => allPassAction.value.scheduling === 'resume' && allPassAction.value.group_mode === 'keep' && allFailAction.value.scheduling === 'pause' && allFailAction.value.group_mode === 'keep')
 const setAllPassAction = (outcome: 'pass' | 'fail', action: TestOutcomeAction) => update(next => {
   if (outcome === 'pass') next.on_pass = action
   else next.on_fail = action

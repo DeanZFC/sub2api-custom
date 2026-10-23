@@ -16,7 +16,7 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.success,
 
 const plan = { id: 10, name: 'Candy hourly', test_definition_id: 2, test_definition_ids: [2], group_ids: [8], model_id: 'test-model', cron_expression: '0 * * * *', enabled: true, max_results: 50 }
 const makeWrapper = () => mount(TestManagementView, { global: {
-  plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: { tests: { elapsed: ({ named }: { named: (key: string) => string }) => `Elapsed ${named('duration')}` } } } } })],
+  plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: { tests: { totalDuration: ({ named }: { named: (key: string) => string }) => 'Total duration: ' + named('seconds') + ' s', elapsed: ({ named }: { named: (key: string) => string }) => `Elapsed ${named('duration')}` } } } } })],
   stubs: { AppLayout: { template: '<main><slot /></main>' }, Icon: true, BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><h3>{{ title }}</h3><slot /><slot name="footer" /></section>' } }
 } })
 
@@ -322,7 +322,7 @@ describe('configurable test management', () => {
 
     api.listResults.mockResolvedValue([{ ...running, status: 'success', latency_ms: 130123, output_numeric: 29 }])
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
-    expect(wrapper.get('[data-dialog] article').text()).toContain('130123ms')
+    expect(wrapper.get('[data-dialog] article').text()).toContain('Total duration: 130.123 s')
     expect(wrapper.get('[data-dialog] article').text()).not.toContain('Elapsed')
     wrapper.unmount()
   })

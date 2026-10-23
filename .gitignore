@@ -135,6 +135,7 @@ deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/channel-quality-experience.md
 !docs/passive-quality.md
 !docs/codex-fingerprint.md
 !docs/upstream-billing-rate-limit.md

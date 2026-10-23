@@ -81,15 +81,17 @@ type DashboardStats struct {
 
 // TrendDataPoint represents a single point in trend data
 type TrendDataPoint struct {
-	Date                string  `json:"date"`
-	Requests            int64   `json:"requests"`
-	InputTokens         int64   `json:"input_tokens"`
-	OutputTokens        int64   `json:"output_tokens"`
-	CacheCreationTokens int64   `json:"cache_creation_tokens"`
-	CacheReadTokens     int64   `json:"cache_read_tokens"`
-	TotalTokens         int64   `json:"total_tokens"`
-	Cost                float64 `json:"cost"`        // 标准计费
-	ActualCost          float64 `json:"actual_cost"` // 实际扣除
+	// CacheHitRate is nil when no eligible prompt tokens were observed.
+	CacheHitRate        *float64 `json:"cache_hit_rate"`
+	Date                string   `json:"date"`
+	Requests            int64    `json:"requests"`
+	InputTokens         int64    `json:"input_tokens"`
+	OutputTokens        int64    `json:"output_tokens"`
+	CacheCreationTokens int64    `json:"cache_creation_tokens"`
+	CacheReadTokens     int64    `json:"cache_read_tokens"`
+	TotalTokens         int64    `json:"total_tokens"`
+	Cost                float64  `json:"cost"`        // 标准计费
+	ActualCost          float64  `json:"actual_cost"` // 实际扣除
 }
 
 // ModelStat represents usage statistics for a single model
@@ -291,6 +293,8 @@ type UsageLogFilters struct {
 
 // UsageStats represents usage statistics
 type UsageStats struct {
+	// CacheHitRate is nil when no eligible prompt tokens were observed.
+	CacheHitRate             *float64       `json:"cache_hit_rate"`
 	TotalRequests            int64          `json:"total_requests"`
 	TotalInputTokens         int64          `json:"total_input_tokens"`
 	TotalOutputTokens        int64          `json:"total_output_tokens"`

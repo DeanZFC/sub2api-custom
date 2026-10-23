@@ -31,6 +31,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const stats = {
+  cache_hit_rate: 22 / 134,
   total_requests: 1,
   total_input_tokens: 100,
   total_output_tokens: 50,
@@ -90,3 +91,14 @@ describe('UsageStatsCards', () => {
     expect(tooltip?.classes()).not.toContain('opacity-0')
   })
 })
+
+ it.each([[null, '-'], [undefined, '-'], [0, '0.0%'], [0.8, '80.0%']] as const)(
+  'uses eligible rate %s without recomputing from total traffic', (rate, expected) => {
+    const wrapper = mount(UsageStatsCards, {
+      props: { stats: { ...stats, total_input_tokens: 1000000, cache_hit_rate: rate } },
+      global: { stubs: { Icon: true } },
+    })
+    expect(wrapper.get('[data-testid="total-cache-hit-rate"]').text()).toBe('Cache hit rate: ' + expected)
+    expect(wrapper.text()).toContain('In: 1.00M')
+  },
+)

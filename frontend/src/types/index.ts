@@ -2002,6 +2002,7 @@ export interface DashboardStats {
 }
 
 export interface UsageStatsResponse {
+  cache_hit_rate?: number | null
   period?: string
   total_requests: number
   total_input_tokens: number
@@ -2022,6 +2023,7 @@ export interface UsageStatsResponse {
 // ==================== Trend & Chart Types ====================
 
 export interface TrendDataPoint {
+  cache_hit_rate?: number | null
   date: string
   requests: number
   input_tokens: number

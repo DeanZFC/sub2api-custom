@@ -28,7 +28,8 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
-			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
+			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms,
+			` + usageLogCacheRateSQL + ` AS cache_hit_rate
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
@@ -48,6 +49,7 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
+		&stats.CacheHitRate,
 	); err != nil {
 		return nil, err
 	}
@@ -67,7 +69,8 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
-			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
+			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms,
+			` + usageLogCacheRateSQL + ` AS cache_hit_rate
 		FROM usage_logs
 		WHERE api_key_id = $1 AND created_at >= $2 AND created_at < $3
 	`
@@ -87,6 +90,7 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
+		&stats.CacheHitRate,
 	); err != nil {
 		return nil, err
 	}
@@ -116,7 +120,8 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
-			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
+			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms,
+			` + usageLogCacheRateSQL + ` AS cache_hit_rate
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
 	`
@@ -136,6 +141,7 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
+		&stats.CacheHitRate,
 	); err != nil {
 		return nil, err
 	}
@@ -156,7 +162,8 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
-			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
+			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms,
+			`+usageLogCacheRateSQL+` AS cache_hit_rate
 		FROM usage_logs
 		WHERE %s = $1 AND created_at >= $2 AND created_at < $3
 	`, rawUsageLogModelColumn)
@@ -176,6 +183,7 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
+		&stats.CacheHitRate,
 	); err != nil {
 		return nil, err
 	}
@@ -629,7 +637,8 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
-			COALESCE(AVG(duration_ms), 0) as avg_duration_ms
+			COALESCE(AVG(duration_ms), 0) as avg_duration_ms,
+			` + usageLogCacheRateSQL + ` AS cache_hit_rate
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
 	`
@@ -647,6 +656,7 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
+		&stats.CacheHitRate,
 	); err != nil {
 		return nil, err
 	}
@@ -700,6 +710,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			SELECT
 				COALESCE(NULLIF(TRIM(inbound_endpoint), ''), 'unknown') AS inbound_endpoint,
 				COALESCE(NULLIF(TRIM(upstream_endpoint), ''), 'unknown') AS upstream_endpoint,
+				request_type, stream, openai_ws_mode, image_input_tokens,
 				input_tokens,
 				output_tokens,
 				cache_creation_tokens,
@@ -724,7 +735,8 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			COALESCE(SUM(total_cost), 0) AS cost,
 			COALESCE(SUM(actual_cost), 0) AS actual_cost,
 			COALESCE(SUM(account_cost), 0) AS account_cost,
-			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms
+			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms,
+			`+usageLogCacheRateSQL+` AS cache_hit_rate
 		FROM scoped
 		GROUP BY GROUPING SETS (
 			(),
@@ -744,6 +756,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
+		var cacheHitRate *float64
 		var (
 			inboundGrouped, upstreamGrouped                                      int
 			inboundEndpoint, upstreamEndpoint                                    sql.NullString
@@ -764,6 +777,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			&actualCost,
 			&accountCost,
 			&averageDurationMs,
+			&cacheHitRate,
 		); err != nil {
 			return nil, err
 		}
@@ -776,6 +790,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 
 		switch {
 		case inboundGrouped == 1 && upstreamGrouped == 1:
+			stats.CacheHitRate = cacheHitRate
 			stats.TotalRequests = requests
 			stats.TotalInputTokens = inputTokens
 			stats.TotalOutputTokens = outputTokens

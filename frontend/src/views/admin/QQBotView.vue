@@ -118,6 +118,12 @@
         <div v-show="activeTab === 'autonomous'" id="qqbot-settings-panel-autonomous" role="tabpanel" aria-labelledby="qqbot-settings-tab-autonomous">
           <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" />
         </div>
+        <div v-show="activeTab === 'moderation'" id="qqbot-settings-panel-moderation" role="tabpanel" aria-labelledby="qqbot-settings-tab-moderation">
+          <QQBotModerationSettings v-model="moderation" :groups="allowedGroups" :runtime="form.app_id === savedAppId ? runtime : null" :disabled="busy" />
+        </div>
+        <div v-show="activeTab === 'group-admins'" id="qqbot-settings-panel-group-admins" role="tabpanel" aria-labelledby="qqbot-settings-tab-group-admins">
+          <QQBotGroupAdminSettings v-model="groupAdmins" :app-id="form.app_id" :groups="allowedGroups" :runtime="form.app_id === savedAppId ? runtime : null" :disabled="busy" />
+        </div>
         <section v-show="activeTab === 'images'" id="qqbot-settings-panel-images" role="tabpanel" aria-labelledby="qqbot-settings-tab-images" class="card space-y-4 p-6">
           <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">{{ t('qqbot.images') }}</h2><label class="flex items-center gap-2"><input v-model="form.image_enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
           <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('qqbot.chatImageHelp') }}</p>
@@ -151,12 +157,17 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import QQBotAutonomousSettings from '@/components/admin/qqbot/QQBotAutonomousSettings.vue'
+import QQBotGroupAdminSettings from '@/components/admin/qqbot/QQBotGroupAdminSettings.vue'
+import QQBotModerationSettings from '@/components/admin/qqbot/QQBotModerationSettings.vue'
+import { defaultModerationConfig } from '@/api/qqbot'
 import { defaultAutonomousConfig } from '@/api/qqbot'
 import { defaultHealthNotificationConfig, qqbotAPI, type QQBotConfig, type QQBotRuntime } from '@/api/qqbot'
 const { t } = useI18n()
 const tabs = [
   { key: 'connection', label: 'qqbot.connection' },
   { key: 'chat', label: 'qqbot.ai' },
+  { key: 'group-admins', label: 'qqbot.groupAdmins.title' },
+  { key: 'moderation', label: 'qqbot.moderation.title' },
   { key: 'autonomous', label: 'qqbot.autonomous.title' },
   { key: 'images', label: 'qqbot.images' },
   { key: 'commands', label: 'qqbot.customCommands' },
@@ -167,9 +178,16 @@ type SettingsTab = (typeof tabs)[number]['key']
 const activeTab = ref<SettingsTab>('connection')
 const settingsForm = ref<HTMLFormElement | null>(null)
 const form = ref<QQBotConfig | null>(null)
+const groupAdmins = computed({
+  get: () => form.value?.group_admins ?? [],
+  set: value => { if (form.value) form.value.group_admins = value }
+})
 const runtime = ref<QQBotRuntime | null>(null)
+const savedAppId = ref('')
 const groupsText = ref('')
+const allowedGroups = computed(() => [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))])
 const autonomous = ref(defaultAutonomousConfig())
+const moderation = ref(defaultModerationConfig())
 const healthNotifications = ref(defaultHealthNotificationConfig())
 const healthGroupsText = ref('')
 const healthFields = [
@@ -197,7 +215,7 @@ const limitFields = [
   { key: 'total_daily_image_limit', label: 'totalImage', max: 100000 },
   { key: 'cooldown_seconds', label: 'cooldown', max: 3600 }
 ] as const
-const snapshot = computed(() => JSON.stringify([form.value, groupsText.value, priceNotifications.value, notificationGroupsText.value, autonomous.value, healthNotifications.value, healthGroupsText.value]))
+const snapshot = computed(() => JSON.stringify([form.value, groupsText.value, priceNotifications.value, notificationGroupsText.value, autonomous.value, healthNotifications.value, healthGroupsText.value, moderation.value]))
 const dirty = computed(() => snapshot.value !== savedSnapshot.value)
 const webhookURL = computed(() => `${window.location.origin}/api/v1/qqbot/webhook`)
 async function handleTabKeydown(event: KeyboardEvent, tab: SettingsTab) {
@@ -218,8 +236,10 @@ async function handleTabKeydown(event: KeyboardEvent, tab: SettingsTab) {
 function secretHint(set: boolean) { return t(set ? 'qqbot.secretStored' : 'qqbot.secretEmpty') }
 function message(e: unknown) { return (e as {message?: string})?.message || t('common.error') }
 function apply(c: QQBotConfig) {
+  savedAppId.value = c.app_id
   form.value = { ...c, custom_commands: c.custom_commands ?? [] }
   autonomous.value = { ...defaultAutonomousConfig(), ...c.autonomous }
+  moderation.value = { ...defaultModerationConfig(), ...c.moderation }
   healthNotifications.value = { ...defaultHealthNotificationConfig(), ...c.health_notifications }
   healthGroupsText.value = healthNotifications.value.groups.join('\n')
   groupsText.value = (c.allowed_groups || []).join('\n')
@@ -258,7 +278,7 @@ async function save() {
     return
   }
   busy.value = true; error.value = ''; notice.value = ''
-  try { apply(await qqbotAPI.save({ ...form.value, health_notifications: { ...healthNotifications.value, groups: [...new Set(healthGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, autonomous: { ...autonomous.value }, price_notifications: { ...priceNotifications.value, groups: [...new Set(notificationGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, allowed_groups: [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))] })); notice.value = t('common.saved'); await refreshRuntime() }
+  try { apply(await qqbotAPI.save({ ...form.value, moderation: { ...moderation.value }, health_notifications: { ...healthNotifications.value, groups: [...new Set(healthGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, autonomous: { ...autonomous.value }, price_notifications: { ...priceNotifications.value, groups: [...new Set(notificationGroupsText.value.split(/[\s,，]+/).filter(Boolean))] }, allowed_groups: [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))] })); notice.value = t('common.saved'); await refreshRuntime() }
   catch (e) { error.value = message(e) } finally { busy.value = false }
 }
 function addGroup(id: string) { groupsText.value = [...new Set([...groupsText.value.split(/[\s,，]+/).filter(Boolean), id])].join('\n') }

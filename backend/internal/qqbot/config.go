@@ -19,6 +19,7 @@ const configKey = "qq_bot_config"
 func (c *Config) UnmarshalJSON(data []byte) error {
 	type configJSON Config
 	decoded := configJSON(*c)
+	decoded.Moderation = DefaultModerationConfig()
 	decoded.Autonomous = DefaultAutonomousConfig()
 	decoded.HealthNotifications = DefaultHealthNotificationConfig()
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -96,6 +97,9 @@ func validateURL(raw string) error {
 	return nil
 }
 func validateConfig(c Config) error {
+	if err := validateModeration(c); err != nil {
+		return err
+	}
 	if err := validateHealthNotifications(c); err != nil {
 		return err
 	}
@@ -106,6 +110,9 @@ func validateConfig(c Config) error {
 		return err
 	}
 	if err := validateCustomCommands(c.CustomCommands); err != nil {
+		return err
+	}
+	if err := validateGroupAdmins(c); err != nil {
 		return err
 	}
 	if c.ChatProtocol != "responses" && c.ChatProtocol != "chat_completions" {
@@ -202,6 +209,7 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 	c = update(old)
 	c.CustomCommands = normalizeCustomCommands(c.CustomCommands)
 	c.AppID = strings.TrimSpace(c.AppID)
+	c.GroupAdmins = normalizeGroupAdmins(c.GroupAdmins)
 	c.BaseURL = strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	c.ImageBaseURL = strings.TrimRight(strings.TrimSpace(c.ImageBaseURL), "/")
 	if old.AppID != "" && old.AppID != c.AppID {
@@ -237,6 +245,19 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 	c.ClearImageAPIKey = false
 	if err = validateConfig(c); err != nil {
 		return c, err
+	}
+	if (old.Moderation.Enabled || c.Moderation.Enabled) && moderationPolicy(old) != moderationPolicy(c) {
+		// Retain replay tombstones, but never reuse old counting windows after a
+		// disable/enable cycle or policy change. Successful mutes are not lifted.
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_moderation_events SET policy_hash='' WHERE app_id=$1`, old.AppID); err != nil {
+			return c, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_moderation_members m SET cooldown_until=LEAST(cooldown_until,NOW()),active_incident_id='' WHERE app_id=$1 AND NOT EXISTS(SELECT 1 FROM qq_bot_moderation_operations o WHERE o.incident_id=m.active_incident_id AND o.kind='mute' AND o.status IN ('started','succeeded','unconfirmed'))`, old.AppID); err != nil {
+			return c, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_moderation_operations o SET status='cancelled',error='配置或白名单已变更，取消处罚',finished_at=NOW() FROM qq_bot_moderation_incidents i WHERE i.id=o.incident_id AND i.app_id=$1 AND o.status='queued'`, old.AppID); err != nil {
+			return c, err
+		}
 	}
 	if err = resetAutonomous(ctx, tx, old, c); err != nil {
 		return c, err

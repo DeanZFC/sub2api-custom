@@ -41,8 +41,8 @@
 
     <BaseDialog :show="!!editingPlan" :title="editingPlan?.id ? t('common.edit') : t('common.create')" width="wide" @close="editingPlan = null">
       <div v-if="editingPlan" class="grid gap-4 sm:grid-cols-2">
+        <p class="text-sm text-gray-500 sm:col-span-2">{{ t('admin.tests.experience.activeHint') }}</p>
         <label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingPlan.name" class="input mt-1 w-full" /></label>
-        <label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingPlan.sort_order" min="0" type="number" class="input mt-1 w-full" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.planSortOrderHint') }}</span></label>
         <p v-if="editingPlan.migration_note" class="text-sm text-amber-700 dark:text-amber-300 sm:col-span-2" data-plan-migration-note>{{ editingPlan.migration_note }}</p>
         <fieldset class="sm:col-span-2">
           <legend class="input-label">{{ t('admin.tests.types') }}</legend>
@@ -65,6 +65,16 @@
           </ol>
           <p v-if="editingPlan.group_ids.length && !validStrategyGroups(editingPlan.group_ids)" role="alert" class="text-xs text-red-600 dark:text-red-400">{{ t('admin.tests.invalidStrategyGroups') }}</p>
         </fieldset>
+        <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_ids.length || modelOptionsLoading" :placeholder="editingPlan.group_ids.length ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.commonModelsHint') }}</span></label>
+        <p v-if="editingPlan.group_ids.length && !modelOptionsLoading && !modelOptions.length" class="text-xs text-amber-700 dark:text-amber-300" data-no-common-model>{{ t('admin.tests.noCommonModels') }}</p>
+        <TestScheduleEditor v-model:schedule="editingPlan.schedule" v-model:cron-expression="editingPlan.cron_expression" class="sm:col-span-2" />
+        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :groups="protectionGroups" class="sm:col-span-2" />
+        <details class="rounded-lg border border-gray-200 p-4 dark:border-dark-700 sm:col-span-2" data-plan-advanced>
+          <summary class="cursor-pointer text-sm font-medium">{{ t('admin.tests.experience.activeAdvanced') }}</summary>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingPlan.sort_order" min="0" type="number" class="input mt-1 w-full" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.planSortOrderHint') }}</span></label>
+        <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
+        <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
         <div class="space-y-2 sm:col-span-2" data-plan-exclusions>
           <div class="flex items-center justify-between gap-2">
             <label for="plan-excluded-account-search" class="input-label">{{ t('admin.tests.excludedAccounts') }}</label>
@@ -80,12 +90,8 @@
           </div>
           <p v-else class="text-xs text-gray-500">{{ t(editingPlan.group_ids.length ? 'admin.tests.noExclusionAccounts' : 'admin.tests.selectGroupFirst') }}</p>
         </div>
-        <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_ids.length || modelOptionsLoading" :placeholder="editingPlan.group_ids.length ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.commonModelsHint') }}</span></label>
-        <p v-if="editingPlan.group_ids.length && !modelOptionsLoading && !modelOptions.length" class="text-xs text-amber-700 dark:text-amber-300" data-no-common-model>{{ t('admin.tests.noCommonModels') }}</p>
-        <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
-        <TestScheduleEditor v-model:schedule="editingPlan.schedule" v-model:cron-expression="editingPlan.cron_expression" class="sm:col-span-2" />
-        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :groups="protectionGroups" class="sm:col-span-2" />
-        <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
+          </div>
+        </details>
         <label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label>
       </div>
       <template #footer><button class="btn btn-secondary" @click="editingPlan = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="saving || !canSavePlan" @click="savePlan">{{ t('common.save') }}</button></template>

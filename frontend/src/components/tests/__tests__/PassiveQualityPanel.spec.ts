@@ -67,7 +67,7 @@ describe('passive quality management', () => {
     await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
     const label = wrapper.get('[data-dialog]').findAll('label').find(l => l.text() === 'Minimum recovery samples')!
     await label.get('input').setValue(200)
-    expect(wrapper.get('[data-passive-save]').attributes('disabled')).toBeDefined(); expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-passive-save]').attributes('disabled')).toBeDefined(); expect(wrapper.get('[data-quality-advanced]').attributes('open')).toBeDefined(); expect(api.save).not.toHaveBeenCalled()
     wrapper.unmount()
   })
   it('shows missing metrics and keeps verify distinct from temporary exemption', async () => {
@@ -88,4 +88,52 @@ describe('passive quality management', () => {
     const wrapper = makeWrapper();await flushPromises();expect(wrapper.get('[role="alert"]').exists()).toBe(true)
     await wrapper.get('[role="alert"] button').trigger('click');await flushPromises();expect(wrapper.find('[role="alert"]').exists()).toBe(false);wrapper.unmount()
   })
+  it('preserves custom values and avoids resetting protection on an unchanged save', async () => {
+    const policy = { ...defaultPassivePolicy(), id: 9, version: 3, name: 'Custom', group_ids: [8], window_seconds: 1234, trial_concurrency: 3, mode: 'enforce' as const, model: 'model', scope: 'model' as const }
+    api.policies.mockResolvedValue([policy])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    expect(wrapper.get('[data-current-profile]').text()).toContain('Custom')
+    expect(wrapper.get('[data-quality-advanced]').attributes('open')).toBeUndefined()
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    await wrapper.get('[data-dialog] input:not([type])').setValue('Renamed custom')
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith({ ...policy, name: 'Renamed custom' })
+    wrapper.unmount()
+  })
+
+  it('applies a profile without enabling enforcement or changing thresholds, then explicitly enables limiting', async () => {
+    const policy = { ...defaultPassivePolicy(), id: 9, version: 3, name: 'Custom', group_ids: [8], error_rate: { enabled: true, pause: 17, recover: 3 } }
+    api.policies.mockResolvedValue([policy])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    await wrapper.get('[data-quality-profile="steady"]').trigger('click')
+    expect(wrapper.get('[data-quality-response="observe"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-policy-preview]').text()).toContain('No scheduling changes or recovery probes')
+    await wrapper.get('[data-quality-response="limit"]').trigger('click')
+    expect(wrapper.get('[data-policy-preview]').text()).toContain('Concurrency cap 2')
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ mode: 'enforce', action: 'limit', min_samples: 60, max_samples: 200, error_rate: policy.error_rate, group_ids: [8], version: 3 }))
+    expect(policy.mode).toBe('observe')
+    wrapper.unmount()
+  })
+
+  it('uses seconds for first-token inputs and prevents empty thresholds from becoming zero', async () => {
+    api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 1, version: 2, name: 'Policy', group_ids: [8], ttft: { enabled: true, pause: 10001, recover: 5001 } }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    const row = wrapper.findAll('label').find(l => l.text() === 'First token P90 (seconds)')!.element.parentElement!
+    const inputs = row.querySelectorAll<HTMLInputElement>('input[type="number"]')
+    expect(inputs[0].value).toBe('10.001')
+    inputs[0].value = ''; inputs[0].dispatchEvent(new Event('input', { bubbles: true })); await flushPromises()
+    expect(wrapper.get('[data-passive-save]').attributes('disabled')).toBeDefined()
+    inputs[0].value = '12.345'; inputs[0].dispatchEvent(new Event('input', { bubbles: true })); await flushPromises()
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ ttft: { enabled: true, pause: 12345, recover: 5001 } }))
+    wrapper.unmount()
+  })
+
 })

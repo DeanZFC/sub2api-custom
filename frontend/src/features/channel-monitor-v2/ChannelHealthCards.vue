@@ -36,7 +36,7 @@
             <dl class="my-3 grid grid-cols-3 gap-2">
               <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">
                 <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.cacheRate')">{{ t('channelMonitorV2.metrics.cacheRate') }}</dt>
-                <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl">{{ hasMonitorTraffic(row) ? formatMonitorPercent(row.metrics.cache_rate) : '-' }}</dd>
+                <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl">{{ formatMonitorCacheRate(row.metrics) }}</dd>
               </div>
               <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">
                 <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.cards.availability')">{{ t('channelMonitorV2.cards.availability') }}</dt>
@@ -98,6 +98,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatMonitorCacheRate } from '@/features/channel-monitor-v2/monitorFormat'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { HealthState, MonitorCoverage, MonitorMatrixGroupBy, MonitorMatrixRow } from '@/api/channelMonitorV2'
@@ -175,7 +176,7 @@ function historySlots(row: MonitorMatrixRow) {
         t('channelMonitorV2.matrix.scoreLine', { score: score == null ? '-' : Math.round(score) }),
         t('channelMonitorV2.metrics.successRateValue', { value: formatMonitorSuccessRateFromError(metrics.error_rate, health.error_rate) }),
         t('channelMonitorV2.metrics.ttftValue', { value: formatLatencyPrivacy(metrics.ttft.p50_ms, metrics.ttft.p90_ms, metrics.ttft.avg_ms, metrics.ttft.p95_ms) }),
-        t('channelMonitorV2.metrics.cacheRateValue', { value: health.cache === 'unknown' ? '-' : formatMonitorPercent(metrics.cache_rate) }),
+        t('channelMonitorV2.metrics.cacheRateValue', { value: formatMonitorCacheRate(metrics) }),
         t('channelMonitorV2.metrics.durationValue', { value: formatLatencyPrivacy(metrics.duration.p50_ms, metrics.duration.p90_ms, metrics.duration.avg_ms, metrics.duration.p95_ms) }),
       ].join('\n'),
     }

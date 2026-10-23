@@ -504,6 +504,11 @@ func (s *Service) sendFormatted(ctx context.Context, c Config, j Job, text strin
 }
 
 func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job, text string, img []byte, seq int, keyboard *messageKeyboard) error {
+	if blocked, err := s.moderationBlocked(ctx, c, j.GroupID, j.MessageID); err != nil {
+		return err
+	} else if blocked {
+		return errors.New("防刷屏已拦截原消息，取消机器人回复")
+	}
 	// Only passive replies: no accidental proactive notification or expired retry.
 	if j.MessageID == "" || time.Since(j.CreatedAt) > 280*time.Second {
 		return errors.New("回复窗口已过期")

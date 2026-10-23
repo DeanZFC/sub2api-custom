@@ -1,4 +1,52 @@
 export default { qqbot: {
+  moderation: {
+    "title": "防刷屏",
+    "enabled": "开启自动撤回与禁言",
+    "help": "按群、成员分别检测重复文字和连续发言，命中后撤回刷屏消息并禁言，不调用 AI。默认关闭。",
+    "permission": "请先在 QQ 群内将机器人设为管理员、开启“接收所有消息”，并确保已获得官方接口权限。只能处罚普通成员，超过 2 分钟的消息不能撤回。",
+    "groups": "启用的群",
+    "noGroups": "请先在连接配置中填写允许使用的群。",
+    "removedGroup": "已不在允许使用的群中，请取消选择",
+    "repeat_window_seconds": "重复文字统计窗口（秒）",
+    "repeat_count": "相同文字触发条数",
+    "burst_window_seconds": "连续发言统计窗口（秒）",
+    "burst_count": "连续发言触发条数",
+    "mute_minutes": "首次禁言（分钟）",
+    "repeat_offense_minutes": "再次违规判定窗口（分钟）",
+    "escalated_mute_minutes": "再次违规禁言（分钟）",
+    "ruleHelp": "重复文字保留第一条；连续发言统计包含图片等消息。再次违规以最近一次成功禁言为准。修改规则会取消尚未执行的处罚，已执行的禁言可在 QQ 中手动解除。",
+    "exemptions": "豁免白名单",
+    "exemptionsHelp": "QQ 群主、管理员、机器人及本站绑定的群管理员自动豁免。以下白名单按群生效，请填写成员 OpenID（不是 QQ 号码）。角色信息缺失时不自动处罚。",
+    "removeExemption": "删除白名单 {index}",
+    "records": "最近处罚记录",
+    "recordsHelp": "显示最近 50 次，记录保留 30 天。点击页面顶部刷新查看执行结果。群内不额外发送处罚提示。",
+    "empty": "暂无处罚记录。",
+    "muteResult": "计划禁言 {minutes} 分钟 · {status}",
+    "recallResult": "撤回成功 {succeeded}/{total} 条 · 待完成操作 {pending} 项",
+    "reasons": {
+        "repeat": "重复文字",
+        "burst": "连续刷屏"
+    },
+    "statuses": {
+        "queued": "排队中",
+        "started": "执行中",
+        "succeeded": "已禁言",
+        "unconfirmed": "未确认成功，不自动重试",
+        "cancelled": "已取消",
+        "expired": "已过期"
+    }
+},
+  groupAdmins: {
+    title: '群管理员', add: '添加管理员', entry: '管理员 {index}', remove: '删除管理员 {index}',
+    help: '绑定后，管理员直接 {\'@\'} 机器人时，机器人会优先遵照他本次提出的聊天任务、语气、人设和回复格式要求。每个群独立绑定，可添加多位管理员。',
+    appRequired: '请先在连接配置中填写机器人 AppID。',
+    appChanged: '此绑定属于另一个机器人，请删除后重新添加。',
+    empty: '尚未绑定群管理员。', group: '群 OpenID', member: '成员 OpenID', nickname: '备注 / 昵称（可选）',
+    recent: '从最近发言成员添加', choose: '选择群 / 成员',
+    recentHelp: '可先让管理员在目标群 {\'@\'} 机器人发送一句话，刷新页面后选择对应成员。这里的成员标识不是 QQ 号码。',
+    fromBindings: '从已绑定网站账号选择', search: '搜索邮箱、昵称或成员 OpenID', noBindings: '没有匹配的绑定账号。', select: '设为管理员',
+    saveHelp: '点击页面底部“保存”后生效，删除绑定后后续聊天恢复普通身份。请由站长确认管理员身份；备注和聊天中自称管理员不会获得权限。本功能仅影响聊天，不修改群设置，也不授予账户或资金操作权限。'
+  },
   rankings: {
     tab: '每日排行', title: '每日排行榜与名次奖励',
     help: '发送 /今日排行榜，同时查看全站有效账号的 Token 消耗榜和消费金额榜，各显示前 10 名，未绑定 QQ 的账号也参与。仅展示脱敏邮箱和名次，邮箱用户名中间统一用 **** 隐藏，不公开完整邮箱、昵称、QQ、账号 ID 或具体消耗。',

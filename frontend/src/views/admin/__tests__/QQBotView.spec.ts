@@ -5,12 +5,56 @@ import { createI18n } from 'vue-i18n'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 
-const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), runtime: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn() }))
+const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), runtime: vi.fn(), bindings: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn() }))
 vi.mock('@/api/qqbot', async (importOriginal) => ({ ...await importOriginal<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/QQBotBindings.vue', () => ({ default: { template: '<section />' } }))
 
 describe('QQ bot settings', () => {
+  it.each(['zh', 'en'] as const)('%s configures anti-spam and shows actual operation results', async (locale) => {
+    const config = await api.config()
+    api.config.mockResolvedValue({ ...config, allowed_groups: ['group', 'other-group'] })
+    api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [], bindings: 0, encryption_ready: true,
+      moderation_records: [{ id: 'incident', group_id: 'group', member_id: 'spam-member', reason: 'repeat', mute_seconds: 300,
+        created_at: '2026-10-23T10:00:00+08:00', mute_status: 'unconfirmed', recall_total: 3, recall_succeeded: 2, pending: 0,
+        error: 'QQ HTTP 403 / code 40062003' }] })
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
+    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    await wrapper.get('#qqbot-settings-tab-moderation').trigger('click')
+    expect((wrapper.get('[data-testid="moderation-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.get('[data-testid="moderation-record"]').text()).toContain('40062003')
+    expect(wrapper.get('[data-testid="moderation-record"]').text()).toContain('2/3')
+    await wrapper.get('[data-testid="moderation-enabled"]').setValue(true)
+    await wrapper.findAll('[data-testid="moderation-group"]')[0]!.setValue(true)
+    await wrapper.get('[data-testid="moderation-repeat_count"]').setValue(5)
+    await wrapper.get('[data-testid="moderation-add-exemption"]').trigger('click')
+    await wrapper.get('[data-testid="moderation-exempt-member"]').setValue('trusted-member')
+    await wrapper.get('#qqbot-settings-tab-chat').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ moderation: {
+      enabled: true, groups: ['group'], repeat_window_seconds: 15, repeat_count: 5,
+      burst_window_seconds: 10, burst_count: 10, mute_minutes: 5, repeat_offense_minutes: 30,
+      escalated_mute_minutes: 30, exemptions: [{ group_id: 'group', member_id: 'trusted-member' }]
+    } }))
+    wrapper.unmount()
+  })
+
+  it('reveals invalid anti-spam limits before saving another tab', async () => {
+    const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
+    const wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    await wrapper.get('#qqbot-settings-tab-moderation').trigger('click')
+    await wrapper.get('[data-testid="moderation-escalated_mute_minutes"]').setValue(1)
+    await wrapper.get('#qqbot-settings-tab-chat').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('#qqbot-settings-tab-moderation').attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     vi.resetAllMocks()
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -25,6 +69,69 @@ describe('QQ bot settings', () => {
     } finally {
       vi.restoreAllMocks()
     }
+  })
+  it.each(['zh', 'en'] as const)('%s saves group admin identities from recent speakers and bound accounts and supports removal', async (locale) => {
+    const config = await api.config()
+    api.config.mockResolvedValue({ ...config, allowed_groups: ['group', 'second-group'] })
+    api.runtime.mockResolvedValue({ groups: [], jobs: [
+      { id: 'recent', group_id: 'group', member_id: 'recent-member' },
+      { id: 'duplicate', group_id: 'group', member_id: 'recent-member' },
+      { id: 'outside', group_id: 'outside', member_id: 'outsider' }
+    ], rewards: [], bindings: 1, encryption_ready: true })
+    api.bindings.mockResolvedValue({ items: [{ app_id: 'app', group_id: 'second-group', member_id: 'bound-member', nickname: 'Alice', email: 'alice@example.com' }], total: 1, page: 1, page_size: 20 })
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
+    let wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    await wrapper.get('#qqbot-settings-tab-group-admins').trigger('click')
+    expect(wrapper.text()).toContain(i18n.global.t('qqbot.groupAdmins.help'))
+    expect(wrapper.findAll('[data-testid="group-admin-recent"] option')).toHaveLength(2)
+    await wrapper.get('[data-testid="group-admin-recent"]').setValue(JSON.stringify({ group_id: 'group', member_id: 'recent-member' }))
+    expect(wrapper.findAll('[data-testid="group-admin-entry"]')).toHaveLength(1)
+    await wrapper.get('[data-testid="group-admin-search"]').setValue('alice')
+    await wrapper.get('[data-testid="group-admin-search-button"]').trigger('click')
+    await flushPromises()
+    expect(api.bindings).toHaveBeenCalledWith('alice', 1)
+    const selectButton = wrapper.findAll('button').find(button => button.text() === i18n.global.t('qqbot.groupAdmins.select'))!
+    await selectButton.trigger('click')
+    expect(wrapper.findAll('[data-testid="group-admin-entry"]')).toHaveLength(2)
+    expect(selectButton.attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const saved = api.save.mock.calls.at(-1)![0]
+    expect(saved.group_admins).toEqual([
+      { app_id: 'app', group_id: 'group', member_id: 'recent-member', nickname: '' },
+      { app_id: 'app', group_id: 'second-group', member_id: 'bound-member', nickname: 'Alice' }
+    ])
+    api.config.mockResolvedValue(saved)
+    wrapper.unmount()
+    wrapper = mount(QQBotView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    await wrapper.get('#qqbot-settings-tab-group-admins').trigger('click')
+    expect(wrapper.findAll('[data-testid="group-admin-entry"]')).toHaveLength(2)
+    await wrapper.get('[data-testid="group-admin-entry"] button').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.save.mock.calls.at(-1)![0].group_admins).toEqual([saved.group_admins[1]])
+    wrapper.unmount()
+  })
+
+  it('supports manual member entry and never transfers an existing binding to a changed bot AppID', async () => {
+    const i18n = createI18n({ legacy: false, locale: 'en', messages: { zh, en } })
+    const wrapper = mount(QQBotView, { attachTo: document.body, global: { plugins: [i18n] } })
+    await flushPromises()
+    await wrapper.get('#qqbot-settings-tab-group-admins').trigger('click')
+    await wrapper.get('[data-testid="add-group-admin"]').trigger('click')
+    await wrapper.get('[data-testid="group-admin-group"]').setValue('manual-group')
+    await wrapper.get('[data-testid="group-admin-member"]').setValue('manual-member')
+    await wrapper.get('[data-testid="group-admin-nickname"]').setValue('Label')
+    await wrapper.get('#qqbot-settings-tab-connection').trigger('click')
+    await wrapper.get('#qqbot-settings-panel-connection input[autocomplete="off"]').setValue('changed-app')
+    await wrapper.get('#qqbot-settings-tab-group-admins').trigger('click')
+    expect(wrapper.get('[data-testid="group-admin-entry"] [role="alert"]').text()).toContain(i18n.global.t('qqbot.groupAdmins.appChanged'))
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.save.mock.calls.at(-1)![0].group_admins).toEqual([{ app_id: 'app', group_id: 'manual-group', member_id: 'manual-member', nickname: 'Label' }])
+    wrapper.unmount()
   })
   it('saves health thresholds and recipients independently of price alerts', async () => {
     const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
@@ -234,7 +341,7 @@ describe('QQ bot settings', () => {
     wrapper.unmount()
   })
 
-  it.each(['chat', 'autonomous', 'commands'] as const)('opens the %s tab when a hidden field is invalid before saving', async (tab) => {
+  it.each(['chat', 'autonomous', 'commands', 'group-admins'] as const)('opens the %s tab when a hidden field is invalid before saving', async (tab) => {
     const i18n = createI18n({ legacy: false, locale: 'en', messages: { zh, en } })
     const wrapper = mount(QQBotView, { attachTo: document.body, global: { plugins: [i18n] } })
     await flushPromises()
@@ -242,6 +349,7 @@ describe('QQ bot settings', () => {
     if (tab === 'chat') await wrapper.get('[data-testid="history-messages"]').setValue(101)
     if (tab === 'autonomous') await wrapper.get('[data-testid="autonomous-enabled"]').setValue(true)
     if (tab === 'commands') await wrapper.get('#qqbot-settings-panel-commands button').trigger('click')
+    if (tab === 'group-admins') await wrapper.get('[data-testid="add-group-admin"]').trigger('click')
     const panel = wrapper.get(`#qqbot-settings-panel-${tab}`)
     const input = panel.get('input:invalid, textarea:invalid').element as HTMLInputElement | HTMLTextAreaElement
     const reportValidity = vi.spyOn(input, 'reportValidity')

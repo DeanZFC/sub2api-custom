@@ -137,7 +137,7 @@ func formatChannelStatusMetric(metric ChannelStatusMetric, throughput bool) stri
 		text = "成功率样本不足\n错误率样本不足"
 	}
 	if metric.CacheRate == nil {
-		text += "\n缓存暂无数据"
+		text += "\n缓存率：-"
 	} else {
 		text += fmt.Sprintf("\n缓存率：%.2f%%", *metric.CacheRate*100)
 	}

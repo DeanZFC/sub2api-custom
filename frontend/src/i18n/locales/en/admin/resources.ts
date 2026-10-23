@@ -1,5 +1,8 @@
+import qualityExperience from './qualityExperience'
+
 export default {
     tests: {
+      experience: qualityExperience,
       operations: {
   "title": "Budgets & suppliers",
   "budgetTitle": "Test budgets",

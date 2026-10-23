@@ -541,6 +541,7 @@ func TestAPIContracts(t *testing.T) {
 					"total_input_tokens": 15,
 					"total_output_tokens": 35,
 					"total_cache_tokens": 3,
+					"cache_hit_rate": null,
 					"total_cache_creation_tokens": 1,
 					"total_cache_read_tokens": 2,
 					"total_tokens": 53,

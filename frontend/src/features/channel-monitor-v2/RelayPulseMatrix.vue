@@ -82,7 +82,7 @@
             <strong
               class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300"
             >
-              {{ formatPercent(entry.row.metrics.cache_rate) }}
+              {{ formatMonitorCacheRate(entry.row.metrics) }}
             </strong>
             <div class="pulse-track grid items-stretch" :style="pulseStyle">
               <span
@@ -111,7 +111,7 @@
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.successRateValue', { value: successRate(slot.bucket.metrics, slot.bucket.health) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.ttftValue', { value: latencyPrivacy(slot.bucket.metrics.ttft) }) }}</span>
                     <span v-if="showThroughput" class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.tpsValue', { value: formatTps(slot.bucket.metrics.tpm) }) }}</span>
-                    <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.cacheRateValue', { value: formatPercent(slot.bucket.metrics.cache_rate) }) }}</span>
+                    <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.cacheRateValue', { value: formatMonitorCacheRate(slot.bucket.metrics) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.errorRateValue', { value: formatMonitorErrorRate(slot.bucket.metrics.error_rate, slot.bucket.health.error_rate) }) }}</span>
                     <span v-if="showThroughput" class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.rpmValue', { value: formatRate(slot.bucket.metrics.rpm) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.durationValue', { value: latencyPrivacy(slot.bucket.metrics.duration) }) }}</span>
@@ -169,6 +169,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatMonitorCacheRate } from '@/features/channel-monitor-v2/monitorFormat'
 import { useI18n } from 'vue-i18n'
 import { computed, reactive, ref, watch } from 'vue'
 import type {
@@ -185,7 +186,6 @@ import {
   formatLatencyPrivacy,
   formatMonitorMs,
   formatMonitorErrorRate,
-  formatMonitorPercent,
   formatMonitorSuccessRateFromError,
   formatMonitorThroughput,
   formatMonitorTokensPerSecond,
@@ -395,7 +395,7 @@ function bucketTooltipLines(bucket: MonitorMatrixBucket): string[] {
     lines.push(t('channelMonitorV2.metrics.tpsValue', { value: formatTps(metrics.tpm) }))
   }
   lines.push(
-    t('channelMonitorV2.metrics.cacheRateValue', { value: formatPercent(metrics.cache_rate) }),
+    t('channelMonitorV2.metrics.cacheRateValue', { value: formatMonitorCacheRate(metrics) }),
     t('channelMonitorV2.metrics.errorRateValue', { value: formatMonitorErrorRate(metrics.error_rate, bucket.health.error_rate) }),
   )
   if (props.showThroughput) {
@@ -438,10 +438,6 @@ function positionTooltip(event: MouseEvent | FocusEvent) {
 
 function latencyPrivacy(metric: LatencyMetric) {
   return formatLatencyPrivacy(metric.p50_ms, metric.p90_ms, metric.avg_ms, metric.p95_ms)
-}
-
-function formatPercent(value: number) {
-  return formatMonitorPercent(value)
 }
 
 function formatRate(value: number) {

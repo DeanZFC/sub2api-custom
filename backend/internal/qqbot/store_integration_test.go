@@ -60,6 +60,12 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	_, err = db.Exec(string(raw))
 	require.NoError(t, err)
+	moderationSQL, err := migrations.FS.ReadFile("297_qq_bot_moderation.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(moderationSQL))
+		require.NoError(t, err)
+	}
 	raw, err = migrations.FS.ReadFile("285_qq_bot_autonomous.sql")
 	require.NoError(t, err)
 	for range 2 {

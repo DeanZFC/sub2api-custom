@@ -1,9 +1,11 @@
 <template>
   <section class="space-y-5" data-quality-overview>
     <div class="rounded-xl border border-primary-100 bg-primary-50/60 p-5 dark:border-primary-900 dark:bg-primary-950/20">
-      <h3 class="font-semibold text-gray-900 dark:text-white">{{ tr('overview') }}</h3>
-      <p class="mt-2 max-w-4xl text-sm leading-6 text-gray-600 dark:text-gray-300">{{ tr('intro') }}</p>
-      <div class="mt-4 flex flex-wrap gap-2"><button class="btn btn-secondary btn-sm" @click="$emit('navigate', 'plans')">{{ tr('active') }}</button><button class="btn btn-secondary btn-sm" @click="$emit('navigate', 'passive')">{{ tr('passive') }}</button><button class="btn btn-secondary btn-sm" @click="$emit('navigate', 'types')">{{ tr('questionBank') }}</button></div>
+      <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.experience.overviewTitle') }}</h3>
+      <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">{{ t('admin.tests.experience.overviewHint') }}</p>
+      <div class="mt-4 grid gap-3 md:grid-cols-3">
+        <button v-for="goal in goals" :key="goal.tab" type="button" class="rounded-lg border border-primary-100 bg-white p-4 text-left transition hover:border-primary-400 dark:border-dark-600 dark:bg-dark-900" @click="$emit('navigate', goal.tab)"><strong class="text-sm text-gray-900 dark:text-white">{{ t('admin.tests.experience.' + goal.title) }} →</strong><span class="mt-2 block text-xs leading-5 text-gray-500">{{ t('admin.tests.experience.' + goal.hint) }}</span></button>
+      </div>
     </div>
     <form class="flex flex-wrap items-end gap-3" @submit.prevent="load(false)">
       <label class="input-label">{{ tr('search') }}<input v-model.trim="search" class="input mt-1" maxlength="200" /></label>
@@ -44,6 +46,7 @@ import type { AdminGroup } from '@/types'
 const props = defineProps<{ groups: AdminGroup[]; accountId?: number; visible: boolean }>()
 defineEmits<{ navigate: [tab: string, policy?: number, account?: number] }>()
 const { t } = useI18n()
+const goals = [{ tab: 'passive', title: 'trafficGoal', hint: 'trafficGoalHint' }, { tab: 'plans', title: 'scheduledGoal', hint: 'scheduledGoalHint' }, { tab: 'operations', title: 'costGoal', hint: 'costGoalHint' }]
 const tr = (key: string, values: Record<string, unknown> = {}) => t(`admin.tests.quality.${key}`, values)
 const { reason, date } = useQualityLabels()
 const search = ref(''), model = ref(''), group = ref(0), problemsOnly = ref(false)

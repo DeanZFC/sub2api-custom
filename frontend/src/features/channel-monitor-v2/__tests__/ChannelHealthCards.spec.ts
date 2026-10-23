@@ -9,7 +9,7 @@ import type { MonitorCoverage, MonitorHealth, MonitorMatrixRow, MonitorMetric, M
 
 const metrics: MonitorMetric = {
   success_requests: 0, error_requests: 0, request_count: 0, token_count: 0, rpm: 0, tpm: 0,
-  error_rate: 0.04, cache_rate: 0.7, cache_rate_numerator: 0, cache_rate_denominator: 0,
+  has_cache_samples: true, error_rate: 0.04, cache_rate: 0.7, cache_rate_numerator: 0, cache_rate_denominator: 0,
   ttft: { sample_count: 0, p50_ms: 8000, p95_ms: 12000, avg_ms: 9000 },
   duration: { sample_count: 0, p50_ms: null, p95_ms: null, avg_ms: null },
 }
@@ -127,7 +127,7 @@ describe('channel health cards', () => {
       expect(wrapper.get('[data-testid=recent-requests]').findAll('[role=img]')[19].attributes('data-state')).toBe('healthy')
     }
     const unknownHealth: MonitorHealth = { ...health, overall: 'unknown', error_rate: 'unknown', ttft: 'unknown', cache: 'unknown' }
-    await wrapper.setProps({ rows: [{ ...row, buckets: [{ ...row.buckets[0], health: unknownHealth }] }] })
+    await wrapper.setProps({ rows: [{ ...row, buckets: [{ ...row.buckets[0], metrics: { ...metrics, has_cache_samples: false }, health: unknownHealth }] }] })
     expect(slots[4].classes()).toContain('health-unknown')
     expect(slots[4].attributes('title')).toContain('成功率 -')
     expect(slots[4].attributes('title')).toContain('缓存率 -')
@@ -202,4 +202,14 @@ describe('channel health cards', () => {
     wrapper.unmount()
   })
 
+})
+
+it('shows a dash for sync-only traffic and zero for measured cache misses after redaction', async () => {
+  const wrapper = mount(ChannelHealthCards, {
+    props: { rows: [{ ...row, metrics: { ...metrics, cache_rate: 0, has_cache_samples: false } }], coverage, groupBy: 'platform_group', healthMode: 'cache' },
+    global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+  })
+  expect(wrapper.findAll('dd')[0].text()).toBe('-')
+  await wrapper.setProps({ rows: [{ ...row, metrics: { ...metrics, cache_rate: 0, has_cache_samples: true } }] })
+  expect(wrapper.findAll('dd')[0].text()).toBe('0.00%')
 })

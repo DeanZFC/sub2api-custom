@@ -11,6 +11,7 @@ import (
 var ErrDisabled = errors.New("QQ 机器人尚未启用")
 
 type Config struct {
+	Moderation               ModerationConfig         `json:"moderation"`
 	HealthNotifications      HealthNotificationConfig `json:"health_notifications"`
 	Autonomous               AutonomousConfig         `json:"autonomous"`
 	Enabled                  bool                     `json:"enabled"`
@@ -21,6 +22,7 @@ type Config struct {
 	AllowedGroups            []string                 `json:"allowed_groups"`
 	PriceNotifications       PriceNotificationConfig  `json:"price_notifications"`
 	CustomCommands           []CustomCommand          `json:"custom_commands"`
+	GroupAdmins              []GroupAdmin             `json:"group_admins"`
 	BaseURL                  string                   `json:"base_url"`
 	APIKey                   string                   `json:"api_key"`
 	APIKeySet                bool                     `json:"api_key_set"`
@@ -56,7 +58,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	return Config{HealthNotifications: DefaultHealthNotificationConfig(), Autonomous: DefaultAutonomousConfig(), PriceNotifications: PriceNotificationConfig{Scheduled: true, Groups: []string{}}, AllowedGroups: []string{}, CustomCommands: []CustomCommand{}, ChatProtocol: "chat_completions", ImageSize: "1024x1024",
+	return Config{Moderation: DefaultModerationConfig(), HealthNotifications: DefaultHealthNotificationConfig(), Autonomous: DefaultAutonomousConfig(), PriceNotifications: PriceNotificationConfig{Scheduled: true, Groups: []string{}}, AllowedGroups: []string{}, CustomCommands: []CustomCommand{}, GroupAdmins: []GroupAdmin{}, ChatProtocol: "chat_completions", ImageSize: "1024x1024",
 		SystemPrompt:    "你是 CTAV 群助手。用简洁、友好的中文回答。签到、绑定和奖励由固定指令处理，你不能修改账户或余额。",
 		MaxOutputTokens: 2048, HistoryMessages: 12, DailyChatLimit: 30, DailyImageLimit: 2,
 		TotalDailyChatLimit: 500, TotalDailyImageLimit: 20, CooldownSeconds: 5, InviteDailyLimit: 10,
@@ -103,9 +105,10 @@ type Event struct {
 		MessageID string `json:"message_id"`
 	} `json:"message_reference"`
 	Author struct {
-		MemberID string `json:"member_openid"`
-		Username string `json:"username"`
-		Bot      bool   `json:"bot"`
+		MemberRole string `json:"member_role"`
+		MemberID   string `json:"member_openid"`
+		Username   string `json:"username"`
+		Bot        bool   `json:"bot"`
 	} `json:"author"`
 	ApplySource   string `json:"apply_source"`
 	InvitedBy     string `json:"invited_by"`
@@ -216,10 +219,11 @@ type Group struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 type Runtime struct {
-	AutonomousStats []AutonomousStat `json:"autonomous_stats"`
-	Groups          []Group          `json:"groups"`
-	Jobs            []Job            `json:"jobs"`
-	Rewards         []Reward         `json:"rewards"`
-	Bindings        int              `json:"bindings"`
-	EncryptionReady bool             `json:"encryption_ready"`
+	ModerationRecords []ModerationRecord `json:"moderation_records"`
+	AutonomousStats   []AutonomousStat   `json:"autonomous_stats"`
+	Groups            []Group            `json:"groups"`
+	Jobs              []Job              `json:"jobs"`
+	Rewards           []Reward           `json:"rewards"`
+	Bindings          int                `json:"bindings"`
+	EncryptionReady   bool               `json:"encryption_ready"`
 }

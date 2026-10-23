@@ -354,6 +354,7 @@ func TestChannelMonitorV2SyncTrafficDoesNotBecomeCacheMisses(t *testing.T) {
 	require.Equal(t, int64(100), m.InputTokens)
 	require.Zero(t, m.CacheEligibleInputTokens)
 	require.Zero(t, m.CacheRateDenominator)
+	require.False(t, m.HasCacheSamples)
 	require.Zero(t, m.CacheRate)
 	require.Equal(t, int64(200), m.TokenCount)
 	require.Equal(t, int64(30), m.CacheCreationTokens)
@@ -364,6 +365,7 @@ func TestChannelMonitorV2SyncTrafficDoesNotBecomeCacheMisses(t *testing.T) {
 	require.Equal(t, int64(200), m.InputTokens)
 	require.Equal(t, int64(100), m.CacheEligibleInputTokens)
 	require.Equal(t, int64(180), m.CacheRateDenominator)
+	require.True(t, m.HasCacheSamples)
 	require.InDelta(t, 80.0/180.0, m.CacheRate, 0.0001)
 }
 

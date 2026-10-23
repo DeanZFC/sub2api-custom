@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { OpsRequestDetail } from '@/api/admin/ops'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
-import { formatCacheHitRate } from '@/utils/cacheHitRate'
+import { formatCacheHitRate, isCacheEligibleRequest } from '@/utils/cacheHitRate'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 
 const props = defineProps<{ request: OpsRequestDetail }>()
@@ -32,7 +32,7 @@ const requestTypeLabel = computed(() => {
 })
 const cacheHitRate = computed(() => {
   const r = props.request
-  if (r.input_tokens == null || r.cache_read_tokens == null || r.cache_creation_tokens == null) return '—'
+  if (r.kind === 'error' || !isCacheEligibleRequest(r) || r.input_tokens == null || r.cache_read_tokens == null || r.cache_creation_tokens == null) return '-'
   return formatCacheHitRate(Math.max(0, r.input_tokens - (r.image_input_tokens ?? 0)), r.cache_read_tokens, r.cache_creation_tokens, 2)
 })
 </script>

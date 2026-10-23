@@ -1,3 +1,5 @@
+import type { UsageRequestTypeLike } from './usageRequestType'
+
 type TokenCount = number | null | undefined
 
 const normalizeTokenCount = (value: TokenCount): number => {
@@ -28,3 +30,13 @@ export const formatCacheHitRate = (
   const rate = calculateCacheHitRate(inputTokens, cacheReadTokens, cacheCreationTokens)
   return rate == null ? '-' : `${(rate * 100).toFixed(fractionDigits)}%`
 }
+
+/** Match the backend cache-telemetry eligibility rule, including legacy rows. */
+export const isCacheEligibleRequest = (request: UsageRequestTypeLike): boolean => {
+  if (request.request_type === 'sync' || request.request_type === 'cyber') return false
+  return request.stream === true || request.openai_ws_mode === true ||
+    (request.openai_ws_mode == null && request.request_type === 'ws_v2')
+}
+
+export const formatCacheRate = (rate: number | null | undefined, fractionDigits = 1): string =>
+  rate == null || !Number.isFinite(rate) ? '-' : (rate * 100).toFixed(fractionDigits) + '%'

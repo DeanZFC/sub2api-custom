@@ -100,7 +100,7 @@ import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
-import { formatCacheHitRate } from '@/utils/cacheHitRate'
+import { formatCacheRate } from '@/utils/cacheHitRate'
 
 const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
@@ -117,17 +117,8 @@ const totalAccountCost = computed(() => {
   const stats = props.stats as (AdminUsageStatsResponse & { total_account_cost?: number }) | null
   return stats?.total_account_cost ?? null
 })
-const totalCacheHitRate = computed(() => formatCacheHitRate(
-  props.stats?.total_input_tokens,
-  props.stats?.total_cache_read_tokens,
-  props.stats?.total_cache_creation_tokens,
-))
-const totalCacheHitRateExact = computed(() => formatCacheHitRate(
-  props.stats?.total_input_tokens,
-  props.stats?.total_cache_read_tokens,
-  props.stats?.total_cache_creation_tokens,
-  2,
-))
+const totalCacheHitRate = computed(() => formatCacheRate(props.stats?.cache_hit_rate))
+const totalCacheHitRateExact = computed(() => formatCacheRate(props.stats?.cache_hit_rate, 2))
 const showAccountCost = computed(() => props.showAccountCost)
 const strikeStandardCost = computed(() => props.strikeStandardCost)
 

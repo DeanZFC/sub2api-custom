@@ -62,6 +62,7 @@ describe('all automatic checks pass', () => {
   it('edits and reopens independent pass and fail actions, including legacy pass groups', async () => {
     const original: TestProtectionConfig = { enabled: true, mode: 'all_pass', pass_group_ids: [10], rules: types.map(defaultProtectionRule) }
     const wrapper = mountEditor(original)
+    expect(wrapper.get('[data-all-pass-action-details]').attributes('open')).toBeDefined()
     const pass = wrapper.get('[data-all-pass-policy] [data-outcome="pass"]')
     const fail = wrapper.get('[data-all-pass-policy] [data-outcome="fail"]')
     expect(pass.get('[data-action-group="10"]').element).toHaveProperty('checked', true)
@@ -174,4 +175,13 @@ describe('all automatic checks pass', () => {
     expect(validTestProtection(wrapper.props('modelValue'), selectedTypes, groups)).toBe(true)
     wrapper.unmount()
   })
+  it('folds default scheduling actions without writing to the policy', () => {
+    const original: TestProtectionConfig = { enabled: true, mode: 'all_pass', rules: types.map(defaultProtectionRule) }
+    const wrapper = mountEditor(original)
+    expect(wrapper.get('[data-all-pass-action-details]').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-decision-mode]').attributes('open')).toBeUndefined()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+
 })

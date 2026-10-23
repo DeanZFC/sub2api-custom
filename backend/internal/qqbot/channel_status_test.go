@@ -72,7 +72,7 @@ func TestChannelStatusMissingSamplesAreNotZeroOrPerfectSuccess(t *testing.T) {
 	report.Overall = ChannelStatusMetric{HasRequests: true, ErrorRate: 1}
 	text = formatChannelStatus(report)[0]
 	require.Contains(t, text, "成功率：0.00%\n错误率：100.00%")
-	require.Contains(t, text, "缓存暂无数据\n首 Token 暂无数据")
+	require.Contains(t, text, "缓存率：-\n首 Token 暂无数据")
 	zero := 0.0
 	report.Overall.CacheRate = &zero
 	require.Contains(t, formatChannelStatus(report)[0], "缓存率：0.00%")
@@ -84,7 +84,7 @@ func TestChannelStatusInsufficientSamplesDoNotReportExtremeRates(t *testing.T) {
 		text := formatChannelStatusMetric(metric, false)
 		require.Contains(t, text, "成功率样本不足")
 		require.Contains(t, text, "错误率样本不足")
-		require.Contains(t, text, "缓存暂无数据")
+		require.Contains(t, text, "缓存率：-")
 		require.NotContains(t, text, "0.00%")
 		require.NotContains(t, text, "暂无请求数据")
 	}

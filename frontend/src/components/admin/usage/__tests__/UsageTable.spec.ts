@@ -338,6 +338,7 @@ describe('admin UsageTable tooltip', () => {
 
   it('keeps cache token counts beside a compact cache hit rate in the list', async () => {
     const row = {
+      request_type: 'stream', stream: true,
       request_id: 'req-admin-cache-hit-rate',
       actual_cost: 0,
       total_cost: 0,
