@@ -26,19 +26,23 @@ func (r *passiveQualityRepository) modelTargets(ctx context.Context, p service.P
 	if p.UpdatedAt.After(from) {
 		from = p.UpdatedAt
 	}
+	groupID := int64(0)
+	if p.IsGroupQualityTarget() {
+		groupID = p.GroupIDs[0]
+	}
 	rows, err := r.db.QueryContext(ctx, `SELECT a.id,m.model FROM accounts a
  CROSS JOIN LATERAL (
  SELECT $4::text AS model WHERE NOT $5 OR $4<>''
  UNION SELECT model_key FROM passive_quality_states WHERE $5 AND $4='' AND policy_id=$2 AND account_id=a.id AND model_key<>''
  UNION SELECT model FROM (SELECT COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model) AS model FROM usage_logs ul
- WHERE $5 AND $4='' AND ul.account_id=a.id AND ul.created_at>=$6 AND ul.created_at<=$7
+ WHERE $5 AND $4='' AND ul.account_id=a.id AND ul.created_at>=$6 AND ul.created_at<=$7 AND ($8::bigint=0 OR (ul.group_id=$8 AND `+passiveGroupTargetTextUsageSQL+`))
  AND COALESCE(ul.request_type,0) NOT IN (4,6) AND ul.duration_ms IS NOT NULL
  ORDER BY ul.created_at DESC,ul.id DESC LIMIT 10001) u WHERE COALESCE(TRIM(model),'')<>''
  UNION SELECT model FROM (SELECT f.model FROM passive_quality_failures f WHERE $5 AND $4=''
- AND f.account_id=a.id AND f.created_at>=$6 AND f.created_at<=$7 ORDER BY f.created_at DESC,f.id DESC LIMIT 10001) f WHERE TRIM(model)<>''
+ AND f.account_id=a.id AND f.created_at>=$6 AND f.created_at<=$7 AND ($8::bigint=0 OR (f.group_id=$8 AND NOT f.non_text)) ORDER BY f.created_at DESC,f.id DESC LIMIT 10001) f WHERE TRIM(model)<>''
  ) m LEFT JOIN passive_quality_states s ON s.account_id=a.id AND s.policy_id=$2 AND s.model_key=CASE WHEN $5 THEN m.model ELSE '' END
  WHERE a.deleted_at IS NULL AND ((NOT(a.id=ANY($3)) AND EXISTS(SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=a.id AND ag.group_id=ANY($1) AND g.status='active' AND g.deleted_at IS NULL)) OR s.account_id IS NOT NULL)
- ORDER BY s.data->>'updated_at' ASC NULLS FIRST,a.id,m.model LIMIT 128`, pq.Array(p.GroupIDs), p.ID, pq.Array(p.ExcludedAccountIDs), p.Model, p.PerModel(), from, now)
+ ORDER BY s.data->>'updated_at' ASC NULLS FIRST,a.id,m.model LIMIT 128`, pq.Array(p.GroupIDs), p.ID, pq.Array(p.ExcludedAccountIDs), p.Model, p.PerModel(), from, now, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -67,10 +71,14 @@ func passiveReplayModels(ctx context.Context, tx *sql.Tx, p service.PassiveQuali
 	if !p.PerModel() || p.Model != "" {
 		return []string{p.Model}, nil
 	}
+	groupID := int64(0)
+	if p.IsGroupQualityTarget() {
+		groupID = p.GroupIDs[0]
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT model FROM (
- SELECT COALESCE(NULLIF(TRIM(requested_model),''),model) AS model FROM usage_logs WHERE account_id=$1 AND created_at>=$2 AND created_at<=$3 AND COALESCE(request_type,0) NOT IN (4,6)
- UNION SELECT model FROM passive_quality_failures WHERE account_id=$1 AND created_at>=$2 AND created_at<=$3
- ) x WHERE COALESCE(TRIM(model),'')<>'' ORDER BY model LIMIT 129`, aid, from, to)
+ SELECT COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model) AS model FROM usage_logs ul WHERE ul.account_id=$1 AND ul.created_at>=$2 AND ul.created_at<=$3 AND COALESCE(ul.request_type,0) NOT IN (4,6) AND ($4::bigint=0 OR (ul.group_id=$4 AND `+passiveGroupTargetTextUsageSQL+`))
+ UNION SELECT model FROM passive_quality_failures WHERE account_id=$1 AND created_at>=$2 AND created_at<=$3 AND ($4::bigint=0 OR (group_id=$4 AND NOT non_text))
+ ) x WHERE COALESCE(TRIM(model),'')<>'' ORDER BY model LIMIT 129`, aid, from, to, groupID)
 	if err != nil {
 		return nil, err
 	}

@@ -12,6 +12,9 @@ import (
 
 func advancePassiveMetrics(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, s *service.PassiveQualityState, now time.Time) ([]string, error) {
 	events := []string{}
+	if p.IsGroupQualityTarget() {
+		return events, nil
+	}
 	if p.TTFT.Enabled {
 		if s.Latency == nil {
 			s.Latency = &service.PassiveQualityMetricState{ObserveAfter: p.UpdatedAt}

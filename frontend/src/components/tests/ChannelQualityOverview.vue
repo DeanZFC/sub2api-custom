@@ -3,7 +3,8 @@
     <div class="rounded-xl border border-primary-100 bg-primary-50/60 p-5 dark:border-primary-900 dark:bg-primary-950/20">
       <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.experience.overviewTitle') }}</h3>
       <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">{{ t('admin.tests.experience.overviewHint') }}</p>
-      <div class="mt-4 grid gap-3 md:grid-cols-3">
+      <button type="button" class="mt-4 w-full rounded-lg border border-primary-200 bg-white p-4 text-left dark:border-primary-800 dark:bg-dark-900" data-overview-group-targets @click="$emit('navigate', 'group-targets')"><strong class="text-sm text-gray-900 dark:text-white">{{ t('admin.tests.groupTargets.title') }} →</strong><span class="mt-2 block text-xs leading-5 text-gray-500">{{ t('admin.tests.groupTargets.goalHint') }}</span></button>
+      <div class="mt-3 grid gap-3 md:grid-cols-3">
         <button v-for="goal in goals" :key="goal.tab" type="button" class="rounded-lg border border-primary-100 bg-white p-4 text-left transition hover:border-primary-400 dark:border-dark-600 dark:bg-dark-900" @click="$emit('navigate', goal.tab)"><strong class="text-sm text-gray-900 dark:text-white">{{ t('admin.tests.experience.' + goal.title) }} →</strong><span class="mt-2 block text-xs leading-5 text-gray-500">{{ t('admin.tests.experience.' + goal.hint) }}</span></button>
       </div>
     </div>
@@ -25,7 +26,7 @@
         <p v-if="!account.controls.length" class="px-5 py-4 text-sm text-gray-500">{{ tr('noEvidence') }}</p>
         <div v-for="(control, index) in account.controls" :key="`${control.source}-${control.id}-${control.metric || ''}-${control.model}-${index}`" class="grid gap-3 border-b border-gray-100 px-5 py-4 text-sm last:border-0 dark:border-dark-800 lg:grid-cols-[1fr_2fr_1fr_auto]">
           <div><span class="text-xs text-gray-500">{{ tr(`sources.${control.source}`) }}</span><p v-if="control.metric" class="mt-1 text-xs text-gray-500">{{ tr('metrics.' + control.metric) }}</p><p class="mt-1 font-medium">{{ control.name && control.source !== 'account' ? control.name : reason(control.reason) }}</p><p class="mt-1 text-xs text-gray-500">{{ control.model || tr('allModels') }} · {{ tr(control.scope === 'account' ? 'accountScope' : 'modelScope') }}</p></div>
-          <div><span class="badge" :class="control.blocking ? 'badge-warning' : 'badge-gray'">{{ t(`admin.tests.passive.phases.${control.phase}`) }}</span><p class="mt-2 break-words text-gray-600 dark:text-gray-300">{{ reason(control.reason) || '—' }}</p><p v-if="control.evidence" class="mt-2 text-xs text-gray-500">{{ tr('evidence', { samples: control.evidence.samples, error: metric(control.evidence.error_rate, '%'), ttft: metric(control.evidence.ttft, ' ms'), cache: metric(control.evidence.cache_rate, '%') }) }}</p><div v-if="control.cache" class="mt-2 space-y-1 text-xs" data-overview-cache><strong>{{ t('admin.tests.passive.v2.allocation', { value: control.allocation_percent }) }}</strong><p>{{ t('admin.tests.passive.v2.actualRate') }}: {{ metric(control.cache.action.cache_rate, '%') }} · {{ t('admin.tests.passive.v2.protectionRate') }}: {{ metric(control.cache.action.protection_rate, '%') }}</p><p>{{ t('admin.tests.passive.v2.sampleEvidence', { total: control.cache.action.total_samples, reusable: control.cache.action.reusable_samples, cold: control.cache.action.cold_samples, unknown: control.cache.action.unknown_samples, missing: control.cache.action.missing_telemetry_samples }) }}</p></div></div>
+          <div><span class="badge" :class="control.blocking ? 'badge-warning' : 'badge-gray'">{{ t(`admin.tests.passive.phases.${controlPhase(control)}`) }}</span><p class="mt-2 break-words text-gray-600 dark:text-gray-300">{{ reason(control.reason) || '—' }}</p><p v-if="control.evidence" class="mt-2 text-xs text-gray-500">{{ control.metric === 'group_quality_target' ? t('admin.tests.groupTargets.evidenceSummary', { samples: control.evidence.samples, availability: metric(control.evidence.error_rate == null ? null : 100 - control.evidence.error_rate, '%'), ttft: metric(control.evidence.ttft == null ? null : control.evidence.ttft / 1000, ' s'), cache: metric(control.evidence.cache_rate, '%') }) : tr('evidence', { samples: control.evidence.samples, error: metric(control.evidence.error_rate, '%'), ttft: metric(control.evidence.ttft, ' ms'), cache: metric(control.evidence.cache_rate, '%') }) }}</p><div v-if="control.cache" class="mt-2 space-y-1 text-xs" data-overview-cache><strong>{{ t('admin.tests.passive.v2.allocation', { value: control.allocation_percent }) }}</strong><p>{{ t('admin.tests.passive.v2.actualRate') }}: {{ metric(control.cache.action.cache_rate, '%') }} · {{ t('admin.tests.passive.v2.protectionRate') }}: {{ metric(control.cache.action.protection_rate, '%') }}</p><p>{{ t('admin.tests.passive.v2.sampleEvidence', { total: control.cache.action.total_samples, reusable: control.cache.action.reusable_samples, cold: control.cache.action.cold_samples, unknown: control.cache.action.unknown_samples, missing: control.cache.action.missing_telemetry_samples }) }}</p></div></div>
           <div class="text-xs text-gray-500"><p>{{ tr(`recovery.${control.recovery}`) }}</p><p class="mt-2">{{ date(control.next_at) }}</p><p class="mt-2">{{ tr('updated') }} {{ date(control.updated_at) }}</p></div>
           <button v-if="control.source !== 'account'" class="btn btn-secondary btn-sm self-start" @click="$emit('navigate', control.source === 'active' ? 'plans' : 'records', control.id, account.id)">{{ tr('inspect') }}</button>
         </div>
@@ -39,7 +40,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { channelQualityAPI, type QualityAccount } from '@/api/admin/channelQuality'
+import { channelQualityAPI, type QualityAccount, type QualityControl } from '@/api/admin/channelQuality'
 import { useQualityLabels } from '@/composables/useQualityLabels'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import type { AdminGroup } from '@/types'
@@ -71,6 +72,7 @@ async function load(append = false) {
   } catch (e) { if (token === request) error.value = extractApiErrorMessage(e, tr('loadFailed')) }
   finally { if (token === request) loading.value = false }
 }
+function controlPhase(control: QualityControl) { return control.metric === 'group_quality_target' && control.phase === 'healthy' && !control.evidence?.complete ? 'insufficient' : control.phase }
 const metric = (value: number | null, suffix: string) => value == null ? '—' : `${Math.round(value * 100) / 100}${suffix}`
 watch(() => [props.visible, props.accountId], () => { if (props.visible) void load() })
 let timer: ReturnType<typeof setInterval> | undefined

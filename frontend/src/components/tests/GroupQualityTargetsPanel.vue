@@ -1,0 +1,198 @@
+<template>
+  <section class="space-y-5" data-group-quality-targets>
+    <header class="rounded-xl border border-primary-200 bg-primary-50/60 p-5 dark:border-primary-900 dark:bg-primary-950/20">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="max-w-3xl"><h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ tr('title') }}</h3><p class="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300">{{ tr('intro') }}</p></div>
+        <button type="button" class="btn btn-primary" data-target-create :disabled="loading" @click="edit()">{{ tr('create') }}</button>
+      </div>
+      <button type="button" class="mt-4 flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-primary-100 bg-white p-4 text-left dark:border-dark-600 dark:bg-dark-900" data-target-capability @click="emit('navigate', 'plans')"><strong>{{ tr('capability') }} →</strong><span class="text-sm text-gray-500">{{ tr('capabilityHint') }}</span></button>
+    </header>
+    <p v-if="loadError" role="alert" class="text-sm text-red-600">{{ loadError }} <button class="underline" @click="refresh">{{ t('common.retry') }}</button></p>
+    <p v-if="summaryError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">{{ tr('summaryFailed') }} <button class="underline" @click="refresh">{{ t('common.retry') }}</button></p>
+    <p v-if="!loading && !loadError && !targets.length" class="rounded-xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500 dark:border-dark-600">{{ tr('empty') }}</p>
+    <article v-for="policy in targets" :key="policy.id" :data-group-target="policy.id" class="space-y-4 rounded-xl border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-900">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2"><h4 class="text-lg font-semibold">{{ groupName(policy.group_ids[0]) }}</h4><span class="badge" :class="statusClass(policy)">{{ tr(targetStatus(policy)) }}</span><span v-if="policy.mode === 'observe'" class="badge badge-gray">{{ t('admin.tests.passive.observe') }}</span><span v-if="policy.model" class="badge badge-gray">{{ policy.model }}</span><span v-if="policy.enabled && policy.mode === 'enforce'" class="text-xs text-gray-500">{{ tr('recovery') }}</span></div>
+        <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-secondary btn-sm" :data-target-toggle="policy.id" :disabled="busy || loading" @click="toggle(policy)">{{ tr(policy.enabled ? 'disable' : 'enable') }}</button><button type="button" class="btn btn-secondary btn-sm" :data-target-edit="policy.id" :disabled="busy" @click="edit(policy)">{{ tr('edit') }}</button><button type="button" class="btn btn-secondary btn-sm" @click="emit('navigate', 'records', policy.id)">{{ tr('records') }}</button></div>
+      </div>
+      <div class="grid gap-3 md:grid-cols-3">
+        <div v-for="row in metricRows(policy)" :key="row.key" :data-target-metric="row.key" class="rounded-lg bg-gray-50 p-4 dark:bg-dark-800">
+          <p class="text-xs text-gray-500">{{ tr(row.key) }} · {{ tr('target') }} {{ row.target }}</p>
+          <p class="mt-2 text-2xl font-semibold tabular-nums" :class="row.known && row.breach ? 'text-amber-700 dark:text-amber-300' : 'text-gray-900 dark:text-white'">{{ row.value }}</p>
+          <p class="mt-2 text-xs text-gray-500">{{ tr('samples', { count: row.samples }) }}<span v-if="row.samples < minimum(policy)"> · {{ tr('remaining', { count: minimum(policy) - row.samples }) }}</span></p>
+          <p v-if="row.unknown > 0" class="mt-1 text-xs text-amber-700 dark:text-amber-300">{{ tr(row.key === 'cache' ? 'unknownSamples' : 'unknownFailures', { count: row.unknown }) }}</p>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500">{{ tr('window', { minutes: (summaryFor(policy)?.window_seconds || 3600) / 60 }) }}<span v-if="summaryFor(policy)"> · {{ tr('updated', { date: date(summaryFor(policy)?.generated_at) }) }}</span></p>
+      <p v-if="summaryFor(policy) && !summaryFor(policy)?.telemetry_complete" class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p>
+      <div class="flex flex-wrap gap-2 text-xs"><span class="badge badge-gray">{{ tr('scopeCount', { count: policyStates(policy).length }) }}</span><span v-if="countPhase(policy, ['paused', 'probing'])" class="badge badge-warning">{{ tr('pausedCount', { count: countPhase(policy, ['paused', 'probing']) }) }}</span><span v-if="countPhase(policy, ['trial'])" class="badge badge-gray">{{ tr('trialCount', { count: countPhase(policy, ['trial']) }) }}</span><span v-if="countPhase(policy, ['insufficient', 'suspect', 'observed'])" class="badge badge-gray">{{ tr('pendingCount', { count: countPhase(policy, ['insufficient', 'suspect', 'observed']) }) }}</span><span v-if="!policyStates(policy).length" class="text-gray-500">{{ tr('noStates') }}</span></div>
+      <div v-if="policy.enabled && policy.mode === 'enforce'" class="space-y-2">
+        <p class="text-sm font-medium" data-target-verified>{{ tr('verifiedCount', { count: verifiedCount(policy) }) }}</p>
+        <p v-if="verifiedCount(policy) === 0" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium leading-6 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-target-no-verified>{{ tr('noVerified') }}</p>
+        <p class="text-xs text-gray-500">{{ tr('verifiedCaveat') }}</p>
+      </div>
+      <details v-if="policyStates(policy).length" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
+        <summary class="cursor-pointer text-sm font-medium">{{ tr('latestEvidence') }}</summary><p class="my-3 text-xs text-gray-500">{{ tr('frozenEvidence') }}</p>
+        <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-700"><th class="p-2">{{ tr('accountModel') }}</th><th class="p-2">{{ tr('phase') }}</th><th class="p-2">{{ tr('latestEvidence') }}</th><th class="p-2">{{ tr('reason') }}</th></tr></thead><tbody>
+          <tr v-for="state in policyStates(policy)" :key="`${state.account_id}-${state.model}`" class="border-b border-gray-100 align-top last:border-0 dark:border-dark-800" :data-target-state="`${state.account_id}-${state.model}`">
+            <td class="p-2"><strong>{{ state.account_name || `#${state.account_id}` }}</strong><p class="mt-1 text-xs text-gray-500">#{{ state.account_id }} · {{ state.model || t('admin.tests.passive.allModels') }}</p></td>
+            <td class="p-2 text-xs"><span class="badge" :class="['paused', 'probing'].includes(state.phase) ? 'badge-warning' : 'badge-gray'">{{ phaseLabel(state) }}</span><p class="mt-2">{{ tr('confirmations', { count: state.hits, required: policy.confirmations || 2 }) }}</p><p v-if="state.phase === 'paused'" class="mt-2">{{ tr('nextTrial', { date: date(state.next_at) }) }}</p><template v-if="state.phase === 'trial'"><p class="mt-2">{{ tr('trialProgress', { used: state.used, max: policy.trial_requests || 20, samples: stateSampleCount(policy, state), required: policy.recovery_samples || 5 }) }}</p><p class="mt-1">{{ tr('trialDeadline', { date: date(state.trial_ends_at) }) }}</p></template></td>
+            <td class="space-y-1 p-2 text-xs"><p v-if="policy.cache_rate.enabled">{{ tr('cache') }}: {{ percent(state.evidence.cache_rate) }} · {{ tr('samples', { count: state.evidence.cache_samples }) }}</p><p v-if="policy.error_rate.enabled">{{ tr('availability') }}: {{ percent(state.evidence.error_rate == null ? null : 100 - state.evidence.error_rate) }} · {{ tr('samples', { count: state.evidence.samples }) }}</p><p v-if="policy.ttft.enabled">{{ tr('ttft') }}: {{ seconds(state.evidence.ttft) }} · {{ tr('samples', { count: state.evidence.ttft_samples }) }}</p><p v-if="stateSampleCount(policy, state) < stateMinimum(policy, state)" class="text-amber-700 dark:text-amber-300">{{ tr('remaining', { count: stateMinimum(policy, state) - stateSampleCount(policy, state) }) }}</p><p class="text-gray-500">{{ date(state.updated_at) }}</p></td>
+            <td class="max-w-80 break-words p-2 text-xs"><p>{{ reason(state.reason) || '—' }}</p><p v-if="!state.evidence.complete" class="mt-2 text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p><p v-if="state.other_hold" class="mt-2 text-amber-700 dark:text-amber-300">{{ tr('otherHold') }}</p></td>
+          </tr>
+        </tbody></table></div>
+      </details>
+    </article>
+    <aside class="space-y-2 rounded-lg bg-gray-50 p-4 text-xs leading-5 text-gray-600 dark:bg-dark-800 dark:text-gray-300"><p>{{ tr('evidenceScope') }}</p><p>{{ tr('limitations') }}</p><p>{{ tr('sharedScope') }}</p></aside>
+    <BaseDialog :show="!!editing" :title="tr('editorTitle')" width="wide" @close="editing = null">
+      <form v-if="editing" class="space-y-5" @submit.prevent="save">
+        <label class="input-label block">{{ tr('group') }}<select :value="editing.group_ids[0] || 0" class="input mt-2 w-full" data-target-group :disabled="busy" @change="selectGroup(Number(($event.target as HTMLSelectElement).value))"><option :value="0">{{ tr('chooseGroup') }}</option><option v-for="group in eligibleGroups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label>
+        <p v-if="editing.id" class="text-xs text-gray-500">{{ tr('existing') }}</p>
+        <div class="grid gap-4 md:grid-cols-3">
+          <label class="input-label block"><span class="flex items-center gap-2"><input v-model="editing.cache_rate.enabled" type="checkbox" data-target-cache-enabled />{{ tr('cacheTarget') }}</span><input :value="editing.cache_rate.pause" type="number" min="0" max="99.9" step="0.1" class="input mt-2 w-full" data-target-cache :disabled="!editing.cache_rate.enabled" @input="setThreshold('cache_rate', $event)" /></label>
+          <label class="input-label block"><span class="flex items-center gap-2"><input v-model="editing.error_rate.enabled" type="checkbox" data-target-availability-enabled />{{ tr('availabilityTarget') }}</span><input :value="rounded(100 - editing.error_rate.pause)" type="number" min="0" max="99.9" step="0.1" class="input mt-2 w-full" data-target-availability :disabled="!editing.error_rate.enabled" @input="setThreshold('error_rate', $event)" /></label>
+          <label class="input-label block"><span class="flex items-center gap-2"><input v-model="editing.ttft.enabled" type="checkbox" data-target-ttft-enabled />{{ tr('ttftTarget') }}</span><input :value="editing.ttft.pause / 1000" type="number" min="0.001" max="600" step="0.001" class="input mt-2 w-full" data-target-ttft :disabled="!editing.ttft.enabled" @input="setThreshold('ttft', $event)" /></label>
+        </div>
+        <label class="flex items-center gap-2 text-sm font-medium"><input v-model="editing.enabled" type="checkbox" data-target-enabled />{{ editing.mode === 'observe' ? tr('enableObservation') : tr('enabled') }}</label>
+        <div v-if="editing.mode === 'observe'" class="rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/20"><p>{{ tr('observationRetained') }}</p><button type="button" class="btn btn-secondary btn-sm mt-2" data-target-enforce @click="editing.mode = 'enforce'">{{ tr('switchToEnforce') }}</button></div>
+        <p v-if="editing.model" class="text-xs text-gray-500">{{ tr('modelRetained', { model: editing.model }) }}</p>
+        <div class="rounded-lg bg-primary-50 p-4 dark:bg-primary-950/20"><strong class="text-sm">{{ tr('recovery') }}</strong><p class="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ tr('recoveryHint') }}</p><p class="mt-2 text-xs">{{ tr('recoveryTargets') }}: {{ recoveryLabels(editing).join(' · ') }}</p></div>
+        <details class="rounded-lg border border-gray-200 p-4 text-xs leading-5 dark:border-dark-700"><summary class="cursor-pointer text-sm font-medium">{{ tr('details') }}</summary><p class="mt-3">{{ tr('sampling', { max: editing.max_samples || 100, minutes: (editing.window_seconds || 3600) / 60, min: editing.min_samples || 5, confirmations: editing.confirmations || 2, fresh: editing.new_samples || 2 }) }}</p><p class="mt-2">{{ tr('trialDefaults', { minutes: (editing.cooldown_seconds || 300) / 60, requests: editing.trial_requests || 20, concurrency: editing.trial_concurrency || 1, duration: (editing.trial_seconds || 900) / 60, samples: editing.recovery_samples || 5 }) }}</p><p class="mt-2">{{ tr('sharedScope') }}</p><p v-if="editing.excluded_account_ids.length" class="mt-2">{{ tr('exclusionsRetained', { count: editing.excluded_account_ids.length }) }}</p></details>
+        <p class="text-xs leading-5 text-gray-500">{{ tr('limitations') }}</p><p v-if="editing.id" class="text-xs text-amber-700 dark:text-amber-300">{{ tr('resetHint') }}</p><p v-if="validationError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">{{ validationError }}</p>
+      </form>
+      <template #footer><button type="button" class="btn btn-secondary" :disabled="busy" @click="editing = null">{{ t('common.cancel') }}</button><button type="button" class="btn btn-primary" data-target-save :disabled="busy || !!validationError" @click="save">{{ t('common.save') }}</button></template>
+    </BaseDialog>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import { passiveQualityAPI as api, groupQualityTargetDraft, isGroupQualityTarget, type GroupQualityTargetDraft, type GroupQualityTargetSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
+import { useQualityLabels } from '@/composables/useQualityLabels'
+import { useAppStore } from '@/stores/app'
+import { extractApiErrorMessage } from '@/utils/apiError'
+import type { AdminGroup } from '@/types'
+
+const props = defineProps<{ groups: AdminGroup[]; visible: boolean; policyId?: number }>()
+const emit = defineEmits<{ navigate: [tab: string, policy?: number, account?: number] }>()
+const { t } = useI18n(), app = useAppStore(), { reason, date } = useQualityLabels()
+const tr = (key: string, values: Record<string, unknown> = {}) => t('admin.tests.groupTargets.' + key, values)
+const policies = ref<PassivePolicy[]>([]), states = ref<PassiveState[]>([]), summaries = ref<GroupQualityTargetSummary[]>([])
+const targets = computed(() => policies.value.filter(isGroupQualityTarget))
+const eligibleGroups = computed(() => props.groups.filter(g => g.status === 'active' && g.platform !== 'composite'))
+const loading = ref(false), busy = ref(false), loadError = ref(''), summaryError = ref(false)
+const editing = ref<GroupQualityTargetDraft | null>(null), baseline = ref('')
+const rounded = (value: number) => Math.round(value * 1000) / 1000
+const percent = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? tr('unknown') : `${rounded(value)}%`
+const seconds = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? tr('unknown') : `${rounded(value / 1000)} ${t('admin.tests.experience.seconds')}`
+const groupName = (id?: number) => props.groups.find(g => g.id === id)?.name || `#${id}`
+const summaryFor = (p: PassivePolicy) => summaries.value.find(s => s.policy_id === p.id && s.group_id === p.group_ids[0])
+const policyStates = (p: PassivePolicy) => states.value.filter(s => s.policy_id === p.id)
+const countPhase = (p: PassivePolicy, phases: string[]) => policyStates(p).filter(s => phases.includes(s.phase)).length
+const minimum = (p: PassivePolicy) => p.min_samples || 5
+const stateMinimum = (p: PassivePolicy, s: PassiveState) => s.phase === 'trial' ? p.recovery_samples || 5 : minimum(p)
+function verifiedCount(p: PassivePolicy) {
+  return policyStates(p).filter(s => {
+    if (s.phase !== 'healthy' || s.evidence.complete !== true || s.other_hold || stateSampleCount(p, s) < minimum(p)) return false
+    const e = s.evidence
+    return (!p.cache_rate.enabled || (e.cache_rate != null && Number.isFinite(e.cache_rate) && e.cache_rate > p.cache_rate.pause))
+      && (!p.error_rate.enabled || (e.error_rate != null && Number.isFinite(e.error_rate) && e.error_rate < p.error_rate.pause))
+      && (!p.ttft.enabled || (e.ttft != null && Number.isFinite(e.ttft) && e.ttft < p.ttft.pause))
+  }).length
+}
+function stateSampleCount(p: PassivePolicy, s: PassiveState) {
+  const counts = [p.cache_rate.enabled ? s.evidence.cache_samples : undefined, p.error_rate.enabled ? s.evidence.samples : undefined, p.ttft.enabled ? s.evidence.ttft_samples : undefined].filter((v): v is number => v !== undefined)
+  return counts.length ? Math.min(...counts) : 0
+}
+function phaseLabel(s: PassiveState) { if (s.phase === 'healthy' && !s.evidence.complete) return tr('insufficient'); return s.phase === 'probing' ? tr('trialPreparing') : t('admin.tests.passive.phases.' + s.phase) }
+function metricRows(p: PassivePolicy) {
+  const s = summaryFor(p)
+  return [
+    { key: 'cache', enabled: p.cache_rate.enabled, known: s?.actual_cache_rate != null, value: percent(s?.actual_cache_rate), samples: s?.cache_samples || 0, unknown: s?.cache_unknown_samples || 0, breach: s?.actual_cache_rate != null && s.actual_cache_rate <= p.cache_rate.pause, target: `> ${percent(p.cache_rate.pause)}` },
+    { key: 'availability', enabled: p.error_rate.enabled, known: s?.actual_availability != null, value: percent(s?.actual_availability), samples: (s?.success_samples || 0) + (s?.failure_samples || 0), unknown: s?.failure_unknown_samples || 0, breach: s?.actual_availability != null && s.actual_availability <= 100 - p.error_rate.pause, target: `> ${percent(100 - p.error_rate.pause)}` },
+    { key: 'ttft', enabled: p.ttft.enabled, known: s?.ttft_p90_ms != null, value: seconds(s?.ttft_p90_ms), samples: s?.ttft_samples || 0, unknown: 0, breach: s?.ttft_p90_ms != null && s.ttft_p90_ms >= p.ttft.pause, target: `< ${seconds(p.ttft.pause)}` },
+  ].filter(row => row.enabled)
+}
+function targetStatus(p: PassivePolicy) {
+  if (!p.enabled) return 'disabled'
+  if (summaryFor(p)?.telemetry_complete !== true) return 'insufficient'
+  const rows = metricRows(p)
+  if (rows.some(row => row.known && row.samples >= minimum(p) && row.breach)) return 'belowTarget'
+  if (!rows.length || rows.some(row => !row.known || row.samples < minimum(p) || row.unknown > 0)) return 'insufficient'
+  return 'atTarget'
+}
+function statusClass(p: PassivePolicy) { const status = targetStatus(p); return status === 'atTarget' ? 'badge-success' : status === 'belowTarget' ? 'badge-warning' : 'badge-gray' }
+const validationError = computed(() => {
+  const p = editing.value
+  if (!p) return ''
+  if (p.group_ids.length !== 1 || !eligibleGroups.value.some(g => g.id === p.group_ids[0]) || ![p.cache_rate, p.error_rate, p.ttft].some(m => m.enabled)) return tr('invalid')
+  if (p.cache_rate.enabled && (!Number.isFinite(p.cache_rate.pause) || p.cache_rate.pause < 0 || p.cache_rate.pause > 99.9)) return tr('invalid')
+  if (p.error_rate.enabled && (!Number.isFinite(p.error_rate.pause) || p.error_rate.pause < .1 - 1e-9 || p.error_rate.pause > 100)) return tr('invalid')
+  if (p.ttft.enabled && (!Number.isFinite(p.ttft.pause) || p.ttft.pause < 1 || p.ttft.pause > 600000)) return tr('invalid')
+  return ''
+})
+function edit(p?: PassivePolicy) { editing.value = groupQualityTargetDraft(p); baseline.value = JSON.stringify(editing.value) }
+function selectGroup(id: number) {
+  const existing = targets.value.find(p => p.group_ids.includes(id))
+  if (existing) { edit(existing); return }
+  editing.value = groupQualityTargetDraft(undefined, groupName(id))
+  editing.value.group_ids = id ? [id] : []
+  baseline.value = ''
+}
+function setThreshold(metric: 'cache_rate' | 'error_rate' | 'ttft', event: Event) {
+  if (!editing.value) return
+  const value = (event.target as HTMLInputElement).valueAsNumber
+  const m = editing.value[metric]
+  m.pause = metric === 'error_rate' ? rounded(100 - value) : metric === 'ttft' ? Math.round(value * 1000) : value
+  m.recover = metric === 'cache_rate' ? Math.min(100, value + 5) : metric === 'error_rate' ? Math.max(0, rounded(m.pause - 5)) : m.pause * .8
+}
+function recoveryLabels(p: GroupQualityTargetDraft) {
+  return [p.cache_rate.enabled ? `${tr('cache')}: ${percent(p.cache_rate.recover)}` : '', p.error_rate.enabled ? `${tr('availability')}: ${percent(100 - p.error_rate.recover)}` : '', p.ttft.enabled ? `${tr('ttft')}: ${seconds(p.ttft.recover)}` : ''].filter(Boolean)
+}
+let request = 0
+async function refresh() {
+  const current = ++request
+  loading.value = true
+  const [policyResult, stateResult, summaryResult] = await Promise.allSettled([api.policies(), api.states(), api.groupTargets()])
+  if (current !== request) return
+  if (policyResult.status === 'fulfilled' && stateResult.status === 'fulfilled') {
+    policies.value = policyResult.value; states.value = stateResult.value; loadError.value = ''
+  } else {
+    loadError.value = extractApiErrorMessage(policyResult.status === 'rejected' ? policyResult.reason : stateResult.status === 'rejected' ? stateResult.reason : undefined, tr('loadFailed'))
+  }
+  summaryError.value = summaryResult.status === 'rejected'
+  summaries.value = summaryResult.status === 'fulfilled' ? summaryResult.value : []
+  loading.value = false
+}
+async function save() {
+  const p = editing.value
+  if (!p || validationError.value || busy.value) return
+  if (p.id && JSON.stringify(p) === baseline.value) { editing.value = null; return }
+  // Keep the version the administrator reviewed. A refresh cannot authorize
+  // overwriting a newer policy, or turn a concurrent create into an update.
+  const payload = { ...p, name: p.name || tr('policyName', { group: groupName(p.group_ids[0]) }) }
+  busy.value = true
+  try { await api.saveGroupQualityTarget(payload); editing.value = null; await refresh(); app.showSuccess(tr('saved')) }
+  catch (e) { app.showError(extractApiErrorMessage(e, tr('loadFailed'))) }
+  finally { busy.value = false }
+}
+async function toggle(p: PassivePolicy) {
+  busy.value = true
+  try { await api.saveGroupQualityTarget({ ...groupQualityTargetDraft(p), enabled: !p.enabled }); await refresh() }
+  catch (e) { app.showError(extractApiErrorMessage(e, tr('loadFailed'))) }
+  finally { busy.value = false }
+}
+let timer: ReturnType<typeof setInterval> | undefined
+let openedPolicy = 0
+watch(() => [props.policyId, targets.value] as const, ([id]) => {
+  if (!id || id === openedPolicy) return
+  const policy = targets.value.find(p => p.id === id)
+  if (policy) { openedPolicy = id; edit(policy) }
+})
+onMounted(() => { if (props.visible) void refresh(); timer = setInterval(() => { if (props.visible && !document.hidden && !loading.value && !busy.value) void refresh() }, 15000) })
+watch(() => props.visible, visible => { if (visible) void refresh(); else editing.value = null })
+onUnmounted(() => { request++; clearInterval(timer) })
+defineExpose({ refresh })
+</script>

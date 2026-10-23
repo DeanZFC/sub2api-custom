@@ -1042,6 +1042,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackAPIKey
+						service.SetPassiveQualityAttemptGroup(c, fallbackGroup.ID)
 						currentSubscription = nil
 						fallbackUsed = true
 						retryWithFallback = true

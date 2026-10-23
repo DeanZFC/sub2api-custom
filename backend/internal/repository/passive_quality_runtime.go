@@ -34,7 +34,7 @@ func (r *passiveQualityRepository) RecordFailures(ctx context.Context, items []s
 			}
 			continue
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_failures(account_id,model,request_key,started_at,created_at) SELECT $1,$2,$3,$4,$5 WHERE EXISTS(SELECT 1 FROM accounts WHERE id=$1) ON CONFLICT(account_id,request_key) DO NOTHING`, f.AccountID, f.Model, f.RequestKey, f.StartedAt, f.At); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_failures(account_id,model,request_key,started_at,created_at,group_id,non_text) SELECT $1,$2,$3,$4,$5,$6,$7 WHERE EXISTS(SELECT 1 FROM accounts WHERE id=$1) ON CONFLICT(account_id,request_key) DO NOTHING`, f.AccountID, f.Model, f.RequestKey, f.StartedAt, f.At, f.GroupID, f.NonText); err != nil {
 			return err
 		}
 	}
@@ -46,6 +46,9 @@ func (r *passiveQualityRepository) RecordFailures(ctx context.Context, items []s
 	return tx.Commit()
 }
 func passiveSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, s service.PassiveQualityState, now time.Time) (service.PassiveQualityEvidence, error) {
+	if p.IsGroupQualityTarget() {
+		return passiveGroupTargetSamples(ctx, tx, p, s, now)
+	}
 	from := now.Add(-time.Duration(p.WindowSeconds) * time.Second)
 	if s.ObserveAfter.After(from) {
 		from = s.ObserveAfter
@@ -219,7 +222,7 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 	}
 	metricEvents := []string{}
 	metricPolicy := p
-	if p.IsolatedMetrics() && s.Phase != "exempt" {
+	if p.IsolatedMetrics() && !p.IsGroupQualityTarget() && s.Phase != "exempt" {
 		p.PassiveQualityConfig = service.PassiveQualityMetricConfig(p.PassiveQualityConfig, "availability")
 	}
 	switch s.Phase {
@@ -239,6 +242,12 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 			service.PassiveQualityPause(p.PassiveQualityConfig, &s, now, "probe_timeout")
 		}
 	case "paused":
+		if p.IsGroupQualityTarget() {
+			if !now.Before(s.NextAt) && !s.OtherHold {
+				beginPassiveTrial(p, &s, now, "group_target_trial")
+			}
+			break
+		}
 		if !now.Before(s.NextAt) && canProbe && !s.OtherHold {
 			if p.Model != "" {
 				s.ProbeModel = p.Model
@@ -258,7 +267,7 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 		if err != nil {
 			return nil, err
 		}
-		if p.IsolatedMetrics() && !p.ErrorRate.Enabled && p.ConsecutiveFailures == 0 {
+		if p.IsolatedMetrics() && !p.IsGroupQualityTarget() && !p.ErrorRate.Enabled && p.ConsecutiveFailures == 0 {
 			s.Evidence = e
 			s.Phase, s.Reason = "healthy", "availability_not_enabled"
 			break
@@ -267,7 +276,7 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 	}
 	// Apply availability first so a new hard pause cannot simultaneously expand
 	// cache restrictions. Replay uses the same order and transition helpers.
-	if metricPolicy.IsolatedMetrics() && oldPhase != "exempt" {
+	if metricPolicy.IsolatedMetrics() && !metricPolicy.IsGroupQualityTarget() && oldPhase != "exempt" {
 		metricEvents, err = advancePassiveMetrics(ctx, tx, metricPolicy, &s, now)
 		if err != nil {
 			return nil, err
@@ -318,16 +327,11 @@ func (r *passiveQualityRepository) FinishProbe(ctx context.Context, probe servic
 	if !valid || !p.Enabled || s.Generation != probe.Generation || s.Version != probe.Version || s.Phase != "probing" || !now.Before(s.NextAt) {
 		return nil
 	}
+	if p.IsGroupQualityTarget() {
+		return nil // Group objectives never recover from a connectivity probe.
+	}
 	if success && !s.OtherHold {
-		s.Phase = "trial"
-		s.Reason = "probe_passed"
-		s.Generation++
-		s.TrialStartedAt = now
-		s.TrialEndsAt = now.Add(time.Duration(p.TrialSeconds) * time.Second)
-		s.Used = 0
-		s.Inflight = 0
-		s.LastEvidenceAt = now
-		s.Evidence = service.PassiveQualityEvidence{Complete: true}
+		beginPassiveTrial(p, &s, now, "probe_passed")
 	} else {
 		service.PassiveQualityPause(p.PassiveQualityConfig, &s, now, "probe_failed_or_other_hold")
 	}

@@ -1,8 +1,10 @@
 import qualityExperience from './qualityExperience'
 import passiveQualityV2 from './passiveQualityV2'
+import groupQualityTargets from './groupQualityTargets'
 
 export default {
     tests: {
+      groupTargets: groupQualityTargets,
       experience: qualityExperience,
       operations: {
   "title": "预算与供应商",
@@ -90,6 +92,7 @@ export default {
     "pending": "证据不足"
   },
   "actions": {
+    "recovery_requires_real_traffic": "暂停后的恢复需要新的真实请求验证",
     "would_cache_watch": "快速观察到缓存异常",
     "would_cache_reduced": "新会话分配已减少",
     "would_cache_recovery_step": "新会话分配逐步恢复",
@@ -133,7 +136,7 @@ export default {
         "restricted": "存在调度限制",
         "limited": "限流降权中",
         "cacheLimited": "新会话分配减少",
-        metrics: { availability: "可用率", latency: "首字", cache: "缓存复用" },
+        metrics: { availability: "可用率", latency: "首字", cache: "缓存复用", group_quality_target: "分组质量目标 · 真实流量" },
         "noHold": "未发现保护限制",
         "noEvidence": "暂无质量判定证据，可配置主动检测和被动保护。",
         "allModels": "所有模型",
@@ -149,6 +152,7 @@ export default {
                 "account": "账号限制"
         },
         "recovery": {
+                "real_traffic_trial": "冷却后限量试运行，使用新的真实请求验证恢复",
                 "monitoring": "持续监测真实请求",
                 "scheduled_tests": "按策略计划复测",
 

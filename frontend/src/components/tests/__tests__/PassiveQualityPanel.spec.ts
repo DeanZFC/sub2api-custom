@@ -18,6 +18,27 @@ const makeWrapper = (tab = 'passive') => mount(PassiveQualityPanel, { props: { t
 } })
 beforeEach(() => { vi.resetAllMocks(); api.policies.mockResolvedValue([]); api.states.mockResolvedValue([]); api.events.mockResolvedValue([]); api.models.mockResolvedValue(['model']); api.save.mockResolvedValue({}) })
 describe('passive quality management', () => {
+  it('keeps group targets out of the generic V2 editor and links to their dedicated panel', async () => {
+    api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 7, name: 'Protected group target', purpose: 'group_quality_target', group_ids: [8] }])
+    const wrapper = makeWrapper(); await flushPromises()
+    expect(wrapper.findAll('article')).toHaveLength(0)
+    expect(wrapper.get('[data-target-managed]').text()).toContain('dedicated editor')
+    await wrapper.get('[data-target-managed] button').trigger('click')
+    expect(wrapper.emitted('tab')).toEqual([['group-targets']])
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('labels group target records as actual cache and starts a real-traffic trial', async () => {
+    const state = { purpose: 'group_quality_target', policy_id: 7, policy_name: 'Group targets', account_id: 62, model: 'A', scope: 'model', mode: 'enforce', phase: 'paused', reason: 'group_target_trial', used: 0, inflight: 0, other_hold: false, evidence: { samples: 10, failures: 2, error_rate: 20, ttft: 1000, ttft_samples: 10, cache_rate: 0, cache_samples: 10, complete: true } }
+    api.states.mockResolvedValue([state])
+    const wrapper = makeWrapper('records'); await flushPromises()
+    expect(wrapper.text()).toContain('Group quality protection')
+    expect(wrapper.text()).toContain('Actual cache usage: 0%')
+    expect(wrapper.text()).toContain('Availability: 80%')
+    await wrapper.findAll('button').find(button => button.text() === 'Start recovery trial')!.trigger('click'); await flushPromises()
+    expect(api.act).toHaveBeenCalledWith(state, 'verify', 0)
+    wrapper.unmount()
+  })
   it('saves all models independently by default without requiring a model', async () => {
     const wrapper = makeWrapper(); await flushPromises(); await wrapper.get('[data-passive-create]').trigger('click')
     const dialog = wrapper.get('[data-dialog]')

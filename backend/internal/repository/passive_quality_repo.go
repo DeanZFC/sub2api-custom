@@ -65,6 +65,15 @@ func (r *passiveQualityRepository) SavePolicy(ctx context.Context, p *service.Pa
 	if count != len(p.GroupIDs) || platforms != 1 {
 		return fmt.Errorf("groups must be active and belong to one non-composite platform")
 	}
+	if p.IsGroupQualityTarget() {
+		var duplicate bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_policies WHERE id<>$1 AND config->>'purpose' IN ('cache_target','group_quality_target') AND config->'group_ids' @> to_jsonb(ARRAY[$2::bigint]))`, p.ID, p.GroupIDs[0]).Scan(&duplicate); err != nil {
+			return err
+		}
+		if duplicate {
+			return fmt.Errorf("this group already has a quality target policy; edit the existing policy")
+		}
+	}
 	raw, err := json.Marshal(p.PassiveQualityConfig)
 	if err != nil {
 		return err
@@ -301,7 +310,7 @@ func (r *passiveQualityRepository) lockedState(ctx context.Context, tx *sql.Tx, 
 		}
 		p.Model = modelKey
 	}
-	s := service.PassiveQualityState{PolicyID: p.ID, PolicyName: p.Name, AccountID: aid, Model: p.Model, Scope: p.Scope, Mode: p.Mode, Version: p.Version, Phase: "insufficient", ObserveAfter: time.Now()}
+	s := service.PassiveQualityState{Purpose: p.Purpose, PolicyID: p.ID, PolicyName: p.Name, AccountID: aid, Model: p.Model, Scope: p.Scope, Mode: p.Mode, Version: p.Version, Phase: "insufficient", ObserveAfter: time.Now()}
 	var raw []byte
 	err = tx.QueryRowContext(ctx, `SELECT data FROM passive_quality_states WHERE policy_id=$1 AND account_id=$2 AND model_key=$3 FOR UPDATE`, pid, aid, modelKey).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -310,6 +319,7 @@ func (r *passiveQualityRepository) lockedState(ctx context.Context, tx *sql.Tx, 
 		err = json.Unmarshal(raw, &s)
 	}
 	s.OtherHold = other
+	s.Purpose = p.Purpose
 	return p, s, err
 }
 func passiveTarget(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, aid int64) (bool, error) {

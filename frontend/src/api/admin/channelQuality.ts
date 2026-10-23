@@ -5,7 +5,7 @@ export interface QualityControl {
   source: 'active' | 'passive' | 'account'
   id: number; name: string; model: string; scope: string; phase: string; reason: string
   recovery: string; next_at?: string; updated_at: string; blocking: boolean; result_id?: number
-  evidence?: PassiveEvidence; metric?: 'availability' | 'latency' | 'cache'; allocation_percent?: number; cache?: PassiveCacheEvidence
+  evidence?: PassiveEvidence; metric?: 'availability' | 'latency' | 'cache' | 'group_quality_target'; allocation_percent?: number; cache?: PassiveCacheEvidence
 }
 export interface QualityAccount {
   id: number; name: string; platform: string; status: string; schedulable: boolean

@@ -11,6 +11,16 @@ const mountView = () => mount(ChannelQualityOverview, { props: { groups: [], vis
 beforeEach(() => { vi.resetAllMocks(); api.overview.mockResolvedValue(page([1])) })
 afterEach(() => vi.useRealTimers())
 describe('quality overview', () => {
+  it('links to simple group targets and labels their actual traffic evidence', async () => {
+    api.overview.mockResolvedValue({ ...page([]), items: [{ ...account(1), controls: [{ source: 'passive', id: 5, metric: 'group_quality_target', name: 'Group targets', model: 'A', scope: 'model', phase: 'paused', reason: 'group_target_trial', recovery: 'real_traffic_trial', blocking: true, evidence: { samples: 5, error_rate: 20, ttft: 1000, cache_rate: 0 } }] }] })
+    const w = mountView(); await flushPromises()
+    expect(w.text()).toContain('Group quality targets · actual traffic')
+    expect(w.text()).toContain('Availability 80% · First-token P90 1 s · Actual cache 0%')
+    expect(w.text()).toContain('bounded trial verified with fresh production traffic')
+    await w.get('[data-overview-group-targets]').trigger('click')
+    expect(w.emitted('navigate')).toEqual([['group-targets']])
+    w.unmount()
+  })
   it('does not discard appended accounts on the refresh timer', async () => {
     vi.useFakeTimers(); api.overview.mockResolvedValueOnce(page([1], 1)).mockResolvedValueOnce(page([2]))
     const w = mountView(); await flushPromises()

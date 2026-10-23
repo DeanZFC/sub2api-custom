@@ -34,7 +34,7 @@ func (r *qualityOperationsRepository) ReplayQualityPolicy(ctx context.Context, r
 	if !req.Config.Enabled {
 		out.Warnings = append(out.Warnings, "policy_disabled")
 	}
-	if req.Config.IsolatedMetrics() {
+	if req.Config.IsolatedMetrics() && !req.Config.IsGroupQualityTarget() {
 		out.Warnings = append(out.Warnings, "cache_pool_guard_not_simulated")
 	}
 	for _, id := range req.AccountIDs {

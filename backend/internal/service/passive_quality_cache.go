@@ -169,6 +169,9 @@ func (c *PassiveQualityConfig) validateIsolatedMetrics() error {
 	if c.SchemaVersion < 0 || c.SchemaVersion > 2 {
 		return fmt.Errorf("schema_version must be 0, 1 or 2")
 	}
+	if c.IsGroupQualityTarget() {
+		return nil
+	}
 	if !c.IsolatedMetrics() {
 		if c.CacheProtection != nil || c.TTFTAction != "" {
 			return fmt.Errorf("independent metric configuration requires schema_version 2")
@@ -216,6 +219,9 @@ func (c *PassiveQualityConfig) validateIsolatedMetrics() error {
 // availability probe/trial settings. Never pass a combined v2 policy to the
 // legacy evaluator: a cache evidence gap must not veto availability recovery.
 func PassiveQualityMetricConfig(c PassiveQualityConfig, metric string) PassiveQualityConfig {
+	if c.IsGroupQualityTarget() {
+		return c
+	}
 	switch metric {
 	case "availability":
 		c.TTFT.Enabled, c.CacheRate.Enabled = false, false

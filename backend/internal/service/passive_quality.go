@@ -16,6 +16,7 @@ type PassiveQualityMetric struct {
 	Recover float64 `json:"recover"`
 }
 type PassiveQualityConfig struct {
+	Purpose              string                     `json:"purpose,omitempty"`
 	SchemaVersion        int                        `json:"schema_version,omitempty"`
 	TTFTAction           string                     `json:"ttft_action,omitempty"`
 	TTFTConcurrencyLimit int                        `json:"ttft_concurrency_limit,omitempty"`
@@ -70,6 +71,7 @@ type PassiveQualitySample struct {
 	CacheInput          int64     `json:"cache_input"`
 }
 type PassiveQualityEvidence struct {
+	CacheFresh          int       `json:"cache_fresh"`
 	TTFTFresh           int       `json:"ttft_fresh"`
 	TTFTLatest          time.Time `json:"ttft_latest"`
 	CacheReadTokens     int64     `json:"cache_read_tokens"`
@@ -88,6 +90,7 @@ type PassiveQualityEvidence struct {
 	Complete            bool      `json:"complete"`
 }
 type PassiveQualityState struct {
+	Purpose           string                              `json:"purpose,omitempty"`
 	CacheObserveAfter time.Time                           `json:"cache_observe_after"`
 	Latency           *PassiveQualityMetricState          `json:"latency,omitempty"`
 	Cache             map[string]PassiveQualityCacheState `json:"cache,omitempty"`
@@ -126,6 +129,8 @@ type PassiveQualityEvent struct {
 	CreatedAt  time.Time           `json:"created_at"`
 }
 type PassiveQualityFailure struct {
+	GroupID           int64
+	NonText           bool
 	CacheMetadata     *PassiveQualityCacheMetadata
 	CacheReported     bool
 	AttemptKey        string
@@ -155,6 +160,9 @@ type PassiveQualityConcurrencyGate interface {
 }
 
 func (c *PassiveQualityConfig) Validate() error {
+	if err := c.prepareGroupQualityTarget(); err != nil {
+		return err
+	}
 	if err := c.validateIsolatedMetrics(); err != nil {
 		return err
 	}
@@ -279,6 +287,9 @@ func PassiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 		}
 		if s.CacheInput > 0 {
 			e.CacheSamples++
+			if s.At.After(after) {
+				e.CacheFresh++
+			}
 			input += s.CacheInput
 			read += s.CacheRead
 		}

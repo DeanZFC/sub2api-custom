@@ -1,0 +1,33 @@
+package service
+
+import (
+	"context"
+	"time"
+)
+
+// GroupQualityTargetSummary is a live rolling-window measurement. It must not
+// reuse the frozen evidence retained by a paused account's protection state.
+type GroupQualityTargetSummary struct {
+	PolicyID              int64     `json:"policy_id"`
+	GroupID               int64     `json:"group_id"`
+	WindowSeconds         int       `json:"window_seconds"`
+	ActualCacheRate       *float64  `json:"actual_cache_rate"`
+	CacheSamples          int64     `json:"cache_samples"`
+	CacheReadTokens       int64     `json:"cache_read_tokens"`
+	CacheInputTokens      int64     `json:"cache_input_tokens"`
+	CacheUnknownSamples   int64     `json:"cache_unknown_samples"`
+	ActualAvailability    *float64  `json:"actual_availability"`
+	SuccessSamples        int64     `json:"success_samples"`
+	FailureSamples        int64     `json:"failure_samples"`
+	FailureUnknownSamples int64     `json:"failure_unknown_samples"`
+	TTFTP90MS             *float64  `json:"ttft_p90_ms"`
+	TTFTSamples           int64     `json:"ttft_samples"`
+	TelemetryComplete     bool      `json:"telemetry_complete"`
+	GeneratedAt           time.Time `json:"generated_at"`
+}
+
+// Kept separate from the protection interface so existing collectors and
+// admission implementations need no reporting-only methods.
+type GroupQualityTargetSummaryRepository interface {
+	GroupQualityTargetSummaries(context.Context, time.Time) ([]GroupQualityTargetSummary, error)
+}

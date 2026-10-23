@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -15,10 +16,27 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 	trial := s.Phase == "trial"
 	limited := s.Phase == "limited"
 	verdict, reason := service.EvaluatePassiveQuality(p.PassiveQualityConfig, e, trial || limited)
+	if p.IsGroupQualityTarget() && !trial && !limited {
+		if !s.LastEvidenceAt.IsZero() && now.Sub(s.LastEvidenceAt) > time.Duration(p.WindowSeconds)*time.Second {
+			s.Hits = 0
+		}
+		if verdict == "pending" {
+			s.Phase, s.Reason, s.Hits = "insufficient", reason, 0
+		}
+	}
+	fresh := e.Fresh
+	if p.IsGroupQualityTarget() && verdict == "fail" {
+		if strings.HasPrefix(reason, "cache_rate:") {
+			fresh = e.CacheFresh
+		}
+		if strings.HasPrefix(reason, "ttft_p90:") {
+			fresh = e.TTFTFresh
+		}
+	}
 	if limited {
 		// Keep serving bounded traffic while checking the healthier recovery
 		// thresholds. Re-reading the same window cannot advance recovery.
-		if e.Fresh >= p.NewSamples {
+		if fresh >= p.NewSamples {
 			s.LastEvidenceAt = e.Latest
 			if verdict == "pass" {
 				s.Hits++
@@ -55,7 +73,7 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 				s.Reason = "waiting_for_recovery: " + reason
 			}
 		}
-	} else if e.Fresh >= p.NewSamples {
+	} else if fresh >= p.NewSamples {
 		s.LastEvidenceAt = e.Latest
 		if verdict == "fail" {
 			s.Hits++

@@ -64,6 +64,10 @@ func passiveDBSchema(t *testing.T, modelStates bool) (context.Context, *sql.DB, 
 	migration, err = os.ReadFile("../../migrations/301_passive_quality_reuse_evidence.sql")
 	require.NoError(t, err)
 	exec(string(migration))
+	migration, err = os.ReadFile("../../migrations/305_passive_quality_failure_group.sql")
+	require.NoError(t, err)
+	exec(string(migration))
+	exec(`ALTER TABLE usage_logs ADD COLUMN group_id BIGINT DEFAULT 8`)
 	if modelStates {
 		migration, err = os.ReadFile("../../migrations/303_passive_quality_model_states.sql")
 		require.NoError(t, err)

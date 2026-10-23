@@ -1,8 +1,10 @@
 import qualityExperience from './qualityExperience'
 import passiveQualityV2 from './passiveQualityV2'
+import groupQualityTargets from './groupQualityTargets'
 
 export default {
     tests: {
+      groupTargets: groupQualityTargets,
       experience: qualityExperience,
       operations: {
   "title": "Budgets & suppliers",
@@ -90,6 +92,7 @@ export default {
     "pending": "Insufficient evidence"
   },
   "actions": {
+    "recovery_requires_real_traffic": "Recovery requires fresh production traffic after the pause",
     "would_cache_watch": "Quick cache anomaly observed",
     "would_cache_reduced": "New-session allocation reduced",
     "would_cache_recovery_step": "New-session allocation recovery step",
@@ -133,7 +136,7 @@ export default {
         "restricted": "Scheduling restricted",
         "limited": "Concurrency and priority reduced",
         "cacheLimited": "New-session allocation reduced",
-        metrics: { availability: "Availability", latency: "First-token latency", cache: "Cache reuse" },
+        metrics: { availability: "Availability", latency: "First-token latency", cache: "Cache reuse", group_quality_target: "Group quality targets · actual traffic" },
         "noHold": "No quality hold found",
         "noEvidence": "No quality evidence yet. Configure active checks and passive protection.",
         "allModels": "All models",
@@ -149,6 +152,7 @@ export default {
                 "account": "Account restriction"
         },
         "recovery": {
+                "real_traffic_trial": "Cooldown, then a bounded trial verified with fresh production traffic",
                 "monitoring": "Continuing to monitor production traffic",
                 "scheduled_tests": "Retest on the policy schedule",
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -57,6 +58,19 @@ func passiveQuery(c *gin.Context, key string) (int64, bool) {
 }
 func (h *PassiveQualityHandler) Policies(c *gin.Context) {
 	out, err := h.svc.Repo.ListPolicies(c.Request.Context())
+	if err != nil {
+		passiveError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+func (h *PassiveQualityHandler) GroupTargets(c *gin.Context) {
+	repo, ok := h.svc.Repo.(service.GroupQualityTargetSummaryRepository)
+	if !ok {
+		response.InternalError(c, "group quality reporting unavailable")
+		return
+	}
+	out, err := repo.GroupQualityTargetSummaries(c.Request.Context(), time.Now())
 	if err != nil {
 		passiveError(c, err)
 		return

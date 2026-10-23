@@ -122,15 +122,25 @@ func passiveQualityOverviewControls(s service.PassiveQualityState, modelFilter s
 	if s.Latency != nil || len(s.Cache) > 0 {
 		c.Metric = "availability"
 	}
+	groupTarget := s.Purpose == "group_quality_target" || s.Purpose == "cache_target"
+	if groupTarget {
+		c.Metric = "group_quality_target"
+	}
 	if s.Phase == "healthy" || s.Phase == "insufficient" || s.Phase == "suspect" || s.Phase == "observed" {
 		c.Recovery = "monitoring"
 	}
 	c.Blocking = s.Mode == "enforce" && (s.Phase == "paused" || s.Phase == "probing")
 	if s.Phase == "paused" || s.Phase == "probing" {
 		c.Recovery, c.NextAt = "probe_then_trial", &s.NextAt
+		if groupTarget {
+			c.Recovery = "real_traffic_trial"
+		}
 	}
 	if s.Phase == "trial" {
 		c.NextAt = &s.TrialEndsAt
+		if groupTarget {
+			c.Recovery = "real_traffic_trial"
+		}
 	}
 	if s.Phase == "exempt" {
 		c.NextAt, c.Recovery = &s.NextAt, "exemption_expiry"
