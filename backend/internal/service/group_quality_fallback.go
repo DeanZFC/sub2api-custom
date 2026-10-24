@@ -8,8 +8,8 @@ import (
 )
 
 // GroupQualityFallbackRequest identifies one exact automatic-quality recovery
-// candidate. The repository must recheck live supply and reserve its bounded
-// emergency lease; the marker alone never authorizes traffic.
+// candidate. The repository must recheck live supply and reserve a per-request
+// tracking lease; the marker alone never authorizes traffic.
 type GroupQualityFallbackRequest struct {
 	GroupID, AccountID int64
 	Model              string

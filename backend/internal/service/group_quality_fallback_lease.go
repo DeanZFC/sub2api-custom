@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Renewal is mandatory for emergency traffic: a long stream must not outlive
-// its distributed lease and overlap a second emergency request.
+// Renewal keeps each fallback request's in-flight tracking lease alive for
+// long streams. Independent fallback requests may hold leases concurrently.
 type GroupQualityFallbackLeaseGate interface {
 	RefreshGroupQualityFallback(context.Context, string) (bool, error)
 }

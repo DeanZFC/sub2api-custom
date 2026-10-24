@@ -31,7 +31,7 @@ func (h *OpenAIGatewayHandler) tryAcquireOpenAIWSTurnAccountSlot(ctx context.Con
 		return release, acquired, err
 	}
 	// Preserve the established credential and group; only the current public
-	// model is refreshed. Live admission rechecks hard gates and lease capacity.
+	// model is refreshed. Live admission rechecks hard gates and lease ownership.
 	fallback.Model = traffic.Model
 	return h.concurrencyHelper.TryAcquireAccountSlot(service.WithGroupQualityFallback(normalCtx, fallback), accountID, maxConcurrency, account)
 }

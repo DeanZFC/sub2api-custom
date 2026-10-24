@@ -4,6 +4,7 @@ import { createI18n } from 'vue-i18n'
 import GroupQualityTargetsPanel from '../GroupQualityTargetsPanel.vue'
 import { defaultPassivePolicy, type GroupQualityTargetSummary, type GroupQualityTrafficControl, type GroupQualityFallbackSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
 import resources from '@/i18n/locales/en/admin/resources'
+import zhResources from '@/i18n/locales/zh/admin/resources'
 import type { AdminGroup } from '@/types'
 
 const api = vi.hoisted(() => ({ policies: vi.fn(), states: vi.fn(), groupTargets: vi.fn(), saveGroupQualityTarget: vi.fn(), success: vi.fn(), error: vi.fn() }))
@@ -40,11 +41,11 @@ const state = (overrides: Partial<PassiveState> = {}): PassiveState => ({
   ...overrides,
 })
 const fallback = (overrides: Partial<GroupQualityFallbackSummary> = {}): GroupQualityFallbackSummary => ({
-  enabled: true, in_flight: 0, requests: 0, input_tokens: 0, reserved_input_tokens: 0, lease_seconds: 120, pacing_seconds: 2, ...overrides,
+  enabled: true, in_flight: 0, requests: 0, input_tokens: 0, reserved_input_tokens: 0, lease_seconds: 120, pacing_seconds: 0, ...overrides,
 })
-function makeWrapper(policyId?: number) {
+function makeWrapper(policyId?: number, locale = 'en') {
   return mount(GroupQualityTargetsPanel, { props: { groups, visible: true, policyId }, global: {
-    plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: resources } } })],
+    plugins: [createI18n({ legacy: false, locale, missingWarn: false, fallbackWarn: false, messages: { en: { admin: resources }, zh: { admin: zhResources } } })],
     stubs: { BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><h2>{{ title }}</h2><slot/><slot name="footer"/></section>' } },
   } })
 }
@@ -58,18 +59,19 @@ describe('simple group quality targets', () => {
     const w = makeWrapper(); await flushPromises()
     expect(w.find('[data-target-traffic-control]').exists()).toBe(false)
     expect(w.get('[data-target-fallback-status]').text()).toBe('Enabled · Standby')
-    expect(w.get('[data-target-fallback-inflight]').text()).toContain('0 / 1')
-    expect(w.get('[data-target-fallback]').text()).toContain('at least 2 seconds')
-    expect(w.get('[data-target-no-verified]').text()).toContain('scored fallback provides limited concurrency')
+    expect(w.get('[data-target-fallback-inflight] .text-xl').text()).toBe('0')
+    expect(w.get('[data-target-fallback]').text()).toContain('Fallback adds no concurrency cap or delay between request starts')
+    expect(w.get('[data-target-fallback]').text()).toContain('normal account concurrency limits still apply')
+    expect(w.get('[data-target-no-verified]').text()).toContain('scored fallback adds no extra concurrency cap')
     expect(w.find('[data-target-fallback-last]').exists()).toBe(false)
     w.unmount()
   })
 
   it('distinguishes active fallback from recent history and shows real usage', async () => {
-    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ in_flight: 1, requests: 7, input_tokens: 32000, reserved_input_tokens: 4096, last_used_at: '2026-10-24T01:00:00Z', last_account_id: 62 }) })])
+    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ in_flight: 3, requests: 7, input_tokens: 32000, reserved_input_tokens: 4096, last_used_at: '2026-10-24T01:00:00Z', last_account_id: 62 }) })])
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-target-fallback-status]').text()).toBe('Serving fallback traffic')
-    expect(w.get('[data-target-fallback-inflight]').text()).toContain('1 / 1')
+    expect(w.get('[data-target-fallback-inflight] .text-xl').text()).toBe('3')
     expect(w.get('[data-target-fallback-requests]').text()).toContain('7')
     expect(w.get('[data-target-fallback-input]').text()).toContain('32,000')
     expect(w.get('[data-target-fallback-input]').text()).toContain('4,096')
@@ -80,6 +82,17 @@ describe('simple group quality targets', () => {
     const idle = makeWrapper(); await flushPromises()
     expect(idle.get('[data-target-fallback-status]').text()).toBe('Enabled · Standby')
     idle.unmount()
+  })
+
+  it('shows uncapped fallback in Chinese even when a legacy pacing field is present', async () => {
+    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ in_flight: 3, pacing_seconds: 2 }) })])
+    const w = makeWrapper(undefined, 'zh'); await flushPromises()
+    expect(w.get('[data-target-fallback-inflight] .text-xl').text()).toBe('3')
+    expect(w.get('[data-target-fallback]').text()).toContain('兜底不额外限制并发或请求启动间隔，仍遵守账号原有并发设置')
+    expect(w.get('[data-target-fallback]').text()).not.toContain('最多 1 个')
+    expect(w.get('[data-target-fallback]').text()).not.toContain('间隔 2 秒')
+    expect(w.get('[data-target-no-verified]').text()).toContain('按评分兜底，不额外限制并发')
+    w.unmount()
   })
 
   it.each([

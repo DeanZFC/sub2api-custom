@@ -4,7 +4,6 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -26,12 +25,6 @@ func acquireFallback(t *testing.T, r *passiveQualityRepository, req service.Grou
 	require.NoError(t, err)
 	return allowed, reserved
 }
-func readyFallbackPacing(t *testing.T, db *sql.DB) {
-	t.Helper()
-	_, err := db.Exec(`UPDATE group_quality_traffic_snapshots SET last_fallback_at=now()-interval '3 seconds'`)
-	require.NoError(t, err)
-}
-
 func TestGroupQualityTrafficNonOpenAIHasNoPartialBudgetIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
@@ -55,17 +48,23 @@ func TestGroupQualityTrafficNonOpenAIHasNoPartialBudgetIntegration(t *testing.T)
 	require.False(t, s.Fallback.Enabled)
 }
 
-func TestGroupQualityFallbackSharedLeasePacingExpiryIntegration(t *testing.T) {
+func TestGroupQualityFallbackConcurrentAdmissionIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
-	allowed, _ := acquireTraffic(t, r, trafficRequest("spent", "A", "spent", 1000000), 62)
+	allowed, reserved := acquireTraffic(t, r, trafficRequest("spent", "A", "spent", 1000000), 62)
 	require.True(t, allowed)
+	require.True(t, reserved)
+	allowed, _ = acquireTraffic(t, r, trafficRequest("normal-no-room", "A", "normal-no-room", 4096), 62)
+	require.False(t, allowed, "ordinary validation is still subject to the exhausted hour budget")
+	const requests = 20
+	start := make(chan struct{})
 	var admitted atomic.Int32
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for i := 0; i < requests; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			<-start
 			req := trafficRequest(fmt.Sprint("emergency-", i), fmt.Sprintf("model-%d", i%3), fmt.Sprint("emergency-", i), 70000)
 			aid := int64(62 + i%2)
 			other := &passiveQualityRepository{db: db}
@@ -82,45 +81,88 @@ func TestGroupQualityFallbackSharedLeasePacingExpiryIntegration(t *testing.T) {
 			}
 		}(i)
 	}
+	close(start)
 	wg.Wait()
-	require.EqualValues(t, 1, admitted.Load())
+	require.EqualValues(t, requests, admitted.Load(), "all gateway instances, accounts and models may fall back concurrently, including repeated account/model pairs")
 	s, err := r.groupQualityFallbackSummary(ctx, p, time.Now())
 	require.NoError(t, err)
-	require.Equal(t, 1, s.InFlight)
-	require.EqualValues(t, 1, s.Requests)
-	require.EqualValues(t, 70000, s.ReservedInputTokens)
+	require.Equal(t, requests, s.InFlight)
+	require.EqualValues(t, requests, s.Requests)
+	require.EqualValues(t, requests*70000, s.ReservedInputTokens)
+	require.Zero(t, s.PacingSeconds)
 	require.NotNil(t, s.LastAccountID)
 	require.NotNil(t, s.LastUsedAt)
-	var lease string
-	require.NoError(t, db.QueryRow(`SELECT lease_id FROM group_quality_traffic_leases WHERE fallback`).Scan(&lease))
-	_, err = db.Exec(`UPDATE group_quality_traffic_leases SET fallback_expires_at=now()+interval '1 second' WHERE lease_id=$1`, lease)
+
+	// A second gateway may retry the same attempt without counting or charging it twice.
+	other := &passiveQualityRepository{db: db}
+	req := trafficRequest("emergency-0", "model-0", "emergency-0", 70000)
+	allowed, reserved = acquireFallback(t, other, req, 62)
+	require.True(t, allowed)
+	require.True(t, reserved)
+	for _, changed := range []service.GroupQualityTrafficRequest{
+		trafficRequest("another-request", req.Model, req.LeaseID, 70000),
+		trafficRequest(req.Key, "another-model", req.LeaseID, 70000),
+	} {
+		allowed, _ = acquireFallback(t, other, changed, 62)
+		require.False(t, allowed, "an existing reservation must retain its exact request and model")
+	}
+	allowed, _ = acquireFallback(t, other, req, 63)
+	require.False(t, allowed, "an existing reservation cannot move to another account")
+	s, err = r.groupQualityFallbackSummary(ctx, p, time.Now())
 	require.NoError(t, err)
-	renewed, err := r.RefreshGroupQualityFallback(ctx, lease)
+	require.Equal(t, requests, s.InFlight)
+	require.EqualValues(t, requests, s.Requests)
+	require.EqualValues(t, requests*70000, s.ReservedInputTokens)
+}
+
+func TestGroupQualityFallbackIndependentLeaseLifecycleIntegration(t *testing.T) {
+	ctx, db, r := passiveDB(t)
+	p := newGroupTargetPolicy(t, ctx, db, r)
+	first := trafficRequest("first", "A", "first", 70000)
+	allowed, reserved := acquireFallback(t, r, first, 62)
+	require.True(t, allowed)
+	require.True(t, reserved)
+	_, err := db.Exec(`UPDATE group_quality_traffic_leases SET fallback_expires_at=now()+interval '1 second' WHERE lease_id=$1`, first.LeaseID)
+	require.NoError(t, err)
+	other := &passiveQualityRepository{db: db}
+	renewed, err := other.RefreshGroupQualityFallback(ctx, first.LeaseID)
 	require.NoError(t, err)
 	require.True(t, renewed)
 	var expires time.Time
-	require.NoError(t, db.QueryRow(`SELECT fallback_expires_at FROM group_quality_traffic_leases WHERE lease_id=$1`, lease).Scan(&expires))
+	require.NoError(t, db.QueryRow(`SELECT fallback_expires_at FROM group_quality_traffic_leases WHERE lease_id=$1`, first.LeaseID).Scan(&expires))
 	require.True(t, expires.After(time.Now().Add(119*time.Second)), "renewal extends the still-owned lease")
 
-	require.NoError(t, r.ReleaseGroupQualityTraffic(ctx, lease, false))
-	renewed, err = r.RefreshGroupQualityFallback(ctx, lease)
+	second := trafficRequest("second", "A", "second", 4096)
+	allowed, reserved = acquireFallback(t, other, second, 62)
+	require.True(t, allowed, "same-account same-model fallback does not wait for an in-flight request to release")
+	require.True(t, reserved)
+	require.NoError(t, r.ReleaseGroupQualityTraffic(ctx, first.LeaseID, false))
+	renewed, err = r.RefreshGroupQualityFallback(ctx, first.LeaseID)
 	require.NoError(t, err)
 	require.False(t, renewed)
-	allowed, _ = acquireFallback(t, r, trafficRequest("paced", "A", "paced", 4096), 62)
-	require.False(t, allowed)
-	readyFallbackPacing(t, db)
+	allowed, _ = acquireFallback(t, r, first, 62)
+	require.False(t, allowed, "released attempts cannot be revived")
+	renewed, err = r.RefreshGroupQualityFallback(ctx, second.LeaseID)
+	require.NoError(t, err)
+	require.True(t, renewed, "releasing one request does not invalidate another request's lease")
+	require.NoError(t, r.ReleaseGroupQualityTraffic(ctx, second.LeaseID, true))
+	// A future legacy timestamp makes the lack of a pacing gate deterministic,
+	// even if the test process is suspended between these sequential admissions.
+	_, err = db.Exec(`UPDATE group_quality_traffic_snapshots SET last_fallback_at=now()+interval '1 minute' WHERE policy_id=$1`, p.ID)
+	require.NoError(t, err)
 	next := trafficRequest("next", "A", "next", 4096)
 	allowed, _ = acquireFallback(t, r, next, 62)
-	require.True(t, allowed, "exhausted hour budget does not permanently close emergency lane")
+	require.True(t, allowed, "fallback does not wait for the old two-second pacing interval")
 	_, err = db.Exec(`UPDATE group_quality_traffic_leases SET fallback_expires_at=now()-interval '1 second' WHERE lease_id='next'`)
 	require.NoError(t, err)
 	renewed, err = r.RefreshGroupQualityFallback(ctx, "next")
 	require.NoError(t, err)
 	require.False(t, renewed, "expired owner never revives")
-	readyFallbackPacing(t, db)
+	allowed, _ = acquireFallback(t, r, next, 62)
+	require.False(t, allowed, "expired attempts cannot be reacquired")
 	allowed, _ = acquireFallback(t, r, trafficRequest("crash-replacement", "B", "crash-replacement", 4096), 63)
 	require.True(t, allowed)
-	s, err = r.groupQualityFallbackSummary(ctx, p, time.Now())
+	s, err := r.groupQualityFallbackSummary(ctx, p, time.Now())
 	require.NoError(t, err)
 	require.Equal(t, 1, s.InFlight)
 	require.EqualValues(t, 3, s.Requests)
@@ -130,13 +172,14 @@ func TestGroupQualityFallbackSharedLeasePacingExpiryIntegration(t *testing.T) {
 func TestGroupQualityFallbackHealthySupplyAndExactModelIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
+	allowed, _ := acquireFallback(t, r, trafficRequest("before-recovery", "A", "before-recovery", 4096), 63)
+	require.True(t, allowed)
 	healthyTrafficState(t, ctx, db, r, p, "A")
-	allowed, _ := acquireFallback(t, r, trafficRequest("same-model", "A", "same-model", 4096), 63)
-	require.False(t, allowed)
+	allowed, _ = acquireFallback(t, r, trafficRequest("same-model", "A", "same-model", 4096), 63)
+	require.False(t, allowed, "recovered healthy supply closes new fallback admission for that exact model")
 	allowed, _ = acquireFallback(t, r, trafficRequest("other-model", "B", "other-model", 4096), 63)
 	require.True(t, allowed)
 	require.NoError(t, r.ReleaseGroupQualityTraffic(ctx, "other-model", true))
-	readyFallbackPacing(t, db)
 	_, err := db.Exec(`UPDATE accounts SET schedulable=false WHERE id=62`)
 	require.NoError(t, err)
 	allowed, _ = acquireFallback(t, r, trafficRequest("unavailable-healthy", "A", "unavailable-healthy", 4096), 63)
@@ -174,7 +217,6 @@ func TestGroupQualityFallbackHardAndActiveProofFencesIntegration(t *testing.T) {
 	allowed, _ = acquireFallback(t, r, trafficRequest("proven-active", "A", "proven-active", 4096), 62)
 	require.True(t, allowed)
 	require.NoError(t, r.ReleaseGroupQualityTraffic(ctx, "proven-active", true))
-	readyFallbackPacing(t, db)
 	_, err = db.Exec(`DELETE FROM account_groups WHERE account_id=62 AND group_id=8`)
 	require.NoError(t, err)
 	allowed, _ = acquireFallback(t, r, trafficRequest("detached", "A", "detached", 4096), 62)
@@ -205,7 +247,6 @@ func TestGroupQualityFallbackAutomaticPassiveAndMissingPolicyIntegration(t *test
 	allowed, _ = acquireFallback(t, r, req, 62)
 	require.True(t, allowed)
 	require.NoError(t, r.ReleaseGroupQualityTraffic(ctx, req.LeaseID, true))
-	readyFallbackPacing(t, db)
 	p.Enabled = false
 	require.NoError(t, r.SavePolicy(ctx, &p))
 	allowed, reserved = acquireFallback(t, r, trafficRequest("no-policy", "A", "no-policy", 4096), 62)

@@ -37,7 +37,7 @@ type GroupQualityFallbackSummary struct {
 	InputTokens         int64      `json:"input_tokens"`
 	ReservedInputTokens int64      `json:"reserved_input_tokens"`
 	LeaseSeconds        int        `json:"lease_seconds"`
-	PacingSeconds       int        `json:"pacing_seconds"`
+	PacingSeconds       int        `json:"pacing_seconds"` // Compatibility field; zero means no fallback pacing.
 	LastUsedAt          *time.Time `json:"last_used_at,omitempty"`
 	LastAccountID       *int64     `json:"last_account_id,omitempty"`
 }

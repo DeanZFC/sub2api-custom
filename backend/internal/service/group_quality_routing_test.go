@@ -78,15 +78,15 @@ func TestGroupQualityRoutingProjectionRequiresFreshVerification(t *testing.T) {
 	}
 }
 
-func TestGroupQualityRoutingVerifiedCacheLimitedOutranksUnverified(t *testing.T) {
+func TestGroupQualityRoutingVerifiedStatusDoesNotOverrideCacheAllocation(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		t.Run(mode, func(t *testing.T) {
 			resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			groupID := int64(47054)
-			verified := groupQualityRoutingTestAccount(1, groupID, 100, "healthy")
+			verified := groupQualityRoutingTestAccount(1, groupID, 0, "healthy")
 			verified.Extra["passive_quality"] = []any{map[string]any{"scope": "model", "model": "public-model", "phase": "cache_limited", "allocation_percent": float64(20)}}
-			accounts := []Account{verified, groupQualityRoutingTestAccount(2, groupID, 0, "insufficient")}
+			accounts := []Account{verified, groupQualityRoutingTestAccount(2, groupID, 100, "insufficient")}
 			session := ""
 			for i := 0; i < 100; i++ {
 				candidate := fmt.Sprintf("group-quality-cache-%d", i)
@@ -101,7 +101,7 @@ func TestGroupQualityRoutingVerifiedCacheLimitedOutranksUnverified(t *testing.T)
 			require.NoError(t, err)
 			require.NotNil(t, selection)
 			require.True(t, selection.Acquired)
-			require.Equal(t, verified.ID, selection.Account.ID)
+			require.Equal(t, int64(2), selection.Account.ID, "verified status must not bypass independent cache allocation protection")
 			selection.ReleaseFunc()
 		})
 	}
@@ -160,9 +160,9 @@ func TestGroupQualityBudgetDenialPreviousResponseNeverMigrates(t *testing.T) {
 	}
 }
 
-func TestGroupQualityRoutingAllSchedulersPreferVerifiedAndRetainFallback(t *testing.T) {
+func TestGroupQualityRoutingAllSchedulersUseAccountPriorityAndRetainFallback(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
-		for _, scenario := range []string{"verified", "first_verified_busy", "all_verified_busy", "manual_disabled", "other_model", "public_model_mapping"} {
+		for _, scenario := range []string{"insufficient_higher_priority", "insufficient_busy", "insufficient_and_first_healthy_busy", "manual_disabled", "healthy_higher_priority", "other_model", "public_model_mapping"} {
 			t.Run(mode+"/"+scenario, func(t *testing.T) {
 				resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
@@ -172,20 +172,24 @@ func TestGroupQualityRoutingAllSchedulersPreferVerifiedAndRetainFallback(t *test
 					groupQualityRoutingTestAccount(2, groupID, 200, "healthy"),
 					groupQualityRoutingTestAccount(3, groupID, 0, "insufficient"),
 				}
-				wantID := int64(1)
+				wantID := int64(3)
+				wantAttempts := []int64{3}
 				cc := schedulerTestConcurrencyCache{}
 				ctx := context.Background()
 				model := "public-model"
 				switch scenario {
-				case "first_verified_busy":
-					cc.acquireResults = map[int64]bool{1: false}
-					wantID = 2
-				case "all_verified_busy":
-					cc.acquireResults = map[int64]bool{1: false, 2: false}
-					wantID = 3
+				case "insufficient_busy":
+					cc.acquireResults = map[int64]bool{3: false}
+					wantID, wantAttempts = 1, []int64{3, 1}
+				case "insufficient_and_first_healthy_busy":
+					cc.acquireResults = map[int64]bool{3: false, 1: false}
+					wantID, wantAttempts = 2, []int64{3, 1, 2}
 				case "manual_disabled":
-					accounts[0].Schedulable = false
-					wantID = 2
+					accounts[2].Schedulable = false
+					wantID, wantAttempts = 1, []int64{1}
+				case "healthy_higher_priority":
+					accounts[2].Priority = 300
+					wantID, wantAttempts = 1, []int64{1}
 				case "other_model":
 					model, wantID = "another-model", 3
 				case "public_model_mapping":
@@ -198,13 +202,42 @@ func TestGroupQualityRoutingAllSchedulersPreferVerifiedAndRetainFallback(t *test
 				selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", model, nil, OpenAIUpstreamTransportAny, false)
 				require.NoError(t, err)
 				require.NotNil(t, selection)
-				require.True(t, selection.Acquired, "try every usable tier before returning a wait plan")
+				require.True(t, selection.Acquired, "try every usable candidate before returning a wait plan")
 				require.Equal(t, wantID, selection.Account.ID)
+				require.Equal(t, wantAttempts, acquired, "quality verification must not override native account priority or hide peers beyond TopK")
 				if selection.ReleaseFunc != nil {
 					selection.ReleaseFunc()
 				}
 			})
 		}
+	}
+}
+
+func TestGroupQualityRoutingEqualPriorityKeepsInsufficientSamplesEligible(t *testing.T) {
+	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
+		t.Run(mode, func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			groupID := int64(47058)
+			recentlyUsed := time.Now().Add(-time.Minute)
+			accounts := []Account{
+				groupQualityRoutingTestAccount(2, groupID, 0, "healthy"),
+				groupQualityRoutingTestAccount(1, groupID, 0, "insufficient"),
+			}
+			accounts[0].LastUsedAt = &recentlyUsed
+			cc := schedulerTestConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{
+				1: {AccountID: 1, LoadRate: 0},
+				2: {AccountID: 2, LoadRate: 50},
+			}}
+			svc := groupQualityRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, cc)
+			svc.cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 1
+			selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "", "public-model", nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.True(t, selection.Acquired)
+			require.Equal(t, int64(1), selection.Account.ID, "equal-priority insufficient accounts must compete using normal load and recency rules")
+			selection.ReleaseFunc()
+		})
 	}
 }
 

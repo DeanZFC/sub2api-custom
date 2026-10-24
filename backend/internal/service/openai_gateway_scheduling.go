@@ -1091,10 +1091,8 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 	if len(eligible) == 0 {
 		return nil, compactBlocked, filterStats
 	}
-	// Group quality is the outer tier. Filtering cache-limited accounts across
-	// the whole pool could discard a verified target in favor of an unverified
-	// peer before the quality ordering ever runs.
-	eligible = groupQualityRoutingTiers(ctx, eligible, groupID, requestedModel)[0]
+	// Verified and insufficient-sample group targets share the normal scheduler
+	// order. Explicit cache-allocation limits and live admission still apply.
 	eligible = passiveQualityNewSessionCandidates(ctx, eligible, requestedModel)
 	rateOrder := openAILegacyUpstreamRateOrder{}
 	if preferLowUpstreamRate {
@@ -1104,11 +1102,6 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		a, b := eligible[i], eligible[j]
 		if requireCompact && compactTiers[a.ID] != compactTiers[b.ID] {
 			return compactTiers[a.ID] > compactTiers[b.ID]
-		}
-		aVerified, _ := groupQualityRoutingState(a, groupID, passiveQualityRoutingModel(ctx, requestedModel))
-		bVerified, _ := groupQualityRoutingState(b, groupID, passiveQualityRoutingModel(ctx, requestedModel))
-		if aVerified != bVerified {
-			return aVerified
 		}
 		if rateCmp := rateOrder.compare(a, b); rateCmp != 0 {
 			return rateCmp < 0
@@ -1453,7 +1446,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 
 		passiveQualityOrderNewSessionLoads(ctx, selectionOrder, requestedModel, stickyAccountID)
-		groupQualityOrderLoads(ctx, selectionOrder, groupID, requestedModel)
 		for _, item := range selectionOrder {
 			if trafficDenied[item.account.ID] {
 				continue
@@ -1502,7 +1494,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
 		passiveQualityOrderNewSessionCandidates(ctx, ordered, requestedModel, stickyAccountID)
-		groupQualityOrderAccounts(ctx, ordered, groupID, requestedModel)
 		for _, acc := range ordered {
 			if trafficDenied[acc.ID] {
 				continue
@@ -1562,7 +1553,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
 	passiveQualityOrderNewSessionCandidates(ctx, candidates, requestedModel, stickyAccountID)
-	groupQualityOrderAccounts(ctx, candidates, groupID, requestedModel)
 	for _, acc := range candidates {
 		if trafficDenied[acc.ID] {
 			continue

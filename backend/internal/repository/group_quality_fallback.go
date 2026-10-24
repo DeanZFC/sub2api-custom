@@ -11,7 +11,6 @@ import (
 )
 
 const groupQualityFallbackLease = 120 * time.Second
-const groupQualityFallbackPacing = 2 * time.Second
 
 func groupQualityFallbackMatches(ctx context.Context, aid int64, model string) bool {
 	fallback, ok := service.GroupQualityFallbackFromContext(ctx)
@@ -171,7 +170,7 @@ func (r *passiveQualityRepository) RefreshGroupQualityFallback(ctx context.Conte
 }
 
 func (r *passiveQualityRepository) groupQualityFallbackSummary(ctx context.Context, p service.PassiveQualityPolicy, now time.Time) (*service.GroupQualityFallbackSummary, error) {
-	s := &service.GroupQualityFallbackSummary{LeaseSeconds: int(groupQualityFallbackLease / time.Second), PacingSeconds: int(groupQualityFallbackPacing / time.Second)}
+	s := &service.GroupQualityFallbackSummary{LeaseSeconds: int(groupQualityFallbackLease / time.Second)}
 	var supported bool
 	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM groups WHERE id=$1 AND platform='openai' AND deleted_at IS NULL AND status='active')`, p.GroupIDs[0]).Scan(&supported); err != nil {
 		return nil, err

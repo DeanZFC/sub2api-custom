@@ -103,7 +103,7 @@ func TestForwardOpenAIWSV2_GroupFallbackCancellationStopsUpstream(t *testing.T) 
 			captureConn.mu.Lock()
 			closed, remaining := captureConn.closed, len(captureConn.events)
 			captureConn.mu.Unlock()
-			require.True(t, closed, "close upstream before another emergency lease can run")
+			require.True(t, closed, "close the upstream owned by the canceled fallback request")
 			require.Equal(t, 1, remaining, "do not consume the delayed terminal event after cancellation")
 		})
 	}

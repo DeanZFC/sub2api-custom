@@ -106,8 +106,8 @@ func (r *passiveQualityRepository) AcquireGroupQualityTraffic(ctx context.Contex
 	}
 	var version, input, read int64
 	var complete bool
-	var measured, lastFallback sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT policy_version,input_tokens,read_tokens,telemetry_complete,measured_at,last_fallback_at FROM group_quality_traffic_snapshots WHERE policy_id=$1 FOR UPDATE`, p.ID).Scan(&version, &input, &read, &complete, &measured, &lastFallback)
+	var measured sql.NullTime
+	err = tx.QueryRowContext(ctx, `SELECT policy_version,input_tokens,read_tokens,telemetry_complete,measured_at FROM group_quality_traffic_snapshots WHERE policy_id=$1 FOR UPDATE`, p.ID).Scan(&version, &input, &read, &complete, &measured)
 	if err != nil {
 		return false, false, err
 	}
@@ -151,11 +151,9 @@ func (r *passiveQualityRepository) AcquireGroupQualityTraffic(ctx context.Contex
 		if e != nil {
 			return false, false, e
 		}
-		var live bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_quality_traffic_leases WHERE group_id=$1 AND fallback AND released_at IS NULL AND NOT unused AND fallback_expires_at>$2)`, req.GroupID, now).Scan(&live); err != nil {
-			return false, false, err
-		}
-		denied = supply || live || (lastFallback.Valid && now.Before(lastFallback.Time.Add(groupQualityFallbackPacing)))
+		// Fallback adds no concurrency cap or pacing delay. Each request keeps
+		// its own usage lease; ordinary account concurrency still applies.
+		denied = supply
 		fallbackExpires = now.Add(groupQualityFallbackLease)
 	}
 	if denied {

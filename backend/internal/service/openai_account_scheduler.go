@@ -1624,30 +1624,28 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		}
 	}
 
-	// Verified target accounts are considered before subscription preference and
-	// TopK. Retain both cache-allocation tiers inside each quality tier, so a
-	// failed live check cannot hide usable peers or force a needless wait.
+	// Group target verification does not add a priority tier: insufficient-sample
+	// accounts need normal scheduling opportunities to collect real evidence.
+	// Retain explicit cache-allocation tiers and live admission checks.
 	var waiting *AccountSelectionResult
 	var waitCount, waitTopK int
 	var waitSkew float64
 	var lastErr error
-	for _, qualityPool := range groupQualityRoutingTiers(ctx, filtered, req.GroupID, req.RequestedModel) {
-		preferred, cacheFallback := passiveQualityNewSessionTiers(ctx, qualityPool, req.RequestedModel, req.StickyAccountID, req.StickyPreviousAccountID, req.GuardianParentAccountID)
-		for _, pool := range [][]*Account{preferred, cacheFallback} {
-			if len(pool) == 0 {
-				continue
-			}
-			result, count, topK, skew, selectErr := s.selectByLoadBalanceCandidates(ctx, req, pool, loadMap, budget, filterStats)
-			if result != nil && (result.Acquired || result.stickySessionHit || (result.Account != nil && (result.Account.ID == req.StickyAccountID || result.Account.ID == req.StickyPreviousAccountID || result.Account.ID == req.GuardianParentAccountID))) {
-				return result, count, topK, skew, selectErr
-			}
-			if selectErr != nil && !errors.Is(selectErr, ErrNoAvailableAccounts) && !errors.Is(selectErr, ErrNoAvailableCompactAccounts) && !errors.Is(selectErr, ErrAccountAdmissionDenied) && !errors.Is(selectErr, ErrGroupQualityTrafficBudget) {
-				return result, count, topK, skew, selectErr
-			}
-			lastErr = selectErr
-			if waiting == nil && result != nil {
-				waiting, waitCount, waitTopK, waitSkew = result, count, topK, skew
-			}
+	preferred, cacheFallback := passiveQualityNewSessionTiers(ctx, filtered, req.RequestedModel, req.StickyAccountID, req.StickyPreviousAccountID, req.GuardianParentAccountID)
+	for _, pool := range [][]*Account{preferred, cacheFallback} {
+		if len(pool) == 0 {
+			continue
+		}
+		result, count, topK, skew, selectErr := s.selectByLoadBalanceCandidates(ctx, req, pool, loadMap, budget, filterStats)
+		if result != nil && (result.Acquired || result.stickySessionHit || (result.Account != nil && (result.Account.ID == req.StickyAccountID || result.Account.ID == req.StickyPreviousAccountID || result.Account.ID == req.GuardianParentAccountID))) {
+			return result, count, topK, skew, selectErr
+		}
+		if selectErr != nil && !errors.Is(selectErr, ErrNoAvailableAccounts) && !errors.Is(selectErr, ErrNoAvailableCompactAccounts) && !errors.Is(selectErr, ErrAccountAdmissionDenied) && !errors.Is(selectErr, ErrGroupQualityTrafficBudget) {
+			return result, count, topK, skew, selectErr
+		}
+		lastErr = selectErr
+		if waiting == nil && result != nil {
+			waiting, waitCount, waitTopK, waitSkew = result, count, topK, skew
 		}
 	}
 	if waiting != nil {

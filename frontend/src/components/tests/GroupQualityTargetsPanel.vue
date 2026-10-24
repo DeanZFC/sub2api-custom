@@ -39,9 +39,9 @@
       </section>
       <section v-if="fallbackFor(policy)" class="space-y-3 rounded-lg border border-amber-200 p-4 dark:border-amber-900" data-target-fallback>
         <div class="flex flex-wrap items-center justify-between gap-2"><h5 class="text-sm font-semibold">{{ tr('fallbackTitle') }}</h5><span class="badge" :class="fallbackFor(policy)!.in_flight > 0 ? 'badge-warning' : 'badge-gray'" data-target-fallback-status>{{ tr(fallbackFor(policy)!.in_flight > 0 ? 'fallbackActive' : 'fallbackReady') }}</span></div>
-        <p class="text-sm leading-6 text-gray-600 dark:text-gray-300">{{ tr('fallbackHint', { seconds: fallbackFor(policy)?.pacing_seconds }) }}</p>
+        <p class="text-sm leading-6 text-gray-600 dark:text-gray-300">{{ tr('fallbackHint') }}</p>
         <div class="grid gap-3 sm:grid-cols-3">
-          <div data-target-fallback-inflight><p class="text-xs text-gray-500">{{ tr('fallbackInFlight') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.in_flight) }} / 1</p></div>
+          <div data-target-fallback-inflight><p class="text-xs text-gray-500">{{ tr('fallbackInFlight') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.in_flight) }}</p></div>
           <div data-target-fallback-requests><p class="text-xs text-gray-500">{{ tr('fallbackRequests') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.requests) }}</p></div>
           <div data-target-fallback-input><p class="text-xs text-gray-500">{{ tr('fallbackInput') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.input_tokens) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('fallbackReserved', { count: tokenCount(fallbackFor(policy)?.reserved_input_tokens) }) }}</p></div>
         </div>
