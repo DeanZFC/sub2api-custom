@@ -119,10 +119,16 @@ func ActivateAPIKeyFallbackRouting(ctx context.Context, fallbackGroupID int64) b
 }
 
 func apiKeyFallbackGroupForSelection(ctx context.Context, groupID *int64, selectionErr error) (*Group, context.Context, bool) {
-	if ctx == nil || groupID == nil || *groupID <= 0 {
+	if ctx == nil || ctx.Err() != nil || groupID == nil || *groupID <= 0 {
 		return nil, ctx, false
 	}
-	if !errors.Is(selectionErr, ErrNoAvailableAccounts) && !errors.Is(selectionErr, ErrNoAvailableCompactAccounts) {
+	// Quality validation capacity is group-scoped. Once the primary group's
+	// normal and recovery admission are exhausted, the configured fallback can
+	// still admit this request under its own budget and scheduling restrictions.
+	// Do not treat arbitrary admission or infrastructure failures as exhaustion.
+	if !errors.Is(selectionErr, ErrNoAvailableAccounts) &&
+		!errors.Is(selectionErr, ErrNoAvailableCompactAccounts) &&
+		!errors.Is(selectionErr, ErrGroupQualityTrafficBudget) {
 		return nil, ctx, false
 	}
 	if attempted, _ := ctx.Value(apiKeyGroupFallbackAttemptContextKey{}).(bool); attempted {

@@ -2366,6 +2366,12 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerAndAPIKeyFallback(
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	selection, decision, err := s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	// A quality-budget rejection can deliberately preserve the credential that
+	// owns incremental response state. Only complete, replayable requests may
+	// move to another group; keep the original denial for owner-bound requests.
+	if errors.Is(err, ErrGroupQualityTrafficBudget) && strings.TrimSpace(previousResponseID) != "" && !previousResponseCanMove {
+		return selection, decision, err
+	}
 	fallbackGroup, fallbackCtx, ok := apiKeyFallbackGroupForSelection(ctx, groupID, err)
 	if !ok {
 		return selection, decision, err
