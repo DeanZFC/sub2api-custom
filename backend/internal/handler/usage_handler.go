@@ -336,7 +336,8 @@ func (h *UsageHandler) ListErrors(c *gin.Context) {
 	// 排序对齐用量明细:列白名单与方向归一在 repo 层,非法值回退 created_at DESC。
 	filter.SetSort(c.Query("sort_by"), c.Query("sort_order"))
 
-	result, err := h.opsService.ListUserErrorRequests(c.Request.Context(), subject.UserID, filter)
+	ctx := service.WithUpstreamErrorMessage(c.Request.Context(), h.settingService.GetUpstreamErrorMessage(c.Request.Context()))
+	result, err := h.opsService.ListUserErrorRequests(ctx, subject.UserID, filter)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -365,7 +366,8 @@ func (h *UsageHandler) GetErrorDetail(c *gin.Context) {
 		response.BadRequest(c, "Invalid id")
 		return
 	}
-	detail, err := h.opsService.GetUserErrorRequestDetail(c.Request.Context(), subject.UserID, id)
+	ctx := service.WithUpstreamErrorMessage(c.Request.Context(), h.settingService.GetUpstreamErrorMessage(c.Request.Context()))
+	detail, err := h.opsService.GetUserErrorRequestDetail(ctx, subject.UserID, id)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

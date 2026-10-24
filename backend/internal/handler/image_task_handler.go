@@ -229,15 +229,51 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 		}
 	}()
 
-	h.execute(platform, taskCtx)
-	body := bytes.TrimSpace(recorder.Body.Bytes())
+	var ops *service.OpsService
+	if h.openAI != nil {
+		ops = h.openAI.opsService
+	}
+	var body []byte
+	var statusCode int
+	var inBandError bool
+	// Detached execution does not traverse the submission route's middleware.
+	// Capture the original response and upstream diagnostics before task polling
+	// applies the configured client-facing message.
+	OpsErrorLoggerMiddleware(ops, func(c *gin.Context) {
+		h.execute(platform, c)
+		body = bytes.TrimSpace(recorder.Body.Bytes())
+		statusCode = recorder.Code
+		if statusCode == 0 {
+			statusCode = http.StatusOK
+		}
+		inBandError = statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices &&
+			service.IsUpstreamErrorPayload(body, "")
+		if !inBandError {
+			return
+		}
+		parsed := parseOpsErrorResponse(body)
+		statusCode = inferStreamFailureStatus(c, parsed)
+		upstreamStatus := 0
+		if !hasOpsUpstreamErrorContext(c) {
+			upstreamStatus = statusCode
+		}
+		message := ""
+		if strings.TrimSpace(c.GetString(service.OpsUpstreamErrorMessageKey)) == "" {
+			message = parsed.Message
+		}
+		detail := ""
+		if strings.TrimSpace(c.GetString(service.OpsUpstreamErrorDetailKey)) == "" {
+			detail = string(body)
+		}
+		service.SetOpsUpstreamError(c, upstreamStatus, message, detail)
+		service.MarkOpsStreamErrorValue(c, service.OpsStreamError{
+			ErrType: parsed.ErrorType, Code: parsed.Code, Message: parsed.Message,
+			IntendedStatus: statusCode, CountTowardsSLA: true, NonStream: true,
+		})
+	})(taskCtx)
 	if err := taskCtx.Request.Context().Err(); err != nil && len(body) == 0 {
 		h.failTask(taskID, http.StatusGatewayTimeout, imageTaskErrorPayload("timeout_error", "image generation task timed out"))
 		return
-	}
-	statusCode := recorder.Code
-	if statusCode == 0 {
-		statusCode = http.StatusOK
 	}
 	if statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices {
 		if len(body) == 0 || !json.Valid(body) {
@@ -249,11 +285,18 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 		}
 		return
 	}
-	h.failTask(taskID, statusCode, extractImageTaskError(body))
+	parsed := parseOpsErrorResponse(body)
+	phase, _, _, _ := classifyOpsErrorLog(taskCtx, parsed.ErrorType, parsed.Message, parsed.Code, statusCode)
+	upstream := inBandError || hasOpsUpstreamErrorContext(taskCtx) || phase == "upstream" || phase == "account_auth" || phase == "network"
+	h.failTaskWithSource(taskID, statusCode, extractImageTaskError(body), upstream)
 }
 
 func (h *AsyncImageHandler) failTask(taskID string, statusCode int, taskErr json.RawMessage) {
-	if err := h.tasks.Fail(context.Background(), taskID, statusCode, taskErr); err != nil {
+	h.failTaskWithSource(taskID, statusCode, taskErr, false)
+}
+
+func (h *AsyncImageHandler) failTaskWithSource(taskID string, statusCode int, taskErr json.RawMessage, upstream bool) {
+	if err := h.tasks.FailWithSource(context.Background(), taskID, statusCode, taskErr, upstream); err != nil {
 		logger.L().Error("image_task.failure_store_failed", zap.String("task_id", taskID), zap.Error(err))
 	}
 }

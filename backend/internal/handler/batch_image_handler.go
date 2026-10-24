@@ -327,6 +327,9 @@ func batchImageError(c *gin.Context, err error) {
 		code = "BATCH_IMAGE_NOT_FOUND"
 		message = "batch image job not found"
 	}
+	if errors.Is(err, service.ErrBatchImageProviderSubmitFailed) || errors.Is(err, service.ErrBatchImageItemFailed) {
+		message = service.UpstreamErrorClientMessage(c.Request.Context(), message)
+	}
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"type":    "invalid_request_error",

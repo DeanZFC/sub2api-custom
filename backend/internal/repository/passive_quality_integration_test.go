@@ -51,6 +51,8 @@ func passiveDBSchema(t *testing.T, modelStates bool) (context.Context, *sql.DB, 
 	exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,status TEXT DEFAULT 'active',schedulable BOOLEAN DEFAULT true,deleted_at TIMESTAMPTZ,extra JSONB DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT now(),temp_unschedulable_until TIMESTAMPTZ,rate_limit_reset_at TIMESTAMPTZ);
  CREATE TABLE groups(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ);
  CREATE TABLE account_groups(account_id BIGINT,group_id BIGINT);
+ CREATE TABLE scheduled_test_protection_states(account_id BIGINT,blocked BOOLEAN DEFAULT false);
+ CREATE TABLE scheduled_test_combination_states(account_id BIGINT,blocked BOOLEAN DEFAULT false);
  CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT now());
  CREATE UNIQUE INDEX outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL;
  CREATE TABLE usage_logs(id BIGSERIAL PRIMARY KEY,account_id BIGINT,request_id TEXT,created_at TIMESTAMPTZ,model TEXT DEFAULT 'model',requested_model TEXT,duration_ms BIGINT DEFAULT 0,request_type SMALLINT DEFAULT 2,stream BOOLEAN DEFAULT true,openai_ws_mode BOOLEAN DEFAULT false,first_token_ms BIGINT,input_tokens BIGINT DEFAULT 100,output_tokens BIGINT DEFAULT 1,cache_creation_tokens BIGINT DEFAULT 0,cache_read_tokens BIGINT DEFAULT 0,image_input_tokens BIGINT DEFAULT 0,image_output_tokens BIGINT DEFAULT 0,image_count INT DEFAULT 0,video_count INT DEFAULT 0,actual_cost NUMERIC DEFAULT 0,total_cost NUMERIC DEFAULT 0,input_cost NUMERIC DEFAULT 0,cache_creation_cost NUMERIC DEFAULT 0,cache_read_cost NUMERIC DEFAULT 0,native_compaction_v2 BOOLEAN DEFAULT false,inbound_endpoint TEXT,upstream_endpoint TEXT);
@@ -65,6 +67,9 @@ func passiveDBSchema(t *testing.T, modelStates bool) (context.Context, *sql.DB, 
 	require.NoError(t, err)
 	exec(string(migration))
 	migration, err = os.ReadFile("../../migrations/305_passive_quality_failure_group.sql")
+	require.NoError(t, err)
+	exec(string(migration))
+	migration, err = os.ReadFile("../../migrations/307_group_quality_traffic_budget.sql")
 	require.NoError(t, err)
 	exec(string(migration))
 	exec(`ALTER TABLE usage_logs ADD COLUMN group_id BIGINT DEFAULT 8`)

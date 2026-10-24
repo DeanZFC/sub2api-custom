@@ -51,6 +51,11 @@ func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte,
 	if message == "" {
 		message = openAIUpstreamClientErrorFallbackMessage
 	}
+	// A provider can mislabel an internal stream failure as HTTP 400. Keep
+	// parameter/code metadata, but do not display its implementation details.
+	if openAIInternalFailureMessage(message) {
+		message = OpenAIUpstreamFailureClientMessage
+	}
 	errorPayload["message"] = message
 
 	c.JSON(statusCode, gin.H{"error": errorPayload})

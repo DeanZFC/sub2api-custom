@@ -59,6 +59,8 @@ func applyErrorPassthroughRule(
 	errMsg = ExtractUpstreamErrorMessage(responseBody)
 	if !rule.PassthroughBody && rule.CustomMessage != nil {
 		errMsg = *rule.CustomMessage
+	} else if platform == PlatformOpenAI || platform == PlatformGrok {
+		errMsg = OpenAIUpstreamErrorClientMessage(responseBody, errMsg)
 	}
 
 	// 命中 skip_monitoring 时在 context 中标记，供 ops_error_logger 跳过记录。

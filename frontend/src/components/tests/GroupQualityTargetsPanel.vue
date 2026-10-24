@@ -25,10 +25,33 @@
       </div>
       <p class="text-xs text-gray-500">{{ tr('window', { minutes: (summaryFor(policy)?.window_seconds || 3600) / 60 }) }}<span v-if="summaryFor(policy)"> · {{ tr('updated', { date: date(summaryFor(policy)?.generated_at) }) }}</span></p>
       <p v-if="summaryFor(policy) && !summaryFor(policy)?.telemetry_complete" class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p>
+      <section v-if="trafficControlFor(policy)" class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-700" data-target-traffic-control>
+        <div class="flex flex-wrap items-center justify-between gap-2"><h5 class="text-sm font-semibold">{{ tr('trafficTitle') }}</h5><span class="badge" :class="trafficControlFor(policy)?.mode === 'normal' ? 'badge-gray' : 'badge-warning'" data-target-traffic-mode>{{ tr('trafficModes.' + trafficControlFor(policy)?.mode) }}</span></div>
+        <p v-if="trafficControlFor(policy)?.mode === 'bootstrap'" role="status" class="rounded-lg bg-amber-50 p-3 text-sm font-medium leading-6 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200" data-target-bootstrap>{{ tr('trafficBootstrap') }}</p>
+        <p v-else-if="trafficControlFor(policy)?.mode === 'conserving'" class="text-xs leading-5 text-amber-700 dark:text-amber-300">{{ tr('trafficConserving') }}</p>
+        <div class="grid gap-4 sm:grid-cols-3">
+          <div data-target-validation-share><p class="text-xs text-gray-500">{{ tr('trafficShare') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ percent(trafficControlFor(policy)?.validation_share_percent) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('trafficInputs', { validation: tokenCount(trafficControlFor(policy)?.validation_input_tokens), total: tokenCount(trafficControlFor(policy)?.total_input_tokens) }) }}</p></div>
+          <div data-target-budget-remaining><p class="text-xs text-gray-500">{{ tr('trafficRemaining') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(trafficControlFor(policy)?.remaining_tokens) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('trafficBudget', { reserved: tokenCount(trafficControlFor(policy)?.reserved_input_tokens), budget: tokenCount(trafficControlFor(policy)?.budget_tokens) }) }}</p></div>
+          <div data-target-limited-requests><p class="text-xs text-gray-500">{{ tr('trafficLimited') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(trafficControlFor(policy)?.limited_requests) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('trafficVerified', { count: tokenCount(trafficControlFor(policy)?.verified_accounts) }) }}</p></div>
+        </div>
+        <p class="text-xs leading-5 text-gray-500">{{ tr('trafficBudgetHint') }}</p>
+        <p class="text-xs leading-5 text-gray-500">{{ tr('trafficModelHint') }}</p>
+      </section>
+      <section v-if="fallbackFor(policy)" class="space-y-3 rounded-lg border border-amber-200 p-4 dark:border-amber-900" data-target-fallback>
+        <div class="flex flex-wrap items-center justify-between gap-2"><h5 class="text-sm font-semibold">{{ tr('fallbackTitle') }}</h5><span class="badge" :class="fallbackFor(policy)!.in_flight > 0 ? 'badge-warning' : 'badge-gray'" data-target-fallback-status>{{ tr(fallbackFor(policy)!.in_flight > 0 ? 'fallbackActive' : 'fallbackReady') }}</span></div>
+        <p class="text-sm leading-6 text-gray-600 dark:text-gray-300">{{ tr('fallbackHint', { seconds: fallbackFor(policy)?.pacing_seconds }) }}</p>
+        <div class="grid gap-3 sm:grid-cols-3">
+          <div data-target-fallback-inflight><p class="text-xs text-gray-500">{{ tr('fallbackInFlight') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.in_flight) }} / 1</p></div>
+          <div data-target-fallback-requests><p class="text-xs text-gray-500">{{ tr('fallbackRequests') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.requests) }}</p></div>
+          <div data-target-fallback-input><p class="text-xs text-gray-500">{{ tr('fallbackInput') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.input_tokens) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('fallbackReserved', { count: tokenCount(fallbackFor(policy)?.reserved_input_tokens) }) }}</p></div>
+        </div>
+        <p v-if="fallbackFor(policy)?.last_used_at && fallbackFor(policy)?.last_account_id" class="text-xs text-gray-500" data-target-fallback-last>{{ tr('fallbackLast', { account: fallbackFor(policy)?.last_account_id, date: date(fallbackFor(policy)?.last_used_at) }) }}</p>
+        <p class="text-xs leading-5 text-amber-700 dark:text-amber-300">{{ tr('fallbackCaveat') }}</p>
+      </section>
       <div class="flex flex-wrap gap-2 text-xs"><span class="badge badge-gray">{{ tr('scopeCount', { count: policyStates(policy).length }) }}</span><span v-if="countPhase(policy, ['paused', 'probing'])" class="badge badge-warning">{{ tr('pausedCount', { count: countPhase(policy, ['paused', 'probing']) }) }}</span><span v-if="countPhase(policy, ['trial'])" class="badge badge-gray">{{ tr('trialCount', { count: countPhase(policy, ['trial']) }) }}</span><span v-if="countPhase(policy, ['insufficient', 'suspect', 'observed'])" class="badge badge-gray">{{ tr('pendingCount', { count: countPhase(policy, ['insufficient', 'suspect', 'observed']) }) }}</span><span v-if="!policyStates(policy).length" class="text-gray-500">{{ tr('noStates') }}</span></div>
       <div v-if="policy.enabled && policy.mode === 'enforce'" class="space-y-2">
         <p class="text-sm font-medium" data-target-verified>{{ tr('verifiedCount', { count: verifiedCount(policy) }) }}</p>
-        <p v-if="verifiedCount(policy) === 0" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium leading-6 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-target-no-verified>{{ tr('noVerified') }}</p>
+        <p v-if="verifiedCount(policy) === 0 && trafficControlFor(policy)?.mode !== 'bootstrap'" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium leading-6 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-target-no-verified>{{ tr(fallbackFor(policy) ? 'noVerifiedFallback' : 'noVerified') }}</p>
         <p class="text-xs text-gray-500">{{ tr('verifiedCaveat') }}</p>
       </div>
       <details v-if="policyStates(policy).length" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
@@ -56,7 +79,7 @@
         <label class="flex items-center gap-2 text-sm font-medium"><input v-model="editing.enabled" type="checkbox" data-target-enabled />{{ editing.mode === 'observe' ? tr('enableObservation') : tr('enabled') }}</label>
         <div v-if="editing.mode === 'observe'" class="rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/20"><p>{{ tr('observationRetained') }}</p><button type="button" class="btn btn-secondary btn-sm mt-2" data-target-enforce @click="editing.mode = 'enforce'">{{ tr('switchToEnforce') }}</button></div>
         <p v-if="editing.model" class="text-xs text-gray-500">{{ tr('modelRetained', { model: editing.model }) }}</p>
-        <div class="rounded-lg bg-primary-50 p-4 dark:bg-primary-950/20"><strong class="text-sm">{{ tr('recovery') }}</strong><p class="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ tr('recoveryHint') }}</p><p class="mt-2 text-xs">{{ tr('recoveryTargets') }}: {{ recoveryLabels(editing).join(' · ') }}</p></div>
+        <div class="rounded-lg bg-primary-50 p-4 dark:bg-primary-950/20"><strong class="text-sm">{{ tr('recovery') }}</strong><p class="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ tr('recoveryHint') }}</p><p class="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ tr('trafficDefault') }}</p><p class="mt-2 text-xs">{{ tr('recoveryTargets') }}: {{ recoveryLabels(editing).join(' · ') }}</p></div>
         <details class="rounded-lg border border-gray-200 p-4 text-xs leading-5 dark:border-dark-700"><summary class="cursor-pointer text-sm font-medium">{{ tr('details') }}</summary><p class="mt-3">{{ tr('sampling', { max: editing.max_samples || 100, minutes: (editing.window_seconds || 3600) / 60, min: editing.min_samples || 5, confirmations: editing.confirmations || 2, fresh: editing.new_samples || 2 }) }}</p><p class="mt-2">{{ tr('trialDefaults', { minutes: (editing.cooldown_seconds || 300) / 60, requests: editing.trial_requests || 20, concurrency: editing.trial_concurrency || 1, duration: (editing.trial_seconds || 900) / 60, samples: editing.recovery_samples || 5 }) }}</p><p class="mt-2">{{ tr('sharedScope') }}</p><p v-if="editing.excluded_account_ids.length" class="mt-2">{{ tr('exclusionsRetained', { count: editing.excluded_account_ids.length }) }}</p></details>
         <p class="text-xs leading-5 text-gray-500">{{ tr('limitations') }}</p><p v-if="editing.id" class="text-xs text-amber-700 dark:text-amber-300">{{ tr('resetHint') }}</p><p v-if="validationError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">{{ validationError }}</p>
       </form>
@@ -77,7 +100,7 @@ import type { AdminGroup } from '@/types'
 
 const props = defineProps<{ groups: AdminGroup[]; visible: boolean; policyId?: number }>()
 const emit = defineEmits<{ navigate: [tab: string, policy?: number, account?: number] }>()
-const { t } = useI18n(), app = useAppStore(), { reason, date } = useQualityLabels()
+const { t, locale } = useI18n(), app = useAppStore(), { reason, date } = useQualityLabels()
 const tr = (key: string, values: Record<string, unknown> = {}) => t('admin.tests.groupTargets.' + key, values)
 const policies = ref<PassivePolicy[]>([]), states = ref<PassiveState[]>([]), summaries = ref<GroupQualityTargetSummary[]>([])
 const targets = computed(() => policies.value.filter(isGroupQualityTarget))
@@ -87,13 +110,18 @@ const editing = ref<GroupQualityTargetDraft | null>(null), baseline = ref('')
 const rounded = (value: number) => Math.round(value * 1000) / 1000
 const percent = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? tr('unknown') : `${rounded(value)}%`
 const seconds = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? tr('unknown') : `${rounded(value / 1000)} ${t('admin.tests.experience.seconds')}`
+const tokenCount = (value: number | undefined) => value == null || !Number.isFinite(value) ? tr('unknown') : new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }).format(value)
 const groupName = (id?: number) => props.groups.find(g => g.id === id)?.name || `#${id}`
 const summaryFor = (p: PassivePolicy) => summaries.value.find(s => s.policy_id === p.id && s.group_id === p.group_ids[0])
+const trafficControlFor = (p: PassivePolicy) => p.enabled && p.mode === 'enforce' && summaryFor(p)?.traffic_control?.enabled ? summaryFor(p)?.traffic_control : undefined
+const fallbackFor = (p: PassivePolicy) => p.enabled && p.mode === 'enforce' && summaryFor(p)?.fallback?.enabled ? summaryFor(p)?.fallback : undefined
 const policyStates = (p: PassivePolicy) => states.value.filter(s => s.policy_id === p.id)
 const countPhase = (p: PassivePolicy, phases: string[]) => policyStates(p).filter(s => phases.includes(s.phase)).length
 const minimum = (p: PassivePolicy) => p.min_samples || 5
 const stateMinimum = (p: PassivePolicy, s: PassiveState) => s.phase === 'trial' ? p.recovery_samples || 5 : minimum(p)
 function verifiedCount(p: PassivePolicy) {
+  const traffic = trafficControlFor(p)
+  if (traffic) return traffic.verified_accounts
   return policyStates(p).filter(s => {
     if (s.phase !== 'healthy' || s.evidence.complete !== true || s.other_hold || stateSampleCount(p, s) < minimum(p)) return false
     const e = s.evidence

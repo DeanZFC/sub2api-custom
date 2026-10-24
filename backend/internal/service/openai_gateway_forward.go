@@ -907,6 +907,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if wsErr == nil {
 				break
 			}
+			if GroupQualityFallbackActive(ctx) && (ctx.Err() != nil || errors.Is(wsErr, context.Canceled)) {
+				// Local emergency-lease cancellation must not retry or synthesize an
+				// upstream failure. Keep any usage already observed for settlement.
+				return wsResult, wsErr
+			}
 			if c != nil && c.Writer != nil && c.Writer.Written() {
 				break
 			}

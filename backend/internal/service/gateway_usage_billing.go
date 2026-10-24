@@ -586,7 +586,7 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
-	if !stream {
+	if !stream || GroupQualityFallbackActive(ctx) {
 		return ctx, func() {}
 	}
 	return context.WithoutCancel(ctx), func() {}
@@ -595,6 +595,11 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.Background(), func() {}
+	}
+	// Emergency traffic must stop when its distributed lease or client context
+	// ends; otherwise a detached upstream can overlap the next admitted lease.
+	if GroupQualityFallbackActive(ctx) {
+		return ctx, func() {}
 	}
 	return context.WithoutCancel(ctx), func() {}
 }

@@ -862,6 +862,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// cch_signing=false, claude_oauth_system_prompt_injection=true)
 	retrySettings := parseUpstreamErrorRetrySettings(settings[SettingKeyUpstreamErrorRetry])
 	result.UpstreamErrorRetry = &retrySettings
+	result.UpstreamErrorMessage, _ = normalizeUpstreamErrorMessage(settings[SettingKeyUpstreamErrorMessage])
 	result.OpenAITTFTMode = normalizeOpenAITTFTMode(settings[SettingKeyOpenAITTFTMode])
 	if v, ok := settings[SettingKeyEnableFingerprintUnification]; ok && v != "" {
 		result.EnableFingerprintUnification = v == "true"

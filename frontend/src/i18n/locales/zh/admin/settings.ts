@@ -473,6 +473,14 @@ export default {
         saved: 'Ollama Cloud 用量刷新设置已保存',
         saveFailed: '保存 Ollama Cloud 用量刷新设置失败'
       },
+      upstreamErrorMessage: {
+        title: '统一上游错误提示',
+        description: '填写后，所有平台的上游错误都向用户显示此提示，包括流式响应和错误透传。留空保留默认错误处理。',
+        label: '向用户显示的提示',
+        placeholder: '本次请求未能完成，请稍后重试。',
+        hint: '最多 500 个字符。原始错误原因仍可在管理员“调用错误”中查看，网关自身的请求校验提示不受影响。',
+        invalid: '统一上游错误提示不能超过 500 个字符。',
+      },
       upstreamErrorRetry: {
         title: '上游错误自动重试',
         description: '命中配置的上游错误时，由网关自动重试，减少客户端重连。',

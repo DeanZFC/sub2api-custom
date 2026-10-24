@@ -3984,7 +3984,9 @@ func TestHandleSSEToJSON_ResponseFailedWithoutAccountReturnsProtocolError(t *tes
 	require.Nil(t, usage)
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Contains(t, rec.Body.String(), "upstream rejected request")
+	require.Contains(t, rec.Body.String(), OpenAIUpstreamFailureClientMessage)
+	require.Equal(t, "upstream rejected request", c.GetString(OpsUpstreamErrorMessageKey))
+	require.ErrorContains(t, err, "upstream rejected request")
 	require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 }
 

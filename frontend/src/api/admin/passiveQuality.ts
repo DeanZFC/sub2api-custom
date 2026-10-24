@@ -59,12 +59,23 @@ export interface GroupQualityTargetDraft {
   window_seconds?: number; max_samples?: number; min_samples?: number; confirmations?: number; new_samples?: number
   cooldown_seconds?: number; max_cooldown_seconds?: number; trial_seconds?: number; trial_requests?: number; trial_concurrency?: number; recovery_samples?: number
 }
+export interface GroupQualityTrafficControl {
+  enabled: boolean; mode: 'normal' | 'conserving' | 'bootstrap'; verified_accounts: number
+  validation_input_tokens: number; total_input_tokens: number; validation_share_percent: number
+  reserved_input_tokens: number; budget_tokens: number; remaining_tokens: number; limited_requests: number
+}
+export interface GroupQualityFallbackSummary {
+  enabled: boolean; in_flight: number; requests: number; input_tokens: number; reserved_input_tokens: number
+  lease_seconds: number; pacing_seconds: number; last_used_at?: string; last_account_id?: number
+}
 export interface GroupQualityTargetSummary {
   policy_id: number; group_id: number; window_seconds: number; actual_cache_rate: number | null
   cache_samples: number; cache_read_tokens: number; cache_input_tokens: number; cache_unknown_samples: number
   actual_availability: number | null; success_samples: number; failure_samples: number; failure_unknown_samples: number
   ttft_p90_ms: number | null; ttft_samples: number; generated_at: string
   telemetry_complete: boolean
+  traffic_control?: GroupQualityTrafficControl
+  fallback?: GroupQualityFallbackSummary
 }
 export const passiveQualityAPI = {
   policies: async () => (await apiClient.get<PassivePolicy[]>('/admin/passive-quality-policies')).data,
@@ -87,9 +98,10 @@ export function isGroupQualityTarget(policy: Pick<PassivePolicy, 'purpose'>): bo
   return policy.purpose === 'group_quality_target' || policy.purpose === 'cache_target'
 }
 export function groupQualityTargetDraft(policy?: PassivePolicy, groupName = ''): GroupQualityTargetDraft {
-  const plus = groupName.trim().toLowerCase() === 'gpt-plus'
+  const normalizedName = groupName.trim().toLowerCase()
+  const plus = normalizedName === 'gpt-plus'
   const percentage = plus ? 70 : 80
-  const ttft = plus ? 20000 : 10000
+  const ttft = plus ? 20000 : normalizedName === 'gpt-pro' ? 15000 : 10000
   const draft: GroupQualityTargetDraft = {
     id: policy?.id || 0, version: policy?.version || 0, purpose: 'group_quality_target', name: policy?.name || '',
     enabled: policy?.enabled ?? true, mode: policy?.mode || 'enforce', model: policy?.model || '', group_ids: policy ? [...policy.group_ids] : [],

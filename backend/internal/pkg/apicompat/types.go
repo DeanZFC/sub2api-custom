@@ -511,6 +511,8 @@ type ResponsesSummary struct {
 
 // ResponsesUsage holds token counts in Responses API format.
 type ResponsesUsage struct {
+	// Preserve the distinction between omitted cache usage and an explicit zero.
+	cacheReadReported        *bool
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
 	TotalTokens              int `json:"total_tokens"`
@@ -521,14 +523,32 @@ type ResponsesUsage struct {
 	OutputTokensDetails *ResponsesOutputTokensDetails `json:"output_tokens_details,omitempty"`
 }
 
+// CacheReadUsageReported preserves wire presence while allowing internally
+// constructed canonical usage values to retain their existing semantics.
+func (u *ResponsesUsage) CacheReadUsageReported() bool {
+	if u == nil {
+		return false
+	}
+	if u.cacheReadReported != nil {
+		return *u.cacheReadReported
+	}
+	return u.InputTokensDetails != nil
+}
+
 func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	type responsesUsageAlias ResponsesUsage
 	type cacheTokenPresence struct {
+		CachedTokens        *int `json:"cached_tokens"`
 		CacheCreationTokens *int `json:"cache_creation_tokens"`
 		CacheWriteTokens    *int `json:"cache_write_tokens"`
 	}
 	var aux struct {
 		responsesUsageAlias
+		CacheReadInputTokens    *int                          `json:"cache_read_input_tokens"`
+		CacheReadTokens         *int                          `json:"cache_read_tokens"`
+		CachedTokens            *int                          `json:"cached_tokens"`
+		PromptCacheHitTokens    *int                          `json:"prompt_cache_hit_tokens"`
+		CachedContentTokenCount *int                          `json:"cachedContentTokenCount"`
 		PromptTokens            int                           `json:"prompt_tokens"`
 		CompletionTokens        int                           `json:"completion_tokens"`
 		CacheCreationTokens     int                           `json:"cache_creation_tokens"`
@@ -569,6 +589,29 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	}
 	if u.OutputTokensDetails == nil && aux.CompletionTokensDetails != nil {
 		u.OutputTokensDetails = aux.CompletionTokensDetails
+	}
+	var canonicalCacheReadTokens *int
+	if nestedPresence.InputTokensDetails != nil {
+		canonicalCacheReadTokens = nestedPresence.InputTokensDetails.CachedTokens
+	}
+	if canonicalCacheReadTokens == nil && nestedPresence.PromptTokensDetails != nil {
+		canonicalCacheReadTokens = nestedPresence.PromptTokensDetails.CachedTokens
+	}
+	if canonicalCacheReadTokens == nil {
+		for _, alias := range []*int{aux.CacheReadInputTokens, aux.CacheReadTokens, aux.CachedTokens, aux.PromptCacheHitTokens, aux.CachedContentTokenCount} {
+			if alias != nil {
+				canonicalCacheReadTokens = alias
+				break
+			}
+		}
+	}
+	cacheReadReported := canonicalCacheReadTokens != nil && *canonicalCacheReadTokens >= 0
+	u.cacheReadReported = &cacheReadReported
+	if canonicalCacheReadTokens != nil {
+		if u.InputTokensDetails == nil {
+			u.InputTokensDetails = &ResponsesInputTokensDetails{}
+		}
+		u.InputTokensDetails.CachedTokens = max(*canonicalCacheReadTokens, 0)
 	}
 	var canonicalCacheCreationTokens *int
 	switch {

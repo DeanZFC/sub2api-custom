@@ -1586,11 +1586,12 @@ func openAICacheReadTokensFromUsage(value gjson.Result) int {
 		}
 	}
 
-	return firstPositiveGJSONInt(
-		value.Get("cache_read_input_tokens"),
-		value.Get("cache_read_tokens"),
-		value.Get("cached_tokens"),
-	)
+	for _, path := range []string{"cache_read_input_tokens", "cache_read_tokens", "cached_tokens", "prompt_cache_hit_tokens", "cachedContentTokenCount"} {
+		if alias := value.Get(path); alias.Exists() && alias.Type == gjson.Number {
+			return max(int(alias.Int()), 0)
+		}
+	}
+	return 0
 }
 
 func openAICacheCreationTokensFromUsage(value gjson.Result) int {
@@ -1749,7 +1750,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, s.parseSSEUsageFromBody(bodyText), mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg, terminalPayload)
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
@@ -1880,6 +1881,7 @@ func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, sou
 		code = "upstream_account_unavailable"
 		message = UpstreamBillingExhaustedClientMessage
 	}
+	message = OpenAIUpstreamErrorClientMessage(source, message)
 	errorBody := gin.H{"code": code, "message": message}
 	if errorType != "" {
 		errorBody["type"] = errorType
@@ -1917,19 +1919,38 @@ func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, sou
 	return "event: response.failed\ndata: " + string(payload) + "\n\n"
 }
 
-func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string, clientOutputStarted bool) ([]byte, bool) {
+func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string, clientOutputStarted bool, contexts ...context.Context) ([]byte, bool) {
+	if len(contexts) > 0 && ConfiguredUpstreamErrorMessage(contexts[0]) != "" {
+		updated := WrapUpstreamErrorPayload(contexts[0], payload, eventType)
+		return updated, !bytes.Equal(updated, payload)
+	}
 	eventType = strings.TrimSpace(eventType)
 	isFailedEvent := eventType == "response.failed"
 	if (!isFailedEvent && eventType != "error") || len(payload) == 0 || !gjson.ValidBytes(payload) {
 		return payload, false
 	}
 	updated := payload
-	if IsUpstreamBillingError(openAIStreamFailureStatus(updated, extractOpenAISSEErrorMessage(updated)), updated) {
+	clientMessage := OpenAIUpstreamErrorClientMessage(payload, extractOpenAISSEErrorMessage(payload))
+	billingFailure := IsUpstreamBillingError(openAIStreamFailureStatus(updated, extractOpenAISSEErrorMessage(updated)), updated)
+	if billingFailure || clientMessage == OpenAIUpstreamFailureClientMessage {
 		// Rebuild a minimal protocol envelope. Providers sometimes repeat their
-		// billing message in top-level details or custom response fields.
+		// internal error in details, stack traces or custom response fields.
 		safeError := gin.H{
-			"type": "upstream_error", "code": "upstream_account_unavailable",
-			"message": UpstreamBillingExhaustedClientMessage,
+			"type": "upstream_error", "code": "upstream_error", "message": clientMessage,
+		}
+		for _, field := range []string{"type", "code"} {
+			for _, path := range []string{"response.error." + field, "error." + field, field} {
+				if path == "type" { // top-level type identifies the event, not the error
+					continue
+				}
+				if value := gjson.GetBytes(payload, path); value.Type == gjson.String && strings.TrimSpace(value.String()) != "" {
+					safeError[field] = value.String()
+					break
+				}
+			}
+		}
+		if billingFailure {
+			safeError = gin.H{"type": "upstream_error", "code": "upstream_account_unavailable", "message": UpstreamBillingExhaustedClientMessage}
 		}
 		// Rebuilding the error must retain the protocol envelope even when a
 		// compatible provider omitted fields required by strict Responses clients.
@@ -1950,20 +1971,35 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 			if created := gjson.GetBytes(payload, "response.created_at"); created.Type == gjson.Number {
 				response["created_at"] = created.Int()
 			}
+			if usage := gjson.GetBytes(payload, "response.usage"); usage.IsObject() {
+				response["usage"] = upstreamErrorUsageForClient(usage)
+			}
 			safe["response"] = response
 		}
 		if !isFailedEvent || gjson.GetBytes(payload, "error").Exists() {
 			safe["error"] = safeError
 		}
+		if !isFailedEvent {
+			// Responses-native error events also expose these top-level fields.
+			safe["code"], safe["message"], safe["param"] = safeError["code"], safeError["message"], nil
+			if status := gjson.GetBytes(payload, "status"); status.Type == gjson.Number {
+				safe["status"] = status.Int()
+			}
+		}
+		if usage := gjson.GetBytes(payload, "usage"); usage.IsObject() {
+			safe["usage"] = upstreamErrorUsageForClient(usage)
+		}
 		// Values are limited to JSON primitives and maps, so marshaling cannot fail.
-		sanitized, _ := json.Marshal(safe)
-		return sanitized, !bytes.Equal(sanitized, payload)
+		updated, _ = json.Marshal(safe)
 	}
 	// 容量降载码对 Codex CLI 是致命错误；事件既然要写给客户端（failover 已不可用），
 	// 就改写为客户端可重试的错误码。error 帧与 response.failed 都要改：上游降载
 	// 总是先推 error 帧再收 failed，两帧携带同一个错误。
 	if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(updated); changed {
 		updated = rewritten
+	}
+	if billingFailure || clientMessage == OpenAIUpstreamFailureClientMessage {
+		return updated, !bytes.Equal(updated, payload)
 	}
 	if !isFailedEvent {
 		return updated, !bytes.Equal(updated, payload)
@@ -2015,16 +2051,21 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 	return updated, !bytes.Equal(updated, payload)
 }
 
-func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string) error {
+func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string, source ...[]byte) error {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "Upstream returned an invalid non-streaming response"
 	}
 	setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+	var payload []byte
+	if len(source) > 0 {
+		payload = source[0]
+	}
+	clientMessage := OpenAIUpstreamErrorClientMessage(payload, message)
 	// body-signal compact 心跳可能已把响应头提交为 200，此时只能以
 	// response.failed 终止事件回传错误，不能再写 JSON+状态码。
 	if openAICompactClientWantsStream(c) && StopOpenAICompactSSEKeepaliveCommitted(c) {
-		writeOpenAICompactSSEFailureMessage(c, http.StatusBadGateway, "upstream_error", message)
+		writeOpenAICompactSSEFailureMessage(c, http.StatusBadGateway, "upstream_error", clientMessage)
 		return fmt.Errorf("non-streaming openai protocol error: %s", message)
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -2032,7 +2073,7 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 	c.JSON(http.StatusBadGateway, gin.H{
 		"error": gin.H{
 			"type":    "upstream_error",
-			"message": message,
+			"message": clientMessage,
 		},
 	})
 	return fmt.Errorf("non-streaming openai protocol error: %s", message)

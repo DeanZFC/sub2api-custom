@@ -1162,7 +1162,10 @@ func TestForwardAsChatCompletions_StreamBareErrorAfterOutputDoesNotFailOver(t *t
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
 	require.Contains(t, rec.Body.String(), "partial")
-	require.Contains(t, rec.Body.String(), "temporary upstream failure")
+	require.Contains(t, rec.Body.String(), OpenAIUpstreamFailureClientMessage)
+	require.NotContains(t, rec.Body.String(), "temporary upstream failure")
+	require.ErrorContains(t, err, "temporary upstream failure")
+	require.Equal(t, "temporary upstream failure", c.GetString(OpsUpstreamErrorMessageKey))
 	require.NotContains(t, rec.Body.String(), "[DONE]")
 }
 

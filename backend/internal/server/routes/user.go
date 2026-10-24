@@ -97,6 +97,11 @@ func RegisterUserRoutes(
 		if h.BatchImage != nil && len(panelKeyAuth) > 0 {
 			batches := authenticated.Group("/key-image-batches/:key_id")
 			batches.Use(panelKeyAuth[0])
+			batches.Use(func(c *gin.Context) {
+				ctx := service.WithUpstreamErrorMessage(c.Request.Context(), settingService.GetUpstreamErrorMessage(c.Request.Context()))
+				c.Request = c.Request.WithContext(ctx)
+				c.Next()
+			})
 			batches.POST("", panelRateLimiter.Heavy(), h.BatchImage.Submit)
 			batches.GET("", h.BatchImage.List)
 			batches.GET("/models", h.BatchImage.Models)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -418,28 +419,49 @@ func (s *Service) runModeration(parent context.Context) {
 	if report {
 		allowed, expectedPolicy = c.reportsSpam(group), spamReportPolicy(c)
 	}
-	if !allowed || c.moderationExempt(group, member) || policy != expectedPolicy {
+	if report {
+		if rejection := spamReportConfigReason(c, c, group, member); rejection != spamSourceOK {
+			status, detail = "cancelled", spamReportOperationCancellation(rejection, kind)
+		} else if policy != expectedPolicy {
+			status, detail = "cancelled", spamReportOperationCancellation(spamSourcePolicyChanged, kind)
+		} else if !expires.After(time.Now()) {
+			status, detail = "expired", spamReportOperationCancellation(spamReportOperationExpiryReason(kind), kind)
+		}
+	} else if !allowed || c.moderationExempt(group, member) || policy != expectedPolicy {
 		status, detail = "cancelled", "配置或白名单已变更，取消处罚"
 	} else if !expires.After(time.Now()) {
 		status, detail = "expired", "已超过处罚时限"
 	}
 	if report && status == "started" {
-		var target, targetMember, reportPolicy string
-		var recallSucceeded bool
-		err = tx.QueryRowContext(ctx, `SELECT r.message_id,r.member_id,r.policy_hash,
- EXISTS(SELECT 1 FROM qq_bot_moderation_operations o WHERE o.incident_id=r.incident_id AND o.kind='recall' AND o.status='succeeded')
- FROM qq_bot_spam_reports r WHERE r.incident_id=$1 AND r.app_id=$2 AND r.sandbox=$3 AND r.group_id=$4 AND r.status='queued'`, incident, c.AppID, c.Sandbox, group).Scan(&target, &targetMember, &reportPolicy, &recallSucceeded)
-		if err != nil {
-			status, detail = "cancelled", "举报依据不可核验，取消处罚"
+		var target, targetMember, reportPolicy, reportID, reportStatus, reportReason string
+		var recallSucceeded, recallSkipped bool
+		err = tx.QueryRowContext(ctx, `SELECT r.message_id,r.member_id,r.policy_hash,r.id,r.status,r.reason,
+ EXISTS(SELECT 1 FROM qq_bot_moderation_operations o WHERE o.incident_id=r.incident_id AND o.kind='recall' AND o.message_id=r.message_id AND o.status='succeeded'),
+ EXISTS(SELECT 1 FROM qq_bot_moderation_operations o WHERE o.incident_id=r.incident_id AND o.kind='recall' AND o.message_id=r.message_id
+ AND o.status='skipped' AND o.error=$5 AND o.started_at IS NULL AND o.finished_at IS NOT NULL
+ AND o.expires_at<o.finished_at+INTERVAL '5 seconds')
+ FROM qq_bot_spam_reports r WHERE r.incident_id=$1 AND r.app_id=$2 AND r.sandbox=$3 AND r.group_id=$4`, incident, c.AppID, c.Sandbox, group, spamReportRecallSkippedReason).Scan(&target, &targetMember, &reportPolicy, &reportID, &reportStatus, &reportReason, &recallSucceeded, &recallSkipped)
+		if errors.Is(err, sql.ErrNoRows) {
+			status, detail = "cancelled", spamReportOperationCancellation(spamSourceReportInvalid, kind)
+		} else if err != nil {
+			return // Database failures are not evidence of a revoked report.
+		} else if reportStatus != "queued" {
+			status, detail = "cancelled", spamReportOperationCancellation(spamReportCancellationReason(reportReason), kind)
 		} else {
-			source, sourceErr := s.loadSpamReportSource(ctx, tx, c, group, target)
+			source, sourceReason, sourceErr := s.inspectSpamReportSourceForReport(ctx, tx, c, group, target, reportID)
 			if sourceErr != nil {
 				return // Database errors must never authorize an external operation.
 			}
-			if source == nil || source.MemberID != member || targetMember != member || reportPolicy != policy || (kind == "recall" && message != source.MessageID) {
-				status, detail = "cancelled", "举报原文、身份或权限已失效，取消处罚"
-			} else if kind == "mute" && !recallSucceeded {
-				status, detail = "cancelled", "原消息撤回未确认成功，未执行禁言"
+			if source == nil {
+				status, detail = "cancelled", spamReportOperationCancellation(sourceReason, kind)
+			} else if source.MemberID != member || targetMember != member || (kind == "recall" && message != source.MessageID) {
+				status, detail = "cancelled", spamReportOperationCancellation(spamSourceChanged, kind)
+			} else if reportPolicy != policy {
+				status, detail = "cancelled", spamReportOperationCancellation(spamSourcePolicyChanged, kind)
+			} else if kind == "recall" && !source.SentAt.Add(spamReportRecallWindow).After(time.Now()) {
+				status, detail = "expired", spamReportOperationCancellation(spamSourceRecallExpired, kind)
+			} else if kind == "mute" && !recallSucceeded && !(recallSkipped && time.Until(source.SentAt.Add(spamReportRecallWindow)) < 5*time.Second) {
+				status, detail = "cancelled", spamReportOperationCancellation(spamSourceRecallUnconfirmed, kind)
 			}
 		}
 	}
@@ -485,10 +507,14 @@ func (s *Service) runModeration(parent context.Context) {
 	}
 	status, detail = "succeeded", ""
 	if err != nil {
-		status, detail = "unconfirmed", limitText(err.Error()+"；操作未确认成功，未自动重试", 250)
+		if report {
+			status, detail = "unconfirmed", "spam_report_operation_unconfirmed：举报处罚请求或最终校验未能确认完成，结果未知，未自动重试；请管理员核查执行记录。"
+		} else {
+			status, detail = "unconfirmed", limitText(err.Error()+"；操作未确认成功，未自动重试", 250)
+		}
 	}
 	if errors.Is(err, errSpamReportRevoked) {
-		status, detail = "cancelled", "发送前核验未通过，举报处罚已取消"
+		status, detail = "cancelled", spamReportOperationCancellation(spamReportRevocationReason(err), kind)
 	}
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finishCancel()
@@ -510,7 +536,11 @@ func (s *Service) runModeration(parent context.Context) {
 
 func (s *Service) maintainModeration(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_moderation_operations SET status='unconfirmed',error='处理进程中断，操作结果未知，未自动重试',finished_at=NOW() WHERE status='started' AND started_at<NOW()-INTERVAL '1 minute'`)
-	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_moderation_operations SET status='expired',error='已超过处罚时限',finished_at=NOW() WHERE status='queued' AND expires_at<NOW()`)
+	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_moderation_operations o SET status='expired',
+ error=CASE WHEN i.reason IN ('spam_advertising','spam_phishing','spam_scam')
+ THEN CASE WHEN o.kind='recall' THEN $1 ELSE $2 END ELSE '已超过处罚时限' END,finished_at=NOW()
+ FROM qq_bot_moderation_incidents i WHERE i.id=o.incident_id AND o.status='queued' AND o.expires_at<NOW()`,
+		spamReportOperationCancellation(spamSourceRecallExpired, "recall"), spamReportOperationCancellation(spamSourceProcessingExpired, "mute"))
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_moderation_events WHERE created_at<NOW()-INTERVAL '10 minutes'`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_moderation_members WHERE updated_at<NOW()-INTERVAL '2 days' AND cooldown_until<NOW()`)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_moderation_incidents WHERE created_at<NOW()-INTERVAL '30 days'`)

@@ -17,28 +17,29 @@ import (
 )
 
 type Service struct {
-	db              *sql.DB
-	encryptor       Encryptor
-	encryptionReady bool
-	invalidate      func(context.Context, int64)
-	bindingEmail    BindingEmailDelivery
-	channelStatus   ChannelStatusProvider
-	modelPrices     ModelPriceProvider
-	healthSource    HealthSnapshotProvider
-	priceSource     PriceSnapshotProvider
-	priceWake       chan struct{}
-	http            *http.Client
-	tokenURL        string
-	qqURL           string
-	tokenGate       chan struct{}
-	accessToken     string
-	tokenKey        string
-	tokenExpires    time.Time
-	groupBotMu      sync.Mutex
-	groupBots       map[string]groupBotIdentity
-	imageDownload   func(context.Context, string) ([]byte, error)
-	cancel          context.CancelFunc
-	wg              sync.WaitGroup
+	db                    *sql.DB
+	encryptor             Encryptor
+	encryptionReady       bool
+	invalidate            func(context.Context, int64)
+	bindingEmail          BindingEmailDelivery
+	channelStatus         ChannelStatusProvider
+	modelPrices           ModelPriceProvider
+	healthSource          HealthSnapshotProvider
+	priceSource           PriceSnapshotProvider
+	priceWake             chan struct{}
+	http                  *http.Client
+	tokenURL              string
+	qqURL                 string
+	tokenGate             chan struct{}
+	accessToken           string
+	tokenKey              string
+	tokenExpires          time.Time
+	groupBotMu            sync.Mutex
+	groupBots             map[string]groupBotIdentity
+	spamSourceDiagnostics spamSourceReceptionDiagnostics
+	imageDownload         func(context.Context, string) ([]byte, error)
+	cancel                context.CancelFunc
+	wg                    sync.WaitGroup
 }
 
 func New(db *sql.DB, encryptor Encryptor, ready bool, invalidate func(context.Context, int64)) *Service {

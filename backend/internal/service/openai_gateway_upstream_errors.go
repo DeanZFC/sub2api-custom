@@ -996,6 +996,10 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		errType = "api_error"
 	}
 
-	writeError(c, resp.StatusCode, errType, upstreamMsg)
+	clientMessage := upstreamMsg
+	if resp.StatusCode >= http.StatusInternalServerError || openAIInternalFailureMessage(upstreamMsg) {
+		clientMessage = OpenAIUpstreamErrorClientMessage(body, upstreamMsg)
+	}
+	writeError(c, resp.StatusCode, errType, clientMessage)
 	return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 }

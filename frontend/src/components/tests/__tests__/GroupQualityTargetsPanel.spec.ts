@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import GroupQualityTargetsPanel from '../GroupQualityTargetsPanel.vue'
-import { defaultPassivePolicy, type GroupQualityTargetSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
+import { defaultPassivePolicy, type GroupQualityTargetSummary, type GroupQualityTrafficControl, type GroupQualityFallbackSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
 import resources from '@/i18n/locales/en/admin/resources'
 import type { AdminGroup } from '@/types'
 
@@ -27,12 +27,20 @@ const summary = (overrides: Partial<GroupQualityTargetSummary> = {}): GroupQuali
   actual_availability: 100, success_samples: 10, failure_samples: 0, failure_unknown_samples: 0, ttft_p90_ms: 1000, ttft_samples: 10,
   generated_at: '2026-10-24T00:00:00Z', telemetry_complete: true, ...overrides,
 })
+const trafficControl = (overrides: Partial<GroupQualityTrafficControl> = {}): GroupQualityTrafficControl => ({
+  enabled: true, mode: 'normal', verified_accounts: 3, validation_input_tokens: 12500, total_input_tokens: 500000,
+  validation_share_percent: 2.5, reserved_input_tokens: 5000, budget_tokens: 25000, remaining_tokens: 7500, limited_requests: 12,
+  ...overrides,
+})
 const state = (overrides: Partial<PassiveState> = {}): PassiveState => ({
   policy_id: 11, policy_name: 'Pro target', purpose: 'group_quality_target', account_id: 62, account_name: 'Provider', model: 'model-a', scope: 'model', mode: 'enforce',
   phase: 'trial', reason: 'group_target_trial', hits: 0, backoff: 0, used: 3, inflight: 0, generation: 1,
   next_at: '', trial_started_at: '2026-10-24T00:00:00Z', trial_ends_at: '2026-10-24T00:15:00Z', updated_at: '2026-10-24T00:01:00Z', other_hold: false,
   evidence: { samples: 3, failures: 0, consecutive_failures: 0, error_rate: 0, ttft: 500, ttft_samples: 3, cache_rate: 0, cache_samples: 2, fresh: 2, complete: true, latest: '' },
   ...overrides,
+})
+const fallback = (overrides: Partial<GroupQualityFallbackSummary> = {}): GroupQualityFallbackSummary => ({
+  enabled: true, in_flight: 0, requests: 0, input_tokens: 0, reserved_input_tokens: 0, lease_seconds: 120, pacing_seconds: 2, ...overrides,
 })
 function makeWrapper(policyId?: number) {
   return mount(GroupQualityTargetsPanel, { props: { groups, visible: true, policyId }, global: {
@@ -44,6 +52,49 @@ beforeEach(() => { vi.resetAllMocks(); api.policies.mockResolvedValue([policy()]
 afterEach(() => vi.useRealTimers())
 
 describe('simple group quality targets', () => {
+  it('shows automatic fallback independently of a disabled cache metric', async () => {
+    api.policies.mockResolvedValue([policy({ cache_rate: { enabled: false, pause: 80, recover: 85 } })])
+    api.groupTargets.mockResolvedValue([summary({ fallback: fallback() })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.find('[data-target-traffic-control]').exists()).toBe(false)
+    expect(w.get('[data-target-fallback-status]').text()).toBe('Enabled · Standby')
+    expect(w.get('[data-target-fallback-inflight]').text()).toContain('0 / 1')
+    expect(w.get('[data-target-fallback]').text()).toContain('at least 2 seconds')
+    expect(w.get('[data-target-no-verified]').text()).toContain('scored fallback provides limited concurrency')
+    expect(w.find('[data-target-fallback-last]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('distinguishes active fallback from recent history and shows real usage', async () => {
+    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ in_flight: 1, requests: 7, input_tokens: 32000, reserved_input_tokens: 4096, last_used_at: '2026-10-24T01:00:00Z', last_account_id: 62 }) })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('[data-target-fallback-status]').text()).toBe('Serving fallback traffic')
+    expect(w.get('[data-target-fallback-inflight]').text()).toContain('1 / 1')
+    expect(w.get('[data-target-fallback-requests]').text()).toContain('7')
+    expect(w.get('[data-target-fallback-input]').text()).toContain('32,000')
+    expect(w.get('[data-target-fallback-input]').text()).toContain('4,096')
+    expect(w.get('[data-target-fallback-last]').text()).toContain('account #62')
+    expect(w.get('[data-target-fallback]').text()).toContain('Manual stops, invalid credentials and hard limits still apply')
+    w.unmount()
+    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ requests: 7 }) })])
+    const idle = makeWrapper(); await flushPromises()
+    expect(idle.get('[data-target-fallback-status]').text()).toBe('Enabled · Standby')
+    idle.unmount()
+  })
+
+  it.each([
+    { value: undefined, policy: {} },
+    { value: fallback({ enabled: false }), policy: {} },
+    { value: fallback(), policy: { enabled: false } },
+    { value: fallback(), policy: { mode: 'observe' as const } },
+  ])('does not invent fallback support or enablement: %j', async values => {
+    api.policies.mockResolvedValue([policy(values.policy)])
+    api.groupTargets.mockResolvedValue([summary({ fallback: values.value })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.find('[data-target-fallback]').exists()).toBe(false)
+    w.unmount()
+  })
+
   it('creates Plus with visible 70/70/20 presets and independent recovery thresholds', async () => {
     api.policies.mockResolvedValue([])
     const w = makeWrapper(); await flushPromises(); await w.get('[data-target-create]').trigger('click')
@@ -60,7 +111,19 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
-  it('uses 80/80/10 for Pro and other groups, and switches to the existing target without creating a duplicate', async () => {
+  it('creates Pro with a 15-second first-token target and preserves the simple automatic defaults', async () => {
+    api.policies.mockResolvedValue([])
+    const w = makeWrapper(); await flushPromises(); await w.get('[data-target-create]').trigger('click')
+    await w.get('[data-target-group]').setValue('3')
+    expect((w.get('[data-target-ttft]').element as HTMLInputElement).value).toBe('15')
+    expect(w.get('[data-dialog]').text()).toContain('No extra configuration is needed')
+    await w.get('[data-target-save]').trigger('click'); await flushPromises()
+    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ group_ids: [3],
+      cache_rate: { enabled: true, pause: 80, recover: 85 }, ttft: { enabled: true, pause: 15000, recover: 12000 } }))
+    w.unmount()
+  })
+
+  it('keeps other groups and existing targets unchanged, without creating a duplicate', async () => {
     const w = makeWrapper(); await flushPromises(); await w.get('[data-target-create]').trigger('click')
     await w.get('[data-target-group]').setValue('5')
     expect((w.get('[data-target-cache]').element as HTMLInputElement).value).toBe('80')
@@ -68,6 +131,7 @@ describe('simple group quality targets', () => {
     expect((w.get('[data-target-ttft]').element as HTMLInputElement).value).toBe('10')
     await w.get('[data-target-group]').setValue('3')
     expect(w.get('[data-dialog]').text()).toContain('updates the existing policy')
+    expect((w.get('[data-target-ttft]').element as HTMLInputElement).value).toBe('10')
     await w.get('[data-target-save]').trigger('click'); await flushPromises()
     expect(api.saveGroupQualityTarget).not.toHaveBeenCalled()
     await w.get('[data-target-edit="11"]').trigger('click'); await w.get('[data-target-cache]').setValue('82')
@@ -142,6 +206,59 @@ describe('simple group quality targets', () => {
     expect(w.get('[data-group-target]').text()).toContain('Measured targets met')
     expect(w.get('[data-target-verified]').text()).toContain('0 account/models verified')
     expect(w.get('[data-target-no-verified]').text()).toContain('protection is not bypassed when all are paused')
+    w.unmount()
+  })
+
+  it('shows the server token budget separately from request and account evidence', async () => {
+    api.groupTargets.mockResolvedValue([summary({ traffic_control: trafficControl() })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('[data-target-traffic-mode]').text()).toBe('Normal validation')
+    expect(w.get('[data-target-validation-share]').text()).toContain('2.5%')
+    expect(w.get('[data-target-validation-share]').text()).toContain('Validation input 12,500 / group input 500,000 tokens')
+    expect(w.get('[data-target-budget-remaining]').text()).toContain('7,500')
+    expect(w.get('[data-target-budget-remaining]').text()).toContain('Reserved 5,000 / total budget 25,000 tokens')
+    expect(w.get('[data-target-limited-requests]').text()).toContain('12')
+    expect(w.get('[data-target-limited-requests]').text()).toContain('Verified account/model pairs: 3')
+    expect(w.get('[data-target-verified]').text()).toContain('3 account/models verified')
+    expect(w.find('[data-target-no-verified]').exists()).toBe(false)
+    expect(w.get('[data-target-traffic-control]').text()).toContain('reservations remain when usage is missing')
+    expect(w.get('[data-target-traffic-control]').text()).toContain('does not mean every model has verified supply')
+    expect(w.find('[data-target-bootstrap]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('makes bootstrap limits explicit even when the measured group window meets its targets', async () => {
+    api.groupTargets.mockResolvedValue([summary({ traffic_control: trafficControl({ mode: 'bootstrap', verified_accounts: 0 }) })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('[data-group-target]').text()).toContain('Measured targets met')
+    expect(w.get('[data-target-bootstrap]').attributes('role')).toBe('status')
+    expect(w.get('[data-target-bootstrap]').text()).toContain('Only limited validation traffic is admitted; the targets are not guaranteed')
+    expect(w.find('[data-target-no-verified]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('shows an exhausted budget as zero and explains conserving mode', async () => {
+    api.groupTargets.mockResolvedValue([summary({ traffic_control: trafficControl({ mode: 'conserving', remaining_tokens: 0, validation_share_percent: 0, validation_input_tokens: 0 }) })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('[data-target-traffic-mode]').text()).toBe('Conserving validation traffic')
+    expect(w.get('[data-target-budget-remaining]').find('.text-xl').text()).toBe('0')
+    expect(w.get('[data-target-validation-share]').text()).toContain('0%')
+    expect(w.get('[data-target-traffic-control]').text()).toContain('Validation traffic is being reduced')
+    expect(w.get('[data-target-traffic-control]').text()).not.toContain('Unknown')
+    w.unmount()
+  })
+
+  it.each([
+    { control: undefined, policy: {} },
+    { control: trafficControl({ enabled: false }), policy: {} },
+    { control: trafficControl(), policy: { enabled: false } },
+    { control: trafficControl(), policy: { mode: 'observe' as const } },
+  ])('does not claim an active budget for old servers or inactive enforcement: %j', async values => {
+    api.policies.mockResolvedValue([policy(values.policy)])
+    api.groupTargets.mockResolvedValue([summary({ traffic_control: values.control })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.find('[data-target-traffic-control]').exists()).toBe(false)
+    expect(w.get('[data-target-metric="cache"]').text()).toContain('90%')
     w.unmount()
   })
 

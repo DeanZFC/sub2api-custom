@@ -203,6 +203,27 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+          <div class="card" data-testid="upstream-error-message-settings">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t('admin.settings.upstreamErrorMessage.title') }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.upstreamErrorMessage.description') }}
+              </p>
+            </div>
+            <div class="space-y-3 p-6">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.settings.upstreamErrorMessage.label') }}
+                <textarea v-model="form.upstream_error_message" rows="3" maxlength="500"
+                  class="input mt-2" data-testid="upstream-error-message"
+                  :placeholder="t('admin.settings.upstreamErrorMessage.placeholder')" />
+              </label>
+              <p class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.upstreamErrorMessage.hint') }}
+              </p>
+            </div>
+          </div>
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -10057,6 +10078,7 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_weight_session_sticky: "",
   // Gateway forwarding behavior
   upstream_error_retry: { enabled: false, max_retries: 3, delay_ms: 1000, errors: "" },
+  upstream_error_message: "",
   openai_ttft_mode: "semantic",
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
@@ -11362,6 +11384,12 @@ const siteBillingModeHint = computed(() =>
 async function saveSettings() {
   saving.value = true;
   try {
+    const upstreamErrorMessage = form.upstream_error_message.trim();
+    if (Array.from(upstreamErrorMessage).length > 500) {
+      appStore.showError(t("admin.settings.upstreamErrorMessage.invalid"));
+      activeTab.value = "gateway";
+      return;
+    }
     const retry = form.upstream_error_retry;
     const errorLines = retry.errors.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (!Number.isInteger(retry.max_retries) || retry.max_retries < 1 || retry.max_retries > 10 ||
@@ -11712,6 +11740,7 @@ async function saveSettings() {
       max_claude_code_version: form.max_claude_code_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
       upstream_error_retry: { ...form.upstream_error_retry },
+      upstream_error_message: upstreamErrorMessage,
       openai_ttft_mode:
         form.openai_ttft_mode === "visible" ? "visible" : "semantic",
       enable_fingerprint_unification: form.enable_fingerprint_unification,

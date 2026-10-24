@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -375,6 +376,12 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				}
 			}
 		}
+		// Interpret usage/terminal state above using the untouched upstream frame.
+		// Only the copy sent to the client loses provider implementation details.
+		if payload, ok := extractOpenAISSEDataLine(line); ok && isRawChatCompletionsErrorPayload([]byte(payload)) {
+			s.recordOpenAIStreamUpstreamError(c, account, true, requestID, "http_error", []byte(payload), extractOpenAISSEErrorMessage([]byte(payload)))
+			line = "data: " + string(rawChatCompletionsClientErrorBody([]byte(payload)))
+		}
 		line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
 		line = stripEmptyChatToolCallIdentityFromSSELine(line)
 
@@ -548,6 +555,10 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		upstreamRequestID := firstNonEmpty(requestID, resp.Header.Get("xai-request-id"))
 		return nil, newGrokMissingUsageFailoverError(c, account, upstreamRequestID)
 	}
+	if isRawChatCompletionsErrorPayload(respBody) {
+		s.recordOpenAIStreamUpstreamError(c, account, true, requestID, "http_error", respBody, extractOpenAISSEErrorMessage(respBody))
+		respBody = rawChatCompletionsClientErrorBody(respBody)
+	}
 	respBody = applyOllamaCloudRawChatCompletionsResponse(account, respBody)
 	respBody = s.replaceModelInResponseBody(respBody, upstreamModel, originalModel)
 
@@ -589,4 +600,47 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 // 与 buildOpenAIResponsesURL 是姐妹函数。
 func buildOpenAIChatCompletionsURL(base string) string {
 	return buildOpenAIEndpointURL(base, "/v1/chat/completions")
+}
+
+// isRawChatCompletionsErrorPayload deliberately ignores ordinary content chunks:
+// an assistant can discuss error messages without the gateway rewriting its text.
+func isRawChatCompletionsErrorPayload(payload []byte) bool {
+	if !gjson.ValidBytes(payload) {
+		return false
+	}
+	upstreamError := gjson.GetBytes(payload, "error")
+	return (upstreamError.Exists() && upstreamError.Type != gjson.Null) || gjson.GetBytes(payload, "type").String() == "error"
+}
+
+// rawChatCompletionsClientErrorBody creates a display-only error envelope.
+// Unknown provider extensions may repeat the same internal failure in details,
+// so replacing error.message alone would still leak it. Keep protocol fields and
+// usage, which the raw Chat Completions contract forwards to downstream billing.
+func rawChatCompletionsClientErrorBody(payload []byte) []byte {
+	message := extractOpenAISSEErrorMessage(payload)
+	clientMessage := OpenAIUpstreamErrorClientMessage(payload, message)
+	if clientMessage == message {
+		return payload
+	}
+	errorBody := gin.H{"message": clientMessage}
+	for _, field := range []string{"type", "code", "param"} {
+		if value := gjson.GetBytes(payload, "error."+field); value.Type == gjson.String && strings.TrimSpace(value.String()) != "" {
+			errorBody[field] = value.String()
+		}
+	}
+	if _, ok := errorBody["type"]; !ok {
+		errorBody["type"] = "upstream_error"
+	}
+	body := gin.H{"error": errorBody}
+	if gjson.GetBytes(payload, "type").String() == "error" {
+		body["type"] = "error"
+	}
+	if usage := gjson.GetBytes(payload, "usage"); usage.IsObject() {
+		body["usage"] = json.RawMessage(usage.Raw)
+	}
+	out, err := json.Marshal(body)
+	if err != nil {
+		return []byte(`{"error":{"type":"upstream_error","message":"` + OpenAIUpstreamFailureClientMessage + `"}}`)
+	}
+	return out
 }

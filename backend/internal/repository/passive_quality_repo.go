@@ -235,11 +235,72 @@ func reconcilePassiveAccount(ctx context.Context, tx sqlExecutor, aid int64) err
 		return err
 	}
 	n, err := result.RowsAffected()
-	if err != nil || n == 0 {
+	if err != nil {
+		return err
+	}
+	changed, err := reconcileGroupQualityTargets(ctx, tx, aid)
+	if err != nil || (n == 0 && !changed) {
 		return err
 	}
 	return enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &aid, nil, nil)
 }
+
+// Healthy target evidence is projected too, so production routing can prefer
+// verified supply before TopK. Admission always repeats this check in SQL.
+func reconcileGroupQualityTargets(ctx context.Context, tx sqlExecutor, aid int64) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT p.id,p.version,p.updated_at,p.config,s.data FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id
+ WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce'
+ AND p.config->>'purpose' IN ('cache_target','group_quality_target') AND `+passiveMembership+` ORDER BY p.id,s.model_key`, aid)
+	if err != nil {
+		return false, err
+	}
+	entries := []map[string]any{}
+	now := time.Now()
+	for rows.Next() {
+		var p service.PassiveQualityPolicy
+		var state service.PassiveQualityState
+		var config, raw []byte
+		if err = rows.Scan(&p.ID, &p.Version, &p.UpdatedAt, &config, &raw); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		if err = json.Unmarshal(config, &p.PassiveQualityConfig); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		if err = json.Unmarshal(raw, &state); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		if len(p.GroupIDs) != 1 || (p.Model != "" && state.Model != p.Model) {
+			continue
+		}
+		until := state.UpdatedAt.Add(time.Duration(p.WindowSeconds) * time.Second)
+		if e := state.Evidence.Latest.Add(time.Duration(p.WindowSeconds) * time.Second); e.Before(until) {
+			until = e
+		}
+		entries = append(entries, map[string]any{"policy_id": p.ID, "group_id": p.GroupIDs[0], "model": state.Model, "phase": state.Phase,
+			"verified": groupQualityStateVerified(p, state, now), "verified_until": until.UTC().Format(time.RFC3339Nano)})
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return false, err
+	}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE accounts SET extra=CASE WHEN $2::jsonb='[]'::jsonb THEN COALESCE(extra,'{}')-'group_quality_targets'
+ ELSE jsonb_set(COALESCE(extra,'{}'),'{group_quality_targets}',$2::jsonb) END,updated_at=clock_timestamp()
+ WHERE id=$1 AND COALESCE(extra->'group_quality_targets','[]') IS DISTINCT FROM $2::jsonb`, aid, raw)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
+}
+
 func (r *passiveQualityRepository) ListStates(ctx context.Context, aid int64) ([]service.PassiveQualityState, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT s.data,a.name,(SELECT count(*) FROM passive_quality_leases l WHERE l.policy_id=s.policy_id AND l.account_id=s.account_id AND l.model_key=s.model_key AND l.generation=(s.data->>'generation')::bigint),(a.status<>'active' OR NOT a.schedulable OR COALESCE(a.temp_unschedulable_until>now(),false) OR COALESCE(a.rate_limit_reset_at>now(),false))
  FROM passive_quality_states s JOIN accounts a ON a.id=s.account_id WHERE ($1=0 OR s.account_id=$1) AND a.deleted_at IS NULL ORDER BY s.policy_id,s.account_id,s.model_key LIMIT 10000`, aid)

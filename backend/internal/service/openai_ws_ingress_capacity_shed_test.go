@@ -43,6 +43,7 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 
 	tests := []struct {
 		name           string
+		configured     string
 		upstreamEvents [][]byte
 		wantContains   []string
 		wantAbsent     []string
@@ -55,9 +56,18 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 			},
 			wantContains: []string{
 				`"code":"server_error"`,
-				"Our servers are currently overloaded",
+				OpenAIUpstreamFailureClientMessage,
 			},
 			wantAbsent: []string{"server_is_overloaded"},
+		},
+		{
+			name: "internal_errors_are_wrapped_for_client",
+			upstreamEvents: [][]byte{
+				[]byte(`{"type":"error","error":{"type":"server_error","code":"stream_error","message":"stream disconnected before completion: Excel BPS did not deliver validated output within the allowed interval","details":"private backend stack trace"}}`),
+				[]byte(`{"type":"response.failed","response":{"id":"resp_internal","error":{"code":"stream_error","message":"stream disconnected before completion: Excel BPS did not deliver validated output within the allowed interval","details":"private backend stack trace"}}}`),
+			},
+			wantContains: []string{OpenAIUpstreamFailureClientMessage},
+			wantAbsent:   []string{"Excel BPS", "private backend"},
 		},
 		{
 			name: "non_capacity_error_code_is_passed_through",
@@ -70,6 +80,16 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 				"workspace is suspended",
 			},
 			wantAbsent: []string{"server_error"},
+		},
+		{
+			name:       "configured_context_error_is_wrapped",
+			configured: openAIWSCustomFailureMessage,
+			upstreamEvents: [][]byte{
+				[]byte(`{"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window"}}`),
+				[]byte(`{"type":"response.failed","response":{"id":"resp_context","error":{"code":"context_length_exceeded","message":"Your input exceeds the context window"}}}`),
+			},
+			wantContains: []string{openAIWSCustomFailureMessage},
+			wantAbsent:   []string{"Your input exceeds"},
 		},
 	}
 
@@ -128,7 +148,7 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 
 				rec := httptest.NewRecorder()
 				ginCtx, _ := gin.CreateTestContext(rec)
-				req := r.Clone(r.Context())
+				req := r.Clone(WithUpstreamErrorMessage(r.Context(), tt.configured))
 				req.Header = req.Header.Clone()
 				req.Header.Set("User-Agent", "unit-test-agent/1.0")
 				ginCtx.Request = req
@@ -139,7 +159,7 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 				if readErr != nil || (msgType != coderws.MessageText && msgType != coderws.MessageBinary) {
 					return
 				}
-				_ = svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, &account, "sk-test", firstMessage, nil)
+				_ = svc.ProxyResponsesWebSocketFromClient(req.Context(), ginCtx, conn, &account, "sk-test", firstMessage, nil)
 			}))
 			defer wsServer.Close()
 

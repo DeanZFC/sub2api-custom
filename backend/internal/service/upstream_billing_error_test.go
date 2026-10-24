@@ -166,7 +166,7 @@ func TestSanitizeOpenAIBillingEvent_RemovesVendorDetails(t *testing.T) {
 			require.True(t, changed)
 			require.Equal(t, original, string(source), "operator evidence must remain unmodified")
 			require.Contains(t, string(safe), UpstreamBillingExhaustedClientMessage)
-			for _, secret := range []string{"provider balance", "insufficient_balance", "insufficient_quota", "PAYMENT_REQUIRED", `"details"`, `"param"`} {
+			for _, secret := range []string{"provider balance", "insufficient_balance", "insufficient_quota", "PAYMENT_REQUIRED", `"details"`, `"param":"billing"`} {
 				require.NotContains(t, string(safe), secret)
 			}
 			if eventType == "response.failed" {

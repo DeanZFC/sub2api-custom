@@ -480,6 +480,14 @@ export default {
         saved: 'Ollama Cloud usage refresh settings saved',
         saveFailed: 'Failed to save Ollama Cloud usage refresh settings'
       },
+      upstreamErrorMessage: {
+        title: 'Unified upstream error message',
+        description: 'When set, users see this message for upstream errors across all platforms, including streaming and error passthrough. Leave blank to keep default error handling.',
+        label: 'Message shown to users',
+        placeholder: 'Your request could not be completed. Please try again later.',
+        hint: 'Up to 500 characters. Administrators can still inspect the original cause in Call Errors. Gateway request validation messages are unaffected.',
+        invalid: 'The unified upstream error message must not exceed 500 characters.',
+      },
       upstreamErrorRetry: {
         title: 'Upstream error auto retry',
         description: 'Retry matching upstream errors inside the gateway to reduce client reconnections.',

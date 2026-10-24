@@ -1,10 +1,71 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
 )
+
+func hasUserErrorUpstreamEvidence(e *OpsErrorLog) bool {
+	if e == nil {
+		return false
+	}
+	if e.HasUpstreamError || strings.EqualFold(e.Source, "upstream_http") || strings.EqualFold(e.Owner, "provider") {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(e.Phase)) {
+	case "upstream", "account_auth", "network":
+		return true
+	}
+	return false
+}
+
+func isLocalUserBillingFailure(e *OpsErrorLog) bool {
+	if e == nil || (e.Type != "billing_error" && e.Type != "subscription_error") {
+		return false
+	}
+	// A final local eligibility check may fail after an earlier upstream retry.
+	// Match the gateway's own messages, not the provider's error type alone.
+	switch strings.ToLower(strings.TrimSpace(e.Message)) {
+	case "insufficient balance", "insufficient account balance", "no active subscription found for this group",
+		"subscription is invalid or expired", "daily usage limit exceeded", "weekly usage limit exceeded",
+		"monthly usage limit exceeded", "usage quota exhausted for this platform":
+		return true
+	}
+	return false
+}
+
+// The presentation override applies only to copies returned to the caller.
+// Stored diagnostics and administrator projections retain their original text.
+func toUserErrorRequestForContext(ctx context.Context, e *OpsErrorLog) *UserErrorRequest {
+	out := ToUserErrorRequest(e)
+	if out != nil && ConfiguredUpstreamErrorMessage(ctx) != "" && isLocalUserBillingFailure(e) {
+		out.Message, out.StatusCode = e.Message, e.StatusCode
+		return out
+	}
+	if out != nil && hasUserErrorUpstreamEvidence(e) {
+		out.Message = UpstreamErrorClientMessage(ctx, out.Message)
+	}
+	return out
+}
+
+func toUserErrorRequestDetailForContext(ctx context.Context, e *OpsErrorLogDetail) *UserErrorRequestDetail {
+	out := ToUserErrorRequestDetail(e)
+	if out == nil || ConfiguredUpstreamErrorMessage(ctx) == "" {
+		return out
+	}
+	if isLocalUserBillingFailure(&e.OpsErrorLog) {
+		out.Message, out.StatusCode, out.ErrorBody = e.Message, e.StatusCode, e.ErrorBody
+		return out
+	}
+	if hasUserErrorUpstreamEvidence(&e.OpsErrorLog) || e.UpstreamStatusCode != nil || strings.TrimSpace(e.UpstreamErrorMessage) != "" {
+		out.Message = UpstreamErrorClientMessage(ctx, out.Message)
+		// The response body may contain duplicated provider details outside message.
+		out.ErrorBody = ""
+	}
+	return out
+}
 
 // UserErrorRequest 是面向终端用户的"错误请求"精简脱敏视图（白名单）。
 // 严禁包含 account / api_key_prefix / upstream_endpoint / user_email 等

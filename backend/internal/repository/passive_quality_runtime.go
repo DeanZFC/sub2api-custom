@@ -164,9 +164,14 @@ func (r *passiveQualityRepository) Sweep(ctx context.Context, now time.Time, pro
 				probes = append(probes, *s)
 			}
 		}
+		if err = r.refreshGroupQualityTrafficSnapshot(ctx, p, now); err != nil {
+			return probes, err
+		}
 	}
 	// Bounded retention; delete in batches so housekeeping never monopolizes DB.
 	for _, q := range []string{
+		`DELETE FROM group_quality_traffic_leases WHERE (lease_id,policy_id) IN (SELECT lease_id,policy_id FROM group_quality_traffic_leases WHERE created_at<now()-INTERVAL '2 days' LIMIT 5000)`,
+		`DELETE FROM group_quality_traffic_denials WHERE (policy_id,minute) IN (SELECT policy_id,minute FROM group_quality_traffic_denials WHERE minute<now()-INTERVAL '2 days' LIMIT 1000)`,
 		`DELETE FROM passive_quality_failures WHERE id IN (SELECT id FROM passive_quality_failures WHERE created_at<now()-INTERVAL '2 days' LIMIT 5000)`,
 		`DELETE FROM passive_quality_events WHERE id IN (SELECT id FROM passive_quality_events WHERE created_at<now()-INTERVAL '30 days' LIMIT 1000)`,
 		`DELETE FROM passive_quality_telemetry_gaps WHERE created_at<now()-INTERVAL '2 days'`,
@@ -351,6 +356,11 @@ func (r *passiveQualityRepository) FinishProbe(ctx context.Context, probe servic
 // Every applicable hold must approve. Account locking serializes all policies,
 // all gateway instances, membership edits, and trial lease reservations.
 func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, aid int64, model, lease string) (bool, bool, error) {
+	// This only defers automatic-quality holds to the following durable emergency
+	// gate. That gate fails closed without a matching policy and exact lease.
+	if groupQualityFallbackMatches(ctx, aid, model) {
+		return true, false, nil
+	}
 	var held bool
 	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2 OR $2=''))`, aid, model).Scan(&held); err != nil || !held {
 		return !held, false, err

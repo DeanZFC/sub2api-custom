@@ -29,6 +29,7 @@ const passiveQualityAttemptGroupKey = "passive_quality_attempt_group"
 func SetPassiveQualityAttemptGroup(c *gin.Context, groupID int64) {
 	if c != nil {
 		c.Set(passiveQualityAttemptGroupKey, groupID)
+		SetGroupQualityTrafficGroup(c, groupID)
 	}
 }
 
@@ -294,6 +295,7 @@ func (s *PassiveQualityService) Capture() gin.HandlerFunc {
 }
 func PassiveQualityBeginTurn(c *gin.Context) {
 	if c != nil {
+		beginGroupQualityTrafficTurn(c)
 		key := uuid.NewString()
 		c.Set(passiveQualityStartedKey, time.Now())
 		c.Set(passiveQualityTurnKey, key)
@@ -342,7 +344,7 @@ func PassiveQualityUsageContext(parent, base context.Context) context.Context {
 			base = context.WithValue(base, key, value)
 		}
 	}
-	return base
+	return freezeGroupQualityTrafficContext(parent, base)
 }
 
 // Record cache reporting presence and correlate WS usage IDs with failure turn

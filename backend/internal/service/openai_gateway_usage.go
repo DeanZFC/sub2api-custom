@@ -151,6 +151,15 @@ func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTie
 	}
 }
 
+// RecordOpenAIGroupQualityTrafficUsage settles known text input independently
+// of billing success. Unknown/empty and media usage keep conservative admission.
+func RecordOpenAIGroupQualityTrafficUsage(ctx context.Context, accountID int64, result *OpenAIForwardResult) {
+	if result == nil || result.Usage.InputTokens <= 0 || result.ImageCount > 0 || result.VideoCount > 0 || result.Usage.ImageOutputTokens > 0 {
+		return
+	}
+	recordGroupQualityTrafficUsage(ctx, accountID, int64(result.Usage.InputTokens), int64(result.Usage.CacheReadInputTokens), result.Usage.CacheUsageReported || result.Usage.CacheReadInputTokens > 0)
+}
+
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
 	if input == nil {
@@ -159,6 +168,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	result := input.Result
 	if result == nil {
 		return errors.New("openai usage result is nil")
+	}
+	// Settle admission against observed upstream usage independently of billing.
+	// Missing cache telemetry remains unknown and must not refund a reservation.
+	if input.Account != nil && !input.NativeCompactionV2 && !passiveQualityNonTextEndpoint(input.InboundEndpoint) && !passiveQualityNonTextEndpoint(input.UpstreamEndpoint) {
+		RecordOpenAIGroupQualityTrafficUsage(ctx, input.Account.ID, result)
 	}
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)

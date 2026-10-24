@@ -39,6 +39,18 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
+	fallbackActive := GroupQualityFallbackActive(ctx)
+	fallbackCancellationError := func() error {
+		if !fallbackActive || ctx.Err() == nil {
+			return nil
+		}
+		// Preserve both ordinary cancellation classification and the local lease
+		// loss cause. Neither is evidence of an upstream account failure.
+		return errors.Join(ctx.Err(), context.Cause(ctx))
+	}
+	if err := fallbackCancellationError(); err != nil {
+		return nil, err
+	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -227,6 +239,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}(),
 	})
 	if err != nil {
+		if cancelErr := fallbackCancellationError(); cancelErr != nil {
+			return nil, cancelErr
+		}
 		var agentDialErr *openAIWSDialError
 		if s.isAgentIdentityAccount(ctx, account) && errors.As(err, &agentDialErr) && isAgentIdentityTaskInvalidWSDialError(agentDialErr) && agentTaskRecoveryTried != nil && !*agentTaskRecoveryTried {
 			*agentTaskRecoveryTried = true
@@ -347,11 +362,17 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		stateStore,
 		groupID,
 	); err != nil {
+		if cancelErr := fallbackCancellationError(); cancelErr != nil {
+			return nil, cancelErr
+		}
 		return nil, err
 	}
 
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
+		if cancelErr := fallbackCancellationError(); cancelErr != nil {
+			return nil, cancelErr
+		}
 		logOpenAIWSModeInfo(
 			"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",
 			account.ID,
@@ -407,7 +428,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 		clientDisconnected = true
 		clientDisconnectDrainStartedAt = time.Now()
-		if !upstreamReadDetached {
+		if !fallbackActive && !upstreamReadDetached {
 			upstreamReadCtx = context.WithoutCancel(ctx)
 			upstreamReadDetached = true
 		}
@@ -421,7 +442,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		)
 	}
 	markClientRequestCanceled := func() {
-		if clientRequestCanceled() {
+		if clientRequestCanceled() && !errors.Is(context.Cause(ctx), ErrGroupQualityFallbackLeaseLost) {
 			markClientDisconnected("request_context_canceled")
 		}
 	}
@@ -497,7 +518,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			return
 		}
 		markClientDisconnected("downstream_write_error")
-		logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode] client disconnected, continue draining upstream: account=%d", account.ID)
+		logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode] client disconnected: account=%d drain_upstream=%v", account.ID, !fallbackActive)
 	}
 	flushBufferedStreamEvents := func(reason string) {
 		if len(bufferedStreamEvents) == 0 {
@@ -530,6 +551,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 readLoop:
 	for {
 		markClientRequestCanceled()
+		if cancelErr := fallbackCancellationError(); cancelErr != nil {
+			return resultWithUsage(), cancelErr
+		}
+		if fallbackActive && clientDisconnected {
+			return resultWithUsage(), context.Canceled
+		}
 		var message []byte
 		var readErr error
 		readUsedDetachedContext := upstreamReadDetached
@@ -564,6 +591,9 @@ readLoop:
 			}
 		}
 		markClientRequestCanceled()
+		if cancelErr := fallbackCancellationError(); cancelErr != nil {
+			return resultWithUsage(), cancelErr
+		}
 		if readErr == nil && !json.Valid(message) {
 			eventType, _, _ := parseOpenAIWSEventEnvelope(message)
 			if eventType == "" {
@@ -603,7 +633,7 @@ readLoop:
 				truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
 			)
 			if clientDisconnected {
-				if !readUsedDetachedContext && errors.Is(readErr, context.Canceled) && clientRequestCanceled() {
+				if !fallbackActive && !readUsedDetachedContext && errors.Is(readErr, context.Canceled) && clientRequestCanceled() {
 					continue
 				}
 				break
@@ -712,9 +742,6 @@ readLoop:
 						false,
 					)
 				}
-				if sanitized, changed := sanitizeOpenAIResponseFailedEventForClient(message, "error", true); changed {
-					message = sanitized
-				}
 			}
 			if billingStatus == 0 {
 				s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
@@ -769,14 +796,18 @@ readLoop:
 			}
 			statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
 			setOpsUpstreamError(c, statusCode, errMsg, "")
-			clientStatusCode, clientMessage := statusCode, errMsg
+			clientStatusCode, clientMessage := statusCode, UpstreamErrorClientMessage(ctx, OpenAIUpstreamErrorClientMessage(message, errMsg))
 			if billingStatus != 0 {
 				clientStatusCode = http.StatusBadGateway
-				clientMessage = UpstreamBillingExhaustedClientMessage
+				clientMessage = UpstreamErrorClientMessage(ctx, UpstreamBillingExhaustedClientMessage)
 			}
 			if reqStream && !clientDisconnected {
 				flushBufferedStreamEvents("error_event")
-				emitStreamMessage(message, true)
+				clientEvent := message
+				if sanitized, changed := sanitizeOpenAIResponseFailedEventForClient(clientEvent, "error", wroteDownstream, ctx); changed {
+					clientEvent = sanitized
+				}
+				emitStreamMessage(clientEvent, true)
 			}
 			if !reqStream {
 				c.JSON(clientStatusCode, gin.H{
@@ -786,7 +817,7 @@ readLoop:
 					},
 				})
 			}
-			return nil, fmt.Errorf("openai ws error event: %s", clientMessage)
+			return nil, fmt.Errorf("openai ws error event: %s", errMsg)
 		}
 		if eventType == "response.failed" {
 			if billingStatus := openAIWSBillingStatus(message, extractOpenAISSEErrorMessage(message)); billingStatus != 0 {
@@ -813,19 +844,24 @@ readLoop:
 					s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
 					billingAccountSideEffectsApplied = true
 				}
-				if sanitized, changed := sanitizeOpenAIResponseFailedEventForClient(message, "response.failed", true); changed {
-					message = sanitized
-				}
 			}
 		}
 
+		// Retain the provider payload for Ops and account-health classification.
+		// Only the final client copy hides internal upstream error messages.
+		clientMessage := message
+		if eventType == "response.failed" {
+			if sanitized, changed := sanitizeOpenAIResponseFailedEventForClient(clientMessage, eventType, wroteDownstream, ctx); changed {
+				clientMessage = sanitized
+			}
+		}
 		if reqStream {
 			// 在首个 token 前先缓冲事件（如 response.created），
 			// 以便上游早期断连时仍可安全回退到 HTTP，不给下游发送半截流。
 			shouldBuffer := firstTokenMs == nil && !isTokenEvent && !isTerminalEvent
 			if shouldBuffer {
-				buffered := make([]byte, len(message))
-				copy(buffered, message)
+				buffered := make([]byte, len(clientMessage))
+				copy(buffered, clientMessage)
 				bufferedStreamEvents = append(bufferedStreamEvents, buffered)
 				bufferedEventCount++
 				if debugEnabled && shouldLogOpenAIWSBufferedEvent(bufferedEventCount) {
@@ -841,9 +877,12 @@ readLoop:
 				}
 			} else {
 				flushBufferedStreamEvents(eventType)
-				emitStreamMessage(message, isTerminalEvent)
+				emitStreamMessage(clientMessage, isTerminalEvent)
 			}
 		} else {
+			if eventType == "response.failed" {
+				responseField = gjson.GetBytes(clientMessage, "response")
+			}
 			if responseField.Exists() && responseField.Type == gjson.JSON {
 				finalResponse = []byte(responseField.Raw)
 			}

@@ -5,6 +5,7 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -229,4 +230,29 @@ func TestUpdateSettingsSubscriptionEnabledIsWritableAndKeptWhenOmitted(t *testin
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "false", repo.values[service.SettingKeySubscriptionEnabled],
 		"a payload without subscription_enabled must not flip the stored value back to true")
+}
+
+func TestUpstreamErrorMessageSettingsRoundTripAndPartialUpdate(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	rec := doUpdateSettings(t, h, map[string]any{"upstream_error_message": "  服务暂时不可用，请重试。  "}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "服务暂时不可用，请重试。", repo.values[service.SettingKeyUpstreamErrorMessage])
+	var envelope struct {
+		Data struct {
+			Message string `json:"upstream_error_message"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	require.Equal(t, "服务暂时不可用，请重试。", envelope.Data.Message)
+	rec = doUpdateSettings(t, h, map[string]any{"site_name": "Changed"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "服务暂时不可用，请重试。", repo.values[service.SettingKeyUpstreamErrorMessage])
+	rec = doUpdateSettings(t, h, map[string]any{"upstream_error_message": strings.Repeat("错", 501)}, nil)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Equal(t, "服务暂时不可用，请重试。", repo.values[service.SettingKeyUpstreamErrorMessage])
+	rec = doUpdateSettings(t, h, map[string]any{"upstream_error_message": "  "}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Empty(t, repo.values[service.SettingKeyUpstreamErrorMessage])
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	require.Empty(t, envelope.Data.Message)
 }

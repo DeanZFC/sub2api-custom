@@ -660,7 +660,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 			writeAnthropicError(c, status, errType, errMsg)
 			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
-		writeAnthropicError(c, http.StatusBadGateway, "api_error", message)
+		writeAnthropicError(c, http.StatusBadGateway, "api_error", OpenAIUpstreamErrorClientMessage(payload, message))
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
@@ -1087,6 +1087,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				}
 				message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 				errStatus, errType, errMsg := http.StatusBadGateway, "api_error", message
+				clientMsg := OpenAIUpstreamErrorClientMessage(payloadBytes, message)
 				// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），
 				// 使按错误码配置的透传规则可命中。
 				if status, et, em, matched := applyOpenAIStreamFailedErrorPassthroughRule(
@@ -1096,15 +1097,16 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 						em = errMsg
 					}
 					errStatus, errType, errMsg = status, et, em
+					clientMsg = em
 					MarkResponseCommitted(c)
 				}
 				if !clientDisconnected {
 					if !clientOutputStarted {
-						writeAnthropicError(c, errStatus, errType, errMsg)
+						writeAnthropicError(c, errStatus, errType, clientMsg)
 						clientOutputStarted = true
 					} else {
 						writeStreamHeaders()
-						if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, errMsg)); err == nil {
+						if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, clientMsg)); err == nil {
 							c.Writer.Flush()
 						}
 					}
@@ -1390,7 +1392,7 @@ func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUs
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 	}
 	if usage.InputTokensDetails != nil {
-		result.CacheUsageReported = true
+		result.CacheUsageReported = usage.CacheReadUsageReported()
 		result.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens
 	}
 	return result

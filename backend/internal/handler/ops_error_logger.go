@@ -849,11 +849,7 @@ func isOpsTerminalSSEFrame(frame []byte) bool {
 	if !bytes.Contains(payload, []byte("response.failed")) && !bytes.Contains(payload, []byte(`"error"`)) {
 		return false
 	}
-	var event struct {
-		Type string `json:"type"`
-	}
-	return json.Unmarshal(payload, &event) == nil &&
-		(event.Type == "response.failed" || event.Type == "error")
+	return service.IsUpstreamErrorPayload(payload, string(eventType))
 }
 
 func parseOpsSSEFrameEnvelope(frame []byte) ([]byte, []byte) {
@@ -1003,8 +999,7 @@ func mayContainOpsTerminalSSE(chunk []byte) bool {
 	if bytes.Contains(chunk, []byte("response.failed")) {
 		return true
 	}
-	return bytes.Contains(chunk, []byte("error")) &&
-		(bytes.Contains(chunk, []byte("event")) || bytes.Contains(chunk, []byte(`"type"`)))
+	return bytes.Contains(chunk, []byte("error"))
 }
 
 func isOpsTerminalSSEEventLine(line []byte) bool {
@@ -1074,7 +1069,8 @@ func (state *opsCaptureWriterState) shouldCapture() bool {
 // Notes:
 // - It buffers response bodies only for status >= 400 or terminal SSE frames.
 // - Streaming errors after the response has started (SSE) may still need explicit logging.
-func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
+// - Detached tasks can supply execution instead of advancing a Gin route chain.
+func OpsErrorLoggerMiddleware(ops *service.OpsService, execution ...gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		originalWriter := c.Writer
 		w := acquireOpsCaptureWriter(originalWriter)
@@ -1088,7 +1084,11 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			releaseOpsCaptureWriter(w)
 		}()
 		c.Writer = w
-		c.Next()
+		if len(execution) > 0 && execution[0] != nil {
+			execution[0](c)
+		} else {
+			c.Next()
+		}
 		w.finalizeCapture()
 
 		if _, rejected := middleware2.GetIngressRejectReason(c); rejected {
@@ -1115,6 +1115,15 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		if !parsed.StreamFailure {
 			if terminal, ok := w.capturedTerminalError(); ok {
 				parsed = terminal
+			}
+		}
+		// Native data-only error envelopes may contain only a numeric status.
+		// Keep the richer original classification already recorded by the
+		// provider adapter instead of replacing it with parser fallbacks.
+		if status < 400 && parsed.StreamFailure && parsed.Message == "upstream stream failed" {
+			if marked, ok := service.GetOpsStreamError(c); ok {
+				parsed.ErrorType, parsed.Code, parsed.Message = marked.ErrType, marked.Code, marked.Message
+				parsed.StatusCode = marked.IntendedStatus
 			}
 		}
 		if status < 400 {
@@ -1902,6 +1911,9 @@ func parseOpsSSEFailure(body []byte) (parsedOpsError, bool) {
 		if err := json.Unmarshal(payloadBytes, &event); err == nil {
 			if eventType == "" {
 				eventType, _ = event["type"].(string)
+				if eventType == "" && event["error"] != nil {
+					eventType = "error"
+				}
 			}
 		}
 		if eventType != "response.failed" && eventType != "error" {
@@ -1929,6 +1941,12 @@ func parseOpsSSEFailure(body []byte) (parsedOpsError, bool) {
 				parsed.Code = strconvItoa(int(code))
 			}
 			parsed.StatusCode = opsJSONInt(errObj["status_code"])
+			if parsed.StatusCode == 0 {
+				// Native Google errors put their HTTP status in error.code.
+				if code, ok := errObj["code"].(float64); ok && code >= 400 && code <= 599 {
+					parsed.StatusCode = int(code)
+				}
+			}
 			if parsed.StatusCode == 0 {
 				parsed.StatusCode = opsJSONInt(errObj["status"])
 			}

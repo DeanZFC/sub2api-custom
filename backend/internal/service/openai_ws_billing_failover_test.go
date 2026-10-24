@@ -127,7 +127,7 @@ func TestOpenAIWSBillingErrorBeforeOutputReturnsSafeNonStreamingResponse(t *test
 	}
 }
 
-func TestOpenAIWSBillingErrorAfterStreamOutputHidesProviderAndReturnedMessage(t *testing.T) {
+func TestOpenAIWSBillingErrorAfterStreamOutputHidesProviderAndRetainsDiagnostics(t *testing.T) {
 	svc, c, recorder, account := newOpenAIWSBillingForwardFixture(t,
 		`{"type":"response.created","response":{"id":"resp_billing","model":"gpt-5.1"}}`,
 		`{"type":"response.output_text.delta","delta":"hello"}`,
@@ -137,8 +137,8 @@ func TestOpenAIWSBillingErrorAfterStreamOutputHidesProviderAndReturnedMessage(t 
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.Nil(t, result)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), UpstreamBillingExhaustedClientMessage)
-	require.NotContains(t, err.Error(), "provider balance")
+	require.ErrorContains(t, err, "provider balance is zero")
+	require.Equal(t, "provider balance is zero", c.GetString(OpsUpstreamErrorMessageKey))
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "hello")
 	require.Contains(t, recorder.Body.String(), UpstreamBillingExhaustedClientMessage)

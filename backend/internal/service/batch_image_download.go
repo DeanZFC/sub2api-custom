@@ -238,7 +238,7 @@ func (s *BatchImageDownloadService) StreamZip(ctx context.Context, owner BatchIm
 		}
 		return result, ErrBatchImageDownloadFailed.WithCause(err)
 	}
-	zipErrors = append(zipErrors, batchImageZipErrorsFromItems(failedItems)...)
+	zipErrors = append(zipErrors, batchImageZipErrorsFromItems(ctx, failedItems)...)
 	if err := writeBatchImageZipJSON(zipWriter, "manifest.json", batchImageZipManifest{
 		BatchID:      job.BatchID,
 		Model:        job.Model,
@@ -304,7 +304,7 @@ func (s *BatchImageDownloadService) writeZipImages(ctx context.Context, zipWrite
 		}
 		delete(missing, images.CustomID)
 		if len(images.Images) == 0 {
-			zipErrors = append(zipErrors, batchImageZipError{CustomID: images.CustomID, Code: "EMPTY_IMAGE_OUTPUT", Message: "provider response contained no image output"})
+			zipErrors = append(zipErrors, batchImageZipError{CustomID: images.CustomID, Code: "EMPTY_IMAGE_OUTPUT", Message: UpstreamErrorClientMessage(ctx, "provider response contained no image output")})
 			continue
 		}
 		for idx, image := range images.Images {
@@ -340,7 +340,7 @@ func (s *BatchImageDownloadService) writeZipImages(ctx context.Context, zipWrite
 	}
 	sort.Strings(missingIDs)
 	for _, customID := range missingIDs {
-		zipErrors = append(zipErrors, batchImageZipError{CustomID: customID, Code: "RESULT_MISSING", Message: "provider result was not found for item"})
+		zipErrors = append(zipErrors, batchImageZipError{CustomID: customID, Code: "RESULT_MISSING", Message: UpstreamErrorClientMessage(ctx, "provider result was not found for item")})
 	}
 	return result, manifestFiles, zipErrors, nil
 }
@@ -628,16 +628,21 @@ type batchImageZipError struct {
 	Message  string `json:"message"`
 }
 
-func batchImageZipErrorsFromItems(items []*BatchImageItem) []batchImageZipError {
+func batchImageZipErrorsFromItems(ctx context.Context, items []*BatchImageItem) []batchImageZipError {
 	out := make([]batchImageZipError, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue
 		}
+		public := batchImageItemToPublicForContext(ctx, item)
+		message := sanitizeBatchImagePublicMessage(batchImageDerefString(item.ErrorMessage))
+		if public.Error != nil {
+			message = public.Error.Message
+		}
 		out = append(out, batchImageZipError{
 			CustomID: item.CustomID,
 			Code:     batchImageDerefString(item.ErrorCode),
-			Message:  sanitizeBatchImagePublicMessage(batchImageDerefString(item.ErrorMessage)),
+			Message:  message,
 		})
 	}
 	return out

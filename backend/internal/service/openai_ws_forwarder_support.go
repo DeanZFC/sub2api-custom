@@ -518,12 +518,23 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	if s == nil {
 		return nil, nil
 	}
+	SetGroupQualityTrafficGroupContext(ctx, derefGroupID(groupID))
 	accountID, account, responseID, store := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	if accountID <= 0 || account == nil || store == nil {
 		return nil, nil
 	}
+	// Automatic protection is temporary. Preserve response ownership and let the
+	// bounded recovery pass try this exact credential; never replay elsewhere.
+	if groupQualityAutomaticHold(ctx, account, groupID, requestedModel) {
+		return nil, ErrGroupQualityTrafficBudget
+	}
 
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, &account)
+	if errors.Is(acquireErr, ErrGroupQualityTrafficBudget) {
+		// Incremental previous_response requests cannot be replayed on another
+		// account. Keep response ownership and propagate the temporary denial.
+		return nil, acquireErr
+	}
 	if acquireErr == nil && result.Acquired {
 		logOpenAIWSBindResponseAccountWarn(
 			derefGroupID(groupID),
@@ -609,6 +620,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	if !account.IsOpenAIApiKey() && s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		return 0, nil, "", nil
 	}
+	if groupQualityAutomaticHold(ctx, account, groupID, requestedModel) {
+		return accountID, account, responseID, store
+	}
 	if shouldClearStickySessionWithContext(ctx, account, requestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
@@ -641,6 +655,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		if latestErr != nil || latest == nil {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
+		}
+		if groupQualityAutomaticHold(ctx, latest, groupID, requestedModel) {
+			return accountID, latest, responseID, store
 		}
 		if shouldClearStickySessionWithContext(ctx, latest, requestedModel) || !latest.IsOpenAI() || !latest.IsSchedulable() {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)

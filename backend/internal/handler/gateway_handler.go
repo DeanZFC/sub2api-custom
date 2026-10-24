@@ -1946,6 +1946,8 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 			msg := service.ExtractUpstreamErrorMessage(responseBody)
 			if !rule.PassthroughBody && rule.CustomMessage != nil {
 				msg = *rule.CustomMessage
+			} else if platform == service.PlatformOpenAI || platform == service.PlatformGrok {
+				msg = service.OpenAIUpstreamErrorClientMessage(responseBody, msg)
 			}
 
 			if rule.SkipMonitoring {

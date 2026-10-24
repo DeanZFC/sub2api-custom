@@ -453,6 +453,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableFingerprintUnification != after.EnableFingerprintUnification {
 		changed = append(changed, "enable_fingerprint_unification")
 	}
+	if before.UpstreamErrorMessage != after.UpstreamErrorMessage {
+		changed = append(changed, "upstream_error_message")
+	}
 	if !reflect.DeepEqual(before.UpstreamErrorRetry, after.UpstreamErrorRetry) {
 		changed = append(changed, "upstream_error_retry")
 	}

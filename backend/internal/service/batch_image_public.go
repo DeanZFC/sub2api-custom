@@ -701,7 +701,7 @@ func (s *BatchImagePublicService) ListItems(ctx context.Context, owner BatchImag
 	}
 	data := make([]BatchImagePublicItem, 0, len(items))
 	for _, item := range items {
-		data = append(data, BatchImageItemToPublic(item))
+		data = append(data, batchImageItemToPublicForContext(ctx, item))
 	}
 	return &BatchImagePublicItemsResponse{
 		Object:  "list",
@@ -1243,6 +1243,14 @@ func BatchImageItemToPublic(item *BatchImageItem) BatchImagePublicItem {
 		Code:    batchImageDerefString(item.ErrorCode),
 		Message: sanitizeBatchImagePublicMessage(batchImageDerefString(item.ErrorMessage)),
 		Source:  batchImageItemErrorSource(item),
+	}
+	return out
+}
+
+func batchImageItemToPublicForContext(ctx context.Context, item *BatchImageItem) BatchImagePublicItem {
+	out := BatchImageItemToPublic(item)
+	if out.Error != nil && out.Error.Source != "system" {
+		out.Error.Message = UpstreamErrorClientMessage(ctx, out.Error.Message)
 	}
 	return out
 }

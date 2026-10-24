@@ -36,6 +36,10 @@ type OpsErrorLog struct {
 	Owner  string `json:"error_owner"`
 	Source string `json:"error_source"`
 
+	// List projections need upstream provenance even when a request-scoped
+	// provider rejection is classified as a client error. Never expose it in DTOs.
+	HasUpstreamError bool `json:"-"`
+
 	Severity string `json:"severity"`
 
 	StatusCode int    `json:"status_code"`

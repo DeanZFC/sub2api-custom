@@ -35,6 +35,7 @@ func (r *passiveQualityRepository) groupQualityTargetSummary(ctx context.Context
 	groupID := p.GroupIDs[0]
 	s := service.GroupQualityTargetSummary{GroupID: groupID, WindowSeconds: 3600, GeneratedAt: now}
 	var cache, availability, ttft sql.NullFloat64
+	var totalInput int64
 	// Account/request identity is retained across WS turns. A failed attempt
 	// wins over partial usage, matching the real-traffic protection collector.
 	err := r.db.QueryRowContext(ctx, `WITH failed AS MATERIALIZED (
@@ -78,10 +79,11 @@ func (r *passiveQualityRepository) groupQualityTargetSummary(ctx context.Context
  CASE WHEN telemetry.complete THEN 100.0*stats.cache_read/NULLIF(stats.cache_input,0) END,
  stats.successes,failures.failures,unknown.failures,
  CASE WHEN telemetry.complete AND unknown.failures=0 THEN 100.0*stats.successes/NULLIF(stats.successes+failures.failures,0) END,
- stats.ttft_samples,CASE WHEN telemetry.complete THEN stats.ttft_p90 END,telemetry.complete
+ stats.ttft_samples,CASE WHEN telemetry.complete THEN stats.ttft_p90 END,telemetry.complete,
+ (SELECT COALESCE(sum(text_input),0) FROM succeeded)
  FROM stats CROSS JOIN failures CROSS JOIN unknown CROSS JOIN telemetry`, groupID, now.Add(-time.Hour), now, p.Model, pq.Array(append([]int64{}, p.ExcludedAccountIDs...))).Scan(
 		&s.CacheSamples, &s.CacheReadTokens, &s.CacheInputTokens, &s.CacheUnknownSamples, &cache,
-		&s.SuccessSamples, &s.FailureSamples, &s.FailureUnknownSamples, &availability, &s.TTFTSamples, &ttft, &s.TelemetryComplete)
+		&s.SuccessSamples, &s.FailureSamples, &s.FailureUnknownSamples, &availability, &s.TTFTSamples, &ttft, &s.TelemetryComplete, &totalInput)
 	if err != nil {
 		return s, err
 	}
@@ -94,5 +96,12 @@ func (r *passiveQualityRepository) groupQualityTargetSummary(ctx context.Context
 	if ttft.Valid {
 		s.TTFTP90MS = &ttft.Float64
 	}
-	return s, nil
+	if err = r.updateGroupQualityTrafficSnapshot(ctx, p, now, totalInput, s.CacheReadTokens, s.TelemetryComplete); err != nil {
+		return s, err
+	}
+	s.TrafficControl, err = r.groupQualityTrafficSummary(ctx, p, now, totalInput, s.CacheReadTokens, s.TelemetryComplete)
+	if err == nil {
+		s.Fallback, err = r.groupQualityFallbackSummary(ctx, p, now)
+	}
+	return s, err
 }

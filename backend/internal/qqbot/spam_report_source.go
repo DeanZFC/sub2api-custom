@@ -13,6 +13,14 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	spamReportWindow              = 30 * time.Minute
+	spamReportProcessingWindow    = 2 * time.Minute
+	spamReportSourceRetention     = spamReportWindow + spamReportProcessingWindow
+	spamReportRecallWindow        = 115 * time.Second
+	spamReportRecallSkippedReason = "原消息已超过安全撤回时限，按举报规则仅禁言"
+)
+
 func (c Config) reportsSpam(group string) bool {
 	if !c.Enabled || !c.Moderation.ReportEnabled || !c.allows(group) {
 		return false
@@ -27,7 +35,7 @@ func (c Config) reportsSpam(group string) bool {
 
 // Model and credential changes invalidate a verdict as well as policy changes.
 func spamReportPolicy(c Config) string {
-	raw, _ := json.Marshal([]any{"spam-report-v1", c.Enabled, c.AppID, c.Sandbox, c.AllowedGroups,
+	raw, _ := json.Marshal([]any{"spam-report-v2-30m", c.Enabled, c.AppID, c.Sandbox, c.AllowedGroups,
 		c.Moderation, c.GroupAdmins, c.BaseURL, c.APIKey, c.ChatModel, c.ChatProtocol})
 	mac := hmac.New(sha256.New, []byte(c.AppSecret))
 	_, _ = mac.Write(raw)
@@ -49,79 +57,254 @@ func spamReportTextEligible(e Event) bool {
 		len(e.Content) <= 24000 && utf8.RuneCountInString(e.Content) <= 6000 && !containsRewardCode(e.Content)
 }
 
+// The existing TEXT hash column also records callback provenance. An @ callback
+// can establish a consistency observation, but cannot supply a complete source.
+// Keeping an explicit invalid state prevents a later callback from reviving a
+// rejected observation; an empty ciphertext never implies trusted provenance.
+type spamReportCallbackHash struct {
+	Version        int    `json:"v"`
+	Kind           string `json:"kind"`
+	Reason         string `json:"reason,omitempty"`
+	Content        string `json:"content,omitempty"`
+	TrimmedContent string `json:"trimmed_content,omitempty"`
+	WithoutMention string `json:"without_mention,omitempty"`
+	AtContent      string `json:"at_content,omitempty"`
+}
+
+func spamReportContentHash(secret, content string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(content))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func spamReportCallbackFingerprint(c Config, e Event, eventType string, eligible bool) spamReportCallbackHash {
+	h := spamReportCallbackHash{Version: 1, Kind: "invalid", Reason: "ineligible_content"}
+	if !eligible {
+		return h
+	}
+	if eventType == groupMessageCreate {
+		h.Kind = "full"
+	} else {
+		h.Kind = "at"
+	}
+	h.Reason = ""
+	h.Content = spamReportContentHash(c.AppSecret, e.Content)
+	h.TrimmedContent = spamReportContentHash(c.AppSecret, strings.TrimSpace(e.Content))
+	if h.Kind == "full" {
+		// QQ removes only the leading bot mention in GROUP_AT_MESSAGE_CREATE.
+		// The matching signed @ callback with the same immutable identity is the
+		// evidence for that transformation; never strip interior or @all tags.
+		text := strings.TrimSpace(e.Content)
+		if strings.HasPrefix(text, "<@") {
+			mention, remainder, ok := strings.Cut(text[2:], ">")
+			member := strings.TrimPrefix(mention, "!")
+			valid := ok && member != "" && member != "all" && len(member) <= 128
+			for _, r := range member {
+				if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+					valid = false
+				}
+			}
+			if valid && strings.TrimSpace(remainder) != "" {
+				h.WithoutMention = spamReportContentHash(c.AppSecret, strings.TrimSpace(remainder))
+			}
+		}
+	}
+	return h
+}
+
+func spamReportCallbacksMatch(previous, current spamReportCallbackHash) bool {
+	valid := func(h spamReportCallbackHash) bool {
+		return h.Version == 1 && (h.Kind == "full" || h.Kind == "at") && len(h.Content) == 64
+	}
+	if !valid(previous) || !valid(current) {
+		return false
+	}
+	if previous.Content == current.Content {
+		return true
+	}
+	if previous.Kind == current.Kind {
+		return false // Same-event duplicates must retain the exact original body.
+	}
+	if previous.Kind == "at" {
+		previous, current = current, previous
+	}
+	return previous.WithoutMention != "" && previous.WithoutMention == current.TrimmedContent
+}
+
 // Capture only signed original callbacks. Quote bodies never establish authorship.
 // This path runs before history, AI chat and ambient-message routing gates.
-func (s *Service) rememberSpamReportSource(ctx context.Context, snapshot Config, e Event) error {
-	if !snapshot.reportsSpam(e.GroupID) || e.ID == "" || len(e.ID) > 1024 ||
-		e.Author.MemberID == "" || len(e.Author.MemberID) > 128 || len(e.Author.MemberRole) > 32 {
+func (s *Service) rememberSpamReportSource(ctx context.Context, snapshot Config, e Event, eventTypes ...string) error {
+	eventType := groupMessageCreate
+	if len(eventTypes) > 0 {
+		eventType = eventTypes[0]
+	}
+	if !isGroupMessageEvent(eventType) {
+		return nil
+	}
+	if !snapshot.reportsSpam(e.GroupID) {
+		return nil
+	}
+	receptionReason := ""
+	defer func() { s.logSpamSourceReception(ctx, snapshot, e, eventType, receptionReason) }()
+	switch {
+	case e.ID == "":
+		receptionReason = "message_id_missing"
+	case len(e.ID) > 1024:
+		receptionReason = "message_id_too_long"
+	case e.Author.MemberID == "":
+		receptionReason = "member_id_missing"
+	case len(e.Author.MemberID) > 128:
+		receptionReason = "member_id_too_long"
+	case len(e.Author.MemberRole) > 32:
+		receptionReason = "member_role_too_long"
+	case len(e.Timestamp) == 0:
+		receptionReason = "timestamp_missing"
+	}
+	if receptionReason != "" {
 		return nil
 	}
 	var stamp string
 	if json.Unmarshal(e.Timestamp, &stamp) != nil {
+		receptionReason = "timestamp_type_invalid"
+		return nil
+	}
+	if stamp == "" {
+		receptionReason = "timestamp_empty"
 		return nil
 	}
 	sent, err := time.Parse(time.RFC3339Nano, stamp)
-	if err != nil || time.Since(sent) > 120*time.Second || sent.After(time.Now().Add(5*time.Second)) {
+	if err != nil {
+		receptionReason = "timestamp_invalid"
+		return nil
+	}
+	if time.Since(sent) > spamReportSourceRetention {
+		receptionReason = "timestamp_expired"
+		return nil
+	}
+	if sent.After(time.Now().Add(5 * time.Second)) {
+		receptionReason = "timestamp_future"
 		return nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		receptionReason = "transaction_begin_failed"
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	c, err := s.lockConfig(ctx, tx)
 	if err != nil {
+		receptionReason = "config_read_failed"
 		return err
 	}
-	if c.AppID != snapshot.AppID || c.Sandbox != snapshot.Sandbox || !c.reportsSpam(e.GroupID) {
+	if c.AppID != snapshot.AppID || c.Sandbox != snapshot.Sandbox {
+		receptionReason = "scope_changed"
+		return nil
+	}
+	if !c.reportsSpam(e.GroupID) {
+		receptionReason = "report_disabled"
 		return nil
 	}
 	// Bound this evidence buffer even for unmentioned, high-volume group traffic.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,306))`, c.AppID+":"+e.GroupID); err != nil {
+		receptionReason = "group_lock_failed"
 		return err
 	}
-	eligible := spamReportTextEligible(e) && !c.moderationExempt(e.GroupID, e.Author.MemberID)
+	observationEligible := spamReportTextEligible(e) && !c.moderationExempt(e.GroupID, e.Author.MemberID)
+	fingerprint := spamReportCallbackFingerprint(c, e, eventType, observationEligible)
+	eligible := observationEligible && eventType == groupMessageCreate
 	ciphertext := ""
-	mac := hmac.New(sha256.New, []byte(c.AppSecret))
-	_, _ = mac.Write([]byte(e.Content))
-	contentHash := hex.EncodeToString(mac.Sum(nil))
 	if eligible {
 		if !s.encryptionReady || s.encryptor == nil {
+			receptionReason = "encryption_unavailable"
 			return errors.New("举报原消息证据加密不可用")
 		}
 		ciphertext, err = s.encryptor.Encrypt(e.Content)
 		if err != nil {
+			receptionReason = "encryption_failed"
 			return errors.New("举报原消息证据加密失败")
 		}
 	}
-	// QQ may deliver the same message through both event types. Conflicting
-	// immutable metadata fails closed; duplicates cannot refresh the expiry.
+	// The group advisory lock serializes source writes. Compare immutable fields
+	// in PostgreSQL so timestamp precision has exactly the same semantics as the
+	// stored value, and retain the first timestamp and sender on every duplicate.
+	var previousHash, previousCiphertext, previousRole string
+	var previousBot, previousEligible, unchanged bool
+	err = tx.QueryRowContext(ctx, `SELECT content_hash,content_encrypted,member_role,is_bot,eligible,
+ member_id=$5 AND member_role=$6 AND ref_idx=$7 AND sent_at=$8 AND policy_hash=$9
+ FROM qq_bot_spam_report_sources WHERE app_id=$1 AND sandbox=$2 AND group_id=$3 AND message_id=$4`,
+		c.AppID, c.Sandbox, e.GroupID, e.ID, e.Author.MemberID, e.Author.MemberRole,
+		e.MessageScene.value("msg_idx"), sent, spamReportPolicy(c)).Scan(&previousHash, &previousCiphertext, &previousRole, &previousBot, &previousEligible, &unchanged)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		receptionReason = "previous_source_read_failed"
+		return err
+	}
+	role, bot := e.Author.MemberRole, e.Author.Bot
+	if err == nil {
+		var previous spamReportCallbackHash
+		parsed := json.Unmarshal([]byte(previousHash), &previous) == nil
+		matches := parsed && unchanged && observationEligible && !previousBot && spamReportCallbacksMatch(previous, fingerprint)
+		if previous.Kind == "full" && !previousEligible {
+			matches = false
+		}
+		if previous.Kind == "full" && fingerprint.Kind == "at" && previous.AtContent != "" && previous.AtContent != fingerprint.Content {
+			matches = false
+		}
+		if role == "member" {
+			role = previousRole
+		}
+		bot = bot || previousBot
+		if !matches {
+			// Legacy hashes have no provenance and cannot safely be upgraded.
+			reason := "callback_conflict"
+			if !parsed || previous.Version != 1 {
+				reason = "legacy_provenance"
+			} else if previous.Kind == "invalid" && previous.Reason != "" {
+				reason = previous.Reason
+			}
+			fingerprint = spamReportCallbackHash{Version: 1, Kind: "invalid", Reason: reason}
+			eligible, ciphertext = false, previousCiphertext
+		} else if previous.Kind == "full" {
+			if fingerprint.Kind == "at" {
+				previous.AtContent = fingerprint.Content
+			}
+			fingerprint, eligible, ciphertext = previous, true, previousCiphertext
+		} else if fingerprint.Kind == "full" {
+			fingerprint.AtContent = previous.Content
+		}
+	}
+	encodedHash, err := json.Marshal(fingerprint)
+	if err != nil {
+		receptionReason = "fingerprint_encode_failed"
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_spam_report_sources
  (app_id,sandbox,group_id,message_id,ref_idx,member_id,member_role,is_bot,eligible,content_encrypted,policy_hash,sent_at,content_hash)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
  ON CONFLICT(app_id,sandbox,group_id,message_id) DO UPDATE SET
- member_role=CASE WHEN EXCLUDED.member_role<>'member' THEN EXCLUDED.member_role ELSE qq_bot_spam_report_sources.member_role END,
- is_bot=qq_bot_spam_report_sources.is_bot OR EXCLUDED.is_bot,
- eligible=
- qq_bot_spam_report_sources.eligible AND EXCLUDED.eligible
- AND qq_bot_spam_report_sources.member_id=EXCLUDED.member_id
- AND qq_bot_spam_report_sources.member_role=EXCLUDED.member_role
- AND qq_bot_spam_report_sources.ref_idx=EXCLUDED.ref_idx
- AND qq_bot_spam_report_sources.sent_at=EXCLUDED.sent_at
-	 AND qq_bot_spam_report_sources.content_hash=EXCLUDED.content_hash
- AND qq_bot_spam_report_sources.policy_hash=EXCLUDED.policy_hash`, c.AppID, c.Sandbox, e.GroupID, e.ID,
-		e.MessageScene.value("msg_idx"), e.Author.MemberID, e.Author.MemberRole, e.Author.Bot, eligible, ciphertext, spamReportPolicy(c), sent, contentHash)
+ member_role=EXCLUDED.member_role,is_bot=EXCLUDED.is_bot,eligible=EXCLUDED.eligible,
+ content_encrypted=EXCLUDED.content_encrypted,content_hash=EXCLUDED.content_hash`, c.AppID, c.Sandbox, e.GroupID, e.ID,
+		e.MessageScene.value("msg_idx"), e.Author.MemberID, role, bot, eligible, ciphertext, spamReportPolicy(c), sent, string(encodedHash))
 	if err != nil {
+		receptionReason = "source_write_failed"
 		return err
 	}
+	// QQ may timestamp multiple events to the same second. Retain protective
+	// observations before ordinary sources at that timestamp, so capacity
+	// eviction cannot remove a protection while leaving its affected source.
 	_, err = tx.ExecContext(ctx, `DELETE FROM qq_bot_spam_report_sources WHERE app_id=$1 AND sandbox=$2 AND group_id=$3
- AND (sent_at<clock_timestamp()-INTERVAL '120 seconds' OR message_id IN
+ AND (sent_at<clock_timestamp()-($4::double precision * INTERVAL '1 second') OR message_id IN
  (SELECT message_id FROM qq_bot_spam_report_sources WHERE app_id=$1 AND sandbox=$2 AND group_id=$3
- ORDER BY sent_at DESC,message_id DESC OFFSET 2000))`, c.AppID, c.Sandbox, e.GroupID)
+ ORDER BY sent_at DESC,(member_role<>'member' OR is_bot) DESC,message_id DESC OFFSET 2000))`, c.AppID, c.Sandbox, e.GroupID, spamReportSourceRetention.Seconds())
 	if err != nil {
+		receptionReason = "source_prune_failed"
 		return err
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		receptionReason = "transaction_commit_failed"
+		return err
+	}
+	receptionReason = spamSourceReceptionStoredReason(c, e, fingerprint, eligible)
+	return nil
 }
 
 type spamReportQueryer interface {
@@ -133,110 +316,115 @@ func (s *Service) spamReportSource(ctx context.Context, c Config, group, referen
 }
 
 func (s *Service) loadSpamReportSource(ctx context.Context, db spamReportQueryer, c Config, group, reference string) (*spamReportSource, error) {
-	if !c.reportsSpam(group) || reference == "" || len(reference) > 1024 {
+	source, _, err := s.inspectSpamReportSource(ctx, db, c, group, reference)
+	return source, err
+}
+
+func (s *Service) loadSpamReportEvidence(ctx context.Context, db spamReportQueryer, c Config, group, reference, reportID string) (*spamReportSource, error) {
+	if reportID == "" {
 		return nil, nil
 	}
-	// Resolve ambiguity before checking eligibility. An invalid colliding record
-	// must not cause an apparently unique match against a different sender.
-	rows, err := db.QueryContext(ctx, `SELECT s.message_id,s.member_id,s.content_encrypted,s.sent_at,
- s.eligible AND NOT s.is_bot AND s.member_role='member' AND s.policy_hash=$5
- AND NOT EXISTS(SELECT 1 FROM qq_bot_spam_report_sources newer WHERE newer.app_id=s.app_id
- AND newer.sandbox=s.sandbox AND newer.group_id=s.group_id AND newer.member_id=s.member_id
- AND newer.sent_at>=s.sent_at AND (newer.member_role<>'member' OR newer.is_bot))
- FROM qq_bot_spam_report_sources s WHERE s.app_id=$1 AND s.sandbox=$2 AND s.group_id=$3
- AND (s.message_id=$4 OR s.ref_idx=$4) AND s.sent_at>clock_timestamp()-INTERVAL '115 seconds'
- AND s.sent_at<=clock_timestamp()+INTERVAL '5 seconds' LIMIT 2`, c.AppID, c.Sandbox, group, reference, spamReportPolicy(c))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var source spamReportSource
-	var encrypted string
-	var eligible bool
-	count := 0
-	for rows.Next() {
-		if err = rows.Scan(&source.MessageID, &source.MemberID, &encrypted, &source.SentAt, &eligible); err != nil {
-			return nil, err
-		}
-		count++
-	}
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	if count != 1 || !eligible || c.moderationExempt(group, source.MemberID) {
-		return nil, nil
-	}
-	if s.encryptor == nil {
-		return nil, errors.New("举报证据解密不可用")
-	}
-	source.Content, err = s.encryptor.Decrypt(encrypted)
-	if err != nil {
-		return nil, errors.New("举报证据解密失败")
-	}
-	if strings.TrimSpace(source.Content) == "" {
-		return nil, nil
-	}
-	return &source, nil
+	source, _, err := s.inspectSpamReportSourceForReport(ctx, db, c, group, reference, reportID)
+	return source, err
 }
 
 func (s *Service) confirmSpamReport(ctx context.Context, snapshot Config, reportID string, source spamReportSource, category, reason string) (bool, error) {
+	queued, _, err := s.confirmSpamReportWithReason(ctx, snapshot, reportID, source, category, reason)
+	return queued, err
+}
+
+func (s *Service) confirmSpamReportWithReason(ctx context.Context, snapshot Config, reportID string, source spamReportSource, category, reason string) (bool, spamReportSourceReason, error) {
 	if category != "advertising" && category != "phishing" && category != "scam" {
-		return false, nil
+		return false, spamSourceUnverified, nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return false, spamSourceUnverified, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	c, err := s.lockConfig(ctx, tx)
 	if err != nil {
-		return false, err
+		return false, spamSourceUnverified, err
 	}
-	if c.AppID != snapshot.AppID || c.Sandbox != snapshot.Sandbox || spamReportPolicy(c) != spamReportPolicy(snapshot) {
-		return false, nil
+	if c.AppID != snapshot.AppID || c.Sandbox != snapshot.Sandbox {
+		return false, spamSourcePolicyChanged, nil
 	}
-	var group, status, policy, message, member string
-	err = tx.QueryRowContext(ctx, `SELECT group_id,status,policy_hash,message_id,member_id FROM qq_bot_spam_reports
- WHERE id=$1 AND app_id=$2 AND sandbox=$3 FOR UPDATE`, reportID, c.AppID, c.Sandbox).Scan(&group, &status, &policy, &message, &member)
+	var group, status, policy, message, member, recordedReason string
+	var created time.Time
+	err = tx.QueryRowContext(ctx, `SELECT group_id,status,policy_hash,message_id,member_id,created_at,reason FROM qq_bot_spam_reports
+ WHERE id=$1 AND app_id=$2 AND sandbox=$3 FOR UPDATE`, reportID, c.AppID, c.Sandbox).Scan(&group, &status, &policy, &message, &member, &created, &recordedReason)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, spamSourceReportMissing, nil
 	}
 	if err != nil {
-		return false, err
+		return false, spamSourceUnverified, err
 	}
-	if status != "evaluating" || policy != spamReportPolicy(c) || message != source.MessageID || member != source.MemberID ||
-		!c.reportsSpam(group) || c.moderationExempt(group, member) || time.Until(source.SentAt.Add(115*time.Second)) < 5*time.Second {
-		return false, nil
+	if message != source.MessageID || member != source.MemberID {
+		return false, spamSourceChanged, nil
 	}
-	current, err := s.loadSpamReportSource(ctx, tx, c, group, message)
+	if status == "cancelled" || (status == "failed" && spamReportCancellationReason(recordedReason) == spamSourceProcessingExpired) {
+		return false, spamReportCancellationReason(recordedReason), nil
+	}
+	if rejection := spamReportConfigReason(c, snapshot, group, member); rejection != spamSourceOK {
+		return false, rejection, nil
+	}
+	if status != "evaluating" {
+		return false, spamSourceReportInvalid, nil
+	}
+	if policy != spamReportPolicy(c) {
+		return false, spamSourcePolicyChanged, nil
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,306))`, c.AppID+":"+group); err != nil {
+		return false, spamSourceUnverified, err
+	}
+	var now time.Time
+	if err = tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return false, spamSourceUnverified, err
+	}
+	if !created.Add(spamReportProcessingWindow).After(now) {
+		return false, spamSourceProcessingExpired, nil
+	}
+	if created.Add(spamReportProcessingWindow).Sub(now) < 5*time.Second {
+		return false, spamSourceProcessingInsufficient, nil
+	}
+	current, rejection, err := s.inspectSpamReportSourceForReport(ctx, tx, c, group, message, reportID)
 	if err != nil {
-		return false, err
+		return false, spamSourceUnverified, err
 	}
-	if current == nil || current.MemberID != source.MemberID || current.Content != source.Content || !current.SentAt.Equal(source.SentAt) {
-		return false, nil
+	if current == nil {
+		return false, rejection, nil
+	}
+	if current.MemberID != source.MemberID || current.Content != source.Content || !current.SentAt.Equal(source.SentAt) {
+		return false, spamSourceChanged, nil
 	}
 	incident := randomID()
 	if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_moderation_incidents
  (id,app_id,sandbox,group_id,member_id,policy_hash,reason,mute_seconds) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
 		incident, c.AppID, c.Sandbox, group, member, policy, "spam_"+category, c.Moderation.ReportMuteMinutes*60); err != nil {
-		return false, err
+		return false, spamSourceUnverified, err
 	}
-	// Recall must be confirmed before the executor may mute. Never activate the
-	// anti-flood cooldown: no other messages were judged by this report.
-	if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_moderation_operations(incident_id,kind,message_id,expires_at)
- VALUES($1,'recall',$2,$3),($1,'mute','',$3)`, incident, message, source.SentAt.Add(115*time.Second)); err != nil {
-		return false, err
+	// Decide the action once. A fresh recall that fails or becomes unknown must
+	// never turn into the explicitly authorized old-message mute-only path.
+	recallExpires := source.SentAt.Add(spamReportRecallWindow)
+	recallStatus, recallReason := "queued", ""
+	if time.Until(recallExpires) < 5*time.Second {
+		recallStatus, recallReason = "skipped", spamReportRecallSkippedReason
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_moderation_operations(incident_id,kind,message_id,expires_at,status,error,finished_at)
+ VALUES($1,'recall',$2,$3,$4,$5,CASE WHEN $4='skipped' THEN clock_timestamp() END),
+ ($1,'mute','',$6,'queued','',NULL)`, incident, message, recallExpires, recallStatus, recallReason, created.Add(spamReportProcessingWindow)); err != nil {
+		return false, spamSourceUnverified, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_spam_reports SET status='queued',category=$2,reason=$3,incident_id=$4,finished_at=NOW() WHERE id=$1`, reportID, category, limitText(reason, 250), incident); err != nil {
-		return false, err
+		return false, spamSourceUnverified, err
 	}
-	return true, tx.Commit()
+	return true, spamSourceOK, tx.Commit()
 }
 
 func (s *Service) maintainSpamReports(ctx context.Context) {
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_spam_report_sources WHERE sent_at<NOW()-INTERVAL '120 seconds'`)
-	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_spam_reports SET status='failed',reason='审核中断或超时，未采取处罚',finished_at=NOW()
- WHERE status='evaluating' AND created_at<NOW()-INTERVAL '2 minutes'`)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_spam_report_sources WHERE sent_at<clock_timestamp()-($1::double precision * INTERVAL '1 second')`, spamReportSourceRetention.Seconds())
+	_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_spam_reports SET status='failed',reason=$1,finished_at=NOW()
+ WHERE status='evaluating' AND created_at<clock_timestamp()-INTERVAL '2 minutes'`, spamSourceProcessingExpired.audit())
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_spam_reports WHERE created_at<NOW()-INTERVAL '30 days'`)
 }
 
@@ -247,16 +435,61 @@ func resetSpamReports(ctx context.Context, tx *sql.Tx, old, current Config) erro
 	if (!old.Moderation.ReportEnabled && !current.Moderation.ReportEnabled) || spamReportPolicy(old) == spamReportPolicy(current) {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE qq_bot_spam_reports r SET status='cancelled',reason='审核配置或白名单已变更，取消未执行处罚',finished_at=NOW()
+	// Store the first verified cancellation cause under the config lock. Later
+	// configuration restoration cannot replace it or revive the old admission.
+	exemptions, err := json.Marshal(current.Moderation.Exemptions)
+	if err != nil {
+		return err
+	}
+	admins, err := json.Marshal(current.GroupAdmins)
+	if err != nil {
+		return err
+	}
+	groups := []string{}
+	for _, group := range current.Moderation.Groups {
+		if current.reportsSpam(group) {
+			groups = append(groups, group)
+		}
+	}
+	activeGroups, err := json.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE qq_bot_spam_reports r SET status='cancelled',reason=CASE
+ WHEN r.app_id<>$2 OR r.sandbox<>$3 THEN $7
+ WHEN EXISTS(SELECT 1 FROM jsonb_to_recordset(COALESCE(NULLIF($4::jsonb,'null'::jsonb),'[]'::jsonb)) AS e(group_id text,member_id text)
+ WHERE e.group_id=r.group_id AND e.member_id=r.member_id) THEN $8
+ WHEN EXISTS(SELECT 1 FROM jsonb_to_recordset(COALESCE(NULLIF($5::jsonb,'null'::jsonb),'[]'::jsonb)) AS a(app_id text,group_id text,member_id text)
+ WHERE a.app_id=r.app_id AND a.group_id=r.group_id AND a.member_id=r.member_id) THEN $9
+ WHEN NOT ($6::jsonb ? r.group_id) THEN $10 ELSE $7 END,finished_at=NOW()
  WHERE app_id=$1 AND (status='evaluating' OR (status='queued' AND EXISTS
- (SELECT 1 FROM qq_bot_moderation_operations o WHERE o.incident_id=r.incident_id AND o.status IN ('queued','started'))))`, old.AppID); err != nil {
+ (SELECT 1 FROM qq_bot_moderation_operations o WHERE o.incident_id=r.incident_id AND o.status IN ('queued','started'))))`, old.AppID,
+		current.AppID, current.Sandbox, string(exemptions), string(admins), string(activeGroups),
+		spamSourcePolicyChanged.audit(), spamSourceWhitelistChanged.audit(), spamSourceChatAuthorizationChanged.audit(), spamSourcePolicyDisabled.audit()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE qq_bot_moderation_operations o SET status='cancelled',error='举报配置或白名单已变更，取消处罚',finished_at=NOW()
- FROM qq_bot_moderation_incidents i WHERE i.id=o.incident_id AND i.app_id=$1
- AND i.reason IN ('spam_advertising','spam_phishing','spam_scam') AND o.status='queued'`, old.AppID); err != nil {
+	// Never copy arbitrary persisted reason text into an operation's public
+	// audit. Select a fixed, operation-specific explanation by known code only.
+	operationReasons := map[string]map[string]string{}
+	for _, reason := range []spamReportSourceReason{spamSourcePolicyChanged, spamSourceWhitelistChanged, spamSourceChatAuthorizationChanged, spamSourcePolicyDisabled} {
+		operationReasons[string(reason)] = map[string]string{
+			"recall": spamReportOperationCancellation(reason, "recall"),
+			"mute":   spamReportOperationCancellation(reason, "mute"),
+		}
+	}
+	operationReasonsJSON, err := json.Marshal(operationReasons)
+	if err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `DELETE FROM qq_bot_spam_report_sources WHERE app_id=$1`, old.AppID)
+	if _, err := tx.ExecContext(ctx, `UPDATE qq_bot_moderation_operations o SET status='cancelled',
+ error=COALESCE($2::jsonb->split_part(r.reason,'：',1)->>o.kind,CASE WHEN o.kind='recall' THEN $3 ELSE $4 END),finished_at=NOW()
+ FROM qq_bot_moderation_incidents i JOIN qq_bot_spam_reports r ON r.incident_id=i.id
+ AND r.app_id=i.app_id AND r.sandbox=i.sandbox AND r.group_id=i.group_id AND r.member_id=i.member_id
+ WHERE i.id=o.incident_id AND i.app_id=$1 AND r.status='cancelled'
+ AND i.reason IN ('spam_advertising','spam_phishing','spam_scam') AND o.status='queued'`, old.AppID, string(operationReasonsJSON),
+		spamReportOperationCancellation(spamSourceReportInvalid, "recall"), spamReportOperationCancellation(spamSourceReportInvalid, "mute")); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM qq_bot_spam_report_sources WHERE app_id=$1`, old.AppID)
 	return err
 }

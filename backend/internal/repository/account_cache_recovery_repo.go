@@ -26,6 +26,38 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	if !ok {
 		return false, fmt.Errorf("cache recovery admission database is unavailable")
 	}
+	if _, fallback := service.GroupQualityFallbackFromContext(ctx); fallback {
+		req, hasTraffic := service.GroupQualityTrafficRequestFromContext(ctx)
+		if !hasTraffic || req.LeaseID == "" || req.AccountID != accountID || !groupQualityFallbackMatches(ctx, accountID, req.Model) {
+			return false, nil
+		}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return false, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		eligible, err := groupQualityFallbackCandidate(ctx, tx, accountID, req.Model)
+		if err != nil || !eligible {
+			return false, err
+		}
+		var lease string
+		err = tx.QueryRowContext(ctx, `SELECT l.lease_id FROM group_quality_traffic_leases l
+ JOIN passive_quality_policies p ON p.id=l.policy_id AND p.version=l.policy_version
+ JOIN groups g ON g.id=l.group_id
+ WHERE l.lease_id=$1 AND l.account_id=$2 AND l.group_id=$3 AND l.request_key=$4 AND l.model=$5
+ AND l.fallback AND NOT l.unused AND l.released_at IS NULL AND l.fallback_expires_at>clock_timestamp()
+ AND g.platform='openai' AND g.status='active' AND g.deleted_at IS NULL
+ AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce'
+ AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=l.account_id AND ag.group_id=l.group_id)
+ FOR SHARE OF l`, req.LeaseID, accountID, req.GroupID, req.Key, req.Model).Scan(&lease)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return true, tx.Commit()
+	}
 	// Most accounts have no quality hold. Check live scheduling state and the
 	// indexed hold set in one read without serializing ordinary traffic.
 	var eligible, held bool

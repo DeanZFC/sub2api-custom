@@ -914,7 +914,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if errors.Is(acquireErr, errOpenAIWSPreferredConnUnavailable) {
 				return nil, NewOpenAIWSClientCloseError(
 					coderws.StatusPolicyViolation,
-					"upstream continuation connection is unavailable; please restart the conversation",
+					UpstreamErrorClientMessage(ctx, "upstream continuation connection is unavailable; please restart the conversation"),
 					acquireErr,
 				)
 			}
@@ -1217,7 +1217,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				// sanitizeOpenAICapacityShedErrorCodeForClient 注释里写明的前提。
 				clientMessage := upstreamMessage
 				if eventType == "error" || eventType == "response.failed" {
-					if rewritten, changed := sanitizeOpenAIResponseFailedEventForClient(clientMessage, eventType, wroteDownstream); changed {
+					if rewritten, changed := sanitizeOpenAIResponseFailedEventForClient(clientMessage, eventType, wroteDownstream, ctx); changed {
 						clientMessage = rewritten
 					}
 					if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
@@ -1807,7 +1807,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					resetSessionLease(true)
 					return NewOpenAIWSClientCloseError(
 						coderws.StatusPolicyViolation,
-						"upstream continuation connection is unavailable; please restart the conversation",
+						UpstreamErrorClientMessage(ctx, "upstream continuation connection is unavailable; please restart the conversation"),
 						pingErr,
 					)
 				}

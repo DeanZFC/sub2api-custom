@@ -115,7 +115,8 @@ func TestForwardAsAnthropic_StreamingBareErrorAfterOutputIsVisible(t *testing.T)
 	clientStream := rec.Body.String()
 	require.Contains(t, clientStream, `"text":"partial"`)
 	require.Contains(t, clientStream, "event: error")
-	require.Contains(t, clientStream, "mixed tools failed")
+	require.Contains(t, clientStream, OpenAIUpstreamFailureClientMessage)
+	require.NotContains(t, clientStream, "mixed tools failed")
 	require.NotContains(t, clientStream, "event: message_stop")
 	require.NotContains(t, err.Error(), "missing terminal event")
 }
@@ -179,7 +180,8 @@ func TestForwardAsAnthropic_StreamingGenericBareErrorBeforeOutputIsNotHiddenByFa
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
-	require.Contains(t, rec.Body.String(), "mixed tools failed")
+	require.Contains(t, rec.Body.String(), OpenAIUpstreamFailureClientMessage)
+	require.NotContains(t, rec.Body.String(), "mixed tools failed")
 }
 
 func TestForwardAsAnthropic_BufferedResponseFailed_Failover(t *testing.T) {

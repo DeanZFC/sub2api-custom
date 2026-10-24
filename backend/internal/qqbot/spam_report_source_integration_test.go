@@ -193,7 +193,7 @@ func TestSpamReportSourcesRejectUnverifiableContentAndIdentity(t *testing.T) {
 		{"nested_content", func(e *Event, _ *Config) { e.MsgElements = []MessageElement{{Content: e.Content}} }},
 		{"overlong_content", func(e *Event, _ *Config) { e.Content = strings.Repeat("文", 6001) }},
 		{"expired", func(e *Event, _ *Config) {
-			e.Timestamp, _ = json.Marshal(time.Now().Add(-3 * time.Minute).Format(time.RFC3339Nano))
+			e.Timestamp, _ = json.Marshal(time.Now().Add(-spamReportSourceRetention - time.Second).Format(time.RFC3339Nano))
 		}},
 		{"future", func(e *Event, _ *Config) {
 			e.Timestamp, _ = json.Marshal(time.Now().Add(time.Minute).Format(time.RFC3339Nano))
@@ -414,7 +414,7 @@ func TestSpamReportEvidenceExpiryPreventsConfirmationAndExecution(t *testing.T) 
 			if queued {
 				require.True(t, h.confirm(t, id, source))
 			}
-			_, err := h.db.Exec(`UPDATE qq_bot_spam_report_sources SET sent_at=NOW()-INTERVAL '116 seconds'`)
+			_, err := h.db.Exec(`UPDATE qq_bot_spam_report_sources SET sent_at=NOW()-INTERVAL '32 minutes 1 second'`)
 			require.NoError(t, err)
 			require.Nil(t, h.source(t, "reported"))
 			if queued {
@@ -463,8 +463,10 @@ func TestSpamReportPolicyChangeAndRestoreNeverRevivesOldEvidence(t *testing.T) {
 func TestSpamReportConfirmationRequiresSafetyTimeRemaining(t *testing.T) {
 	h := newSpamSourceHarness(t)
 	e := spamSourceTestEvent("almost-expired")
-	e.Timestamp, _ = json.Marshal(time.Now().Add(-112 * time.Second).UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano))
+	e.Timestamp, _ = json.Marshal(time.Now().Add(-29 * time.Minute).UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano))
 	id, source := h.stage(t, e)
+	_, err := h.db.Exec(`UPDATE qq_bot_spam_reports SET created_at=clock_timestamp()-INTERVAL '118 seconds' WHERE id=$1`, id)
+	require.NoError(t, err)
 	require.False(t, h.confirm(t, id, source))
 	require.Empty(t, h.operations(t))
 }

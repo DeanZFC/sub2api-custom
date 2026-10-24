@@ -14,9 +14,14 @@ import (
 )
 
 const (
-	spamReportUncertain = "未能确定为垃圾信息，本次不撤回、不禁言。"
-	spamReportFailed    = "评估暂时失败，本次不撤回、不禁言。"
-	spamReportQueued    = "已确认存在垃圾信息，已提交撤回与禁言处理。"
+	spamReportUncertain       = "未能确定为垃圾信息，本次不撤回、不禁言。"
+	spamReportFailed          = "评估暂时失败，本次不撤回、不禁言。"
+	spamReportModelFailed     = "AI 审核调用失败，无法取得有效结论，未自动重试。本次不撤回、不禁言。"
+	spamReportModelMalformed  = "AI 审核响应格式不符合要求，无法使用这次结果。本次不撤回、不禁言。"
+	spamReportReviewTimedOut  = "AI 审核处理超时，无法在本次审核期限内完成确认。本次不撤回、不禁言。"
+	spamReportReviewDisagreed = "两次独立 AI 审核的违规类别不一致，无法确认处罚依据。本次不撤回、不禁言。"
+	spamReportQueued          = "已确认存在垃圾信息，已提交撤回与禁言处理。"
+	spamReportMuteOnlyQueued  = "已确认存在垃圾信息，原消息已超过安全撤回时限，无法撤回，已提交禁言处理。"
 )
 
 // This policy is deliberately independent of operator chat prompts and member
@@ -31,6 +36,7 @@ type spamReportReview struct {
 	Confidence float64  `json:"confidence"`
 	Evidence   []string `json:"evidence"`
 	Reason     string   `json:"reason"`
+	Rejection  string   `json:"-"`
 }
 
 // A second reviewer cannot turn an uncertain first review into a punishment.
@@ -68,14 +74,21 @@ func parseSpamReportReview(raw, source string) (spamReportReview, error) {
 	}
 	// Confidence is necessary, never sufficient. A deterministic, intentionally
 	// narrow source/evidence check protects ordinary links and injected verdicts.
-	if review.Confidence < .99 || !spamReportUnambiguousSource(source) {
+	if review.Confidence < .99 {
 		review.Decision = "uncertain"
+		review.Rejection = "AI 审核置信度未达到 0.99 的自动处理门槛。"
+		return review, nil
+	}
+	if !spamReportUnambiguousSource(source) {
+		review.Decision = "uncertain"
+		review.Rejection = "原文存在歧义或不符合自动审核的文本条件。"
 		return review, nil
 	}
 	for _, evidence := range review.Evidence {
 		if evidence != strings.TrimSpace(evidence) || utf8.RuneCountInString(evidence) < 12 || utf8.RuneCountInString(evidence) > 1000 ||
 			!strings.Contains(source, evidence) || !spamReportCategoryEvidence(review.Category, evidence) {
 			review.Decision = "uncertain"
+			review.Rejection = "AI 提供的违规证据未通过原文逐字匹配及完整行为证据校验。"
 			return review, nil
 		}
 	}
@@ -175,30 +188,29 @@ func spamReportAuditReason(category string) string {
 
 // claimSpamReport serializes the small reservation transaction across instances
 // and config saves. No model request or QQ network call runs under this lock.
-func (s *Service) claimSpamReport(ctx context.Context, snapshot Config, j Job, source spamReportSource) (string, error) {
+func (s *Service) claimSpamReport(ctx context.Context, snapshot Config, j Job, source spamReportSource) (string, spamReportSourceReason, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", err
+		return "", spamSourceUnverified, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(71427101)`); err != nil {
-		return "", err
+		return "", spamSourceUnverified, err
 	}
 	c, err := s.loadConfig(ctx, tx)
 	if err != nil {
-		return "", err
+		return "", spamSourceUnverified, err
 	}
-	if c.AppID != snapshot.AppID || c.Sandbox != snapshot.Sandbox || !c.reportsSpam(j.GroupID) ||
-		spamReportPolicy(c) != spamReportPolicy(snapshot) || c.moderationExempt(j.GroupID, source.MemberID) {
-		return "cancelled", nil
+	if reason := spamReportConfigReason(c, snapshot, j.GroupID, source.MemberID); reason != spamSourceOK {
+		return "cancelled", reason, nil
 	}
 	var status string
 	err = tx.QueryRowContext(ctx, `SELECT status FROM qq_bot_spam_reports WHERE app_id=$1 AND sandbox=$2 AND group_id=$3 AND message_id=$4`, c.AppID, c.Sandbox, j.GroupID, source.MessageID).Scan(&status)
 	if err == nil {
-		return "duplicate", nil
+		return "duplicate", spamSourceOK, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return "", err
+		return "", spamSourceUnverified, err
 	}
 	var cooldown, reporterDaily, groupDaily int
 	err = tx.QueryRowContext(ctx, `SELECT
@@ -208,26 +220,74 @@ func (s *Service) claimSpamReport(ctx context.Context, snapshot Config, j Job, s
  FROM qq_bot_spam_reports WHERE app_id=$1 AND sandbox=$2
  AND created_at>=LEAST(NOW()-INTERVAL '30 seconds',date_trunc('day',NOW() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')`, c.AppID, c.Sandbox, j.MemberID, j.GroupID).Scan(&cooldown, &reporterDaily, &groupDaily)
 	if err != nil {
-		return "", err
+		return "", spamSourceUnverified, err
 	}
 	if cooldown != 0 {
-		return "cooldown", nil
+		return "cooldown", spamSourceOK, nil
 	}
-	if reporterDaily >= 20 || groupDaily >= 100 {
-		return "limit", nil
+	if reporterDaily >= 20 {
+		return "reporter_limit", spamSourceOK, nil
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_spam_reports(id,app_id,sandbox,group_id,reporter_id,message_id,member_id,policy_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, j.ID, c.AppID, c.Sandbox, j.GroupID, j.MemberID, source.MessageID, source.MemberID, spamReportPolicy(c))
+	if groupDaily >= 100 {
+		return "group_limit", spamSourceOK, nil
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,306))`, c.AppID+":"+j.GroupID); err != nil {
+		return "", spamSourceUnverified, err
+	}
+	current, reason, err := s.inspectSpamReportSource(ctx, tx, c, j.GroupID, source.MessageID)
 	if err != nil {
-		return "", err
+		return "", spamSourceUnverified, err
 	}
-	return "claimed", tx.Commit()
+	if current == nil {
+		return "cancelled", reason, nil
+	}
+	if current.MemberID != source.MemberID || current.Content != source.Content || !current.SentAt.Equal(source.SentAt) {
+		return "cancelled", spamSourceChanged, nil
+	}
+	result, err := tx.ExecContext(ctx, `WITH admission AS MATERIALIZED (SELECT clock_timestamp() AS admitted_at)
+ INSERT INTO qq_bot_spam_reports(id,app_id,sandbox,group_id,reporter_id,message_id,member_id,policy_hash,created_at)
+ SELECT $1,$2,$3,$4,$5,$6,$7,$8,admitted_at FROM admission
+ WHERE admitted_at<=$9::timestamptz`, j.ID, c.AppID, c.Sandbox, j.GroupID, j.MemberID, source.MessageID, source.MemberID, spamReportPolicy(c), source.SentAt.Add(spamReportWindow))
+	if err != nil {
+		return "", spamSourceUnverified, err
+	}
+	if count, countErr := result.RowsAffected(); countErr != nil {
+		return "", spamSourceUnverified, countErr
+	} else if count != 1 {
+		return "cancelled", spamSourceExpired, nil
+	}
+	return "claimed", spamSourceOK, tx.Commit()
 }
 
 func (s *Service) finishSpamReport(ctx context.Context, id, status, category, reason string) error {
+	_, err := s.finishSpamReportOutcome(ctx, id, status, category, reason)
+	return err
+}
+
+// Configuration cancellation can win while a model returns uncertainty or an
+// error. Keep that durable cause in the user reply as well as in the audit.
+func (s *Service) finishSpamReportOutcome(ctx context.Context, id, status, category, reason string) (spamReportSourceReason, error) {
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_, err := s.db.ExecContext(finishCtx, `UPDATE qq_bot_spam_reports SET status=$2,category=$3,reason=$4,finished_at=NOW() WHERE id=$1 AND status='evaluating'`, id, status, limitText(category, 24), limitText(reason, 240))
-	return err
+	tx, err := s.db.BeginTx(finishCtx, nil)
+	if err != nil {
+		return spamSourceUnverified, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(finishCtx, `UPDATE qq_bot_spam_reports SET status=$2,category=$3,reason=$4,finished_at=NOW() WHERE id=$1 AND status='evaluating'`, id, status, limitText(category, 24), limitText(reason, 240)); err != nil {
+		return spamSourceUnverified, err
+	}
+	var currentStatus, currentReason string
+	if err = tx.QueryRowContext(finishCtx, `SELECT status,reason FROM qq_bot_spam_reports WHERE id=$1 FOR UPDATE`, id).Scan(&currentStatus, &currentReason); err != nil {
+		return spamSourceUnverified, err
+	}
+	rejection := spamSourceOK
+	if currentStatus == "cancelled" && currentReason != limitText(reason, 240) {
+		rejection = spamReportCancellationReason(currentReason)
+	} else if currentStatus == "failed" && spamReportCancellationReason(currentReason) == spamSourceProcessingExpired {
+		rejection = spamSourceProcessingExpired
+	}
+	return rejection, tx.Commit()
 }
 
 func spamReportAddTokens(total, used int64) int64 {
@@ -277,17 +337,20 @@ func (s *Service) reportSpam(ctx context.Context, c Config, j *Job, e Event, arg
 	if arg != "" || e.referenceID() == "" {
 		return sendResult("用法不符，必须引用原消息且不附加参数。", "请引用要举报的原消息后发送 /举报垃圾信息，指令后无需附加内容。", 1)
 	}
-	if !c.reportsSpam(j.GroupID) || c.BaseURL == "" || c.APIKey == "" || c.ChatModel == "" {
+	if !c.reportsSpam(j.GroupID) {
+		return sendResult(spamSourcePolicyInactive.decision(), spamSourcePolicyInactive.reply(), 1)
+	}
+	if c.BaseURL == "" || c.APIKey == "" || c.ChatModel == "" {
 		return sendResult("群未启用举报评估，未调用模型。", "本群尚未启用垃圾信息举报评估。", 1)
 	}
-	source, err := s.spamReportSource(ctx, c, j.GroupID, e.referenceID())
+	source, sourceReason, err := s.inspectSpamReportSource(ctx, s.db, c, j.GroupID, e.referenceID())
 	if err != nil {
 		return err
 	}
 	if source == nil {
-		return sendResult("无法核实来源或成员受保护，未执行处罚。", "无法安全核实这条原消息，或该成员已受保护，本次不撤回、不禁言。请引用最近的原始文本消息。", 1)
+		return sendResult(sourceReason.decision(), sourceReason.reply(), 1)
 	}
-	claim, err := s.claimSpamReport(ctx, c, *j, *source)
+	claim, claimReason, err := s.claimSpamReport(ctx, c, *j, *source)
 	if err != nil {
 		return err
 	}
@@ -296,10 +359,12 @@ func (s *Service) reportSpam(ctx context.Context, c Config, j *Job, e Event, arg
 		return sendResult("同一消息重复举报，未重复调用模型或处罚。", "这条消息已收到举报，正在评估或已处理，请勿重复举报。", 1)
 	case "cooldown":
 		return sendResult("举报触发 30 秒冷却，未调用模型。", "举报过于频繁，请至少间隔 30 秒后再试。", 1)
-	case "limit":
-		return sendResult("举报触发北京日限额，未调用模型。", "今日举报评估次数已达上限，请联系群管理员。", 1)
+	case "reporter_limit":
+		return sendResult("举报触发个人每日 20 条限额，未调用模型。", "你今天的举报评估已达 20 条上限（北京时间），请联系群管理员人工处理。", 1)
+	case "group_limit":
+		return sendResult("举报触发本群每日 100 条限额，未调用模型。", "本群今天的举报评估已达 100 条上限（北京时间），请联系群管理员人工处理。", 1)
 	case "cancelled":
-		return sendResult("配置或白名单已变化，取消举报评估。", spamReportUncertain, 1)
+		return sendResult(claimReason.decision(), claimReason.reply(), 1)
 	case "claimed":
 	default:
 		return errors.New("invalid spam report reservation")
@@ -312,18 +377,20 @@ func (s *Service) reportSpam(ctx context.Context, c Config, j *Job, e Event, arg
 		_ = s.saveSpamReportDecision(ctx, j, "举报确认回复失败，未调用模型或执行处罚。", "")
 		return err
 	}
+	modelCalls := 0
 	finish := func(status, category, reason, text string) error {
-		if err := s.finishSpamReport(ctx, j.ID, status, category, reason); err != nil {
+		rejection, err := s.finishSpamReportOutcome(ctx, j.ID, status, category, reason)
+		if err != nil {
 			return err
+		}
+		if rejection != spamSourceOK {
+			reason, text = rejection.decisionWithModel(modelCalls > 0), rejection.reply()
 		}
 		return sendResult(reason, text, 2)
 	}
 	deadline := time.Now().Add(45 * time.Second)
-	if cutoff := source.SentAt.Add(105 * time.Second); cutoff.Before(deadline) {
-		deadline = cutoff
-	}
-	if time.Until(deadline) < 5*time.Second || !spamReportUnambiguousSource(source.Content) {
-		return finish("uncertain", "", "原文有歧义或安全处理时间不足，未执行处罚。", spamReportUncertain)
+	if !spamReportUnambiguousSource(source.Content) {
+		return finish("uncertain", "", "原文存在歧义或不符合自动审核文本条件，未调用模型、未执行处罚。", "原文存在歧义或不符合自动审核的文本条件，不能据此确认垃圾信息。本次不撤回、不禁言。")
 	}
 	reviewCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
@@ -341,6 +408,7 @@ func (s *Service) reportSpam(ctx context.Context, c Config, j *Job, e Event, arg
 		}
 		callCtx, callCancel := context.WithTimeout(reviewCtx, 20*time.Second)
 		raw, in, out, callErr := s.chat(callCtx, modelConfig, []Message{{Role: "system", Content: prompt}, {Role: "user", Content: string(input)}})
+		modelCalls++
 		callCancel()
 		if err := s.saveSpamReportUsage(ctx, j, in, out, i+1); err != nil {
 			_ = s.finishSpamReport(ctx, j.ID, "failed", "", "审核用量审计保存失败；未执行处罚。")
@@ -348,21 +416,34 @@ func (s *Service) reportSpam(ctx context.Context, c Config, j *Job, e Event, arg
 			return err
 		}
 		if callErr != nil {
-			return finish("failed", "", "模型调用失败或结果未知；未重试、未执行处罚。", spamReportFailed)
+			if errors.Is(callErr, context.DeadlineExceeded) || errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+				return finish("failed", "", "AI 审核调用超时，未重试、未执行处罚。", spamReportReviewTimedOut)
+			}
+			return finish("failed", "", "模型调用失败或结果未知；未重试、未执行处罚。", spamReportModelFailed)
 		}
 		reviews[i], err = parseSpamReportReview(raw, source.Content)
 		if err != nil {
-			return finish("failed", "", "模型审核响应格式无效；未执行处罚。", spamReportFailed)
+			return finish("failed", "", "模型审核响应格式无效；未执行处罚。", spamReportModelMalformed)
 		}
 		if reviews[i].Decision != "spam" {
-			return finish("uncertain", "", "审核未确认明确违规，或直接证据校验未通过。", spamReportUncertain)
+			why := reviews[i].Rejection
+			if why == "" {
+				why = "首轮 AI 审核未确认明确的垃圾信息。"
+				if i == 1 {
+					why = "第二次独立 AI 复核未确认明确的垃圾信息。"
+				}
+			}
+			return finish("uncertain", "", why+"未执行处罚。", why+spamReportUncertain)
 		}
 	}
-	if reviews[0].Category != reviews[1].Category || reviewCtx.Err() != nil {
-		return finish("uncertain", "", "独立审核不一致或处理超时；未执行处罚。", spamReportUncertain)
+	if reviewCtx.Err() != nil {
+		return finish("uncertain", "", "独立审核处理超时；未执行处罚。", spamReportReviewTimedOut)
+	}
+	if reviews[0].Category != reviews[1].Category {
+		return finish("uncertain", "", "独立审核类别不一致；未执行处罚。", spamReportReviewDisagreed)
 	}
 	category := reviews[0].Category
-	queued, err := s.confirmSpamReport(reviewCtx, c, j.ID, *source, category, spamReportAuditReason(category))
+	queued, rejection, err := s.confirmSpamReportWithReason(reviewCtx, c, j.ID, *source, category, spamReportAuditReason(category))
 	if err != nil {
 		// The commit outcome may be unknown. Never re-queue and never claim that
 		// no operation exists when a transaction could already have committed.
@@ -370,7 +451,16 @@ func (s *Service) reportSpam(ctx context.Context, c Config, j *Job, e Event, arg
 		return sendResult("处罚提交结果未知，未自动重试；请检查审核记录。", "评估处理结果暂时无法确认，未自动重试，请联系群管理员查看审核记录。", 2)
 	}
 	if !queued {
-		return finish("cancelled", "", "政策、白名单或原消息状态已变化，取消处罚。", spamReportUncertain)
+		return finish("cancelled", "", rejection.decisionWithModel(true), rejection.reply())
+	}
+	var recallSkipped bool
+	if err = s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_bot_moderation_operations o
+ JOIN qq_bot_spam_reports r ON r.incident_id=o.incident_id
+ WHERE r.id=$1 AND o.kind='recall' AND o.status='skipped' AND o.error=$2)`, j.ID, spamReportRecallSkippedReason).Scan(&recallSkipped); err != nil {
+		return sendResult("处罚已提交，但未能读取处理方式；请查看审核记录。", "已确认存在垃圾信息并提交处理，请联系群管理员查看实际处理结果。", 2)
+	}
+	if recallSkipped {
+		return sendResult("双重独立审核及直接证据校验通过；原消息超过安全撤回时限，已提交仅禁言。", spamReportMuteOnlyQueued, 2)
 	}
 	return sendResult("双重独立审核及直接证据校验通过，已提交撤回与禁言。", spamReportQueued, 2)
 }
