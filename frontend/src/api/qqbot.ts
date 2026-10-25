@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 function versions(headers: Record<string, unknown>) {
- const extra: { _version?: string; _sections?: Record<string, string> } = { _version: headers?.etag as string | undefined }
+ const extra: { _version?: string; _sections?: Record<string, string> } = { _version: (headers?.['x-qqbot-config-version'] || headers?.etag) as string | undefined }
  if (headers?.['x-qqbot-checkin-version']) extra._sections = Object.fromEntries(['checkin', 'tasks', 'periodic_tasks'].map(key => [key, headers[`x-qqbot-${key}-version`] as string]))
  return extra
 }

@@ -17,6 +17,7 @@ func (h *QQBotHandler) GetRankingConfig(c *gin.Context) {
 		return
 	}
 	c.Header("ETag", `"`+qqbot.ConfigVersion(cfg)+`"`)
+	c.Header("X-QQBot-Config-Version", qqbot.ConfigVersion(cfg))
 	c.Header("Cache-Control", "no-store")
 	response.Success(c, cfg)
 }
@@ -37,6 +38,7 @@ func (h *QQBotHandler) SaveRankingConfig(c *gin.Context) {
 		return
 	}
 	c.Header("ETag", `"`+qqbot.ConfigVersion(saved)+`"`)
+	c.Header("X-QQBot-Config-Version", qqbot.ConfigVersion(saved))
 	c.Header("Cache-Control", "no-store")
 	response.Success(c, saved)
 }

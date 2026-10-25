@@ -11,7 +11,18 @@ import (
 type configVersionContextKey struct{}
 
 func WithConfigVersion(ctx context.Context, version string) context.Context {
-	return context.WithValue(ctx, configVersionContextKey{}, strings.Trim(version, "\""))
+	version = strings.TrimSpace(version)
+	version = strings.TrimPrefix(version, "W/")
+	version = strings.TrimSpace(version)
+	if len(version) >= 2 && version[0] == '"' && version[len(version)-1] == '"' {
+		version = version[1 : len(version)-1]
+	}
+	// Caddy appends the selected content encoding to strong ETags. Older
+	// frontends send that transformed ETag as If-Match, so normalize only the
+	// known encoding suffixes to keep those already-open pages working.
+	version = strings.TrimSuffix(version, "-gzip")
+	version = strings.TrimSuffix(version, "-zstd")
+	return context.WithValue(ctx, configVersionContextKey{}, version)
 }
 func ConfigVersion(value any) string {
 	raw, _ := json.Marshal(value)
