@@ -494,20 +494,11 @@ func (s *OpenAIQuotaService) prepareUpstreamCall(ctx context.Context, accountID 
 	}
 	fedRAMP = account.IsChatGPTAccountFedRAMP()
 
-	// account.Proxy is eager-loaded by accountRepo.GetByID (see
-	// repository.accountsToService), so we can read the proxy URL directly
-	// instead of round-tripping the DB again. Fall back to proxyRepo only
-	// when Proxy isn't pre-populated (defensive — e.g. callers that built
-	// the Account by hand).
-	if account.ProxyID != nil {
-		switch {
-		case account.Proxy != nil:
-			proxyURL = account.Proxy.URL()
-		case s.proxyRepo != nil:
-			if proxy, perr := s.proxyRepo.GetByID(ctx, *account.ProxyID); perr == nil && proxy != nil {
-				proxyURL = proxy.URL()
-			}
-		}
+	// Revalidate managed proxies before issuing quota requests so an unavailable
+	// account route cannot silently fall back to direct egress.
+	proxyURL, err = resolveOpenAIAccountProxyURL(ctx, s.proxyRepo, account)
+	if err != nil {
+		return "", "", "", false, err
 	}
 
 	return accessToken, chatGPTAccountID, proxyURL, fedRAMP, nil

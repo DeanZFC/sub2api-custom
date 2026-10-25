@@ -1,0 +1,19 @@
+# Build from the repository root. No Docker socket in the bridge runtime.
+ARG GOLANG_IMAGE=golang:1.27.3-alpine
+ARG ALPINE_IMAGE=alpine:3.20
+FROM --platform=$BUILDPLATFORM ${GOLANG_IMAGE} AS build
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ENV GOTOOLCHAIN=local CGO_ENABLED=0
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+COPY backend/cmd/vm2api-bridge ./cmd/vm2api-bridge
+COPY backend/internal/pkg/vm2api ./internal/pkg/vm2api
+COPY backend/internal/pkg/vmbridge ./internal/pkg/vmbridge
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -buildvcs=false -trimpath -ldflags='-s -w' -o /out/vm2api-bridge ./cmd/vm2api-bridge
+
+FROM ${ALPINE_IMAGE}
+RUN apk add --no-cache ca-certificates && addgroup -g 10001 bridge && adduser -D -H -u 10001 -G bridge bridge
+COPY --from=build /out/vm2api-bridge /usr/local/bin/vm2api-bridge
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/vm2api-bridge"]

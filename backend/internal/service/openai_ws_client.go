@@ -158,7 +158,9 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		},
 	}
 	tlsProfile := openAIWSTLSProfileFromContext(ctx)
-	if proxy := strings.TrimSpace(proxyURL); proxy != "" {
+	if vmClient := openAIVMWSHTTPClientFromContext(ctx); vmClient != nil {
+		opts.HTTPClient = vmClient
+	} else if proxy := strings.TrimSpace(proxyURL); proxy != "" {
 		proxyClient, err := d.proxyHTTPClient(proxy, tlsProfile)
 		if err != nil {
 			return nil, 0, nil, err

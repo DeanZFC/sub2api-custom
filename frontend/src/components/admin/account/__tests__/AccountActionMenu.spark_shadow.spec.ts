@@ -160,6 +160,30 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
     const body = getBodyText()
     expect(body).toContain('admin.accounts.reAuthorize')
     expect(body).toContain('admin.accounts.setPrivacy')
+    expect(body).toContain('admin.accounts.openaiVm.title')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { platform: 'openai', type: 'oauth', parent_account_id: 42 },
+    { platform: 'openai', type: 'apikey', parent_account_id: null },
+    { platform: 'openai', type: 'setup-token', parent_account_id: null },
+    { platform: 'anthropic', type: 'oauth', parent_account_id: null }
+  ] as Partial<Account>[])('非 OpenAI OAuth 母账号隐藏专属槽位操作', (overrides) => {
+    const wrapper = mount(AccountActionMenu, { props: { show: true, account: makeAccount(overrides), anchorRect }, attachTo: document.body })
+    expect(getBodyText()).not.toContain('admin.accounts.openaiVm.title')
+    wrapper.unmount()
+  })
+
+  it('专属槽位按钮传递账号并关闭菜单', async () => {
+    const account = makeAccount({ parent_account_id: null })
+    const wrapper = mount(AccountActionMenu, { props: { show: true, account, anchorRect }, attachTo: document.body })
+    const button = getBodyButtons().find(b => b.textContent?.includes('admin.accounts.openaiVm.title'))
+    expect(button).toBeDefined()
+    button!.click()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('openai-vm')?.[0]).toEqual([account])
+    expect(wrapper.emitted('close')).toHaveLength(1)
     wrapper.unmount()
   })
 

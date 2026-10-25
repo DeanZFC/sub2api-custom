@@ -886,6 +886,9 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
+		return nil, err
+	}
 	client, err := httppool.GetClient(httppool.Options{
 		ProxyURL:              proxyURL,
 		Timeout:               15 * time.Second,
@@ -894,7 +897,14 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if err != nil {
 		return nil, fmt.Errorf("build openai probe client: %w", err)
 	}
-	resp, err := client.Do(req)
+	var resp *http.Response
+	handled := false
+	if gateway, ok := s.agentIdentityWS.(*OpenAIGatewayService); ok && gateway.openaiVM != nil {
+		resp, handled, err = gateway.openaiVM.RoundTrip(req, account)
+	}
+	if !handled {
+		resp, err = client.Do(req)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("openai codex probe request failed: %w", err)
 	}

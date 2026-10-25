@@ -123,7 +123,17 @@ func (s *OpenAIGatewayService) fetchOpenAIImageURLBase64(ctx context.Context, ac
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	var resp *http.Response
+	handled := false
+	if s.openaiVM != nil {
+		resp, handled, err = s.openaiVM.RoundTrip(req, account)
+	}
+	if !handled {
+		if proxyErr := validateOpenAIVMProxy(account, account.Proxy); proxyErr != nil {
+			return "", proxyErr
+		}
+		resp, err = s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	}
 	if err != nil {
 		return "", fmt.Errorf("download image: %w", err)
 	}

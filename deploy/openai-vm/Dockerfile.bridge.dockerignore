@@ -1,0 +1,13 @@
+**
+!backend
+!backend/go.mod
+!backend/go.sum
+!backend/cmd
+!backend/cmd/vm2api-bridge
+!backend/cmd/vm2api-bridge/**
+!backend/internal
+!backend/internal/pkg
+!backend/internal/pkg/vm2api
+!backend/internal/pkg/vm2api/**
+!backend/internal/pkg/vmbridge
+!backend/internal/pkg/vmbridge/**

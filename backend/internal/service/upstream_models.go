@@ -1358,6 +1358,14 @@ func (s *AccountTestService) fetchAntigravityOAuthUpstreamModels(ctx context.Con
 }
 
 func (s *AccountTestService) doUpstreamModelsRequest(req *http.Request, proxyURL string, account *Account) (*http.Response, error) {
+	if s.openaiVM != nil {
+		if response, handled, err := s.openaiVM.RoundTrip(req, account); handled {
+			return response, err
+		}
+	}
+	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
+		return nil, err
+	}
 	if s.tlsFPProfileService == nil {
 		return s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, nil)
 	}

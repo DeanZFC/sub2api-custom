@@ -84,6 +84,7 @@ func RegisterAdminRoutes(
 
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
+		registerOpenAIVMRoutes(admin, h, stepUpAuth)
 
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
@@ -860,6 +861,20 @@ func registerPluginRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 		plugins.POST("/:id/test", gin.HandlerFunc(stepUpAuth), h.Admin.Plugin.Test)
 		plugins.POST("/:id/ui-session", h.Admin.Plugin.CreateUISession)
 	}
+}
+
+func registerOpenAIVMRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	if h.Admin.OpenAIVM == nil {
+		return
+	}
+	vm := admin.Group("/openai-vm")
+	vm.GET("/config", h.Admin.OpenAIVM.GetConfig)
+	vm.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.SaveConfig)
+	vm.POST("/test", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.Test)
+	admin.GET("/accounts/:id/vm", h.Admin.OpenAIVM.Status)
+	admin.POST("/accounts/:id/vm", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.Create)
+	admin.DELETE("/accounts/:id/vm", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.Delete)
+	admin.POST("/accounts/:id/vm/retry", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.Retry)
 }
 
 func registerChannelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

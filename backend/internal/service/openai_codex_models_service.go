@@ -1939,10 +1939,18 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 		resp, err = s.httpUpstream.Do(req, request.proxyURL, request.accountID, request.accountConcurrency)
 	} else {
 		handled := false
-		if s.pluginManager != nil {
+		if s.openaiVM != nil {
+			resp, handled, err = s.openaiVM.RoundTrip(req, request.credentialAccount)
+		}
+		if !handled && s.pluginManager != nil {
 			resp, handled, err = s.pluginManager.RoundTripOpenAIOAuth(reqCtx, req, request.proxyURL, request.credentialAccount)
 		}
 		if !handled {
+			if request.credentialAccount != nil {
+				if proxyErr := validateOpenAIVMProxy(request.credentialAccount, request.credentialAccount.Proxy); proxyErr != nil {
+					return nil, proxyErr
+				}
+			}
 			client, clientErr := httpclient.GetClient(httpclient.Options{
 				ProxyURL:              request.proxyURL,
 				Timeout:               codexModelsManifestRequestTimeout,

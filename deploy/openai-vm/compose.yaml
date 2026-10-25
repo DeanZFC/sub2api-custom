@@ -1,0 +1,102 @@
+# Optional Linux amd64 stack; never changes the main Sub2API Compose.
+name: ${OPENAI_VM_PROJECT:-sub2api-openai-vm}
+services:
+  vm2api:
+    # Fixed v1.3.225 Linux amd64 manifest.
+    image: ghcr.io/dofastted/vm2api:v1.3.225@sha256:420b5292047751e2b412b694176c71987320ccb132e09e3b51e0a11e8f19e23e
+    platform: linux/amd64
+    container_name: ${OPENAI_VM_PROJECT:-sub2api-openai-vm}-control
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      HOST: 127.0.0.1
+      PORT: ${VM2API_PORT:-8787}
+      VM2API_API_KEY: ${VM2API_MASTER_KEY:?Run init.sh first}
+      VM2API_DB_SECRET: ${VM2API_DB_SECRET:?Run init.sh first}
+      VM2API_ADMIN_USER: admin
+      VM2API_ADMIN_PASSWORD: ${VM2API_ADMIN_PASSWORD:?Run init.sh first}
+      VM2API_CONTAINER_NAME: ${OPENAI_VM_PROJECT:-sub2api-openai-vm}-control
+      VM2API_HOST_ROOT: ${OPENAI_VM_DATA_DIR:?Run init.sh first}/vm2api
+      KIN_PROJECT_ROOT: /opt/vm2api
+      KIN_DATA_DIR: /opt/vm2api/data
+      KIN_KERNEL_BIN: /opt/vm2api/bin/kin-kernel
+      KIN_EGRESS_BIN: /opt/vm2api/bin/kin-egress
+      KIN_WORKER_BIN: /opt/vm2api/bin/kin-worker
+      KIN_CODEX_KERNEL_BIN: /opt/vm2api/bin/kin-codex-kernel
+      KIN_OAUTH_AUTH_BIN: /opt/vm2api/bin/kin-oauth-auth
+      KIN_COMPUTER_BIN: /opt/vm2api/bin/kin-computer
+      KIN_API_KERNEL_BIN: /opt/vm2api/bin/kin-api-kernel
+      KIN_AUTO_SYNC_WRAP: '1'
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${OPENAI_VM_DATA_DIR}/vm2api/vms
+        target: /opt/vm2api/vms
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${OPENAI_VM_DATA_DIR}/vm2api/data
+        target: /opt/vm2api/data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${OPENAI_VM_DATA_DIR}/vm2api/bin
+        target: /opt/vm2api/bin
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${OPENAI_VM_DATA_DIR}/vm2api/share
+        target: /opt/vm2api/share
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${OPENAI_VM_DATA_DIR}/vm2api/src/config
+        target: /opt/vm2api/src/config
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz',{signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 6s
+      retries: 4
+      start_period: 60s
+    stop_grace_period: 45s
+
+  bridge:
+    image: sub2api-vm2api-bridge:local
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: deploy/openai-vm/Dockerfile.bridge
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    user: '${BRIDGE_UID:?Run init.sh first}:${BRIDGE_GID:?Run init.sh first}'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=16m']
+    depends_on:
+      vm2api: {condition: service_healthy}
+    environment:
+      VM2API_URL: http://127.0.0.1:${VM2API_PORT:-8787}
+      VM2API_MASTER_KEY: ${VM2API_MASTER_KEY:?Run init.sh first}
+      VM2API_BRIDGE_SECRET: ${VM2API_BRIDGE_SECRET:?Run init.sh first}
+      VM2API_BRIDGE_NAMESPACE: ${VM2API_BRIDGE_NAMESPACE:?Run init.sh first}
+      VM2API_BRIDGE_LISTEN: ${VM2API_BRIDGE_LISTEN:?Run init.sh first}
+      VM2API_BRIDGE_STATE_DIR: /var/lib/vm2api-bridge
+      VM2API_BRIDGE_DRAIN_TIMEOUT: 30s
+      VM2API_BRIDGE_DIAL_TIMEOUT: 15s
+      VM2API_BRIDGE_MANAGEMENT_TIMEOUT: 90s
+    volumes:
+      - type: bind
+        source: ${OPENAI_VM_DATA_DIR}/bridge/state
+        target: /var/lib/vm2api-bridge
+        bind: {create_host_path: false}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, -T, '5', '${VM2API_BRIDGE_ORIGIN:?Run init.sh first}/health']
+      interval: 15s
+      timeout: 6s
+      retries: 4
+      start_period: 10s
+    stop_grace_period: 20s

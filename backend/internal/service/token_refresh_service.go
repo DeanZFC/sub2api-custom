@@ -1464,6 +1464,13 @@ func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *
 		}
 	}
 
+	if account.IsOpenAIVMBound() {
+		var err error
+		proxyURL, err = resolveOpenAIAccountProxyURL(ctx, s.proxyRepo, account)
+		if err != nil {
+			return
+		}
+	}
 	mode := disableOpenAITraining(ctx, s.privacyClientFactory, token, proxyURL)
 	if mode == "" {
 		return

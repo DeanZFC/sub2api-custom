@@ -23,6 +23,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	defer releaseStagedCodexFingerprintLease(c)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	if s.openaiVM != nil {
+		bound, err := s.openaiVM.RouteBound(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		if bound {
+			return s.forwardOpenAIVMResponses(ctx, c, account, body)
+		}
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
