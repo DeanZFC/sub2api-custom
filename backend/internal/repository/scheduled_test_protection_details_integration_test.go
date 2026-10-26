@@ -44,6 +44,7 @@ func testScheduledTestProtectionDetails(t *testing.T, ctx context.Context, db *s
 	holds, err := svc.AccountProtectionDetails(ctx, 901)
 	require.NoError(t, err)
 	require.Len(t, holds, 2, "a manual scheduling stop must not hide existing quality holds")
+	require.Nil(t, holds[0].TriggerSnapshot, "legacy holds must not acquire fabricated historical evidence")
 	require.Equal(t, "combined", holds[0].Mode)
 	require.Equal(t, "per_test", holds[1].Mode)
 	require.Equal(t, "pass", holds[0].Rules[0].CurrentMatch)

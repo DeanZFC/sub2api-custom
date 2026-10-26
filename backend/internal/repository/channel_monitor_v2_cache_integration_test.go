@@ -11,11 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
-func TestChannelMonitorV2CacheEligibilityIntegration(t *testing.T) {
+func TestChannelMonitorV2OfficialCacheRateIntegration(t *testing.T) {
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("MIGRATION_TEST_DATABASE_URL is not set")
@@ -76,8 +77,24 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 		require.Equal(t, int64(4), metric.RequestCount, table)
 		require.Equal(t, int64(3320), metric.TokenCount, table)
 		require.Equal(t, int64(230), metric.CacheReadTokens, table)
-		require.Equal(t, int64(180), metric.CacheRateNumerator, table)
-		require.Equal(t, int64(200), metric.CacheRateDenominator, table)
-		require.InDelta(t, .9, metric.CacheRate, .00001, table)
+		require.Equal(t, int64(230), metric.CacheRateNumerator, table)
+		require.Equal(t, int64(3280), metric.CacheRateDenominator, table)
+		require.True(t, metric.HasCacheSamples, table)
+		require.InDelta(t, 230.0/3280.0, metric.CacheRate, .00001, table)
+		// Eligibility columns remain maintained for compatibility; they no longer
+		// supply the cache health signal for minute facts or rollups.
+		require.Equal(t, int64(20), f.CacheEligibleInput, table)
+		require.Equal(t, int64(180), f.CacheEligibleRead, table)
+		thresholds := service.DefaultChannelMonitorV2HealthThresholds()
+		thresholds.MinimumSample = 1
+		thresholds.WarningCacheRate, thresholds.CriticalCacheRate = 0.85, 0.60
+		health := service.ChannelMonitorV2HealthForWithThresholds(metric, thresholds)
+		require.NotNil(t, health.CacheScore, table)
+		require.NotNil(t, health.Score, table)
+		cacheScore := 100 * 230.0 / 3280.0
+		require.InDelta(t, cacheScore, *health.CacheScore, .00001, table)
+		require.InDelta(t, (100*thresholds.ErrorWeight+cacheScore*thresholds.CacheWeight)/(thresholds.ErrorWeight+thresholds.CacheWeight), *health.Score, .00001, table)
+		require.Equal(t, "critical", health.Cache, table)
+		require.Equal(t, "warning", health.Overall, table)
 	}
 }

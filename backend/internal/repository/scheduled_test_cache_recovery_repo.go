@@ -199,6 +199,8 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 	if err != nil {
 		return err
 	}
+	state.evidenceSource = "recovery"
+	state.recoveryEvidence = stats
 	if !state.blocked || state.recoveryPhase != c.phase || !reflect.DeepEqual(state.rule, c.rule) ||
 		!state.recoveryTrialStarted.Time.Equal(c.trialStarted.Time) || !state.recoveryTrialEnds.Time.Equal(c.trialEnds.Time) {
 		return nil
@@ -265,7 +267,7 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 		if verdict == "pass" {
 			reason = cacheRecoverySampleReason("限量试运行统计指标全部达标，解除本规则调度保护", state, stats)
 			// Keep trial_started_at as the lower bound for later scheduled checks.
-			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET blocked=FALSE,
+			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET blocked=FALSE,trigger_event_id=NULL,
 			 automated_verdict='pass',verdict='pass',completed=TRUE,
 			 recovery_phase='',recovery_cooldown_until=NULL,recovery_trial_ends_at=NULL,
 			 reason=$4,updated_at=$5 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`,

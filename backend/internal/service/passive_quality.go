@@ -16,6 +16,9 @@ type PassiveQualityMetric struct {
 	Recover float64 `json:"recover"`
 }
 type PassiveQualityConfig struct {
+	// Read-only decision identity; repository ignores client-supplied values.
+	EvidenceStartedAt    *time.Time                 `json:"evidence_started_at,omitempty"`
+	EvaluationVersion    int64                      `json:"evaluation_version,omitempty"`
 	Purpose              string                     `json:"purpose,omitempty"`
 	SchemaVersion        int                        `json:"schema_version,omitempty"`
 	TTFTAction           string                     `json:"ttft_action,omitempty"`
@@ -54,6 +57,21 @@ type PassiveQualityPolicy struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	PassiveQualityConfig
 }
+
+func (p PassiveQualityPolicy) EvidenceSince() time.Time {
+	if p.EvidenceStartedAt != nil {
+		return *p.EvidenceStartedAt
+	}
+	return p.UpdatedAt
+}
+
+func (p PassiveQualityPolicy) DecisionVersion() int64 {
+	if p.EvaluationVersion > 0 {
+		return p.EvaluationVersion
+	}
+	return p.Version
+}
+
 type PassiveQualitySample struct {
 	CacheReported       bool      `json:"cache_reported,omitempty"`
 	CacheOpportunity    string    `json:"cache_opportunity,omitempty"`
@@ -71,6 +89,9 @@ type PassiveQualitySample struct {
 	CacheInput          int64     `json:"cache_input"`
 }
 type PassiveQualityEvidence struct {
+	FreshErrorRate      *float64  `json:"fresh_error_rate,omitempty"`
+	FreshTTFT           *float64  `json:"fresh_ttft,omitempty"`
+	FreshCacheRate      *float64  `json:"fresh_cache_rate,omitempty"`
 	CacheFresh          int       `json:"cache_fresh"`
 	TTFTFresh           int       `json:"ttft_fresh"`
 	TTFTLatest          time.Time `json:"ttft_latest"`
@@ -90,34 +111,35 @@ type PassiveQualityEvidence struct {
 	Complete            bool      `json:"complete"`
 }
 type PassiveQualityState struct {
-	Purpose           string                              `json:"purpose,omitempty"`
-	CacheObserveAfter time.Time                           `json:"cache_observe_after"`
-	Latency           *PassiveQualityMetricState          `json:"latency,omitempty"`
-	Cache             map[string]PassiveQualityCacheState `json:"cache,omitempty"`
-	PolicyID          int64                               `json:"policy_id"`
-	PolicyName        string                              `json:"policy_name"`
-	AccountID         int64                               `json:"account_id"`
-	AccountName       string                              `json:"account_name,omitempty"`
-	Model             string                              `json:"model"`
-	ProbeModel        string                              `json:"probe_model,omitempty"`
-	Scope             string                              `json:"scope"`
-	Mode              string                              `json:"mode"`
-	Version           int64                               `json:"version"`
-	Generation        int64                               `json:"generation"`
-	Phase             string                              `json:"phase"`
-	Reason            string                              `json:"reason"`
-	Hits              int                                 `json:"hits"`
-	Backoff           int                                 `json:"backoff"`
-	Used              int                                 `json:"used"`
-	Inflight          int                                 `json:"inflight"`
-	LastEvidenceAt    time.Time                           `json:"last_evidence_at"`
-	ObserveAfter      time.Time                           `json:"observe_after"`
-	NextAt            time.Time                           `json:"next_at"`
-	TrialStartedAt    time.Time                           `json:"trial_started_at"`
-	TrialEndsAt       time.Time                           `json:"trial_ends_at"`
-	UpdatedAt         time.Time                           `json:"updated_at"`
-	Evidence          PassiveQualityEvidence              `json:"evidence"`
-	OtherHold         bool                                `json:"other_hold"`
+	ConfirmationMetric string                              `json:"confirmation_metric,omitempty"`
+	Purpose            string                              `json:"purpose,omitempty"`
+	CacheObserveAfter  time.Time                           `json:"cache_observe_after"`
+	Latency            *PassiveQualityMetricState          `json:"latency,omitempty"`
+	Cache              map[string]PassiveQualityCacheState `json:"cache,omitempty"`
+	PolicyID           int64                               `json:"policy_id"`
+	PolicyName         string                              `json:"policy_name"`
+	AccountID          int64                               `json:"account_id"`
+	AccountName        string                              `json:"account_name,omitempty"`
+	Model              string                              `json:"model"`
+	ProbeModel         string                              `json:"probe_model,omitempty"`
+	Scope              string                              `json:"scope"`
+	Mode               string                              `json:"mode"`
+	Version            int64                               `json:"version"`
+	Generation         int64                               `json:"generation"`
+	Phase              string                              `json:"phase"`
+	Reason             string                              `json:"reason"`
+	Hits               int                                 `json:"hits"`
+	Backoff            int                                 `json:"backoff"`
+	Used               int                                 `json:"used"`
+	Inflight           int                                 `json:"inflight"`
+	LastEvidenceAt     time.Time                           `json:"last_evidence_at"`
+	ObserveAfter       time.Time                           `json:"observe_after"`
+	NextAt             time.Time                           `json:"next_at"`
+	TrialStartedAt     time.Time                           `json:"trial_started_at"`
+	TrialEndsAt        time.Time                           `json:"trial_ends_at"`
+	UpdatedAt          time.Time                           `json:"updated_at"`
+	Evidence           PassiveQualityEvidence              `json:"evidence"`
+	OtherHold          bool                                `json:"other_hold"`
 }
 type PassiveQualityEvent struct {
 	ID         int64               `json:"id"`
@@ -249,7 +271,12 @@ func (c *PassiveQualityConfig) Validate() error {
 }
 
 func PassiveQualitySummarize(samples []PassiveQualitySample, after time.Time, complete bool) PassiveQualityEvidence {
+	return passiveQualitySummarize(samples, after, complete, true)
+}
+
+func passiveQualitySummarize(samples []PassiveQualitySample, after time.Time, complete, withFresh bool) PassiveQualityEvidence {
 	e := PassiveQualityEvidence{Samples: len(samples), Complete: complete}
+	var freshSamples []PassiveQualitySample
 	var ttft []float64
 	var read, input int64
 	consecutive := true
@@ -267,6 +294,9 @@ func PassiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 		}
 		if s.At.After(after) {
 			e.Fresh++
+			if withFresh {
+				freshSamples = append(freshSamples, s)
+			}
 		}
 		if s.Failed {
 			e.Failures++
@@ -308,6 +338,10 @@ func PassiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 	if input > 0 {
 		v := float64(read) * 100 / float64(input)
 		e.CacheRate = &v
+	}
+	if withFresh {
+		fresh := passiveQualitySummarize(freshSamples, after, complete, false)
+		e.FreshErrorRate, e.FreshTTFT, e.FreshCacheRate = fresh.ErrorRate, fresh.TTFT, fresh.CacheRate
 	}
 	return e
 }

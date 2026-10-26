@@ -11,10 +11,8 @@ import (
 const channelMonitorV2PlatformSQL = `lower(` + usageLogEffectivePlatformExpr + `)`
 const channelMonitorV2ModelSQL = `COALESCE(NULLIF(TRIM(ul.requested_model), ''), NULLIF(TRIM(ul.model), ''), 'unknown')`
 
-// Synchronous requests do not expose provider cache telemetry. Keep them in
-// traffic/token metrics, but only use streaming/WS requests for cache-rate
-// calculations. The stream/openai_ws_mode check also covers legacy rows whose
-// request_type was not backfilled yet.
+// Retain the legacy streaming/WS token subset for compatibility with existing
+// cache_eligible_* columns. Cache-rate calculations use the full token totals.
 const channelMonitorV2CacheEligibleUL = `(COALESCE(ul.request_type, 0) NOT IN (1, 4, 6) AND (ul.stream = TRUE OR ul.openai_ws_mode = TRUE))`
 
 // Tiered retention balances UI windows against storage:

@@ -7,6 +7,10 @@ export default {
       groupTargets: groupQualityTargets,
       experience: qualityExperience,
       operations: {
+        "recovery_reserve_percent": "Recovery reserve (%)",
+        "recovery_requests": "Recovery requests",
+        "recovery_tokens": "Recovery tokens",
+        "recoveryReserveHint": "Reserve this share of global and per-account daily limits for recovery. Ordinary tests cannot consume the unused reserve; recovery remains within the total hard limit. Set 0 to disable.",
   "title": "Budgets & suppliers",
   "budgetTitle": "Test budgets",
   "budgetHint": "Covers manual quality runs, scheduled tests, retries, capability questions and recovery probes. Resets at 00:00 UTC. A limit of 0 means unlimited. Customer traffic and standalone account-page connection debugging are excluded.",

@@ -51,7 +51,7 @@ func helpSystemItems() []helpItem {
 		{action: "balance", label: "我的余额", description: "查询账户余额", command: "/我的余额"},
 		{action: "today_usage", label: "今日用量", description: "查看今日用量", command: "/今日用量"},
 		{action: "rewards", label: "我的奖励", description: "查看累计奖励", command: "/我的奖励"},
-		{action: "lottery", label: "抽奖一次", description: "消耗一次抽奖次数", command: "/抽奖"},
+		{action: "lottery", label: "抽奖一次", description: "省略次数抽 1 次；可填 1–10 连抽，次数不足整批不抽", command: "/抽奖", usage: "/抽奖 [次数]"},
 		{action: "lottery_count", label: "抽奖次数", description: "查询剩余抽奖次数", command: "/抽奖次数"},
 		{action: "lottery_info", label: "抽奖活动", description: "查看抽奖活动规则", command: "/抽奖活动"},
 		{action: "growth", label: "成长任务", description: "查看成长进度和奖励", command: "/成长任务"},

@@ -26,15 +26,17 @@ func TestGroupQualityTargetIndependentConfirmationUsesBreachedMetricFreshness(t 
 				cache, latency = 95, 11000
 			}
 			e := service.PassiveQualityEvidence{Complete: true, Samples: 10, CacheSamples: 5, TTFTSamples: 5, CacheRate: &cache, TTFT: &latency, Fresh: 5, Latest: now.Add(time.Second)}
-			s := service.PassiveQualityState{Phase: "suspect", Hits: 1, LastEvidenceAt: now}
+			s := service.PassiveQualityState{Phase: "suspect", Hits: 1, LastEvidenceAt: now, ConfirmationMetric: map[string]string{"cache": "cache_rate", "ttft": "ttft_p90"}[metric]}
 			advancePassiveObserved(p, &s, e, now.Add(2*time.Second))
 			require.Equal(t, "suspect", s.Phase)
 			require.Equal(t, 1, s.Hits, "unrelated new observations cannot confirm old bad metric values")
 			require.Equal(t, now, s.LastEvidenceAt)
 			if metric == "cache" {
 				e.CacheFresh = p.NewSamples
+				e.FreshCacheRate = &cache
 			} else {
 				e.TTFTFresh = p.NewSamples
+				e.FreshTTFT = &latency
 			}
 			advancePassiveObserved(p, &s, e, now.Add(3*time.Second))
 			require.Equal(t, "paused", s.Phase)

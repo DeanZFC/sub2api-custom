@@ -151,9 +151,8 @@ func (r *passiveQualityRepository) RefreshGroupQualityFallback(ctx context.Conte
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err = lockGroupQualityTrafficLease(ctx, tx, lease); err != nil {
-		return false, err
-	}
+	// Renewal changes only expiry, so the lease row itself is sufficient;
+	// it does not compete with admissions for the shared budget lock.
 	result, err := tx.ExecContext(ctx, `UPDATE group_quality_traffic_leases SET fallback_expires_at=clock_timestamp()+($2*interval '1 second')
  WHERE lease_id=$1 AND fallback AND released_at IS NULL AND NOT unused AND fallback_expires_at>clock_timestamp()`, lease, int(groupQualityFallbackLease/time.Second))
 	if err != nil {
@@ -169,14 +168,14 @@ func (r *passiveQualityRepository) RefreshGroupQualityFallback(ctx context.Conte
 	return count == 1, nil
 }
 
-func (r *passiveQualityRepository) groupQualityFallbackSummary(ctx context.Context, p service.PassiveQualityPolicy, now time.Time) (*service.GroupQualityFallbackSummary, error) {
+func readGroupQualityFallbackSummary(ctx context.Context, reader groupQualitySummaryReader, p service.PassiveQualityPolicy, now time.Time) (*service.GroupQualityFallbackSummary, error) {
 	s := &service.GroupQualityFallbackSummary{LeaseSeconds: int(groupQualityFallbackLease / time.Second)}
 	var supported bool
-	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM groups WHERE id=$1 AND platform='openai' AND deleted_at IS NULL AND status='active')`, p.GroupIDs[0]).Scan(&supported); err != nil {
+	if err := reader.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM groups WHERE id=$1 AND platform='openai' AND deleted_at IS NULL AND status='active')`, p.GroupIDs[0]).Scan(&supported); err != nil {
 		return nil, err
 	}
 	s.Enabled = supported && p.Enabled && p.Mode == "enforce"
-	err := r.db.QueryRowContext(ctx, `SELECT count(*) FILTER(WHERE released_at IS NULL AND fallback_expires_at>$3),count(*) FILTER(WHERE created_at>=$2),
+	err := reader.QueryRowContext(ctx, `SELECT count(*) FILTER(WHERE released_at IS NULL AND fallback_expires_at>$3),count(*) FILTER(WHERE created_at>=$2),
  COALESCE(sum(CASE WHEN cache_reported AND input_tokens>0 THEN input_tokens ELSE 0 END) FILTER(WHERE created_at>=$2),0),
  COALESCE(sum(CASE WHEN cache_reported AND input_tokens>0 THEN 0 ELSE GREATEST(reserved_input,COALESCE(input_tokens,0)) END) FILTER(WHERE created_at>=$2),0)
  FROM group_quality_traffic_leases WHERE group_id=$1 AND fallback AND NOT unused AND created_at<=$3`, p.GroupIDs[0], now.Add(-time.Hour), now).Scan(&s.InFlight, &s.Requests, &s.InputTokens, &s.ReservedInputTokens)
@@ -185,7 +184,7 @@ func (r *passiveQualityRepository) groupQualityFallbackSummary(ctx context.Conte
 	}
 	var at time.Time
 	var aid int64
-	err = r.db.QueryRowContext(ctx, `SELECT created_at,account_id FROM group_quality_traffic_leases WHERE group_id=$1 AND fallback AND NOT unused ORDER BY created_at DESC LIMIT 1`, p.GroupIDs[0]).Scan(&at, &aid)
+	err = reader.QueryRowContext(ctx, `SELECT created_at,account_id FROM group_quality_traffic_leases WHERE group_id=$1 AND fallback AND NOT unused ORDER BY created_at DESC LIMIT 1`, p.GroupIDs[0]).Scan(&at, &aid)
 	if err == nil {
 		s.LastUsedAt = &at
 		s.LastAccountID = &aid

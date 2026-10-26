@@ -24,6 +24,12 @@
         </div>
       </div>
       <p class="text-xs text-gray-500">{{ tr('window', { minutes: (summaryFor(policy)?.window_seconds || 3600) / 60 }) }}<span v-if="summaryFor(policy)"> · {{ tr('updated', { date: date(summaryFor(policy)?.generated_at) }) }}</span></p>
+      <p v-if="summaryFor(policy)?.snapshot_ready === false || summaryFor(policy)?.stale" class="text-xs text-amber-700" data-target-snapshot>{{ tr(summaryFor(policy)?.snapshot_ready === false ? 'snapshotPending' : 'snapshotStale') }}</p>
+      <details v-if="summaryFor(policy)?.contributors?.length" class="rounded-lg border p-3 dark:border-dark-700" data-target-contributors>
+        <summary class="cursor-pointer text-sm font-medium">{{ tr('contributors') }}</summary><p class="my-2 text-xs text-gray-500">{{ tr('contributorsHint') }} · {{ date(summaryFor(policy)?.window_started_at) }} — {{ date(summaryFor(policy)?.generated_at) }}</p>
+        <div class="overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr><th class="p-2">{{ tr('accountModel') }}</th><th class="p-2">{{ tr('trafficKind') }}</th><th class="p-2">{{ tr('uncachedTokens') }}</th><th class="p-2">{{ tr('failures') }}</th><th class="p-2">{{ tr('slowRequests') }}</th><th class="p-2">{{ tr('ttft') }}</th></tr></thead><tbody><tr v-for="c in summaryFor(policy)?.contributors" :key="`${c.account_id}-${c.model}-${c.traffic_kind}`" class="border-t dark:border-dark-700"><td class="p-2">{{ c.account_name || `#${c.account_id}` }} · {{ c.model || t('admin.tests.passive.allModels') }}</td><td class="p-2">{{ tr('trafficKinds.' + c.traffic_kind) }}</td><td class="p-2">{{ tokenCount(c.uncached_tokens) }}<span v-if="c.cache_unknown_samples" class="block text-amber-700">{{ tr('unknownSamples', { count: c.cache_unknown_samples }) }}</span></td><td class="p-2">{{ c.failure_samples }} / {{ c.failure_samples + c.success_samples }}</td><td class="p-2">{{ c.slow_requests }} / {{ c.ttft_samples }}</td><td class="p-2">{{ seconds(c.ttft_p90_ms) }}</td></tr></tbody></table></div>
+        <p v-if="summaryFor(policy)?.contributors_truncated" class="mt-2 text-xs text-amber-700">{{ tr('contributorsTruncated', { shown: summaryFor(policy)?.contributors?.length || 0, total: summaryFor(policy)?.contributor_total || 0 }) }}</p>
+      </details>
       <p v-if="summaryFor(policy) && !summaryFor(policy)?.telemetry_complete" class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p>
       <section v-if="trafficControlFor(policy)" class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-700" data-target-traffic-control>
         <div class="flex flex-wrap items-center justify-between gap-2"><h5 class="text-sm font-semibold">{{ tr('trafficTitle') }}</h5><span class="badge" :class="trafficControlFor(policy)?.mode === 'normal' ? 'badge-gray' : 'badge-warning'" data-target-traffic-mode>{{ tr('trafficModes.' + trafficControlFor(policy)?.mode) }}</span></div>
@@ -48,7 +54,7 @@
         <p v-if="fallbackFor(policy)?.last_used_at && fallbackFor(policy)?.last_account_id" class="text-xs text-gray-500" data-target-fallback-last>{{ tr('fallbackLast', { account: fallbackFor(policy)?.last_account_id, date: date(fallbackFor(policy)?.last_used_at) }) }}</p>
         <p class="text-xs leading-5 text-amber-700 dark:text-amber-300">{{ tr('fallbackCaveat') }}</p>
       </section>
-      <div class="flex flex-wrap gap-2 text-xs"><span class="badge badge-gray">{{ tr('scopeCount', { count: policyStates(policy).length }) }}</span><span v-if="countPhase(policy, ['paused', 'probing'])" class="badge badge-warning">{{ tr('pausedCount', { count: countPhase(policy, ['paused', 'probing']) }) }}</span><span v-if="countPhase(policy, ['trial'])" class="badge badge-gray">{{ tr('trialCount', { count: countPhase(policy, ['trial']) }) }}</span><span v-if="countPhase(policy, ['insufficient', 'suspect', 'observed'])" class="badge badge-gray">{{ tr('pendingCount', { count: countPhase(policy, ['insufficient', 'suspect', 'observed']) }) }}</span><span v-if="!policyStates(policy).length" class="text-gray-500">{{ tr('noStates') }}</span></div>
+      <div class="flex flex-wrap gap-2 text-xs"><span class="badge badge-gray">{{ tr('scopeCount', { count: policyCounts(policy)?.total || 0 }) }}</span><span v-if="countPhase(policy, ['paused', 'probing'])" class="badge badge-warning">{{ tr('pausedCount', { count: countPhase(policy, ['paused', 'probing']) }) }}</span><span v-if="countPhase(policy, ['trial'])" class="badge badge-gray">{{ tr('trialCount', { count: countPhase(policy, ['trial']) }) }}</span><span v-if="countPhase(policy, ['insufficient', 'suspect', 'observed'])" class="badge badge-gray">{{ tr('pendingCount', { count: countPhase(policy, ['insufficient', 'suspect', 'observed']) }) }}</span><span v-if="!policyCounts(policy)?.total" class="text-gray-500">{{ tr('noStates') }}</span></div>
       <div v-if="policy.enabled && policy.mode === 'enforce'" class="space-y-2">
         <p class="text-sm font-medium" data-target-verified>{{ tr('verifiedCount', { count: verifiedCount(policy) }) }}</p>
         <p v-if="verifiedCount(policy) === 0 && trafficControlFor(policy)?.mode !== 'bootstrap'" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium leading-6 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-target-no-verified>{{ tr(fallbackFor(policy) ? 'noVerifiedFallback' : 'noVerified') }}</p>
@@ -59,11 +65,12 @@
         <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-700"><th class="p-2">{{ tr('accountModel') }}</th><th class="p-2">{{ tr('phase') }}</th><th class="p-2">{{ tr('latestEvidence') }}</th><th class="p-2">{{ tr('reason') }}</th></tr></thead><tbody>
           <tr v-for="state in policyStates(policy)" :key="`${state.account_id}-${state.model}`" class="border-b border-gray-100 align-top last:border-0 dark:border-dark-800" :data-target-state="`${state.account_id}-${state.model}`">
             <td class="p-2"><strong>{{ state.account_name || `#${state.account_id}` }}</strong><p class="mt-1 text-xs text-gray-500">#{{ state.account_id }} · {{ state.model || t('admin.tests.passive.allModels') }}</p></td>
-            <td class="p-2 text-xs"><span class="badge" :class="['paused', 'probing'].includes(state.phase) ? 'badge-warning' : 'badge-gray'">{{ phaseLabel(state) }}</span><p class="mt-2">{{ tr('confirmations', { count: state.hits, required: policy.confirmations || 2 }) }}</p><p v-if="state.phase === 'paused'" class="mt-2">{{ tr('nextTrial', { date: date(state.next_at) }) }}</p><template v-if="state.phase === 'trial'"><p class="mt-2">{{ tr('trialProgress', { used: state.used, max: policy.trial_requests || 20, samples: stateSampleCount(policy, state), required: policy.recovery_samples || 5 }) }}</p><p class="mt-1">{{ tr('trialDeadline', { date: date(state.trial_ends_at) }) }}</p></template></td>
-            <td class="space-y-1 p-2 text-xs"><p v-if="policy.cache_rate.enabled">{{ tr('cache') }}: {{ percent(state.evidence.cache_rate) }} · {{ tr('samples', { count: state.evidence.cache_samples }) }}</p><p v-if="policy.error_rate.enabled">{{ tr('availability') }}: {{ percent(state.evidence.error_rate == null ? null : 100 - state.evidence.error_rate) }} · {{ tr('samples', { count: state.evidence.samples }) }}</p><p v-if="policy.ttft.enabled">{{ tr('ttft') }}: {{ seconds(state.evidence.ttft) }} · {{ tr('samples', { count: state.evidence.ttft_samples }) }}</p><p v-if="stateSampleCount(policy, state) < stateMinimum(policy, state)" class="text-amber-700 dark:text-amber-300">{{ tr('remaining', { count: stateMinimum(policy, state) - stateSampleCount(policy, state) }) }}</p><p class="text-gray-500">{{ date(state.updated_at) }}</p></td>
+            <td class="p-2 text-xs"><span class="badge" :class="['paused', 'probing'].includes(state.phase) ? 'badge-warning' : 'badge-gray'">{{ phaseLabel(state) }}</span><p class="mt-2">{{ tr('confirmations', { count: state.hits, required: policy.confirmations || 2 }) }}</p><p v-if="state.phase === 'paused'" class="mt-2">{{ tr('nextTrial', { date: date(state.next_at) }) }}</p><template v-if="state.phase === 'trial'"><p class="mt-2">{{ tr('trialProgress', { used: state.used, max: policy.trial_requests || 20, samples: stateSampleCount(policy, state), required: policy.recovery_samples || 5 }) }}</p><p v-if="trialWaiting(state)" class="mt-1" data-target-trial-waiting>{{ tr('trialRetryAfter', { date: date(state.next_at) }) }}</p><p v-else class="mt-1">{{ tr('trialDeadline', { date: date(state.trial_ends_at) }) }}</p></template></td>
+            <td class="space-y-1 p-2 text-xs"><p v-if="policy.cache_rate.enabled">{{ tr('cache') }}: {{ percent(state.evidence.cache_rate) }} · {{ tr('samples', { count: state.evidence.cache_samples }) }}</p><p v-if="policy.error_rate.enabled">{{ tr('availability') }}: {{ percent(state.evidence.error_rate == null ? null : 100 - state.evidence.error_rate) }} · {{ tr('samples', { count: state.evidence.samples }) }}</p><p v-if="policy.ttft.enabled">{{ tr('ttft') }}: {{ seconds(state.evidence.ttft) }} · {{ tr('samples', { count: state.evidence.ttft_samples }) }}</p><p v-if="stateSampleCount(policy, state) < stateMinimum(policy, state)" class="text-amber-700 dark:text-amber-300">{{ tr('remaining', { count: stateMinimum(policy, state) - stateSampleCount(policy, state) }) }}</p><PassiveFreshEvidence :evidence="state.evidence" /><p class="text-gray-500">{{ date(state.updated_at) }}</p></td>
             <td class="max-w-80 break-words p-2 text-xs"><p>{{ reason(state.reason) || '—' }}</p><p v-if="!state.evidence.complete" class="mt-2 text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p><p v-if="state.other_hold" class="mt-2 text-amber-700 dark:text-amber-300">{{ tr('otherHold') }}</p></td>
           </tr>
         </tbody></table></div>
+        <p v-if="statePaginated[policy.id]" class="mt-2 text-xs text-amber-700">{{ t('admin.tests.experience.refreshPaused') }} <button class="underline" @click="loadPolicyStates(policy.id)">{{ t('common.refresh') }}</button></p><div class="mt-3 flex items-center gap-3"><span class="text-xs text-gray-500">{{ t('admin.tests.experience.loadedStates', { loaded: policyStates(policy).length, total: policyCounts(policy)?.total || 0 }) }}</span><button v-if="stateCursors[policy.id]" class="btn btn-secondary btn-sm" :disabled="stateLoading[policy.id]" :data-target-more-states="policy.id" @click="loadPolicyStates(policy.id, true)">{{ t('admin.tests.experience.moreStates') }}</button></div>
       </details>
     </article>
     <aside class="space-y-2 rounded-lg bg-gray-50 p-4 text-xs leading-5 text-gray-600 dark:bg-dark-800 dark:text-gray-300"><p>{{ tr('evidenceScope') }}</p><p>{{ tr('limitations') }}</p><p>{{ tr('sharedScope') }}</p></aside>
@@ -92,7 +99,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import { passiveQualityAPI as api, groupQualityTargetDraft, isGroupQualityTarget, type GroupQualityTargetDraft, type GroupQualityTargetSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
+import PassiveFreshEvidence from './PassiveFreshEvidence.vue'
+import { passiveQualityAPI as api, groupQualityTargetDraft, isGroupQualityTarget, emptyPassiveSummary, type GroupQualityTargetDraft, type GroupQualityTargetSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
 import { useQualityLabels } from '@/composables/useQualityLabels'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -103,6 +111,7 @@ const emit = defineEmits<{ navigate: [tab: string, policy?: number, account?: nu
 const { t, locale } = useI18n(), app = useAppStore(), { reason, date } = useQualityLabels()
 const tr = (key: string, values: Record<string, unknown> = {}) => t('admin.tests.groupTargets.' + key, values)
 const policies = ref<PassivePolicy[]>([]), states = ref<PassiveState[]>([]), summaries = ref<GroupQualityTargetSummary[]>([])
+const stateSummary = ref(emptyPassiveSummary()), stateCursors = ref<Record<number, string>>({}), stateLoading = ref<Record<number, boolean>>({})
 const targets = computed(() => policies.value.filter(isGroupQualityTarget))
 const eligibleGroups = computed(() => props.groups.filter(g => g.status === 'active' && g.platform !== 'composite'))
 const loading = ref(false), busy = ref(false), loadError = ref(''), summaryError = ref(false)
@@ -116,25 +125,23 @@ const summaryFor = (p: PassivePolicy) => summaries.value.find(s => s.policy_id =
 const trafficControlFor = (p: PassivePolicy) => p.enabled && p.mode === 'enforce' && summaryFor(p)?.traffic_control?.enabled ? summaryFor(p)?.traffic_control : undefined
 const fallbackFor = (p: PassivePolicy) => p.enabled && p.mode === 'enforce' && summaryFor(p)?.fallback?.enabled ? summaryFor(p)?.fallback : undefined
 const policyStates = (p: PassivePolicy) => states.value.filter(s => s.policy_id === p.id)
-const countPhase = (p: PassivePolicy, phases: string[]) => policyStates(p).filter(s => phases.includes(s.phase)).length
+const policyCounts = (p: PassivePolicy) => stateSummary.value.by_policy.find(s => s.policy_id === p.id)
+const countPhase = (p: PassivePolicy, phases: string[]) => phases.reduce((sum, phase) => sum + (policyCounts(p)?.phases[phase] || 0), 0)
 const minimum = (p: PassivePolicy) => p.min_samples || 5
 const stateMinimum = (p: PassivePolicy, s: PassiveState) => s.phase === 'trial' ? p.recovery_samples || 5 : minimum(p)
 function verifiedCount(p: PassivePolicy) {
   const traffic = trafficControlFor(p)
   if (traffic) return traffic.verified_accounts
-  return policyStates(p).filter(s => {
-    if (s.phase !== 'healthy' || s.evidence.complete !== true || s.other_hold || stateSampleCount(p, s) < minimum(p)) return false
-    const e = s.evidence
-    return (!p.cache_rate.enabled || (e.cache_rate != null && Number.isFinite(e.cache_rate) && e.cache_rate > p.cache_rate.pause))
-      && (!p.error_rate.enabled || (e.error_rate != null && Number.isFinite(e.error_rate) && e.error_rate < p.error_rate.pause))
-      && (!p.ttft.enabled || (e.ttft != null && Number.isFinite(e.ttft) && e.ttft < p.ttft.pause))
-  }).length
+  return policyCounts(p)?.verified || 0
 }
 function stateSampleCount(p: PassivePolicy, s: PassiveState) {
   const counts = [p.cache_rate.enabled ? s.evidence.cache_samples : undefined, p.error_rate.enabled ? s.evidence.samples : undefined, p.ttft.enabled ? s.evidence.ttft_samples : undefined].filter((v): v is number => v !== undefined)
   return counts.length ? Math.min(...counts) : 0
 }
-function phaseLabel(s: PassiveState) { if (s.phase === 'healthy' && !s.evidence.complete) return tr('insufficient'); return s.phase === 'probing' ? tr('trialPreparing') : t('admin.tests.passive.phases.' + s.phase) }
+function trialWaiting(s: PassiveState) {
+  return s.phase === 'trial' && s.reason.startsWith('waiting_for_recovery: ') && new Date(s.next_at).getTime() > new Date(s.trial_ends_at).getTime()
+}
+function phaseLabel(s: PassiveState) { if (s.phase === 'healthy' && !s.evidence.complete) return tr('insufficient'); if (trialWaiting(s)) return tr('trialWaiting'); return s.phase === 'probing' ? tr('trialPreparing') : t('admin.tests.passive.phases.' + s.phase) }
 function metricRows(p: PassivePolicy) {
   const s = summaryFor(p)
   return [
@@ -145,7 +152,7 @@ function metricRows(p: PassivePolicy) {
 }
 function targetStatus(p: PassivePolicy) {
   if (!p.enabled) return 'disabled'
-  if (summaryFor(p)?.telemetry_complete !== true) return 'insufficient'
+  if (summaryFor(p)?.telemetry_complete !== true || summaryFor(p)?.stale || summaryFor(p)?.snapshot_ready === false) return 'insufficient'
   const rows = metricRows(p)
   if (rows.some(row => row.known && row.samples >= minimum(p) && row.breach)) return 'belowTarget'
   if (!rows.length || rows.some(row => !row.known || row.samples < minimum(p) || row.unknown > 0)) return 'insufficient'
@@ -180,16 +187,39 @@ function recoveryLabels(p: GroupQualityTargetDraft) {
   return [p.cache_rate.enabled ? `${tr('cache')}: ${percent(p.cache_rate.recover)}` : '', p.error_rate.enabled ? `${tr('availability')}: ${percent(100 - p.error_rate.recover)}` : '', p.ttft.enabled ? `${tr('ttft')}: ${seconds(p.ttft.recover)}` : ''].filter(Boolean)
 }
 let request = 0
+const stateRequests = new Map<number, number>()
+const statePaginated = ref<Record<number, boolean>>({})
+async function loadPolicyStates(id: number, append = false) {
+  if (append && stateLoading.value[id]) return
+  append = append && !!stateCursors.value[id]
+  const current = (stateRequests.get(id) || 0) + 1
+  stateRequests.set(id, current); stateLoading.value[id] = true
+  try {
+    const page = await api.statePage({ policy_id: id, cursor: append ? stateCursors.value[id] : undefined, limit: 20 })
+    if (stateRequests.get(id) !== current) return
+    states.value = append ? [...states.value, ...page.items] : [...states.value.filter(s => s.policy_id !== id), ...page.items]
+    stateCursors.value[id] = page.has_more ? page.next_cursor || '' : ''; statePaginated.value[id] = append
+  } catch (e) { if (stateRequests.get(id) === current) loadError.value = extractApiErrorMessage(e, tr('loadFailed')) }
+  finally { if (stateRequests.get(id) === current) stateLoading.value[id] = false }
+}
 async function refresh() {
-  const current = ++request
-  loading.value = true
-  const [policyResult, stateResult, summaryResult] = await Promise.allSettled([api.policies(), api.states(), api.groupTargets()])
+  const current = ++request; loading.value = true
+  const [policyResult, stateResult, summaryResult] = await Promise.allSettled([api.policies(), api.stateSummary(), api.groupTargets()])
   if (current !== request) return
   if (policyResult.status === 'fulfilled' && stateResult.status === 'fulfilled') {
-    policies.value = policyResult.value; states.value = stateResult.value; loadError.value = ''
-  } else {
-    loadError.value = extractApiErrorMessage(policyResult.status === 'rejected' ? policyResult.reason : stateResult.status === 'rejected' ? stateResult.reason : undefined, tr('loadFailed'))
-  }
+    const previous = new Map(policies.value.map(policy => [policy.id, policy.version]))
+    for (const policy of policyResult.value) if (previous.has(policy.id) && previous.get(policy.id) !== policy.version) {
+      stateRequests.set(policy.id, (stateRequests.get(policy.id) || 0) + 1)
+      states.value = states.value.filter(state => state.policy_id !== policy.id)
+      delete statePaginated.value[policy.id]; delete stateCursors.value[policy.id]; delete stateLoading.value[policy.id]
+    }
+    policies.value = policyResult.value; stateSummary.value = stateResult.value; loadError.value = ''
+    const ids = new Set(targets.value.map(p => p.id))
+    states.value = states.value.filter(s => ids.has(s.policy_id))
+    for (const [id, token] of stateRequests) if (!ids.has(id)) { stateRequests.set(id, token + 1); delete statePaginated.value[id]; delete stateCursors.value[id]; delete stateLoading.value[id] }
+    await Promise.all(targets.value.filter(p => !statePaginated.value[p.id] && !stateLoading.value[p.id]).map(p => loadPolicyStates(p.id)))
+  } else { loadError.value = extractApiErrorMessage(policyResult.status === 'rejected' ? policyResult.reason : stateResult.status === 'rejected' ? stateResult.reason : undefined, tr('loadFailed')) }
+  if (current !== request) return
   summaryError.value = summaryResult.status === 'rejected'
   summaries.value = summaryResult.status === 'fulfilled' ? summaryResult.value : []
   loading.value = false
@@ -221,6 +251,6 @@ watch(() => [props.policyId, targets.value] as const, ([id]) => {
 })
 onMounted(() => { if (props.visible) void refresh(); timer = setInterval(() => { if (props.visible && !document.hidden && !loading.value && !busy.value) void refresh() }, 15000) })
 watch(() => props.visible, visible => { if (visible) void refresh(); else editing.value = null })
-onUnmounted(() => { request++; clearInterval(timer) })
+onUnmounted(() => { request++; for (const [id, token] of stateRequests) stateRequests.set(id, token + 1); clearInterval(timer) })
 defineExpose({ refresh })
 </script>

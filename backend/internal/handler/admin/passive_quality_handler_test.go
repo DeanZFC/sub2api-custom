@@ -24,6 +24,55 @@ type passiveHandlerRepo struct {
 	conflict      bool
 }
 
+type passiveQueryHandlerRepo struct {
+	passiveHandlerRepo
+	query service.PassiveQualityQuery
+	err   error
+}
+
+func (r *passiveQueryHandlerRepo) QueryStates(_ context.Context, q service.PassiveQualityQuery) (*service.PassiveQualityStatePage, error) {
+	r.query = q
+	return &service.PassiveQualityStatePage{Items: []service.PassiveQualityState{}, Total: 12345}, r.err
+}
+func (r *passiveQueryHandlerRepo) QueryEvents(_ context.Context, q service.PassiveQualityQuery) (*service.PassiveQualityEventPage, error) {
+	r.query = q
+	return &service.PassiveQualityEventPage{Items: []service.PassiveQualityEvent{}, HasMore: true, NextCursor: "22"}, r.err
+}
+func (r *passiveQueryHandlerRepo) StateSummary(context.Context) (*service.PassiveQualityStateSummary, error) {
+	return &service.PassiveQualityStateSummary{Total: 12345}, nil
+}
+
+func TestPassiveQualityReportValidation(t *testing.T) {
+	repo := &passiveQueryHandlerRepo{}
+	h := NewPassiveQualityHandler(service.NewPassiveQualityService(repo, nil))
+	router := gin.New()
+	router.GET("/states", h.States)
+	router.GET("/events", h.Events)
+	router.GET("/summary", h.StateSummary)
+	request := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		return w
+	}
+	require.Equal(t, 200, request("/events?paginated=true&policy_id=7&account_id=62&model=model-a&kind=paused&cursor=30&limit=20&since=2026-10-01T00:00:00Z&until=2026-10-02T00:00:00Z").Code)
+	require.EqualValues(t, 7, repo.query.PolicyID)
+	require.EqualValues(t, 62, repo.query.AccountID)
+	require.Equal(t, "model-a", repo.query.Model)
+	require.Equal(t, "paused", repo.query.Kind)
+	require.Equal(t, "30", repo.query.Cursor)
+	require.Equal(t, 20, repo.query.Limit)
+	require.NotNil(t, repo.query.Since)
+	require.NotNil(t, repo.query.Until)
+	for _, filter := range []string{"policy_id=-1", "account_id=nope", "limit=201", "since=bad", "since=2026-10-02T00:00:00Z&until=2026-10-01T00:00:00Z"} {
+		require.Equal(t, 400, request("/events?paginated=true&"+filter).Code, filter)
+	}
+	require.Contains(t, request("/states?paginated=true&phase=paused").Body.String(), `"total":12345`)
+	require.Equal(t, "paused", repo.query.Phase)
+	require.Contains(t, request("/summary").Body.String(), `"total":12345`)
+	repo.err = service.ErrPassiveQualityCursor
+	require.Equal(t, 400, request("/events?paginated=true&cursor=bad").Code)
+}
+
 func (r *passiveHandlerRepo) SavePolicy(_ context.Context, p *service.PassiveQualityPolicy) error {
 	if r.conflict {
 		return service.ErrPassiveQualityConflict

@@ -123,6 +123,7 @@ func (r *scheduledTestResultRepository) DecideTestResult(ctx context.Context, ad
 		return err
 	}
 	state.adminVerdict = verdict
+	state.evidenceSource, state.evidenceActor = "administrator", &adminID
 	if err := saveProtectionVerdict(ctx, tx, state); err != nil {
 		return err
 	}

@@ -22,39 +22,6 @@
       <p v-if="notice" role="status" class="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">{{ notice }}</p>
 
       <section class="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-dark-600">
-        <h4 class="font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.openaiVm.configTitle') }}</h4>
-        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openaiVm.configHint') }}</p>
-        <p v-if="configError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ configError }}</p>
-        <button v-if="!config && !busy" type="button" class="btn btn-secondary btn-sm" @click="load">{{ t('common.retry') }}</button>
-        <form v-if="config" data-testid="vm-config-form" @submit.prevent="save">
-          <fieldset :disabled="busy" class="space-y-3 disabled:opacity-70">
-            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-              <input v-model="form.enabled" type="checkbox" data-testid="vm-enabled" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-              {{ t('admin.accounts.openaiVm.enabled') }}
-            </label>
-            <div>
-              <label for="openai-vm-base-url" class="input-label">{{ t('admin.accounts.openaiVm.baseUrl') }}</label>
-              <input id="openai-vm-base-url" v-model="form.base_url" type="url" :required="form.enabled" class="input" placeholder="http://127.0.0.1:8097" autocomplete="off" />
-            </div>
-            <div>
-              <label for="openai-vm-proxy-url" class="input-label">{{ t('admin.accounts.openaiVm.proxyUrl') }}</label>
-              <input id="openai-vm-proxy-url" v-model="form.proxy_url" type="url" :required="form.enabled" class="input" placeholder="http://127.0.0.1:8097" autocomplete="off" />
-            </div>
-            <div>
-              <label for="openai-vm-secret" class="input-label">{{ t('admin.accounts.openaiVm.secret') }}</label>
-              <input id="openai-vm-secret" v-model="form.secret" type="password" class="input" autocomplete="new-password" :placeholder="t(config.secret_configured ? 'admin.accounts.openaiVm.secretKeep' : 'admin.accounts.openaiVm.secretMissing')" />
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t(config.secret_configured ? 'admin.accounts.openaiVm.secretConfigured' : 'admin.accounts.openaiVm.secretMissing') }}</p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <button type="submit" class="btn btn-primary btn-sm" data-testid="vm-save">{{ t('common.save') }}</button>
-              <button type="button" :disabled="configDirty || !config.enabled || !config.secret_configured" class="btn btn-secondary btn-sm" data-testid="vm-test" @click="test">{{ t('admin.accounts.openaiVm.test') }}</button>
-            </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(configDirty ? 'admin.accounts.openaiVm.saveFirst' : 'admin.accounts.openaiVm.testHint') }}</p>
-          </fieldset>
-        </form>
-      </section>
-
-      <section class="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-dark-600">
         <div class="flex items-center justify-between gap-3">
           <h4 class="font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.openaiVm.bindingTitle') }}</h4>
           <button type="button" :disabled="busy" class="btn btn-secondary btn-sm" data-testid="vm-refresh" @click="refresh">{{ t('common.refresh') }}</button>
@@ -73,7 +40,7 @@
           <p v-if="binding.last_error" role="alert" class="whitespace-pre-wrap break-words rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ binding.last_error }}</p>
           <p v-if="binding.status !== 'ready'" class="text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openaiVm.notReady') }}</p>
           <div v-if="eligible" class="flex flex-wrap gap-2">
-            <button v-if="canRetry" type="button" :disabled="busy || (configDirty && !cleanupRetry)" class="btn btn-primary btn-sm" data-testid="vm-retry" @click="mutate('retry')">{{ t(cleanupRetry ? 'admin.accounts.openaiVm.retryCleanup' : 'admin.accounts.openaiVm.retry') }}</button>
+            <button v-if="canRetry" type="button" :disabled="busy || (!state?.configured && !cleanupRetry)" class="btn btn-primary btn-sm" data-testid="vm-retry" @click="mutate('retry')">{{ t(cleanupRetry ? 'admin.accounts.openaiVm.retryCleanup' : 'admin.accounts.openaiVm.retry') }}</button>
             <button type="button" :disabled="busy" class="btn btn-danger btn-sm" data-testid="vm-delete" @click="confirmDelete = true">{{ t('admin.accounts.openaiVm.unbind') }}</button>
           </div>
         </template>
@@ -89,9 +56,12 @@
                 <option value="kvm">KVM</option>
               </select>
             </div>
-            <button type="button" :disabled="busy || !state.configured || !config?.enabled || configDirty" class="btn btn-primary" data-testid="vm-create" @click="mutate('create')">{{ t('admin.accounts.openaiVm.create') }}</button>
+            <button type="button" :disabled="busy || !state.configured" class="btn btn-primary" data-testid="vm-create" @click="mutate('create')">{{ t('admin.accounts.openaiVm.create') }}</button>
           </div>
         </template>
+        <RouterLink v-if="state && !state.configured" v-slot="{ href, navigate }" to="/admin/settings?tab=openai-vm" custom>
+          <a :href="busy ? undefined : href" :aria-disabled="busy" :tabindex="busy ? -1 : undefined" class="inline-block text-sm text-primary-600 hover:underline aria-disabled:cursor-not-allowed aria-disabled:opacity-50" data-testid="vm-settings-link" @click="openSettings($event, navigate)">{{ t('admin.accounts.openaiVm.configureGlobally') }}</a>
+        </RouterLink>
         <div v-if="confirmDelete" class="space-y-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-900/20">
           <p class="text-sm text-red-700 dark:text-red-300">{{ t('admin.accounts.openaiVm.unbindConfirm') }}</p>
           <div class="flex gap-2">
@@ -111,27 +81,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink, type NavigationFailure } from 'vue-router'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import { Icon } from '@/components/icons'
-import { isStepUpBlocked, isStepUpCancelled, stepUpBlockReason, useStepUp } from '@/composables/useStepUp'
-import { openaiVmAPI, type OpenAIVMAccountState, type OpenAIVMBinding, type OpenAIVMConfig, type OpenAIVMRuntime } from '@/api/admin/openaiVm'
+import { isStepUpBlocked, isStepUpCancelled, StepUpCancelledError, stepUpBlockReason, useStepUp } from '@/composables/useStepUp'
+import { openaiVmAPI, type OpenAIVMAccountState, type OpenAIVMBinding, type OpenAIVMRuntime } from '@/api/admin/openaiVm'
 import type { Account } from '@/types'
 
 const props = defineProps<{ show: boolean; account: Account | null }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'updated'): void }>()
 const { t } = useI18n()
 const stepUp = useStepUp()
-const config = ref<OpenAIVMConfig | null>(null)
-const form = reactive({ enabled: false, base_url: '', proxy_url: '', secret: '' })
 const state = ref<OpenAIVMAccountState | null>(null)
 const runtime = ref<OpenAIVMRuntime>('docker')
 const operation = ref('')
 const error = ref('')
 const notice = ref('')
-const configError = ref('')
 const bindingError = ref('')
 const confirmDelete = ref(false)
 let session = 0
@@ -139,7 +107,6 @@ let session = 0
 const busy = computed(() => operation.value !== '')
 const binding = computed(() => state.value?.binding ?? null)
 const eligible = computed(() => Boolean(state.value?.eligible && props.account?.platform === 'openai' && props.account.type === 'oauth' && props.account.parent_account_id == null))
-const configDirty = computed(() => !config.value || form.enabled !== config.value.enabled || form.base_url.trim() !== config.value.base_url || form.proxy_url.trim() !== config.value.proxy_url || form.secret !== '')
 const cleanupRetry = computed(() => ['deleting', 'delete_failed'].includes(binding.value?.status ?? ''))
 const canRetry = computed(() => ['provisioning', 'error'].includes(binding.value?.status ?? '') || cleanupRetry.value)
 const statusLabel = computed(() => {
@@ -157,11 +124,6 @@ function messageOf(cause: unknown): string {
   return typeof message === 'string' && message ? message : t('admin.accounts.openaiVm.failed')
 }
 
-function applyConfig(value: OpenAIVMConfig) {
-  config.value = value
-  Object.assign(form, { enabled: value.enabled, base_url: value.base_url, proxy_url: value.proxy_url, secret: '' })
-}
-
 async function readBinding(accountId: number, current: number) {
   const value = await openaiVmAPI.getBinding(accountId)
   if (current !== session) return
@@ -174,17 +136,13 @@ async function load() {
   const current = session
   const accountId = props.account.id
   operation.value = 'load'
-  const [configResult, bindingResult] = await Promise.allSettled([openaiVmAPI.getConfig(), openaiVmAPI.getBinding(accountId)])
-  if (current !== session) return
-  if (configResult.status === 'fulfilled') {
-    applyConfig(configResult.value)
-    configError.value = ''
-  } else configError.value = messageOf(configResult.reason)
-  if (bindingResult.status === 'fulfilled') {
-    state.value = bindingResult.value
-    bindingError.value = ''
-  } else bindingError.value = messageOf(bindingResult.reason)
-  operation.value = ''
+  try {
+    await readBinding(accountId, current)
+  } catch (cause) {
+    if (current === session) bindingError.value = messageOf(cause)
+  } finally {
+    if (current === session) operation.value = ''
+  }
 }
 
 async function run(kind: string, action: (accountId: number, current: number) => Promise<void>) {
@@ -211,45 +169,31 @@ async function run(kind: string, action: (accountId: number, current: number) =>
   }
 }
 
-async function save() {
-  if (!config.value) return
-  const payload = { enabled: form.enabled, base_url: form.base_url.trim(), proxy_url: form.proxy_url.trim(), ...(form.secret ? { secret: form.secret } : {}) }
-  await run('save', async (accountId, current) => {
-    const saved = await stepUp.run(() => openaiVmAPI.saveConfig(payload))
-    if (current !== session) return
-    applyConfig(saved)
-    configError.value = ''
-    await readBinding(accountId, current)
-    if (current === session) notice.value = t('admin.accounts.openaiVm.saved')
-  })
-}
-
-async function test() {
-  if (configDirty.value || !config.value?.enabled || !config.value.secret_configured) return
-  await run('test', async (_accountId, current) => {
-    const result = await stepUp.run(() => openaiVmAPI.testConnection())
-    if (!result.healthy) throw new Error(result.message || t('admin.accounts.openaiVm.failed'))
-    if (current === session) notice.value = t('admin.accounts.openaiVm.healthy')
-  })
-}
-
 async function refresh() {
   await run('refresh', readBinding)
 }
 
 async function mutate(kind: 'create' | 'retry' | 'delete') {
   if (!eligible.value) return
-  if (kind === 'create' && (binding.value || !state.value?.configured || !config.value?.enabled || configDirty.value)) return
-  if (kind === 'retry' && (!canRetry.value || (configDirty.value && !cleanupRetry.value))) return
+  if (kind === 'create' && (binding.value || !state.value?.configured)) return
+  if (kind === 'retry' && (!canRetry.value || (!state.value?.configured && !cleanupRetry.value))) return
   if (kind === 'delete' && (!binding.value || !confirmDelete.value)) return
   const runtimeType = runtime.value
   const cleaningUp = kind === 'delete' || (kind === 'retry' && cleanupRetry.value)
   await run(kind, async (accountId, current) => {
-    const result = await stepUp.run<OpenAIVMBinding | null | void>(() => kind === 'create'
-      ? openaiVmAPI.createBinding(accountId, runtimeType)
-      : kind === 'retry'
-        ? openaiVmAPI.retryBinding(accountId)
-        : openaiVmAPI.deleteBinding(accountId))
+    const result = await stepUp.run<OpenAIVMBinding | null | void>(async () => {
+      if (current !== session) throw new StepUpCancelledError()
+      try {
+        return await (kind === 'create'
+          ? openaiVmAPI.createBinding(accountId, runtimeType)
+          : kind === 'retry'
+            ? openaiVmAPI.retryBinding(accountId)
+            : openaiVmAPI.deleteBinding(accountId))
+      } catch (cause) {
+        if (current !== session) throw new StepUpCancelledError()
+        throw cause
+      }
+    })
     if (current !== session) return
     if (state.value) state.value = { ...state.value, binding: result ?? null }
     confirmDelete.value = false
@@ -270,16 +214,25 @@ function close() {
   if (!busy.value) emit('close')
 }
 
+async function openSettings(event: MouseEvent, navigate: (event?: MouseEvent) => Promise<void | NavigationFailure>) {
+  if (busy.value) {
+    event.preventDefault()
+    return
+  }
+  if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+  await run('navigate', async (_accountId, current) => {
+    const failure = await navigate(event)
+    if (!failure && current === session) emit('close')
+  })
+}
+
 watch([() => props.show, () => props.account?.id], () => {
   session += 1
   stepUp.onCancel()
   operation.value = ''
-  config.value = null
   state.value = null
-  form.secret = ''
   error.value = ''
   notice.value = ''
-  configError.value = ''
   bindingError.value = ''
   confirmDelete.value = false
   runtime.value = 'docker'

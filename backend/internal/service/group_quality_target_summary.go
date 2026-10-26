@@ -8,6 +8,13 @@ import (
 // GroupQualityTargetSummary is a live rolling-window measurement. It must not
 // reuse the frozen evidence retained by a paused account's protection state.
 type GroupQualityTargetSummary struct {
+	SnapshotReady         bool                         `json:"snapshot_ready"`
+	Stale                 bool                         `json:"stale"`
+	WindowStartedAt       time.Time                    `json:"window_started_at"`
+	Contributors          []GroupQualityContributor    `json:"contributors"`
+	ContributorTotal      int                          `json:"contributor_total"`
+	ContributorsTruncated bool                         `json:"contributors_truncated"`
+	TotalInputTokens      int64                        `json:"total_input_tokens"`
 	Fallback              *GroupQualityFallbackSummary `json:"fallback,omitempty"`
 	TrafficControl        *GroupQualityTrafficSummary  `json:"traffic_control,omitempty"`
 	PolicyID              int64                        `json:"policy_id"`
@@ -46,4 +53,22 @@ type GroupQualityFallbackSummary struct {
 // admission implementations need no reporting-only methods.
 type GroupQualityTargetSummaryRepository interface {
 	GroupQualityTargetSummaries(context.Context, time.Time) ([]GroupQualityTargetSummary, error)
+}
+
+// An exact admitted attempt is required to attribute the routing category.
+type GroupQualityContributor struct {
+	AccountID           int64    `json:"account_id"`
+	AccountName         string   `json:"account_name"`
+	Model               string   `json:"model"`
+	TrafficKind         string   `json:"traffic_kind"`
+	SuccessSamples      int64    `json:"success_samples"`
+	FailureSamples      int64    `json:"failure_samples"`
+	CacheSamples        int64    `json:"cache_samples"`
+	CacheUnknownSamples int64    `json:"cache_unknown_samples"`
+	CacheInputTokens    int64    `json:"cache_input_tokens"`
+	CacheReadTokens     int64    `json:"cache_read_tokens"`
+	UncachedTokens      int64    `json:"uncached_tokens"`
+	TTFTSamples         int64    `json:"ttft_samples"`
+	SlowRequests        int64    `json:"slow_requests"`
+	TTFTP90MS           *float64 `json:"ttft_p90_ms"`
 }

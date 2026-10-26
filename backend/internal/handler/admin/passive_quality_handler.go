@@ -22,7 +22,7 @@ func NewPassiveQualityHandler(svc *service.PassiveQualityService) *PassiveQualit
 }
 func (h *PassiveQualityHandler) Capture() gin.HandlerFunc { return h.svc.Capture() }
 func passiveError(c *gin.Context, err error) {
-	if errors.Is(err, service.ErrPassiveQualityModelRequired) {
+	if errors.Is(err, service.ErrPassiveQualityModelRequired) || errors.Is(err, service.ErrPassiveQualityCursor) {
 		response.BadRequest(c, err.Error())
 		return
 	}
@@ -121,6 +121,24 @@ func (h *PassiveQualityHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 func (h *PassiveQualityHandler) States(c *gin.Context) {
+	if c.Query("paginated") == "true" {
+		q, ok := passiveReportQuery(c)
+		if !ok {
+			return
+		}
+		repo, ok := h.svc.Repo.(service.PassiveQualityQueryRepository)
+		if !ok {
+			response.InternalError(c, "quality reporting unavailable")
+			return
+		}
+		out, err := repo.QueryStates(c.Request.Context(), q)
+		if err != nil {
+			passiveError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, out)
+		return
+	}
 	id, ok := passiveQuery(c, "account_id")
 	if !ok {
 		return
@@ -133,6 +151,24 @@ func (h *PassiveQualityHandler) States(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 func (h *PassiveQualityHandler) Events(c *gin.Context) {
+	if c.Query("paginated") == "true" {
+		q, ok := passiveReportQuery(c)
+		if !ok {
+			return
+		}
+		repo, ok := h.svc.Repo.(service.PassiveQualityQueryRepository)
+		if !ok {
+			response.InternalError(c, "quality reporting unavailable")
+			return
+		}
+		out, err := repo.QueryEvents(c.Request.Context(), q)
+		if err != nil {
+			passiveError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, out)
+		return
+	}
 	id, ok := passiveQuery(c, "account_id")
 	if !ok {
 		return
@@ -184,4 +220,62 @@ func (h *PassiveQualityHandler) Act(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func passiveReportQuery(c *gin.Context) (service.PassiveQualityQuery, bool) {
+	q := service.PassiveQualityQuery{Model: strings.TrimSpace(c.Query("model")), Phase: c.Query("phase"), Kind: c.Query("kind"), Cursor: c.Query("cursor"), Limit: 100}
+	var ok bool
+	if q.AccountID, ok = passiveQuery(c, "account_id"); !ok {
+		return q, false
+	}
+	if q.PolicyID, ok = passiveQuery(c, "policy_id"); !ok {
+		return q, false
+	}
+	if len(q.Model) > 200 || len(q.Kind) > 100 || len(q.Phase) > 40 || len(q.Cursor) > 1024 {
+		response.BadRequest(c, "invalid report filter")
+		return q, false
+	}
+	if raw := c.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 200 {
+			response.BadRequest(c, "limit must be 1..200")
+			return q, false
+		}
+		q.Limit = n
+	}
+	for _, field := range []struct {
+		name   string
+		target **time.Time
+	}{{"since", &q.Since}, {"until", &q.Until}} {
+		if raw := c.Query(field.name); raw != "" {
+			v, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				response.BadRequest(c, "invalid "+field.name)
+				return q, false
+			}
+			*field.target = &v
+		}
+	}
+	if q.Since != nil && q.Until != nil && q.Since.After(*q.Until) {
+		response.BadRequest(c, "since must precede until")
+		return q, false
+	}
+	return q, true
+}
+func (h *PassiveQualityHandler) StateSummary(c *gin.Context) {
+	repo, ok := h.svc.Repo.(service.PassiveQualityQueryRepository)
+	if !ok {
+		response.InternalError(c, "quality reporting unavailable")
+		return
+	}
+	out, err := repo.StateSummary(c.Request.Context())
+	if err != nil {
+		passiveError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *PassiveQualityHandler) Runtime(c *gin.Context) {
+	c.JSON(http.StatusOK, h.svc.Diagnostics())
 }

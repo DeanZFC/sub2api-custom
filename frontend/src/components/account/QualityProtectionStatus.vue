@@ -55,6 +55,25 @@
               <div class="mt-1 text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.updatedAt', { time: formatDateTime(hold.updated_at) }) }}</div>
               <p v-if="hold.prior_round" class="mt-1 text-amber-300">{{ t('admin.accounts.qualityDetails.retained') }}</p>
             </div>
+            <section v-if="hold.trigger_snapshot" class="space-y-2 rounded border border-amber-400/30 p-2" data-trigger-snapshot>
+              <h4 class="font-semibold text-amber-200">{{ t('admin.tests.experience.triggerSnapshot') }}</h4>
+              <p>{{ formatDateTime(hold.trigger_snapshot.occurred_at) }} · {{ hold.trigger_snapshot.model_id }}</p>
+              <p>{{ hold.trigger_snapshot.reason }}</p>
+              <p class="break-all text-[11px] text-gray-400">{{ t('admin.tests.experience.triggerVersion', { version: hold.trigger_snapshot.policy_version, run: hold.trigger_snapshot.run_id || '—' }) }}</p>
+              <div v-for="rule in hold.trigger_snapshot.rules" :key="rule.id"><strong>{{ rule.name }}</strong><p v-if="rule.condition">{{ conditionText(rule.condition, hold.trigger_snapshot) }}</p></div>
+              <div v-for="test in hold.trigger_snapshot.tests" :key="test.test_definition_id" class="space-y-1 border-t border-white/10 pt-2">
+                <strong>{{ test.test_name || `#${test.test_definition_id}` }} · {{ verdictText(test.verdict) }}</strong>
+                <p class="text-[11px] text-gray-400">#{{ test.result_id || '—' }} · {{ formatDateTime(test.started_at) }}</p>
+                <p v-if="test.window_start || test.window_end" class="text-[11px] text-gray-400">{{ formatDateTime(test.window_start) }} — {{ formatDateTime(test.window_end) }}</p>
+                <p>{{ test.reason }}</p>
+                <div v-for="(threshold, ti) in test.thresholds" :key="ti" class="text-[11px]">
+                  {{ t(`admin.accounts.qualityDetails.metrics.${threshold.metric}`) }} {{ threshold.operator === 'lt' ? '&lt;' : '&gt;' }} {{ metricValue(threshold.value, threshold.metric) }} · {{ t('admin.accounts.qualityDetails.observed') }}：{{ threshold.observed == null ? '—' : metricValue(threshold.observed, threshold.metric) }}
+                  <p>{{ t('admin.tests.experience.triggerSamples', { samples: threshold.samples ?? '—', minimum: test.min_samples ?? '—' }) }}</p>
+                </div>
+              </div>
+            </section>
+            <p v-else class="text-amber-300" data-trigger-missing>{{ t('admin.tests.experience.triggerMissing') }}</p>
+            <h4 class="font-semibold text-gray-200">{{ t('admin.tests.experience.currentObservation') }}</h4>
             <div v-for="rule in hold.rules" :key="rule.id" class="space-y-1 border-l-2 border-amber-400/50 pl-2">
               <div class="font-medium text-amber-200">{{ t('admin.accounts.qualityDetails.hitRule', { name: rule.name }) }}</div>
               <p v-if="rule.condition">{{ conditionText(rule.condition, hold) }}</p>
@@ -111,7 +130,7 @@ let closeTimer: ReturnType<typeof setTimeout> | undefined
 
 const verdictText = (verdict: string) => t(`admin.accounts.qualityDetails.${verdict === 'pass' || verdict === 'fail' ? verdict : 'pending'}`)
 const matchText = (verdict: string) => t(`admin.accounts.qualityDetails.${verdict === 'pass' ? 'matched' : verdict === 'fail' ? 'unmatched' : 'pending'}`)
-function conditionText(condition: TestCombinationCondition, hold: QualityProtectionHold): string {
+function conditionText(condition: TestCombinationCondition, hold: Pick<QualityProtectionHold, 'tests'>): string {
   if (condition.operator === 'test') {
     const name = hold.tests.find(test => test.test_definition_id === condition.test_definition_id)?.test_name || `#${condition.test_definition_id}`
     return `${name} = ${verdictText(condition.verdict || 'pending')}`

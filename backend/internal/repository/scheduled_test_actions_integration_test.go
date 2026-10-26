@@ -73,6 +73,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 		"262_scheduled_test_execution_snapshot.sql",
 		"281_scheduled_test_membership_revocation.sql", "291_passive_quality.sql", "303_passive_quality_model_states.sql",
 		"264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql", "282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql",
+		"309_quality_recovery_budget_evidence.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -85,12 +86,20 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 	repo := &scheduledTestResultRepository{db: db}
 	reset := func(t *testing.T) {
 		currentT = t
-		exec(`TRUNCATE scheduled_test_plans,scheduled_test_results,scheduled_test_plan_definitions,scheduled_test_protection_states,scheduled_test_managed_accounts,scheduled_test_votes,scheduler_outbox RESTART IDENTITY CASCADE`)
+		exec(`TRUNCATE scheduled_test_plans,scheduled_test_results,scheduled_test_plan_definitions,scheduled_test_protection_states,scheduled_test_managed_accounts,scheduled_test_votes,scheduler_outbox,scheduled_test_protection_events RESTART IDENTITY CASCADE`)
 		exec(`UPDATE accounts SET platform='openai',status='active',schedulable=TRUE,deleted_at=NULL,extra='{}';
 UPDATE groups SET platform='openai',status='active',deleted_at=NULL,is_exclusive=FALSE;
 TRUNCATE user_allowed_groups,user_subscriptions,account_groups;
 INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,72),(63,8,73);`)
 	}
+	t.Run("immutable trigger evidence", func(t *testing.T) {
+		for _, combined := range []bool{false, true} {
+			t.Run(fmt.Sprintf("combined=%t", combined), func(t *testing.T) {
+				reset(t)
+				testScheduledTestTriggerEvidence(t, ctx, db, plans, repo, candyID, combined)
+			})
+		}
+	})
 	t.Run("all pass scheduling and manual veto", func(t *testing.T) {
 		reset(t)
 		testScheduledTestAllPassLifecycle(t, ctx, db, plans, repo)

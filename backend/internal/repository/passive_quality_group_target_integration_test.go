@@ -115,7 +115,9 @@ func TestGroupQualityTargetMeasuredCacheLifecycleIntegration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = r.advance(ctx, p.ID, 62, trialAt.Add(12*time.Second), false, "A")
 	require.NoError(t, err)
-	require.Equal(t, "paused", targetStates(t, ctx, r)["A"].Phase)
+	state = targetStates(t, ctx, r)["A"]
+	require.Equal(t, "trial", state.Phase)
+	require.Equal(t, "waiting_for_recovery: insufficient_samples", state.Reason)
 }
 
 func TestGroupQualityTargetFailureMembershipAndReplayIntegration(t *testing.T) {

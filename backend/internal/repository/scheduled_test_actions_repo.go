@@ -475,8 +475,15 @@ func applyCombinationScheduling(ctx context.Context, tx *sql.Tx, state *protecti
 		return err
 	}
 	blocked := decision.Action.Scheduling == "pause"
+	var wasBlocked bool
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT blocked FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2),FALSE)`, state.planID, state.accountID).Scan(&wasBlocked)
+	if err != nil {
+		return err
+	}
+	state.newCombinedHold = blocked && !wasBlocked
 	_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_combination_states(plan_id,account_id,blocked,reason,rule_ids)
  VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(plan_id,account_id) DO UPDATE SET
+	 trigger_event_id=CASE WHEN EXCLUDED.blocked AND scheduled_test_combination_states.blocked THEN scheduled_test_combination_states.trigger_event_id ELSE NULL END,
  blocked=EXCLUDED.blocked,reason=EXCLUDED.reason,rule_ids=EXCLUDED.rule_ids,updated_at=NOW()`,
 		state.planID, state.accountID, blocked, state.actionReason, raw)
 	return err

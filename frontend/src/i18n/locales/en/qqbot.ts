@@ -512,7 +512,7 @@ export default { qqbot: {
   "guaranteeProgress": "Guaranteed every {every} draws; {count} draws until the next guarantee.",
   "guaranteedDraw": "Guaranteed draw",
   "prizeHelp": "Probabilities must total 100%, with a minimum of 0.01%. A zero amount means no prize and still consumes one chance. Rewards are credited directly and do not trigger rebates or additional chances.",
-  "lotteryCommand": "Send /抽奖 to draw, /抽奖次数 for chances, or /抽奖活动 for rules. Requires account binding, enabled bot and group access, and QQ Receive all messages.",
+  "lotteryCommand": "Send /抽奖 [count] for 1–10 draws, for example /抽奖 5; omit the count for one draw. If you lack enough chances, the whole batch is skipped without consuming any chances. Guarantees apply to each draw and results appear in one reply. Use /抽奖次数 for chances or /抽奖活动 for rules. Requires account binding, enabled bot and group access, and QQ Receive all messages.",
   "chanceLookup": "Look up user chances",
   "userID": "Website user ID",
   "eligibleRecharge": "Eligible recharge total",

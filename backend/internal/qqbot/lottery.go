@@ -44,6 +44,66 @@ type LotteryDrawsPage struct {
 	PageSize int           `json:"page_size"`
 }
 
+const lotteryMaxDrawCount = 10
+
+const lotteryDrawUsage = "用法：/抽奖 [次数]，次数为 1–10；不填默认抽 1 次。"
+
+func lotteryDrawCount(arg string) (int, bool) {
+	if arg == "" {
+		return 1, true
+	}
+	for _, digit := range arg {
+		if digit < '0' || digit > '9' {
+			return 0, false
+		}
+	}
+	count, err := strconv.Atoi(arg)
+	return count, err == nil && count >= 1 && count <= lotteryMaxDrawCount
+}
+
+type lotteryOutcome struct {
+	prize      LotteryPrize
+	guaranteed bool
+}
+
+func lotteryResult(cfg LotteryConfig, state LotteryState, draws []lotteryOutcome) string {
+	var b strings.Builder
+	if len(draws) == 1 {
+		draw := draws[0]
+		fmt.Fprintf(&b, "🎉 **抽奖结果**\n奖品：%s\n奖励额度：USD %.2f\n剩余抽奖次数：%d 次", replyPlainLabel(draw.prize.Name), draw.prize.Amount, state.Remaining-1)
+		if draw.guaranteed {
+			_, _ = b.WriteString("\n本次触发保底抽奖")
+		}
+	} else {
+		fmt.Fprintf(&b, "🎉 **连抽结果（%d次）**", len(draws))
+		names := make([]string, 0, len(draws))
+		counts := make(map[string]int, len(draws))
+		total := decimal.Zero
+		guaranteed := 0
+		for _, draw := range draws {
+			if counts[draw.prize.Name] == 0 {
+				names = append(names, draw.prize.Name)
+			}
+			counts[draw.prize.Name]++
+			total = total.Add(decimal.NewFromFloat(draw.prize.Amount))
+			if draw.guaranteed {
+				guaranteed++
+			}
+		}
+		for _, name := range names {
+			fmt.Fprintf(&b, "\n%s × %d", replyPlainLabel(name), counts[name])
+		}
+		fmt.Fprintf(&b, "\n合计奖励额度：USD %s\n剩余抽奖次数：%d 次", total.StringFixed(2), state.Remaining-int64(len(draws)))
+		if guaranteed > 0 {
+			fmt.Fprintf(&b, "\n本次触发保底抽奖 %d 次", guaranteed)
+		}
+	}
+	if cfg.GuaranteeEnabled {
+		fmt.Fprintf(&b, "\n距保底 %d 次", cfg.drawsUntilGuarantee(state.Used+int64(len(draws))))
+	}
+	return b.String()
+}
+
 // Count USD principal from completed online balance orders and redeemed positive
 // balance codes, including history. Payment-generated codes only count as orders.
 // Bonus credits, subscriptions and administrative credits never create chances.
@@ -179,6 +239,13 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 	return result, tx.Commit()
 }
 func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, error) {
+	return s.drawLotteryCount(ctx, c, j, 1)
+}
+
+func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count int) (string, error) {
+	if count < 1 || count > lotteryMaxDrawCount {
+		return lotteryDrawUsage, nil
+	}
 	if j.ID == "" {
 		return "", errors.New("缺少抽奖请求标识")
 	}
@@ -245,58 +312,67 @@ func (s *Service) drawLottery(ctx context.Context, c Config, j Job) (string, err
 	if err != nil {
 		return "", err
 	}
-	if state.Remaining < 1 {
+	if state.Remaining < int64(count) {
+		if count > 1 {
+			return fmt.Sprintf("抽奖次数不足，本次未抽奖\n需要抽奖次数：%d 次\n剩余抽奖次数：%d 次\n再充值 USD %.2f 获赠", count, state.Remaining, state.NextRecharge), nil
+		}
 		return fmt.Sprintf("抽奖次数不足\n再充值 USD %.2f 获赠", state.NextRecharge), nil
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(10000))
-	if err != nil {
-		return "", err
-	}
-	guaranteed := state.DrawsUntilGuarantee == 1
-	pool := cfg.Prizes
-	if guaranteed {
-		pool = cfg.GuaranteePrizes
-	}
-	prize := lotteryPrizeAt(pool, n.Int64())
-	result = fmt.Sprintf("🎉 **抽奖结果**\n奖品：%s\n奖励额度：USD %.2f\n剩余抽奖次数：%d 次", replyPlainLabel(prize.Name), prize.Amount, state.Remaining-1)
-	if guaranteed {
-		result += "\n本次触发保底抽奖"
-	}
-	if cfg.GuaranteeEnabled {
-		result += fmt.Sprintf("\n距保底 %d 次", cfg.drawsUntilGuarantee(state.Used+1))
-	}
-	// Keep the draw's classification alongside its immutable configuration snapshot.
-	// Older records without this field remain ordinary draws, without a migration.
-	snapshot, err := json.Marshal(struct {
-		LotteryConfig
-		IsGuaranteed bool  `json:"is_guaranteed"`
-		DrawNumber   int64 `json:"draw_number"`
-	}{cfg, guaranteed, state.Used + 1})
-	if err != nil {
-		return "", err
-	}
-	var drawID int64
-	err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_lottery_draws(request_key,app_id,member_id,group_id,user_id,prize_name,amount,config_snapshot,recharge_total,earned,remaining,result_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, requestKey, c.AppID, j.MemberID, j.GroupID, uid, prize.Name, prize.Amount, string(snapshot), state.RechargeTotal, state.Earned, state.Remaining-1, result).Scan(&drawID)
-	if err != nil {
-		return "", err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount) VALUES($1,$2,$3,$4,$5,'lottery',$6)`, fmt.Sprintf("lottery:%d", drawID), c.AppID, j.GroupID, j.MemberID, uid, prize.Amount); err != nil {
-		return "", err
-	}
-	updated, err := tx.ExecContext(ctx, `UPDATE users SET balance=balance+$1,updated_at=NOW() WHERE id=$2 AND status='active' AND deleted_at IS NULL`, prize.Amount, uid)
-	if err != nil {
-		return "", err
-	}
-	count, err := updated.RowsAffected()
-	if err != nil {
-		return "", err
-	}
-	if count != 1 {
-		return "", errors.New("账户不可用")
-	}
-	if prize.Amount > 0 {
-		if _, err = tx.ExecContext(ctx, `INSERT INTO redeem_codes(code,type,value,status,used_by,used_at,notes) VALUES($1,'admin_balance',$2,'used',$3,NOW(),$4)`, "QQ"+randomID(), prize.Amount, uid, fmt.Sprintf("QQ lottery reward #%d: %s", drawID, prize.Name)); err != nil {
+	draws := make([]lotteryOutcome, count)
+	for i := range draws {
+		n, err := rand.Int(rand.Reader, big.NewInt(10000))
+		if err != nil {
 			return "", err
+		}
+		guaranteed := cfg.drawsUntilGuarantee(state.Used+int64(i)) == 1
+		pool := cfg.Prizes
+		if guaranteed {
+			pool = cfg.GuaranteePrizes
+		}
+		draws[i] = lotteryOutcome{prize: lotteryPrizeAt(pool, n.Int64()), guaranteed: guaranteed}
+	}
+	result = lotteryResult(cfg, state, draws)
+	for i, draw := range draws {
+		prize, guaranteed := draw.prize, draw.guaranteed
+		// Keep the draw's classification alongside its immutable configuration snapshot.
+		// Older records without this field remain ordinary draws, without a migration.
+		snapshot, err := json.Marshal(struct {
+			LotteryConfig
+			IsGuaranteed bool  `json:"is_guaranteed"`
+			DrawNumber   int64 `json:"draw_number"`
+		}{cfg, guaranteed, state.Used + int64(i) + 1})
+		if err != nil {
+			return "", err
+		}
+		var drawID int64
+		// The first draw retains the original key for replaying the whole result.
+		// Additional draws use a separate namespace from incoming message/job IDs.
+		drawKey := requestKey
+		if i > 0 {
+			drawKey = fmt.Sprintf("%s:lottery-batch:%s:%d", c.AppID, codeHash(requestKey), i+1)
+		}
+		err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_lottery_draws(request_key,app_id,member_id,group_id,user_id,prize_name,amount,config_snapshot,recharge_total,earned,remaining,result_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, drawKey, c.AppID, j.MemberID, j.GroupID, uid, prize.Name, prize.Amount, string(snapshot), state.RechargeTotal, state.Earned, state.Remaining-int64(i)-1, result).Scan(&drawID)
+		if err != nil {
+			return "", err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount) VALUES($1,$2,$3,$4,$5,'lottery',$6)`, fmt.Sprintf("lottery:%d", drawID), c.AppID, j.GroupID, j.MemberID, uid, prize.Amount); err != nil {
+			return "", err
+		}
+		updated, err := tx.ExecContext(ctx, `UPDATE users SET balance=balance+$1,updated_at=NOW() WHERE id=$2 AND status='active' AND deleted_at IS NULL`, prize.Amount, uid)
+		if err != nil {
+			return "", err
+		}
+		updatedCount, err := updated.RowsAffected()
+		if err != nil {
+			return "", err
+		}
+		if updatedCount != 1 {
+			return "", errors.New("账户不可用")
+		}
+		if prize.Amount > 0 {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO redeem_codes(code,type,value,status,used_by,used_at,notes) VALUES($1,'admin_balance',$2,'used',$3,NOW(),$4)`, "QQ"+randomID(), prize.Amount, uid, fmt.Sprintf("QQ lottery reward #%d: %s", drawID, prize.Name)); err != nil {
+				return "", err
+			}
 		}
 	}
 	// Persist the result before delivery for auditing and message deduplication.

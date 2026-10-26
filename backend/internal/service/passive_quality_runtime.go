@@ -47,18 +47,24 @@ func passiveQualityNonTextEndpoint(endpoint string) bool {
 }
 
 type PassiveQualityService struct {
-	Repo         PassiveQualityRepository
-	test         *AccountTestService
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	queue        chan PassiveQualityFailure
-	gap          atomic.Int64
-	enabled      atomic.Bool
-	cacheEnabled atomic.Bool
-	flushMu      sync.Mutex
-	pending      []PassiveQualityFailure
-	probeSlots   chan struct{}
+	Repo          PassiveQualityRepository
+	test          *AccountTestService
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	queue         chan PassiveQualityFailure
+	enabled       atomic.Bool
+	cacheEnabled  atomic.Bool
+	flushMu       sync.Mutex
+	pending       []PassiveQualityFailure
+	probeSlots    chan struct{}
+	diagnosticsMu sync.Mutex
+	diagnostics   PassiveQualityRuntimeDiagnostics
+	pendingCount  atomic.Int64
+	dropped       atomic.Int64
+	backlogSince  atomic.Int64
+	gapsMu        sync.Mutex
+	gaps          map[passiveQualityGapScope]PassiveQualityTelemetryGap
 }
 
 func NewPassiveQualityService(repo PassiveQualityRepository, test *AccountTestService) *PassiveQualityService {
@@ -70,9 +76,10 @@ func (s *PassiveQualityService) Start() {
 	// read failure must not silently suppress failures for existing policies.
 	s.enabled.Store(true)
 	s.cacheEnabled.Store(true)
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.run()
 	go s.flushLoop()
+	go s.maintenanceLoop()
 }
 func (s *PassiveQualityService) Stop() { s.cancel(); s.wg.Wait() }
 func (s *PassiveQualityService) ConfigurationChanged() {
@@ -83,49 +90,111 @@ func (s *PassiveQualityService) run() {
 	defer s.wg.Done()
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
-	nextMaintenance := time.Time{}
 	for {
 		if s.ctx.Err() != nil {
 			return
 		}
-		ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
-		policies, err := s.Repo.ListPolicies(ctx)
-		if err == nil {
-			enabled := false
-			cacheEnabled := false
-			for _, p := range policies {
-				enabled = enabled || p.Enabled
-				cacheEnabled = cacheEnabled || (p.Enabled && p.CacheRate.Enabled)
+		s.sweepCycle()
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *PassiveQualityService) sweepCycle() {
+	started := time.Now()
+	s.diagnosticsMu.Lock()
+	s.diagnostics.LastSweepStartedAt = &started
+	s.diagnosticsMu.Unlock()
+	ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+	policies, err := s.Repo.ListPolicies(ctx)
+	cancel()
+	policyErr := err
+	if err == nil {
+		enabled, cacheEnabled := false, false
+		for _, p := range policies {
+			enabled = enabled || p.Enabled
+			cacheEnabled = cacheEnabled || (p.Enabled && p.CacheRate.Enabled)
+		}
+		s.enabled.Store(enabled)
+		s.cacheEnabled.Store(cacheEnabled)
+	}
+	cutoff := time.Now()
+	ready := s.flush(true)
+	var probes []PassiveQualityState
+	if ready {
+		// Collection has its own budget; a slow flush must not consume evaluation time.
+		evaluation, stop := context.WithTimeout(s.ctx, 12*time.Second)
+		probes, err = s.Repo.Sweep(evaluation, cutoff, cap(s.probeSlots)-len(s.probeSlots))
+		stop()
+	}
+	ended := time.Now()
+	s.diagnosticsMu.Lock()
+	s.diagnostics.LastSweepDurationMS = ended.Sub(started).Milliseconds()
+	if !ready {
+		s.diagnostics.SweepSkippedBacklog++
+	}
+	if err != nil {
+		s.diagnostics.LastSweepError = err.Error()
+	} else if policyErr != nil {
+		s.diagnostics.LastSweepError = policyErr.Error()
+	} else if ready {
+		s.diagnostics.LastSweepError = ""
+		s.diagnostics.LastSweepSucceededAt = &ended
+	}
+	s.diagnosticsMu.Unlock()
+	if policyErr != nil && s.ctx.Err() == nil {
+		logger.LegacyPrintf("service.passive_quality", "policy refresh failed: %v", policyErr)
+	}
+	if err != nil && s.ctx.Err() == nil {
+		logger.LegacyPrintf("service.passive_quality", "sweep failed: %v", err)
+	}
+	for _, p := range probes {
+		s.probeSlots <- struct{}{}
+		s.wg.Add(1)
+		go func(p PassiveQualityState) { defer s.wg.Done(); defer func() { <-s.probeSlots }(); s.probe(p) }(p)
+	}
+}
+
+func (s *PassiveQualityService) maintenanceLoop() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	nextOperations := time.Time{}
+	for {
+		if s.ctx.Err() != nil {
+			return
+		}
+		if repo, ok := s.Repo.(PassiveQualityTelemetryRepository); ok {
+			ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+			err := repo.PrunePassiveQuality(ctx)
+			cancel()
+			now := time.Now()
+			s.diagnosticsMu.Lock()
+			if err != nil {
+				s.diagnostics.LastCleanupError = err.Error()
+			} else {
+				s.diagnostics.LastCleanupError = ""
+				s.diagnostics.LastCleanupSucceededAt = &now
 			}
-			s.enabled.Store(enabled)
-			s.cacheEnabled.Store(cacheEnabled)
+			s.diagnosticsMu.Unlock()
+			if err != nil && s.ctx.Err() == nil {
+				logger.LegacyPrintf("service.passive_quality", "maintenance failed: %v", err)
+			}
 		}
-		cutoff := time.Now()
-		ready := s.flush(true)
-		var probes []PassiveQualityState
-		if ready {
-			probes, err = s.Repo.Sweep(ctx, cutoff, cap(s.probeSlots)-len(s.probeSlots))
-		}
-		cancel()
-		if err != nil && s.ctx.Err() == nil {
-			logger.LegacyPrintf("service.passive_quality", "sweep failed: %v", err)
-		}
-		if time.Now().After(nextMaintenance) && s.test != nil && s.test.qualityOperations != nil {
-			nextMaintenance = time.Now().Add(time.Hour)
+		if time.Now().After(nextOperations) && s.test != nil && s.test.qualityOperations != nil {
+			nextOperations = time.Now().Add(time.Hour)
 			if repo, ok := s.test.qualityOperations.(interface{ PruneQualityOperations(context.Context) error }); ok {
-				maintenance, stop := context.WithTimeout(s.ctx, 3*time.Second)
-				if err := repo.PruneQualityOperations(maintenance); err != nil && s.ctx.Err() == nil {
+				ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+				err := repo.PruneQualityOperations(ctx)
+				cancel()
+				if err != nil && s.ctx.Err() == nil {
 					logger.LegacyPrintf("service.quality_operations", "maintenance failed: %v", err)
 				}
-				stop()
 			}
 		}
-		for _, p := range probes {
-			s.probeSlots <- struct{}{}
-			s.wg.Add(1)
-			go func(p PassiveQualityState) { defer s.wg.Done(); defer func() { <-s.probeSlots }(); s.probe(p) }(p)
-		}
-
 		select {
 		case <-s.ctx.Done():
 			return
@@ -172,20 +241,41 @@ func (s *PassiveQualityService) enqueue(f PassiveQualityFailure) {
 	if !s.enabled.Load() {
 		return
 	}
+	if f.At.IsZero() {
+		f.At = time.Now()
+	}
+	s.backlogSince.CompareAndSwap(0, time.Now().UnixNano())
 	select {
 	case s.queue <- f:
 	default:
-		s.gap.Store(time.Now().UnixNano())
+		kind := "failure"
+		if f.CacheReported || f.AttemptKey != "" || f.CacheMetadata != nil {
+			kind = "cache"
+		}
+		s.dropped.Add(1)
+		s.markGap(PassiveQualityTelemetryGap{From: f.At, To: f.At, AccountID: f.AccountID, GroupID: f.GroupID, Model: f.Model, Kind: kind, DroppedRecords: 1})
 	}
 }
 func (s *PassiveQualityService) flush(all bool) bool {
-	s.flushMu.Lock()
+	// One budget covers lock contention and the entire batch drain.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for !s.flushMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	defer s.flushMu.Unlock()
 	rounds := 1
 	if all {
 		rounds = 17
 	}
 	for i := 0; i < rounds; i++ {
+		if ctx.Err() != nil {
+			return false
+		}
 		for len(s.pending) < 512 {
 			select {
 			case f := <-s.queue:
@@ -195,29 +285,86 @@ func (s *PassiveQualityService) flush(all bool) bool {
 			}
 		}
 	drained:
-		gapNS := s.gap.Swap(0)
-		var gap *time.Time
-		if gapNS > 0 {
-			v := time.Unix(0, gapNS)
-			gap = &v
-		}
-		if len(s.pending) == 0 && gap == nil {
+		s.pendingCount.Store(int64(len(s.pending)))
+		gaps := s.takeGaps()
+		if len(s.pending) == 0 && len(gaps) == 0 {
+			s.clearCollectionBacklog()
 			return true
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		err := s.Repo.RecordFailures(ctx, s.pending, gap)
-		cancel()
+		var err error
+		if repo, ok := s.Repo.(PassiveQualityTelemetryRepository); ok {
+			err = repo.RecordTelemetry(ctx, s.pending, gaps)
+		} else {
+			// Old repository implementations can only express a conservative global gap.
+			var gap *time.Time
+			for _, g := range gaps {
+				if gap == nil || g.From.Before(*gap) {
+					v := g.From
+					gap = &v
+				}
+			}
+			err = s.Repo.RecordFailures(ctx, s.pending, gap)
+		}
+		now := time.Now()
+		s.diagnosticsMu.Lock()
 		if err != nil {
-			s.gap.Store(time.Now().UnixNano())
+			s.diagnostics.LastPersistError = err.Error()
+		} else {
+			s.diagnostics.LastPersistError = ""
+			s.diagnostics.LastPersistedAt = &now
+		}
+		s.diagnosticsMu.Unlock()
+		if err != nil {
+			// Retain both records and loss markers until one transaction persists them.
+			for _, g := range gaps {
+				s.markGap(g)
+			}
+			// Make the failed persistence interval visible to other replicas after
+			// the database recovers. The items remain queued for eventual backfill;
+			// the marker errs conservatively for this window during that handoff.
+			for _, f := range s.pending {
+				kind := "failure"
+				if f.CacheReported || f.AttemptKey != "" || f.CacheMetadata != nil {
+					kind = "cache"
+				}
+				from := f.At
+				if from.IsZero() {
+					from = now
+				}
+				s.markGap(PassiveQualityTelemetryGap{From: from, To: now, AccountID: f.AccountID, GroupID: f.GroupID, Model: f.Model, Kind: kind})
+			}
 			logger.LegacyPrintf("service.passive_quality", "telemetry persistence failed: %v", err)
 			return false
 		}
 		s.pending = nil
+		s.pendingCount.Store(0)
 		if !all {
+			if len(s.queue) == 0 {
+				s.clearCollectionBacklog()
+			}
 			return true
 		}
 	}
-	return len(s.queue) == 0
+	ready := len(s.queue) == 0
+	if ready {
+		s.gapsMu.Lock()
+		ready = len(s.gaps) == 0
+		s.gapsMu.Unlock()
+	}
+	if ready {
+		s.clearCollectionBacklog()
+	}
+	return ready
+}
+func (s *PassiveQualityService) clearCollectionBacklog() {
+	s.backlogSince.Store(0)
+	// An enqueue racing with the reset must still leave a visible backlog.
+	s.gapsMu.Lock()
+	hasGaps := len(s.gaps) > 0
+	s.gapsMu.Unlock()
+	if len(s.queue) > 0 || hasGaps {
+		s.backlogSince.CompareAndSwap(0, time.Now().UnixNano())
+	}
 }
 func (s *PassiveQualityService) flushLoop() {
 	defer s.wg.Done()
@@ -266,12 +413,9 @@ func (s *PassiveQualityService) Capture() gin.HandlerFunc {
 			if model == "" {
 				return
 			}
-			key := resolveUsageBillingRequestID(c.Request.Context(), "")
-			// Connection IDs are not request IDs. The turn marker changes before each
-			// turn's first upstream send and deduplicates retry-exhausted summary events.
-			if strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
-				key = "ws:" + c.GetString(passiveQualityTurnKey)
-			}
+			// Admission, usage correlation, and retry failures share a quality turn
+			// identity. Billing IDs remain independent, including upstream WS IDs.
+			key, _ := c.Request.Context().Value(passiveQualityUsageTurnKey{}).(string)
 			if key == "" {
 				key = c.GetString(passiveQualityTurnKey)
 			}
@@ -295,15 +439,16 @@ func (s *PassiveQualityService) Capture() gin.HandlerFunc {
 }
 func PassiveQualityBeginTurn(c *gin.Context) {
 	if c != nil {
-		beginGroupQualityTrafficTurn(c)
 		key := uuid.NewString()
 		c.Set(passiveQualityStartedKey, time.Now())
 		c.Set(passiveQualityTurnKey, key)
+		if c.Request != nil && strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
+			key = "ws:" + key
+		}
+		beginGroupQualityTrafficTurn(c, key)
 		if c.Request != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityCacheMetadataKey{}, (*PassiveQualityCacheMetadata)(nil)))
-		}
-		if c.Request != nil && strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
-			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityUsageTurnKey{}, "ws:"+key))
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityUsageTurnKey{}, key))
 		}
 	}
 }
@@ -347,7 +492,7 @@ func PassiveQualityUsageContext(parent, base context.Context) context.Context {
 	return freezeGroupQualityTrafficContext(parent, base)
 }
 
-// Record cache reporting presence and correlate WS usage IDs with failure turn
+// Record cache reporting presence and correlate billing IDs with quality turn
 // IDs without changing billing identity or storing billing values.
 func recordPassiveQualityCache(ctx context.Context, accountID int64, requestKey string, reported bool) {
 	if ctx == nil || accountID <= 0 || requestKey == "" {
@@ -362,7 +507,12 @@ func recordPassiveQualityCache(ctx context.Context, accountID int64, requestKey 
 		return
 	}
 	if sink, ok := ctx.Value(passiveQualityCacheSinkKey{}).(func(PassiveQualityFailure)); ok {
-		sink(PassiveQualityFailure{AccountID: accountID, RequestKey: requestKey, AttemptKey: attemptKey, At: time.Now(), CacheReported: reported, CacheMetadata: metadata})
+		model, _ := RequestedPublicModelFromContext(ctx)
+		traffic, _ := GroupQualityTrafficRequestFromContext(ctx)
+		if model == "" {
+			model = traffic.Model
+		}
+		sink(PassiveQualityFailure{AccountID: accountID, GroupID: traffic.GroupID, Model: model, RequestKey: requestKey, AttemptKey: attemptKey, At: time.Now(), CacheReported: reported, CacheMetadata: metadata})
 	}
 }
 

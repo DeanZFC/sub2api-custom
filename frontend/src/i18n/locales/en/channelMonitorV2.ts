@@ -42,7 +42,7 @@ export default {
       historyLegend: 'Green → yellow → red: high to low health score · Gray: no data / insufficient samples',
       noHistory: 'No more statistical intervals in the selected time range',
       noIntervalData: 'No statistics available for this interval',
-      requestLegend: 'Green: success · Yellow: slow / ignored error · Red: failed · Gray: no request',
+      requestLegend: 'Green: succeeded (including slow responses) · Red: failed (including ignored errors) · Gray: no request',
       noRequest: 'No more requests in the selected time range',
       health: { healthy: 'Healthy', warning: 'Attention', critical: 'Unhealthy', unknown: 'Unknown' },
       legend: { healthy: 'Healthy', warning: 'Attention', critical: 'Unhealthy', unknown: 'No traffic / insufficient samples' },

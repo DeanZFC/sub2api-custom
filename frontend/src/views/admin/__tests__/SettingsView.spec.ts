@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defineComponent, h } from "vue";
+import { defineComponent, h, reactive } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 
 import enCommon from "@/i18n/locales/en/common";
@@ -7,6 +7,26 @@ import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
+import { useRoute, useRouter } from "vue-router";
+
+vi.mock("vue-router", async () => {
+  const actual = await vi.importActual<typeof import("vue-router")>("vue-router");
+  return {
+    ...actual,
+    useRoute: vi.fn(),
+    useRouter: vi.fn(),
+  };
+});
+
+beforeEach(() => {
+  const route = reactive({ query: {} as Record<string, string> });
+  vi.mocked(useRoute).mockReturnValue(route as unknown as ReturnType<typeof useRoute>);
+  vi.mocked(useRouter).mockReturnValue({
+    replace: vi.fn(async ({ query }: { query: Record<string, string> }) => {
+      route.query = query;
+    }),
+  } as unknown as ReturnType<typeof useRouter>);
+});
 
 const {
   getSettings,
@@ -571,6 +591,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        OpenAIVMSettings: { template: '<section data-testid="openai-vm-settings-stub"><form data-testid="vm-settings-form"><button type="submit">Save Bridge</button></form></section>' },
       },
     },
   });
@@ -730,6 +751,53 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it("opens global Bridge settings from its URL outside the shared settings form", async () => {
+    useRoute().query.tab = "openai-vm";
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get('#settings-tab-openai-vm').attributes('aria-selected')).toBe('true');
+    const panel = wrapper.get('[data-testid="openai-vm-settings-stub"]');
+    expect(panel.element.closest('form')).toBeNull();
+    expect(wrapper.get<HTMLFormElement>('form').element.style.display).toBe('none');
+    await panel.get('form').trigger('submit');
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    await wrapper.get('#settings-tab-general').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="openai-vm-settings-stub"]').exists()).toBe(false);
+    expect(wrapper.get<HTMLFormElement>('form').element.style.display).not.toBe('none');
+    expect(useRoute().query.tab).toBe('general');
+    wrapper.unmount();
+  });
+
+  it("opens Bridge settings from its tab and follows URL changes", async () => {
+    useRoute().query.keep = 'preserved';
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="openai-vm-settings-stub"]').exists()).toBe(false);
+
+    await wrapper.get('#settings-tab-openai-vm').trigger('click');
+    await flushPromises();
+    expect(useRoute().query).toEqual({ tab: 'openai-vm', keep: 'preserved' });
+    expect(wrapper.get('[data-testid="openai-vm-settings-stub"]').isVisible()).toBe(true);
+
+    await useRouter().replace({ query: { tab: 'gateway' } });
+    await flushPromises();
+    expect(wrapper.get('#settings-tab-gateway').attributes('aria-selected')).toBe('true');
+    expect(wrapper.find('[data-testid="openai-vm-settings-stub"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("uses the general settings tab for an unknown URL tab", async () => {
+    useRoute().query.tab = "invalid-tab";
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.get('#settings-tab-general').attributes('aria-selected')).toBe('true');
+    expect(wrapper.find('[data-testid="openai-vm-settings-stub"]').exists()).toBe(false);
+    wrapper.unmount();
   });
 
   it("loads and saves the open button visibility for each custom menu", async () => {

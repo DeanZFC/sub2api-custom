@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -164,7 +165,7 @@ func TestPassiveQualityCaptureIndependentOfOpsAndDeduplicable(t *testing.T) {
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: 1, UpstreamStatusCode: 503, Kind: "retry_exhausted"})
 	a, b := <-s.queue, <-s.queue
 	require.Equal(t, a.RequestKey, b.RequestKey)
-	require.Equal(t, "client:local-uuid", a.RequestKey)
+	require.Equal(t, c.GetString(passiveQualityTurnKey), a.RequestKey)
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: 2, UpstreamStatusCode: 400, Kind: "http_error"})
 	require.Empty(t, s.queue)
 	c.Request.Header.Set("Upgrade", "websocket")
@@ -204,7 +205,7 @@ func TestPassiveQualityUsageWorkerRetainsReportingAndFrozenTurn(t *testing.T) {
 	recordPassiveQualityCache(worker, 62, "client:zero", true)
 	zero := <-s.queue
 	require.True(t, zero.CacheReported)
-	require.Empty(t, zero.AttemptKey)
+	require.Equal(t, c.GetString(passiveQualityTurnKey), zero.AttemptKey)
 
 	c.Request.Header.Set("Upgrade", "websocket")
 	PassiveQualityBeginTurn(c)
@@ -219,6 +220,48 @@ func TestPassiveQualityUsageWorkerRetainsReportingAndFrozenTurn(t *testing.T) {
 	require.Equal(t, "resp_first", first.RequestKey)
 	require.False(t, first.CacheReported)
 	require.NotEqual(t, "ws:"+c.GetString(passiveQualityTurnKey), first.AttemptKey)
+}
+
+func TestPassiveQualityTrafficAndOutcomesShareTurnIdentity(t *testing.T) {
+	for _, websocket := range []bool{false, true} {
+		t.Run(fmt.Sprint(websocket), func(t *testing.T) {
+			s := NewPassiveQualityService(nil, nil)
+			defer s.cancel()
+			s.enabled.Store(true)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+			if websocket {
+				c.Request.Header.Set("Upgrade", "websocket")
+			}
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Model, "model"))
+			s.Capture()(c)
+			SetGroupQualityTrafficGroup(c, 8)
+			SetGroupQualityTrafficModel(c.Request.Context(), "model")
+			traffic, ok := GroupQualityTrafficRequestFromContext(c.Request.Context())
+			require.True(t, ok)
+			worker := PassiveQualityUsageContext(c.Request.Context(), context.Background())
+			for _, account := range []int64{62, 63} {
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: account, UpstreamStatusCode: 503})
+				failure := <-s.queue
+				require.Equal(t, traffic.Key, failure.RequestKey)
+				require.Equal(t, account, failure.AccountID)
+			}
+			PassiveQualityBeginTurn(c)
+			next, ok := GroupQualityTrafficRequestFromContext(c.Request.Context())
+			require.True(t, ok)
+			require.NotEqual(t, traffic.Key, next.Key)
+			// A late HTTP bill or WS turn keeps its original admission identity,
+			// including responses without cache reporting and disabled cache policy.
+			recordPassiveQualityCache(worker, 63, "upstream-billing-id", false)
+			usage := <-s.queue
+			require.Equal(t, traffic.Key, usage.AttemptKey)
+			require.Equal(t, "upstream-billing-id", usage.RequestKey)
+			require.False(t, usage.CacheReported)
+			frozen, ok := GroupQualityTrafficRequestFromContext(worker)
+			require.True(t, ok)
+			require.Equal(t, traffic.Key, frozen.Key)
+		})
+	}
 }
 
 type passiveAdmissionTestRepo struct {

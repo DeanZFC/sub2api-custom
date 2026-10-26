@@ -38,6 +38,9 @@ func TestGroupQualityTargetLiveSummaryIntegration(t *testing.T) {
 	require.NoError(t, r.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: 62, GroupID: 8, Model: "model", RequestKey: "partial-failed", StartedAt: now.Add(-2 * time.Minute), At: now.Add(-time.Minute)}}, nil))
 	read := func() service.GroupQualityTargetSummary {
 		t.Helper()
+		computed, err := r.groupQualityTargetSummary(ctx, p, now)
+		require.NoError(t, err)
+		require.NoError(t, r.publishGroupQualitySummary(ctx, p, computed))
 		out, err := r.GroupQualityTargetSummaries(ctx, now)
 		require.NoError(t, err)
 		require.Len(t, out, 1)
@@ -77,6 +80,7 @@ func TestGroupQualityTargetLiveSummaryIntegration(t *testing.T) {
 	// A paused state's old evidence must not leak into the current window.
 	_, err = db.Exec(`INSERT INTO passive_quality_states(policy_id,account_id,model_key,data) VALUES($1,62,'model',$2::jsonb)`, p.ID, `{"phase":"paused","evidence":{"cache_rate":99,"ttft_p90":1,"samples":100}}`)
 	require.NoError(t, err)
+	require.NoError(t, r.refreshGroupQualityTrafficSnapshot(ctx, p, now.Add(2*time.Hour)))
 	newer, err := r.GroupQualityTargetSummaries(ctx, now.Add(2*time.Hour))
 	require.NoError(t, err)
 	require.Len(t, newer, 1)
@@ -94,6 +98,9 @@ func TestGroupQualityTargetSummaryScopeIntegration(t *testing.T) {
 	_, err := db.Exec(`INSERT INTO usage_logs(account_id,group_id,request_id,model,created_at,input_tokens,cache_read_tokens,first_token_ms) VALUES(62,8,'kept','target',$1,10,90,5000),(62,8,'other-model','other',$1,999999,1,99999),(63,8,'excluded','target',$1,999999,1,99999)`, now.Add(-time.Minute))
 	require.NoError(t, err)
 	require.NoError(t, r.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: 63, GroupID: 8, Model: "target", RequestKey: "excluded-failure", StartedAt: now.Add(-2 * time.Minute), At: now.Add(-time.Minute)}, {AccountID: 62, GroupID: 8, Model: "other", RequestKey: "other-model-failure", StartedAt: now.Add(-2 * time.Minute), At: now.Add(-time.Minute)}}, nil))
+	computed, err := r.groupQualityTargetSummary(ctx, p, now)
+	require.NoError(t, err)
+	require.NoError(t, r.publishGroupQualitySummary(ctx, p, computed))
 	out, err := r.GroupQualityTargetSummaries(ctx, now)
 	require.NoError(t, err)
 	require.Len(t, out, 1)

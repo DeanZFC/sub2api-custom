@@ -10,9 +10,14 @@ export default {
         security: '安全与认证',
         users: '用户默认值',
         gateway: '网关服务',
+        'openai-vm': 'OpenAI 专属槽位',
         email: '邮件设置',
         backup: '数据备份',
         payment: '支付设置',
+      },
+      openaiVm: {
+        title: '全局 Bridge 配置',
+        description: '所有 OpenAI OAuth 账号共用此配置。',
       },
       features: {
         channelMonitor: {

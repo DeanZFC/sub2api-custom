@@ -166,6 +166,10 @@ type protectionState struct {
 	started                                                        time.Time
 	automated, verdict, reason                                     string
 	actionReason                                                   string
+	newHold, newCombinedHold                                       bool
+	evidenceSource                                                 string
+	evidenceActor                                                  *int64
+	recoveryEvidence                                               *service.ScheduledTestStatistics
 	blocked, completed                                             bool
 	rule                                                           service.ScheduledTestProtectionRule
 }
@@ -269,9 +273,11 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	case "resume":
 		blocked = false
 	}
+	state.newHold = blocked && !state.blocked
 
 	_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states
 		SET automated_verdict=$2,verdict=$3,reason=$4,blocked=$5,completed=$6,
+		 trigger_event_id=CASE WHEN $5 THEN trigger_event_id ELSE NULL END,
 		 updated_at=NOW()
 		WHERE result_id=$1 AND generation=$7`, state.resultID, state.automated, verdict, reason, blocked, state.completed, state.generation)
 	if err != nil {
@@ -654,6 +660,7 @@ func (r *scheduledTestResultRepository) CastTestVote(ctx context.Context, userID
 	if err != nil {
 		return nil, err
 	}
+	state.evidenceSource, state.evidenceActor = "vote", &userID
 	if err := saveProtectionVerdict(ctx, tx, state); err != nil {
 		return nil, err
 	}

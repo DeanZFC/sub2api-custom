@@ -59,7 +59,7 @@ Sub2API 和 bridge 不需要 Docker socket；由 vm2api 控制面按其部署要
 
 ### 2. 在 Sub2API 保存连接设置
 
-管理员进入 **账号管理 → OpenAI OAuth 母账号操作菜单 → 专属槽位**，在“全局 Bridge 配置”中设置：
+管理员进入 **系统设置 → OpenAI 专属槽位**（`/admin/settings?tab=openai-vm`），在“全局 Bridge 配置”中设置一次，所有账号共用。账号的“专属槽位”弹窗仅管理当前账号绑定，不再重复展示连接设置。
 
 1. 勾选“启用专属槽位”。
 2. 填写“Bridge 管理地址”和“Bridge 代理地址”。使用参考 bridge 时，两者通常填写同一个监听 origin，例如同机部署的 `http://127.0.0.1:8097`，或 TLS 部署的 `https://bridge.example.com:8097`。
@@ -76,7 +76,7 @@ Sub2API 和 bridge 不需要 Docker socket；由 vm2api 控制面按其部署要
 
 1. 确认母账号是正常的 OpenAI OAuth 账号，存在可用 access token 和 `chatgpt_account_id`。缺少身份 ID 时先刷新或重新授权账号。
 2. 确认原路由是明确直连，或只有一个有效的 SOCKS5/SOCKS5H 代理；多代理池需先在未绑定状态下整理为一个出口。
-3. 保存并启用完整的全局配置。选择 Docker 或 KVM，点击“创建专属槽位”，完成二次验证。
+3. 在 **系统设置 → OpenAI 专属槽位** 保存并启用完整的全局配置；之后进入 **账号管理 → OpenAI OAuth 母账号操作菜单 → 专属槽位**，选择 Docker 或 KVM，点击“创建专属槽位”，完成二次验证。全局配置无需逐账号重复填写；尚未配置时，账号弹窗提供前往全局设置的入口。
 4. 等待界面刷新，只有重新读取到绑定且状态为“已就绪”才表示创建确认完成。记录当前账号、槽位 ID 和运行时，便于后续排查。
 5. 在目标环境验证正常推理、流式取消、OAuth 刷新、用量查询及需要的辅助功能。真实账号验证可能产生实际请求和计费，应按本地运维流程执行。
 
@@ -98,7 +98,7 @@ Sub2API 和 bridge 不需要 Docker socket；由 vm2api 控制面按其部署要
 
 绑定存在但未就绪时，不会自动回退到原代理或本机直连。请求超时也不代表没有创建资源；界面会尝试重新读取绑定并保留原操作错误。先刷新状态，不要另建重复账号或手工删除数据库行来“解锁”。
 
-创建重试复用原绑定的身份、上游代理和运行时，不创建另一种配置的槽位。要改变运行时或上游出口，先完成解绑再重新配置。清理重试继续完成删除和原路由恢复，即使配置表单有未保存的编辑，也仍可执行清理重试。
+创建重试复用原绑定的身份、上游代理和运行时，不创建另一种配置的槽位。要改变运行时或上游出口，先完成解绑再重新配置。清理重试继续完成删除和原路由恢复，不受全局设置页面中未保存的编辑影响。
 
 常见情况：
 
@@ -144,7 +144,7 @@ Sub2API 和 bridge 不需要 Docker socket；由 vm2api 控制面按其部署要
    ORDER BY id;
    ```
 
-3. 在界面取消“启用专属槽位”并保存。禁用不会清空已保存的共享密钥；密钥输入留空仍表示保留。
+3. 在 **系统设置 → OpenAI 专属槽位** 取消“启用专属槽位”并保存。禁用不会清空已保存的共享密钥；密钥输入留空仍表示保留。
 4. 核对 vm2api 中相应槽位及专属 key 已回收，确认母账号和影子账号使用恢复后的原路由。再停止 bridge，按凭据和备份管理要求处理其服务定义、环境文件及状态目录。
 5. 如需换宿主机、管理地址、共享密钥、namespace 或运行时，在全部解绑后完成新部署及配置，再逐账号创建。
 
@@ -162,7 +162,7 @@ Sub2API 和 bridge 不需要 Docker socket；由 vm2api 控制面按其部署要
 | 生命周期与持久化 | `backend/internal/service/openai_vm_service.go`、`openai_vm_types.go`、`backend/internal/repository/openai_vm_repo.go` 及专属测试 | 移除专属接口与实现，同时处理被其他服务调用的代理校验/解析 helper |
 | 管理 API 与依赖注入 | `backend/internal/handler/admin/openai_vm_handler.go`、`handler.go`、各层 `wire.go`、`backend/internal/server/routes/admin.go` | 移除 handler、路由和 provider，再按仓库流程重新生成 `backend/cmd/server/wire_gen.go` |
 | 请求链集成 | OpenAI gateway、HTTP/plugin transport、WebSocket ingress、测试、用量、模型、配额、图片回填及 OAuth/token refresh 服务 | 仅撤去 VM 适配器分支和受管代理限制，恢复各路径原有代理解析；保留现有插件和其他平台逻辑 |
-| 管理界面 | `frontend/src/api/admin/openaiVm.ts`、`OpenAIVMModal.vue`、账号操作菜单、`AccountsView.vue`、中英文账号文案及对应测试 | 同步移除入口、事件、状态、API 和专属测试；不要删除共享账号测试文件中的其他用例 |
+| 管理界面 | `frontend/src/api/admin/openaiVm.ts`、`OpenAIVMModal.vue`、`OpenAIVMSettings.vue`、账号操作菜单、`AccountsView.vue`、`SettingsView.vue` 专属页签、中英文账号与系统设置文案及对应测试 | 同步移除入口、事件、状态、API 和专属测试；不要删除共享账号测试文件中的其他用例 |
 | 数据库 | `backend/migrations/308_openai_vm_bindings.sql` 引入的配置表、绑定表及保护触发器/函数 | 已应用迁移不能靠删除或改写历史文件撤销；默认保留空表与历史迁移 |
 
 可先用以下命令定位当前代码引用，最终以实际引用和编译结果为准：

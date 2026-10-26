@@ -7,6 +7,10 @@ export default {
       groupTargets: groupQualityTargets,
       experience: qualityExperience,
       operations: {
+        "recovery_reserve_percent": "恢复专用预留比例（%）",
+        "recovery_requests": "恢复请求数",
+        "recovery_tokens": "恢复 Token",
+        "recoveryReserveHint": "在全局和账号日限额内，为恢复探测保留这部分额度。普通检测不能消耗未使用的恢复预留；恢复探测仍不能突破总硬限额。0 表示不预留。",
   "title": "预算与供应商",
   "budgetTitle": "检测预算",
   "budgetHint": "覆盖质量管理中的手动运行、自动检测、重试、能力题库与恢复探测。每日按 UTC 00:00 重置（北京时间 08:00），0 表示该项不限额。客户正常请求和账号页的独立连接调试不计入。",

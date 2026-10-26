@@ -103,6 +103,7 @@ func completeStatisticsRecoveryProbe(ctx context.Context, tx *sql.Tx, config *se
 		return true, err
 	}
 	state.recoveryPhase = ""
+	state.evidenceSource = "recovery_probe"
 	state.automated, state.reason, state.completed = verdict, reason, true
 	return true, saveProtectionVerdict(ctx, tx, state)
 }

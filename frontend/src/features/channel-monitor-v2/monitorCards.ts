@@ -45,7 +45,6 @@ export function recentRequestsForCard(requests: MonitorRecentRequest[] = []): Ar
 
 export function requestHealth(request: MonitorRecentRequest | null): HealthState {
   if (!request) return 'unknown'
-  if (request.status === 'success') return 'healthy'
-  if (request.status === 'error') return 'critical'
-  return 'warning'
+  if (request.status === 'success' || request.status === 'slow') return 'healthy'
+  return 'critical'
 }

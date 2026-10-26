@@ -10,7 +10,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -107,7 +106,7 @@ func GroupQualityTrafficRequestFromContext(ctx context.Context) (GroupQualityTra
 	return r, r.Key != "" && r.GroupID > 0 && !r.NonText
 }
 
-func beginGroupQualityTrafficTurn(c *gin.Context) {
+func beginGroupQualityTrafficTurn(c *gin.Context, key string) {
 	if c == nil || c.Request == nil {
 		return
 	}
@@ -124,7 +123,7 @@ func beginGroupQualityTrafficTurn(c *gin.Context) {
 	if c.Request.URL != nil {
 		path = c.Request.URL.Path
 	}
-	slot.request = GroupQualityTrafficRequest{Key: uuid.NewString(), GroupID: slot.request.GroupID, Model: slot.request.Model, EstimatedInput: 65536, NonText: passiveQualityNonTextEndpoint(path) || strings.Contains(path, "/compact")}
+	slot.request = GroupQualityTrafficRequest{Key: key, GroupID: slot.request.GroupID, Model: slot.request.Model, EstimatedInput: 65536, NonText: passiveQualityNonTextEndpoint(path) || strings.Contains(path, "/compact")}
 	slot.gate = nil
 	slot.stopFallback = nil
 	slot.fallbackActive = false

@@ -1,7 +1,7 @@
 import apiClient from '../client'
 import type { PassivePolicy, PassiveEvidence, PassiveMetricState, PassiveCacheState } from './passiveQuality'
 export interface QualityOperationsConfig {
-  version: number; budget_enabled: boolean; daily_requests: number; daily_tokens: number
+  recovery_reserve_percent?: number; version: number; budget_enabled: boolean; daily_requests: number; daily_tokens: number
   account_daily_requests: number; account_daily_tokens: number; token_reservation: number
   dynamic_enabled: boolean; healthy_rounds: number; healthy_base_seconds: number; healthy_max_seconds: number
 }
@@ -13,7 +13,7 @@ export interface QualitySupplier {
 }
 export interface QualityOperationsSnapshot {
   config: QualityOperationsConfig; day: string; resets_at: string
-  usage: { account_id: number; requests: number; tokens: number; unknown_requests: number }[]
+  usage: { account_id: number; requests: number; tokens: number; unknown_requests: number; recovery_requests?: number; recovery_tokens?: number }[]
   suppliers: QualitySupplier[]
 }
 export interface QualityReplayRequest { config: PassivePolicy; account_ids: number[]; from: string; to: string; step_seconds: number }

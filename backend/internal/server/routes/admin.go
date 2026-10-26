@@ -787,6 +787,8 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		admin.PUT("/passive-quality-policies/:id", q.Save)
 		admin.DELETE("/passive-quality-policies/:id", q.Delete)
 		admin.GET("/passive-quality-states", q.States)
+		admin.GET("/passive-quality-states/summary", q.StateSummary)
+		admin.GET("/passive-quality/runtime", q.Runtime)
 		admin.GET("/passive-quality-events", q.Events)
 		admin.POST("/passive-quality-policies/:id/accounts/:account/action", q.Act)
 	}

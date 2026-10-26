@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,11 +76,13 @@ func (r *passiveQualityRepository) SavePolicy(ctx context.Context, p *service.Pa
 			return fmt.Errorf("this group already has a quality target policy; edit the existing policy")
 		}
 	}
-	raw, err := json.Marshal(p.PassiveQualityConfig)
-	if err != nil {
-		return err
-	}
+	// Clients cannot reset decision identity or backdate the evidence boundary.
+	p.EvidenceStartedAt, p.EvaluationVersion = nil, 0
 	if p.ID == 0 {
+		raw, marshalErr := json.Marshal(p.PassiveQualityConfig)
+		if marshalErr != nil {
+			return marshalErr
+		}
 		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM passive_quality_policies`).Scan(&count); err != nil {
 			return err
 		}
@@ -87,23 +91,89 @@ func (r *passiveQualityRepository) SavePolicy(ctx context.Context, p *service.Pa
 		}
 		err = tx.QueryRowContext(ctx, `INSERT INTO passive_quality_policies(config) VALUES($1) RETURNING id,version,updated_at`, raw).Scan(&p.ID, &p.Version, &p.UpdatedAt)
 	} else {
-		var version int64
-		if err = tx.QueryRowContext(ctx, `SELECT version FROM passive_quality_policies WHERE id=$1 FOR UPDATE`, p.ID).Scan(&version); err != nil {
-			return err
+		old, loadErr := scanPassivePolicy(tx.QueryRowContext(ctx, `SELECT id,version,updated_at,config FROM passive_quality_policies WHERE id=$1 FOR UPDATE`, p.ID))
+		if loadErr != nil {
+			return loadErr
 		}
-		if p.Version != version {
+		unchanged, metadataOnly := passivePolicyChange(old.PassiveQualityConfig, p.PassiveQualityConfig)
+		// A retry is safe even when the first successful response was lost.
+		if unchanged {
+			*p = old
+			return tx.Commit()
+		}
+		if p.Version != old.Version {
 			return service.ErrPassiveQualityConflict
 		}
-		if err = r.clearPolicy(ctx, tx, p.ID, "policy_changed"); err != nil {
+		if metadataOnly {
+			since := old.EvidenceSince()
+			p.EvidenceStartedAt, p.EvaluationVersion = &since, old.DecisionVersion()
+		} else if err = r.clearPolicy(ctx, tx, p.ID, "policy_changed"); err != nil {
 			return err
 		}
+		raw, marshalErr := json.Marshal(p.PassiveQualityConfig)
+		if marshalErr != nil {
+			return marshalErr
+		}
 		err = tx.QueryRowContext(ctx, `UPDATE passive_quality_policies SET config=$2,version=version+1,updated_at=clock_timestamp() WHERE id=$1 RETURNING version,updated_at`, p.ID, raw).Scan(&p.Version, &p.UpdatedAt)
+		if err == nil && metadataOnly {
+			err = r.renamePolicyStates(ctx, tx, *p)
+		}
 	}
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
 }
+
+// Array order and read-only bookkeeping do not change policy behavior.
+func passivePolicyChange(old, next service.PassiveQualityConfig) (unchanged, metadataOnly bool) {
+	normalize := func(c service.PassiveQualityConfig) service.PassiveQualityConfig {
+		c.EvidenceStartedAt, c.EvaluationVersion = nil, 0
+		c.GroupIDs = append([]int64{}, c.GroupIDs...)
+		c.ExcludedAccountIDs = append([]int64{}, c.ExcludedAccountIDs...)
+		slices.Sort(c.GroupIDs)
+		slices.Sort(c.ExcludedAccountIDs)
+		return c
+	}
+	old, next = normalize(old), normalize(next)
+	unchanged = reflect.DeepEqual(old, next)
+	old.Name, next.Name = "", ""
+	return unchanged, reflect.DeepEqual(old, next)
+}
+
+func (r *passiveQualityRepository) renamePolicyStates(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy) error {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT account_id FROM passive_quality_states WHERE policy_id=$1 ORDER BY account_id`, p.ID)
+	if err != nil {
+		return err
+	}
+	var accounts []int64
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		accounts = append(accounts, id)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, aid := range accounts {
+		if _, err = lockPassiveAccount(ctx, tx, aid); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE passive_quality_states SET data=jsonb_set(data,'{policy_name}',to_jsonb($3::text)) WHERE policy_id=$1 AND account_id=$2`, p.ID, aid, p.Name); err != nil {
+			return err
+		}
+		if err = reconcilePassiveAccount(ctx, tx, aid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *passiveQualityRepository) DeletePolicy(ctx context.Context, id int64) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -371,7 +441,7 @@ func (r *passiveQualityRepository) lockedState(ctx context.Context, tx *sql.Tx, 
 		}
 		p.Model = modelKey
 	}
-	s := service.PassiveQualityState{Purpose: p.Purpose, PolicyID: p.ID, PolicyName: p.Name, AccountID: aid, Model: p.Model, Scope: p.Scope, Mode: p.Mode, Version: p.Version, Phase: "insufficient", ObserveAfter: time.Now()}
+	s := service.PassiveQualityState{Purpose: p.Purpose, PolicyID: p.ID, PolicyName: p.Name, AccountID: aid, Model: p.Model, Scope: p.Scope, Mode: p.Mode, Version: p.DecisionVersion(), Phase: "insufficient", ObserveAfter: time.Now()}
 	var raw []byte
 	err = tx.QueryRowContext(ctx, `SELECT data FROM passive_quality_states WHERE policy_id=$1 AND account_id=$2 AND model_key=$3 FOR UPDATE`, pid, aid, modelKey).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {

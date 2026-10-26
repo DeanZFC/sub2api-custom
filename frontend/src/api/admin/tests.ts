@@ -16,6 +16,10 @@ export interface QualityProtectionEvidence {
   test_definition_id: number
   test_name: string
   result_id?: number
+  run_id?: string
+  min_samples?: number
+  window_start?: string
+  window_end?: string
   started_at?: string
   current: boolean
   verdict: string
@@ -23,10 +27,19 @@ export interface QualityProtectionEvidence {
   admin_verdict: string
   reason: string
   automatic_reason: string
-  thresholds: (TestProtectionThreshold & { observed: number | null })[]
+  thresholds: (TestProtectionThreshold & { observed: number | null; samples?: number })[]
   vote?: TestProtectionVote
   pass_count: number
   fail_count: number
+}
+
+export interface QualityProtectionTrigger {
+  id: number; occurred_at: string; plan_id: number; plan_name: string
+  test_definition_id: number; result_id: number; run_id: string; model_id: string
+  policy_version: string; policy_updated_at: string; source: string; actor_user_id?: number; reason: string
+  before: { status: string; schedulable: boolean; group_ids: number[] }
+  after: { status: string; schedulable: boolean; group_ids: number[] }
+  rules: QualityProtectionHold['rules']; tests: QualityProtectionEvidence[]
 }
 
 export interface QualityProtectionHold {
@@ -35,6 +48,7 @@ export interface QualityProtectionHold {
   mode: 'combined' | 'per_test' | 'all_pass'
   reason: string
   updated_at: string
+  trigger_snapshot?: QualityProtectionTrigger
   prior_round: boolean
   rules: { id: string; name: string; condition?: TestCombinationCondition; current_match: string }[]
   tests: QualityProtectionEvidence[]

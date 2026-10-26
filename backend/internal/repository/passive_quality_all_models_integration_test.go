@@ -232,6 +232,7 @@ func TestPassiveQualityAllModelsProbeRetentionIntegration(t *testing.T) {
 			} else {
 				require.NotNil(t, probe)
 				require.Equal(t, model, probe.ProbeModel, "empty trials must retain the previous probe target")
+				p.ErrorRate.Pause++ // A behavior change invalidates the in-flight probe.
 				require.NoError(t, r.SavePolicy(ctx, &p))
 				require.NoError(t, r.FinishProbe(ctx, *probe, true, now))
 				states, err = r.ListStates(ctx, 62)

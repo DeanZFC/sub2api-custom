@@ -25,7 +25,15 @@ func passiveGroupTargetSamples(ctx context.Context, tx *sql.Tx, p service.Passiv
 	}
 	started := s.ObserveAfter
 	if s.Phase == "trial" {
-		from, started = s.TrialStartedAt, s.TrialStartedAt
+		// Sample-starved trials can reopen bounded admission windows. Retain
+		// their recent observations without replaying pre-trial traffic or
+		// accumulating evidence beyond the configured rolling window.
+		if s.TrialStartedAt.After(from) {
+			from = s.TrialStartedAt
+		}
+		if s.TrialStartedAt.After(started) {
+			started = s.TrialStartedAt
+		}
 	}
 	rows, err := tx.QueryContext(ctx, `WITH failed AS MATERIALIZED (
  SELECT request_key,created_at,model FROM passive_quality_failures
@@ -71,9 +79,13 @@ func passiveGroupTargetSamples(ctx context.Context, tx *sql.Tx, p service.Passiv
 	if err != nil {
 		return service.PassiveQualityEvidence{}, err
 	}
-	var complete bool
-	err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM passive_quality_telemetry_gaps WHERE created_at>=$1 AND created_at<=$2)
- AND (NOT $6 OR NOT EXISTS(SELECT 1 FROM passive_quality_failures WHERE account_id=$3 AND group_id=0 AND NOT non_text AND ($4='' OR model=$4) AND created_at>=$1 AND created_at<=$2 AND started_at>=$5))`, from, now, s.AccountID, p.Model, started, p.ErrorRate.Enabled).Scan(&complete)
+	complete, err := passiveTelemetryComplete(ctx, tx, from, now, s.AccountID, p.Model, p.GroupIDs[0], "all")
+	if err != nil {
+		return service.PassiveQualityEvidence{}, err
+	}
+	if complete && p.ErrorRate.Enabled {
+		err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM passive_quality_failures WHERE account_id=$1 AND group_id=0 AND NOT non_text AND ($2='' OR model=$2) AND created_at>=$3 AND created_at<=$4 AND started_at>=$5)`, s.AccountID, p.Model, from, now, started).Scan(&complete)
+	}
 	return service.PassiveQualitySummarize(samples, s.LastEvidenceAt, complete), err
 }
 
@@ -85,4 +97,21 @@ func beginPassiveTrial(p service.PassiveQualityPolicy, s *service.PassiveQuality
 	s.Used, s.Inflight, s.Hits = 0, 0, 0
 	s.LastEvidenceAt = now
 	s.Evidence = service.PassiveQualityEvidence{Complete: true}
+}
+
+// Missing evidence is not another quality failure. Keep the hold while waiting,
+// then permit another bounded real-traffic window after the normal cooldown.
+func waitPassiveGroupTargetTrial(p service.PassiveQualityPolicy, s *service.PassiveQualityState, now time.Time, reason string) {
+	s.Reason = "waiting_for_recovery: " + reason
+	s.NextAt = s.TrialEndsAt.Add(time.Duration(p.CooldownSeconds) * time.Second)
+	if now.Before(s.NextAt) || s.OtherHold {
+		return
+	}
+	// Preserve TrialStartedAt and LastEvidenceAt: recent late completions are
+	// still evidence. Like a fresh trial, the new window has its own generation
+	// and budget; abandoned old leases cannot block it or refund its capacity.
+	s.Generation++
+	s.TrialEndsAt = now.Add(time.Duration(p.TrialSeconds) * time.Second)
+	s.Used, s.Inflight, s.Hits = 0, 0, 0
+	s.NextAt = time.Time{}
 }

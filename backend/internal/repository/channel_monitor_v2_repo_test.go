@@ -346,16 +346,17 @@ func TestChannelMonitorV2UsageSuccessExcludesCyberBillingRows(t *testing.T) {
 	require.Contains(t, channelMonitorV2HistogramSQL, "ul.actual_cost > 0")
 }
 
-func TestChannelMonitorV2SyncTrafficDoesNotBecomeCacheMisses(t *testing.T) {
+func TestChannelMonitorV2CacheRateIncludesSynchronousRequests(t *testing.T) {
 	acc := newMetricAccumulator()
 	acc.addFact(channelMonitorV2Fact{Success: 1, Input: 100, Output: 20, CacheCreation: 30, CacheRead: 50})
 	m := acc.metric(1, true)
 	require.Equal(t, int64(1), m.RequestCount)
 	require.Equal(t, int64(100), m.InputTokens)
 	require.Zero(t, m.CacheEligibleInputTokens)
-	require.Zero(t, m.CacheRateDenominator)
-	require.False(t, m.HasCacheSamples)
-	require.Zero(t, m.CacheRate)
+	require.Equal(t, int64(50), m.CacheRateNumerator)
+	require.Equal(t, int64(180), m.CacheRateDenominator)
+	require.True(t, m.HasCacheSamples)
+	require.InDelta(t, 50.0/180.0, m.CacheRate, 0.0001)
 	require.Equal(t, int64(200), m.TokenCount)
 	require.Equal(t, int64(30), m.CacheCreationTokens)
 	require.Equal(t, int64(50), m.CacheReadTokens)
@@ -364,9 +365,48 @@ func TestChannelMonitorV2SyncTrafficDoesNotBecomeCacheMisses(t *testing.T) {
 	m = acc.metric(1, true)
 	require.Equal(t, int64(200), m.InputTokens)
 	require.Equal(t, int64(100), m.CacheEligibleInputTokens)
-	require.Equal(t, int64(180), m.CacheRateDenominator)
+	require.Equal(t, int64(130), m.CacheRateNumerator)
+	require.Equal(t, int64(360), m.CacheRateDenominator)
 	require.True(t, m.HasCacheSamples)
-	require.InDelta(t, 80.0/180.0, m.CacheRate, 0.0001)
+	require.InDelta(t, 130.0/360.0, m.CacheRate, 0.0001)
+}
+
+func TestChannelMonitorV2CacheRateDistinguishesMissingTokensAndZeroHits(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		input      int64
+		hasSamples bool
+	}{
+		{name: "empty denominator"},
+		{name: "synchronous input without cache hits", input: 100, hasSamples: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acc := newMetricAccumulator()
+			acc.addFact(channelMonitorV2Fact{Success: 1, Input: tc.input, Output: 20})
+			m := acc.metric(1, true)
+			require.Equal(t, int64(1), m.RequestCount)
+			require.Zero(t, m.CacheEligibleInputTokens)
+			require.Zero(t, m.CacheRateNumerator)
+			require.Equal(t, tc.input, m.CacheRateDenominator)
+			require.Equal(t, tc.hasSamples, m.HasCacheSamples)
+			require.Zero(t, m.CacheRate)
+		})
+	}
+}
+
+func TestChannelMonitorV2HistoricalCacheTotalsDoNotRequireEligibilityBackfill(t *testing.T) {
+	// Aggregates with full token totals must not depend on the compatibility
+	// eligibility columns having been populated.
+	acc := newMetricAccumulator()
+	acc.addFact(channelMonitorV2Fact{Success: 4, Input: 3020, Output: 40, CacheCreation: 30, CacheRead: 230})
+	m := acc.metric(1, true)
+	require.Equal(t, int64(4), m.RequestCount)
+	require.Equal(t, int64(3320), m.TokenCount)
+	require.Zero(t, m.CacheEligibleInputTokens)
+	require.Equal(t, int64(230), m.CacheRateNumerator)
+	require.Equal(t, int64(3280), m.CacheRateDenominator)
+	require.True(t, m.HasCacheSamples)
+	require.InDelta(t, 230.0/3280.0, m.CacheRate, 0.000001)
 }
 
 func TestChannelMonitorV2RatesUseCoveredWindow(t *testing.T) {

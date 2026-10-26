@@ -15,8 +15,8 @@ func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
 	ctx, db, passive := passiveDB(t)
 	_, err := db.Exec(`ALTER TABLE accounts ADD COLUMN platform TEXT DEFAULT 'openai',ADD COLUMN overload_until TIMESTAMPTZ;
  CREATE TABLE scheduled_test_plans(id BIGINT PRIMARY KEY,name TEXT,model_id TEXT,enabled BOOLEAN,group_ids BIGINT[],excluded_account_ids BIGINT[] DEFAULT '{}',next_run_at TIMESTAMPTZ);
- CREATE TABLE scheduled_test_protection_states(plan_id BIGINT,account_id BIGINT,reason TEXT,updated_at TIMESTAMPTZ DEFAULT now(),blocked BOOLEAN,completed BOOLEAN,result_id BIGINT,result_started_at TIMESTAMPTZ DEFAULT now(),round_started_at TIMESTAMPTZ DEFAULT now(),verdict TEXT);
- CREATE TABLE scheduled_test_combination_states(plan_id BIGINT,account_id BIGINT,reason TEXT,updated_at TIMESTAMPTZ DEFAULT now(),blocked BOOLEAN);
+ ALTER TABLE scheduled_test_protection_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN completed BOOLEAN,ADD COLUMN result_id BIGINT,ADD COLUMN result_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN round_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN verdict TEXT;
+ ALTER TABLE scheduled_test_combination_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();
  INSERT INTO scheduled_test_plans VALUES(1,'Capability','model',true,ARRAY[8]::bigint[],'{}',now());
  INSERT INTO scheduled_test_protection_states(plan_id,account_id,reason,blocked,completed,result_id,verdict) VALUES(1,62,'Passed',false,true,5,'pass');
  UPDATE accounts SET status='quality_paused',schedulable=false WHERE id=63;`)

@@ -72,6 +72,11 @@ func passiveDBSchema(t *testing.T, modelStates bool) (context.Context, *sql.DB, 
 	migration, err = os.ReadFile("../../migrations/307_group_quality_traffic_budget.sql")
 	require.NoError(t, err)
 	exec(string(migration))
+	for _, name := range []string{"310_passive_quality_telemetry_scope.sql", "311_group_quality_reporting.sql"} {
+		migration, err = os.ReadFile("../../migrations/" + name)
+		require.NoError(t, err)
+		exec(string(migration))
+	}
 	exec(`ALTER TABLE usage_logs ADD COLUMN group_id BIGINT DEFAULT 8`)
 	if modelStates {
 		migration, err = os.ReadFile("../../migrations/303_passive_quality_model_states.sql")

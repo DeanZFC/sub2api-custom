@@ -115,13 +115,14 @@ func scheduledTestSameExecutionPolicy(a, b *service.ScheduledTestPlan) bool {
 }
 
 type protectionAccountSnapshot struct {
-	status string
-	groups map[int64]bool
+	status      string
+	schedulable bool
+	groups      map[int64]bool
 }
 
 func readProtectionAccountSnapshot(ctx context.Context, tx *sql.Tx, accountID int64) (*protectionAccountSnapshot, error) {
 	snapshot := &protectionAccountSnapshot{groups: make(map[int64]bool)}
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM accounts WHERE id=$1`, accountID).Scan(&snapshot.status); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT status,schedulable FROM accounts WHERE id=$1`, accountID).Scan(&snapshot.status, &snapshot.schedulable); err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT group_id FROM account_groups WHERE account_id=$1`, accountID)
@@ -185,5 +186,8 @@ func recordProtectionAction(ctx context.Context, tx *sql.Tx, state *protectionSt
 	 CASE WHEN $2::jsonb->>'status'='unchanged' AND protection_decision->>'status'='applied'
 	 AND protection_decision->>'verdict'=$2::jsonb->>'verdict' THEN protection_decision ELSE $2::jsonb END
 	 WHERE id=$1 AND started_at=$3`, state.resultID, raw, state.started)
-	return err
+	if err != nil {
+		return err
+	}
+	return recordProtectionEvidence(ctx, tx, state, before, after, decision)
 }

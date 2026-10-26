@@ -121,6 +121,49 @@ func TestQualityOperationsDynamicBoundaries(t *testing.T) {
 	require.Error(t, c.Validate())
 }
 
+func TestQualityOperationsRecoveryReserveBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		limit, recoverySpent int64
+		percent              int
+		purpose              string
+		want                 int64
+	}{
+		{10, 0, 20, "regular", 8}, {3, 0, 20, "regular", 2}, {10, 1, 20, "regular", 9},
+		{10, 3, 20, "regular", 10}, {10, 0, 20, "recovery", 10}, {0, 0, 20, "regular", 0}, {10, 0, 0, "regular", 10},
+	} {
+		require.Equal(t, tc.want, QualityBudgetAdmissionLimit(tc.limit, tc.recoverySpent, tc.percent, tc.purpose))
+	}
+	c := DefaultQualityOperationsConfig()
+	require.Zero(t, c.RecoveryReservePercent, "existing budgets preserve their behavior until explicitly configured")
+	c.RecoveryReservePercent = 51
+	require.Error(t, c.Validate())
+	for _, tc := range []struct {
+		name, status string
+		ctx          context.Context
+		want         string
+	}{
+		{"ordinary", "active", context.Background(), "regular"},
+		{"active recovery", "quality_paused", context.Background(), "recovery"},
+		{"statistics recovery", "active", WithQualityRecoveryProbe(context.Background()), "recovery"},
+		{"passive recovery", "active", context.WithValue(context.Background(), passiveQualityProbeKey{}, true), "recovery"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := &Account{ID: 42, Status: tc.status, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
+			calls := 0
+			repo := &qualityOperationsStub{reserve: func(ctx context.Context, _ int64, _ int64, _ bool, _ string) (*QualityProbeReservation, error) {
+				calls++
+				require.Equal(t, tc.want, QualityProbePurpose(ctx))
+				return nil, &QualityDeferredError{Reason: "budget", Until: time.Now().Add(time.Hour)}
+			}}
+			svc := &AccountTestService{accountRepo: &modelIdentityAccountRepo{account: account}, httpUpstream: &modelIdentityHTTPUpstream{}, cfg: &config.Config{}, qualityOperations: repo}
+			result, err := svc.RunTestBackground(tc.ctx, 42, "model")
+			require.NoError(t, err)
+			require.Equal(t, 1, calls)
+			require.True(t, QualityResultDeferred(result))
+		})
+	}
+}
+
 func (s *qualityOperationsStub) QualityFrequencyDue(context.Context, int64, int64, string) (*time.Time, error) {
 	next := time.Now().Add(time.Hour)
 	return &next, nil

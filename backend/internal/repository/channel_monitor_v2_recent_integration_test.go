@@ -89,7 +89,7 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 		require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items, false))
 		recent := items[0].RecentRequests
 		require.Len(t, recent, 20)
-		errors, ignored, unnamed := 0, 0, 0
+		errors, ignored, unnamed, syncRequests := 0, 0, 0, 0
 		for i, request := range recent {
 			require.Nil(t, request.Error)
 			require.Empty(t, request.ErrorCategory)
@@ -111,8 +111,12 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 			}
 			if request.Status == "success" {
 				switch request.OccurredAt.Sub(start) {
-				case 20 * time.Minute, 22 * time.Minute, 23 * time.Minute:
-					require.Nil(t, request.CacheRate) // absent input or synchronous cache telemetry
+				case 20 * time.Minute:
+					require.Nil(t, request.CacheRate) // no input or cache tokens
+				case 22 * time.Minute, 23 * time.Minute:
+					syncRequests++
+					require.NotNil(t, request.CacheRate) // explicit and legacy synchronous requests use the same token formula
+					require.InDelta(t, 0.8, *request.CacheRate, 0.00001)
 				case 21 * time.Minute:
 					require.Zero(t, *request.CacheRate) // known zero is distinct from missing data
 					require.Zero(t, *request.TTFTMs)
@@ -132,6 +136,7 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 		require.Equal(t, 1, errors)
 		require.Equal(t, 1, ignored) // ignored categories are indistinguishable from generic failures to users
 		require.Equal(t, 1, unnamed) // unauthorized group's 45 requests do not leak into platform view
+		require.Equal(t, 2, syncRequests)
 		require.Equal(t, start.Add(33*time.Minute), recent[19].OccurredAt)
 	}
 	filter.RestrictGroups = false

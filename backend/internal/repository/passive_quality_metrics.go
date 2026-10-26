@@ -17,7 +17,7 @@ func advancePassiveMetrics(ctx context.Context, tx *sql.Tx, p service.PassiveQua
 	}
 	if p.TTFT.Enabled {
 		if s.Latency == nil {
-			s.Latency = &service.PassiveQualityMetricState{ObserveAfter: p.UpdatedAt}
+			s.Latency = &service.PassiveQualityMetricState{ObserveAfter: p.EvidenceSince()}
 		}
 		view := *s
 		view.Phase = "healthy"

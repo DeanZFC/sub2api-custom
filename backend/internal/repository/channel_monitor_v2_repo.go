@@ -1270,18 +1270,20 @@ func (a *metricAccumulator) addHistogram(h channelMonitorV2Histogram) {
 func (a *metricAccumulator) metric(minutes float64, admin bool) service.ChannelMonitorV2Metric {
 	requests := a.success + a.errors
 	tokens := a.input + a.output + a.cacheCreation + a.cacheRead
-	denom := a.cacheEligibleInput + a.cacheEligibleCreation + a.cacheEligibleRead
+	// Match upstream: all successful request types contribute to cache rate.
+	// Use full totals retained alongside the legacy eligible-token columns.
+	denom := a.input + a.cacheCreation + a.cacheRead
 	if minutes <= 0 {
 		minutes = 1
 	}
-	m := service.ChannelMonitorV2Metric{SuccessRequests: a.success, ErrorRequests: a.errors, RequestCount: requests, InputTokens: a.input, CacheEligibleInputTokens: a.cacheEligibleInput, OutputTokens: a.output, CacheCreationTokens: a.cacheCreation, CacheReadTokens: a.cacheRead, TokenCount: tokens, RPM: float64(requests) / minutes, TPM: float64(tokens) / minutes, CacheRateNumerator: a.cacheEligibleRead, CacheRateDenominator: denom, TTFT: latencyMetric(a.ttftSum, a.ttftCount, a.hist["ttft"]), Duration: latencyMetric(a.durationSum, a.durationCount, a.hist["duration"])}
+	m := service.ChannelMonitorV2Metric{SuccessRequests: a.success, ErrorRequests: a.errors, RequestCount: requests, InputTokens: a.input, CacheEligibleInputTokens: a.cacheEligibleInput, OutputTokens: a.output, CacheCreationTokens: a.cacheCreation, CacheReadTokens: a.cacheRead, TokenCount: tokens, RPM: float64(requests) / minutes, TPM: float64(tokens) / minutes, CacheRateNumerator: a.cacheRead, CacheRateDenominator: denom, TTFT: latencyMetric(a.ttftSum, a.ttftCount, a.hist["ttft"]), Duration: latencyMetric(a.durationSum, a.durationCount, a.hist["duration"])}
 	if requests > 0 {
 		m.ErrorRate = float64(a.errors) / float64(requests)
 		m.SuccessRate = float64(a.success) / float64(requests)
 	}
 	if denom > 0 {
 		m.HasCacheSamples = true
-		m.CacheRate = float64(a.cacheEligibleRead) / float64(denom)
+		m.CacheRate = float64(a.cacheRead) / float64(denom)
 	}
 	if admin {
 		affected, attempts := a.upstreamAffected, a.upstreamAttempts

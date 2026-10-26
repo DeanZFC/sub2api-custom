@@ -42,7 +42,7 @@ export default {
       historyLegend: '绿 → 黄 → 红：健康分由高到低 · 灰：无数据 / 样本不足',
       noHistory: '当前时间范围内暂无更多统计时段',
       noIntervalData: '该时段暂无统计数据',
-      requestLegend: '绿：成功 · 黄：响应较慢 / 已忽略错误 · 红：失败 · 灰：暂无请求',
+      requestLegend: '绿：成功（含响应较慢） · 红：失败（含已忽略错误） · 灰：暂无请求',
       noRequest: '当前时间范围内暂无更多请求',
       health: { healthy: '健康', warning: '需关注', critical: '异常', unknown: '暂无状态' },
       legend: { healthy: '健康', warning: '需关注', critical: '异常', unknown: '无流量 / 样本不足' },

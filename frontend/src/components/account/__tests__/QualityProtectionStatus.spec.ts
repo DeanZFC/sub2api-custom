@@ -7,7 +7,7 @@ import type { Account } from '@/types'
 
 vi.mock('@/api/admin/tests', () => ({ getAccountProtection: vi.fn() }))
 vi.mock('vue-i18n', async () => {
-  const dictionary = { admin: (await import('@/i18n/locales/zh/admin/accounts')).default, common: { close: '关闭', loading: '加载中', retry: '重试' } }
+  const dictionary = { admin: { ...(await import('@/i18n/locales/zh/admin/accounts')).default, tests: { experience: (await import('@/i18n/locales/zh/admin/qualityExperience')).default } }, common: { close: '关闭', loading: '加载中', retry: '重试' } }
   return { ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string, params: Record<string, unknown> = {}) => {
     const value = key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], dictionary)
     return typeof value === 'string' ? value.replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? '')) : key
@@ -52,7 +52,31 @@ describe('quality pause details', () => {
     expect(getAccountProtection).toHaveBeenCalledWith(62)
     const text = dialog()?.textContent
     for (const value of ['策略 A', '命中规则：不通过', '任一满足', '全部满足', '缓存检测 = 不通过', '60%', '80%', '管理员判定：通过', '通过 2 / 不通过 0']) expect(text).toContain(value)
+    expect(dialog()?.querySelector('[data-trigger-missing]')?.textContent).toContain('当前观察不能还原当时的判断依据')
     expect(wrapper.element.contains(dialog())).toBe(false)
+  })
+
+  it('keeps the historical trigger evidence and policy version separate from current passing observations', async () => {
+    const value = structuredClone(details)
+    value[0].tests[0] = { ...value[0].tests[0], verdict: 'pass', automated_verdict: 'pass', reason: '当前缓存已恢复', thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 75, observed: 95 }] }
+    value[0].trigger_snapshot = {
+      id: 100, occurred_at: '2026-10-12T06:00:00Z', plan_id: 3, plan_name: '触发时策略', test_definition_id: 2,
+      result_id: 77, run_id: 'trigger-run-42', model_id: 'historical-model', policy_version: 'version-abc123', policy_updated_at: '2026-10-11T06:00:00Z',
+      source: 'scheduled', reason: '当时缓存指标未达标',
+      before: { status: 'active', schedulable: true, group_ids: [8] }, after: { status: 'quality_paused', schedulable: true, group_ids: [8] },
+      rules: [{ id: 'old-rule', name: '历史缓存规则', current_match: 'fail', condition: { operator: 'test', test_definition_id: 2, verdict: 'fail' } }],
+      tests: [{ ...details[0].tests[0], result_id: 77, test_name: '历史缓存检测', started_at: '2026-10-12T06:00:00Z', window_start: '2026-10-12T05:00:00Z', window_end: '2026-10-12T06:00:00Z', min_samples: 20, reason: '历史实测缓存率低', thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80, observed: 12, samples: 25 }] }],
+    }
+    vi.mocked(getAccountProtection).mockResolvedValueOnce(value)
+    await trigger().trigger('mouseenter'); await flushPromises()
+    const snapshot = dialog()?.querySelector('[data-trigger-snapshot]')?.textContent
+    for (const text of ['触发保护时的依据', 'historical-model', '当时缓存指标未达标', 'version-abc123', 'trigger-run-42', '历史缓存规则', '历史缓存检测', '#77', '12%', '80%', '有效样本 25 / 最低要求 20']) expect(snapshot).toContain(text)
+    expect(snapshot).not.toContain('95%')
+    expect(snapshot).not.toContain('当前缓存已恢复')
+    expect(dialog()?.textContent).toContain('当前观察')
+    expect(dialog()?.textContent).toContain('当前缓存已恢复')
+    expect(dialog()?.textContent).toContain('95%')
+    expect(dialog()?.querySelector('[data-trigger-missing]')).toBeNull()
   })
 
   it('keeps hover content readable, supports pinning, and closes on Escape', async () => {

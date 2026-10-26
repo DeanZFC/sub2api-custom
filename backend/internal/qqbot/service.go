@@ -429,7 +429,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	}
 	if arg != "" {
 		switch cmd {
-		case "签到", "我的余额", "今日用量", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "邀请奖励", "邀请活动", "我的邀请":
+		case "签到", "我的余额", "今日用量", "我的奖励", "抽奖次数", "我的抽奖", "邀请奖励", "邀请活动", "我的邀请":
 			return s.send(ctx, c, *j, "用法：/"+cmd+"。", nil, 1)
 		}
 	}
@@ -494,8 +494,16 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		}
 		return s.sendCommandPage(ctx, c, *j, cmd, text, arg)
 	case "抽奖":
+		count, ok := lotteryDrawCount(arg)
+		if !ok {
+			return s.send(ctx, c, *j, lotteryDrawUsage, nil, 1)
+		}
 		var err error
-		text, err = s.drawLottery(ctx, c, *j)
+		if count == 1 {
+			text, err = s.drawLottery(ctx, c, *j)
+		} else {
+			text, err = s.drawLotteryCount(ctx, c, *j, count)
+		}
 		if err != nil {
 			text = "抽奖处理异常，请发送 /抽奖次数 查询剩余次数。"
 		}

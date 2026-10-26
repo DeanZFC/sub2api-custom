@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import OpenAIVMModal from '../OpenAIVMModal.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
@@ -16,15 +17,21 @@ vi.mock('vue-i18n', async () => ({
   useI18n: () => ({ t: (key: string) => key })
 }))
 
-const config = { enabled: true, base_url: 'https://bridge.example', proxy_url: 'https://proxy.example', secret_configured: true }
 const account = { id: 42, name: 'OpenAI parent', platform: 'openai', type: 'oauth', parent_account_id: null } as Account
 const binding: OpenAIVMBinding = { account_id: 42, slot_id: 'slot-42', status: 'ready', last_error: null, created_at: '2026-10-24T00:00:00Z', updated_at: '2026-10-24T00:00:00Z' }
-const state = (value: OpenAIVMBinding | null = null) => ({ eligible: true, configured: true, binding: value })
+const state = (value: OpenAIVMBinding | null = null, configured = true) => ({ eligible: true, configured, binding: value })
 
-function mountModal(value = account) {
+function makeRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/', component: { template: '<div />' } }, { path: '/admin/settings', component: { template: '<div />' } }]
+  })
+}
+
+function mountModal(value = account, router = makeRouter()) {
   return mount(OpenAIVMModal, {
     props: { show: true, account: value },
-    global: { stubs: {
+    global: { plugins: [router], stubs: {
       BaseDialog: { props: ['show', 'showCloseButton', 'closeOnEscape'], emits: ['close'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
       TotpStepUpDialog: { props: ['controller'], template: '<div />' },
       Icon: true
@@ -35,50 +42,75 @@ function mountModal(value = account) {
 describe('OpenAI dedicated slot modal', () => {
   beforeEach(() => {
     Object.values(api).forEach(fn => fn.mockReset())
-    api.getConfig.mockResolvedValue(config)
-    api.saveConfig.mockResolvedValue(config)
     api.getBinding.mockResolvedValue(state())
-    api.testConnection.mockResolvedValue({ healthy: true })
     api.createBinding.mockResolvedValue(binding)
     api.retryBinding.mockResolvedValue(binding)
     api.deleteBinding.mockResolvedValue(undefined)
   })
 
-  it('loads sanitized configuration and keeps the secret blank when saving', async () => {
+  it('only loads account binding state and does not expose global configuration', async () => {
     const wrapper = mountModal()
     await flushPromises()
     expect(api.getBinding).toHaveBeenCalledWith(42)
-    expect(wrapper.get<HTMLInputElement>('#openai-vm-secret').element.value).toBe('')
-    await wrapper.get('[data-testid="vm-config-form"]').trigger('submit')
-    await flushPromises()
-    expect(api.saveConfig).toHaveBeenCalledWith({ enabled: true, base_url: config.base_url, proxy_url: config.proxy_url })
-    expect(wrapper.text()).toContain('admin.accounts.openaiVm.saved')
+    expect(api.getConfig).not.toHaveBeenCalled()
+    expect(api.saveConfig).not.toHaveBeenCalled()
+    expect(api.testConnection).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="vm-config-form"]').exists()).toBe(false)
+    expect(wrapper.find('#openai-vm-secret').exists()).toBe(false)
+    expect(wrapper.find('#openai-vm-base-url').exists()).toBe(false)
+    expect(wrapper.find('#openai-vm-proxy-url').exists()).toBe(false)
+    expect(wrapper.get<HTMLButtonElement>('[data-testid="vm-create"]').element.disabled).toBe(false)
+    expect(wrapper.find('[data-testid="vm-settings-link"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
-  it('sends a replacement secret only on save and clears it after success', async () => {
-    const wrapper = mountModal()
+  it('disables creation until configured and links to the global settings tab', async () => {
+    api.getBinding.mockResolvedValue(state(null, false))
+    const router = makeRouter()
+    const wrapper = mountModal(account, router)
     await flushPromises()
-    await wrapper.get('#openai-vm-secret').setValue('replacement-secret')
-    expect(wrapper.get<HTMLButtonElement>('[data-testid="vm-test"]').element.disabled).toBe(true)
     expect(wrapper.get<HTMLButtonElement>('[data-testid="vm-create"]').element.disabled).toBe(true)
-    await wrapper.get('[data-testid="vm-config-form"]').trigger('submit')
+    await wrapper.get('[data-testid="vm-create"]').trigger('click')
+    expect(api.createBinding).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('admin.accounts.openaiVm.notConfigured')
+    expect(wrapper.get('[data-testid="vm-settings-link"]').attributes('href')).toBe('/admin/settings?tab=openai-vm')
+    await wrapper.get('[data-testid="vm-settings-link"]').trigger('click')
     await flushPromises()
-    expect(api.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ secret: 'replacement-secret' }))
-    expect(wrapper.get<HTMLInputElement>('#openai-vm-secret').element.value).toBe('')
+    expect(router.currentRoute.value.fullPath).toBe('/admin/settings?tab=openai-vm')
+    expect(wrapper.emitted('close')).toHaveLength(1)
     wrapper.unmount()
   })
 
-  it('health testing never creates a binding and rejects an unhealthy response', async () => {
-    api.testConnection.mockResolvedValueOnce({ healthy: false, message: 'Bridge unavailable' })
-    const wrapper = mountModal()
+  it('blocks settings navigation and closing while binding state is refreshing', async () => {
+    api.getBinding.mockResolvedValue(state(null, false))
+    const router = makeRouter()
+    const wrapper = mountModal(account, router)
     await flushPromises()
-    await wrapper.get('[data-testid="vm-test"]').trigger('click')
+    let resolveRefresh!: (value: ReturnType<typeof state>) => void
+    api.getBinding.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve }))
+    await wrapper.get('[data-testid="vm-refresh"]').trigger('click')
+    expect(wrapper.get('[data-testid="vm-settings-link"]').attributes('href')).toBeUndefined()
+    expect(wrapper.get('[data-testid="vm-settings-link"]').attributes('aria-disabled')).toBe('true')
+    await wrapper.get('[data-testid="vm-settings-link"]').trigger('click')
+    wrapper.findComponent(BaseDialog).vm.$emit('close')
+    expect(router.currentRoute.value.fullPath).toBe('/')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    resolveRefresh(state(null, false))
     await flushPromises()
-    expect(api.testConnection).toHaveBeenCalledTimes(1)
-    expect(api.createBinding).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Bridge unavailable')
-    expect(wrapper.text()).not.toContain('admin.accounts.openaiVm.healthy')
+    expect(wrapper.get('[data-testid="vm-settings-link"]').attributes('aria-disabled')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('keeps the modal open when settings navigation is aborted', async () => {
+    api.getBinding.mockResolvedValue(state(null, false))
+    const router = makeRouter()
+    const wrapper = mountModal(account, router)
+    await flushPromises()
+    router.beforeEach(to => to.path === '/admin/settings' ? false : true)
+    await wrapper.get('[data-testid="vm-settings-link"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/')
+    expect(wrapper.emitted('close')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -179,6 +211,68 @@ describe('OpenAI dedicated slot modal', () => {
     expect(api.retryBinding).toHaveBeenCalledWith(42)
     expect(wrapper.text()).toContain('admin.accounts.openaiVm.readySuccess')
     wrapper.unmount()
+  })
+
+  it('requires global configuration for provisioning retries but permits cleanup retries', async () => {
+    api.getBinding.mockResolvedValue(state({ ...binding, status: 'error' }, false))
+    const wrapper = mountModal()
+    await flushPromises()
+    expect(wrapper.get<HTMLButtonElement>('[data-testid="vm-retry"]').element.disabled).toBe(true)
+    api.getBinding.mockResolvedValue(state({ ...binding, status: 'delete_failed' }, false))
+    await wrapper.get('[data-testid="vm-refresh"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get<HTMLButtonElement>('[data-testid="vm-retry"]').element.disabled).toBe(false)
+    api.retryBinding.mockResolvedValueOnce(null)
+    api.getBinding.mockResolvedValue(state(null, false))
+    await wrapper.get('[data-testid="vm-retry"]').trigger('click')
+    await flushPromises()
+    expect(api.retryBinding).toHaveBeenCalledWith(42)
+    expect(wrapper.text()).toContain('admin.accounts.openaiVm.unboundSuccess')
+    wrapper.unmount()
+  })
+
+  it('ignores binding results from a previous account', async () => {
+    let resolveInitial!: (value: ReturnType<typeof state>) => void
+    api.getBinding.mockImplementationOnce(() => new Promise(resolve => { resolveInitial = resolve }))
+    const wrapper = mountModal()
+    await wrapper.setProps({ account: { ...account, id: 43 } })
+    await flushPromises()
+    resolveInitial(state(binding))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('slot-42')
+    expect(api.getBinding).toHaveBeenLastCalledWith(43)
+    wrapper.unmount()
+  })
+
+  it('does not prompt for or retry step-up when the account changes during a request', async () => {
+    let rejectCreate!: (cause: unknown) => void
+    api.createBinding.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectCreate = reject }))
+    const wrapper = mountModal()
+    await flushPromises()
+    await wrapper.get('[data-testid="vm-create"]').trigger('click')
+    await wrapper.setProps({ account: { ...account, id: 43 } })
+    rejectCreate({ code: 'STEP_UP_REQUIRED' })
+    await flushPromises()
+    const controller = wrapper.findComponent(TotpStepUpDialog).props('controller')
+    expect(controller.visible.value).toBe(false)
+    expect(api.createBinding).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('updated')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('cancels pending step-up on unmount without retrying the mutation', async () => {
+    api.createBinding.mockRejectedValueOnce({ code: 'STEP_UP_REQUIRED' })
+    const wrapper = mountModal()
+    await flushPromises()
+    await wrapper.get('[data-testid="vm-create"]').trigger('click')
+    await flushPromises()
+    const controller = wrapper.findComponent(TotpStepUpDialog).props('controller')
+    expect(controller.visible.value).toBe(true)
+    wrapper.unmount()
+    controller.onVerified()
+    await flushPromises()
+    expect(api.createBinding).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('updated')).toBeUndefined()
   })
 
   it('does not report cleanup when creation returns without a confirmed binding', async () => {

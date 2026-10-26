@@ -26,7 +26,7 @@ func executeQualityTestHTTP(req *http.Request, account int64, send func(*http.Re
 			return nil, collector.deferred
 		}
 		automatic, _ := ctx.Value(scheduledTestAutomaticRunKey{}).(bool)
-		recovery, _ := ctx.Value(passiveQualityProbeKey{}).(bool)
+		recovery := QualityProbePurpose(ctx) == "recovery"
 		session, _ := ctx.Value(qualityRunKey{}).(string)
 		// Body byte length is a conservative input estimate. The configured reserve
 		// also covers protocols which cannot enforce an output-token ceiling.

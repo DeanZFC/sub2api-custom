@@ -162,7 +162,8 @@ func TestPassiveQualityModelTrialLeaseAndActionsIntegration(t *testing.T) {
 	require.Equal(t, "insufficient", states[0].Phase)
 	require.Equal(t, "trial", states[1].Phase)
 	require.Zero(t, states[1].Used)
-	// Replacing the policy clears every model and every lease, not just one row.
+	// Changing policy behavior clears every model and every lease, not just one row.
+	p.ErrorRate.Pause++
 	require.NoError(t, r.SavePolicy(ctx, &p))
 	states, err = r.ListStates(ctx, 62)
 	require.NoError(t, err)

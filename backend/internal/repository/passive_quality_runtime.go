@@ -11,40 +11,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-func (r *passiveQualityRepository) RecordFailures(ctx context.Context, items []service.PassiveQualityFailure, gap *time.Time) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, f := range items {
-		if f.CacheReported || f.AttemptKey != "" || f.CacheMetadata != nil {
-			metadata, marshalErr := json.Marshal(f.CacheMetadata)
-			if marshalErr != nil {
-				return marshalErr
-			}
-			if f.CacheMetadata == nil {
-				metadata = []byte(`{}`)
-			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_cache_reports(account_id,request_key,created_at,attempt_key,cache_reported,cache_metadata) SELECT $1,$2,$3,$4,$5,$6 WHERE EXISTS(SELECT 1 FROM accounts WHERE id=$1)
- ON CONFLICT(account_id,request_key) DO UPDATE SET cache_reported=passive_quality_cache_reports.cache_reported OR excluded.cache_reported,
- attempt_key=COALESCE(NULLIF(passive_quality_cache_reports.attempt_key,''),excluded.attempt_key),
- cache_metadata=CASE WHEN passive_quality_cache_reports.cache_metadata='{}'::jsonb THEN excluded.cache_metadata ELSE passive_quality_cache_reports.cache_metadata END`, f.AccountID, f.RequestKey, f.At, f.AttemptKey, f.CacheReported, metadata); err != nil {
-				return err
-			}
-			continue
-		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_failures(account_id,model,request_key,started_at,created_at,group_id,non_text) SELECT $1,$2,$3,$4,$5,$6,$7 WHERE EXISTS(SELECT 1 FROM accounts WHERE id=$1) ON CONFLICT(account_id,request_key) DO NOTHING`, f.AccountID, f.Model, f.RequestKey, f.StartedAt, f.At, f.GroupID, f.NonText); err != nil {
-			return err
-		}
-	}
-	if gap != nil {
-		if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_telemetry_gaps VALUES($1) ON CONFLICT DO NOTHING`, *gap); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
 func passiveSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, s service.PassiveQualityState, now time.Time) (service.PassiveQualityEvidence, error) {
 	if p.IsGroupQualityTarget() {
 		return passiveGroupTargetSamples(ctx, tx, p, s, now)
@@ -98,8 +64,7 @@ func passiveSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPol
 	if err != nil {
 		return service.PassiveQualityEvidence{}, err
 	}
-	var complete bool
-	err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM passive_quality_telemetry_gaps WHERE created_at >= $1 AND created_at <= $2)`, from, now).Scan(&complete)
+	complete, err := passiveTelemetryComplete(ctx, tx, from, now, s.AccountID, p.Model, 0, "all")
 	return service.PassiveQualitySummarize(samples, s.LastEvidenceAt, complete), err
 }
 
@@ -168,20 +133,7 @@ func (r *passiveQualityRepository) Sweep(ctx context.Context, now time.Time, pro
 			return probes, err
 		}
 	}
-	// Bounded retention; delete in batches so housekeeping never monopolizes DB.
-	for _, q := range []string{
-		`DELETE FROM group_quality_traffic_leases WHERE (lease_id,policy_id) IN (SELECT lease_id,policy_id FROM group_quality_traffic_leases WHERE created_at<now()-INTERVAL '2 days' LIMIT 5000)`,
-		`DELETE FROM group_quality_traffic_denials WHERE (policy_id,minute) IN (SELECT policy_id,minute FROM group_quality_traffic_denials WHERE minute<now()-INTERVAL '2 days' LIMIT 1000)`,
-		`DELETE FROM passive_quality_failures WHERE id IN (SELECT id FROM passive_quality_failures WHERE created_at<now()-INTERVAL '2 days' LIMIT 5000)`,
-		`DELETE FROM passive_quality_events WHERE id IN (SELECT id FROM passive_quality_events WHERE created_at<now()-INTERVAL '30 days' LIMIT 1000)`,
-		`DELETE FROM passive_quality_telemetry_gaps WHERE created_at<now()-INTERVAL '2 days'`,
-		`DELETE FROM passive_quality_cache_reports WHERE (account_id,request_key) IN (SELECT account_id,request_key FROM passive_quality_cache_reports WHERE created_at<now()-INTERVAL '2 days' LIMIT 5000)`,
-		`DELETE FROM passive_quality_leases l USING passive_quality_states s WHERE l.policy_id=s.policy_id AND l.account_id=s.account_id AND l.model_key=s.model_key AND (s.data->>'generation')::bigint<>l.generation`,
-	} {
-		if _, err = r.db.ExecContext(ctx, q); err != nil {
-			return probes, err
-		}
-	}
+
 	return probes, nil
 }
 func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, now time.Time, canProbe bool, models ...string) (*service.PassiveQualityState, error) {
@@ -223,7 +175,7 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 	oldPhase := s.Phase
 	oldReason := s.Reason
 	if s.UpdatedAt.IsZero() {
-		s.ObserveAfter = p.UpdatedAt
+		s.ObserveAfter = p.EvidenceSince()
 	}
 	metricEvents := []string{}
 	metricPolicy := p

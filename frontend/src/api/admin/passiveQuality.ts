@@ -40,6 +40,8 @@ export interface PassivePolicy {
   trial_requests: number; trial_concurrency: number; recovery_samples: number
 }
 export interface PassiveEvidence {
+  cache_fresh?: number; ttft_fresh?: number
+  fresh_error_rate?: number | null; fresh_ttft?: number | null; fresh_cache_rate?: number | null
   cache_read_tokens?: number; cache_input_tokens?: number
   samples: number; failures: number; consecutive_failures: number; error_rate: number | null; ttft: number | null
   ttft_samples: number; cache_rate: number | null; cache_samples: number; fresh: number; complete: boolean; latest: string
@@ -69,6 +71,8 @@ export interface GroupQualityFallbackSummary {
   lease_seconds: number; pacing_seconds: number; last_used_at?: string; last_account_id?: number
 }
 export interface GroupQualityTargetSummary {
+  snapshot_ready?: boolean; stale?: boolean; window_started_at?: string
+  contributors?: GroupQualityContributor[]; contributor_total?: number; contributors_truncated?: boolean
   policy_id: number; group_id: number; window_seconds: number; actual_cache_rate: number | null
   cache_samples: number; cache_read_tokens: number; cache_input_tokens: number; cache_unknown_samples: number
   actual_availability: number | null; success_samples: number; failure_samples: number; failure_unknown_samples: number
@@ -77,6 +81,16 @@ export interface GroupQualityTargetSummary {
   traffic_control?: GroupQualityTrafficControl
   fallback?: GroupQualityFallbackSummary
 }
+export interface GroupQualityContributor {
+  account_id: number; account_name: string; model: string; traffic_kind: 'normal' | 'validation' | 'fallback' | 'unattributed'
+  success_samples: number; failure_samples: number; cache_samples: number; cache_unknown_samples: number
+  cache_input_tokens: number; cache_read_tokens: number; uncached_tokens: number; ttft_samples: number; slow_requests: number; ttft_p90_ms: number | null
+}
+export interface PassiveQuery { policy_id?: number; account_id?: number; model?: string; phase?: string; kind?: string; since?: string; until?: string; cursor?: string; limit?: number }
+export interface PassivePage<T> { items: T[]; next_cursor?: string; has_more: boolean; total?: number }
+export interface PassiveStateSummary { total: number; paused_accounts: number; limited_accounts: number; trial_accounts: number; observed_accounts: number; by_policy: { policy_id: number; total: number; phases: Record<string, number>; verified: number }[] }
+export interface PassiveRuntime { queue_depth: number; queue_capacity: number; pending_records: number; dropped_records: number; pending_gap_scopes: number; last_persisted_at: string | null; last_persist_error: string; last_sweep_started_at: string | null; last_sweep_succeeded_at: string | null; last_sweep_duration_ms: number; last_sweep_error: string; sweep_skipped_backlog: number; last_cleanup_succeeded_at: string | null; last_cleanup_error: string; collection_lag_seconds: number }
+export const emptyPassiveSummary = (): PassiveStateSummary => ({ total: 0, paused_accounts: 0, limited_accounts: 0, trial_accounts: 0, observed_accounts: 0, by_policy: [] })
 export const passiveQualityAPI = {
   policies: async () => (await apiClient.get<PassivePolicy[]>('/admin/passive-quality-policies')).data,
   save: async (policy: PassivePolicy) => (await (policy.id
@@ -84,6 +98,10 @@ export const passiveQualityAPI = {
     : apiClient.post<PassivePolicy>('/admin/passive-quality-policies', policy))).data,
   remove: async (id: number) => { await apiClient.delete(`/admin/passive-quality-policies/${id}`) },
   states: async () => (await apiClient.get<PassiveState[]>('/admin/passive-quality-states')).data,
+  statePage: async (params: PassiveQuery = {}) => (await apiClient.get<PassivePage<PassiveState>>('/admin/passive-quality-states', { params: { ...params, paginated: true } })).data,
+  stateSummary: async () => (await apiClient.get<PassiveStateSummary>('/admin/passive-quality-states/summary')).data,
+  eventPage: async (params: PassiveQuery = {}) => (await apiClient.get<PassivePage<PassiveEvent>>('/admin/passive-quality-events', { params: { ...params, paginated: true } })).data,
+  runtime: async () => (await apiClient.get<PassiveRuntime>('/admin/passive-quality/runtime')).data,
   groupTargets: async () => (await apiClient.get<GroupQualityTargetSummary[]>('/admin/passive-quality/group-targets')).data,
   saveGroupQualityTarget: async (policy: GroupQualityTargetDraft) => (await (policy.id
     ? apiClient.put<PassivePolicy>(`/admin/passive-quality-policies/${policy.id}`, policy)

@@ -23,8 +23,8 @@ func (r *passiveQualityRepository) modelTargets(ctx context.Context, p service.P
 		window = max(window, p.CacheProtection.Quick.WindowSeconds, p.CacheProtection.ActionWindow.WindowSeconds)
 	}
 	from := now.Add(-time.Duration(window) * time.Second)
-	if p.UpdatedAt.After(from) {
-		from = p.UpdatedAt
+	if p.EvidenceSince().After(from) {
+		from = p.EvidenceSince()
 	}
 	groupID := int64(0)
 	if p.IsGroupQualityTarget() {

@@ -23,6 +23,7 @@ func TestChannelMonitorV2RecentRequestsScopeAndModelMapping(t *testing.T) {
 	require.Contains(t, query, "ul.group_id = ANY($5)")
 	require.Contains(t, query, "current_error.group_id = ANY($5)")
 	require.Contains(t, query, "ul.actual_cost > 0")
+	require.NotContains(t, query, channelMonitorV2CacheEligibleUL) // synchronous successes retain their recorded cache ratio
 	require.Contains(t, query, "NOT current_error.is_count_tokens")
 	require.Equal(t, 3, strings.Count(query, "LIMIT 20"))
 	require.Contains(t, query, "succeeded.request_id = current_error.request_id")

@@ -87,7 +87,7 @@ func (s *ScheduledTestRunnerService) probeStatisticsRecovery(ctx context.Context
 	probe := &ScheduledTestRecoveryProbe{Status: "failed", StartedAt: time.Now().UTC()}
 	// Use the existing small account connectivity test with the plan's model.
 	// It uses the account's provider, model mapping, credentials and proxy route.
-	response, err := s.accountTestSvc.RunTestBackground(probeCtx, *result.AccountID, plan.ModelID)
+	response, err := s.accountTestSvc.RunTestBackground(WithQualityRecoveryProbe(probeCtx), *result.AccountID, plan.ModelID)
 	if response != nil {
 		result.ExecutionInfo = mergeScheduledTestExecution(result.ExecutionInfo, response.ExecutionInfo)
 	}

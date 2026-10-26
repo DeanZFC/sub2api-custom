@@ -100,13 +100,13 @@ func (r *qualityOperationsRepository) OperationsSnapshot(ctx context.Context) (*
 	now := time.Now().UTC()
 	day := now.Format("2006-01-02")
 	out := &service.QualityOperationsSnapshot{Config: c, Day: day, ResetsAt: now.Truncate(24 * time.Hour).Add(24 * time.Hour), Usage: []service.QualityBudgetUsage{}, Suppliers: []service.QualitySupplier{}}
-	rows, err := tx.QueryContext(ctx, `SELECT account_id,requests,tokens,unknown_requests FROM quality_budget_days WHERE day=$1 ORDER BY account_id`, day)
+	rows, err := tx.QueryContext(ctx, `SELECT account_id,requests,tokens,unknown_requests,recovery_requests,recovery_tokens FROM quality_budget_days WHERE day=$1 ORDER BY account_id`, day)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var u service.QualityBudgetUsage
-		if err = rows.Scan(&u.AccountID, &u.Requests, &u.Tokens, &u.UnknownRequests); err != nil {
+		if err = rows.Scan(&u.AccountID, &u.Requests, &u.Tokens, &u.UnknownRequests, &u.RecoveryRequests, &u.RecoveryTokens); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -177,9 +177,16 @@ func (r *qualityOperationsRepository) SaveSupplier(ctx context.Context, s *servi
 	copy.Affected = 0
 	raw, _ := json.Marshal(copy)
 	if s.ID == 0 {
-		err = tx.QueryRowContext(ctx, `INSERT INTO quality_suppliers(config) VALUES($1) RETURNING id,version`, raw).Scan(&s.ID, &s.Version)
+		err = tx.QueryRowContext(ctx, `INSERT INTO quality_suppliers(config,updated_at) VALUES($1,clock_timestamp()) RETURNING id,version`, raw).Scan(&s.ID, &s.Version)
 	} else {
-		err = tx.QueryRowContext(ctx, `UPDATE quality_suppliers SET config=$1,version=version+1,updated_at=now(),next_probe_at=NULL,probe_lease='' WHERE id=$2 AND version=$3 RETURNING version`, raw, s.ID, s.Version).Scan(&s.Version)
+		// A probe can hold this row while its budget admission is pending. Take
+		// the row lock before evaluating the evidence fence: UPDATE expressions
+		// can otherwise be evaluated before waiting for a pure row lock.
+		var lockedID int64
+		err = tx.QueryRowContext(ctx, `SELECT id FROM quality_suppliers WHERE id=$1 AND version=$2 FOR UPDATE`, s.ID, s.Version).Scan(&lockedID)
+		if err == nil {
+			err = tx.QueryRowContext(ctx, `UPDATE quality_suppliers SET config=$1,version=version+1,updated_at=clock_timestamp(),next_probe_at=NULL,probe_lease='' WHERE id=$2 AND version=$3 RETURNING version`, raw, s.ID, s.Version).Scan(&s.Version)
+		}
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrPassiveQualityConflict
@@ -222,6 +229,8 @@ func (r *qualityOperationsRepository) ReserveQualityProbe(ctx context.Context, a
 	now := time.Now().UTC()
 	day := now.Format("2006-01-02")
 	// Supplier row locks coordinate sentinel rounds across scheduler instances.
+	purpose := service.QualityProbePurpose(ctx)
+	recovery := purpose == "recovery"
 	var supplierID *int64
 	supplier, err := scanQualitySupplier(tx.QueryRowContext(ctx, `SELECT s.id,s.version,s.config,s.next_probe_at FROM quality_suppliers s JOIN quality_supplier_accounts m ON m.supplier_id=s.id WHERE m.account_id=$1 FOR UPDATE OF s`, account))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -256,8 +265,8 @@ func (r *qualityOperationsRepository) ReserveQualityProbe(ctx context.Context, a
 		if _, err = tx.ExecContext(ctx, `INSERT INTO quality_budget_days(day,account_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, day, id); err != nil {
 			return nil, err
 		}
-		var requests, spent int64
-		if err = tx.QueryRowContext(ctx, `SELECT requests,tokens FROM quality_budget_days WHERE day=$1 AND account_id=$2 FOR UPDATE`, day, id).Scan(&requests, &spent); err != nil {
+		var requests, spent, recoveryRequests, recoveryTokens int64
+		if err = tx.QueryRowContext(ctx, `SELECT requests,tokens,recovery_requests,recovery_tokens FROM quality_budget_days WHERE day=$1 AND account_id=$2 FOR UPDATE`, day, id).Scan(&requests, &spent, &recoveryRequests, &recoveryTokens); err != nil {
 			return nil, err
 		}
 		maxRequests, maxTokens := c.DailyRequests, c.DailyTokens
@@ -267,12 +276,19 @@ func (r *qualityOperationsRepository) ReserveQualityProbe(ctx context.Context, a
 		if c.BudgetEnabled && ((maxRequests > 0 && requests >= maxRequests) || (maxTokens > 0 && (tokens > maxTokens || spent > maxTokens-tokens))) {
 			return nil, &service.QualityDeferredError{Reason: "今日检测预算不足", Until: now.Truncate(24 * time.Hour).Add(24 * time.Hour)}
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE quality_budget_days SET requests=requests+1,tokens=tokens+$3,unknown_requests=unknown_requests+1 WHERE day=$1 AND account_id=$2`, day, id, tokens); err != nil {
+		requestLimit := service.QualityBudgetAdmissionLimit(maxRequests, recoveryRequests, c.RecoveryReservePercent, purpose)
+		tokenLimit := service.QualityBudgetAdmissionLimit(maxTokens, recoveryTokens, c.RecoveryReservePercent, purpose)
+		if c.BudgetEnabled && ((maxRequests > 0 && requests >= requestLimit) || (maxTokens > 0 && (tokens > tokenLimit || spent > tokenLimit-tokens))) {
+			return nil, &service.QualityDeferredError{Reason: "剩余额度已为恢复探测预留", Until: now.Truncate(24 * time.Hour).Add(24 * time.Hour)}
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE quality_budget_days SET requests=requests+1,tokens=tokens+$3,unknown_requests=unknown_requests+1,recovery_requests=recovery_requests+CASE WHEN $4 THEN 1 ELSE 0 END,recovery_tokens=recovery_tokens+CASE WHEN $4 THEN $3 ELSE 0 END WHERE day=$1 AND account_id=$2`, day, id, tokens, recovery); err != nil {
 			return nil, err
 		}
 	}
 	res := &service.QualityProbeReservation{AccountID: account}
-	if err = tx.QueryRowContext(ctx, `INSERT INTO quality_probe_attempts(account_id,day,supplier_id,reserved_tokens,started_at) VALUES($1,$2,$3,$4,$5) RETURNING id`, account, day, supplierID, tokens, now).Scan(&res.ID); err != nil {
+	// Use the same database clock as the supplier edit fence, after obtaining
+	// the supplier row lock, so old-config probes cannot become fresh evidence.
+	if err = tx.QueryRowContext(ctx, `INSERT INTO quality_probe_attempts(account_id,day,supplier_id,reserved_tokens,started_at,purpose) VALUES($1,$2,$3,$4,clock_timestamp(),$5) RETURNING id`, account, day, supplierID, tokens, purpose).Scan(&res.ID); err != nil {
 		return nil, err
 	}
 	return res, tx.Commit()
@@ -291,7 +307,8 @@ func (r *qualityOperationsRepository) SettleQualityProbe(ctx context.Context, re
 	var settled bool
 	var supplier *int64
 	var started time.Time
-	err = tx.QueryRowContext(ctx, `SELECT day,reserved_tokens,settled,account_id,supplier_id,started_at FROM quality_probe_attempts WHERE id=$1 FOR UPDATE`, res.ID).Scan(&day, &reserved, &settled, &account, &supplier, &started)
+	var purpose string
+	err = tx.QueryRowContext(ctx, `SELECT day,reserved_tokens,settled,account_id,supplier_id,started_at,purpose FROM quality_probe_attempts WHERE id=$1 FOR UPDATE`, res.ID).Scan(&day, &reserved, &settled, &account, &supplier, &started, &purpose)
 	if err != nil {
 		return err
 	}
@@ -300,7 +317,7 @@ func (r *qualityOperationsRepository) SettleQualityProbe(ctx context.Context, re
 	}
 	if o.Tokens != nil && *o.Tokens >= 0 {
 		for _, id := range []int64{0, account} {
-			if _, err = tx.ExecContext(ctx, `UPDATE quality_budget_days SET tokens=tokens+$3,unknown_requests=unknown_requests-1 WHERE day=$1 AND account_id=$2`, day, id, *o.Tokens-reserved); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE quality_budget_days SET tokens=tokens+$3,unknown_requests=unknown_requests-1,recovery_tokens=recovery_tokens+CASE WHEN $4 THEN $3 ELSE 0 END WHERE day=$1 AND account_id=$2`, day, id, *o.Tokens-reserved, purpose == "recovery"); err != nil {
 				return err
 			}
 		}

@@ -97,6 +97,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	applyMigration("276_scheduled_test_cost_control.sql")
 	applyMigration("282_scheduled_test_excluded_accounts.sql")
 	applyMigration("282_scheduled_test_excluded_accounts.sql")
+	applyMigration("309_quality_recovery_budget_evidence.sql")
 	applyMigration("284_scheduled_test_output_tokens.sql")
 	var statisticsCount int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))

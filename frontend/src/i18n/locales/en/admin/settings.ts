@@ -10,9 +10,14 @@ export default {
         security: 'Security',
         users: 'Users',
         gateway: 'Gateway',
+        'openai-vm': 'OpenAI Dedicated Slots',
         email: 'Email',
         backup: 'Backup',
         payment: 'Payment',
+      },
+      openaiVm: {
+        title: 'Global Bridge Configuration',
+        description: 'Shared by all OpenAI OAuth accounts.',
       },
       features: {
         channelMonitor: {

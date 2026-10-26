@@ -17,8 +17,8 @@ func passiveCacheSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQuali
 		return nil, false, nil
 	}
 	from := now.Add(-time.Duration(max(c.Quick.WindowSeconds, c.ActionWindow.WindowSeconds)) * time.Second)
-	if p.UpdatedAt.After(from) {
-		from = p.UpdatedAt
+	if p.EvidenceSince().After(from) {
+		from = p.EvidenceSince()
 	}
 	// Exemptions reset all independent evidence; availability trials do not.
 	if s.CacheObserveAfter.After(from) {
@@ -115,8 +115,7 @@ func passiveCacheSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQuali
 	if err != nil {
 		return nil, false, err
 	}
-	var complete bool
-	err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM passive_quality_telemetry_gaps WHERE created_at>=$1 AND created_at<=$2)`, from, now).Scan(&complete)
+	complete, err := passiveTelemetryComplete(ctx, tx, from, now, s.AccountID, p.Model, 0, "all")
 	complete = complete && withinBudget
 	if len(samples) > 10000 {
 		complete = false

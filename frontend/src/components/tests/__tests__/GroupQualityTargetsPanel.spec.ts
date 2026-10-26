@@ -2,12 +2,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import GroupQualityTargetsPanel from '../GroupQualityTargetsPanel.vue'
-import { defaultPassivePolicy, type GroupQualityTargetSummary, type GroupQualityTrafficControl, type GroupQualityFallbackSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
+import { defaultPassivePolicy, emptyPassiveSummary, type GroupQualityContributor, type GroupQualityTargetSummary, type GroupQualityTrafficControl, type GroupQualityFallbackSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
 import resources from '@/i18n/locales/en/admin/resources'
 import zhResources from '@/i18n/locales/zh/admin/resources'
 import type { AdminGroup } from '@/types'
 
-const api = vi.hoisted(() => ({ policies: vi.fn(), states: vi.fn(), groupTargets: vi.fn(), saveGroupQualityTarget: vi.fn(), success: vi.fn(), error: vi.fn() }))
+const api = vi.hoisted(() => ({ policies: vi.fn(), states: vi.fn(), statePage: vi.fn(), stateSummary: vi.fn(), groupTargets: vi.fn(), saveGroupQualityTarget: vi.fn(), success: vi.fn(), error: vi.fn() }))
 vi.mock('@/api/admin/passiveQuality', async original => ({ ...await original<object>(), passiveQualityAPI: api }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.success, showError: api.error }) }))
 const groups = [
@@ -49,7 +49,7 @@ function makeWrapper(policyId?: number, locale = 'en') {
     stubs: { BaseDialog: { props: ['show', 'title'], template: '<section v-if="show" data-dialog><h2>{{ title }}</h2><slot/><slot name="footer"/></section>' } },
   } })
 }
-beforeEach(() => { vi.resetAllMocks(); api.policies.mockResolvedValue([policy()]); api.states.mockResolvedValue([]); api.groupTargets.mockResolvedValue([summary()]); api.saveGroupQualityTarget.mockResolvedValue(policy()) })
+beforeEach(() => { vi.resetAllMocks(); api.policies.mockResolvedValue([policy()]); api.states.mockResolvedValue([]); api.statePage.mockImplementation(async () => ({ items: await api.states(), total: (await api.states()).length, has_more: false })); api.stateSummary.mockImplementation(async () => { const items: PassiveState[] = await api.states(); const phases: Record<string, number> = {}; for (const s of items) phases[s.phase] = (phases[s.phase] || 0) + 1; return { ...emptyPassiveSummary(), total: items.length, by_policy: [{ policy_id: 11, total: items.length, phases, verified: 0 }] } }); api.groupTargets.mockResolvedValue([summary()]); api.saveGroupQualityTarget.mockResolvedValue(policy()) })
 afterEach(() => vi.useRealTimers())
 
 describe('simple group quality targets', () => {
@@ -222,6 +222,24 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
+  it('distinguishes deferred recovery from an open trial without claiming another failure', async () => {
+    const waiting = state({ reason: 'waiting_for_recovery: insufficient_samples', next_at: '2026-10-24T00:20:00Z' })
+    api.states.mockResolvedValue([waiting])
+    const w = makeWrapper(); await flushPromises()
+    const row = w.get('[data-target-state="62-model-a"]')
+    expect(row.text()).toContain('Waiting for recovery evidence')
+    expect(row.get('[data-target-trial-waiting]').text()).toContain('Missing evidence is not a new failure')
+    expect(row.text()).not.toContain('Trial ends:')
+    expect(row.text()).not.toContain('Trial failed again')
+    w.unmount()
+
+    api.states.mockResolvedValue([state({ ...waiting, next_at: '0001-01-01T00:00:00Z', trial_ends_at: '2026-10-24T00:35:00Z' })])
+    const resumed = makeWrapper(); await flushPromises()
+    expect(resumed.find('[data-target-trial-waiting]').exists()).toBe(false)
+    expect(resumed.get('[data-target-state="62-model-a"]').text()).toContain('Trial ends:')
+    resumed.unmount()
+  })
+
   it('shows the server token budget separately from request and account evidence', async () => {
     api.groupTargets.mockResolvedValue([summary({ traffic_control: trafficControl() })])
     const w = makeWrapper(); await flushPromises()
@@ -275,7 +293,8 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
-  it('counts only healthy, complete, sufficiently sampled target evidence without another hold', async () => {
+  it('uses independently aggregated verified counts rather than counting the loaded state page', async () => {
+    api.stateSummary.mockResolvedValue({ ...emptyPassiveSummary(), total: 101, by_policy: [{ policy_id: 11, total: 101, phases: { healthy: 1, paused: 100 }, verified: 1 }] })
     const evidence = { ...state().evidence, samples: 10, cache_samples: 10, ttft_samples: 10, cache_rate: 90 }
     api.states.mockResolvedValue([
       state({ phase: 'healthy', evidence }),
@@ -289,6 +308,79 @@ describe('simple group quality targets', () => {
     expect(w.get('[data-target-verified]').text()).toContain('1 account/models verified')
     expect(w.find('[data-target-no-verified]').exists()).toBe(false)
     expect(w.get('[data-group-target]').text()).toContain('not guaranteed current availability')
+    w.unmount()
+  })
+
+  it('keeps independent policy counts and appended state pages through automatic refreshes', async () => {
+    vi.useFakeTimers()
+    api.stateSummary.mockResolvedValue({ ...emptyPassiveSummary(), total: 51, by_policy: [{ policy_id: 11, total: 51, phases: { paused: 40, trial: 10, healthy: 1 }, verified: 1 }] })
+    api.statePage.mockResolvedValueOnce({ items: [state()], total: 51, has_more: true, next_cursor: 'policy-page-2' })
+    let resolveNext!: (value: { items: PassiveState[]; total: number; has_more: boolean }) => void
+    api.statePage.mockImplementationOnce(() => new Promise(resolve => { resolveNext = resolve }))
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('[data-group-target]').text()).toContain('51 account/model states')
+    expect(w.get('[data-group-target]').text()).toContain('40 paused')
+    expect(w.get('[data-group-target]').text()).toContain('10 in recovery trial')
+    expect(w.text()).toContain('Loaded 1 of 51 states')
+    await w.get('[data-target-more-states="11"]').trigger('click')
+    await vi.advanceTimersByTimeAsync(15000); await flushPromises()
+    expect(api.statePage).toHaveBeenCalledTimes(2)
+    resolveNext({ items: [state({ account_id: 63, account_name: 'Second account', model: 'model-b' })], total: 51, has_more: false })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(15000); await flushPromises()
+    expect(api.statePage).toHaveBeenCalledTimes(2)
+    expect(w.findAll('[data-target-state]')).toHaveLength(2)
+    expect(w.text()).toContain('Loaded 2 of 51 states')
+    expect(w.text()).toContain('Automatic refresh is paused')
+    w.unmount()
+  })
+
+  it('invalidates appended states and their pending responses when the policy version changes', async () => {
+    api.statePage.mockResolvedValueOnce({ items: [state({ account_name: 'Old evidence' })], total: 2, has_more: true, next_cursor: 'old-page-2' })
+    let resolveOldAppend!: (value: { items: PassiveState[]; total: number; has_more: boolean }) => void
+    api.statePage.mockImplementationOnce(() => new Promise(resolve => { resolveOldAppend = resolve }))
+    api.statePage.mockResolvedValueOnce({ items: [state({ account_id: 64, account_name: 'New policy evidence', model: 'model-new' })], total: 1, has_more: false })
+    const w = makeWrapper(); await flushPromises()
+    await w.get('[data-target-more-states="11"]').trigger('click')
+    api.policies.mockResolvedValue([policy({ version: 4 })])
+    await w.vm.refresh(); await flushPromises()
+    expect(w.findAll('[data-target-state]').map(row => row.text()).join(' ')).toContain('New policy evidence')
+    expect(w.findAll('[data-target-state]').map(row => row.text()).join(' ')).not.toContain('Old evidence')
+    resolveOldAppend({ items: [state({ account_id: 63, account_name: 'Stale append' })], total: 2, has_more: false }); await flushPromises()
+    expect(w.findAll('[data-target-state]')).toHaveLength(1)
+    expect(w.findAll('[data-target-state]').map(row => row.text()).join(' ')).not.toContain('Stale append')
+    expect(w.find('[data-target-more-states]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('renders contributor purposes, unknown measurements and truncation independently of state rows', async () => {
+    const contributor = (traffic_kind: GroupQualityContributor['traffic_kind'], overrides: Partial<GroupQualityContributor> = {}): GroupQualityContributor => ({
+      account_id: 62, account_name: 'Provider', model: 'model-a', traffic_kind,
+      success_samples: 8, failure_samples: 2, cache_samples: 10, cache_unknown_samples: 0,
+      cache_input_tokens: 10000, cache_read_tokens: 2000, uncached_tokens: 8000, ttft_samples: 10, slow_requests: 3, ttft_p90_ms: 1500, ...overrides,
+    })
+    api.groupTargets.mockResolvedValue([summary({
+      window_started_at: '2026-10-23T23:00:00Z', contributors: [contributor('normal'), contributor('validation'), contributor('fallback'), contributor('unattributed', { account_id: 63, account_name: '', model: '', cache_unknown_samples: 4, ttft_p90_ms: null })],
+      contributor_total: 9, contributors_truncated: true,
+    })])
+    const w = makeWrapper(); await flushPromises()
+    const contributors = w.get('[data-target-contributors]')
+    expect(contributors.findAll('tbody tr')).toHaveLength(4)
+    const text = contributors.text()
+    for (const value of ['Provider · model-a', 'Normal', 'Recovery / validation', 'Fallback', 'Unattributed', '#63', '8,000', '2 / 10', '3 / 10', '1.5 s', 'Unknown', '4 requests without usable cache telemetry', 'Showing 4 of 9 contributors']) expect(text).toContain(value)
+    expect(w.findAll('[data-target-state]')).toHaveLength(0)
+    w.unmount()
+  })
+
+  it.each([
+    { values: { snapshot_ready: false }, message: 'Waiting for the first reporting snapshot' },
+    { values: { stale: true }, message: 'The reporting snapshot is stale' },
+  ])('does not report current target success for pending or stale snapshots: %j', async ({ values, message }) => {
+    api.groupTargets.mockResolvedValue([summary(values)])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('[data-target-snapshot]').text()).toContain(message)
+    expect(w.get('[data-group-target]').text()).toContain('Insufficient samples')
+    expect(w.get('[data-group-target]').text()).not.toContain('Measured targets met')
     w.unmount()
   })
 

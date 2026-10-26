@@ -3,20 +3,51 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 )
 
 // This read-only projection intentionally separates the persisted hold from
 // current evidence: protection states are replaced at the start of each round.
 type ScheduledTestProtectionHold struct {
-	PlanID     int64                             `json:"plan_id"`
-	PlanName   string                            `json:"plan_name"`
-	Mode       string                            `json:"mode"`
-	Reason     string                            `json:"reason"`
-	UpdatedAt  time.Time                         `json:"updated_at"`
-	PriorRound bool                              `json:"prior_round"`
-	Rules      []ScheduledTestProtectionHit      `json:"rules"`
-	Tests      []ScheduledTestProtectionEvidence `json:"tests"`
+	PlanID          int64                             `json:"plan_id"`
+	PlanName        string                            `json:"plan_name"`
+	Mode            string                            `json:"mode"`
+	Reason          string                            `json:"reason"`
+	UpdatedAt       time.Time                         `json:"updated_at"`
+	PriorRound      bool                              `json:"prior_round"`
+	Rules           []ScheduledTestProtectionHit      `json:"rules"`
+	Tests           []ScheduledTestProtectionEvidence `json:"tests"`
+	TriggerSnapshot *ScheduledTestProtectionTrigger   `json:"trigger_snapshot,omitempty"`
+}
+
+// Trigger evidence is an immutable projection, independent of mutable results.
+type ScheduledTestProtectionTrigger struct {
+	ID               int64                               `json:"id"`
+	OccurredAt       time.Time                           `json:"occurred_at"`
+	PlanID           int64                               `json:"plan_id"`
+	PlanName         string                              `json:"plan_name"`
+	TestDefinitionID int64                               `json:"test_definition_id"`
+	ResultID         int64                               `json:"result_id"`
+	RunID            string                              `json:"run_id"`
+	ModelID          string                              `json:"model_id"`
+	PolicyVersion    string                              `json:"policy_version"`
+	PolicyUpdatedAt  time.Time                           `json:"policy_updated_at"`
+	Policy           ScheduledTestProtectionConfig       `json:"policy"`
+	Source           string                              `json:"source"`
+	ActorUserID      *int64                              `json:"actor_user_id,omitempty"`
+	Reason           string                              `json:"reason"`
+	Decision         ScheduledTestProtectionDecision     `json:"decision"`
+	Before           ScheduledTestProtectionAccountState `json:"before"`
+	After            ScheduledTestProtectionAccountState `json:"after"`
+	Rules            []ScheduledTestProtectionHit        `json:"rules"`
+	Tests            []ScheduledTestProtectionEvidence   `json:"tests"`
+}
+
+type ScheduledTestProtectionAccountState struct {
+	Status      string  `json:"status"`
+	Schedulable bool    `json:"schedulable"`
+	GroupIDs    []int64 `json:"group_ids"`
 }
 
 type ScheduledTestProtectionHit struct {
@@ -30,6 +61,10 @@ type ScheduledTestProtectionEvidence struct {
 	TestDefinitionID int64                          `json:"test_definition_id"`
 	TestName         string                         `json:"test_name"`
 	ResultID         int64                          `json:"result_id,omitempty"`
+	RunID            string                         `json:"run_id,omitempty"`
+	MinSamples       int64                          `json:"min_samples"`
+	WindowStart      *time.Time                     `json:"window_start,omitempty"`
+	WindowEnd        *time.Time                     `json:"window_end,omitempty"`
 	StartedAt        *time.Time                     `json:"started_at,omitempty"`
 	Current          bool                           `json:"current"`
 	Verdict          string                         `json:"verdict"`
@@ -46,19 +81,21 @@ type ScheduledTestProtectionEvidence struct {
 type ScheduledTestThresholdDetail struct {
 	ScheduledTestThreshold
 	Observed *float64 `json:"observed"`
+	Samples  *int64   `json:"samples,omitempty"`
 }
 
 // Source fields are private to the admin projection and never serialized to
 // clients. In particular, full model output is only used to evaluate metrics.
 type ScheduledTestProtectionHoldSource struct {
-	PlanID       int64
-	PlanName     string
-	DefinitionID int64
-	Reason       string
-	UpdatedAt    time.Time
-	RuleIDs      []string
-	Config       ScheduledTestProtectionConfig
-	States       []ScheduledTestProtectionStateSource
+	PlanID          int64
+	PlanName        string
+	DefinitionID    int64
+	Reason          string
+	UpdatedAt       time.Time
+	RuleIDs         []string
+	Config          ScheduledTestProtectionConfig
+	States          []ScheduledTestProtectionStateSource
+	TriggerSnapshot *ScheduledTestProtectionTrigger
 }
 
 type ScheduledTestProtectionStateSource struct {
@@ -74,6 +111,7 @@ type ScheduledTestProtectionStateSource struct {
 	Result       *ScheduledTestResult        `json:"result"`
 	PassCount    int64                       `json:"pass_count"`
 	FailCount    int64                       `json:"fail_count"`
+	RunID        string                      `json:"run_id"`
 }
 
 type ScheduledTestProtectionDetailsRepository interface {
@@ -91,20 +129,31 @@ func (s *ScheduledTestService) AccountProtectionDetails(ctx context.Context, acc
 	}
 	holds := make([]ScheduledTestProtectionHold, 0, len(sources))
 	for _, source := range sources {
-		for _, state := range source.States {
-			if state.Result != nil {
-				normalizeStoredTestResults([]*ScheduledTestResult{state.Result})
-			}
-		}
 		holds = append(holds, buildScheduledTestProtectionHold(source))
 	}
 	return holds, nil
 }
 
 func buildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) ScheduledTestProtectionHold {
+	return BuildScheduledTestProtectionHold(source)
+}
+
+// BuildScheduledTestProtectionHold is shared by current details and persisted
+// trigger evidence, so both use exactly the same metric validity checks.
+func BuildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) ScheduledTestProtectionHold {
+	source.States = slices.Clone(source.States)
+	for i := range source.States {
+		if source.States[i].Result != nil {
+			copy := *source.States[i].Result
+			if copy.OutputStatistics == nil {
+				normalizeStoredTestResults([]*ScheduledTestResult{&copy})
+			}
+			source.States[i].Result = &copy
+		}
+	}
 	hold := ScheduledTestProtectionHold{PlanID: source.PlanID, PlanName: source.PlanName,
 		Reason: source.Reason, UpdatedAt: source.UpdatedAt, Mode: "per_test",
-		Rules: []ScheduledTestProtectionHit{}, Tests: []ScheduledTestProtectionEvidence{}}
+		Rules: []ScheduledTestProtectionHit{}, Tests: []ScheduledTestProtectionEvidence{}, TriggerSnapshot: source.TriggerSnapshot}
 	verdicts := map[int64]string{}
 	for _, state := range source.States {
 		if state.Current {
@@ -143,7 +192,13 @@ func buildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 		}
 		evidence := ScheduledTestProtectionEvidence{TestDefinitionID: state.DefinitionID,
 			TestName: state.TestName, Current: state.Current, Verdict: "pending", AutomatedVerdict: "pending",
-			Vote: state.Rule.Vote, Thresholds: []ScheduledTestThresholdDetail{}}
+			Vote: state.Rule.Vote, Thresholds: []ScheduledTestThresholdDetail{}, RunID: state.RunID, MinSamples: state.Rule.MinSamples}
+		if evidence.MinSamples < 1 {
+			evidence.MinSamples = 1
+		}
+		if state.Current && state.Result != nil && state.Result.OutputStatistics != nil {
+			evidence.WindowStart, evidence.WindowEnd = &state.Result.OutputStatistics.WindowStart, &state.Result.OutputStatistics.WindowEnd
+		}
 		if state.Result != nil {
 			evidence.ResultID, evidence.StartedAt = state.Result.ID, &state.Result.StartedAt
 		}
@@ -158,6 +213,9 @@ func buildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 		}
 		for _, threshold := range state.Rule.Thresholds {
 			detail := ScheduledTestThresholdDetail{ScheduledTestThreshold: threshold}
+			if state.Current && state.Result != nil {
+				detail.Samples = scheduledTestMetricSamples(state.Result, threshold.Metric)
+			}
 			if state.Current && state.Result != nil && (state.Result.Status == "success" || state.Result.Status == "passed") {
 				if value, ok := scheduledTestMetric(state.Result, threshold.Metric, state.Rule.MinSamples); ok {
 					detail.Observed = &value
@@ -168,6 +226,24 @@ func buildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 		hold.Tests = append(hold.Tests, evidence)
 	}
 	return hold
+}
+
+func scheduledTestMetricSamples(result *ScheduledTestResult, metric string) *int64 {
+	if stats := result.OutputStatistics; stats != nil {
+		switch metric {
+		case "success_rate":
+			return &stats.TotalRequests
+		case "cache_rate":
+			return &stats.CacheSamples
+		case "avg_first_token_ms":
+			return &stats.FirstTokenSamples
+		}
+	}
+	if metric == "latency_ms" || metric == "output_numeric" {
+		samples := int64(1)
+		return &samples
+	}
+	return nil
 }
 
 func collectProtectionConditionTests(condition ScheduledTestCombinationCondition, ids map[int64]bool) {

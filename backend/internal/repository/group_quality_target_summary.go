@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -10,6 +12,11 @@ import (
 )
 
 var _ service.GroupQualityTargetSummaryRepository = (*passiveQualityRepository)(nil)
+
+type groupQualitySummaryReader interface {
+	sqlExecutor
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
 
 func (r *passiveQualityRepository) GroupQualityTargetSummaries(ctx context.Context, now time.Time) ([]service.GroupQualityTargetSummary, error) {
 	policies, err := r.ListPolicies(ctx)
@@ -21,46 +28,51 @@ func (r *passiveQualityRepository) GroupQualityTargetSummaries(ctx context.Conte
 		if !p.IsGroupQualityTarget() || len(p.GroupIDs) != 1 {
 			continue
 		}
-		s, err := r.groupQualityTargetSummary(ctx, p, now)
-		if err != nil {
+		s := service.GroupQualityTargetSummary{PolicyID: p.ID, GroupID: p.GroupIDs[0], WindowSeconds: 3600, WindowStartedAt: now.Add(-time.Hour), GeneratedAt: now, Contributors: []service.GroupQualityContributor{}}
+		var raw []byte
+		err = r.db.QueryRowContext(ctx, `SELECT data FROM group_quality_report_snapshots WHERE policy_id=$1 AND policy_version=$2`, p.ID, p.DecisionVersion()).Scan(&raw)
+		if err == nil {
+			if err = json.Unmarshal(raw, &s); err != nil {
+				return nil, err
+			}
+			s.Stale = now.Sub(s.GeneratedAt) > 2*time.Minute
+			if s.Fallback != nil {
+				err = r.db.QueryRowContext(ctx, `SELECT count(*) FROM group_quality_traffic_leases WHERE group_id=$1 AND fallback AND NOT unused AND released_at IS NULL AND fallback_expires_at>$2`, s.GroupID, now).Scan(&s.Fallback.InFlight)
+				if err != nil {
+					return nil, err
+				}
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		s.PolicyID = p.ID
 		out = append(out, s)
 	}
 	return out, nil
 }
 
 func (r *passiveQualityRepository) groupQualityTargetSummary(ctx context.Context, p service.PassiveQualityPolicy, now time.Time) (service.GroupQualityTargetSummary, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return service.GroupQualityTargetSummary{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	s, err := readGroupQualityTargetSummary(ctx, tx, p, now)
+	if err != nil {
+		return s, err
+	}
+	return s, tx.Commit()
+}
+
+// Delayed usage and telemetry writes cannot change the population between the
+// headline metrics, traffic accounting, and contributor queries.
+func readGroupQualityTargetSummary(ctx context.Context, reader groupQualitySummaryReader, p service.PassiveQualityPolicy, now time.Time) (service.GroupQualityTargetSummary, error) {
 	groupID := p.GroupIDs[0]
-	s := service.GroupQualityTargetSummary{GroupID: groupID, WindowSeconds: 3600, GeneratedAt: now}
+	s := service.GroupQualityTargetSummary{PolicyID: p.ID, GroupID: groupID, WindowSeconds: 3600, WindowStartedAt: now.Add(-time.Hour), GeneratedAt: now, SnapshotReady: true, Contributors: []service.GroupQualityContributor{}}
 	var cache, availability, ttft sql.NullFloat64
 	var totalInput int64
 	// Account/request identity is retained across WS turns. A failed attempt
 	// wins over partial usage, matching the real-traffic protection collector.
-	err := r.db.QueryRowContext(ctx, `WITH failed AS MATERIALIZED (
- SELECT account_id,request_key,created_at FROM passive_quality_failures
- WHERE group_id=$1 AND NOT non_text AND created_at>=$2 AND created_at<=$3
- AND ($4='' OR model=$4) AND NOT(account_id=ANY($5))
- ), succeeded AS MATERIALIZED (
- SELECT DISTINCT ON (ul.account_id,COALESCE(NULLIF(COALESCE(NULLIF(cr.attempt_key,''),ul.request_id),''),'usage:'||ul.id))
- ul.account_id,COALESCE(NULLIF(COALESCE(NULLIF(cr.attempt_key,''),ul.request_id),''),'usage:'||ul.id) AS request_key,
- CASE WHEN (ul.stream OR ul.openai_ws_mode) AND ul.first_token_ms>=0 THEN ul.first_token_ms END AS ttft,
- CASE WHEN NOT COALESCE(ul.native_compaction_v2,false)
- AND COALESCE(ul.inbound_endpoint,'') NOT LIKE '%/compact%'
- AND COALESCE(ul.upstream_endpoint,'') NOT LIKE '%/compact%'
- THEN GREATEST(ul.input_tokens-ul.image_input_tokens,0)::bigint+GREATEST(ul.cache_creation_tokens,0)+GREATEST(ul.cache_read_tokens,0) ELSE 0 END AS text_input,
- GREATEST(ul.cache_read_tokens,0)::bigint AS cache_read,
- (ul.cache_read_tokens>0 OR COALESCE(cr.cache_reported,false)) AS cache_reported
- FROM usage_logs ul LEFT JOIN passive_quality_cache_reports cr ON cr.account_id=ul.account_id AND cr.request_key=ul.request_id
- WHERE ul.group_id=$1 AND ul.created_at>=$2 AND ul.created_at<=$3 AND ul.duration_ms IS NOT NULL
- AND ($4='' OR COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model)=$4) AND NOT(ul.account_id=ANY($5))
- AND COALESCE(ul.request_type,0) NOT IN(4,6)
- AND `+passiveGroupTargetTextUsageSQL+`
- AND (ul.input_tokens>0 OR ul.output_tokens>0 OR ul.cache_creation_tokens>0 OR ul.cache_read_tokens>0 OR ul.image_input_tokens>0 OR ul.image_output_tokens>0 OR ul.total_cost>0 OR ul.actual_cost>0 OR ul.image_count>0 OR ul.video_count>0)
- AND NOT EXISTS(SELECT 1 FROM passive_quality_failures f WHERE f.account_id=ul.account_id AND NOT f.non_text AND f.request_key=COALESCE(NULLIF(cr.attempt_key,''),ul.request_id))
- ORDER BY ul.account_id,COALESCE(NULLIF(COALESCE(NULLIF(cr.attempt_key,''),ul.request_id),''),'usage:'||ul.id),ul.created_at DESC,ul.id DESC
- ), stats AS (
+	err := reader.QueryRowContext(ctx, groupQualitySummaryPopulationSQL+`, stats AS (
  SELECT count(*) AS successes,count(*) FILTER(WHERE ttft IS NOT NULL) AS ttft_samples,
  percentile_disc(.9) WITHIN GROUP(ORDER BY ttft) FILTER(WHERE ttft IS NOT NULL) AS ttft_p90,
  count(*) FILTER(WHERE text_input>0 AND cache_reported) AS cache_samples,
@@ -74,7 +86,10 @@ func (r *passiveQualityRepository) groupQualityTargetSummary(ctx context.Context
  AND (EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=f.account_id AND ag.group_id=$1)
  OR EXISTS(SELECT 1 FROM succeeded s WHERE s.account_id=f.account_id))
  ), telemetry AS (
- SELECT NOT EXISTS(SELECT 1 FROM passive_quality_telemetry_gaps WHERE created_at>=$2 AND created_at<=$3) AS complete
+ SELECT NOT EXISTS(SELECT 1 FROM passive_quality_telemetry_gaps WHERE created_at>=$2 AND created_at<=$3)
+ AND NOT EXISTS(SELECT 1 FROM passive_quality_telemetry_gap_scopes
+ WHERE created_at<=$3 AND ended_at>=$2 AND (group_id=0 OR group_id=$1)
+ AND ($4='' OR model='' OR model=$4) AND (account_id=0 OR NOT(account_id=ANY($5)))) AS complete
  ) SELECT stats.cache_samples,stats.cache_read,stats.cache_input,stats.cache_unknown,
  CASE WHEN telemetry.complete THEN 100.0*stats.cache_read/NULLIF(stats.cache_input,0) END,
  stats.successes,failures.failures,unknown.failures,
@@ -96,12 +111,38 @@ func (r *passiveQualityRepository) groupQualityTargetSummary(ctx context.Context
 	if ttft.Valid {
 		s.TTFTP90MS = &ttft.Float64
 	}
-	if err = r.updateGroupQualityTrafficSnapshot(ctx, p, now, totalInput, s.CacheReadTokens, s.TelemetryComplete); err != nil {
-		return s, err
-	}
-	s.TrafficControl, err = r.groupQualityTrafficSummary(ctx, p, now, totalInput, s.CacheReadTokens, s.TelemetryComplete)
+	s.TotalInputTokens = totalInput
+	s.TrafficControl, err = readGroupQualityTrafficSummary(ctx, reader, p, now, totalInput, s.CacheReadTokens, s.TelemetryComplete)
 	if err == nil {
-		s.Fallback, err = r.groupQualityFallbackSummary(ctx, p, now)
+		s.Fallback, err = readGroupQualityFallbackSummary(ctx, reader, p, now)
+	}
+	if err == nil {
+		s.Contributors, s.ContributorTotal, err = groupQualityContributors(ctx, reader, p, now)
+		s.ContributorsTruncated = s.ContributorTotal > len(s.Contributors)
 	}
 	return s, err
 }
+
+const groupQualitySummaryPopulationSQL = `WITH failed AS MATERIALIZED (
+ SELECT account_id,request_key,created_at,model FROM passive_quality_failures
+ WHERE group_id=$1 AND NOT non_text AND created_at>=$2 AND created_at<=$3
+ AND ($4='' OR model=$4) AND NOT(account_id=ANY($5))
+ ), succeeded AS MATERIALIZED (
+ SELECT DISTINCT ON (ul.account_id,COALESCE(NULLIF(COALESCE(NULLIF(cr.attempt_key,''),ul.request_id),''),'usage:'||ul.id))
+ ul.account_id,ul.created_at,COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model) AS model,COALESCE(NULLIF(COALESCE(NULLIF(cr.attempt_key,''),ul.request_id),''),'usage:'||ul.id) AS request_key,
+ CASE WHEN (ul.stream OR ul.openai_ws_mode) AND ul.first_token_ms>=0 THEN ul.first_token_ms END AS ttft,
+ CASE WHEN NOT COALESCE(ul.native_compaction_v2,false)
+ AND COALESCE(ul.inbound_endpoint,'') NOT LIKE '%/compact%'
+ AND COALESCE(ul.upstream_endpoint,'') NOT LIKE '%/compact%'
+ THEN GREATEST(ul.input_tokens-ul.image_input_tokens,0)::bigint+GREATEST(ul.cache_creation_tokens,0)+GREATEST(ul.cache_read_tokens,0) ELSE 0 END AS text_input,
+ GREATEST(ul.cache_read_tokens,0)::bigint AS cache_read,
+ (ul.cache_read_tokens>0 OR COALESCE(cr.cache_reported,false)) AS cache_reported
+ FROM usage_logs ul LEFT JOIN passive_quality_cache_reports cr ON cr.account_id=ul.account_id AND cr.request_key=ul.request_id
+ WHERE ul.group_id=$1 AND ul.created_at>=$2 AND ul.created_at<=$3 AND ul.duration_ms IS NOT NULL
+ AND ($4='' OR COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model)=$4) AND NOT(ul.account_id=ANY($5))
+ AND COALESCE(ul.request_type,0) NOT IN(4,6)
+ AND ` + passiveGroupTargetTextUsageSQL + `
+ AND (ul.input_tokens>0 OR ul.output_tokens>0 OR ul.cache_creation_tokens>0 OR ul.cache_read_tokens>0 OR ul.image_input_tokens>0 OR ul.image_output_tokens>0 OR ul.total_cost>0 OR ul.actual_cost>0 OR ul.image_count>0 OR ul.video_count>0)
+ AND NOT EXISTS(SELECT 1 FROM passive_quality_failures f WHERE f.account_id=ul.account_id AND NOT f.non_text AND f.request_key=COALESCE(NULLIF(cr.attempt_key,''),ul.request_id))
+ ORDER BY ul.account_id,COALESCE(NULLIF(COALESCE(NULLIF(cr.attempt_key,''),ul.request_id),''),'usage:'||ul.id),ul.created_at DESC,ul.id DESC
+ )`

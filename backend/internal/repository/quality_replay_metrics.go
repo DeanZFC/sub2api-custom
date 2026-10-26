@@ -65,7 +65,7 @@ func replayPassiveMetrics(ctx context.Context, tx *sql.Tx, p service.PassiveQual
 	}
 	if p.TTFT.Enabled && !p.IsGroupQualityTarget() {
 		if s.Latency == nil {
-			s.Latency = &service.PassiveQualityMetricState{ObserveAfter: p.UpdatedAt}
+			s.Latency = &service.PassiveQualityMetricState{ObserveAfter: p.EvidenceSince()}
 		}
 		view := *s
 		view.Phase = "healthy"

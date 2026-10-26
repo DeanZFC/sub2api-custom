@@ -10,23 +10,27 @@ import (
 // QualityOperationsConfig applies to quality-management tests (including manual
 // plan runs, retries and recovery probes), not customer inference traffic.
 type QualityOperationsConfig struct {
-	Version              int64 `json:"version"`
-	BudgetEnabled        bool  `json:"budget_enabled"`
-	DailyRequests        int64 `json:"daily_requests"`
-	DailyTokens          int64 `json:"daily_tokens"`
-	AccountDailyRequests int64 `json:"account_daily_requests"`
-	AccountDailyTokens   int64 `json:"account_daily_tokens"`
-	TokenReservation     int64 `json:"token_reservation"`
-	DynamicEnabled       bool  `json:"dynamic_enabled"`
-	HealthyRounds        int   `json:"healthy_rounds"`
-	HealthyBaseSeconds   int   `json:"healthy_base_seconds"`
-	HealthyMaxSeconds    int   `json:"healthy_max_seconds"`
+	Version                int64 `json:"version"`
+	BudgetEnabled          bool  `json:"budget_enabled"`
+	DailyRequests          int64 `json:"daily_requests"`
+	DailyTokens            int64 `json:"daily_tokens"`
+	AccountDailyRequests   int64 `json:"account_daily_requests"`
+	AccountDailyTokens     int64 `json:"account_daily_tokens"`
+	TokenReservation       int64 `json:"token_reservation"`
+	RecoveryReservePercent int   `json:"recovery_reserve_percent"`
+	DynamicEnabled         bool  `json:"dynamic_enabled"`
+	HealthyRounds          int   `json:"healthy_rounds"`
+	HealthyBaseSeconds     int   `json:"healthy_base_seconds"`
+	HealthyMaxSeconds      int   `json:"healthy_max_seconds"`
 }
 
 func DefaultQualityOperationsConfig() QualityOperationsConfig {
 	return QualityOperationsConfig{Version: 1, DailyRequests: 10000, DailyTokens: 10000000, AccountDailyRequests: 200, AccountDailyTokens: 1000000, TokenReservation: 32768, HealthyRounds: 3, HealthyBaseSeconds: 900, HealthyMaxSeconds: 14400}
 }
 func (c QualityOperationsConfig) Validate() error {
+	if c.RecoveryReservePercent < 0 || c.RecoveryReservePercent > 50 {
+		return fmt.Errorf("recovery reserve percent must be 0..50")
+	}
 	if c.Version < 1 || c.DailyRequests < 0 || c.DailyRequests > 10000000 || c.DailyTokens < 0 || c.DailyTokens > 1000000000000 || c.AccountDailyRequests < 0 || c.AccountDailyRequests > 10000000 || c.AccountDailyTokens < 0 || c.AccountDailyTokens > 1000000000000 {
 		return fmt.Errorf("invalid budget limits (0 means unlimited)")
 	}
@@ -53,11 +57,45 @@ func (c QualityOperationsConfig) HealthyDelay(streak int) time.Duration {
 }
 
 type QualityBudgetUsage struct {
-	AccountID       int64 `json:"account_id"`
-	Requests        int64 `json:"requests"`
-	Tokens          int64 `json:"tokens"`
-	UnknownRequests int64 `json:"unknown_requests"`
+	AccountID        int64 `json:"account_id"`
+	Requests         int64 `json:"requests"`
+	Tokens           int64 `json:"tokens"`
+	UnknownRequests  int64 `json:"unknown_requests"`
+	RecoveryRequests int64 `json:"recovery_requests"`
+	RecoveryTokens   int64 `json:"recovery_tokens"`
 }
+
+type qualityProbePurposeKey struct{}
+
+// WithQualityRecoveryProbe labels a recovery request before budget admission.
+// It grants access to reserved capacity, never an exemption from the hard cap.
+func WithQualityRecoveryProbe(ctx context.Context) context.Context {
+	return context.WithValue(ctx, qualityProbePurposeKey{}, "recovery")
+}
+
+func QualityProbePurpose(ctx context.Context) string {
+	if purpose, _ := ctx.Value(qualityProbePurposeKey{}).(string); purpose == "recovery" {
+		return purpose
+	}
+	if recovery, _ := ctx.Value(passiveQualityProbeKey{}).(bool); recovery {
+		return "recovery"
+	}
+	return "regular"
+}
+
+// QualityBudgetAdmissionLimit leaves unused recovery capacity unavailable to
+// ordinary probes. Recovery spending consumes that reserve inside the same cap.
+func QualityBudgetAdmissionLimit(limit, recoverySpent int64, percent int, purpose string) int64 {
+	if limit <= 0 || percent <= 0 || purpose == "recovery" {
+		return limit
+	}
+	reserved := (limit*int64(percent) + 99) / 100
+	if remaining := reserved - recoverySpent; remaining > 0 {
+		return limit - remaining
+	}
+	return limit
+}
+
 type QualitySupplier struct {
 	ID                   int64                   `json:"id"`
 	Version              int64                   `json:"version"`

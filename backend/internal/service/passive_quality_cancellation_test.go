@@ -46,7 +46,7 @@ func TestPassiveQualityCaptureKeepsUpstreamHTTPFailureAfterClientCancellation(t 
 			require.Equal(t, int64(2298), first.AccountID)
 			require.Equal(t, int64(9), first.GroupID)
 			require.Equal(t, "gpt-6-astra", first.Model)
-			require.Equal(t, "client:canceled-upstream-failure", first.RequestKey)
+			require.Equal(t, c.GetString(passiveQualityTurnKey), first.RequestKey)
 			require.Equal(t, first.RequestKey, repeated.RequestKey, "the repository must still be able to deduplicate the attempt")
 			require.Equal(t, first.StartedAt, repeated.StartedAt)
 			require.False(t, first.NonText)

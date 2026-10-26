@@ -76,7 +76,7 @@ describe('channel health cards', () => {
     expect(requests[0]).toEqual(request('success', 24))
   })
 
-  it.each([['success', 'healthy'], ['slow', 'warning'], ['error', 'critical'], ['ignored', 'warning']] as const)('maps %s requests to %s independently of time-bucket health', (status, state) => {
+  it.each([['success', 'healthy'], ['slow', 'healthy'], ['error', 'critical'], ['ignored', 'critical']] as const)('maps %s requests to %s independently of time-bucket health', (status, state) => {
     expect(requestHealth(request(status))).toBe(state)
     expect(requestHealth(null)).toBe('unknown')
   })
@@ -96,11 +96,12 @@ describe('channel health cards', () => {
     expect(wrapper.text()).toContain('被动健康')
     const requests = wrapper.get('[data-testid=recent-requests]').findAll('button[data-state]')
     expect(requests).toHaveLength(20)
-    expect(requests.slice(-4).map(slot => slot.attributes('data-state'))).toEqual(['healthy', 'warning', 'critical', 'warning'])
+    expect(requests.slice(-4).map(slot => slot.attributes('data-state'))).toEqual(['healthy', 'healthy', 'critical', 'critical'])
     expect(requests[0].attributes('data-state')).toBe('unknown')
+    expect(wrapper.get('[data-testid=recent-requests]').text()).toContain('绿：成功（含响应较慢） · 红：失败（含已忽略错误） · 灰：暂无请求')
     expect(wrapper.get('[data-testid=latest-request-time]').text()).toBe(`最近请求：${requestTime(request('ignored', 3).occurred_at)}`)
     await wrapper.setProps({ healthMode: 'ttft' })
-    expect(requests.slice(-4).map(slot => slot.attributes('data-state'))).toEqual(['healthy', 'warning', 'critical', 'warning'])
+    expect(requests.slice(-4).map(slot => slot.attributes('data-state'))).toEqual(['healthy', 'healthy', 'critical', 'critical'])
     wrapper.unmount()
   })
 

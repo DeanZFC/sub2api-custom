@@ -16,7 +16,7 @@
       <button class="btn btn-secondary" :disabled="loading">{{ t('common.refresh') }}</button>
     </form>
     <p class="text-xs text-gray-500">{{ tr('coverageHint') }} · {{ date(updatedAt) }}</p>
-    <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }} <button class="underline" @click="load(false)">{{ t('common.retry') }}</button></p>
+    <p v-if="paginated" class="flex flex-wrap items-center gap-2 text-xs text-amber-700" data-overview-refresh-paused>{{ t('admin.tests.experience.refreshPaused') }}<button type="button" class="underline" :disabled="loading" @click="refreshLoaded">{{ t('admin.tests.experience.refreshLoaded') }}</button></p><p v-if="error" role="alert" class="text-sm text-red-600">{{ error }} <button class="underline" @click="load(false)">{{ t('common.retry') }}</button></p>
     <div class="space-y-3">
       <article v-for="account in items" :key="account.id" class="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900" :data-quality-account="account.id">
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-800">
@@ -53,7 +53,7 @@ const { reason, date } = useQualityLabels()
 const search = ref(''), model = ref(''), group = ref(0), problemsOnly = ref(false)
 const items = ref<QualityAccount[]>([]), nextAfter = ref(0), loading = ref(false), error = ref(''), updatedAt = ref('')
 let request = 0
-let paginated = false
+const paginated = ref(false)
 let filterKey = ''
 async function load(append = false) {
   const key = JSON.stringify([search.value, model.value, group.value, props.accountId, problemsOnly.value])
@@ -64,7 +64,7 @@ async function load(append = false) {
     const page = await channelQualityAPI.overview({ search: search.value, model: model.value, group_id: group.value, account_id: props.accountId, problems_only: problemsOnly.value, after: append ? nextAfter.value : undefined })
     if (token !== request) return
     items.value = append ? [...items.value, ...page.items] : page.items
-    paginated = append
+    paginated.value = append
     filterKey = key
     nextAfter.value = page.next_after || 0
     updatedAt.value = page.generated_at
@@ -72,11 +72,29 @@ async function load(append = false) {
   } catch (e) { if (token === request) error.value = extractApiErrorMessage(e, tr('loadFailed')) }
   finally { if (token === request) loading.value = false }
 }
+async function refreshLoaded() {
+  const key = JSON.stringify([search.value, model.value, group.value, props.accountId, problemsOnly.value])
+  if (key !== filterKey) { await load(); return }
+  const token = ++request, count = items.value.length
+  loading.value = true
+  try {
+    const refreshed: QualityAccount[] = []; let after = 0; let generated = ''
+    do {
+      const page = await channelQualityAPI.overview({ search: search.value, model: model.value, group_id: group.value, account_id: props.accountId, problems_only: problemsOnly.value, after: after || undefined })
+      if (token !== request) return
+      refreshed.push(...page.items); generated = page.generated_at
+      const next = page.next_after || 0
+      if (!next || next <= after) { after = 0; break }
+      after = next
+    } while (refreshed.length < count)
+    items.value = refreshed; nextAfter.value = after; updatedAt.value = generated; error.value = ''
+  } catch (e) { if (token === request) error.value = extractApiErrorMessage(e, tr('loadFailed')) } finally { if (token === request) loading.value = false }
+}
 function controlPhase(control: QualityControl) { return control.metric === 'group_quality_target' && control.phase === 'healthy' && !control.evidence?.complete ? 'insufficient' : control.phase }
 const metric = (value: number | null, suffix: string) => value == null ? '—' : `${Math.round(value * 100) / 100}${suffix}`
 watch(() => [props.visible, props.accountId], () => { if (props.visible) void load() })
 let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => { if (props.visible) void load(); timer = setInterval(() => { if (props.visible && !document.hidden && !loading.value && !paginated) void load() }, 15000) })
+onMounted(() => { if (props.visible) void load(); timer = setInterval(() => { if (props.visible && !document.hidden && !loading.value && !paginated.value) void load() }, 15000) })
 onUnmounted(() => { request++; clearInterval(timer) })
 defineExpose({ refresh: load })
 </script>

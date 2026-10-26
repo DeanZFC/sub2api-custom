@@ -5,7 +5,7 @@
         <span class="text-xs text-gray-500">{{ tr(card.key) }}</span><strong class="mt-1 block text-xl text-gray-900 dark:text-white">{{ card.count }}</strong>
       </button>
     </div>
-    <p v-if="loadError" role="alert" class="text-sm text-red-600">{{ loadError }} <button class="underline" @click="refresh">{{ t('common.retry') }}</button></p>
+    <p v-if="loadError" role="alert" class="text-sm text-red-600">{{ loadError }} <button class="underline" @click="refresh()">{{ t('common.retry') }}</button></p>
     <section v-if="tab === 'passive'" class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3"><p class="max-w-3xl text-sm text-gray-500">{{ tr('intro') }}</p><button class="btn btn-primary" data-passive-create @click="edit()">{{ q('createTraffic') }}</button></div>
       <div v-if="policies.some(isGroupQualityTarget)" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-200 p-4 text-sm dark:border-primary-900" data-target-managed><p>{{ targetText('managedSeparately') }}</p><button type="button" class="btn btn-secondary btn-sm" @click="emit('tab', 'group-targets')">{{ targetText('openTargets') }}</button></div>
@@ -17,23 +17,23 @@
     </section>
     <section v-if="tab === 'records'" class="space-y-4">
       <div class="flex flex-wrap items-center gap-3">
-        <label class="text-sm">{{ tr('phase') }}<select v-model="phaseFilter" class="input ml-2"><option value="">{{ tr('all') }}</option><option v-for="phase in phases" :key="phase" :value="phase">{{ tr(`phases.${phase}`) }}</option></select></label>
-        <label class="text-sm">{{ tr('policy') }}<select v-model.number="policyFilter" class="input ml-2"><option :value="0">{{ tr('all') }}</option><option v-for="p in policies" :key="p.id" :value="p.id">{{ p.name }}</option></select></label>
-        <label class="text-sm">{{ tr('accountID') }}<input v-model.number="accountFilter" type="number" min="0" class="input ml-2 w-28" /></label><button class="btn btn-secondary btn-sm" :disabled="loading" @click="refresh">{{ t('common.refresh') }}</button>
+        <label class="text-sm">{{ tr('phase') }}<select v-model="phaseFilter" data-record-phase class="input ml-2"><option value="">{{ tr('all') }}</option><option v-for="phase in phases" :key="phase" :value="phase">{{ tr(`phases.${phase}`) }}</option></select></label>
+        <label class="text-sm">{{ tr('policy') }}<select v-model.number="policyFilter" data-record-policy class="input ml-2"><option :value="0">{{ tr('all') }}</option><option v-for="p in policies" :key="p.id" :value="p.id">{{ p.name }}</option></select></label>
+        <label class="text-sm">{{ tr('accountID') }}<input v-model.number="accountFilter" data-record-account type="number" min="0" class="input ml-2 w-28" /></label><button class="btn btn-secondary btn-sm" :disabled="loading" @click="refresh()">{{ t('common.refresh') }}</button>
       </div>
-      <p class="text-xs text-gray-500">{{ tr('recordHint') }}</p>
+      <label class="text-sm">{{ tr('modelFilter') }}<input v-model.trim="modelFilter" class="input ml-2" maxlength="200" data-record-model /></label><p class="text-xs text-gray-500">{{ tr('recordHint') }}</p>
       <div class="overflow-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b text-gray-500"><th class="p-2">{{ tr('accountPolicy') }}</th><th class="p-2">{{ tr('phase') }}</th><th class="p-2">{{ tr('evidence') }}</th><th class="p-2">{{ tr('recovery') }}</th><th class="p-2">{{ t('common.actions') }}</th></tr></thead><tbody>
         <tr v-for="state in filteredStates" :key="`${state.policy_id}-${state.account_id}-${state.model}`" class="border-b border-gray-100 align-top dark:border-dark-800">
           <td class="p-2"><strong>{{ state.account_name || `#${state.account_id}` }}</strong><div v-if="targetState(state)" class="mt-1 text-xs text-primary-600">{{ targetText('targetState') }}</div><div class="text-xs text-gray-500">#{{ state.account_id }} · {{ state.policy_name }}</div><div class="mt-1 text-xs">{{ state.model || tr('allModels') }} · {{ tr(state.scope === 'account' ? 'accountScope' : 'modelScope') }}</div></td>
           <td class="p-2"><span class="badge" :class="['paused', 'probing'].includes(state.phase) ? 'badge-warning' : statePhase(state) === 'healthy' ? 'badge-success' : 'badge-gray'">{{ phaseLabel(state) }}</span><p v-if="state.latency || state.cache" class="mt-1 text-xs">{{ targetState(state) ? targetText('targetState') : tr('v2.availabilityState') }}: {{ tr('phases.' + state.phase) }} · {{ tr('v2.confirmations', { hits: state.hits }) }}</p><p v-if="state.mode === 'observe'" class="mt-1 text-xs text-gray-500">{{ tr('observe') }}</p><p v-if="state.other_hold" class="mt-1 text-xs text-amber-600">{{ tr('otherHold') }}</p><p class="mt-1 max-w-64 break-words text-xs text-gray-500">{{ reasonText(state.reason) }}</p></td>
-          <td class="space-y-1 p-2 text-xs"><div>{{ tr('samples') }}: {{ state.evidence.samples }} · {{ tr('failures') }}: {{ state.evidence.failures }}</div><div>{{ targetState(state) ? targetText('availability') : tr('errorRate') }}: {{ metric(targetState(state) && state.evidence.error_rate != null ? 100 - state.evidence.error_rate : state.evidence.error_rate, '%') }}</div><div>{{ tr('ttft') }}: {{ metric(state.evidence.ttft, ' ms') }} ({{ state.evidence.ttft_samples }})</div><div>{{ targetState(state) ? targetText('actualCache') : tr('cacheRate') }}: {{ metric(state.evidence.cache_rate, '%') }} ({{ state.evidence.cache_samples }})</div><div v-if="state.latency && state.phase !== 'exempt'" class="rounded border p-2"><strong>{{ tr('v2.latencyState') }}</strong>: {{ tr('v2.phases.' + state.latency.phase) }} · {{ tr('v2.confirmations', { hits: state.latency.hits }) }} · {{ tr('v2.recoveryConfirmations', { hits: state.latency.recovery_hits ?? 0 }) }}<p>{{ reasonText(state.latency.reason) }}</p></div><PassiveCacheEvidence v-if="state.cache && state.phase !== 'exempt'" :cache="state.cache" :config="policies.find(p => p.id === state.policy_id)?.cache_protection" /><div v-if="!state.evidence.complete" class="text-amber-600">{{ tr('telemetryIncomplete') }}</div></td>
+          <td class="space-y-1 p-2 text-xs"><div>{{ tr('samples') }}: {{ state.evidence.samples }} · {{ tr('failures') }}: {{ state.evidence.failures }}</div><div>{{ targetState(state) ? targetText('availability') : tr('errorRate') }}: {{ metric(targetState(state) && state.evidence.error_rate != null ? 100 - state.evidence.error_rate : state.evidence.error_rate, '%') }}</div><div>{{ tr('ttft') }}: {{ metric(state.evidence.ttft, ' ms') }} ({{ state.evidence.ttft_samples }})</div><div>{{ targetState(state) ? targetText('actualCache') : tr('cacheRate') }}: {{ metric(state.evidence.cache_rate, '%') }} ({{ state.evidence.cache_samples }})</div><div v-if="state.latency && state.phase !== 'exempt'" class="rounded border p-2"><strong>{{ tr('v2.latencyState') }}</strong>: {{ tr('v2.phases.' + state.latency.phase) }} · {{ tr('v2.confirmations', { hits: state.latency.hits }) }} · {{ tr('v2.recoveryConfirmations', { hits: state.latency.recovery_hits ?? 0 }) }}<p>{{ reasonText(state.latency.reason) }}</p></div><PassiveFreshEvidence :evidence="state.evidence" /><PassiveCacheEvidence v-if="state.cache && state.phase !== 'exempt'" :cache="state.cache" :config="policies.find(p => p.id === state.policy_id)?.cache_protection" /><div v-if="!state.evidence.complete" class="text-amber-600">{{ tr('telemetryIncomplete') }}</div></td>
           <td class="p-2 text-xs"><template v-if="state.phase === 'trial'"><div>{{ tr('trialUsage', { used: state.used, inflight: state.inflight }) }}</div><div>{{ tr('deadline') }}: {{ date(state.trial_ends_at) }}</div></template><div v-else-if="['limited', 'cache_limited'].includes(statePhase(state))">{{ tr('limitedStateHint') }}</div><div v-else-if="['paused', 'probing', 'exempt'].includes(state.phase)">{{ tr('nextAt') }}: {{ date(state.next_at) }}</div><div v-if="!state.model && state.probe_model && ['paused', 'probing', 'trial'].includes(state.phase)" class="mt-1">{{ tr('probeModel') }}: {{ state.probe_model }}</div><div class="mt-1 text-gray-500">{{ date(state.updated_at) }}</div></td>
           <td class="p-2"><div class="flex flex-wrap gap-2"><button v-if="state.phase === 'paused'" class="btn btn-secondary btn-sm" :disabled="busy" @click="act(state, 'verify')">{{ targetState(state) ? targetText('startTrial') : tr('verify') }}</button><button v-if="state.phase !== 'exempt'" class="btn btn-secondary btn-sm" :disabled="busy" @click="exemptState = state">{{ tr('exempt') }}</button><button v-else class="btn btn-secondary btn-sm" :disabled="busy" @click="act(state, 'cancel_exemption')">{{ tr('cancelExemption') }}</button></div></td>
         </tr><tr v-if="!filteredStates.length"><td colspan="5" class="p-8 text-center text-gray-500">{{ t('common.noData') }}</td></tr>
       </tbody></table></div>
-      <div class="flex items-center justify-between"><h3 class="font-semibold">{{ tr('history') }}</h3><button class="btn btn-secondary btn-sm" :disabled="loadingEvents" @click="loadEvents(false)">{{ t('common.refresh') }}</button></div>
-      <ol class="space-y-2"><li v-for="event in filteredEvents" :key="event.id" class="rounded border border-gray-200 p-3 text-sm dark:border-dark-700"><span class="text-xs text-gray-500">{{ date(event.created_at) }} · #{{ event.account_id }} · {{ event.policy_name }} · {{ event.detail.model || tr('allModels') }}</span><div>{{ targetState(event.detail) ? targetText('targetState') + ' · ' : '' }}{{ eventText(event.kind) }} · {{ reasonText(event.detail.reason) }}</div><p class="text-xs text-gray-500">{{ tr('samples') }} {{ event.detail.evidence.samples }} · {{ targetState(event.detail) ? targetText('availability') : tr('errorRate') }} {{ metric(targetState(event.detail) && event.detail.evidence.error_rate != null ? 100 - event.detail.evidence.error_rate : event.detail.evidence.error_rate, '%') }} · {{ tr('ttft') }} {{ metric(event.detail.evidence.ttft, ' ms') }} · {{ targetState(event.detail) ? targetText('actualCache') : tr('cacheRate') }} {{ metric(event.detail.evidence.cache_rate, '%') }}</p><PassiveCacheEvidence v-if="event.detail.cache" :cache="event.detail.cache" /></li></ol>
-      <button v-if="hasMore" class="btn btn-secondary" :disabled="loadingEvents" @click="loadEvents(true)">{{ tr('more') }}</button>
+      <p v-if="statesPaginated" class="text-xs text-amber-700">{{ q('refreshPaused') }}</p><div class="flex items-center gap-3"><span class="text-xs text-gray-500">{{ q('loadedStates', { loaded: states.length, total: stateTotal }) }}</span><button v-if="stateCursor" class="btn btn-secondary btn-sm" :disabled="loadingStates" data-more-states @click="loadStates(true)">{{ q('moreStates') }}</button></div><div class="flex items-center justify-between"><h3 class="font-semibold">{{ tr('history') }}</h3><button class="btn btn-secondary btn-sm" :disabled="loadingEvents" @click="loadEvents(false)">{{ t('common.refresh') }}</button></div>
+      <div class="flex flex-wrap gap-3 text-sm"><label>{{ q('eventKind') }}<input v-model.trim="kindFilter" data-event-kind class="input ml-2" maxlength="100" /></label><label>{{ q('since') }}<input v-model="sinceFilter" data-event-since type="datetime-local" class="input ml-2" /></label><label>{{ q('until') }}<input v-model="untilFilter" data-event-until type="datetime-local" class="input ml-2" /></label></div><ol class="space-y-2"><li v-for="event in filteredEvents" :key="event.id" class="rounded border border-gray-200 p-3 text-sm dark:border-dark-700"><span class="text-xs text-gray-500">{{ date(event.created_at) }} · #{{ event.account_id }} · {{ event.policy_name }} · {{ event.detail.model || tr('allModels') }}</span><div>{{ targetState(event.detail) ? targetText('targetState') + ' · ' : '' }}{{ eventText(event.kind) }} · {{ reasonText(event.detail.reason) }}</div><p class="text-xs text-gray-500">{{ tr('samples') }} {{ event.detail.evidence.samples }} · {{ targetState(event.detail) ? targetText('availability') : tr('errorRate') }} {{ metric(targetState(event.detail) && event.detail.evidence.error_rate != null ? 100 - event.detail.evidence.error_rate : event.detail.evidence.error_rate, '%') }} · {{ tr('ttft') }} {{ metric(event.detail.evidence.ttft, ' ms') }} · {{ targetState(event.detail) ? targetText('actualCache') : tr('cacheRate') }} {{ metric(event.detail.evidence.cache_rate, '%') }}</p><PassiveCacheEvidence v-if="event.detail.cache" :cache="event.detail.cache" /></li></ol>
+      <button v-if="hasMore" data-more-events class="btn btn-secondary" :disabled="loadingEvents" @click="loadEvents(true)">{{ tr('more') }}</button>
     </section>
 
     <BaseDialog :show="!!editing" :title="tr('editorTitle')" width="wide" @close="editing = null">
@@ -78,8 +78,7 @@
         </details>
         <QualityPolicySummary :policy="editing" :groups="groups" :accounts="accounts" :policies="policies" />
         <p v-if="validationError" role="alert" class="text-sm text-amber-600">{{ validationError }}</p>
-        <p v-if="editing.id" class="text-xs text-amber-700 dark:text-amber-300">{{ tr('editHint') }}</p>
-        <QualityReplayPanel :policy="editing" :accounts="accounts" :disabled="!!validationError" />
+        <p v-if="editing.id" class="text-xs text-amber-700" data-policy-change-hint>{{ q('policyChangeHint') }}</p><QualityReplayPanel :policy="editing" :accounts="accounts" :disabled="!!validationError" />
       </form>
       <template #footer><button class="btn btn-secondary" @click="editing = null">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="busy || !!validationError" data-passive-save @click="save">{{ t('common.save') }}</button></template>
     </BaseDialog>
@@ -96,9 +95,10 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import QualityPolicySummary from './QualityPolicySummary.vue'
 import PassiveQualityV2Settings from './PassiveQualityV2Settings.vue'
 import PassiveCacheEvidence from './PassiveCacheEvidence.vue'
+import PassiveFreshEvidence from './PassiveFreshEvidence.vue'
 import { applyQualityProfile, matchingQualityProfile, policyResponse, setPolicyResponse, qualityProfileKeys, type QualityProfile, type QualityResponse } from './qualityPolicyProfiles'
 import QualityReplayPanel from '@/components/tests/QualityReplayPanel.vue'
-import { passiveQualityAPI as api, passivePolicyDraft, upgradePassivePolicy, passiveCacheValidation, isGroupQualityTarget, type PassivePolicy, type PassiveState, type PassiveEvent } from '@/api/admin/passiveQuality'
+import { passiveQualityAPI as api, passivePolicyDraft, upgradePassivePolicy, passiveCacheValidation, isGroupQualityTarget, emptyPassiveSummary, type PassivePolicy, type PassiveState, type PassiveEvent } from '@/api/admin/passiveQuality'
 import { adminAPI } from '@/api/admin'
 import type { AccountListItem, AdminGroup } from '@/types'
 import { useAppStore } from '@/stores/app'
@@ -112,6 +112,7 @@ const tr = (key: string, args: Record<string, unknown> = {}) => t(`admin.tests.p
 const q = (key: string, args: Record<string, unknown> = {}) => t('admin.tests.experience.' + key, args)
 const targetText = (key: string, args: Record<string, unknown> = {}) => t('admin.tests.groupTargets.' + key, args)
 const policies = ref<PassivePolicy[]>([]), states = ref<PassiveState[]>([]), events = ref<PassiveEvent[]>([])
+const summary = ref(emptyPassiveSummary()), stateCursor = ref(''), eventCursor = ref(''), stateTotal = ref(0), loadingStates = ref(false), modelFilter = ref(''), kindFilter = ref(''), sinceFilter = ref(''), untilFilter = ref('')
 const genericPolicies = computed(() => policies.value.filter(p => !isGroupQualityTarget(p)))
 const loading = ref(false), loadingEvents = ref(false), busy = ref(false), loadError = ref(''), hasMore = ref(false)
 const editing = ref<PassivePolicy | null>(null), exemptState = ref<PassiveState | null>(null), exemptMinutes = ref(30)
@@ -121,13 +122,13 @@ const editingBaseline = ref('')
 const phases = ['cache_limited', 'limited', 'healthy', 'insufficient', 'suspect', 'observed', 'paused', 'probing', 'trial', 'exempt']
 const summaryCards = computed(() => [
   { key: 'activePolicies', count: policies.value.filter(p => p.enabled).length },
-  { key: 'pausedAccounts', count: new Set(states.value.filter(s => ['paused', 'probing'].includes(s.phase)).map(s => s.account_id)).size },
-  { key: 'limitedAccounts', count: new Set(states.value.filter(s => ['limited', 'cache_limited'].includes(statePhase(s))).map(s => s.account_id)).size },
-  { key: 'trialAccounts', count: new Set(states.value.filter(s => s.phase === 'trial').map(s => s.account_id)).size },
-  { key: 'observedAccounts', count: new Set(states.value.filter(s => statePhase(s) === 'observed').map(s => s.account_id)).size },
+  { key: 'pausedAccounts', count: summary.value.paused_accounts },
+  { key: 'limitedAccounts', count: summary.value.limited_accounts },
+  { key: 'trialAccounts', count: summary.value.trial_accounts },
+  { key: 'observedAccounts', count: summary.value.observed_accounts },
 ])
-const filteredStates = computed(() => states.value.filter(s => (!phaseFilter.value || statePhase(s) === phaseFilter.value || (phaseFilter.value === 'limited' && statePhase(s) === 'cache_limited') || (phaseFilter.value === 'paused' && s.phase === 'probing')) && (!policyFilter.value || s.policy_id === policyFilter.value) && (!accountFilter.value || s.account_id === accountFilter.value)))
-const filteredEvents = computed(() => events.value.filter(e => (!policyFilter.value || e.policy_id === policyFilter.value) && (!accountFilter.value || e.account_id === accountFilter.value)))
+const filteredStates = computed(() => states.value)
+const filteredEvents = computed(() => events.value)
 const windowFields = [{ key: 'window_seconds', min: 60, max: 86400 }, { key: 'max_samples', min: 5, max: 2000 }, { key: 'min_samples', min: 5, max: 2000 }, { key: 'confirmations', min: 1, max: 10 }, { key: 'new_samples', min: 1, max: 2000 }] as const
 const recoveryFields = [{ key: 'cooldown_seconds', min: 30, max: 86400 }, { key: 'max_cooldown_seconds', min: 30, max: 86400 }, { key: 'trial_seconds', min: 60, max: 3600 }, { key: 'trial_requests', min: 5, max: 2000 }, { key: 'trial_concurrency', min: 1, max: 20 }, { key: 'recovery_samples', min: 5, max: 2000 }] as const
 const metricFields = [{ key: 'error_rate', label: 'errorSignal', max: 100, divisor: 1 }, { key: 'ttft', label: 'ttftSeconds', max: 600000, divisor: 1000 }, { key: 'cache_rate', label: 'cacheSignal', max: 100, divisor: 1 }] as const
@@ -180,24 +181,50 @@ function phaseLabel(state: PassiveState) { if (targetState(state) && state.phase
 function policyModelLabel(p: Pick<PassivePolicy, 'model' | 'schema_version' | 'scope'>) { return p.model || tr(p.schema_version === 2 ? p.scope === 'model' ? 'v2.allModelsIndependent' : 'v2.allModelsAggregated' : 'allModels') }
 function describe(p: PassivePolicy) { if (p.schema_version === 2) return tr('v2.preview'); if (p.mode === 'observe') return q('windowPreview', { minutes: Number((p.window_seconds / 60).toFixed(2)), max: p.max_samples, min: p.min_samples, confirmations: p.confirmations, fresh: p.new_samples }) + ' ' + q('observeFlow'); return tr(p.action === 'limit' ? 'summaryLimit' : 'summary', { cap: p.concurrency_limit, penalty: p.priority_penalty, seconds: p.window_seconds, max: p.max_samples, min: p.min_samples, confirmations: p.confirmations, fresh: p.new_samples, mode: tr(p.mode), cooldown: p.cooldown_seconds, requests: p.trial_requests, concurrency: p.trial_concurrency }) }
 function report(error: unknown) { app.showError(extractApiErrorMessage(error, tr('loadFailed'))) }
-async function refresh() {
-  if (loading.value) return
-  loading.value = true
-  try { const [p, s] = await Promise.all([api.policies(), api.states()]); policies.value = p; states.value = s; loadError.value = '' } catch (e) { loadError.value = extractApiErrorMessage(e, tr('loadFailed')) } finally { loading.value = false }
+const statesPaginated = ref(false)
+let refreshRequest = 0, statesRequest = 0, eventsRequest = 0
+let stateFilterKey = '', eventFilterKey = ''
+function recordFilters() { return { policy_id: policyFilter.value || undefined, account_id: accountFilter.value || undefined, model: modelFilter.value || undefined } }
+async function refresh(refreshRecords = true) {
+  const request = ++refreshRequest, recordsRequest = statesRequest; let policyChanged = false; loading.value = true
+  try {
+    const [p, s] = await Promise.all([api.policies(), api.stateSummary()])
+    if (request === refreshRequest) {
+      const versions = new Map(p.map(policy => [policy.id, policy.version]))
+      policyChanged = policies.value.some(policy => versions.get(policy.id) !== policy.version)
+      policies.value = p; summary.value = s; loadError.value = ''
+      if (policyChanged) { statesRequest++; states.value = []; stateCursor.value = ''; stateTotal.value = 0; statesPaginated.value = false; loadingStates.value = false }
+    }
+  } catch (e) { if (request === refreshRequest) loadError.value = extractApiErrorMessage(e, tr('loadFailed')) } finally { if (request === refreshRequest) loading.value = false }
+  if (request === refreshRequest && props.tab === 'records' && (policyChanged || (recordsRequest === statesRequest && refreshRecords))) await loadStates()
 }
-let eventsRequest = 0
+async function loadStates(append = false) {
+  if (append && loadingStates.value) return
+  const filters = { ...recordFilters(), phase: phaseFilter.value || undefined }, key = JSON.stringify(filters)
+  append = append && key === stateFilterKey && !!stateCursor.value
+  if (key !== stateFilterKey) { states.value = []; stateCursor.value = ''; stateTotal.value = 0; stateFilterKey = key; statesPaginated.value = false }
+  const request = ++statesRequest; loadingStates.value = true
+  try {
+    const page = await api.statePage({ ...filters, cursor: append ? stateCursor.value : undefined })
+    if (request !== statesRequest) return
+    states.value = append ? [...states.value, ...page.items] : page.items
+    stateCursor.value = page.has_more ? page.next_cursor || '' : ''; stateTotal.value = page.total || 0; statesPaginated.value = append; loadError.value = ''
+  } catch (e) { if (request === statesRequest) loadError.value = extractApiErrorMessage(e, tr('loadFailed')) } finally { if (request === statesRequest) loadingStates.value = false }
+}
 async function loadEvents(append = false) {
-  const request = ++eventsRequest
-  loadingEvents.value = true
-  try { const next = await api.events(append ? events.value.at(-1)?.id : undefined, accountFilter.value); if (request === eventsRequest) { events.value = append ? [...events.value, ...next] : next; hasMore.value = next.length === 100 } } catch (e) { report(e) } finally { if (request === eventsRequest) loadingEvents.value = false }
+  if (append && loadingEvents.value) return
+  const filters = { ...recordFilters(), kind: kindFilter.value || undefined, since: sinceFilter.value ? new Date(sinceFilter.value).toISOString() : undefined, until: untilFilter.value ? new Date(untilFilter.value).toISOString() : undefined }, key = JSON.stringify(filters)
+  append = append && key === eventFilterKey && !!eventCursor.value
+  if (key !== eventFilterKey) { events.value = []; eventCursor.value = ''; hasMore.value = false; eventFilterKey = key }
+  const request = ++eventsRequest; loadingEvents.value = true
+  try { const page = await api.eventPage({ ...filters, cursor: append ? eventCursor.value : undefined }); if (request === eventsRequest) { events.value = append ? [...events.value, ...page.items] : page.items; eventCursor.value = page.next_cursor || ''; hasMore.value = page.has_more } } catch (e) { if (request === eventsRequest) report(e) } finally { if (request === eventsRequest) loadingEvents.value = false }
 }
-function selectSummary(key: string) { policyFilter.value = 0; accountFilter.value = 0; phaseFilter.value = key === 'limitedAccounts' ? 'limited' : key === 'trialAccounts' ? 'trial' : key === 'observedAccounts' ? 'observed' : key === 'pausedAccounts' ? 'paused' : ''; emit('tab', key === 'activePolicies' ? 'passive' : 'records') }
-function showPolicy(p: PassivePolicy) { policyFilter.value = p.id; phaseFilter.value = ''; accountFilter.value = 0; emit('tab', 'records') }
+function selectSummary(key: string) { policyFilter.value = 0; accountFilter.value = 0; modelFilter.value = ''; phaseFilter.value = key === 'limitedAccounts' ? 'limited' : key === 'trialAccounts' ? 'trial' : key === 'observedAccounts' ? 'observed' : key === 'pausedAccounts' ? 'paused' : ''; emit('tab', key === 'activePolicies' ? 'passive' : 'records') }
+function showPolicy(p: PassivePolicy) { policyFilter.value = p.id; phaseFilter.value = ''; accountFilter.value = 0; modelFilter.value = ''; emit('tab', 'records') }
 function edit(p?: PassivePolicy) { if (p && isGroupQualityTarget(p)) { emit('tab', 'group-targets'); return } editing.value = passivePolicyDraft(p); editingBaseline.value = JSON.stringify(editing.value); accountSearch.value = '' }
 async function save() {
   if (!editing.value || validationError.value || busy.value) return
-  // The API clears this policy's evidence and holds on every update.
-  // Closing an unchanged draft must not reset live protection.
+  // Avoid an unnecessary write for an unchanged draft.
   if (editing.value.id && JSON.stringify(editing.value) === editingBaseline.value) {
     editing.value = null
     return
@@ -224,11 +251,13 @@ watch(() => editing.value?.group_ids.join(','), async () => {
   try { const lists = await Promise.all(groups.map(g => adminAPI.groups.getModelAllowlistCandidates(g.id, g.platform))); if (request === modelsRequest) modelChoices.value = lists.slice(1).reduce((a, b) => a.filter(x => b.includes(x)), lists[0]) } catch (e) { if (request === modelsRequest) report(e) }
 })
 watch(() => props.tab, tab => { if (tab !== 'passive') editing.value = null; if (tab !== 'records') exemptState.value = null })
-watch(() => [props.tab, accountFilter.value], () => { if (props.tab === 'records') void loadEvents() }, { immediate: true })
+watch(() => [props.tab, accountFilter.value, policyFilter.value, modelFilter.value], () => { if (props.tab === 'records') { void loadEvents(); void loadStates() } }, { immediate: true })
+watch(phaseFilter, () => { if (props.tab === 'records') void loadStates() })
+watch([kindFilter, sinceFilter, untilFilter], () => { if (props.tab === 'records') void loadEvents() })
 watch(() => route?.query.account_id, value => { accountFilter.value = Number(value) || 0 })
 watch(() => route?.query.policy_id, value => { policyFilter.value = Number(value) || 0 })
 let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => { void refresh(); timer = setInterval(() => { if (!document.hidden && ['passive', 'records'].includes(props.tab)) void refresh() }, 15000) })
-onUnmounted(() => { clearInterval(timer); modelsRequest++; eventsRequest++ })
+onMounted(() => { void refresh(false); timer = setInterval(() => { if (!document.hidden && ['passive', 'records'].includes(props.tab)) void refresh(!statesPaginated.value && !loadingStates.value) }, 15000) })
+onUnmounted(() => { clearInterval(timer); modelsRequest++; eventsRequest++; statesRequest++; refreshRequest++ })
 defineExpose({ refresh })
 </script>

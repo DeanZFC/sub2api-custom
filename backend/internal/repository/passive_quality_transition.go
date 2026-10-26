@@ -63,7 +63,11 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 			s.ObserveAfter = s.TrialStartedAt
 			s.LastEvidenceAt = e.Latest
 		} else if !now.Before(s.TrialEndsAt) {
-			service.PassiveQualityPause(p.PassiveQualityConfig, s, now, "trial_expired: "+reason)
+			if p.IsGroupQualityTarget() && verdict == "pending" {
+				waitPassiveGroupTargetTrial(p, s, now, reason)
+			} else {
+				service.PassiveQualityPause(p.PassiveQualityConfig, s, now, "trial_expired: "+reason)
+			}
 		} else if verdict == "fail" {
 			c := p.PassiveQualityConfig
 			c.MinSamples = c.RecoverySamples
@@ -76,6 +80,22 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 	} else if fresh >= p.NewSamples {
 		s.LastEvidenceAt = e.Latest
 		if verdict == "fail" {
+			if p.IsGroupQualityTarget() {
+				metric, _, _ := strings.Cut(reason, ":")
+				sameMetric := s.ConfirmationMetric == metric
+				if !sameMetric {
+					s.Hits = 0
+				}
+				// The initial full window supplies the first suspicion. Later
+				// confirmations must contain a new breach of the same metric;
+				// two healthy arrivals cannot reconfirm an old five-request spike.
+				if sameMetric && !freshGroupTargetBreach(p, e, metric) {
+					s.Hits = 0
+					s.Phase, s.Reason = "suspect", "waiting_for_fresh_failure: "+reason
+					return
+				}
+				s.ConfirmationMetric = metric
+			}
 			s.Hits++
 			s.Phase = "suspect"
 			s.Reason = reason
@@ -93,6 +113,7 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 			}
 		} else {
 			s.Hits = 0
+			s.ConfirmationMetric = ""
 			s.Reason = reason
 			if verdict == "pass" {
 				s.Phase = "healthy"
@@ -105,4 +126,16 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 		s.Reason = "insufficient_samples"
 		s.Hits = 0
 	}
+}
+
+func freshGroupTargetBreach(p service.PassiveQualityPolicy, e service.PassiveQualityEvidence, metric string) bool {
+	switch metric {
+	case "error_rate":
+		return e.FreshErrorRate != nil && *e.FreshErrorRate >= p.ErrorRate.Pause
+	case "ttft_p90":
+		return e.FreshTTFT != nil && *e.FreshTTFT >= p.TTFT.Pause
+	case "cache_rate":
+		return e.FreshCacheRate != nil && *e.FreshCacheRate <= p.CacheRate.Pause
+	}
+	return false
 }

@@ -2,10 +2,27 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
+	"time"
 )
+
+const groupQualityFallbackAffinityTTL = 30 * time.Minute
+
+// Use a separate namespace from normal sticky ownership. A fallback is only a
+// temporary route, and must not replace the conversation's original account.
+// An explicit client session is only meaningful inside its authenticated key.
+func groupQualityFallbackAffinityKey(apiKeyID, groupID int64, model, sessionHash string) string {
+	if apiKeyID <= 0 || groupID <= 0 || model == "" || strings.TrimSpace(sessionHash) == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%s", len(model), model, sessionHash)))
+	return fmt.Sprintf("openai:group-quality-fallback:v1:%d:%d:%x", apiKeyID, groupID, digest)
+}
 
 // GroupQualityFallbackRequest identifies one exact automatic-quality recovery
 // candidate. The repository must recheck live supply and reserve a per-request
@@ -104,7 +121,8 @@ func groupQualityFallbackRetryable(err error) bool {
 
 // Recovery is a second, acquired-only pass. It never substitutes a wait plan,
 // changes persistent account state, or replays incremental response state on
-// another credential. Ranking uses the scheduler's existing score.
+// another credential. A session's previous fallback is preferred while it is
+// eligible; first selection and overflow use the scheduler's existing score.
 func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, req OpenAIAccountScheduleRequest, originalErr error) (*AccountSelectionResult, error) {
 	if s == nil || s.accountRepo == nil || s.concurrencyService == nil || !groupQualityFallbackRetryable(originalErr) || NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI || req.RequiredImageCapability != "" || req.GroupID == nil || *req.GroupID <= 0 {
 		return nil, originalErr
@@ -183,6 +201,36 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 	plan := scheduler.buildOpenAIAccountLoadPlan(ctx, req, candidates, loadMap)
 	ranked := append([]openAIAccountCandidateScore(nil), plan.candidates...)
 	sort.SliceStable(ranked, func(i, j int) bool { return isOpenAIAccountCandidateBetter(ranked[i], ranked[j]) })
+	model := passiveQualityRoutingModel(ctx, req.RequestedModel)
+	affinityKey := ""
+	if apiKey, authenticated := APIKeyForUsageContext(ctx); authenticated {
+		affinityKey = groupQualityFallbackAffinityKey(apiKey.ID, *req.GroupID, model, req.SessionHash)
+	}
+	affinityAccountID, preferredAccountID := int64(0), int64(0)
+	affinityEscapeReason := ""
+	if affinityKey != "" && s.cache != nil {
+		if id, lookupErr := s.cache.GetSessionAccountID(ctx, *req.GroupID, affinityKey); lookupErr == nil && id > 0 {
+			affinityAccountID = id
+			for i, candidate := range ranked {
+				if candidate.account.ID != id {
+					continue
+				}
+				// TTFT is a soft score in recovery and must not undo affinity on
+				// every slow turn. The advanced scheduler's runtime error stats
+				// still remove preference, without excluding the last supply.
+				// Legacy schedulers retain their existing stateless scoring.
+				escapeCfg := s.openAIStickyEscapeConfig()
+				if escapeCfg.enabled && candidate.errorRate > escapeCfg.errorRate {
+					affinityEscapeReason = "error_rate"
+					break
+				}
+				preferredAccountID = id
+				copy(ranked[1:i+1], ranked[:i])
+				ranked[0] = candidate
+				break
+			}
+		}
+	}
 	budget := newOpenAISelectionProbeBudget()
 	budget.enableLimit()
 	if req.SessionHash != "" && s.cache != nil {
@@ -192,12 +240,32 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 	}
 	req.PreserveStickyBinding = req.PreserveStickyBinding || owner > 0
 	for _, candidate := range ranked {
-		candidateCtx := WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: *req.GroupID, AccountID: candidate.account.ID, Model: passiveQualityRoutingModel(ctx, req.RequestedModel)})
+		candidateCtx := WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: *req.GroupID, AccountID: candidate.account.ID, Model: model})
 		selection, _, acquireErr := scheduler.tryAcquireOpenAISelectionOrderWithBudget(candidateCtx, req, []openAIAccountCandidateScore{candidate}, budget)
 		if acquireErr != nil {
 			return nil, acquireErr
 		}
 		if selection != nil {
+			accountID := selection.Account.ID
+			if affinityKey != "" && s.cache != nil {
+				if affinityAccountID == accountID {
+					// Refresh only: an overlapping request may already have moved
+					// affinity after a failure; do not overwrite it on this hit.
+					_ = s.cache.RefreshSessionTTL(ctx, *req.GroupID, affinityKey, groupQualityFallbackAffinityTTL)
+				} else {
+					// GatewayCache has no CAS. Concurrent first selections are
+					// best-effort; every later hit still passes all live gates.
+					_ = s.cache.SetSessionAccountID(ctx, *req.GroupID, affinityKey, accountID, groupQualityFallbackAffinityTTL)
+				}
+			}
+			source := "score"
+			if owner > 0 {
+				source = "previous_response_owner"
+			} else if accountID == preferredAccountID {
+				source = "affinity"
+			}
+			slog.Info("group_quality_fallback_selected", "group_id", *req.GroupID, "account_id", accountID, "model", model,
+				"affinity_hit", accountID == preferredAccountID, "selection_source", source, "affinity_escape_reason", affinityEscapeReason)
 			return selection, nil
 		}
 	}
