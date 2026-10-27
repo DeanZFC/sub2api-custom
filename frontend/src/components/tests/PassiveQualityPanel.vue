@@ -8,7 +8,7 @@
     <p v-if="loadError" role="alert" class="text-sm text-red-600">{{ loadError }} <button class="underline" @click="refresh()">{{ t('common.retry') }}</button></p>
     <section v-if="tab === 'passive'" class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3"><p class="max-w-3xl text-sm text-gray-500">{{ tr('intro') }}</p><button class="btn btn-primary" data-passive-create @click="edit()">{{ q('createTraffic') }}</button></div>
-      <div v-if="policies.some(isGroupQualityTarget)" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-200 p-4 text-sm dark:border-primary-900" data-target-managed><p>{{ targetText('managedSeparately') }}</p><button type="button" class="btn btn-secondary btn-sm" @click="emit('tab', 'group-targets')">{{ targetText('openTargets') }}</button></div>
+      <div v-if="!integrated && policies.some(isGroupQualityTarget)" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-200 p-4 text-sm dark:border-primary-900" data-target-managed><p>{{ targetText('managedSeparately') }}</p><button type="button" class="btn btn-secondary btn-sm" @click="emit('tab', 'group-targets')">{{ targetText('openTargets') }}</button></div>
       <div v-if="!genericPolicies.length && !loading" class="rounded-lg border border-dashed p-8 text-center text-gray-500">{{ tr('empty') }}</div>
       <article v-for="policy in genericPolicies" :key="policy.id" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
         <div class="flex flex-wrap items-center justify-between gap-3"><div class="flex items-center gap-2"><strong>{{ policy.name }}</strong><span class="badge badge-gray">{{ tr(policy.mode) }}</span><span class="badge badge-gray">{{ tr(policy.schema_version === 2 ? 'v2.badge' : 'v2.legacy') }}</span><span v-if="policy.mode === 'enforce' && policy.schema_version !== 2" class="badge badge-gray">{{ tr(policy.action === 'limit' ? 'actionLimit' : 'actionPause') }}</span><span class="badge" :class="policy.enabled ? 'badge-success' : 'badge-gray'">{{ t(policy.enabled ? 'common.enabled' : 'common.disabled') }}</span></div><div class="flex gap-2"><button class="btn btn-secondary btn-sm" :disabled="busy" @click="toggle(policy)">{{ tr(policy.enabled ? 'disablePolicy' : 'enablePolicy') }}</button><button class="btn btn-secondary btn-sm" @click="edit(policy)">{{ t('common.edit') }}</button><button class="btn btn-secondary btn-sm" @click="showPolicy(policy)">{{ tr('records') }}</button><button class="btn btn-secondary btn-sm text-red-600" :disabled="busy" @click="remove(policy)">{{ t('common.delete') }}</button></div></div>
@@ -103,8 +103,8 @@ import { adminAPI } from '@/api/admin'
 import type { AccountListItem, AdminGroup } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
-const props = defineProps<{ tab: string; groups: AdminGroup[]; accounts: AccountListItem[] }>()
-const emit = defineEmits<{ tab: [value: string] }>()
+const props = defineProps<{ tab: string; groups: AdminGroup[]; accounts: AccountListItem[]; integrated?: boolean }>()
+const emit = defineEmits<{ tab: [value: string, policy?: number, account?: number, phase?: string, advanced?: boolean] }>()
 const { t, te } = useI18n()
 const route = useRoute()
 const app = useAppStore()
@@ -116,10 +116,11 @@ const summary = ref(emptyPassiveSummary()), stateCursor = ref(''), eventCursor =
 const genericPolicies = computed(() => policies.value.filter(p => !isGroupQualityTarget(p)))
 const loading = ref(false), loadingEvents = ref(false), busy = ref(false), loadError = ref(''), hasMore = ref(false)
 const editing = ref<PassivePolicy | null>(null), exemptState = ref<PassiveState | null>(null), exemptMinutes = ref(30)
-const phaseFilter = ref(''), policyFilter = ref(Number(route?.query.policy_id) || 0), accountFilter = ref(Number(route?.query.account_id) || 0), accountSearch = ref('')
+const phases = ['cache_limited', 'limited', 'healthy', 'insufficient', 'suspect', 'observed', 'paused', 'probing', 'trial', 'exempt']
+const recordPhase = (value: unknown) => typeof value === 'string' && phases.includes(value) ? value : ''
+const phaseFilter = ref(recordPhase(route?.query.phase)), policyFilter = ref(Number(route?.query.policy_id) || 0), accountFilter = ref(Number(route?.query.account_id) || 0), accountSearch = ref('')
 const modelChoices = ref<string[]>([])
 const editingBaseline = ref('')
-const phases = ['cache_limited', 'limited', 'healthy', 'insufficient', 'suspect', 'observed', 'paused', 'probing', 'trial', 'exempt']
 const summaryCards = computed(() => [
   { key: 'activePolicies', count: policies.value.filter(p => p.enabled).length },
   { key: 'pausedAccounts', count: summary.value.paused_accounts },
@@ -219,8 +220,13 @@ async function loadEvents(append = false) {
   const request = ++eventsRequest; loadingEvents.value = true
   try { const page = await api.eventPage({ ...filters, cursor: append ? eventCursor.value : undefined }); if (request === eventsRequest) { events.value = append ? [...events.value, ...page.items] : page.items; eventCursor.value = page.next_cursor || ''; hasMore.value = page.has_more } } catch (e) { if (request === eventsRequest) report(e) } finally { if (request === eventsRequest) loadingEvents.value = false }
 }
-function selectSummary(key: string) { policyFilter.value = 0; accountFilter.value = 0; modelFilter.value = ''; phaseFilter.value = key === 'limitedAccounts' ? 'limited' : key === 'trialAccounts' ? 'trial' : key === 'observedAccounts' ? 'observed' : key === 'pausedAccounts' ? 'paused' : ''; emit('tab', key === 'activePolicies' ? 'passive' : 'records') }
-function showPolicy(p: PassivePolicy) { policyFilter.value = p.id; phaseFilter.value = ''; accountFilter.value = 0; modelFilter.value = ''; emit('tab', 'records') }
+function selectSummary(key: string) {
+  policyFilter.value = 0; accountFilter.value = 0; modelFilter.value = ''
+  phaseFilter.value = key === 'limitedAccounts' ? 'limited' : key === 'trialAccounts' ? 'trial' : key === 'observedAccounts' ? 'observed' : key === 'pausedAccounts' ? 'paused' : ''
+  if (key === 'activePolicies') emit('tab', 'passive', undefined, undefined, undefined, true)
+  else emit('tab', 'records', undefined, undefined, phaseFilter.value || undefined)
+}
+function showPolicy(p: PassivePolicy) { policyFilter.value = p.id; phaseFilter.value = ''; accountFilter.value = 0; modelFilter.value = ''; emit('tab', 'records', p.id) }
 function edit(p?: PassivePolicy) { if (p && isGroupQualityTarget(p)) { emit('tab', 'group-targets'); return } editing.value = passivePolicyDraft(p); editingBaseline.value = JSON.stringify(editing.value); accountSearch.value = '' }
 async function save() {
   if (!editing.value || validationError.value || busy.value) return
@@ -256,6 +262,7 @@ watch(phaseFilter, () => { if (props.tab === 'records') void loadStates() })
 watch([kindFilter, sinceFilter, untilFilter], () => { if (props.tab === 'records') void loadEvents() })
 watch(() => route?.query.account_id, value => { accountFilter.value = Number(value) || 0 })
 watch(() => route?.query.policy_id, value => { policyFilter.value = Number(value) || 0 })
+watch(() => route?.query.phase, value => { phaseFilter.value = recordPhase(value) })
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => { void refresh(false); timer = setInterval(() => { if (!document.hidden && ['passive', 'records'].includes(props.tab)) void refresh(!statesPaginated.value && !loadingStates.value) }, 15000) })
 onUnmounted(() => { clearInterval(timer); modelsRequest++; eventsRequest++; statesRequest++; refreshRequest++ })

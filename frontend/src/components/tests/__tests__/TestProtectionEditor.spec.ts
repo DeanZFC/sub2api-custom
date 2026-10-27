@@ -5,6 +5,7 @@ import TestProtectionEditor from '../TestProtectionEditor.vue'
 import type { AdminGroup, TestOutcomeAction, TestProtectionConfig, TestProtectionRecovery, TestType } from '@/types'
 import { canEnableStatisticsRecovery, copyTestProtection, defaultTestProtectionRecovery, validTestProtection } from '@/utils/testProtection'
 import resources from '@/i18n/locales/en/admin/resources'
+import { defaultTestPassRate } from '@/utils/testPassRate'
 
 const types: TestType[] = [
   { id: 1, name: 'Statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true },
@@ -24,6 +25,24 @@ const mountEditor = (config: TestProtectionConfig = { enabled: false, rules: [] 
 }
 
 describe('quality protection settings', () => {
+  it('offers rate protection for active checks and preserves existing fail actions', async () => {
+    const original: TestProtectionConfig = { enabled: true, rules: [{
+      test_definition_id: 3, priority: 0, required_pass: false, pause_on_failure: true,
+      expected_answer: '29', on_fail: { scheduling: 'pause', group_mode: 'keep' },
+    }, { test_definition_id: 1, priority: 0, required_pass: false, pause_on_failure: true }] }
+    const wrapper = mountEditor(original)
+    expect(wrapper.get('[data-protection-type="1"]').find('[data-pass-rate-editor]').exists()).toBe(false)
+    const candy = wrapper.get('[data-protection-type="3"]')
+    await candy.get('[data-pass-rate-enabled]').setValue(true)
+    expect(wrapper.props('modelValue').rules[0].pass_rate).toEqual(defaultTestPassRate())
+    expect(wrapper.props('modelValue').rules[0].on_fail).toEqual(original.rules[0].on_fail)
+    expect(wrapper.props('modelValue').rules[0].pause_on_failure).toBe(true)
+    expect(original.rules[0].pass_rate).toBeUndefined()
+    await candy.get('[data-pass-rate-threshold]').setValue(95)
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(false)
+    wrapper.unmount()
+  })
+
   it.each(['per_test', 'all_pass'] as const)('configures an independent pelican duration limit alongside review in %s mode', async mode => {
     const config: TestProtectionConfig = { enabled: true, mode, rules: [{
       test_definition_id: 2, priority: 0, required_pass: false, pause_on_failure: true,

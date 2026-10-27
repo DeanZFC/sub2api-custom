@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestResultsView from '../TestResultsView.vue'
 import TestVoteCard from '@/components/tests/TestVoteCard.vue'
+import TestPassRateEvidence from '@/components/tests/TestPassRateEvidence.vue'
 
 const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), votes: vi.fn(), vote: vi.fn(), error: vi.fn(), reviews: vi.fn(), decide: vi.fn(), adminResults: vi.fn(), isAdmin: false }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: api.isAdmin }) }))
@@ -31,6 +32,25 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('channel quality result groups', () => {
+  it('shows current pass-rate evidence in administrator review cards without changing the pending decision', async () => {
+    api.isAdmin = true
+    api.list.mockResolvedValue([])
+    const pass_rate = {
+      samples: 10, passed: 7, pass_rate: 70, window_size: 10, window_seconds: 604800,
+      pause_below: 80, recover_at_least: 90, recover_consecutive: 2, consecutive_passes: 1,
+      blocked: true, ready: true, stale: false, reason: 'recovery_pending',
+      latest_verdict: 'pass', rule_version: 'v1', model: 'gpt-6-astra',
+    }
+    const result = { ...baseResult, id: 91, pass_rate }
+    api.reviews.mockResolvedValue([{ result, generation: 7, verdict: 'pending', admin_verdict: '', account_paused: true }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.getComponent(TestPassRateEvidence).props('evidence')).toEqual(pass_rate)
+    expect(wrapper.get('[data-admin-decision] [data-pass-rate-state]').text()).toContain('states.blocked')
+    expect(wrapper.get('[data-admin-pass]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-admin-fail]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('shows a skipped badge when a later check was not executed', async () => {
     api.list.mockResolvedValue([{ ...baseResult, id: 11, status: 'failed', error_message: '检测跳过：前一项检测未满足条件' }])
     const wrapper = mountResults(); await flushPromises()

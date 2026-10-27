@@ -31,6 +31,7 @@ func (r *passiveQualityRepository) RecordTelemetry(ctx context.Context, items []
 		AccountID     int64           `json:"account_id"`
 		RequestKey    string          `json:"request_key"`
 		At            time.Time       `json:"created_at"`
+		StartedAt     *time.Time      `json:"started_at"`
 		AttemptKey    string          `json:"attempt_key"`
 		CacheReported bool            `json:"cache_reported"`
 		Metadata      json.RawMessage `json:"cache_metadata"`
@@ -47,6 +48,10 @@ func (r *passiveQualityRepository) RecordTelemetry(ctx context.Context, items []
 			item, exists := reports[k]
 			if !exists {
 				item = report{AccountID: f.AccountID, RequestKey: f.RequestKey, At: f.At, Metadata: json.RawMessage(`{}`)}
+			}
+			if !f.StartedAt.IsZero() && (item.StartedAt == nil || f.StartedAt.Before(*item.StartedAt)) {
+				started := f.StartedAt
+				item.StartedAt = &started
 			}
 			item.CacheReported = item.CacheReported || f.CacheReported
 			if item.AttemptKey == "" {
@@ -78,12 +83,13 @@ func (r *passiveQualityRepository) RecordTelemetry(ctx context.Context, items []
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_cache_reports(account_id,request_key,created_at,attempt_key,cache_reported,cache_metadata)
- SELECT x.account_id,x.request_key,x.created_at,x.attempt_key,x.cache_reported,x.cache_metadata
- FROM jsonb_to_recordset($1::jsonb) AS x(account_id bigint,request_key text,created_at timestamptz,attempt_key text,cache_reported boolean,cache_metadata jsonb)
+		if _, err = tx.ExecContext(ctx, `INSERT INTO passive_quality_cache_reports(account_id,request_key,created_at,attempt_key,cache_reported,cache_metadata,started_at)
+ SELECT x.account_id,x.request_key,x.created_at,x.attempt_key,x.cache_reported,x.cache_metadata,x.started_at
+ FROM jsonb_to_recordset($1::jsonb) AS x(account_id bigint,request_key text,created_at timestamptz,attempt_key text,cache_reported boolean,cache_metadata jsonb,started_at timestamptz)
  JOIN accounts a ON a.id=x.account_id ORDER BY x.account_id,x.request_key
  ON CONFLICT(account_id,request_key) DO UPDATE SET cache_reported=passive_quality_cache_reports.cache_reported OR excluded.cache_reported,
  attempt_key=COALESCE(NULLIF(passive_quality_cache_reports.attempt_key,''),excluded.attempt_key),
+ started_at=LEAST(passive_quality_cache_reports.started_at,excluded.started_at),
  cache_metadata=CASE WHEN passive_quality_cache_reports.cache_metadata='{}'::jsonb THEN excluded.cache_metadata ELSE passive_quality_cache_reports.cache_metadata END`, raw); err != nil {
 			return err
 		}

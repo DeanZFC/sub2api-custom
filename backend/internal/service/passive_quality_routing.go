@@ -213,7 +213,7 @@ func shouldClearStickySessionWithContext(ctx context.Context, account *Account, 
 	if account == nil {
 		return false
 	}
-	if !account.IsSchedulable() || account.PassiveQualityBlocked(passiveQualityRoutingModel(ctx, requestedModel)) {
+	if !account.IsSchedulable() || account.PassiveQualityBlocked(passiveQualityRoutingModel(ctx, requestedModel)) || account.ActivePassRateBlocked(activePassRateRoutingModel(ctx, requestedModel)) {
 		return true
 	}
 	// Upstream cooldown is still keyed by the mapped provider model.

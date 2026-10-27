@@ -11,14 +11,34 @@ const mountView = () => mount(ChannelQualityOverview, { props: { groups: [], vis
 beforeEach(() => { vi.resetAllMocks(); api.overview.mockResolvedValue(page([1])) })
 afterEach(() => vi.useRealTimers())
 describe('quality overview', () => {
-  it('links to simple group targets and labels their actual traffic evidence', async () => {
+  it('shows model-scoped active pass-rate evidence and opens its plan', async () => {
+    api.overview.mockResolvedValue({ ...page([]), items: [{ ...account(1), controls: [{
+      source: 'active', id: 7, metric: 'pass_rate', name: 'Candy', model: 'A', scope: 'model',
+      phase: 'paused', reason: 'Recent capability failures', recovery: 'active_tests', blocking: true,
+      pass_rate: {
+        samples: 10, passed: 7, pass_rate: 70, window_size: 10, window_seconds: 604800,
+        pause_below: 80, recover_at_least: 90, recover_consecutive: 2, consecutive_passes: 1,
+        blocked: true, ready: true, stale: false, reason: 'recovery_pending',
+        latest_verdict: 'pass', rule_version: 'v1', model: 'A',
+      },
+    }] }] })
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.text()).toContain('Capability pass rate')
+    expect(wrapper.get('[data-pass-rate-counts]').text()).toBe('7/10 passed · 70%')
+    expect(wrapper.get('[data-pass-rate-recovery-requirement]').text()).toContain('90%')
+    await wrapper.findAll('button').find(button => button.text() === 'Inspect and manage')!.trigger('click')
+    expect(wrapper.emitted('navigate')).toEqual([['plans', 7, 1]])
+    wrapper.unmount()
+  })
+
+  it('links to passive quality management and labels their actual traffic evidence', async () => {
     api.overview.mockResolvedValue({ ...page([]), items: [{ ...account(1), controls: [{ source: 'passive', id: 5, metric: 'group_quality_target', name: 'Group targets', model: 'A', scope: 'model', phase: 'paused', reason: 'group_target_trial', recovery: 'real_traffic_trial', blocking: true, evidence: { samples: 5, error_rate: 20, ttft: 1000, cache_rate: 0 } }] }] })
     const w = mountView(); await flushPromises()
     expect(w.text()).toContain('Group quality targets · actual traffic')
     expect(w.text()).toContain('Availability 80% · First-token P90 1 s · Actual cache 0%')
     expect(w.text()).toContain('bounded trial verified with fresh production traffic')
-    await w.get('[data-overview-group-targets]').trigger('click')
-    expect(w.emitted('navigate')).toEqual([['group-targets']])
+    await w.get('[data-overview-goal="passive"]').trigger('click')
+    expect(w.emitted('navigate')).toEqual([['passive']])
     w.unmount()
   })
   it('does not discard appended accounts on the refresh timer', async () => {
@@ -52,6 +72,22 @@ describe('quality overview', () => {
     expect(w.get('[data-overview-cache]').text()).toContain('Reusable-request protection rate: —')
     expect(w.text()).not.toContain('Concurrency and priority reduced')
     expect(w.text()).not.toContain('Scheduling restricted')
+    w.unmount()
+  })
+
+  it('shows a recent account quality score and sample confidence', async () => {
+    api.overview.mockResolvedValue({ ...page([]), items: [{ ...account(1), quality_score: { value: 82.4, samples: 16, models: 2, latest_at: '2026-10-22T12:00:00Z' } }] })
+    const w = mountView(); await flushPromises()
+    expect(w.get('[data-quality-score]').text()).toContain('Quality score')
+    expect(w.get('[data-quality-score]').text()).toContain('82')
+    expect(w.get('[data-quality-score]').text()).toContain('2 models · 16 samples')
+    w.unmount()
+  })
+
+  it('labels missing account scores as unavailable instead of zero', async () => {
+    const w = mountView(); await flushPromises()
+    expect(w.get('[data-quality-score]').text()).toContain('—')
+    expect(w.get('[data-quality-score]').text()).toContain('No valid samples')
     w.unmount()
   })
 

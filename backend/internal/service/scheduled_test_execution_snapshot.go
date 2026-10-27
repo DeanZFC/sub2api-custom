@@ -28,6 +28,16 @@ func (p *scheduledTestAccountProgress) allowsNext(plan *ScheduledTestPlan, resul
 	if p.stopped {
 		return false
 	}
+	if plan != nil && plan.Protection.Enabled {
+		for _, rule := range plan.Protection.Rules {
+			if rule.PassRate != nil && rule.PassRate.Enabled {
+				// Each capability window needs its own fresh evidence, including
+				// recovery probes after another selected check has failed.
+				// Budgets, cancellation and account backoff still bound the queue.
+				return true
+			}
+		}
+	}
 	if plan == nil || !plan.Protection.Enabled || !plan.Protection.UsesCombinations() {
 		p.stopped = !scheduledTestResultSatisfies(plan, result)
 		return !p.stopped
@@ -375,7 +385,7 @@ func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, tar
 	target.pending.Status = "running"
 	err := s.scheduledSvc.resultRepo.Update(persistCtx, target.pending)
 	if err == nil {
-		err = s.beginResultProtection(persistCtx, target.plan, target.pending)
+		err = s.beginResultProtection(WithScheduledTestPassRateSnapshot(persistCtx, target.prompt, target.kind, target.maxOutputTokens), target.plan, target.pending)
 	}
 	cancel()
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -124,6 +125,9 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	if err := validateScheduledTestPlanConflicts(ctx, tx, plan); err != nil {
 		return nil, err
 	}
+	if err := lockScheduledTestLifecycleAccounts(ctx, tx, plan.ID); err != nil {
+		return nil, err
+	}
 	if !scheduledTestSameExecutionPolicy(previous, plan) {
 		if err := resetPlanProtectionTx(ctx, tx, plan.ID); err != nil {
 			return nil, err
@@ -141,6 +145,12 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	`, plan.ID, plan.Name, plan.SortOrder, plan.AccountID, plan.GroupID, plan.TestDefinitionID, plan.TestType, plan.TargetMode, plan.ModelID, plan.ReasoningEffort, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.AutoRecover, plan.NextRunAt, pq.Array(plan.TestDefinitionIDs), protection, pq.Array(plan.GroupIDs), plan.MigrationNote, schedule, pq.Array(plan.ExcludedAccountIDs))
 	updated, err := scanPlan(row)
 	if err != nil {
+		return nil, err
+	}
+	previousGroups, currentGroups := slices.Clone(previous.GroupIDs), slices.Clone(updated.GroupIDs)
+	slices.Sort(previousGroups)
+	slices.Sort(currentGroups)
+	if err := reconcileScheduledTestPassRates(ctx, tx, updated, !slices.Equal(previousGroups, currentGroups)); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -179,6 +189,9 @@ func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) erro
 	}
 	defer tx.Rollback()
 	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockScheduledTestLifecycleAccounts(ctx, tx, id); err != nil {
 		return err
 	}
 	if err := clearPlanProtectionTx(ctx, tx, id); err != nil {
@@ -291,7 +304,31 @@ func (r *scheduledTestDefinitionRepository) List(ctx context.Context, enabledOnl
 	return out, rows.Err()
 }
 func (r *scheduledTestDefinitionRepository) Update(ctx context.Context, d *service.ScheduledTestDefinition) (*service.ScheduledTestDefinition, error) {
-	return r.scan(r.db.QueryRowContext(ctx, `UPDATE scheduled_test_definitions SET key=$2,name=$3,description=$4,prompt=$5,output_kind=$6,enabled=$7,sort_order=$8,max_output_tokens=$9,updated_at=NOW() WHERE id=$1 RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at`, d.ID, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder, d.MaxOutputTokens))
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
+		return nil, err
+	}
+	plans, err := lockScheduledTestPassRateDefinitionPlans(ctx, tx, d.ID)
+	if err != nil {
+		return nil, err
+	}
+	updated, err := r.scan(tx.QueryRowContext(ctx, `UPDATE scheduled_test_definitions SET key=$2,name=$3,description=$4,prompt=$5,output_kind=$6,enabled=$7,sort_order=$8,max_output_tokens=$9,updated_at=NOW() WHERE id=$1 RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at`, d.ID, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder, d.MaxOutputTokens))
+	if err != nil {
+		return nil, err
+	}
+	for _, plan := range plans {
+		if err := reconcileScheduledTestPassRates(ctx, tx, plan, false); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 func (r *scheduledTestDefinitionRepository) Delete(ctx context.Context, id int64) error {
 	result, e := r.db.ExecContext(ctx, `DELETE FROM scheduled_test_definitions
@@ -512,7 +549,13 @@ WHERE id = ANY($1)`, pq.Array(ids))
 		}
 		result.ProtectionDecision = decision
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return r.hydratePassRates(ctx, results)
 }
 
 // Display position belongs to the current group, independently of the rule
@@ -720,7 +763,7 @@ func (r *scheduledTestResultRepository) Delete(ctx context.Context, id int64) er
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := lockProtectionPlan(ctx, tx, planID); err != nil {
 		return err
 	}

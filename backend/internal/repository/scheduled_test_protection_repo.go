@@ -122,6 +122,9 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 	if err := initializeProtectionActionStates(ctx, tx, result.PlanID, *result.AccountID, config); err != nil {
 		return err
 	}
+	if err := beginScheduledTestPassRate(ctx, tx, result, rule); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(rule)
 	if err != nil {
 		return err
@@ -257,6 +260,9 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 		return err
 	}
 	verdict, _, reason := combineProtectionVerdict(state, pass, fail)
+	if err := recordScheduledTestPassRate(ctx, tx, state); err != nil {
+		return err
+	}
 	blocked := state.blocked
 	scheduling := state.rule.OutcomeAction(verdict).Scheduling
 	// Combined mode consumes the original check verdicts without executing its

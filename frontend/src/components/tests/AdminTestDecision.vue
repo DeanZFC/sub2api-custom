@@ -5,6 +5,7 @@
       <span v-if="review.admin_verdict" class="text-xs" :class="review.admin_verdict === 'pass' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">{{ t(`tests.adminReview.${review.admin_verdict}`) }}</span>
       <span v-if="review.account_paused" class="badge badge-warning">{{ t('tests.voting.paused') }}</span>
     </div>
+    <TestPassRateEvidence v-if="review.result.pass_rate" :evidence="review.result.pass_rate" />
     <div class="flex flex-wrap gap-2">
       <button type="button" class="btn btn-secondary btn-sm min-w-0 max-w-full whitespace-normal" :disabled="busy || review.admin_verdict === 'pass'" :aria-pressed="review.admin_verdict === 'pass'" data-admin-pass @click="decide('pass')"><Icon name="check" size="sm" /><span class="min-w-0 break-words">{{ t('tests.adminReview.markPass') }}</span></button>
       <button type="button" class="btn btn-secondary btn-sm min-w-0 max-w-full whitespace-normal text-red-600 dark:text-red-400" :disabled="busy || review.admin_verdict === 'fail'" :aria-pressed="review.admin_verdict === 'fail'" data-admin-fail @click="decide('fail')"><Icon name="x" size="sm" /><span class="min-w-0 break-words">{{ t('tests.adminReview.markFail') }}</span></button>
@@ -24,6 +25,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { decideResult, type TestAdminReview } from '@/api/admin/tests'
 import Icon from '@/components/icons/Icon.vue'
+import TestPassRateEvidence from './TestPassRateEvidence.vue'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const props = withDefaults(defineProps<{ review: TestAdminReview; compact?: boolean }>(), { compact: false })

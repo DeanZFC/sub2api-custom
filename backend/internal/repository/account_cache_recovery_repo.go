@@ -60,11 +60,13 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	}
 	// Most accounts have no quality hold. Check live scheduling state and the
 	// indexed hold set in one read without serializing ordinary traffic.
+	model := service.ActivePassRateRequestModel(ctx)
 	var eligible, held bool
 	err := db.QueryRowContext(ctx, `SELECT status='active' AND schedulable AND deleted_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked),
+        AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
+        AND NOT EXISTS (SELECT 1 FROM scheduled_test_pass_rate_states WHERE account_id=$1 AND blocked AND ($2='' OR model_key='' OR model_key=$2)),
 		EXISTS (SELECT 1 FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked)
-		FROM accounts WHERE id=$1`, accountID).Scan(&eligible, &held)
+		FROM accounts WHERE id=$1`, accountID, model).Scan(&eligible, &held)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -84,7 +86,8 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	// Gate calls never lock plans, preserving the plan -> account -> state order.
 	err = tx.QueryRowContext(ctx, `SELECT status='active' AND schedulable AND deleted_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
-		FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, accountID).Scan(&eligible)
+        AND NOT EXISTS (SELECT 1 FROM scheduled_test_pass_rate_states WHERE account_id=$1 AND blocked AND ($2='' OR model_key='' OR model_key=$2))
+		FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, accountID, model).Scan(&eligible)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

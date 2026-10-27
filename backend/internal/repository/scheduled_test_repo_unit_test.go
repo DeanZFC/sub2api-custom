@@ -59,6 +59,9 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT id, protection_decision.*FROM scheduled_test_results`).
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision", "execution_info"}))
+	mock.ExpectQuery(`(?s)SELECT r.id,s.plan_id.*JOIN scheduled_test_pass_rate_states.*WHERE r.id=ANY`).
+		WithArgs("{1}").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "plan_id", "account_id", "test_definition_id", "model_key", "summary", "blocked"}))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)

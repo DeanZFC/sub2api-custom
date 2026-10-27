@@ -68,7 +68,7 @@
         <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_ids.length || modelOptionsLoading" :placeholder="editingPlan.group_ids.length ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.commonModelsHint') }}</span></label>
         <p v-if="editingPlan.group_ids.length && !modelOptionsLoading && !modelOptions.length" class="text-xs text-amber-700 dark:text-amber-300" data-no-common-model>{{ t('admin.tests.noCommonModels') }}</p>
         <TestScheduleEditor v-model:schedule="editingPlan.schedule" v-model:cron-expression="editingPlan.cron_expression" class="sm:col-span-2" />
-        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :groups="protectionGroups" class="sm:col-span-2" />
+        <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :groups="protectionGroups" :schedule="editingPlan.schedule" class="sm:col-span-2" />
         <details class="rounded-lg border border-gray-200 p-4 dark:border-dark-700 sm:col-span-2" data-plan-advanced>
           <summary class="cursor-pointer text-sm font-medium">{{ t('admin.tests.experience.activeAdvanced') }}</summary>
           <div class="mt-4 grid gap-4 sm:grid-cols-2">

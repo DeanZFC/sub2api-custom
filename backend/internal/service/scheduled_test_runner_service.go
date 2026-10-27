@@ -527,7 +527,7 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 	}
 	pending, err := s.startAccountResult(persistCtx, plan, accountID, outputKind)
 	if err == nil {
-		err = s.beginResultProtection(persistCtx, plan, pending)
+		err = s.beginResultProtection(WithScheduledTestPassRateSnapshot(persistCtx, prompt, outputKind, accountTestOutputTokenLimit(ctx)), plan, pending)
 	}
 	cancel()
 	if err != nil {
@@ -781,6 +781,10 @@ func (s *ScheduledTestRunnerService) applyOutputContract(result *ScheduledTestRe
 		html := extractScheduledTestHTML(result.ResponseText)
 		if html == "" {
 			if result.Status == "success" {
+				if result.ExecutionInfo == nil {
+					result.ExecutionInfo = newScheduledTestExecutionInfo()
+				}
+				result.ExecutionInfo.OutputContractFailed = true
 				result.Status = "failed"
 			}
 			if result.ErrorMessage == "" {
@@ -796,6 +800,10 @@ func (s *ScheduledTestRunnerService) applyOutputContract(result *ScheduledTestRe
 			return
 		}
 		if result.Status == "success" {
+			if result.ExecutionInfo == nil {
+				result.ExecutionInfo = newScheduledTestExecutionInfo()
+			}
+			result.ExecutionInfo.OutputContractFailed = true
 			result.Status = "failed"
 		}
 		if result.ErrorMessage == "" {
@@ -1100,7 +1108,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if err := s.scheduledSvc.RestartFailedResult(ctx, pending); err != nil {
 		return nil, err
 	}
-	if err := s.beginResultProtection(ctx, plan, pending); err != nil {
+	if err := s.beginResultProtection(WithScheduledTestPassRateSnapshot(ctx, prompt, outputKind, maxOutputTokens), plan, pending); err != nil {
 		pending.Status, pending.ErrorMessage = "failed", "unable to initialize test protection"
 		cleanupCtx, cleanupCancel := scheduledTestPersistenceContext()
 		_ = s.scheduledSvc.CompleteResult(cleanupCtx, plan.MaxResults, pending)

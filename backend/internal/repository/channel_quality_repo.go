@@ -16,8 +16,8 @@ func NewChannelQualityRepository(db *sql.DB) service.ChannelQualityRepository {
 	return &channelQualityRepository{db: db}
 }
 
-// Page accounts before reading their evidence; each lateral lookup is bounded
-// by account/policy indexes. No usage-log scan and no upstream call is needed.
+// Page accounts before reading evidence. Independent score windows are fetched
+// in one bounded batch after the page cursor has closed; no upstream is called.
 func (r *channelQualityRepository) ListQualityAccounts(ctx context.Context, f service.ChannelQualityFilter) (*service.ChannelQualityPage, error) {
 	limit := f.Limit
 	if limit < 1 || limit > 100 {
@@ -28,18 +28,23 @@ func (r *channelQualityRepository) ListQualityAccounts(ctx context.Context, f se
  AND ($2=0 OR a.id=$2) AND ($3='' OR a.name ILIKE '%'||$3||'%' OR a.id::text=$3)
  AND ($4=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=$4))
  AND ($5='' OR EXISTS(SELECT 1 FROM passive_quality_states s WHERE s.account_id=a.id AND (s.data->>'scope'='account' OR s.data->>'model' IN ('',$5)))
- OR EXISTS(SELECT 1 FROM scheduled_test_plans p JOIN account_groups ag ON ag.group_id=ANY(p.group_ids) WHERE ag.account_id=a.id AND p.enabled AND p.model_id=$5))
+ OR EXISTS(SELECT 1 FROM scheduled_test_plans p JOIN account_groups ag ON ag.group_id=ANY(p.group_ids) WHERE ag.account_id=a.id AND p.enabled AND p.model_id=$5)
+ OR EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states s JOIN scheduled_test_plans p ON p.id=s.plan_id WHERE s.account_id=a.id AND (s.blocked OR p.enabled) AND s.model_key=$5)
+ OR EXISTS(SELECT 1 FROM usage_logs ul WHERE ul.account_id=a.id AND COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model)=$5 AND ul.created_at>=now()-INTERVAL '1 day' AND COALESCE(ul.request_type,0) NOT IN (4,6))
+ OR EXISTS(SELECT 1 FROM passive_quality_failures f WHERE f.account_id=a.id AND f.model=$5 AND f.created_at>=now()-INTERVAL '1 day'))
  AND (NOT $6 OR a.status<>'active' OR NOT a.schedulable OR a.rate_limit_reset_at>now() OR a.temp_unschedulable_until>now() OR a.overload_until>now()
  OR EXISTS(SELECT 1 FROM passive_quality_states s WHERE s.account_id=a.id AND ($5='' OR s.data->>'scope'='account' OR s.data->>'model'=$5) AND (
  s.data->>'phase' IN ('limited','paused','probing','trial','suspect','observed')
  OR (s.data->>'phase'<>'exempt' AND (s.data->'latency'->>'phase' IN ('limited','watching')
  OR EXISTS(SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof(s.data->'cache')='object' THEN s.data->'cache' ELSE '{}'::jsonb END) c
  WHERE c.value->>'phase' IN ('reduced','recovering','watching') AND ($5='' OR c.key=$5))))))
- OR EXISTS(SELECT 1 FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id WHERE s.account_id=a.id AND (s.blocked OR (p.enabled AND s.completed AND s.result_started_at>=s.round_started_at AND s.verdict='fail'))))
+ OR EXISTS(SELECT 1 FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id WHERE s.account_id=a.id AND (s.blocked OR (p.enabled AND s.completed AND s.result_started_at>=s.round_started_at AND s.verdict='fail')))
+ OR EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.account_id=a.id AND s.blocked AND ($5='' OR s.model_key='' OR s.model_key=$5)))
  ORDER BY a.id LIMIT $7
  ) SELECT a.id,a.name,a.platform,a.status,a.schedulable,a.updated_at,
  a.rate_limit_reset_at,a.temp_unschedulable_until,a.overload_until,
- COALESCE((SELECT jsonb_agg(s.data ORDER BY s.policy_id,s.model_key) FROM passive_quality_states s WHERE s.account_id=a.id),'[]'),
+		 COALESCE((SELECT jsonb_agg(s.data ORDER BY s.policy_id,s.model_key)
+		   FROM passive_quality_states s WHERE s.account_id=a.id),'[]'),
  COALESCE((SELECT jsonb_agg(jsonb_build_object('source','active','id',p.id,'name',p.name,'model',p.model_id,'scope','account',
  'phase',h.phase,'reason',h.reason,'recovery',CASE WHEN h.phase='healthy' THEN 'scheduled_tests' ELSE 'active_tests' END,'blocking',h.blocked,'updated_at',h.updated_at,'next_at',p.next_run_at,'result_id',h.result_id))
  FROM (SELECT s.plan_id,s.reason,s.updated_at,s.blocked,s.result_id,
@@ -48,6 +53,13 @@ func (r *channelQualityRepository) ListQualityAccounts(ctx context.Context, f se
  WHERE s.account_id=a.id AND (s.blocked OR plan.enabled)
  UNION ALL SELECT plan_id,reason,updated_at,blocked,NULL::bigint,'paused' FROM scheduled_test_combination_states WHERE account_id=a.id AND blocked) h
  JOIN scheduled_test_plans p ON p.id=h.plan_id),'[]'),
+ COALESCE((SELECT jsonb_agg(jsonb_build_object('source','active','metric','pass_rate','id',p.id,'name',p.name,'model',s.model_key,'scope','model',
+ 'phase',CASE WHEN s.blocked THEN 'paused' WHEN s.summary->>'ready'='true' THEN 'healthy' ELSE 'insufficient' END,
+ 'reason',s.summary->>'reason','recovery',CASE WHEN s.blocked THEN 'active_tests' ELSE 'scheduled_tests' END,'blocking',s.blocked,
+ 'updated_at',s.updated_at,'next_at',p.next_run_at,'test_definition_id',s.test_definition_id,
+ 'pass_rate',s.summary||jsonb_build_object('blocked',s.blocked,'model',s.model_key)) ORDER BY s.plan_id,s.test_definition_id,s.model_key)
+ FROM scheduled_test_pass_rate_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
+ WHERE s.account_id=a.id AND (s.blocked OR p.enabled) AND ($5='' OR s.model_key='' OR s.model_key=$5)),'[]'),
  (SELECT count(*) FROM scheduled_test_plans p WHERE p.enabled AND NOT (a.id=ANY(p.excluded_account_ids)) AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=ANY(p.group_ids))),
  (SELECT count(*) FROM passive_quality_policies p WHERE p.config->>'enabled'='true'
  AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(NULLIF(p.config->'excluded_account_ids','null'::jsonb),'[]')) x WHERE x::bigint=a.id)
@@ -62,8 +74,8 @@ func (r *channelQualityRepository) ListQualityAccounts(ctx context.Context, f se
 		var a service.ChannelQualityAccount
 		var updated time.Time
 		var rate, temporary, overload *time.Time
-		var passiveRaw, activeRaw []byte
-		if err = rows.Scan(&a.ID, &a.Name, &a.Platform, &a.Status, &a.Schedulable, &updated, &rate, &temporary, &overload, &passiveRaw, &activeRaw, &a.ActivePlans, &a.PassivePolicies); err != nil {
+		var passiveRaw, activeRaw, passRateRaw []byte
+		if err = rows.Scan(&a.ID, &a.Name, &a.Platform, &a.Status, &a.Schedulable, &updated, &rate, &temporary, &overload, &passiveRaw, &activeRaw, &passRateRaw, &a.ActivePlans, &a.PassivePolicies); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(activeRaw, &a.Controls); err != nil {
@@ -72,6 +84,11 @@ func (r *channelQualityRepository) ListQualityAccounts(ctx context.Context, f se
 		if a.Controls == nil {
 			a.Controls = []service.ChannelQualityControl{}
 		}
+		var passRateControls []service.ChannelQualityControl
+		if err = json.Unmarshal(passRateRaw, &passRateControls); err != nil {
+			return nil, err
+		}
+		a.Controls = append(a.Controls, passRateControls...)
 		add := func(phase, reason, recovery string, next *time.Time) {
 			a.Controls = append(a.Controls, service.ChannelQualityControl{Source: "account", Name: reason, Phase: phase, Reason: reason, Recovery: recovery, Scope: "account", Blocking: true, NextAt: next, UpdatedAt: updated})
 		}
@@ -97,17 +114,53 @@ func (r *channelQualityRepository) ListQualityAccounts(ctx context.Context, f se
 		if err = json.Unmarshal(passiveRaw, &states); err != nil {
 			return nil, err
 		}
-		for _, s := range states {
-			a.Controls = append(a.Controls, passiveQualityOverviewControls(s, f.Model)...)
+		for _, state := range states {
+			a.Controls = append(a.Controls, passiveQualityOverviewControls(state, f.Model)...)
 		}
 		page.Items = append(page.Items, a)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
 	if len(page.Items) > limit {
 		page.Items = page.Items[:limit]
 		page.NextAfter = page.Items[limit-1].ID
+	}
+	accountIDs := make([]int64, 0, len(page.Items))
+	for _, account := range page.Items {
+		accountIDs = append(accountIDs, account.ID)
+	}
+	scores, err := r.ChannelQualityScores(ctx, accountIDs, f.Model)
+	if err != nil {
+		return nil, err
+	}
+	for i := range page.Items {
+		page.Items[i].QualityScore = scores[page.Items[i].ID]
+	}
+	// Expired observations change the displayed window, never the live hold.
+	// Close the page cursor first so this also works with one DB connection.
+	for ai := range page.Items {
+		account := &page.Items[ai]
+		for ci := range account.Controls {
+			control := &account.Controls[ci]
+			if control.PassRate == nil {
+				continue
+			}
+			if err = refreshScheduledTestPassRateSummary(ctx, r.db, control.ID, account.ID, control.TestDefinitionID, control.Model, control.PassRate, page.GeneratedAt); err != nil {
+				return nil, err
+			}
+			control.Reason = control.PassRate.Reason
+			if control.Blocking {
+				control.Phase = "paused"
+			} else if !control.PassRate.Ready {
+				control.Phase = "insufficient"
+			} else {
+				control.Phase = "healthy"
+			}
+		}
 	}
 	return page, nil
 }

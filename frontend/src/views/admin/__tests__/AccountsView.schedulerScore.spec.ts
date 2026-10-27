@@ -5,17 +5,21 @@ import AccountsView from '../AccountsView.vue'
 
 const {
   listAccounts,
+  qualityScores,
   listWithEtag,
   getBatchTodayStats,
   getAllProxies,
   getAllGroups
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  qualityScores: vi.fn(),
   listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn()
 }))
+
+vi.mock('@/api/admin/channelQuality', () => ({ channelQualityAPI: { scores: qualityScores } }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
@@ -67,8 +71,9 @@ const DataTableStub = {
   props: ['columns', 'data'],
   template: `
     <div data-test="data-table">
-      <div v-for="row in data" :key="row.id" :data-test="'scheduler-score-' + row.id">
-        <slot name="cell-scheduler_score" :row="row" />
+      <div v-for="row in data" :key="row.id">
+        <div :data-test="'scheduler-score-' + row.id"><slot name="cell-scheduler_score" :row="row" /></div>
+        <div :data-quality-cell="row.id"><slot name="cell-quality_score" :row="row" /></div>
       </div>
     </div>
   `
@@ -133,6 +138,8 @@ describe('admin AccountsView scheduler score column', () => {
   beforeEach(() => {
     localStorage.clear()
 
+    qualityScores.mockReset()
+    qualityScores.mockResolvedValue({})
     listAccounts.mockReset()
     listWithEtag.mockReset()
     getBatchTodayStats.mockReset()
@@ -250,4 +257,16 @@ describe('admin AccountsView scheduler score column', () => {
     expect(emptyCell.exists()).toBe(true)
     expect(emptyCell.text()).toBe('-')
   })
+  it('loads independent quality scores for the visible page and links to their evidence', async () => {
+    qualityScores.mockResolvedValue({ '1': { value: 87.6, status: 'ready' }, '2': { value: null, status: 'insufficient' } })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(qualityScores).toHaveBeenCalledWith([1, 2, 3])
+    expect(wrapper.get('[data-account-quality-score="1"]').text()).toContain('88')
+    expect(wrapper.get('[data-account-quality-score="1"]').attributes('href')).toBe('/admin/tests?tab=overview&account_id=1')
+    expect(wrapper.get('[data-account-quality-score="2"] strong').text()).toBe('—')
+    expect(wrapper.get('[data-account-quality-score="3"] strong').text()).toBe('—')
+    wrapper.unmount()
+  })
+
 })

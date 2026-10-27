@@ -67,6 +67,9 @@ func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, 
 	if row.Extra == nil {
 		row.Extra = map[string]any{}
 	}
+	if (&service.Account{Extra: row.Extra}).ActivePassRateBlocked(model) {
+		return false, nil
+	}
 	if fallback {
 		// Only automatic active protection owns quality_paused. A reason string or
 		// scheduler projection alone cannot turn a disabled account back on.
@@ -102,7 +105,9 @@ func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, 
 func groupQualityFallbackCandidate(ctx context.Context, tx *sql.Tx, aid int64, model string) (bool, error) {
 	var raw []byte
 	var active bool
-	err := tx.QueryRowContext(ctx, `SELECT to_jsonb(a), (`+groupQualityActiveProof+`) FROM accounts a WHERE a.id=$1 FOR NO KEY UPDATE`, aid).Scan(&raw, &active)
+	err := tx.QueryRowContext(ctx, `SELECT to_jsonb(a), (`+groupQualityActiveProof+`) FROM accounts a WHERE a.id=$1
+ AND NOT EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.account_id=a.id AND s.blocked AND ($2='' OR s.model_key='' OR s.model_key=$2))
+ FOR NO KEY UPDATE`, aid, model).Scan(&raw, &active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -115,7 +120,9 @@ func groupQualityFallbackCandidate(ctx context.Context, tx *sql.Tx, aid int64, m
 func groupQualityFallbackHasVerifiedSupply(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, model string, now time.Time) (bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT s.data,to_jsonb(a) FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id
  JOIN accounts a ON a.id=s.account_id WHERE s.policy_id=$1 AND s.model_key=$2 AND s.data->>'phase'='healthy'
- AND a.deleted_at IS NULL AND a.status='active' AND a.schedulable AND `+passiveMembership, p.ID, model)
+ AND a.deleted_at IS NULL AND a.status='active' AND a.schedulable
+ AND NOT EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states capability WHERE capability.account_id=a.id AND capability.blocked AND ($2='' OR capability.model_key='' OR capability.model_key=$2))
+ AND `+passiveMembership, p.ID, model)
 	if err != nil {
 		return false, err
 	}

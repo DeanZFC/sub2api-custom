@@ -440,6 +440,11 @@
               @error="(message: string) => appStore.showError(message)"
             />
           </template>
+          <template #cell-quality_score="{ row }">
+            <a :href="`/admin/tests?tab=overview&account_id=${row.id}`" class="block rounded px-1 hover:bg-gray-50 dark:hover:bg-dark-800" :title="t('admin.tests.scoring.details')" :data-account-quality-score="row.id">
+              <ChannelQualityScoreEvidence :score="accountQualityScores[String(row.id)]" compact />
+            </a>
+          </template>
           <template #header-scheduler_score="{ column }">
             <div class="flex items-center">
               <span>{{ column.label }}</span>
@@ -558,6 +563,8 @@ import AccountPlatformTabs from '@/components/admin/account/AccountPlatformTabs.
 import AccountGroupTabs from '@/components/admin/account/AccountGroupTabs.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import { useTableLoader } from '@/composables/useTableLoader'
+import { useAccountQualityScores } from '@/composables/useAccountQualityScores'
+import ChannelQualityScoreEvidence from '@/components/tests/ChannelQualityScoreEvidence.vue'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
@@ -1221,6 +1228,8 @@ const {
   }
 })
 
+const { scores: accountQualityScores, refresh: refreshAccountQualityScores } = useAccountQualityScores(accounts, computed(() => isColumnVisible('quality_score')))
+
 const {
   selectedSet,
   selectedIds: selIds,
@@ -1683,6 +1692,7 @@ const refreshAccountsIncrementally = async () => {
   syncAccountListDerivedParams()
   autoRefreshFetching.value = true
   const requestContext = upstreamBillingRateContextKey()
+  const previousAccounts = accounts.value
   try {
     const result = await adminAPI.accounts.listWithEtag(
       pagination.page,
@@ -1715,6 +1725,8 @@ const refreshAccountsIncrementally = async () => {
       hasPendingListSync.value = false
     }
     upstreamBillingNow.value = Date.now()
+    // Row replacements already trigger a score refresh through the page watcher.
+    if (accounts.value === previousAccounts) void refreshAccountQualityScores()
 
     await refreshTodayStatsBatch()
     await refreshRecentRequests()
@@ -2036,6 +2048,7 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'recent_requests', label: t('admin.accounts.columns.recentRequests'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
+    { key: 'quality_score', label: t('admin.tests.quality.qualityScore'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]

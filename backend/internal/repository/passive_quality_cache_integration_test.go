@@ -129,7 +129,7 @@ func TestPassiveQualityLatencyRecoveryLeavesCacheHoldIntegration(t *testing.T) {
 func recordCacheRequest(t *testing.T, ctx context.Context, db *sql.DB, r *passiveQualityRepository, aid int64, key, session, prefix string, at time.Time, read int64) {
 	t.Helper()
 	metadata := &service.PassiveQualityCacheMetadata{Version: 1, WireVerified: true, AccountID: aid, SessionHash: session, Model: "model", Scope: fmt.Sprintf("scope-%d", aid), StartedAt: at.Add(-100 * time.Millisecond), PrefixHashes: []string{prefix}, PromptHash: prefix, MinimumTokens: 1024, RetentionSeconds: 300}
-	require.NoError(t, r.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: aid, RequestKey: key, At: at, CacheReported: true, CacheMetadata: metadata}}, nil))
+	require.NoError(t, r.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: aid, RequestKey: key, StartedAt: metadata.StartedAt, At: at, CacheReported: true, CacheMetadata: metadata}}, nil))
 	_, err := db.Exec(`INSERT INTO usage_logs(account_id,request_id,created_at,model,input_tokens,cache_read_tokens,first_token_ms,duration_ms)VALUES($1,$2,$3,'model',$4,$5,50,100)`, aid, key, at, 2048-read, read)
 	require.NoError(t, err)
 }

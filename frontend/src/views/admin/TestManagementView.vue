@@ -11,14 +11,14 @@
       <section v-if="section === 'policies' || section === 'settings'" class="space-y-3">
         <p v-if="section === 'policies'" class="text-sm text-gray-500">{{ t('admin.tests.experience.strategyHint') }}</p>
         <div class="flex flex-wrap gap-2" role="group" :aria-label="t(section === 'policies' ? 'admin.tests.experience.policies' : 'admin.tests.experience.settings')">
-          <button v-for="tab in section === 'policies' ? policyTabs : settingsTabs" :key="tab.key" type="button" :aria-pressed="activeTab === tab.key" :data-quality-tab="tab.key" class="rounded-lg border px-4 py-2 text-sm" :class="activeTab === tab.key ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-950/30 dark:text-primary-300' : 'border-gray-200 text-gray-500 dark:border-dark-700'" @click="navigate(tab.key)">{{ t(tab.label) }}</button>
+          <button v-for="tab in section === 'policies' ? policyTabs : settingsTabs" :key="tab.key" type="button" :aria-pressed="(tab.key === 'passive' ? passiveTab : activeTab === tab.key)" :data-quality-tab="tab.key" class="rounded-lg border px-4 py-2 text-sm" :class="(tab.key === 'passive' ? passiveTab : activeTab === tab.key) ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-950/30 dark:text-primary-300' : 'border-gray-200 text-gray-500 dark:border-dark-700'" @click="navigate(tab.key)">{{ t(tab.label) }}</button>
         </div>
       </section>
       <div v-if="activeTab === 'records'" class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 p-4 dark:bg-dark-800"><p class="text-sm text-gray-500">{{ t('admin.tests.experience.recordsHint') }}</p><button class="btn btn-secondary btn-sm" @click="navigate('plans')">{{ t('admin.tests.experience.viewActiveResults') }}</button></div>
       <ChannelQualityOverview v-show="activeTab === 'overview'" ref="overview" :visible="activeTab === 'overview'" :groups="groups" :account-id="accountId" @navigate="navigate" />
-      <GroupQualityTargetsPanel v-if="activeTab === 'group-targets'" ref="targets" :visible="true" :groups="groups" :policy-id="Number(route.query.policy_id) || undefined" @navigate="navigate" />
+      <PassiveQualityManagementPanel v-if="passiveTab" ref="management" :groups="groups" :accounts="accounts" :target-policy-id="activeTab === 'group-targets' ? Number(route.query.policy_id) || undefined : undefined" :advanced-policy="activeTab === 'passive' && (!!route.query.policy_id || route.query.advanced === '1')" @navigate="navigate" />
       <ActiveQualityPanel v-show="activeTab === 'plans' || activeTab === 'types'" ref="active" :tab="activeTab" @catalog="setCatalog" />
-      <PassiveQualityPanel v-show="activeTab === 'passive' || activeTab === 'records'" ref="passive" :tab="activeTab" :groups="groups" :accounts="accounts" @tab="navigate" />
+      <PassiveQualityPanel v-if="activeTab === 'records'" ref="passive" :tab="activeTab" :groups="groups" :accounts="accounts" @tab="navigate" />
       <QualityOperationsPanel v-if="activeTab === 'operations'" ref="operations" :visible="true" :accounts="accounts" />
     </div>
   </AppLayout>
@@ -32,7 +32,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ActiveQualityPanel from '@/components/tests/ActiveQualityPanel.vue'
 import PassiveQualityPanel from '@/components/tests/PassiveQualityPanel.vue'
 import ChannelQualityOverview from '@/components/tests/ChannelQualityOverview.vue'
-import GroupQualityTargetsPanel from '@/components/tests/GroupQualityTargetsPanel.vue'
+import PassiveQualityManagementPanel from '@/components/tests/PassiveQualityManagementPanel.vue'
 import QualityOperationsPanel from '@/components/tests/QualityOperationsPanel.vue'
 import type { AdminGroup, AccountListItem } from '@/types'
 const { t } = useI18n()
@@ -48,32 +48,32 @@ const tabs = [
 ]
 const primaryTabs = [
   { key: 'overview', target: 'overview', label: 'admin.tests.quality.overview' },
-  { key: 'policies', target: 'group-targets', label: 'admin.tests.experience.policies' },
+  { key: 'policies', target: 'passive', label: 'admin.tests.experience.policies' },
   { key: 'records', target: 'records', label: 'admin.tests.experience.records' },
   { key: 'settings', target: 'types', label: 'admin.tests.experience.settings' },
 ]
 const policyTabs = [
-  { key: 'group-targets', label: 'admin.tests.groupTargets.title' },
-  { key: 'passive', label: 'admin.tests.experience.traffic' },
   { key: 'plans', label: 'admin.tests.experience.scheduled' },
+  { key: 'passive', label: 'admin.tests.experience.traffic' },
 ]
 const settingsTabs = tabs.filter(tab => ['types', 'operations'].includes(tab.key))
 const section = computed(() => ['group-targets', 'plans', 'passive'].includes(activeTab.value) ? 'policies' : ['types', 'operations'].includes(activeTab.value) ? 'settings' : activeTab.value)
 const activeTab = computed(() => tabs.some(tab => tab.key === route.query.tab) ? String(route.query.tab) : 'overview')
+const passiveTab = computed(() => ['passive', 'group-targets'].includes(activeTab.value))
 const accountId = computed(() => Number(route.query.account_id) || undefined)
 const groups = ref<AdminGroup[]>([]), accounts = ref<AccountListItem[]>([])
 const active = ref<InstanceType<typeof ActiveQualityPanel> | null>(null)
 const passive = ref<InstanceType<typeof PassiveQualityPanel> | null>(null)
 const overview = ref<InstanceType<typeof ChannelQualityOverview> | null>(null)
-const targets = ref<InstanceType<typeof GroupQualityTargetsPanel> | null>(null)
+const management = ref<InstanceType<typeof PassiveQualityManagementPanel> | null>(null)
 const operations = ref<InstanceType<typeof QualityOperationsPanel> | null>(null)
 function setCatalog(g: AdminGroup[], a: AccountListItem[]) { groups.value = g; accounts.value = a }
-function navigate(tab: string, policy?: number, account?: number) {
-  void router.replace({ query: { tab, ...(account ? { account_id: account } : {}), ...(policy ? tab === 'plans' ? { plan_id: policy } : { policy_id: policy } : {}) } })
+function navigate(tab: string, policy?: number, account?: number, phase?: string, advanced?: boolean) {
+  void router.replace({ query: { tab, ...(account ? { account_id: account } : {}), ...(policy ? tab === 'plans' ? { plan_id: policy } : { policy_id: policy } : {}), ...(tab === 'records' && phase ? { phase } : {}), ...(tab === 'passive' && advanced ? { advanced: '1' } : {}) } })
 }
 function refresh() {
   if (activeTab.value === 'overview') void overview.value?.refresh()
-  else if (activeTab.value === 'group-targets') void targets.value?.refresh()
+  else if (passiveTab.value) void management.value?.refresh()
   else if (activeTab.value === 'plans' || activeTab.value === 'types') void active.value?.refresh()
   else if (activeTab.value === 'operations') void operations.value?.refresh()
   else void passive.value?.refresh()

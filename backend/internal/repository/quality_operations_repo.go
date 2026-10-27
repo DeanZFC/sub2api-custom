@@ -336,6 +336,7 @@ func (r *qualityOperationsRepository) QualityFrequencyDue(ctx context.Context, p
 	var next time.Time
 	err := r.db.QueryRowContext(ctx, `SELECT f.next_at FROM quality_healthy_frequency f JOIN quality_operations_config c ON c.id=1 AND c.version=f.config_version AND c.config->>'dynamic_enabled'='true'
  WHERE f.plan_id=$1 AND f.account_id=$2 AND f.policy_key=$3 AND f.streak>=(c.config->>'healthy_rounds')::integer AND f.next_at>now()
+ AND NOT EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.account_id=$2 AND s.blocked)
  AND NOT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$2 AND p.config->>'enabled'='true' AND (s.data->>'updated_at')::timestamptz>f.observed_at AND (s.data->>'phase' IN ('suspect','observed','limited','paused','probing','trial') OR (s.data->>'phase'<>'exempt' AND (s.data->'latency'->>'phase' IN ('watching','limited') OR EXISTS(SELECT 1 FROM jsonb_each(COALESCE(NULLIF(s.data->'cache','null'::jsonb),'{}'::jsonb)) c WHERE c.value->>'phase' IN ('watching','reduced','recovering'))))))`, plan, account, key).Scan(&next)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -387,10 +388,10 @@ func (r *qualityOperationsRepository) RecordQualityFrequency(ctx context.Context
 	} else {
 		streak = 0
 	}
-	// An outstanding passive anomaly prevents healthy active tests from slowing
-	// checks of a still-degraded account.
+	// Outstanding operational or capability holds prevent healthy active tests
+	// from slowing the fresh probes needed to recover a degraded account.
 	var anomaly bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND (s.data->>'phase' IN ('suspect','observed','limited','paused','probing','trial') OR (s.data->>'phase'<>'exempt' AND (s.data->'latency'->>'phase' IN ('watching','limited') OR EXISTS(SELECT 1 FROM jsonb_each(COALESCE(NULLIF(s.data->'cache','null'::jsonb),'{}'::jsonb)) c WHERE c.value->>'phase' IN ('watching','reduced','recovering'))))))`, *result.AccountID).Scan(&anomaly); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.account_id=$1 AND s.blocked) OR EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND (s.data->>'phase' IN ('suspect','observed','limited','paused','probing','trial') OR (s.data->>'phase'<>'exempt' AND (s.data->'latency'->>'phase' IN ('watching','limited') OR EXISTS(SELECT 1 FROM jsonb_each(COALESCE(NULLIF(s.data->'cache','null'::jsonb),'{}'::jsonb)) c WHERE c.value->>'phase' IN ('watching','reduced','recovering'))))))`, *result.AccountID).Scan(&anomaly); err != nil {
 		return err
 	}
 	if anomaly {

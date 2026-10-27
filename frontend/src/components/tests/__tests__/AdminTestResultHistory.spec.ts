@@ -34,6 +34,25 @@ const mountHistory = (results: TestResult[], extra = {}) => mount(AdminTestResul
 })
 
 describe('admin result account history', () => {
+  it('shows the current rolling window alongside an unchanged historical verdict', async () => {
+    const wrapper = mountHistory([result(1, {
+      protection_decision: { status: 'applied', verdict: 'pass', scheduling: 'keep', reason: 'This check passed' },
+      pass_rate: {
+        samples: 10, passed: 7, pass_rate: 70, window_size: 10, window_seconds: 604800,
+        pause_below: 80, recover_at_least: 90, recover_consecutive: 2, consecutive_passes: 1,
+        blocked: true, ready: true, stale: false, reason: 'recovery_pending',
+        latest_verdict: 'pass', rule_version: 'v1', model: 'gpt-6-astra',
+      },
+    })])
+    await flushPromises()
+    expect(wrapper.get('[data-result-id="1"] .badge').classes()).not.toContain('badge-danger')
+    expect(wrapper.get('[data-protection-decision]').text()).toContain('This check passed')
+    expect(wrapper.get('[data-pass-rate-state]').text()).toBe('Calls paused')
+    expect(wrapper.get('[data-pass-rate-counts]').text()).toBe('7/10 passed · 70%')
+    expect(wrapper.text()).toContain('current window, not the evidence as of this historical result')
+    wrapper.unmount()
+  })
+
   it('shows total duration and filters a slow completed pelican as a quality failure while preserving its output', async () => {
     const wrapper = mountHistory([
       result(1),

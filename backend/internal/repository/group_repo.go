@@ -455,9 +455,30 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 }
 
 func (r *groupRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Group.Delete().Where(group.IDEQ(id)).Exec(ctx)
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	exec := r.client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		exec = tx.Client()
+	}
+	plans, err := lockGroupPassRateProtection(ctx, exec, id)
+	if err != nil {
+		return err
+	}
+	_, err = exec.Group.Delete().Where(group.IDEQ(id)).Exec(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
+	}
+	if err := releaseDetachedGroupPassRates(ctx, exec, plans); err != nil {
+		return err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group delete failed: group=%d err=%v", id, err)
@@ -848,9 +869,30 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 }
 
 func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return 0, err
+	}
+	exec := r.client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		exec = tx.Client()
+	}
+	plans, err := lockGroupPassRateProtection(ctx, exec, groupID)
 	if err != nil {
 		return 0, err
+	}
+	res, err := exec.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
+	if err != nil {
+		return 0, err
+	}
+	if err := releaseDetachedGroupPassRates(ctx, exec, plans); err != nil {
+		return 0, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
 	}
 	affected, _ := res.RowsAffected()
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
@@ -882,6 +924,10 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 		txClient = exec
 	}
 	// err 为 dbent.ErrTxStarted 时，复用当前 client 参与同一事务。
+	plans, err := lockGroupPassRateProtection(ctx, exec, id)
+	if err != nil {
+		return nil, err
+	}
 
 	// Lock the group row to avoid concurrent writes while we cascade.
 	// 这里使用 exec.QueryContext 手动扫描，确保同一事务内加锁并能区分"未找到"与其他错误。
@@ -966,6 +1012,9 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 
 	// 5. Soft-delete group itself.
 	if _, err := txClient.Group.Delete().Where(group.IDEQ(id)).Exec(ctx); err != nil {
+		return nil, err
+	}
+	if err := releaseDetachedGroupPassRates(ctx, exec, plans); err != nil {
 		return nil, err
 	}
 	// Lock and validate the text value before using JSONB operators. A legacy

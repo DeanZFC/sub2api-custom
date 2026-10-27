@@ -280,6 +280,34 @@ func TestQualityOperationsHealthyFrequencyFencingIntegration(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, next, "active success cannot slow tests of a passive-degraded account")
 }
+
+func TestQualityOperationsCapabilityHoldPreventsHealthyFrequencyIntegration(t *testing.T) {
+	ctx, db, r, _ := qualityOperationsDB(t)
+	c := service.DefaultQualityOperationsConfig()
+	c.DynamicEnabled, c.HealthyRounds, c.HealthyBaseSeconds, c.HealthyMaxSeconds = true, 2, 60, 240
+	require.NoError(t, r.SaveOperationsConfig(ctx, &c))
+	plan := &service.ScheduledTestPlan{ID: 1}
+	require.NoError(t, db.QueryRow(`SELECT updated_at FROM scheduled_test_plans WHERE id=1`).Scan(&plan.UpdatedAt))
+	id := int64(62)
+	result := &service.ScheduledTestResult{AccountID: &id, RunID: "run", StartedAt: time.Now().Add(-time.Minute)}
+	for range 2 {
+		result.StartedAt = result.StartedAt.Add(time.Second)
+		require.NoError(t, r.RecordQualityFrequency(ctx, plan, result, "policy", true))
+	}
+	next, err := r.QualityFrequencyDue(ctx, 1, id, "policy")
+	require.NoError(t, err)
+	require.NotNil(t, next)
+	_, err = db.Exec(`INSERT INTO scheduled_test_pass_rate_states(plan_id,account_id,test_definition_id,model_key,blocked) VALUES(1,62,2,'model',true)`)
+	require.NoError(t, err)
+	next, err = r.QualityFrequencyDue(ctx, 1, id, "policy")
+	require.NoError(t, err)
+	require.Nil(t, next, "capability recovery must not wait on a previous healthy streak")
+	result.StartedAt = time.Now()
+	require.NoError(t, r.RecordQualityFrequency(ctx, plan, result, "policy", true))
+	var streak int
+	require.NoError(t, db.QueryRow(`SELECT streak FROM quality_healthy_frequency WHERE plan_id=1 AND account_id=62`).Scan(&streak))
+	require.Zero(t, streak, "a passing round does not claim health while another independent capability hold persists")
+}
 func TestQualityOperationsReplayReadOnlyAndFreshEvidenceIntegration(t *testing.T) {
 	ctx, db, r, passive := qualityOperationsDB(t)
 	from := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)

@@ -35,7 +35,9 @@ type ChannelQualityControl struct {
 	UpdatedAt         time.Time                           `json:"updated_at"`
 	Blocking          bool                                `json:"blocking"`
 	ResultID          int64                               `json:"result_id,omitempty"`
+	TestDefinitionID  int64                               `json:"test_definition_id,omitempty"`
 	Evidence          *PassiveQualityEvidence             `json:"evidence,omitempty"`
+	PassRate          *ScheduledTestPassRateSummary       `json:"pass_rate,omitempty"`
 }
 
 type ChannelQualityAccount struct {
@@ -44,6 +46,7 @@ type ChannelQualityAccount struct {
 	Platform        string                  `json:"platform"`
 	Status          string                  `json:"status"`
 	Schedulable     bool                    `json:"schedulable"`
+	QualityScore    *ChannelQualityScore    `json:"quality_score,omitempty"`
 	Controls        []ChannelQualityControl `json:"controls"`
 	ActivePlans     int                     `json:"active_plans"`
 	PassivePolicies int                     `json:"passive_policies"`

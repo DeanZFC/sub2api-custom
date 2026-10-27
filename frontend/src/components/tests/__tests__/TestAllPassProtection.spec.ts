@@ -4,6 +4,7 @@ import { createI18n } from 'vue-i18n'
 import TestProtectionEditor from '../TestProtectionEditor.vue'
 import type { AdminGroup, TestProtectionConfig, TestType } from '@/types'
 import { copyTestProtection, defaultProtectionRule, defaultTestProtectionRecovery, validTestProtection } from '@/utils/testProtection'
+import { defaultTestPassRate } from '@/utils/testPassRate'
 
 const types: TestType[] = [
   { id: 1, name: 'Model', key: 'model_check', output_kind: 'model_check', prompt: '', enabled: true },
@@ -25,6 +26,7 @@ describe('all automatic checks pass', () => {
     const original: TestProtectionConfig = { enabled: true, mode: 'per_test', rules: types.map(defaultProtectionRule) }
     original.rules[0].priority = 999
     original.rules[1].expected_answer = '21'
+    original.rules[1].pass_rate = { ...defaultTestPassRate(), window_size: 20 }
     original.rules[1].on_pass = { scheduling: 'pause', group_mode: 'assign', group_ids: [8] }
     original.rules[2].thresholds = [{ metric: 'cache_rate', operator: 'lt', value: 80 }]
     original.rules[2].recovery = { ...defaultTestProtectionRecovery(original.rules[2]), enabled: true }
@@ -37,6 +39,7 @@ describe('all automatic checks pass', () => {
     const value = wrapper.props('modelValue')
     expect(value.rules[0].priority).toBe(0)
     expect(value.rules[1].expected_answer).toBe('21')
+    expect(value.rules[1].pass_rate).toEqual(original.rules[1].pass_rate)
     expect(value.rules[1].on_pass).toEqual({ scheduling: 'resume', group_mode: 'keep' })
     expect(value.rules[2].thresholds).toEqual(original.rules[2].thresholds)
     expect(value.rules[2].recovery).toEqual(original.rules[2].recovery)
@@ -56,6 +59,9 @@ describe('all automatic checks pass', () => {
     expect(wrapper.props('modelValue').on_pass).toBeUndefined()
     expect(wrapper.props('modelValue').on_fail).toBeUndefined()
     expect(wrapper.findAll('[data-combination-rule]')).toHaveLength(2)
+    expect(wrapper.props('modelValue').rules[1].pass_rate).toEqual(original.rules[1].pass_rate)
+    await wrapper.get('[data-protection-mode]').setValue('per_test')
+    expect(wrapper.props('modelValue').rules[1].pass_rate).toEqual(original.rules[1].pass_rate)
     wrapper.unmount()
   })
 

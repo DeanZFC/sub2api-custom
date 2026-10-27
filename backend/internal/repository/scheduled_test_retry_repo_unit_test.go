@@ -29,6 +29,9 @@ func TestScheduledTestResultRepositoryGetByIDLoadsActualTestedAccount(t *testing
 		WithArgs("{9}").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision", "execution_info"}).
 			AddRow(9, nil, `{"input_tokens":17,"failure_kind":"server","attempts":[{"http_status":503}]}`))
+	mock.ExpectQuery(`(?s)SELECT r.id,s.plan_id.*JOIN scheduled_test_pass_rate_states.*WHERE r.id=ANY`).
+		WithArgs("{9}").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "plan_id", "account_id", "test_definition_id", "model_key", "summary", "blocked"}))
 	result, err := repo.GetByID(context.Background(), 9)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), result.PlanID)

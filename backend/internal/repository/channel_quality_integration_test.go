@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -11,13 +12,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
-	ctx, db, passive := passiveDB(t)
+func prepareChannelQualitySchema(t *testing.T, db *sql.DB) {
+	t.Helper()
 	_, err := db.Exec(`ALTER TABLE accounts ADD COLUMN platform TEXT DEFAULT 'openai',ADD COLUMN overload_until TIMESTAMPTZ;
  CREATE TABLE scheduled_test_plans(id BIGINT PRIMARY KEY,name TEXT,model_id TEXT,enabled BOOLEAN,group_ids BIGINT[],excluded_account_ids BIGINT[] DEFAULT '{}',next_run_at TIMESTAMPTZ);
  ALTER TABLE scheduled_test_protection_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN completed BOOLEAN,ADD COLUMN result_id BIGINT,ADD COLUMN result_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN round_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN verdict TEXT;
- ALTER TABLE scheduled_test_combination_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();
- INSERT INTO scheduled_test_plans VALUES(1,'Capability','model',true,ARRAY[8]::bigint[],'{}',now());
+ ALTER TABLE scheduled_test_combination_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();`)
+	require.NoError(t, err)
+}
+
+func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
+	ctx, db, passive := passiveDB(t)
+	prepareChannelQualitySchema(t, db)
+	_, err := db.Exec(`INSERT INTO scheduled_test_plans VALUES(1,'Capability','model',true,ARRAY[8]::bigint[],'{}',now());
  INSERT INTO scheduled_test_protection_states(plan_id,account_id,reason,blocked,completed,result_id,verdict) VALUES(1,62,'Passed',false,true,5,'pass');
  UPDATE accounts SET status='quality_paused',schedulable=false WHERE id=63;`)
 	require.NoError(t, err)
@@ -100,4 +107,76 @@ func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
 	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{ProblemsOnly: true, AccountID: 62, Model: "B"})
 	require.NoError(t, err)
 	require.Empty(t, page.Items)
+}
+
+func TestChannelQualityOverviewIncludesIndependentRealTrafficScore(t *testing.T) {
+	ctx, db, _ := passiveDB(t)
+	prepareChannelQualitySchema(t, db)
+	_, err := db.Exec(`INSERT INTO usage_logs(account_id,request_id,created_at,model,requested_model,first_token_ms,duration_ms)
+ SELECT 62,'score-'||i,now()-i*INTERVAL '1 second','upstream-model','public-model',2000,10000 FROM generate_series(1,20) i`)
+	require.NoError(t, err)
+	seedScoreFixtureReports(t, db, time.Now().Add(-time.Minute))
+	// No active plan or passive policy exists; real public-model traffic still
+	// makes this account discoverable and independently scoreable.
+	page, err := NewChannelQualityRepository(db).ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "public-model"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	score := page.Items[0].QualityScore
+	require.NotNil(t, score)
+	require.NotNil(t, score.Value)
+	require.Equal(t, 100., *score.Value)
+	require.Equal(t, "partial", score.Status)
+	require.Equal(t, 20, score.Samples)
+	page, err = NewChannelQualityRepository(db).ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "upstream-model"})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
+}
+
+func TestChannelQualityOverviewPassRateModelScopeAndStaleHolds(t *testing.T) {
+	ctx, db, _ := passiveDB(t)
+	prepareChannelQualitySchema(t, db)
+	// A disabled plan may retain an independent capability hold. Changing the
+	// plan's current model must not make its old-model hold disappear.
+	_, err := db.Exec(`INSERT INTO scheduled_test_plans VALUES(1,'Capability','new-model',false,ARRAY[8]::bigint[],'{}',now())`)
+	require.NoError(t, err)
+	config := service.ScheduledTestPassRateConfig{Enabled: true, WindowSize: 2, WindowSeconds: 3600, PauseBelow: 80, RecoverAtLeast: 90, RecoverConsecutive: 2}
+	now := time.Now()
+	summary := service.SummarizeScheduledTestPassRate(config, []service.ScheduledTestPassRateObservation{{Verdict: "fail", StartedAt: now.Add(-2 * time.Hour)}, {Verdict: "pass", StartedAt: now.Add(-3 * time.Hour)}}, true, now.Add(-2*time.Hour))
+	summary.RuleVersion, summary.Model = "v1", "old-model"
+	raw, err := json.Marshal(summary)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO scheduled_test_pass_rate_states(plan_id,account_id,test_definition_id,model_key,rule_version,blocked,summary) VALUES(1,62,7,'old-model','v1',true,$1)`, string(raw))
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO scheduled_test_pass_rate_evidence(plan_id,account_id,test_definition_id,model_key,rule_version,verdict,started_at)
+ VALUES(1,62,7,'old-model','v1','fail',now()-interval '2 hours'),(1,62,7,'old-model','v1','pass',now()-interval '3 hours')`)
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	r := NewChannelQualityRepository(db)
+	page, err := r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "old-model", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Len(t, page.Items[0].Controls, 1)
+	c := page.Items[0].Controls[0]
+	require.Equal(t, "pass_rate", c.Metric)
+	require.Equal(t, "model", c.Scope)
+	require.Equal(t, "old-model", c.Model)
+	require.Equal(t, "paused", c.Phase)
+	require.True(t, c.Blocking)
+	require.True(t, c.PassRate.Blocked)
+	require.True(t, c.PassRate.Stale)
+	require.Zero(t, c.PassRate.Samples)
+	require.Nil(t, c.PassRate.PassRate)
+	var blocked bool
+	require.NoError(t, db.QueryRow(`SELECT blocked FROM scheduled_test_pass_rate_states WHERE account_id=62`).Scan(&blocked))
+	require.True(t, blocked, "reading expired evidence must never release a live hold")
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "other-model", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
+
+	_, err = db.Exec(`UPDATE scheduled_test_plans SET enabled=true; UPDATE scheduled_test_pass_rate_states SET blocked=false`)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "old-model"})
+	require.NoError(t, err)
+	require.Equal(t, "insufficient", page.Items[0].Controls[0].Phase)
+	require.False(t, page.Items[0].Controls[0].Blocking)
 }

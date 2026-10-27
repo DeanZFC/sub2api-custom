@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
@@ -58,6 +59,7 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		 recovery_trial_ends_at TIMESTAMPTZ DEFAULT clock_timestamp()+INTERVAL '1 hour',recovery_trial_requests BIGINT NOT NULL DEFAULT 0,rule_config JSONB NOT NULL,
 		 PRIMARY KEY(plan_id,account_id,test_definition_id));
 		CREATE TABLE scheduled_test_combination_states(plan_id BIGINT,account_id BIGINT,blocked BOOLEAN NOT NULL DEFAULT TRUE,PRIMARY KEY(plan_id,account_id));
+		CREATE TABLE scheduled_test_pass_rate_states(account_id BIGINT,model_key TEXT,blocked BOOLEAN NOT NULL DEFAULT TRUE);
 		INSERT INTO accounts(id) VALUES(41);`)
 	repos := []*accountRepository{{sql: db}, {sql: otherDB}}
 	check := func(want bool) {
@@ -67,7 +69,7 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		require.Equal(t, want, allowed)
 	}
 	reset := func() {
-		exec(`TRUNCATE scheduled_test_protection_states,scheduled_test_combination_states; UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL`)
+		exec(`TRUNCATE scheduled_test_protection_states,scheduled_test_combination_states,scheduled_test_pass_rate_states; UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL`)
 	}
 	hold := func(planID, maxRequests int64) {
 		exec(`INSERT INTO scheduled_test_protection_states(plan_id,account_id,test_definition_id,rule_config)
@@ -104,6 +106,25 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		check(false)
 		exec(`UPDATE scheduled_test_protection_states SET blocked=FALSE WHERE plan_id=2`)
 		check(true)
+	})
+	t.Run("capability holds remain model scoped and do not consume legacy trials", func(t *testing.T) {
+		reset()
+		hold(1, 3)
+		exec(`INSERT INTO scheduled_test_pass_rate_states(account_id,model_key) VALUES(41,'public-a')`)
+		for _, model := range []string{"", "public-a", "public-b"} {
+			requestCtx := context.WithValue(ctx, ctxkey.Model, model)
+			allowed, err := repos[0].AcquireCacheRecoveryRequest(requestCtx, 41)
+			require.NoError(t, err)
+			require.Equal(t, model == "public-b", allowed)
+		}
+		requestCtx := context.WithValue(ctx, ctxkey.Model, "provider-b")
+		requestCtx = context.WithValue(requestCtx, ctxkey.RequestedPublicModel, "public-a")
+		allowed, err := repos[0].AcquireCacheRecoveryRequest(requestCtx, 41)
+		require.NoError(t, err)
+		require.False(t, allowed, "public model wins over a provider alias")
+		var used int64
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT recovery_trial_requests FROM scheduled_test_protection_states WHERE plan_id=1`).Scan(&used))
+		require.EqualValues(t, 1, used)
 	})
 	t.Run("combination hold overrides an active cache trial", func(t *testing.T) {
 		reset()

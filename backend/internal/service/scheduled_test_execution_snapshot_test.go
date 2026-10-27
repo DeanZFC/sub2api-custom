@@ -257,6 +257,52 @@ func TestScheduledTestSnapshotRunsCheapStatisticsFirstAndSkipsFailedAccount(t *t
 	require.EqualValues(t, 1, upstreamCalls.Load())
 }
 
+func TestScheduledTestSnapshotPassRateRunsIndependentChecksAfterFailure(t *testing.T) {
+	repo := &snapshotResultRepoStub{
+		retryResultRepoStub: &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 16)},
+		targets:             []int64{12},
+		collect: func(context.Context, ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error) {
+			return &ScheduledTestStatistics{TotalRequests: 10, SuccessRate: protectionFloat(.5)}, nil
+		},
+	}
+	var calls atomic.Int32
+	accounts := scheduledTestExecutionAccountRepo{get: func(_ context.Context, id int64) (*Account, error) {
+		calls.Add(1)
+		return &Account{ID: id, Extra: map[string]any{"synthetic_ui_test": true}}, nil
+	}}
+	runner := newSnapshotRunner(repo, accounts)
+	runner.scheduledSvc.resultRepo = &snapshotProtectionResultRepoStub{snapshotResultRepoStub: repo}
+	defer runner.Stop()
+	plan := scheduledTestExecutionPlan()
+	plan.Enabled = true
+	plan.TestDefinitionIDs = []int64{1, 2, 3}
+	plan.Protection = ScheduledTestProtectionConfig{
+		Enabled: true, Mode: "all_pass",
+		Rules: []ScheduledTestProtectionRule{
+			{TestDefinitionID: 1, ExpectedAnswer: "wrong answer"},
+			{TestDefinitionID: 2, ExpectedAnswer: "yes", PassRate: &ScheduledTestPassRateConfig{Enabled: true}},
+			{TestDefinitionID: 3, MinSamples: 10, Thresholds: []ScheduledTestThreshold{{Metric: "success_rate", Operator: "lt", Value: 80}}},
+		},
+	}
+	runner.RunPlanNow(context.Background(), plan)
+	close(repo.updated)
+	finals := make(map[int64]*ScheduledTestResult)
+	for result := range repo.updated {
+		if result.Status != "running" {
+			finals[*result.TestDefinitionID] = result
+		}
+	}
+	require.Len(t, finals, 3)
+	statisticsPlan := *plan
+	statisticsPlan.TestDefinitionID = scheduledTestPtrInt64(3)
+	require.False(t, scheduledTestResultSatisfies(&statisticsPlan, finals[3]), "statistics failure retains its operational verdict")
+	require.EqualValues(t, 2, calls.Load(), "independent capability checks need fresh evidence despite earlier failures")
+	for _, id := range []int64{1, 2} {
+		require.Equal(t, "success", finals[id].Status)
+		require.NotContains(t, finals[id].ErrorMessage, "前一项检测未满足条件")
+	}
+}
+
 func TestScheduledTestResultSatisfiesConfiguredCondition(t *testing.T) {
 	plan := scheduledTestExecutionPlan()
 	plan.Enabled = true

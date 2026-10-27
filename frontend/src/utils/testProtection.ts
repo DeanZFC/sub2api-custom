@@ -1,4 +1,5 @@
 import type { TestCombinationCondition, TestCombinationRule, TestOutcomeAction, TestProtectionConfig, TestProtectionMetric, TestProtectionRecovery, TestProtectionRule, TestProtectionVote, TestType } from '@/types'
+import { validTestPassRate } from './testPassRate'
 
 export const protectionMetrics = (kind: string): TestProtectionMetric[] => kind === 'statistics'
   ? ['success_rate', 'cache_rate', 'avg_first_token_ms']
@@ -24,7 +25,7 @@ export function allPassOutcomeAction(value: TestProtectionConfig, outcome: 'pass
 export const copyTestProtection = (value?: TestProtectionConfig): TestProtectionConfig => value
   ? { enabled: value.enabled, ...(value.mode ? { mode: value.mode } : {}), ...(value.pass_group_ids ? { pass_group_ids: [...value.pass_group_ids] } : {}),
     ...(value.on_pass ? { on_pass: copyAction(value.on_pass) } : {}), ...(value.on_fail ? { on_fail: copyAction(value.on_fail) } : {}),
-    ...(value.combinations ? { combinations: value.combinations.map(copyTestCombination) } : {}), rules: (value.rules || []).map(rule => ({ ...rule, priority: rule.priority ?? 0, required_pass: rule.required_pass ?? false, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined })) }
+    ...(value.combinations ? { combinations: value.combinations.map(copyTestCombination) } : {}), rules: (value.rules || []).map(rule => ({ ...rule, priority: rule.priority ?? 0, required_pass: rule.required_pass ?? false, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), recovery: rule.recovery ? { ...rule.recovery } : undefined, pass_rate: rule.pass_rate ? { ...rule.pass_rate } : undefined })) }
   : { enabled: false, rules: [] }
 
 export const copyTestCombinationCondition = (condition: TestCombinationCondition): TestCombinationCondition => ({
@@ -151,6 +152,7 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
   return value.rules.every(rule => {
     const type = types.find(item => item.id === rule.test_definition_id)
     if (!type?.enabled) return false
+    if (!validTestPassRate(rule.pass_rate, type.output_kind)) return false
     if (!combined && (!Number.isInteger(rule.priority) || rule.priority < 0 || rule.priority > 1000 || typeof rule.required_pass !== 'boolean')) return false
     if (!combined && rule.required_pass && rule.vote?.enabled) return false
     if (!validStatisticsRecovery(rule, type.output_kind)) return false
@@ -166,6 +168,8 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
     if (rule.vote && !validTestVote(rule.vote)) return false
     const answer = rule.expected_answer?.trim()
     if (answer && [...answer].length > 10000) return false
+    if (rule.pass_rate?.enabled && !['model_check', 'capability'].includes(type.output_kind)
+      && !answer && !voting && !thresholds.some(item => item.metric === 'output_numeric')) return false
     if (rule.answer_match && !['exact', 'contains', 'numeric'].includes(rule.answer_match)) return false
     if (['statistics', 'model_check', 'capability'].includes(type.output_kind) && (voting || answer)) return false
     if (rule.model_match && (type.output_kind !== 'model_check' || !['exact', 'snapshot'].includes(rule.model_match))) return false

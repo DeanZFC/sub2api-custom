@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const groupQualityFallbackAffinityTTL = 30 * time.Minute
+const (
+	groupQualityFallbackAffinityTTL  = 30 * time.Minute
+	groupQualityFallbackScoreTimeout = time.Second
+)
 
 // Use a separate namespace from normal sticky ownership. A fallback is only a
 // temporary route, and must not replace the conversation's original account.
@@ -122,7 +125,8 @@ func groupQualityFallbackRetryable(err error) bool {
 // Recovery is a second, acquired-only pass. It never substitutes a wait plan,
 // changes persistent account state, or replays incremental response state on
 // another credential. A session's previous fallback is preferred while it is
-// eligible; first selection and overflow use the scheduler's existing score.
+// eligible; first selection and overflow prefer independent quality scores,
+// with the scheduler's existing order retained for ties and unknown scores.
 func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, req OpenAIAccountScheduleRequest, originalErr error) (*AccountSelectionResult, error) {
 	if s == nil || s.accountRepo == nil || s.concurrencyService == nil || !groupQualityFallbackRetryable(originalErr) || NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI || req.RequiredImageCapability != "" || req.GroupID == nil || *req.GroupID <= 0 {
 		return nil, originalErr
@@ -202,6 +206,10 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 	ranked := append([]openAIAccountCandidateScore(nil), plan.candidates...)
 	sort.SliceStable(ranked, func(i, j int) bool { return isOpenAIAccountCandidateBetter(ranked[i], ranked[j]) })
 	model := passiveQualityRoutingModel(ctx, req.RequestedModel)
+	qualityRanked := s.rankGroupQualityFallbackByScore(ctx, ranked, model)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	affinityKey := ""
 	if apiKey, authenticated := APIKeyForUsageContext(ctx); authenticated {
 		affinityKey = groupQualityFallbackAffinityKey(apiKey.ID, *req.GroupID, model, req.SessionHash)
@@ -259,15 +267,64 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 				}
 			}
 			source := "score"
+			rankingSource := "scheduler"
+			if qualityRanked {
+				rankingSource = "quality_score"
+			}
 			if owner > 0 {
 				source = "previous_response_owner"
 			} else if accountID == preferredAccountID {
 				source = "affinity"
 			}
 			slog.Info("group_quality_fallback_selected", "group_id", *req.GroupID, "account_id", accountID, "model", model,
-				"affinity_hit", accountID == preferredAccountID, "selection_source", source, "affinity_escape_reason", affinityEscapeReason)
+				"affinity_hit", accountID == preferredAccountID, "selection_source", source, "ranking_source", rankingSource, "affinity_escape_reason", affinityEscapeReason)
 			return selection, nil
 		}
 	}
 	return nil, ErrGroupQualityTrafficBudget
+}
+
+// Ranking only changes preference. Unknown evidence remains eligible, and all
+// candidates still pass the same concurrency acquisition and live admission.
+// Starting with the scheduler's order preserves its tie-breaks in both sets.
+func (s *OpenAIGatewayService) rankGroupQualityFallbackByScore(ctx context.Context, ranked []openAIAccountCandidateScore, model string) bool {
+	provider, ok := s.concurrencyService.passiveQualityGate.(ChannelQualityScoreProvider)
+	if !ok || len(ranked) == 0 {
+		return false
+	}
+	ids := make([]int64, 0, len(ranked))
+	for _, candidate := range ranked {
+		ids = append(ids, candidate.account.ID)
+	}
+	scoreCtx, cancel := context.WithTimeout(ctx, groupQualityFallbackScoreTimeout)
+	scores, err := provider.ChannelQualityScores(scoreCtx, ids, model)
+	cancel()
+	if err != nil {
+		slog.Warn("group_quality_fallback_score_unavailable", "model", model, "error", err)
+		return false
+	}
+	known := make([]openAIAccountCandidateScore, 0, len(ranked))
+	unknown := make([]openAIAccountCandidateScore, 0, len(ranked))
+	for _, candidate := range ranked {
+		score := scores[candidate.account.ID]
+		// Scoring is one global configuration. An explicitly disabled summary
+		// means the existing scheduler owns the complete ordering again.
+		if score != nil && score.Status == "disabled" {
+			return false
+		}
+		if score != nil && score.IsRankable() {
+			known = append(known, candidate)
+		} else {
+			unknown = append(unknown, candidate)
+		}
+	}
+	if len(known) == 0 {
+		return false
+	}
+	sort.SliceStable(known, func(i, j int) bool {
+		return *scores[known[i].account.ID].Value > *scores[known[j].account.ID].Value
+	})
+	copy(ranked, known)
+	copy(ranked[len(known):], unknown)
+	return true
 }

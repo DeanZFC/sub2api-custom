@@ -1,4 +1,5 @@
 import qualityExperience from './qualityExperience'
+import qualityScoring from './qualityScoring'
 import passiveQualityV2 from './passiveQualityV2'
 import groupQualityTargets from './groupQualityTargets'
 
@@ -6,6 +7,7 @@ export default {
     tests: {
       groupTargets: groupQualityTargets,
       experience: qualityExperience,
+      scoring: qualityScoring,
       operations: {
         "recovery_reserve_percent": "恢复专用预留比例（%）",
         "recovery_requests": "恢复请求数",
@@ -130,17 +132,22 @@ export default {
         "overview": "健康总览",
         "subtitle": "统一查看可用性、性能与能力检测，按原因处理异常和恢复。",
         "intro": "先查看哪些上游受到限制、由哪项策略触发，再进入对应记录处理。主动能力检测、真实请求保护与人工停用分别保留自己的限制；一次恢复只解除对应原因。",
-        "active": "定时能力检测",
-        "passive": "实时流量保护",
+        "active": "主动智力检测",
+        "passive": "被动质量管理",
         "questionBank": "检测类型与题库",
         "search": "账号名称或 ID",
         "problemsOnly": "只看异常与受限账号",
         "coverageHint": "以下为当前账号状态与已采集证据。无保护限制不代表能力已验证；指标缺失显示为 —。",
+        "qualityScore": "质量分",
+        "qualityScoreHint": "使用独立标准，对真实请求的错误率、缓存率、首字和总耗时评分；缺失指标单独标记。",
+        "qualityScoreSamples": "{models} 个模型 · {samples} 个样本",
+        "qualityScoreAccountSamples": "账号范围 · {samples} 个样本",
+        "qualityScoreUnavailable": "暂无有效样本",
         "coverage": "主动策略 {active} 个 · 被动策略 {passive} 个",
         "restricted": "存在调度限制",
         "limited": "限流降权中",
         "cacheLimited": "新会话分配减少",
-        metrics: { availability: "可用率", latency: "首字", cache: "缓存复用", group_quality_target: "分组质量目标 · 真实流量" },
+        metrics: { availability: "可用率", latency: "首字", cache: "缓存复用", group_quality_target: "分组质量目标 · 真实流量", pass_rate: "能力检测通过率" },
         "noHold": "未发现保护限制",
         "noEvidence": "暂无质量判定证据，可配置主动检测和被动保护。",
         "allModels": "所有模型",
@@ -151,8 +158,8 @@ export default {
         "inspect": "查看原因与处理",
         "loadFailed": "加载质量总览失败",
         "sources": {
-                "active": "定时能力检测",
-                "passive": "实时流量保护",
+                "active": "主动智力检测",
+                "passive": "被动质量管理",
                 "account": "账号限制"
         },
         "recovery": {
@@ -357,6 +364,44 @@ export default {
       commonModelsHint: '仅显示所有所选分组共同支持的模型。',
       noCommonModels: '这些分组没有共同支持的模型，请调整分组或模型配置。',
       protection: {
+        passRate: {
+          title: '近期智力检测通过率',
+          description: '按账号、模型、检测项目和规则版本分别判断。此项独立停用限制同样适用于兜底调用。',
+          windowSize: '统计最近有效检测次数',
+          pauseBelow: '通过率低于多少暂停（%）',
+          samplingHint: '最多回看 {days} 天内最近 {count} 次有效检测；满 {count} 次后，严格低于 {threshold}% 才触发通过率暂停。',
+          advanced: '恢复与高级设置',
+          lookbackDays: '最多回看天数',
+          recoverAtLeast: '恢复通过率至少达到（%）',
+          recoverConsecutive: '恢复所需连续通过次数',
+          singleFailure: '单次有效智力检测不通过也立即暂停',
+          existingActionsHint: '原有单项和组合失败动作继续生效；关闭此开关不会取消那些动作。',
+          recoveryHint: '业务调用暂停后仍继续定时主动复检。恢复需要满 {count} 次有效检测、通过率至少 {rate}%，且最近连续 {consecutive} 次通过。数据过期或缺少样本不会解除暂停。',
+          validSamplesHint: '请先配置标准答案、数值阈值或评审条件（模型核验和能力检测使用内置判定）。只有明确通过或不通过才计入；网络或服务执行错误不计入，回答格式错误计为不通过。同轮重试只计一次，不能覆盖已经有效判定的失败。',
+          scheduleWarning: '当前频率在回看窗口内最多执行 {count} 次，不足所需的 {required} 次。请提高频率、扩大回看时间或减少统计次数。',
+          invalid: '请设置 2–1000 次检测、1 小时–30 天回看时间、0–100% 的通过率（恢复门槛不低于暂停门槛），以及 1–N 次连续通过。此设置仅支持主动能力检测。',
+          currentWindow: '当前近期通过率',
+          currentWindowHint: '这里展示当前窗口，不是这条历史记录发生时的统计；不同检测项目和规则版本不会混算。',
+          counts: '通过 {passed}/{samples} 次 · {rate}',
+          collectingHint: '样本收集中：满 {required} 次还差 {remaining} 次有效检测；不代表能力已合格。',
+          staleHint: '近期证据已过期，需要新的有效检测；过期不会自动解除已有暂停。',
+          recoveryRequirement: '恢复要求：满 {count} 次、通过率至少 {rate}%，且连续 {consecutive} 次通过（当前连续 {current} 次）。',
+          evidenceDetails: '证据与规则详情',
+          latestVerdict: '最近有效判定',
+          modelAndVersion: '模型：{model} · 规则版本：{version}',
+          states: { blocked: '已暂停调用', stale: '证据已过期', ready: '统计窗口已满', collecting: '样本收集中' },
+          verdicts: { pass: '通过', fail: '不通过', pending: '待判定' },
+          reasons: {
+            pass_rate_below_threshold: '近期通过率低于暂停门槛。',
+            single_failure: '单次有效智力检测不通过，触发立即暂停。',
+            insufficient_samples: '当前窗口内有效检测次数不足。',
+            stale_evidence: '缺少新鲜的有效能力证据。',
+            recovery_pending: '尚未满足全部恢复条件，继续暂停。',
+            recovered: '新的能力检测证据已满足恢复要求。',
+            healthy: '近期通过率满足配置标准。',
+            pending_verdict: '等待明确的能力判定结果。',
+          },
+        },
         allPass: {
           role: '参与方式',
           automatic: '自动条件（必须通过）',

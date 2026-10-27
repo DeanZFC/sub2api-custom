@@ -26,6 +26,7 @@ type ScheduledTestProtectionConfig struct {
 }
 
 type ScheduledTestProtectionRule struct {
+	PassRate         *ScheduledTestPassRateConfig      `json:"pass_rate,omitempty"`
 	Priority         int                               `json:"priority"`
 	RequiredPass     bool                              `json:"required_pass"`
 	TestDefinitionID int64                             `json:"test_definition_id"`
@@ -115,6 +116,9 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 	seen := map[int64]bool{}
 	for i := range config.Rules {
 		rule := &config.Rules[i]
+		if err := rule.PassRate.Validate(); err != nil {
+			return err
+		}
 		if !selected[rule.TestDefinitionID] || seen[rule.TestDefinitionID] {
 			return fmt.Errorf("protection rules must refer to distinct selected test definitions")
 		}
@@ -200,6 +204,18 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string) error {
 	if rule == nil {
 		return nil
+	}
+	if rule.PassRate != nil && rule.PassRate.Enabled && kind == "statistics" {
+		return fmt.Errorf("pass_rate requires an active capability test")
+	}
+	if rule.PassRate != nil && rule.PassRate.Enabled && kind != "statistics" && kind != "capability" && kind != "model_check" {
+		hasAbilityCondition := rule.ExpectedAnswer != "" || rule.Vote != nil && rule.Vote.Enabled
+		for _, threshold := range rule.Thresholds {
+			hasAbilityCondition = hasAbilityCondition || threshold.Metric == "output_numeric"
+		}
+		if !hasAbilityCondition {
+			return fmt.Errorf("pass_rate requires an answer, numeric threshold, or review condition")
+		}
 	}
 	if rule.Recovery != nil && rule.Recovery.Enabled && kind != "statistics" {
 		return fmt.Errorf("trial recovery requires a statistics test")

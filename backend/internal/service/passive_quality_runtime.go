@@ -112,14 +112,21 @@ func (s *PassiveQualityService) sweepCycle() {
 	policies, err := s.Repo.ListPolicies(ctx)
 	cancel()
 	policyErr := err
+	// Independent scoring observes real traffic even when enforcement or scoring
+	// is switched off. Keeping its bounded telemetry warm avoids a false healthy
+	// window after enabling scoring, and decouples evidence from protection rules.
+	_, scoreTelemetry := s.Repo.(ChannelQualityScoreProvider)
 	if err == nil {
-		enabled, cacheEnabled := false, false
+		enabled, cacheEnabled := scoreTelemetry, scoreTelemetry
 		for _, p := range policies {
 			enabled = enabled || p.Enabled
 			cacheEnabled = cacheEnabled || (p.Enabled && p.CacheRate.Enabled)
 		}
 		s.enabled.Store(enabled)
 		s.cacheEnabled.Store(cacheEnabled)
+	} else if scoreTelemetry {
+		s.enabled.Store(true)
+		s.cacheEnabled.Store(true)
 	}
 	cutoff := time.Now()
 	ready := s.flush(true)
@@ -440,7 +447,8 @@ func (s *PassiveQualityService) Capture() gin.HandlerFunc {
 func PassiveQualityBeginTurn(c *gin.Context) {
 	if c != nil {
 		key := uuid.NewString()
-		c.Set(passiveQualityStartedKey, time.Now())
+		startedAt := time.Now()
+		c.Set(passiveQualityStartedKey, startedAt)
 		c.Set(passiveQualityTurnKey, key)
 		if c.Request != nil && strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
 			key = "ws:" + key
@@ -449,6 +457,7 @@ func PassiveQualityBeginTurn(c *gin.Context) {
 		if c.Request != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityCacheMetadataKey{}, (*PassiveQualityCacheMetadata)(nil)))
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityUsageTurnKey{}, key))
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), passiveQualityUsageStartedKey{}, startedAt))
 		}
 	}
 }
@@ -474,6 +483,7 @@ func RecordPassiveQualityAttempt(c *gin.Context, ev OpsUpstreamErrorEvent) {
 
 type passiveQualityCacheSinkKey struct{}
 type passiveQualityUsageTurnKey struct{}
+type passiveQualityUsageStartedKey struct{}
 
 // Usage workers replace request deadlines with their own bounded context. Copy
 // only immutable telemetry values, including the turn captured at submission.
@@ -484,7 +494,7 @@ func PassiveQualityUsageContext(parent, base context.Context) context.Context {
 	if parent == nil {
 		return base
 	}
-	for _, key := range []any{passiveQualityCacheSinkKey{}, passiveQualityUsageTurnKey{}, passiveQualityCacheMetadataKey{}} {
+	for _, key := range []any{passiveQualityCacheSinkKey{}, passiveQualityUsageTurnKey{}, passiveQualityUsageStartedKey{}, passiveQualityCacheMetadataKey{}} {
 		if value := parent.Value(key); value != nil {
 			base = context.WithValue(base, key, value)
 		}
@@ -499,6 +509,7 @@ func recordPassiveQualityCache(ctx context.Context, accountID int64, requestKey 
 		return
 	}
 	attemptKey, _ := ctx.Value(passiveQualityUsageTurnKey{}).(string)
+	startedAt, _ := ctx.Value(passiveQualityUsageStartedKey{}).(time.Time)
 	metadata, _ := ctx.Value(passiveQualityCacheMetadataKey{}).(*PassiveQualityCacheMetadata)
 	if metadata != nil && metadata.AccountID != accountID {
 		metadata = nil
@@ -512,7 +523,7 @@ func recordPassiveQualityCache(ctx context.Context, accountID int64, requestKey 
 		if model == "" {
 			model = traffic.Model
 		}
-		sink(PassiveQualityFailure{AccountID: accountID, GroupID: traffic.GroupID, Model: model, RequestKey: requestKey, AttemptKey: attemptKey, At: time.Now(), CacheReported: reported, CacheMetadata: metadata})
+		sink(PassiveQualityFailure{AccountID: accountID, GroupID: traffic.GroupID, Model: model, RequestKey: requestKey, AttemptKey: attemptKey, StartedAt: startedAt, At: time.Now(), CacheReported: reported, CacheMetadata: metadata})
 	}
 }
 

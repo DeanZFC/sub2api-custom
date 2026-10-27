@@ -22,6 +22,8 @@ type ScheduledTestRequestAttempt struct {
 }
 type ScheduledTestExecutionInfo struct {
 	Capability *QualityCapabilityResult `json:"capability,omitempty"`
+	// Set only after successful upstream completion with an invalid answer format.
+	OutputContractFailed bool `json:"output_contract_failed,omitempty"`
 	ScheduledTestTokenUsage
 	Attempts            []ScheduledTestRequestAttempt `json:"attempts"`
 	FailureKind         string                        `json:"failure_kind,omitempty"`

@@ -37,14 +37,15 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
-	ExecutionInfo    *ScheduledTestExecutionInfo `json:"execution_info,omitempty"`
-	RunID            string                      `json:"-"`
-	ID               int64                       `json:"id"`
-	PlanID           int64                       `json:"plan_id"`
-	TestDefinitionID *int64                      `json:"test_definition_id,omitempty"`
-	PlanName         string                      `json:"plan_name"`
-	TestName         string                      `json:"test_name"`
-	TestKey          string                      `json:"test_key,omitempty"`
+	PassRate         *ScheduledTestPassRateSummary `json:"pass_rate,omitempty"`
+	ExecutionInfo    *ScheduledTestExecutionInfo   `json:"execution_info,omitempty"`
+	RunID            string                        `json:"-"`
+	ID               int64                         `json:"id"`
+	PlanID           int64                         `json:"plan_id"`
+	TestDefinitionID *int64                        `json:"test_definition_id,omitempty"`
+	PlanName         string                        `json:"plan_name"`
+	TestName         string                        `json:"test_name"`
+	TestKey          string                        `json:"test_key,omitempty"`
 	// QualityVerdict is the saved check verdict, without private action details.
 	QualityVerdict string `json:"quality_verdict,omitempty"`
 	TestOrder      int    `json:"test_order"`

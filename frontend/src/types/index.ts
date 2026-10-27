@@ -2635,6 +2635,34 @@ export interface TestProtectionVote {
   reject_above: number
   pass_at_least: number
 }
+export interface TestPassRateConfig {
+  enabled: boolean
+  window_size: number
+  window_seconds: number
+  pause_below: number
+  recover_at_least: number
+  recover_consecutive: number
+  pause_on_single_failure: boolean
+}
+export interface TestPassRateSummary {
+  samples: number
+  passed: number
+  pass_rate: number | null
+  window_size: number
+  window_seconds: number
+  pause_below: number
+  recover_at_least: number
+  recover_consecutive: number
+  consecutive_passes: number
+  blocked: boolean
+  ready: boolean
+  stale: boolean
+  reason: string
+  latest_at?: string
+  latest_verdict: string
+  rule_version: string
+  model: string
+}
 export interface TestProtectionRule {
   test_definition_id: number
   priority: number
@@ -2649,6 +2677,7 @@ export interface TestProtectionRule {
   on_pass?: TestOutcomeAction
   on_fail?: TestOutcomeAction
   recovery?: TestProtectionRecovery
+  pass_rate?: TestPassRateConfig
 }
 export interface TestProtectionConfig {
   enabled: boolean
@@ -2738,6 +2767,8 @@ export interface TestProtectionDecision {
 }
 
 export interface TestResult {
+  /** Current rolling evidence, not a historical snapshot at this result's time. */
+  pass_rate?: TestPassRateSummary | null
   test_key?: string
   /** Saved quality verdict; transport success does not imply a pass. */
   quality_verdict?: 'pass' | 'fail' | 'pending' | ''

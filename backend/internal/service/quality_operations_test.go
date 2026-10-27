@@ -141,14 +141,20 @@ func TestQualityOperationsRecoveryReserveBoundaries(t *testing.T) {
 		name, status string
 		ctx          context.Context
 		want         string
+		hold         string
 	}{
-		{"ordinary", "active", context.Background(), "regular"},
-		{"active recovery", "quality_paused", context.Background(), "recovery"},
-		{"statistics recovery", "active", WithQualityRecoveryProbe(context.Background()), "recovery"},
-		{"passive recovery", "active", context.WithValue(context.Background(), passiveQualityProbeKey{}, true), "recovery"},
+		{"ordinary", "active", context.Background(), "regular", ""},
+		{"active recovery", "quality_paused", context.Background(), "recovery", ""},
+		{"capability recovery", "active", context.Background(), "recovery", "model"},
+		{"other model capability hold", "active", context.Background(), "regular", "other"},
+		{"statistics recovery", "active", WithQualityRecoveryProbe(context.Background()), "recovery", ""},
+		{"passive recovery", "active", context.WithValue(context.Background(), passiveQualityProbeKey{}, true), "recovery", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := &Account{ID: 42, Status: tc.status, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
+			if tc.hold != "" {
+				account.Extra["active_pass_rate_holds"] = map[string]any{tc.hold: "pass_rate_low"}
+			}
 			calls := 0
 			repo := &qualityOperationsStub{reserve: func(ctx context.Context, _ int64, _ int64, _ bool, _ string) (*QualityProbeReservation, error) {
 				calls++

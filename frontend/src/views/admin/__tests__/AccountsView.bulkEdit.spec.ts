@@ -29,6 +29,8 @@ const {
   showSuccess: vi.fn()
 }))
 
+vi.mock('@/api/admin/channelQuality', () => ({ channelQualityAPI: { scores: async () => ({}) } }))
+
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {

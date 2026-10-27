@@ -1,4 +1,5 @@
 import qualityExperience from './qualityExperience'
+import qualityScoring from './qualityScoring'
 import passiveQualityV2 from './passiveQualityV2'
 import groupQualityTargets from './groupQualityTargets'
 
@@ -6,6 +7,7 @@ export default {
     tests: {
       groupTargets: groupQualityTargets,
       experience: qualityExperience,
+      scoring: qualityScoring,
       operations: {
         "recovery_reserve_percent": "Recovery reserve (%)",
         "recovery_requests": "Recovery requests",
@@ -130,17 +132,22 @@ export default {
         "overview": "Health overview",
         "subtitle": "Manage availability, performance and capability checks with cause-specific recovery.",
         "intro": "See which upstreams are restricted and which policy owns each restriction. Capability checks, real-request protection and manual stops retain independent authority; recovery clears only its own cause.",
-        "active": "Active checks",
-        "passive": "Passive protection",
+        "active": "Active intelligence tests",
+        "passive": "Passive quality management",
         "questionBank": "Test types & question banks",
         "search": "Account name or ID",
         "problemsOnly": "Only anomalies and restricted accounts",
         "coverageHint": "Current account states and collected evidence. No quality hold does not prove capability; missing metrics appear as —.",
+        "qualityScore": "Quality score",
+        "qualityScoreHint": "Scores real-request errors, cache rate, first-token latency and duration using independent standards; missing metrics are identified separately.",
+        "qualityScoreSamples": "{models} models · {samples} samples",
+        "qualityScoreAccountSamples": "Account scope · {samples} samples",
+        "qualityScoreUnavailable": "No valid samples",
         "coverage": "{active} active policies · {passive} passive policies",
         "restricted": "Scheduling restricted",
         "limited": "Concurrency and priority reduced",
         "cacheLimited": "New-session allocation reduced",
-        metrics: { availability: "Availability", latency: "First-token latency", cache: "Cache reuse", group_quality_target: "Group quality targets · actual traffic" },
+        metrics: { availability: "Availability", latency: "First-token latency", cache: "Cache reuse", group_quality_target: "Group quality targets · actual traffic", pass_rate: "Capability pass rate" },
         "noHold": "No quality hold found",
         "noEvidence": "No quality evidence yet. Configure active checks and passive protection.",
         "allModels": "All models",
@@ -151,8 +158,8 @@ export default {
         "inspect": "Inspect and manage",
         "loadFailed": "Unable to load quality overview",
         "sources": {
-                "active": "Active check",
-                "passive": "Passive protection",
+                "active": "Active intelligence test",
+                "passive": "Passive quality management",
                 "account": "Account restriction"
         },
         "recovery": {
@@ -357,6 +364,44 @@ export default {
       commonModelsHint: 'Only models supported by every selected group are available.',
       noCommonModels: 'These groups have no shared model. Adjust the groups or their model settings.',
       protection: {
+        passRate: {
+          title: 'Recent capability pass rate',
+          description: 'Judge each account, model, check and rule version separately. This independent hold also applies to fallback routing.',
+          windowSize: 'Recent valid checks',
+          pauseBelow: 'Pause below pass rate (%)',
+          samplingHint: 'Use the last {count} valid checks within {days} days. Rate-based pausing requires all {count} samples and triggers strictly below {threshold}%.',
+          advanced: 'Recovery and advanced settings',
+          lookbackDays: 'Maximum lookback (days)',
+          recoverAtLeast: 'Recovery pass rate at least (%)',
+          recoverConsecutive: 'Consecutive passes to recover',
+          singleFailure: 'Also pause after one valid capability failure',
+          existingActionsHint: 'Existing single-check and combined failure actions remain in effect. Turning this option off does not disable those actions.',
+          recoveryHint: 'Continue scheduled active retests while business calls are paused. Recovery needs {count} valid samples, at least {rate}% passes and the latest {consecutive} checks passing. Expired or missing evidence cannot clear a hold.',
+          validSamplesHint: 'Configure an expected answer, numeric threshold, or review condition first (model and capability checks have built-in verdicts). Only explicit passes or failures count. Network or service execution errors are excluded; an invalid answer format counts as a failure. Retries of the same round count once and cannot overwrite a valid failure.',
+          scheduleWarning: 'This schedule permits at most {count} checks in the lookback window, fewer than the required {required}. Increase the frequency or lookback, or reduce the sample count.',
+          invalid: 'Use 2–1000 checks, a 1-hour–30-day lookback, rates between 0 and 100 with recovery at least the pause threshold, and 1–N consecutive recovery passes. This setting requires an active capability check.',
+          currentWindow: 'Current recent pass rate',
+          currentWindowHint: 'This is the current window, not the evidence as of this historical result. Different checks and rule versions are not pooled.',
+          counts: '{passed}/{samples} passed · {rate}',
+          collectingHint: 'Collecting: {remaining} more valid checks needed for the {required}-sample window. This does not certify capability.',
+          staleHint: 'Recent evidence is stale. New valid checks are required; expiry does not remove an existing hold.',
+          recoveryRequirement: 'Recovery: {count} valid checks, at least {rate}% passing and {consecutive} consecutive passes (currently {current}).',
+          evidenceDetails: 'Evidence and rule details',
+          latestVerdict: 'Latest valid verdict',
+          modelAndVersion: 'Model: {model} · Rule version: {version}',
+          states: { blocked: 'Calls paused', stale: 'Stale evidence', ready: 'Window complete', collecting: 'Collecting samples' },
+          verdicts: { pass: 'Pass', fail: 'Fail', pending: 'Not yet determined' },
+          reasons: {
+            pass_rate_below_threshold: 'Recent pass rate is below the pause threshold.',
+            single_failure: 'A valid capability failure triggered immediate pausing.',
+            insufficient_samples: 'Not enough valid checks in the current window.',
+            stale_evidence: 'No fresh valid capability evidence is available.',
+            recovery_pending: 'The hold remains until all recovery requirements pass.',
+            recovered: 'Fresh capability evidence meets the recovery requirements.',
+            healthy: 'Recent pass rate meets the configured standard.',
+            pending_verdict: 'Waiting for a definitive capability verdict.',
+          },
+        },
         allPass: {
           role: 'Check role',
           automatic: 'Automatic requirement (must pass)',
