@@ -22,7 +22,18 @@ describe('quality score evidence', () => {
     expect(wrapper.text()).toContain('Model: model-a')
     expect(wrapper.get('[data-score-dimension="cache_rate"]').text()).toContain('—')
     expect(wrapper.get('[data-score-dimension="cache_rate"]').text()).toContain('No eligible samples')
+    expect(wrapper.get('[data-score-dimension="cache_rate"]').text()).toContain('Actual cache rate (%)')
     expect(wrapper.get('[data-score-dimension="error_rate"]').text()).toContain('0%')
+  })
+  it('displays an explicitly reported zero cache rate as a scored dimension', () => {
+    const data = score()
+    data.dimensions[1] = { key: 'cache_rate', value: 0, score: 0, weight: 25, samples: 40, status: 'ready', unit: 'percent', reason: '' }
+    const wrapper = render(data)
+    const metric = wrapper.get('[data-score-dimension="cache_rate"]')
+    expect(metric.text()).toContain('Actual cache rate (%)')
+    expect(metric.text()).toContain('0%')
+    expect(metric.text()).not.toContain('No eligible samples')
+    expect(metric.text()).not.toContain('—')
   })
   it('uses token-per-second units for the independent output-speed dimension', () => {
     const data = score()

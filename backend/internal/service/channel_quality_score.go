@@ -120,23 +120,21 @@ type ChannelQualityScoreSettingsRepository interface {
 	SaveQualityScoreConfig(context.Context, *ChannelQualityScoreConfig) error
 }
 
-// Observations describe completed, real upstream attempts. CacheReusable is
-// established from earlier completed, matching request digests, never from the
-// hit counter itself. Cold requests and missing metadata have no cache score.
+// Observations describe completed, real upstream attempts. CacheInput is the
+// total text input (uncached, cache creation and cache read tokens). Actual cache
+// usage is independent of prefix-reuse metadata; omitted counters remain unknown.
 type ChannelQualityScoreObservation struct {
-	OutputTokens        int64
-	GenerationMS        float64
-	Key                 string
-	At                  time.Time
-	Model               string
-	Failed              bool
-	TTFT                *float64
-	Duration            *float64
-	CacheReported       bool
-	CacheReusable       bool
-	CacheInput          int64
-	CacheRead           int64
-	CacheExpectedTokens int64
+	OutputTokens  int64
+	GenerationMS  float64
+	Key           string
+	At            time.Time
+	Model         string
+	Failed        bool
+	TTFT          *float64
+	Duration      *float64
+	CacheReported bool
+	CacheInput    int64
+	CacheRead     int64
 }
 
 func SummarizeChannelQualityScore(c ChannelQualityScoreConfig, observations []ChannelQualityScoreObservation, model string, complete bool, now time.Time) *ChannelQualityScore {
@@ -209,10 +207,10 @@ func SummarizeChannelQualityScore(c ChannelQualityScoreConfig, observations []Ch
 			generationMS += v.GenerationMS
 			tpsSamples++
 		}
-		if v.CacheReported && v.CacheReusable && v.CacheInput > 0 && v.CacheRead >= 0 && v.CacheRead <= v.CacheInput && v.CacheExpectedTokens > 0 && v.CacheExpectedTokens <= v.CacheInput {
+		if v.CacheReported && v.CacheInput > 0 && v.CacheRead >= 0 && v.CacheRead <= v.CacheInput {
 			cacheSamples++
-			input += v.CacheExpectedTokens
-			read += min(v.CacheRead, v.CacheExpectedTokens)
+			input += v.CacheInput
+			read += v.CacheRead
 		}
 	}
 	s.Models = len(models)

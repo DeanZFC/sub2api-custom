@@ -135,6 +135,10 @@ func passivePolicyChange(old, next service.PassiveQualityConfig) (unchanged, met
 		if c.IsGroupQualityTarget() && c.TrafficMode == "" {
 			c.TrafficMode = "strict"
 		}
+		if c.IsGroupQualityTarget() {
+			stability := c.GroupTargetStability()
+			c.Stability = &stability
+		}
 		// Older V2 policies predate TPS. Defaults supplied by validation or a
 		// newer editor cannot change behavior while this dimension is disabled,
 		// and must not clear existing holds on a no-op save or rename.
@@ -299,6 +303,13 @@ func reconcilePassiveAccount(ctx context.Context, tx sqlExecutor, aid int64) err
  'trial_ends_at',data->'trial_ends_at','used',data->'used','max_requests',config->'trial_requests',
  'concurrency_limit',config->'concurrency_limit','priority_penalty',config->'priority_penalty') AS value
  FROM active WHERE data->>'phase' IN ('paused','probing','trial','limited')
+ UNION ALL
+ SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name','metric','performance',
+ 'scope','model','model',COALESCE(data->>'model',config->>'model'),'phase','cache_limited','reason',data->>'reason',
+ 'allocation_percent',COALESCE(config->'stability'->'new_session_percent','20'::jsonb))
+ FROM active WHERE config->>'purpose' IN ('group_quality_target','cache_target')
+ AND (data->>'cache_allocation_reduced'='true' OR (data->>'phase'='suspect' AND COALESCE((data->>'hits')::int,0)>0
+ AND data->>'confirmation_metric' IN ('cache_rate','ttft_p90','output_tps')))
  UNION ALL
  SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name','metric','ttft',
  'scope',config->>'scope','model',COALESCE(data->>'model',config->>'model'),'phase','limited','reason',data->'latency'->>'reason',

@@ -23,7 +23,7 @@ export default {
   "confidence": "证据充足度 {value}%",
   "dimensions": {
     "error_rate": "错误率（%）",
-    "cache_rate": "可复用前缀缓存率（%）",
+    "cache_rate": "实际缓存率（%）",
     "ttft": "首字 P90（毫秒）",
     "tps": "输出 TPS（token/s）",
     "duration": "总耗时 P90（毫秒）"

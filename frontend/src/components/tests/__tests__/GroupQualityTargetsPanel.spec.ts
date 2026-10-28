@@ -8,7 +8,7 @@ import resources from '@/i18n/locales/en/admin/resources'
 import zhResources from '@/i18n/locales/zh/admin/resources'
 import type { AdminGroup } from '@/types'
 
-const api = vi.hoisted(() => ({ policies: vi.fn(), states: vi.fn(), statePage: vi.fn(), stateSummary: vi.fn(), groupTargets: vi.fn(), saveGroupQualityTarget: vi.fn(), success: vi.fn(), error: vi.fn() }))
+const api = vi.hoisted(() => ({ policies: vi.fn(), states: vi.fn(), statePage: vi.fn(), stateSummary: vi.fn(), groupTargets: vi.fn(), saveGroupQualityTarget: vi.fn(), remove: vi.fn(), success: vi.fn(), error: vi.fn() }))
 vi.mock('@/api/admin/passiveQuality', async original => ({ ...await original<object>(), passiveQualityAPI: api }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: api.success, showError: api.error }) }))
 const groups = [
@@ -54,6 +54,86 @@ beforeEach(() => { vi.resetAllMocks(); api.policies.mockResolvedValue([policy()]
 afterEach(() => vi.useRealTimers())
 
 describe('simple group quality targets', () => {
+  it.each([
+    { locale: 'en', warning: 'Other policies and manual restrictions still apply.' },
+    { locale: 'zh', warning: '其他策略和人工限制仍然生效。' },
+  ])('names the group and preserves the target when deletion is cancelled: $locale', async ({ locale, warning }) => {
+    const w = makeWrapper(undefined, locale); await flushPromises()
+    await w.get('[data-target-delete="11"]').trigger('click')
+    expect(w.get('[data-target-delete-dialog]').text()).toContain('GPT-Pro')
+    expect(w.get('[data-target-delete-dialog]').text()).toContain(warning)
+    expect(api.remove).not.toHaveBeenCalled()
+    await w.get('[data-target-delete-cancel]').trigger('click')
+    expect(w.find('[data-target-delete-dialog]').exists()).toBe(false)
+    expect(w.find('[data-group-target="11"]').exists()).toBe(true)
+    expect(api.remove).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('deletes the confirmed target and closes its open editor without affecting other targets', async () => {
+    const other = policy({ id: 12, name: 'Plus target', group_ids: [4] })
+    api.policies.mockResolvedValue([policy(), other])
+    const w = makeWrapper(11); await flushPromises()
+    expect(w.find('[data-target-group]').exists()).toBe(true)
+    await w.get('[data-target-delete="11"]').trigger('click')
+    api.policies.mockResolvedValue([other])
+    await w.get('[data-target-delete-confirm]').trigger('click'); await flushPromises()
+    expect(api.remove).toHaveBeenCalledTimes(1)
+    expect(api.remove).toHaveBeenCalledWith(11)
+    expect(api.policies).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-group-target="11"]').exists()).toBe(false)
+    expect(w.find('[data-group-target="12"]').exists()).toBe(true)
+    expect(w.find('[data-target-group]').exists()).toBe(false)
+    expect(w.find('[data-target-delete-dialog]').exists()).toBe(false)
+    expect(api.success).toHaveBeenCalledWith('Group quality targets deleted')
+    w.unmount()
+  })
+
+  it('keeps the target and editor available when deletion fails', async () => {
+    api.remove.mockRejectedValue(new Error('Deletion unavailable'))
+    const w = makeWrapper(11); await flushPromises()
+    await w.get('[data-target-delete="11"]').trigger('click')
+    await w.get('[data-target-delete-confirm]').trigger('click'); await flushPromises()
+    expect(api.error).toHaveBeenCalledWith('Deletion unavailable')
+    expect(api.success).not.toHaveBeenCalled()
+    expect(w.find('[data-group-target="11"]').exists()).toBe(true)
+    expect(w.find('[data-target-group]').exists()).toBe(true)
+    expect(w.find('[data-target-delete-dialog]').exists()).toBe(true)
+    expect(w.get('[data-target-delete-confirm]').attributes('disabled')).toBeUndefined()
+    w.unmount()
+  })
+
+  it('submits one deletion while pending and ignores old list and evidence responses after success', async () => {
+    api.statePage.mockResolvedValueOnce({ items: [state()], total: 2, has_more: true, next_cursor: 'page-2' })
+    let resolveEvidence!: (value: { items: PassiveState[]; has_more: boolean }) => void
+    api.statePage.mockImplementationOnce(() => new Promise(resolve => { resolveEvidence = resolve }))
+    let resolveDelete!: () => void
+    api.remove.mockImplementation(() => new Promise<void>(resolve => { resolveDelete = resolve }))
+    const w = makeWrapper(); await flushPromises()
+    await w.get('[data-target-more-states="11"]').trigger('click')
+    await w.get('[data-target-delete="11"]').trigger('click')
+    const confirm = w.get('[data-target-delete-confirm]')
+    await Promise.all([confirm.trigger('click'), confirm.trigger('click')])
+    expect(api.remove).toHaveBeenCalledTimes(1)
+    expect(api.remove).toHaveBeenCalledWith(11)
+    expect(confirm.attributes('disabled')).toBeDefined()
+    expect(w.get('[data-target-delete-cancel]').attributes('disabled')).toBeDefined()
+    let resolveOldList!: (value: PassivePolicy[]) => void
+    api.policies.mockImplementationOnce(() => new Promise(resolve => { resolveOldList = resolve }))
+    const oldRefresh = w.vm.refresh()
+    api.policies.mockRejectedValueOnce(new Error('Refresh unavailable'))
+    resolveDelete(); await flushPromises()
+    expect(w.find('[data-group-target]').exists()).toBe(false)
+    expect(w.get('[role="alert"]').text()).toContain('Refresh unavailable')
+    resolveOldList([policy()])
+    resolveEvidence({ items: [state({ account_name: 'Stale evidence' })], has_more: false })
+    await oldRefresh; await flushPromises()
+    expect(w.find('[data-group-target]').exists()).toBe(false)
+    expect(w.find('[data-target-state]').exists()).toBe(false)
+    expect(api.success).toHaveBeenCalledWith('Group quality targets deleted')
+    w.unmount()
+  })
+
   it('shows automatic fallback independently of a disabled cache metric', async () => {
     api.policies.mockResolvedValue([policy({ cache_rate: { enabled: false, pause: 80, recover: 85 } })])
     api.groupTargets.mockResolvedValue([summary({ fallback: fallback() })])
@@ -119,9 +199,66 @@ describe('simple group quality targets', () => {
     expect(w.text()).toContain('Cold starts')
     await w.get('[data-target-save]').trigger('click'); await flushPromises()
     expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ id: 0, purpose: 'group_quality_target', group_ids: [4], mode: 'enforce', enabled: true, model: '',
-      cache_rate: { enabled: true, pause: 80, recover: 85 }, error_rate: { enabled: true, pause: 10, recover: 5 }, ttft: { enabled: true, pause: 15000, recover: 12000 }, tps: { enabled: true, pause: 30, recover: 36 } }))
+      cache_rate: { enabled: true, pause: 80, recover: 85 }, error_rate: { enabled: true, pause: 10, recover: 5 }, ttft: { enabled: true, pause: 15000, recover: 12000 }, tps: { enabled: true, pause: 30, recover: 36 }, stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 120, new_session_percent: 20 } }))
     expect(api.saveGroupQualityTarget.mock.calls[0][0]).not.toHaveProperty('cache_protection')
     expect(api.saveGroupQualityTarget.mock.calls[0][0]).not.toHaveProperty('ttft_action')
+    w.unmount()
+  })
+
+  it('validates and saves the stability controls in the target editor', async () => {
+    api.policies.mockResolvedValue([])
+    const w = makeWrapper(); await flushPromises(); await w.get('[data-target-create]').trigger('click')
+    await w.get('[data-target-group]').setValue('4')
+    expect((w.get('[data-target-performance-debounce]').element as HTMLInputElement).value).toBe('300')
+    await w.get('[data-target-new-session-share]').setValue('0')
+    expect(w.get('[data-target-save]').attributes('disabled')).toBeDefined()
+    await w.get('[data-target-new-session-share]').setValue('30')
+    await w.get('[data-target-performance-debounce]').setValue('1.5')
+    expect(w.get('[data-target-save]').attributes('disabled')).toBeDefined()
+    await w.get('[data-target-performance-debounce]').setValue('600')
+    await w.get('[data-target-availability-debounce]').setValue('0')
+    await w.get('[data-target-recovery-stable]').setValue('180')
+    await w.get('[data-target-save]').trigger('click'); await flushPromises()
+    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ stability: { availability_pause_seconds: 0, performance_pause_seconds: 600, recovery_seconds: 180, new_session_percent: 30 } }))
+    w.unmount()
+  })
+
+  it('shows evidence timestamps and translates nested recovery stability reasons', async () => {
+    api.states.mockResolvedValue([state({ reason: 'waiting_for_recovery: stability_confirmation', recovery_since: '2026-10-24T00:00:30Z' }), state({ model: 'model-b', phase: 'suspect', cache_allocation_reduced: true, suspicion_since: '2026-10-24T00:00:00Z', reason: 'waiting_for_fresh_failure: cache_rate: 50 / 80 (5)' })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('[data-target-recovery-since]').text()).toContain('Continuous healthy recovery evidence since')
+    expect(w.get('[data-target-suspicion-since]').text()).toContain('Continuous breach evidence since')
+    expect(w.text()).toContain('Waiting for sustained healthy evidence and fresh confirmations')
+    expect(w.text()).toContain('Old window remains below target; waiting for new failing evidence')
+    expect(w.text()).toContain('Reduced new assignments')
+    expect(w.text()).not.toContain('waiting_for_recovery: stability_confirmation')
+    w.unmount()
+  })
+
+  it('shows the effective recovery window for a short legacy trial with many confirmations', async () => {
+    api.policies.mockResolvedValue([policy({ trial_seconds: 60, confirmations: 10, stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 0, new_session_percent: 20 } })])
+    const w = makeWrapper(); await flushPromises(); await w.get('[data-target-edit]').trigger('click')
+    expect(w.text()).toContain('trial up to 20 requests, concurrency 1, 7 minutes')
+    w.unmount()
+  })
+
+  it('distinguishes recovery confirmations and their two-batch minimum from breach confirmations', async () => {
+    api.policies.mockResolvedValue([policy({ confirmations: 1 })])
+    api.states.mockResolvedValue([state({ hits: 1 }), state({ model: 'model-b', phase: 'suspect', cache_allocation_reduced: true, hits: 5, recovery_hits: 1, recovery_since: '2026-10-24T00:00:30Z' })])
+    const w = makeWrapper(); await flushPromises()
+    const rows = w.findAll('[data-target-state]')
+    expect(rows).toHaveLength(2)
+    for (const row of rows) expect(row.text()).toContain('Recovery confirmations 1/2')
+    w.unmount()
+  })
+
+  it('caps legacy trial confirmations by its finite budget without capping cache recovery', async () => {
+    api.policies.mockResolvedValue([policy({ confirmations: 10, trial_requests: 5 })])
+    api.states.mockResolvedValue([state({ hits: 1 }), state({ model: 'model-b', phase: 'suspect', cache_allocation_reduced: true, recovery_hits: 1, recovery_since: '2026-10-24T00:00:30Z' })])
+    const w = makeWrapper(); await flushPromises()
+    const rows = w.findAll('[data-target-state]')
+    expect(rows[0].text()).toContain('Recovery confirmations 1/5')
+    expect(rows[1].text()).toContain('Recovery confirmations 1/10')
     w.unmount()
   })
 
@@ -167,14 +304,15 @@ describe('simple group quality targets', () => {
   })
 
   it('preserves exclusions, model, observation mode and custom recovery parameters when toggled or edited', async () => {
-    api.policies.mockResolvedValue([policy({ model: 'only-model', mode: 'observe', excluded_account_ids: [3, 2280, 2283], cooldown_seconds: 600, trial_requests: 30 })])
+    const stability = { availability_pause_seconds: 0, performance_pause_seconds: 600, recovery_seconds: 180, new_session_percent: 30 }
+    api.policies.mockResolvedValue([policy({ model: 'only-model', mode: 'observe', excluded_account_ids: [3, 2280, 2283], cooldown_seconds: 600, trial_requests: 30, stability })])
     const w = makeWrapper(); await flushPromises(); await w.get('[data-target-toggle="11"]').trigger('click'); await flushPromises()
-    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, mode: 'observe', model: 'only-model', excluded_account_ids: [3, 2280, 2283], cooldown_seconds: 600, trial_requests: 30 }))
+    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, mode: 'observe', model: 'only-model', excluded_account_ids: [3, 2280, 2283], cooldown_seconds: 600, trial_requests: 30, stability }))
     await w.get('[data-target-edit="11"]').trigger('click')
     expect(w.get('[data-dialog]').text()).toContain('Existing model filter preserved: only-model')
     expect(w.get('[data-dialog]').text()).toContain('3 account exclusions are preserved')
     await w.get('[data-target-cache]').setValue('85'); await w.get('[data-target-save]').trigger('click'); await flushPromises()
-    expect(api.saveGroupQualityTarget).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'observe', model: 'only-model', excluded_account_ids: [3, 2280, 2283] }))
+    expect(api.saveGroupQualityTarget).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'observe', model: 'only-model', excluded_account_ids: [3, 2280, 2283], stability }))
     w.unmount()
   })
 
@@ -219,7 +357,7 @@ describe('simple group quality targets', () => {
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-group-target]').text()).toContain('Some accounts protected')
     expect(w.get('[data-target-metric="cache"]').text()).toContain('≥ 80%')
-    expect(w.get('[data-target-state="62-model-a"]').text()).toContain('Trial attempts 3/20 · 2/5 valid samples')
+    expect(w.get('[data-target-state="62-model-a"]').text()).toContain('Trial attempts 3/20 · 3/5 valid samples')
     expect(w.get('[data-target-state="62-model-a"]').text()).toContain('Actual cache usage: 0%')
     expect(w.get('[data-target-state="62-model-a"]').text()).toContain('verifying recovery with limited fresh production traffic')
     expect(w.get('[data-target-metric="cache"]').text()).toContain('80%')

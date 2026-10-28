@@ -16,9 +16,8 @@ func prepareChannelQualitySchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.Exec(`ALTER TABLE accounts ADD COLUMN platform TEXT DEFAULT 'openai',ADD COLUMN overload_until TIMESTAMPTZ;
  CREATE TABLE scheduled_test_plans(id BIGINT PRIMARY KEY,name TEXT,model_id TEXT,enabled BOOLEAN,group_ids BIGINT[],excluded_account_ids BIGINT[] DEFAULT '{}',next_run_at TIMESTAMPTZ,model_ids TEXT[] DEFAULT '{}');
- CREATE TABLE scheduled_test_definitions(id BIGINT PRIMARY KEY,output_kind TEXT);
- ALTER TABLE scheduled_test_protection_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN completed BOOLEAN,ADD COLUMN result_id BIGINT,ADD COLUMN result_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN round_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN verdict TEXT,ADD COLUMN model_key TEXT NOT NULL DEFAULT '',ADD COLUMN test_definition_id BIGINT;
- ALTER TABLE scheduled_test_combination_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN model_key TEXT NOT NULL DEFAULT '',ADD COLUMN account_wide BOOLEAN NOT NULL DEFAULT false;`)
+ ALTER TABLE scheduled_test_protection_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN completed BOOLEAN,ADD COLUMN result_id BIGINT,ADD COLUMN result_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN round_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN verdict TEXT;
+ ALTER TABLE scheduled_test_combination_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();`)
 	require.NoError(t, err)
 }
 

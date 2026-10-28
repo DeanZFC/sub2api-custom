@@ -5,11 +5,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
 type groupQualityFallbackTestRepo struct {
 	schedulerGroupAwareOpenAIAccountRepo
+}
+
+type groupQualityFallbackGroupTestRepo struct{ GroupRepository }
+
+func (groupQualityFallbackGroupTestRepo) GetByIDLite(_ context.Context, id int64) (*Group, error) {
+	return &Group{ID: id, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true}, nil
 }
 
 func (r groupQualityFallbackTestRepo) ListByGroup(ctx context.Context, groupID int64) ([]Account, error) {
@@ -54,6 +61,7 @@ func groupQualityFallbackTestAccount(id, groupID int64, priority int, activeHold
 func groupQualityFallbackService(mode string, accounts []Account, gate *groupQualityFallbackTestGate) *OpenAIGatewayService {
 	svc := groupQualityRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
 	svc.accountRepo = groupQualityFallbackTestRepo{schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}}
+	svc.schedulerSnapshot = &SchedulerSnapshotService{accountRepo: svc.accountRepo, groupRepo: groupQualityFallbackGroupTestRepo{}}
 	svc.concurrencyService.passiveQualityGate = gate
 	svc.cfg.Gateway.OpenAIWS = newSchedulerTestOpenAIWSV2Config().Gateway.OpenAIWS
 	svc.cfg.Gateway.OpenAIWS.LBTopK = 1
@@ -195,6 +203,70 @@ func TestGroupQualityFallbackStillEnforcesProfitAndExactModel(t *testing.T) {
 	require.Equal(t, "quality_paused", groupQualityFallbackAccount(markerCtx, &account, "other-model").Status, "marker may only relax its public model")
 	markerCtx = WithGroupQualityFallback(context.Background(), GroupQualityFallbackRequest{GroupID: groupID, AccountID: 999, Model: "public-model"})
 	require.Equal(t, "quality_paused", groupQualityFallbackAccount(markerCtx, &account, "public-model").Status, "marker may only relax its exact account")
+}
+
+func TestGroupQualityFallbackPlusProfitControlCannotBeBypassedByRanking(t *testing.T) {
+	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
+		for _, preference := range []string{"scheduler", "quality_score", "fallback_affinity"} {
+			for _, hasAffordable := range []bool{true, false} {
+				pool := map[bool]string{true: "affordable", false: "all_expensive"}[hasAffordable]
+				t.Run(mode+"/"+preference+"/"+pool, func(t *testing.T) {
+					resetOpenAIAdvancedSchedulerSettingCacheForTest()
+					defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+					groupID := int64(43)
+					group := profitControlTestGroup(groupID, 0.2, 0)
+					group.RateMultiplier = 0.11
+					accounts := []Account{
+						groupQualityFallbackTestAccount(1, groupID, -200, true),
+						groupQualityFallbackTestAccount(2, groupID, -100, true),
+					}
+					profitControlTestAccountWithRate(&accounts[0], 0.1)
+					profitControlTestAccountWithRate(&accounts[1], 0.2)
+					if hasAffordable {
+						accounts = append(accounts, groupQualityFallbackTestAccount(3, groupID, 1000, true))
+						profitControlTestAccountWithRate(&accounts[2], 0.08)
+					}
+					gate := &groupQualityFallbackTestGate{recovery: true}
+					svc := groupQualityFallbackService(mode, accounts, gate)
+					if preference == "quality_score" {
+						scoreGate := &groupQualityFallbackScoreTestGate{
+							groupQualityFallbackTestGate: *gate,
+							scores: map[int64]*ChannelQualityScore{
+								1: groupQualityFallbackTestScore("ready", 100),
+								2: groupQualityFallbackTestScore("ready", 99),
+								3: groupQualityFallbackTestScore("ready", 1),
+							},
+						}
+						svc.concurrencyService.passiveQualityGate = scoreGate
+						gate = &scoreGate.groupQualityFallbackTestGate
+					}
+					const session = "plus-conversation"
+					if preference == "fallback_affinity" {
+						key := groupQualityFallbackAffinityKey(101, groupID, "public-model", session)
+						svc.cache = &schedulerTestGatewayCache{sessionBindings: map[string]int64{key: 1}}
+					}
+					ctx, _ := groupQualityAffinityRequest(&groupID, "public-model", session)
+					ctx = context.WithValue(ctx, ctxkey.Group, group)
+					ctx, _ = svc.WithOpenAIRequestPricingContext(ctx, &groupID)
+					selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", session, "public-model", nil, OpenAIUpstreamTransportHTTPSSE, false)
+					if !hasAffordable {
+						require.ErrorIs(t, err, ErrNoAvailableAccounts)
+						require.Nil(t, selection)
+						require.Empty(t, gate.calls, "ranking and affinity must never admit an account above the Plus profit threshold")
+						return
+					}
+					require.NoError(t, err)
+					require.NotNil(t, selection)
+					require.True(t, selection.Acquired)
+					defer selection.ReleaseFunc()
+					require.Equal(t, int64(3), selection.Account.ID, "Plus 0.11 with 20%% margin permits 0.08, but excludes 0.1 and 0.2")
+					require.Equal(t, "group_quality_fallback", decision.Layer)
+					require.Len(t, gate.calls, 1)
+					require.Equal(t, int64(3), gate.calls[0].AccountID)
+				})
+			}
+		}
+	}
 }
 
 func TestGroupQualityFallbackHandlesHoldsBeforeTargetProjectionRefresh(t *testing.T) {

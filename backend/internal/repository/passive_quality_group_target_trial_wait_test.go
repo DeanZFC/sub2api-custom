@@ -18,7 +18,7 @@ func TestGroupQualityTargetTrialWaitDoesNotTreatMissingEvidenceAsFailure(t *test
 	}{
 		{"no_samples", service.PassiveQualityEvidence{Complete: true}, "insufficient_samples"},
 		{"few_samples", service.PassiveQualityEvidence{Complete: true, Samples: 4, CacheSamples: 4, CacheRate: &cache}, "insufficient_samples"},
-		{"few_metric_samples", service.PassiveQualityEvidence{Complete: true, Samples: 8, CacheSamples: 4, CacheRate: &cache}, "insufficient_metric_samples"},
+		{"few_metric_samples", service.PassiveQualityEvidence{Complete: true, Samples: 8, CacheSamples: 4, CacheRate: &cache}, "stability_confirmation"},
 		{"telemetry_gap", service.PassiveQualityEvidence{Samples: 8, CacheSamples: 8, CacheRate: &cache}, "telemetry_incomplete"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,17 +79,20 @@ func TestGroupQualityTargetTrialWaitStillResolvesRealEvidence(t *testing.T) {
 	now := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
 	for _, cache := range []float64{50, 82, 95} {
 		s := service.PassiveQualityState{AccountID: 62, Phase: "trial", Generation: 7, Backoff: 3, TrialStartedAt: now.Add(-time.Minute), TrialEndsAt: now}
-		e := service.PassiveQualityEvidence{Complete: true, Samples: 5, CacheSamples: 5, CacheRate: &cache, Latest: now.Add(time.Second)}
+		e := service.PassiveQualityEvidence{Complete: true, Samples: 5, Fresh: 2, CacheFresh: 2, CacheSamples: 5, CacheRate: &cache, FreshCacheRate: &cache, Latest: now.Add(-time.Second)}
+		advancePassiveObserved(p, &s, e, now.Add(-time.Second))
+		require.Equal(t, "trial", s.Phase)
+		e.Latest = now.Add(time.Second)
 		advancePassiveObserved(p, &s, e, now.Add(2*time.Second))
 		if cache >= p.CacheRate.Recover {
 			require.Equal(t, "healthy", s.Phase)
-			require.Zero(t, s.Backoff)
 			require.Equal(t, s.TrialStartedAt, s.ObserveAfter)
 		} else {
-			require.Equal(t, "paused", s.Phase, "sufficient evidence that has not recovered still expires as a failed trial")
-			require.Equal(t, 4, s.Backoff)
-			require.Contains(t, s.Reason, "trial_expired:")
+			require.Equal(t, "suspect", s.Phase, "cache alone remains soft after hard availability recovery")
+			require.Equal(t, "cache_rate", s.ConfirmationMetric)
+			require.Contains(t, s.Reason, "cache_allocation_reduced:")
 		}
+		require.Equal(t, 3, s.Backoff, "short successful trials retain repeated-failure backoff")
 		require.EqualValues(t, 8, s.Generation)
 	}
 }

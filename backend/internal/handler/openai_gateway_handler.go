@@ -2356,9 +2356,8 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		}
 		account = latest
 		selection.Account = latest
-		// 调度器已抢槽路径无门时由选号内部完成 eager 绑定；门下选号内部
-		// 推迟绑定，这里在终检通过后补准入后绑定。
-		if selection.ProfitGateActive() && !selection.PreserveStickyBinding {
+		// 终检通过后提交认证用户归属及门下会话粘连；临时借用保留原归属。
+		if !selection.PreserveStickyBinding {
 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
@@ -3178,7 +3177,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
-				if _, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(turnCtx, account); vetoed {
+				profitCtx := turnCtx
+				if !service.GroupQualityFallbackActive(turnCtx) {
+					// Keep the connection marker for a possible new fallback, but
+					// ordinary admission retains its original profit-check semantics.
+					profitCtx = service.WithoutGroupQualityFallback(turnCtx)
+				}
+				if _, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(profitCtx, account); vetoed {
 					reqLog.Info("openai.websocket_turn_profit_vetoed",
 						zap.Int("turn", turn),
 						zap.Int64("account_id", account.ID),

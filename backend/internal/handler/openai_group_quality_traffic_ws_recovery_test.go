@@ -58,6 +58,25 @@ func (g *handlerFallbackTrafficGate) snapshot() []handlerFallbackAdmission {
 	return append([]handlerFallbackAdmission(nil), g.admissions...)
 }
 
+type wsRecoveryProfitAccountRepo struct {
+	groupTrafficAccountRepo
+	mu          sync.Mutex
+	failRead    bool
+	reads       int
+	failedReads int
+}
+
+func (r *wsRecoveryProfitAccountRepo) GetByID(ctx context.Context, id int64) (*service.Account, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reads++
+	if r.failRead {
+		r.failedReads++
+		return nil, errors.New("account storage unavailable after quality recovery")
+	}
+	return r.groupTrafficAccountRepo.GetByID(ctx, id)
+}
+
 func TestOpenAIGroupTrafficWSFallbackRecoversNormallyOrRefreshesModel(t *testing.T) {
 	for _, tc := range []struct {
 		name, nextModel string
@@ -90,12 +109,25 @@ func TestOpenAIGroupTrafficWSFallbackRecoversNormallyOrRefreshesModel(t *testing
 				}
 			}))
 			defer upstream.Close()
+			var account service.Account
 			h := newGroupTrafficHandler(t, gate, upstream.URL, nil, nil, func(a *service.Account) {
 				a.GroupIDs = []int64{3131}
 				a.Status = "quality_paused"
 				a.Extra["quality_protection_reason"] = "automatic quality hold"
+				rate := 0.08
+				a.RateMultiplier = &rate
+				account = *a
 			})
-			conn, _ := startGroupTrafficWS(t, h)
+			var profitRepo *wsRecoveryProfitAccountRepo
+			if tc.healthy {
+				profitRepo = &wsRecoveryProfitAccountRepo{groupTrafficAccountRepo: groupTrafficAccountRepo{openAIImagesFailoverAccountRepo{accounts: []service.Account{account}}}}
+				h.gatewayService = service.NewOpenAIGatewayService(profitRepo, &openAIWSUsageHandlerUsageLogRepoStub{}, nil, nil, nil, nil, nil, h.cfg, nil, h.concurrencyHelper.concurrencyService, service.NewBillingService(h.cfg, nil), nil, h.billingCacheService, nil, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
+			}
+			conn, _ := startGroupTrafficWS(t, h, func(group *service.Group) {
+				if tc.healthy {
+					group.RateMultiplier, group.ProfitControlEnabled, group.ProfitMinMargin = 0.11, true, 0.2
+				}
+			})
 			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 			defer cancel()
 			for turn, model := range []string{"gpt-5.1", tc.nextModel} {
@@ -103,6 +135,12 @@ func TestOpenAIGroupTrafficWSFallbackRecoversNormallyOrRefreshesModel(t *testing
 					gate.stateMu.Lock()
 					gate.normalReady = tc.healthy
 					gate.stateMu.Unlock()
+					if profitRepo != nil {
+						profitRepo.mu.Lock()
+						require.Positive(t, profitRepo.reads, "first fallback must use the authoritative profit check")
+						profitRepo.failRead = true
+						profitRepo.mu.Unlock()
+					}
 				}
 				previous := ""
 				if turn == 1 {
@@ -113,6 +151,11 @@ func TestOpenAIGroupTrafficWSFallbackRecoversNormallyOrRefreshesModel(t *testing
 				_, payload, err := conn.Read(ctx)
 				require.NoError(t, err)
 				require.Equal(t, "response.completed", gjson.GetBytes(payload, "type").String(), string(payload))
+			}
+			if profitRepo != nil {
+				profitRepo.mu.Lock()
+				require.Zero(t, profitRepo.failedReads, "ordinary recovery must not fail because of the connection's old fallback marker")
+				profitRepo.mu.Unlock()
 			}
 			calls := gate.snapshot()
 			wantCalls := 3

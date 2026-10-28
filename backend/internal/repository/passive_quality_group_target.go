@@ -19,7 +19,13 @@ const passiveGroupTargetTextUsageSQL = `COALESCE(ul.image_count,0)=0
 // explicit reported counters (including zero) or positive reads are evidence.
 // Non-streaming requests may report real counters too; TTFT still needs a stream.
 func passiveGroupTargetSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, s service.PassiveQualityState, now time.Time) (service.PassiveQualityEvidence, error) {
-	from := now.Add(-time.Duration(p.WindowSeconds) * time.Second)
+	window := time.Duration(p.WindowSeconds) * time.Second
+	if s.Phase == "trial" {
+		// Keep the bounded trial's earlier batches while its paced recovery
+		// clock runs, including when the ordinary rolling window is shorter.
+		window = max(window, p.GroupTargetTrialDuration())
+	}
+	from := now.Add(-window)
 	if s.ObserveAfter.After(from) {
 		from = s.ObserveAfter
 	}
@@ -95,8 +101,12 @@ func beginPassiveTrial(p service.PassiveQualityPolicy, s *service.PassiveQuality
 	s.Phase, s.Reason = "trial", reason
 	s.Generation++
 	s.TrialStartedAt = now
-	s.TrialEndsAt = now.Add(time.Duration(p.TrialSeconds) * time.Second)
+	s.TrialEndsAt = now.Add(p.GroupTargetTrialDuration())
 	s.Used, s.Inflight, s.Hits = 0, 0, 0
+	s.RecoveryHits = 0
+	s.SuspicionSince, s.RecoverySince, s.HealthySince, s.StabilityEvidenceAt = time.Time{}, time.Time{}, time.Time{}, time.Time{}
+	s.LastTrialAdmissionAt = time.Time{}
+	s.LastTrialObservedAt = time.Time{}
 	s.LastEvidenceAt = now
 	s.Evidence = service.PassiveQualityEvidence{Complete: true}
 }
@@ -113,7 +123,11 @@ func waitPassiveGroupTargetTrial(p service.PassiveQualityPolicy, s *service.Pass
 	// still evidence. Like a fresh trial, the new window has its own generation
 	// and budget; abandoned old leases cannot block it or refund its capacity.
 	s.Generation++
-	s.TrialEndsAt = now.Add(time.Duration(p.TrialSeconds) * time.Second)
+	s.TrialEndsAt = now.Add(p.GroupTargetTrialDuration())
 	s.Used, s.Inflight, s.Hits = 0, 0, 0
+	s.RecoveryHits = 0
+	s.RecoverySince, s.StabilityEvidenceAt = time.Time{}, time.Time{}
+	s.LastTrialAdmissionAt = time.Time{}
+	s.LastTrialObservedAt = time.Time{}
 	s.NextAt = time.Time{}
 }

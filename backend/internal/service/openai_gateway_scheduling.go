@@ -966,7 +966,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx 
 // tryStickySessionHit attempts to get account from sticky session.
 // Returns account if hit and usable; clears session and returns nil if account is unavailable.
 func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID *int64, platform string, sessionHash, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability) *Account {
-	if sessionHash == "" {
+	if sessionHash == "" && openAIUserAffinityFromContext(ctx) == nil {
 		return nil
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
@@ -974,7 +974,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	accountID := stickyAccountID
 	if accountID <= 0 {
 		var err error
-		accountID, err = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+		accountID, err = s.stickySessionAccountIDForRouting(ctx, groupID, sessionHash)
 		if err != nil || accountID <= 0 {
 			return nil
 		}
@@ -989,40 +989,48 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 	if groupQualityAutomaticHold(ctx, account, groupID, requestedModel) {
+		markOpenAIUserAffinityMigration(ctx, accountID)
 		return nil
 	}
 
 	// 检查账号是否需要清理粘性会话
 	// Check if sticky session should be cleared
 	if shouldClearStickySessionWithContext(ctx, account, requestedModel) {
-		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 		return nil
 	}
 
 	// 验证账号是否可用于当前请求
 	// Verify account is usable for current request
-	if !isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
+	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, account, platform, requestedModel, false, requiredCapability) {
+		_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
+		return nil
+	}
+	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
 		return nil
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
-		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel) {
-		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 		return nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	account = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
-		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 		return nil
 	}
 	if groupID != nil && s.needsUpstreamChannelRestrictionCheck(ctx, groupID) &&
 		s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
-		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 		return nil
 	}
 
+	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
+		return nil
+	}
 	// 刷新会话 TTL 并返回账号
 	// Refresh session TTL and return account
 	_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL)
@@ -1197,8 +1205,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	preferLowUpstreamRate := useUpstreamTokenCost && s.isOpenAILowUpstreamRatePriorityEnabled(ctx)
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	var stickyAccountID int64
-	if sessionHash != "" && s.cache != nil {
-		if accountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); err == nil {
+	if (sessionHash != "" || openAIUserAffinityFromContext(ctx) != nil) && s.cache != nil {
+		if accountID, err := s.stickySessionAccountIDForRouting(ctx, groupID, sessionHash); err == nil {
 			stickyAccountID = accountID
 		}
 	}
@@ -1269,29 +1277,35 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	// whole conversation to a cache-cold account.
 	stickySpillover := false
 	trafficDenied := make(map[int64]bool)
-	if sessionHash != "" {
+	if sessionHash != "" || openAIUserAffinityFromContext(ctx) != nil {
 		accountID := stickyAccountID
 		if accountID > 0 && !isExcluded(accountID) {
 			account, err := s.getSchedulableAccount(ctx, accountID)
 			if err == nil {
 				automaticHold := groupQualityAutomaticHold(ctx, account, groupID, requestedModel)
-				stickySpillover = stickySpillover || automaticHold
-				clearSticky := !automaticHold && shouldClearStickySessionWithContext(ctx, account, requestedModel)
+				if automaticHold && openAIUserAffinityFromContext(ctx) != nil {
+					markOpenAIUserAffinityMigration(ctx, accountID)
+				} else {
+					stickySpillover = stickySpillover || automaticHold
+				}
+				clearSticky := !automaticHold && (account == nil || shouldClearStickySessionWithContext(ctx, account, requestedModel) || !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, account, platform, requestedModel, false, requiredCapability))
 				if clearSticky {
-					_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+					_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 				}
 				if !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
-					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+					account = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
-						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
-						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel) {
-						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
-						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
 					} else if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
-						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						_ = s.clearOpenAIStickySessionForRouting(ctx, groupID, sessionHash)
+					} else if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
+						stickySpillover = true
 					} else {
 						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, &account)
 						if err == nil && result != nil && result.Acquired {

@@ -152,6 +152,10 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 }
 
 func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	if openAIUserAffinityFromContext(ctx) != nil {
+		// Authenticated affinity is committed after terminal admission, using CAS.
+		return nil
+	}
 	if s == nil || s.cache == nil || accountID <= 0 {
 		return nil
 	}

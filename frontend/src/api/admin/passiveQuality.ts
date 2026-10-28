@@ -1,6 +1,9 @@
 import apiClient from '../client'
 
 export interface PassiveMetric { enabled: boolean; pause: number; recover: number }
+export interface GroupQualityStability {
+  availability_pause_seconds: number; performance_pause_seconds: number; recovery_seconds: number; new_session_percent: number
+}
 export interface PassiveCacheWindow {
   window_seconds: number; max_samples: number; min_samples: number; confirmations: number; new_samples: number
   min_tokens: number; min_sessions: number; max_session_share_percent: number
@@ -29,6 +32,7 @@ export interface PassiveCacheState extends Omit<PassiveMetricState, 'evidence'> 
 }
 export interface PassivePolicy {
   purpose?: 'cache_target' | 'group_quality_target'
+  stability?: GroupQualityStability
   traffic_mode?: 'strict' | 'availability'
   schema_version?: number; ttft_action?: 'observe' | 'limit'; ttft_concurrency_limit?: number; ttft_priority_penalty?: number
   tps_action?: 'observe' | 'limit'; tps_concurrency_limit?: number; tps_priority_penalty?: number
@@ -43,7 +47,7 @@ export interface PassivePolicy {
 }
 export interface PassiveEvidence {
   output_tps?: number | null; tps_samples?: number; tps_fresh?: number; tps_latest?: string; fresh_output_tps?: number | null
-  cache_fresh?: number; ttft_fresh?: number
+  cache_fresh?: number; cache_latest?: string; ttft_fresh?: number; ttft_latest?: string
   fresh_error_rate?: number | null; fresh_ttft?: number | null; fresh_cache_rate?: number | null
   cache_read_tokens?: number; cache_input_tokens?: number
   samples: number; failures: number; consecutive_failures: number; error_rate: number | null; ttft: number | null
@@ -51,6 +55,7 @@ export interface PassiveEvidence {
 }
 export interface PassiveState {
   purpose?: 'cache_target' | 'group_quality_target'
+  suspicion_since?: string; recovery_since?: string; recovery_hits?: number; cache_allocation_reduced?: boolean; stability_evidence_at?: string; confirmation_metric?: string
   speed?: PassiveMetricState; latency?: PassiveMetricState; cache?: Record<string, PassiveCacheState>; allocation_percent?: number
   policy_id: number; policy_name: string; account_id: number; account_name?: string; model: string; probe_model?: string; scope: string; mode: string
   phase: string; reason: string; hits: number; backoff: number; used: number; inflight: number; generation: number
@@ -60,6 +65,7 @@ export interface PassiveEvent { id: number; policy_id: number; account_id: numbe
 export interface GroupQualityTargetDraft {
   id: number; version: number; purpose: 'group_quality_target'; name: string; enabled: boolean; mode: 'observe' | 'enforce'; model: string
   traffic_mode: 'strict' | 'availability'
+  stability: GroupQualityStability
   group_ids: number[]; cache_rate: PassiveMetric; error_rate: PassiveMetric; ttft: PassiveMetric; tps: PassiveMetric
   excluded_account_ids: number[]
   window_seconds?: number; max_samples?: number; min_samples?: number; confirmations?: number; new_samples?: number
@@ -128,6 +134,7 @@ export function groupQualityTargetDraft(policy?: PassivePolicy, _groupName = '')
   const draft: GroupQualityTargetDraft = {
     id: policy?.id || 0, version: policy?.version || 0, purpose: 'group_quality_target', name: policy?.name || '',
     enabled: policy?.enabled ?? true, mode: policy?.mode || 'enforce', traffic_mode: policy?.traffic_mode || 'strict', model: policy?.model || '', group_ids: policy ? [...policy.group_ids] : [],
+    stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 120, new_session_percent: 20, ...policy?.stability },
     excluded_account_ids: [...(policy?.excluded_account_ids || [])],
     cache_rate: { enabled: policy?.cache_rate.enabled ?? true, pause: policy?.cache_rate.pause ?? percentage, recover: policy?.cache_rate.recover ?? percentage + 5 },
     error_rate: { enabled: policy?.error_rate.enabled ?? true, pause: policy?.error_rate.pause ?? 10, recover: policy?.error_rate.recover ?? 5 },

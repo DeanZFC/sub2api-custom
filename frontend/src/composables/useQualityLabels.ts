@@ -8,9 +8,10 @@ export function useQualityLabels() {
     if (te('admin.tests.passive.v2.reasons.' + value)) return passive('v2.reasons.' + value)
     if (te(`admin.tests.passive.reasons.${value}`)) return passive(`reasons.${value}`)
     if (te(`admin.tests.quality.reasons.${value}`)) return t(`admin.tests.quality.reasons.${value}`)
-    for (const prefix of ['trial_expired', 'trial_failed', 'waiting_for_recovery']) {
-      if (value.startsWith(`${prefix}: `)) return `${passive(`reasons.${prefix}`)}: ${reason(value.slice(prefix.length + 2))}`
+    for (const prefix of ['trial_expired', 'trial_failed', 'waiting_for_recovery', 'waiting_for_fresh_failure', 'cache_allocation_reduced']) {
+      if (value.startsWith(`${prefix}: `)) return `${reason(prefix)}: ${reason(value.slice(prefix.length + 2))}`
     }
+    if (value.startsWith('fresh_')) return t('admin.tests.groupTargets.freshEvidenceReason', { reason: reason(value.slice(6)) })
     const metric = /^(error_rate|ttft_p90|cache_rate|output_tps): ([\d.]+) \/ ([\d.]+) \((\d+)\)$/.exec(value)
     if (metric) return passive('metricReason', { metric: passive(metric[1] === 'error_rate' ? 'errorRate' : metric[1] === 'ttft_p90' ? 'ttft' : metric[1] === 'output_tps' ? 'tps' : 'cacheRate'), observed: metric[2], threshold: metric[3], samples: metric[4] })
     const consecutive = /^consecutive_failures: (\d+)$/.exec(value)

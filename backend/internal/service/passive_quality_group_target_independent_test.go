@@ -46,6 +46,25 @@ func TestGroupQualityTargetIndependentMinimalConfiguration(t *testing.T) {
 	}
 }
 
+func TestGroupQualityTargetTrialRecoveryNormalizesWithinConfiguredBudget(t *testing.T) {
+	legacy := independentGroupTargetConfig(t, "group_quality_target", 80)
+	legacy.NewSamples, legacy.Confirmations, legacy.TrialRequests = 20, 10, 5
+	require.NoError(t, legacy.Validate())
+	// Validation preserves the persisted policy. Only the bounded trial uses
+	// effective values, so old policies remain editable without losing intent.
+	require.Equal(t, 20, legacy.NewSamples)
+	require.Equal(t, 10, legacy.Confirmations)
+	require.Equal(t, 5, legacy.TrialRequests)
+	require.Equal(t, 5, legacy.GroupTargetRecoveryConfirmations())
+	require.Equal(t, 1, legacy.GroupTargetRecoveryBatchSize())
+
+	modern := independentGroupTargetConfig(t, "group_quality_target", 80)
+	modern.NewSamples, modern.Confirmations, modern.TrialRequests = 20, 2, 20
+	require.NoError(t, modern.Validate())
+	require.Equal(t, 2, modern.GroupTargetRecoveryConfirmations())
+	require.Equal(t, 10, modern.GroupTargetRecoveryBatchSize())
+}
+
 func TestGroupQualityTargetTrafficModeDefaultsAndValidation(t *testing.T) {
 	defaultMode := independentGroupTargetConfig(t, "group_quality_target", 80)
 	require.NoError(t, defaultMode.Validate())

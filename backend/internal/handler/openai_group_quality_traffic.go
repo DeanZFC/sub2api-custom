@@ -33,7 +33,27 @@ func (h *OpenAIGatewayHandler) tryAcquireOpenAIWSTurnAccountSlot(ctx context.Con
 	// Preserve the established credential and group; only the current public
 	// model is refreshed. Live admission rechecks hard gates and lease ownership.
 	fallback.Model = traffic.Model
-	return h.concurrencyHelper.TryAcquireAccountSlot(service.WithGroupQualityFallback(normalCtx, fallback), accountID, maxConcurrency, account)
+	fallbackCtx := service.WithGroupQualityFallback(normalCtx, fallback)
+	release, acquired, err = h.concurrencyHelper.TryAcquireAccountSlot(fallbackCtx, accountID, maxConcurrency, account)
+	if err != nil || !acquired {
+		return release, acquired, err
+	}
+	// Recovery must recheck the authoritative rate after reserving this turn's
+	// slot; the pre-slot check cannot see rate changes during admission.
+	var selected *service.Account
+	if account != nil {
+		selected = *account
+	}
+	latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(fallbackCtx, selected)
+	if h.gatewayService == nil || selected == nil || vetoed {
+		service.ReleaseUnusedGroupQualityTraffic(fallbackCtx, accountID)
+		if release != nil {
+			release()
+		}
+		return nil, false, fmt.Errorf("%w: quality fallback profit admission rejected: %s", service.ErrAccountAdmissionDenied, reason)
+	}
+	*account = latest
+	return release, true, nil
 }
 
 func (h *OpenAIGatewayHandler) handleGroupQualityBudgetError(c *gin.Context, err error, streamStarted bool) bool {

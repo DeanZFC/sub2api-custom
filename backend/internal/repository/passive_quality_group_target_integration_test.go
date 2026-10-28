@@ -48,7 +48,11 @@ func targetStates(t *testing.T, ctx context.Context, r *passiveQualityRepository
 func TestGroupQualityTargetMeasuredCacheLifecycleIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
-	base := time.Now().Add(-20 * time.Second)
+	p.WindowSeconds = 60
+	require.NoError(t, r.SavePolicy(ctx, &p))
+	base := time.Now().Add(-10 * time.Minute)
+	_, err := db.Exec(`UPDATE passive_quality_policies SET updated_at=$2 WHERE id=$1`, p.ID, base.Add(-time.Second))
+	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
 		at := base.Add(time.Duration(i) * time.Millisecond)
 		insertGroupTargetUsage(t, db, r, fmt.Sprintf("a-%d", i), "A", 8, at, 0, true)
@@ -56,7 +60,7 @@ func TestGroupQualityTargetMeasuredCacheLifecycleIntegration(t *testing.T) {
 		insertGroupTargetUsage(t, db, r, fmt.Sprintf("unknown-%d", i), "unknown", 8, at, 0, false)
 		insertGroupTargetUsage(t, db, r, fmt.Sprintf("other-group-%d", i), "other-group", 9, at, 0, true)
 	}
-	_, err := r.Sweep(ctx, base.Add(time.Second), 0)
+	_, err = r.Sweep(ctx, base.Add(time.Second), 0)
 	require.NoError(t, err)
 	states := targetStates(t, ctx, r)
 	require.Len(t, states, 3)
@@ -77,47 +81,50 @@ func TestGroupQualityTargetMeasuredCacheLifecycleIntegration(t *testing.T) {
 	}
 	_, err = r.Sweep(ctx, base.Add(5*time.Second), 0)
 	require.NoError(t, err)
-	require.Equal(t, "paused", targetStates(t, ctx, r)["A"].Phase)
-	allowed, _, err := r.AcquirePassiveQuality(ctx, 62, "A", "blocked")
+	require.Equal(t, "suspect", targetStates(t, ctx, r)["A"].Phase, "cache-only degradation must not interrupt existing owners")
+	allowed, leased, err := r.AcquirePassiveQuality(ctx, 62, "A", "existing-owner")
 	require.NoError(t, err)
-	require.False(t, allowed)
+	require.True(t, allowed)
+	require.False(t, leased, "soft cache allocation does not consume bounded recovery traffic")
 	allowed, _, err = r.AcquirePassiveQuality(ctx, 62, "B", "healthy-other-model")
 	require.NoError(t, err)
 	require.True(t, allowed)
-	_, err = db.Exec(`UPDATE passive_quality_states SET data=jsonb_set(data,'{next_at}',to_jsonb($2::timestamptz)) WHERE policy_id=$1 AND model_key='A'`, p.ID, time.Now().Add(-time.Second))
+	// Passing only the pause threshold must not restore allocation. The old
+	// bad window has expired, so this specifically exercises recovery hysteresis.
+	for i := 0; i < 5; i++ {
+		insertGroupTargetUsage(t, db, r, fmt.Sprintf("between-%d", i), "A", 8, base.Add(70*time.Second+time.Duration(i)*time.Millisecond), 81, true)
+	}
+	_, err = r.advance(ctx, p.ID, 62, base.Add(71*time.Second), false, "A")
 	require.NoError(t, err)
-	trialAt := time.Now().Add(-time.Millisecond)
-	probe, err := r.advance(ctx, p.ID, 62, trialAt, false, "A")
+	require.Equal(t, "suspect", targetStates(t, ctx, r)["A"].Phase)
+	// Other-group successes cannot confirm this target's recovery.
+	for i := 0; i < 5; i++ {
+		insertGroupTargetUsage(t, db, r, fmt.Sprintf("wrong-recovery-%d", i), "A", 9, base.Add(131*time.Second+time.Duration(i)*time.Millisecond), 95, true)
+	}
+	_, err = r.advance(ctx, p.ID, 62, base.Add(132*time.Second), false, "A")
 	require.NoError(t, err)
-	require.Nil(t, probe, "no probe budget and no paid connectivity probe required")
+	require.Equal(t, "suspect", targetStates(t, ctx, r)["A"].Phase)
+	// Keep fresh >=85% cache batches throughout the recovery period. One batch
+	// and the mere passage of time cannot clear the soft allocation restriction.
+	for batch, offset := range []int{135, 175, 215, 256} {
+		for i := 0; i < 5; i++ {
+			insertGroupTargetUsage(t, db, r, fmt.Sprintf("recover-%d-%d", batch, i), "A", 8, base.Add(time.Duration(offset)*time.Second+time.Duration(i)*time.Millisecond), 95, true)
+		}
+		_, err = r.advance(ctx, p.ID, 62, base.Add(time.Duration(offset+1)*time.Second), false, "A")
+		require.NoError(t, err)
+		if batch < 3 {
+			require.Equal(t, "suspect", targetStates(t, ctx, r)["A"].Phase)
+		}
+	}
 	state := targetStates(t, ctx, r)["A"]
-	require.Equal(t, "trial", state.Phase)
-	allowed, leased, err := r.AcquirePassiveQuality(ctx, 62, "A", "trial")
-	require.NoError(t, err)
-	require.True(t, allowed)
-	require.True(t, leased)
-	require.NoError(t, r.ReleasePassiveQuality(ctx, "trial", false))
-	// Other groups cannot supply recovery evidence for this target.
-	for i := 0; i < 5; i++ {
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("wrong-recovery-%d", i), "A", 9, trialAt.Add(time.Second+time.Duration(i)*time.Millisecond), 95, true)
-	}
-	_, err = r.advance(ctx, p.ID, 62, trialAt.Add(2*time.Second), false, "A")
-	require.NoError(t, err)
-	require.Equal(t, "trial", targetStates(t, ctx, r)["A"].Phase)
-	for i := 0; i < 5; i++ {
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("recover-%d", i), "A", 8, trialAt.Add(3*time.Second+time.Duration(i)*time.Millisecond), 85, true)
-	}
-	_, err = r.advance(ctx, p.ID, 62, trialAt.Add(4*time.Second), false, "A")
-	require.NoError(t, err)
-	require.Equal(t, "healthy", targetStates(t, ctx, r)["A"].Phase)
-	// Re-enter trial with no new traffic: timeout must preserve the hard hold.
-	_, err = db.Exec(`UPDATE passive_quality_states SET data=jsonb_set(jsonb_set(jsonb_set(data,'{phase}','"trial"'),'{trial_started_at}',to_jsonb($2::timestamptz)),'{trial_ends_at}',to_jsonb($3::timestamptz)) WHERE policy_id=$1 AND model_key='A'`, p.ID, trialAt.Add(10*time.Second), trialAt.Add(11*time.Second))
-	require.NoError(t, err)
-	_, err = r.advance(ctx, p.ID, 62, trialAt.Add(12*time.Second), false, "A")
-	require.NoError(t, err)
-	state = targetStates(t, ctx, r)["A"]
-	require.Equal(t, "trial", state.Phase)
-	require.Equal(t, "waiting_for_recovery: insufficient_samples", state.Reason)
+	require.Equal(t, "healthy", state.Phase)
+	require.Equal(t, "cache_allocation_recovered", state.Reason)
+	require.Zero(t, state.Backoff)
+	var status string
+	var schedulable bool
+	require.NoError(t, db.QueryRow(`SELECT status,schedulable FROM accounts WHERE id=62`).Scan(&status, &schedulable))
+	require.Equal(t, "active", status)
+	require.True(t, schedulable)
 }
 
 func TestGroupQualityTargetFailureMembershipAndReplayIntegration(t *testing.T) {

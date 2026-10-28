@@ -13,7 +13,7 @@ func scoreFloat(v float64) *float64 { return &v }
 func scoreObservations(now time.Time, n int) []ChannelQualityScoreObservation {
 	result := make([]ChannelQualityScoreObservation, n)
 	for i := range result {
-		result[i] = ChannelQualityScoreObservation{Key: fmt.Sprint(i), At: now.Add(-time.Duration(i) * time.Second), Model: "public", TTFT: scoreFloat(2000), Duration: scoreFloat(10000), CacheReported: true, CacheReusable: true, CacheInput: 2000, CacheRead: 800, CacheExpectedTokens: 1000, OutputTokens: 100, GenerationMS: 2000}
+		result[i] = ChannelQualityScoreObservation{Key: fmt.Sprint(i), At: now.Add(-time.Duration(i) * time.Second), Model: "public", TTFT: scoreFloat(2000), Duration: scoreFloat(10000), CacheReported: true, CacheInput: 1000, CacheRead: 800, OutputTokens: 100, GenerationMS: 2000}
 	}
 	return result
 }
@@ -45,12 +45,12 @@ func TestChannelQualityScoreIndependentWeightedScale(t *testing.T) {
 	require.Equal(t, 8500., *s.Dimensions[2].Value)
 }
 
-func TestChannelQualityScoreMissingCacheIsUnknownAndColdDoesNotPenalize(t *testing.T) {
+func TestChannelQualityScoreMissingCacheIsUnknownAndReportedZeroParticipates(t *testing.T) {
 	now := time.Now()
 	c := DefaultChannelQualityScoreConfig()
 	samples := scoreObservations(now, 20)
 	for i := range samples {
-		samples[i].CacheReusable = false
+		samples[i].CacheReported = false
 		samples[i].CacheRead = 0
 	}
 	s := SummarizeChannelQualityScore(c, samples, "public", true, now)
@@ -60,12 +60,7 @@ func TestChannelQualityScoreMissingCacheIsUnknownAndColdDoesNotPenalize(t *testi
 	require.InDelta(t, .18, s.Confidence, .000001)
 	require.Nil(t, s.Dimensions[1].Value)
 	require.Nil(t, s.Dimensions[1].Score)
-	for i := range samples {
-		samples[i].CacheReusable = true
-		samples[i].CacheReported = false
-	}
-	s = SummarizeChannelQualityScore(c, samples, "public", true, now)
-	require.Nil(t, s.Dimensions[1].Value)
+	require.Zero(t, s.Dimensions[1].Samples)
 	for i := range samples {
 		samples[i].CacheReported = true
 	}
@@ -73,6 +68,72 @@ func TestChannelQualityScoreMissingCacheIsUnknownAndColdDoesNotPenalize(t *testi
 	require.Equal(t, "ready", s.Status)
 	require.Equal(t, 90., *s.Value)
 	require.Equal(t, 0., *s.Dimensions[1].Value)
+	require.Equal(t, 20, s.Dimensions[1].Samples)
+	require.Equal(t, 0., *s.Dimensions[1].Score)
+}
+
+func TestChannelQualityScoreActualCacheIsTokenWeighted(t *testing.T) {
+	now := time.Now()
+	c := DefaultChannelQualityScoreConfig()
+	samples := scoreObservations(now, 20)
+	for i := range samples {
+		samples[i].CacheInput, samples[i].CacheRead = 100, 0
+	}
+	// One large cached request contributes as many input tokens as its 19
+	// uncached peers. Averaging per-request rates would incorrectly give 5%.
+	samples[0].CacheInput, samples[0].CacheRead = 1900, 1900
+	s := SummarizeChannelQualityScore(c, samples, "public", true, now)
+	require.Equal(t, "ready", s.Status)
+	require.Equal(t, 20, s.Dimensions[1].Samples)
+	require.Equal(t, 50., *s.Dimensions[1].Value)
+	require.Equal(t, 62.5, *s.Dimensions[1].Score)
+	require.Equal(t, 96.25, *s.Value)
+}
+
+func TestChannelQualityScoreActualCacheRetainsEffectiveSampleFloor(t *testing.T) {
+	now := time.Now()
+	c := DefaultChannelQualityScoreConfig()
+	samples := scoreObservations(now, 25)
+	for i := range samples {
+		samples[i].CacheReported = i < 19
+	}
+	s := SummarizeChannelQualityScore(c, samples, "public", true, now)
+	require.Equal(t, "partial", s.Status)
+	require.Equal(t, "minimum_samples", s.Dimensions[1].Reason)
+	require.Equal(t, 19, s.Dimensions[1].Samples)
+	require.Equal(t, 80., *s.Dimensions[1].Value)
+	require.Nil(t, s.Dimensions[1].Score)
+	samples[19].CacheReported = true
+	s = SummarizeChannelQualityScore(c, samples, "public", true, now)
+	require.Equal(t, "ready", s.Status)
+	require.Equal(t, 20, s.Dimensions[1].Samples)
+	require.Equal(t, 100., *s.Dimensions[1].Score)
+}
+
+func TestChannelQualityScoreInvalidCacheCountersRemainUnknown(t *testing.T) {
+	now := time.Now()
+	c := DefaultChannelQualityScoreConfig()
+	for _, tc := range []struct {
+		name  string
+		input int64
+		read  int64
+	}{
+		{"zero denominator", 0, 0},
+		{"negative input", -100, 0},
+		{"negative read", 100, -1},
+		{"read exceeds input", 100, 101},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			samples := scoreObservations(now, 20)
+			for i := range samples {
+				samples[i].CacheInput, samples[i].CacheRead = tc.input, tc.read
+			}
+			s := SummarizeChannelQualityScore(c, samples, "public", true, now)
+			require.Zero(t, s.Dimensions[1].Samples)
+			require.Nil(t, s.Dimensions[1].Value)
+			require.Nil(t, s.Dimensions[1].Score)
+		})
+	}
 }
 
 func TestChannelQualityScoreWindowCapDedupAndPublicModelIsolation(t *testing.T) {

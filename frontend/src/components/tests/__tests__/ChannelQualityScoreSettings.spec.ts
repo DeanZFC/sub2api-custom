@@ -33,7 +33,7 @@ describe('independent quality scoring settings', () => {
     expect(api.saveScoreConfig).not.toHaveBeenCalled()
     await wrapper.get('[data-score-field="min_samples"]').setValue(20)
     await wrapper.get('[data-score-field="cache_rate.good"]').setValue(0)
-    expect(wrapper.text()).toContain('Check Reusable-prefix cache rate (%)')
+    expect(wrapper.text()).toContain('Check Actual cache rate (%)')
     await wrapper.get('form').trigger('submit')
     expect(api.saveScoreConfig).not.toHaveBeenCalled()
     wrapper.unmount()

@@ -53,6 +53,23 @@ func (c *gatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, s
 	return c.rdb.Set(ctx, key, accountID, ttl).Err()
 }
 
+var compareAndSetSessionAccountScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if (ARGV[1] == '0' and current ~= false) or (ARGV[1] ~= '0' and current ~= ARGV[1]) then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+return 1
+`)
+
+func (c *gatewayCache) CompareAndSetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, expected, accountID int64, ttl time.Duration) (bool, error) {
+	if expected < 0 || accountID <= 0 || ttl <= 0 {
+		return false, errors.New("invalid session account binding")
+	}
+	updated, err := compareAndSetSessionAccountScript.Run(ctx, c.rdb, []string{buildSessionKey(groupID, sessionHash)}, expected, accountID, ttl.Milliseconds()).Int()
+	return updated == 1, err
+}
+
 func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Expire(ctx, key, ttl).Err()

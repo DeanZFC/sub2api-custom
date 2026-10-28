@@ -209,7 +209,7 @@ func queryChannelQualityScoresUncached(ctx context.Context, db *sql.DB, accountI
  ul.*,CASE WHEN `+outputTPSEligibleSQL("ul")+` THEN ul.output_tokens ELSE 0 END AS tps_output,
  CASE WHEN `+outputTPSEligibleSQL("ul")+` THEN ul.duration_ms::float8-ul.first_token_ms::float8 ELSE 0 END AS tps_ms,
  COALESCE(NULLIF(cr.attempt_key,''),NULLIF(ul.request_id,''),'usage:'||ul.id) AS outcome_key,
- COALESCE(cr.cache_reported,false) OR ul.cache_read_tokens>0 AS cache_reported,cr.cache_metadata,
+ COALESCE(cr.cache_reported,false) OR ul.cache_read_tokens>0 AS cache_reported,
  CASE WHEN `+channelMonitorV2CacheEligibleUL+` AND (ul.cache_read_tokens>0 OR cr.cache_reported)
  AND NOT COALESCE(ul.native_compaction_v2,false)
  AND COALESCE(ul.inbound_endpoint,'') NOT LIKE '%/compact%' AND COALESCE(ul.upstream_endpoint,'') NOT LIKE '%/compact%'
@@ -225,52 +225,17 @@ func queryChannelQualityScoresUncached(ctx context.Context, db *sql.DB, accountI
  SELECT account_id,outcome_key AS key,created_at,false AS failed,
  COALESCE(NULLIF(TRIM(requested_model),''),model) AS model,
  CASE WHEN stream OR openai_ws_mode THEN first_token_ms END::float8 AS ttft,duration_ms::float8 AS duration,
- cache_reported,cache_metadata,cache_input,GREATEST(cache_read_tokens,0)::bigint AS cache_read,tps_output,tps_ms FROM succeeded
- UNION ALL SELECT account_id,request_key,created_at,true,model,NULL::float8,NULL::float8,false,NULL::jsonb,0,0,0,0 FROM failed
+ cache_reported,cache_input,GREATEST(cache_read_tokens,0)::bigint AS cache_read,tps_output,tps_ms FROM succeeded
+ UNION ALL SELECT account_id,request_key,created_at,true,model,NULL::float8,NULL::float8,false,0,0,0,0 FROM failed
  ), ranked AS (SELECT *,row_number() OVER(PARTITION BY account_id ORDER BY created_at DESC,key DESC) AS n FROM outcomes),
  selected AS MATERIALIZED (SELECT * FROM ranked WHERE n<=$5)
  SELECT ul.account_id,ul.key,ul.created_at,ul.failed,COALESCE(ul.model,''),ul.ttft,ul.duration,
  ul.cache_reported,ul.cache_input,ul.cache_read,ul.tps_output,ul.tps_ms,
- CASE WHEN COALESCE(ul.cache_metadata->>'version','')='1'
- AND COALESCE(ul.cache_metadata->>'session_hash','')<>'' AND COALESCE(ul.cache_metadata->>'prompt_hash','')<>''
- AND COALESCE(ul.cache_metadata->>'unsupported_reason','')='' AND ul.cache_metadata->>'wire_verified'='true'
- AND COALESCE(ul.cache_metadata->>'scope','')<>'' AND COALESCE(ul.cache_metadata->>'model','')<>''
- AND (ul.cache_metadata->>'started_at')::timestamptz<=ul.created_at
- AND (recent.account_id IS NULL OR recent.account_id=ul.account_id)
- AND prior.samples>=1 AND prior.tokens>=COALESCE((ul.cache_metadata->>'minimum_tokens')::bigint,1024)
- THEN true ELSE false END AS reusable,COALESCE(prior.tokens,0)::bigint,
  (SELECT count(*)<$6 FROM raw_usage ru WHERE ru.account_id=ul.account_id)
  OR ((SELECT count(*)>=$5 FROM selected so WHERE so.account_id=ul.account_id)
  AND (SELECT min(so.created_at) FROM selected so WHERE so.account_id=ul.account_id)
  > (SELECT min(ru.created_at) FROM raw_usage ru WHERE ru.account_id=ul.account_id))
  FROM selected ul
- LEFT JOIN LATERAL (
- SELECT count(*) AS samples,max(GREATEST(prev.input_tokens-prev.image_input_tokens,0)::bigint+GREATEST(prev.cache_creation_tokens,0)+GREATEST(prev.cache_read_tokens,0)) AS tokens
- FROM passive_quality_cache_reports pc JOIN usage_logs prev ON prev.account_id=pc.account_id AND prev.request_id=pc.request_key
- WHERE pc.account_id=ul.account_id AND pc.cache_metadata->>'session_hash'=ul.cache_metadata->>'session_hash'
- AND pc.cache_metadata->>'scope'=ul.cache_metadata->>'scope' AND pc.cache_metadata->>'model'=ul.cache_metadata->>'model'
- AND COALESCE(pc.cache_metadata->>'unsupported_reason','')='' AND pc.cache_metadata->>'wire_verified'='true' AND pc.cache_metadata->>'version'='1'
- AND COALESCE(pc.cache_metadata->>'scope','')<>'' AND COALESCE(pc.cache_metadata->>'model','')<>''
- AND ul.cache_metadata->'prefix_hashes' ? (pc.cache_metadata->>'prompt_hash')
- AND (pc.cache_metadata->>'started_at')::timestamptz<=prev.created_at
- AND (pc.cache_metadata->>'started_at')::timestamptz >= (ul.cache_metadata->>'started_at')::timestamptz-LEAST(300,COALESCE((ul.cache_metadata->>'retention_seconds')::int,300),COALESCE((pc.cache_metadata->>'retention_seconds')::int,300))*INTERVAL '1 second'
- AND pc.created_at < (ul.cache_metadata->>'started_at')::timestamptz
- AND pc.created_at >= (ul.cache_metadata->>'started_at')::timestamptz-LEAST(300,COALESCE((ul.cache_metadata->>'retention_seconds')::int,300),COALESCE((pc.cache_metadata->>'retention_seconds')::int,300))*INTERVAL '1 second'
- AND prev.created_at < (ul.cache_metadata->>'started_at')::timestamptz
- AND prev.created_at >= (ul.cache_metadata->>'started_at')::timestamptz-LEAST(300,COALESCE((ul.cache_metadata->>'retention_seconds')::int,300),COALESCE((pc.cache_metadata->>'retention_seconds')::int,300))*INTERVAL '1 second'
- AND prev.duration_ms IS NOT NULL AND COALESCE(prev.request_type,0) NOT IN (4,6)
- AND NOT COALESCE(prev.native_compaction_v2,false) AND COALESCE(prev.inbound_endpoint,'') NOT LIKE '%/compact%' AND COALESCE(prev.upstream_endpoint,'') NOT LIKE '%/compact%'
- AND NOT EXISTS(SELECT 1 FROM passive_quality_failures f WHERE f.account_id=pc.account_id AND f.request_key=COALESCE(NULLIF(pc.attempt_key,''),pc.request_key))
- ) prior ON NOT ul.failed AND ul.cache_reported
- LEFT JOIN LATERAL (
- SELECT pc.account_id FROM passive_quality_cache_reports pc
- JOIN usage_logs prev ON prev.account_id=pc.account_id AND prev.request_id=pc.request_key
- WHERE pc.cache_metadata->>'session_hash'=ul.cache_metadata->>'session_hash'
- AND pc.cache_metadata->>'model'=ul.cache_metadata->>'model'
- AND pc.created_at<(ul.cache_metadata->>'started_at')::timestamptz AND prev.created_at<(ul.cache_metadata->>'started_at')::timestamptz
- AND pc.created_at>=(ul.cache_metadata->>'started_at')::timestamptz-INTERVAL '2 days'
- ORDER BY pc.created_at DESC LIMIT 1
- ) recent ON NOT ul.failed AND ul.cache_reported
  ORDER BY ul.account_id,ul.created_at DESC,ul.key DESC`, pq.Array(ids), model, from, now, c.MaxRequests, c.MaxRequests*4+1, c.EvidenceSince)
 	if err != nil {
 		return nil, err
@@ -281,7 +246,7 @@ func queryChannelQualityScoresUncached(ctx context.Context, db *sql.DB, accountI
 		var id int64
 		var v service.ChannelQualityScoreObservation
 		var budget bool
-		if err = rows.Scan(&id, &v.Key, &v.At, &v.Failed, &v.Model, &v.TTFT, &v.Duration, &v.CacheReported, &v.CacheInput, &v.CacheRead, &v.OutputTokens, &v.GenerationMS, &v.CacheReusable, &v.CacheExpectedTokens, &budget); err != nil {
+		if err = rows.Scan(&id, &v.Key, &v.At, &v.Failed, &v.Model, &v.TTFT, &v.Duration, &v.CacheReported, &v.CacheInput, &v.CacheRead, &v.OutputTokens, &v.GenerationMS, &budget); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}

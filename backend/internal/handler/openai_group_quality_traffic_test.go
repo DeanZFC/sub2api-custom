@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -157,14 +158,19 @@ func TestOpenAIGroupTrafficWaitPlanPreservesStickyOwner(t *testing.T) {
 	}
 }
 
-func startGroupTrafficWS(t *testing.T, h *OpenAIGatewayHandler) (*coderws.Conn, <-chan struct{}) {
+func startGroupTrafficWS(t *testing.T, h *OpenAIGatewayHandler, groupChanges ...func(*service.Group)) (*coderws.Conn, <-chan struct{}) {
 	t.Helper()
 	done := make(chan struct{})
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		gid := int64(3131)
-		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 99, UserID: 100, GroupID: &gid, User: &service.User{ID: 100, Status: service.StatusActive}, Group: &service.Group{ID: gid, Platform: service.PlatformOpenAI}})
+		group := &service.Group{ID: gid, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+		for _, change := range groupChanges {
+			change(group)
+		}
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 99, UserID: 100, GroupID: &gid, User: &service.User{ID: 100, Status: service.StatusActive}, Group: group})
 		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100, Concurrency: 1})
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
 		service.PassiveQualityBeginTurn(c)
 		c.Next()
 	})

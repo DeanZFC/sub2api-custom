@@ -23,7 +23,7 @@ export default {
   "confidence": "Evidence sufficiency {value}%",
   "dimensions": {
     "error_rate": "Error rate (%)",
-    "cache_rate": "Reusable-prefix cache rate (%)",
+    "cache_rate": "Actual cache rate (%)",
     "ttft": "First-token P90 (ms)",
     "tps": "Output TPS (token/s)",
     "duration": "Total duration P90 (ms)"

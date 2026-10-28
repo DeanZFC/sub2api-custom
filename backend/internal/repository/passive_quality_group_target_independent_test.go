@@ -11,6 +11,7 @@ import (
 func independentObservedGroupTarget(t *testing.T) service.PassiveQualityPolicy {
 	t.Helper()
 	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", Name: "independent target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85}}}
+	p.Stability = &service.GroupQualityStability{NewSessionPercent: 20}
 	require.NoError(t, p.Validate())
 	return p
 }
@@ -39,7 +40,12 @@ func TestGroupQualityTargetIndependentConfirmationUsesBreachedMetricFreshness(t 
 				e.FreshTTFT = &latency
 			}
 			advancePassiveObserved(p, &s, e, now.Add(3*time.Second))
-			require.Equal(t, "paused", s.Phase)
+			if metric == "cache" {
+				require.Equal(t, "suspect", s.Phase, "cache alone must preserve warm owners")
+				require.Contains(t, s.Reason, "cache_allocation_reduced:")
+			} else {
+				require.Equal(t, "paused", s.Phase)
+			}
 		})
 	}
 }
@@ -66,9 +72,9 @@ func TestGroupQualityTargetIndependentTrialRequiresPostStartEvidence(t *testing.
 	require.Equal(t, "trial", s.Phase, "a healthy pre-trial aggregate cannot release a hold")
 	require.EqualValues(t, 4, s.Generation)
 	advancePassiveObserved(p, &s, e, now.Add(time.Minute))
-	require.Equal(t, "paused", s.Phase)
-	require.Contains(t, s.Reason, "trial_expired:")
-	require.Greater(t, s.Generation, int64(4))
+	require.Equal(t, "trial", s.Phase)
+	require.Contains(t, s.Reason, "waiting_for_recovery:")
+	require.EqualValues(t, 4, s.Generation, "missing fresh confirmation must retain the bounded hold without counting another failure")
 }
 
 func TestGroupQualityTargetIndependentRecoveryNeedsEveryEnabledMetric(t *testing.T) {
@@ -78,11 +84,16 @@ func TestGroupQualityTargetIndependentRecoveryNeedsEveryEnabledMetric(t *testing
 	now := time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
 	s := service.PassiveQualityState{Phase: "trial", TrialStartedAt: now, TrialEndsAt: now.Add(time.Minute)}
 	cache, errors, latency := 85.0, 0.0, 7000.0
-	e := service.PassiveQualityEvidence{Complete: true, Samples: 10, CacheSamples: 4, TTFTSamples: 10, CacheRate: &cache, ErrorRate: &errors, TTFT: &latency, Latest: now.Add(time.Second)}
+	e := service.PassiveQualityEvidence{Complete: true, Samples: 10, Fresh: 2, CacheSamples: 4, TTFTSamples: 10, TTFTFresh: 0, CacheRate: &cache, ErrorRate: &errors, FreshErrorRate: &errors, TTFT: &latency, FreshTTFT: &latency, Latest: now.Add(time.Second)}
 	advancePassiveObserved(p, &s, e, now.Add(2*time.Second))
-	require.Equal(t, "trial", s.Phase, "successful fast requests cannot replace missing cache samples")
+	require.Equal(t, "trial", s.Phase, "successful requests cannot replace missing fresh latency evidence")
 	e.CacheSamples = 5
+	e.TTFTFresh = 2
+	e.Latest = now.Add(2 * time.Second)
 	advancePassiveObserved(p, &s, e, now.Add(3*time.Second))
+	require.Equal(t, "trial", s.Phase, "one fresh confirmation cannot restore a hold")
+	e.Latest = now.Add(4 * time.Second)
+	advancePassiveObserved(p, &s, e, now.Add(5*time.Second))
 	require.Equal(t, "healthy", s.Phase)
 	require.Equal(t, "recovered", s.Reason)
 	require.Equal(t, s.TrialStartedAt, s.ObserveAfter, "late trial completions must remain visible after recovery")

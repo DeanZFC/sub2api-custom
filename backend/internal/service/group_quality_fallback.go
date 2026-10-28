@@ -229,7 +229,11 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 		return nil, originalErr
 	}
 	ctx = withPassiveQualityRoutingModel(withoutGroupQualityFallback(ctx), req.RequestedModel)
-	ctx = s.withOpenAIProfitControlGate(ctx, req.GroupID)
+	var profitErr error
+	ctx, profitErr = s.withGroupQualityFallbackProfitControl(ctx, req.GroupID)
+	if profitErr != nil {
+		return nil, profitErr
+	}
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, req.GroupID)
 	if s.checkChannelPricingRestriction(ctx, req.GroupID, req.RequestedModel) {
 		return nil, originalErr
@@ -312,8 +316,11 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 		return nil, err
 	}
 	affinityKey := ""
-	if apiKey, authenticated := APIKeyForUsageContext(ctx); authenticated {
-		affinityKey = groupQualityFallbackAffinityKey(apiKey.ID, *req.GroupID, model, req.SessionHash)
+	userAffinity := openAIUserAffinityFromContext(ctx)
+	if userAffinity == nil {
+		if apiKey, authenticated := APIKeyForUsageContext(ctx); authenticated {
+			affinityKey = groupQualityFallbackAffinityKey(apiKey.ID, *req.GroupID, model, req.SessionHash)
+		}
 	}
 	affinityAccountID, preferredAccountID := int64(0), int64(0)
 	affinityEscapeReason := ""
@@ -340,11 +347,35 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 			}
 		}
 	}
+	if userAffinity != nil {
+		// The authenticated-user affinity is the durable owner across sessions.
+		// Prefer it during emergency recovery when still eligible; per-session
+		// fallback affinity must not create a second, API-key-scoped owner.
+		preferredOwner := userAffinity.sessionAccountID
+		if preferredOwner <= 0 {
+			preferredOwner = userAffinity.userAccountID
+		}
+		for i, candidate := range ranked {
+			if candidate.account.ID == preferredOwner {
+				escapeCfg := s.openAIStickyEscapeConfig()
+				if escapeCfg.enabled && candidate.errorRate > escapeCfg.errorRate {
+					affinityEscapeReason = "error_rate"
+					markOpenAIUserAffinityMigration(ctx, preferredOwner)
+					break
+				}
+				preferredAccountID = preferredOwner
+				copy(ranked[1:i+1], ranked[:i])
+				ranked[0] = candidate
+				break
+			}
+		}
+	}
 	budget := newOpenAISelectionProbeBudget()
 	budget.enableLimit()
 	if req.SessionHash != "" && s.cache != nil {
 		if id, lookupErr := s.getStickySessionAccountID(ctx, req.GroupID, req.SessionHash); lookupErr == nil && id > 0 {
-			req.PreserveStickyBinding = true
+			confirmedMigration := userAffinity != nil && userAffinity.migrationFrom == id
+			req.PreserveStickyBinding = req.PreserveStickyBinding || !confirmedMigration
 		}
 	}
 	req.PreserveStickyBinding = req.PreserveStickyBinding || owner > 0

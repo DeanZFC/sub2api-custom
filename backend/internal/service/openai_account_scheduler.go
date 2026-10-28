@@ -422,6 +422,11 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		req.RequirePrivacySet = true
 	}
 	start := time.Now()
+	// Scores determine new placement; a valid conversation owner remains a
+	// first-class sticky candidate even when weighted scheduling is enabled.
+	if req.StickyAccountID > 0 && openAIUserAffinityFromContext(ctx) != nil {
+		req.StickyWeighted = false
+	}
 	// Cache allocation governs only new placement. Weighted sticky scoring must
 	// not migrate a healthy owner merely because its new-session share decreased.
 	if req.StickyWeighted && s != nil && s.service != nil {
@@ -553,19 +558,19 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, bool, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
-	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
+	if (sessionHash == "" && openAIUserAffinityFromContext(ctx) == nil) || s == nil || s.service == nil || s.service.cache == nil {
 		return nil, false, nil
 	}
 
 	accountID := req.StickyAccountID
 	clearBinding := func() {
 		if !req.PreserveStickyBinding {
-			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+			_ = s.service.clearOpenAIStickySessionForRouting(ctx, req.GroupID, sessionHash)
 		}
 	}
 	if accountID <= 0 {
 		var err error
-		accountID, err = s.service.getStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		accountID, err = s.service.stickySessionAccountIDForRouting(ctx, req.GroupID, sessionHash)
 		if err != nil || accountID <= 0 {
 			return nil, false, nil
 		}
@@ -585,20 +590,32 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, false, nil
 	}
 	if groupQualityAutomaticHold(ctx, account, req.GroupID, req.RequestedModel) {
+		if openAIUserAffinityFromContext(ctx) != nil {
+			markOpenAIUserAffinityMigration(ctx, accountID)
+			return nil, false, nil
+		}
 		return nil, true, nil
 	}
 	if shouldClearStickySessionWithContext(ctx, account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
 		clearBinding()
 		return nil, false, nil
 	}
-	if !s.isAccountRequestCompatible(ctx, account, req) {
+	if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
+		if reason != openAIProfitFilterReasonThreshold && reason != openAIProfitFilterReasonInvalidAccountRate {
+			clearBinding()
+		}
 		return nil, false, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		clearBinding()
 		return nil, false, nil
 	}
-	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	account = s.service.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	if account != nil {
+		if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
+			return nil, true, nil
+		}
+	}
 	if account == nil || !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		clearBinding()
 		return nil, false, nil
@@ -621,6 +638,11 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, false, nil
 	}
 	escapeCfg := s.service.openAIStickyEscapeConfig()
+	if _, managed := groupQualityRoutingState(account, req.GroupID, passiveQualityRoutingModel(ctx, req.RequestedModel)); managed {
+		// Persistent quality confirmation owns slow-response decisions. A single
+		// runtime TTFT spike must not bypass it and abandon a warm account.
+		escapeCfg.ttftMs = math.Inf(1)
+	}
 	if reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID, escapeCfg); shouldEscape && !req.DisableStickyEscape {
 		slog.Info("sticky_escape_triggered",
 			"account_id", accountID,
@@ -628,6 +650,10 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 			"error_rate", errorRate,
 			"ttft", ttft,
 		)
+		if reason == "error_rate" && openAIUserAffinityFromContext(ctx) != nil {
+			markOpenAIUserAffinityMigration(ctx, accountID)
+			return nil, false, nil
+		}
 		return nil, true, nil
 	}
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, &account)
@@ -2560,9 +2586,20 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	ctx = withoutGroupQualityFallback(ctx)
+	if openAIUserAffinityFromContext(ctx) != nil {
+		ctx = context.WithValue(ctx, openAIUserAffinityContextKey{}, (*openAIUserAffinity)(nil))
+	}
 	SetGroupQualityTrafficGroupContext(ctx, derefGroupID(groupID))
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
+	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && requiredImageCapability == "" && !requireCompact && (strings.TrimSpace(previousResponseID) == "" || previousResponseCanMove) && !preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
+		ctx, sessionHash = s.withOpenAIUserAffinity(ctx, groupID, sessionHash, requestedModel)
+	}
+	defer func() {
+		if selection != nil {
+			selection.userAffinity = openAIUserAffinityFromContext(ctx)
+		}
+	}()
 	// 分组利润控制：唯一文本调度入口的防御性装门。handler 文本
 	// 入口已在请求开始经 WithOpenAIRequestPricingContext 装门并固定 pricingAt，
 	// 此处对同分组门直接复用（failover 重入阈值稳定），仅为不经 handler 装配的
@@ -2723,8 +2760,8 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 
 	var stickyAccountID int64
-	if sessionHash != "" && s.cache != nil {
-		if accountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); err == nil && accountID > 0 {
+	if (sessionHash != "" || openAIUserAffinityFromContext(ctx) != nil) && s.cache != nil {
+		if accountID, err := s.stickySessionAccountIDForRouting(ctx, groupID, sessionHash); err == nil && accountID > 0 {
 			stickyAccountID = accountID
 		}
 	}

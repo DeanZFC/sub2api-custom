@@ -53,6 +53,8 @@ package service
 // 失败语义：分组配置读取失败时放行并告警（fail-open）。这是"配置系统故障时
 // 可用性优先"的显式取舍——该异常窗口内利润保证不成立，靠 WARN 与采样观测
 // 暴露，绝不把瞬时 DB 抖动放大成全站不可调度。
+// 分组质量兜底额外经 withGroupQualityFallbackProfitControl 校验，无法确认配置
+// 时只拒绝质量兜底，不改变普通请求的上述失败语义。
 //
 // 可观测性：按分组和平台累计装门/threshold 否决/invalid-rate 否决/终检刷新
 // 失败计数，≥5 分钟采样输出一条 Info（profit_control_activity），无逐请求日志。
@@ -277,6 +279,7 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 	if sel == nil {
 		return nil
 	}
+	sel.userAffinity = openAIUserAffinityFromContext(ctx)
 	if recovery, ok := GroupQualityFallbackFromContext(ctx); ok {
 		sel.groupQualityFallback = &recovery
 	}
@@ -292,6 +295,11 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 // 绑定，否则这两步会因为看不到调度栈内安装的门而退化为空操作。
 func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult) context.Context {
 	ctx = withoutGroupQualityFallback(ctx)
+	if sel != nil && sel.userAffinity != nil {
+		ctx = context.WithValue(ctx, openAIUserAffinityContextKey{}, sel.userAffinity)
+	} else if openAIUserAffinityFromContext(ctx) != nil {
+		ctx = context.WithValue(ctx, openAIUserAffinityContextKey{}, (*openAIUserAffinity)(nil))
+	}
 	if sel != nil && sel.groupQualityFallback != nil {
 		ctx = WithGroupQualityFallback(ctx, *sel.groupQualityFallback)
 	}
@@ -337,9 +345,14 @@ func OpenAIProfitControlVeto(ctx context.Context, account *Account) (bool, strin
 // concurrency slot is actually acquired. The latest cached account replaces
 // the selection snapshot when available, so a probe/manual rate change during
 // wait time cannot pass on a stale pointer.
+// Group-quality recovery instead requires a successful authoritative account
+// read, while retaining the same request-scoped gate and profit formula.
 func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, selected *Account) (*Account, bool, string) {
 	if s == nil {
 		return selected, false, ""
+	}
+	if _, recovery := GroupQualityFallbackFromContext(ctx); recovery {
+		return s.groupQualityFallbackProfitVetoLatest(ctx, selected)
 	}
 	return profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
 }
@@ -349,7 +362,7 @@ func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, sele
 // only after the terminal post-slot check, so an account rejected after a rate
 // refresh cannot become the new sticky target.
 func (s *OpenAIGatewayService) bindOpenAIStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if gatewayProfitControlGateActive(ctx) || preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
+	if openAIUserAffinityFromContext(ctx) != nil || gatewayProfitControlGateActive(ctx) || preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
 		return nil
 	}
 	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
@@ -362,6 +375,9 @@ func (s *OpenAIGatewayService) bindOpenAIStickySessionDuringSelection(ctx contex
 // remains sticky and becomes eligible again automatically after its rate
 // recovers.
 func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if handled, err := s.bindOpenAIUserAffinityAfterAdmission(ctx, groupID, sessionHash, accountID); handled {
+		return err
+	}
 	if sessionHash == "" || accountID <= 0 {
 		return nil
 	}

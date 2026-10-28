@@ -367,7 +367,7 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 		matches := model != "" && (c.Model == "" || model == c.Model)
 		filteredTrial = filteredTrial || c.Model != ""
 		matchedFilter = matchedFilter || (c.Model != "" && matches)
-		if s.Phase != "trial" || now.Before(s.TrialStartedAt) || !now.Before(s.TrialEndsAt) || (matches && (s.Used >= c.TrialRequests || inflight >= c.TrialConcurrency)) {
+		if s.Phase != "trial" || now.Before(s.TrialStartedAt) || !now.Before(s.TrialEndsAt) || (matches && (s.Used >= c.TrialRequests || inflight >= c.TrialConcurrency || !passiveTrialAdmissionReady(c, s, now))) {
 			allowed = false
 		}
 		if !matches {
@@ -375,6 +375,9 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 		}
 		matched = true
 		s.Used++
+		if c.IsGroupQualityTarget() {
+			s.LastTrialAdmissionAt = now
+		}
 		s.Inflight = inflight + 1
 		states = append(states, s)
 	}
