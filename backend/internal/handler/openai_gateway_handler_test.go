@@ -1573,6 +1573,55 @@ func TestOpenAIResponsesWebSocket_ChannelMappedTargetSelectsAccountWithoutReques
 	}
 }
 
+func TestOpenAIResponsesWebSocket_TurnAdmissionUsesFrozenMappedModel(t *testing.T) {
+	for _, ingress := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
+		for _, nextPublic := range []string{"sol", "terra"} {
+			t.Run(ingress+"/"+nextPublic, func(t *testing.T) {
+				type admission struct{ public, forwarded string }
+				admissions := make(chan admission, 4)
+				var calls atomic.Int64
+				updateMapping := func(channelSvc *service.ChannelService, target string) error {
+					_, err := channelSvc.Update(context.Background(), 7701, &service.UpdateChannelInput{
+						ModelMapping: map[string]map[string]string{service.PlatformOpenAI: {"sol": "gpt-5.6-sol", nextPublic: target}},
+					})
+					return err
+				}
+				got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+					firstPayload:  `{"type":"response.create","model":"sol","stream":false}`,
+					secondPayload: fmt.Sprintf(`{"type":"response.create","model":%q,"stream":false}`, nextPublic),
+					ingressMode:   ingress,
+					channelMapping: map[string]string{
+						"sol": "gpt-5.6-sol", "terra": "gpt-5.6-terra",
+					},
+					accountModelMapping: map[string]any{
+						"gpt-5.6-sol": "gpt-5.6-sol", "gpt-5.6-terra": "gpt-5.6-terra",
+					},
+					afterFirstUpstreamRequest: func(channelSvc *service.ChannelService) error {
+						return updateMapping(channelSvc, "gpt-5.6-terra")
+					},
+					beforeAccountSlot: func(ctx context.Context, channelSvc *service.ChannelService) error {
+						public, _ := ctx.Value(ctxkey.Model).(string)
+						admissions <- admission{public: public, forwarded: service.GroupQualityFallbackAdmissionModel(ctx, public)}
+						if calls.Add(1) == 1 {
+							// A channel refresh after admission must not change this turn's
+							// forwarded model, regardless of ingress callback ordering.
+							return updateMapping(channelSvc, "gpt-5.6-luna")
+						}
+						return nil
+					},
+				})
+				require.Len(t, admissions, 1, "this fixture acquires its first turn during selection")
+				second := <-admissions
+				require.Equal(t, nextPublic, second.public, "quality holds keep the public model")
+				require.Equal(t, "gpt-5.6-terra", second.forwarded, "admission uses this turn's forwarded model")
+				require.Len(t, got.upstreamPayloads, 2)
+				require.Equal(t, second.forwarded, gjson.GetBytes(got.upstreamPayloads[1], "model").String())
+				require.Equal(t, nextPublic, got.logs[1].RequestedModel)
+			})
+		}
+	}
+}
+
 func TestOpenAIResponsesWebSocket_PassthroughKeepsTurnMappingSnapshot(t *testing.T) {
 	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
 		firstPayload:  `{"type":"response.create","model":"sol","stream":false}`,
@@ -1947,6 +1996,7 @@ type openAIResponsesWSUsageLogCase struct {
 	billingModelSource        string
 	accountModelMapping       map[string]any
 	afterFirstUpstreamRequest func(channelSvc *service.ChannelService) error
+	beforeAccountSlot         func(ctx context.Context, channelSvc *service.ChannelService) error
 	// group 覆盖 apiKey.Group（分组级模型白名单测试用）；nil 保持原有无分组行为。
 	group *service.Group
 	// apiKeyService 非 nil 时模拟 API Key 认证中间件：连接认证快照经它按
@@ -3041,6 +3091,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			return true, nil
 		},
 		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			if tc.beforeAccountSlot != nil {
+				if err := tc.beforeAccountSlot(ctx, channelSvc); err != nil {
+					return false, err
+				}
+			}
 			return true, nil
 		},
 	}

@@ -2574,15 +2574,29 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	decision = OpenAIAccountScheduleDecision{}
+	guardianParentAccountID := int64(0)
 	defer func() {
-		if selection != nil || !groupQualityFallbackRetryable(err) {
+		waiting := selection != nil && !selection.Acquired && selection.WaitPlan != nil
+		if selection != nil && (!waiting || guardianParentAccountID > 0 || decision.Layer == openAIAccountScheduleLayerGuardianParent) {
 			return
 		}
-		selection, err = s.selectGroupQualityFallback(ctx, OpenAIAccountScheduleRequest{
+		fallbackCause := err
+		if waiting {
+			// Try immediately available recovery capacity before committing to a
+			// normal concurrency queue. A failed attempt retains that queue plan.
+			fallbackCause = ErrNoAvailableAccounts
+		} else if !groupQualityFallbackRetryable(err) {
+			return
+		}
+		fallbackSelection, fallbackErr := s.selectGroupQualityFallback(ctx, OpenAIAccountScheduleRequest{
 			GroupID: groupID, Platform: platform, PreviousResponseID: previousResponseID, PreviousResponseCanMove: previousResponseCanMove,
 			SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequiredTransport: requiredTransport,
 			RequiredCapability: requiredCapability, RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, UseUpstreamTokenCost: useUpstreamTokenCost,
-		}, err)
+		}, fallbackCause)
+		if waiting && (fallbackErr != nil || fallbackSelection == nil || !fallbackSelection.Acquired) {
+			return
+		}
+		selection, err = fallbackSelection, fallbackErr
 		if selection != nil && selection.Account != nil {
 			decision.Layer = "group_quality_fallback"
 			decision.SelectedAccountID = selection.Account.ID
@@ -2590,7 +2604,6 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		}
 	}()
 	preserveGuardianParentBinding := preserveOpenAIGuardianParentBinding(ctx, sessionHash)
-	guardianParentAccountID := int64(0)
 	if strings.TrimSpace(previousResponseID) == "" {
 		guardianParentAccountID = s.resolveOpenAIGuardianParentAccountID(ctx, groupID)
 	}

@@ -37,6 +37,66 @@ afterEach(() => {
 })
 
 describe('RecentRequestsCell', () => {
+  it('shows aggregate metrics above the timeline while keeping the latest request time', () => {
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('80.0%')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('3.06s')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('38.66s')
+    expect(wrapper.get('[data-testid="recent-requests-metrics"]').element.compareDocumentPosition(triggers()[0].element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.text()).toContain('10:27:52')
+    expect(dialog()).toBeNull()
+  })
+
+  it('weights cache rate by text prompt tokens and averages each valid latency sample separately', async () => {
+    await wrapper.setProps({ requests: [
+      { ...success, request_id: 'small', input_tokens: 200, image_input_tokens: 100, cache_read_tokens: 800, cache_creation_tokens: 100, first_token_ms: 1000, duration_ms: 4000 },
+      { ...success, request_id: 'large', input_tokens: 8500, cache_read_tokens: 0, cache_creation_tokens: 500, first_token_ms: 3000, duration_ms: 8000 },
+      { ...success, request_id: 'sync', request_type: 'sync', stream: true, input_tokens: 0, cache_read_tokens: 10000, first_token_ms: 99999, duration_ms: 12000 },
+      { ...failure, input_tokens: 0, cache_read_tokens: 10000, cache_creation_tokens: 0, request_type: 'stream', stream: true, first_token_ms: 99999, duration_ms: 99999 },
+      { ...success, request_id: 'missing', input_tokens: undefined, cache_creation_tokens: undefined, first_token_ms: undefined, duration_ms: undefined },
+    ] })
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('8.0%')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('2.00s')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('8.00s')
+  })
+
+  it('preserves measured zero, updates the summary on refresh, and excludes missing or invalid telemetry', async () => {
+    await wrapper.setProps({ requests: [
+      { ...success, stream: false, input_tokens: 100, cache_read_tokens: 0, cache_creation_tokens: 0, first_token_ms: 0, duration_ms: 0 },
+      { ...success, request_id: 'missing', input_tokens: null, first_token_ms: null, duration_ms: null },
+      { ...success, request_id: 'invalid', input_tokens: Number.NaN, first_token_ms: -1000, duration_ms: Number.POSITIVE_INFINITY },
+    ] })
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('0.0%')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('0ms')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('0ms')
+    await wrapper.setProps({ requests: [failure] })
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('-')
+  })
+
+  it('uses the same latest twenty requests for both the summary and the timeline', async () => {
+    const requests = Array.from({ length: 21 }, (_, index) => ({
+      ...success, request_id: `req-${index}`, input_tokens: index < 20 ? 100 : 0,
+      cache_read_tokens: index < 20 ? 0 : 100000, cache_creation_tokens: 0,
+      first_token_ms: index < 20 ? 1000 : 99000, duration_ms: index < 20 ? 2000 : 99000,
+    }))
+    await wrapper.setProps({ requests })
+    expect(triggers()).toHaveLength(20)
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('0.0%')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('1.00s')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('2.00s')
+    await triggers()[0].trigger('click')
+    expect(dialog()?.textContent).toContain('req-19')
+    await triggers()[19].trigger('click')
+    expect(dialog()?.textContent).toContain('req-0')
+  })
+
+  it('shows twenty loading placeholders and hides the summary when no requests have loaded', async () => {
+    await wrapper.setProps({ requests: [], loading: true })
+    expect(wrapper.findAll('.animate-pulse')).toHaveLength(20)
+    expect(wrapper.find('[data-testid="recent-requests-metrics"]').exists()).toBe(false)
+  })
+
   it('lazily opens named identities, tokens, costs and latency on hover; newest is rightmost', async () => {
     expect(dialog()).toBeNull()
     expect(triggers()[0].classes()).toContain('bg-red-500')

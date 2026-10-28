@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -201,6 +202,58 @@ func TestGroupQualityFallbackHealthySupplyAndExactModelIntegration(t *testing.T)
 	require.NoError(t, err)
 	allowed, _ = acquireFallback(t, r, trafficRequest("unavailable-healthy", "A", "unavailable-healthy", 4096), 63)
 	require.True(t, allowed, "manually disabled healthy state is not usable supply")
+}
+
+func TestGroupQualityFallbackRequestSupplyIsRecheckedAtAdmissionIntegration(t *testing.T) {
+	for _, outcome := range []string{"unusable", "usable", "read error"} {
+		t.Run(outcome, func(t *testing.T) {
+			ctx, db, r := passiveDB(t)
+			p := newGroupTargetPolicy(t, ctx, db, r)
+			groupTrafficState(t, ctx, db, p, 62, "A", "paused")
+			_, err := db.Exec(`ALTER TABLE accounts ADD COLUMN concurrency INT DEFAULT 3,ADD COLUMN load_factor INT;
+ INSERT INTO account_proxies(account_id,proxy_id,position) VALUES(63,8,1),(63,7,0);
+ INSERT INTO proxies(id,status,expires_at) VALUES(7,'active',NULL),(8,'disabled',now()-interval '1 hour')`)
+			require.NoError(t, err)
+			req := trafficRequest("request-scoped", "A", "request-scoped", 4096)
+			marked := fallbackTrafficContext(req, 62)
+			calls := 0
+			capacityErr := errors.New("live capacity read failed")
+			marked = service.WithGroupQualityFallbackSupplyChecker(marked, func(_ context.Context, accounts []*service.Account) (bool, error) {
+				calls++
+				require.Len(t, accounts, 1)
+				require.Equal(t, int64(63), accounts[0].ID)
+				require.Equal(t, []int64{8}, accounts[0].GroupIDs)
+				require.Equal(t, 4, accounts[0].Concurrency, "admission uses the current DB value")
+				require.Equal(t, []int64{7, 8}, accounts[0].ProxyIDs)
+				require.Len(t, accounts[0].Proxies, 2)
+				require.Equal(t, service.StatusDisabled, accounts[0].Proxies[1].Status)
+				require.True(t, accounts[0].Proxies[1].IsExpired(time.Now()))
+				if outcome == "read error" {
+					return false, capacityErr
+				}
+				return outcome == "usable", nil
+			})
+			// Change persisted capacity after the request scope was constructed.
+			_, err = db.Exec(`UPDATE accounts SET concurrency=4 WHERE id=63`)
+			require.NoError(t, err)
+			allowed, reserved, err := r.AcquireGroupQualityTraffic(marked, 62, "A", req.LeaseID)
+			if outcome == "read error" {
+				require.ErrorIs(t, err, capacityErr)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, outcome == "unusable", allowed)
+			require.Equal(t, outcome == "unusable", reserved)
+			require.Equal(t, 1, calls)
+			var leases int
+			require.NoError(t, db.QueryRow(`SELECT count(*) FROM group_quality_traffic_leases WHERE lease_id=$1`, req.LeaseID).Scan(&leases))
+			if outcome == "unusable" {
+				require.Equal(t, 1, leases)
+			} else {
+				require.Zero(t, leases)
+			}
+		})
+	}
 }
 
 func TestGroupQualityFallbackHardAndActiveProofFencesIntegration(t *testing.T) {

@@ -1167,6 +1167,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwarenessForAPIKeyGroup(ctx 
 	// selectAccountWithScheduler 的调用方也无法绕过利润准入。
 	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
+	if selection != nil && !selection.Acquired && selection.WaitPlan != nil {
+		// An immediate quality fallback may avoid a saturated normal queue. Keep
+		// the existing plan when recovery has no immediately usable capacity.
+		fallback, fallbackErr := s.selectGroupQualityFallback(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: PlatformOpenAI, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, UseUpstreamTokenCost: true}, ErrNoAvailableAccounts)
+		if fallbackErr == nil && fallback != nil && fallback.Acquired {
+			return fallback, nil
+		}
+	}
 	if selection == nil && groupQualityFallbackRetryable(err) {
 		return s.selectGroupQualityFallback(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: PlatformOpenAI, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, UseUpstreamTokenCost: true}, err)
 	}

@@ -1,9 +1,27 @@
 <template>
-  <div class="min-w-[116px]">
+  <div class="min-w-[196px]">
     <div v-if="!requests.length && loading && !loadError" class="flex h-7 items-center justify-end gap-1" :aria-label="t('common.loading')">
-      <span v-for="index in 10" :key="index" class="h-6 w-1.5 animate-pulse rounded-full bg-gray-200 dark:bg-dark-600" />
+      <span v-for="index in 20" :key="index" class="h-6 w-1.5 animate-pulse rounded-full bg-gray-200 dark:bg-dark-600" />
     </div>
     <div v-else-if="timeline.length" :aria-label="t('admin.accounts.recentRequests.summary', { count: timeline.length })">
+      <div
+        class="mb-1 grid grid-cols-3 gap-x-2 text-right text-[11px] leading-4 tabular-nums"
+        :title="t('admin.accounts.recentRequests.metricsHint', { count: timeline.length })"
+        data-testid="recent-requests-metrics"
+      >
+        <div :title="t('admin.accounts.recentRequests.metricSamples', { count: metrics.cacheSamples })">
+          <div class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.recentRequests.cacheRate') }}</div>
+          <div class="font-medium text-sky-600 dark:text-sky-400" data-testid="recent-requests-cache-rate">{{ formatCacheRate(metrics.cacheRate) }}</div>
+        </div>
+        <div :title="t('admin.accounts.recentRequests.metricSamples', { count: metrics.firstTokenSamples })">
+          <div class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.recentRequests.averageFirstToken') }}</div>
+          <div class="font-medium text-gray-700 dark:text-gray-200" data-testid="recent-requests-first-token">{{ formatLatency(metrics.averageFirstTokenMs) }}</div>
+        </div>
+        <div :title="t('admin.accounts.recentRequests.metricSamples', { count: metrics.durationSamples })">
+          <div class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.recentRequests.averageDuration') }}</div>
+          <div class="font-medium text-gray-700 dark:text-gray-200" data-testid="recent-requests-duration">{{ formatLatency(metrics.averageDurationMs) }}</div>
+        </div>
+      </div>
       <div class="mb-1 text-right text-[11px] font-medium tabular-nums text-gray-500 dark:text-gray-400">{{ formatTime(latestCreatedAt) }}</div>
       <div class="flex h-6 items-center justify-end gap-1">
         <template v-for="request in timeline" :key="requestKey(request)">
@@ -72,6 +90,8 @@ import Icon from '@/components/icons/Icon.vue'
 import RecentRequestDetails from './RecentRequestDetails.vue'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatDateTime } from '@/utils/format'
+import { calculateCacheHitRate, formatCacheRate, isCacheEligibleRequest } from '@/utils/cacheHitRate'
+import { resolveUsageRequestType } from '@/utils/usageRequestType'
 
 const { t } = useI18n()
 const props = withDefaults(defineProps<{ requests: OpsRequestDetail[]; loading?: boolean; loadError?: boolean; interactive?: boolean }>(), {
@@ -79,9 +99,65 @@ const props = withDefaults(defineProps<{ requests: OpsRequestDetail[]; loading?:
   interactive: true,
 })
 
+// Use the same latest twenty requests for the metrics and timeline.
+const recentRequests = computed(() => props.requests.slice(0, 20))
 // The API sends newest first; keep newest at the right of the timeline.
-const timeline = computed(() => [...props.requests].reverse())
-const latestCreatedAt = computed(() => props.requests[0]?.created_at ?? '')
+const timeline = computed(() => [...recentRequests.value].reverse())
+const latestCreatedAt = computed(() => recentRequests.value[0]?.created_at ?? '')
+const isValidMeasurement = (value: number | null | undefined): value is number =>
+  value != null && Number.isFinite(value) && value >= 0
+const metrics = computed(() => {
+  let inputTokens = 0
+  let cacheReadTokens = 0
+  let cacheCreationTokens = 0
+  let cacheSamples = 0
+  let firstTokenMs = 0
+  let firstTokenSamples = 0
+  let durationMs = 0
+  let durationSamples = 0
+  for (const request of recentRequests.value) {
+    if (request.kind !== 'success') continue
+    if (isCacheEligibleRequest(request) &&
+        isValidMeasurement(request.input_tokens) &&
+        isValidMeasurement(request.cache_read_tokens) &&
+        isValidMeasurement(request.cache_creation_tokens) &&
+        (request.image_input_tokens == null || isValidMeasurement(request.image_input_tokens))) {
+      const textInputTokens = Math.max(0, request.input_tokens - (request.image_input_tokens ?? 0))
+      if (textInputTokens + request.cache_read_tokens + request.cache_creation_tokens > 0) {
+        inputTokens += textInputTokens
+        cacheReadTokens += request.cache_read_tokens
+        cacheCreationTokens += request.cache_creation_tokens
+        cacheSamples++
+      }
+    }
+    const requestType = resolveUsageRequestType(request)
+    if ((requestType === 'stream' || requestType === 'ws_v2') && isValidMeasurement(request.first_token_ms)) {
+      firstTokenMs += request.first_token_ms
+      firstTokenSamples++
+    }
+    if (isValidMeasurement(request.duration_ms)) {
+      durationMs += request.duration_ms
+      durationSamples++
+    }
+  }
+  return {
+    cacheRate: calculateCacheHitRate(inputTokens, cacheReadTokens, cacheCreationTokens),
+    cacheSamples,
+    averageFirstTokenMs: firstTokenSamples ? firstTokenMs / firstTokenSamples : null,
+    firstTokenSamples,
+    averageDurationMs: durationSamples ? durationMs / durationSamples : null,
+    durationSamples,
+  }
+})
+const formatLatency = (ms: number | null) => {
+  if (ms == null) return '-'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(2)}s`
+  const seconds = Math.round(ms / 1000)
+  return seconds < 3600
+    ? `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+    : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
 const formatTime = (value: string) => formatDateTime(value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 const requestKey = (request: OpsRequestDetail) => `${request.kind}:${request.error_id ?? request.request_id}:${request.created_at}`
 const activeRequest = shallowRef<OpsRequestDetail | null>(null)
@@ -166,7 +242,7 @@ watch(() => activeRequest.value !== null, (open, _, onCleanup) => {
   })
 })
 
-// Keep the selected snapshot if it ages out of the latest ten while being read.
+// Keep the selected snapshot if it ages out of the latest twenty while being read.
 watch(() => props.requests, requests => {
   if (!activeRequest.value) return
   const updated = requests.find(request => requestKey(request) === activeKey.value)

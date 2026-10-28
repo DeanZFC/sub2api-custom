@@ -3056,6 +3056,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// turn-tagged slot preserves the exact mapping used for the in-flight request.
 		var turnChannelMapping atomic.Pointer[openAIWSTurnChannelMappingSnapshot]
 		turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: 1, mapping: channelMappingWS})
+		// Native ingress maps before admission; passthrough maps afterward. Freeze
+		// the latter's mapping before admission and reuse it for the same turn.
+		var pendingTurnChannelMapping atomic.Pointer[openAIWSTurnChannelMappingSnapshot]
 		// turn 级定价：首轮回退到 TurnStarted 的所属 turn 时刻；后续 turn 由
 		// BeforeTurn 重新冻结 pricingAt 并按最新门复核当前账号。
 		var turnPricing openAIWSTurnPricing
@@ -3146,7 +3149,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					}
 					routeModel = wsRouteModel
 				}
-				mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
+				var mapping service.ChannelMappingResult
+				if pending := pendingTurnChannelMapping.Load(); pending != nil && pending.turn == turn {
+					mapping = pending.mapping
+				} else if current := turnChannelMapping.Load(); current != nil && current.turn == turn {
+					mapping = current.mapping
+				} else {
+					mapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
+				}
 				mappedModelUnchanged := false
 				if previous := turnChannelMapping.Load(); previous != nil && previous.turn < turn {
 					mappedModelUnchanged = strings.TrimSpace(previous.mapping.MappedModel) == strings.TrimSpace(mapping.MappedModel)
@@ -3189,7 +3199,20 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if !userAcquired {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "too many concurrent requests, please retry later", nil)
 				}
-				accountReleaseFunc, accountAcquired, err := h.tryAcquireOpenAIWSTurnAccountSlot(context.WithValue(turnCtx, ctxkey.Model, c.GetString(opsModelKey)), account.ID, accountMaxConcurrency, &account)
+				publicModel := c.GetString(opsModelKey)
+				admissionCtx := context.WithValue(turnCtx, ctxkey.Model, publicModel)
+				snapshot := turnChannelMapping.Load()
+				if snapshot == nil || snapshot.turn != turn {
+					routeModel := publicModel
+					if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
+						routeModel = wsRouteModel
+					}
+					mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
+					snapshot = &openAIWSTurnChannelMappingSnapshot{turn: turn, mapping: mapping}
+					pendingTurnChannelMapping.Store(snapshot)
+				}
+				admissionCtx = service.WithGroupQualityFallbackAdmissionModel(admissionCtx, snapshot.mapping.MappedModel)
+				accountReleaseFunc, accountAcquired, err := h.tryAcquireOpenAIWSTurnAccountSlot(admissionCtx, account.ID, accountMaxConcurrency, &account)
 				if err != nil {
 					if userReleaseFunc != nil {
 						userReleaseFunc()

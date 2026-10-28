@@ -325,6 +325,11 @@ func (s *ConcurrencyService) admitCacheRecoveryRequest(ctx context.Context, acco
 		}
 		if err == nil && !allowed {
 			err = ErrGroupQualityTrafficBudget
+			if wantsFallback {
+				// Fallback admission checks live supply and eligibility rather than
+				// the normal recovery token budget.
+				err = ErrAccountAdmissionDenied
+			}
 		}
 	}
 	if err == nil && allowed && wantsFallback && trafficLease == "" {

@@ -33,9 +33,64 @@ func groupQualityFallbackAffinityKey(apiKeyID, groupID int64, model, sessionHash
 type GroupQualityFallbackRequest struct {
 	GroupID, AccountID int64
 	Model              string
+	supply             *groupQualityFallbackSupplyScope
 }
 
 type groupQualityFallbackContextKey struct{}
+
+type groupQualityFallbackSupplyScope struct {
+	check          func(context.Context, []*Account) (bool, error)
+	requestedModel string
+	publicModel    string
+}
+
+// GroupQualityFallbackAdmissionModel keeps capability/model gates on the
+// scheduler's forwarded model while protection and leases retain public identity.
+func GroupQualityFallbackAdmissionModel(ctx context.Context, model string) string {
+	if ctx != nil {
+		if current, _ := ctx.Value(groupQualityFallbackAdmissionModelContextKey{}).(string); current != "" {
+			return current
+		}
+	}
+	if req, ok := GroupQualityFallbackFromContext(ctx); ok && req.supply != nil && req.supply.requestedModel != "" && req.Model == req.supply.publicModel {
+		return req.supply.requestedModel
+	}
+	return model
+}
+
+type groupQualityFallbackAdmissionModelContextKey struct{}
+
+// WithGroupQualityFallbackAdmissionModel freezes the forwarded model for one
+// admission attempt without changing the public protection or lease identity.
+func WithGroupQualityFallbackAdmissionModel(ctx context.Context, model string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, groupQualityFallbackAdmissionModelContextKey{}, strings.TrimSpace(model))
+}
+
+// WithGroupQualityFallbackSupplyChecker carries request constraints to the live
+// repository check. Accounts passed to the checker must come from its locked
+// membership and protection query, rather than a scheduler snapshot.
+func WithGroupQualityFallbackSupplyChecker(ctx context.Context, check func(context.Context, []*Account) (bool, error)) context.Context {
+	req, ok := GroupQualityFallbackFromContext(ctx)
+	if !ok || check == nil {
+		return ctx
+	}
+	req.supply = &groupQualityFallbackSupplyScope{check: check}
+	return WithGroupQualityFallback(ctx, req)
+}
+
+// GroupQualityFallbackHasRequestSupply checks whether live unrestricted
+// accounts can serve this request now. Unscoped internal callers retain the
+// conservative group-wide supply check.
+func GroupQualityFallbackHasRequestSupply(ctx context.Context, accounts []*Account) (bool, error) {
+	req, ok := GroupQualityFallbackFromContext(ctx)
+	if ok && req.supply != nil && req.supply.check != nil {
+		return req.supply.check(ctx, accounts)
+	}
+	return len(accounts) > 0, nil
+}
 
 func WithGroupQualityFallback(ctx context.Context, req GroupQualityFallbackRequest) context.Context {
 	if ctx == nil {
@@ -190,7 +245,15 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 			return nil, originalErr
 		}
 	}
-	accounts, err := s.accountRepo.ListByGroup(ctx, *req.GroupID)
+	var accounts []Account
+	var err error
+	if repo, ok := s.accountRepo.(interface {
+		ListGroupQualityFallbackCandidates(context.Context, int64) ([]Account, error)
+	}); ok {
+		accounts, err = repo.ListGroupQualityFallbackCandidates(ctx, *req.GroupID)
+	} else {
+		accounts, err = s.accountRepo.ListByGroup(ctx, *req.GroupID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +263,9 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 	}
 	req.RequirePrivacySet = s.openAIGroupRequiresPrivacySet(ctx, req.GroupID)
 	candidates := make([]*Account, 0, len(accounts))
+	normal := make([]*Account, 0, len(accounts))
+	supplyCheck := s.groupQualityFallbackSupplyChecker(ctx, scheduler, req, owner)
+	supplyScope := &groupQualityFallbackSupplyScope{check: supplyCheck, requestedModel: req.RequestedModel, publicModel: passiveQualityRoutingModel(ctx, req.RequestedModel)}
 	for i := range accounts {
 		account := &accounts[i]
 		if _, excluded := req.ExcludedIDs[account.ID]; excluded {
@@ -208,18 +274,19 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 		if !s.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
 			continue
 		}
+		if owner > 0 && account.ID != owner {
+			continue
+		}
 		marker := GroupQualityFallbackRequest{GroupID: *req.GroupID, AccountID: account.ID, Model: passiveQualityRoutingModel(ctx, req.RequestedModel)}
 		candidateCtx := WithGroupQualityFallback(ctx, marker)
 		adjusted := groupQualityFallbackAccount(candidateCtx, account, req.RequestedModel)
 		if !isOpenAICompatibleAccountEligibleForRequest(candidateCtx, adjusted, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability) || !scheduler.isAccountRequestCompatible(candidateCtx, adjusted, req) || !scheduler.isAccountTransportCompatible(adjusted, req.RequiredTransport) || s.isOpenAIAccountBlockedBySchedulingThreshold(candidateCtx, adjusted) {
 			continue
 		}
-		// Insufficient evidence never makes an unrestricted account an emergency
-		// candidate. Leave it on normal routing, even if a stale gate denied it.
+		// Unrestricted accounts stay on normal routing. Only normal capacity that
+		// can serve this exact request may prevent recovery fallback.
 		if !groupQualityAutomaticHold(ctx, account, req.GroupID, req.RequestedModel) {
-			return nil, originalErr
-		}
-		if owner > 0 && account.ID != owner {
+			normal = append(normal, account)
 			continue
 		}
 		candidates = append(candidates, passiveQualitySchedulingAccount(candidateCtx, adjusted, req.RequestedModel))
@@ -227,7 +294,12 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 	if len(candidates) == 0 {
 		return nil, originalErr
 	}
-	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, buildOpenAIAccountLoadRequest(candidates))
+	if available, checkErr := supplyCheck(ctx, normal); checkErr != nil {
+		return nil, checkErr
+	} else if available {
+		return nil, originalErr
+	}
+	loadMap, err := s.concurrencyService.GetAccountsLoadBatchFresh(ctx, buildOpenAIAccountLoadRequest(candidates))
 	if err != nil {
 		loadMap = nil
 	}
@@ -277,7 +349,7 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 	}
 	req.PreserveStickyBinding = req.PreserveStickyBinding || owner > 0
 	for _, candidate := range ranked {
-		candidateCtx := WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: *req.GroupID, AccountID: candidate.account.ID, Model: model})
+		candidateCtx := WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: *req.GroupID, AccountID: candidate.account.ID, Model: model, supply: supplyScope})
 		selection, _, acquireErr := scheduler.tryAcquireOpenAISelectionOrderWithBudget(candidateCtx, req, []openAIAccountCandidateScore{candidate}, budget)
 		if acquireErr != nil {
 			return nil, acquireErr
@@ -310,7 +382,114 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 			return selection, nil
 		}
 	}
-	return nil, ErrGroupQualityTrafficBudget
+	// An unsuccessful emergency pass must not hide a real ordinary recovery
+	// budget denial: API-key fallback groups may still serve that request.
+	// Pure concurrency exhaustion never creates this original budget error.
+	if errors.Is(originalErr, ErrGroupQualityTrafficBudget) {
+		return nil, originalErr
+	}
+	if len(budget.trafficDenied) > 0 {
+		return nil, ErrGroupQualityTrafficBudget
+	}
+	if len(budget.denied) > 0 {
+		return nil, ErrAccountAdmissionDenied
+	}
+	return nil, ErrNoAvailableAccounts
+}
+
+func (s *OpenAIGatewayService) groupQualityFallbackSupplyChecker(ctx context.Context, scheduler *defaultOpenAIAccountScheduler, req OpenAIAccountScheduleRequest, owner int64) func(context.Context, []*Account) (bool, error) {
+	// Read configuration before the repository locks account rows. The checker
+	// must not invoke ApplyAccountSchedulingThreshold, which writes those rows.
+	var thresholds map[string]int
+	if s.rateLimitService != nil && s.rateLimitService.settingService != nil {
+		thresholds = s.rateLimitService.settingService.GetAccountSchedulingThresholds(ctx)
+	}
+	initialTraffic, _ := GroupQualityTrafficRequestFromContext(ctx)
+	initialPublicModel := passiveQualityRoutingModel(ctx, req.RequestedModel)
+	// A caller may reuse its exclusion map for the next attempt or WS turn.
+	excluded := make(map[int64]struct{}, len(req.ExcludedIDs))
+	for id := range req.ExcludedIDs {
+		excluded[id] = struct{}{}
+	}
+	req.ExcludedIDs = excluded
+	return func(ctx context.Context, accounts []*Account) (bool, error) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		currentReq, currentOwner := req, owner
+		if traffic, ok := GroupQualityTrafficRequestFromContext(ctx); ok {
+			if traffic.Model != "" && traffic.Model != initialPublicModel {
+				currentReq.RequestedModel = traffic.Model
+			}
+			if traffic.Key != initialTraffic.Key {
+				// Later WS turns remain bound to the established upstream owner.
+				if fallback, marked := GroupQualityFallbackFromContext(ctx); marked {
+					currentOwner = fallback.AccountID
+				}
+			}
+		}
+		currentReq.RequestedModel = GroupQualityFallbackAdmissionModel(ctx, currentReq.RequestedModel)
+		ctx = withPassiveQualityRoutingModel(withoutGroupQualityFallback(ctx), currentReq.RequestedModel)
+		eligible := make([]*Account, 0, len(accounts))
+		for _, account := range accounts {
+			if account == nil || (currentOwner > 0 && account.ID != currentOwner) {
+				continue
+			}
+			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
+				continue
+			}
+			if !s.openAIAccountMatchesSchedulingGroup(account, currentReq.GroupID) ||
+				!isOpenAICompatibleAccountEligibleForRequest(ctx, account, currentReq.Platform, currentReq.RequestedModel, currentReq.RequireCompact, currentReq.RequiredCapability) ||
+				!scheduler.isAccountRequestCompatible(ctx, account, currentReq) || !scheduler.isAccountTransportCompatible(account, currentReq.RequiredTransport) {
+				continue
+			}
+			if decision := EvaluateAccountSchedulingThreshold(account, thresholds, time.Now()); decision.ShouldPause && decision.Until != nil && decision.Until.After(time.Now()) {
+				continue
+			}
+			adjusted := passiveQualitySchedulingAccount(ctx, account, currentReq.RequestedModel)
+			if len(account.ProxyIDs) > 1 {
+				active := 0
+				now := time.Now()
+				for _, id := range account.ProxyIDs {
+					for _, proxy := range account.Proxies {
+						if proxy != nil && proxy.ID == id && proxy.IsActive() && !proxy.IsExpired(now) {
+							active++
+							break
+						}
+					}
+				}
+				if active == 0 {
+					continue
+				}
+				// Only active, unexpired egress routes contribute normal capacity.
+				copy := *adjusted
+				copy.qualityConcurrencyLimit = min(adjusted.TotalConcurrency(), active*account.Concurrency)
+				adjusted = &copy
+			}
+			if account.Concurrency <= 0 {
+				return true, nil
+			}
+			eligible = append(eligible, adjusted)
+		}
+		if len(eligible) == 0 {
+			return false, nil
+		}
+		loads, err := s.concurrencyService.GetAccountsLoadBatchFresh(ctx, buildOpenAIAccountLoadRequest(eligible))
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return false, ctxErr
+		}
+		if err != nil {
+			// Unknown peer capacity cannot veto an acquired emergency candidate.
+			// Its own slot still goes through atomic acquisition and live gates.
+			return false, nil
+		}
+		for _, account := range eligible {
+			if load := loads[account.ID]; load != nil && load.CurrentConcurrency < account.TotalConcurrency() {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
 }
 
 // Ranking only changes preference. Unknown evidence remains eligible, and all

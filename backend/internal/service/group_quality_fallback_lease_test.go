@@ -22,6 +22,45 @@ func (g *fallbackAdmissionGateStub) RefreshGroupQualityFallback(context.Context,
 	return true, nil
 }
 
+func TestGroupQualityFallbackTrafficDenialPreservesAdmissionReason(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		fallback bool
+		wantErr  error
+	}{
+		{name: "ordinary validation budget", wantErr: ErrGroupQualityTrafficBudget},
+		{name: "fallback supply denial", fallback: true, wantErr: ErrAccountAdmissionDenied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gate := &fallbackAdmissionGateStub{groupTrafficTestGate: groupTrafficTestGate{allow: false}}
+			svc := NewConcurrencyService(nil)
+			svc.passiveQualityGate = gate
+			finalGateCalls := 0
+			svc.SetCacheRecoveryGate(cacheRecoveryGateFunc(func(context.Context, int64) (bool, error) {
+				finalGateCalls++
+				return true, nil
+			}))
+			ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "turn", GroupID: 8, Model: "public"})
+			if tc.fallback {
+				ctx = WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: 8, AccountID: 62, Model: "public"})
+			}
+			released := 0
+			result, err := svc.admitCacheRecoveryRequest(ctx, 62, &AcquireResult{Acquired: true, ReleaseFunc: func() { released++ }})
+			require.ErrorIs(t, err, tc.wantErr)
+			if tc.fallback {
+				require.NotErrorIs(t, err, ErrGroupQualityTrafficBudget)
+			}
+			require.False(t, result.Acquired)
+			require.Equal(t, []string{"public"}, gate.acquired)
+			require.Equal(t, 1, released, "rejected admission releases its concurrency slot")
+			require.Equal(t, []bool{true}, gate.passiveReleases, "pre-send rejection refunds passive admission")
+			require.Empty(t, gate.trafficReleases, "denial creates no traffic lease to refund")
+			require.Zero(t, finalGateCalls, "rejected traffic never reaches final admission")
+			require.False(t, GroupQualityFallbackActive(ctx))
+		})
+	}
+}
+
 func TestGroupQualityFallbackFinalGateSeesExactLeaseAndRefunds(t *testing.T) {
 	for _, allow := range []bool{false, true} {
 		gate := &fallbackAdmissionGateStub{groupTrafficTestGate: groupTrafficTestGate{allow: true}}

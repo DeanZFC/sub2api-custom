@@ -47,36 +47,62 @@ const groupQualityActiveHolds = `WITH live_holds AS (
 )`
 
 type groupQualityAccountRow struct {
-	ID                     int64          `json:"id"`
-	Platform               string         `json:"platform"`
-	Type                   string         `json:"type"`
-	Credentials            map[string]any `json:"credentials"`
-	Extra                  map[string]any `json:"extra"`
-	Status                 string         `json:"status"`
-	Schedulable            bool           `json:"schedulable"`
-	RateMultiplier         *float64       `json:"rate_multiplier"`
-	DeletedAt              *time.Time     `json:"deleted_at"`
-	ExpiresAt              *time.Time     `json:"expires_at"`
-	AutoPauseOnExpired     bool           `json:"auto_pause_on_expired"`
-	RateLimitResetAt       *time.Time     `json:"rate_limit_reset_at"`
-	OverloadUntil          *time.Time     `json:"overload_until"`
-	TempUnschedulableUntil *time.Time     `json:"temp_unschedulable_until"`
-	ParentAccountID        *int64         `json:"parent_account_id"`
+	ID                      int64                  `json:"id"`
+	Name                    string                 `json:"name"`
+	Platform                string                 `json:"platform"`
+	Type                    string                 `json:"type"`
+	Credentials             map[string]any         `json:"credentials"`
+	Extra                   map[string]any         `json:"extra"`
+	ProxyID                 *int64                 `json:"proxy_id"`
+	ProxyIDs                []int64                `json:"proxy_ids"`
+	Proxies                 []groupQualityProxyRow `json:"proxies"`
+	Concurrency             int                    `json:"concurrency"`
+	LoadFactor              *int                   `json:"load_factor"`
+	Priority                int                    `json:"priority"`
+	Status                  string                 `json:"status"`
+	Schedulable             bool                   `json:"schedulable"`
+	RateMultiplier          *float64               `json:"rate_multiplier"`
+	DeletedAt               *time.Time             `json:"deleted_at"`
+	ExpiresAt               *time.Time             `json:"expires_at"`
+	AutoPauseOnExpired      bool                   `json:"auto_pause_on_expired"`
+	RateLimitedAt           *time.Time             `json:"rate_limited_at"`
+	RateLimitResetAt        *time.Time             `json:"rate_limit_reset_at"`
+	OverloadUntil           *time.Time             `json:"overload_until"`
+	TempUnschedulableUntil  *time.Time             `json:"temp_unschedulable_until"`
+	TempUnschedulableReason string                 `json:"temp_unschedulable_reason"`
+	SessionWindowStart      *time.Time             `json:"session_window_start"`
+	SessionWindowEnd        *time.Time             `json:"session_window_end"`
+	SessionWindowStatus     string                 `json:"session_window_status"`
+	ParentAccountID         *int64                 `json:"parent_account_id"`
+	QuotaDimension          string                 `json:"quota_dimension"`
+}
+
+type groupQualityProxyRow struct {
+	ID        int64      `json:"id"`
+	Status    string     `json:"status"`
+	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, fallback, activeProof, modelProof bool) (bool, error) {
+	account, err := groupQualityLiveAccount(ctx, raw, model, fallback, activeProof, modelProof)
+	return account != nil, err
+}
+
+// Return the same live account used for the durable eligibility decision, so
+// request-specific supply checks cannot fall back to a scheduler snapshot.
+func groupQualityLiveAccount(ctx context.Context, raw []byte, model string, fallback, activeProof, modelProof bool) (*service.Account, error) {
 	var row groupQualityAccountRow
 	if err := json.Unmarshal(raw, &row); err != nil {
-		return false, err
+		return nil, err
 	}
 	if row.DeletedAt != nil {
-		return false, nil
+		return nil, nil
 	}
 	if row.Extra == nil {
 		row.Extra = map[string]any{}
 	}
 	if (&service.Account{Extra: row.Extra}).ActiveTestModelBlocked(model) && (!fallback || !activeProof) {
-		return false, nil
+		return nil, nil
 	}
 	if fallback {
 		// Ignore only the aggregate flag for this check. Explicit per-model
@@ -87,7 +113,7 @@ func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, 
 		}
 		delete(projected, "active_test_all_models_paused")
 		if (&service.Account{Extra: projected}).ActiveTestModelBlocked(model) && !modelProof {
-			return false, nil
+			return nil, nil
 		}
 		// Only automatic active protection owns quality_paused. A reason string or
 		// scheduler projection alone cannot turn a disabled account back on.
@@ -111,14 +137,31 @@ func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, 
 		}
 		row.Extra["passive_quality"] = kept
 	}
-	a := &service.Account{ID: row.ID, Platform: row.Platform, Type: row.Type, Credentials: row.Credentials, Extra: row.Extra, Status: row.Status, Schedulable: row.Schedulable, RateMultiplier: row.RateMultiplier, ExpiresAt: row.ExpiresAt, AutoPauseOnExpired: row.AutoPauseOnExpired, RateLimitResetAt: row.RateLimitResetAt, OverloadUntil: row.OverloadUntil, TempUnschedulableUntil: row.TempUnschedulableUntil, ParentAccountID: row.ParentAccountID}
+	a := &service.Account{
+		ID: row.ID, Name: row.Name, Platform: row.Platform, Type: row.Type,
+		Credentials: row.Credentials, Extra: row.Extra, ProxyID: row.ProxyID, ProxyIDs: row.ProxyIDs,
+		Concurrency: row.Concurrency, LoadFactor: row.LoadFactor, Priority: row.Priority,
+		Status: row.Status, Schedulable: row.Schedulable, RateMultiplier: row.RateMultiplier,
+		ExpiresAt: row.ExpiresAt, AutoPauseOnExpired: row.AutoPauseOnExpired,
+		RateLimitedAt: row.RateLimitedAt, RateLimitResetAt: row.RateLimitResetAt, OverloadUntil: row.OverloadUntil,
+		TempUnschedulableUntil: row.TempUnschedulableUntil, TempUnschedulableReason: row.TempUnschedulableReason,
+		SessionWindowStart: row.SessionWindowStart, SessionWindowEnd: row.SessionWindowEnd, SessionWindowStatus: row.SessionWindowStatus,
+		ParentAccountID: row.ParentAccountID, QuotaDimension: row.QuotaDimension,
+	}
+	for _, proxy := range row.Proxies {
+		a.Proxies = append(a.Proxies, &service.Proxy{ID: proxy.ID, Status: proxy.Status, ExpiresAt: proxy.ExpiresAt})
+	}
 	// The live row has already been filtered; do not let a routing marker loosen
 	// any additional common durable scheduling condition during this check.
+	admissionModel := service.GroupQualityFallbackAdmissionModel(ctx, model)
 	ctx = service.WithGroupQualityFallback(ctx, service.GroupQualityFallbackRequest{})
 	if veto, _ := service.OpenAIProfitControlVeto(ctx, a); veto {
-		return false, nil
+		return nil, nil
 	}
-	return service.PassiveQualityPoolAccountEligible(ctx, a, model), nil
+	if !service.PassiveQualityPoolAccountEligible(ctx, a, admissionModel) {
+		return nil, nil
+	}
+	return a, nil
 }
 
 func groupQualityFallbackCandidate(ctx context.Context, tx *sql.Tx, aid int64, model string) (bool, error) {
@@ -139,8 +182,13 @@ func groupQualityFallbackCandidate(ctx context.Context, tx *sql.Tx, aid int64, m
 // Every unrestricted account is normal supply, including accounts with no
 // samples, pending confirmation or expired evidence. Trial windows are bounded
 // recovery capacity, so they cannot prevent emergency fallback when exhausted.
+// The database still proves current membership and protection state; the
+// request checker then verifies those live rows can serve this exact request.
 func groupQualityFallbackHasNormalSupply(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, model string) (bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT to_jsonb(a) FROM accounts a
+	rows, err := tx.QueryContext(ctx, `SELECT to_jsonb(a) || jsonb_build_object('proxy_ids',
+ COALESCE((SELECT jsonb_agg(ap.proxy_id ORDER BY ap.position) FROM account_proxies ap WHERE ap.account_id=a.id),'[]'::jsonb),'proxies',
+ COALESCE((SELECT jsonb_agg(jsonb_build_object('id',pr.id,'status',pr.status,'expires_at',pr.expires_at) ORDER BY ap.position)
+ FROM account_proxies ap JOIN proxies pr ON pr.id=ap.proxy_id AND pr.deleted_at IS NULL WHERE ap.account_id=a.id),'[]'::jsonb)) FROM accounts a
  WHERE a.deleted_at IS NULL AND a.status='active' AND a.schedulable
  AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=$1)
  AND NOT EXISTS(SELECT 1 FROM scheduled_test_protection_states h LEFT JOIN scheduled_test_definitions d ON d.id=h.test_definition_id
@@ -155,20 +203,30 @@ func groupQualityFallbackHasNormalSupply(ctx context.Context, tx *sql.Tx, p serv
 		return false, err
 	}
 	defer func() { _ = rows.Close() }()
+	accounts := make([]*service.Account, 0)
 	for rows.Next() {
 		var accountRaw []byte
 		if err = rows.Scan(&accountRaw); err != nil {
 			return false, err
 		}
-		eligible, e := groupQualityAccountEligible(ctx, accountRaw, model, false, false, false)
+		account, e := groupQualityLiveAccount(ctx, accountRaw, model, false, false, false)
 		if e != nil {
 			return false, e
 		}
-		if eligible {
-			return true, nil
+		if account != nil {
+			account.GroupIDs = []int64{p.GroupIDs[0]}
+			accounts = append(accounts, account)
 		}
 	}
-	return false, rows.Err()
+	if err = rows.Err(); err != nil {
+		return false, err
+	}
+	// Release the cursor before the batch callback performs its fresh runtime
+	// capacity read. Account locks remain owned by this admission transaction.
+	if err = rows.Close(); err != nil {
+		return false, err
+	}
+	return service.GroupQualityFallbackHasRequestSupply(ctx, accounts)
 }
 
 // Renewal never revives an expired or released emergency request. The caller

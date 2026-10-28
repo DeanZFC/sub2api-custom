@@ -1312,9 +1312,9 @@ const refreshRecentRequests = async () => {
       kind: 'all',
       sort: 'created_at_desc',
       page: 1,
-      page_size: 10
+      page_size: 20
     })
-    return [String(row.id), response.items.slice(0, 10)] as const
+    return [String(row.id), response.items.slice(0, 20)] as const
   }))
 
   if (requestSeq !== recentRequestsReqSeq) return
