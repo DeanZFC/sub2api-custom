@@ -1,6 +1,17 @@
 import apiClient from '../client'
 import type { PassivePolicy, PassiveEvidence, PassiveMetricState, PassiveCacheState } from './passiveQuality'
+export interface PelicanReviewConfig {
+  enabled: boolean
+  judge_account_id: number
+  judge_model: string
+  daily_requests: number
+}
+export const defaultPelicanReviewConfig = (): PelicanReviewConfig => ({ enabled: false, judge_account_id: 0, judge_model: '', daily_requests: 200 })
+export function copyQualityOperationsConfig(value: QualityOperationsConfig): QualityOperationsConfig {
+  return { recovery_reserve_percent: 0, ...value, pelican_review: { ...defaultPelicanReviewConfig(), ...value.pelican_review } }
+}
 export interface QualityOperationsConfig {
+  pelican_review?: PelicanReviewConfig
   recovery_reserve_percent?: number; version: number; budget_enabled: boolean; daily_requests: number; daily_tokens: number
   account_daily_requests: number; account_daily_tokens: number; token_reservation: number
   dynamic_enabled: boolean; healthy_rounds: number; healthy_base_seconds: number; healthy_max_seconds: number

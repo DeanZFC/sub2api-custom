@@ -156,6 +156,7 @@ type createScheduledTestPlanRequest struct {
 	ExcludedAccountIDs []int64                               `json:"excluded_account_ids"`
 	TestDefinitionIDs  []int64                               `json:"test_definition_ids" binding:"required"`
 	ModelID            string                                `json:"model_id"`
+	ModelIDs           []string                              `json:"model_ids"`
 	ReasoningEffort    string                                `json:"reasoning_effort"`
 	CronExpression     string                                `json:"cron_expression"`
 	Schedule           *service.ScheduledTestSchedule        `json:"schedule"`
@@ -172,6 +173,7 @@ type updateScheduledTestPlanRequest struct {
 	ExcludedAccountIDs json.RawMessage                        `json:"excluded_account_ids"`
 	TestDefinitionIDs  json.RawMessage                        `json:"test_definition_ids"`
 	ModelID            string                                 `json:"model_id"`
+	ModelIDs           json.RawMessage                        `json:"model_ids"`
 	ReasoningEffort    json.RawMessage                        `json:"reasoning_effort"`
 	CronExpression     string                                 `json:"cron_expression"`
 	Schedule           json.RawMessage                        `json:"schedule"`
@@ -235,6 +237,7 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 		ExcludedAccountIDs: req.ExcludedAccountIDs,
 		TestDefinitionIDs:  req.TestDefinitionIDs,
 		ModelID:            req.ModelID,
+		ModelIDs:           req.ModelIDs,
 		ReasoningEffort:    req.ReasoningEffort,
 		CronExpression:     req.CronExpression,
 		Schedule:           req.Schedule,
@@ -288,8 +291,17 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 		response.BadRequest(c, "migrated strategy requires reviewing and saving group_ids and test_definition_ids before activation")
 		return
 	}
-	if req.ModelID != "" {
+	if len(req.ModelIDs) > 0 {
+		var models []string
+		if err := json.Unmarshal(req.ModelIDs, &models); err != nil || models == nil || len(models) == 0 {
+			response.BadRequest(c, "model_ids must be a nonempty array")
+			return
+		}
+		existing.ModelIDs = models
+	} else if req.ModelID != "" {
+		// Older clients explicitly replacing the scalar select one model.
 		existing.ModelID = req.ModelID
+		existing.ModelIDs = nil
 	}
 	if len(req.ReasoningEffort) > 0 {
 		if bytes.Equal(bytes.TrimSpace(req.ReasoningEffort), []byte("null")) {

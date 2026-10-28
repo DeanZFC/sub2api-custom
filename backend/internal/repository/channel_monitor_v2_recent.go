@@ -76,28 +76,31 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
 	}
 	// Each branch is capped per visible card before UNION; no global truncation
 	// can starve quiet channels. Correlated lookups use source time/group indexes.
-	query := `SELECT d.idx, recent.id, recent.created_at, recent.model, recent.is_error, recent.first_token_ms, recent.duration_ms, recent.cache_rate,
+	query := channelMonitorV2FinalFailureKeysSQL + `SELECT d.idx, recent.id, recent.created_at, recent.model, recent.is_error, recent.first_token_ms, recent.duration_ms, recent.cache_rate, recent.output_tps,
     recent.error_type, recent.error_owner, recent.error_source, recent.status_code, recent.upstream_status_code, recent.message, recent.error_summary
   FROM jsonb_to_recordset($4::jsonb) AS d(idx integer, platform text, group_id bigint, model text)
   CROSS JOIN LATERAL (
     (SELECT ul.created_at, ul.id, ` + usageModel + ` AS model, FALSE AS is_error, ul.first_token_ms::bigint, ul.duration_ms::bigint,
       ul.cache_read_tokens::double precision /
         NULLIF(ul.input_tokens::bigint + ul.cache_creation_tokens::bigint + ul.cache_read_tokens::bigint, 0) AS cache_rate,
+      CASE WHEN ` + outputTPSEligibleSQL("ul") + ` THEN ul.output_tokens::double precision*1000/(ul.duration_ms::bigint-ul.first_token_ms::bigint) END AS output_tps,
       ''::text AS error_type, ''::text AS error_owner, ''::text AS error_source, 0 AS status_code, 0 AS upstream_status_code, ''::text AS message, ''::text AS error_summary
     FROM usage_logs ul
     LEFT JOIN groups g ON g.id = ul.group_id
     LEFT JOIN accounts a ON a.id = ul.account_id
     WHERE ` + scope("ul", channelMonitorV2PlatformSQL, usageModel) + `
-      AND COALESCE(ul.request_type, 0) NOT IN (4, 6) AND ` + usageLogSuccessFilterUL + `
-      AND (NULLIF(ul.request_id, '') IS NULL OR NOT EXISTS (
+      AND COALESCE(ul.request_type, 0) NOT IN (4, 6) AND (` + usageLogSuccessFilterUL + ` OR ul.output_tokens>0)
+      AND ` + channelMonitorV2NoFinalFailureSQL("ul") + `
+      AND (COALESCE(ul.request_type,0)=3 OR COALESCE(ul.openai_ws_mode,false) OR NULLIF(ul.request_id, '') IS NULL OR NOT EXISTS (
         SELECT 1 FROM usage_logs newer WHERE newer.request_id = ul.request_id
+          AND COALESCE(newer.api_key_id,0)=COALESCE(ul.api_key_id,0) AND COALESCE(newer.account_id,0)=COALESCE(ul.account_id,0)
           AND newer.created_at >= $1 AND newer.created_at < $2
-          AND newer.actual_cost > 0 AND COALESCE(newer.request_type, 0) NOT IN (4, 6)
+          AND (newer.actual_cost > 0 OR newer.output_tokens>0) AND COALESCE(newer.request_type, 0) NOT IN (4, 6)
           AND (newer.created_at, newer.id) > (ul.created_at, ul.id)))
     ORDER BY ul.created_at DESC, ul.id DESC LIMIT 20)
     UNION ALL
     (SELECT current_error.created_at, current_error.id, ` + errorModel + ` AS model, TRUE AS is_error, current_error.time_to_first_token_ms AS first_token_ms,
-      current_error.duration_ms::bigint, NULL::double precision AS cache_rate,
+      current_error.duration_ms::bigint, NULL::double precision AS cache_rate, NULL::double precision AS output_tps,
       COALESCE(current_error.error_type, ''), COALESCE(current_error.error_owner, ''), COALESCE(current_error.error_source, ''),
       COALESCE(current_error.status_code, 0), COALESCE(current_error.upstream_status_code, 0),
       CONCAT_WS(' ', current_error.error_message, current_error.upstream_error_message, current_error.upstream_error_detail, current_error.error_body),
@@ -109,14 +112,12 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
     WHERE ` + scope("current_error", channelMonitorV2RecentErrorPlatform, errorModel) + `
       AND NOT current_error.is_count_tokens
       AND (COALESCE(current_error.status_code, 0) >= 400 OR current_error.error_type = 'cyber_policy')
-      AND (NULLIF(current_error.request_id, '') IS NULL OR (
+      AND (COALESCE(current_error.request_type,0)=3 OR NULLIF(current_error.request_id, '') IS NULL OR (
         NOT EXISTS (SELECT 1 FROM ops_error_logs newer WHERE newer.request_id = current_error.request_id
+          AND COALESCE(newer.api_key_id,0)=COALESCE(current_error.api_key_id,0) AND COALESCE(newer.account_id,0)=COALESCE(current_error.account_id,0)
           AND newer.created_at >= $1 AND newer.created_at < $2 AND NOT newer.is_count_tokens
           AND (COALESCE(newer.status_code, 0) >= 400 OR newer.error_type = 'cyber_policy')
-          AND (newer.created_at, newer.id) > (current_error.created_at, current_error.id))
-        AND NOT EXISTS (SELECT 1 FROM usage_logs succeeded WHERE succeeded.request_id = current_error.request_id
-          AND succeeded.created_at >= $1 AND succeeded.created_at < $2
-          AND succeeded.actual_cost > 0 AND COALESCE(succeeded.request_type, 0) NOT IN (4, 6))))
+          AND (newer.created_at, newer.id) > (current_error.created_at, current_error.id))))
     ORDER BY current_error.created_at DESC, current_error.id DESC LIMIT 20)
     ORDER BY created_at DESC, id DESC, is_error DESC LIMIT 20
   ) recent
@@ -150,7 +151,7 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2RecentRequests(ctx cont
 		var ttft, duration sql.NullInt64
 		var cacheRate sql.NullFloat64
 		var input service.ChannelMonitorV2ErrorInput
-		if err := rows.Scan(&index, &logID, &request.OccurredAt, &request.Model, &isError, &ttft, &duration, &cacheRate, &input.ErrorType, &input.ErrorOwner, &input.ErrorSource, &input.StatusCode, &input.UpstreamStatusCode, &input.Message, &summary); err != nil {
+		if err := rows.Scan(&index, &logID, &request.OccurredAt, &request.Model, &isError, &ttft, &duration, &cacheRate, &request.OutputTPS, &input.ErrorType, &input.ErrorOwner, &input.ErrorSource, &input.StatusCode, &input.UpstreamStatusCode, &input.Message, &summary); err != nil {
 			return err
 		}
 		if index < 0 || index >= len(items) {

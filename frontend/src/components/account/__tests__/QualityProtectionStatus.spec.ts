@@ -41,6 +41,15 @@ afterEach(() => {
 })
 
 describe('quality pause details', () => {
+  it('distinguishes models when one plan has several active holds', async () => {
+    vi.mocked(getAccountProtection).mockResolvedValueOnce([
+      { ...details[0], model_id: 'model-a' },
+      { ...details[0], model_id: 'model-b' },
+    ])
+    await trigger().trigger('mouseenter'); await flushPromises()
+    expect(Array.from(dialog()?.querySelectorAll('[data-hold-model]') || []).map(node => node.textContent)).toEqual(['model-a', 'model-b'])
+  })
+
   it('loads only on hover and displays nested rules, actual values and manual decisions', async () => {
     let resolve!: (value: QualityProtectionHold[]) => void
     vi.mocked(getAccountProtection).mockReturnValueOnce(new Promise(done => { resolve = done }))

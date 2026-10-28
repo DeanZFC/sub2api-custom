@@ -19,6 +19,7 @@ type ChannelStatusProvider interface {
 }
 
 type ChannelStatusMetric struct {
+	OutputTPS           *float64
 	HasRequests         bool
 	InsufficientSamples bool
 	ErrorRate           float64
@@ -146,8 +147,13 @@ func formatChannelStatusMetric(metric ChannelStatusMetric, throughput bool) stri
 	} else {
 		text += fmt.Sprintf("\n首 Token P50：%.2f 秒", float64(*metric.TTFTP50Ms)/1000)
 	}
+	if metric.OutputTPS == nil {
+		text += "\n输出 TPS：暂无数据"
+	} else {
+		text += fmt.Sprintf("\n输出 TPS：%.2f token/s", *metric.OutputTPS)
+	}
 	if throughput {
-		text += fmt.Sprintf("\nRPM：%.2f\nTPS：%.2f", metric.RPM, metric.TokensPerSecond)
+		text += fmt.Sprintf("\nRPM：%.2f\n总吞吐：%.2f token/s", metric.RPM, metric.TokensPerSecond)
 	}
 	return text
 }

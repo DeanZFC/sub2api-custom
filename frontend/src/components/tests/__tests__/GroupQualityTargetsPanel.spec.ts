@@ -124,6 +124,18 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
+  it('saves an output TPS-only target with a higher recovery standard', async () => {
+    api.policies.mockResolvedValue([])
+    const w = makeWrapper(); await flushPromises(); await w.get('[data-target-create]').trigger('click')
+    await w.get('[data-target-group]').setValue('3')
+    for (const metric of ['cache', 'availability', 'ttft']) await w.get(`[data-target-${metric}-enabled]`).setValue(false)
+    await w.get('[data-target-tps-enabled]').setValue(true)
+    await w.get('[data-target-tps]').setValue(30)
+    await w.get('[data-target-save]').trigger('click'); await flushPromises()
+    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ tps: { enabled: true, pause: 30, recover: 36 } }))
+    w.unmount()
+  })
+
   it('creates Pro with a 15-second first-token target and preserves the simple automatic defaults', async () => {
     api.policies.mockResolvedValue([])
     const w = makeWrapper(); await flushPromises(); await w.get('[data-target-create]').trigger('click')

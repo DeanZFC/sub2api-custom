@@ -3,7 +3,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestManagementView from '@/components/tests/ActiveQualityPanel.vue'
 import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vue'
-import Select from '@/components/common/Select.vue'
 
 const api = vi.hoisted(() => ({
   listTypes: vi.fn(), listPlans: vi.fn(), createType: vi.fn(), updateType: vi.fn(), deleteType: vi.fn(),
@@ -415,6 +414,22 @@ describe('configurable test management', () => {
     wrapper.unmount()
   })
 
+  it('keeps other model executions running when one model result arrives', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.listPlans.mockResolvedValue([{ ...plan, model_ids: ['test-model', 'another-model'] }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('button[aria-label="admin.tests.run"]').trigger('click'); await flushPromises()
+    const pane = wrapper.getComponent(AdminTestResultHistory)
+    expect(pane.props('results').map(result => result.model_id)).toEqual(['test-model', 'another-model'])
+    api.listResults.mockResolvedValue([{ id: 101, plan_id: 10, test_definition_id: 2, model_id: 'test-model', status: 'success', output_kind: 'number', output_numeric: 29, started_at: '2099-01-01T00:00:00Z' }])
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(pane.props('results')).toEqual([
+      expect.objectContaining({ model_id: 'another-model', status: 'running' }),
+      expect.objectContaining({ model_id: 'test-model', status: 'success' }),
+    ])
+    wrapper.unmount()
+  })
+
   it('persists the configured user-facing type order', async () => {
     const wrapper = makeWrapper(); await flushPromises()
     const orderInput = wrapper.find('input[type="number"]')
@@ -729,7 +744,7 @@ describe('general strategies across ordered groups', () => {
     ], pages: 1, total: 2 })
     const wrapper = makeWrapper(); await flushPromises()
     await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
-    expect(wrapper.getComponent(Select).props('options')).toEqual([{ value: 'gpt-6-astra', label: 'gpt-6-astra' }])
+    expect(wrapper.findAll('[data-plan-model]').map(input => input.attributes('data-plan-model'))).toEqual(['gpt-6-astra'])
     const effort = wrapper.get('[data-dialog]').findAll('select').find(select => select.find('option[value="high"]').exists())!
     expect(effort.find('option[value="ultra"]').exists()).toBe(false)
     expect(effort.find('option[value="low"]').exists()).toBe(false)
@@ -748,12 +763,52 @@ describe('general strategies across ordered groups', () => {
     const wrapper = makeWrapper(); await flushPromises()
     await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
     await wrapper.get('[data-plan-group="9"]').setValue(true); await flushPromises()
-    expect(wrapper.getComponent(Select).props('options')).toEqual([])
+    expect(wrapper.findAll('[data-plan-model]')).toHaveLength(0)
     expect(wrapper.find('[data-no-common-model]').exists()).toBe(true)
     expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
     resolveOld(['test-model']); await flushPromises()
-    expect(wrapper.getComponent(Select).props('options')).toEqual([])
+    expect(wrapper.findAll('[data-plan-model]')).toHaveLength(0)
     expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('selects and copies multiple models while retaining legacy single-model plans', async () => {
+    api.getModelAllowlistCandidates.mockResolvedValue(['test-model', 'another-model'])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    expect((wrapper.get('[data-plan-model="test-model"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-plan-model="another-model"]').setValue(true)
+    await saveButton(wrapper).trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ model_id: 'test-model', model_ids: ['test-model', 'another-model'] }))
+    wrapper.unmount()
+    api.listPlans.mockResolvedValue([{ ...plan, model_ids: ['another-model', 'test-model'] }])
+    const second = makeWrapper(); await flushPromises()
+    expect(second.get('tbody').text()).toContain('another-model, test-model')
+    await second.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ model_id: 'another-model', model_ids: ['another-model', 'test-model'], enabled: false }))
+    await second.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    await second.get('[data-plan-model="another-model"]').setValue(false)
+    await second.get('[data-plan-model="test-model"]').setValue(false)
+    expect(saveButton(second).attributes('disabled')).toBeDefined()
+    second.unmount()
+  })
+
+  it('intersects reasoning levels across selected models and bounds model count', async () => {
+    api.listPlans.mockResolvedValue([{ ...plan, model_id: 'gpt-6-astra', model_ids: ['gpt-6-astra'], reasoning_effort: 'ultra' }])
+    api.getModelAllowlistCandidates.mockResolvedValue(['gpt-6-astra', 'gpt-6-sol', ...Array.from({ length: 15 }, (_, i) => `other-${i}`)])
+    api.getAccounts.mockResolvedValue({ items: [{ id: 1, group_ids: [8], extra: { upstream_model_metadata: { models: {
+      'gpt-6-astra': { supported_reasoning_levels: ['high', 'ultra'] },
+      'gpt-6-sol': { supported_reasoning_levels: ['low', 'high'] },
+    } } } }], pages: 1, total: 1 })
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-plan-model="gpt-6-sol"]').setValue(true)
+    const effort = wrapper.get('[data-dialog]').findAll('select').find(select => select.find('option[value="high"]').exists())!
+    expect(effort.find('option[value="ultra"]').exists()).toBe(false)
+    expect((effort.element as HTMLSelectElement).value).not.toBe('ultra')
+    for (let i = 0; i < 14; i++) await wrapper.get(`[data-plan-model="other-${i}"]`).setValue(true)
+    expect(wrapper.get('[data-plan-model="other-14"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-plan-model="gpt-6-sol"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 

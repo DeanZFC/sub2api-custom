@@ -43,6 +43,7 @@ export interface QualityProtectionTrigger {
 }
 
 export interface QualityProtectionHold {
+  model_id?: string
   plan_id: number
   plan_name: string
   mode: 'combined' | 'per_test' | 'all_pass'

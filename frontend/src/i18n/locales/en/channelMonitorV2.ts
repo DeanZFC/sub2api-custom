@@ -71,9 +71,10 @@ export default {
     healthMode: { label: 'Health display', overall: 'Overall', success: 'Error rate', ttft: 'First token', cache: 'Cache rate' },
     tabs: { aria: 'Detail dimension', models: 'Models', errors: 'Error reasons', users: 'User ranking' },
     metrics: {
+      outputTps: 'Output TPS', outputTpsValue: 'Output TPS {value}', outputTpsDetail: 'Streaming output tokens ÷ generation seconds after the first token; duration-weighted, missing evidence excluded',
       rpm: 'RPM',
       tpm: 'TPM',
-      tps: 'Tokens/s',
+      tps: 'Throughput token/s',
       rpmDetail: 'Requests per minute',
       tpmDetail: 'Tokens per minute',
       tpsDetail: 'Derived as TPM ÷ 60',
@@ -88,7 +89,7 @@ export default {
       errorRateValue: 'Error rate {value}',
       rpmValue: 'RPM {value}',
       tpmValue: 'TPM {value}',
-      tpsValue: 'Tokens/s {value}',
+      tpsValue: 'Throughput {value} token/s',
       ttftValue: 'First token {value}',
       durationValue: 'Duration {value}',
       cacheRateValue: 'Cache rate {value}',
@@ -100,7 +101,8 @@ export default {
       title: 'Availability trend', description: 'Each row is a channel dimension and each block is an aggregate interval; hover for details', wheelZoom: 'Scroll over blocks to zoom in (narrower range, wider blocks)', wheelZoomX: 'Scroll over blocks to zoom in (narrower range, wider blocks)', dimension: 'Channel dimension', emptyTitle: 'No matrix data for the selected window', legendAria: 'Health score legend', bad: 'Bad', good: 'Good', healthyLegend: 'Healthy (≥80)', warningLegend: 'Watch (50–79)', criticalLegend: 'Critical (<50)', unknownLegend: 'No traffic / insufficient samples', noTraffic: 'No traffic in this interval', noTrafficAt: '{time} · no traffic', scoreLine: 'Health score {score}', resetZoom: 'Reset zoom'
     },
     chart: {
-      title: 'Availability trend', description: 'Smoothed trend: error rate · first token P50 · cache rate', emptyTitle: 'No trend data for the selected window', errorLegend: 'Error rate (left axis %)', cacheLegend: 'Cache rate (left axis %)', ttftLegend: 'First token P50 (right axis)', errorDataset: 'Error rate trend %', cacheDataset: 'Cache rate trend %', ttftDataset: 'First token trend P50 (ms)', percentAxis: 'Rate %', resetZoom: 'Reset zoom'
+      tpsLegend: 'Output TPS (token/s)', tpsDataset: 'Output TPS trend (token/s)',
+      title: 'Availability trend', description: 'Error rate · first token P50 · cache rate · output TPS', emptyTitle: 'No trend data for the selected window', errorLegend: 'Error rate (left axis %)', cacheLegend: 'Cache rate (left axis %)', ttftLegend: 'First token P50 (right axis)', errorDataset: 'Error rate trend %', cacheDataset: 'Cache rate trend %', ttftDataset: 'First token trend P50 (ms)', percentAxis: 'Rate %', resetZoom: 'Reset zoom'
     },
     errorDetail: { http: 'HTTP {code}', upstream: 'Upstream {code}', noMessage: 'No error message', empty: 'Category rates only (sample messages are admin-only)' },
     errorCategories: {

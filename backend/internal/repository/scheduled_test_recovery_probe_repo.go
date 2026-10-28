@@ -51,7 +51,7 @@ func (r *scheduledTestResultRepository) StatisticsRecoveryProbeNeeded(ctx contex
 func statisticsProbeStateCurrent(state *protectionState, result *service.ScheduledTestResult) bool {
 	return result.OutputKind == "statistics" && !state.completed && state.automated == "pending" &&
 		state.rule.Recovery != nil && state.rule.Recovery.Enabled &&
-		state.planID == result.PlanID && state.accountID == *result.AccountID &&
+		state.planID == result.PlanID && state.accountID == *result.AccountID && state.modelKey == result.ModelID &&
 		state.started.Equal(result.StartedAt.Round(time.Microsecond)) &&
 		!result.StartedAt.Round(time.Microsecond).Before(state.roundStarted)
 }
@@ -69,8 +69,8 @@ func statisticsProbeHoldCurrent(ctx context.Context, tx *sql.Tx, config *service
 	}
 	var held bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS (
- SELECT 1 FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2 AND blocked
- )`, state.planID, state.accountID).Scan(&held)
+ SELECT 1 FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2 AND model_key=$3 AND blocked
+ )`, state.planID, state.accountID, state.modelKey).Scan(&held)
 	return held, err
 }
 

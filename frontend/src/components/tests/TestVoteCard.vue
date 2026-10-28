@@ -4,6 +4,7 @@
       <div class="min-w-0">
         <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('tests.account') }} #{{ item.result.account_id }} · {{ item.result.test_name || t('tests.unknownType') }}</h4>
         <p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ item.result.model_id || '-' }}<span v-if="item.result.reasoning_effort"> · {{ t('tests.reasoningEffort') }}: {{ item.result.reasoning_effort }}</span> · {{ formatDate(item.result.started_at || item.result.created_at) }}</p>
+        <p v-if="item.result.model_schedulable != null" class="mt-1 text-xs font-medium" :class="item.result.model_schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'" data-model-scheduling-status>{{ t(item.result.model_schedulable ? 'tests.modelSchedulingActive' : 'tests.modelSchedulingPaused') }}</p>
       </div>
       <span v-if="item.voting.account_paused" class="badge badge-warning">{{ t('tests.voting.paused') }}</span>
     </header>

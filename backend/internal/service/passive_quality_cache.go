@@ -173,10 +173,25 @@ func (c *PassiveQualityConfig) validateIsolatedMetrics() error {
 		return nil
 	}
 	if !c.IsolatedMetrics() {
-		if c.CacheProtection != nil || c.TTFTAction != "" {
+		if c.CacheProtection != nil || c.TTFTAction != "" || c.TPSAction != "" {
 			return fmt.Errorf("independent metric configuration requires schema_version 2")
 		}
 		return nil
+	}
+	if c.TPSAction == "" {
+		c.TPSAction = "limit"
+		if c.TPSPriorityPenalty == 0 {
+			c.TPSPriorityPenalty = 50
+		}
+	}
+	if c.TPSConcurrencyLimit == 0 {
+		c.TPSConcurrencyLimit = 2
+	}
+	if c.TPSAction != "observe" && c.TPSAction != "limit" {
+		return fmt.Errorf("TPS action must be observe or limit")
+	}
+	if c.TPSConcurrencyLimit < 1 || c.TPSConcurrencyLimit > 1000 || c.TPSPriorityPenalty < 0 || c.TPSPriorityPenalty > 1000 {
+		return fmt.Errorf("invalid TPS concurrency or priority penalty")
 	}
 	if c.TTFTAction == "" {
 		c.TTFTAction = "limit"
@@ -224,10 +239,13 @@ func PassiveQualityMetricConfig(c PassiveQualityConfig, metric string) PassiveQu
 	}
 	switch metric {
 	case "availability":
-		c.TTFT.Enabled, c.CacheRate.Enabled = false, false
+		c.TTFT.Enabled, c.CacheRate.Enabled, c.TPS.Enabled = false, false, false
 	case "ttft":
-		c.ErrorRate.Enabled, c.CacheRate.Enabled, c.ConsecutiveFailures = false, false, 0
+		c.ErrorRate.Enabled, c.CacheRate.Enabled, c.TPS.Enabled, c.ConsecutiveFailures = false, false, false, 0
 		c.Action, c.ConcurrencyLimit, c.PriorityPenalty = "limit", c.TTFTConcurrencyLimit, c.TTFTPriorityPenalty
+	case "tps":
+		c.ErrorRate.Enabled, c.TTFT.Enabled, c.CacheRate.Enabled, c.ConsecutiveFailures = false, false, false, 0
+		c.Action, c.ConcurrencyLimit, c.PriorityPenalty = "limit", c.TPSConcurrencyLimit, c.TPSPriorityPenalty
 	}
 	return c
 }
@@ -639,7 +657,15 @@ func AdvancePassiveQualityCache(c PassiveQualityConfig, s *PassiveQualityCacheSt
 // TTFT is independent of both availability and cache evidence. A latency
 // restriction never pauses an account or consumes availability trial budgets.
 func AdvancePassiveQualityLatency(c PassiveQualityConfig, s *PassiveQualityMetricState, e PassiveQualityEvidence, now time.Time) string {
-	if !c.IsolatedMetrics() || !c.TTFT.Enabled || s == nil {
+	return advancePassiveQualitySpeed(c, s, e, now, "ttft", c.TTFT.Enabled, c.TTFTAction, e.TTFTFresh, e.TTFTLatest)
+}
+
+func AdvancePassiveQualityTPS(c PassiveQualityConfig, s *PassiveQualityMetricState, e PassiveQualityEvidence, now time.Time) string {
+	return advancePassiveQualitySpeed(c, s, e, now, "tps", c.TPS.Enabled, c.TPSAction, e.TPSFresh, e.TPSLatest)
+}
+
+func advancePassiveQualitySpeed(c PassiveQualityConfig, s *PassiveQualityMetricState, e PassiveQualityEvidence, now time.Time, metric string, enabled bool, action string, fresh int, latest time.Time) string {
+	if !c.IsolatedMetrics() || !enabled || s == nil {
 		return ""
 	}
 	s.Evidence = e
@@ -651,22 +677,22 @@ func AdvancePassiveQualityLatency(c PassiveQualityConfig, s *PassiveQualityMetri
 		s.Phase = "healthy"
 	}
 	restricted := s.Phase == "limited"
-	verdict, reason := EvaluatePassiveQuality(PassiveQualityMetricConfig(c, "ttft"), e, restricted)
+	verdict, reason := EvaluatePassiveQuality(PassiveQualityMetricConfig(c, metric), e, restricted)
 	s.Reason = reason
 	if verdict == "pending" {
 		s.Hits, s.RecoveryHits = 0, 0
 	}
-	if e.TTFTFresh < c.NewSamples || !e.TTFTLatest.After(s.LastEvidenceAt) || verdict == "pending" {
+	if fresh < c.NewSamples || !latest.After(s.LastEvidenceAt) || verdict == "pending" {
 		return ""
 	}
-	s.LastEvidenceAt = e.TTFTLatest
+	s.LastEvidenceAt = latest
 	if restricted {
 		if verdict != "pass" {
 			s.RecoveryHits = 0
 			return ""
 		}
 		if now.Before(s.HoldUntil) {
-			s.Reason = "ttft_minimum_hold"
+			s.Reason = metric + "_minimum_hold"
 			return ""
 		}
 		s.RecoveryHits++
@@ -674,18 +700,18 @@ func AdvancePassiveQualityLatency(c PassiveQualityConfig, s *PassiveQualityMetri
 			return ""
 		}
 		s.Phase = "healthy"
-		s.Reason = "ttft_recovered"
+		s.Reason = metric + "_recovered"
 		s.Hits = 0
 		s.RecoveryHits = 0
 		s.ObserveAfter = now
 		s.HoldUntil = now.Add(time.Duration(max(30, c.CooldownSeconds)) * time.Second)
-		return "ttft_recovered"
+		return metric + "_recovered"
 	}
 	if verdict == "pass" {
 		s.Hits = 0
 		if s.Phase == "watching" {
 			s.Phase = "healthy"
-			return "ttft_watch_cleared"
+			return metric + "_watch_cleared"
 		}
 		return ""
 	}
@@ -694,21 +720,21 @@ func AdvancePassiveQualityLatency(c PassiveQualityConfig, s *PassiveQualityMetri
 		return ""
 	}
 	s.Hits = c.Confirmations
-	if c.Mode != "enforce" || c.TTFTAction == "observe" {
+	if c.Mode != "enforce" || action == "observe" {
 		if s.Phase == "watching" {
 			return ""
 		}
 		s.Phase = "watching"
-		return "ttft_watch"
+		return metric + "_watch"
 	}
 	if now.Before(s.HoldUntil) {
 		s.Phase = "watching"
-		s.Reason = "ttft_minimum_hold"
+		s.Reason = metric + "_minimum_hold"
 		return ""
 	}
 	s.Phase = "limited"
 	s.ObserveAfter = now
 	s.LastEvidenceAt = now
 	s.HoldUntil = now.Add(time.Duration(max(30, c.CooldownSeconds)) * time.Second)
-	return "ttft_limited"
+	return metric + "_limited"
 }

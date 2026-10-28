@@ -1,6 +1,6 @@
 export default {
   "title": "独立账号评分",
-  "intro": "根据真实客户请求的错误率、缓存率、首字延迟和总耗时评分。主动智力检测单独判定是否允许调用。",
+  "intro": "根据真实客户请求的错误率、缓存率、首字延迟、总耗时和可选输出 TPS 评分。主动智力检测单独判定是否允许调用。",
   "enabled": "启用评分，并用于兜底账号排序",
   "window": "最近 {minutes} 分钟 · 最多 {max} 次请求 · 每个维度至少 {min} 个有效样本",
   "advanced": "评分标准与采样范围（高级）",
@@ -25,6 +25,7 @@ export default {
     "error_rate": "错误率（%）",
     "cache_rate": "可复用前缀缓存率（%）",
     "ttft": "首字 P90（毫秒）",
+    "tps": "输出 TPS（token/s）",
     "duration": "总耗时 P90（毫秒）"
   },
   "saved": "评分配置已保存",
@@ -34,7 +35,7 @@ export default {
   "invalidWindow": "采样窗口应为 60–86400 秒，请求和样本上限应为 5–1000 之间的整数。",
   "invalidSamples": "最低有效样本不能大于最近请求上限。",
   "invalidWeights": "各维度权重应在 0–100 之间，且至少一个维度权重大于零。",
-  "invalidStandard": "请检查{dimension}：百分率应为 0–100，耗时应为 0–3600000 毫秒；100 分标准必须比 0 分标准更好。",
+  "invalidStandard": "请检查{dimension}：百分率应为 0–100，耗时应为 0–3600000 毫秒；TPS 应为 0–1000000 token/s；100 分标准必须比 0 分标准更好。",
   "details": "查看评分明细",
   "status": {
     "ready": "样本完整",

@@ -63,6 +63,11 @@
             <label class="input-label block">{{ t('tests.modelCheck.matchMode') }}<select :value="ruleFor(type.id)?.model_match || 'exact'" class="input mt-1 w-full" data-rule-model-match @change="patchRule(type.id, { model_match: ($event.target as HTMLSelectElement).value as TestProtectionRule['model_match'] })"><option value="exact">{{ t('tests.modelCheck.exact') }}</option><option value="snapshot">{{ t('tests.modelCheck.snapshot') }}</option></select></label>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.modelMatchHint') }}</p>
           </template>
+          <div v-if="type.output_kind === 'html'" class="space-y-2 rounded-md border border-gray-200 p-3 dark:border-dark-700" data-auto-review-condition>
+            <label class="flex items-center gap-2 text-sm"><input :checked="ruleFor(type.id)?.auto_review?.enabled || false" type="checkbox" data-auto-review-enabled @change="toggleAutoReview(type.id, ($event.target as HTMLInputElement).checked)" />{{ t('admin.tests.autoReview.enableRule') }}</label>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.autoReview.ruleHint') }}</p>
+            <a v-if="ruleFor(type.id)?.auto_review?.enabled" href="/admin/tests?tab=operations" class="text-xs font-medium text-primary-600 dark:text-primary-400">{{ t('admin.tests.autoReview.configureJudge') }}</a>
+          </div>
           <div v-if="type.output_kind === 'html'" class="space-y-2 rounded-md border border-gray-200 p-3 dark:border-dark-700" data-duration-condition>
             <label class="flex items-center gap-2 text-sm"><input :checked="hasDurationLimit(type.id)" type="checkbox" data-duration-enabled @change="setDurationLimit(type.id, ($event.target as HTMLInputElement).checked ? 60 : undefined)" />{{ t('admin.tests.protection.durationEnabled') }}</label>
             <label v-if="hasDurationLimit(type.id)" class="input-label block">{{ t('admin.tests.protection.durationLimitSeconds') }}<input :value="durationLimit(type.id)" type="number" min="0" step="0.001" class="input ml-2 w-32" data-duration-limit @input="setDurationLimit(type.id, ($event.target as HTMLInputElement).valueAsNumber)" /></label>
@@ -78,7 +83,7 @@
             <button v-if="type.output_kind !== 'html'" type="button" class="text-xs font-medium text-primary-600 dark:text-primary-400" :disabled="(ruleFor(type.id)?.thresholds?.length || 0) >= 20" data-add-threshold @click="addThreshold(type)">+ {{ t('admin.tests.protection.addThreshold') }}</button>
           </template>
           <template v-if="!['statistics', 'model_check', 'capability'].includes(type.output_kind)">
-            <label v-if="!allPass" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.vote?.enabled || false" type="checkbox" data-rule-vote @change="toggleVote(type.id, ($event.target as HTMLInputElement).checked)" />{{ t('admin.tests.protection.vote') }}</label>
+            <label v-if="!allPass" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.vote?.enabled || false" :disabled="ruleFor(type.id)?.auto_review?.enabled" type="checkbox" data-rule-vote @change="toggleVote(type.id, ($event.target as HTMLInputElement).checked)" />{{ t('admin.tests.protection.vote') }}</label>
             <template v-if="!allPass && ruleFor(type.id)?.vote?.enabled">
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.vote?.public_enabled === true" type="checkbox" data-rule-public-vote @change="patchVote(type.id, { public_enabled: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.publicVote') }}</label>
               <p class="text-xs text-gray-500 dark:text-gray-400" data-public-vote-hint>{{ t(ruleFor(type.id)?.vote?.public_enabled ? 'admin.tests.protection.publicVoteHint' : 'admin.tests.protection.adminOnlyHint') }}</p>
@@ -145,7 +150,7 @@ const update = (change: (value: TestProtectionConfig) => void) => {
 }
 type AllPassRole = 'automatic' | 'review' | 'observe'
 const canReview = (type: TestType) => !['statistics', 'model_check', 'capability'].includes(type.output_kind)
-const ruleRole = (id: number): AllPassRole => !ruleFor(id) ? 'observe' : ruleFor(id)?.vote?.enabled ? 'review' : 'automatic'
+const ruleRole = (id: number): AllPassRole => !ruleFor(id) ? 'observe' : ruleFor(id)?.auto_review?.enabled ? 'automatic' : ruleFor(id)?.vote?.enabled ? 'review' : 'automatic'
 // Keep edits when switching to display-only and back within this editor.
 const roleDrafts = new Map<number, TestProtectionRule>()
 const setRuleRole = (type: TestType, role: AllPassRole) => update(next => {
@@ -156,8 +161,9 @@ const setRuleRole = (type: TestType, role: AllPassRole) => update(next => {
   if (role === 'observe') return
   const draft = roleDrafts.get(type.id)
   const rule = existing || (draft ? copyTestProtection({ enabled: true, rules: [draft] }).rules[0] : defaultProtectionRule(type))
+  if (role === 'review' && rule.auto_review) rule.auto_review.enabled = false
   if (role === 'review' || rule.vote) {
-    rule.vote = { reject_above: 0, pass_at_least: 1, ...rule.vote, enabled: role === 'review', public_enabled: false }
+    rule.vote = { reject_above: 0, pass_at_least: 1, ...rule.vote, enabled: role === 'review' || !!rule.auto_review?.enabled, public_enabled: false }
   }
   next.rules.push(rule)
 })
@@ -199,6 +205,10 @@ const toggleRule = (type: TestType, enabled: boolean) => update(next => {
 const patchRule = (id: number, patch: Partial<TestProtectionRule>) => update(next => {
   const rule = next.rules.find(item => item.test_definition_id === id)
   if (rule) Object.assign(rule, patch)
+})
+const toggleAutoReview = (id: number, enabled: boolean) => patchRule(id, {
+  auto_review: { enabled },
+  ...(enabled ? { required_pass: false, vote: { reject_above: 0, pass_at_least: 1, ...ruleFor(id)?.vote, enabled: true, public_enabled: ruleFor(id)?.vote?.public_enabled ?? false } } : {}),
 })
 const hasDurationLimit = (id: number) => !!ruleFor(id)?.thresholds?.some(item => item.metric === 'latency_ms' && item.operator === 'gt')
 const durationLimit = (id: number) => Math.min(...(ruleFor(id)?.thresholds || []).filter(item => item.metric === 'latency_ms' && item.operator === 'gt').map(item => item.value)) / 1000

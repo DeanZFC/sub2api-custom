@@ -63,9 +63,12 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	model := service.ActivePassRateRequestModel(ctx)
 	var eligible, held bool
 	err := db.QueryRowContext(ctx, `SELECT status='active' AND schedulable AND deleted_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
+        AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked AND (account_wide OR $2='' OR model_key='' OR model_key=$2))
+        AND COALESCE(extra->>'active_test_all_models_paused','false')<>'true'
+        AND NOT (COALESCE(extra->'active_test_model_holds','{}'::jsonb) ? $2 OR COALESCE(extra->'active_test_model_holds','{}'::jsonb) ? ''
+          OR ($2='' AND COALESCE(extra->'active_test_model_holds','{}'::jsonb)<>'{}'::jsonb))
         AND NOT EXISTS (SELECT 1 FROM scheduled_test_pass_rate_states WHERE account_id=$1 AND blocked AND ($2='' OR model_key='' OR model_key=$2)),
-		EXISTS (SELECT 1 FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked)
+		EXISTS (SELECT 1 FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked AND recovery_phase<>'')
 		FROM accounts WHERE id=$1`, accountID, model).Scan(&eligible, &held)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -85,7 +88,10 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	// Every protection writer takes this account lock before its state locks.
 	// Gate calls never lock plans, preserving the plan -> account -> state order.
 	err = tx.QueryRowContext(ctx, `SELECT status='active' AND schedulable AND deleted_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
+        AND NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked AND (account_wide OR $2='' OR model_key='' OR model_key=$2))
+        AND COALESCE(extra->>'active_test_all_models_paused','false')<>'true'
+        AND NOT (COALESCE(extra->'active_test_model_holds','{}'::jsonb) ? $2 OR COALESCE(extra->'active_test_model_holds','{}'::jsonb) ? ''
+          OR ($2='' AND COALESCE(extra->'active_test_model_holds','{}'::jsonb)<>'{}'::jsonb))
         AND NOT EXISTS (SELECT 1 FROM scheduled_test_pass_rate_states WHERE account_id=$1 AND blocked AND ($2='' OR model_key='' OR model_key=$2))
 		FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, accountID, model).Scan(&eligible)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -97,7 +103,7 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	rows, err := tx.QueryContext(ctx, `SELECT recovery_phase,
 		COALESCE(recovery_trial_started_at <= clock_timestamp() AND recovery_trial_ends_at > clock_timestamp(), FALSE),
 		recovery_trial_requests,rule_config
-		FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked
+		FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked AND recovery_phase<>''
 		ORDER BY plan_id,test_definition_id FOR UPDATE`, accountID)
 	if err != nil {
 		return false, err
@@ -135,7 +141,7 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
 	// therefore limits the entire account across plans, proxies and instances.
 	if _, err := tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states
 		SET recovery_trial_requests=recovery_trial_requests+1
-		WHERE account_id=$1 AND blocked`, accountID); err != nil {
+		WHERE account_id=$1 AND blocked AND recovery_phase<>''`, accountID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {

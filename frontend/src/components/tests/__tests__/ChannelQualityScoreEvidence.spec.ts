@@ -22,6 +22,15 @@ describe('quality score evidence', () => {
     expect(wrapper.get('[data-score-dimension="cache_rate"]').text()).toContain('No eligible samples')
     expect(wrapper.get('[data-score-dimension="error_rate"]').text()).toContain('0%')
   })
+  it('uses token-per-second units for the independent output-speed dimension', () => {
+    const data = score()
+    data.dimensions.push({ key: 'tps', value: 42.5, score: 85, weight: 10, samples: 30, status: 'ready', unit: 'token/s', reason: '' })
+    const wrapper = render(data)
+    const metric = wrapper.get('[data-score-dimension="tps"]')
+    expect(metric.text()).toContain('42.5 token/s')
+    expect(metric.text()).not.toContain('42.5 ms')
+  })
+
   it.each(['insufficient', 'incomplete', 'disabled'] as const)('does not manufacture a zero score for %s', status => {
     const wrapper = render({ ...score(), status, value: null })
     expect(wrapper.get('strong').text()).toBe('—')

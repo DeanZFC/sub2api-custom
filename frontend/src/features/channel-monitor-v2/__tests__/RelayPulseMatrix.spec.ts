@@ -8,6 +8,8 @@ const i18nT = (key: string, params?: Record<string, unknown>) => {
     'channelMonitorV2.matrix.dimension': '维度',
     'channelMonitorV2.metrics.successRate': '成功率',
     'channelMonitorV2.metrics.ttft': '首 Token',
+    'channelMonitorV2.metrics.outputTps': '输出 TPS',
+    'channelMonitorV2.metrics.outputTpsValue': '输出 TPS {value}',
     'channelMonitorV2.metrics.tps': '每秒 Token',
     'channelMonitorV2.metrics.cacheRate': '缓存率',
     'channelMonitorV2.matrix.scoreLine': '评分 {score}',
@@ -178,6 +180,21 @@ describe('RelayPulseMatrix', () => {
 })
 
 describe('RelayPulseMatrix axis range', () => {
+  it('shows measured output TPS independently of hidden throughput and leaves missing speed unknown', async () => {
+    const row = { platform: 'openai', metrics: { ...metrics(0), output_tps: 37.5 }, health, buckets: [] }
+    const wrapper = mount(RelayPulseMatrix, { props: {
+      rows: [row], healthMode: 'overall', showThroughput: false,
+      coverage: { requested_start: '2026-08-01T00:00:00Z', requested_end: '2026-08-01T00:01:00Z',
+        coverage_start: '2026-08-01T00:00:00Z', data_through: '2026-08-01T00:01:00Z', computed_at: '2026-08-01T00:01:00Z',
+        aggregation_lag_seconds: 0, coverage_complete: true, bucket_seconds: 60 },
+    } })
+    expect(wrapper.get('[data-output-tps]').text()).toBe('37.5 token/s')
+    expect(wrapper.get('.matrix-header').text()).not.toContain('每秒 Token')
+    await wrapper.setProps({ rows: [{ ...row, metrics: { ...row.metrics, output_tps: null, tpm: 6000 } }] })
+    expect(wrapper.get('[data-output-tps]').text()).toBe('—')
+    wrapper.unmount()
+  })
+
   it('uses selected requested range for the X axis even with partial coverage', () => {
     const wrapper = mount(RelayPulseMatrix, {
       props: {

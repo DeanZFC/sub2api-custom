@@ -89,6 +89,40 @@ func TestScheduledTestProtectionObservedViolationWinsOverMissingMetric(t *testin
 	require.Contains(t, reason, "成功率小于80%")
 }
 
+func TestScheduledTestOutputTPSThresholdRequiresIndependentSamples(t *testing.T) {
+	rule := ScheduledTestProtectionRule{MinSamples: 5, Thresholds: []ScheduledTestThreshold{{Metric: "output_tps", Operator: "lt", Value: 20}}}
+	plan := protectionPlan()
+	plan.Protection.Rules[0] = rule
+	plan.Protection.Rules[0].TestDefinitionID = 1
+	require.NoError(t, validateScheduledTestProtection(plan))
+	for _, tc := range []struct {
+		name    string
+		value   *float64
+		samples int64
+		want    string
+	}{
+		{"missing timing stays unknown", nil, 5, "pending"},
+		{"unrelated requests cannot meet sample floor", protectionFloat(100), 4, "pending"},
+		{"threshold equality passes", protectionFloat(20), 5, "pass"},
+		{"slow output fails", protectionFloat(19.9), 5, "fail"},
+		{"fast output passes", protectionFloat(40), 5, "pass"},
+		{"negative speed is invalid", protectionFloat(-1), 5, "pending"},
+		{"nonfinite speed is invalid", protectionFloat(math.Inf(1)), 5, "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &ScheduledTestResult{Status: "success", OutputKind: "statistics", OutputStatistics: &ScheduledTestStatistics{
+				TotalRequests: 100, FirstTokenSamples: 100, TPSSamples: tc.samples, OutputTPS: tc.value,
+			}}
+			verdict, reason := evaluateScheduledTestProtection(rule, result)
+			require.Equal(t, tc.want, verdict)
+			require.EqualValues(t, tc.samples, *scheduledTestMetricSamples(result, "output_tps"))
+			if verdict == "fail" {
+				require.Contains(t, reason, "输出速度小于20tokens/s")
+			}
+		})
+	}
+}
+
 func TestScheduledTestProtectionAnswersAndExecutionFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name, match, expected, actual, status, want string
@@ -172,6 +206,9 @@ func TestScheduledTestProtectionValidation(t *testing.T) {
 		{"negative latency", func(p *ScheduledTestPlan) {
 			p.Protection.Rules[0].Thresholds = []ScheduledTestThreshold{{Metric: "latency_ms", Operator: "gt", Value: -1}}
 		}},
+		{"negative output speed", func(p *ScheduledTestPlan) {
+			p.Protection.Rules[0].Thresholds = []ScheduledTestThreshold{{Metric: "output_tps", Operator: "lt", Value: -1}}
+		}},
 		{"nonfinite threshold", func(p *ScheduledTestPlan) {
 			p.Protection.Rules[0].Thresholds = []ScheduledTestThreshold{{Metric: "output_numeric", Operator: "gt", Value: math.NaN()}}
 		}},
@@ -203,6 +240,7 @@ func TestScheduledTestProtectionOutputKindAndSelectedDefinition(t *testing.T) {
 	}{
 		{"success_rate", "statistics", true}, {"cache_rate", "text", false}, {"success_rate", "number", false},
 		{"avg_first_token_ms", "statistics", true}, {"avg_first_token_ms", "html", false},
+		{"output_tps", "statistics", true}, {"output_tps", "text", false},
 		{"output_numeric", "number", true}, {"output_numeric", "text", false},
 		{"latency_ms", "statistics", false}, {"latency_ms", "html", true},
 	} {

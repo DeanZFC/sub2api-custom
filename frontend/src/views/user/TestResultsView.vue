@@ -7,6 +7,10 @@
       </header>
 
       <p v-if="auth.isAdmin && reviewError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ reviewError }}</p>
+      <div v-if="auth.isAdmin && hasAutomaticReviews" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-review-filter>
+        <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.tests.autoReview.filterHint') }}</p>
+        <label class="flex items-center gap-2 text-sm"><input v-model="showAllReviewResults" type="checkbox" data-show-all-reviews />{{ t('admin.tests.autoReview.showAllResults') }}</label>
+      </div>
 
       <div v-if="displayResults.length" class="flex flex-wrap items-end justify-between gap-3 border-b border-gray-200 dark:border-dark-700">
         <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" :aria-label="t('tests.groupFilter')">
@@ -14,7 +18,7 @@
         </nav>
         <label class="mb-2 flex w-full items-center gap-2 text-sm text-gray-500 dark:text-gray-400 sm:w-auto">
           <span class="shrink-0">{{ t('tests.modelFilter') }}</span>
-          <select v-model="modelFilter" class="input min-w-0 flex-1 text-sm sm:w-48"><option value="">{{ t('tests.allModels') }}</option><option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option></select>
+          <select v-model="modelFilter" class="input min-w-0 flex-1 text-sm sm:w-48" data-result-model-filter><option value="">{{ t('tests.allModels') }}</option><option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option></select>
         </label>
       </div>
 
@@ -29,9 +33,15 @@
         <article v-for="account in accountResults" :key="account.key" class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900" data-account-result>
           <header class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-800/50" data-account-info>
             <div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 break-words"><h3 class="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="text-xs text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
-            <div v-if="account.schedulable != null" class="flex shrink-0 items-center gap-2 text-xs" data-scheduling-status>
-              <span class="text-gray-500 dark:text-gray-400">{{ t('tests.currentScheduling') }}</span>
-              <span class="inline-flex items-center gap-1.5 font-medium" :class="account.schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'"><span class="h-1.5 w-1.5 rounded-full bg-current" />{{ t(account.schedulable ? 'tests.schedulingActive' : 'tests.schedulingPaused') }}</span>
+            <div class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+              <div v-if="account.schedulable != null" class="flex items-center gap-2" data-scheduling-status>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('tests.currentScheduling') }}</span>
+                <span class="inline-flex items-center gap-1.5 font-medium" :class="account.schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'"><span class="h-1.5 w-1.5 rounded-full bg-current" />{{ t(account.schedulable ? 'tests.schedulingActive' : 'tests.schedulingPaused') }}</span>
+              </div>
+              <div v-if="modelFilter && account.selectedModelSchedulable != null" class="flex items-center gap-2" data-selected-model-status>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('tests.currentModelScheduling') }}</span>
+                <span class="font-medium" :class="account.selectedModelSchedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">{{ t(account.selectedModelSchedulable ? 'tests.modelSchedulingActive' : 'tests.modelSchedulingPaused') }}</span>
+              </div>
             </div>
           </header>
           <div class="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3 p-3" data-account-tests>
@@ -50,6 +60,7 @@
                   <button v-if="historyAnchor(test)" type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
                 </div>
                 <div class="mt-1.5 flex flex-wrap items-center gap-1.5"><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span><span class="min-w-0 break-all text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}<span v-if="test.latest.output_kind !== 'statistics' && test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></span></div>
+                <p v-if="test.latest.model_schedulable != null" class="mt-1 text-xs font-medium" :class="test.latest.model_schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'" data-model-scheduling-status>{{ t(test.latest.model_schedulable ? 'tests.modelSchedulingActive' : 'tests.modelSchedulingPaused') }}</p>
               </div>
               <template v-if="test.latest.output_kind === 'statistics'">
                 <TestResultOutput :result="test.latest" compact />
@@ -133,6 +144,14 @@ const adminReviews = ref<TestAdminReview[]>([])
 const reviewError = ref('')
 const reviewIndex = computed(() => new Map(auth.isAdmin ? adminReviews.value.map(review => [review.result.id, review]) : []))
 const reviewFor = (result: TestResult) => reviewIndex.value.get(result.id)
+const showAllReviewResults = ref(false)
+const hasAutomaticReviews = computed(() => auth.isAdmin && regularResults.value.some(result => !!result.execution_info?.auto_review))
+const reviewNeedsAttention = (result: TestResult) => {
+  if (!auth.isAdmin || showAllReviewResults.value) return true
+  const review = reviewFor(result)
+  const automatic = result.execution_info?.auto_review
+  return !automatic || (automatic.verdict === 'pending' && !review?.admin_verdict)
+}
 // Reviews and votes provide a fallback when a result has no live scheduling
 // projection. A paused account remains visible in the regular result list.
 const pausedAccountIds = computed(() => {
@@ -155,7 +174,7 @@ const regularResults = computed(() => {
   // source group until the next poll.
   if (auth.isAdmin) for (const review of adminReviews.value) {
     const current = records.get(review.result.id)
-    records.set(review.result.id, current ? { ...review.result, ...current, account_name: review.result.account_name } : review.result)
+    records.set(review.result.id, current ? { ...review.result, ...current, account_name: review.result.account_name, ...(review.result.execution_info ? { execution_info: { ...current.execution_info, ...review.result.execution_info } } : {}) } : review.result)
   }
   return [...records.values()]
 })
@@ -213,18 +232,22 @@ const projectedVotes = computed(() => {
   const records = new Map(regularResults.value.map(result => [result.id, result]))
   return visibleVoteResults.value.map(item => {
     const current = records.get(item.result.id)
-    return current ? { ...item, result: { ...item.result, group_id: current.group_id, group_name: current.group_name, group_order: current.group_order, plan_order: current.plan_order } } : item
+    return current ? { ...item, result: { ...item.result, group_id: current.group_id, group_name: current.group_name, group_order: current.group_order, plan_order: current.plan_order,
+      account_schedulable: current.account_schedulable ?? item.result.account_schedulable,
+      model_schedulable: current.model_schedulable ?? item.result.model_schedulable,
+    } } : item
   })
 })
-const filteredVotes = computed(() => projectedVotes.value.filter(item => groupKey(item.result) === activeGroup.value && (!modelFilter.value || item.result.model_id === modelFilter.value)))
+const filteredVotes = computed(() => projectedVotes.value.filter(item => reviewNeedsAttention(reviewFor(item.result)?.result || item.result) && groupKey(item.result) === activeGroup.value && (!modelFilter.value || item.result.model_id === modelFilter.value)))
 const filteredResults = computed(() => sortResults(regularResults.value.filter(result => groupKey(result) === activeGroup.value && (!modelFilter.value || result.model_id === modelFilter.value))))
 const schedulingState = (result: TestResult) => result.account_schedulable
   ?? (isHiddenPausedAccount(result) ? false : undefined)
 const isSkippedResult = (result: TestResult) => result.execution_info?.failure_kind === 'quality_deferred' || (result.status === 'failed' && (result.error_message || '').startsWith('检测跳过：'))
 const resultRank = (result: TestResult) => {
+  if (result.model_schedulable === false) return 3
   if (isSkippedResult(result)) return 1
-  if (['failed', 'error'].includes(result.status) || result.output_model_check?.verdict === 'fail' || result.execution_info?.capability?.verdict === 'fail') return 2
-  if (!isSuccessful(result) || (result.output_kind === 'model_check' && result.output_model_check?.verdict !== 'pass') || (result.output_kind === 'capability' && result.execution_info?.capability?.verdict !== 'pass')) return 1
+  if (['failed', 'error'].includes(result.status) || result.output_model_check?.verdict === 'fail' || result.execution_info?.capability?.verdict === 'fail' || result.execution_info?.auto_review?.verdict === 'fail') return 2
+  if (!isSuccessful(result) || result.execution_info?.auto_review?.verdict === 'pending' || (result.output_kind === 'model_check' && result.output_model_check?.verdict !== 'pass') || (result.output_kind === 'capability' && result.execution_info?.capability?.verdict !== 'pass')) return 1
   return 0
 }
 const accountResults = computed(() => {
@@ -245,12 +268,14 @@ const accountResults = computed(() => {
     series.results.push(result)
   }
   return [...accounts.values()].map(account => {
-    const tests = [...account.tests.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
+    const tests = [...account.tests.values()].filter(test => reviewNeedsAttention(test.latest)).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
     const states = tests.map(test => schedulingState(test.latest))
     const schedulable = states.includes(false) ? false : states.includes(true) ? true : undefined
+    const modelStates = modelFilter.value ? tests.map(test => test.latest.model_schedulable) : []
+    const selectedModelSchedulable = modelStates.includes(false) ? false : modelStates.includes(true) ? true : undefined
     const rank = schedulable === false ? 3 : Math.max(...tests.map(test => resultRank(test.latest)))
-    return { ...account, tests, schedulable, rank }
-  }).sort((a, b) => a.rank - b.rank || a.order - b.order)
+    return { ...account, tests, schedulable, selectedModelSchedulable, rank }
+  }).filter(account => account.tests.length > 0).sort((a, b) => a.rank - b.rank || a.order - b.order)
 })
 
 const isSuccessful = (result: TestResult) => ['success', 'passed'].includes(result.status)
@@ -309,11 +334,13 @@ const openHistory = (series: TestSeries) => {
 }
 const statusClass = (result: TestResult) => result.status === 'running' || result.status === 'pending' || isSkippedResult(result) ? 'badge badge-warning'
   : !isSuccessful(result) ? 'badge badge-danger'
+  : result.execution_info?.auto_review ? result.execution_info.auto_review.verdict === 'pass' ? 'badge badge-success' : result.execution_info.auto_review.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning'
   : result.output_kind === 'capability' ? result.execution_info?.capability?.verdict === 'pass' ? 'badge badge-success' : result.execution_info?.capability?.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning'
   : result.output_kind === 'model_check' ? result.output_model_check?.verdict === 'pass' ? 'badge badge-success' : result.output_model_check?.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning' : 'badge badge-success'
 const statusLabel = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? t('tests.running')
   : isSkippedResult(result) ? t('tests.skipped')
   : !isSuccessful(result) ? t('tests.failed')
+  : result.execution_info?.auto_review ? t(`admin.tests.autoReview.${result.execution_info.auto_review.verdict}`)
   : result.output_kind === 'capability' ? t(`admin.tests.capability.verdicts.${result.execution_info?.capability?.verdict || 'pending'}`)
   : result.output_kind === 'model_check' ? t(`tests.modelCheck.${result.output_model_check?.verdict || 'unknown'}`) : t('tests.completed')
 const modelLabel = (result: TestResult) => `${result.model_id || '-'}${result.reasoning_effort ? ` · ${t('tests.reasoningEffort')}: ${result.reasoning_effort}` : ''}`

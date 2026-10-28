@@ -18,12 +18,13 @@ it('keeps cache gaps and measured zero without smoothing them into neighboring b
   const health: MonitorHealth = { overall: 'unknown', error_rate: 'unknown', ttft: 'unknown', cache: 'unknown', minimum_sample: 20 }
   const wrapper = mount(MonitorTrendChart, {
     props: { coverage: null, trend: [
-      { bucket_start: '2026-10-23T00:00:00Z', metrics: metric, health },
+      { bucket_start: '2026-10-23T00:00:00Z', metrics: { ...metric, output_tps: 42 }, health },
       { bucket_start: '2026-10-23T00:01:00Z', metrics: { ...metric, cache_rate: 0, has_cache_samples: false }, health },
-      { bucket_start: '2026-10-23T00:02:00Z', metrics: { ...metric, cache_rate: 0 }, health },
+      { bucket_start: '2026-10-23T00:02:00Z', metrics: { ...metric, cache_rate: 0, output_tps: 0 }, health },
     ] },
     global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { Icon: true, EmptyState: true } },
   })
   const data = JSON.parse(wrapper.get('.chart-data').text())
   expect(data.datasets[1].data).toEqual([90, null, 0])
+  expect(data.datasets.find((d: { label: string }) => d.label.includes('TPS')).data).toEqual([42, null, 0])
 })

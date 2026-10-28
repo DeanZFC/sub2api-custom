@@ -22,8 +22,8 @@ func (f channelStatusProviderFunc) ChannelStatus(ctx context.Context) (*ChannelS
 }
 
 func channelStatusFixture() *ChannelStatusReport {
-	cache, ttft := .7625, int64(1280)
-	metric := ChannelStatusMetric{HasRequests: true, ErrorRate: .0032, CacheRate: &cache, TTFTP50Ms: &ttft, RPM: 12.34, TokensPerSecond: 56.78}
+	cache, ttft, tps := .7625, int64(1280), 42.5
+	metric := ChannelStatusMetric{OutputTPS: &tps, HasRequests: true, ErrorRate: .0032, CacheRate: &cache, TTFTP50Ms: &ttft, RPM: 12.34, TokensPerSecond: 56.78}
 	return &ChannelStatusReport{
 		UpdatedAt: time.Date(2026, 10, 16, 6, 30, 0, 0, time.UTC),
 		Overall:   metric,
@@ -43,20 +43,23 @@ func TestFormatChannelStatus(t *testing.T) {
 错误率：0.32%
 缓存率：76.25%
 首 Token P50：1.28 秒
+输出 TPS：42.50 token/s
 
 **1. OpenAI 标准组**
 成功率：99.68%
 错误率：0.32%
 缓存率：76.25%
 首 Token P50：1.28 秒
+输出 TPS：42.50 token/s
 
 **2. Gemini 分组**
 暂无请求数据`}, chunks)
 	require.NotContains(t, chunks[0], "RPM")
-	require.NotContains(t, chunks[0], "TPS")
+	require.NotContains(t, chunks[0], "总吞吐")
+	require.Contains(t, chunks[0], "输出 TPS：42.50 token/s")
 	report.ShowThroughput = true
 	text := strings.Join(formatChannelStatus(report), "")
-	require.Equal(t, 2, strings.Count(text, "RPM：12.34\nTPS：56.78"))
+	require.Equal(t, 2, strings.Count(text, "RPM：12.34\n总吞吐：56.78 token/s"))
 }
 
 func TestChannelStatusMissingSamplesAreNotZeroOrPerfectSuccess(t *testing.T) {

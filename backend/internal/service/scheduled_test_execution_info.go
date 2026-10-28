@@ -21,7 +21,8 @@ type ScheduledTestRequestAttempt struct {
 	RetryAfter  *time.Time `json:"retry_after,omitempty"`
 }
 type ScheduledTestExecutionInfo struct {
-	Capability *QualityCapabilityResult `json:"capability,omitempty"`
+	AutoReview *ScheduledTestAutoReviewSummary `json:"auto_review,omitempty"`
+	Capability *QualityCapabilityResult        `json:"capability,omitempty"`
 	// Set only after successful upstream completion with an invalid answer format.
 	OutputContractFailed bool `json:"output_contract_failed,omitempty"`
 	ScheduledTestTokenUsage

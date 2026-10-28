@@ -102,6 +102,7 @@ func (r *channelMonitorV2Repository) UpdateConfig(ctx context.Context, cfg servi
 }
 
 type channelMonitorV2Fact struct {
+	TPSOutputTokens, TPSGenerationMS, TPSSamples                                                          int64
 	BucketStart, Platform, GroupName, Model                                                               string
 	GroupID                                                                                               int64
 	Success, Errors, UpstreamAffected, UpstreamAttempts                                                   int64
@@ -813,7 +814,7 @@ func (r *channelMonitorV2Repository) GetUsers(ctx context.Context, filter servic
 	filter = effectiveFilter
 	where, args, _ := channelMonitorV2WhereWithRollup(filter, cfg, "m")
 	query := `SELECT m.user_id,COALESCE(u.email,''),COALESCE(u.username,''),m.platform,m.model,
-	SUM(m.success_requests),SUM(m.error_requests),SUM(m.input_tokens),SUM(m.cache_eligible_input_tokens),SUM(m.output_tokens),SUM(m.cache_creation_tokens),SUM(m.cache_read_tokens),SUM(m.cache_eligible_creation_tokens),SUM(m.cache_eligible_read_tokens),SUM(m.ttft_sum_ms),SUM(m.ttft_count),SUM(m.duration_sum_ms),SUM(m.duration_count)
+	SUM(m.success_requests),SUM(m.error_requests),SUM(m.input_tokens),SUM(m.cache_eligible_input_tokens),SUM(m.output_tokens),SUM(m.cache_creation_tokens),SUM(m.cache_read_tokens),SUM(m.cache_eligible_creation_tokens),SUM(m.cache_eligible_read_tokens),SUM(m.ttft_sum_ms),SUM(m.ttft_count),SUM(m.duration_sum_ms),SUM(m.duration_count),SUM(m.tps_output_tokens),SUM(m.tps_generation_ms),SUM(m.tps_samples)
 	FROM ` + channelMonitorV2UserMetricsTable(filter) + ` m LEFT JOIN users u ON u.id=m.user_id ` + where + ` GROUP BY m.user_id,u.email,u.username,m.platform,m.model`
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -827,7 +828,7 @@ func (r *channelMonitorV2Repository) GetUsers(ctx context.Context, filter servic
 		var uid int64
 		var email, username string
 		var f channelMonitorV2Fact
-		if err := rows.Scan(&uid, &email, &username, &f.Platform, &f.Model, &f.Success, &f.Errors, &f.Input, &f.CacheEligibleInput, &f.Output, &f.CacheCreation, &f.CacheRead, &f.CacheEligibleCreation, &f.CacheEligibleRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount); err != nil {
+		if err := rows.Scan(&uid, &email, &username, &f.Platform, &f.Model, &f.Success, &f.Errors, &f.Input, &f.CacheEligibleInput, &f.Output, &f.CacheCreation, &f.CacheRead, &f.CacheEligibleCreation, &f.CacheEligibleRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount, &f.TPSOutputTokens, &f.TPSGenerationMS, &f.TPSSamples); err != nil {
 			return nil, err
 		}
 		if !channelMonitorV2ModelSelected(filter, cfg, f.Platform, f.Model) {
@@ -907,7 +908,7 @@ func (r *channelMonitorV2Repository) loadFacts(ctx context.Context, filter servi
 			group = bucketExpr + "," + group
 		}
 	}
-	query := `SELECT ` + bucketExpr + `,m.platform,m.group_id,COALESCE(g.name,''),m.model,SUM(m.success_requests),SUM(m.error_requests),SUM(m.upstream_affected_requests),SUM(m.upstream_attempt_count),SUM(m.input_tokens),SUM(m.cache_eligible_input_tokens),SUM(m.output_tokens),SUM(m.cache_creation_tokens),SUM(m.cache_read_tokens),SUM(m.cache_eligible_creation_tokens),SUM(m.cache_eligible_read_tokens),SUM(m.ttft_sum_ms),SUM(m.ttft_count),SUM(m.duration_sum_ms),SUM(m.duration_count) FROM ` + channelMonitorV2MetricsTable(filter) + ` m LEFT JOIN groups g ON g.id=NULLIF(m.group_id,0) ` + where + ` GROUP BY ` + group
+	query := `SELECT ` + bucketExpr + `,m.platform,m.group_id,COALESCE(g.name,''),m.model,SUM(m.success_requests),SUM(m.error_requests),SUM(m.upstream_affected_requests),SUM(m.upstream_attempt_count),SUM(m.input_tokens),SUM(m.cache_eligible_input_tokens),SUM(m.output_tokens),SUM(m.cache_creation_tokens),SUM(m.cache_read_tokens),SUM(m.cache_eligible_creation_tokens),SUM(m.cache_eligible_read_tokens),SUM(m.ttft_sum_ms),SUM(m.ttft_count),SUM(m.duration_sum_ms),SUM(m.duration_count),SUM(m.tps_output_tokens),SUM(m.tps_generation_ms),SUM(m.tps_samples) FROM ` + channelMonitorV2MetricsTable(filter) + ` m LEFT JOIN groups g ON g.id=NULLIF(m.group_id,0) ` + where + ` GROUP BY ` + group
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -917,7 +918,7 @@ func (r *channelMonitorV2Repository) loadFacts(ctx context.Context, filter servi
 	for rows.Next() {
 		var bucket time.Time
 		var f channelMonitorV2Fact
-		if err := rows.Scan(&bucket, &f.Platform, &f.GroupID, &f.GroupName, &f.Model, &f.Success, &f.Errors, &f.UpstreamAffected, &f.UpstreamAttempts, &f.Input, &f.CacheEligibleInput, &f.Output, &f.CacheCreation, &f.CacheRead, &f.CacheEligibleCreation, &f.CacheEligibleRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount); err != nil {
+		if err := rows.Scan(&bucket, &f.Platform, &f.GroupID, &f.GroupName, &f.Model, &f.Success, &f.Errors, &f.UpstreamAffected, &f.UpstreamAttempts, &f.Input, &f.CacheEligibleInput, &f.Output, &f.CacheCreation, &f.CacheRead, &f.CacheEligibleCreation, &f.CacheEligibleRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount, &f.TPSOutputTokens, &f.TPSGenerationMS, &f.TPSSamples); err != nil {
 			return nil, err
 		}
 		f.BucketStart = bucket.UTC().Format(time.RFC3339Nano)
@@ -1237,6 +1238,7 @@ func shiftSQLPlaceholders(query string, offset int) string {
 }
 
 type metricAccumulator struct {
+	tpsOutputTokens, tpsGenerationMS, tpsSamples                                                                                                                                                               int64
 	success, errors, upstreamAffected, upstreamAttempts, input, cacheEligibleInput, output, cacheCreation, cacheRead, cacheEligibleCreation, cacheEligibleRead, ttftSum, ttftCount, durationSum, durationCount int64
 	hist                                                                                                                                                                                                       map[string]map[int64]int64
 }
@@ -1260,6 +1262,9 @@ func (a *metricAccumulator) addFact(f channelMonitorV2Fact) {
 	a.ttftCount += f.TTFTCount
 	a.durationSum += f.DurationSum
 	a.durationCount += f.DurationCount
+	a.tpsOutputTokens += f.TPSOutputTokens
+	a.tpsGenerationMS += f.TPSGenerationMS
+	a.tpsSamples += f.TPSSamples
 }
 func (a *metricAccumulator) addHistogram(h channelMonitorV2Histogram) {
 	if a.hist[h.Metric] == nil {
@@ -1277,6 +1282,8 @@ func (a *metricAccumulator) metric(minutes float64, admin bool) service.ChannelM
 		minutes = 1
 	}
 	m := service.ChannelMonitorV2Metric{SuccessRequests: a.success, ErrorRequests: a.errors, RequestCount: requests, InputTokens: a.input, CacheEligibleInputTokens: a.cacheEligibleInput, OutputTokens: a.output, CacheCreationTokens: a.cacheCreation, CacheReadTokens: a.cacheRead, TokenCount: tokens, RPM: float64(requests) / minutes, TPM: float64(tokens) / minutes, CacheRateNumerator: a.cacheRead, CacheRateDenominator: denom, TTFT: latencyMetric(a.ttftSum, a.ttftCount, a.hist["ttft"]), Duration: latencyMetric(a.durationSum, a.durationCount, a.hist["duration"])}
+	m.OutputTPS = service.OutputTokensPerSecond(a.tpsOutputTokens, float64(a.tpsGenerationMS))
+	m.TPSSamples = a.tpsSamples
 	if requests > 0 {
 		m.ErrorRate = float64(a.errors) / float64(requests)
 		m.SuccessRate = float64(a.success) / float64(requests)

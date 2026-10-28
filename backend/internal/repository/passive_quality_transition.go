@@ -29,6 +29,9 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 		if strings.HasPrefix(reason, "cache_rate:") {
 			fresh = e.CacheFresh
 		}
+		if strings.HasPrefix(reason, "output_tps:") {
+			fresh = e.TPSFresh
+		}
 		if strings.HasPrefix(reason, "ttft_p90:") {
 			fresh = e.TTFTFresh
 		}
@@ -132,6 +135,8 @@ func freshGroupTargetBreach(p service.PassiveQualityPolicy, e service.PassiveQua
 	switch metric {
 	case "error_rate":
 		return e.FreshErrorRate != nil && *e.FreshErrorRate >= p.ErrorRate.Pause
+	case "output_tps":
+		return e.FreshOutputTPS != nil && *e.FreshOutputTPS <= p.TPS.Pause
 	case "ttft_p90":
 		return e.FreshTTFT != nil && *e.FreshTTFT >= p.TTFT.Pause
 	case "cache_rate":

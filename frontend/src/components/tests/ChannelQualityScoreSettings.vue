@@ -15,7 +15,7 @@
           <p class="text-xs text-gray-500">{{ tr('independent') }}</p>
           <div class="grid gap-3 sm:grid-cols-3"><label v-for="field in qualityScoreWindowFields" :key="field.key" class="input-label">{{ tr(field.key) }}<input v-model.number="config[field.key]" :data-score-field="field.key" type="number" :min="field.min" :max="field.max" step="1" required class="input mt-1 w-full" /></label></div>
           <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr><th class="p-2">{{ tr('dimension') }}</th><th class="p-2">{{ tr('weight') }}</th><th class="p-2">{{ tr('good') }}</th><th class="p-2">{{ tr('bad') }}</th></tr></thead><tbody>
-            <tr v-for="key in qualityScoreDimensions" :key="key"><th scope="row" class="p-2 font-normal">{{ tr('dimensions.' + key) }}</th><td v-for="field in ['weight', 'good', 'bad'] as const" :key="field" class="p-2"><input v-model.number="config[key][field]" :aria-label="tr('dimensions.' + key) + ' · ' + tr(field)" :data-score-field="`${key}.${field}`" type="number" min="0" :max="field === 'weight' || key === 'error_rate' || key === 'cache_rate' ? 100 : 3600000" step="any" required class="input w-full min-w-24" /></td></tr>
+            <tr v-for="key in qualityScoreDimensions" :key="key"><th scope="row" class="p-2 font-normal">{{ tr('dimensions.' + key) }}</th><td v-for="field in ['weight', 'good', 'bad'] as const" :key="field" class="p-2"><input v-model.number="config[key][field]" :aria-label="tr('dimensions.' + key) + ' · ' + tr(field)" :data-score-field="`${key}.${field}`" type="number" min="0" :max="field === 'weight' || key === 'error_rate' || key === 'cache_rate' ? 100 : key === 'tps' ? 1000000 : 3600000" step="any" required class="input w-full min-w-24" /></td></tr>
           </tbody></table></div>
           <p class="text-xs leading-5 text-gray-500">{{ tr('formula') }}</p>
           <button type="button" class="btn btn-secondary btn-sm" data-score-defaults @click="config = defaultQualityScoreConfig(config.version)">{{ tr('defaults') }}</button>
@@ -46,7 +46,7 @@ async function refresh(discard = false) {
   const token = ++request
   loading.value = true
   try {
-    const latest = await channelQualityAPI.scoreConfig()
+    const latest = { ...defaultQualityScoreConfig(), ...await channelQualityAPI.scoreConfig() }
     if (token !== request) return
     if (!config.value || discard || JSON.stringify(config.value) === baseline) {
       config.value = latest; baseline = JSON.stringify(latest); conflict.value = false; error.value = ''
@@ -58,7 +58,7 @@ async function save() {
   if (!config.value || busy.value || loading.value || validationError.value || conflict.value) return
   busy.value = true; saved.value = false; error.value = ''
   try {
-    config.value = await channelQualityAPI.saveScoreConfig(JSON.parse(JSON.stringify(config.value)))
+    config.value = { ...defaultQualityScoreConfig(), ...await channelQualityAPI.saveScoreConfig(JSON.parse(JSON.stringify(config.value))) }
     baseline = JSON.stringify(config.value); saved.value = true
   } catch (e) {
     const failure = e as { status?: number; response?: { status?: number } }

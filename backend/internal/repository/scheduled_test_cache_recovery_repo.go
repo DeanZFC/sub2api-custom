@@ -15,10 +15,10 @@ import (
 
 var _ service.ScheduledTestCacheRecoveryRepository = (*scheduledTestResultRepository)(nil)
 
-func (r *scheduledTestResultRepository) CacheRecoveryWindowStart(ctx context.Context, planID, accountID, definitionID int64) (*time.Time, error) {
+func (r *scheduledTestResultRepository) CacheRecoveryWindowStart(ctx context.Context, planID, accountID, definitionID int64, model string) (*time.Time, error) {
 	var started sql.NullTime
 	err := r.db.QueryRowContext(ctx, `SELECT recovery_trial_started_at FROM scheduled_test_protection_states
-	 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`, planID, accountID, definitionID).Scan(&started)
+	 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$4`, planID, accountID, definitionID, model).Scan(&started)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !started.Valid) {
 		return nil, nil
 	}
@@ -39,8 +39,8 @@ func startCacheRecoveryCooldown(ctx context.Context, tx *sql.Tx, state *protecti
 	 blocked=TRUE,automated_verdict='fail',verdict='fail',completed=TRUE,
 	 recovery_phase='cooldown',recovery_cooldown_until=$4,
 	 recovery_trial_started_at=NULL,recovery_trial_ends_at=NULL,recovery_trial_requests=0,
-	 reason=$5,updated_at=$6 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`,
-		state.planID, state.accountID, state.definitionID, until, reason, now)
+	 reason=$5,updated_at=$6 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$7`,
+		state.planID, state.accountID, state.definitionID, until, reason, now, state.modelKey)
 	state.reason = reason
 	return err
 }
@@ -67,6 +67,8 @@ func cacheRecoverySampleReason(reason string, state *protectionState, stats *ser
 			label, unit, samples, observed, scale = "缓存率", "%", stats.CacheSamples, stats.CacheRate, 100
 		case "avg_first_token_ms":
 			label, unit, samples, observed = "平均首字延迟", "ms", stats.FirstTokenSamples, stats.AvgFirstTokenMs
+		case "output_tps":
+			label, unit, samples, observed = "输出速度", "tokens/s", stats.TPSSamples, stats.OutputTPS
 		default:
 			continue
 		}
@@ -91,11 +93,12 @@ func (r *scheduledTestResultRepository) AdvanceCacheRecovery(ctx context.Context
 	// Read statistics before taking mutation locks, so a slow query never holds
 	// an account lock or needs a second pooled connection inside a transaction.
 	rows, err := r.db.QueryContext(ctx, `SELECT s.plan_id,s.account_id,s.test_definition_id,s.recovery_phase,
-	 s.recovery_trial_started_at,s.recovery_trial_ends_at,s.rule_config,p.group_id,p.model_id,p.protection
+	 s.recovery_trial_started_at,s.recovery_trial_ends_at,s.rule_config,p.group_id,s.model_key,p.protection
 	 FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id JOIN accounts a ON a.id=s.account_id
 	 WHERE s.blocked AND p.enabled AND p.protection->>'enabled'='true'
 	 AND a.deleted_at IS NULL AND a.schedulable AND a.status IN ('active','quality_paused')
 	 AND (p.account_id IS NULL OR p.account_id=s.account_id)
+	 AND s.model_key=ANY(CASE WHEN cardinality(p.model_ids)>0 THEN p.model_ids ELSE ARRAY[p.model_id] END)
 	 AND (s.test_definition_id=ANY(p.test_definition_ids) OR s.test_definition_id=p.test_definition_id)
 	 AND EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=s.account_id AND ag.group_id=ANY(p.group_ids))
 	 AND (s.recovery_phase='trial' OR (s.recovery_phase='cooldown' AND s.recovery_cooldown_until<=$1))
@@ -161,11 +164,11 @@ func loadCacheRecoveryState(ctx context.Context, tx *sql.Tx, c cacheRecoveryCand
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT plan_id,account_id,test_definition_id,COALESCE(result_id,0),generation,result_started_at,
 	 automated_verdict,verdict,reason,blocked,completed,rule_config,round_started_at,admin_verdict,
-	 recovery_phase,recovery_cooldown_until,recovery_trial_started_at,recovery_trial_ends_at,recovery_trial_requests
-	 FROM scheduled_test_protection_states WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 FOR UPDATE`,
-		c.planID, c.accountID, c.definitionID).Scan(&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started,
+	 recovery_phase,recovery_cooldown_until,recovery_trial_started_at,recovery_trial_ends_at,recovery_trial_requests,model_key
+	 FROM scheduled_test_protection_states WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$4 FOR UPDATE`,
+		c.planID, c.accountID, c.definitionID, c.plan.ModelID).Scan(&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started,
 		&s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw, &s.roundStarted, &s.adminVerdict,
-		&s.recoveryPhase, &s.recoveryCooldownUntil, &s.recoveryTrialStarted, &s.recoveryTrialEnds, &s.recoveryTrialRequests)
+		&s.recoveryPhase, &s.recoveryCooldownUntil, &s.recoveryTrialStarted, &s.recoveryTrialEnds, &s.recoveryTrialRequests, &s.modelKey)
 	if err != nil {
 		return nil, err
 	}
@@ -207,15 +210,15 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 	}
 	// Plan edits clear its holds under the same plan lock. Check model/group as
 	// well before using the statistics snapshot collected outside this lock.
-	var model string
+	var modelCurrent bool
 	var groupID *int64
 	var member bool
-	err = tx.QueryRowContext(ctx, `SELECT p.model_id,p.group_id,
+	err = tx.QueryRowContext(ctx, `SELECT $4=ANY(CASE WHEN cardinality(p.model_ids)>0 THEN p.model_ids ELSE ARRAY[p.model_id] END),p.group_id,
 	 (p.account_id IS NULL OR p.account_id=$2)
 	 AND ($3=ANY(p.test_definition_ids) OR $3=p.test_definition_id)
 	 AND EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id=$2 AND ag.group_id=ANY(p.group_ids))
-	 FROM scheduled_test_plans p WHERE p.id=$1`, c.planID, c.accountID, c.definitionID).Scan(&model, &groupID, &member)
-	if err != nil || !member || model != c.plan.ModelID || !reflect.DeepEqual(groupID, c.plan.GroupID) {
+	 FROM scheduled_test_plans p WHERE p.id=$1`, c.planID, c.accountID, c.definitionID, c.plan.ModelID).Scan(&modelCurrent, &groupID, &member)
+	if err != nil || !member || !modelCurrent || !reflect.DeepEqual(groupID, c.plan.GroupID) {
 		return err
 	}
 	before, err := readProtectionAccountSnapshot(ctx, tx, state.accountID)
@@ -235,24 +238,29 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 		if !state.recoveryCooldownUntil.Valid || now.Before(state.recoveryCooldownUntil.Time) {
 			return nil
 		}
-		// Open overlapping trials together. Independent timers can otherwise
-		// alternate forever while another hold prevents any real traffic.
+		// Open overlapping statistics trials together. Capability holds on a
+		// different model must not prevent this model from collecting evidence.
 		var ready bool
 		err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS (
-		 SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
+		 SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked
+		 AND (account_wide OR model_key='' OR model_key=$5))
+		 AND NOT EXISTS (SELECT 1 FROM scheduled_test_pass_rate_states WHERE account_id=$1 AND blocked AND (model_key='' OR model_key=$5))
+		 AND NOT EXISTS (SELECT 1 FROM accounts WHERE id=$1 AND extra->>'active_test_all_models_paused'='true')
 		 AND NOT EXISTS (
-		 SELECT 1 FROM scheduled_test_protection_states other WHERE other.account_id=$1 AND other.blocked
-		 AND (other.plan_id<>$2 OR other.test_definition_id<>$3)
+		 SELECT 1 FROM scheduled_test_protection_states other JOIN scheduled_test_definitions d ON d.id=other.test_definition_id
+		 WHERE other.account_id=$1 AND other.blocked
+		 AND (d.output_kind='statistics' OR other.model_key='' OR other.model_key=$5)
+		 AND (other.plan_id<>$2 OR other.test_definition_id<>$3 OR other.model_key<>$5)
 		 AND NOT COALESCE(other.rule_config->'recovery'->>'enabled'='true'
 		 AND ((other.recovery_phase='trial' AND other.recovery_trial_started_at<=$4 AND other.recovery_trial_ends_at>$4)
 		 OR (other.recovery_phase='cooldown' AND other.recovery_cooldown_until<=$4)),FALSE)
-		)`, state.accountID, state.planID, state.definitionID, now).Scan(&ready)
+		)`, state.accountID, state.planID, state.definitionID, now, state.modelKey).Scan(&ready)
 		if err != nil {
 			return err
 		}
 		if !ready {
 			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET updated_at=$4
-			 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`, state.planID, state.accountID, state.definitionID, now)
+			 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$5`, state.planID, state.accountID, state.definitionID, now, state.modelKey)
 			if err != nil {
 				return err
 			}
@@ -260,8 +268,8 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET recovery_phase='trial',
 		 recovery_cooldown_until=NULL,recovery_trial_started_at=$4,recovery_trial_ends_at=$5,recovery_trial_requests=0,
-		 reason=$6,updated_at=$4 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`,
-			state.planID, state.accountID, state.definitionID, now, now.Add(time.Duration(state.rule.Recovery.TrialSeconds)*time.Second), reason)
+		 reason=$6,updated_at=$4 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$7`,
+			state.planID, state.accountID, state.definitionID, now, now.Add(time.Duration(state.rule.Recovery.TrialSeconds)*time.Second), reason, state.modelKey)
 	} else {
 		verdict, reason = service.EvaluateScheduledTestCacheRecovery(state.rule, stats)
 		if verdict == "pass" {
@@ -270,8 +278,8 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET blocked=FALSE,trigger_event_id=NULL,
 			 automated_verdict='pass',verdict='pass',completed=TRUE,
 			 recovery_phase='',recovery_cooldown_until=NULL,recovery_trial_ends_at=NULL,
-			 reason=$4,updated_at=$5 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`,
-				state.planID, state.accountID, state.definitionID, reason, now)
+			 reason=$4,updated_at=$5 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$6`,
+				state.planID, state.accountID, state.definitionID, reason, now, state.modelKey)
 		} else if verdict == "fail" || !state.recoveryTrialEnds.Valid || !now.Before(state.recoveryTrialEnds.Time) {
 			if verdict != "fail" {
 				reason = "限量试运行超时，有效样本不足，重新冷却"
@@ -284,7 +292,7 @@ func (r *scheduledTestResultRepository) advanceCacheRecoveryCandidate(ctx contex
 			// Rotate pending trials behind other due rows in the bounded sweep.
 			reason = cacheRecoverySampleReason(reason, state, stats)
 			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET updated_at=$4,reason=$5
-			 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`, state.planID, state.accountID, state.definitionID, now, reason)
+			 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$6`, state.planID, state.accountID, state.definitionID, now, reason, state.modelKey)
 		}
 	}
 	if err != nil {

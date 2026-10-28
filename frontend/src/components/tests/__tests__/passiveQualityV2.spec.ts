@@ -21,6 +21,19 @@ describe('independent protection configuration', () => {
     expect(draft.mode).toBe('enforce')
     expect(draft.scope).toBe('account')
   })
+  it('keeps optional TPS protection off until selected and validates its independent action', () => {
+    const p = defaultPassivePolicy()
+    expect(p.tps.enabled).toBe(false)
+    expect(passivePolicyDraft({ ...p, tps: { enabled: false, pause: 0, recover: 0 } }).tps).toEqual({ enabled: false, pause: 10, recover: 15 })
+    p.tps.enabled = true
+    expect(passiveCacheValidation(p)).toBe('')
+    p.tps_concurrency_limit = 0
+    expect(passiveCacheValidation(p)).toBe('invalidMetricActions')
+    p.tps_concurrency_limit = 2
+    expect(passiveCacheValidation(p)).toBe('')
+    expect(upgradePassivePolicy({ ...p, schema_version: 0 })).toMatchObject({ tps_action: 'limit', tps_concurrency_limit: 2 })
+  })
+
   it('rejects zero-allocation starvation and impossible independent-session evidence', () => {
     const p = defaultPassivePolicy()
     p.cache_protection!.allocation_percent = 0

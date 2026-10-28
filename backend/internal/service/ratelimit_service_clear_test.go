@@ -266,6 +266,23 @@ func TestRateLimitService_RecoverAccountAfterSuccessfulTest_NoRecoverableStateIs
 	require.Empty(t, cache.deletedIDs)
 }
 
+func TestRateLimitService_SuccessfulConnectivityTestPreservesAllModelAbilityPause(t *testing.T) {
+	account := &Account{ID: 7, Status: "quality_paused", Schedulable: true, Extra: map[string]any{
+		"active_test_model_holds":       map[string]any{"model-a": "ability failed"},
+		"active_test_all_models_paused": true,
+	}}
+	repo := &rateLimitClearRepoStub{getByIDAccount: account}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	result, err := svc.RecoverAccountAfterSuccessfulTest(context.Background(), 7)
+	require.NoError(t, err)
+	require.False(t, result.ClearedError)
+	require.False(t, result.ClearedRateLimit)
+	require.Zero(t, repo.clearErrorCalls)
+	require.Equal(t, "quality_paused", account.Status)
+	require.True(t, account.ActiveTestAllModelsPaused())
+	require.True(t, account.ActiveTestModelBlocked("unmonitored-model"))
+}
+
 func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearErrorFailed(t *testing.T) {
 	repo := &rateLimitClearRepoStub{
 		getByIDAccount: &Account{

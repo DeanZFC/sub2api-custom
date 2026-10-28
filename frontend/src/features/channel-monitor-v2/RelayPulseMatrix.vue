@@ -43,6 +43,7 @@
             <span>{{ t('channelMonitorV2.matrix.dimension') }}</span>
             <span>{{ t('channelMonitorV2.metrics.successRate') }}</span>
             <span>{{ t('channelMonitorV2.metrics.ttft') }}</span>
+            <span :title="t('channelMonitorV2.metrics.outputTpsDetail')">{{ t('channelMonitorV2.metrics.outputTps') }}</span>
             <span v-if="showThroughput">{{ t('channelMonitorV2.metrics.tps') }}</span>
             <span>{{ t('channelMonitorV2.metrics.cacheRate') }}</span>
             <span class="pulse-axis flex justify-between gap-3">
@@ -72,6 +73,7 @@
             >
               {{ formatMs(entry.row.metrics.ttft.p50_ms) }}
             </strong>
+            <strong class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300" data-output-tps>{{ formatMonitorOutputTps(entry.row.metrics.output_tps) }}</strong>
             <strong
               v-if="showThroughput"
               class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300"
@@ -110,6 +112,7 @@
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.matrix.scoreLine', { score: formatScore(slot.bucket.health) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.successRateValue', { value: successRate(slot.bucket.metrics, slot.bucket.health) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.ttftValue', { value: latencyPrivacy(slot.bucket.metrics.ttft) }) }}</span>
+                    <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.outputTpsValue', { value: formatMonitorOutputTps(slot.bucket.metrics.output_tps) }) }}</span>
                     <span v-if="showThroughput" class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.tpsValue', { value: formatTps(slot.bucket.metrics.tpm) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.cacheRateValue', { value: formatMonitorCacheRate(slot.bucket.metrics) }) }}</span>
                     <span class="pulse-tooltip-line">{{ t('channelMonitorV2.metrics.errorRateValue', { value: formatMonitorErrorRate(slot.bucket.metrics.error_rate, slot.bucket.health.error_rate) }) }}</span>
@@ -190,6 +193,7 @@ import {
   formatMonitorThroughput,
   formatMonitorTokensPerSecond,
   tokensPerSecondFromTpm,
+  formatMonitorOutputTps,
   healthModeScore,
   healthScoreClass,
 } from '@/features/channel-monitor-v2/monitorFormat'
@@ -253,7 +257,7 @@ const allBucketStarts = computed(() => {
 const bucketStarts = computed(() => sliceByZoom(allBucketStarts.value, zoom.value))
 const tableStyle = computed(() => ({
   '--bucket-count': String(Math.max(1, bucketStarts.value.length)),
-  minWidth: zoomed.value ? `calc(260px + ${pulseMinWidth.value})` : '0',
+  minWidth: zoomed.value ? `calc(${props.showThroughput ? 430 : 360}px + ${pulseMinWidth.value})` : props.showThroughput ? '700px' : '620px',
 }))
 const pulseMinWidth = computed(() => {
   const count = Math.max(1, bucketStarts.value.length)
@@ -390,6 +394,7 @@ function bucketTooltipLines(bucket: MonitorMatrixBucket): string[] {
     t('channelMonitorV2.matrix.scoreLine', { score: formatScore(bucket.health) }),
     t('channelMonitorV2.metrics.successRateValue', { value: successRate(metrics, bucket.health) }),
     t('channelMonitorV2.metrics.ttftValue', { value: latencyPrivacy(metrics.ttft) }),
+    t('channelMonitorV2.metrics.outputTpsValue', { value: formatMonitorOutputTps(metrics.output_tps) }),
   ]
   if (props.showThroughput) {
     lines.push(t('channelMonitorV2.metrics.tpsValue', { value: formatTps(metrics.tpm) }))
@@ -476,13 +481,14 @@ function formatBucketRange(value: string) {
 <style scoped src="./monitorHealthColors.css"></style>
 
 <style scoped>
-/* dimension | success | ttft | cache | pulse */
+/* dimension | success | ttft | output TPS | cache | pulse */
 .matrix-row {
   display: grid;
   grid-template-columns:
     minmax(120px, 1.2fr)
     minmax(52px, 0.34fr)
     minmax(58px, 0.36fr)
+    minmax(72px, 0.4fr)
     minmax(52px, 0.34fr)
     minmax(120px, 2.8fr);
   align-items: center;
@@ -495,6 +501,7 @@ function formatBucketRange(value: string) {
     minmax(110px, 1.15fr)
     minmax(48px, 0.3fr)
     minmax(54px, 0.32fr)
+    minmax(72px, 0.4fr)
     minmax(58px, 0.36fr)
     minmax(48px, 0.3fr)
     minmax(120px, 2.6fr);
@@ -637,8 +644,11 @@ function formatBucketRange(value: string) {
 
 @media (max-width: 640px) {
   .matrix-row {
-    grid-template-columns: minmax(88px, 1fr) minmax(48px, 0.45fr) minmax(54px, 0.5fr) minmax(96px, 2.6fr);
+    grid-template-columns: minmax(88px, 1fr) minmax(48px, 0.45fr) minmax(54px, 0.5fr) minmax(76px, 0.65fr) minmax(48px, 0.45fr) minmax(96px, 2.6fr);
     gap: 0.35rem;
+  }
+  .matrix-row--with-tps {
+    grid-template-columns: minmax(88px, 1fr) minmax(48px, 0.45fr) minmax(54px, 0.5fr) minmax(76px, 0.65fr) minmax(58px, 0.5fr) minmax(48px, 0.45fr) minmax(96px, 2.6fr);
   }
   .matrix-row > :nth-child(2) {
     left: 0;

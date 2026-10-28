@@ -25,6 +25,51 @@ const mountEditor = (config: TestProtectionConfig = { enabled: false, rules: [] 
 }
 
 describe('quality protection settings', () => {
+  it('enables HTML auto review with administrator override and counts it for recent pass rates', async () => {
+    const config: TestProtectionConfig = { enabled: true, rules: [{
+      test_definition_id: 2, priority: 0, required_pass: false, pause_on_failure: true,
+      pass_rate: defaultTestPassRate(),
+    }, { test_definition_id: 3, priority: 0, required_pass: false, pause_on_failure: true, expected_answer: '29' }] }
+    expect(validTestProtection(config, types, groups)).toBe(false)
+    const wrapper = mountEditor(config)
+    expect(wrapper.get('[data-protection-type="3"]').find('[data-auto-review-enabled]').exists()).toBe(false)
+    await wrapper.get('[data-protection-type="2"] [data-auto-review-enabled]').setValue(true)
+    expect(wrapper.props('modelValue').rules[0]).toMatchObject({
+      auto_review: { enabled: true }, required_pass: false,
+      vote: { enabled: true, public_enabled: false, pass_at_least: 1, reject_above: 0 },
+    })
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
+    expect(config.rules[0].auto_review).toBeUndefined()
+    expect(wrapper.get('[data-protection-type="2"] [data-rule-vote]').attributes('disabled')).toBeDefined()
+    const copy = copyTestProtection(wrapper.props('modelValue'))
+    copy.rules[0].auto_review!.enabled = false
+    expect(wrapper.props('modelValue').rules[0].auto_review?.enabled).toBe(true)
+    copy.rules = [copy.rules[0]]
+    copy.rules[0].auto_review!.enabled = true
+    copy.rules[0].test_definition_id = 3
+    expect(validTestProtection(copy, types, groups)).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('accepts auto review as the automatic HTML condition in all-pass mode and switches back to manual review explicitly', async () => {
+    const config: TestProtectionConfig = { enabled: true, mode: 'all_pass', rules: [{
+      test_definition_id: 2, priority: 0, required_pass: false, pause_on_failure: true,
+      auto_review: { enabled: true }, vote: { enabled: true, public_enabled: false, pass_at_least: 1, reject_above: 0 },
+      pass_rate: defaultTestPassRate(),
+    }] }
+    expect(validTestProtection(config, types, groups)).toBe(true)
+    const wrapper = mountEditor(config)
+    const role = wrapper.get<HTMLSelectElement>('[data-protection-type="2"] [data-rule-role]')
+    expect(role.element.value).toBe('automatic')
+    await role.setValue('review')
+    expect(wrapper.props('modelValue').rules[0].auto_review?.enabled).toBe(false)
+    expect(wrapper.props('modelValue').rules[0].vote?.enabled).toBe(true)
+    await wrapper.get('[data-protection-type="2"] [data-auto-review-enabled]').setValue(true)
+    expect(role.element.value).toBe('automatic')
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
+    wrapper.unmount()
+  })
+
   it('offers rate protection for active checks and preserves existing fail actions', async () => {
     const original: TestProtectionConfig = { enabled: true, rules: [{
       test_definition_id: 3, priority: 0, required_pass: false, pause_on_failure: true,
@@ -154,7 +199,7 @@ describe('quality protection settings', () => {
     expect(stats.find('[data-rule-vote]').exists()).toBe(false)
     expect(stats.find('[data-rule-answer]').exists()).toBe(false)
     await stats.get('[data-add-threshold]').trigger('click')
-    expect(stats.findAll('[data-threshold] select')[0].findAll('option').map(option => option.attributes('value'))).toEqual(['success_rate', 'cache_rate', 'avg_first_token_ms'])
+    expect(stats.findAll('[data-threshold] select')[0].findAll('option').map(option => option.attributes('value'))).toEqual(['success_rate', 'cache_rate', 'avg_first_token_ms', 'output_tps'])
     await stats.get('[data-rule-samples]').setValue(25)
     const html = wrapper.get('[data-protection-type="2"]')
     await html.get('[data-rule-vote]').setValue(true)

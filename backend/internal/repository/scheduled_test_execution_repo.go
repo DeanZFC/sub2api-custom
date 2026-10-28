@@ -35,7 +35,7 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *serv
 	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
 		return nil, err
 	}
-	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
+	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids, model_ids FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func scheduledTestSameExecutionPolicy(a, b *service.ScheduledTestPlan) bool {
 	slices.Sort(be)
 	return slices.Equal(ae, be) && slices.Equal(ag, bg) && reflect.DeepEqual(a.AccountID, b.AccountID) &&
 		reflect.DeepEqual(a.TestDefinitionIDs, b.TestDefinitionIDs) && reflect.DeepEqual(a.TestDefinitionID, b.TestDefinitionID) &&
-		a.TargetMode == b.TargetMode && a.TestType == b.TestType && a.ModelID == b.ModelID && a.ReasoningEffort == b.ReasoningEffort &&
+		a.TargetMode == b.TargetMode && a.TestType == b.TestType && slices.Equal(a.SelectedModelIDs(), b.SelectedModelIDs()) && a.ReasoningEffort == b.ReasoningEffort &&
 		a.Enabled == b.Enabled && a.AutoRecover == b.AutoRecover && protectionConfigSamePolicy(a.Protection, b.Protection)
 }
 

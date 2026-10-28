@@ -50,7 +50,7 @@
           <p class="text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.evidenceHint') }}</p>
           <section v-for="(hold, index) in holds" :key="`${hold.plan_id}-${index}`" class="space-y-3 rounded-lg border border-white/10 p-3">
             <div>
-              <div class="font-semibold text-white">{{ hold.plan_name || `#${hold.plan_id}` }}</div>
+              <div class="flex flex-wrap items-baseline gap-x-2 font-semibold text-white">{{ hold.plan_name || `#${hold.plan_id}` }}<span v-if="hold.model_id" class="break-all font-mono text-[11px] font-normal text-gray-300" data-hold-model>{{ hold.model_id }}</span></div>
               <p v-if="hold.reason !== reason" class="mt-1 text-amber-200">{{ hold.reason }}</p>
               <div class="mt-1 text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.updatedAt', { time: formatDateTime(hold.updated_at) }) }}</div>
               <p v-if="hold.prior_round" class="mt-1 text-amber-300">{{ t('admin.accounts.qualityDetails.retained') }}</p>

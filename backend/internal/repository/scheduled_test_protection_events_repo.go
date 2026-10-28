@@ -17,14 +17,14 @@ func recordProtectionEvidence(ctx context.Context, tx *sql.Tx, state *protection
 	if !state.newHold && !state.newCombinedHold && decision.Status != "applied" && state.evidenceSource != "recovery" {
 		return nil
 	}
-	source := service.ScheduledTestProtectionHoldSource{PlanID: state.planID, DefinitionID: state.definitionID, Reason: decision.Reason, UpdatedAt: time.Now().UTC()}
+	source := service.ScheduledTestProtectionHoldSource{PlanID: state.planID, ModelID: state.modelKey, DefinitionID: state.definitionID, Reason: decision.Reason, UpdatedAt: time.Now().UTC()}
 	var configRaw, statesRaw []byte
 	var policyUpdatedAt time.Time
 	var runID, modelID string
 	err := tx.QueryRowContext(ctx, `SELECT name,protection,updated_at,
  COALESCE((SELECT run_id FROM scheduled_test_results WHERE id=$2),''),
- COALESCE((SELECT model_id FROM scheduled_test_results WHERE id=$2),model_id)
- FROM scheduled_test_plans WHERE id=$1`, state.planID, state.resultID).Scan(&source.PlanName, &configRaw, &policyUpdatedAt, &runID, &modelID)
+ COALESCE((SELECT model_id FROM scheduled_test_results WHERE id=$2),$3)
+ FROM scheduled_test_plans WHERE id=$1`, state.planID, state.resultID, state.modelKey).Scan(&source.PlanName, &configRaw, &policyUpdatedAt, &runID, &modelID)
 	if err != nil {
 		return err
 	}
@@ -45,7 +45,7 @@ func recordProtectionEvidence(ctx context.Context, tx *sql.Tx, state *protection
  ) ORDER BY d.sort_order,s.test_definition_id),'[]'::jsonb)
  FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
  JOIN scheduled_test_definitions d ON d.id=s.test_definition_id LEFT JOIN scheduled_test_results r ON r.id=s.result_id
- WHERE s.plan_id=$1 AND s.account_id=$2`, state.planID, state.accountID).Scan(&statesRaw)
+ WHERE s.plan_id=$1 AND s.account_id=$2 AND s.model_key=$3`, state.planID, state.accountID, state.modelKey).Scan(&statesRaw)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func recordProtectionEvidence(ctx context.Context, tx *sql.Tx, state *protection
 				s.Rule.MinSamples = int64(state.rule.Recovery.MinSamples)
 			}
 			if s.Current {
-				s.Result = &service.ScheduledTestResult{ID: state.resultID, StartedAt: state.recoveryEvidence.WindowEnd, Status: "success", OutputStatistics: state.recoveryEvidence}
+				s.Result = &service.ScheduledTestResult{ID: state.resultID, ModelID: state.modelKey, StartedAt: state.recoveryEvidence.WindowEnd, Status: "success", OutputStatistics: state.recoveryEvidence}
 			}
 		}
 	}
@@ -76,7 +76,7 @@ func recordProtectionEvidence(ctx context.Context, tx *sql.Tx, state *protection
 		eventSource = "automatic"
 		if state.adminVerdict != "" {
 			eventSource = "administrator"
-			if err = tx.QueryRowContext(ctx, `SELECT admin_user_id FROM scheduled_test_protection_states WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3`, state.planID, state.accountID, state.definitionID).Scan(&actor); err != nil {
+			if err = tx.QueryRowContext(ctx, `SELECT admin_user_id FROM scheduled_test_protection_states WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$4`, state.planID, state.accountID, state.definitionID, state.modelKey).Scan(&actor); err != nil {
 				return err
 			}
 		}
@@ -100,7 +100,7 @@ func recordProtectionEvidence(ctx context.Context, tx *sql.Tx, state *protection
 		source.DefinitionID = definitionID
 		if definitionID == 0 {
 			var ids []byte
-			if err = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT rule_ids FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2),'[]'::jsonb)`, state.planID, state.accountID).Scan(&ids); err != nil {
+			if err = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT rule_ids FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2 AND model_key=$3),'[]'::jsonb)`, state.planID, state.accountID, state.modelKey).Scan(&ids); err != nil {
 				return err
 			}
 			if err = json.Unmarshal(ids, &source.RuleIDs); err != nil {
@@ -123,9 +123,9 @@ func recordProtectionEvidence(ctx context.Context, tx *sql.Tx, state *protection
 			return err
 		}
 		if definitionID == 0 && state.newCombinedHold {
-			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_combination_states SET trigger_event_id=$3 WHERE plan_id=$1 AND account_id=$2 AND blocked`, state.planID, state.accountID, eventID)
+			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_combination_states SET trigger_event_id=$3 WHERE plan_id=$1 AND account_id=$2 AND model_key=$4 AND blocked`, state.planID, state.accountID, eventID, state.modelKey)
 		} else if definitionID != 0 && state.newHold {
-			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET trigger_event_id=$4 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND blocked`, state.planID, state.accountID, definitionID, eventID)
+			_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET trigger_event_id=$4 WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$5 AND blocked`, state.planID, state.accountID, definitionID, eventID, state.modelKey)
 		}
 		if err != nil {
 			return err

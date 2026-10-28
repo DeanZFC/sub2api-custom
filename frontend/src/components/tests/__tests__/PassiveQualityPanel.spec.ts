@@ -90,6 +90,35 @@ describe('passive quality management', () => {
     expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Protect provider', mode: 'observe', group_ids: [8], model: 'model', trial_concurrency: 1, error_rate: { enabled: true, pause: 20, recover: 5 } }))
     wrapper.unmount()
   })
+  it('saves independent output-speed limits and rejects reversed recovery thresholds', async () => {
+    api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 1, version: 2, name: 'Policy', group_ids: [8] }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    const speed = wrapper.get('[data-passive-metric="tps"]')
+    await speed.get('input[type="checkbox"]').setValue(true)
+    expect(wrapper.find('[data-speed-settings]').exists()).toBe(true)
+    await speed.findAll('input[type="number"]')[0].setValue(30)
+    await speed.findAll('input[type="number"]')[1].setValue(20)
+    expect(wrapper.get('[data-passive-save]').attributes('disabled')).toBeDefined()
+    await speed.findAll('input[type="number"]')[1].setValue(40)
+    await wrapper.get('[data-passive-save]').trigger('click'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ tps: { enabled: true, pause: 30, recover: 40 }, tps_action: 'limit', tps_concurrency_limit: 2 }))
+    wrapper.unmount()
+  })
+
+  it('shows TPS evidence and preserves an independent speed restriction when availability is healthy', async () => {
+    api.states.mockResolvedValue([recordState({
+      speed: { phase: 'limited', reason: 'output_tps: 8.00 / 10.00 (20)', hits: 2, recovery_hits: 0 },
+      evidence: { ...recordState().evidence, output_tps: 8, tps_samples: 20, fresh_output_tps: 9, tps_fresh: 5 },
+    })])
+    const wrapper = makeWrapper('records'); await flushPromises()
+    expect(wrapper.get('[data-passive-tps]').text()).toBe('Output TPS: 8 token/s (20)')
+    expect(wrapper.get('[data-speed-state]').text()).toContain('TPS state')
+    expect(wrapper.get('[data-fresh-evidence]').text()).toContain('Output TPS 9 token/s (5)')
+    expect(wrapper.get('tbody tr').text()).toContain('Limited')
+    wrapper.unmount()
+  })
+
   it('rejects impossible recovery sample budgets before saving', async () => {
     api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 1, version: 2, name: 'Policy', model: 'model', group_ids: [8] }])
     const wrapper = makeWrapper(); await flushPromises()

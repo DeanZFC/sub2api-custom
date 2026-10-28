@@ -111,3 +111,46 @@ func TestGroupQualityTargetSummaryScopeIntegration(t *testing.T) {
 	require.NotNil(t, out[0].ActualAvailability)
 	require.Equal(t, 100.0, *out[0].ActualAvailability)
 }
+
+func TestGroupQualityTargetSummaryOutputTPSUsesCombinedGenerationTimeIntegration(t *testing.T) {
+	ctx, db, r := passiveDB(t)
+	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", GroupIDs: []int64{8}, Enabled: true, Mode: "enforce", CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80}}}
+	require.NoError(t, r.SavePolicy(ctx, &p))
+	now := time.Now()
+	_, err := db.Exec(`INSERT INTO usage_logs(account_id,group_id,request_id,model,created_at,input_tokens,output_tokens,duration_ms,first_token_ms) VALUES
+ (62,8,'fast','model',$1,10,100,1500,500),
+ (62,8,'slow','model',$1,10,100,9500,500),
+ (63,8,'another-account','model',$1,10,200,2500,500),
+ (62,8,'missing-first-token','model',$1,10,10000,1500,NULL),
+ (62,8,'invalid-generation-time','model',$1,10,10000,500,500),
+ (62,8,'failed-partial-output','model',$1,10,10000,1500,500)`, now.Add(-time.Minute))
+	require.NoError(t, err)
+	require.NoError(t, r.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: 62, GroupID: 8, Model: "model", RequestKey: "failed-partial-output", StartedAt: now.Add(-2 * time.Minute), At: now.Add(-time.Minute)}}, nil))
+	s, err := r.groupQualityTargetSummary(ctx, p, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, s.TPSSamples)
+	require.NotNil(t, s.OutputTPS)
+	require.InDelta(t, 400.0/12, *s.OutputTPS, .000001, "headline combines token/time sums across accounts")
+	require.Len(t, s.Contributors, 2)
+	for _, contributor := range s.Contributors {
+		require.NotNil(t, contributor.OutputTPS)
+		if contributor.AccountID == 62 {
+			require.EqualValues(t, 2, contributor.TPSSamples)
+			require.InDelta(t, 20, *contributor.OutputTPS, .000001, "each contributor weights its requests by generation time")
+		} else {
+			require.EqualValues(t, 1, contributor.TPSSamples)
+			require.InDelta(t, 100, *contributor.OutputTPS, .000001)
+		}
+	}
+	require.NoError(t, r.publishGroupQualitySummary(ctx, p, s))
+	stored, err := r.GroupQualityTargetSummaries(ctx, now)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, s.OutputTPS, stored[0].OutputTPS)
+	require.Equal(t, s.TPSSamples, stored[0].TPSSamples)
+	gap := now.Add(-time.Second)
+	require.NoError(t, r.RecordFailures(ctx, nil, &gap))
+	s, err = r.groupQualityTargetSummary(ctx, p, now)
+	require.NoError(t, err)
+	require.Nil(t, s.OutputTPS, "incomplete telemetry cannot establish a trustworthy headline speed")
+}

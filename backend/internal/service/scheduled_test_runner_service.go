@@ -63,8 +63,11 @@ type ScheduledTestRunnerService struct {
 	workerSem         chan struct{}
 	statisticsSem     chan struct{}
 	accountRunMu      sync.Mutex
-	runningAccounts   map[[3]int64]struct{}
+	runningAccounts   map[scheduledTestRunKey]struct{}
 	accountExecutions map[int64]*scheduledTestAccountExecution
+	reviewRenderer    ScheduledTestReviewRenderer
+	reviewJudge       ScheduledTestReviewJudge
+	reviewSem         chan struct{}
 }
 
 type scheduledTestAccountExecution struct {
@@ -88,6 +91,9 @@ func NewScheduledTestRunnerService(
 		accountRepo:    accountRepo,
 		rateLimitSvc:   rateLimitSvc,
 		cfg:            cfg,
+		reviewRenderer: NewScheduledTestReviewRenderer(),
+		reviewJudge:    NewScheduledTestReviewJudge(accountTestSvc, accountRepo),
+		reviewSem:      make(chan struct{}, 1),
 	}
 }
 
@@ -330,16 +336,28 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 }
 
 func scheduledTestExecutionPlans(plan *ScheduledTestPlan) []*ScheduledTestPlan {
-	ids := plan.TestDefinitionIDs
-	if len(ids) == 0 {
-		return []*ScheduledTestPlan{plan}
+	if plan == nil {
+		return nil
 	}
-	result := make([]*ScheduledTestPlan, 0, len(ids))
-	for _, id := range ids {
-		execution := *plan
-		execution.TestDefinitionID = &id
-		execution.TestDefinitionIDs = []int64{id}
-		result = append(result, &execution)
+	models := plan.SelectedModelIDs()
+	if len(models) == 0 {
+		models = []string{plan.ModelID}
+	}
+	result := make([]*ScheduledTestPlan, 0, len(models)*max(1, len(plan.TestDefinitionIDs)))
+	for _, model := range models {
+		if len(plan.TestDefinitionIDs) == 0 {
+			execution := *plan
+			execution.ModelID = model
+			result = append(result, &execution)
+			continue
+		}
+		for _, id := range plan.TestDefinitionIDs {
+			execution := *plan
+			execution.ModelID = model
+			execution.TestDefinitionID = &id
+			execution.TestDefinitionIDs = []int64{id}
+			result = append(result, &execution)
+		}
 	}
 	return result
 }
@@ -409,7 +427,7 @@ dispatchAccounts:
 		accountID := accountID
 		if progress != nil {
 			progressMu.Lock()
-			accountProgress := progress[accountID]
+			accountProgress := progress[accountID].forModel(plan.ModelID)
 			stopped := accountProgress != nil && accountProgress.stopped
 			progressMu.Unlock()
 			if stopped {
@@ -434,7 +452,7 @@ dispatchAccounts:
 					accountProgress = &scheduledTestAccountProgress{}
 					progress[accountID] = accountProgress
 				}
-				accountProgress.allowsNext(plan, result)
+				accountProgress.forModel(plan.ModelID).allowsNext(plan, result)
 				progressMu.Unlock()
 			}
 		}()
@@ -511,11 +529,11 @@ func (s *ScheduledTestRunnerService) runOneAccount(ctx context.Context, plan *Sc
 	if ctx.Err() != nil {
 		return nil
 	}
-	if !s.beginAccountRun(plan.ID, accountID, plan.TestDefinitionID) {
+	if !s.beginAccountRun(plan.ID, accountID, plan.TestDefinitionID, plan.ModelID) {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d account=%d is already running; skipping overlapping run", plan.ID, accountID)
 		return nil
 	}
-	defer s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID)
+	defer s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID, plan.ModelID)
 
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	eligible, eligibleErr := s.detectionAccountEligible(persistCtx, plan, accountID)
@@ -692,6 +710,7 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	if outputKind == "model_check" {
 		applyScheduledTestModelCheck(result, plan)
 	}
+	s.runAutomaticVisualReview(ctx, plan, result)
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	defer cancel()
 	if s.scheduledSvc == nil {
@@ -1014,6 +1033,9 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if previous.Status != "failed" {
 		return nil, ErrScheduledTestResultNotFailed
 	}
+	if previous.ModelID != "" && !plan.SelectsModel(previous.ModelID) {
+		return nil, fmt.Errorf("the result model is no longer selected by this plan")
+	}
 	bg, finish, err := s.beginRunContext(context.Background())
 	if err != nil {
 		return nil, err
@@ -1046,12 +1068,12 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	}
 	plan = &execution
 	accountID := *previous.AccountID
-	if !s.beginAccountRun(plan.ID, accountID, plan.TestDefinitionID) {
+	if !s.beginAccountRun(plan.ID, accountID, plan.TestDefinitionID, plan.ModelID) {
 		return nil, ErrScheduledTestAccountRunning
 	}
 	defer func() {
 		if !queued {
-			s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID)
+			s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID, plan.ModelID)
 		}
 	}()
 	if plan.AccountID != nil && *plan.AccountID != accountID {
@@ -1121,7 +1143,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	queued = true
 	go func() {
 		defer finish()
-		defer s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID)
+		defer s.endAccountRun(plan.ID, accountID, plan.TestDefinitionID, plan.ModelID)
 		s.runAccountWithResult(withAccountTestMaxOutputTokens(bg, maxOutputTokens), plan, accountID, prompt, outputKind, pending)
 	}()
 	return &response, nil
@@ -1150,22 +1172,31 @@ func (s *ScheduledTestRunnerService) endPlanRun(planID int64) {
 	delete(s.runningPlans, planID)
 }
 
-// A retry suppresses duplicate executions of its check, never another type.
-func scheduledTestAccountRunKey(planID, accountID int64, definitionID *int64) [3]int64 {
-	key := [3]int64{planID, accountID, 0}
+// A retry suppresses duplicate executions of the same model and check.
+// The shared account execution lease still serializes different models.
+type scheduledTestRunKey struct {
+	planID, accountID, definitionID int64
+	model                           string
+}
+
+func scheduledTestAccountRunKey(planID, accountID int64, definitionID *int64, model ...string) scheduledTestRunKey {
+	key := scheduledTestRunKey{planID: planID, accountID: accountID}
 	if definitionID != nil {
-		key[2] = *definitionID
+		key.definitionID = *definitionID
+	}
+	if len(model) > 0 {
+		key.model = model[0]
 	}
 	return key
 }
 
-func (s *ScheduledTestRunnerService) beginAccountRun(planID, accountID int64, definitionID *int64) bool {
+func (s *ScheduledTestRunnerService) beginAccountRun(planID, accountID int64, definitionID *int64, model ...string) bool {
 	s.accountRunMu.Lock()
 	defer s.accountRunMu.Unlock()
 	if s.runningAccounts == nil {
-		s.runningAccounts = make(map[[3]int64]struct{})
+		s.runningAccounts = make(map[scheduledTestRunKey]struct{})
 	}
-	key := scheduledTestAccountRunKey(planID, accountID, definitionID)
+	key := scheduledTestAccountRunKey(planID, accountID, definitionID, model...)
 	if _, running := s.runningAccounts[key]; running {
 		return false
 	}
@@ -1173,10 +1204,10 @@ func (s *ScheduledTestRunnerService) beginAccountRun(planID, accountID int64, de
 	return true
 }
 
-func (s *ScheduledTestRunnerService) endAccountRun(planID, accountID int64, definitionID *int64) {
+func (s *ScheduledTestRunnerService) endAccountRun(planID, accountID int64, definitionID *int64, model ...string) {
 	s.accountRunMu.Lock()
 	defer s.accountRunMu.Unlock()
-	delete(s.runningAccounts, scheduledTestAccountRunKey(planID, accountID, definitionID))
+	delete(s.runningAccounts, scheduledTestAccountRunKey(planID, accountID, definitionID, model...))
 }
 
 // Full rounds already queue each account's definitions in order. Retries and

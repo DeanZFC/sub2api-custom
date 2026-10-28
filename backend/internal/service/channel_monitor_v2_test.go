@@ -150,6 +150,22 @@ func TestParseChannelMonitorV2GroupBy(t *testing.T) {
 	require.ErrorIs(t, err, ErrChannelMonitorV2InvalidGroupBy)
 }
 
+func TestChannelMonitorV2OutputSpeedRemainsVisibleWithoutVolume(t *testing.T) {
+	for _, hideThroughput := range []bool{false, true} {
+		tps := 42.5
+		metric := ChannelMonitorV2Metric{OutputTPS: &tps, TPSSamples: 100, RPM: 2, TPM: 1000, RequestCount: 100, OutputTokens: 3000}
+		redactChannelMonitorV2Metric(&metric, hideThroughput)
+		require.Equal(t, &tps, metric.OutputTPS)
+		require.Zero(t, metric.TPSSamples)
+		require.Zero(t, metric.RequestCount)
+		require.Zero(t, metric.OutputTokens)
+		if hideThroughput {
+			require.Zero(t, metric.RPM)
+			require.Zero(t, metric.TPM)
+		}
+	}
+}
+
 func TestChannelMonitorV2MatrixForwardsGroupingAndAdminScope(t *testing.T) {
 	want := &ChannelMonitorV2Matrix{GroupBy: ChannelMonitorV2GroupByPlatformModel}
 	repo := &channelMonitorV2RepoStub{config: ChannelMonitorV2Config{Enabled: true}, matrix: want}

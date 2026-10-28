@@ -67,7 +67,7 @@ func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, 
 	if row.Extra == nil {
 		row.Extra = map[string]any{}
 	}
-	if (&service.Account{Extra: row.Extra}).ActivePassRateBlocked(model) {
+	if (&service.Account{Extra: row.Extra}).ActiveTestModelBlocked(model) {
 		return false, nil
 	}
 	if fallback {

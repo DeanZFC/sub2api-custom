@@ -87,7 +87,7 @@ CREATE TABLE ops_error_logs (
 		"281_scheduled_test_membership_revocation.sql",
 		"264_scheduled_test_cache_recovery.sql", "264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql", "282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql",
 		"309_quality_recovery_budget_evidence.sql",
-		"312_scheduled_test_pass_rate.sql",
+		"312_scheduled_test_pass_rate.sql", "315_scheduled_test_multi_model.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -201,7 +201,7 @@ CREATE TABLE ops_error_logs (
 		require.Empty(t, phase)
 		require.False(t, blocked)
 		status("active", false)
-		start, err := repo.CacheRecoveryWindowStart(ctx, p.ID, accountID, definitionID)
+		start, err := repo.CacheRecoveryWindowStart(ctx, p.ID, accountID, definitionID, "model")
 		require.NoError(t, err)
 		require.Equal(t, now, *start)
 		// A delayed old completion cannot pause an account after its trial passed.
@@ -345,6 +345,33 @@ CREATE TABLE ops_error_logs (
 		status("active", false)
 	})
 
+	t.Run("output speed recovery needs fresh timed streams and uses weighted generation speed", func(t *testing.T) {
+		reset()
+		statsRule := rule
+		statsRule.Thresholds = []service.ScheduledTestThreshold{{Metric: "output_tps", Operator: "lt", Value: 20}}
+		p, _ := newHold(statsRule)
+		openTrial(p.ID)
+		status("active", true)
+		// Unknown TTFT and synchronous output cannot release the hold.
+		exec(`INSERT INTO usage_logs(created_at,output_tokens,duration_ms,first_token_ms,request_type,stream)
+ VALUES($1,100,1000,NULL,2,TRUE),($1,100,1000,500,1,FALSE)`, now.Add(2*time.Second))
+		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
+		phase, blocked, _ := state(p.ID)
+		require.Equal(t, "trial", phase)
+		require.True(t, blocked)
+		// Both started after the trial boundary: 200 tokens / 10 seconds.
+		exec(`INSERT INTO usage_logs(created_at,output_tokens,duration_ms,first_token_ms)
+ VALUES($1,100,1500,500),($2,100,9500,500)`, now.Add(3*time.Second), now.Add(11*time.Second))
+		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(12*time.Second)))
+		phase, blocked, _ = state(p.ID)
+		require.Empty(t, phase)
+		require.False(t, blocked)
+		status("active", false)
+		var reason string
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT reason FROM scheduled_test_protection_states WHERE plan_id=$1`, p.ID).Scan(&reason))
+		require.Contains(t, reason, "输出速度样本 2/2，实测20.00tokens/s")
+	})
+
 	t.Run("ordinary hold keeps recovery waiting without spending its trial", func(t *testing.T) {
 		reset()
 		p, _ := newHold(rule)
@@ -360,6 +387,75 @@ CREATE TABLE ops_error_logs (
 		_, blocked, _ = state(other.ID)
 		require.True(t, blocked)
 		status("quality_paused", false)
+	})
+
+	t.Run("capability holds block only their model while account-wide holds remain authoritative", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, kind, model       string
+			accountWide, canRecover bool
+		}{
+			{name: "independent other model", kind: "independent", model: "model-b", canRecover: true},
+			{name: "independent same model", kind: "independent", model: "model"},
+			{name: "combination other model", kind: "combination", model: "model-b", canRecover: true},
+			{name: "combination same model", kind: "combination", model: "model"},
+			{name: "account-wide combination other model", kind: "combination", model: "model-b", accountWide: true},
+			{name: "pass rate other model", kind: "pass_rate", model: "model-b", canRecover: true},
+			{name: "pass rate same model", kind: "pass_rate", model: "model"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				reset()
+				p, _ := newHold(rule)
+				var candyID int64
+				require.NoError(t, db.QueryRowContext(ctx, `SELECT id FROM scheduled_test_definitions WHERE key='candy'`).Scan(&candyID))
+				iqRule := service.ScheduledTestProtectionRule{TestDefinitionID: candyID, ExpectedAnswer: "21",
+					OnFail: &service.ScheduledTestOutcomeAction{Scheduling: "pause"}, OnPass: &service.ScheduledTestOutcomeAction{Scheduling: "resume"}}
+				iq, err := plans.Create(ctx, &service.ScheduledTestPlan{Name: "Capability protection", GroupIDs: []int64{groupID}, GroupID: &groupID, TargetMode: "all_accounts",
+					TestDefinitionID: &candyID, TestDefinitionIDs: []int64{candyID}, ModelID: "model", ModelIDs: []string{"model", "model-b"},
+					CronExpression: "0 * * * *", Enabled: true, MaxResults: 3,
+					Protection: service.ScheduledTestProtectionConfig{Enabled: true, Rules: []service.ScheduledTestProtectionRule{iqRule}}})
+				require.NoError(t, err)
+				var holdTable string
+				switch tc.kind {
+				case "independent":
+					holdTable = "scheduled_test_protection_states"
+					exec(`INSERT INTO scheduled_test_protection_states(plan_id,account_id,test_definition_id,model_key,result_started_at,blocked,completed,verdict)
+					 VALUES($1,62,$2,$3,$4,TRUE,TRUE,'fail')`, iq.ID, candyID, tc.model, now)
+				case "combination":
+					holdTable = "scheduled_test_combination_states"
+					exec(`INSERT INTO scheduled_test_combination_states(plan_id,account_id,model_key,account_wide,blocked)
+					 VALUES($1,62,$2,$3,TRUE)`, iq.ID, tc.model, tc.accountWide)
+				case "pass_rate":
+					holdTable = "scheduled_test_pass_rate_states"
+					exec(`INSERT INTO scheduled_test_pass_rate_states(plan_id,account_id,test_definition_id,model_key,rule_version,blocked,summary)
+					 VALUES($1,62,$2,$3,'fixture',TRUE,'{}')`, iq.ID, candyID, tc.model)
+				}
+				// Only one of the two monitored capability models is held, so the
+				// all-models safeguard must not obscure the model-specific check.
+				exec(`SELECT reconcile_active_test_model_protection(62)`)
+				exec(`UPDATE scheduled_test_protection_states SET recovery_cooldown_until=$2 WHERE plan_id=$1`, p.ID, now.Add(-time.Second))
+				require.NoError(t, repo.AdvanceCacheRecovery(ctx, now))
+				phase, blocked, _ := state(p.ID)
+				require.True(t, blocked)
+				if !tc.canRecover {
+					require.Equal(t, "cooldown", phase)
+					status("quality_paused", false)
+					start, err := repo.CacheRecoveryWindowStart(ctx, p.ID, accountID, definitionID, "model")
+					require.NoError(t, err)
+					require.Nil(t, start, "an ineligible trial must not spend its evidence window")
+					return
+				}
+				require.Equal(t, "trial", phase)
+				status("active", true)
+				goodSamples()
+				require.NoError(t, repo.AdvanceCacheRecovery(ctx, now.Add(5*time.Second)))
+				phase, blocked, _ = state(p.ID)
+				require.Empty(t, phase)
+				require.False(t, blocked)
+				status("active", false)
+				require.NoError(t, db.QueryRowContext(ctx, `SELECT blocked FROM `+holdTable+` WHERE plan_id=$1 AND account_id=62 AND model_key=$2`, iq.ID, tc.model).Scan(&blocked))
+				require.True(t, blocked, "recovering statistics must preserve the other model's capability hold")
+			})
+		}
 	})
 
 	t.Run("staggered cooldowns open overlapping trials when every hold is ready", func(t *testing.T) {
@@ -379,7 +475,7 @@ CREATE TABLE ops_error_logs (
 		require.NoError(t, repo.AdvanceCacheRecovery(ctx, now))
 		status("active", true)
 		for _, id := range []int64{p.ID, other.ID} {
-			start, err := repo.CacheRecoveryWindowStart(ctx, id, accountID, definitionID)
+			start, err := repo.CacheRecoveryWindowStart(ctx, id, accountID, definitionID, "model")
 			require.NoError(t, err)
 			require.Equal(t, now, *start)
 		}
@@ -406,7 +502,7 @@ CREATE TABLE ops_error_logs (
 		}
 		status("active", true)
 		for _, id := range []int64{p.ID, other.ID} {
-			start, err := repo.CacheRecoveryWindowStart(ctx, id, accountID, definitionID)
+			start, err := repo.CacheRecoveryWindowStart(ctx, id, accountID, definitionID, "model")
 			require.NoError(t, err)
 			require.Equal(t, now, *start)
 		}
@@ -458,7 +554,7 @@ CREATE TABLE ops_error_logs (
 		status("active", true)
 		require.NoError(t, repo.ClearPlanProtection(ctx, p.ID))
 		status("active", false)
-		start, err := repo.CacheRecoveryWindowStart(ctx, p.ID, accountID, definitionID)
+		start, err := repo.CacheRecoveryWindowStart(ctx, p.ID, accountID, definitionID, "model")
 		require.NoError(t, err)
 		require.Nil(t, start)
 		p, _ = newHold(rule)
@@ -480,7 +576,7 @@ CREATE TABLE ops_error_logs (
 		require.Empty(t, phase)
 		require.False(t, blocked)
 		status("active", false)
-		start, err := repo.CacheRecoveryWindowStart(ctx, p.ID, accountID, definitionID)
+		start, err := repo.CacheRecoveryWindowStart(ctx, p.ID, accountID, definitionID, "model")
 		require.NoError(t, err)
 		require.Equal(t, row.FinishedAt, *start)
 		var reason string

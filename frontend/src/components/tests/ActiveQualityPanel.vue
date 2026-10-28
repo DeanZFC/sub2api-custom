@@ -20,7 +20,7 @@
             <td class="min-w-32 px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}<div class="mt-1 text-xs font-normal text-gray-500">{{ t('admin.tests.sortOrder') }}: {{ plan.sort_order ?? 0 }}</div><p v-if="plan.migration_note" class="mt-2 text-xs font-normal text-amber-700 dark:text-amber-300" data-migration-note>{{ plan.migration_note }}</p></td>
             <td class="min-w-32 px-2 py-3"><div class="flex flex-wrap gap-1"><span v-for="type in planTypes(plan)" :key="type.id" class="badge badge-gray">{{ type.name }}</span><span v-if="!planTypes(plan).length">-</span></div></td>
             <td class="min-w-32 px-2 py-3">{{ groupName(plan) }}<div class="mt-1 text-xs text-gray-500">{{ targetName() }}</div></td>
-            <td class="min-w-32 px-2 py-3 font-mono text-xs">{{ plan.model_id || '-' }}<span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td>
+            <td class="min-w-32 px-2 py-3 font-mono text-xs"><span v-if="modelIDs(plan).length">{{ modelIDs(plan).join(', ') }}</span><span v-else>-</span><span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td>
             <td class="min-w-52 px-2 py-3 text-xs"><template v-if="plan.schedule"><div v-for="(period, index) in plan.schedule.periods" :key="index">{{ period.start }}–{{ period.end }} · {{ period.interval_minutes % 60 === 0 ? t('admin.tests.timing.everyHours', { count: period.interval_minutes / 60 }) : t('admin.tests.timing.everyMinutes', { count: period.interval_minutes }) }}</div><div class="mt-1 text-gray-500">{{ plan.schedule.timezone }}</div></template><span v-else class="font-mono">{{ plan.cron_expression || '-' }}</span><div class="mt-1 text-gray-500">{{ t('admin.tests.nextRun') }}: {{ formatDate(plan.next_run_at || undefined) }}</div></td>
             <td class="px-2 py-3"><span :class="plan.enabled ? 'badge badge-success' : 'badge badge-gray'">{{ plan.enabled ? t('common.enabled') : t('common.disabled') }}</span><span v-if="plan.protection?.enabled" class="badge badge-primary mt-1">{{ t('admin.tests.protection.title') }}</span></td>
             <td class="px-2 py-3"><div class="flex justify-end gap-1">
@@ -65,8 +65,22 @@
           </ol>
           <p v-if="editingPlan.group_ids.length && !validStrategyGroups(editingPlan.group_ids)" role="alert" class="text-xs text-red-600 dark:text-red-400">{{ t('admin.tests.invalidStrategyGroups') }}</p>
         </fieldset>
-        <label class="input-label">{{ t('admin.tests.model') }}<Select v-model="editingPlan.model_id" :options="modelOptions" :loading="modelOptionsLoading" searchable :disabled="!editingPlan.group_ids.length || modelOptionsLoading" :placeholder="editingPlan.group_ids.length ? t('admin.tests.model') : t('admin.tests.selectGroupFirst')" class="mt-1" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.commonModelsHint') }}</span></label>
-        <p v-if="editingPlan.group_ids.length && !modelOptionsLoading && !modelOptions.length" class="text-xs text-amber-700 dark:text-amber-300" data-no-common-model>{{ t('admin.tests.noCommonModels') }}</p>
+        <fieldset class="input-label sm:col-span-2" data-plan-models>
+          <legend>{{ t('admin.tests.model') }}</legend>
+          <p class="mt-1 text-xs font-normal text-gray-500">{{ t('admin.tests.multiModelHint') }}</p>
+          <p class="mt-1 text-xs font-normal text-gray-500">{{ t('admin.tests.multiModelProtectionHint') }}</p>
+          <input v-if="modelOptions.length > 8" v-model="modelSearch" type="search" class="input mt-2 w-full text-sm font-normal" :placeholder="t('common.search')" :aria-label="t('admin.tests.model')" data-model-search />
+          <div v-if="modelOptions.length" class="mt-2 grid max-h-48 gap-2 overflow-y-auto rounded-md border border-gray-200 p-3 sm:grid-cols-2 dark:border-dark-700" :aria-busy="modelOptionsLoading">
+            <label v-for="option in visibleModelOptions" :key="String(option.value)" class="flex min-w-0 items-center gap-2 text-sm font-normal text-gray-700 dark:text-gray-200">
+              <input v-model="editingPlan.model_ids" type="checkbox" :value="String(option.value)" :disabled="modelOptionsLoading || (!editingPlan.model_ids.includes(String(option.value)) && editingPlan.model_ids.length >= 16)" :data-plan-model="String(option.value)" />
+              <span class="min-w-0 break-all">{{ option.label }}</span>
+            </label>
+            <p v-if="!visibleModelOptions.length" class="text-xs font-normal text-gray-500">{{ t('common.noData') }}</p>
+          </div>
+          <p v-else-if="modelOptionsLoading" class="mt-2 text-xs font-normal text-gray-500">{{ t('common.loading') }}</p>
+          <p v-else class="mt-2 text-xs font-normal text-amber-700 dark:text-amber-300" data-no-common-model>{{ editingPlan.group_ids.length ? t('admin.tests.noCommonModels') : t('admin.tests.selectGroupFirst') }}</p>
+          <p v-if="editingPlan.model_ids.length > 1" class="mt-1 text-xs font-normal text-primary-600 dark:text-primary-400">{{ t('admin.tests.multiModelRunHint', { count: editingPlan.model_ids.length }) }}</p>
+        </fieldset>
         <TestScheduleEditor v-model:schedule="editingPlan.schedule" v-model:cron-expression="editingPlan.cron_expression" class="sm:col-span-2" />
         <TestProtectionEditor v-model="editingPlan.protection" :types="selectedProtectionTypes" :groups="protectionGroups" :schedule="editingPlan.schedule" class="sm:col-span-2" />
         <details class="rounded-lg border border-gray-200 p-4 dark:border-dark-700 sm:col-span-2" data-plan-advanced>
@@ -129,7 +143,7 @@ import { copyTestSchedule, defaultTestSchedule, validTestSchedule } from '@/util
 import { copyTestProtection, validTestProtection } from '@/utils/testProtection'
 import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType, TestProtectionConfig } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import Select, { type SelectOption } from '@/components/common/Select.vue'
+import type { SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
@@ -151,6 +165,8 @@ const accounts = ref<AccountListItem[]>([])
 const excludedAccountSearch = ref('')
 const modelOptions = ref<SelectOption[]>([])
 const modelOptionsLoading = ref(false)
+const modelSearch = ref('')
+const visibleModelOptions = computed(() => modelOptions.value.filter(option => option.label.toLowerCase().includes(modelSearch.value.trim().toLowerCase())))
 const results = ref<TestResult[]>([])
 const resultsNow = ref(Date.now())
 const resultsHistory = ref(false)
@@ -161,7 +177,7 @@ const pendingRuns = ref(new Map<number, TestResult[]>())
 const deletingResultId = ref<number | null>(null)
 const retryingResultId = ref<number | null>(null)
 const editingType = ref<(CreateTestTypeRequest & { id?: number }) | null>(null)
-const editingPlan = ref<(CreateTestPlanRequest & { id?: number; excluded_account_ids: number[]; protection: TestProtectionConfig; migration_note?: string }) | null>(null)
+const editingPlan = ref<(CreateTestPlanRequest & { id?: number; model_ids: string[]; excluded_account_ids: number[]; protection: TestProtectionConfig; migration_note?: string }) | null>(null)
 const resultPlan = ref<TestPlan | null>(null)
 let modelOptionsRequest = 0
 
@@ -180,6 +196,10 @@ const orderedTypes = computed(() => [...types.value].sort((a, b) => {
   return orderA - orderB || a.id - b.id
 }))
 const orderedPlans = computed(() => [...plans.value].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id))
+const modelIDs = (plan: Pick<TestPlan, 'model_id' | 'model_ids'>): string[] => {
+  const values = plan.model_ids ?? (plan.model_id ? [plan.model_id] : [])
+  return [...new Set(values.map(model => model.trim()).filter(Boolean))]
+}
 const planTypeIDs = (plan: TestPlan): number[] => {
   if (plan.test_definition_ids?.length) return [...new Set(plan.test_definition_ids)]
   if (plan.test_definitions?.length) return plan.test_definitions.map(type => type.id)
@@ -239,16 +259,21 @@ const moveGroup = (index: number, direction: number) => {
 }
 const reasoningEffortOptions = computed(() => {
   const plan = editingPlan.value
-  if (!plan?.model_id || !plan.group_ids.length) return []
-  const choices = plan.group_ids.map(id => reasoningEffortsForTestModel(plan.model_id, accounts.value.filter(account => account.schedulable !== false
-    && (!account.status || ['active', 'quality_paused'].includes(account.status)) && !plan.excluded_account_ids.includes(account.id)), id))
+  const models = plan ? modelIDs(plan) : []
+  if (!plan || !models.length || !plan.group_ids.length) return []
+  const eligibleAccounts = accounts.value.filter(account => account.schedulable !== false
+    && (!account.status || ['active', 'quality_paused'].includes(account.status)) && !plan.excluded_account_ids.includes(account.id))
+  const choices = models.flatMap(model => plan.group_ids.map(id => reasoningEffortsForTestModel(model, eligibleAccounts, id)))
   return choices.slice(1).reduce((common, options) => common.filter(effort => options.includes(effort)), choices[0])
 })
 const canSavePlan = computed(() => {
   const plan = editingPlan.value
+  const selectedModels = plan ? modelIDs(plan) : []
+  const allowedModels = new Set(modelOptions.value.map(option => String(option.value)))
   return Boolean(plan && validStrategyTypes(plan.test_definition_ids)
-    && plan.model_id && validTestSchedule(plan.schedule, plan.cron_expression) && validStrategyGroups(plan.group_ids)
-    && !modelOptionsLoading.value && modelOptions.value.some(option => option.value === plan.model_id)
+    && selectedModels.length > 0 && selectedModels.length <= 16 && selectedModels.every(model => allowedModels.has(model))
+    && validTestSchedule(plan.schedule, plan.cron_expression) && validStrategyGroups(plan.group_ids)
+    && !modelOptionsLoading.value
     && validTestProtection(plan.protection, selectedProtectionTypes.value, protectionGroups.value))
 })
 const loadModelOptions = async () => {
@@ -267,7 +292,8 @@ const loadModelOptions = async () => {
     const lists = catalogs.map(models => [...new Set(models.map(model => String(model).trim()).filter(Boolean))])
     const common = lists.slice(1).reduce((values, choices) => values.filter(value => choices.includes(value)), lists[0])
     modelOptions.value = common.map(value => ({ value, label: value }))
-    if (plan.model_id && !common.includes(plan.model_id)) plan.model_id = ''
+    plan.model_ids = modelIDs(plan).filter(model => common.includes(model))
+    plan.model_id = plan.model_ids[0] || ''
   } catch (error) {
     if (request === modelOptionsRequest) reportError(error)
   } finally {
@@ -349,20 +375,21 @@ const updateTypeOrder = async (type: TestType) => {
 }
 const removeType = async (type: TestType) => { if (!window.confirm(`${t('common.delete')} ${type.name}?`)) return; try { await adminAPI.tests.deleteType(type.id); await load() } catch (error) { reportError(error) } }
 
-const planPayload = (plan: TestPlan): CreateTestPlanRequest => ({
+const planPayload = (plan: TestPlan): CreateTestPlanRequest & { model_ids: string[] } => ({
   name: plan.name || '', sort_order: plan.sort_order ?? 0,
   group_ids: [...(plan.group_ids || [])], test_definition_ids: planTypeIDs(plan),
   excluded_account_ids: [...(plan.excluded_account_ids || [])],
-  model_id: plan.model_id || '', reasoning_effort: plan.reasoning_effort ?? null,
+  model_id: modelIDs(plan)[0] || '', model_ids: modelIDs(plan), reasoning_effort: plan.reasoning_effort ?? null,
   cron_expression: plan.cron_expression || '0 * * * *', enabled: plan.enabled,
   schedule: copyTestSchedule(plan.schedule),
   max_results: plan.max_results || 50, protection: copyTestProtection(plan.protection),
 })
 const openPlan = (plan?: TestPlan) => {
   excludedAccountSearch.value = ''
+  modelSearch.value = ''
   editingPlan.value = plan
     ? { ...planPayload(plan), excluded_account_ids: [...(plan.excluded_account_ids || [])], id: plan.id, migration_note: plan.migration_note, protection: copyTestProtection(plan.protection) }
-    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], excluded_account_ids: [], model_id: '', reasoning_effort: null, cron_expression: '0 * * * *', schedule: defaultTestSchedule(), enabled: true, max_results: 50, protection: { enabled: false, mode: 'all_pass', rules: [] } }
+    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], excluded_account_ids: [], model_id: '', model_ids: [], reasoning_effort: null, cron_expression: '0 * * * *', schedule: defaultTestSchedule(), enabled: true, max_results: 50, protection: { enabled: false, mode: 'all_pass', rules: [] } }
 }
 const savePlan = async () => {
   if (!editingPlan.value || !canSavePlan.value) return
@@ -415,8 +442,9 @@ const run = async (plan: TestPlan) => {
   if (runningPlans.value.has(plan.id) || plan.migration_note) return
   runningPlans.value.add(plan.id)
   const startedAt = new Date().toISOString()
-  pendingRuns.value.set(plan.id, planTypeIDs(plan).map((typeID, index) => ({
-    id: -(index + 1),
+  const models = modelIDs(plan)
+  pendingRuns.value.set(plan.id, planTypeIDs(plan).flatMap((typeID, typeIndex) => models.map((model, modelIndex) => ({
+    id: -((typeIndex * models.length) + modelIndex + 1),
     plan_id: plan.id,
     plan_name: plan.name,
     test_definition_id: typeID,
@@ -424,7 +452,7 @@ const run = async (plan: TestPlan) => {
     group_id: null,
     account_id: null,
     target_mode: 'all_accounts',
-    model_id: plan.model_id,
+    model_id: model,
     reasoning_effort: plan.reasoning_effort ?? null,
     status: 'running',
     output_kind: types.value.find(type => type.id === typeID)?.output_kind || 'text',
@@ -433,7 +461,7 @@ const run = async (plan: TestPlan) => {
     latency_ms: null,
     started_at: startedAt,
     created_at: startedAt,
-  })))
+  }))))
   resultsHistory.value = false
   resultsRequest++
   resultsLoading.value = false
@@ -479,7 +507,8 @@ const refreshResults = async () => {
     if (request === resultsRequest && resultPlan.value?.id === id) {
       const placeholders = (pendingRuns.value.get(id) || []).filter(pending => !next.some(result => {
         const started = result.started_at ? new Date(result.started_at).getTime() : 0
-        return result.test_definition_id === pending.test_definition_id && started >= new Date(pending.started_at || 0).getTime()
+        return result.test_definition_id === pending.test_definition_id && result.model_id === pending.model_id
+          && started >= new Date(pending.started_at || 0).getTime()
       }))
       if (placeholders.length) pendingRuns.value.set(id, placeholders)
       else pendingRuns.value.delete(id)
@@ -542,6 +571,10 @@ watch(
 watch(reasoningEffortOptions, choices => {
   const plan = editingPlan.value
   if (plan?.reasoning_effort && !choices.includes(plan.reasoning_effort)) plan.reasoning_effort = null
+})
+watch(() => editingPlan.value?.model_ids?.slice(), ids => {
+  const plan = editingPlan.value
+  if (plan) plan.model_id = ids?.[0] || ''
 })
 watch(
   () => editingPlan.value ? JSON.stringify([...editingPlan.value.group_ids].sort((a, b) => a - b)) : undefined,

@@ -78,7 +78,7 @@ dispatch:
 	for _, id := range ids {
 		if progress != nil {
 			progressMu.Lock()
-			accountProgress := progress[id]
+			accountProgress := progress[id].forModel(plan.ModelID)
 			stopped := accountProgress != nil && accountProgress.stopped
 			progressMu.Unlock()
 			if stopped {
@@ -103,7 +103,7 @@ dispatch:
 					accountProgress = &scheduledTestAccountProgress{}
 					progress[id] = accountProgress
 				}
-				accountProgress.allowsNext(plan, result)
+				accountProgress.forModel(plan.ModelID).allowsNext(plan, result)
 				progressMu.Unlock()
 			}
 		}(id)
@@ -119,10 +119,10 @@ func (s *ScheduledTestRunnerService) startStatisticsResult(ctx context.Context, 
 	if accountID != nil {
 		id = *accountID
 	}
-	if !s.beginAccountRun(plan.ID, id, plan.TestDefinitionID) {
+	if !s.beginAccountRun(plan.ID, id, plan.TestDefinitionID, plan.ModelID) {
 		return nil
 	}
-	defer s.endAccountRun(plan.ID, id, plan.TestDefinitionID)
+	defer s.endAccountRun(plan.ID, id, plan.TestDefinitionID, plan.ModelID)
 	pending := &ScheduledTestResult{
 		TestDefinitionID: plan.TestDefinitionID, TargetMode: plan.TargetMode, Status: "running",
 		OutputKind: "statistics", AccountID: accountID, ModelID: plan.ModelID, GroupID: plan.GroupID,
@@ -205,7 +205,7 @@ func (s *ScheduledTestRunnerService) runStatisticsResult(ctx context.Context, pl
 					windowStart := windowEnd.Add(-time.Hour)
 					var requestStartedAfter *time.Time
 					if recoveryRepo, ok := repo.(ScheduledTestCacheRecoveryRepository); ok && accountID != nil && plan.TestDefinitionID != nil {
-						requestStartedAfter, err = recoveryRepo.CacheRecoveryWindowStart(queryCtx, plan.ID, *accountID, *plan.TestDefinitionID)
+						requestStartedAfter, err = recoveryRepo.CacheRecoveryWindowStart(queryCtx, plan.ID, *accountID, *plan.TestDefinitionID, plan.ModelID)
 						if err != nil {
 							return
 						}

@@ -71,9 +71,10 @@ export default {
     healthMode: { label: '健康显示', overall: '综合', success: '错误率', ttft: '首 Token', cache: '缓存率' },
     tabs: { aria: '明细维度', models: '模型', errors: '错误原因', users: '用户排行' },
     metrics: {
+      outputTps: '输出 TPS', outputTpsValue: '输出 TPS {value}', outputTpsDetail: '有效流式输出 token ÷ 首字后生成秒数；按生成耗时加权，缺失数据不计入',
       rpm: 'RPM',
       tpm: 'TPM',
-      tps: '每秒 Token',
+      tps: '总吞吐 token/s',
       rpmDetail: '每分钟请求数',
       tpmDetail: '每分钟 Token 数',
       tpsDetail: '由 TPM ÷ 60 换算',
@@ -88,7 +89,7 @@ export default {
       errorRateValue: '错误率 {value}',
       rpmValue: 'RPM {value}',
       tpmValue: 'TPM {value}',
-      tpsValue: '每秒 Token {value}',
+      tpsValue: '总吞吐 {value} token/s',
       ttftValue: '首 Token {value}',
       durationValue: '请求时长 {value}',
       cacheRateValue: '缓存率 {value}',
@@ -100,7 +101,8 @@ export default {
       title: '可用性趋势', description: '每行是一种渠道组合，每个色块代表一个统计区间；悬停查看明细', wheelZoom: '在色块上滚轮放大（区间变窄、色块变宽）', wheelZoomX: '在色块上滚轮放大（区间变窄、色块变宽）', dimension: '渠道维度', emptyTitle: '当前筛选窗口没有矩阵数据', legendAria: '健康分数图例', bad: '差', good: '好', healthyLegend: '健康 (≥80)', warningLegend: '需关注 (50–79)', criticalLegend: '异常 (<50)', unknownLegend: '无流量 / 样本不足', noTraffic: '该区间无流量', noTrafficAt: '{time} · 无流量', scoreLine: '健康分 {score}', resetZoom: '重置缩放'
     },
     chart: {
-      title: '可用性趋势', description: '平滑趋势：错误率 · 首 Token P50 · 缓存率', emptyTitle: '当前筛选窗口没有趋势数据', errorLegend: '错误率（左轴 %）', cacheLegend: '缓存率（左轴 %）', ttftLegend: '首 Token P50（右轴）', errorDataset: '错误率趋势 %', cacheDataset: '缓存率趋势 %', ttftDataset: '首 Token 趋势 P50 (ms)', percentAxis: '比率 %', resetZoom: '重置缩放'
+      tpsLegend: '输出 TPS（token/s）', tpsDataset: '输出 TPS 趋势（token/s）',
+      title: '可用性趋势', description: '错误率 · 首 Token P50 · 缓存率 · 输出 TPS', emptyTitle: '当前筛选窗口没有趋势数据', errorLegend: '错误率（左轴 %）', cacheLegend: '缓存率（左轴 %）', ttftLegend: '首 Token P50（右轴）', errorDataset: '错误率趋势 %', cacheDataset: '缓存率趋势 %', ttftDataset: '首 Token 趋势 P50 (ms)', percentAxis: '比率 %', resetZoom: '重置缩放'
     },
     errorDetail: { http: 'HTTP {code}', upstream: '上游 {code}', noMessage: '无错误消息', empty: '仅展示分类占比（样本消息仅管理员可见）' },
     errorCategories: {

@@ -167,11 +167,11 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	return nil
 }
 
-const channelMonitorV2UsageMetricsSQL = `
+var channelMonitorV2UsageMetricsSQL = channelMonitorV2FinalFailureKeysSQL + `
 INSERT INTO channel_monitor_v2_metrics_1m (
   bucket_start, platform, group_id, model, success_requests,
   input_tokens, cache_eligible_input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_eligible_creation_tokens, cache_eligible_read_tokens,
-  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at
+  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, tps_output_tokens, tps_generation_ms, tps_samples, computed_at
 )
 SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s,
        COUNT(DISTINCT COALESCE(NULLIF(ul.request_id, ''), 'usage:' || ul.id::text))
@@ -186,18 +186,21 @@ SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s,
        COALESCE(SUM(ul.first_token_ms) FILTER (WHERE ul.first_token_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
        COUNT(ul.first_token_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `),
        COALESCE(SUM(ul.duration_ms) FILTER (WHERE ul.duration_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
-       COUNT(ul.duration_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `), NOW()
+       COUNT(ul.duration_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `),
+       COALESCE(SUM(ul.output_tokens) FILTER (WHERE ` + outputTPSEligibleSQL("ul") + ` AND ` + channelMonitorV2NoFinalFailureSQL("ul") + `), 0),
+       COALESCE(SUM(ul.duration_ms::bigint-ul.first_token_ms::bigint) FILTER (WHERE ` + outputTPSEligibleSQL("ul") + ` AND ` + channelMonitorV2NoFinalFailureSQL("ul") + `), 0),
+       COUNT(*) FILTER (WHERE ` + outputTPSEligibleSQL("ul") + ` AND ` + channelMonitorV2NoFinalFailureSQL("ul") + `), NOW()
 FROM usage_logs ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
 WHERE ul.created_at >= $1 AND ul.created_at < $2
 GROUP BY 1, 2, 3, 4`
 
-const channelMonitorV2UserMetricsSQL = `
+var channelMonitorV2UserMetricsSQL = channelMonitorV2FinalFailureKeysSQL + `
 INSERT INTO channel_monitor_v2_user_metrics_1m (
   bucket_start, platform, group_id, model, user_id, success_requests,
   input_tokens, cache_eligible_input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_eligible_creation_tokens, cache_eligible_read_tokens,
-  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at
+  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, tps_output_tokens, tps_generation_ms, tps_samples, computed_at
 )
 SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s, ul.user_id,
        COUNT(DISTINCT COALESCE(NULLIF(ul.request_id, ''), 'usage:' || ul.id::text))
@@ -212,7 +215,10 @@ SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s, ul
        COALESCE(SUM(ul.first_token_ms) FILTER (WHERE ul.first_token_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
        COUNT(ul.first_token_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `),
        COALESCE(SUM(ul.duration_ms) FILTER (WHERE ul.duration_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
-       COUNT(ul.duration_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `), NOW()
+       COUNT(ul.duration_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `),
+       COALESCE(SUM(ul.output_tokens) FILTER (WHERE ` + outputTPSEligibleSQL("ul") + ` AND ` + channelMonitorV2NoFinalFailureSQL("ul") + `), 0),
+       COALESCE(SUM(ul.duration_ms::bigint-ul.first_token_ms::bigint) FILTER (WHERE ` + outputTPSEligibleSQL("ul") + ` AND ` + channelMonitorV2NoFinalFailureSQL("ul") + `), 0),
+       COUNT(*) FILTER (WHERE ` + outputTPSEligibleSQL("ul") + ` AND ` + channelMonitorV2NoFinalFailureSQL("ul") + `), NOW()
 FROM usage_logs ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
@@ -434,14 +440,14 @@ INSERT INTO channel_monitor_v2_metrics_rollup (
   bucket_start, bucket_seconds, platform, group_id, model, success_requests, error_requests,
   upstream_affected_requests, upstream_attempt_count, input_tokens, output_tokens,
   cache_eligible_input_tokens, cache_creation_tokens, cache_read_tokens, cache_eligible_creation_tokens, cache_eligible_read_tokens, ttft_sum_ms, ttft_count, duration_sum_ms,
-  duration_count, computed_at
+  duration_count, tps_output_tokens, tps_generation_ms, tps_samples, computed_at
 )
 ` + channelMonitorV2FixedRollupBoundsSQL + `
 SELECT date_bin($1::interval, m.bucket_start, ` + channelMonitorV2DateBinOrigin + `), $2::integer,
        platform, group_id, model, SUM(success_requests), SUM(error_requests),
        SUM(upstream_affected_requests), SUM(upstream_attempt_count), SUM(input_tokens),
        SUM(output_tokens), SUM(cache_eligible_input_tokens), SUM(cache_creation_tokens), SUM(cache_read_tokens), SUM(cache_eligible_creation_tokens), SUM(cache_eligible_read_tokens),
-       SUM(ttft_sum_ms), SUM(ttft_count), SUM(duration_sum_ms), SUM(duration_count), NOW()
+       SUM(ttft_sum_ms), SUM(ttft_count), SUM(duration_sum_ms), SUM(duration_count), SUM(tps_output_tokens), SUM(tps_generation_ms), SUM(tps_samples), NOW()
 FROM channel_monitor_v2_metrics_1m m, bounds
 WHERE m.bucket_start >= bounds.start_at AND m.bucket_start < bounds.end_at
 GROUP BY 1, 2, 3, 4, 5`
@@ -450,13 +456,13 @@ const channelMonitorV2UserMetricsRollupSQL = `
 INSERT INTO channel_monitor_v2_user_metrics_rollup (
   bucket_start, bucket_seconds, platform, group_id, model, user_id, success_requests,
   error_requests, input_tokens, cache_eligible_input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_eligible_creation_tokens, cache_eligible_read_tokens,
-  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at
+  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, tps_output_tokens, tps_generation_ms, tps_samples, computed_at
 )
 ` + channelMonitorV2FixedRollupBoundsSQL + `
 SELECT date_bin($1::interval, m.bucket_start, ` + channelMonitorV2DateBinOrigin + `), $2::integer,
        platform, group_id, model, user_id, SUM(success_requests), SUM(error_requests),
        SUM(input_tokens), SUM(cache_eligible_input_tokens), SUM(output_tokens), SUM(cache_creation_tokens), SUM(cache_read_tokens), SUM(cache_eligible_creation_tokens), SUM(cache_eligible_read_tokens),
-       SUM(ttft_sum_ms), SUM(ttft_count), SUM(duration_sum_ms), SUM(duration_count), NOW()
+       SUM(ttft_sum_ms), SUM(ttft_count), SUM(duration_sum_ms), SUM(duration_count), SUM(tps_output_tokens), SUM(tps_generation_ms), SUM(tps_samples), NOW()
 FROM channel_monitor_v2_user_metrics_1m m, bounds
 WHERE m.bucket_start >= bounds.start_at AND m.bucket_start < bounds.end_at
 GROUP BY 1, 2, 3, 4, 5, 6`

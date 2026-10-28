@@ -22,7 +22,7 @@ type ScheduledTestCacheRecoveryConfig struct {
 
 type ScheduledTestCacheRecoveryRepository interface {
 	AdvanceCacheRecovery(context.Context, time.Time) error
-	CacheRecoveryWindowStart(context.Context, int64, int64, int64) (*time.Time, error)
+	CacheRecoveryWindowStart(context.Context, int64, int64, int64, string) (*time.Time, error)
 }
 
 func validateScheduledTestCacheRecovery(rule *ScheduledTestProtectionRule) error {
@@ -51,7 +51,7 @@ func validateScheduledTestCacheRecovery(rule *ScheduledTestProtectionRule) error
 	hasCacheMinimum := false
 	for _, threshold := range rule.Thresholds {
 		switch threshold.Metric {
-		case "success_rate", "cache_rate", "avg_first_token_ms":
+		case "success_rate", "cache_rate", "avg_first_token_ms", "output_tps":
 		default:
 			return fmt.Errorf("statistics recovery does not support metric %q", threshold.Metric)
 		}

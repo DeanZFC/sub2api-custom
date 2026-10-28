@@ -94,6 +94,37 @@ func replayPassiveMetrics(ctx context.Context, tx *sql.Tx, p service.PassiveQual
 		cp := *s.Latency
 		point.Latency = &cp
 	}
+	if p.TPS.Enabled && !p.IsGroupQualityTarget() {
+		if s.Speed == nil {
+			s.Speed = &service.PassiveQualityMetricState{ObserveAfter: p.EvidenceSince()}
+		}
+		view := *s
+		view.Phase = "healthy"
+		view.LastEvidenceAt = s.Speed.LastEvidenceAt
+		view.ObserveAfter = s.Speed.ObserveAfter
+		if s.CacheObserveAfter.After(view.ObserveAfter) {
+			view.ObserveAfter = s.CacheObserveAfter
+		}
+		e, err := passiveSamples(ctx, tx, p, view, at)
+		if err != nil {
+			return point, 0, false, err
+		}
+		if at.Add(-time.Duration(p.WindowSeconds) * time.Second).Before(now.Add(-48 * time.Hour)) {
+			e.Complete = false
+		}
+		v, r := service.EvaluatePassiveQuality(service.PassiveQualityMetricConfig(p.PassiveQualityConfig, "tps"), e, s.Speed.Phase == "limited")
+		merge(v, r)
+		if p.Enabled {
+			if event := service.AdvancePassiveQualityTPS(p.PassiveQualityConfig, s.Speed, e, at); event != "" {
+				events = append(events, "would_"+event)
+				if event == "tps_limited" || event == "tps_watch" {
+					triggers++
+				}
+			}
+		}
+		cp := *s.Speed
+		point.Speed = &cp
+	}
 	if p.CacheRate.Enabled && p.CacheProtection != nil && !p.IsGroupQualityTarget() {
 		samples, complete, err := passiveCacheSamples(ctx, tx, p, *s, at)
 		if err != nil {

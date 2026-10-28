@@ -171,7 +171,7 @@ func TestScheduledTestRetryPreservesTypeAndTargetAfterRuleChanges(t *testing.T) 
 	}})
 	accounts := retryAccountRepoStub{account: &Account{ID: accountID, GroupIDs: []int64{groupID}, Extra: map[string]any{"synthetic_ui_test": true}}}
 	runner := NewScheduledTestRunnerService(nil, svc, &AccountTestService{accountRepo: accounts}, accounts, nil, nil)
-	plan := &ScheduledTestPlan{ID: 3, GroupID: scheduledTestPtrInt64(8), TargetMode: "all_accounts", TestDefinitionID: scheduledTestPtrInt64(1), TestDefinitionIDs: []int64{1}, ModelID: "new-model", ReasoningEffort: "low"}
+	plan := &ScheduledTestPlan{ID: 3, GroupID: scheduledTestPtrInt64(8), TargetMode: "all_accounts", TestDefinitionID: scheduledTestPtrInt64(1), TestDefinitionIDs: []int64{1}, ModelID: "new-model", ModelIDs: []string{"new-model", "original-model"}, ReasoningEffort: "low"}
 	pending, err := runner.RetryAccount(context.Background(), plan, previous)
 	require.NoError(t, err)
 	require.Equal(t, previous.ID, pending.ID)

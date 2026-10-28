@@ -58,7 +58,7 @@ func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 		r.Priority, r.RequiredPass, r.PauseOnFailure = 0, false, true
 		r.OnPass = &ScheduledTestOutcomeAction{Scheduling: pass.Scheduling, GroupMode: "keep"}
 		r.OnFail = &ScheduledTestOutcomeAction{Scheduling: fail.Scheduling, GroupMode: "keep"}
-		if r.Vote == nil || !r.Vote.Enabled || r.HasDurationThreshold() {
+		if r.Vote == nil || !r.Vote.Enabled || r.HasDurationThreshold() || r.UsesAutoReview() {
 			automatic++
 		}
 		if r.Vote != nil && r.Vote.Enabled && r.Vote.PublicEnabled {
@@ -97,7 +97,7 @@ func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts
 			decision.Action = &action
 			return decision, "自动检测或人工评审不通过，执行不通过动作"
 		}
-		if rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold() {
+		if rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold() || rule.UsesAutoReview() {
 			automatic++
 			pending = pending || verdicts[id] != "pass"
 		}

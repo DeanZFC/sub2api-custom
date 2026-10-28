@@ -70,7 +70,7 @@ func WithoutGroupQualityFallback(ctx context.Context) context.Context {
 // The live repository must prove automatic hold provenance before admitting it.
 func groupQualityFallbackAccount(ctx context.Context, account *Account, requestedModel string) *Account {
 	req, ok := GroupQualityFallbackFromContext(ctx)
-	if !ok || account == nil || req.AccountID != account.ID || req.Model != passiveQualityRoutingModel(ctx, requestedModel) || !openAIStickyAccountMatchesGroup(account, &req.GroupID) {
+	if !ok || account == nil || account.ActiveTestAllModelsPaused() || req.AccountID != account.ID || req.Model != passiveQualityRoutingModel(ctx, requestedModel) || !openAIStickyAccountMatchesGroup(account, &req.GroupID) {
 		return account
 	}
 	adjusted := *account

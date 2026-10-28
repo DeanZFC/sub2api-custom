@@ -115,6 +115,21 @@ func TestChannelMonitorV2MetricIncludesSuccessRate(t *testing.T) {
 	require.NotNil(t, adminMetric.UpstreamAffectedRequests)
 }
 
+func TestChannelMonitorV2OutputTPSUsesGenerationSumsAndMissingStaysUnknown(t *testing.T) {
+	acc := newMetricAccumulator()
+	require.Nil(t, acc.metric(1, true).OutputTPS)
+	// Legacy aggregates may contain output totals without eligible timings.
+	acc.addFact(channelMonitorV2Fact{Output: 10000, DurationSum: 500, DurationCount: 1})
+	require.Nil(t, acc.metric(1, true).OutputTPS)
+	acc.addFact(channelMonitorV2Fact{TPSOutputTokens: 100, TPSGenerationMS: 1000, TPSSamples: 1})
+	acc.addFact(channelMonitorV2Fact{TPSOutputTokens: 100, TPSGenerationMS: 10000, TPSSamples: 1})
+	for _, minutes := range []float64{1, 60, 1440} {
+		metric := acc.metric(minutes, true)
+		require.EqualValues(t, 2, metric.TPSSamples)
+		require.InDelta(t, 200.0/11, *metric.OutputTPS, .00001)
+	}
+}
+
 func TestChannelMonitorV2WhereUsesConfiguredScopeAndEmptyFilterMeansAllConfigured(t *testing.T) {
 	filter := service.ChannelMonitorV2Filter{Start: time.Unix(1, 0), End: time.Unix(2, 0)}
 	cfg := service.ChannelMonitorV2Config{

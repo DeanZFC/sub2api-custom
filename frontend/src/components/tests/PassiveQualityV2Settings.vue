@@ -12,6 +12,11 @@
       <label class="input-label">{{ v('latencyConcurrency') }}<input v-model.number="policy.ttft_concurrency_limit" type="number" min="1" max="1000" class="input mt-1 w-full" /></label>
       <label class="input-label">{{ v('latencyPenalty') }}<input v-model.number="policy.ttft_priority_penalty" type="number" min="0" max="1000" class="input mt-1 w-full" /></label>
     </div>
+    <div v-if="policy.tps.enabled" class="grid gap-3 sm:grid-cols-3" data-speed-settings>
+      <label class="input-label">{{ v('speedAction') }}<select v-model="policy.tps_action" class="input mt-1 w-full"><option value="observe">{{ p('observe') }}</option><option value="limit">{{ p('actionLimit') }}</option></select></label>
+      <label v-if="policy.tps_action === 'limit'" class="input-label">{{ v('speedConcurrency') }}<input v-model.number="policy.tps_concurrency_limit" type="number" min="1" max="1000" class="input mt-1 w-full" /></label>
+      <label v-if="policy.tps_action === 'limit'" class="input-label">{{ v('speedPenalty') }}<input v-model.number="policy.tps_priority_penalty" type="number" min="0" max="1000" class="input mt-1 w-full" /></label>
+    </div>
     <template v-if="policy.cache_rate.enabled && policy.cache_protection">
       <p class="rounded-lg bg-primary-50 p-3 text-xs leading-5 dark:bg-primary-950/30">{{ v('cacheHint') }}</p>
       <fieldset v-for="kind in windowKinds" :key="kind" class="space-y-3" :data-cache-window="kind">

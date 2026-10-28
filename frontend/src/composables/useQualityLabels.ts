@@ -11,8 +11,8 @@ export function useQualityLabels() {
     for (const prefix of ['trial_expired', 'trial_failed', 'waiting_for_recovery']) {
       if (value.startsWith(`${prefix}: `)) return `${passive(`reasons.${prefix}`)}: ${reason(value.slice(prefix.length + 2))}`
     }
-    const metric = /^(error_rate|ttft_p90|cache_rate): ([\d.]+) \/ ([\d.]+) \((\d+)\)$/.exec(value)
-    if (metric) return passive('metricReason', { metric: passive(metric[1] === 'error_rate' ? 'errorRate' : metric[1] === 'ttft_p90' ? 'ttft' : 'cacheRate'), observed: metric[2], threshold: metric[3], samples: metric[4] })
+    const metric = /^(error_rate|ttft_p90|cache_rate|output_tps): ([\d.]+) \/ ([\d.]+) \((\d+)\)$/.exec(value)
+    if (metric) return passive('metricReason', { metric: passive(metric[1] === 'error_rate' ? 'errorRate' : metric[1] === 'ttft_p90' ? 'ttft' : metric[1] === 'output_tps' ? 'tps' : 'cacheRate'), observed: metric[2], threshold: metric[3], samples: metric[4] })
     const consecutive = /^consecutive_failures: (\d+)$/.exec(value)
     return consecutive ? passive('consecutiveReason', { count: consecutive[1] }) : value
   }

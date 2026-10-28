@@ -105,7 +105,7 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 	conclusive := complete
 	var retryAfter *time.Time
 	var last *ScheduledTestResult
-	verdicts := make(map[int64]string)
+	modelVerdicts := make(map[string]map[int64]string)
 	for i, result := range observations {
 		if result == nil || QualityResultDeferred(result) {
 			return
@@ -129,16 +129,19 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 			plan := queue[i].plan
 			if plan.Protection.Enabled {
 				if rule := plan.ProtectionRule(plan.TestDefinitionID); rule != nil &&
-					(!plan.Protection.UsesAllPass() || rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold()) {
+					(!plan.Protection.UsesAllPass() || rule.Vote == nil || !rule.Vote.Enabled || rule.UsesAutoReview() || rule.HasDurationThreshold()) {
 					verdict, _ := evaluateScheduledTestProtection(*rule, result)
-					if plan.Protection.UsesAllPass() && rule.Vote != nil && rule.Vote.Enabled {
+					if plan.Protection.UsesAllPass() && rule.Vote != nil && rule.Vote.Enabled && !rule.UsesAutoReview() {
 						verdict, _ = EvaluateScheduledTestDuration(*rule, result)
 					}
 					if probeVerdict, _, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
 						verdict = probeVerdict
 					}
 					if plan.TestDefinitionID != nil {
-						verdicts[*plan.TestDefinitionID] = verdict
+						if modelVerdicts[plan.ModelID] == nil {
+							modelVerdicts[plan.ModelID] = make(map[int64]string)
+						}
+						modelVerdicts[plan.ModelID][*plan.TestDefinitionID] = verdict
 					}
 					if verdict == "pending" {
 						conclusive = false
@@ -158,22 +161,30 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 	// Matching a failure condition or a selected pause never claims recovery.
 	plan := queue[0].plan
 	if complete && plan.Protection.Enabled && plan.Protection.UsesCombinations() {
-		decision := EvaluateScheduledTestCombinations(plan.Protection, verdicts)
-		if decision.Action != nil && decision.Action.Scheduling == "pause" {
-			failed = true
-		} else {
+		allModelsPassed := len(modelVerdicts) > 0
+		for _, verdicts := range modelVerdicts {
+			decision := EvaluateScheduledTestCombinations(plan.Protection, verdicts)
+			if decision.Action != nil && decision.Action.Scheduling == "pause" {
+				failed, allModelsPassed = true, false
+				continue
+			}
 			passing := make(map[int64]string)
 			for id, verdict := range verdicts {
 				if verdict == "pass" {
 					passing[id] = verdict
 				}
 			}
+			modelPassed := false
 			for _, combination := range plan.Protection.Combinations {
 				if slices.Contains(decision.RuleIDs, combination.ID) && EvaluateScheduledTestCombinationCondition(combination.Condition, passing) == "pass" {
-					failed, conclusive = false, true
+					modelPassed = true
 					break
 				}
 			}
+			allModelsPassed = allModelsPassed && modelPassed
+		}
+		if allModelsPassed {
+			failed, conclusive = false, true
 		}
 	}
 	if !failed && !conclusive {

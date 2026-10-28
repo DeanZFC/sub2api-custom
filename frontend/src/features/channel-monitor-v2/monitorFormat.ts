@@ -203,3 +203,8 @@ export function formatMonitorCacheRate(metric: Pick<MonitorMetric, 'has_cache_sa
   const rate = monitorCacheRate(metric)
   return rate == null ? '-' : formatMonitorPercent(rate)
 }
+
+/** Per-request output generation speed; unavailable evidence stays unknown. */
+export function formatMonitorOutputTps(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) || value < 0 ? '—' : `${Number(value.toFixed(1))} token/s`
+}

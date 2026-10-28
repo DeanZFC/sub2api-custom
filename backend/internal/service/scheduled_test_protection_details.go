@@ -10,6 +10,7 @@ import (
 // This read-only projection intentionally separates the persisted hold from
 // current evidence: protection states are replaced at the start of each round.
 type ScheduledTestProtectionHold struct {
+	ModelID         string                            `json:"model_id,omitempty"`
 	PlanID          int64                             `json:"plan_id"`
 	PlanName        string                            `json:"plan_name"`
 	Mode            string                            `json:"mode"`
@@ -87,6 +88,7 @@ type ScheduledTestThresholdDetail struct {
 // Source fields are private to the admin projection and never serialized to
 // clients. In particular, full model output is only used to evaluate metrics.
 type ScheduledTestProtectionHoldSource struct {
+	ModelID         string
 	PlanID          int64
 	PlanName        string
 	DefinitionID    int64
@@ -152,7 +154,7 @@ func BuildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 		}
 	}
 	hold := ScheduledTestProtectionHold{PlanID: source.PlanID, PlanName: source.PlanName,
-		Reason: source.Reason, UpdatedAt: source.UpdatedAt, Mode: "per_test",
+		Reason: source.Reason, UpdatedAt: source.UpdatedAt, Mode: "per_test", ModelID: source.ModelID,
 		Rules: []ScheduledTestProtectionHit{}, Tests: []ScheduledTestProtectionEvidence{}, TriggerSnapshot: source.TriggerSnapshot}
 	verdicts := map[int64]string{}
 	for _, state := range source.States {
@@ -237,6 +239,8 @@ func scheduledTestMetricSamples(result *ScheduledTestResult, metric string) *int
 			return &stats.CacheSamples
 		case "avg_first_token_ms":
 			return &stats.FirstTokenSamples
+		case "output_tps":
+			return &stats.TPSSamples
 		}
 	}
 	if metric == "latency_ms" || metric == "output_numeric" {

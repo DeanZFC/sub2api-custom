@@ -10,24 +10,28 @@ import (
 // QualityOperationsConfig applies to quality-management tests (including manual
 // plan runs, retries and recovery probes), not customer inference traffic.
 type QualityOperationsConfig struct {
-	Version                int64 `json:"version"`
-	BudgetEnabled          bool  `json:"budget_enabled"`
-	DailyRequests          int64 `json:"daily_requests"`
-	DailyTokens            int64 `json:"daily_tokens"`
-	AccountDailyRequests   int64 `json:"account_daily_requests"`
-	AccountDailyTokens     int64 `json:"account_daily_tokens"`
-	TokenReservation       int64 `json:"token_reservation"`
-	RecoveryReservePercent int   `json:"recovery_reserve_percent"`
-	DynamicEnabled         bool  `json:"dynamic_enabled"`
-	HealthyRounds          int   `json:"healthy_rounds"`
-	HealthyBaseSeconds     int   `json:"healthy_base_seconds"`
-	HealthyMaxSeconds      int   `json:"healthy_max_seconds"`
+	PelicanReview          *ScheduledTestReviewSettings `json:"pelican_review,omitempty"`
+	Version                int64                        `json:"version"`
+	BudgetEnabled          bool                         `json:"budget_enabled"`
+	DailyRequests          int64                        `json:"daily_requests"`
+	DailyTokens            int64                        `json:"daily_tokens"`
+	AccountDailyRequests   int64                        `json:"account_daily_requests"`
+	AccountDailyTokens     int64                        `json:"account_daily_tokens"`
+	TokenReservation       int64                        `json:"token_reservation"`
+	RecoveryReservePercent int                          `json:"recovery_reserve_percent"`
+	DynamicEnabled         bool                         `json:"dynamic_enabled"`
+	HealthyRounds          int                          `json:"healthy_rounds"`
+	HealthyBaseSeconds     int                          `json:"healthy_base_seconds"`
+	HealthyMaxSeconds      int                          `json:"healthy_max_seconds"`
 }
 
 func DefaultQualityOperationsConfig() QualityOperationsConfig {
 	return QualityOperationsConfig{Version: 1, DailyRequests: 10000, DailyTokens: 10000000, AccountDailyRequests: 200, AccountDailyTokens: 1000000, TokenReservation: 32768, HealthyRounds: 3, HealthyBaseSeconds: 900, HealthyMaxSeconds: 14400}
 }
 func (c QualityOperationsConfig) Validate() error {
+	if err := c.PelicanReview.Validate(); err != nil {
+		return err
+	}
 	if c.RecoveryReservePercent < 0 || c.RecoveryReservePercent > 50 {
 		return fmt.Errorf("recovery reserve percent must be 0..50")
 	}
@@ -219,6 +223,7 @@ func (r QualityReplayRequest) Validate(now time.Time) error {
 }
 
 type QualityReplayPoint struct {
+	Speed     *PassiveQualityMetricState          `json:"speed,omitempty"`
 	Model     string                              `json:"model,omitempty"`
 	Latency   *PassiveQualityMetricState          `json:"latency,omitempty"`
 	Cache     map[string]PassiveQualityCacheState `json:"cache,omitempty"`

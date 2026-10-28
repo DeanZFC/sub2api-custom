@@ -21,8 +21,21 @@
         <label class="flex items-center gap-2 text-sm"><input v-model="config.dynamic_enabled" type="checkbox" />{{ tr('enableDynamic') }}</label><p class="text-sm text-gray-500">{{ tr('frequencyHint') }}</p>
         <fieldset :disabled="!config.dynamic_enabled && !frequencyError" v-show="config.dynamic_enabled || !!frequencyError" data-frequency-fields class="grid gap-4 sm:grid-cols-3"><label v-for="f in frequencyFields" :key="f.key" class="input-label">{{ tr(f.key) }}<input v-model.number="config[f.key]" type="number" :min="f.min" :max="f.max" step="1" required class="input mt-1 w-full" /></label></fieldset>
         <p v-if="!config.dynamic_enabled" class="text-sm text-gray-500">{{ t('admin.tests.experience.dynamicOff') }}</p>
+        <hr class="dark:border-dark-700" />
+        <section v-if="config.pelican_review" class="space-y-3" data-pelican-review-config>
+          <h3 class="font-semibold">{{ t('admin.tests.autoReview.title') }}</h3>
+          <label class="flex items-center gap-2 text-sm"><input v-model="config.pelican_review.enabled" type="checkbox" data-pelican-review-global-enabled />{{ t('admin.tests.autoReview.enableGlobal') }}</label>
+          <p class="text-sm text-gray-500">{{ t('admin.tests.autoReview.globalHint') }}</p>
+          <fieldset v-if="config.pelican_review.enabled" class="grid gap-4 sm:grid-cols-2" data-pelican-review-fields>
+            <label class="input-label">{{ t('admin.tests.autoReview.judgeAccount') }}<select v-model.number="config.pelican_review.judge_account_id" required class="input mt-1 w-full" data-pelican-review-account><option :value="0" disabled>{{ t('admin.tests.autoReview.selectAccount') }}</option><option v-for="a in judgeAccounts" :key="a.id" :value="a.id">{{ a.name }} #{{ a.id }}</option></select></label>
+            <label class="input-label">{{ t('admin.tests.autoReview.judgeModel') }}<input v-model.trim="config.pelican_review.judge_model" required maxlength="200" class="input mt-1 w-full" data-pelican-review-model /></label>
+            <label class="input-label">{{ t('admin.tests.autoReview.dailyRequests') }}<input v-model.number="config.pelican_review.daily_requests" required type="number" min="1" max="1000000" step="1" class="input mt-1 w-full" data-pelican-review-budget /></label>
+            <p class="text-xs text-gray-500 sm:col-span-2">{{ t('admin.tests.autoReview.budgetHint') }}</p>
+          </fieldset>
+          <p v-if="reviewError" role="alert" class="text-sm text-red-600">{{ reviewError }}</p>
+        </section>
         <p v-if="budgetError || frequencyError" role="alert" class="text-sm text-red-600">{{ budgetError || frequencyError }}</p>
-        <div class="flex items-center gap-3"><button class="btn btn-primary" type="submit" :disabled="busy || !!budgetError || !!frequencyError" data-save-operations>{{ t('common.save') }}</button><span v-if="saved" role="status" class="text-sm text-green-600">{{ tr('saved') }}</span></div>
+        <div class="flex items-center gap-3"><button class="btn btn-primary" type="submit" :disabled="busy || !!budgetError || !!frequencyError || !!reviewError" data-save-operations>{{ t('common.save') }}</button><span v-if="saved" role="status" class="text-sm text-green-600">{{ tr('saved') }}</span></div>
       </form>
       <details class="rounded-xl border border-gray-200 p-4 dark:border-dark-700"><summary class="cursor-pointer text-sm font-medium">{{ tr('accountUsage') }}</summary><div class="mt-3 max-h-72 overflow-auto"><table class="w-full text-left text-sm"><thead><tr><th class="p-2">{{ tr('account') }}</th><th class="p-2">{{ tr('requests') }}</th><th class="p-2">{{ tr('tokens') }}</th><th class="p-2">{{ tr('unknown_requests') }}</th><th class="p-2">{{ tr('recovery_requests') }}</th><th class="p-2">{{ tr('recovery_tokens') }}</th></tr></thead><tbody><tr v-for="u in snapshot.usage.filter(u => u.account_id)" :key="u.account_id"><td class="p-2">{{ accountName(u.account_id) }}</td><td class="p-2">{{ u.requests }}</td><td class="p-2">{{ u.tokens }}</td><td class="p-2">{{ u.unknown_requests }}</td><td class="p-2">{{ u.recovery_requests || 0 }}</td><td class="p-2">{{ u.recovery_tokens || 0 }}</td></tr></tbody></table></div></details>
       <details :open="!!snapshot.suppliers.length" class="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-dark-700"><summary class="cursor-pointer text-sm font-semibold">{{ t('admin.tests.experience.suppliersOptional') }}</summary>
@@ -44,7 +57,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import PassiveQualityRuntimePanel from './PassiveQualityRuntimePanel.vue'
-import { qualityOperationsAPI as api, defaultQualitySupplier, type QualityOperationsSnapshot, type QualityOperationsConfig, type QualitySupplier } from '@/api/admin/qualityOperations'
+import { qualityOperationsAPI as api, copyQualityOperationsConfig, defaultQualitySupplier, type QualityOperationsSnapshot, type QualityOperationsConfig, type QualitySupplier } from '@/api/admin/qualityOperations'
 import type { AccountListItem } from '@/types'
 import { useQualityLabels } from '@/composables/useQualityLabels'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -65,6 +78,16 @@ function invalidField(fields: readonly { key: keyof QualityOperationsConfig; min
 }
 const budgetError = computed(() => invalidField(budgetFields))
 const frequencyError = computed(() => invalidField(frequencyFields) || (config.value && config.value.healthy_max_seconds < config.value.healthy_base_seconds ? t('admin.tests.experience.frequencyOrder') : ''))
+const judgeAccounts = computed(() => props.accounts.filter(a => a.platform === 'openai'))
+const reviewError = computed(() => {
+  const review = config.value?.pelican_review
+  if (!review?.enabled) return ''
+  return Number.isSafeInteger(review.judge_account_id) && review.judge_account_id > 0
+    && judgeAccounts.value.some(a => a.id === review.judge_account_id)
+    && !!review.judge_model.trim() && [...review.judge_model].length <= 200
+    && Number.isInteger(review.daily_requests) && review.daily_requests >= 1 && review.daily_requests <= 1000000
+    ? '' : t('admin.tests.autoReview.invalidConfig')
+})
 const supplierFields = [{ key: 'window_seconds', min: 60, max: 86400 }, { key: 'min_accounts', min: 2, max: 1000 }, { key: 'failure_percent', min: 1, max: 100 }, { key: 'probe_interval_seconds', min: 15, max: 3600 }] as const
 const choices = computed(() => {
   const accounts = new Map(props.accounts.map(a => [a.id, { id: a.id, name: a.name }]))
@@ -77,12 +100,12 @@ function report(e: unknown) { error.value = extractApiErrorMessage(e, tr('failed
 async function refresh() {
   if (loading.value) return
   loading.value = true; error.value = ''
-  try { const previous = snapshot.value ? { recovery_reserve_percent: 0, ...snapshot.value.config } : undefined; snapshot.value = await api.get(); if (!config.value || JSON.stringify(config.value) === JSON.stringify(previous)) config.value = { recovery_reserve_percent: 0, ...snapshot.value.config } } catch (e) { report(e) } finally { loading.value = false }
+  try { const previous = snapshot.value ? copyQualityOperationsConfig(snapshot.value.config) : undefined; snapshot.value = await api.get(); if (!config.value || JSON.stringify(config.value) === JSON.stringify(previous)) config.value = copyQualityOperationsConfig(snapshot.value.config) } catch (e) { report(e) } finally { loading.value = false }
 }
 async function save() {
-  if (!config.value || busy.value || budgetError.value || frequencyError.value) return
+  if (!config.value || busy.value || budgetError.value || frequencyError.value || reviewError.value) return
   busy.value = true; error.value = ''; saved.value = false
-  try { config.value = await api.save({ ...config.value }); if (snapshot.value) snapshot.value.config = { ...config.value }; saved.value = true; await refresh() } catch (e) { report(e) } finally { busy.value = false }
+  try { config.value = copyQualityOperationsConfig(await api.save(copyQualityOperationsConfig(config.value))); if (snapshot.value) snapshot.value.config = copyQualityOperationsConfig(config.value); saved.value = true; await refresh() } catch (e) { report(e) } finally { busy.value = false }
 }
 function editSupplier(s?: QualitySupplier) { error.value = ''; editing.value = s ? JSON.parse(JSON.stringify(s)) : defaultQualitySupplier(); search.value = '' }
 async function saveSupplier() {

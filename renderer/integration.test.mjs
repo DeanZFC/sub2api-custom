@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import http from 'node:http'
+import { test } from 'node:test'
+import { chromium } from 'playwright'
+import { renderHTML } from './server.mjs'
+
+// In the shipped image Playwright uses its matching bundled Chromium. A local
+// test may select an already installed executable without changing production.
+const launch = options => chromium.launch({ ...options, ...(process.env.RENDERER_TEST_EXECUTABLE ? { executablePath: process.env.RENDERER_TEST_EXECUTABLE } : {}) })
+
+test('real Chromium renders animation frames and blocks outbound content', async t => {
+  let hits = 0
+  const trap = http.createServer((_, response) => { hits++; response.end('network must not be used') })
+  await new Promise(resolve => trap.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => trap.close(resolve)))
+  const target = `http://127.0.0.1:${trap.address().port}/forbidden`
+  const html = `<!doctype html><html><body><svg width="960" height="720"><rect width="960" height="720" fill="white"/><circle cx="100" cy="200" r="50" fill="red"><animate attributeName="cx" values="100;800;100" dur="2.3s" repeatCount="indefinite"/></circle></svg><img src="${target}"><script src="${target}"></script><iframe src="${target}"></iframe><script>fetch('${target}').catch(()=>{});try{new WebSocket('${target.replace('http:', 'ws:')}')}catch{}; window.open('${target}')</script></body></html>`
+  const { frames } = await renderHTML(html, launch)
+  assert.deepEqual(frames.map(frame => frame.at_ms), [0, 700, 1700, 2900])
+  assert.equal(hits, 0)
+  const hashes = frames.map(frame => createHash('sha256').update(frame.png_base64).digest('hex'))
+  assert.ok(new Set(hashes).size > 1, 'animation must advance between sampled frames')
+  for (const frame of frames) assert.ok(Buffer.from(frame.png_base64, 'base64').length > 1000)
+})

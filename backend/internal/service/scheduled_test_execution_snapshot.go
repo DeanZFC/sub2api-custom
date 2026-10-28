@@ -22,6 +22,20 @@ type scheduledTestExecutionTarget struct {
 type scheduledTestAccountProgress struct {
 	verdicts map[int64]string
 	stopped  bool
+	models   map[string]*scheduledTestAccountProgress
+}
+
+func (p *scheduledTestAccountProgress) forModel(model string) *scheduledTestAccountProgress {
+	if p == nil {
+		return nil
+	}
+	if p.models == nil {
+		p.models = make(map[string]*scheduledTestAccountProgress)
+	}
+	if p.models[model] == nil {
+		p.models[model] = &scheduledTestAccountProgress{}
+	}
+	return p.models[model]
 }
 
 func (p *scheduledTestAccountProgress) allowsNext(plan *ScheduledTestPlan, result *ScheduledTestResult) bool {
@@ -92,7 +106,7 @@ func scheduledTestResultSatisfies(plan *ScheduledTestPlan, result *ScheduledTest
 			return true
 		}
 		if rule := plan.ProtectionRule(plan.TestDefinitionID); rule == nil ||
-			(plan.Protection.UsesAllPass() && rule.Vote != nil && rule.Vote.Enabled) {
+			(plan.Protection.UsesAllPass() && rule.Vote != nil && rule.Vote.Enabled && !rule.UsesAutoReview()) {
 			if rule != nil && rule.HasDurationThreshold() {
 				verdict, _ := EvaluateScheduledTestDuration(*rule, result)
 				return verdict == "pass"
@@ -165,7 +179,7 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 			target := &scheduledTestExecutionTarget{plan: execution, prompt: prompt, kind: kind, maxOutputTokens: maxOutputTokens, accountID: id, err: definitionErr}
 			target.pending = &ScheduledTestResult{
 				PlanID: plan.ID, TestDefinitionID: execution.TestDefinitionID, TargetMode: plan.TargetMode,
-				AccountID: id, GroupID: plan.GroupID, ModelID: plan.ModelID, ReasoningEffort: execution.ReasoningEffort,
+				AccountID: id, GroupID: plan.GroupID, ModelID: execution.ModelID, ReasoningEffort: execution.ReasoningEffort,
 				OutputKind: kind, Status: "pending", StartedAt: started, FinishedAt: started,
 			}
 			if kind == "statistics" {
@@ -262,30 +276,33 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 				accountProgress = &scheduledTestAccountProgress{}
 				progress[accountID] = accountProgress
 			}
-			stopped := accountProgress.stopped
 			progressMu.Unlock()
-			if stopped {
-				for _, skipped := range queue {
-					s.skipExecutionTarget(skipped)
-				}
-				return
-			}
 			policy := scheduledTestQueuePolicy(queue)
 			if s.deferAccountQueue(ctx, queue, policy) {
 				return
 			}
 			var observations []*ScheduledTestResult
+			var observedTargets []*scheduledTestExecutionTarget
+			stopped := false
 			complete := false
 			defer func() {
-				s.recordAccountQueueBackoff(ctx, queue, policy, observations, accountProgress.stopped, complete)
+				s.recordAccountQueueBackoff(ctx, observedTargets, policy, observations, stopped, complete)
 			}()
 			dynamicChecked := false
 			for targetIndex, target := range queue {
+				progressMu.Lock()
+				modelProgress := accountProgress.forModel(target.plan.ModelID)
+				modelStopped := modelProgress.stopped
+				progressMu.Unlock()
+				if modelStopped {
+					s.skipExecutionTarget(target)
+					continue
+				}
 				if target.kind != "statistics" && !dynamicChecked {
 					dynamicChecked = true
 					localHealthy := true
 					for i, observation := range observations {
-						if !scheduledTestResultSatisfies(queue[i].plan, observation) {
+						if !scheduledTestResultSatisfies(observedTargets[i].plan, observation) {
 							localHealthy = false
 						}
 					}
@@ -295,6 +312,7 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 				}
 				result, ignoreGate := s.runExecutionTarget(ctx, target, started)
 				observations = append(observations, result)
+				observedTargets = append(observedTargets, target)
 				if QualityResultDeferred(result) {
 					for _, remaining := range queue[targetIndex+1:] {
 						s.failExecutionTarget(remaining, fmt.Errorf("检测跳过：本轮检测暂缓"))
@@ -310,14 +328,13 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 				progressMu.Lock()
 				continueQueue := true
 				if !ignoreGate {
-					continueQueue = accountProgress.allowsNext(target.plan, result)
+					continueQueue = modelProgress.allowsNext(target.plan, result)
 				}
 				progressMu.Unlock()
 				if !continueQueue {
-					for _, skipped := range queue[targetIndex+1:] {
-						s.skipExecutionTarget(skipped)
-					}
-					return
+					// A failed model stops only its own remaining checks. Other
+					// selected models still receive their scheduled observations.
+					stopped = true
 				}
 			}
 			complete = true
@@ -365,11 +382,11 @@ func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, tar
 	if target.accountID != nil {
 		id = *target.accountID
 	}
-	if !s.beginAccountRun(target.plan.ID, id, target.plan.TestDefinitionID) {
+	if !s.beginAccountRun(target.plan.ID, id, target.plan.TestDefinitionID, target.plan.ModelID) {
 		s.failExecutionTarget(target, fmt.Errorf("检测跳过：该账号的同类型检测正在执行"))
 		return nil, false
 	}
-	defer s.endAccountRun(target.plan.ID, id, target.plan.TestDefinitionID)
+	defer s.endAccountRun(target.plan.ID, id, target.plan.TestDefinitionID, target.plan.ModelID)
 	persistCtx, cancel := scheduledTestPersistenceContext()
 	if target.accountID != nil {
 		eligible, err := s.runAccountEligible(persistCtx, target.plan, target.pending, id)

@@ -435,7 +435,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	bindAccountTestPlatform(c, account)
-	if ctx.Value(qualityOperationsKey{}) != nil && (account.Status == "quality_paused" || account.ActivePassRateBlocked(modelID)) {
+	if ctx.Value(qualityOperationsKey{}) != nil && (account.Status == "quality_paused" || account.ActiveTestModelBlocked(modelID)) {
 		ctx = WithQualityRecoveryProbe(c.Request.Context())
 		c.Request = c.Request.WithContext(ctx)
 	}
@@ -981,6 +981,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
 	applyCodexFingerprintTestPayload(c, account, payload)
 	applyScheduledTestContentInstructions(ctx, payload, APIProtocolResponses)
+	applyAccountTestVisionInput(ctx, payload, false)
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -2288,6 +2289,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	}
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
 	applyScheduledTestContentInstructions(ctx, payload, APIProtocolChatCompletions)
+	applyAccountTestVisionInput(ctx, payload, true)
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})

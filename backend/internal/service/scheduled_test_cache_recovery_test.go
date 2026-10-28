@@ -20,7 +20,7 @@ func (r *cacheRecoveryRunnerRepo) AdvanceCacheRecovery(_ context.Context, now ti
 	return nil
 }
 
-func (r *cacheRecoveryRunnerRepo) CacheRecoveryWindowStart(context.Context, int64, int64, int64) (*time.Time, error) {
+func (r *cacheRecoveryRunnerRepo) CacheRecoveryWindowStart(context.Context, int64, int64, int64, string) (*time.Time, error) {
 	return r.windowStart, nil
 }
 
@@ -77,6 +77,9 @@ func TestScheduledTestCacheRecoveryValidation(t *testing.T) {
 		{"success rate only", func(r *ScheduledTestProtectionRule) { r.Thresholds[0].Metric = "success_rate" }, true},
 		{"first token only", func(r *ScheduledTestProtectionRule) {
 			r.Thresholds[0] = ScheduledTestThreshold{Metric: "avg_first_token_ms", Operator: "gt", Value: 1000}
+		}, true},
+		{"output speed only", func(r *ScheduledTestProtectionRule) {
+			r.Thresholds[0] = ScheduledTestThreshold{Metric: "output_tps", Operator: "lt", Value: 20}
 		}, true},
 		{"unreachable cache range", func(r *ScheduledTestProtectionRule) {
 			r.Thresholds = append(r.Thresholds, ScheduledTestThreshold{Metric: "cache_rate", Operator: "gt", Value: 84})
@@ -152,6 +155,7 @@ func TestScheduledTestStatisticsRecoveryUsesConfiguredMetricSamples(t *testing.T
 	success := ScheduledTestThreshold{Metric: "success_rate", Operator: "lt", Value: 90}
 	latency := ScheduledTestThreshold{Metric: "avg_first_token_ms", Operator: "gt", Value: 1000}
 	cache := ScheduledTestThreshold{Metric: "cache_rate", Operator: "lt", Value: 80}
+	tps := ScheduledTestThreshold{Metric: "output_tps", Operator: "lt", Value: 20}
 	for _, tc := range []struct {
 		name       string
 		thresholds []ScheduledTestThreshold
@@ -171,6 +175,11 @@ func TestScheduledTestStatisticsRecoveryUsesConfiguredMetricSamples(t *testing.T
 		{"success failure wins despite missing cache", []ScheduledTestThreshold{cache, success}, &ScheduledTestStatistics{TotalRequests: 10, SuccessRate: protectionFloat(.8)}, "fail"},
 		{"cache still requires its own samples", []ScheduledTestThreshold{cache, success}, &ScheduledTestStatistics{TotalRequests: 100, SuccessRate: protectionFloat(1), CacheSamples: 9, CacheInputTokens: 1000, CacheRate: protectionFloat(.95)}, "pending"},
 		{"cache upper bound uses its configured value", []ScheduledTestThreshold{{Metric: "cache_rate", Operator: "gt", Value: 95}}, &ScheduledTestStatistics{TotalRequests: 10, CacheSamples: 10, CacheInputTokens: 1000, CacheRate: protectionFloat(.9)}, "pass"},
+		{"too few output speed samples", []ScheduledTestThreshold{tps}, &ScheduledTestStatistics{TotalRequests: 100, TPSSamples: 9, OutputTPS: protectionFloat(40)}, "pending"},
+		{"unknown output speed", []ScheduledTestThreshold{tps}, &ScheduledTestStatistics{TotalRequests: 100, TPSSamples: 10}, "pending"},
+		{"output speed at boundary recovers", []ScheduledTestThreshold{tps}, &ScheduledTestStatistics{TotalRequests: 10, TPSSamples: 10, OutputTPS: protectionFloat(20)}, "pass"},
+		{"output speed below boundary keeps hold", []ScheduledTestThreshold{tps}, &ScheduledTestStatistics{TotalRequests: 10, TPSSamples: 10, OutputTPS: protectionFloat(19)}, "fail"},
+		{"other metrics cannot replace missing speed", []ScheduledTestThreshold{success, tps}, &ScheduledTestStatistics{TotalRequests: 100, SuccessRate: protectionFloat(1)}, "pending"},
 		{"no configured metrics cannot pass", nil, &ScheduledTestStatistics{TotalRequests: 10}, "pending"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

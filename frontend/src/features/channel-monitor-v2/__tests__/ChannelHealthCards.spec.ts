@@ -120,7 +120,7 @@ describe('channel health cards', () => {
     expect(slots[0].attributes('aria-label')).toBe('当前时间范围内暂无更多统计时段')
     expect(slots[3].attributes('aria-label')).toContain('该时段暂无统计数据')
     expect(slots[4].get('span').classes()).toContain('health-score10')
-    expect(slots[4].attributes('aria-label')).toContain('健康分 96\n成功率 96.0%\n首 Token AVG 9.0s · P50 8.0s · P95 12.0s\n缓存率 70.0%\n请求时长 -')
+    expect(slots[4].attributes('aria-label')).toContain('健康分 96\n成功率 96.0%\n首 Token AVG 9.0s · P50 8.0s · P95 12.0s\n输出 TPS —\n缓存率 70.0%\n请求时长 -')
     expect(slots[4].attributes('title')).toBeUndefined()
     for (const [healthMode, color] of [['ttft', 'health-score7'], ['cache', 'health-score3'], ['success', 'health-score10']] as const) {
       await wrapper.setProps({ healthMode })
@@ -136,7 +136,7 @@ describe('channel health cards', () => {
   })
 
   it('shows the latest actual request per card and complete hover metrics, preserving zero and missing values', async () => {
-    const latest = { ...request('success', 10), ttft_ms: 800, cache_rate: 0.8, duration_ms: 3500 }
+    const latest = { ...request('success', 10), ttft_ms: 800, output_tps: 37.5, cache_rate: 0.8, duration_ms: 3500 }
     const zero = { ...request('success', 1), ttft_ms: 0, cache_rate: 0, duration_ms: 0 }
     const failed = { ...request('error'), error_category: 'upstream_5xx' }
     const wrapper = mount(ChannelHealthCards, {
@@ -151,11 +151,11 @@ describe('channel health cards', () => {
     ])
     const slots = wrapper.get('[data-testid=recent-requests]').findAll('button[data-state]')
     expect(slots[19].attributes('aria-label')).toBe([
-      'gpt-test · 请求成功', `请求时间：${requestTime(latest.occurred_at)}`, '首字：800ms', '缓存率 80.0%', '总耗时：3.5s',
+      'gpt-test · 请求成功', `请求时间：${requestTime(latest.occurred_at)}`, '首字：800ms', '输出 TPS 37.5 token/s', '缓存率 80.0%', '总耗时：3.5s',
     ].join('\n'))
     expect(slots[19].attributes('title')).toBeUndefined()
-    expect(slots[18].attributes('aria-label')).toContain('首字：0ms\n缓存率 0.00%\n总耗时：0ms')
-    expect(slots[17].attributes('aria-label')).toContain('首字：-\n缓存率 -\n总耗时：-')
+    expect(slots[18].attributes('aria-label')).toContain('首字：0ms\n输出 TPS —\n缓存率 0.00%\n总耗时：0ms')
+    expect(slots[17].attributes('aria-label')).toContain('首字：-\n输出 TPS —\n缓存率 -\n总耗时：-')
     expect(slots[17].attributes('aria-label')).not.toContain('上游 5xx')
     expect(slots[0].attributes('aria-label')).toBe('当前时间范围内暂无更多请求')
     await wrapper.setProps({ rows: [{ ...row, recent_requests: [request('error', 20)] }] })

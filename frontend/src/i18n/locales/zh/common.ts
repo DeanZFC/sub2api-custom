@@ -221,7 +221,8 @@ export default {
   },
 
   tests: {
-    currentScheduling: '当前调度', schedulingActive: '参与调度', schedulingPaused: '暂停调度', failed: '未通过', skipped: '检测跳过',
+    currentScheduling: '账号调度', schedulingActive: '参与调度', schedulingPaused: '暂停调度', failed: '未通过', skipped: '检测跳过',
+    currentModelScheduling: '所选模型', modelSchedulingActive: '模型可调用', modelSchedulingPaused: '模型已暂停',
     expandPreview: '放大查看',
     adminReview: {
       details: '评审说明',

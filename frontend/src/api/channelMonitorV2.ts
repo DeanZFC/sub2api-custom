@@ -40,6 +40,8 @@ export interface MonitorMetric {
   token_count: number
   rpm: number
   tpm: number
+  output_tps?: number | null
+  tps_samples?: number
   error_rate: number
   cache_rate: number
   has_cache_samples?: boolean
@@ -177,6 +179,7 @@ export interface MonitorRecentRequest {
   model: string
   status: 'success' | 'slow' | 'error' | 'ignored'
   ttft_ms?: number
+  output_tps?: number | null
   duration_ms?: number
   cache_rate?: number
   /** Error categories and diagnostics are administrator-only. */

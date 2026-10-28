@@ -15,16 +15,17 @@ import (
 func prepareChannelQualitySchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.Exec(`ALTER TABLE accounts ADD COLUMN platform TEXT DEFAULT 'openai',ADD COLUMN overload_until TIMESTAMPTZ;
- CREATE TABLE scheduled_test_plans(id BIGINT PRIMARY KEY,name TEXT,model_id TEXT,enabled BOOLEAN,group_ids BIGINT[],excluded_account_ids BIGINT[] DEFAULT '{}',next_run_at TIMESTAMPTZ);
- ALTER TABLE scheduled_test_protection_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN completed BOOLEAN,ADD COLUMN result_id BIGINT,ADD COLUMN result_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN round_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN verdict TEXT;
- ALTER TABLE scheduled_test_combination_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();`)
+ CREATE TABLE scheduled_test_plans(id BIGINT PRIMARY KEY,name TEXT,model_id TEXT,enabled BOOLEAN,group_ids BIGINT[],excluded_account_ids BIGINT[] DEFAULT '{}',next_run_at TIMESTAMPTZ,model_ids TEXT[] DEFAULT '{}');
+ CREATE TABLE scheduled_test_definitions(id BIGINT PRIMARY KEY,output_kind TEXT);
+ ALTER TABLE scheduled_test_protection_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN completed BOOLEAN,ADD COLUMN result_id BIGINT,ADD COLUMN result_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN round_started_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN verdict TEXT,ADD COLUMN model_key TEXT NOT NULL DEFAULT '',ADD COLUMN test_definition_id BIGINT;
+ ALTER TABLE scheduled_test_combination_states ADD COLUMN plan_id BIGINT,ADD COLUMN reason TEXT,ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now(),ADD COLUMN model_key TEXT NOT NULL DEFAULT '',ADD COLUMN account_wide BOOLEAN NOT NULL DEFAULT false;`)
 	require.NoError(t, err)
 }
 
 func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
 	ctx, db, passive := passiveDB(t)
 	prepareChannelQualitySchema(t, db)
-	_, err := db.Exec(`INSERT INTO scheduled_test_plans VALUES(1,'Capability','model',true,ARRAY[8]::bigint[],'{}',now());
+	_, err := db.Exec(`INSERT INTO scheduled_test_plans(id,name,model_id,enabled,group_ids,excluded_account_ids,next_run_at) VALUES(1,'Capability','model',true,ARRAY[8]::bigint[],'{}',now());
  INSERT INTO scheduled_test_protection_states(plan_id,account_id,reason,blocked,completed,result_id,verdict) VALUES(1,62,'Passed',false,true,5,'pass');
  UPDATE accounts SET status='quality_paused',schedulable=false WHERE id=63;`)
 	require.NoError(t, err)
@@ -137,7 +138,7 @@ func TestChannelQualityOverviewPassRateModelScopeAndStaleHolds(t *testing.T) {
 	prepareChannelQualitySchema(t, db)
 	// A disabled plan may retain an independent capability hold. Changing the
 	// plan's current model must not make its old-model hold disappear.
-	_, err := db.Exec(`INSERT INTO scheduled_test_plans VALUES(1,'Capability','new-model',false,ARRAY[8]::bigint[],'{}',now())`)
+	_, err := db.Exec(`INSERT INTO scheduled_test_plans(id,name,model_id,enabled,group_ids,excluded_account_ids,next_run_at) VALUES(1,'Capability','new-model',false,ARRAY[8]::bigint[],'{}',now())`)
 	require.NoError(t, err)
 	config := service.ScheduledTestPassRateConfig{Enabled: true, WindowSize: 2, WindowSeconds: 3600, PauseBelow: 80, RecoverAtLeast: 90, RecoverConsecutive: 2}
 	now := time.Now()
@@ -179,4 +180,110 @@ func TestChannelQualityOverviewPassRateModelScopeAndStaleHolds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "insufficient", page.Items[0].Controls[0].Phase)
 	require.False(t, page.Items[0].Controls[0].Blocking)
+}
+
+func TestChannelQualityOverviewActiveModelsRemainIndependent(t *testing.T) {
+	ctx, db, _ := passiveDB(t)
+	prepareChannelQualitySchema(t, db)
+	_, err := db.Exec(`INSERT INTO scheduled_test_plans(id,name,model_id,model_ids,enabled,group_ids,next_run_at)
+ VALUES(1,'Capability','A',ARRAY['A','B'],true,ARRAY[8]::bigint[],now());
+ INSERT INTO scheduled_test_definitions VALUES(7,'number');`)
+	require.NoError(t, err)
+	r := NewChannelQualityRepository(db)
+	page, err := r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "B"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1, "a selected non-primary model is discoverable before its first result")
+	require.Empty(t, page.Items[0].Controls)
+	_, err = db.Exec(`INSERT INTO scheduled_test_protection_states(plan_id,account_id,test_definition_id,model_key,reason,blocked,completed,result_id,verdict)
+ VALUES(1,62,7,'A','Passed',false,true,5,'pass'),(1,62,7,'B','Wrong answer',true,true,6,'fail')`)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "B", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Len(t, page.Items[0].Controls, 1)
+	c := page.Items[0].Controls[0]
+	require.Equal(t, "B", c.Model)
+	require.Equal(t, "model", c.Scope)
+	require.Equal(t, "paused", c.Phase)
+	require.True(t, c.Blocking)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "A", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Empty(t, page.Items, "model B's hold must not mark model A as a problem")
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "A"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Len(t, page.Items[0].Controls, 1)
+	require.Equal(t, "A", page.Items[0].Controls[0].Model)
+	require.Equal(t, "healthy", page.Items[0].Controls[0].Phase)
+	// Unenforced failures still belong only to their own model.
+	_, err = db.Exec(`UPDATE scheduled_test_protection_states SET blocked=false WHERE model_key='B'`)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "B", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "observed", page.Items[0].Controls[0].Phase)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "A", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
+	// Retained holds remain visible under the result's original model after a
+	// plan is disabled or its current selection changes.
+	_, err = db.Exec(`UPDATE scheduled_test_plans SET enabled=false,model_id='C',model_ids=ARRAY['C'];
+ UPDATE scheduled_test_protection_states SET blocked=true WHERE model_key='B'`)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "B", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Len(t, page.Items[0].Controls, 1)
+	require.Equal(t, "B", page.Items[0].Controls[0].Model)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "C", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
+}
+
+func TestChannelQualityOverviewCombinationAndStatisticsScopes(t *testing.T) {
+	ctx, db, _ := passiveDB(t)
+	prepareChannelQualitySchema(t, db)
+	_, err := db.Exec(`INSERT INTO scheduled_test_plans(id,name,model_id,model_ids,enabled,group_ids,next_run_at)
+ VALUES(1,'Combined','A',ARRAY['A','B'],true,ARRAY[8]::bigint[],now());
+ INSERT INTO scheduled_test_definitions VALUES(7,'statistics');
+ INSERT INTO scheduled_test_combination_states(plan_id,account_id,model_key,reason,blocked)
+ VALUES(1,62,'B','Combined failure',true)`)
+	require.NoError(t, err)
+	r := NewChannelQualityRepository(db)
+	page, err := r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "B", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Len(t, page.Items[0].Controls, 1)
+	c := page.Items[0].Controls[0]
+	require.Equal(t, "B", c.Model)
+	require.Equal(t, "model", c.Scope)
+	require.True(t, c.Blocking)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "A", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
+	// Statistics-driven combinations protect the whole account, including a
+	// model outside the plan's selected evidence models.
+	_, err = db.Exec(`UPDATE scheduled_test_combination_states SET account_wide=true;
+ UPDATE scheduled_test_plans SET enabled=false`)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "C", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Len(t, page.Items[0].Controls, 1)
+	c = page.Items[0].Controls[0]
+	require.Equal(t, "B", c.Model)
+	require.Equal(t, "account", c.Scope)
+	require.True(t, c.Blocking)
+	_, err = db.Exec(`DELETE FROM scheduled_test_combination_states;
+ INSERT INTO scheduled_test_protection_states(plan_id,account_id,test_definition_id,model_key,reason,blocked,completed,result_id,verdict)
+ VALUES(1,62,7,'B','Low cache rate',true,true,8,'fail')`)
+	require.NoError(t, err)
+	page, err = r.ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "C", ProblemsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Len(t, page.Items[0].Controls, 1)
+	c = page.Items[0].Controls[0]
+	require.Equal(t, "B", c.Model)
+	require.Equal(t, "account", c.Scope)
+	require.True(t, c.Blocking)
 }

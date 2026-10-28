@@ -46,7 +46,9 @@ func passiveGroupTargetSamples(ctx context.Context, tx *sql.Tx, p service.Passiv
  CASE WHEN (ul.cache_read_tokens>0 OR cr.cache_reported) AND NOT COALESCE(ul.native_compaction_v2,false)
  AND COALESCE(ul.inbound_endpoint,'') NOT LIKE '%/compact%' AND COALESCE(ul.upstream_endpoint,'') NOT LIKE '%/compact%'
  THEN GREATEST(ul.input_tokens-ul.image_input_tokens,0)::bigint+GREATEST(ul.cache_creation_tokens,0)+GREATEST(ul.cache_read_tokens,0) ELSE 0 END AS cache_input,
- GREATEST(ul.cache_read_tokens,0)::bigint AS cache_read,COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model) AS model
+ GREATEST(ul.cache_read_tokens,0)::bigint AS cache_read,COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model) AS model,
+ CASE WHEN `+outputTPSEligibleSQL("ul")+` THEN ul.output_tokens ELSE 0 END AS tps_output,
+ CASE WHEN `+outputTPSEligibleSQL("ul")+` THEN (ul.duration_ms::float8-ul.first_token_ms::float8) ELSE 0 END AS tps_ms
  FROM usage_logs ul LEFT JOIN passive_quality_cache_reports cr ON cr.account_id=ul.account_id AND cr.request_key=ul.request_id
  WHERE ul.account_id=$1 AND ul.group_id=$7 AND ($2='' OR COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model)=$2)
  AND ul.created_at>=$3 AND ul.created_at<=$4 AND ul.duration_ms IS NOT NULL
@@ -57,10 +59,10 @@ func passiveGroupTargetSamples(ctx context.Context, tx *sql.Tx, p service.Passiv
  AND NOT EXISTS(SELECT 1 FROM passive_quality_failures f WHERE f.account_id=$1 AND NOT f.non_text AND f.request_key=COALESCE(NULLIF(cr.attempt_key,''),ul.request_id))
  ORDER BY ul.created_at DESC,ul.id DESC LIMIT $6
  ), outcomes AS (
- SELECT DISTINCT ON (COALESCE(NULLIF(request_id,''),'usage:'||id)) COALESCE(NULLIF(request_id,''),'usage:'||id) AS key,created_at,false AS failed,first_token_ms::float8,cache_input,cache_read,model
+ SELECT DISTINCT ON (COALESCE(NULLIF(request_id,''),'usage:'||id)) COALESCE(NULLIF(request_id,''),'usage:'||id) AS key,created_at,false AS failed,first_token_ms::float8,cache_input,cache_read,model,tps_output,tps_ms
  FROM succeeded ORDER BY COALESCE(NULLIF(request_id,''),'usage:'||id),created_at DESC
- ) SELECT key,created_at,failed,first_token_ms,cache_input,cache_read,COALESCE(model,'') FROM (
- SELECT * FROM outcomes UNION ALL SELECT request_key,created_at,true,NULL::float8,0,0,model FROM failed
+ ) SELECT key,created_at,failed,first_token_ms,cache_input,cache_read,COALESCE(model,''),tps_output,tps_ms FROM (
+ SELECT * FROM outcomes UNION ALL SELECT request_key,created_at,true,NULL::float8,0,0,model,0,0 FROM failed
  ) combined ORDER BY created_at DESC,key DESC LIMIT $6`, s.AccountID, p.Model, from, now, started, p.MaxSamples, p.GroupIDs[0])
 	if err != nil {
 		return service.PassiveQualityEvidence{}, err
@@ -68,7 +70,7 @@ func passiveGroupTargetSamples(ctx context.Context, tx *sql.Tx, p service.Passiv
 	samples := []service.PassiveQualitySample{}
 	for rows.Next() {
 		var v service.PassiveQualitySample
-		if err = rows.Scan(&v.Key, &v.At, &v.Failed, &v.TTFT, &v.CacheInput, &v.CacheRead, &v.Model); err != nil {
+		if err = rows.Scan(&v.Key, &v.At, &v.Failed, &v.TTFT, &v.CacheInput, &v.CacheRead, &v.Model, &v.OutputTokens, &v.GenerationMS); err != nil {
 			_ = rows.Close()
 			return service.PassiveQualityEvidence{}, err
 		}

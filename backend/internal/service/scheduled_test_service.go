@@ -119,14 +119,15 @@ func validateScheduledTestPlan(plan *ScheduledTestPlan) error {
 	if len(plan.TestDefinitionIDs) == 0 {
 		return fmt.Errorf("test_definition_ids requires at least one test")
 	}
-	plan.ModelID = strings.TrimSpace(plan.ModelID)
-	if plan.ModelID == "" {
-		return fmt.Errorf("model_id is required")
+	if err := normalizeScheduledTestModelIDs(plan); err != nil {
+		return err
 	}
 	plan.ReasoningEffort = strings.ToLower(strings.TrimSpace(plan.ReasoningEffort))
 	if plan.ReasoningEffort != "" {
-		if !scheduledTestReasoningEffortAllowed(plan.ModelID, plan.ReasoningEffort) {
-			return fmt.Errorf("reasoning_effort %q is not supported by model %q", plan.ReasoningEffort, plan.ModelID)
+		for _, model := range plan.ModelIDs {
+			if !scheduledTestReasoningEffortAllowed(model, plan.ReasoningEffort) {
+				return fmt.Errorf("reasoning_effort %q is not supported by model %q", plan.ReasoningEffort, model)
+			}
 		}
 	}
 	plan.CronExpression = strings.TrimSpace(plan.CronExpression)
@@ -428,9 +429,8 @@ func (s *ScheduledTestService) DeletePlan(ctx context.Context, id int64) error {
 	return s.planRepo.Delete(ctx, id)
 }
 
-// ListResults returns recent results per account and configured test type.
-// The limit applies independently to each account/type series, rather than to
-// the plan. Model and reasoning effort are execution details of that row.
+// ListResults returns recent results per account, test, model and reasoning effort.
+// The limit applies independently to each series, rather than to the plan.
 func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, limit int) ([]*ScheduledTestResult, error) {
 	if limit <= 0 {
 		limit = 50
@@ -496,6 +496,11 @@ func normalizePublicTestResults(results []*ScheduledTestResult) {
 		if result != nil {
 			result.ErrorMessage = ""
 			result.ProtectionDecision = nil
+			if result.ExecutionInfo != nil && result.ExecutionInfo.AutoReview != nil {
+				publicInfo := *result.ExecutionInfo
+				publicInfo.AutoReview = nil
+				result.ExecutionInfo = &publicInfo
+			}
 			// Transport success alone is not a quality pass. Only publish the
 			// saved verdict, and never report a failed execution as passing.
 			switch result.QualityVerdict {

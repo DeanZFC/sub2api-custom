@@ -73,8 +73,12 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 		"262_scheduled_test_execution_snapshot.sql",
 		"281_scheduled_test_membership_revocation.sql", "291_passive_quality.sql", "303_passive_quality_model_states.sql",
 		"264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql", "282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql",
+		"284_scheduled_test_output_tokens.sql",
+		"294_quality_operations.sql",
 		"309_quality_recovery_budget_evidence.sql",
 		"312_scheduled_test_pass_rate.sql",
+		"314_scheduled_test_auto_review.sql",
+		"315_scheduled_test_multi_model.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -108,6 +112,30 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 	t.Run("pelican duration limits coexist with review", func(t *testing.T) {
 		reset(t)
 		testScheduledTestPelicanDuration(t, ctx, db, plans, repo)
+	})
+	t.Run("multiple models keep independent protection and shared conservative routing", func(t *testing.T) {
+		for _, mode := range []string{"", "all_pass", "combined"} {
+			t.Run("mode="+mode, func(t *testing.T) {
+				reset(t)
+				testScheduledTestMultiModelProtection(t, ctx, db, plans, repo, candyID, pelicanID, mode)
+			})
+		}
+	})
+	t.Run("multiple models keep statistics account protection independent", func(t *testing.T) {
+		reset(t)
+		testScheduledTestMultiModelStatisticsProtection(t, ctx, db, plans, repo, candyID)
+	})
+	t.Run("multiple models keep administrator reviews and pass rate isolated", func(t *testing.T) {
+		reset(t)
+		testScheduledTestMultiModelAdministratorReview(t, ctx, db, plans, repo, pelicanID)
+	})
+	t.Run("multiple models do not combine expression leaves", func(t *testing.T) {
+		reset(t)
+		testScheduledTestMultiModelCombinationEvidence(t, ctx, db, plans, repo, candyID, pelicanID)
+	})
+	t.Run("all pass automatic visual review", func(t *testing.T) {
+		reset(t)
+		testScheduledTestAllPassAutomaticReview(t, ctx, db, plans, repo)
 	})
 	t.Run("all pass custom actions", func(t *testing.T) {
 		reset(t)

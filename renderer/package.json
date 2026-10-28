@@ -1,0 +1,14 @@
+{
+  "name": "sub2api-quality-renderer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test server.test.mjs",
+    "test:integration": "node --test integration.test.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.56.1"
+  }
+}

@@ -110,8 +110,56 @@ CREATE TABLE ops_error_logs (
 		require.Nil(t, result.SuccessRate)
 		require.Nil(t, result.CacheRate)
 		require.Nil(t, result.AvgFirstTokenMs)
+		require.Nil(t, result.OutputTPS)
+		require.Zero(t, result.TPSSamples)
 		require.Equal(t, filter.WindowStart, result.WindowStart)
 		require.Equal(t, filter.WindowEnd, result.WindowEnd)
+	})
+	t.Run("output speed weights generation time and excludes invalid or non-text observations", func(t *testing.T) {
+		reset()
+		// 100 tokens in 1 second and 100 tokens in 9 seconds => 20 tokens/s,
+		// not the unweighted mean of their per-request speeds.
+		usage(map[string]any{"request_id": "fast", "output_tokens": 100, "image_input_tokens": 20, "first_token_ms": 500, "duration_ms": 1500})
+		usage(map[string]any{"request_id": "slow", "output_tokens": 100, "first_token_ms": 500, "duration_ms": 9500})
+		for i, overrides := range []map[string]any{
+			{"first_token_ms": nil}, {"duration_ms": nil}, {"first_token_ms": -1},
+			{"duration_ms": 500}, {"duration_ms": 499}, {"output_tokens": 0},
+			{"request_type": 1, "stream": false}, {"request_type": 4}, {"request_type": 6},
+			{"image_output_tokens": 1}, {"image_count": 1}, {"video_count": 1},
+			{"inbound_endpoint": "/v1/audio/speech"}, {"upstream_endpoint": "/v1/videos"},
+			{"native_compaction_v2": true}, {"inbound_endpoint": "/v1/responses/compact"},
+			{"upstream_endpoint": "/v1/responses/compact"},
+			{"requested_model": "another-model"}, {"group_id": 9}, {"created_at": end},
+		} {
+			row := map[string]any{"request_id": fmt.Sprintf("excluded-speed-%d", i), "input_tokens": 1, "output_tokens": 10000, "first_token_ms": 500, "duration_ms": 1500}
+			for key, value := range overrides {
+				row[key] = value
+			}
+			usage(row)
+		}
+		usage(map[string]any{"request_id": "local:failed-speed", "output_tokens": 10000, "first_token_ms": 500, "duration_ms": 1500})
+		failure(map[string]any{"request_id": "failed-speed"})
+		result := collect(filter)
+		require.EqualValues(t, 2, result.TPSSamples)
+		require.NotNil(t, result.OutputTPS)
+		require.InDelta(t, 20, *result.OutputTPS, .000001)
+	})
+	t.Run("legacy streaming and websocket speeds retain valid generation timing", func(t *testing.T) {
+		reset()
+		usage(map[string]any{"request_id": "legacy-speed", "request_type": 0, "stream": true, "output_tokens": 30, "first_token_ms": 0, "duration_ms": 1000})
+		usage(map[string]any{"request_id": "ws-speed", "request_type": 3, "stream": false, "openai_ws_mode": true, "output_tokens": 90, "first_token_ms": 1000, "duration_ms": 4000})
+		result := collect(filter)
+		require.EqualValues(t, 2, result.TPSSamples)
+		require.NotNil(t, result.OutputTPS)
+		require.InDelta(t, 30, *result.OutputTPS, .000001)
+	})
+	t.Run("successful requests without timing retain unknown output speed", func(t *testing.T) {
+		reset()
+		usage(map[string]any{"output_tokens": 100, "duration_ms": 1000})
+		result := collect(filter)
+		require.EqualValues(t, 1, result.SuccessRequests)
+		require.Zero(t, result.TPSSamples)
+		require.Nil(t, result.OutputTPS)
 	})
 	t.Run("synchronous traffic affects success but not cache samples", func(t *testing.T) {
 		reset()

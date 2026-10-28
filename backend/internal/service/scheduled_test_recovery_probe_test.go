@@ -28,6 +28,7 @@ func TestScheduledTestStatisticsRecoveryProbe(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, wantProbe, wantVerdict                                string
 		needed, disabled, cancelled, timeout, queryError, measuredFailure bool
+		outputSpeed                                                       bool
 	}{
 		{name: "paused account with no usage recovers", needed: true, body: `{"status":"completed","usage":{"input_tokens":8,"output_tokens":2},"output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}`, wantProbe: "success", wantVerdict: "pass"},
 		{name: "failed probe still records usage", needed: true, body: "data: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"message\":\"failed\"},\"usage\":{\"input_tokens\":8,\"output_tokens\":2}}\n\n", wantProbe: "failed", wantVerdict: "fail"},
@@ -37,12 +38,16 @@ func TestScheduledTestStatisticsRecoveryProbe(t *testing.T) {
 		{name: "disabled recovery does not probe", needed: true, disabled: true, wantVerdict: "pending"},
 		{name: "lookup failure does not recover", needed: true, queryError: true, wantVerdict: "pending"},
 		{name: "known recovery failure does not probe", needed: true, measuredFailure: true, wantVerdict: "pending"},
+		{name: "output speed requires real timed streams instead of a connectivity probe", needed: true, outputSpeed: true, wantVerdict: "pending"},
 		{name: "probe deadline retains pause", needed: true, timeout: true, body: `{}`, wantProbe: "failed", wantVerdict: "fail"},
 		{name: "shutdown is not a failed probe", needed: true, cancelled: true, body: `{}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			plan := protectionPlan()
 			plan.Protection.Rules[0] = cacheRecoveryRule()
+			if tc.outputSpeed {
+				plan.Protection.Rules[0].Thresholds = []ScheduledTestThreshold{{Metric: "output_tps", Operator: "lt", Value: 20}}
+			}
 			if tc.disabled {
 				plan.Protection.Rules[0].Recovery.Enabled = false
 			}
@@ -127,4 +132,20 @@ func TestScheduledTestRecoveryProbeCannotWaiveMeasuredFailures(t *testing.T) {
 	result.OutputStatistics.RecoveryProbe.StartedAt = now.Add(-time.Second)
 	_, _, accepted = EvaluateScheduledTestRecoveryProbe(rule, result)
 	require.False(t, accepted, "an older probe cannot be reused for a new statistics execution")
+}
+
+func TestScheduledTestRecoveryProbeCannotReplaceMissingOutputSpeed(t *testing.T) {
+	rule := cacheRecoveryRule()
+	rule.Thresholds = []ScheduledTestThreshold{{Metric: "output_tps", Operator: "lt", Value: 20}}
+	now := time.Now()
+	result := &ScheduledTestResult{Status: "success", OutputKind: "statistics", StartedAt: now, FinishedAt: now.Add(time.Second),
+		OutputStatistics: &ScheduledTestStatistics{TotalRequests: 100,
+			RecoveryProbe: &ScheduledTestRecoveryProbe{Status: "success", StartedAt: now, FinishedAt: now.Add(time.Second)}}}
+	_, _, accepted := EvaluateScheduledTestRecoveryProbe(rule, result)
+	require.False(t, accepted, "a successful connectivity probe must not clear a speed-based pause")
+	verdict, _ := EvaluateScheduledTestCacheRecovery(rule, result.OutputStatistics)
+	require.Equal(t, "pending", verdict)
+	result.OutputStatistics.TPSSamples, result.OutputStatistics.OutputTPS = 10, protectionFloat(20)
+	verdict, _ = EvaluateScheduledTestCacheRecovery(rule, result.OutputStatistics)
+	require.Equal(t, "pass", verdict, "enough real timed streams can recover the speed rule")
 }

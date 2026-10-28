@@ -92,22 +92,26 @@ type ChannelMonitorV2Filter struct {
 }
 
 type ChannelMonitorV2Metric struct {
-	SuccessRequests      int64   `json:"success_requests"`
-	ErrorRequests        int64   `json:"error_requests"`
-	RequestCount         int64   `json:"request_count"`
-	InputTokens          int64   `json:"input_tokens"`
-	OutputTokens         int64   `json:"output_tokens"`
-	CacheCreationTokens  int64   `json:"cache_creation_tokens"`
-	CacheReadTokens      int64   `json:"cache_read_tokens"`
-	TokenCount           int64   `json:"token_count"`
-	RPM                  float64 `json:"rpm"`
-	TPM                  float64 `json:"tpm"`
-	ErrorRate            float64 `json:"error_rate"`
-	SuccessRate          float64 `json:"success_rate"`
-	CacheRate            float64 `json:"cache_rate"`
-	HasCacheSamples      bool    `json:"has_cache_samples"`
-	CacheRateNumerator   int64   `json:"cache_rate_numerator"`
-	CacheRateDenominator int64   `json:"cache_rate_denominator"`
+	// OutputTPS measures generated output tokens per second after the first token.
+	// It is independent of fleet throughput (TPM) and is nil without valid samples.
+	OutputTPS            *float64 `json:"output_tps"`
+	TPSSamples           int64    `json:"tps_samples"`
+	SuccessRequests      int64    `json:"success_requests"`
+	ErrorRequests        int64    `json:"error_requests"`
+	RequestCount         int64    `json:"request_count"`
+	InputTokens          int64    `json:"input_tokens"`
+	OutputTokens         int64    `json:"output_tokens"`
+	CacheCreationTokens  int64    `json:"cache_creation_tokens"`
+	CacheReadTokens      int64    `json:"cache_read_tokens"`
+	TokenCount           int64    `json:"token_count"`
+	RPM                  float64  `json:"rpm"`
+	TPM                  float64  `json:"tpm"`
+	ErrorRate            float64  `json:"error_rate"`
+	SuccessRate          float64  `json:"success_rate"`
+	CacheRate            float64  `json:"cache_rate"`
+	HasCacheSamples      bool     `json:"has_cache_samples"`
+	CacheRateNumerator   int64    `json:"cache_rate_numerator"`
+	CacheRateDenominator int64    `json:"cache_rate_denominator"`
 	// CacheEligibleInputTokens retains the legacy streaming/WS subset for API
 	// compatibility; cache rate uses InputTokens and all cache token totals.
 	CacheEligibleInputTokens int64                   `json:"cache_eligible_input_tokens,omitempty"`
@@ -264,6 +268,7 @@ type ChannelMonitorV2MatrixRow struct {
 
 // ChannelMonitorV2RecentRequest exposes diagnostics only to administrators.
 type ChannelMonitorV2RecentRequest struct {
+	OutputTPS     *float64                     `json:"output_tps"`
 	OccurredAt    time.Time                    `json:"occurred_at"`
 	Model         string                       `json:"model"`
 	Status        string                       `json:"status"`
@@ -677,6 +682,7 @@ func redactChannelMonitorV2Metric(m *ChannelMonitorV2Metric, hideThroughput bool
 	// Latency sample_count is also a volume signal.
 	m.TTFT.SampleCount = 0
 	m.Duration.SampleCount = 0
+	m.TPSSamples = 0
 	m.UpstreamAffectedRequests = nil
 	m.UpstreamAttemptCount = nil
 	if hideThroughput {

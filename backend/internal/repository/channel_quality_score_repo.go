@@ -206,7 +206,9 @@ func queryChannelQualityScoresUncached(ctx context.Context, db *sql.DB, accountI
  ) f
  ), succeeded AS (
  SELECT DISTINCT ON (ul.account_id,COALESCE(NULLIF(cr.attempt_key,''),NULLIF(ul.request_id,''),'usage:'||ul.id))
- ul.*,COALESCE(NULLIF(cr.attempt_key,''),NULLIF(ul.request_id,''),'usage:'||ul.id) AS outcome_key,
+ ul.*,CASE WHEN `+outputTPSEligibleSQL("ul")+` THEN ul.output_tokens ELSE 0 END AS tps_output,
+ CASE WHEN `+outputTPSEligibleSQL("ul")+` THEN ul.duration_ms::float8-ul.first_token_ms::float8 ELSE 0 END AS tps_ms,
+ COALESCE(NULLIF(cr.attempt_key,''),NULLIF(ul.request_id,''),'usage:'||ul.id) AS outcome_key,
  COALESCE(cr.cache_reported,false) OR ul.cache_read_tokens>0 AS cache_reported,cr.cache_metadata,
  CASE WHEN `+channelMonitorV2CacheEligibleUL+` AND (ul.cache_read_tokens>0 OR cr.cache_reported)
  AND NOT COALESCE(ul.native_compaction_v2,false)
@@ -223,12 +225,12 @@ func queryChannelQualityScoresUncached(ctx context.Context, db *sql.DB, accountI
  SELECT account_id,outcome_key AS key,created_at,false AS failed,
  COALESCE(NULLIF(TRIM(requested_model),''),model) AS model,
  CASE WHEN stream OR openai_ws_mode THEN first_token_ms END::float8 AS ttft,duration_ms::float8 AS duration,
- cache_reported,cache_metadata,cache_input,GREATEST(cache_read_tokens,0)::bigint AS cache_read FROM succeeded
- UNION ALL SELECT account_id,request_key,created_at,true,model,NULL::float8,NULL::float8,false,NULL::jsonb,0,0 FROM failed
+ cache_reported,cache_metadata,cache_input,GREATEST(cache_read_tokens,0)::bigint AS cache_read,tps_output,tps_ms FROM succeeded
+ UNION ALL SELECT account_id,request_key,created_at,true,model,NULL::float8,NULL::float8,false,NULL::jsonb,0,0,0,0 FROM failed
  ), ranked AS (SELECT *,row_number() OVER(PARTITION BY account_id ORDER BY created_at DESC,key DESC) AS n FROM outcomes),
  selected AS MATERIALIZED (SELECT * FROM ranked WHERE n<=$5)
  SELECT ul.account_id,ul.key,ul.created_at,ul.failed,COALESCE(ul.model,''),ul.ttft,ul.duration,
- ul.cache_reported,ul.cache_input,ul.cache_read,
+ ul.cache_reported,ul.cache_input,ul.cache_read,ul.tps_output,ul.tps_ms,
  CASE WHEN COALESCE(ul.cache_metadata->>'version','')='1'
  AND COALESCE(ul.cache_metadata->>'session_hash','')<>'' AND COALESCE(ul.cache_metadata->>'prompt_hash','')<>''
  AND COALESCE(ul.cache_metadata->>'unsupported_reason','')='' AND ul.cache_metadata->>'wire_verified'='true'
@@ -279,7 +281,7 @@ func queryChannelQualityScoresUncached(ctx context.Context, db *sql.DB, accountI
 		var id int64
 		var v service.ChannelQualityScoreObservation
 		var budget bool
-		if err = rows.Scan(&id, &v.Key, &v.At, &v.Failed, &v.Model, &v.TTFT, &v.Duration, &v.CacheReported, &v.CacheInput, &v.CacheRead, &v.CacheReusable, &v.CacheExpectedTokens, &budget); err != nil {
+		if err = rows.Scan(&id, &v.Key, &v.At, &v.Failed, &v.Model, &v.TTFT, &v.Duration, &v.CacheReported, &v.CacheInput, &v.CacheRead, &v.OutputTokens, &v.GenerationMS, &v.CacheReusable, &v.CacheExpectedTokens, &budget); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}

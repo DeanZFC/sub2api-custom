@@ -31,6 +31,8 @@ type GroupQualityTargetSummary struct {
 	FailureUnknownSamples int64                        `json:"failure_unknown_samples"`
 	TTFTP90MS             *float64                     `json:"ttft_p90_ms"`
 	TTFTSamples           int64                        `json:"ttft_samples"`
+	OutputTPS             *float64                     `json:"output_tps"`
+	TPSSamples            int64                        `json:"tps_samples"`
 	TelemetryComplete     bool                         `json:"telemetry_complete"`
 	GeneratedAt           time.Time                    `json:"generated_at"`
 }
@@ -71,4 +73,6 @@ type GroupQualityContributor struct {
 	TTFTSamples         int64    `json:"ttft_samples"`
 	SlowRequests        int64    `json:"slow_requests"`
 	TTFTP90MS           *float64 `json:"ttft_p90_ms"`
+	OutputTPS           *float64 `json:"output_tps"`
+	TPSSamples          int64    `json:"tps_samples"`
 }

@@ -193,11 +193,11 @@
         </div>
       </section>
 
-      <!-- Overview KPI: success · TTFT · tokens/s(optional) · cache · (+ RPM when throughput visible) -->
+      <!-- Overview KPI: success · TTFT · output TPS · cache · optional aggregate throughput -->
       <section
         v-if="snapshot"
         class="grid grid-cols-2 gap-3 sm:grid-cols-3"
-        :class="showThroughput ? 'xl:grid-cols-5' : 'xl:grid-cols-4'"
+        :class="showThroughput ? 'xl:grid-cols-6' : 'xl:grid-cols-4'"
         :aria-label="t('channelMonitorV2.summaryAria')"
       >
         <MetricCell
@@ -212,6 +212,12 @@
           :detail="latencyKpiSecondary(snapshot.metrics.ttft)"
           :title="latencyDetail(snapshot.metrics.ttft)"
           :state="ttftCellState(snapshot.health.ttft, snapshot.metrics.ttft)"
+        />
+        <MetricCell
+          :label="t('channelMonitorV2.metrics.outputTps')"
+          :value="formatMonitorOutputTps(snapshot.metrics.output_tps)"
+          :detail="t('channelMonitorV2.metrics.outputTpsDetail')"
+          data-output-tps
         />
         <MetricCell
           v-if="showThroughput"
@@ -237,11 +243,11 @@
       <section
         v-else-if="loading"
         class="grid grid-cols-2 gap-3 sm:grid-cols-3"
-        :class="showThroughput ? 'xl:grid-cols-5' : 'xl:grid-cols-4'"
+        :class="showThroughput ? 'xl:grid-cols-6' : 'xl:grid-cols-4'"
         aria-hidden="true"
       >
         <div
-          v-for="i in (showThroughput ? 5 : 4)"
+          v-for="i in (showThroughput ? 6 : 4)"
           :key="i"
           class="h-24 animate-pulse rounded-2xl bg-gray-50 dark:bg-dark-900/30"
         />
@@ -298,6 +304,7 @@
                   <th>{{ t('channelMonitorV2.table.platformModel') }}</th>
                   <th>{{ t('channelMonitorV2.metrics.successRate') }}</th>
                   <th>{{ t('channelMonitorV2.metrics.ttftP50') }}</th>
+                  <th :title="t('channelMonitorV2.metrics.outputTpsDetail')">{{ t('channelMonitorV2.metrics.outputTps') }}</th>
                   <th v-if="showThroughput">{{ t('channelMonitorV2.metrics.tps') }}</th>
                   <th>{{ t('channelMonitorV2.metrics.cacheRate') }}</th>
                   <th v-if="showThroughput">{{ t('channelMonitorV2.metrics.rpm') }}</th>
@@ -329,6 +336,7 @@
                     <span class="block">{{ formatMs(row.metrics.ttft.p50_ms) }}</span>
                     <small class="text-xs text-gray-400">{{ latencyDetail(row.metrics.ttft) }}</small>
                   </td>
+                  <td data-output-tps>{{ formatMonitorOutputTps(row.metrics.output_tps) }}</td>
                   <td v-if="showThroughput" :title="exactTps(row.metrics.tpm)">{{ formatTps(row.metrics.tpm) }}</td>
                   <td>{{ formatMonitorCacheRate(row.metrics) }}</td>
                   <td v-if="showThroughput">{{ formatRate(row.metrics.rpm) }}</td>
@@ -396,6 +404,7 @@
                   <th>{{ t('channelMonitorV2.table.user') }}</th>
                   <th>{{ t('channelMonitorV2.metrics.successRate') }}</th>
                   <th>{{ t('channelMonitorV2.metrics.ttftP50') }}</th>
+                  <th :title="t('channelMonitorV2.metrics.outputTpsDetail')">{{ t('channelMonitorV2.metrics.outputTps') }}</th>
                   <th v-if="showThroughput">{{ t('channelMonitorV2.metrics.tps') }}</th>
                   <th>{{ t('channelMonitorV2.metrics.cacheRate') }}</th>
                   <th v-if="showThroughput">{{ t('channelMonitorV2.metrics.rpm') }}</th>
@@ -430,6 +439,7 @@
                     <span class="block">{{ formatMs(row.metrics.ttft.p50_ms) }}</span>
                     <small class="text-xs text-gray-400">{{ latencyDetail(row.metrics.ttft) }}</small>
                   </td>
+                  <td data-output-tps>{{ formatMonitorOutputTps(row.metrics.output_tps) }}</td>
                   <td v-if="showThroughput" :title="exactTps(row.metrics.tpm)">{{ formatTps(row.metrics.tpm) }}</td>
                   <td>{{ formatMonitorCacheRate(row.metrics) }}</td>
                   <td v-if="showThroughput">{{ formatRate(row.metrics.rpm) }}</td>
@@ -513,6 +523,7 @@ import {
   formatMonitorPercent,
   formatMonitorThroughput,
   formatMonitorTokensPerSecond,
+  formatMonitorOutputTps,
   tokensPerSecondFromTpm,
   healthScoreClass,
   monitorErrorCategoryLabel,

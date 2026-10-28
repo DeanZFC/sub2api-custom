@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -28,13 +29,7 @@ func executeQualityTestHTTP(req *http.Request, account int64, send func(*http.Re
 		automatic, _ := ctx.Value(scheduledTestAutomaticRunKey{}).(bool)
 		recovery := QualityProbePurpose(ctx) == "recovery"
 		session, _ := ctx.Value(qualityRunKey{}).(string)
-		// Body byte length is a conservative input estimate. The configured reserve
-		// also covers protocols which cannot enforce an output-token ceiling.
-		estimate := req.ContentLength
-		if estimate < 0 {
-			estimate = 0
-		}
-		estimate += int64(accountTestOutputTokenLimit(ctx))
+		estimate := qualityProbeTokenEstimate(req)
 		reserveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		res, err := repo.ReserveQualityProbe(reserveCtx, account, estimate, automatic || recovery, session)
 		cancel()
@@ -103,6 +98,61 @@ func executeQualityTestHTTP(req *http.Request, account int64, send func(*http.Re
 		err = errors.New("upstream returned nil response")
 	}
 	return observeAccountTestResponse(ctx, started, resp, err)
+}
+
+// Text probes retain the conservative one-token-per-body-byte reservation.
+// Trusted visual review images use a bounded per-image allowance instead of
+// counting PNG compression/base64 bytes as text. Image allowances include
+// headroom for the fixed 960x720 renderer frames; they are budget estimates,
+// not billing rates. Actual upstream usage settles the reservation afterwards.
+func qualityProbeTokenEstimate(req *http.Request) int64 {
+	estimate := req.ContentLength
+	if estimate < 0 {
+		estimate = 0
+	}
+	if vision, ok := req.Context().Value(accountTestVisionContextKey{}).(accountTestVisionInput); ok && len(vision.Images) >= 4 && len(vision.Images) <= 8 {
+		imageBytes := int64(0)
+		for _, image := range vision.Images {
+			imageBytes = saturatingQualityTokenAdd(imageBytes, int64(len(image)))
+		}
+		if imageBytes <= estimate {
+			estimate -= imageBytes
+			model := ""
+			if identity, ok := req.Context().Value(accountTestModelIdentityContextKey{}).(*accountTestModelIdentity); ok && identity != nil {
+				model, _, _ = identity.snapshot()
+			}
+			estimate = saturatingQualityTokenAdd(estimate, int64(len(vision.Images))*qualityVisionImageTokenAllowance(model))
+		}
+	}
+	return saturatingQualityTokenAdd(estimate, int64(accountTestOutputTokenLimit(req.Context())))
+}
+
+func qualityVisionImageTokenAllowance(model string) int64 {
+	model = strings.ToLower(strings.TrimSpace(model))
+	// GPT-4o mini's high-detail image units are much larger than other models.
+	// Match it before GPT-4o and retain conservative admission for unknown IDs.
+	switch {
+	case strings.HasPrefix(model, "gpt-4o-mini"):
+		return 32768
+	case strings.HasPrefix(model, "gpt-5"), strings.HasPrefix(model, "gpt-6"),
+		strings.HasPrefix(model, "gpt-4.1-mini"), strings.HasPrefix(model, "gpt-4.1-nano"), strings.HasPrefix(model, "o4-mini"):
+		return 8192
+	case strings.HasPrefix(model, "gpt-4o"), strings.HasPrefix(model, "gpt-4.1"),
+		strings.HasPrefix(model, "o1"), strings.HasPrefix(model, "o3"):
+		return 2048
+	default:
+		return 65536
+	}
+}
+
+func saturatingQualityTokenAdd(a, b int64) int64 {
+	if b < 0 {
+		return a
+	}
+	if a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
 }
 
 func qualityUsageReadError(a *ScheduledTestRequestAttempt, err error) {

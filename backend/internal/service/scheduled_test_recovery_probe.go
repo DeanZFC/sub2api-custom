@@ -25,6 +25,13 @@ func statisticsRecoverySamplesMissing(rule ScheduledTestProtectionRule, result *
 		result.OutputKind != "statistics" || result.OutputStatistics == nil {
 		return false
 	}
+	for _, threshold := range rule.Thresholds {
+		if threshold.Metric == "output_tps" {
+			// Connectivity alone cannot establish generation speed. TPS rules
+			// recover through the bounded trial using real timed streams.
+			return false
+		}
+	}
 	verdict, _ := evaluateScheduledTestProtection(rule, result)
 	if verdict != "pending" {
 		return false

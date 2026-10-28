@@ -130,15 +130,15 @@ func (r *scheduledTestPlanRepository) validateProtectionGroups(ctx context.Conte
 
 // Enroll all types before the first type finishes, so a quick statistics result
 // cannot upgrade an account while its candy/pelican result has never been judged.
-func initializeProtectionActionStates(ctx context.Context, tx *sql.Tx, planID, accountID int64, config *service.ScheduledTestProtectionConfig) error {
+func initializeProtectionActionStates(ctx context.Context, tx *sql.Tx, planID, accountID int64, modelKey string, config *service.ScheduledTestProtectionConfig) error {
 	for _, rule := range config.Rules {
 		raw, err := json.Marshal(rule)
 		if err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_protection_states
-   (plan_id,account_id,test_definition_id,result_started_at,rule_config)
-   VALUES ($1,$2,$3,'epoch',$4::jsonb) ON CONFLICT (plan_id,account_id,test_definition_id) DO NOTHING`, planID, accountID, rule.TestDefinitionID, raw); err != nil {
+   (plan_id,account_id,test_definition_id,model_key,result_started_at,rule_config)
+   VALUES ($1,$2,$3,$4,'epoch',$5::jsonb) ON CONFLICT (plan_id,account_id,test_definition_id,model_key) DO NOTHING`, planID, accountID, rule.TestDefinitionID, modelKey, raw); err != nil {
 			return err
 		}
 	}
@@ -281,6 +281,98 @@ func sortedProtectionIDs(ids map[int64]bool) []int64 {
 	return out
 }
 
+// Expressions are evaluated inside one model only. Group memberships belong
+// to the account, so their final assignment is resolved across those decisions.
+type protectionModelRouting struct {
+	verdicts            map[int64]string
+	recovering          map[int64]bool
+	held                bool
+	accountWide         bool
+	statisticsUnhealthy bool
+	statisticsFailed    bool
+	decision            service.ScheduledTestCombinationDecision
+	reason              string
+}
+
+func protectionModelGroupChanges(config service.ScheduledTestProtectionConfig, models map[string]*protectionModelRouting, current map[int64]bool) []protectionRoutingChange {
+	type candidate struct {
+		action   *service.ScheduledTestOutcomeAction
+		priority int
+		unsafe   bool
+	}
+	var candidates []candidate
+	unresolved, unsafe := false, false
+	for _, model := range models {
+		action := model.decision.Action
+		failed := false
+		for _, verdict := range model.verdicts {
+			failed = failed || verdict == "fail"
+		}
+		pending := action == nil
+		if config.UsesAllPass() {
+			for _, rule := range config.Rules {
+				if model.recovering[rule.TestDefinitionID] {
+					continue
+				}
+				if (rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold() || rule.UsesAutoReview()) && model.verdicts[rule.TestDefinitionID] != "pass" && model.verdicts[rule.TestDefinitionID] != "fail" {
+					pending = true
+				}
+			}
+		}
+		unresolved = unresolved || pending
+		if action == nil {
+			// A previous unresolved model hold still prevents promotion, even
+			// when no expression currently resolves to a replacement action.
+			unsafe = unsafe || model.held
+			continue
+		}
+		isUnsafe := failed || action.Scheduling == "pause" || (model.held && action.Scheduling != "resume")
+		unsafe = unsafe || isUnsafe
+		priority := 0
+		for _, id := range model.decision.RuleIDs {
+			for _, rule := range config.Combinations {
+				if rule.ID == id && rule.Priority > priority {
+					priority = rule.Priority
+				}
+			}
+		}
+		candidates = append(candidates, candidate{action: action, priority: priority, unsafe: isUnsafe})
+	}
+	if len(models) == 0 || (!unsafe && unresolved) {
+		return nil
+	}
+	priority := -1
+	desired := map[int64]bool{}
+	assigned := false
+	for _, candidate := range candidates {
+		if candidate.unsafe != unsafe || candidate.priority < priority {
+			continue
+		}
+		if candidate.priority > priority {
+			priority = candidate.priority
+			desired = map[int64]bool{}
+			assigned = false
+		}
+		if candidate.action.GroupMode == "assign" {
+			assigned = true
+			for _, id := range candidate.action.GroupIDs {
+				desired[id] = true
+			}
+		}
+	}
+	if !assigned {
+		return nil
+	}
+	scope := map[int64]bool{}
+	for id := range current {
+		scope[id] = true
+	}
+	for id := range desired {
+		scope[id] = true
+	}
+	return []protectionRoutingChange{{scope: scope, desired: desired}}
+}
+
 func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectionState) error {
 	owned, err := scheduledTestAccountOwnershipCurrent(ctx, tx, state.planID, state.accountID)
 	if err != nil {
@@ -306,31 +398,33 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 			return err
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT s.rule_config,s.verdict,s.automated_verdict,s.admin_verdict,p.protection,
+	rows, err := tx.QueryContext(ctx, `SELECT s.model_key,s.rule_config,s.verdict,s.automated_verdict,s.admin_verdict,
  s.completed AND s.result_started_at>=s.round_started_at AND EXISTS (
  SELECT 1 FROM scheduled_test_results evidence WHERE evidence.id=s.result_id
  AND evidence.started_at=s.result_started_at AND evidence.run_id<>'' AND evidence.run_id=p.latest_run_id),
  s.blocked AND s.recovery_phase<>'',
  (SELECT latency_ms FROM scheduled_test_results WHERE id=s.result_id),
- (SELECT status FROM scheduled_test_results WHERE id=s.result_id)
+ (SELECT status FROM scheduled_test_results WHERE id=s.result_id),d.output_kind
  FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
+ JOIN scheduled_test_definitions d ON d.id=s.test_definition_id
  WHERE s.plan_id=$1 AND s.account_id=$2 AND s.round_started_at=$3
+ AND s.model_key=ANY(CASE WHEN cardinality(p.model_ids)>0 THEN p.model_ids ELSE ARRAY[p.model_id] END)
  AND p.enabled AND p.protection->>'enabled'='true'
- ORDER BY s.test_definition_id`, state.planID, state.accountID, state.roundStarted)
+ ORDER BY s.model_key,s.test_definition_id`, state.planID, state.accountID, state.roundStarted)
 	if err != nil {
 		return err
 	}
+	models := map[string]*protectionModelRouting{}
 	var rules []protectionRoutingRule
-	verdicts := map[int64]string{}
-	recovering := map[int64]bool{}
 	for rows.Next() {
 		var entry protectionRoutingRule
-		var raw, configRaw []byte
+		var modelKey, outputKind string
+		var raw []byte
 		var evidenceCurrent bool
 		var inRecovery bool
 		var latency sql.NullInt64
 		var resultStatus sql.NullString
-		if err := rows.Scan(&raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &configRaw, &evidenceCurrent, &inRecovery, &latency, &resultStatus); err != nil {
+		if err := rows.Scan(&modelKey, &raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &evidenceCurrent, &inRecovery, &latency, &resultStatus, &outputKind); err != nil {
 			rows.Close()
 			return err
 		}
@@ -338,27 +432,36 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 			rows.Close()
 			return err
 		}
-		if err := json.Unmarshal(configRaw, &config); err != nil {
-			rows.Close()
-			return err
+		if !protectionRuleCurrent(&config, entry.rule) {
+			continue
 		}
-		if protectionRuleCurrent(&config, entry.rule) {
-			recovering[entry.rule.TestDefinitionID] = inRecovery
-			rules = append(rules, entry)
-			if evidenceCurrent {
-				verdicts[entry.rule.TestDefinitionID] = entry.currentVerdict
-				if config.UsesAllPass() && entry.rule.Vote != nil && entry.rule.Vote.Enabled {
-					// Reviews are a manual veto, separate from the automatic checks.
-					verdicts[entry.rule.TestDefinitionID] = entry.adminVerdict
-					if entry.rule.HasDurationThreshold() {
-						ms := int64(-1)
-						if latency.Valid {
-							ms = latency.Int64
-						}
-						verdict, _ := service.EvaluateScheduledTestDuration(entry.rule, &service.ScheduledTestResult{Status: resultStatus.String, LatencyMs: ms})
-						if entry.adminVerdict != "fail" {
-							verdicts[entry.rule.TestDefinitionID] = verdict
-						}
+		model := models[modelKey]
+		if model == nil {
+			model = &protectionModelRouting{verdicts: map[int64]string{}, recovering: map[int64]bool{}}
+			models[modelKey] = model
+		}
+		model.recovering[entry.rule.TestDefinitionID] = inRecovery
+		if !evidenceCurrent {
+			entry.currentVerdict, entry.automated, entry.adminVerdict = "pending", "pending", ""
+		}
+		rules = append(rules, entry)
+		if outputKind == "statistics" {
+			model.statisticsUnhealthy = model.statisticsUnhealthy || entry.currentVerdict != "pass"
+			model.statisticsFailed = model.statisticsFailed || entry.currentVerdict == "fail"
+		}
+		if evidenceCurrent {
+			model.verdicts[entry.rule.TestDefinitionID] = entry.currentVerdict
+			if config.UsesAllPass() && entry.rule.Vote != nil && entry.rule.Vote.Enabled && !entry.rule.UsesAutoReview() {
+				// Manual review is a veto; automatic visual evidence remains automatic.
+				model.verdicts[entry.rule.TestDefinitionID] = entry.adminVerdict
+				if entry.rule.HasDurationThreshold() {
+					ms := int64(-1)
+					if latency.Valid {
+						ms = latency.Int64
+					}
+					verdict, _ := service.EvaluateScheduledTestDuration(entry.rule, &service.ScheduledTestResult{Status: resultStatus.String, LatencyMs: ms})
+					if entry.adminVerdict != "fail" {
+						model.verdicts[entry.rule.TestDefinitionID] = verdict
 					}
 				}
 			}
@@ -375,54 +478,86 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 	}
 	var changes []protectionRoutingChange
 	if config.UsesCombinations() || config.UsesAllPass() {
-		var decision service.ScheduledTestCombinationDecision
-		if config.UsesAllPass() {
-			var held bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2 AND blocked)`, state.planID, state.accountID).Scan(&held); err != nil {
-				return err
-			}
-			held = held || state.blocked || state.recoveryPhase != "" || before.status == "quality_paused"
-			for _, active := range recovering {
-				held = held || active
-			}
-			decision, state.actionReason = service.EvaluateScheduledTestAllPass(config, verdicts, recovering, held)
-		} else {
-			decision = service.EvaluateScheduledTestCombinations(config, verdicts)
-		}
-		if decision.Action == nil {
-			return nil
-		}
-		labels := make([]string, 0, len(decision.RuleIDs))
-		for _, id := range decision.RuleIDs {
-			label := id
-			for _, combination := range config.Combinations {
-				if combination.ID == id && combination.Name != "" {
-					label = combination.Name
-					break
-				}
-			}
-			labels = append(labels, label)
-		}
-		if !config.UsesAllPass() {
-			state.actionReason = "命中组合规则：" + strings.Join(labels, "、")
-		}
-		if err := applyCombinationScheduling(ctx, tx, state, decision); err != nil {
+		// A model owns its own scheduling hold. Completing one model must not
+		// release or replace the hold/condition evidence of another model.
+		rows, err := tx.QueryContext(ctx, `SELECT model_key,blocked,account_wide FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2`, state.planID, state.accountID)
+		if err != nil {
 			return err
 		}
-		if decision.Action.GroupMode == "assign" {
-			desired, scope := map[int64]bool{}, map[int64]bool{}
-			for id := range before.groups {
-				scope[id] = true
+		for rows.Next() {
+			var modelKey string
+			var held, accountWide bool
+			if err := rows.Scan(&modelKey, &held, &accountWide); err != nil {
+				_ = rows.Close()
+				return err
 			}
-			for _, id := range decision.Action.GroupIDs {
-				desired[id], scope[id] = true, true
+			if model := models[modelKey]; model != nil {
+				model.held, model.accountWide = held, accountWide
 			}
-			changes = []protectionRoutingChange{{scope: scope, desired: desired}}
 		}
+		err = rows.Err()
+		closeErr := rows.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		keys := make([]string, 0, len(models))
+		for key := range models {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			model := models[key]
+			if config.UsesAllPass() {
+				held := model.held
+				if key == state.modelKey {
+					held = held || state.blocked || state.recoveryPhase != ""
+				}
+				for _, active := range model.recovering {
+					held = held || active
+				}
+				model.decision, model.reason = service.EvaluateScheduledTestAllPass(config, model.verdicts, model.recovering, held)
+			} else {
+				model.decision = service.EvaluateScheduledTestCombinations(config, model.verdicts)
+				labels := make([]string, 0, len(model.decision.RuleIDs))
+				for _, id := range model.decision.RuleIDs {
+					label := id
+					for _, combination := range config.Combinations {
+						if combination.ID == id && combination.Name != "" {
+							label = combination.Name
+							break
+						}
+					}
+					labels = append(labels, label)
+				}
+				model.reason = "命中组合规则：" + strings.Join(labels, "、")
+			}
+			if key == state.modelKey {
+				state.actionReason = model.reason
+				if err := applyCombinationScheduling(ctx, tx, state, model.decision, model.statisticsFailed || (model.accountWide && model.statisticsUnhealthy)); err != nil {
+					return err
+				}
+			}
+		}
+		changes = protectionModelGroupChanges(config, models, before.groups)
 	} else {
+		// Generic priority rules consist of independent test leaves. Feeding
+		// every model's leaves through the existing selector makes failures
+		// win at the same priority and required passes gate every promotion.
 		changes = protectionRoutingChanges(rules, before.groups)
 	}
 	if len(changes) == 0 {
+		return nil
+	}
+	// Group membership is account-wide. A single failed model must not move
+	// healthy peers into another group or remove their source membership.
+	projection, err := readActiveTestProtection(ctx, tx, state.accountID)
+	if err != nil {
+		return err
+	}
+	if string(projection.modelHolds) != "{}" && !projection.allModelsBlocked && !projection.accountWide {
 		return nil
 	}
 	change := changes[0]
@@ -466,7 +601,7 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 	return enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountGroupsChanged, &state.accountID, nil, buildSchedulerGroupPayload(sortedProtectionIDs(change.scope)))
 }
 
-func applyCombinationScheduling(ctx context.Context, tx *sql.Tx, state *protectionState, decision service.ScheduledTestCombinationDecision) error {
+func applyCombinationScheduling(ctx context.Context, tx *sql.Tx, state *protectionState, decision service.ScheduledTestCombinationDecision, accountWide bool) error {
 	if decision.Action == nil || (decision.Action.Scheduling != "pause" && decision.Action.Scheduling != "resume") {
 		return nil
 	}
@@ -476,16 +611,16 @@ func applyCombinationScheduling(ctx context.Context, tx *sql.Tx, state *protecti
 	}
 	blocked := decision.Action.Scheduling == "pause"
 	var wasBlocked bool
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT blocked FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2),FALSE)`, state.planID, state.accountID).Scan(&wasBlocked)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT blocked FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2 AND model_key=$3),FALSE)`, state.planID, state.accountID, state.modelKey).Scan(&wasBlocked)
 	if err != nil {
 		return err
 	}
 	state.newCombinedHold = blocked && !wasBlocked
-	_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_combination_states(plan_id,account_id,blocked,reason,rule_ids)
- VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(plan_id,account_id) DO UPDATE SET
+	_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_combination_states(plan_id,account_id,model_key,blocked,reason,rule_ids,account_wide)
+ VALUES($1,$2,$3,$4,$5,$6::jsonb,$7) ON CONFLICT(plan_id,account_id,model_key) DO UPDATE SET
 	 trigger_event_id=CASE WHEN EXCLUDED.blocked AND scheduled_test_combination_states.blocked THEN scheduled_test_combination_states.trigger_event_id ELSE NULL END,
- blocked=EXCLUDED.blocked,reason=EXCLUDED.reason,rule_ids=EXCLUDED.rule_ids,updated_at=NOW()`,
-		state.planID, state.accountID, blocked, state.actionReason, raw)
+ blocked=EXCLUDED.blocked,reason=EXCLUDED.reason,rule_ids=EXCLUDED.rule_ids,account_wide=EXCLUDED.account_wide,updated_at=NOW()`,
+		state.planID, state.accountID, state.modelKey, blocked, state.actionReason, raw, blocked && accountWide)
 	return err
 }
 
@@ -501,7 +636,7 @@ func (r *scheduledTestResultRepository) BeginProtectionRun(ctx context.Context, 
 		return err
 	}
 	defer tx.Rollback()
-	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
+	current, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids, model_ids FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
 	if err != nil {
 		return err
 	}
@@ -509,32 +644,36 @@ func (r *scheduledTestResultRepository) BeginProtectionRun(ctx context.Context, 
 		return fmt.Errorf("quality plan changed before execution")
 	}
 	config := &current.Protection
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT r.account_id FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
- WHERE r.plan_id=$1 AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked AND r.account_id IS NOT NULL ORDER BY r.account_id`, plan.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT r.account_id,r.model_id FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
+ WHERE r.plan_id=$1 AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked AND r.account_id IS NOT NULL ORDER BY r.account_id,r.model_id`, plan.ID)
 	if err != nil {
 		return err
 	}
-	var ids []int64
+	type modelTarget struct {
+		accountID int64
+		modelKey  string
+	}
+	var targets []modelTarget
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var target modelTarget
+		if err := rows.Scan(&target.accountID, &target.modelKey); err != nil {
 			rows.Close()
 			return err
 		}
-		ids = append(ids, id)
+		targets = append(targets, target)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return err
 	}
-	for _, id := range ids {
-		eligible, err := lockProtectionAccount(ctx, tx, id)
+	for _, target := range targets {
+		eligible, err := lockProtectionAccount(ctx, tx, target.accountID)
 		if err != nil {
 			return err
 		}
 		if eligible {
-			if err := initializeProtectionActionStates(ctx, tx, plan.ID, id, config); err != nil {
+			if err := initializeProtectionActionStates(ctx, tx, plan.ID, target.accountID, target.modelKey, config); err != nil {
 				return err
 			}
 		}

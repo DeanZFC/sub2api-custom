@@ -1,9 +1,10 @@
 <template>
   <div class="min-w-0" data-statistics-output>
-    <dl class="grid" :class="compact ? 'grid-cols-2 gap-x-3 gap-y-2' : 'grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'">
+    <dl class="grid" :class="compact ? 'grid-cols-2 gap-x-3 gap-y-2' : 'grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5'">
       <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsSuccessRate') }}</dt><dd class="mt-1 break-all font-semibold tabular-nums text-gray-900 dark:text-white" :class="compact ? 'text-lg' : 'text-2xl'" data-success-rate>{{ successRate }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsRequestSamples', { success: count(statistics.success_requests), total: count(statistics.total_requests) }) }}</p></div>
       <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsCacheRate') }}</dt><dd class="mt-1 break-all font-semibold tabular-nums text-gray-900 dark:text-white" :class="compact ? 'text-lg' : 'text-2xl'" data-cache-rate>{{ cacheRate }}</dd><p class="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsTokenSamples', { cached: count(statistics.cache_read_tokens), input: count(statistics.cache_input_tokens) }) }}</p></div>
       <div class="min-w-0" :title="t('tests.statisticsSourceHint')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsFirstToken') }}</dt><dd class="mt-1 break-all font-semibold tabular-nums text-gray-900 dark:text-white" :class="compact ? 'text-lg' : 'text-2xl'" data-first-token>{{ firstToken }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsFirstTokenSamples', { count: count(statistics.first_token_samples) }) }}</p></div>
+      <div class="min-w-0" :title="t('channelMonitorV2.metrics.outputTpsDetail')"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.metrics.outputTps') }}</dt><dd class="mt-1 break-all font-semibold tabular-nums text-gray-900 dark:text-white" :class="compact ? 'text-lg' : 'text-2xl'" data-output-tps>{{ (statistics.tps_samples ?? 0) > 0 ? formatMonitorOutputTps(statistics.output_tps) : '—' }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsFirstTokenSamples', { count: count(statistics.tps_samples ?? 0) }) }}</p></div>
       <div class="min-w-0" data-statistics-recent-requests>
         <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.statisticsRecentRequests') }}</dt>
         <dd v-if="recentRequests.length" class="mt-1 w-fit min-w-[6rem]">
@@ -35,6 +36,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatMonitorOutputTps } from '@/features/channel-monitor-v2/monitorFormat'
 import { useI18n } from 'vue-i18n'
 import type { TestOutputStatistics } from '@/types'
 import { formatDateTime } from '@/utils/format'

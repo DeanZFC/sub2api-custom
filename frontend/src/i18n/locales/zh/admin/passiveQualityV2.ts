@@ -1,4 +1,6 @@
 export default {
+  speedAction: '输出变慢处置', speedConcurrency: 'TPS 保护并发上限', speedPenalty: 'TPS 保护优先级惩罚', speedState: 'TPS 独立状态',
+
   allModelsIndependent: "全部模型分别评估",
   allModelsAggregated: "全部模型汇总（整个账号）",
   modelScope: "仅影响异常模型（模型隔离）",
@@ -11,13 +13,13 @@ export default {
   impactScope: '只汇总本窗口成功且相关的请求；成功率见可用率指标。费用为未缓存文本输入 + 缓存写入/读取，按系统记录费率计价，非供应商账单或最终扣费，不估算节省。记录为 0 不证明费率完整。',
 
   invalidCacheOrder: "自动减量窗口的时间、样本、tokens、会话数和确认要求不得低于快速观察窗口。",
-  availabilityRecoveryHint: "可用率暂停经冷却、探测和限量真实流量验证后恢复；首字独立等待自身的新健康样本，缓存样本不足不阻塞两者。",
+  availabilityRecoveryHint: "可用率暂停经冷却、探测和限量真实流量验证后恢复；首字和输出 TPS 独立等待自身的新健康样本，缓存样本不足不阻塞两者。",
   recoveryConfirmations: "恢复确认 {hits} 次",
 
   title: '按指标独立保护（V2）', badge: '独立保护 V2', legacy: '旧版联合判定',
   legacyHint: '此策略保留旧版口径：各指标共用处置，恢复要求全部指标通过。直接编辑不会自动升级。',
   upgrade: '升级为独立保护', upgradeHint: '升级后保留分组、模型筛选和阈值，默认改为模型隔离，采用独立缓存窗口，并切回仅观察；保存会清除本策略当前保护并重新积累证据。',
-  independentHint: '可用率、首字和缓存分别判定、处置及恢复。一个指标恢复不会解除其他指标或策略的限制；缓存样本不足不阻止可用率恢复。',
+  independentHint: '可用率、首字、输出 TPS 和缓存分别判定、处置及恢复。一个指标恢复不会解除其他指标或策略的限制；缓存样本不足不阻止可用率恢复。',
   availabilityAction: '可用率 / 连续失败处置', latencyAction: '首字变慢处置', cacheAction: '缓存异常处置',
   latencyConcurrency: '首字保护并发上限', latencyPenalty: '首字保护优先级惩罚', reduce: '减少新会话分配，保留已有会话',
   cacheHint: '实际缓存率按全部已上报的有效输入 tokens 加权。保护缓存率只统计发送前已识别复用机会的请求，按模型独立判定。首次请求、切换账号、前缀变化和复用过期进入预热或未知；明确的零命中仍参与保护。',
@@ -30,7 +32,7 @@ export default {
   min_hold_seconds: '减量最短保持（秒）', recovery_hold_seconds: '恢复步骤间隔（秒）', max_reduced_percent: '账号池最大同时缓存减量比例 (%)',
   min_serving_accounts: '至少保留正常分配账号数', reuse_window_seconds: '复用机会最大间隔（秒）', warmup_requests: '新账号落点预热请求数',
   guardHint: '达到账号池限制时停止扩大缓存减量并提示共同原因，不解除真正不可用账号的限制。其他策略仍独立生效。',
-  invalidMetricActions: '请检查首字处置、并发上限（1–1000）和优先级惩罚（0–1000）。',
+  invalidMetricActions: '请检查首字 / TPS 处置、并发上限（1–1000）和优先级惩罚（0–1000）。',
   invalidCacheWindow: '请检查缓存窗口：样本和新增数不超过请求上限，独立会话至少 2 个且不超过最低样本的一半（每会话至少 2 条），tokens 大于 0，集中度为 10–90% 且在所需会话数下可达。',
   invalidCacheConfig: '请检查缓存减量、恢复保持、复用间隔、预热及账号池保护参数范围。',
   allocation: '新会话分配 {value}%', actualRate: '实际缓存使用率', protectionRate: '可复用请求保护缓存率',
@@ -40,15 +42,17 @@ export default {
   tokenEvidence: '保护读取/可复用输入 {read}/{input} tokens · 实际读取/输入 {actualRead}/{actualInput} tokens',
   sessionEvidence: '独立会话 {sessions} · 最大占比 {concentration}% · 异常会话 {breached} · 健康会话 {healthy}',
   latencyState: '首字独立状态', availabilityState: '可用率独立状态', confirmations: '确认 {hits} 次',
-  preview: '可用率按所选动作处理，首字独立限流或观察；缓存仅观察或减少新会话。既有健康会话继续使用原账号，恢复不会强制迁回。',
+  preview: '可用率按所选动作处理，首字和输出 TPS 独立限流或观察；缓存仅观察或减少新会话。既有健康会话继续使用原账号，恢复不会强制迁回。',
   cachePreview: '缓存快速：{quickSeconds} 秒 / {quickMax} 条 / 至少 {quickMin} 个可复用样本；自动减量：{seconds} 秒 / {max} 条 / 至少 {min} 个可复用样本，连续 {confirmations} 次且每次新增 {fresh} 条。',
   cacheRecoveryPreview: '异常保留 {allocation}% 新会话分配，每轮恢复增加 {step} 个百分点；至少 {sessions} 个独立会话、{tokens} 个可复用输入 tokens，单会话最多 {share}%。',
   profileHint: '灵敏度模板仅调整可用率与首字的通用窗口和恢复预算。V2 缓存使用下方独立窗口，不随模板隐式改变。',
-  metricHint: 'V2 的可用率、首字和缓存独立判定及恢复。首字使用 P90；缓存实际利用率和复用保护率分开展示，未知或缺少复用证据不会计为零，也不会证明恢复。',
+  metricHint: 'V2 的可用率、首字、输出 TPS 和缓存独立判定及恢复。首字使用 P90；缓存实际利用率和复用保护率分开展示，未知或缺少复用证据不会计为零，也不会证明恢复。',
   mixedModelHint: '当前为整账号范围：可用率与首字按筛选后的请求汇总，缓存仍按模型积累复用证据。混合模型首字阈值需校准；需要故障隔离时改为模型范围。',
-  windowTitle: '可用率 / 首字统计窗口', recoveryTitle: '可用率 / 首字恢复',
+  windowTitle: '可用率 / 首字 / TPS 统计窗口', recoveryTitle: '可用率 / 首字 / TPS 恢复',
   replayHint: '缓存回放只能使用当时记录的复用证据；旧历史无法反推首次请求、账号切换或可复用前缀，不据此给出缓存健康结论。',
   reasons: {
+    tps_minimum_hold: 'TPS 保护等待最短保持时间', tps_recovered: '输出速度真实请求证据已恢复',
+
     unsupported_cache_model: '该模型不支持可信缓存复用识别',
 
     unverified_wire_request: '实际发送到上游的请求未完成摘要校验',
@@ -105,6 +109,8 @@ export default {
     "unknown": "复用信息未知"
 },
   events: {
+    tps_limited: '输出 TPS 独立限流', tps_watch: '观察到输出速度异常', tps_recovered: 'TPS 保护已恢复', tps_watch_cleared: 'TPS 观察异常已解除',
+
     "cache_watch": "快速观察到缓存异常",
     "cache_reduced": "新会话分配已减少",
     "cache_recovery_step": "新会话分配逐步恢复",
@@ -118,5 +124,5 @@ export default {
     "ttft_recovered": "首字保护已恢复",
     "ttft_watch_cleared": "首字观察异常已解除"
 },
-  phases: { healthy: '正常', watching: '观察中', reduced: '减少新会话', recovering: '逐步恢复', insufficient: '证据不足', suspect: '异常待确认', observed: '观察异常', limited: '首字限流' },
+  phases: { healthy: '正常', watching: '观察中', reduced: '减少新会话', recovering: '逐步恢复', insufficient: '证据不足', suspect: '异常待确认', observed: '观察异常', limited: '指标限流' },
 }

@@ -15,9 +15,9 @@ const passiveStateReport = `WITH reporting AS (SELECT s.*,a.name AS account_name
  CASE
  WHEN p.config->>'purpose' IN ('cache_target','group_quality_target') AND s.data->>'phase'='healthy' AND NOT COALESCE((s.data->'evidence'->>'complete')::boolean,false) THEN 'insufficient'
  WHEN s.data->>'phase' IN ('paused','probing','trial','exempt') THEN s.data->>'phase'
- WHEN s.data->>'phase'='limited' OR s.data->'latency'->>'phase'='limited' THEN 'limited'
+ WHEN s.data->>'phase'='limited' OR s.data->'latency'->>'phase'='limited' OR s.data->'speed'->>'phase'='limited' THEN 'limited'
  WHEN EXISTS (SELECT 1 FROM jsonb_each(COALESCE(NULLIF(s.data->'cache','null'::jsonb),'{}'::jsonb)) c WHERE c.value->>'phase' IN ('reduced','recovering')) THEN 'cache_limited'
- WHEN s.data->'latency'->>'phase'='watching' OR EXISTS (SELECT 1 FROM jsonb_each(COALESCE(NULLIF(s.data->'cache','null'::jsonb),'{}'::jsonb)) c WHERE c.value->>'phase'='watching') THEN 'observed'
+ WHEN s.data->'latency'->>'phase'='watching' OR s.data->'speed'->>'phase'='watching' OR EXISTS (SELECT 1 FROM jsonb_each(COALESCE(NULLIF(s.data->'cache','null'::jsonb),'{}'::jsonb)) c WHERE c.value->>'phase'='watching') THEN 'observed'
  WHEN s.data->>'phase'='healthy' AND EXISTS (SELECT 1 FROM jsonb_each(COALESCE(NULLIF(s.data->'cache','null'::jsonb),'{}'::jsonb)) c WHERE c.value->>'phase'='insufficient') THEN 'insufficient'
  ELSE s.data->>'phase' END AS effective_phase
  FROM passive_quality_states s JOIN accounts a ON a.id=s.account_id JOIN passive_quality_policies p ON p.id=s.policy_id WHERE a.deleted_at IS NULL) `

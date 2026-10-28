@@ -221,7 +221,8 @@ export default {
   },
 
   tests: {
-    currentScheduling: 'Current scheduling', schedulingActive: 'Active', schedulingPaused: 'Paused', failed: 'Failed', skipped: 'Skipped',
+    currentScheduling: 'Account scheduling', schedulingActive: 'Active', schedulingPaused: 'Paused', failed: 'Failed', skipped: 'Skipped',
+    currentModelScheduling: 'Selected model', modelSchedulingActive: 'Model available', modelSchedulingPaused: 'Model paused',
     expandPreview: 'Expand preview',
     adminReview: {
       details: 'Review details',

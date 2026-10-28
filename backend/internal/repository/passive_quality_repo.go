@@ -129,6 +129,13 @@ func (r *passiveQualityRepository) SavePolicy(ctx context.Context, p *service.Pa
 func passivePolicyChange(old, next service.PassiveQualityConfig) (unchanged, metadataOnly bool) {
 	normalize := func(c service.PassiveQualityConfig) service.PassiveQualityConfig {
 		c.EvidenceStartedAt, c.EvaluationVersion = nil, 0
+		// Older V2 policies predate TPS. Defaults supplied by validation or a
+		// newer editor cannot change behavior while this dimension is disabled,
+		// and must not clear existing holds on a no-op save or rename.
+		if !c.TPS.Enabled {
+			c.TPS = service.PassiveQualityMetric{}
+			c.TPSAction, c.TPSConcurrencyLimit, c.TPSPriorityPenalty = "", 0, 0
+		}
 		c.GroupIDs = append([]int64{}, c.GroupIDs...)
 		c.ExcludedAccountIDs = append([]int64{}, c.ExcludedAccountIDs...)
 		slices.Sort(c.GroupIDs)
@@ -291,6 +298,11 @@ func reconcilePassiveAccount(ctx context.Context, tx sqlExecutor, aid int64) err
  'scope',config->>'scope','model',COALESCE(data->>'model',config->>'model'),'phase','limited','reason',data->'latency'->>'reason',
  'concurrency_limit',config->'ttft_concurrency_limit','priority_penalty',config->'ttft_priority_penalty')
  FROM active WHERE config->>'schema_version'='2' AND data->'latency'->>'phase'='limited'
+ UNION ALL
+ SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name','metric','tps',
+ 'scope',config->>'scope','model',COALESCE(data->>'model',config->>'model'),'phase','limited','reason',data->'speed'->>'reason',
+ 'concurrency_limit',config->'tps_concurrency_limit','priority_penalty',config->'tps_priority_penalty')
+ FROM active WHERE config->>'schema_version'='2' AND data->'speed'->>'phase'='limited'
  UNION ALL
  SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name','metric','cache',
  'scope','model','model',entry.key,'phase','cache_limited','reason',entry.value->>'reason',
@@ -493,6 +505,7 @@ func (r *passiveQualityRepository) Act(ctx context.Context, pid, aid int64, acti
 		s.Reason = "verification_requested"
 	case "exempt":
 		s.Latency = nil
+		s.Speed = nil
 		s.Cache = nil
 		s.CacheObserveAfter = now
 		s.Phase = "exempt"
@@ -506,6 +519,7 @@ func (r *passiveQualityRepository) Act(ctx context.Context, pid, aid int64, acti
 		s.ObserveAfter = now
 		s.CacheObserveAfter = now
 		s.Latency = nil
+		s.Speed = nil
 		s.Cache = nil
 		s.Hits = 0
 		s.Reason = "exemption_ended"

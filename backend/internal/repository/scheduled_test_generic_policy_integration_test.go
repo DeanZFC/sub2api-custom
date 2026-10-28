@@ -141,6 +141,7 @@ func testScheduledTestGenericPolicy(t *testing.T, ctx context.Context, db *sql.D
 	// A model edit likewise cannot publish an obsolete snapshot.
 	stale := *plan
 	plan.ModelID = "new-model"
+	plan.ModelIDs = []string{"new-model"}
 	plan, err = plans.Update(ctx, plan)
 	require.NoError(t, err)
 	_, err = repo.BeginRun(ctx, &stale, "stale", genericRoundInputs(&stale, []int64{62}, started.Add(2*time.Hour)))

@@ -23,11 +23,11 @@ func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	if (c.SchemaVersion != 0 && c.SchemaVersion != 2) || (c.Scope != "" && c.Scope != "model") || (c.Action != "" && c.Action != "pause") || len(c.GroupIDs) != 1 {
 		return fmt.Errorf("group quality targets require V2, model scope, pause action and exactly one group")
 	}
-	if c.CacheProtection != nil || c.TTFTAction != "" || c.ConsecutiveFailures != 0 {
+	if c.CacheProtection != nil || c.TTFTAction != "" || c.TPSAction != "" || c.ConsecutiveFailures != 0 {
 		return fmt.Errorf("group quality targets do not accept reuse protection, latency actions or consecutive failures")
 	}
 	if c.IsCacheTarget() {
-		if c.ErrorRate.Enabled || c.TTFT.Enabled {
+		if c.ErrorRate.Enabled || c.TTFT.Enabled || c.TPS.Enabled {
 			return fmt.Errorf("cache targets only accept the cache metric")
 		}
 		c.CacheRate.Enabled = true
@@ -40,6 +40,9 @@ func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	}
 	if c.TTFT.Enabled && c.TTFT.Pause <= 0 {
 		return fmt.Errorf("first-token target must be greater than zero")
+	}
+	if c.TPS.Enabled && c.TPS.Pause <= 0 {
+		return fmt.Errorf("TPS target must be greater than zero")
 	}
 	c.SchemaVersion, c.Scope, c.Action = 2, "model", "pause"
 	if c.Mode == "" {
@@ -69,6 +72,9 @@ func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	}
 	if c.TTFT.Enabled && c.TTFT.Recover == 0 {
 		c.TTFT.Recover = c.TTFT.Pause * .8
+	}
+	if c.TPS.Enabled && c.TPS.Recover == 0 {
+		c.TPS.Recover = c.TPS.Pause * 1.2
 	}
 	return nil
 }

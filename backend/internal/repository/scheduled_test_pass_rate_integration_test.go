@@ -78,7 +78,7 @@ INSERT INTO account_groups VALUES(62,8),(63,8);`)
 		"262_scheduled_test_execution_snapshot.sql", "281_scheduled_test_membership_revocation.sql", "264_scheduled_test_cache_recovery.sql",
 		"265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql",
 		"282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql", "284_scheduled_test_output_tokens.sql",
-		"309_quality_recovery_budget_evidence.sql", "312_scheduled_test_pass_rate.sql",
+		"309_quality_recovery_budget_evidence.sql", "312_scheduled_test_pass_rate.sql", "315_scheduled_test_multi_model.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -206,6 +206,7 @@ func TestScheduledTestPassRateIntegration(t *testing.T) {
 		old := f.summary("model-a")
 		require.True(t, old.Blocked)
 		f.plan.ModelID = "model-b"
+		f.plan.ModelIDs = []string{"model-b"}
 		var err error
 		f.plan, err = f.plans.Update(f.ctx, f.plan)
 		require.NoError(t, err)
@@ -216,6 +217,7 @@ func TestScheduledTestPassRateIntegration(t *testing.T) {
 		require.False(t, fresh.Blocked)
 		require.True(t, f.summary("model-a").Blocked)
 		f.plan.ModelID = "model-a"
+		f.plan.ModelIDs = []string{"model-a"}
 		f.plan, err = f.plans.Update(f.ctx, f.plan)
 		require.NoError(t, err)
 		f.exec(`UPDATE scheduled_test_definitions SET prompt=prompt||' revised',updated_at=NOW() WHERE id=$1`, f.definitionID)
@@ -229,6 +231,10 @@ func TestScheduledTestPassRateIntegration(t *testing.T) {
 	})
 	t.Run("live admission rejects held model and missing model only", func(t *testing.T) {
 		f := newPassRateFixture(t, 2)
+		f.plan.ModelIDs = []string{"model-a", "model-b"}
+		var err error
+		f.plan, err = f.plans.Update(f.ctx, f.plan)
+		require.NoError(t, err)
 		f.result("fail")
 		f.result("fail")
 		repo := &accountRepository{sql: f.db}

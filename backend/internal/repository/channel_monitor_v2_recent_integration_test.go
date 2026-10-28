@@ -44,9 +44,9 @@ func TestChannelMonitorV2RecentRequestsIntegration(t *testing.T) {
 	_, err = db.ExecContext(ctx, `
 CREATE TABLE groups (id bigint PRIMARY KEY, platform text);
 CREATE TABLE accounts (id bigint PRIMARY KEY, platform text);
-CREATE TABLE usage_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, request_id text, model text, requested_model text, request_type int DEFAULT 2, actual_cost numeric DEFAULT 1, first_token_ms int DEFAULT 1000,
- duration_ms int DEFAULT 3500, input_tokens int DEFAULT 100, cache_creation_tokens int DEFAULT 100, cache_read_tokens int DEFAULT 800, stream boolean DEFAULT true, openai_ws_mode boolean DEFAULT false);
-CREATE TABLE ops_error_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, request_id text, platform text DEFAULT 'openai', model text DEFAULT 'gpt-named', requested_model text, is_count_tokens boolean DEFAULT false, status_code int DEFAULT 503, upstream_status_code int, error_type text DEFAULT 'upstream', error_owner text, error_source text, error_message text, upstream_error_message text, upstream_error_detail text, error_body text,
+CREATE TABLE usage_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, api_key_id bigint DEFAULT 1, request_id text, model text, requested_model text, request_type int DEFAULT 2, actual_cost numeric DEFAULT 1, first_token_ms int DEFAULT 1000,
+ duration_ms int DEFAULT 3500, output_tokens int DEFAULT 100, image_count int DEFAULT 0, video_count int DEFAULT 0, image_output_tokens int DEFAULT 0, inbound_endpoint text, upstream_endpoint text, native_compaction_v2 boolean DEFAULT false, input_tokens int DEFAULT 100, cache_creation_tokens int DEFAULT 100, cache_read_tokens int DEFAULT 800, stream boolean DEFAULT true, openai_ws_mode boolean DEFAULT false);
+CREATE TABLE ops_error_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, api_key_id bigint DEFAULT 1, request_id text, client_request_id text, request_type int DEFAULT 2, platform text DEFAULT 'openai', model text DEFAULT 'gpt-named', requested_model text, is_count_tokens boolean DEFAULT false, status_code int DEFAULT 503, upstream_status_code int, error_type text DEFAULT 'upstream', error_owner text, error_source text, error_message text, upstream_error_message text, upstream_error_detail text, error_body text,
  duration_ms int, time_to_first_token_ms bigint);
 INSERT INTO groups VALUES(7,'openai'),(8,'openai'),(9,'composite');
 INSERT INTO accounts VALUES(1,'openai');
@@ -59,7 +59,7 @@ INSERT INTO usage_logs(created_at,group_id,request_id,model) VALUES
 INSERT INTO usage_logs(created_at,group_id,request_id,model,request_type,actual_cost) VALUES
  ('2026-10-20T00:50:00Z',7,'cyber','gpt-named',4,1),('2026-10-20T00:51:00Z',7,'count','gpt-named',6,1),('2026-10-20T00:52:00Z',7,'unbilled','gpt-named',2,0);
 INSERT INTO ops_error_logs(created_at,group_id,request_id,status_code,error_type) VALUES
- ('2026-10-20T00:27:00Z',7,'recovered',503,'recovered-attempt'),
+ ('2026-10-20T00:27:00Z',7,'recovered',0,'recovered-attempt'),
  ('2026-10-20T00:31:00Z',7,'final-error',503,'old-error'),('2026-10-20T00:32:00Z',7,'final-error',503,'latest-error'),
  ('2026-10-20T00:33:00Z',7,'ignored',401,'authentication'),
  ('2026-10-20T00:53:00Z',7,'attempt-only',0,'attempt-only'),
@@ -72,6 +72,7 @@ UPDATE usage_logs SET request_type=1, stream=false WHERE request_id='seven-22';
 UPDATE usage_logs SET request_type=0, stream=false WHERE request_id='seven-23';
 UPDATE usage_logs SET request_type=3, stream=false, openai_ws_mode=true WHERE request_id='seven-24';
 UPDATE usage_logs SET first_token_ms=NULL, duration_ms=NULL WHERE request_id='seven-25';
+UPDATE usage_logs SET output_tokens=0,input_tokens=0,cache_creation_tokens=0,cache_read_tokens=0 WHERE request_id='unbilled';
 UPDATE ops_error_logs SET duration_ms=5000, time_to_first_token_ms=400 WHERE request_id='final-error';
 UPDATE ops_error_logs SET error_message='Internal server error', upstream_status_code=502,
  upstream_error_message='Upstream worker failed: trace=test-trace Bearer private-token', upstream_error_detail='fallback detail'
@@ -99,6 +100,7 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 			require.NotEqual(t, start.Add(26*time.Minute), request.OccurredAt) // duplicate source row
 			if request.Status == "error" && request.OccurredAt.Equal(start.Add(32*time.Minute)) {
 				errors++
+				require.Nil(t, request.OutputTPS)
 				require.EqualValues(t, 5000, *request.DurationMs)
 				require.EqualValues(t, 400, *request.TTFTMs)
 				require.Nil(t, request.CacheRate)
@@ -110,6 +112,12 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 				require.Nil(t, request.CacheRate)
 			}
 			if request.Status == "success" {
+				if request.OccurredAt.Equal(start.Add(21*time.Minute)) || request.OccurredAt.Equal(start.Add(22*time.Minute)) || request.OccurredAt.Equal(start.Add(23*time.Minute)) || request.OccurredAt.Equal(start.Add(25*time.Minute)) {
+					require.Nil(t, request.OutputTPS)
+				} else {
+					require.NotNil(t, request.OutputTPS)
+					require.InDelta(t, 40.0, *request.OutputTPS, .00001)
+				}
 				switch request.OccurredAt.Sub(start) {
 				case 20 * time.Minute:
 					require.Nil(t, request.CacheRate) // no input or cache tokens
@@ -173,4 +181,49 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 	require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items, false))
 	require.Len(t, items[0].RecentRequests, 1)
 	require.Equal(t, "actual-unnamed", items[0].RecentRequests[0].Model)
+
+	t.Run("free success remains visible and paid final failure never presents as normal speed", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `TRUNCATE usage_logs,ops_error_logs;
+INSERT INTO usage_logs(created_at,group_id,request_id,model,actual_cost) VALUES
+ ('2026-10-20T00:10:00Z',7,'free','gpt-named',0),
+ ('2026-10-20T00:11:00Z',7,'local:paid-failure','gpt-named',1),
+ ('2026-10-20T00:13:00Z',7,'client:client-failure','gpt-named',1),
+ ('2026-10-20T00:15:00Z',7,'other-account','gpt-named',1),
+ ('2026-10-20T00:17:00Z',7,'other-key','gpt-named',1),
+ ('2026-10-20T00:19:00Z',7,'ws-connection','gpt-named',1),
+ ('2026-10-20T00:20:00Z',7,'ws-connection','gpt-named',1),
+ ('2026-10-20T00:23:00Z',7,'retry','gpt-named',1);
+UPDATE usage_logs SET request_type=3,stream=false,openai_ws_mode=true WHERE request_id='ws-connection';
+INSERT INTO ops_error_logs(created_at,group_id,request_id,client_request_id,account_id,api_key_id,request_type,status_code) VALUES
+ ('2026-10-20T00:12:00Z',7,'paid-failure',NULL,1,1,2,503),
+ ('2026-10-20T00:14:00Z',7,'mapped-client','client-failure',1,1,2,503),
+ ('2026-10-20T00:16:00Z',7,'other-account',NULL,2,1,2,503),
+ ('2026-10-20T00:18:00Z',7,'other-key',NULL,1,2,2,503),
+ ('2026-10-20T00:21:00Z',7,'ws-connection',NULL,1,1,3,503),
+ ('2026-10-20T00:22:00Z',7,'ws-connection',NULL,1,1,3,503),
+ ('2026-10-20T00:24:00Z',7,'retry',NULL,1,1,2,0);`)
+		require.NoError(t, err)
+		filter.Models = nil
+		items := []service.ChannelMonitorV2MatrixRow{{Platform: "openai", GroupID: &seven}}
+		require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items, false))
+		require.Len(t, items[0].RecentRequests, 12)
+		byMinute := make(map[int]service.ChannelMonitorV2RecentRequest)
+		for _, request := range items[0].RecentRequests {
+			byMinute[request.OccurredAt.Minute()] = request
+		}
+		for _, minute := range []int{10, 15, 17, 19, 20, 23} {
+			request, found := byMinute[minute]
+			require.True(t, found, "successful request at minute %d must be retained", minute)
+			require.Equal(t, "success", request.Status)
+			require.NotNil(t, request.OutputTPS)
+			require.InDelta(t, 40, *request.OutputTPS, .000001)
+		}
+		for _, minute := range []int{12, 14, 16, 18, 21, 22} {
+			require.Equal(t, "error", byMinute[minute].Status)
+			require.Nil(t, byMinute[minute].OutputTPS)
+		}
+		require.NotContains(t, byMinute, 11, "paid partial usage is replaced by its final error")
+		require.NotContains(t, byMinute, 13, "client request identities correlate despite different local IDs")
+		require.NotContains(t, byMinute, 24, "a non-terminal retry attempt is not a final failure")
+	})
 }

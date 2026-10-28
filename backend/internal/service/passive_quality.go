@@ -21,6 +21,9 @@ type PassiveQualityConfig struct {
 	EvaluationVersion    int64                      `json:"evaluation_version,omitempty"`
 	Purpose              string                     `json:"purpose,omitempty"`
 	SchemaVersion        int                        `json:"schema_version,omitempty"`
+	TPSAction            string                     `json:"tps_action,omitempty"`
+	TPSConcurrencyLimit  int                        `json:"tps_concurrency_limit,omitempty"`
+	TPSPriorityPenalty   int                        `json:"tps_priority_penalty,omitempty"`
 	TTFTAction           string                     `json:"ttft_action,omitempty"`
 	TTFTConcurrencyLimit int                        `json:"ttft_concurrency_limit,omitempty"`
 	TTFTPriorityPenalty  int                        `json:"ttft_priority_penalty,omitempty"`
@@ -41,6 +44,7 @@ type PassiveQualityConfig struct {
 	Confirmations        int                        `json:"confirmations"`
 	NewSamples           int                        `json:"new_samples"`
 	ErrorRate            PassiveQualityMetric       `json:"error_rate"`
+	TPS                  PassiveQualityMetric       `json:"tps"`
 	TTFT                 PassiveQualityMetric       `json:"ttft"`
 	CacheRate            PassiveQualityMetric       `json:"cache_rate"`
 	ConsecutiveFailures  int                        `json:"consecutive_failures"`
@@ -73,6 +77,8 @@ func (p PassiveQualityPolicy) DecisionVersion() int64 {
 }
 
 type PassiveQualitySample struct {
+	OutputTokens        int64     `json:"output_tokens,omitempty"`
+	GenerationMS        float64   `json:"generation_ms,omitempty"`
 	CacheReported       bool      `json:"cache_reported,omitempty"`
 	CacheOpportunity    string    `json:"cache_opportunity,omitempty"`
 	CacheSession        string    `json:"cache_session,omitempty"`
@@ -89,6 +95,11 @@ type PassiveQualitySample struct {
 	CacheInput          int64     `json:"cache_input"`
 }
 type PassiveQualityEvidence struct {
+	OutputTPS           *float64  `json:"output_tps"`
+	TPSSamples          int       `json:"tps_samples"`
+	TPSFresh            int       `json:"tps_fresh"`
+	TPSLatest           time.Time `json:"tps_latest"`
+	FreshOutputTPS      *float64  `json:"fresh_output_tps,omitempty"`
 	FreshErrorRate      *float64  `json:"fresh_error_rate,omitempty"`
 	FreshTTFT           *float64  `json:"fresh_ttft,omitempty"`
 	FreshCacheRate      *float64  `json:"fresh_cache_rate,omitempty"`
@@ -114,6 +125,7 @@ type PassiveQualityState struct {
 	ConfirmationMetric string                              `json:"confirmation_metric,omitempty"`
 	Purpose            string                              `json:"purpose,omitempty"`
 	CacheObserveAfter  time.Time                           `json:"cache_observe_after"`
+	Speed              *PassiveQualityMetricState          `json:"speed,omitempty"`
 	Latency            *PassiveQualityMetricState          `json:"latency,omitempty"`
 	Cache              map[string]PassiveQualityCacheState `json:"cache,omitempty"`
 	PolicyID           int64                               `json:"policy_id"`
@@ -239,7 +251,7 @@ func (c *PassiveQualityConfig) Validate() error {
 	if c.Confirmations < 1 || c.Confirmations > 10 || c.NewSamples < 1 || c.NewSamples > c.MaxSamples {
 		return fmt.Errorf("confirmations must be 1..10 and new samples 1..max_samples")
 	}
-	if !c.ErrorRate.Enabled && !c.TTFT.Enabled && !c.CacheRate.Enabled && c.ConsecutiveFailures == 0 {
+	if !c.ErrorRate.Enabled && !c.TTFT.Enabled && !c.CacheRate.Enabled && !c.TPS.Enabled && c.ConsecutiveFailures == 0 {
 		return fmt.Errorf("enable at least one metric")
 	}
 	if c.ConsecutiveFailures < 0 || c.ConsecutiveFailures > c.MaxSamples {
@@ -250,7 +262,7 @@ func (c *PassiveQualityConfig) Validate() error {
 		v    PassiveQualityMetric
 		max  float64
 		low  bool
-	}{{"error_rate", c.ErrorRate, 100, false}, {"ttft", c.TTFT, 600000, false}, {"cache_rate", c.CacheRate, 100, true}} {
+	}{{"error_rate", c.ErrorRate, 100, false}, {"ttft", c.TTFT, 600000, false}, {"cache_rate", c.CacheRate, 100, true}, {"tps", c.TPS, 1000000, true}} {
 		if !m.v.Enabled {
 			continue
 		}
@@ -278,7 +290,8 @@ func passiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 	e := PassiveQualityEvidence{Samples: len(samples), Complete: complete}
 	var freshSamples []PassiveQualitySample
 	var ttft []float64
-	var read, input int64
+	var read, input, output int64
+	var generationMS float64
 	consecutive := true
 	failureProbe := false
 	// Repository supplies newest first, with a deterministic tie break.
@@ -315,6 +328,17 @@ func passiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 				e.TTFTLatest = s.At
 			}
 		}
+		if OutputTokensPerSecond(s.OutputTokens, s.GenerationMS) != nil {
+			e.TPSSamples++
+			output += s.OutputTokens
+			generationMS += s.GenerationMS
+			if s.At.After(after) {
+				e.TPSFresh++
+			}
+			if s.At.After(e.TPSLatest) {
+				e.TPSLatest = s.At
+			}
+		}
 		if s.CacheInput > 0 {
 			e.CacheSamples++
 			if s.At.After(after) {
@@ -334,6 +358,7 @@ func passiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 		e.TTFT = &v
 		e.TTFTSamples = len(ttft)
 	}
+	e.OutputTPS = OutputTokensPerSecond(output, generationMS)
 	e.CacheReadTokens, e.CacheInputTokens = read, input
 	if input > 0 {
 		v := float64(read) * 100 / float64(input)
@@ -342,6 +367,7 @@ func passiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 	if withFresh {
 		fresh := passiveQualitySummarize(freshSamples, after, complete, false)
 		e.FreshErrorRate, e.FreshTTFT, e.FreshCacheRate = fresh.ErrorRate, fresh.TTFT, fresh.CacheRate
+		e.FreshOutputTPS = fresh.OutputTPS
 	}
 	return e
 }
@@ -366,7 +392,7 @@ func EvaluatePassiveQuality(c PassiveQualityConfig, e PassiveQualityEvidence, re
 		value   *float64
 		samples int
 		low     bool
-	}{{"error_rate", c.ErrorRate, e.ErrorRate, e.Samples, false}, {"ttft_p90", c.TTFT, e.TTFT, e.TTFTSamples, false}, {"cache_rate", c.CacheRate, e.CacheRate, e.CacheSamples, true}} {
+	}{{"error_rate", c.ErrorRate, e.ErrorRate, e.Samples, false}, {"ttft_p90", c.TTFT, e.TTFT, e.TTFTSamples, false}, {"cache_rate", c.CacheRate, e.CacheRate, e.CacheSamples, true}, {"output_tps", c.TPS, e.OutputTPS, e.TPSSamples, true}} {
 		if !m.cfg.Enabled {
 			continue
 		}

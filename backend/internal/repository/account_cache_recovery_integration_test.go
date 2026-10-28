@@ -53,12 +53,12 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		_, err := db.ExecContext(ctx, query, args...)
 		require.NoError(t, err)
 	}
-	exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,deleted_at TIMESTAMPTZ);
+	exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,deleted_at TIMESTAMPTZ,extra JSONB NOT NULL DEFAULT '{}');
 		CREATE TABLE scheduled_test_protection_states(plan_id BIGINT,account_id BIGINT,test_definition_id BIGINT,blocked BOOLEAN NOT NULL DEFAULT TRUE,
 		 recovery_phase TEXT NOT NULL DEFAULT 'trial',recovery_trial_started_at TIMESTAMPTZ DEFAULT clock_timestamp()-INTERVAL '1 minute',
 		 recovery_trial_ends_at TIMESTAMPTZ DEFAULT clock_timestamp()+INTERVAL '1 hour',recovery_trial_requests BIGINT NOT NULL DEFAULT 0,rule_config JSONB NOT NULL,
 		 PRIMARY KEY(plan_id,account_id,test_definition_id));
-		CREATE TABLE scheduled_test_combination_states(plan_id BIGINT,account_id BIGINT,blocked BOOLEAN NOT NULL DEFAULT TRUE,PRIMARY KEY(plan_id,account_id));
+		CREATE TABLE scheduled_test_combination_states(plan_id BIGINT,account_id BIGINT,blocked BOOLEAN NOT NULL DEFAULT TRUE,model_key TEXT NOT NULL DEFAULT '',account_wide BOOLEAN NOT NULL DEFAULT TRUE,PRIMARY KEY(plan_id,account_id));
 		CREATE TABLE scheduled_test_pass_rate_states(account_id BIGINT,model_key TEXT,blocked BOOLEAN NOT NULL DEFAULT TRUE);
 		INSERT INTO accounts(id) VALUES(41);`)
 	repos := []*accountRepository{{sql: db}, {sql: otherDB}}
@@ -69,7 +69,7 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		require.Equal(t, want, allowed)
 	}
 	reset := func() {
-		exec(`TRUNCATE scheduled_test_protection_states,scheduled_test_combination_states,scheduled_test_pass_rate_states; UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL`)
+		exec(`TRUNCATE scheduled_test_protection_states,scheduled_test_combination_states,scheduled_test_pass_rate_states; UPDATE accounts SET status='active',schedulable=TRUE,deleted_at=NULL,extra='{}'`)
 	}
 	hold := func(planID, maxRequests int64) {
 		exec(`INSERT INTO scheduled_test_protection_states(plan_id,account_id,test_definition_id,rule_config)
@@ -126,6 +126,30 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		require.NoError(t, db.QueryRowContext(ctx, `SELECT recovery_trial_requests FROM scheduled_test_protection_states WHERE plan_id=1`).Scan(&used))
 		require.EqualValues(t, 1, used)
 	})
+	t.Run("single-result model holds cannot block peers or escape through missing model", func(t *testing.T) {
+		reset()
+		exec(`UPDATE accounts SET extra='{"active_test_model_holds":{"public-a":"ability failed"}}'`)
+		exec(`INSERT INTO scheduled_test_combination_states(plan_id,account_id,model_key,account_wide) VALUES(2,41,'public-a',false)`)
+		for _, model := range []string{"", "public-a", "public-b"} {
+			allowed, err := repos[0].AcquireCacheRecoveryRequest(context.WithValue(ctx, ctxkey.Model, model), 41)
+			require.NoError(t, err)
+			require.Equal(t, model == "public-b", allowed, model)
+		}
+		requestCtx := context.WithValue(ctx, ctxkey.Model, "provider-b")
+		requestCtx = context.WithValue(requestCtx, ctxkey.RequestedPublicModel, "public-a")
+		allowed, err := repos[0].AcquireCacheRecoveryRequest(requestCtx, 41)
+		require.NoError(t, err)
+		require.False(t, allowed, "the requested public model cannot escape through an upstream alias")
+		exec(`UPDATE accounts SET extra=extra || '{"active_test_all_models_paused":true}'`)
+		allowed, err = repos[0].AcquireCacheRecoveryRequest(context.WithValue(ctx, ctxkey.Model, "unmonitored"), 41)
+		require.NoError(t, err)
+		require.False(t, allowed, "all monitored models failed: reject even an unmonitored model with a stale active status")
+		exec(`UPDATE accounts SET extra=extra-'active_test_all_models_paused'`)
+		allowed, err = repos[0].AcquireCacheRecoveryRequest(context.WithValue(ctx, ctxkey.Model, "public-b"), 41)
+		require.NoError(t, err)
+		require.True(t, allowed, "recovering one model reopens the account without clearing the other model hold")
+	})
+
 	t.Run("combination hold overrides an active cache trial", func(t *testing.T) {
 		reset()
 		hold(1, 3)

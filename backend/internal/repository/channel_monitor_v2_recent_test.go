@@ -26,7 +26,8 @@ func TestChannelMonitorV2RecentRequestsScopeAndModelMapping(t *testing.T) {
 	require.NotContains(t, query, channelMonitorV2CacheEligibleUL) // synchronous successes retain their recorded cache ratio
 	require.Contains(t, query, "NOT current_error.is_count_tokens")
 	require.Equal(t, 3, strings.Count(query, "LIMIT 20"))
-	require.Contains(t, query, "succeeded.request_id = current_error.request_id")
+	require.Contains(t, query, "tps_final_failure_keys")
+	require.NotContains(t, query, "succeeded.request_id = current_error.request_id", "billed partial output cannot hide a terminal failure")
 	require.NotContains(t, query, "__other__")
 	require.Contains(t, query, "ANY($6)")
 	require.Contains(t, query, channelMonitorV2ModelSQL)
@@ -43,11 +44,11 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 	require.NoError(t, err)
 	defer db.Close()
 	now := time.Now().UTC()
-	rows := sqlmock.NewRows([]string{"idx", "id", "created_at", "model", "is_error", "ttft", "duration", "cache_rate", "type", "owner", "source", "status", "upstream_status", "message", "error_summary"}).
-		AddRow(0, 1, now, "gpt-test", false, 1000, 3500, 0.8, "", "", "", 0, 0, "", "").
-		AddRow(0, 2, now.Add(time.Second), "gpt-test", false, 15000, 0, 0.0, "", "", "", 0, 0, "", "").
-		AddRow(0, 3, now.Add(2*time.Second), "gpt-test", true, nil, 5000, nil, "upstream", "provider", "", 503, 503, "private message body", "private summary").
-		AddRow(1, 4, now, "grok-test", true, -1, -1, nil, "authentication", "client", "", 401, 0, "private API key text", "private summary")
+	rows := sqlmock.NewRows([]string{"idx", "id", "created_at", "model", "is_error", "ttft", "duration", "cache_rate", "output_tps", "type", "owner", "source", "status", "upstream_status", "message", "error_summary"}).
+		AddRow(0, 1, now, "gpt-test", false, 1000, 3500, 0.8, 40.0, "", "", "", 0, 0, "", "").
+		AddRow(0, 2, now.Add(time.Second), "gpt-test", false, 15000, 0, 0.0, nil, "", "", "", 0, 0, "", "").
+		AddRow(0, 3, now.Add(2*time.Second), "gpt-test", true, nil, 5000, nil, nil, "upstream", "provider", "", 503, 503, "private message body", "private summary").
+		AddRow(1, 4, now, "grok-test", true, -1, -1, nil, nil, "authentication", "client", "", 401, 0, "private API key text", "private summary")
 	mock.ExpectQuery("SELECT d.idx, recent.id, recent.created_at").WillReturnRows(rows)
 	cfg := service.ChannelMonitorV2Config{HealthThresholds: service.ChannelMonitorV2HealthThresholds{WarningTTFTMs: 10000}, IgnoredErrorCategories: []string{"authentication"}}
 	items := []service.ChannelMonitorV2MatrixRow{{Platform: "openai"}, {Platform: "grok"}}
@@ -62,6 +63,9 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 	require.Nil(t, items[0].RecentRequests[2].TTFTMs)
 	require.EqualValues(t, 3500, *items[0].RecentRequests[0].DurationMs)
 	require.Equal(t, 0.8, *items[0].RecentRequests[0].CacheRate)
+	require.Equal(t, 40.0, *items[0].RecentRequests[0].OutputTPS)
+	require.Nil(t, items[0].RecentRequests[1].OutputTPS)
+	require.Nil(t, items[0].RecentRequests[2].OutputTPS)
 	require.EqualValues(t, 0, *items[0].RecentRequests[1].DurationMs)
 	require.Zero(t, *items[0].RecentRequests[1].CacheRate)
 	require.EqualValues(t, 5000, *items[0].RecentRequests[2].DurationMs)

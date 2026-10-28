@@ -70,6 +70,8 @@ func readGroupQualityTargetSummary(ctx context.Context, reader groupQualitySumma
 	s := service.GroupQualityTargetSummary{PolicyID: p.ID, GroupID: groupID, WindowSeconds: 3600, WindowStartedAt: now.Add(-time.Hour), GeneratedAt: now, SnapshotReady: true, Contributors: []service.GroupQualityContributor{}}
 	var cache, availability, ttft sql.NullFloat64
 	var totalInput int64
+	var tpsOutputTokens int64
+	var tpsGenerationMS float64
 	// Account/request identity is retained across WS turns. A failed attempt
 	// wins over partial usage, matching the real-traffic protection collector.
 	err := reader.QueryRowContext(ctx, groupQualitySummaryPopulationSQL+`, stats AS (
@@ -78,7 +80,10 @@ func readGroupQualityTargetSummary(ctx context.Context, reader groupQualitySumma
  count(*) FILTER(WHERE text_input>0 AND cache_reported) AS cache_samples,
  COALESCE(sum(cache_read) FILTER(WHERE text_input>0 AND cache_reported),0) AS cache_read,
  COALESCE(sum(text_input) FILTER(WHERE text_input>0 AND cache_reported),0) AS cache_input,
- count(*) FILTER(WHERE text_input>0 AND NOT cache_reported) AS cache_unknown FROM succeeded
+ count(*) FILTER(WHERE text_input>0 AND NOT cache_reported) AS cache_unknown,
+ count(*) FILTER(WHERE tps_eligible) AS tps_samples,
+ COALESCE(sum(output_tokens) FILTER(WHERE tps_eligible),0)::bigint AS tps_output_tokens,
+ COALESCE(sum(generation_ms) FILTER(WHERE tps_eligible),0)::float8 AS tps_generation_ms FROM succeeded
  ), failures AS (SELECT count(*) AS failures FROM failed), unknown AS (
  SELECT count(*) AS failures FROM passive_quality_failures f
  WHERE f.group_id=0 AND NOT f.non_text AND f.created_at>=$2 AND f.created_at<=$3
@@ -95,10 +100,12 @@ func readGroupQualityTargetSummary(ctx context.Context, reader groupQualitySumma
  stats.successes,failures.failures,unknown.failures,
  CASE WHEN telemetry.complete AND unknown.failures=0 THEN 100.0*stats.successes/NULLIF(stats.successes+failures.failures,0) END,
  stats.ttft_samples,CASE WHEN telemetry.complete THEN stats.ttft_p90 END,telemetry.complete,
+ stats.tps_samples,stats.tps_output_tokens,stats.tps_generation_ms,
  (SELECT COALESCE(sum(text_input),0) FROM succeeded)
  FROM stats CROSS JOIN failures CROSS JOIN unknown CROSS JOIN telemetry`, groupID, now.Add(-time.Hour), now, p.Model, pq.Array(append([]int64{}, p.ExcludedAccountIDs...))).Scan(
 		&s.CacheSamples, &s.CacheReadTokens, &s.CacheInputTokens, &s.CacheUnknownSamples, &cache,
-		&s.SuccessSamples, &s.FailureSamples, &s.FailureUnknownSamples, &availability, &s.TTFTSamples, &ttft, &s.TelemetryComplete, &totalInput)
+		&s.SuccessSamples, &s.FailureSamples, &s.FailureUnknownSamples, &availability, &s.TTFTSamples, &ttft, &s.TelemetryComplete,
+		&s.TPSSamples, &tpsOutputTokens, &tpsGenerationMS, &totalInput)
 	if err != nil {
 		return s, err
 	}
@@ -110,6 +117,9 @@ func readGroupQualityTargetSummary(ctx context.Context, reader groupQualitySumma
 	}
 	if ttft.Valid {
 		s.TTFTP90MS = &ttft.Float64
+	}
+	if s.TelemetryComplete {
+		s.OutputTPS = service.OutputTokensPerSecond(tpsOutputTokens, tpsGenerationMS)
 	}
 	s.TotalInputTokens = totalInput
 	s.TrafficControl, err = readGroupQualityTrafficSummary(ctx, reader, p, now, totalInput, s.CacheReadTokens, s.TelemetryComplete)
@@ -123,7 +133,7 @@ func readGroupQualityTargetSummary(ctx context.Context, reader groupQualitySumma
 	return s, err
 }
 
-const groupQualitySummaryPopulationSQL = `WITH failed AS MATERIALIZED (
+var groupQualitySummaryPopulationSQL = `WITH failed AS MATERIALIZED (
  SELECT account_id,request_key,created_at,model FROM passive_quality_failures
  WHERE group_id=$1 AND NOT non_text AND created_at>=$2 AND created_at<=$3
  AND ($4='' OR model=$4) AND NOT(account_id=ANY($5))
@@ -131,6 +141,8 @@ const groupQualitySummaryPopulationSQL = `WITH failed AS MATERIALIZED (
  SELECT DISTINCT ON (ul.account_id,COALESCE(NULLIF(COALESCE(NULLIF(cr.attempt_key,''),ul.request_id),''),'usage:'||ul.id))
  ul.account_id,ul.created_at,COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model) AS model,COALESCE(NULLIF(COALESCE(NULLIF(cr.attempt_key,''),ul.request_id),''),'usage:'||ul.id) AS request_key,
  CASE WHEN (ul.stream OR ul.openai_ws_mode) AND ul.first_token_ms>=0 THEN ul.first_token_ms END AS ttft,
+ ul.output_tokens,(ul.duration_ms::float8-ul.first_token_ms::float8) AS generation_ms,
+ (` + outputTPSEligibleSQL("ul") + `) AS tps_eligible,
  CASE WHEN NOT COALESCE(ul.native_compaction_v2,false)
  AND COALESCE(ul.inbound_endpoint,'') NOT LIKE '%/compact%'
  AND COALESCE(ul.upstream_endpoint,'') NOT LIKE '%/compact%'

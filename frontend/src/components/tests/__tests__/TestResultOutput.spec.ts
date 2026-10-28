@@ -8,6 +8,29 @@ import { buildTestPreviewHTML } from '@/utils/testPreview'
 const global = { plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: {} } })] }
 
 describe('test result output', () => {
+  it('shows pending and failed automatic review safely without leaking judge account metadata', async () => {
+    const execution = {
+      input_tokens: null, output_tokens: null, reasoning_tokens: null, cache_read_tokens: null, cache_creation_tokens: null, attempts: [],
+      auto_review: { verdict: 'pending' as const, reason: '<script>untrusted judge text</script>', judge_account_id: 999123, judge_model: 'vision-a', attempts: 1, reviewed_at: '2026-10-27T10:00:00Z' },
+    }
+    const wrapper = mount(TestResultOutput, { global, props: { result: { id: 51, status: 'success', output_kind: 'html', output_html: '<svg />', execution_info: execution } } })
+    expect(wrapper.get('[data-auto-review-verdict]').classes()).toContain('badge-warning')
+    expect(wrapper.find('[data-auto-review-pending]').exists()).toBe(true)
+    expect(wrapper.get('[data-auto-review-reason]').text()).toBe('<script>untrusted judge text</script>')
+    expect(wrapper.find('script').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('999123')
+    await wrapper.setProps({ result: { ...wrapper.props('result'), execution_info: { ...execution, auto_review: {
+      ...execution.auto_review, verdict: 'fail', reason: 'Motion failed', criteria: [{ key: 'motion', passed: false, reason: 'No cycling movement' }],
+    } } } })
+    expect(wrapper.get('[data-auto-review-verdict]').classes()).toContain('badge-danger')
+    expect(wrapper.find('[data-auto-review-pending]').exists()).toBe(false)
+    expect(wrapper.get('[data-auto-review-criteria]').text()).toContain('No cycling movement')
+    await wrapper.setProps({ compact: true })
+    expect(wrapper.find('[data-auto-review-criteria]').exists()).toBe(false)
+    expect(wrapper.get('[data-auto-review-reason]').text()).toBe('Motion failed')
+    wrapper.unmount()
+  })
+
   it('renders model metadata and its verdict without exposing raw response text', async () => {
     const check = { requested_model: 'public-alias', upstream_model: 'gpt-5.6-sol', returned_models: ['gpt-5.6-sol-2026-09-21'], match_mode: 'snapshot' as const, verdict: 'pass' as const, reason: 'match' as const }
     const wrapper = mount(TestResultOutput, { global, props: { result: { id: 50, status: 'success', output_kind: 'model_check', output_model_check: check, response_text: '{"private":"not for display"}' } } })
@@ -65,11 +88,12 @@ describe('test result output', () => {
   it('renders structured statistics and never falls back to raw statistics JSON', async () => {
     const wrapper = mount(TestResultOutput, { global, props: { result: {
       id: 42, status: 'success', output_kind: 'statistics', response_text: '{"private":"do not render"}',
-      output_statistics: { window_start: '2026-09-21T10:00:00Z', window_end: '2026-09-21T11:00:00Z', total_requests: 20, success_requests: 19, failed_requests: 1, success_rate: 0.95, cache_rate: 0.625, avg_first_token_ms: 432.6, first_token_samples: 19, cache_read_tokens: 625, cache_input_tokens: 1000 },
+      output_statistics: { window_start: '2026-09-21T10:00:00Z', window_end: '2026-09-21T11:00:00Z', total_requests: 20, success_requests: 19, failed_requests: 1, success_rate: 0.95, cache_rate: 0.625, avg_first_token_ms: 432.6, first_token_samples: 19, output_tps: 42.5, tps_samples: 17, cache_read_tokens: 625, cache_input_tokens: 1000 },
     } } })
     expect(wrapper.get('[data-success-rate]').text()).toBe('95.0%')
     expect(wrapper.get('[data-cache-rate]').text()).toBe('62.5%')
     expect(wrapper.get('[data-first-token]').text()).toBe('433ms')
+    expect(wrapper.get('[data-output-tps]').text()).toBe('42.5 token/s')
     expect(wrapper.find('pre').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('private')
     await wrapper.setProps({ result: { ...wrapper.props('result'), output_statistics: null } })
@@ -81,13 +105,13 @@ describe('test result output', () => {
   it('shows no-data metrics as dashes while retaining valid zero percentages', async () => {
     const statistics = { window_start: 'invalid', window_end: 'invalid', total_requests: 0, success_requests: 0, failed_requests: 0, success_rate: null, cache_rate: null, avg_first_token_ms: null, first_token_samples: 0, cache_read_tokens: 0, cache_input_tokens: 0 }
     const wrapper = mount(TestResultOutput, { global, props: { result: { id: 42, status: 'success', output_kind: 'statistics', output_statistics: statistics } } })
-    for (const selector of ['[data-success-rate]', '[data-cache-rate]', '[data-first-token]']) expect(wrapper.get(selector).text()).toBe('—')
+    for (const selector of ['[data-success-rate]', '[data-cache-rate]', '[data-first-token]', '[data-output-tps]']) expect(wrapper.get(selector).text()).toBe('—')
     await wrapper.setProps({ result: { ...wrapper.props('result'), output_statistics: { ...statistics, total_requests: 10, failed_requests: 10, success_rate: 0, cache_input_tokens: 100, cache_rate: 0, first_token_samples: 1, avg_first_token_ms: 0 } } })
     expect(wrapper.get('[data-success-rate]').text()).toBe('0.0%')
     expect(wrapper.get('[data-cache-rate]').text()).toBe('0.0%')
     expect(wrapper.get('[data-first-token]').text()).toBe('0ms')
     await wrapper.setProps({ result: { ...wrapper.props('result'), output_statistics: { ...statistics, total_requests: 0, success_rate: 1, cache_rate: 0, avg_first_token_ms: 0 } } })
-    for (const selector of ['[data-success-rate]', '[data-cache-rate]', '[data-first-token]']) expect(wrapper.get(selector).text()).toBe('—')
+    for (const selector of ['[data-success-rate]', '[data-cache-rate]', '[data-first-token]', '[data-output-tps]']) expect(wrapper.get(selector).text()).toBe('—')
     wrapper.unmount()
   })
   it('shows zero as a numeric result and keeps the original response available', () => {

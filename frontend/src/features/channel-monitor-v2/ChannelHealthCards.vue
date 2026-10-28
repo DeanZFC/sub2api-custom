@@ -33,7 +33,7 @@
                 {{ healthLabel(cardHealth(row.health, healthMode)) }}
               </span>
             </header>
-            <dl class="my-3 grid grid-cols-3 gap-2">
+            <dl class="my-3 grid grid-cols-2 gap-2">
               <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">
                 <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.cacheRate')">{{ t('channelMonitorV2.metrics.cacheRate') }}</dt>
                 <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl">{{ formatMonitorCacheRate(row.metrics) }}</dd>
@@ -45,6 +45,10 @@
               <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">
                 <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.ttft')">{{ t('channelMonitorV2.metrics.ttft') }}</dt>
                 <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl" :title="latencyDetail(row)">{{ formatMonitorMs(row.metrics.ttft.p50_ms) }}</dd>
+              </div>
+              <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700" data-output-tps>
+                <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.outputTpsDetail')">{{ t('channelMonitorV2.metrics.outputTps') }}</dt>
+                <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl">{{ formatMonitorOutputTps(row.metrics.output_tps) }}</dd>
               </div>
             </dl>
             <div class="mb-3 border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="health-history">
@@ -98,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { formatMonitorCacheRate } from '@/features/channel-monitor-v2/monitorFormat'
+import { formatMonitorCacheRate, formatMonitorOutputTps } from '@/features/channel-monitor-v2/monitorFormat'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { HealthState, MonitorCoverage, MonitorMatrixGroupBy, MonitorMatrixRow, MonitorRecentRequest } from '@/api/channelMonitorV2'
@@ -178,6 +182,7 @@ function historySlots(row: MonitorMatrixRow) {
         t('channelMonitorV2.matrix.scoreLine', { score: score == null ? '-' : Math.round(score) }),
         t('channelMonitorV2.metrics.successRateValue', { value: formatMonitorSuccessRateFromError(metrics.error_rate, health.error_rate) }),
         t('channelMonitorV2.metrics.ttftValue', { value: formatLatencyPrivacy(metrics.ttft.p50_ms, metrics.ttft.p90_ms, metrics.ttft.avg_ms, metrics.ttft.p95_ms) }),
+        t('channelMonitorV2.metrics.outputTpsValue', { value: formatMonitorOutputTps(metrics.output_tps) }),
         t('channelMonitorV2.metrics.cacheRateValue', { value: formatMonitorCacheRate(metrics) }),
         t('channelMonitorV2.metrics.durationValue', { value: formatLatencyPrivacy(metrics.duration.p50_ms, metrics.duration.p90_ms, metrics.duration.avg_ms, metrics.duration.p95_ms) }),
       ].join('\n'),
@@ -192,6 +197,7 @@ function requestSlots(row: MonitorMatrixRow) {
       `${modelName(request.model)} · ${t(`channelMonitorV2.cards.requests.${request.status}`)}`,
       t('channelMonitorV2.cards.requestTime', { value: timeLabel(request.occurred_at) }),
       t('channelMonitorV2.cards.requestTTFT', { value: formatMonitorMs(request.ttft_ms) }),
+      t('channelMonitorV2.metrics.outputTpsValue', { value: formatMonitorOutputTps(request.output_tps) }),
       t('channelMonitorV2.metrics.cacheRateValue', { value: request.cache_rate == null ? '-' : formatMonitorPercent(request.cache_rate) }),
       t('channelMonitorV2.cards.requestDuration', { value: formatMonitorMs(request.duration_ms) }),
       props.admin && request.error_category ? t(`channelMonitorV2.errorCategories.${request.error_category}`) : '',

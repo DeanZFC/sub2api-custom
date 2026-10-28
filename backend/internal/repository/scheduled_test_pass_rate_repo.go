@@ -38,7 +38,22 @@ func scheduledTestPassRateVersion(ctx context.Context, tx *sql.Tx, planID int64,
 		}
 	}
 	semantic.Thresholds = thresholds
-	raw, err := json.Marshal([]any{"active-pass-rate-v1", prompt, kind, maxTokens, reasoning, semantic})
+	var reviewSemantics any
+	if rule.UsesAutoReview() {
+		config, err := qualityConfig(ctx, tx, false)
+		if err != nil {
+			return "", err
+		}
+		if config.PelicanReview != nil {
+			reviewSemantics = []any{service.ScheduledTestReviewRubricVersion, config.PelicanReview.JudgeAccountID, config.PelicanReview.JudgeModel}
+		}
+	}
+	// Preserve historical versions for rules that do not use visual review.
+	inputs := []any{"active-pass-rate-v1", prompt, kind, maxTokens, reasoning, semantic}
+	if rule.UsesAutoReview() {
+		inputs = append(inputs, reviewSemantics)
+	}
+	raw, err := json.Marshal(inputs)
 	if err != nil {
 		return "", err
 	}
@@ -131,6 +146,21 @@ func recordScheduledTestPassRate(ctx context.Context, tx *sql.Tx, state *protect
 			return err
 		}
 		freshEvidence = count > 0
+		// Only an explicit administrator correction of this exact visual result
+		// may reverse its recorded verdict. Successful execution retries retain
+		// the existing conservative, one-observation-per-round behavior.
+		if state.rule.UsesAutoReview() && state.evidenceSource == "administrator" {
+			changed, err := tx.ExecContext(ctx, `UPDATE scheduled_test_pass_rate_evidence SET verdict=$8
+ WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$4 AND rule_version=$5 AND run_key=$6 AND result_id=$7 AND verdict<>$8`, state.planID, state.accountID, state.definitionID, result.ModelID, version, run, state.resultID, verdict)
+			if err != nil {
+				return err
+			}
+			count, err := changed.RowsAffected()
+			if err != nil {
+				return err
+			}
+			freshEvidence = freshEvidence || count > 0
+		}
 		if verdict == "fail" {
 			changed, err := tx.ExecContext(ctx, `UPDATE scheduled_test_pass_rate_evidence SET verdict='fail'
    WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$4 AND rule_version=$5 AND run_key=$6 AND verdict='pass'`, state.planID, state.accountID, state.definitionID, result.ModelID, version, run)
@@ -240,10 +270,15 @@ func syncActivePassRateProjection(ctx context.Context, tx *sql.Tx, accountID int
 		return err
 	}
 	n, err := changed.RowsAffected()
-	if err != nil || n == 0 {
+	if err != nil {
 		return err
 	}
-	return enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil)
+	if n > 0 {
+		if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+			return err
+		}
+	}
+	return reconcileProtectionAccount(ctx, tx, accountID)
 }
 
 func (r *scheduledTestResultRepository) hydratePassRates(ctx context.Context, results []*service.ScheduledTestResult) error {

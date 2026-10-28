@@ -38,6 +38,23 @@ describe('independent quality scoring settings', () => {
     expect(api.saveScoreConfig).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+  it('keeps TPS disabled for old configs, validates higher-is-better, and saves an explicit weight', async () => {
+    const oldConfig = defaultQualityScoreConfig(4)
+    Reflect.deleteProperty(oldConfig, 'tps')
+    api.scoreConfig.mockResolvedValue(oldConfig)
+    const wrapper = mountPanel(); await flushPromises()
+    expect((wrapper.get('[data-score-field="tps.weight"]').element as HTMLInputElement).value).toBe('0')
+    await wrapper.get('[data-score-field="tps.weight"]').setValue(15)
+    await wrapper.get('[data-score-field="tps.good"]').setValue(4)
+    expect(wrapper.get('[data-save-score]').attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit')
+    expect(api.saveScoreConfig).not.toHaveBeenCalled()
+    await wrapper.get('[data-score-field="tps.good"]').setValue(50)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveScoreConfig).toHaveBeenCalledWith(expect.objectContaining({ tps: { weight: 15, good: 50, bad: 5 } }))
+    wrapper.unmount()
+  })
+
   it('keeps edited values and version on conflict until explicit reload', async () => {
     api.saveScoreConfig.mockRejectedValue({ response: { status: 409 } })
     const wrapper = mountPanel(); await flushPromises()

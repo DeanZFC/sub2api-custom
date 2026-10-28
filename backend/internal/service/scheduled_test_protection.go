@@ -26,6 +26,7 @@ type ScheduledTestProtectionConfig struct {
 }
 
 type ScheduledTestProtectionRule struct {
+	AutoReview       *ScheduledTestAutoReviewConfig    `json:"auto_review,omitempty"`
 	PassRate         *ScheduledTestPassRateConfig      `json:"pass_rate,omitempty"`
 	Priority         int                               `json:"priority"`
 	RequiredPass     bool                              `json:"required_pass"`
@@ -106,6 +107,19 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 	if len(config.Rules) == 0 || len(config.Rules) > 32 {
 		return fmt.Errorf("automatic protection requires between 1 and 32 rules")
 	}
+	// Automatic visual results always retain an administrator correction path.
+	for i := range config.Rules {
+		rule := &config.Rules[i]
+		if rule.UsesAutoReview() {
+			if rule.Vote == nil {
+				rule.Vote = &ScheduledTestVoteConfig{PassAtLeast: 1}
+			}
+			rule.Vote.Enabled = true
+			if rule.Vote.PassAtLeast == 0 {
+				rule.Vote.PassAtLeast = 1
+			}
+		}
+	}
 	if err := validateScheduledTestAllPass(plan); err != nil {
 		return err
 	}
@@ -126,7 +140,7 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 		if !config.UsesCombinations() && (rule.Priority < 0 || rule.Priority > 1000) {
 			return fmt.Errorf("priority must be between 0 and 1000")
 		}
-		if !config.UsesCombinations() && rule.RequiredPass && rule.Vote != nil && rule.Vote.Enabled {
+		if !config.UsesCombinations() && rule.RequiredPass && rule.Vote != nil && rule.Vote.Enabled && !rule.UsesAutoReview() {
 			return fmt.Errorf("required_pass only supports automatic conditions")
 		}
 		if !config.UsesCombinations() || (rule.Recovery != nil && rule.Recovery.Enabled) {
@@ -189,6 +203,10 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 				if threshold.Value < 0 {
 					return fmt.Errorf("latency threshold cannot be negative")
 				}
+			case "output_tps":
+				if threshold.Value < 0 {
+					return fmt.Errorf("output TPS threshold cannot be negative")
+				}
 			case "output_numeric":
 			default:
 				return fmt.Errorf("unsupported protection metric %q", threshold.Metric)
@@ -205,11 +223,14 @@ func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string
 	if rule == nil {
 		return nil
 	}
+	if rule.AutoReview != nil && rule.AutoReview.Enabled && kind != "html" {
+		return fmt.Errorf("automatic visual review requires HTML/SVG output")
+	}
 	if rule.PassRate != nil && rule.PassRate.Enabled && kind == "statistics" {
 		return fmt.Errorf("pass_rate requires an active capability test")
 	}
 	if rule.PassRate != nil && rule.PassRate.Enabled && kind != "statistics" && kind != "capability" && kind != "model_check" {
-		hasAbilityCondition := rule.ExpectedAnswer != "" || rule.Vote != nil && rule.Vote.Enabled
+		hasAbilityCondition := rule.ExpectedAnswer != "" || rule.Vote != nil && rule.Vote.Enabled || rule.UsesAutoReview()
 		for _, threshold := range rule.Thresholds {
 			hasAbilityCondition = hasAbilityCondition || threshold.Metric == "output_numeric"
 		}
@@ -240,7 +261,7 @@ func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string
 	}
 	for _, threshold := range rule.Thresholds {
 		switch threshold.Metric {
-		case "success_rate", "cache_rate", "avg_first_token_ms":
+		case "success_rate", "cache_rate", "avg_first_token_ms", "output_tps":
 			if kind != "statistics" {
 				return fmt.Errorf("metric %s requires a statistics test", threshold.Metric)
 			}
@@ -279,6 +300,18 @@ func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *S
 			return "fail", "检测执行失败"
 		}
 		return "pending", "检测未完成，等待下一轮"
+	}
+	if rule.UsesAutoReview() {
+		if result.ExecutionInfo == nil || result.ExecutionInfo.AutoReview == nil {
+			return "pending", "等待自动视觉评审"
+		}
+		review := result.ExecutionInfo.AutoReview
+		if review.Verdict != "pass" {
+			if review.Verdict == "fail" {
+				return "fail", review.Reason
+			}
+			return "pending", review.Reason
+		}
 	}
 	missing := false
 	if result.OutputKind == "capability" {
@@ -399,6 +432,8 @@ func scheduledTestThresholdReason(threshold ScheduledTestThreshold, observed flo
 		label, unit = "缓存率", "%"
 	case "avg_first_token_ms":
 		label, unit = "平均首字延迟", "ms"
+	case "output_tps":
+		label, unit = "输出速度", "tokens/s"
 	case "latency_ms":
 		label, unit = "检测总耗时", "ms"
 	case "output_numeric":
@@ -430,7 +465,7 @@ func scheduledTestMetric(result *ScheduledTestResult, metric string, minSamples 
 			return extractScheduledTestNumber(result.ResponseText)
 		}
 		value = result.OutputNumeric
-	case "success_rate", "cache_rate", "avg_first_token_ms":
+	case "success_rate", "cache_rate", "avg_first_token_ms", "output_tps":
 		if snapshot == nil || snapshot.TotalRequests < minSamples {
 			return 0, false
 		}
@@ -447,9 +482,17 @@ func scheduledTestMetric(result *ScheduledTestResult, metric string, minSamples 
 				return 0, false
 			}
 			value = snapshot.AvgFirstTokenMs
+		case "output_tps":
+			if snapshot.TPSSamples < minSamples {
+				return 0, false
+			}
+			value = snapshot.OutputTPS
 		}
 	}
 	if value == nil || math.IsNaN(*value) || math.IsInf(*value, 0) {
+		return 0, false
+	}
+	if metric == "output_tps" && *value < 0 {
 		return 0, false
 	}
 	if metric == "success_rate" || metric == "cache_rate" {

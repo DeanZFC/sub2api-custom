@@ -63,6 +63,8 @@ func (r *scheduledTestResultRepository) CollectStatistics(ctx context.Context, f
  SELECT DISTINCT ON (ul.api_key_id, COALESCE(NULLIF(ul.request_id,''), 'usage:'||ul.id::text))
    ul.id, ul.created_at, ul.api_key_id, ul.request_id, ul.request_type, ul.stream, ul.openai_ws_mode,
    ul.input_tokens, ul.image_input_tokens, ul.cache_creation_tokens, ul.cache_read_tokens,
+   ul.output_tokens, (ul.duration_ms::float8-ul.first_token_ms::float8) AS generation_ms,
+   (` + outputTPSEligibleSQL("ul") + `) AS tps_eligible,
    ul.first_token_ms, ul.native_compaction_v2, ul.inbound_endpoint, ul.upstream_endpoint
  FROM usage_logs ul
  WHERE ul.created_at >= $1 AND ul.created_at < $2
@@ -116,17 +118,24 @@ func (r *scheduledTestResultRepository) CollectStatistics(ctx context.Context, f
  COUNT(first_token_ms) FILTER (WHERE first_token_ms>=0) AS first_token_samples,
  COUNT(*) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND NOT COALESCE(native_compaction_v2,false)
    AND COALESCE(inbound_endpoint,'') NOT LIKE '%/compact%' AND COALESCE(upstream_endpoint,'') NOT LIKE '%/compact%'
-   AND GREATEST(input_tokens-image_input_tokens,0)::bigint+GREATEST(cache_creation_tokens,0)+GREATEST(cache_read_tokens,0)>0) AS cache_samples
+   AND GREATEST(input_tokens-image_input_tokens,0)::bigint+GREATEST(cache_creation_tokens,0)+GREATEST(cache_read_tokens,0)>0) AS cache_samples,
+ COALESCE(SUM(output_tokens) FILTER (WHERE tps_eligible),0)::bigint AS tps_output_tokens,
+ COALESCE(SUM(generation_ms) FILTER (WHERE tps_eligible),0)::float8 AS tps_generation_ms,
+ COUNT(*) FILTER (WHERE tps_eligible) AS tps_samples
  FROM successful_usage ul
 )
 SELECT success_requests, (SELECT COUNT(*) FROM failed), cache_read,cache_input,avg_first_token_ms,first_token_samples,cache_samples,
+ tps_output_tokens,tps_generation_ms,tps_samples,
  (SELECT COALESCE(jsonb_agg(jsonb_build_object('success',success,'created_at',created_at)
                           ORDER BY created_at DESC,id DESC,success DESC),'[]'::jsonb)
   FROM recent_requests)
 FROM success_metrics`
 	result := &service.ScheduledTestStatistics{WindowStart: filter.WindowStart, WindowEnd: filter.WindowEnd}
 	var recentJSON []byte
-	err := r.db.QueryRowContext(ctx, query, args...).Scan(&result.SuccessRequests, &result.FailedRequests, &result.CacheReadTokens, &result.CacheInputTokens, &result.AvgFirstTokenMs, &result.FirstTokenSamples, &result.CacheSamples, &recentJSON)
+	var tpsOutputTokens int64
+	var tpsGenerationMS float64
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&result.SuccessRequests, &result.FailedRequests, &result.CacheReadTokens, &result.CacheInputTokens, &result.AvgFirstTokenMs, &result.FirstTokenSamples, &result.CacheSamples,
+		&tpsOutputTokens, &tpsGenerationMS, &result.TPSSamples, &recentJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -142,5 +151,6 @@ FROM success_metrics`
 		rate := float64(result.CacheReadTokens) / float64(result.CacheInputTokens)
 		result.CacheRate = &rate
 	}
+	result.OutputTPS = service.OutputTokensPerSecond(tpsOutputTokens, tpsGenerationMS)
 	return result, nil
 }

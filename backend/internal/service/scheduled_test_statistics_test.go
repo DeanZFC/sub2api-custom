@@ -123,7 +123,7 @@ func TestScheduledTestStatisticsReadExposesOnlyTypedSnapshot(t *testing.T) {
 			oldNumeric := 99.0
 			rows := []*ScheduledTestResult{
 				{ID: 11, OutputKind: " statistics ", Status: "success", ReasoningEffort: "high", OutputHTML: "secret-html", OutputNumeric: &oldNumeric,
-					ResponseText: `{"window_start":"2026-09-21T10:00:00Z","window_end":"2026-09-21T11:00:00Z","total_requests":10,"success_requests":8,"failed_requests":2,"success_rate":0.8,"cache_rate":0,"avg_first_token_ms":120,"first_token_samples":8,"cache_read_tokens":0,"cache_input_tokens":100,"credentials":"secret-credential","account_name":"secret-name","recent_requests":[{"success":false,"created_at":"2026-09-21T10:59:00Z","credentials":"secret-recent-credential","request_id":"secret-request","user_email":"secret-user"},{"success":true,"created_at":"2026-09-21T10:58:00Z","user_id":12345}]}`},
+					ResponseText: `{"window_start":"2026-09-21T10:00:00Z","window_end":"2026-09-21T11:00:00Z","total_requests":10,"success_requests":8,"failed_requests":2,"success_rate":0.8,"cache_rate":0,"avg_first_token_ms":120,"first_token_samples":8,"output_tps":42.5,"tps_samples":6,"cache_read_tokens":0,"cache_input_tokens":100,"credentials":"secret-credential","account_name":"secret-name","recent_requests":[{"success":false,"created_at":"2026-09-21T10:59:00Z","credentials":"secret-recent-credential","request_id":"secret-request","user_email":"secret-user"},{"success":true,"created_at":"2026-09-21T10:58:00Z","user_id":12345}]}`},
 				{ID: 10, OutputKind: "statistics", Status: "success", ResponseText: `not valid JSON secret-invalid`, OutputStatistics: &ScheduledTestStatistics{TotalRequests: 99}},
 				{ID: 9, OutputKind: "statistics", Status: "success", ResponseText: `{"window_start":"2026-09-21T12:00:00Z","window_end":"2026-09-21T11:00:00Z","private":"secret-bad-window"}`},
 				{ID: 8, OutputKind: "text", Status: "success", ResponseText: "ordinary output"},
@@ -153,6 +153,8 @@ func TestScheduledTestStatisticsReadExposesOnlyTypedSnapshot(t *testing.T) {
 			require.NotNil(t, snapshot.CacheRate, "zero cache hits must remain a measured zero")
 			require.Zero(t, *snapshot.CacheRate)
 			require.Equal(t, 120.0, *snapshot.AvgFirstTokenMs)
+			require.Equal(t, 42.5, *snapshot.OutputTPS)
+			require.EqualValues(t, 6, snapshot.TPSSamples)
 			require.Len(t, snapshot.RecentRequests, 2)
 			require.False(t, snapshot.RecentRequests[0].Success)
 			require.True(t, snapshot.RecentRequests[1].Success)

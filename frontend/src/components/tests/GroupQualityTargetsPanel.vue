@@ -15,7 +15,7 @@
         <div class="flex flex-wrap items-center gap-2"><h4 class="text-lg font-semibold">{{ groupName(policy.group_ids[0]) }}</h4><span class="badge" :class="statusClass(policy)">{{ tr(targetStatus(policy)) }}</span><span v-if="policy.mode === 'observe'" class="badge badge-gray">{{ t('admin.tests.passive.observe') }}</span><span v-if="policy.model" class="badge badge-gray">{{ policy.model }}</span><span v-if="policy.enabled && policy.mode === 'enforce'" class="text-xs text-gray-500">{{ tr('recovery') }}</span></div>
         <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-secondary btn-sm" :data-target-toggle="policy.id" :disabled="busy || loading" @click="toggle(policy)">{{ tr(policy.enabled ? 'disable' : 'enable') }}</button><button type="button" class="btn btn-secondary btn-sm" :data-target-edit="policy.id" :disabled="busy" @click="edit(policy)">{{ tr('edit') }}</button><button type="button" class="btn btn-secondary btn-sm" @click="emit('navigate', 'records', policy.id)">{{ tr('records') }}</button></div>
       </div>
-      <div class="grid gap-3 md:grid-cols-3">
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div v-for="row in metricRows(policy)" :key="row.key" :data-target-metric="row.key" class="rounded-lg bg-gray-50 p-4 dark:bg-dark-800">
           <p class="text-xs text-gray-500">{{ tr(row.key) }} · {{ tr('target') }} {{ row.target }}</p>
           <p class="mt-2 text-2xl font-semibold tabular-nums" :class="row.known && row.breach ? 'text-amber-700 dark:text-amber-300' : 'text-gray-900 dark:text-white'">{{ row.value }}</p>
@@ -27,7 +27,7 @@
       <p v-if="summaryFor(policy)?.snapshot_ready === false || summaryFor(policy)?.stale" class="text-xs text-amber-700" data-target-snapshot>{{ tr(summaryFor(policy)?.snapshot_ready === false ? 'snapshotPending' : 'snapshotStale') }}</p>
       <details v-if="summaryFor(policy)?.contributors?.length" class="rounded-lg border p-3 dark:border-dark-700" data-target-contributors>
         <summary class="cursor-pointer text-sm font-medium">{{ tr('contributors') }}</summary><p class="my-2 text-xs text-gray-500">{{ tr('contributorsHint') }} · {{ date(summaryFor(policy)?.window_started_at) }} — {{ date(summaryFor(policy)?.generated_at) }}</p>
-        <div class="overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr><th class="p-2">{{ tr('accountModel') }}</th><th class="p-2">{{ tr('trafficKind') }}</th><th class="p-2">{{ tr('uncachedTokens') }}</th><th class="p-2">{{ tr('failures') }}</th><th class="p-2">{{ tr('slowRequests') }}</th><th class="p-2">{{ tr('ttft') }}</th></tr></thead><tbody><tr v-for="c in summaryFor(policy)?.contributors" :key="`${c.account_id}-${c.model}-${c.traffic_kind}`" class="border-t dark:border-dark-700"><td class="p-2">{{ c.account_name || `#${c.account_id}` }} · {{ c.model || t('admin.tests.passive.allModels') }}</td><td class="p-2">{{ tr('trafficKinds.' + c.traffic_kind) }}</td><td class="p-2">{{ tokenCount(c.uncached_tokens) }}<span v-if="c.cache_unknown_samples" class="block text-amber-700">{{ tr('unknownSamples', { count: c.cache_unknown_samples }) }}</span></td><td class="p-2">{{ c.failure_samples }} / {{ c.failure_samples + c.success_samples }}</td><td class="p-2">{{ c.slow_requests }} / {{ c.ttft_samples }}</td><td class="p-2">{{ seconds(c.ttft_p90_ms) }}</td></tr></tbody></table></div>
+        <div class="overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr><th class="p-2">{{ tr('accountModel') }}</th><th class="p-2">{{ tr('trafficKind') }}</th><th class="p-2">{{ tr('uncachedTokens') }}</th><th class="p-2">{{ tr('failures') }}</th><th class="p-2">{{ tr('slowRequests') }}</th><th class="p-2">{{ tr('ttft') }}</th><th class="p-2">{{ tr('tps') }}</th></tr></thead><tbody><tr v-for="c in summaryFor(policy)?.contributors" :key="`${c.account_id}-${c.model}-${c.traffic_kind}`" class="border-t dark:border-dark-700"><td class="p-2">{{ c.account_name || `#${c.account_id}` }} · {{ c.model || t('admin.tests.passive.allModels') }}</td><td class="p-2">{{ tr('trafficKinds.' + c.traffic_kind) }}</td><td class="p-2">{{ tokenCount(c.uncached_tokens) }}<span v-if="c.cache_unknown_samples" class="block text-amber-700">{{ tr('unknownSamples', { count: c.cache_unknown_samples }) }}</span></td><td class="p-2">{{ c.failure_samples }} / {{ c.failure_samples + c.success_samples }}</td><td class="p-2">{{ c.slow_requests }} / {{ c.ttft_samples }}</td><td class="p-2">{{ seconds(c.ttft_p90_ms) }}</td><td class="p-2">{{ formatMonitorOutputTps(c.output_tps) }} ({{ c.tps_samples ?? 0 }})</td></tr></tbody></table></div>
         <p v-if="summaryFor(policy)?.contributors_truncated" class="mt-2 text-xs text-amber-700">{{ tr('contributorsTruncated', { shown: summaryFor(policy)?.contributors?.length || 0, total: summaryFor(policy)?.contributor_total || 0 }) }}</p>
       </details>
       <p v-if="summaryFor(policy) && !summaryFor(policy)?.telemetry_complete" class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p>
@@ -66,7 +66,7 @@
           <tr v-for="state in policyStates(policy)" :key="`${state.account_id}-${state.model}`" class="border-b border-gray-100 align-top last:border-0 dark:border-dark-800" :data-target-state="`${state.account_id}-${state.model}`">
             <td class="p-2"><strong>{{ state.account_name || `#${state.account_id}` }}</strong><p class="mt-1 text-xs text-gray-500">#{{ state.account_id }} · {{ state.model || t('admin.tests.passive.allModels') }}</p></td>
             <td class="p-2 text-xs"><span class="badge" :class="['paused', 'probing'].includes(state.phase) ? 'badge-warning' : 'badge-gray'">{{ phaseLabel(state) }}</span><p class="mt-2">{{ tr('confirmations', { count: state.hits, required: policy.confirmations || 2 }) }}</p><p v-if="state.phase === 'paused'" class="mt-2">{{ tr('nextTrial', { date: date(state.next_at) }) }}</p><template v-if="state.phase === 'trial'"><p class="mt-2">{{ tr('trialProgress', { used: state.used, max: policy.trial_requests || 20, samples: stateSampleCount(policy, state), required: policy.recovery_samples || 5 }) }}</p><p v-if="trialWaiting(state)" class="mt-1" data-target-trial-waiting>{{ tr('trialRetryAfter', { date: date(state.next_at) }) }}</p><p v-else class="mt-1">{{ tr('trialDeadline', { date: date(state.trial_ends_at) }) }}</p></template></td>
-            <td class="space-y-1 p-2 text-xs"><p v-if="policy.cache_rate.enabled">{{ tr('cache') }}: {{ percent(state.evidence.cache_rate) }} · {{ tr('samples', { count: state.evidence.cache_samples }) }}</p><p v-if="policy.error_rate.enabled">{{ tr('availability') }}: {{ percent(state.evidence.error_rate == null ? null : 100 - state.evidence.error_rate) }} · {{ tr('samples', { count: state.evidence.samples }) }}</p><p v-if="policy.ttft.enabled">{{ tr('ttft') }}: {{ seconds(state.evidence.ttft) }} · {{ tr('samples', { count: state.evidence.ttft_samples }) }}</p><p v-if="stateSampleCount(policy, state) < stateMinimum(policy, state)" class="text-amber-700 dark:text-amber-300">{{ tr('remaining', { count: stateMinimum(policy, state) - stateSampleCount(policy, state) }) }}</p><PassiveFreshEvidence :evidence="state.evidence" /><p class="text-gray-500">{{ date(state.updated_at) }}</p></td>
+            <td class="space-y-1 p-2 text-xs"><p v-if="policy.cache_rate.enabled">{{ tr('cache') }}: {{ percent(state.evidence.cache_rate) }} · {{ tr('samples', { count: state.evidence.cache_samples }) }}</p><p v-if="policy.error_rate.enabled">{{ tr('availability') }}: {{ percent(state.evidence.error_rate == null ? null : 100 - state.evidence.error_rate) }} · {{ tr('samples', { count: state.evidence.samples }) }}</p><p v-if="policy.ttft.enabled">{{ tr('ttft') }}: {{ seconds(state.evidence.ttft) }} · {{ tr('samples', { count: state.evidence.ttft_samples }) }}</p><p v-if="stateSampleCount(policy, state) < stateMinimum(policy, state)" class="text-amber-700 dark:text-amber-300">{{ tr('remaining', { count: stateMinimum(policy, state) - stateSampleCount(policy, state) }) }}</p><p v-if="policy.tps?.enabled" data-target-state-tps>{{ tr('tps') }}: {{ formatMonitorOutputTps(state.evidence.output_tps) }} · {{ tr('samples', { count: state.evidence.tps_samples ?? 0 }) }}</p><PassiveFreshEvidence :evidence="state.evidence" /><p class="text-gray-500">{{ date(state.updated_at) }}</p></td>
             <td class="max-w-80 break-words p-2 text-xs"><p>{{ reason(state.reason) || '—' }}</p><p v-if="!state.evidence.complete" class="mt-2 text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p><p v-if="state.other_hold" class="mt-2 text-amber-700 dark:text-amber-300">{{ tr('otherHold') }}</p></td>
           </tr>
         </tbody></table></div>
@@ -78,10 +78,11 @@
       <form v-if="editing" class="space-y-5" @submit.prevent="save">
         <label class="input-label block">{{ tr('group') }}<select :value="editing.group_ids[0] || 0" class="input mt-2 w-full" data-target-group :disabled="busy" @change="selectGroup(Number(($event.target as HTMLSelectElement).value))"><option :value="0">{{ tr('chooseGroup') }}</option><option v-for="group in eligibleGroups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label>
         <p v-if="editing.id" class="text-xs text-gray-500">{{ tr('existing') }}</p>
-        <div class="grid gap-4 md:grid-cols-3">
+        <div class="grid gap-4 sm:grid-cols-2">
           <label class="input-label block"><span class="flex items-center gap-2"><input v-model="editing.cache_rate.enabled" type="checkbox" data-target-cache-enabled />{{ tr('cacheTarget') }}</span><input :value="editing.cache_rate.pause" type="number" min="0" max="99.9" step="0.1" class="input mt-2 w-full" data-target-cache :disabled="!editing.cache_rate.enabled" @input="setThreshold('cache_rate', $event)" /></label>
           <label class="input-label block"><span class="flex items-center gap-2"><input v-model="editing.error_rate.enabled" type="checkbox" data-target-availability-enabled />{{ tr('availabilityTarget') }}</span><input :value="rounded(100 - editing.error_rate.pause)" type="number" min="0" max="99.9" step="0.1" class="input mt-2 w-full" data-target-availability :disabled="!editing.error_rate.enabled" @input="setThreshold('error_rate', $event)" /></label>
           <label class="input-label block"><span class="flex items-center gap-2"><input v-model="editing.ttft.enabled" type="checkbox" data-target-ttft-enabled />{{ tr('ttftTarget') }}</span><input :value="editing.ttft.pause / 1000" type="number" min="0.001" max="600" step="0.001" class="input mt-2 w-full" data-target-ttft :disabled="!editing.ttft.enabled" @input="setThreshold('ttft', $event)" /></label>
+          <label class="input-label block"><span class="flex items-center gap-2"><input v-model="editing.tps.enabled" type="checkbox" data-target-tps-enabled />{{ tr('tpsTarget') }}</span><input :value="editing.tps.pause" type="number" min="0.1" max="1000000" step="0.1" class="input mt-2 w-full" data-target-tps :disabled="!editing.tps.enabled" @input="setThreshold('tps', $event)" /><span class="mt-2 block text-xs font-normal text-gray-500">{{ t('channelMonitorV2.metrics.outputTpsDetail') }}</span></label>
         </div>
         <label class="flex items-center gap-2 text-sm font-medium"><input v-model="editing.enabled" type="checkbox" data-target-enabled />{{ editing.mode === 'observe' ? tr('enableObservation') : tr('enabled') }}</label>
         <div v-if="editing.mode === 'observe'" class="rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/20"><p>{{ tr('observationRetained') }}</p><button type="button" class="btn btn-secondary btn-sm mt-2" data-target-enforce @click="editing.mode = 'enforce'">{{ tr('switchToEnforce') }}</button></div>
@@ -98,6 +99,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { formatMonitorOutputTps } from '@/features/channel-monitor-v2/monitorFormat'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import PassiveFreshEvidence from './PassiveFreshEvidence.vue'
 import { passiveQualityAPI as api, groupQualityTargetDraft, isGroupQualityTarget, emptyPassiveSummary, type GroupQualityTargetDraft, type GroupQualityTargetSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
@@ -135,7 +137,7 @@ function verifiedCount(p: PassivePolicy) {
   return policyCounts(p)?.verified || 0
 }
 function stateSampleCount(p: PassivePolicy, s: PassiveState) {
-  const counts = [p.cache_rate.enabled ? s.evidence.cache_samples : undefined, p.error_rate.enabled ? s.evidence.samples : undefined, p.ttft.enabled ? s.evidence.ttft_samples : undefined].filter((v): v is number => v !== undefined)
+  const counts = [p.cache_rate.enabled ? s.evidence.cache_samples : undefined, p.error_rate.enabled ? s.evidence.samples : undefined, p.ttft.enabled ? s.evidence.ttft_samples : undefined, p.tps?.enabled ? s.evidence.tps_samples ?? 0 : undefined].filter((v): v is number => v !== undefined)
   return counts.length ? Math.min(...counts) : 0
 }
 function trialWaiting(s: PassiveState) {
@@ -147,6 +149,7 @@ function metricRows(p: PassivePolicy) {
   return [
     { key: 'cache', enabled: p.cache_rate.enabled, known: s?.actual_cache_rate != null, value: percent(s?.actual_cache_rate), samples: s?.cache_samples || 0, unknown: s?.cache_unknown_samples || 0, breach: s?.actual_cache_rate != null && s.actual_cache_rate <= p.cache_rate.pause, target: `> ${percent(p.cache_rate.pause)}` },
     { key: 'availability', enabled: p.error_rate.enabled, known: s?.actual_availability != null, value: percent(s?.actual_availability), samples: (s?.success_samples || 0) + (s?.failure_samples || 0), unknown: s?.failure_unknown_samples || 0, breach: s?.actual_availability != null && s.actual_availability <= 100 - p.error_rate.pause, target: `> ${percent(100 - p.error_rate.pause)}` },
+    { key: 'tps', enabled: p.tps?.enabled, known: s?.output_tps != null, value: formatMonitorOutputTps(s?.output_tps), samples: s?.tps_samples || 0, unknown: 0, breach: s?.output_tps != null && s.output_tps <= p.tps.pause, target: `> ${formatMonitorOutputTps(p.tps?.pause)}` },
     { key: 'ttft', enabled: p.ttft.enabled, known: s?.ttft_p90_ms != null, value: seconds(s?.ttft_p90_ms), samples: s?.ttft_samples || 0, unknown: 0, breach: s?.ttft_p90_ms != null && s.ttft_p90_ms >= p.ttft.pause, target: `< ${seconds(p.ttft.pause)}` },
   ].filter(row => row.enabled)
 }
@@ -162,10 +165,11 @@ function statusClass(p: PassivePolicy) { const status = targetStatus(p); return 
 const validationError = computed(() => {
   const p = editing.value
   if (!p) return ''
-  if (p.group_ids.length !== 1 || !eligibleGroups.value.some(g => g.id === p.group_ids[0]) || ![p.cache_rate, p.error_rate, p.ttft].some(m => m.enabled)) return tr('invalid')
+  if (p.group_ids.length !== 1 || !eligibleGroups.value.some(g => g.id === p.group_ids[0]) || ![p.cache_rate, p.error_rate, p.ttft, p.tps].some(m => m.enabled)) return tr('invalid')
   if (p.cache_rate.enabled && (!Number.isFinite(p.cache_rate.pause) || p.cache_rate.pause < 0 || p.cache_rate.pause > 99.9)) return tr('invalid')
   if (p.error_rate.enabled && (!Number.isFinite(p.error_rate.pause) || p.error_rate.pause < .1 - 1e-9 || p.error_rate.pause > 100)) return tr('invalid')
   if (p.ttft.enabled && (!Number.isFinite(p.ttft.pause) || p.ttft.pause < 1 || p.ttft.pause > 600000)) return tr('invalid')
+  if (p.tps.enabled && (!Number.isFinite(p.tps.pause) || p.tps.pause <= 0 || p.tps.pause >= 1000000 || !Number.isFinite(p.tps.recover) || p.tps.recover <= p.tps.pause || p.tps.recover > 1000000)) return tr('invalid')
   return ''
 })
 function edit(p?: PassivePolicy) { editing.value = groupQualityTargetDraft(p); baseline.value = JSON.stringify(editing.value) }
@@ -176,15 +180,15 @@ function selectGroup(id: number) {
   editing.value.group_ids = id ? [id] : []
   baseline.value = ''
 }
-function setThreshold(metric: 'cache_rate' | 'error_rate' | 'ttft', event: Event) {
+function setThreshold(metric: 'cache_rate' | 'error_rate' | 'ttft' | 'tps', event: Event) {
   if (!editing.value) return
   const value = (event.target as HTMLInputElement).valueAsNumber
   const m = editing.value[metric]
   m.pause = metric === 'error_rate' ? rounded(100 - value) : metric === 'ttft' ? Math.round(value * 1000) : value
-  m.recover = metric === 'cache_rate' ? Math.min(100, value + 5) : metric === 'error_rate' ? Math.max(0, rounded(m.pause - 5)) : m.pause * .8
+  m.recover = metric === 'tps' ? Math.min(1000000, Math.max(value + 5, value * 1.2)) : metric === 'cache_rate' ? Math.min(100, value + 5) : metric === 'error_rate' ? Math.max(0, rounded(m.pause - 5)) : m.pause * .8
 }
 function recoveryLabels(p: GroupQualityTargetDraft) {
-  return [p.cache_rate.enabled ? `${tr('cache')}: ${percent(p.cache_rate.recover)}` : '', p.error_rate.enabled ? `${tr('availability')}: ${percent(100 - p.error_rate.recover)}` : '', p.ttft.enabled ? `${tr('ttft')}: ${seconds(p.ttft.recover)}` : ''].filter(Boolean)
+  return [p.cache_rate.enabled ? `${tr('cache')}: ${percent(p.cache_rate.recover)}` : '', p.error_rate.enabled ? `${tr('availability')}: ${percent(100 - p.error_rate.recover)}` : '', p.ttft.enabled ? `${tr('ttft')}: ${seconds(p.ttft.recover)}` : '', p.tps.enabled ? `${tr('tps')}: ${formatMonitorOutputTps(p.tps.recover)}` : ''].filter(Boolean)
 }
 let request = 0
 const stateRequests = new Map<number, number>()

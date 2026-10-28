@@ -34,6 +34,25 @@ func advancePassiveMetrics(ctx context.Context, tx *sql.Tx, p service.PassiveQua
 			events = append(events, event)
 		}
 	}
+	if p.TPS.Enabled {
+		if s.Speed == nil {
+			s.Speed = &service.PassiveQualityMetricState{ObserveAfter: p.EvidenceSince()}
+		}
+		view := *s
+		view.Phase = "healthy"
+		view.ObserveAfter = s.Speed.ObserveAfter
+		view.LastEvidenceAt = s.Speed.LastEvidenceAt
+		if s.CacheObserveAfter.After(view.ObserveAfter) {
+			view.ObserveAfter = s.CacheObserveAfter
+		}
+		e, err := passiveSamples(ctx, tx, p, view, now)
+		if err != nil {
+			return nil, err
+		}
+		if event := service.AdvancePassiveQualityTPS(p.PassiveQualityConfig, s.Speed, e, now); event != "" {
+			events = append(events, event)
+		}
+	}
 	if p.CacheRate.Enabled && p.CacheProtection != nil {
 		samples, complete, err := passiveCacheSamples(ctx, tx, p, *s, now)
 		if err != nil {

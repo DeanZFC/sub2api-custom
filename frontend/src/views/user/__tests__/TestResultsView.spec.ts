@@ -32,6 +32,49 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('channel quality result groups', () => {
+  it('defaults automatic review to unresolved artwork while retaining an all-results audit and manual override', async () => {
+    api.isAdmin = true
+    const execution = { input_tokens: null, output_tokens: null, reasoning_tokens: null, cache_read_tokens: null, cache_creation_tokens: null, attempts: [] }
+    const autoResult = (id: number, verdict: 'pass' | 'fail' | 'pending') => ({ ...baseResult, id, account_id: id, execution_info: {
+      ...execution, auto_review: { verdict, reason: verdict, judge_account_id: 999, judge_model: 'vision-a', attempts: 1, reviewed_at: '2026-10-27T10:00:00Z' },
+    } })
+    const passed = autoResult(91, 'pass')
+    const failed = autoResult(92, 'fail')
+    const pending = autoResult(93, 'pending')
+    const manuallyHandled = autoResult(94, 'pending')
+    const manualOnly = { ...baseResult, id: 95, account_id: 95 }
+    api.reviews.mockResolvedValue([passed, failed, pending, manuallyHandled, manualOnly].map(result => ({
+      result, generation: 7, verdict: 'pending', admin_verdict: result.id === 94 ? 'pass' : '', account_paused: false,
+    })))
+    // Public results intentionally omit private review information. Their group
+    // projection remains authoritative without discarding the private verdict.
+    api.list.mockResolvedValue([{ ...passed, group_name: 'Current Group', execution_info: execution }, { ...baseResult, id: 90, account_id: 93, created_at: '2026-09-14T12:00:00Z' }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-show-all-reviews]').element).toBeDefined()
+    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id')).sort()).toEqual(['93', '95'])
+    expect(wrapper.get('[data-content-test] .badge').text()).toBe('tests.completed')
+    await wrapper.get('[data-show-all-reviews]').setValue(true)
+    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id')).sort()).toEqual(['91', '92', '93', '94', '95'])
+    expect(wrapper.findAll('[data-admin-decision]')).toHaveLength(5)
+    const passedOutput = wrapper.findAll('[data-content-test]').find(section => section.find('[data-output]').attributes('data-result-id') === '91')!
+    expect(passedOutput.get('.badge').text()).toBe('admin.tests.autoReview.pass')
+    expect(passedOutput.get('.badge').classes()).toContain('badge-success')
+    wrapper.unmount()
+  })
+
+  it('does not resurrect an older pending automatic result after the latest result passed', async () => {
+    api.isAdmin = true
+    const autoReview = (verdict: 'pass' | 'pending') => ({ input_tokens: null, output_tokens: null, reasoning_tokens: null, cache_read_tokens: null, cache_creation_tokens: null, attempts: [], auto_review: { verdict, reason: verdict, judge_account_id: 999, judge_model: 'vision-a', attempts: 1, reviewed_at: '2026-10-27T10:00:00Z' } })
+    const latest = { ...baseResult, id: 2, created_at: '2026-09-16T12:00:00Z', execution_info: autoReview('pass') }
+    api.list.mockResolvedValue([{ ...baseResult, id: 1, execution_info: autoReview('pending') }])
+    api.reviews.mockResolvedValue([{ result: latest, generation: 3, verdict: 'pass', admin_verdict: '', account_paused: false }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.find('[data-account-result]').exists()).toBe(false)
+    await wrapper.get('[data-show-all-reviews]').setValue(true)
+    expect(wrapper.get('[data-result-gallery] [data-output]').attributes('data-result-id')).toBe('2')
+    wrapper.unmount()
+  })
+
   it('shows current pass-rate evidence in administrator review cards without changing the pending decision', async () => {
     api.isAdmin = true
     api.list.mockResolvedValue([])
@@ -377,6 +420,26 @@ describe('channel quality result series', () => {
     await renamed.get('button').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('[data-dialog] [data-output]')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('switches between models from one plan and loads only the selected model history', async () => {
+    const modelA = { ...baseResult, id: 101, model_id: 'model-a' }
+    const modelB = { ...baseResult, id: 102, model_id: 'model-b' }
+    api.list.mockResolvedValue([modelA, modelB])
+    api.history.mockResolvedValue({ items: [modelB, { ...modelB, id: 100, created_at: '2026-09-14T12:00:00Z' }] })
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.findAll('[data-content-test]')).toHaveLength(2)
+    await wrapper.get('[data-result-model-filter]').setValue('model-b')
+    expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['102'])
+    await wrapper.get('[data-content-test] button').trigger('click'); await flushPromises()
+    expect(api.history).toHaveBeenCalledWith(102, undefined)
+    expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['102', '100'])
+    await wrapper.get('[data-dialog] [data-close]').trigger('click')
+    await wrapper.get('[data-result-model-filter]').setValue('model-a')
+    expect(wrapper.get('[data-result-gallery] [data-output]').attributes('data-result-id')).toBe('101')
+    await wrapper.get('[data-result-model-filter]').setValue('')
+    expect(wrapper.findAll('[data-content-test]')).toHaveLength(2)
     wrapper.unmount()
   })
 
@@ -897,15 +960,16 @@ describe('current group display order', () => {
 
   it('sorts voting-only groups by current order and copies current projection order into existing voting cards', async () => {
     const voting = { enabled: true, open: true, pass_count: 0, fail_count: 0, reject_above: 0, pass_at_least: 1, account_paused: false }
-    api.list.mockResolvedValue([proPlus, pro])
+    api.list.mockResolvedValue([proPlus, { ...pro, account_schedulable: true, model_schedulable: false }])
     api.votes.mockResolvedValue([
-      { result: { ...pro, group_id: 43, group_name: 'Pro-不降智', group_order: 0, plan_order: 55 }, voting },
+      { result: { ...pro, group_id: 43, group_name: 'Pro-不降智', group_order: 0, plan_order: 55, model_schedulable: true }, voting },
       { result: plus, voting },
     ])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Pro-不降智', 'Pro', 'Plus'])
     await wrapper.findAll('[role="tab"]')[1].trigger('click')
-    expect(wrapper.getComponent(TestVoteCard).props('item').result).toMatchObject({ id: 2, group_id: 2, group_name: 'Pro', group_order: 1, plan_order: 0 })
+    expect(wrapper.getComponent(TestVoteCard).props('item').result).toMatchObject({ id: 2, group_id: 2, group_name: 'Pro', group_order: 1, plan_order: 0, account_schedulable: true, model_schedulable: false })
+    expect(wrapper.get('[data-vote-result] [data-model-scheduling-status]').text()).toBe('tests.modelSchedulingPaused')
     await wrapper.findAll('[role="tab"]')[2].trigger('click')
     expect(wrapper.get('[data-vote-result]').attributes('data-vote-result')).toBe('3')
     wrapper.unmount()
@@ -914,6 +978,49 @@ describe('current group display order', () => {
 
 
 describe('current scheduling and passing result order', () => {
+  it('shows one paused model without pausing the account or its other model', async () => {
+    const modelA = { ...baseResult, id: 1, model_id: 'model-a', account_schedulable: true, model_schedulable: false }
+    const modelB = { ...baseResult, id: 2, model_id: 'model-b', account_schedulable: true, model_schedulable: true }
+    api.list.mockResolvedValue([modelA, modelB])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingActive')
+    expect(wrapper.find('[data-selected-model-status]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test-section] [data-model-scheduling-status]').map(node => node.text())).toEqual(['tests.modelSchedulingPaused', 'tests.modelSchedulingActive'])
+    await wrapper.get('[data-result-model-filter]').setValue('model-a')
+    expect(wrapper.get('[data-selected-model-status]').text()).toContain('tests.modelSchedulingPaused')
+    expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingActive')
+    await wrapper.get('[data-result-model-filter]').setValue('model-b')
+    expect(wrapper.get('[data-selected-model-status]').text()).toContain('tests.modelSchedulingActive')
+    expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingActive')
+    wrapper.unmount()
+  })
+
+  it('uses the account projection when all monitored models pause and recover', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const modelA = { ...baseResult, id: 1, model_id: 'model-a', account_schedulable: false, model_schedulable: false }
+    const modelB = { ...baseResult, id: 2, model_id: 'model-b', account_schedulable: false, model_schedulable: false }
+    api.list.mockResolvedValueOnce([modelA, modelB]).mockResolvedValue([
+      { ...modelA, account_schedulable: true },
+      { ...modelB, account_schedulable: true, model_schedulable: true },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingPaused')
+    await wrapper.get('[data-result-model-filter]').setValue('model-b')
+    expect(wrapper.get('[data-selected-model-status]').text()).toContain('tests.modelSchedulingPaused')
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingActive')
+    expect(wrapper.get('[data-selected-model-status]').text()).toContain('tests.modelSchedulingActive')
+    wrapper.unmount()
+  })
+
+  it('never infers whole-account unavailability from model-only evidence', async () => {
+    api.list.mockResolvedValue([{ ...baseResult, id: 1, model_schedulable: false }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.find('[data-scheduling-status]').exists()).toBe(false)
+    expect(wrapper.get('[data-model-scheduling-status]').text()).toContain('tests.modelSchedulingPaused')
+    wrapper.unmount()
+  })
+
   it('places passing active accounts first and reorders after scheduling changes', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const paused = { ...baseResult, id: 1, account_id: 1, account_schedulable: false }

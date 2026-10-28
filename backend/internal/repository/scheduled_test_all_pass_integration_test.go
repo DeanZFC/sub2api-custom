@@ -372,7 +372,7 @@ func testScheduledTestAllPassPolicyHoldProbe(t *testing.T, ctx context.Context, 
 	f.check("quality_paused", false, 8, 9)
 	f.complete(rows[1], "pass")
 	f.check("active", false, 10)
-	start, err := repo.CacheRecoveryWindowStart(ctx, f.plan.ID, 62, *rows[2].TestDefinitionID)
+	start, err := repo.CacheRecoveryWindowStart(ctx, f.plan.ID, 62, *rows[2].TestDefinitionID, rows[2].ModelID)
 	require.NoError(t, err)
 	require.NotNil(t, start)
 	require.Equal(t, rows[2].FinishedAt, *start)
@@ -482,3 +482,53 @@ CREATE TABLE ops_error_logs (
  group_id BIGINT DEFAULT 8, account_id BIGINT DEFAULT 62, created_at TIMESTAMPTZ NOT NULL,
  model TEXT DEFAULT 'model', requested_model TEXT, request_type SMALLINT DEFAULT 2, duration_ms INTEGER DEFAULT 0,
  status_code INTEGER DEFAULT 502, error_type TEXT DEFAULT 'upstream_error', is_count_tokens BOOLEAN DEFAULT false);`
+
+func testScheduledTestAllPassAutomaticReview(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository) {
+	t.Helper()
+	_, err := db.ExecContext(ctx, `UPDATE quality_operations_config SET config=jsonb_set(config,'{pelican_review}', '{"enabled":true,"judge_account_id":63,"judge_model":"vision","daily_requests":100}'::jsonb)`)
+	require.NoError(t, err)
+	f := newAllPassFixture(t, ctx, db, plans, repo, false)
+	f.plan.Protection.Rules[3].AutoReview = &service.ScheduledTestAutoReviewConfig{Enabled: true}
+	updated, err := plans.Update(ctx, f.plan)
+	require.NoError(t, err)
+	f.plan = updated
+	complete := func(row *service.ScheduledTestResult, verdict string) {
+		t.Helper()
+		row.ExecutionInfo = &service.ScheduledTestExecutionInfo{AutoReview: &service.ScheduledTestAutoReviewSummary{Verdict: verdict, JudgeAccountID: 63, JudgeModel: "vision", RubricVersion: service.ScheduledTestReviewRubricVersion}}
+		f.complete(row, verdict)
+	}
+	started := time.Now().UTC().Truncate(time.Microsecond)
+	held := f.round("auto-review-pending-first", started)
+	f.complete(held[0], "pass")
+	f.complete(held[1], "pass")
+	f.complete(held[2], "fail")
+	complete(held[3], "pending")
+	f.check("quality_paused", false, 8, 9)
+	pending := f.round("auto-review-pending-next", started.Add(time.Minute))
+	for i := 0; i < 3; i++ {
+		f.complete(pending[i], "pass")
+	}
+	complete(pending[3], "pending")
+	f.check("quality_paused", false, 8, 9)
+	passed := f.round("auto-review-pass", started.Add(2*time.Minute))
+	for i := 0; i < 3; i++ {
+		f.complete(passed[i], "pass")
+	}
+	complete(passed[3], "pass")
+	f.check("active", false, 10)
+	failed := f.round("auto-review-fail", started.Add(3*time.Minute))
+	for i := 0; i < 3; i++ {
+		f.complete(failed[i], "pass")
+	}
+	complete(failed[3], "fail")
+	f.check("quality_paused", false, 10)
+	f.review(failed[3], "pass")
+	f.check("active", false, 10)
+	overridden := f.round("auto-review-admin-veto", started.Add(4*time.Minute))
+	for i := 0; i < 3; i++ {
+		f.complete(overridden[i], "pass")
+	}
+	complete(overridden[3], "pass")
+	f.review(overridden[3], "fail")
+	f.check("quality_paused", false, 10)
+}

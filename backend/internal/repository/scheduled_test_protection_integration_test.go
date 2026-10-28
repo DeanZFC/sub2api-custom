@@ -92,7 +92,7 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		"264_scheduled_test_cache_recovery.sql", "265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql", "282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql",
 		"284_scheduled_test_output_tokens.sql",
 		"309_quality_recovery_budget_evidence.sql",
-		"312_scheduled_test_pass_rate.sql",
+		"312_scheduled_test_pass_rate.sql", "315_scheduled_test_multi_model.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -350,6 +350,7 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		r := begin(p, plain)
 		complete(r, "fail")
 		p.ModelID = "new-model"
+		p.ModelIDs = []string{"new-model"}
 		p, err = plans.Update(ctx, p)
 		require.NoError(t, err)
 		require.Equal(t, "active", status())

@@ -13,10 +13,10 @@ var _ service.ScheduledTestProtectionDetailsRepository = (*scheduledTestResultRe
 // consistent snapshot, even if a new round starts while the tooltip is loading.
 func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context, accountID int64) ([]service.ScheduledTestProtectionHoldSource, error) {
 	rows, err := r.db.QueryContext(ctx, `WITH holds AS (
- SELECT plan_id,account_id,test_definition_id,reason,updated_at,'[]'::jsonb AS rule_ids,trigger_event_id
+ SELECT plan_id,account_id,test_definition_id,reason,updated_at,'[]'::jsonb AS rule_ids,trigger_event_id,model_key
  FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked
  UNION ALL
- SELECT plan_id,account_id,0,reason,updated_at,rule_ids,trigger_event_id
+ SELECT plan_id,account_id,0,reason,updated_at,rule_ids,trigger_event_id,model_key
  FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked
  ) SELECT h.plan_id,p.name,h.test_definition_id,h.reason,h.updated_at,h.rule_ids,p.protection,
  COALESCE((SELECT jsonb_agg(jsonb_build_object(
@@ -35,9 +35,9 @@ func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context,
  FROM scheduled_test_protection_states s
  JOIN scheduled_test_definitions d ON d.id=s.test_definition_id
  LEFT JOIN scheduled_test_results r ON r.id=s.result_id
- WHERE s.plan_id=h.plan_id AND s.account_id=h.account_id
+ WHERE s.plan_id=h.plan_id AND s.account_id=h.account_id AND s.model_key=h.model_key
  AND (h.test_definition_id=0 OR s.test_definition_id=h.test_definition_id)), '[]'::jsonb),
- (SELECT snapshot || jsonb_build_object('id',id) FROM scheduled_test_protection_events e WHERE e.id=h.trigger_event_id AND e.account_id=h.account_id AND e.plan_id=h.plan_id)
+ (SELECT snapshot || jsonb_build_object('id',id) FROM scheduled_test_protection_events e WHERE e.id=h.trigger_event_id AND e.account_id=h.account_id AND e.plan_id=h.plan_id),h.model_key
  FROM holds h JOIN scheduled_test_plans p ON p.id=h.plan_id
  JOIN accounts a ON a.id=h.account_id
  WHERE a.deleted_at IS NULL AND a.status='quality_paused'
@@ -50,7 +50,7 @@ func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context,
 	for rows.Next() {
 		var item service.ScheduledTestProtectionHoldSource
 		var idsRaw, configRaw, statesRaw, triggerRaw []byte
-		if err := rows.Scan(&item.PlanID, &item.PlanName, &item.DefinitionID, &item.Reason, &item.UpdatedAt, &idsRaw, &configRaw, &statesRaw, &triggerRaw); err != nil {
+		if err := rows.Scan(&item.PlanID, &item.PlanName, &item.DefinitionID, &item.Reason, &item.UpdatedAt, &idsRaw, &configRaw, &statesRaw, &triggerRaw, &item.ModelID); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(idsRaw, &item.RuleIDs); err != nil {

@@ -1,4 +1,6 @@
 export default {
+  speedAction: 'Slow output action', speedConcurrency: 'TPS concurrency limit', speedPenalty: 'TPS priority penalty', speedState: 'TPS state',
+
   allModelsIndependent: "All models evaluated independently",
   allModelsAggregated: "All models aggregated (entire account)",
   modelScope: "Only the affected model (isolated)",
@@ -17,7 +19,7 @@ export default {
   title: 'Independent metric protection (V2)', badge: 'Independent V2', legacy: 'Legacy combined evaluation',
   legacyHint: 'This policy keeps legacy semantics: metrics share one action and all metrics must pass recovery. Editing does not upgrade it automatically.',
   upgrade: 'Upgrade to independent protection', upgradeHint: 'Upgrade preserves groups, model filter and thresholds, defaults to model isolation, adds separate cache windows, and returns to observation. Saving clears this policy’s current holds and starts fresh evidence.',
-  independentHint: 'Availability, first-token latency and cache evaluate, act and recover independently. Recovering one metric never clears another hold. Missing cache evidence does not block availability recovery.',
+  independentHint: 'Availability, first-token latency, output TPS and cache evaluate, act and recover independently. Recovering one metric never clears another hold. Missing cache evidence does not block availability recovery.',
   availabilityAction: 'Availability / consecutive failure action', latencyAction: 'Slow first-token action', cacheAction: 'Cache degradation action',
   latencyConcurrency: 'Latency concurrency cap', latencyPenalty: 'Latency priority penalty', reduce: 'Reduce new sessions; preserve existing sessions',
   cacheHint: 'Actual utilization is weighted by all reported eligible input tokens. Protection uses reuse opportunities identified before a response and evaluates each model separately. First requests, account switches, prefix changes and expired reuse enter warmup or unknown status. Explicit zero hits still count.',
@@ -30,7 +32,7 @@ export default {
   min_hold_seconds: 'Minimum reduction hold (seconds)', recovery_hold_seconds: 'Interval between recovery steps (seconds)', max_reduced_percent: 'Maximum simultaneously cache-reduced accounts (%)',
   min_serving_accounts: 'Minimum normally allocated accounts', reuse_window_seconds: 'Maximum reuse interval (seconds)', warmup_requests: 'Warmup requests at a new account',
   guardHint: 'When a pool limit is reached, stop expanding cache reductions and flag a possible shared cause. Never clear a genuinely unavailable account to meet capacity goals. Other policies remain independent.',
-  invalidMetricActions: 'Check latency action, concurrency cap (1–1000), and priority penalty (0–1000).',
+  invalidMetricActions: 'Check latency / TPS actions, concurrency cap (1–1000), and priority penalty (0–1000).',
   invalidCacheWindow: 'Check cache windows: minimum and fresh samples cannot exceed the request cap; at least 2 sessions and no more than half the minimum samples (at least 2 per session); positive tokens; concentration 10–90% and attainable for the required session count.',
   invalidCacheConfig: 'Check cache allocation, recovery holds, reuse interval, warmup and pool protection ranges.',
   allocation: 'New-session allocation {value}%', actualRate: 'Actual cache utilization', protectionRate: 'Reusable-request protection rate',
@@ -49,6 +51,8 @@ export default {
   windowTitle: 'Availability / latency observation window', recoveryTitle: 'Availability / latency recovery',
   replayHint: 'Cache replay requires reuse evidence recorded at the time. Old history cannot reconstruct first requests, account switches or reusable prefixes and cannot establish cache health.',
   reasons: {
+    tps_minimum_hold: 'Waiting for the minimum TPS hold', tps_recovered: 'Output speed recovered on fresh requests',
+
     unsupported_cache_model: 'Trusted cache reuse detection is unsupported for this model',
 
     unverified_wire_request: 'Actual outbound request digest was not verified',
@@ -105,6 +109,8 @@ export default {
     "unknown": "Reuse metadata unknown"
 },
   events: {
+    tps_limited: 'Output TPS limited', tps_watch: 'Slow output observed', tps_recovered: 'TPS protection recovered', tps_watch_cleared: 'TPS observation cleared',
+
     "cache_watch": "Quick cache anomaly observed",
     "cache_reduced": "New-session allocation reduced",
     "cache_recovery_step": "New-session allocation recovery step",
@@ -118,5 +124,5 @@ export default {
     "ttft_recovered": "Latency protection recovered",
     "ttft_watch_cleared": "Observed latency anomaly cleared"
 },
-  phases: { healthy: 'Healthy', watching: 'Watching', reduced: 'New sessions reduced', recovering: 'Recovering gradually', insufficient: 'Insufficient evidence', suspect: 'Awaiting confirmation', observed: 'Observed degradation', limited: 'Latency limited' },
+  phases: { healthy: 'Healthy', watching: 'Watching', reduced: 'New sessions reduced', recovering: 'Recovering gradually', insufficient: 'Insufficient evidence', suspect: 'Awaiting confirmation', observed: 'Observed degradation', limited: 'Metric limited' },
 }

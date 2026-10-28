@@ -100,6 +100,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	applyMigration("309_quality_recovery_budget_evidence.sql")
 	applyMigration("284_scheduled_test_output_tokens.sql")
 	applyMigration("312_scheduled_test_pass_rate.sql")
+	applyMigration("315_scheduled_test_multi_model.sql")
 	var statisticsCount int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))
 	require.Equal(t, 1, statisticsCount, "the local statistics definition is seeded idempotently")
@@ -376,7 +377,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.NoError(t, err)
 		// The second type finishes later, as it does during sequential execution.
 		// A plan-wide LIMIT would hide every result of the first type.
-		latestBySeries := make(map[[2]int64]int64)
+		latestBySeries := make(map[string]int64)
 		sequence := 0
 		addResult := func(accountID, definitionID int64, status, model, effort string) int64 {
 			t.Helper()
@@ -394,17 +395,17 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		for _, definitionID := range []int64{htmlID, candyID} {
 			for _, accountID := range []int64{62, 63} {
 				addResult(accountID, definitionID, "success", "model-a", "high")
-				latestBySeries[[2]int64{definitionID, accountID}] = addResult(accountID, definitionID, "passed", "model-a", "high")
+				latestBySeries[fmt.Sprintf("%d/%d/model-a/high", definitionID, accountID)] = addResult(accountID, definitionID, "passed", "model-a", "high")
 			}
 		}
-		// A later failure, in-flight run, model, or effort replaces the previous
-		// row for the same account/type in the administrator's latest view.
+		// New attempts replace only their own account/type/model/effort series.
+		// Selecting another model or effort must not hide the first one.
 		addResult(62, htmlID, "failed", "model-a", "high")
 		addResult(62, htmlID, "failed", "model-a", "high")
 		addResult(62, htmlID, "running", "model-a", "high")
-		addResult(62, htmlID, "pending", "model-a", "high")
-		addResult(62, htmlID, "success", "model-b", "high")
-		latestBySeries[[2]int64{htmlID, 62}] = addResult(62, htmlID, "success", "model-a", "medium")
+		latestBySeries[fmt.Sprintf("%d/62/model-a/high", htmlID)] = addResult(62, htmlID, "pending", "model-a", "high")
+		latestBySeries[fmt.Sprintf("%d/62/model-b/high", htmlID)] = addResult(62, htmlID, "success", "model-b", "high")
+		latestBySeries[fmt.Sprintf("%d/62/model-a/medium", htmlID)] = addResult(62, htmlID, "success", "model-a", "medium")
 
 		history, err := results.ListByPlanID(ctx, multiPlan.ID, 1)
 		require.NoError(t, err)

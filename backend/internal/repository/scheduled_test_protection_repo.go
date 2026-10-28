@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -48,7 +49,7 @@ func protectionResultCurrent(ctx context.Context, tx *sql.Tx, resultID int64) (b
 	var current bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS (
 	 SELECT 1 FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
-	 WHERE r.id=$1 AND r.model_id=p.model_id
+	 WHERE r.id=$1 AND r.model_id=ANY(CASE WHEN cardinality(p.model_ids)>0 THEN p.model_ids ELSE ARRAY[p.model_id] END)
 	 AND r.target_mode=p.target_mode AND (p.account_id IS NULL OR p.account_id=r.account_id)
 	 AND (r.output_kind='statistics' OR r.reasoning_effort=p.reasoning_effort)
 	 AND (r.test_definition_id=ANY(p.test_definition_ids) OR r.test_definition_id=p.test_definition_id)
@@ -119,7 +120,7 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 	if err != nil || !eligible {
 		return err
 	}
-	if err := initializeProtectionActionStates(ctx, tx, result.PlanID, *result.AccountID, config); err != nil {
+	if err := initializeProtectionActionStates(ctx, tx, result.PlanID, *result.AccountID, result.ModelID, config); err != nil {
 		return err
 	}
 	if err := beginScheduledTestPassRate(ctx, tx, result, rule); err != nil {
@@ -133,10 +134,10 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 	// A repeated Begin for the same ID/start is idempotent, including its votes.
 	var generation int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO scheduled_test_protection_states
-		(plan_id,account_id,test_definition_id,result_id,result_started_at,rule_config)
-		SELECT $1,$2,$3,r.id,r.started_at,$5::jsonb FROM scheduled_test_results r
+		(plan_id,account_id,test_definition_id,result_id,result_started_at,rule_config,model_key)
+		SELECT $1,$2,$3,r.id,r.started_at,$5::jsonb,r.model_id FROM scheduled_test_results r
 		WHERE r.id=$4 AND r.plan_id=$1 AND r.account_id=$2 AND r.test_definition_id=$3
-		ON CONFLICT (plan_id,account_id,test_definition_id) DO UPDATE SET
+		ON CONFLICT (plan_id,account_id,test_definition_id,model_key) DO UPDATE SET
 		 result_id=EXCLUDED.result_id,result_started_at=EXCLUDED.result_started_at,
 		 generation=scheduled_test_protection_states.generation+1,
 		 automated_verdict='pending',verdict='pending',completed=FALSE,rule_config=EXCLUDED.rule_config,
@@ -158,6 +159,7 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 }
 
 type protectionState struct {
+	modelKey                                                       string
 	latencyMs                                                      sql.NullInt64
 	resultStatus                                                   sql.NullString
 	recoveryPhase                                                  string
@@ -184,10 +186,10 @@ func loadProtectionState(ctx context.Context, tx *sql.Tx, resultID int64) (*prot
 		automated_verdict,verdict,reason,blocked,completed,rule_config,round_started_at,admin_verdict,
 		recovery_phase,recovery_cooldown_until,recovery_trial_started_at,recovery_trial_ends_at,recovery_trial_requests,
 		(SELECT latency_ms FROM scheduled_test_results WHERE id=$1),
-		(SELECT status FROM scheduled_test_results WHERE id=$1)
+		(SELECT status FROM scheduled_test_results WHERE id=$1),model_key
 		FROM scheduled_test_protection_states WHERE result_id=$1 FOR UPDATE`, resultID).Scan(
 		&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started, &s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw, &s.roundStarted, &s.adminVerdict,
-		&s.recoveryPhase, &s.recoveryCooldownUntil, &s.recoveryTrialStarted, &s.recoveryTrialEnds, &s.recoveryTrialRequests, &s.latencyMs, &s.resultStatus)
+		&s.recoveryPhase, &s.recoveryCooldownUntil, &s.recoveryTrialStarted, &s.recoveryTrialEnds, &s.recoveryTrialRequests, &s.latencyMs, &s.resultStatus, &s.modelKey)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +233,7 @@ func combineProtectionVerdict(state *protectionState, pass, fail int) (string, b
 		if fail > vote.RejectAbove {
 			return "fail", true, "渠道质量检测不通过票数超过阈值"
 		}
-		if state.automated == "pass" && pass >= vote.PassAtLeast {
+		if state.automated == "pass" && (pass >= vote.PassAtLeast || state.rule.UsesAutoReview()) {
 			return "pass", false, ""
 		}
 		return "pending", state.blocked, state.reason
@@ -302,52 +304,6 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 		return err
 	}
 	return recordProtectionAction(ctx, tx, state, before, verdict, reason)
-}
-
-func reconcileProtectionAccount(ctx context.Context, tx sqlExecutor, accountID int64) error {
-	var reason string
-	var trial bool
-	err := scanSingleRow(ctx, tx, `WITH holds AS (
- SELECT reason,updated_at,plan_id,test_definition_id,false AS combined FROM scheduled_test_protection_states WHERE account_id=$1 AND blocked
- UNION ALL SELECT reason,updated_at,plan_id,0,true FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked
- ) SELECT reason,
-        NOT EXISTS (SELECT 1 FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked)
-		AND NOT EXISTS (SELECT 1 FROM scheduled_test_protection_states other WHERE other.account_id=$1 AND other.blocked
-		 AND (other.recovery_phase<>'trial' OR other.rule_config->'recovery'->>'enabled' IS DISTINCT FROM 'true'
-	 OR other.recovery_trial_started_at IS NULL OR other.recovery_trial_started_at>NOW()
-	 OR other.recovery_trial_ends_at IS NULL OR other.recovery_trial_ends_at<=NOW()))
-		FROM holds ORDER BY combined DESC,updated_at DESC,plan_id,test_definition_id LIMIT 1`, []any{accountID}, &reason, &trial)
-	blocked := err == nil
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	var changed sql.Result
-	if blocked && !trial {
-		if reason == "" {
-			reason = "渠道质量检测保护"
-		}
-		changed, err = tx.ExecContext(ctx, `UPDATE accounts SET status='quality_paused',
-			 extra=jsonb_set(COALESCE(extra,'{}'::jsonb)-'quality_protection_trial','{quality_protection_reason}',to_jsonb($2::text)),updated_at=NOW()
-		 WHERE id=$1 AND deleted_at IS NULL AND schedulable=TRUE AND status IN ('active','quality_paused')
-			 AND (status <> 'quality_paused' OR extra->>'quality_protection_reason' IS DISTINCT FROM $2 OR extra ? 'quality_protection_trial')`, accountID, reason)
-	} else if trial {
-		changed, err = tx.ExecContext(ctx, `UPDATE accounts SET status='active',
-		 extra=jsonb_set(jsonb_set(COALESCE(extra,'{}'::jsonb),'{quality_protection_trial}','true'::jsonb),'{quality_protection_reason}',to_jsonb($2::text)),updated_at=NOW()
-		 WHERE id=$1 AND deleted_at IS NULL AND schedulable=TRUE AND status IN ('active','quality_paused')
-		 AND (status<>'active' OR extra->>'quality_protection_trial' IS DISTINCT FROM 'true' OR extra->>'quality_protection_reason' IS DISTINCT FROM $2)`, accountID, reason)
-	} else {
-		changed, err = tx.ExecContext(ctx, `UPDATE accounts SET status='active',extra=COALESCE(extra,'{}'::jsonb)-'quality_protection_reason'-'quality_protection_trial',updated_at=NOW()
-			 WHERE id=$1 AND deleted_at IS NULL AND schedulable=TRUE AND status IN ('active','quality_paused')
-			 AND (status='quality_paused' OR extra ? 'quality_protection_reason' OR extra ? 'quality_protection_trial')`, accountID)
-	}
-	if err != nil {
-		return err
-	}
-	count, err := changed.RowsAffected()
-	if err != nil || count == 0 {
-		return err
-	}
-	return enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil)
 }
 
 func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, result *service.ScheduledTestResult, verdict, reason string) error {
@@ -426,6 +382,34 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 	// account with samples that the new recovery window deliberately excluded.
 	if state.recoveryTrialStarted.Valid && (result.OutputStatistics == nil || result.OutputStatistics.WindowStart.Before(state.recoveryTrialStarted.Time)) {
 		return tx.Commit()
+	}
+	// Keep the actual judge identity stable through the state commit. A change
+	// during a long vision call must not apply stale evidence to the account.
+	if state.rule.UsesAutoReview() && result.ExecutionInfo != nil && result.ExecutionInfo.AutoReview != nil {
+		review := result.ExecutionInfo.AutoReview
+		if review.Verdict == "pass" || review.Verdict == "fail" {
+			configured, configErr := qualityConfig(ctx, tx, true)
+			if configErr != nil {
+				return configErr
+			}
+			settings := configured.PelicanReview
+			if settings == nil || !settings.Enabled || review.RubricVersion != service.ScheduledTestReviewRubricVersion ||
+				review.JudgeAccountID != settings.JudgeAccountID || review.JudgeModel != strings.TrimSpace(settings.JudgeModel) {
+				review.Verdict = "pending"
+				review.Reason = "视觉裁判配置已变化或不可用，本轮结论不计入通过率，等待复核"
+				raw, err := json.Marshal(result.ExecutionInfo)
+				if err != nil {
+					return err
+				}
+				if _, err = tx.ExecContext(ctx, `UPDATE scheduled_test_results SET execution_info=$2 WHERE id=$1`, result.ID, raw); err != nil {
+					return err
+				}
+				// Duration remains independent, including when the visual evidence is stale.
+				if duration, _ := service.EvaluateScheduledTestDuration(state.rule, result); duration == "pass" {
+					verdict, reason = "pending", review.Reason
+				}
+			}
+		}
 	}
 	state.automated, state.reason, state.completed = verdict, reason, true
 	if err := saveProtectionVerdict(ctx, tx, state); err != nil {
@@ -510,6 +494,8 @@ const protectionVoteResultJSON = `jsonb_build_object(
 	'target_mode',r.target_mode,'status',r.status,'response_text',r.response_text,'output_kind',r.output_kind,'output_html',r.output_html,'output_numeric',r.output_numeric,
 	'account_id',CASE WHEN r.target_mode IN ('account','all_accounts') THEN r.account_id ELSE NULL END,
 	'model_id',r.model_id,'reasoning_effort',r.reasoning_effort,
+	'account_schedulable',a.status='active' AND a.schedulable AND COALESCE(a.extra->>'active_test_all_models_paused','false')<>'true',
+	'model_schedulable',a.status='active' AND a.schedulable AND COALESCE(a.extra->>'active_test_all_models_paused','false')<>'true' AND NOT ((COALESCE(a.extra->'active_test_model_holds','{}'::jsonb) || COALESCE(a.extra->'active_pass_rate_holds','{}'::jsonb)) ?| ARRAY[r.model_id,'']),
 	'group_id',CASE WHEN r.account_id IS NULL THEN r.group_id ELSE current_group.group_id END,'error_message','','latency_ms',r.latency_ms,
 	'started_at',r.started_at,'finished_at',r.finished_at,'created_at',r.created_at)`
 

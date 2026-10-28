@@ -28,6 +28,7 @@ type ChannelQualityScoreConfig struct {
 	ErrorRate     ChannelQualityScoreMetric `json:"error_rate"`
 	CacheRate     ChannelQualityScoreMetric `json:"cache_rate"`
 	TTFT          ChannelQualityScoreMetric `json:"ttft"`
+	TPS           ChannelQualityScoreMetric `json:"tps"`
 	Duration      ChannelQualityScoreMetric `json:"duration"`
 	EvidenceSince time.Time                 `json:"-"`
 	Version       int64                     `json:"version"`
@@ -40,6 +41,7 @@ func DefaultChannelQualityScoreConfig() ChannelQualityScoreConfig {
 		ErrorRate: ChannelQualityScoreMetric{Weight: 40, Good: 0, Bad: 20},
 		CacheRate: ChannelQualityScoreMetric{Weight: 25, Good: 80, Bad: 0},
 		TTFT:      ChannelQualityScoreMetric{Weight: 25, Good: 2000, Bad: 15000},
+		TPS:       ChannelQualityScoreMetric{Weight: 0, Good: 50, Bad: 5},
 		Duration:  ChannelQualityScoreMetric{Weight: 10, Good: 10000, Bad: 120000},
 	}
 }
@@ -47,6 +49,10 @@ func DefaultChannelQualityScoreConfig() ChannelQualityScoreConfig {
 func (c *ChannelQualityScoreConfig) Validate() error {
 	if c == nil {
 		return fmt.Errorf("score configuration is required")
+	}
+	// Older persisted configurations have no TPS dimension.
+	if c.TPS == (ChannelQualityScoreMetric{}) {
+		c.TPS = ChannelQualityScoreMetric{Good: 50, Bad: 5}
 	}
 	if c.WindowSeconds < 60 || c.WindowSeconds > 86400 {
 		return fmt.Errorf("window_seconds must be between 60 and 86400")
@@ -60,7 +66,7 @@ func (c *ChannelQualityScoreConfig) Validate() error {
 		v    ChannelQualityScoreMetric
 		max  float64
 		high bool
-	}{{"error_rate", c.ErrorRate, 100, false}, {"cache_rate", c.CacheRate, 100, true}, {"ttft", c.TTFT, 3600000, false}, {"duration", c.Duration, 3600000, false}} {
+	}{{"error_rate", c.ErrorRate, 100, false}, {"cache_rate", c.CacheRate, 100, true}, {"ttft", c.TTFT, 3600000, false}, {"duration", c.Duration, 3600000, false}, {"tps", c.TPS, 1000000, true}} {
 		if !qualityScoreFinite(m.v.Weight) || !qualityScoreFinite(m.v.Good) || !qualityScoreFinite(m.v.Bad) || m.v.Weight < 0 || m.v.Weight > 100 || m.v.Good < 0 || m.v.Good > m.max || m.v.Bad < 0 || m.v.Bad > m.max {
 			return fmt.Errorf("invalid %s score weight or reference values", m.key)
 		}
@@ -118,6 +124,8 @@ type ChannelQualityScoreSettingsRepository interface {
 // established from earlier completed, matching request digests, never from the
 // hit counter itself. Cold requests and missing metadata have no cache score.
 type ChannelQualityScoreObservation struct {
+	OutputTokens        int64
+	GenerationMS        float64
 	Key                 string
 	At                  time.Time
 	Model               string
@@ -176,7 +184,9 @@ func SummarizeChannelQualityScore(c ChannelQualityScoreConfig, observations []Ch
 	}
 	models := map[string]bool{}
 	var failed, cacheSamples int
-	var input, read int64
+	var input, read, output int64
+	var generationMS float64
+	var tpsSamples int
 	var ttfts, durations []float64
 	for _, v := range items {
 		s.Samples++
@@ -193,6 +203,11 @@ func SummarizeChannelQualityScore(c ChannelQualityScoreConfig, observations []Ch
 		}
 		if v.Duration != nil && qualityScoreFinite(*v.Duration) && *v.Duration >= 0 {
 			durations = append(durations, *v.Duration)
+		}
+		if OutputTokensPerSecond(v.OutputTokens, v.GenerationMS) != nil {
+			output += v.OutputTokens
+			generationMS += v.GenerationMS
+			tpsSamples++
 		}
 		if v.CacheReported && v.CacheReusable && v.CacheInput > 0 && v.CacheRead >= 0 && v.CacheRead <= v.CacheInput && v.CacheExpectedTokens > 0 && v.CacheExpectedTokens <= v.CacheInput {
 			cacheSamples++
@@ -234,6 +249,7 @@ func SummarizeChannelQualityScore(c ChannelQualityScoreConfig, observations []Ch
 	add("cache_rate", "percent", c.CacheRate, cacheRate, cacheSamples)
 	add("ttft", "ms", c.TTFT, qualityScoreP90(ttfts), len(ttfts))
 	add("duration", "ms", c.Duration, qualityScoreP90(durations), len(durations))
+	add("tps", "token/s", c.TPS, OutputTokensPerSecond(output, generationMS), tpsSamples)
 	if !complete {
 		s.Status = "incomplete"
 		return s

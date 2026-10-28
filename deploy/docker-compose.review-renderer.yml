@@ -1,0 +1,48 @@
+# Optional local source-build renderer, used with any compose file whose app
+# service is named sub2api. No public port and no IP network are assigned.
+# Run from repository root:
+# docker compose -f deploy/docker-compose.local.yml -f deploy/docker-compose.custom.yml \
+#   -f deploy/docker-compose.review-renderer.yml up -d --build
+services:
+  sub2api:
+    environment:
+      - SCHEDULED_TEST_RENDERER_SOCKET=/app/review-renderer/renderer.sock
+    volumes:
+      - review_renderer_socket:/app/review-renderer:ro
+    depends_on:
+      review-renderer:
+        condition: service_healthy
+
+  review-renderer:
+    build:
+      context: ..
+      dockerfile: renderer/Dockerfile
+    image: ${SUB2API_REVIEW_RENDERER_IMAGE:-sub2api-review-renderer:local}
+    restart: unless-stopped
+    init: true
+    network_mode: none
+    read_only: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    # Chromium's namespace sandbox uses chroot inside the isolated browser.
+    cap_add: [SYS_CHROOT]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=../renderer/seccomp.json
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 192
+    shm_size: 128m
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+    volumes:
+      - review_renderer_socket:/review-renderer
+    healthcheck:
+      test: ["CMD", "node", "--input-type=module", "-e", "import http from 'node:http';http.get({socketPath:'/review-renderer/renderer.sock',path:'/health'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  review_renderer_socket:
