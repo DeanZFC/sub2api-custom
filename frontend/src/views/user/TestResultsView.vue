@@ -16,10 +16,6 @@
         <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" :aria-label="t('tests.groupFilter')">
           <button v-for="group in availableGroups" :id="tabId(group.key)" :key="group.key" type="button" role="tab" :aria-selected="activeGroup === group.key" aria-controls="quality-results" :tabindex="activeGroup === group.key ? 0 : -1" class="shrink-0 border-b-2 px-4 py-3 text-base font-semibold transition-colors" :class="activeGroup === group.key ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'" @click="activeGroup = group.key" @keydown="onGroupKeydown($event, group.key)">{{ group.name }}</button>
         </nav>
-        <label class="mb-2 flex w-full items-center gap-2 text-sm text-gray-500 dark:text-gray-400 sm:w-auto">
-          <span class="shrink-0">{{ t('tests.modelFilter') }}</span>
-          <select v-model="modelFilter" class="input min-w-0 flex-1 text-sm sm:w-48" data-result-model-filter><option value="">{{ t('tests.allModels') }}</option><option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option></select>
-        </label>
       </div>
 
       <div v-if="votesLoadError" class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200" role="alert" data-votes-error>{{ votesLoadError }}<button type="button" class="ml-3 underline" :disabled="loading" @click="load(true)">{{ t('common.retry') }}</button></div>
@@ -33,54 +29,58 @@
         <article v-for="account in accountResults" :key="account.key" class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900" data-account-result>
           <header class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-800/50" data-account-info>
             <div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 break-words"><h3 class="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="text-xs text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
-            <div class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+            <div class="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+              <div class="min-w-0" :data-account-score="account.key.startsWith('account:') ? '' : undefined" data-account-model-controls>
+                <ChannelQualityScoreEvidence v-if="account.key.startsWith('account:')" :score="account.qualityScore" compact />
+                <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400" data-score-scope>
+                  <select v-if="account.models.length > 1" :value="account.selectedModel" :aria-label="`${account.name} · ${t('tests.modelFilter')}`" class="min-w-0 max-w-full cursor-pointer rounded border border-gray-200 bg-transparent py-1 pl-1.5 pr-6 text-xs text-gray-700 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-dark-700 dark:text-gray-300" data-account-model-selector @change="selectAccountModel(account.key, ($event.target as HTMLSelectElement).value)">
+                    <option v-for="model in account.models" :key="model" :value="model">{{ model || '-' }}</option>
+                  </select>
+                  <span v-else class="min-w-0 break-all">{{ account.selectedModel || '—' }}</span>
+                  <span v-if="account.key.startsWith('account:')">{{ t('tests.scoreScopeSource') }}</span>
+                </div>
+              </div>
               <div v-if="account.schedulable != null" class="flex items-center gap-2" data-scheduling-status>
                 <span class="text-gray-500 dark:text-gray-400">{{ t('tests.currentScheduling') }}</span>
                 <span class="inline-flex items-center gap-1.5 font-medium" :class="account.schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'"><span class="h-1.5 w-1.5 rounded-full bg-current" />{{ t(account.schedulable ? 'tests.schedulingActive' : 'tests.schedulingPaused') }}</span>
               </div>
-              <div v-if="modelFilter && account.selectedModelSchedulable != null" class="flex items-center gap-2" data-selected-model-status>
+              <div v-if="account.selectedModelSchedulable != null" class="flex items-center gap-2" data-selected-model-status>
                 <span class="text-gray-500 dark:text-gray-400">{{ t('tests.currentModelScheduling') }}</span>
                 <span class="font-medium" :class="account.selectedModelSchedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">{{ t(account.selectedModelSchedulable ? 'tests.modelSchedulingActive' : 'tests.modelSchedulingPaused') }}</span>
               </div>
             </div>
           </header>
-          <div class="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3 p-3" data-account-tests>
-            <section
-              v-for="test in account.tests"
-              :key="test.key"
-              class="min-w-0 rounded-md border border-gray-100 p-3 dark:border-dark-800"
-              data-test-section
-              :data-numeric-test="test.latest.output_kind === 'number' ? '' : undefined"
-              :data-statistics-test="test.latest.output_kind === 'statistics' ? '' : undefined"
-              :data-content-test="!['number', 'statistics'].includes(test.latest.output_kind) ? '' : undefined"
-            >
-              <div class="mb-3">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <h4 class="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-white">{{ test.name }}</h4>
-                  <button v-if="historyAnchor(test)" type="button" class="shrink-0 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="openHistory(test)">{{ t('tests.viewHistory') }}</button>
-                </div>
-                <div class="mt-1.5 flex flex-wrap items-center gap-1.5"><span :class="statusClass(test.latest)">{{ statusLabel(test.latest) }}</span><span class="min-w-0 break-all text-xs text-gray-500 dark:text-gray-400">{{ modelLabel(test.latest) }}<span v-if="test.latest.output_kind !== 'statistics' && test.latest.latency_ms != null"> · {{ test.latest.latency_ms }}ms</span></span></div>
-                <p v-if="test.latest.model_schedulable != null" class="mt-1 text-xs font-medium" :class="test.latest.model_schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'" data-model-scheduling-status>{{ t(test.latest.model_schedulable ? 'tests.modelSchedulingActive' : 'tests.modelSchedulingPaused') }}</p>
-              </div>
-              <template v-if="test.latest.output_kind === 'statistics'">
-                <TestResultOutput :result="test.latest" compact />
-                <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" compact @decided="refreshAfterDecision" />
-              </template>
-              <div v-else-if="test.latest.output_kind === 'number'" data-numeric-gallery>
-                <figure :key="test.latest.id" class="min-w-0">
-                  <strong class="block break-all text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ test.latest.output_numeric ?? '-' }}</strong>
-                  <figcaption class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(resultTime(test.latest)) }}</figcaption>
-                  <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" compact @decided="refreshAfterDecision" />
-                </figure>
-              </div>
-              <div v-else data-result-gallery>
-                <figure :key="test.latest.id" class="min-w-0">
-                  <TestResultOutput :result="test.latest" compact :max-preview-height="180" />
-                  <figcaption class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ formatDate(resultTime(test.latest)) }}</span><button v-if="test.latest.output_kind === 'html' && test.latest.output_html" type="button" class="font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" data-expand-preview @click="previewTarget = test.latest">{{ t('tests.expandPreview') }}</button></figcaption>
-                  <AdminTestDecision v-if="reviewFor(test.latest)" :review="reviewFor(test.latest)!" compact @decided="refreshAfterDecision" />
-                </figure>
-              </div>
-            </section>
+          <div class="min-w-0 p-3" :class="account.tests.some(test => test.latest.output_kind === 'html') ? 'grid grid-cols-1 items-start gap-3 md:grid-cols-2' : ''" data-account-tests>
+            <div v-if="account.tests.some(test => test.latest.output_kind !== 'html')" class="min-w-0 space-y-3" :class="account.tests.some(test => test.latest.output_kind === 'html') ? 'md:col-span-1' : ''" data-short-test-stack>
+              <TestResultCard
+                v-for="test in account.tests.filter(test => test.latest.output_kind !== 'html')"
+                :key="test.key"
+                :test="test"
+                :review="reviewFor(test.latest)"
+                :status-class="statusClass"
+                :status-label="statusLabel"
+                :result-time="resultTime"
+                :format-date="formatDate"
+                @view-history="openHistory"
+                @preview="previewTarget = $event"
+                @decided="refreshAfterDecision"
+              />
+            </div>
+            <div v-if="account.tests.some(test => test.latest.output_kind === 'html')" class="min-w-0 space-y-3" :class="account.tests.some(test => test.latest.output_kind !== 'html') ? 'md:col-span-1' : 'md:col-span-2'" data-preview-test-stack>
+              <TestResultCard
+                v-for="test in account.tests.filter(test => test.latest.output_kind === 'html')"
+                :key="test.key"
+                :test="test"
+                :review="reviewFor(test.latest)"
+                :status-class="statusClass"
+                :status-label="statusLabel"
+                :result-time="resultTime"
+                :format-date="formatDate"
+                @view-history="openHistory"
+                @preview="previewTarget = $event"
+                @decided="refreshAfterDecision"
+              />
+            </div>
           </div>
         </article>
       </section>
@@ -116,9 +116,12 @@ import Icon from '@/components/icons/Icon.vue'
 import TestResultOutput from '@/components/tests/TestResultOutput.vue'
 import AdminTestDecision from '@/components/tests/AdminTestDecision.vue'
 import TestVoteCard from '@/components/tests/TestVoteCard.vue'
+import TestResultCard from '@/components/tests/TestResultCard.vue'
+import ChannelQualityScoreEvidence from '@/components/tests/ChannelQualityScoreEvidence.vue'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { testResultState } from '@/utils/testResultPresentation'
 
 interface TestSeries {
   key: string
@@ -144,6 +147,7 @@ const adminReviews = ref<TestAdminReview[]>([])
 const reviewError = ref('')
 const reviewIndex = computed(() => new Map(auth.isAdmin ? adminReviews.value.map(review => [review.result.id, review]) : []))
 const reviewFor = (result: TestResult) => reviewIndex.value.get(result.id)
+const resultState = (result: TestResult) => testResultState(result, reviewFor(result)?.verdict)
 const showAllReviewResults = ref(false)
 const hasAutomaticReviews = computed(() => auth.isAdmin && regularResults.value.some(result => !!result.execution_info?.auto_review))
 const reviewNeedsAttention = (result: TestResult) => {
@@ -184,7 +188,7 @@ const displayResults = computed(() => {
   return [...records.values()]
 })
 const activeGroup = ref('')
-const modelFilter = ref('')
+const selectedAccountModels = ref<Record<string, string>>({})
 const historyTarget = ref<TestSeries | null>(null)
 const previewTarget = ref<TestResult | null>(null)
 watch(displayResults, results => {
@@ -197,7 +201,7 @@ const historyBeforeId = ref<number>()
 let adminHistoryLimit = 20
 let historyRequest = 0
 const resultsPanel = ref<HTMLElement | null>(null)
-watch([activeGroup, modelFilter], () => {
+watch(activeGroup, () => {
   if (resultsPanel.value) resultsPanel.value.scrollTop = 0
 }, { flush: 'post' })
 
@@ -227,7 +231,6 @@ const availableGroups = computed(() => {
 watch(availableGroups, groups => {
   if (!groups.some(group => group.key === activeGroup.value)) activeGroup.value = groups[0]?.key || ''
 }, { immediate: true })
-const availableModels = computed(() => [...new Set(displayResults.value.map(result => result.model_id).filter((model): model is string => Boolean(model)))].sort())
 const projectedVotes = computed(() => {
   const records = new Map(regularResults.value.map(result => [result.id, result]))
   return visibleVoteResults.value.map(item => {
@@ -238,17 +241,20 @@ const projectedVotes = computed(() => {
     } } : item
   })
 })
-const filteredVotes = computed(() => projectedVotes.value.filter(item => reviewNeedsAttention(reviewFor(item.result)?.result || item.result) && groupKey(item.result) === activeGroup.value && (!modelFilter.value || item.result.model_id === modelFilter.value)))
-const filteredResults = computed(() => sortResults(regularResults.value.filter(result => groupKey(result) === activeGroup.value && (!modelFilter.value || result.model_id === modelFilter.value))))
+const filteredVotes = computed(() => projectedVotes.value.filter(item => reviewNeedsAttention(reviewFor(item.result)?.result || item.result) && groupKey(item.result) === activeGroup.value))
+const filteredResults = computed(() => sortResults(regularResults.value.filter(result => groupKey(result) === activeGroup.value)))
+const accountSelectionKey = (key: string) => `${activeGroup.value}:${key}`
+const selectAccountModel = (key: string, model: string) => {
+  selectedAccountModels.value[accountSelectionKey(key)] = model
+  closeHistory()
+  previewTarget.value = null
+}
 const schedulingState = (result: TestResult) => result.account_schedulable
   ?? (isHiddenPausedAccount(result) ? false : undefined)
-const isSkippedResult = (result: TestResult) => result.execution_info?.failure_kind === 'quality_deferred' || (result.status === 'failed' && (result.error_message || '').startsWith('检测跳过：'))
 const resultRank = (result: TestResult) => {
   if (result.model_schedulable === false) return 3
-  if (isSkippedResult(result)) return 1
-  if (['failed', 'error'].includes(result.status) || result.output_model_check?.verdict === 'fail' || result.execution_info?.capability?.verdict === 'fail' || result.execution_info?.auto_review?.verdict === 'fail') return 2
-  if (!isSuccessful(result) || result.execution_info?.auto_review?.verdict === 'pending' || (result.output_kind === 'model_check' && result.output_model_check?.verdict !== 'pass') || (result.output_kind === 'capability' && result.execution_info?.capability?.verdict !== 'pass')) return 1
-  return 0
+  const state = resultState(result)
+  return state === 'pass' ? 0 : state === 'fail' || state === 'error' ? 2 : 1
 }
 const accountResults = computed(() => {
   const accounts = new Map<string, { key: string; name: string; groupName: string; order: number; tests: Map<string, TestSeries> }>()
@@ -268,13 +274,22 @@ const accountResults = computed(() => {
     series.results.push(result)
   }
   return [...accounts.values()].map(account => {
-    const tests = [...account.tests.values()].filter(test => reviewNeedsAttention(test.latest)).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
-    const states = tests.map(test => schedulingState(test.latest))
+    const visibleTests = [...account.tests.values()].filter(test => reviewNeedsAttention(test.latest))
+    const modelResults = visibleTests.map(test => test.latest).sort((a, b) => orderValue(a.plan_order) - orderValue(b.plan_order)
+      || orderValue(a.plan_id) - orderValue(b.plan_id) || orderValue(a.model_order) - orderValue(b.model_order)
+      || (a.model_id || '').localeCompare(b.model_id || ''))
+    const models = [...new Set(modelResults.map(result => result.model_id || ''))]
+    const previousModel = selectedAccountModels.value[accountSelectionKey(account.key)]
+    const selectedModel = previousModel != null && models.includes(previousModel) ? previousModel : models[0] || ''
+    const tests = visibleTests.filter(test => (test.latest.model_id || '') === selectedModel)
+      .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
+    const states = visibleTests.map(test => schedulingState(test.latest))
     const schedulable = states.includes(false) ? false : states.includes(true) ? true : undefined
-    const modelStates = modelFilter.value ? tests.map(test => test.latest.model_schedulable) : []
+    const modelStates = tests.map(test => test.latest.model_schedulable)
     const selectedModelSchedulable = modelStates.includes(false) ? false : modelStates.includes(true) ? true : undefined
+    const qualityScore = tests.find(test => test.latest.quality_score)?.latest.quality_score ?? undefined
     const rank = schedulable === false ? 3 : Math.max(...tests.map(test => resultRank(test.latest)))
-    return { ...account, tests, schedulable, selectedModelSchedulable, rank }
+    return { ...account, models, selectedModel, tests, schedulable, selectedModelSchedulable, qualityScore, rank }
   }).filter(account => account.tests.length > 0).sort((a, b) => a.rank - b.rank || a.order - b.order)
 })
 
@@ -332,17 +347,15 @@ const openHistory = (series: TestSeries) => {
   historyLoading.value = false
   void loadHistory()
 }
-const statusClass = (result: TestResult) => result.status === 'running' || result.status === 'pending' || isSkippedResult(result) ? 'badge badge-warning'
-  : !isSuccessful(result) ? 'badge badge-danger'
-  : result.execution_info?.auto_review ? result.execution_info.auto_review.verdict === 'pass' ? 'badge badge-success' : result.execution_info.auto_review.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning'
-  : result.output_kind === 'capability' ? result.execution_info?.capability?.verdict === 'pass' ? 'badge badge-success' : result.execution_info?.capability?.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning'
-  : result.output_kind === 'model_check' ? result.output_model_check?.verdict === 'pass' ? 'badge badge-success' : result.output_model_check?.verdict === 'fail' ? 'badge badge-danger' : 'badge badge-warning' : 'badge badge-success'
-const statusLabel = (result: TestResult) => result.status === 'running' || result.status === 'pending' ? t('tests.running')
-  : isSkippedResult(result) ? t('tests.skipped')
-  : !isSuccessful(result) ? t('tests.failed')
-  : result.execution_info?.auto_review ? t(`admin.tests.autoReview.${result.execution_info.auto_review.verdict}`)
-  : result.output_kind === 'capability' ? t(`admin.tests.capability.verdicts.${result.execution_info?.capability?.verdict || 'pending'}`)
-  : result.output_kind === 'model_check' ? t(`tests.modelCheck.${result.output_model_check?.verdict || 'unknown'}`) : t('tests.completed')
+const statusClass = (result: TestResult) => {
+  const state = resultState(result)
+  return state === 'pass' ? 'badge badge-success' : state === 'fail' || state === 'error' ? 'badge badge-danger'
+    : state === 'skipped' ? 'badge badge-gray' : 'badge badge-warning'
+}
+const statusLabel = (result: TestResult) => {
+  const state = resultState(result)
+  return t(state === 'running' ? 'tests.running' : state === 'skipped' ? 'tests.skipped' : state === 'error' ? 'tests.executionFailed' : `tests.verdicts.${state}`)
+}
 const modelLabel = (result: TestResult) => `${result.model_id || '-'}${result.reasoning_effort ? ` · ${t('tests.reasoningEffort')}: ${result.reasoning_effort}` : ''}`
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '-'
 const onGroupKeydown = async (event: KeyboardEvent, key: string) => {

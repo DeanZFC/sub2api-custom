@@ -134,13 +134,13 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 func freshGroupTargetBreach(p service.PassiveQualityPolicy, e service.PassiveQualityEvidence, metric string) bool {
 	switch metric {
 	case "error_rate":
-		return e.FreshErrorRate != nil && *e.FreshErrorRate >= p.ErrorRate.Pause
+		return e.FreshErrorRate != nil && *e.FreshErrorRate > p.ErrorRate.Pause
 	case "output_tps":
-		return e.FreshOutputTPS != nil && *e.FreshOutputTPS <= p.TPS.Pause
+		return e.FreshOutputTPS != nil && *e.FreshOutputTPS < p.TPS.Pause
 	case "ttft_p90":
-		return e.FreshTTFT != nil && *e.FreshTTFT >= p.TTFT.Pause
+		return e.FreshTTFT != nil && *e.FreshTTFT > p.TTFT.Pause
 	case "cache_rate":
-		return e.FreshCacheRate != nil && *e.FreshCacheRate <= p.CacheRate.Pause
+		return e.FreshCacheRate != nil && *e.FreshCacheRate < p.CacheRate.Pause
 	}
 	return false
 }

@@ -60,6 +60,48 @@ INSERT INTO user_allowed_groups(user_id,group_id) VALUES (100,99013)`)
 		require.ElementsMatch(t, want, groups)
 	}
 	assertGroups([]int64{99011, 99013})
+	// An evaluator pass recorded after a failed completion transaction is a
+	// preliminary diagnostic, not a final administrator/vote/duration decision.
+	require.NoError(t, results.RecordDecision(ctx, row, service.ScheduledTestProtectionDecision{Status: "error", Verdict: "pass", Reason: "private commit error"}))
+	visible, err := svc.ListVisibleResults(ctx, 100, 3)
+	require.NoError(t, err)
+	for _, got := range visible {
+		if got.ID == row.ID {
+			require.Equal(t, "pending", got.QualityVerdict)
+		}
+	}
+	admin, err := results.GetByID(ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, "pending", admin.QualityVerdict)
+	require.NoError(t, results.RecordDecision(ctx, row, service.ScheduledTestProtectionDecision{Status: "unchanged", Verdict: "fail"}))
+	for _, marker := range []struct {
+		execution, decision, message string
+	}{
+		{`{"failure_kind":"quality_deferred"}`, `{"status":"unchanged","verdict":"fail"}`, "private deferred detail"},
+		{`null`, `{"status":"skipped","reason":"private skipped detail"}`, "private skipped detail"},
+		{`null`, `null`, "检测跳过：private legacy detail"},
+	} {
+		_, err := db.ExecContext(ctx, `UPDATE scheduled_test_results SET status='failed',execution_info=$2,protection_decision=$3,error_message=$4 WHERE id=$1`, row.ID, marker.execution, marker.decision, marker.message)
+		require.NoError(t, err)
+		public, err := svc.ListVisibleResults(ctx, 100, 3)
+		require.NoError(t, err)
+		var skipped *service.ScheduledTestResult
+		for _, got := range public {
+			if got.ID == row.ID {
+				skipped = got
+			}
+		}
+		require.NotNil(t, skipped)
+		require.True(t, skipped.ExecutionSkipped)
+		require.Nil(t, skipped.ExecutionInfo, "public skip marker must survive even without execution details")
+		encoded, err := json.Marshal(skipped)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"execution_skipped":true`)
+		require.NotContains(t, string(encoded), "private")
+	}
+	_, err = db.ExecContext(ctx, `UPDATE scheduled_test_results SET status='success',execution_info=NULL,error_message='' WHERE id=$1`, row.ID)
+	require.NoError(t, err)
+	require.NoError(t, results.RecordDecision(ctx, row, service.ScheduledTestProtectionDecision{Status: "unchanged", Verdict: "fail"}))
 	for _, state := range []struct {
 		status      string
 		schedulable bool

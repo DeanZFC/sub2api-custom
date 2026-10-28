@@ -13,7 +13,7 @@ func scoreFloat(v float64) *float64 { return &v }
 func scoreObservations(now time.Time, n int) []ChannelQualityScoreObservation {
 	result := make([]ChannelQualityScoreObservation, n)
 	for i := range result {
-		result[i] = ChannelQualityScoreObservation{Key: fmt.Sprint(i), At: now.Add(-time.Duration(i) * time.Second), Model: "public", TTFT: scoreFloat(2000), Duration: scoreFloat(10000), CacheReported: true, CacheReusable: true, CacheInput: 2000, CacheRead: 800, CacheExpectedTokens: 1000}
+		result[i] = ChannelQualityScoreObservation{Key: fmt.Sprint(i), At: now.Add(-time.Duration(i) * time.Second), Model: "public", TTFT: scoreFloat(2000), Duration: scoreFloat(10000), CacheReported: true, CacheReusable: true, CacheInput: 2000, CacheRead: 800, CacheExpectedTokens: 1000, OutputTokens: 100, GenerationMS: 2000}
 	}
 	return result
 }
@@ -26,6 +26,7 @@ func TestChannelQualityScoreIndependentWeightedScale(t *testing.T) {
 		samples[i].TTFT = scoreFloat(8500)
 		samples[i].Duration = scoreFloat(65000)
 		samples[i].CacheRead = 400
+		samples[i].GenerationMS = 100000.0 / 27.5
 	}
 	// 20% failures score 0; other dimensions each score 50. Failure outcomes do
 	// not contribute latency/cache, while their 20 successful peers meet the floor.
@@ -35,7 +36,7 @@ func TestChannelQualityScoreIndependentWeightedScale(t *testing.T) {
 	s := SummarizeChannelQualityScore(c, samples, "public", true, now)
 	require.Equal(t, "ready", s.Status)
 	require.NotNil(t, s.Value)
-	require.InDelta(t, 30, *s.Value, .001)
+	require.InDelta(t, 15, *s.Value, .001)
 	require.Equal(t, 25, s.Samples)
 	require.Equal(t, 1, s.Models)
 	require.Equal(t, 100., s.CoveragePercent)
@@ -55,8 +56,8 @@ func TestChannelQualityScoreMissingCacheIsUnknownAndColdDoesNotPenalize(t *testi
 	s := SummarizeChannelQualityScore(c, samples, "public", true, now)
 	require.Equal(t, "partial", s.Status)
 	require.Equal(t, 100., *s.Value)
-	require.Equal(t, 75., s.CoveragePercent)
-	require.InDelta(t, .15, s.Confidence, .000001)
+	require.Equal(t, 90., s.CoveragePercent)
+	require.InDelta(t, .18, s.Confidence, .000001)
 	require.Nil(t, s.Dimensions[1].Value)
 	require.Nil(t, s.Dimensions[1].Score)
 	for i := range samples {
@@ -70,7 +71,7 @@ func TestChannelQualityScoreMissingCacheIsUnknownAndColdDoesNotPenalize(t *testi
 	}
 	s = SummarizeChannelQualityScore(c, samples, "public", true, now)
 	require.Equal(t, "ready", s.Status)
-	require.Equal(t, 75., *s.Value)
+	require.Equal(t, 90., *s.Value)
 	require.Equal(t, 0., *s.Dimensions[1].Value)
 }
 
@@ -138,10 +139,33 @@ func TestChannelQualityScoreP90FiniteInputsAndWeightValidation(t *testing.T) {
 			c.CacheRate.Weight = 0
 			c.TTFT.Weight = 0
 			c.Duration.Weight = 0
+			c.TPS.Weight = 0
 		},
 	} {
 		bad := DefaultChannelQualityScoreConfig()
 		mutate(&bad)
 		require.Error(t, bad.Validate())
 	}
+}
+
+func TestChannelQualityScoreAvailabilityOutweighsAllPerformanceDimensions(t *testing.T) {
+	now := time.Now()
+	stable := scoreObservations(now, 100)
+	flaky := scoreObservations(now, 100)
+	for i := range stable {
+		stable[i].CacheRead = 0
+		stable[i].TTFT = scoreFloat(15000)
+		stable[i].GenerationMS = 20000
+		if i < 10 {
+			flaky[i].Failed = true
+		}
+	}
+	c := DefaultChannelQualityScoreConfig()
+	good := SummarizeChannelQualityScore(c, stable, "public", true, now)
+	bad := SummarizeChannelQualityScore(c, flaky, "public", true, now)
+	require.Equal(t, "ready", good.Status)
+	require.Equal(t, "ready", bad.Status)
+	require.InDelta(t, 70, *good.Value, .001)
+	require.InDelta(t, 65, *bad.Value, .001)
+	require.Greater(t, *good.Value, *bad.Value, "perfect performance cannot outweigh a ten-point availability loss")
 }

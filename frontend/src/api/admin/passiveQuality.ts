@@ -29,6 +29,8 @@ export interface PassiveCacheState extends Omit<PassiveMetricState, 'evidence'> 
 }
 export interface PassivePolicy {
   purpose?: 'cache_target' | 'group_quality_target'
+  consolidated_group_ids?: number[]
+  traffic_mode?: 'strict' | 'availability'
   schema_version?: number; ttft_action?: 'observe' | 'limit'; ttft_concurrency_limit?: number; ttft_priority_penalty?: number
   tps_action?: 'observe' | 'limit'; tps_concurrency_limit?: number; tps_priority_penalty?: number
   cache_protection?: PassiveCacheProtection
@@ -58,6 +60,7 @@ export interface PassiveState {
 export interface PassiveEvent { id: number; policy_id: number; account_id: number; policy_name: string; kind: string; detail: PassiveState; created_at: string }
 export interface GroupQualityTargetDraft {
   id: number; version: number; purpose: 'group_quality_target'; name: string; enabled: boolean; mode: 'observe' | 'enforce'; model: string
+  traffic_mode: 'strict' | 'availability'
   group_ids: number[]; cache_rate: PassiveMetric; error_rate: PassiveMetric; ttft: PassiveMetric; tps: PassiveMetric
   excluded_account_ids: number[]
   window_seconds?: number; max_samples?: number; min_samples?: number; confirmations?: number; new_samples?: number
@@ -124,18 +127,16 @@ function passiveTPSDraft(metric?: PassiveMetric): PassiveMetric {
 export function isGroupQualityTarget(policy: Pick<PassivePolicy, 'purpose'>): boolean {
   return policy.purpose === 'group_quality_target' || policy.purpose === 'cache_target'
 }
-export function groupQualityTargetDraft(policy?: PassivePolicy, groupName = ''): GroupQualityTargetDraft {
-  const normalizedName = groupName.trim().toLowerCase()
-  const plus = normalizedName === 'gpt-plus'
-  const percentage = plus ? 70 : 80
-  const ttft = plus ? 20000 : normalizedName === 'gpt-pro' ? 15000 : 10000
+export function groupQualityTargetDraft(policy?: PassivePolicy, _groupName = ''): GroupQualityTargetDraft {
+  const percentage = 80
+  const ttft = 15000
   const draft: GroupQualityTargetDraft = {
     id: policy?.id || 0, version: policy?.version || 0, purpose: 'group_quality_target', name: policy?.name || '',
-    enabled: policy?.enabled ?? true, mode: policy?.mode || 'enforce', model: policy?.model || '', group_ids: policy ? [...policy.group_ids] : [],
+    enabled: policy?.enabled ?? true, mode: policy?.mode || 'enforce', traffic_mode: policy?.traffic_mode || 'strict', model: policy?.model || '', group_ids: policy ? [...policy.group_ids] : [],
     excluded_account_ids: [...(policy?.excluded_account_ids || [])],
     cache_rate: { enabled: policy?.cache_rate.enabled ?? true, pause: policy?.cache_rate.pause ?? percentage, recover: policy?.cache_rate.recover ?? percentage + 5 },
-    error_rate: { enabled: policy?.error_rate.enabled ?? true, pause: policy?.error_rate.pause ?? 100 - percentage, recover: policy?.error_rate.recover ?? 95 - percentage },
-    tps: passiveTPSDraft(policy?.tps),
+    error_rate: { enabled: policy?.error_rate.enabled ?? true, pause: policy?.error_rate.pause ?? 10, recover: policy?.error_rate.recover ?? 5 },
+    tps: policy ? passiveTPSDraft(policy.tps) : { enabled: true, pause: 30, recover: 36 },
     ttft: { enabled: policy?.ttft.enabled ?? true, pause: policy?.ttft.pause ?? ttft, recover: policy?.ttft.recover ?? ttft * .8 },
   }
   if (policy) {

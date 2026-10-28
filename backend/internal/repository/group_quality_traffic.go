@@ -159,6 +159,13 @@ func (r *passiveQualityRepository) AcquireGroupQualityTraffic(ctx context.Contex
 		fallbackExpires = now.Add(groupQualityFallbackLease)
 	}
 	if denied {
+		// A budget protects the quality sample, not the group's entire serving
+		// capacity. In availability mode, keep all normal live-account gates above
+		// authoritative, but let this account serve without creating a validation
+		// lease or consuming additional budget.
+		if p.TrafficMode == "availability" && !fallback {
+			return true, false, tx.Commit()
+		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO group_quality_traffic_denials(policy_id,minute,requests) VALUES($1,date_trunc('minute',$2::timestamptz),1)
  ON CONFLICT(policy_id,minute) DO UPDATE SET requests=group_quality_traffic_denials.requests+1`, p.ID, now); err != nil {
 			return false, false, err

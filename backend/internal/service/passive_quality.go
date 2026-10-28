@@ -17,9 +17,14 @@ type PassiveQualityMetric struct {
 }
 type PassiveQualityConfig struct {
 	// Read-only decision identity; repository ignores client-supplied values.
-	EvidenceStartedAt    *time.Time                 `json:"evidence_started_at,omitempty"`
-	EvaluationVersion    int64                      `json:"evaluation_version,omitempty"`
-	Purpose              string                     `json:"purpose,omitempty"`
+	EvidenceStartedAt *time.Time `json:"evidence_started_at,omitempty"`
+	EvaluationVersion int64      `json:"evaluation_version,omitempty"`
+	Purpose           string     `json:"purpose,omitempty"`
+	// TrafficMode controls what happens after the shared group validation budget
+	// is exhausted. Strict keeps the historical fail-closed behavior; availability
+	// lets otherwise eligible accounts carry normal traffic without a validation
+	// lease while fresh evidence is collected separately.
+	TrafficMode          string                     `json:"traffic_mode,omitempty"`
 	SchemaVersion        int                        `json:"schema_version,omitempty"`
 	TPSAction            string                     `json:"tps_action,omitempty"`
 	TPSConcurrencyLimit  int                        `json:"tps_concurrency_limit,omitempty"`
@@ -32,6 +37,7 @@ type PassiveQualityConfig struct {
 	Enabled              bool                       `json:"enabled"`
 	Mode                 string                     `json:"mode"`
 	GroupIDs             []int64                    `json:"group_ids"`
+	ConsolidatedGroupIDs []int64                    `json:"consolidated_group_ids,omitempty"`
 	ExcludedAccountIDs   []int64                    `json:"excluded_account_ids"`
 	Model                string                     `json:"model"`
 	Scope                string                     `json:"scope"`
@@ -196,6 +202,14 @@ type PassiveQualityConcurrencyGate interface {
 func (c *PassiveQualityConfig) Validate() error {
 	if err := c.prepareGroupQualityTarget(); err != nil {
 		return err
+	}
+	if c.IsGroupQualityTarget() {
+		if c.TrafficMode == "" {
+			c.TrafficMode = "strict"
+		}
+		if c.TrafficMode != "strict" && c.TrafficMode != "availability" {
+			return fmt.Errorf("traffic mode must be strict or availability")
+		}
 	}
 	if err := c.validateIsolatedMetrics(); err != nil {
 		return err
@@ -408,7 +422,7 @@ func EvaluatePassiveQuality(c PassiveQualityConfig, e PassiveQualityEvidence, re
 		if m.low {
 			bad = *m.value <= threshold
 		}
-		if recovery {
+		if recovery || c.IsGroupQualityTarget() {
 			bad = *m.value > threshold
 			if m.low {
 				bad = *m.value < threshold

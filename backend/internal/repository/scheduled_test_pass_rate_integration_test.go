@@ -409,3 +409,27 @@ func TestScheduledTestPassRateIntegration(t *testing.T) {
 		require.True(t, f.summary("model-a").Blocked)
 	})
 }
+
+func TestScheduledTestAllPassRecoversOnNextCompleteRoundIntegration(t *testing.T) {
+	f := newPassRateFixture(t, 10)
+	f.plan.Protection.Mode = "all_pass"
+	// The service normalizes all-pass plans to a one-result gate.
+	gate := f.plan.Protection.Rules[0].PassRate
+	gate.WindowSize, gate.RecoverConsecutive = 1, 1
+	gate.PauseBelow, gate.RecoverAtLeast, gate.PauseOnSingleFailure = 100, 100, true
+	var err error
+	f.plan, err = f.plans.Update(f.ctx, f.plan)
+	require.NoError(t, err)
+	f.result("fail")
+	require.True(t, f.summary("model-a").Blocked)
+	next := f.begin()
+	var status string
+	require.NoError(t, f.db.QueryRow(`SELECT status FROM accounts WHERE id=62`).Scan(&status))
+	require.Equal(t, "quality_paused", status, "starting the next round must not release the hold")
+	f.complete(next, "success", "pass")
+	require.False(t, f.summary("model-a").Blocked, "one newly completed successful round is sufficient")
+	require.NoError(t, f.db.QueryRow(`SELECT status FROM accounts WHERE id=62`).Scan(&status))
+	require.Equal(t, "active", status)
+	f.result("fail")
+	require.True(t, f.summary("model-a").Blocked)
+}

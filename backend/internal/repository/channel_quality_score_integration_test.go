@@ -26,7 +26,8 @@ func TestChannelQualityScoreConfigurationAndCacheIsolationIntegration(t *testing
 	ctx, db, r := passiveDB(t)
 	c, err := r.GetQualityScoreConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, service.DefaultChannelQualityScoreConfig().ErrorRate, c.ErrorRate)
+	// This fixture stops at migration 313. Stored legacy weights stay intact until migration 317.
+	require.Equal(t, service.ChannelQualityScoreMetric{Weight: 40, Good: 0, Bad: 20}, c.ErrorRate)
 	require.EqualValues(t, 1, c.Version)
 	_, err = db.Exec(`INSERT INTO usage_logs(account_id,request_id,created_at,first_token_ms,duration_ms)
  SELECT 62,'s-'||i,now()-i*INTERVAL '1 second',5000,10000 FROM generate_series(1,20) i`)

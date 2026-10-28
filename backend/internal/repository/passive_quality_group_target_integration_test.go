@@ -135,7 +135,7 @@ func TestGroupQualityTargetFailureMembershipAndReplayIntegration(t *testing.T) {
 		require.NoError(t, r.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: 62, GroupID: 8, Model: "bad", RequestKey: fmt.Sprintf("bad-%d", i), StartedAt: at, At: at}, {AccountID: 62, GroupID: 9, Model: "other-failure", RequestKey: fmt.Sprintf("other-fail-%d", i), StartedAt: at, At: at}}, nil))
 		insertGroupTargetUsage(t, db, r, fmt.Sprintf("slow-%d", i), "slow", 8, at, 90, true)
 	}
-	_, err = db.Exec(`UPDATE usage_logs SET stream=true,request_type=2,first_token_ms=10000 WHERE requested_model='slow'`)
+	_, err = db.Exec(`UPDATE usage_logs SET stream=true,request_type=2,first_token_ms=10001 WHERE requested_model='slow'`)
 	require.NoError(t, err)
 	_, err = r.Sweep(ctx, base.Add(time.Second), 0)
 	require.NoError(t, err)

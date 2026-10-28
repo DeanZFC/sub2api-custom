@@ -38,11 +38,11 @@ type ChannelQualityScoreConfig struct {
 func DefaultChannelQualityScoreConfig() ChannelQualityScoreConfig {
 	return ChannelQualityScoreConfig{
 		Enabled: true, WindowSeconds: 900, MaxRequests: 100, MinSamples: 20,
-		ErrorRate: ChannelQualityScoreMetric{Weight: 40, Good: 0, Bad: 20},
-		CacheRate: ChannelQualityScoreMetric{Weight: 25, Good: 80, Bad: 0},
-		TTFT:      ChannelQualityScoreMetric{Weight: 25, Good: 2000, Bad: 15000},
-		TPS:       ChannelQualityScoreMetric{Weight: 0, Good: 50, Bad: 5},
-		Duration:  ChannelQualityScoreMetric{Weight: 10, Good: 10000, Bad: 120000},
+		ErrorRate: ChannelQualityScoreMetric{Weight: 70, Good: 0, Bad: 20},
+		CacheRate: ChannelQualityScoreMetric{Weight: 10, Good: 80, Bad: 0},
+		TTFT:      ChannelQualityScoreMetric{Weight: 10, Good: 2000, Bad: 15000},
+		TPS:       ChannelQualityScoreMetric{Weight: 10, Good: 50, Bad: 5},
+		Duration:  ChannelQualityScoreMetric{Weight: 0, Good: 10000, Bad: 120000},
 	}
 }
 

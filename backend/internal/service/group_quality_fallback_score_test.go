@@ -69,9 +69,9 @@ func TestGroupQualityFallbackUsesIndependentScoreForExactPublicModel(t *testing.
 				req.RequiredTransport = transport
 				selection, err := svc.selectGroupQualityFallback(ctx, req, ErrNoAvailableAccounts)
 				require.NoError(t, err)
-				require.Equal(t, int64(2), selection.Account.ID, "independent quality evidence must override the old priority order")
+				require.Equal(t, int64(4), selection.Account.ID, "quality score ranks automatic capability holds too")
 				require.Equal(t, "public-model", gate.scoreModel)
-				require.ElementsMatch(t, []int64{1, 2}, gate.scoreIDs, "manual and active intelligence holds remain hard exclusions")
+				require.ElementsMatch(t, []int64{1, 2, 4}, gate.scoreIDs, "manual disable remains a hard exclusion")
 				require.Len(t, gate.calls, 1)
 				require.Equal(t, "public-model", gate.calls[0].Model)
 				selection.ReleaseFunc()

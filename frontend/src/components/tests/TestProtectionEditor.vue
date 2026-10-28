@@ -54,7 +54,7 @@
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.requiredPassHint') }}</p>
           </template>
           <p v-if="type.output_kind === 'capability'" class="text-sm text-gray-500">{{ t('admin.tests.capability.protectionHint') }}</p>
-          <TestPassRateEditor v-if="supportsTestPassRate(type.output_kind) || ruleFor(type.id)?.pass_rate" :model-value="ruleFor(type.id)?.pass_rate" :output-kind="type.output_kind" :schedule="schedule" @update:model-value="patchRule(type.id, { pass_rate: $event })" />
+          <TestPassRateEditor v-if="!allPass && (supportsTestPassRate(type.output_kind) || ruleFor(type.id)?.pass_rate)" :model-value="ruleFor(type.id)?.pass_rate" :output-kind="type.output_kind" :schedule="schedule" @update:model-value="patchRule(type.id, { pass_rate: $event })" />
           <h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.conditions') }}</h4>
           <label v-if="!allPass" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input :checked="ruleFor(type.id)?.pause_on_failure || !!ruleFor(type.id)?.on_fail" :disabled="!!ruleFor(type.id)?.on_fail" type="checkbox" data-rule-failure @change="patchRule(type.id, { pause_on_failure: ($event.target as HTMLInputElement).checked })" />{{ t('admin.tests.protection.pauseOnFailure') }}</label>
           <p v-if="!allPass && ruleFor(type.id)?.on_fail" class="text-xs text-gray-500 dark:text-gray-400" data-rule-failure-action-hint>{{ t(combined ? 'admin.tests.protection.combined.failureActionHint' : 'admin.tests.protection.failureActionHint') }}</p>

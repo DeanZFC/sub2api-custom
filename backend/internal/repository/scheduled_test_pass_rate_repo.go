@@ -283,9 +283,11 @@ func syncActivePassRateProjection(ctx context.Context, tx *sql.Tx, accountID int
 
 func (r *scheduledTestResultRepository) hydratePassRates(ctx context.Context, results []*service.ScheduledTestResult) error {
 	ids := []int64{}
+	seen := map[int64]bool{}
 	for _, v := range results {
-		if v != nil {
+		if v != nil && !seen[v.ID] {
 			ids = append(ids, v.ID)
+			seen[v.ID] = true
 		}
 	}
 	if len(ids) == 0 {
@@ -323,10 +325,10 @@ func (r *scheduledTestResultRepository) hydratePassRates(ctx context.Context, re
 	if err != nil {
 		return err
 	}
-	byID := map[int64]*service.ScheduledTestResult{}
+	byID := map[int64][]*service.ScheduledTestResult{}
 	for _, v := range results {
 		if v != nil {
-			byID[v.ID] = v
+			byID[v.ID] = append(byID[v.ID], v)
 		}
 	}
 	now := time.Now().UTC()
@@ -334,7 +336,9 @@ func (r *scheduledTestResultRepository) hydratePassRates(ctx context.Context, re
 		if err = refreshScheduledTestPassRateSummary(ctx, r.db, v.plan, v.account, v.definition, v.model, &v.s, now); err != nil {
 			return err
 		}
-		byID[v.id].PassRate = &v.s
+		for _, result := range byID[v.id] {
+			result.PassRate = &v.s
+		}
 	}
 	return nil
 }

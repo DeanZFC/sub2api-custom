@@ -105,8 +105,8 @@ func (c *ScheduledTestPassRateConfig) Validate() error {
 		return nil
 	}
 	c.Normalize()
-	if c.WindowSize < 2 || c.WindowSize > 1000 {
-		return fmt.Errorf("pass_rate window_size must be between 2 and 1000")
+	if c.WindowSize < 1 || c.WindowSize > 1000 {
+		return fmt.Errorf("pass_rate window_size must be between 1 and 1000")
 	}
 	if c.WindowSeconds < 3600 || c.WindowSeconds > 30*24*3600 {
 		return fmt.Errorf("pass_rate window_seconds must be between 3600 and 2592000")

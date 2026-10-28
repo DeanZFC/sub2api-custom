@@ -78,9 +78,7 @@ func (r *scheduledTestResultRepository) ListAdminReviews(ctx context.Context) ([
 	for _, review := range results {
 		history = append(history, review.Result)
 	}
-	if err := r.hydratePassRates(ctx, history); err != nil {
-		return nil, err
-	}
+	r.hydrateDisplayEvidence(ctx, history)
 	return results, nil
 }
 

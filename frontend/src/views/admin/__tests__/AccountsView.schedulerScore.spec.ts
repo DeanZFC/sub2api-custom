@@ -263,9 +263,10 @@ describe('admin AccountsView scheduler score column', () => {
     await flushPromises()
     expect(qualityScores).toHaveBeenCalledWith([1, 2, 3])
     expect(wrapper.get('[data-account-quality-score="1"]').text()).toContain('88')
-    expect(wrapper.get('[data-account-quality-score="1"]').attributes('href')).toBe('/admin/tests?tab=overview&account_id=1')
-    expect(wrapper.get('[data-account-quality-score="2"] strong').text()).toBe('—')
-    expect(wrapper.get('[data-account-quality-score="3"] strong').text()).toBe('—')
+    expect(wrapper.get('[data-account-quality-score="1"] button').text()).toBe('88')
+    expect(wrapper.find('[data-account-quality-score="1"] a').exists()).toBe(false)
+    expect(wrapper.get('[data-account-quality-score="2"] button').text()).toBe('—')
+    expect(wrapper.get('[data-account-quality-score="3"] button').text()).toBe('—')
     wrapper.unmount()
   })
 

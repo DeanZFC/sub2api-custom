@@ -23,14 +23,14 @@ describe('active check pass-rate settings', () => {
     expect(validTestPassRate({ ...defaultTestPassRate(), ...patch }, 'number')).toBe(false)
   })
 
-  it('preserves rate settings through copies and aggregate normalization without mutating the source', () => {
+  it('uses the newest verdict in all-pass mode without mutating the original historical gate', () => {
     const original: TestProtectionConfig = { enabled: true, mode: 'all_pass', rules: [{
       test_definition_id: 1, priority: 3, required_pass: false, expected_answer: '29',
       pause_on_failure: false, pass_rate: defaultTestPassRate(),
     }] }
     const copy = copyTestProtection(original)
     normalizeAllPassProtection(copy)
-    expect(copy.rules[0].pass_rate).toEqual(original.rules[0].pass_rate)
+    expect(copy.rules[0].pass_rate).toEqual({ ...original.rules[0].pass_rate, window_size: 1, recover_consecutive: 1, pause_below: 100, recover_at_least: 100, pause_on_single_failure: true })
     copy.rules[0].pass_rate!.window_size = 20
     expect(original.rules[0].pass_rate!.window_size).toBe(10)
     expect(original.rules[0].pause_on_failure).toBe(false)

@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestResultsView from '../TestResultsView.vue'
 import TestVoteCard from '@/components/tests/TestVoteCard.vue'
-import TestPassRateEvidence from '@/components/tests/TestPassRateEvidence.vue'
+import TestRecentPassRate from '@/components/tests/TestRecentPassRate.vue'
+import ChannelQualityScoreEvidence from '@/components/tests/ChannelQualityScoreEvidence.vue'
+import type { ChannelQualityScore } from '@/api/admin/channelQuality'
+import type { TestPassRateSummary } from '@/types'
 
 const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), votes: vi.fn(), vote: vi.fn(), error: vi.fn(), reviews: vi.fn(), decide: vi.fn(), adminResults: vi.fn(), isAdmin: false }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: api.isAdmin }) }))
@@ -12,8 +15,23 @@ vi.mock('@/api/testResults', () => ({ testResultsAPI: { list: api.list, history:
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: api.error }) }))
 
 const baseResult = { plan_id: 10, test_definition_id: 1, test_name: 'Pelican', group_id: 8, group_name: 'Group Eight', account_id: 3, model_id: 'gpt-6-astra', output_kind: 'html', status: 'success', created_at: '2026-09-15T12:00:00Z' }
+const passRate = (samples: number, passed: number, overrides: Partial<TestPassRateSummary> = {}): TestPassRateSummary => ({
+  samples, passed, pass_rate: samples ? passed / samples * 100 : null, window_size: 10, window_seconds: 604800,
+  pause_below: 80, recover_at_least: 90, recover_consecutive: 2, consecutive_passes: 1,
+  blocked: false, ready: samples >= 10, stale: false, reason: samples >= 10 ? 'healthy' : 'insufficient_samples',
+  latest_verdict: 'pass', rule_version: 'v1', model: 'gpt-6-astra', ...overrides,
+})
+const qualityScore = (value: number | null, model: string, overrides: Partial<ChannelQualityScore> = {}): ChannelQualityScore => ({
+  value, status: 'ready', samples: 40, models: 1, latest_at: '2026-10-28T10:00:00Z', model,
+  window_seconds: 900, max_requests: 100, min_samples: 20, confidence: 1, coverage_percent: 100, dimensions: [], ...overrides,
+})
 const mountResults = () => mount(TestResultsView, { global: {
-  plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: {} } })],
+  plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: { tests: { protection: { passRate: {
+    recentCounts: 'Within {window}, last {count} checks · {passed} passed · {rate}',
+    recentWindowDays: '{count} days', recentWindowHours: '{count} hours', recentWindowMinutes: '{count} minutes', recentWindowSeconds: '{count} seconds',
+    recentProgress: 'Collecting {samples}/{count}',
+    recentUnavailable: 'Recent pass-rate statistics unavailable',
+  } } } }, tests: { scoreScopeSource: '· Real request quality' } } } })],
   stubs: {
     AppLayout: { template: '<main><slot /></main>' }, Icon: true,
     TestResultOutput: { props: ['result', 'compact'], template: '<div data-output :data-result-id="result.id" :data-compact="compact" />' },
@@ -30,6 +48,151 @@ beforeEach(() => {
   api.votes.mockResolvedValue([])
 })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+
+describe('public recent check counts and account quality scores', () => {
+  it('shows each check\'s own counts and one account score without requesting administrator APIs', async () => {
+    const score = qualityScore(86, 'gpt-6-astra')
+    const artworkEvidence = passRate(10, 8)
+    const candyEvidence = passRate(20, 19, { window_size: 20 })
+    api.list.mockResolvedValue([
+      { ...baseResult, id: 1, pass_rate: artworkEvidence, quality_score: score },
+      { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29, pass_rate: candyEvidence, quality_score: score },
+      { ...baseResult, id: 3, test_definition_id: 3, test_name: 'Statistics', output_kind: 'statistics', pass_rate: passRate(10, 10), quality_score: score },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-content-test] [data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 8 passed · 80%')
+    expect(wrapper.get('[data-numeric-test] [data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 20 checks · 19 passed · 95%')
+    expect(wrapper.find('[data-statistics-test] [data-recent-pass-rate]').exists()).toBe(false)
+    expect(wrapper.findAllComponents(TestRecentPassRate).map(component => component.props('evidence'))).toEqual([candyEvidence, artworkEvidence])
+    expect(wrapper.findAll('[data-quality-score]')).toHaveLength(1)
+    expect(wrapper.get('[data-account-info] [data-quality-score] strong').text()).toBe('86')
+    expect(wrapper.getComponent(ChannelQualityScoreEvidence).props()).toMatchObject({ score, compact: true })
+    expect(api.reviews).not.toHaveBeenCalled()
+    expect(api.adminResults).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-admin-decision]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps missing statistics and insufficient evidence unknown instead of deriving passes from transport success', async () => {
+    api.list.mockResolvedValue([
+      { ...baseResult, id: 1 },
+      { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29,
+        pass_rate: passRate(2, 1, { pass_rate: null }), quality_score: qualityScore(null, 'gpt-6-astra', { status: 'insufficient', samples: 2 }) },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    const artwork = wrapper.get('[data-content-test]')
+    expect(artwork.get('[data-recent-pass-rate-unavailable]').text()).toBe('Recent pass-rate statistics unavailable')
+    expect(artwork.find('[data-recent-pass-rate-counts]').exists()).toBe(false)
+    expect(wrapper.get('[data-numeric-test] [data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 1 passed · —')
+    expect(wrapper.get('[data-numeric-test] [data-recent-pass-rate-state]').text()).toBe('Collecting 2/10')
+    expect(wrapper.get('[data-account-info] [data-quality-score] strong').text()).toBe('—')
+    expect(wrapper.get('[data-account-info] [data-score-status]').text()).toContain('status.insufficient')
+    wrapper.unmount()
+  })
+
+  it('switches counts and score with the account model and leaves the other account unchanged', async () => {
+    const scoreA = qualityScore(91, 'model-a')
+    const scoreB = qualityScore(43, 'model-b')
+    const otherScore = qualityScore(75, 'model-a')
+    api.list.mockResolvedValue([
+      { ...baseResult, id: 1, model_id: 'model-a', model_order: 0, pass_rate: passRate(10, 9, { model: 'model-a' }), quality_score: scoreA },
+      { ...baseResult, id: 2, model_id: 'model-b', model_order: 1, pass_rate: passRate(10, 4, { model: 'model-b' }), quality_score: scoreB },
+      { ...baseResult, id: 3, account_id: 4, model_id: 'model-a', model_order: 0, pass_rate: passRate(10, 7, { model: 'model-a' }), quality_score: otherScore },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    const accounts = wrapper.findAll('[data-account-result]')
+    expect(accounts[0].get('[data-quality-score] strong').text()).toBe('91')
+    expect(accounts[0].get<HTMLSelectElement>('[data-account-info] [data-score-scope] [data-account-model-selector]').element.value).toBe('model-a')
+    expect(accounts[0].get('[data-score-scope]').text()).toContain('Real request quality')
+    expect(accounts[1].get('[data-quality-score] strong').text()).toBe('75')
+    await accounts[0].get('[data-account-model-selector]').setValue('model-b')
+    expect(accounts[0].get('[data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 4 passed · 40%')
+    expect(accounts[0].getComponent(ChannelQualityScoreEvidence).props('score')).toEqual(scoreB)
+    expect(accounts[0].get('[data-quality-score] strong').text()).toBe('43')
+    expect(accounts[0].get<HTMLSelectElement>('[data-account-info] [data-score-scope] [data-account-model-selector]').element.value).toBe('model-b')
+    expect(accounts[1].get('[data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 7 passed · 70%')
+    expect(accounts[1].get('[data-quality-score] strong').text()).toBe('75')
+    expect(wrapper.findAll('[data-quality-score]')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('refreshes rolling evidence and removes a score that is no longer available', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const result = { ...baseResult, id: 1 }
+    api.list.mockResolvedValueOnce([{ ...result, pass_rate: passRate(10, 8), quality_score: qualityScore(80, 'gpt-6-astra') }])
+      .mockResolvedValue([{ ...result, pass_rate: passRate(10, 9), quality_score: null }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 8 passed · 80%')
+    expect(wrapper.get('[data-quality-score] strong').text()).toBe('80')
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.get('[data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 9 passed · 90%')
+    expect(wrapper.get('[data-quality-score] strong').text()).toBe('—')
+    expect(wrapper.getComponent(ChannelQualityScoreEvidence).props('score')).toBeUndefined()
+    wrapper.unmount()
+  })
+})
+
+describe('quality verdict presentation and result actions', () => {
+  it('shows a saved numeric pass while successful executions without a quality decision remain pending', async () => {
+    api.list.mockResolvedValue([
+      { ...baseResult, id: 1, output_kind: 'number', output_numeric: 29, quality_verdict: 'pass' },
+      { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Unreviewed numeric', output_kind: 'number', output_numeric: 29 },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    const cards = wrapper.findAll('[data-numeric-test]')
+    expect(cards.map(card => card.get('[data-current-verdict]').text())).toEqual(['tests.verdicts.pass', 'tests.verdicts.pending'])
+    expect(cards.map(card => card.get('[data-numeric-gallery] strong').text())).toEqual(['29', '29'])
+    expect(cards[0].get('[data-current-verdict]').classes()).toContain('badge-success')
+    expect(cards[1].get('[data-current-verdict]').classes()).toContain('badge-warning')
+    wrapper.unmount()
+  })
+
+  it('keeps visual success pending and preserves a final duration failure despite a manual pass', async () => {
+    const execution = { input_tokens: null, output_tokens: null, reasoning_tokens: null, cache_read_tokens: null, cache_creation_tokens: null, attempts: [] }
+    const visualPass = { ...baseResult, id: 1, account_id: 1, execution_info: {
+      ...execution, auto_review: { verdict: 'pass', reason: 'visual match', judge_account_id: 999, judge_model: 'vision', attempts: 1, reviewed_at: '2026-10-28T10:00:00Z' },
+    } }
+    const durationFail = { ...visualPass, id: 2, account_id: 2, quality_verdict: 'fail', latency_ms: 120000, protection_decision: { verdict: 'fail', reason: 'duration_exceeded', status: 'applied' } }
+    api.isAdmin = true
+    api.list.mockResolvedValue([visualPass, durationFail])
+    api.reviews.mockResolvedValue([{ result: durationFail, generation: 9, verdict: 'pass', admin_verdict: 'pass', account_paused: true }])
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-show-all-reviews]').setValue(true)
+    const accounts = wrapper.findAll('[data-account-result]')
+    const visual = accounts.find(account => account.get('[data-output]').attributes('data-result-id') === '1')!
+    const duration = accounts.find(account => account.get('[data-output]').attributes('data-result-id') === '2')!
+    expect(visual.get('[data-current-verdict]').text()).toBe('tests.verdicts.pending')
+    expect(duration.get('[data-current-verdict]').text()).toBe('tests.verdicts.fail')
+    expect(duration.get('[data-current-verdict]').classes()).toContain('badge-danger')
+    expect(duration.get('[data-admin-verdict]').text()).toBe('tests.adminReview.pass')
+    expect(duration.get('[data-scheduling-status]').text()).toContain('tests.schedulingPaused')
+    wrapper.unmount()
+  })
+
+  it('stacks short checks beside artwork and keeps timestamp, history and preview actions in the card footer', async () => {
+    const artwork = { ...baseResult, id: 1, output_html: '<svg />' }
+    api.list.mockResolvedValue([artwork, { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29 }])
+    api.history.mockResolvedValue({ items: [artwork] })
+    const wrapper = mountResults(); await flushPromises()
+    const content = wrapper.get('[data-content-test]')
+    const numeric = wrapper.get('[data-numeric-test]')
+    expect(wrapper.findAll('[data-short-test-stack] [data-test-section]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-preview-test-stack] [data-test-section]')).toHaveLength(1)
+    expect(numeric.element.closest('[data-short-test-stack]')).not.toBeNull()
+    expect(content.element.closest('[data-preview-test-stack]')).not.toBeNull()
+    expect(content.get('[data-test-footer] time').attributes('datetime')).toBe(artwork.created_at)
+    expect(numeric.get('[data-test-footer] [data-view-history]').text()).toBe('tests.viewHistory')
+    expect(numeric.find('[data-expand-preview]').exists()).toBe(false)
+    await content.get('[data-test-footer] [data-expand-preview]').trigger('click')
+    expect(wrapper.get('[data-dialog] [data-output]').attributes('data-result-id')).toBe('1')
+    expect(api.history).not.toHaveBeenCalled()
+    await wrapper.get('[data-dialog] [data-close]').trigger('click')
+    await content.get('[data-test-footer] [data-view-history]').trigger('click'); await flushPromises()
+    expect(api.history).toHaveBeenCalledWith(1, undefined)
+    expect(wrapper.get('[data-dialog] [data-output]').attributes('data-result-id')).toBe('1')
+    wrapper.unmount()
+  })
+})
 
 describe('channel quality result groups', () => {
   it('defaults automatic review to unresolved artwork while retaining an all-results audit and manual override', async () => {
@@ -52,13 +215,13 @@ describe('channel quality result groups', () => {
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.get('[data-show-all-reviews]').element).toBeDefined()
     expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id')).sort()).toEqual(['93', '95'])
-    expect(wrapper.get('[data-content-test] .badge').text()).toBe('tests.completed')
+    expect(wrapper.get('[data-content-test] .badge').text()).toBe('tests.verdicts.pending')
     await wrapper.get('[data-show-all-reviews]').setValue(true)
     expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id')).sort()).toEqual(['91', '92', '93', '94', '95'])
     expect(wrapper.findAll('[data-admin-decision]')).toHaveLength(5)
     const passedOutput = wrapper.findAll('[data-content-test]').find(section => section.find('[data-output]').attributes('data-result-id') === '91')!
-    expect(passedOutput.get('.badge').text()).toBe('admin.tests.autoReview.pass')
-    expect(passedOutput.get('.badge').classes()).toContain('badge-success')
+    expect(passedOutput.get('.badge').text()).toBe('tests.verdicts.pending')
+    expect(passedOutput.get('.badge').classes()).toContain('badge-warning')
     wrapper.unmount()
   })
 
@@ -87,8 +250,9 @@ describe('channel quality result groups', () => {
     const result = { ...baseResult, id: 91, pass_rate }
     api.reviews.mockResolvedValue([{ result, generation: 7, verdict: 'pending', admin_verdict: '', account_paused: true }])
     const wrapper = mountResults(); await flushPromises()
-    expect(wrapper.getComponent(TestPassRateEvidence).props('evidence')).toEqual(pass_rate)
-    expect(wrapper.get('[data-admin-decision] [data-pass-rate-state]').text()).toContain('states.blocked')
+    expect(wrapper.getComponent(TestRecentPassRate).props('evidence')).toEqual(pass_rate)
+    expect(wrapper.get('[data-recent-pass-rate] [data-recent-pass-rate-state]').text()).toContain('states.blocked')
+    expect(wrapper.find('[data-admin-decision] [data-pass-rate-evidence]').exists()).toBe(false)
     expect(wrapper.get('[data-admin-pass]').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('[data-admin-fail]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
@@ -98,7 +262,7 @@ describe('channel quality result groups', () => {
     api.list.mockResolvedValue([{ ...baseResult, id: 11, status: 'failed', error_message: '检测跳过：前一项检测未满足条件' }])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.get('[data-test-section] .badge').text()).toBe('tests.skipped')
-    expect(wrapper.get('[data-test-section] .badge').classes()).toContain('badge-warning')
+    expect(wrapper.get('[data-test-section] .badge').classes()).toContain('badge-gray')
     wrapper.unmount()
   })
 
@@ -132,7 +296,7 @@ describe('channel quality result groups', () => {
     expect(wrapper.findAll('[data-test-section]')).toHaveLength(2)
     expect(wrapper.find('[data-voting-section]').exists()).toBe(false)
     expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Group Eight', 'Paused Group'])
-    expect(wrapper.findAll('select option').map(option => option.text())).toContain('paused-model')
+    expect(wrapper.get('[data-account-tests]').text()).toContain('paused-model')
     wrapper.unmount()
   })
 
@@ -180,7 +344,7 @@ describe('channel quality result groups', () => {
     let resolveHistory!: (value: unknown) => void
     api.adminResults.mockReturnValue(new Promise(resolve => { resolveHistory = resolve }))
     const wrapper = mountResults(); await flushPromises()
-    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-test-section] [data-view-history]').trigger('click'); await flushPromises()
     expect(wrapper.find('[data-dialog]').exists()).toBe(true)
     api.reviews.mockResolvedValue([{ ...review, account_paused: true }])
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
@@ -221,7 +385,7 @@ describe('channel quality result groups', () => {
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Target Group'])
     expect(wrapper.get('[data-account-info]').text()).toContain('Review Account')
-    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-test-section] [data-view-history]').trigger('click'); await flushPromises()
     expect(wrapper.get('[data-dialog]').findAll('[data-output]').map(output => output.attributes('data-result-id'))).toEqual(['91'])
     wrapper.unmount()
   })
@@ -242,7 +406,7 @@ describe('channel quality result groups', () => {
     api.reviews.mockResolvedValue([{ result: latest, generation: 3, verdict: 'pending', admin_verdict: '', account_paused: false }])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.findAll('[data-admin-decision]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-result-gallery] figure')).toHaveLength(1)
+    expect(wrapper.findAll('figure[data-result-gallery]')).toHaveLength(1)
     expect(wrapper.get('[data-result-gallery] [data-output]').attributes('data-result-id')).toBe('2')
     wrapper.unmount()
   })
@@ -267,12 +431,12 @@ describe('channel quality result groups', () => {
     api.list.mockResolvedValue([latest])
     api.history.mockResolvedValue({ items: [latest, { ...latest, id: 2, created_at: '2026-09-15T11:00:00Z', output_model_check: { ...check, verdict: 'unknown', reason: 'missing_model', returned_models: [] } }] })
     const wrapper = mountResults(); await flushPromises()
-    expect(wrapper.get('[data-test-section] .badge').text()).toBe('tests.modelCheck.fail')
+    expect(wrapper.get('[data-test-section] .badge').text()).toBe('tests.verdicts.fail')
     expect(wrapper.get('[data-test-section] .badge').classes()).toContain('badge-danger')
     expect(wrapper.text()).not.toContain('Private account name')
-    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-test-section] [data-view-history]').trigger('click'); await flushPromises()
     const badges = wrapper.get('[data-dialog]').findAll('.badge')
-    expect(badges.map(badge => badge.text())).toEqual(['tests.modelCheck.fail', 'tests.modelCheck.unknown'])
+    expect(badges.map(badge => badge.text())).toEqual(['tests.verdicts.fail', 'tests.verdicts.pending'])
     expect(badges[1].classes()).toContain('badge-warning')
     expect(wrapper.text()).not.toContain('Private account name')
     wrapper.unmount()
@@ -327,7 +491,7 @@ describe('channel quality result groups', () => {
     wrapper.unmount()
   })
 
-  it('preserves document scrolling while polling and leaves model filters accessible without matches', async () => {
+  it('preserves document scrolling while polling and switches groups without a global model filter', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     api.list.mockResolvedValue([
       { ...baseResult, id: 1, group_name: 'A', model_id: 'model-a' },
@@ -341,12 +505,13 @@ describe('channel quality result groups', () => {
     await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
     expect(panel.element.scrollTop).toBe(150)
-    await wrapper.get('select').setValue('model-b')
-    expect(panel.element.scrollTop).toBe(0)
-    expect(panel.text()).toContain('tests.noMatches')
-    expect(wrapper.find('select').exists()).toBe(true)
+    expect(wrapper.find('[data-result-model-filter]').exists()).toBe(false)
+    expect(wrapper.find('[data-account-model-selector]').exists()).toBe(false)
+    expect(panel.text()).toContain('model-a')
     await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    expect(panel.element.scrollTop).toBe(0)
     expect(panel.findAll('[data-account-result]')).toHaveLength(1)
+    expect(panel.text()).toContain('model-b')
     wrapper.unmount()
   })
 })
@@ -393,7 +558,7 @@ describe('channel quality result series', () => {
     expect(wrapper.findAll('[data-result-gallery] [data-output]').every(output => output.attributes('data-compact') === '')).toBe(true)
     expect(wrapper.text()).not.toContain('tests.previousResult')
     expect(api.history).not.toHaveBeenCalled()
-    await wrapper.get('[data-content-test] button').trigger('click')
+    await wrapper.get('[data-content-test] [data-view-history]').trigger('click')
     await flushPromises()
     expect(api.history).toHaveBeenCalledWith(5, undefined)
     expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['5', '4', '3', '2', '1'])
@@ -402,10 +567,10 @@ describe('channel quality result series', () => {
 
   it('uses stable type IDs and keeps different model and reasoning configurations separate', async () => {
     const results = [
-      { ...baseResult, id: 4, test_name: 'Renamed Pelican', reasoning_effort: 'ultra', created_at: '2026-09-15T14:00:00Z' },
-      { ...baseResult, id: 3, reasoning_effort: 'ultra', created_at: '2026-09-15T13:00:00Z' },
-      { ...baseResult, id: 2, reasoning_effort: 'high' },
-      { ...baseResult, id: 1, reasoning_effort: 'ultra', model_id: 'another-model' },
+      { ...baseResult, id: 4, model_order: 0, test_name: 'Renamed Pelican', reasoning_effort: 'ultra', created_at: '2026-09-15T14:00:00Z' },
+      { ...baseResult, id: 3, model_order: 0, reasoning_effort: 'ultra', created_at: '2026-09-15T13:00:00Z' },
+      { ...baseResult, id: 2, model_order: 0, reasoning_effort: 'high' },
+      { ...baseResult, id: 1, model_order: 1, reasoning_effort: 'ultra', model_id: 'another-model' },
     ]
     api.list.mockResolvedValue(results)
     api.history.mockResolvedValue({ items: results.slice(0, 2) })
@@ -413,33 +578,109 @@ describe('channel quality result series', () => {
     await flushPromises()
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
     const series = wrapper.findAll('[data-content-test]')
-    expect(series).toHaveLength(3)
+    expect(series).toHaveLength(2)
     const renamed = series.find(item => item.text().includes('Renamed Pelican'))!
-    expect(renamed.text()).toContain('gpt-6-astra · tests.reasoningEffort: ultra')
+    expect(wrapper.get<HTMLSelectElement>('[data-account-info] [data-account-model-selector]').element.value).toBe('gpt-6-astra')
+    expect(renamed.find('[data-account-model-selector]').exists()).toBe(false)
+    expect(renamed.text()).toContain('gpt-6-astra')
+    expect(renamed.text()).toContain('tests.reasoningEffort: ultra')
     expect(renamed.findAll('[data-output]').map(output => output.attributes('data-result-id'))).toEqual(['4'])
-    await renamed.get('button').trigger('click')
+    await renamed.get('[data-view-history]').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('[data-dialog] [data-output]')).toHaveLength(2)
     wrapper.unmount()
   })
 
   it('switches between models from one plan and loads only the selected model history', async () => {
-    const modelA = { ...baseResult, id: 101, model_id: 'model-a' }
-    const modelB = { ...baseResult, id: 102, model_id: 'model-b' }
+    const modelA = { ...baseResult, id: 101, model_id: 'model-a', model_order: 0 }
+    const modelB = { ...baseResult, id: 102, model_id: 'model-b', model_order: 1 }
     api.list.mockResolvedValue([modelA, modelB])
     api.history.mockResolvedValue({ items: [modelB, { ...modelB, id: 100, created_at: '2026-09-14T12:00:00Z' }] })
     const wrapper = mountResults(); await flushPromises()
-    expect(wrapper.findAll('[data-content-test]')).toHaveLength(2)
-    await wrapper.get('[data-result-model-filter]').setValue('model-b')
+    expect(wrapper.findAll('[data-content-test]')).toHaveLength(1)
+    expect(wrapper.get('[data-result-gallery] [data-output]').attributes('data-result-id')).toBe('101')
+    expect(wrapper.find('[data-result-model-filter]').exists()).toBe(false)
+    await wrapper.get('[data-account-model-selector]').setValue('model-b')
     expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['102'])
-    await wrapper.get('[data-content-test] button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-content-test] [data-view-history]').trigger('click'); await flushPromises()
     expect(api.history).toHaveBeenCalledWith(102, undefined)
     expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['102', '100'])
-    await wrapper.get('[data-dialog] [data-close]').trigger('click')
-    await wrapper.get('[data-result-model-filter]').setValue('model-a')
+    await wrapper.get('[data-account-model-selector]').setValue('model-a')
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
     expect(wrapper.get('[data-result-gallery] [data-output]').attributes('data-result-id')).toBe('101')
-    await wrapper.get('[data-result-model-filter]').setValue('')
-    expect(wrapper.findAll('[data-content-test]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-content-test]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('uses one selector below each account score to switch all checks, statistics and score in configured order', async () => {
+    const primary = { ...baseResult, id: 101, model_id: 'model-z', model_order: 0, created_at: '2026-09-14T12:00:00Z', quality_score: qualityScore(91, 'model-z'), pass_rate: passRate(10, 9, { model: 'model-z' }) }
+    const secondary = { ...baseResult, id: 102, model_id: 'model-a', model_order: 1, created_at: '2026-09-16T12:00:00Z', quality_score: qualityScore(43, 'model-a'), pass_rate: passRate(10, 4, { model: 'model-a' }) }
+    const otherPrimary = { ...baseResult, id: 201, account_id: 4, model_id: 'model-a', model_order: 0 }
+    const otherSecondary = { ...baseResult, id: 202, account_id: 4, model_id: 'model-z', model_order: 1 }
+    api.list.mockResolvedValue([
+      secondary, otherSecondary,
+      { ...secondary, id: 104, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 30 },
+      { ...secondary, id: 106, test_definition_id: 3, test_name: 'Statistics', output_kind: 'statistics' },
+      primary, otherPrimary,
+      { ...primary, id: 103, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29 },
+      { ...primary, id: 105, test_definition_id: 3, test_name: 'Statistics', output_kind: 'statistics' },
+    ])
+    const wrapper = mountResults(); await flushPromises()
+    const accounts = wrapper.findAll('[data-account-result]')
+    const outputIDs = (account: typeof accounts[number]) => account.findAll('[data-output]').map(output => output.attributes('data-result-id')).sort()
+    expect(accounts).toHaveLength(2)
+    expect(outputIDs(accounts[0])).toEqual(['101', '105'])
+    expect(accounts[0].get('[data-numeric-gallery] strong').text()).toBe('29')
+    expect(accounts[0].get('[data-quality-score] strong').text()).toBe('91')
+    expect(accounts[0].findAll('[data-recent-pass-rate-counts]').map(counts => counts.text())).toEqual([
+      'Within 7 days, last 10 checks · 9 passed · 90%', 'Within 7 days, last 10 checks · 9 passed · 90%',
+    ])
+    expect(outputIDs(accounts[1])).toEqual(['201'])
+    expect(accounts[0].findAll('[data-account-model-selector]')).toHaveLength(1)
+    expect(accounts[1].findAll('[data-account-model-selector]')).toHaveLength(1)
+    expect(accounts[0].find('[data-account-tests] select').exists()).toBe(false)
+    expect(accounts[0].get('[data-account-model-selector]').element.closest('[data-account-score]')).toBe(accounts[0].get('[data-account-score]').element)
+    expect(accounts[0].get('[data-account-model-selector]').attributes('aria-label')).toBe('tests.account #3 · tests.modelFilter')
+    expect(accounts[0].get('[data-account-model-selector]').findAll('option').map(option => option.attributes('value'))).toEqual(['model-z', 'model-a'])
+    await accounts[0].get('[data-account-model-selector]').setValue('model-a')
+    expect(outputIDs(accounts[0])).toEqual(['102', '106'])
+    expect(accounts[0].get('[data-numeric-gallery] strong').text()).toBe('30')
+    expect(accounts[0].get('[data-quality-score] strong').text()).toBe('43')
+    expect(accounts[0].findAll('[data-recent-pass-rate-counts]').map(counts => counts.text())).toEqual([
+      'Within 7 days, last 10 checks · 4 passed · 40%', 'Within 7 days, last 10 checks · 4 passed · 40%',
+    ])
+    expect(accounts[0].findAll('[data-test-section]').every(card => card.text().includes('model-a'))).toBe(true)
+    expect(accounts[0].get<HTMLSelectElement>('[data-account-model-selector]').element.value).toBe('model-a')
+    expect(outputIDs(accounts[1])).toEqual(['201'])
+    await accounts[1].get('[data-account-model-selector]').setValue('model-z')
+    expect(outputIDs(accounts[1])).toEqual(['202'])
+    expect(outputIDs(accounts[0])).toEqual(['102', '106'])
+    wrapper.unmount()
+  })
+
+  it('retains account model choices through polling and group navigation and falls back when a model disappears', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const primary = { ...baseResult, id: 101, model_id: 'model-z', model_order: 0, output_html: '<svg />' }
+    const secondary = { ...baseResult, id: 102, model_id: 'model-a', model_order: 1, output_html: '<svg />' }
+    const otherGroup = { ...baseResult, id: 201, group_id: 9, group_name: 'Other group' }
+    api.list.mockResolvedValueOnce([secondary, primary, otherGroup])
+      .mockResolvedValueOnce([primary, secondary, otherGroup])
+      .mockResolvedValue([primary, otherGroup])
+    const wrapper = mountResults(); await flushPromises()
+    await wrapper.get('[data-expand-preview]').trigger('click')
+    expect(wrapper.find('[data-dialog]').exists()).toBe(true)
+    await wrapper.get('[data-account-model-selector]').setValue('model-a')
+    expect(wrapper.find('[data-dialog]').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.get<HTMLSelectElement>('[data-account-model-selector]').element.value).toBe('model-a')
+    expect(wrapper.get('[data-output]').attributes('data-result-id')).toBe('102')
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    expect(wrapper.get('[data-output]').attributes('data-result-id')).toBe('201')
+    await wrapper.findAll('[role="tab"]')[0].trigger('click')
+    expect(wrapper.get<HTMLSelectElement>('[data-account-model-selector]').element.value).toBe('model-a')
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(wrapper.get('[data-output]').attributes('data-result-id')).toBe('101')
+    expect(wrapper.find('[data-account-model-selector]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -451,7 +692,7 @@ describe('channel quality result series', () => {
     const wrapper = mountResults()
     await flushPromises()
     expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['1'])
-    expect(wrapper.findAll('figcaption')[0].text()).toContain(new Date('2026-09-15T13:00:00Z').toLocaleString())
+    expect(wrapper.get('[data-test-footer] time').text()).toContain(new Date('2026-09-15T13:00:00Z').toLocaleString())
     wrapper.unmount()
   })
 
@@ -474,7 +715,8 @@ describe('channel quality result series', () => {
     ])
     const wrapper = mountResults()
     await flushPromises()
-    expect(wrapper.findAll('[data-account-tests] > [data-test-section] h4').map(heading => heading.text())).toEqual(['Pelican', 'Last hour', 'Candy'])
+    expect(wrapper.findAll('[data-short-test-stack] [data-test-section] h4').map(heading => heading.text())).toEqual(['Last hour', 'Candy'])
+    expect(wrapper.findAll('[data-preview-test-stack] [data-test-section] h4').map(heading => heading.text())).toEqual(['Pelican'])
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
     expect(wrapper.findAll('[data-statistics-test]')).toHaveLength(1)
     expect(wrapper.get('[data-numeric-test] strong').text()).toBe('29')
@@ -489,7 +731,7 @@ describe('channel quality result series', () => {
     await flushPromises()
     expect(wrapper.findAll('[data-statistics-test] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['3'])
     expect(wrapper.get('[data-statistics-test]').text()).not.toContain('8ms')
-    await wrapper.get('[data-statistics-test] button').trigger('click')
+    await wrapper.get('[data-statistics-test] [data-view-history]').trigger('click')
     await flushPromises()
     expect(api.history).toHaveBeenCalledWith(3, undefined)
     expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['3', '2', '1'])
@@ -507,9 +749,9 @@ describe('channel quality result series', () => {
     const wrapper = mountResults()
     await flushPromises()
     expect(wrapper.findAll('[data-result-gallery] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['3'])
-    expect(wrapper.get('[data-content-test] .badge').text()).toBe('tests.failed')
+    expect(wrapper.get('[data-content-test] .badge').text()).toBe('tests.executionFailed')
     expect(wrapper.get('[data-content-test] .badge').classes()).toContain('badge-danger')
-    await wrapper.get('[data-content-test] button').trigger('click')
+    await wrapper.get('[data-content-test] [data-view-history]').trigger('click')
     await flushPromises()
     expect(api.history).toHaveBeenCalledWith(3, undefined)
     expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['2', '1'])
@@ -521,7 +763,7 @@ describe('channel quality result series', () => {
     api.list.mockResolvedValue([{ ...baseResult, id: 1, status: 'failed' }])
     const wrapper = mountResults()
     await flushPromises()
-    expect(wrapper.text()).toContain('tests.failed')
+    expect(wrapper.text()).toContain('tests.executionFailed')
     expect(wrapper.find('[role="tablist"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
     wrapper.unmount()
@@ -533,7 +775,7 @@ describe('channel quality result series', () => {
     await flushPromises()
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
     expect(wrapper.text()).toContain('tests.running')
-    expect(wrapper.find('[data-content-test] button').exists()).toBe(false)
+    expect(wrapper.find('[data-content-test] [data-view-history]').exists()).toBe(false)
     expect(api.history).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -550,19 +792,19 @@ describe('channel quality result series', () => {
       expect(wrapper.findAll('[data-result-gallery] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['4'])
     }
     expect(api.history).not.toHaveBeenCalled()
-    await wrapper.get('[data-test-section] button').trigger('click')
+    await wrapper.get('[data-test-section] [data-view-history]').trigger('click')
     await flushPromises()
     expect(api.history).toHaveBeenCalledWith(4, undefined)
     expect(wrapper.findAll('[data-dialog] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['4', '3', '2', '1'])
     wrapper.unmount()
   })
 
-  it('labels completed HTML tests as completed without a manual review state', async () => {
+  it('keeps successful HTML executions pending without a final quality decision', async () => {
     api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
     const wrapper = mountResults()
     await flushPromises()
-    expect(wrapper.get('[data-content-test] .badge').text()).toBe('tests.completed')
-    expect(wrapper.get('[data-content-test] .badge').classes()).toContain('badge-success')
+    expect(wrapper.get('[data-content-test] .badge').text()).toBe('tests.verdicts.pending')
+    expect(wrapper.get('[data-content-test] .badge').classes()).toContain('badge-warning')
     expect(wrapper.text()).not.toContain('tests.awaitingReview')
     wrapper.unmount()
   })
@@ -574,7 +816,7 @@ describe('channel quality result series', () => {
       .mockResolvedValueOnce({ items: [{ ...baseResult, id: 4 }, { ...baseResult, id: 3 }] })
     const wrapper = mountResults()
     await flushPromises()
-    await wrapper.get('[data-content-test] button').trigger('click')
+    await wrapper.get('[data-content-test] [data-view-history]').trigger('click')
     await flushPromises()
     await wrapper.findAll('[data-dialog] button').find(button => button.text() === 'tests.loadMore')!.trigger('click')
     await flushPromises()
@@ -599,7 +841,7 @@ describe('channel quality result series', () => {
       .mockResolvedValueOnce({ items: [second] })
     const wrapper = mountResults()
     await flushPromises()
-    const buttons = wrapper.findAll('[data-content-test] button')
+    const buttons = wrapper.findAll('[data-content-test] [data-view-history]')
     await buttons[0].trigger('click')
     expect(wrapper.find('[data-dialog] [role="status"]').exists()).toBe(true)
     await wrapper.get('[data-close]').trigger('click')
@@ -704,7 +946,7 @@ describe('public quality voting follows the configured entries', () => {
     api.vote.mockResolvedValue({ result, voting: { ...voting, my_vote: 'fail' } })
     api.history.mockResolvedValue({ items: [result] })
     const wrapper = mountResults(); await flushPromises()
-    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-test-section] [data-view-history]').trigger('click'); await flushPromises()
     expect(wrapper.find('[data-dialog]').exists()).toBe(true)
     await wrapper.get('[data-vote-fail]').trigger('click'); await flushPromises()
     expect(api.vote).toHaveBeenCalledWith(44, 'fail')
@@ -860,7 +1102,7 @@ describe('current group refresh and access changes', () => {
     api.list.mockResolvedValueOnce([initial]).mockResolvedValue([])
     api.history.mockReturnValue(new Promise(resolve => { resolveHistory = resolve }))
     const wrapper = mountResults(); await flushPromises()
-    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-test-section] [data-view-history]').trigger('click'); await flushPromises()
     expect(wrapper.find('[data-dialog]').exists()).toBe(true)
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect(wrapper.find('[data-dialog]').exists()).toBe(false)
@@ -876,7 +1118,7 @@ describe('current group refresh and access changes', () => {
     api.list.mockResolvedValue([initial])
     api.history.mockResolvedValue({ items: [initial] })
     const wrapper = mountResults(); await flushPromises()
-    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-test-section] [data-view-history]').trigger('click'); await flushPromises()
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect(wrapper.find('[data-dialog]').exists()).toBe(true)
     api.list.mockResolvedValue([moved])
@@ -891,7 +1133,7 @@ describe('current group refresh and access changes', () => {
     api.history.mockResolvedValueOnce({ items: [initial], next_before_id: 44 })
       .mockRejectedValueOnce({ status, message: 'Access is no longer available' })
     const wrapper = mountResults(); await flushPromises()
-    await wrapper.get('[data-test-section] button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-test-section] [data-view-history]').trigger('click'); await flushPromises()
     expect(wrapper.findAll('[data-dialog] [data-output]')).toHaveLength(1)
     await wrapper.findAll('[data-dialog] button').find(button => button.text() === 'tests.loadMore')!.trigger('click'); await flushPromises()
     expect(wrapper.find('[data-dialog]').exists()).toBe(false)
@@ -979,17 +1221,15 @@ describe('current group display order', () => {
 
 describe('current scheduling and passing result order', () => {
   it('shows one paused model without pausing the account or its other model', async () => {
-    const modelA = { ...baseResult, id: 1, model_id: 'model-a', account_schedulable: true, model_schedulable: false }
-    const modelB = { ...baseResult, id: 2, model_id: 'model-b', account_schedulable: true, model_schedulable: true }
+    const modelA = { ...baseResult, id: 1, model_id: 'model-a', model_order: 0, account_schedulable: true, model_schedulable: false }
+    const modelB = { ...baseResult, id: 2, model_id: 'model-b', model_order: 1, account_schedulable: true, model_schedulable: true }
     api.list.mockResolvedValue([modelA, modelB])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingActive')
-    expect(wrapper.find('[data-selected-model-status]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-test-section] [data-model-scheduling-status]').map(node => node.text())).toEqual(['tests.modelSchedulingPaused', 'tests.modelSchedulingActive'])
-    await wrapper.get('[data-result-model-filter]').setValue('model-a')
+    expect(wrapper.findAll('[data-test-section] [data-model-scheduling-status]').map(node => node.text())).toEqual(['tests.modelSchedulingPaused'])
     expect(wrapper.get('[data-selected-model-status]').text()).toContain('tests.modelSchedulingPaused')
     expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingActive')
-    await wrapper.get('[data-result-model-filter]').setValue('model-b')
+    await wrapper.get('[data-account-model-selector]').setValue('model-b')
     expect(wrapper.get('[data-selected-model-status]').text()).toContain('tests.modelSchedulingActive')
     expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingActive')
     wrapper.unmount()
@@ -997,15 +1237,15 @@ describe('current scheduling and passing result order', () => {
 
   it('uses the account projection when all monitored models pause and recover', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
-    const modelA = { ...baseResult, id: 1, model_id: 'model-a', account_schedulable: false, model_schedulable: false }
-    const modelB = { ...baseResult, id: 2, model_id: 'model-b', account_schedulable: false, model_schedulable: false }
+    const modelA = { ...baseResult, id: 1, model_id: 'model-a', model_order: 0, account_schedulable: false, model_schedulable: false }
+    const modelB = { ...baseResult, id: 2, model_id: 'model-b', model_order: 1, account_schedulable: false, model_schedulable: false }
     api.list.mockResolvedValueOnce([modelA, modelB]).mockResolvedValue([
       { ...modelA, account_schedulable: true },
       { ...modelB, account_schedulable: true, model_schedulable: true },
     ])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingPaused')
-    await wrapper.get('[data-result-model-filter]').setValue('model-b')
+    await wrapper.get('[data-account-model-selector]').setValue('model-b')
     expect(wrapper.get('[data-selected-model-status]').text()).toContain('tests.modelSchedulingPaused')
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingActive')
@@ -1023,9 +1263,9 @@ describe('current scheduling and passing result order', () => {
 
   it('places passing active accounts first and reorders after scheduling changes', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
-    const paused = { ...baseResult, id: 1, account_id: 1, account_schedulable: false }
+    const paused = { ...baseResult, id: 1, account_id: 1, account_schedulable: false, quality_verdict: 'pass' }
     const failed = { ...baseResult, id: 2, account_id: 2, account_schedulable: true, status: 'failed' }
-    const passed = { ...baseResult, id: 3, account_id: 3, account_schedulable: true }
+    const passed = { ...baseResult, id: 3, account_id: 3, account_schedulable: true, quality_verdict: 'pass' }
     const mismatch = { ...baseResult, id: 4, account_id: 4, account_schedulable: true, output_kind: 'model_check', output_model_check: { verdict: 'fail' } }
     api.list.mockResolvedValueOnce([paused, failed, mismatch, passed])
       .mockResolvedValue([{ ...paused, account_schedulable: true }, failed, mismatch, { ...passed, account_schedulable: false }])
@@ -1049,7 +1289,7 @@ describe('current scheduling and passing result order', () => {
     api.reviews.mockResolvedValue([{ result, generation: 1, verdict: 'pass', admin_verdict: 'pass', account_paused: false }])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.get('[data-scheduling-status]').text()).toContain('tests.schedulingPaused')
-    expect(wrapper.get('[data-test-section] .badge').text()).toBe('tests.completed')
+    expect(wrapper.get('[data-test-section] .badge').text()).toBe('tests.verdicts.pass')
     wrapper.unmount()
   })
 
@@ -1064,7 +1304,7 @@ describe('current scheduling and passing result order', () => {
 it('reports capability failure even when the upstream request succeeded', async () => {
  api.list.mockResolvedValue([{ ...baseResult, id: 1, output_kind: 'capability', execution_info: { attempts: [], capability: { verdict: 'fail' } } }])
  const w = mountResults(); await flushPromises()
- expect(w.get('[data-test-section] .badge').text()).toBe('admin.tests.capability.verdicts.fail')
+ expect(w.get('[data-test-section] .badge').text()).toBe('tests.verdicts.fail')
  expect(w.get('[data-test-section] .badge').classes()).toContain('badge-danger')
  w.unmount()
 })

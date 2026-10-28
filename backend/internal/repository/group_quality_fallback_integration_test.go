@@ -227,6 +227,9 @@ func TestGroupQualityFallbackAutomaticPassiveAndMissingPolicyIntegration(t *test
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
 	unrelated := newPassivePolicy()
+	unrelated.GroupIDs = []int64{9}
+	_, err := db.Exec(`INSERT INTO account_groups VALUES(62,9)`)
+	require.NoError(t, err)
 	require.NoError(t, r.SavePolicy(ctx, &unrelated))
 	for _, policy := range []service.PassiveQualityPolicy{p, unrelated} {
 		state := service.PassiveQualityState{PolicyID: policy.ID, AccountID: 62, Model: "A", Scope: policy.Scope, Version: policy.Version, Phase: "paused", Purpose: policy.Purpose}
@@ -303,7 +306,7 @@ func TestGroupQualityFallbackCacheDisabledAccountingAndFinalGateIntegration(t *t
 	require.Contains(t, string(raw), `"fallback":{"enabled":true`)
 }
 
-func TestGroupQualityFallbackCannotBypassLivePassRateHoldIntegration(t *testing.T) {
+func TestGroupQualityFallbackCanServeWithLivePassRateHoldIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	newGroupTargetPolicy(t, ctx, db, r)
 	req := trafficRequest("capability", "A", "capability", 4096)
@@ -315,9 +318,12 @@ func TestGroupQualityFallbackCannotBypassLivePassRateHoldIntegration(t *testing.
 	gate := &accountRepository{sql: db}
 	allowed, err = gate.AcquireCacheRecoveryRequest(fallbackTrafficContext(req, 62), 62)
 	require.NoError(t, err)
-	require.False(t, allowed, "final admission checks the live table even with a previously valid fallback lease")
+	require.True(t, allowed, "the final gate accepts a live fallback lease for an automatic hold")
 	allowed, _ = acquireFallback(t, r, trafficRequest("blocked-new", "A", "blocked-new", 4096), 62)
-	require.False(t, allowed, "new fallback requests must also respect capability")
+	require.True(t, allowed, "automatic capability failure permits emergency fallback")
+	var blocked bool
+	require.NoError(t, db.QueryRow(`SELECT blocked FROM scheduled_test_pass_rate_states WHERE account_id=62 AND model_key='A'`).Scan(&blocked))
+	require.True(t, blocked, "fallback is not recovery evidence")
 	allowed, _ = acquireFallback(t, r, trafficRequest("different-model", "B", "different-model", 4096), 62)
 	require.True(t, allowed, "capability is scoped to the tested model")
 	require.NoError(t, r.ReleaseGroupQualityTraffic(ctx, "different-model", true))
@@ -356,4 +362,24 @@ func TestGroupQualityFallbackMarkerAndExclusionFencesIntegration(t *testing.T) {
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM group_quality_traffic_leases`).Scan(&count))
 	require.Zero(t, count)
+}
+
+func TestGroupQualityFallbackRequiresMatchingModelProofIntegration(t *testing.T) {
+	ctx, db, repo := passiveDB(t)
+	newGroupTargetPolicy(t, ctx, db, repo)
+	_, err := db.Exec(`UPDATE accounts SET status='quality_paused',extra='{"active_test_model_holds":{"A":"stale","B":"failed"},"active_test_all_models_paused":true}' WHERE id=62;
+ INSERT INTO scheduled_test_pass_rate_states(account_id,model_key,blocked) VALUES(62,'B',true)`)
+	require.NoError(t, err)
+	allowed, _ := acquireFallback(t, repo, trafficRequest("stale-A", "A", "stale-A", 4096), 62)
+	require.False(t, allowed, "B's current hold cannot prove A's stale model projection")
+	allowed, _ = acquireFallback(t, repo, trafficRequest("proven-B", "B", "proven-B", 4096), 62)
+	require.True(t, allowed)
+	require.NoError(t, repo.ReleaseGroupQualityTraffic(ctx, "proven-B", true))
+	allowed, _ = acquireFallback(t, repo, trafficRequest("aggregate-C", "C", "aggregate-C", 4096), 62)
+	require.True(t, allowed, "an unmonitored model may temporarily use an automatically paused account")
+	require.NoError(t, repo.ReleaseGroupQualityTraffic(ctx, "aggregate-C", true))
+	_, err = db.Exec(`INSERT INTO scheduled_test_protection_states(account_id,model_key,blocked,test_definition_id) VALUES(62,'stats-model',true,1); INSERT INTO scheduled_test_definitions(id,output_kind) VALUES(1,'statistics')`)
+	require.NoError(t, err)
+	allowed, _ = acquireFallback(t, repo, trafficRequest("account-wide-A", "A", "account-wide-A", 4096), 62)
+	require.True(t, allowed, "account-wide statistics retain their scope")
 }

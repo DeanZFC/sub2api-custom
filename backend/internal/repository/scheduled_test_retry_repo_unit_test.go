@@ -27,11 +27,12 @@ func TestScheduledTestResultRepositoryGetByIDLoadsActualTestedAccount(t *testing
 		}).AddRow(9, 3, "group test", "Pelican", 0, "Group", 7, "all_accounts", "failed", "", "html", "", nil, 12, "gpt-6-astra", "high", 7, "upstream error", 20, now, now, now, 1, "Private Account Twelve", "round-9"))
 	mock.ExpectQuery(`(?s)SELECT r.id,r.protection_decision,r.execution_info.*FROM scheduled_test_results`).
 		WithArgs("{9}").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision", "execution_info", "account_schedulable", "model_schedulable"}).
-			AddRow(9, nil, `{"input_tokens":17,"failure_kind":"server","attempts":[{"http_status":503}]}`, true, false))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision", "execution_info", "account_schedulable", "model_schedulable", "model_order"}).
+			AddRow(9, nil, `{"input_tokens":17,"failure_kind":"server","attempts":[{"http_status":503}]}`, true, false, 0))
 	mock.ExpectQuery(`(?s)SELECT r.id,s.plan_id.*JOIN scheduled_test_pass_rate_states.*WHERE r.id=ANY`).
 		WithArgs("{9}").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "plan_id", "account_id", "test_definition_id", "model_key", "summary", "blocked"}))
+	mock.ExpectQuery(`SELECT config,version,updated_at,collect_since FROM channel_quality_score_config`).WillReturnError(errors.New("optional quality score unavailable"))
 	result, err := repo.GetByID(context.Background(), 9)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), result.PlanID)

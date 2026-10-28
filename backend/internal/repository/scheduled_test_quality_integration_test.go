@@ -796,4 +796,8 @@ INSERT INTO account_groups VALUES (70,8),(71,8)`)
 	t.Run("group targets exclude disabled accounts before freezing a run", func(t *testing.T) {
 		testScheduledTestEnabledTargets(t, ctx, db, plans, results, candyID, htmlID)
 	})
+
+	t.Run("model display order follows current configured selection", func(t *testing.T) {
+		testScheduledTestConfiguredModelOrder(t, ctx, db, plans, results, candyID)
+	})
 }

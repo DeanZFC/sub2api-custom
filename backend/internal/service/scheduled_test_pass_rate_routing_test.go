@@ -31,18 +31,20 @@ func TestActivePassRateRoutingScopesPublicModelAndUnknownRequest(t *testing.T) {
 	require.Equal(t, "", ActivePassRateRequestModel(nil)) //nolint:staticcheck // Intentionally exercise the nil-context defensive branch.
 }
 
-func TestGroupQualityFallbackCannotRelaxActivePassRateHold(t *testing.T) {
+func TestGroupQualityFallbackTemporarilyRelaxesActivePassRateHold(t *testing.T) {
 	groupID := int64(43)
 	a := groupQualityFallbackTestAccount(1, groupID, 0, true)
-	a.Extra["active_pass_rate_holds"] = map[string]any{"public-model": true}
+	a.Extra["active_pass_rate_holds"] = map[string]any{"public-model": true, "other-model": true}
 	ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "request", GroupID: groupID, Model: "public-model"})
 	ctx = WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: groupID, AccountID: a.ID, Model: "public-model"})
 	adjusted := groupQualityFallbackAccount(ctx, &a, "public-model")
 	require.Equal(t, StatusActive, adjusted.Status, "existing legacy fallback remains available")
-	require.True(t, adjusted.ActivePassRateBlocked("public-model"))
-	require.False(t, adjusted.IsSchedulableForModelWithContext(ctx, "public-model"))
-	require.True(t, shouldClearStickySessionWithContext(ctx, adjusted, "public-model"))
-	require.False(t, groupQualityAutomaticHold(ctx, &a, &groupID, "public-model"))
+	require.False(t, adjusted.ActivePassRateBlocked("public-model"))
+	require.True(t, a.ActivePassRateBlocked("public-model"), "original holds remain")
+	require.True(t, adjusted.ActivePassRateBlocked("other-model"))
+	require.True(t, adjusted.IsSchedulableForModelWithContext(ctx, "public-model"))
+	require.False(t, shouldClearStickySessionWithContext(ctx, adjusted, "public-model"))
+	require.True(t, groupQualityAutomaticHold(ctx, &a, &groupID, "public-model"))
 }
 
 func TestActiveTestModelHoldAcrossProvidersAndRecovery(t *testing.T) {
@@ -68,20 +70,22 @@ func TestActiveTestModelHoldAcrossProvidersAndRecovery(t *testing.T) {
 	}
 }
 
-func TestGroupQualityFallbackCannotRelaxActiveTestModelHold(t *testing.T) {
+func TestGroupQualityFallbackTemporarilyRelaxesActiveTestModelHold(t *testing.T) {
 	groupID := int64(43)
 	a := groupQualityFallbackTestAccount(1, groupID, 0, true)
-	a.Extra["active_test_model_holds"] = map[string]any{"public-model": "pelican review failed"}
+	a.Extra["active_test_model_holds"] = map[string]any{"public-model": "pelican review failed", "other-model": "failed"}
 	ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "request", GroupID: groupID, Model: "public-model"})
 	ctx = WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: groupID, AccountID: a.ID, Model: "public-model"})
 	adjusted := groupQualityFallbackAccount(ctx, &a, "public-model")
-	require.True(t, adjusted.ActiveTestModelBlocked("public-model"))
-	require.False(t, adjusted.IsSchedulableForModelWithContext(ctx, "provider-alias"))
-	require.True(t, shouldClearStickySessionWithContext(ctx, adjusted, "provider-alias"))
-	require.False(t, groupQualityAutomaticHold(ctx, &a, &groupID, "public-model"))
+	require.False(t, adjusted.ActiveTestModelBlocked("public-model"))
+	require.True(t, a.ActiveTestModelBlocked("public-model"), "original holds remain")
+	require.True(t, adjusted.ActiveTestModelBlocked("other-model"))
+	require.True(t, adjusted.IsSchedulableForModelWithContext(ctx, "provider-alias"))
+	require.False(t, shouldClearStickySessionWithContext(ctx, adjusted, "provider-alias"))
+	require.True(t, groupQualityAutomaticHold(ctx, &a, &groupID, "public-model"))
 }
 
-func TestAllMonitoredModelsFailedCannotFallbackThroughUnmonitoredModel(t *testing.T) {
+func TestAllMonitoredModelsFailedFallbackIsRequestScoped(t *testing.T) {
 	groupID := int64(43)
 	a := groupQualityFallbackTestAccount(1, groupID, 0, true)
 	a.Extra["active_test_model_holds"] = map[string]any{"model-a": "failed", "model-b": "failed"}
@@ -92,9 +96,14 @@ func TestAllMonitoredModelsFailedCannotFallbackThroughUnmonitoredModel(t *testin
 		ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "request", GroupID: groupID, Model: model})
 		ctx = WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: groupID, AccountID: a.ID, Model: model})
 		adjusted := groupQualityFallbackAccount(ctx, &a, model)
-		require.Equal(t, "quality_paused", adjusted.Status)
-		require.False(t, adjusted.IsSchedulableForModelWithContext(ctx, model))
-		require.False(t, groupQualityAutomaticHold(ctx, &a, &groupID, model))
+		if model == "" {
+			require.Same(t, &a, adjusted, "missing model never authorizes fallback")
+		} else {
+			require.Equal(t, StatusActive, adjusted.Status)
+			require.True(t, adjusted.IsSchedulableForModelWithContext(ctx, model))
+			require.True(t, groupQualityAutomaticHold(ctx, &a, &groupID, model))
+		}
+		require.True(t, a.ActiveTestModelBlocked(model), "fallback never clears durable holds")
 	}
 	// A fresh model recovery removes the aggregate pause, while the still-bad
 	// monitored model remains blocked by its individual projection.

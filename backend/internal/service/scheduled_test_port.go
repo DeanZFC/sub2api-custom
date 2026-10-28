@@ -51,6 +51,9 @@ type ScheduledTestResult struct {
 	QualityVerdict string `json:"quality_verdict,omitempty"`
 	TestOrder      int    `json:"test_order"`
 	GroupName      string `json:"group_name"`
+	// ModelOrder is the zero-based position in the current plan's configured
+	// model selection. Models no longer selected sort after configured models.
+	ModelOrder int `json:"model_order"`
 	// PlanOrder belongs to the rule that produced the result. GroupOrder is
 	// resolved from the displayed group's current rules, so moving an account
 	// does not carry its source rule's display position into the new group.
@@ -80,6 +83,10 @@ type ScheduledTestResult struct {
 	StartedAt            time.Time                        `json:"started_at"`
 	FinishedAt           time.Time                        `json:"finished_at"`
 	CreatedAt            time.Time                        `json:"created_at"`
+	// QualityScore is current real-traffic evidence for this account and model.
+	QualityScore *ChannelQualityScore `json:"quality_score,omitempty"`
+	// ExecutionSkipped is a safe public marker; skip diagnostics remain private.
+	ExecutionSkipped bool `json:"execution_skipped,omitempty"`
 }
 
 // ScheduledTestProtectionDecision is populated for administrator result views.

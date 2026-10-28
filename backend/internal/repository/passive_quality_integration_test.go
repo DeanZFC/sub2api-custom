@@ -51,8 +51,9 @@ func passiveDBSchema(t *testing.T, modelStates bool) (context.Context, *sql.DB, 
 	exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,status TEXT DEFAULT 'active',schedulable BOOLEAN DEFAULT true,deleted_at TIMESTAMPTZ,extra JSONB DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT now(),temp_unschedulable_until TIMESTAMPTZ,rate_limit_reset_at TIMESTAMPTZ);
  CREATE TABLE groups(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ);
  CREATE TABLE account_groups(account_id BIGINT,group_id BIGINT);
- CREATE TABLE scheduled_test_protection_states(account_id BIGINT,blocked BOOLEAN DEFAULT false);
- CREATE TABLE scheduled_test_combination_states(account_id BIGINT,blocked BOOLEAN DEFAULT false);
+ CREATE TABLE scheduled_test_definitions(id BIGINT PRIMARY KEY,output_kind TEXT);
+ CREATE TABLE scheduled_test_protection_states(account_id BIGINT,blocked BOOLEAN DEFAULT false,model_key TEXT NOT NULL DEFAULT '',test_definition_id BIGINT);
+ CREATE TABLE scheduled_test_combination_states(account_id BIGINT,blocked BOOLEAN DEFAULT false,model_key TEXT NOT NULL DEFAULT '',account_wide BOOLEAN DEFAULT false);
  CREATE TABLE scheduled_test_pass_rate_states(plan_id BIGINT,account_id BIGINT,test_definition_id BIGINT,model_key TEXT,rule_version TEXT,blocked BOOLEAN DEFAULT false,summary JSONB,updated_at TIMESTAMPTZ DEFAULT now());
  CREATE TABLE scheduled_test_pass_rate_evidence(id BIGSERIAL PRIMARY KEY,plan_id BIGINT,account_id BIGINT,test_definition_id BIGINT,model_key TEXT,rule_version TEXT,verdict TEXT,started_at TIMESTAMPTZ);
  CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT now());

@@ -70,10 +70,11 @@ func WithoutGroupQualityFallback(ctx context.Context) context.Context {
 // The live repository must prove automatic hold provenance before admitting it.
 func groupQualityFallbackAccount(ctx context.Context, account *Account, requestedModel string) *Account {
 	req, ok := GroupQualityFallbackFromContext(ctx)
-	if !ok || account == nil || account.ActiveTestAllModelsPaused() || req.AccountID != account.ID || req.Model != passiveQualityRoutingModel(ctx, requestedModel) || !openAIStickyAccountMatchesGroup(account, &req.GroupID) {
+	if !ok || account == nil || req.AccountID != account.ID || req.Model != passiveQualityRoutingModel(ctx, requestedModel) || !openAIStickyAccountMatchesGroup(account, &req.GroupID) {
 		return account
 	}
 	adjusted := *account
+	adjusted.Extra = GroupQualityFallbackExtra(account.Extra, req.Model)
 	if adjusted.Schedulable && adjusted.Status == "quality_paused" {
 		if reason, _ := adjusted.Extra["quality_protection_reason"].(string); strings.TrimSpace(reason) != "" {
 			adjusted.Status = StatusActive
@@ -96,13 +97,34 @@ func groupQualityFallbackAccount(ctx context.Context, account *Account, requeste
 		kept = append(kept, raw)
 	}
 	if len(kept) != len(holds) {
-		adjusted.Extra = make(map[string]any, len(account.Extra))
-		for key, value := range account.Extra {
-			adjusted.Extra[key] = value
-		}
 		adjusted.Extra["passive_quality"] = kept
 	}
 	return &adjusted
+}
+
+// GroupQualityFallbackExtra copies only automatic capability projections for a
+// single request. Callers at the database boundary must first prove a live hold.
+// Neither the account snapshot nor any persistent protection state is changed.
+func GroupQualityFallbackExtra(extra map[string]any, model string) map[string]any {
+	copy := make(map[string]any, len(extra))
+	for key, value := range extra {
+		copy[key] = value
+	}
+	delete(copy, "active_test_all_models_paused")
+	for _, key := range []string{"active_test_model_holds", "active_pass_rate_holds"} {
+		holds, ok := extra[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		kept := make(map[string]any, len(holds))
+		for heldModel, value := range holds {
+			if heldModel != "" && heldModel != model {
+				kept[heldModel] = value
+			}
+		}
+		copy[key] = kept
+	}
+	return copy
 }
 
 func groupQualityAutomaticHold(ctx context.Context, account *Account, groupID *int64, requestedModel string) bool {
@@ -110,7 +132,7 @@ func groupQualityAutomaticHold(ctx context.Context, account *Account, groupID *i
 		return false
 	}
 	model := passiveQualityRoutingModel(ctx, requestedModel)
-	if account.Status != "quality_paused" && !account.PassiveQualityBlocked(model) {
+	if account.Status != "quality_paused" && !account.PassiveQualityBlocked(model) && !account.ActiveTestModelBlocked(model) {
 		return false
 	}
 	probe := WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: *groupID, AccountID: account.ID, Model: model})

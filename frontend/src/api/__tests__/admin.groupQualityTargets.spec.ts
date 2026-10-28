@@ -8,11 +8,16 @@ describe('group quality target API', () => {
     await passiveQualityAPI.groupTargets()
     expect(client.get).toHaveBeenCalledWith('/admin/passive-quality/group-targets')
   })
-  it('uses the new Pro preset without overwriting existing first-token settings', () => {
+  it('uses unified defaults without overwriting existing first-token settings', () => {
     expect(groupQualityTargetDraft(undefined, ' GPT-Pro ').ttft).toEqual({ enabled: true, pause: 15000, recover: 12000 })
-    expect(groupQualityTargetDraft(undefined, 'Gpt-Plus').ttft).toEqual({ enabled: true, pause: 20000, recover: 16000 })
+    expect(groupQualityTargetDraft(undefined, 'Gpt-Plus').ttft).toEqual({ enabled: true, pause: 15000, recover: 12000 })
     const saved = { ...defaultPassivePolicy(), ttft: { enabled: true, pause: 18000, recover: 14000 } }
     expect(groupQualityTargetDraft(saved, 'GPT-Pro').ttft).toEqual(saved.ttft)
+    expect(groupQualityTargetDraft(undefined, 'GPT-Pro').cache_rate.pause).toBe(80)
+    expect(groupQualityTargetDraft(undefined, 'GPT-Pro').error_rate.pause).toBe(10)
+    expect(groupQualityTargetDraft(undefined, 'GPT-Pro').tps).toEqual({ enabled: true, pause: 30, recover: 36 })
+    expect(groupQualityTargetDraft(undefined, 'GPT-Pro').traffic_mode).toBe('strict')
+    expect(groupQualityTargetDraft({ ...saved, traffic_mode: 'availability' }, 'GPT-Pro').traffic_mode).toBe('availability')
   })
   it('creates and updates purpose-specific payloads without reuse-protection controls', async () => {
     const draft = groupQualityTargetDraft(undefined, 'GPT-Plus'); draft.group_ids = [4]

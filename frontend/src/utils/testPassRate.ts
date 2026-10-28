@@ -16,7 +16,7 @@ export function validTestPassRate(config: TestPassRateConfig | undefined, kind: 
   if (!config.enabled) return true
   const integer = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max
   return supportsTestPassRate(kind)
-    && integer(config.window_size, 2, 1000)
+    && integer(config.window_size, 1, 1000)
     && integer(config.window_seconds, 3600, 2592000)
     && Number.isFinite(config.pause_below) && config.pause_below >= 0 && config.pause_below <= 100
     && Number.isFinite(config.recover_at_least) && config.recover_at_least >= config.pause_below && config.recover_at_least <= 100

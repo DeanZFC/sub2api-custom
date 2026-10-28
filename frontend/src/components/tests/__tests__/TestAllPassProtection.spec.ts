@@ -39,7 +39,10 @@ describe('all automatic checks pass', () => {
     const value = wrapper.props('modelValue')
     expect(value.rules[0].priority).toBe(0)
     expect(value.rules[1].expected_answer).toBe('21')
-    expect(value.rules[1].pass_rate).toEqual(original.rules[1].pass_rate)
+    const roundGate = { ...original.rules[1].pass_rate, window_size: 1, recover_consecutive: 1, pause_below: 100, recover_at_least: 100, pause_on_single_failure: true }
+    expect(value.rules[1].pass_rate).toEqual(roundGate)
+    expect(wrapper.find('[data-pass-rate-window]').exists()).toBe(false)
+    expect(original.rules[1].pass_rate?.window_size).toBe(20)
     expect(value.rules[1].on_pass).toEqual({ scheduling: 'resume', group_mode: 'keep' })
     expect(value.rules[2].thresholds).toEqual(original.rules[2].thresholds)
     expect(value.rules[2].recovery).toEqual(original.rules[2].recovery)
@@ -59,9 +62,9 @@ describe('all automatic checks pass', () => {
     expect(wrapper.props('modelValue').on_pass).toBeUndefined()
     expect(wrapper.props('modelValue').on_fail).toBeUndefined()
     expect(wrapper.findAll('[data-combination-rule]')).toHaveLength(2)
-    expect(wrapper.props('modelValue').rules[1].pass_rate).toEqual(original.rules[1].pass_rate)
+    expect(wrapper.props('modelValue').rules[1].pass_rate).toEqual(roundGate)
     await wrapper.get('[data-protection-mode]').setValue('per_test')
-    expect(wrapper.props('modelValue').rules[1].pass_rate).toEqual(original.rules[1].pass_rate)
+    expect(wrapper.props('modelValue').rules[1].pass_rate).toEqual(roundGate)
     wrapper.unmount()
   })
 

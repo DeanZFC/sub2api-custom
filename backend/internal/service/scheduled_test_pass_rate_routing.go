@@ -31,7 +31,7 @@ func activePassRateRoutingModel(ctx context.Context, requestedModel string) stri
 }
 
 // ActivePassRateBlocked is independent of legacy active protection and passive
-// quality. Fallback may relax those owners, but may never relax capability.
+// quality. Emergency fallback uses a request-local copy after durable admission.
 // The projection contains only blocked entries; live database admission is the
 // final authority if this scheduler snapshot is stale.
 func (a *Account) ActivePassRateBlocked(model string) bool {
@@ -43,8 +43,8 @@ func (a *Account) ActivePassRateBlocked(model string) bool {
 }
 
 // ActiveTestModelBlocked combines an individual capability verdict with the
-// rolling pass-rate gate. It always uses the public request model. Neither a
-// provider alias nor quality fallback may bypass either owner.
+// rolling pass-rate gate. It always uses the public request model. A provider alias
+// cannot bypass either owner on ordinary routes.
 func (a *Account) ActiveTestModelBlocked(model string) bool {
 	if a == nil {
 		return false

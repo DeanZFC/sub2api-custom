@@ -48,6 +48,9 @@ func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	if c.Mode == "" {
 		c.Mode = "observe"
 	}
+	if c.TrafficMode == "" {
+		c.TrafficMode = "strict"
+	}
 	if c.Name == "" {
 		c.Name = "Group quality target"
 	}

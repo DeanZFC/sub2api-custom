@@ -7,7 +7,7 @@
     <p class="text-xs text-gray-500 dark:text-gray-400">{{ tr('description') }}</p>
     <template v-if="modelValue?.enabled">
       <div class="grid gap-3 sm:grid-cols-2">
-        <label class="input-label">{{ tr('windowSize') }}<input :value="config.window_size" type="number" min="2" max="1000" step="1" class="input mt-1 w-full" data-pass-rate-window @input="patch({ window_size: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
+        <label class="input-label">{{ tr('windowSize') }}<input :value="config.window_size" type="number" min="1" max="1000" step="1" class="input mt-1 w-full" data-pass-rate-window @input="patch({ window_size: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
         <label class="input-label">{{ tr('pauseBelow') }}<input :value="config.pause_below" type="number" min="0" max="100" step="any" class="input mt-1 w-full" data-pass-rate-threshold @input="patch({ pause_below: ($event.target as HTMLInputElement).valueAsNumber })" /></label>
       </div>
       <p class="text-xs text-gray-600 dark:text-gray-300" data-pass-rate-summary>{{ tr('samplingHint', { count: config.window_size, days: config.window_seconds / 86400, threshold: config.pause_below }) }}</p>

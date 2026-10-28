@@ -199,6 +199,7 @@ func testScheduledTestMultiModelAdministratorReview(t *testing.T, ctx context.Co
 	generations := map[string]int64{}
 	for _, review := range reviews {
 		generations[review.Result.ModelID] = review.Generation
+		require.Equal(t, map[string]int{"model-a": 0, "model-b": 1}[review.Result.ModelID], review.Result.ModelOrder)
 	}
 	decide := func(model, verdict string) {
 		t.Helper()

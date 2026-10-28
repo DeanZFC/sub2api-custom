@@ -36,7 +36,15 @@ func lockGroupQualityFallbackMembers(ctx context.Context, tx *sql.Tx, gid int64)
 	return rows.Err()
 }
 
-const groupQualityActiveProof = `EXISTS(SELECT 1 FROM scheduled_test_protection_states WHERE account_id=a.id AND blocked) OR EXISTS(SELECT 1 FROM scheduled_test_combination_states WHERE account_id=a.id AND blocked)`
+// Match model holds to this public model. Account-wide statistics and aggregate
+// pauses retain their existing scope; unrelated model evidence is not proof.
+const groupQualityActiveHolds = `WITH live_holds AS (
+ SELECT s.model_key,(s.model_key='' OR d.output_kind='statistics') AS account_wide
+ FROM scheduled_test_protection_states s LEFT JOIN scheduled_test_definitions d ON d.id=s.test_definition_id
+ WHERE s.account_id=$1 AND s.blocked
+ UNION ALL SELECT model_key,(model_key='' OR account_wide) FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked
+ UNION ALL SELECT model_key,(model_key='') FROM scheduled_test_pass_rate_states WHERE account_id=$1 AND blocked
+)`
 
 type groupQualityAccountRow struct {
 	ID                     int64          `json:"id"`
@@ -56,7 +64,7 @@ type groupQualityAccountRow struct {
 	ParentAccountID        *int64         `json:"parent_account_id"`
 }
 
-func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, fallback, activeProof bool) (bool, error) {
+func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, fallback, activeProof, modelProof bool) (bool, error) {
 	var row groupQualityAccountRow
 	if err := json.Unmarshal(raw, &row); err != nil {
 		return false, err
@@ -67,16 +75,27 @@ func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, 
 	if row.Extra == nil {
 		row.Extra = map[string]any{}
 	}
-	if (&service.Account{Extra: row.Extra}).ActiveTestModelBlocked(model) {
+	if (&service.Account{Extra: row.Extra}).ActiveTestModelBlocked(model) && (!fallback || !activeProof) {
 		return false, nil
 	}
 	if fallback {
+		// Ignore only the aggregate flag for this check. Explicit per-model
+		// projections still require live proof for the same model or account.
+		projected := make(map[string]any, len(row.Extra))
+		for key, value := range row.Extra {
+			projected[key] = value
+		}
+		delete(projected, "active_test_all_models_paused")
+		if (&service.Account{Extra: projected}).ActiveTestModelBlocked(model) && !modelProof {
+			return false, nil
+		}
 		// Only automatic active protection owns quality_paused. A reason string or
 		// scheduler projection alone cannot turn a disabled account back on.
 		if row.Status == "quality_paused" && activeProof {
 			row.Status = "active"
 		}
 		if activeProof {
+			row.Extra = service.GroupQualityFallbackExtra(row.Extra, model)
 			delete(row.Extra, "quality_protection_trial")
 		}
 		entries, _ := row.Extra["passive_quality"].([]any)
@@ -104,17 +123,17 @@ func groupQualityAccountEligible(ctx context.Context, raw []byte, model string, 
 
 func groupQualityFallbackCandidate(ctx context.Context, tx *sql.Tx, aid int64, model string) (bool, error) {
 	var raw []byte
-	var active bool
-	err := tx.QueryRowContext(ctx, `SELECT to_jsonb(a), (`+groupQualityActiveProof+`) FROM accounts a WHERE a.id=$1
- AND NOT EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.account_id=a.id AND s.blocked AND ($2='' OR s.model_key='' OR s.model_key=$2))
- FOR NO KEY UPDATE`, aid, model).Scan(&raw, &active)
+	var active, matching bool
+	err := tx.QueryRowContext(ctx, groupQualityActiveHolds+` SELECT to_jsonb(a),EXISTS(SELECT 1 FROM live_holds),
+ EXISTS(SELECT 1 FROM live_holds WHERE account_wide OR model_key=$2)
+ FROM accounts a WHERE a.id=$1 FOR NO KEY UPDATE`, aid, model).Scan(&raw, &active, &matching)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return groupQualityAccountEligible(ctx, raw, model, true, active)
+	return groupQualityAccountEligible(ctx, raw, model, true, active, matching)
 }
 
 func groupQualityFallbackHasVerifiedSupply(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, model string, now time.Time) (bool, error) {
@@ -139,7 +158,7 @@ func groupQualityFallbackHasVerifiedSupply(ctx context.Context, tx *sql.Tx, p se
 		if state.Model != model || !groupQualityStateVerified(p, state, now) {
 			continue
 		}
-		eligible, e := groupQualityAccountEligible(ctx, accountRaw, model, false, false)
+		eligible, e := groupQualityAccountEligible(ctx, accountRaw, model, false, false, false)
 		if e != nil {
 			return false, e
 		}

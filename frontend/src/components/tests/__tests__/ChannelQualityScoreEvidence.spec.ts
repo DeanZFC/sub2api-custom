@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import ChannelQualityScoreEvidence from '../ChannelQualityScoreEvidence.vue'
 import resources from '@/i18n/locales/en/admin/resources'
@@ -12,6 +13,7 @@ const score = (): ChannelQualityScore => ({
   ],
 })
 const render = (data: ChannelQualityScore) => mount(ChannelQualityScoreEvidence, { props: { score: data }, global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en: { admin: resources } } })] } })
+const renderInteractive = (data?: ChannelQualityScore) => mount(ChannelQualityScoreEvidence, { props: { score: data, interactive: true }, global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en: { admin: resources, common: { close: 'Close' } } } })] } })
 describe('quality score evidence', () => {
   it('explains partial evidence and keeps missing cache values unknown', () => {
     const wrapper = render(score())
@@ -35,5 +37,44 @@ describe('quality score evidence', () => {
     const wrapper = render({ ...score(), status, value: null })
     expect(wrapper.get('strong').text()).toBe('—')
     expect(wrapper.get('[data-score-status]').text()).toBe(resources.tests.scoring.status[status])
+  })
+
+  it('shows only the score in interactive mode and reveals dimensions on hover', async () => {
+    const wrapper = renderInteractive(score())
+    const trigger = wrapper.get('button')
+    expect(trigger.text()).toBe('80')
+    expect(wrapper.text()).not.toContain('Partial evidence')
+
+    await trigger.trigger('mouseenter')
+    const dialog = document.body.querySelector('[role="dialog"]')
+    expect(dialog?.textContent).toContain('80')
+    expect(dialog?.textContent).toContain('Partial evidence')
+    expect(dialog?.querySelector('[data-score-dimension="error_rate"]')?.textContent).toContain('100')
+    expect(dialog?.querySelector('[data-score-dimension="cache_rate"]')?.textContent).toContain('No eligible samples')
+    wrapper.unmount()
+  })
+
+  it('pins the detail panel after click and closes it with Escape', async () => {
+    vi.useFakeTimers()
+    const wrapper = renderInteractive(score())
+    const trigger = wrapper.get('button')
+    await trigger.trigger('click')
+    await trigger.trigger('mouseleave')
+    vi.advanceTimersByTime(200)
+    await nextTick()
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('provides a detail panel when the score has no valid samples', async () => {
+    const wrapper = renderInteractive()
+    await wrapper.get('button').trigger('click')
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('No valid samples')
+    wrapper.unmount()
   })
 })

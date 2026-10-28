@@ -76,6 +76,28 @@ func TestGroupQualityTrafficAtomicGroupBudgetIntegration(t *testing.T) {
 	require.EqualValues(t, 17, s.LimitedRequests)
 }
 
+func TestGroupQualityTrafficAvailabilityModeKeepsServingAfterBudgetExhaustionIntegration(t *testing.T) {
+	ctx, db, r := passiveDB(t)
+	p := newGroupTargetPolicy(t, ctx, db, r)
+	_, err := db.Exec(`UPDATE passive_quality_policies SET config=jsonb_set(config,'{traffic_mode}','"availability"'::jsonb) WHERE id=$1`, p.ID)
+	require.NoError(t, err)
+
+	// Exhaust the bootstrap validation allowance with one unverified request.
+	allowed, reserved := acquireTraffic(t, r, trafficRequest("validation", "A", "validation", 1_000_000), 62)
+	require.True(t, allowed)
+	require.True(t, reserved)
+
+	// The next unverified request is ordinary customer traffic in availability
+	// mode: it passes hard account/model checks without creating a validation
+	// lease or consuming more validation budget.
+	allowed, reserved = acquireTraffic(t, r, trafficRequest("ordinary", "A", "ordinary", 4096), 62)
+	require.True(t, allowed)
+	require.False(t, reserved)
+	var leases int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM group_quality_traffic_leases`).Scan(&leases))
+	require.Equal(t, 1, leases)
+}
+
 func TestGroupQualityTrafficExactAttemptSettlementIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)

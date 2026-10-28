@@ -10,9 +10,9 @@ export const qualityScoreWindowFields = [
 export function defaultQualityScoreConfig(version = 0): QualityScoreConfig {
   return {
     version, enabled: true, window_seconds: 900, max_requests: 100, min_samples: 20,
-    error_rate: { weight: 40, good: 0, bad: 20 }, cache_rate: { weight: 25, good: 80, bad: 0 },
-    ttft: { weight: 25, good: 2000, bad: 15000 }, duration: { weight: 10, good: 10000, bad: 120000 },
-    tps: { weight: 0, good: 50, bad: 5 },
+    error_rate: { weight: 70, good: 0, bad: 20 }, cache_rate: { weight: 10, good: 80, bad: 0 },
+    ttft: { weight: 10, good: 2000, bad: 15000 }, duration: { weight: 0, good: 10000, bad: 120000 },
+    tps: { weight: 10, good: 50, bad: 5 },
   }
 }
 

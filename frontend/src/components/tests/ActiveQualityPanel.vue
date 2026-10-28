@@ -65,6 +65,21 @@
           </ol>
           <p v-if="editingPlan.group_ids.length && !validStrategyGroups(editingPlan.group_ids)" role="alert" class="text-xs text-red-600 dark:text-red-400">{{ t('admin.tests.invalidStrategyGroups') }}</p>
         </fieldset>
+        <div class="space-y-2 sm:col-span-2" data-plan-exclusions>
+          <div class="flex items-center justify-between gap-2">
+            <label for="plan-excluded-account-search" class="input-label">{{ t('admin.tests.excludedAccounts') }}</label>
+            <span class="text-xs text-gray-500">{{ t('admin.tests.excludedAccountsCount', { count: editingPlan.excluded_account_ids.length }) }}</span>
+          </div>
+          <p class="text-xs text-gray-500">{{ t('admin.tests.excludedAccountsHint') }}</p>
+          <input id="plan-excluded-account-search" v-model="excludedAccountSearch" type="search" class="input w-full" :placeholder="t('admin.tests.searchExcludedAccounts')" />
+          <div v-if="excludedAccountChoices.length" class="max-h-48 space-y-2 overflow-y-auto rounded-md border border-gray-200 p-3 dark:border-dark-700">
+            <label v-for="account in excludedAccountChoices" :key="account.id" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input v-model="editingPlan.excluded_account_ids" type="checkbox" :value="account.id" :data-excluded-account="account.id" />
+              <span>{{ account.name }} (#{{ account.id }})<span v-if="!account.inScope" class="ml-2 text-xs text-gray-500">{{ t('admin.tests.excludedAccountOutsideGroups') }}</span></span>
+            </label>
+          </div>
+          <p v-else class="text-xs text-gray-500">{{ t(editingPlan.group_ids.length ? 'admin.tests.noExclusionAccounts' : 'admin.tests.selectGroupFirst') }}</p>
+        </div>
         <fieldset class="input-label sm:col-span-2" data-plan-models>
           <legend>{{ t('admin.tests.model') }}</legend>
           <p class="mt-1 text-xs font-normal text-gray-500">{{ t('admin.tests.multiModelHint') }}</p>
@@ -89,21 +104,6 @@
         <label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingPlan.sort_order" min="0" type="number" class="input mt-1 w-full" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.planSortOrderHint') }}</span></label>
         <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
         <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
-        <div class="space-y-2 sm:col-span-2" data-plan-exclusions>
-          <div class="flex items-center justify-between gap-2">
-            <label for="plan-excluded-account-search" class="input-label">{{ t('admin.tests.excludedAccounts') }}</label>
-            <span class="text-xs text-gray-500">{{ t('admin.tests.excludedAccountsCount', { count: editingPlan.excluded_account_ids.length }) }}</span>
-          </div>
-          <p class="text-xs text-gray-500">{{ t('admin.tests.excludedAccountsHint') }}</p>
-          <input id="plan-excluded-account-search" v-model="excludedAccountSearch" type="search" class="input w-full" :placeholder="t('admin.tests.searchExcludedAccounts')" />
-          <div v-if="excludedAccountChoices.length" class="max-h-48 space-y-2 overflow-y-auto rounded-md border border-gray-200 p-3 dark:border-dark-700">
-            <label v-for="account in excludedAccountChoices" :key="account.id" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-              <input v-model="editingPlan.excluded_account_ids" type="checkbox" :value="account.id" :data-excluded-account="account.id" />
-              <span>{{ account.name }} (#{{ account.id }})<span v-if="!account.inScope" class="ml-2 text-xs text-gray-500">{{ t('admin.tests.excludedAccountOutsideGroups') }}</span></span>
-            </label>
-          </div>
-          <p v-else class="text-xs text-gray-500">{{ t(editingPlan.group_ids.length ? 'admin.tests.noExclusionAccounts' : 'admin.tests.selectGroupFirst') }}</p>
-        </div>
           </div>
         </details>
         <label class="flex items-center gap-2 pt-5 text-sm"><input v-model="editingPlan.enabled" type="checkbox" /> {{ t('common.enabled') }}</label>
@@ -140,7 +140,7 @@ import AdminTestResultHistory from '@/components/tests/AdminTestResultHistory.vu
 import TestProtectionEditor from '@/components/tests/TestProtectionEditor.vue'
 import TestScheduleEditor from '@/components/tests/TestScheduleEditor.vue'
 import { copyTestSchedule, defaultTestSchedule, validTestSchedule } from '@/utils/testSchedule'
-import { copyTestProtection, validTestProtection } from '@/utils/testProtection'
+import { defaultProtectionRule, normalizeAllPassProtection, copyTestProtection, validTestProtection } from '@/utils/testProtection'
 import type { AccountListItem, AdminGroup, CreateTestPlanRequest, CreateTestTypeRequest, TestPlan, TestResult, TestType, TestProtectionConfig } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
@@ -389,7 +389,7 @@ const openPlan = (plan?: TestPlan) => {
   modelSearch.value = ''
   editingPlan.value = plan
     ? { ...planPayload(plan), excluded_account_ids: [...(plan.excluded_account_ids || [])], id: plan.id, migration_note: plan.migration_note, protection: copyTestProtection(plan.protection) }
-    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], excluded_account_ids: [], model_id: '', model_ids: [], reasoning_effort: null, cron_expression: '0 * * * *', schedule: defaultTestSchedule(), enabled: true, max_results: 50, protection: { enabled: false, mode: 'all_pass', rules: [] } }
+    : { name: '', sort_order: plans.value.length ? Math.max(...plans.value.map(item => item.sort_order ?? 0)) + 1 : 0, test_definition_ids: [], group_ids: [], excluded_account_ids: [], model_id: '', model_ids: [], reasoning_effort: null, cron_expression: '0 * * * *', schedule: defaultTestSchedule(), enabled: true, max_results: 50, protection: { enabled: true, mode: 'all_pass', rules: [] } }
 }
 const savePlan = async () => {
   if (!editingPlan.value || !canSavePlan.value) return
@@ -562,8 +562,15 @@ const retryResult = async (result: TestResult) => {
 let resultTimer: ReturnType<typeof setInterval> | undefined
 watch(
   () => editingPlan.value?.test_definition_ids.slice(),
-  () => {
+  (ids, previous) => {
     const plan = editingPlan.value
+    if (plan && !plan.id && plan.protection.enabled && plan.protection.mode === 'all_pass') {
+      for (const id of ids || []) {
+        const type = types.value.find(type => type.id === id && type.enabled)
+        if (type && !previous?.includes(id) && !plan.protection.rules.some(rule => rule.test_definition_id === id)) plan.protection.rules.push(defaultProtectionRule(type))
+      }
+      normalizeAllPassProtection(plan.protection)
+    }
     // Keep combined conditions intact so removed checks remain visible and must be repaired.
     if (plan) plan.protection.rules = plan.protection.rules.filter(rule => plan.test_definition_ids.includes(rule.test_definition_id))
   },

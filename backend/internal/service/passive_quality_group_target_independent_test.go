@@ -46,6 +46,23 @@ func TestGroupQualityTargetIndependentMinimalConfiguration(t *testing.T) {
 	}
 }
 
+func TestGroupQualityTargetTrafficModeDefaultsAndValidation(t *testing.T) {
+	defaultMode := independentGroupTargetConfig(t, "group_quality_target", 80)
+	require.NoError(t, defaultMode.Validate())
+	require.Equal(t, "strict", defaultMode.TrafficMode, "existing policies keep fail-closed budget behavior")
+
+	for _, mode := range []string{"strict", "availability"} {
+		c := independentGroupTargetConfig(t, "group_quality_target", 80)
+		c.TrafficMode = mode
+		require.NoError(t, c.Validate())
+		require.Equal(t, mode, c.TrafficMode)
+	}
+
+	invalid := independentGroupTargetConfig(t, "group_quality_target", 80)
+	invalid.TrafficMode = "bypass"
+	require.ErrorContains(t, invalid.Validate(), "traffic mode must be strict or availability")
+}
+
 func TestGroupQualityTargetIndependentRejectsAmbiguousOrImpossibleScope(t *testing.T) {
 	cases := map[string]func(*PassiveQualityConfig){
 		"no group":          func(c *PassiveQualityConfig) { c.GroupIDs = nil },
@@ -85,7 +102,7 @@ func TestGroupQualityTargetIndependentThresholdBoundaries(t *testing.T) {
 			want     string
 		}{
 			{target - 0.01, false, "fail"},
-			{target, false, "fail"},
+			{target, false, "pass"},
 			{target + 0.01, false, "pass"},
 			{target + 4.99, true, "fail"},
 			{target + 5, true, "pass"},
@@ -156,7 +173,7 @@ func TestGroupQualityTargetIndependentEveryEnabledMetricMustRecover(t *testing.T
 	require.Equal(t, "pending", verdict, "cache recovery cannot hide missing latency evidence")
 }
 
-func TestGroupQualityTargetIndependentAvailabilityAndLatencyStrictBoundaries(t *testing.T) {
+func TestGroupQualityTargetIndependentAvailabilityAndLatencyInclusiveBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		availability float64
 		latency      float64
@@ -167,15 +184,21 @@ func TestGroupQualityTargetIndependentAvailabilityAndLatencyStrictBoundaries(t *
 		require.NoError(t, c.Validate())
 		cache, errorRate, latency := 99.0, 100-tc.availability, tc.latency-1
 		e := PassiveQualityEvidence{Complete: true, Samples: 5, CacheSamples: 5, TTFTSamples: 5, CacheRate: &cache, ErrorRate: &errorRate, TTFT: &latency}
+		verdict, _ := EvaluatePassiveQuality(c, e, false)
+		require.Equal(t, "pass", verdict, "availability at the target passes")
+		errorRate += 0.01
 		verdict, reason := EvaluatePassiveQuality(c, e, false)
-		require.Equal(t, "fail", verdict, "availability exactly on a strict lower bound must fail")
+		require.Equal(t, "fail", verdict)
 		require.Contains(t, reason, "error_rate:")
-		errorRate -= 0.01
+		errorRate -= 0.02
 		verdict, _ = EvaluatePassiveQuality(c, e, false)
 		require.Equal(t, "pass", verdict)
 		latency = tc.latency
+		verdict, _ = EvaluatePassiveQuality(c, e, false)
+		require.Equal(t, "pass", verdict, "TTFT at the target passes")
+		latency++
 		verdict, reason = EvaluatePassiveQuality(c, e, false)
-		require.Equal(t, "fail", verdict, "TTFT exactly on a strict upper bound must fail")
+		require.Equal(t, "fail", verdict)
 		require.Contains(t, reason, "ttft_p90:")
 	}
 }

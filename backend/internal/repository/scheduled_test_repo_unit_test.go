@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -58,10 +59,11 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "答案：29", "number", "", 29.0, 7, "model", "high", 3, "", 42, createdAt, createdAt, createdAt, 2, "Account Seven"))
 	mock.ExpectQuery(`(?s)SELECT r.id,r.protection_decision.*FROM scheduled_test_results`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision", "execution_info", "account_schedulable", "model_schedulable"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "protection_decision", "execution_info", "account_schedulable", "model_schedulable", "model_order"}))
 	mock.ExpectQuery(`(?s)SELECT r.id,s.plan_id.*JOIN scheduled_test_pass_rate_states.*WHERE r.id=ANY`).
 		WithArgs("{1}").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "plan_id", "account_id", "test_definition_id", "model_key", "summary", "blocked"}))
+	mock.ExpectQuery(`SELECT config,version,updated_at,collect_since FROM channel_quality_score_config`).WillReturnError(errors.New("optional quality score unavailable"))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -115,12 +117,15 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 	mock.ExpectQuery(`(?s)WITH projected_results AS .*ranked_results AS.*PARTITION BY vr.group_id, vr.result_target_key, vr.test_definition_id, vr.model_id, vr.reasoning_effort.*WHERE execution.run_id = plan.latest_run_id.*WHERE history_rank = 1 AND status IN \('success', 'passed', 'failed', 'error'\).*ORDER BY vr.account_schedulable DESC NULLS LAST.*vr.started_at DESC, vr.id DESC`).
 		WithArgs(int64(5)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "group_order", "account_schedulable", "test_key", "quality_verdict", "model_schedulable",
-		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now, 2, 0, true, "candy", "fail", false))
+			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "group_order", "account_schedulable", "test_key", "quality_verdict", "model_schedulable", "model_order", "execution_skipped",
+		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now, 2, 0, true, "candy", "fail", false, 1, false))
+	mock.ExpectQuery(`SELECT r.id,s.plan_id.*scheduled_test_pass_rate_states`).WithArgs("{1}").WillReturnError(errors.New("optional pass-rate unavailable"))
+	mock.ExpectQuery(`SELECT config,version,updated_at,collect_since FROM channel_quality_score_config`).WillReturnError(errors.New("optional quality score unavailable"))
 	results, err := repo.ListVisible(context.Background(), 5, 20)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, "medium", results[0].ReasoningEffort)
+	require.Equal(t, 1, results[0].ModelOrder)
 	require.Equal(t, "candy", results[0].TestKey)
 	require.Equal(t, "fail", results[0].QualityVerdict)
 	require.NotNil(t, results[0].GroupOrder)

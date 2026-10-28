@@ -515,8 +515,9 @@ func (r *scheduledTestResultRepository) hydrateProtectionDecisions(ctx context.C
  CASE WHEN r.account_id IS NOT NULL THEN COALESCE(a.status='active' AND a.schedulable AND COALESCE(a.extra->>'active_test_all_models_paused','false')<>'true',FALSE) END,
  CASE WHEN r.account_id IS NOT NULL THEN COALESCE(a.status='active' AND a.schedulable
  AND COALESCE(a.extra->>'active_test_all_models_paused','false')<>'true'
- AND NOT ((COALESCE(a.extra->'active_test_model_holds','{}'::jsonb) || COALESCE(a.extra->'active_pass_rate_holds','{}'::jsonb)) ?| ARRAY[r.model_id,'']),FALSE) END
-FROM scheduled_test_results r LEFT JOIN accounts a ON a.id=r.account_id
+ AND NOT ((COALESCE(a.extra->'active_test_model_holds','{}'::jsonb) || COALESCE(a.extra->'active_pass_rate_holds','{}'::jsonb)) ?| ARRAY[r.model_id,'']),FALSE) END,
+ `+scheduledTestModelDisplayOrderSQL+`
+FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id LEFT JOIN accounts a ON a.id=r.account_id
 WHERE r.id = ANY($1)`, pq.Array(ids))
 	if err != nil {
 		return err
@@ -532,7 +533,8 @@ WHERE r.id = ANY($1)`, pq.Array(ids))
 		var id int64
 		var raw, execution []byte
 		var accountSchedulable, modelSchedulable *bool
-		if err := rows.Scan(&id, &raw, &execution, &accountSchedulable, &modelSchedulable); err != nil {
+		var modelOrder int
+		if err := rows.Scan(&id, &raw, &execution, &accountSchedulable, &modelSchedulable, &modelOrder); err != nil {
 			return err
 		}
 		result := byID[id]
@@ -540,6 +542,7 @@ WHERE r.id = ANY($1)`, pq.Array(ids))
 			continue
 		}
 		result.AccountSchedulable, result.ModelSchedulable = accountSchedulable, modelSchedulable
+		result.ModelOrder = modelOrder
 		if len(execution) > 0 && string(execution) != "null" {
 			if err := json.Unmarshal(execution, &result.ExecutionInfo); err != nil {
 				return err
@@ -553,6 +556,11 @@ WHERE r.id = ANY($1)`, pq.Array(ids))
 			return err
 		}
 		result.ProtectionDecision = decision
+		if decision.Status == "error" {
+			result.QualityVerdict = "pending"
+		} else if decision.Verdict == "pass" || decision.Verdict == "fail" || decision.Verdict == "pending" {
+			result.QualityVerdict = decision.Verdict
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -560,7 +568,8 @@ WHERE r.id = ANY($1)`, pq.Array(ids))
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	return r.hydratePassRates(ctx, results)
+	r.hydrateDisplayEvidence(ctx, results)
+	return nil
 }
 
 // Display position belongs to the current group, independently of the rule
@@ -571,6 +580,23 @@ const scheduledTestGroupDisplayOrdersSQL = `SELECT group_id,
  FROM (SELECT DISTINCT ON (selected.group_id) selected.group_id,p.sort_order,selected.position
        FROM scheduled_test_plans p CROSS JOIN LATERAL unnest(p.group_ids) WITH ORDINALITY selected(group_id,position)
        ORDER BY selected.group_id,p.sort_order,selected.position,p.id) configured_groups`
+
+// Re-read the current selection so editing its order updates existing results.
+// Preserve the single-model fallback used by ScheduledTestPlan.SelectedModelIDs.
+const scheduledTestModelDisplayOrderSQL = `COALESCE(array_position(
+ CASE WHEN cardinality(p.model_ids)>0 THEN p.model_ids ELSE ARRAY[p.model_id] END,
+ r.model_id)-1,2147483647)`
+
+// A completion error records the preliminary evaluator result for diagnostics.
+// It has not committed the final vote, administrator and duration decision.
+const scheduledTestPublicQualityVerdictSQL = `CASE
+ WHEN r.protection_decision->>'status'='error' THEN 'pending'
+ WHEN r.protection_decision->>'verdict' IN ('pass','fail','pending')
+ THEN r.protection_decision->>'verdict' ELSE '' END`
+
+const scheduledTestExecutionSkippedSQL = `(COALESCE(r.protection_decision->>'status'='skipped',false)
+ OR COALESCE(r.execution_info->>'failure_kind'='quality_deferred',false)
+ OR (r.status='failed' AND r.error_message LIKE '检测跳过：%'))`
 
 // Both public queries authorize the projected current group. The account is
 // projected only as an ID and hidden for group tests.
@@ -583,10 +609,10 @@ const scheduledTestVisibleProjectionCTE = `WITH projected_results AS NOT MATERIA
            COALESCE(projected_group.name, source_group.name, '') AS group_name,COALESCE(p.sort_order, 2147483647) AS plan_order,r.target_mode,r.status,
            r.response_text,r.output_kind,r.output_html,r.output_numeric,
            COALESCE(d.key, '') AS test_key,
-           CASE WHEN r.protection_decision->>'verdict' IN ('pass', 'fail', 'pending')
-                THEN r.protection_decision->>'verdict' ELSE '' END AS quality_verdict,
+           ` + scheduledTestPublicQualityVerdictSQL + ` AS quality_verdict,
+           ` + scheduledTestExecutionSkippedSQL + ` AS execution_skipped,
            CASE WHEN r.target_mode IN ('account', 'all_accounts') THEN r.account_id ELSE NULL END AS visible_account_id,
-           r.model_id,r.reasoning_effort,
+           r.model_id,r.reasoning_effort,` + scheduledTestModelDisplayOrderSQL + ` AS model_order,
            CASE WHEN r.account_id IS NULL THEN r.group_id ELSE projected_group.group_id END AS group_id,
            r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,
            COALESCE(group_display_order.sort_order, 2147483647) AS group_order,
@@ -627,7 +653,7 @@ const scheduledTestVisibleAccessCTE = `    ) projected_group ON TRUE
 ), visible_results AS NOT MATERIALIZED (
     SELECT r.id,r.plan_id,r.plan_name,r.test_name,r.test_order,r.group_name,r.plan_order,r.target_mode,r.status,
            r.response_text,r.output_kind,r.output_html,r.output_numeric,r.visible_account_id,r.model_id,r.reasoning_effort,
-           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key,r.group_order,r.account_schedulable,r.test_key,r.quality_verdict,r.model_schedulable
+           r.group_id,r.error_message,r.latency_ms,r.started_at,r.finished_at,r.created_at,r.test_definition_id,r.result_target_key,r.group_order,r.account_schedulable,r.test_key,r.quality_verdict,r.model_schedulable,r.model_order,r.execution_skipped
     FROM projected_results r
     WHERE (
         (r.account_id IS NULL AND r.target_mode = 'group')
@@ -664,7 +690,7 @@ const scheduledTestVisibleAccessCTE = `    ) projected_group ON TRUE
 
 const scheduledTestVisibleResultsCTE = scheduledTestVisibleProjectionCTE + "        LIMIT 1\n" + scheduledTestVisibleAccessCTE
 
-const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id,vr.group_order,vr.account_schedulable,vr.test_key,vr.quality_verdict,vr.model_schedulable`
+const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test_name,vr.test_order,vr.group_name,vr.plan_order,vr.target_mode,vr.status,vr.response_text,vr.output_kind,vr.output_html,vr.output_numeric,vr.visible_account_id,vr.model_id,vr.reasoning_effort,vr.group_id,vr.error_message,vr.latency_ms,vr.started_at,vr.finished_at,vr.created_at,vr.test_definition_id,vr.group_order,vr.account_schedulable,vr.test_key,vr.quality_verdict,vr.model_schedulable,vr.model_order,vr.execution_skipped`
 
 // The user list shows completed results, including failures, from each plan's
 // current execution. Rank first so a failed or running check cannot fall back
@@ -698,7 +724,15 @@ ORDER BY vr.account_schedulable DESC NULLS LAST, (vr.status IN ('success', 'pass
 		return nil, err
 	}
 	defer rows.Close()
-	return scanVisibleTestResults(rows)
+	results, err := scanVisibleTestResults(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	r.hydrateDisplayEvidence(ctx, results)
+	return results, nil
 }
 
 // A completed, authorized result determines the entire series. Cursor IDs
@@ -744,14 +778,22 @@ LIMIT $4`, userID, resultID, beforeID, limit)
 		return nil, err
 	}
 	defer rows.Close()
-	return scanVisibleTestResults(rows)
+	results, err := scanVisibleTestResults(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	r.hydrateDisplayEvidence(ctx, results)
+	return results, nil
 }
 
 func scanVisibleTestResults(rows *sql.Rows) ([]*service.ScheduledTestResult, error) {
 	var out []*service.ScheduledTestResult
 	for rows.Next() {
 		v := &service.ScheduledTestResult{}
-		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID, &v.GroupOrder, &v.AccountSchedulable, &v.TestKey, &v.QualityVerdict, &v.ModelSchedulable); err != nil {
+		if err := rows.Scan(&v.ID, &v.PlanID, &v.PlanName, &v.TestName, &v.TestOrder, &v.GroupName, &v.PlanOrder, &v.TargetMode, &v.Status, &v.ResponseText, &v.OutputKind, &v.OutputHTML, &v.OutputNumeric, &v.AccountID, &v.ModelID, &v.ReasoningEffort, &v.GroupID, &v.ErrorMessage, &v.LatencyMs, &v.StartedAt, &v.FinishedAt, &v.CreatedAt, &v.TestDefinitionID, &v.GroupOrder, &v.AccountSchedulable, &v.TestKey, &v.QualityVerdict, &v.ModelSchedulable, &v.ModelOrder, &v.ExecutionSkipped); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

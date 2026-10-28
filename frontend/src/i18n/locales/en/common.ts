@@ -221,11 +221,14 @@ export default {
   },
 
   tests: {
+    currentResult: 'Current result', scoreScopeSource: '· Real traffic', executionFailed: 'Execution failed',
+    verdicts: { pass: 'Passed', fail: 'Failed', pending: 'Awaiting verdict' },
     currentScheduling: 'Account scheduling', schedulingActive: 'Active', schedulingPaused: 'Paused', failed: 'Failed', skipped: 'Skipped',
     currentModelScheduling: 'Selected model', modelSchedulingActive: 'Model available', modelSchedulingPaused: 'Model paused',
     expandPreview: 'Expand preview',
     adminReview: {
       details: 'Review details',
+      editDecision: 'Change decision',
       roundOverrideHint: 'Administrator decisions override ordinary rules for this round. Promotion still requires every required automatic condition to pass. Assigning groups replaces all existing groups; the next round starts fresh.',
       title: 'Admin decision', markPass: 'Mark as passed', markFail: 'Mark as failed',
       pass: 'Marked as passed', fail: 'Marked as failed',

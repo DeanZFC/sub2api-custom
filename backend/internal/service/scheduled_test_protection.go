@@ -110,6 +110,15 @@ func validateScheduledTestProtection(plan *ScheduledTestPlan) error {
 	// Automatic visual results always retain an administrator correction path.
 	for i := range config.Rules {
 		rule := &config.Rules[i]
+		// In the simple round-based mode a successful new round must not wait
+		// for historical failures to age out of a second, independent gate.
+		if config.UsesAllPass() && rule.PassRate != nil && rule.PassRate.Enabled {
+			rule.PassRate.WindowSize = 1
+			rule.PassRate.RecoverConsecutive = 1
+			rule.PassRate.PauseBelow = 100
+			rule.PassRate.RecoverAtLeast = 100
+			rule.PassRate.PauseOnSingleFailure = true
+		}
 		if rule.UsesAutoReview() {
 			if rule.Vote == nil {
 				rule.Vote = &ScheduledTestVoteConfig{PassAtLeast: 1}

@@ -1,4 +1,5 @@
 export default {
+  groupQuality: 'Group quality', capability: 'Capability checks', scoring: 'Scoring standard', legacy: 'Legacy custom rules', legacyHint: 'Group targets own their configured groups and replace overlapping legacy rules. Custom rules for other groups remain here; consolidated rules are retained for reference.', consolidated: 'Consolidated into group targets: {groups}',
   "loadedStates": "Loaded {loaded} of {total} states",
   "moreStates": "Load more states",
   "eventKind": "Event type",
@@ -53,8 +54,8 @@ export default {
   overlap: 'These enabled policies may cover the same accounts and model: {names}. Limits stack and recover independently. Avoid duplicate protection for the same signal.',
   recoveryPreview: 'Initial cooldown {seconds}s. Trial: up to {requests} requests, concurrency {concurrency}, up to {duration}s, and {samples} valid fresh samples per metric.',
   limitPreview: 'Concurrency cap {concurrency}, priority penalty {penalty}. Each metric needs {samples} recovery samples and {confirmations} consecutive healthy fresh windows.',
-  activeAdvanced: 'Display, exclusions and retained history', activeHint: 'Choose tests, groups and a model, then set a schedule. Enable quality automation when results should affect scheduling.',
-  activeRecoveryHint: 'Scheduled tests and live-traffic policies recover independently. Other policies and manual stops still apply after this rule releases its pause.',
+  activeAdvanced: 'Display and retained history', activeHint: 'Choose tests, groups and models, then set a schedule. New plans pause on failure and recover when the next round fully passes. Turn automation off to record results only.',
+  activeRecoveryHint: 'A failed round pauses routing; the next fully passing round releases this test’s hold without waiting for historical pass rates. Scheduled tests and live-traffic policies recover independently. Other policies and manual stops still apply.',
   activeAutomationAdvanced: 'Review decision rules and actions', budgetAdvanced: 'Per-account limits and token reservation',
   budgetOff: 'Quality testing budgets are currently unlimited. Enable limits to configure request and token caps.',
   dynamicOff: 'Tests follow their existing schedules. Enabling this gradually increases retest intervals after consecutive healthy rounds.',

@@ -494,7 +494,13 @@ func normalizePublicTestResults(results []*ScheduledTestResult) {
 	normalizeStoredTestResults(results)
 	for _, result := range results {
 		if result != nil {
+			result.ExecutionSkipped = result.ExecutionSkipped || QualityResultDeferred(result) ||
+				(result.ProtectionDecision != nil && result.ProtectionDecision.Status == "skipped") ||
+				(result.Status == "failed" && strings.HasPrefix(result.ErrorMessage, "检测跳过："))
 			result.ErrorMessage = ""
+			if result.ProtectionDecision != nil && result.ProtectionDecision.Status == "error" {
+				result.QualityVerdict = "pending"
+			}
 			result.ProtectionDecision = nil
 			if result.ExecutionInfo != nil && result.ExecutionInfo.AutoReview != nil {
 				publicInfo := *result.ExecutionInfo

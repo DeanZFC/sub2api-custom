@@ -68,7 +68,7 @@ describe('passive management and records navigation', () => {
     await wrapper.get('[data-passive-quality]').findAll('button').find(button => button.text().includes(resources.tests.passive.activePolicies))!.trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.query).toEqual({ tab: 'passive', advanced: '1' })
-    expect(wrapper.get('[data-advanced-protection]').attributes('open')).toBeDefined()
+    expect(wrapper.get('[data-quality-tab="legacy"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-passive-quality] article').text()).toContain('Selected policy')
     wrapper.unmount()
   })

@@ -193,6 +193,7 @@ export function normalizeAllPassProtection(value: TestProtectionConfig): void {
     rule.pause_on_failure = true
     rule.on_pass = { scheduling: pass.scheduling, group_mode: 'keep' }
     rule.on_fail = { scheduling: fail.scheduling, group_mode: 'keep' }
+    if (rule.pass_rate?.enabled) rule.pass_rate = { ...rule.pass_rate, window_size: 1, recover_consecutive: 1, pause_below: 100, recover_at_least: 100, pause_on_single_failure: true }
     if (rule.vote) rule.vote.public_enabled = false
   }
 }

@@ -41,12 +41,17 @@ const validationError = computed(() => {
   const issue = config.value && qualityScoreConfigError(config.value)
   return issue ? tr(issue.key, { dimension: issue.dimension ? tr('dimensions.' + issue.dimension) : '' }) : ''
 })
+function normalizeConfig(value: QualityScoreConfig): QualityScoreConfig {
+  const defaults = defaultQualityScoreConfig()
+  // Older servers omit TPS; opening their settings must not enable a new weight.
+  return { ...defaults, ...value, tps: value.tps ?? { ...defaults.tps, weight: 0 } }
+}
 async function refresh(discard = false) {
   if (busy.value) return
   const token = ++request
   loading.value = true
   try {
-    const latest = { ...defaultQualityScoreConfig(), ...await channelQualityAPI.scoreConfig() }
+    const latest = normalizeConfig(await channelQualityAPI.scoreConfig())
     if (token !== request) return
     if (!config.value || discard || JSON.stringify(config.value) === baseline) {
       config.value = latest; baseline = JSON.stringify(latest); conflict.value = false; error.value = ''
@@ -58,7 +63,7 @@ async function save() {
   if (!config.value || busy.value || loading.value || validationError.value || conflict.value) return
   busy.value = true; saved.value = false; error.value = ''
   try {
-    config.value = { ...defaultQualityScoreConfig(), ...await channelQualityAPI.saveScoreConfig(JSON.parse(JSON.stringify(config.value))) }
+    config.value = normalizeConfig(await channelQualityAPI.saveScoreConfig(JSON.parse(JSON.stringify(config.value))))
     baseline = JSON.stringify(config.value); saved.value = true
   } catch (e) {
     const failure = e as { status?: number; response?: { status?: number } }

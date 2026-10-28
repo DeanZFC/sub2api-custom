@@ -219,3 +219,24 @@ func TestScheduledTestAllPassRecoveryFailureGroups(t *testing.T) {
 	decision, _ = EvaluateScheduledTestAllPass(p.Protection, verdicts, nil, true)
 	require.Equal(t, []int64{10}, decision.Action.GroupIDs)
 }
+
+func TestScheduledTestAllPassUsesLatestPassRateVerdict(t *testing.T) {
+	for _, mode := range []string{"all_pass", "per_test"} {
+		t.Run(mode, func(t *testing.T) {
+			gate := &ScheduledTestPassRateConfig{Enabled: true, WindowSize: 10, WindowSeconds: 604800, PauseBelow: 80, RecoverAtLeast: 90, RecoverConsecutive: 3}
+			plan := &ScheduledTestPlan{TestDefinitionIDs: []int64{1}, Protection: ScheduledTestProtectionConfig{Enabled: true, Mode: mode, Rules: []ScheduledTestProtectionRule{{TestDefinitionID: 1, ExpectedAnswer: "21", PassRate: gate}}}}
+			require.NoError(t, validateScheduledTestProtection(plan))
+			if mode == "all_pass" {
+				require.Equal(t, 1, gate.WindowSize)
+				require.Equal(t, 1, gate.RecoverConsecutive)
+				require.Equal(t, 100., gate.PauseBelow)
+				require.Equal(t, 100., gate.RecoverAtLeast)
+				require.True(t, gate.PauseOnSingleFailure)
+			} else {
+				require.Equal(t, 10, gate.WindowSize)
+				require.Equal(t, 3, gate.RecoverConsecutive)
+			}
+			require.Equal(t, "21", plan.Protection.Rules[0].ExpectedAnswer)
+		})
+	}
+}

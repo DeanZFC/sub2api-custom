@@ -2,6 +2,8 @@
  * Core Type Definitions for Sub2API Frontend
  */
 
+import type { ChannelQualityScore } from '@/api/admin/channelQuality'
+
 // ==================== Common Types ====================
 
 export interface SelectOption {
@@ -2782,11 +2784,15 @@ export interface TestProtectionDecision {
 }
 
 export interface TestResult {
+  /** Current quality score for the authorized account and this result's requested model. */
+  quality_score?: ChannelQualityScore | null
   /** Current rolling evidence, not a historical snapshot at this result's time. */
   pass_rate?: TestPassRateSummary | null
   test_key?: string
   /** Saved quality verdict; transport success does not imply a pass. */
   quality_verdict?: 'pass' | 'fail' | 'pending' | ''
+  /** Execution was deferred/skipped; raw diagnostic text remains private. */
+  execution_skipped?: boolean
   execution_info?: TestExecutionInfo | null
   /** Current account status and scheduling switch; absent for account-free results. */
   account_schedulable?: boolean | null
@@ -2798,6 +2804,8 @@ export interface TestResult {
   test_name?: string
   /** Configured check type order within the account's quality results. */
   test_order?: number
+  /** Configured model order within the originating test plan, starting at zero. */
+  model_order?: number
   /** Configured display order of the originating test rule/plan. */
   plan_order?: number
   /** Live display order of the account's current group; preferred over plan_order. */

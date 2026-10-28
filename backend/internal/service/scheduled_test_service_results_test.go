@@ -168,3 +168,27 @@ func TestScheduledTestPublicQualityVerdictIsNotTransportStatus(t *testing.T) {
 	require.Equal(t, "fail", rows[3].QualityVerdict)
 	require.Empty(t, rows[4].QualityVerdict)
 }
+
+func TestScheduledTestPublicQualityVerdictWaitsForCompletedDecision(t *testing.T) {
+	row := &ScheduledTestResult{Status: "success", QualityVerdict: "pass", ProtectionDecision: &ScheduledTestProtectionDecision{Status: "error", Verdict: "pass", Reason: "private database diagnostic"}}
+	normalizePublicTestResults([]*ScheduledTestResult{row})
+	require.Equal(t, "pending", row.QualityVerdict)
+	require.Nil(t, row.ProtectionDecision)
+}
+
+func TestScheduledTestPublicSkippedMarkerPreservesPrivacy(t *testing.T) {
+	for _, row := range []*ScheduledTestResult{
+		{Status: "failed", ProtectionDecision: &ScheduledTestProtectionDecision{Status: "skipped", Reason: "private skip diagnostic"}},
+		{Status: "failed", ExecutionInfo: &ScheduledTestExecutionInfo{FailureKind: "quality_deferred"}, ErrorMessage: "private skip diagnostic"},
+		{Status: "failed", ErrorMessage: "检测跳过：private skip diagnostic"},
+	} {
+		normalizePublicTestResults([]*ScheduledTestResult{row})
+		require.True(t, row.ExecutionSkipped)
+		require.Empty(t, row.ErrorMessage)
+		require.Nil(t, row.ProtectionDecision)
+		encoded, err := json.Marshal(row)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"execution_skipped":true`)
+		require.NotContains(t, string(encoded), "private skip diagnostic")
+	}
+}
