@@ -132,7 +132,17 @@ func groupQualityAutomaticHold(ctx context.Context, account *Account, groupID *i
 		return false
 	}
 	model := passiveQualityRoutingModel(ctx, requestedModel)
-	if account.Status != "quality_paused" && !account.PassiveQualityBlocked(model) && !account.ActiveTestModelBlocked(model) {
+	// An open trial is still recovering even when it can accept a limited
+	// request. It must not be mistaken for unrestricted normal supply.
+	trial, _ := account.Extra["quality_protection_trial"].(bool)
+	holds, _ := account.Extra["passive_quality"].([]any)
+	for _, raw := range holds {
+		hold, ok := raw.(map[string]any)
+		if ok && hold["phase"] == "trial" && (hold["scope"] == "account" || hold["model"] == model) {
+			trial = true
+		}
+	}
+	if account.Status != "quality_paused" && !trial && !account.PassiveQualityBlocked(model) && !account.ActiveTestModelBlocked(model) {
 		return false
 	}
 	probe := WithGroupQualityFallback(ctx, GroupQualityFallbackRequest{GroupID: *groupID, AccountID: account.ID, Model: model})
@@ -164,7 +174,6 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 		return nil, originalErr
 	}
 	ctx = withPassiveQualityRoutingModel(withoutGroupQualityFallback(ctx), req.RequestedModel)
-	budgetDenied := errors.Is(originalErr, ErrGroupQualityTrafficBudget)
 	ctx = s.withOpenAIProfitControlGate(ctx, req.GroupID)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, req.GroupID)
 	if s.checkChannelPricingRestriction(ctx, req.GroupID, req.RequestedModel) {
@@ -205,14 +214,12 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 		if !isOpenAICompatibleAccountEligibleForRequest(candidateCtx, adjusted, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability) || !scheduler.isAccountRequestCompatible(candidateCtx, adjusted, req) || !scheduler.isAccountTransportCompatible(adjusted, req.RequiredTransport) || s.isOpenAIAccountBlockedBySchedulingThreshold(candidateCtx, adjusted) {
 			continue
 		}
-		if verified, _ := groupQualityRoutingState(account, req.GroupID, marker.Model); verified && !groupQualityAutomaticHold(ctx, account, req.GroupID, req.RequestedModel) {
+		// Insufficient evidence never makes an unrestricted account an emergency
+		// candidate. Leave it on normal routing, even if a stale gate denied it.
+		if !groupQualityAutomaticHold(ctx, account, req.GroupID, req.RequestedModel) {
 			return nil, originalErr
 		}
 		if owner > 0 && account.ID != owner {
-			continue
-		}
-		_, managed := groupQualityRoutingState(account, req.GroupID, marker.Model)
-		if !managed && !budgetDenied && !groupQualityAutomaticHold(ctx, account, req.GroupID, req.RequestedModel) {
 			continue
 		}
 		candidates = append(candidates, passiveQualitySchedulingAccount(candidateCtx, adjusted, req.RequestedModel))

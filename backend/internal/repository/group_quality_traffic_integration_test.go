@@ -35,9 +35,64 @@ func healthyTrafficState(t *testing.T, ctx context.Context, db *sql.DB, r *passi
 	require.Equal(t, "healthy", targetStates(t, ctx, r)[model].Phase)
 }
 
+func groupTrafficState(t *testing.T, ctx context.Context, db *sql.DB, p service.PassiveQualityPolicy, aid int64, model, phase string) {
+	t.Helper()
+	now := time.Now()
+	state := service.PassiveQualityState{PolicyID: p.ID, AccountID: aid, Model: model, Scope: p.Scope, Version: p.Version, Purpose: p.Purpose, Phase: phase, UpdatedAt: now, TrialStartedAt: now.Add(-time.Minute), TrialEndsAt: now.Add(time.Hour)}
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	require.NoError(t, savePassiveState(ctx, tx, state))
+	require.NoError(t, reconcilePassiveAccount(ctx, tx, aid))
+	require.NoError(t, tx.Commit())
+}
+
+func TestGroupQualityTrafficUnprotectedSamplesServeNormallyIntegration(t *testing.T) {
+	for _, phase := range []string{"", "insufficient", "watching", "healthy"} {
+		t.Run(phase, func(t *testing.T) {
+			ctx, db, r := passiveDB(t)
+			p := newGroupTargetPolicy(t, ctx, db, r)
+			if phase != "" {
+				groupTrafficState(t, ctx, db, p, 62, "A", phase)
+			}
+			// A recovering peer consumes the entire strict-mode allowance first.
+			groupTrafficState(t, ctx, db, p, 63, "A", "trial")
+			allowed, _ := acquireTraffic(t, r, trafficRequest("recovery", "A", "recovery", 1000000), 63)
+			require.True(t, allowed)
+			req := trafficRequest("normal", "A", "normal", 2000000)
+			allowed, reserved := acquireTraffic(t, r, req, 62)
+			require.True(t, allowed, "unprotected samples must keep accumulating even with no validation budget")
+			require.True(t, reserved)
+			var validation, fallback bool
+			require.NoError(t, db.QueryRow(`SELECT validation,fallback FROM group_quality_traffic_leases WHERE lease_id='normal'`).Scan(&validation, &fallback))
+			require.False(t, validation)
+			require.False(t, fallback)
+			allowed, _ = acquireFallback(t, r, trafficRequest("emergency", "A", "emergency", 4096), 63)
+			require.False(t, allowed, "an unprotected peer prevents fallback regardless of verification")
+			allowed, _, err := r.AcquirePassiveQuality(service.GroupQualityTrafficContext(ctx, req), 62, "A", "ordinary")
+			require.NoError(t, err)
+			require.True(t, allowed)
+			groupTrafficState(t, ctx, db, p, 62, "A", "paused")
+			allowed, _, err = r.AcquirePassiveQuality(service.GroupQualityTrafficContext(ctx, req), 62, "A", "paused")
+			require.NoError(t, err)
+			require.False(t, allowed, "actual pauses retain their independent gate")
+			allowed, _ = acquireFallback(t, r, trafficRequest("all-held", "A", "all-held", 4096), 63)
+			require.True(t, allowed, "fallback remains available once every normal account is held")
+		})
+	}
+}
+
 func TestGroupQualityTrafficAtomicGroupBudgetIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
+	groupTrafficState(t, ctx, db, p, 62, "model-0", "trial")
+	groupTrafficState(t, ctx, db, p, 62, "model-1", "trial")
+	groupTrafficState(t, ctx, db, p, 62, "model-2", "trial")
+	groupTrafficState(t, ctx, db, p, 62, "new-model", "trial")
+	groupTrafficState(t, ctx, db, p, 63, "model-0", "trial")
+	groupTrafficState(t, ctx, db, p, 63, "model-1", "trial")
+	groupTrafficState(t, ctx, db, p, 63, "model-2", "trial")
+	groupTrafficState(t, ctx, db, p, 63, "new-model", "trial")
 	var admitted atomic.Int32
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -79,15 +134,16 @@ func TestGroupQualityTrafficAtomicGroupBudgetIntegration(t *testing.T) {
 func TestGroupQualityTrafficAvailabilityModeKeepsServingAfterBudgetExhaustionIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
+	groupTrafficState(t, ctx, db, p, 62, "A", "trial")
 	_, err := db.Exec(`UPDATE passive_quality_policies SET config=jsonb_set(config,'{traffic_mode}','"availability"'::jsonb) WHERE id=$1`, p.ID)
 	require.NoError(t, err)
 
-	// Exhaust the bootstrap validation allowance with one unverified request.
+	// Exhaust the bootstrap validation allowance with one recovery request.
 	allowed, reserved := acquireTraffic(t, r, trafficRequest("validation", "A", "validation", 1_000_000), 62)
 	require.True(t, allowed)
 	require.True(t, reserved)
 
-	// The next unverified request is ordinary customer traffic in availability
+	// The next recovery request is ordinary customer traffic in availability
 	// mode: it passes hard account/model checks without creating a validation
 	// lease or consuming more validation budget.
 	allowed, reserved = acquireTraffic(t, r, trafficRequest("ordinary", "A", "ordinary", 4096), 62)
@@ -101,6 +157,7 @@ func TestGroupQualityTrafficAvailabilityModeKeepsServingAfterBudgetExhaustionInt
 func TestGroupQualityTrafficExactAttemptSettlementIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
+	groupTrafficState(t, ctx, db, p, 62, "A", "trial")
 	first := trafficRequest("same-request", "A", "first", 100000)
 	second := trafficRequest("same-request", "A", "retry", 100000)
 	for _, req := range []service.GroupQualityTrafficRequest{first, second} {
@@ -145,6 +202,9 @@ func TestGroupQualityTrafficHealthyModelAndStaleSnapshotIntegration(t *testing.T
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
 	healthyTrafficState(t, ctx, db, r, p, "A")
+	groupTrafficState(t, ctx, db, p, 62, "B", "trial")
+	groupTrafficState(t, ctx, db, p, 63, "A", "trial")
+	groupTrafficState(t, ctx, db, p, 63, "B", "trial")
 	now := time.Now()
 	require.NoError(t, writeGroupQualityTrafficSnapshot(ctx, r.db, p, now, 10000000, 9000000, true))
 	allowed, reserved := acquireTraffic(t, r, trafficRequest("healthy", "A", "healthy", 100000000), 62)
@@ -154,7 +214,7 @@ func TestGroupQualityTrafficHealthyModelAndStaleSnapshotIntegration(t *testing.T
 	require.NoError(t, db.QueryRow(`SELECT validation FROM group_quality_traffic_leases WHERE lease_id='healthy'`).Scan(&validation))
 	require.False(t, validation)
 	allowed, _ = acquireTraffic(t, r, trafficRequest("other-model", "B", "other-model", 600000), 62)
-	require.False(t, allowed, "another public model cannot borrow the healthy bypass")
+	require.False(t, allowed, "a recovering model remains subject to the validation budget")
 	allowed, _ = acquireTraffic(t, r, trafficRequest("other-account", "A", "other-account", 600000), 63)
 	require.False(t, allowed)
 	_, err := db.Exec(`UPDATE group_quality_traffic_snapshots SET measured_at=now()-interval '3 minutes'`)
@@ -206,7 +266,7 @@ func TestGroupQualityTrafficProjectionAndMembershipFencesIntegration(t *testing.
 	_, err = db.Exec(`UPDATE passive_quality_states SET data=jsonb_set(data,'{updated_at}',to_jsonb(now()-interval '2 hours')) WHERE policy_id=$1`, p.ID)
 	require.NoError(t, err)
 	allowed, _ := acquireTraffic(t, r, trafficRequest("expired", "A", "expired", 2000000), 62)
-	require.False(t, allowed)
+	require.True(t, allowed, "expired healthy evidence is not an actual pause")
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	_, err = lockPassiveAccount(ctx, tx, 62)
@@ -259,6 +319,8 @@ func TestGroupQualityTrafficFullPopulationSnapshotAndRetentionIntegration(t *tes
 func TestGroupQualityTrafficKnownUsageReplacesEstimateIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
+	groupTrafficState(t, ctx, db, p, 62, "A", "trial")
+	groupTrafficState(t, ctx, db, p, 63, "A", "trial")
 	req := trafficRequest("measured", "A", "measured", 400000)
 	allowed, _ := acquireTraffic(t, r, req, 62)
 	require.True(t, allowed)
@@ -289,6 +351,7 @@ func TestGroupQualityTrafficUnknownPositiveAndZeroUsageKeepEstimateIntegration(t
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, db, r := passiveDB(t)
 			p := newGroupTargetPolicy(t, ctx, db, r)
+			groupTrafficState(t, ctx, db, p, 62, "A", "trial")
 			req := trafficRequest("unknown", "A", "unknown", 400000)
 			allowed, _ := acquireTraffic(t, r, req, 62)
 			require.True(t, allowed)
@@ -308,6 +371,7 @@ func TestGroupQualityTrafficUnknownPositiveAndZeroUsageKeepEstimateIntegration(t
 func TestGroupQualityTrafficConcurrentSettlementAndUnusedReleaseIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
+	groupTrafficState(t, ctx, db, p, 62, "A", "trial")
 	req := trafficRequest("race", "A", "race", 500000)
 	allowed, _ := acquireTraffic(t, r, req, 62)
 	require.True(t, allowed)

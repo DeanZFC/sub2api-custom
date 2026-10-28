@@ -12,52 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGroupQualityConsolidationPreservesOtherGroupsIntegration(t *testing.T) {
-	ctx, db, repo := passiveDB(t)
-	_, err := db.Exec(`UPDATE account_groups SET group_id=9 WHERE account_id=63; INSERT INTO accounts(id,name) VALUES(64,'Shared'); INSERT INTO account_groups VALUES(64,8),(64,9)`)
-	require.NoError(t, err)
-	legacy := newPassivePolicy()
-	legacy.GroupIDs = []int64{8, 9}
-	require.NoError(t, repo.SavePolicy(ctx, &legacy))
-	for _, aid := range []int64{62, 63, 64} {
-		tx, err := db.BeginTx(ctx, nil)
-		require.NoError(t, err)
-		state := service.PassiveQualityState{PolicyID: legacy.ID, PolicyName: legacy.Name, AccountID: aid, Model: "model", Scope: "model", Version: legacy.DecisionVersion(), Phase: "paused"}
-		require.NoError(t, savePassiveState(ctx, tx, state))
-		require.NoError(t, reconcilePassiveAccount(ctx, tx, aid))
-		require.NoError(t, tx.Commit())
-	}
-	target := newGroupTargetPolicy(t, ctx, db, repo)
-	updated, err := scanPassivePolicy(db.QueryRow(`SELECT id,version,updated_at,config FROM passive_quality_policies WHERE id=$1`, legacy.ID))
-	require.NoError(t, err)
-	require.Equal(t, []int64{9}, updated.GroupIDs)
-	require.Equal(t, []int64{8}, updated.ConsolidatedGroupIDs)
-	require.True(t, updated.Enabled)
-	require.Equal(t, legacy.ErrorRate, updated.ErrorRate)
-	require.Equal(t, legacy.DecisionVersion(), updated.DecisionVersion())
-	require.WithinDuration(t, legacy.EvidenceSince(), updated.EvidenceSince(), time.Microsecond)
-	for _, aid := range []int64{62, 63, 64} {
-		states, err := repo.ListStates(ctx, aid)
-		require.NoError(t, err)
-		var extra []byte
-		require.NoError(t, db.QueryRow(`SELECT extra FROM accounts WHERE id=$1`, aid).Scan(&extra))
-		if aid == 62 {
-			require.Empty(t, states)
-			require.NotContains(t, string(extra), "passive_quality")
-		} else {
-			require.Len(t, states, 1)
-			require.Contains(t, string(extra), "passive_quality")
-		}
-	}
-	// No-op target saves preserve both decision identities; callers cannot recreate overlap.
-	require.NoError(t, repo.SavePolicy(ctx, &target))
-	updated.GroupIDs = []int64{8, 9}
-	require.ErrorContains(t, repo.SavePolicy(ctx, &updated), "managed by group quality targets")
-	var events int
-	require.NoError(t, db.QueryRow(`SELECT count(*) FROM passive_quality_events WHERE kind='group_target_consolidated'`).Scan(&events))
-	require.Equal(t, 1, events)
-}
-
 func TestGroupQualityUnifiedMigrationIntegration(t *testing.T) {
 	for _, customScore := range []bool{false, true} {
 		t.Run(map[bool]string{false: "old-defaults", true: "custom-score"}[customScore], func(t *testing.T) {

@@ -11,7 +11,7 @@ const mountView = () => mount(TestManagementView, { global: {
   stubs: {
     AppLayout: { template: '<div><slot /></div>' }, Icon: true,
     ActiveQualityPanel: true, PassiveQualityPanel: true, ChannelQualityScoreSettings: true, ChannelQualityOverview: true, QualityOperationsPanel: true,
-    PassiveQualityManagementPanel: { props: ['targetPolicyId', 'advancedPolicy'], template: '<div data-management :data-policy="targetPolicyId" :data-advanced="advancedPolicy" />' },
+    PassiveQualityManagementPanel: { props: ['targetPolicyId'], template: '<div data-management :data-policy="targetPolicyId" />' },
   },
 } })
 beforeEach(() => { navigation.route = reactive({ query: {} }); navigation.replace.mockReset() })
@@ -22,15 +22,14 @@ describe('simplified quality configuration flows', () => {
     expect(wrapper.findAll('[role="tab"]')).toHaveLength(4)
     expect(wrapper.get('[data-quality-section="group-targets"]').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('[data-management]').attributes('data-policy')).toBe('41')
-    expect(wrapper.get('[data-management]').attributes('data-advanced')).toBe('false')
     wrapper.unmount()
   })
-  it('opens legacy individual passive policies in the advanced section and preserves active navigation', async () => {
-    navigation.route.query = { tab: 'passive', policy_id: '7' }
+  it.each(['passive', 'legacy'])('redirects removed %s rule links to group targets', async tab => {
+    navigation.route.query = { tab, policy_id: '7', advanced: '1' }
     const wrapper = mountView()
-    expect(wrapper.find('[data-management]').exists()).toBe(false)
-    expect(wrapper.get('[data-quality-tab="legacy"]').attributes('aria-pressed')).toBe('true')
-    expect(wrapper.findComponent({ name: 'PassiveQualityPanel' }).props('tab')).toBe('passive')
+    expect(wrapper.find('[data-management]').exists()).toBe(true)
+    expect(wrapper.find('[data-quality-tab="legacy"]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'PassiveQualityPanel' }).exists()).toBe(false)
     await wrapper.get('[data-quality-section="plans"]').trigger('click')
     expect(navigation.replace).toHaveBeenCalledWith({ query: { tab: 'plans' } })
     wrapper.unmount()

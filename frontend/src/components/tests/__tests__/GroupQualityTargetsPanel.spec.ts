@@ -1,8 +1,9 @@
+import { defaultPassivePolicy } from '@/test/fixtures/passiveQuality'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import GroupQualityTargetsPanel from '../GroupQualityTargetsPanel.vue'
-import { defaultPassivePolicy, emptyPassiveSummary, type GroupQualityContributor, type GroupQualityTargetSummary, type GroupQualityTrafficControl, type GroupQualityFallbackSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
+import { emptyPassiveSummary, type GroupQualityContributor, type GroupQualityTargetSummary, type GroupQualityTrafficControl, type GroupQualityFallbackSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
 import resources from '@/i18n/locales/en/admin/resources'
 import zhResources from '@/i18n/locales/zh/admin/resources'
 import type { AdminGroup } from '@/types'
@@ -62,7 +63,7 @@ describe('simple group quality targets', () => {
     expect(w.get('[data-target-fallback-inflight] .text-xl').text()).toBe('0')
     expect(w.get('[data-target-fallback]').text()).toContain('Fallback adds no concurrency cap or delay between request starts')
     expect(w.get('[data-target-fallback]').text()).toContain('normal account concurrency limits still apply')
-    expect(w.get('[data-target-no-verified]').text()).toContain('scored fallback adds no extra concurrency cap')
+    expect(w.get('[data-target-no-verified]').text()).toContain('scored fallback is used only when normal supply is exhausted')
     expect(w.find('[data-target-fallback-last]').exists()).toBe(false)
     w.unmount()
   })
@@ -91,7 +92,7 @@ describe('simple group quality targets', () => {
     expect(w.get('[data-target-fallback]').text()).toContain('兜底不额外限制并发或请求启动间隔，仍遵守账号原有并发设置')
     expect(w.get('[data-target-fallback]').text()).not.toContain('最多 1 个')
     expect(w.get('[data-target-fallback]').text()).not.toContain('间隔 2 秒')
-    expect(w.get('[data-target-no-verified]').text()).toContain('按评分兜底，不额外限制并发')
+    expect(w.get('[data-target-no-verified]').text()).toContain('未暂停账号继续正常调用，只有正常供给耗尽时才按评分兜底')
     w.unmount()
   })
 
@@ -230,7 +231,7 @@ describe('simple group quality targets', () => {
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-group-target]').text()).toContain('Some accounts protected')
     expect(w.get('[data-target-verified]').text()).toContain('0 account/models verified')
-    expect(w.get('[data-target-no-verified]').text()).toContain('Normal routing remains paused until recovery is verified')
+    expect(w.get('[data-target-no-verified]').text()).toContain('paused accounts still require recovery verification')
     w.unmount()
   })
 
@@ -270,12 +271,12 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
-  it('makes bootstrap limits explicit even when the measured group window meets its targets', async () => {
+  it('explains normal sample collection independently of recovery allowance', async () => {
     api.groupTargets.mockResolvedValue([summary({ traffic_control: trafficControl({ mode: 'bootstrap', verified_accounts: 0 }) })])
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-group-target]').text()).toContain('Measured targets met')
     expect(w.get('[data-target-bootstrap]').attributes('role')).toBe('status')
-    expect(w.get('[data-target-bootstrap]').text()).toContain('Only limited validation traffic is admitted; the targets are not guaranteed')
+    expect(w.get('[data-target-bootstrap]').text()).toContain('Unpaused accounts keep serving and collecting samples')
     expect(w.find('[data-target-no-verified]').exists()).toBe(false)
     w.unmount()
   })
@@ -286,7 +287,7 @@ describe('simple group quality targets', () => {
     expect(w.get('[data-target-traffic-mode]').text()).toBe('Conserving validation traffic')
     expect(w.get('[data-target-budget-remaining]').find('.text-xl').text()).toBe('0')
     expect(w.get('[data-target-validation-share]').text()).toContain('0%')
-    expect(w.get('[data-target-traffic-control]').text()).toContain('Validation traffic is being reduced')
+    expect(w.get('[data-target-traffic-control]').text()).toContain('Normal traffic on unpaused accounts is unaffected by this budget')
     expect(w.get('[data-target-traffic-control]').text()).not.toContain('Unknown')
     w.unmount()
   })

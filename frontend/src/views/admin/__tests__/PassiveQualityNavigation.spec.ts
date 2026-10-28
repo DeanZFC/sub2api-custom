@@ -1,9 +1,10 @@
+import { defaultPassivePolicy } from '@/test/fixtures/passiveQuality'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createI18n } from 'vue-i18n'
 import TestManagementView from '../TestManagementView.vue'
-import { defaultPassivePolicy, emptyPassiveSummary } from '@/api/admin/passiveQuality'
+import { emptyPassiveSummary } from '@/api/admin/passiveQuality'
 import resources from '@/i18n/locales/en/admin/resources'
 
 const api = vi.hoisted(() => ({ policies: vi.fn(), stateSummary: vi.fn(), statePage: vi.fn(), eventPage: vi.fn(), models: vi.fn(), success: vi.fn(), error: vi.fn() }))
@@ -38,10 +39,8 @@ beforeEach(() => {
 })
 
 describe('passive management and records navigation', () => {
-  it('preserves the selected policy when management unmounts for records', async () => {
-    const { wrapper, router } = await mountView('/admin/tests?tab=passive&advanced=1')
-    await wrapper.get('[data-passive-quality] article').findAll('button').find(button => button.text() === resources.tests.passive.records)!.trigger('click')
-    await flushPromises()
+  it('preserves the selected target in record deep links', async () => {
+    const { wrapper, router } = await mountView('/admin/tests?tab=records&policy_id=7')
     expect(router.currentRoute.value.query).toEqual({ tab: 'records', policy_id: '7' })
     expect((wrapper.get('[data-record-policy]').element as HTMLSelectElement).value).toBe('7')
     expect(api.statePage).toHaveBeenLastCalledWith(expect.objectContaining({ policy_id: 7 }))
@@ -54,7 +53,7 @@ describe('passive management and records navigation', () => {
     ['pausedAccounts', 'paused'], ['limitedAccounts', 'limited'],
     ['trialAccounts', 'trial'], ['observedAccounts', 'observed'],
   ] as const)('preserves the %s summary filter across component replacement', async (key, phase) => {
-    const { wrapper, router } = await mountView('/admin/tests?tab=passive&advanced=1')
+    const { wrapper, router } = await mountView('/admin/tests?tab=records')
     await wrapper.get('[data-passive-quality]').findAll('button').find(button => button.text().includes(resources.tests.passive[key]))!.trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.query).toEqual({ tab: 'records', phase })
@@ -63,13 +62,13 @@ describe('passive management and records navigation', () => {
     wrapper.unmount()
   })
 
-  it('opens the advanced policy list from the active-policy summary', async () => {
+  it('opens group targets from the active-policy summary', async () => {
     const { wrapper, router } = await mountView('/admin/tests?tab=records&phase=paused')
     await wrapper.get('[data-passive-quality]').findAll('button').find(button => button.text().includes(resources.tests.passive.activePolicies))!.trigger('click')
     await flushPromises()
-    expect(router.currentRoute.value.query).toEqual({ tab: 'passive', advanced: '1' })
-    expect(wrapper.get('[data-quality-tab="legacy"]').attributes('aria-pressed')).toBe('true')
-    expect(wrapper.get('[data-passive-quality] article').text()).toContain('Selected policy')
+    expect(router.currentRoute.value.query).toEqual({ tab: 'group-targets' })
+    expect(wrapper.find('[data-quality-tab="legacy"]').exists()).toBe(false)
+    expect(wrapper.find('[data-passive-management]').exists()).toBe(true)
     wrapper.unmount()
   })
 

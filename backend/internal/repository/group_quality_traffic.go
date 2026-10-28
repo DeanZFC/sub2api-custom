@@ -104,8 +104,16 @@ func (r *passiveQualityRepository) AcquireGroupQualityTraffic(ctx context.Contex
 	// Decode and validate account/model evidence before taking the shared budget
 	// lock. Account and policy locks above still fence policy/membership edits.
 	now := time.Now()
-	verified, count, err := groupQualityVerified(ctx, tx, p, aid, model, now)
+	_, count, err := groupQualityVerified(ctx, tx, p, aid, model, now)
 	if err != nil {
+		return false, false, err
+	}
+	// Missing or stale evidence is not a quality hold. Only traffic recovering
+	// from an actual pause shares the validation allowance; initial sampling and
+	// pending confirmations keep serving through the ordinary admission gates.
+	var recovering bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states
+ WHERE policy_id=$1 AND account_id=$2 AND model_key=$3 AND data->>'phase' IN ('paused','probing','trial'))`, p.ID, aid, model).Scan(&recovering); err != nil {
 		return false, false, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO group_quality_traffic_snapshots(policy_id,policy_version) VALUES($1,$2) ON CONFLICT DO NOTHING`, p.ID, p.DecisionVersion()); err != nil {
@@ -139,17 +147,17 @@ func (r *passiveQualityRepository) AcquireGroupQualityTraffic(ctx context.Contex
 	}
 	_, budget := service.GroupQualityTrafficBudget(input, read, p.CacheRate.Pause, count)
 	var spent int64
-	if !verified {
+	if recovering {
 		spent, err = groupQualityChargedTokens(ctx, tx, p.ID, now)
 		if err != nil {
 			return false, false, err
 		}
 	}
 	estimate := max(req.EstimatedInput, int64(4096))
-	denied := !verified && (spent >= budget || estimate > budget-spent)
+	denied := recovering && (spent >= budget || estimate > budget-spent)
 	var fallbackExpires any
 	if fallback {
-		supply, e := groupQualityFallbackHasVerifiedSupply(ctx, tx, p, model, now)
+		supply, e := groupQualityFallbackHasNormalSupply(ctx, tx, p, model)
 		if e != nil {
 			return false, false, e
 		}
@@ -160,7 +168,7 @@ func (r *passiveQualityRepository) AcquireGroupQualityTraffic(ctx context.Contex
 	}
 	if denied {
 		// A budget protects the quality sample, not the group's entire serving
-		// capacity. In availability mode, keep all normal live-account gates above
+		// capacity. In availability mode, keep all live-account and trial gates above
 		// authoritative, but let this account serve without creating a validation
 		// lease or consuming additional budget.
 		if p.TrafficMode == "availability" && !fallback {
@@ -173,7 +181,7 @@ func (r *passiveQualityRepository) AcquireGroupQualityTraffic(ctx context.Contex
 		return false, false, tx.Commit()
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO group_quality_traffic_leases(lease_id,policy_id,policy_version,account_id,group_id,model,request_key,validation,reserved_input,created_at,fallback,fallback_expires_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, lease, p.ID, p.DecisionVersion(), aid, req.GroupID, model, req.Key, !verified || fallback, estimate, now, fallback, fallbackExpires)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, lease, p.ID, p.DecisionVersion(), aid, req.GroupID, model, req.Key, recovering || fallback, estimate, now, fallback, fallbackExpires)
 	if err != nil {
 		return false, false, err
 	}

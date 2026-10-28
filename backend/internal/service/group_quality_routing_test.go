@@ -73,7 +73,7 @@ func TestGroupQualityRoutingProjectionRequiresFreshVerification(t *testing.T) {
 			entry["verified_until"] = until
 			verified, managed := groupQualityRoutingState(&account, &groupID, "public-model")
 			require.False(t, verified)
-			require.True(t, managed, "expired evidence still requires live budget admission")
+			require.True(t, managed, "expired evidence remains visible as managed without implying a hold")
 		})
 	}
 }

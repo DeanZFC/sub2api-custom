@@ -98,20 +98,3 @@ func (h *ChannelQualityHandler) DeleteSupplier(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
-func (h *ChannelQualityHandler) Replay(c *gin.Context) {
-	var req service.QualityReplayRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid replay request")
-		return
-	}
-	if err := req.Validate(time.Now()); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	out, err := h.operations.ReplayQualityPolicy(c.Request.Context(), req)
-	if err != nil {
-		response.BadRequest(c, "replay unavailable: check selected accounts, policy scope and time range")
-		return
-	}
-	c.JSON(http.StatusOK, out)
-}

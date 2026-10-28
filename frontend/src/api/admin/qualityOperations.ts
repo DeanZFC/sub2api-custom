@@ -1,5 +1,4 @@
 import apiClient from '../client'
-import type { PassivePolicy, PassiveEvidence, PassiveMetricState, PassiveCacheState } from './passiveQuality'
 export interface PelicanReviewConfig {
   enabled: boolean
   judge_account_id: number
@@ -27,11 +26,6 @@ export interface QualityOperationsSnapshot {
   usage: { account_id: number; requests: number; tokens: number; unknown_requests: number; recovery_requests?: number; recovery_tokens?: number }[]
   suppliers: QualitySupplier[]
 }
-export interface QualityReplayRequest { config: PassivePolicy; account_ids: number[]; from: string; to: string; step_seconds: number }
-export interface QualityReplayResult {
-  points: { at: string; account_id: number; model?: string; verdict: string; reason: string; action: string; hits: number; evidence: PassiveEvidence; latency?: PassiveMetricState; cache?: Record<string, PassiveCacheState> }[]
-  evaluations: number; triggers: number; pending: number; warnings: string[]
-}
 export const qualityOperationsAPI = {
   get: async () => (await apiClient.get<QualityOperationsSnapshot>('/admin/channel-quality/operations')).data,
   save: async (config: QualityOperationsConfig) => (await apiClient.put<QualityOperationsConfig>('/admin/channel-quality/operations', config)).data,
@@ -39,7 +33,6 @@ export const qualityOperationsAPI = {
     ? apiClient.put<QualitySupplier>(`/admin/channel-quality/suppliers/${supplier.id}`, supplier)
     : apiClient.post<QualitySupplier>('/admin/channel-quality/suppliers', supplier))).data,
   deleteSupplier: async (supplier: QualitySupplier) => { await apiClient.delete(`/admin/channel-quality/suppliers/${supplier.id}`, { params: { version: supplier.version } }) },
-  replay: async (request: QualityReplayRequest, signal?: AbortSignal) => (await apiClient.post<QualityReplayResult>('/admin/channel-quality/replay', request, { timeout: 35000, signal })).data,
 }
 export function defaultQualitySupplier(): QualitySupplier {
   return { id: 0, version: 0, name: '', account_ids: [], enabled: true, window_seconds: 600, min_accounts: 2, failure_percent: 60, probe_interval_seconds: 60, members: [], affected: 0, observed: 0, incident: false, next_probe_at: null }

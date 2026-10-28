@@ -83,6 +83,11 @@ func (h *PassiveQualityHandler) Save(c *gin.Context) {
 		response.BadRequest(c, "invalid policy JSON")
 		return
 	}
+	if !p.IsGroupQualityTarget() {
+		response.BadRequest(c, "custom passive rules have been removed; configure a group quality target")
+		return
+	}
+
 	if c.Param("id") != "" {
 		id, ok := passiveID(c, "id")
 		if !ok {

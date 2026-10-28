@@ -1,5 +1,5 @@
 export default {
-  groupQuality: '分组质量', capability: '能力检测', scoring: '评分标准', legacy: '旧版自定义规则', legacyHint: '已配置分组目标的范围由分组质量统一管理，不再叠加旧规则。这里保留其他分组的自定义配置；已合并规则保留作历史记录。', consolidated: '已合并到分组目标：{groups}',
+  groupQuality: '分组质量', capability: '能力检测', scoring: '评分标准',
   "loadedStates": "已加载 {loaded} / {total} 条状态",
   "moreStates": "加载更多状态",
   "eventKind": "事件类型",

@@ -780,7 +780,6 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		admin.POST("/channel-quality/suppliers", q.SaveSupplier)
 		admin.PUT("/channel-quality/suppliers/:id", q.SaveSupplier)
 		admin.DELETE("/channel-quality/suppliers/:id", q.DeleteSupplier)
-		admin.POST("/channel-quality/replay", q.Replay)
 	}
 	if h.Admin.PassiveQuality != nil {
 		q := h.Admin.PassiveQuality

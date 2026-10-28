@@ -1,5 +1,6 @@
+import { defaultPassivePolicy } from '@/test/fixtures/passiveQuality'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { passiveQualityAPI, groupQualityTargetDraft, defaultPassivePolicy } from '../admin/passiveQuality'
+import { passiveQualityAPI, groupQualityTargetDraft } from '../admin/passiveQuality'
 const client = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn() }))
 vi.mock('../client', () => ({ default: client }))
 beforeEach(() => { vi.clearAllMocks(); client.get.mockResolvedValue({ data: [] }); client.post.mockResolvedValue({ data: {} }); client.put.mockResolvedValue({ data: {} }) })

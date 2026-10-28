@@ -11,6 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func groupQualityBudgetTestAccount(id, groupID int64, normal bool) Account {
+	account := groupQualityRoutingTestAccount(id, groupID, 0, "insufficient")
+	account.Extra["openai_apikey_responses_websockets_v2_enabled"] = true
+	if !normal {
+		// Only an actual recovery trial can exhaust the validation allowance.
+		account.Extra["passive_quality"] = []any{map[string]any{"policy_id": float64(7), "scope": "model", "model": "public-model", "phase": "trial", "trial_ends_at": time.Now().Add(time.Hour).Format(time.RFC3339)}}
+	}
+	return account
+}
+
 func TestAPIKeyGroupFallback_QualityBudgetSelectionErrors(t *testing.T) {
 	for _, tt := range []struct {
 		name string
@@ -71,11 +81,8 @@ func TestAPIKeyGroupFallback_QualityBudgetPreservesResponseOwner(t *testing.T) {
 						FallbackGroup: &Group{ID: fallback, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true},
 					}
 					accounts := []Account{
-						groupQualityRoutingTestAccount(1, primary, 0, "insufficient"),
-						groupQualityRoutingTestAccount(2, fallback, 0, "insufficient"),
-					}
-					for i := range accounts {
-						accounts[i].Extra["openai_apikey_responses_websockets_v2_enabled"] = true
+						groupQualityBudgetTestAccount(1, primary, false),
+						groupQualityBudgetTestAccount(2, fallback, true),
 					}
 					gate := &groupQualityFallbackTestGate{normal: map[int64]bool{2: true}}
 					svc := groupQualityFallbackService(mode, accounts, gate)
@@ -125,7 +132,7 @@ func TestAPIKeyGroupFallback_PrimaryQualityBudgetExhausted(t *testing.T) {
 				wantErr          error
 			}{
 				{name: "budget exhausted switches group", fallbackAllowed: true, wantAccount: 2},
-				{name: "healthy primary wins", primaryAllowed: true, fallbackAllowed: true, wantAccount: 1},
+				{name: "unprotected primary wins", primaryAllowed: true, fallbackAllowed: true, wantAccount: 1},
 				{name: "primary recovery wins", recoveryAllowed: true, fallbackAllowed: true, wantAccount: 1},
 				{name: "both budgets exhausted", wantErr: ErrGroupQualityTrafficBudget},
 				{name: "no fallback configured", withoutFallback: true, fallbackAllowed: true, wantErr: ErrGroupQualityTrafficBudget},
@@ -145,11 +152,8 @@ func TestAPIKeyGroupFallback_PrimaryQualityBudgetExhausted(t *testing.T) {
 						key.FallbackGroup = nil
 					}
 					accounts := []Account{
-						groupQualityRoutingTestAccount(1, primary, 0, "insufficient"),
-						groupQualityRoutingTestAccount(2, fallback, 0, "insufficient"),
-					}
-					for i := range accounts {
-						accounts[i].Extra["openai_apikey_responses_websockets_v2_enabled"] = true
+						groupQualityBudgetTestAccount(1, primary, tt.primaryAllowed),
+						groupQualityBudgetTestAccount(2, fallback, tt.fallbackAllowed),
 					}
 					if tt.fallbackDisabled {
 						accounts[1].Status = StatusDisabled

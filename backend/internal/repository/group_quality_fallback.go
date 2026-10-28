@@ -136,27 +136,29 @@ func groupQualityFallbackCandidate(ctx context.Context, tx *sql.Tx, aid int64, m
 	return groupQualityAccountEligible(ctx, raw, model, true, active, matching)
 }
 
-func groupQualityFallbackHasVerifiedSupply(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, model string, now time.Time) (bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT s.data,to_jsonb(a) FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id
- JOIN accounts a ON a.id=s.account_id WHERE s.policy_id=$1 AND s.model_key=$2 AND s.data->>'phase'='healthy'
- AND a.deleted_at IS NULL AND a.status='active' AND a.schedulable
- AND NOT EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states capability WHERE capability.account_id=a.id AND capability.blocked AND ($2='' OR capability.model_key='' OR capability.model_key=$2))
- AND `+passiveMembership, p.ID, model)
+// Every unrestricted account is normal supply, including accounts with no
+// samples, pending confirmation or expired evidence. Trial windows are bounded
+// recovery capacity, so they cannot prevent emergency fallback when exhausted.
+func groupQualityFallbackHasNormalSupply(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, model string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT to_jsonb(a) FROM accounts a
+ WHERE a.deleted_at IS NULL AND a.status='active' AND a.schedulable
+ AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=$1)
+ AND NOT EXISTS(SELECT 1 FROM scheduled_test_protection_states h LEFT JOIN scheduled_test_definitions d ON d.id=h.test_definition_id
+ WHERE h.account_id=a.id AND h.blocked AND (h.model_key='' OR h.model_key=$2 OR d.output_kind='statistics'))
+ AND NOT EXISTS(SELECT 1 FROM scheduled_test_combination_states h WHERE h.account_id=a.id AND h.blocked AND (h.model_key='' OR h.model_key=$2 OR h.account_wide))
+ AND NOT EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states h WHERE h.account_id=a.id AND h.blocked AND (h.model_key='' OR h.model_key=$2))
+ AND NOT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id
+ WHERE s.account_id=a.id AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce'
+ AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+`
+ AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2))`, p.GroupIDs[0], model)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var stateRaw, accountRaw []byte
-		var state service.PassiveQualityState
-		if err = rows.Scan(&stateRaw, &accountRaw); err != nil {
+		var accountRaw []byte
+		if err = rows.Scan(&accountRaw); err != nil {
 			return false, err
-		}
-		if err = json.Unmarshal(stateRaw, &state); err != nil {
-			return false, err
-		}
-		if state.Model != model || !groupQualityStateVerified(p, state, now) {
-			continue
 		}
 		eligible, e := groupQualityAccountEligible(ctx, accountRaw, model, false, false, false)
 		if e != nil {

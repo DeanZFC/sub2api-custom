@@ -2,9 +2,9 @@ package service
 
 import "time"
 
-// This projection identifies managed targets and verified emergency-fallback
-// supply; it does not change normal candidate priority. The live group budget
-// and the existing hard account checks remain authoritative.
+// This projection identifies managed targets and fresh quality evidence; it
+// does not change normal candidate priority or turn missing samples into a hold.
+// The live recovery budget and hard account checks remain authoritative.
 // Policies use the public request model, before provider model mapping.
 func groupQualityRoutingState(account *Account, groupID *int64, model string) (verified, managed bool) {
 	if account == nil || groupID == nil || *groupID <= 0 || model == "" {

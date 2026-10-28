@@ -15,11 +15,10 @@
       </section>
       <div v-if="activeTab === 'records'" class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 p-4 dark:bg-dark-800"><p class="text-sm text-gray-500">{{ t('admin.tests.experience.recordsHint') }}</p><button class="btn btn-secondary btn-sm" @click="navigate('plans')">{{ t('admin.tests.experience.viewActiveResults') }}</button></div>
       <ChannelQualityOverview v-show="activeTab === 'overview'" ref="overview" :visible="activeTab === 'overview'" :groups="groups" :account-id="accountId" @navigate="navigate" />
-      <PassiveQualityManagementPanel v-if="passiveTab" ref="management" :groups="groups" :accounts="accounts" :target-policy-id="activeTab === 'group-targets' ? Number(route.query.policy_id) || undefined : undefined" :advanced-policy="activeTab === 'passive' && (!!route.query.policy_id || route.query.advanced === '1')" @navigate="navigate" />
+      <PassiveQualityManagementPanel v-if="passiveTab" ref="management" :groups="groups" :accounts="accounts" :target-policy-id="activeTab === 'group-targets' ? Number(route.query.policy_id) || undefined : undefined" @navigate="navigate" />
       <ActiveQualityPanel v-show="activeTab === 'plans' || activeTab === 'types'" ref="active" :tab="activeTab" @catalog="setCatalog" />
-      <PassiveQualityPanel v-if="activeTab === 'records'" ref="passive" :tab="activeTab" :groups="groups" :accounts="accounts" @tab="navigate" />
+      <PassiveQualityPanel v-if="activeTab === 'records'" ref="passive" @tab="navigate" />
       <ChannelQualityScoreSettings v-if="activeTab === 'scoring'" ref="scoring" />
-      <section v-if="activeTab === 'legacy'" class="space-y-4"><p class="text-sm text-gray-500">{{ t('admin.tests.experience.legacyHint') }}</p><PassiveQualityPanel ref="legacy" tab="passive" :integrated="true" :groups="groups" :accounts="accounts" @tab="navigate" /></section>
       <QualityOperationsPanel v-if="activeTab === 'operations'" ref="operations" :visible="true" :accounts="accounts" />
     </div>
   </AppLayout>
@@ -41,11 +40,9 @@ const { t } = useI18n()
 const route = useRoute(), router = useRouter()
 const tabs = [
   { key: 'scoring', label: 'admin.tests.experience.scoring' },
-  { key: 'legacy', label: 'admin.tests.experience.legacy' },
   { key: 'overview', label: 'admin.tests.quality.overview' },
   { key: 'group-targets', label: 'admin.tests.groupTargets.title' },
   { key: 'plans', label: 'admin.tests.quality.active' },
-  { key: 'passive', label: 'admin.tests.quality.passive' },
   { key: 'records', label: 'admin.tests.passive.records' },
   { key: 'types', label: 'admin.tests.quality.questionBank' },
   { key: 'operations', label: 'admin.tests.operations.title' },
@@ -56,13 +53,13 @@ const primaryTabs = [
   { key: 'records', target: 'records', label: 'admin.tests.experience.records' },
   { key: 'settings', target: 'scoring', label: 'admin.tests.experience.settings' },
 ]
-const settingsTabs = tabs.filter(tab => ['scoring', 'types', 'operations', 'overview', 'legacy'].includes(tab.key))
+const settingsTabs = tabs.filter(tab => ['scoring', 'types', 'operations', 'overview'].includes(tab.key))
 const activeTab = computed(() => {
-  if (route.query.tab === 'passive') return route.query.advanced === '1' || route.query.policy_id ? 'legacy' : 'group-targets'
+  if (route.query.tab === 'passive') return 'group-targets'
   return tabs.some(tab => tab.key === route.query.tab) ? String(route.query.tab) : 'group-targets'
 })
 const section = computed(() => settingsTabs.some(tab => tab.key === activeTab.value) ? 'settings' : activeTab.value)
-const passiveTab = computed(() => ['passive', 'group-targets'].includes(activeTab.value))
+const passiveTab = computed(() => activeTab.value === 'group-targets')
 const accountId = computed(() => Number(route.query.account_id) || undefined)
 const groups = ref<AdminGroup[]>([]), accounts = ref<AccountListItem[]>([])
 const active = ref<InstanceType<typeof ActiveQualityPanel> | null>(null)
@@ -70,18 +67,16 @@ const passive = ref<InstanceType<typeof PassiveQualityPanel> | null>(null)
 const overview = ref<InstanceType<typeof ChannelQualityOverview> | null>(null)
 const management = ref<InstanceType<typeof PassiveQualityManagementPanel> | null>(null)
 const scoring = ref<InstanceType<typeof ChannelQualityScoreSettings> | null>(null)
-const legacy = ref<InstanceType<typeof PassiveQualityPanel> | null>(null)
 const operations = ref<InstanceType<typeof QualityOperationsPanel> | null>(null)
 function setCatalog(g: AdminGroup[], a: AccountListItem[]) { groups.value = g; accounts.value = a }
-function navigate(tab: string, policy?: number, account?: number, phase?: string, advanced?: boolean) {
-  void router.replace({ query: { tab, ...(account ? { account_id: account } : {}), ...(policy ? tab === 'plans' ? { plan_id: policy } : { policy_id: policy } : {}), ...(tab === 'records' && phase ? { phase } : {}), ...(tab === 'passive' && advanced ? { advanced: '1' } : {}) } })
+function navigate(tab: string, policy?: number, account?: number, phase?: string) {
+  void router.replace({ query: { tab, ...(account ? { account_id: account } : {}), ...(policy ? tab === 'plans' ? { plan_id: policy } : { policy_id: policy } : {}), ...(tab === 'records' && phase ? { phase } : {}) } })
 }
 function refresh() {
   if (activeTab.value === 'overview') void overview.value?.refresh()
   else if (passiveTab.value) void management.value?.refresh()
   else if (activeTab.value === 'plans' || activeTab.value === 'types') void active.value?.refresh()
   else if (activeTab.value === 'scoring') void scoring.value?.refresh()
-  else if (activeTab.value === 'legacy') void legacy.value?.refresh()
   else if (activeTab.value === 'operations') void operations.value?.refresh()
   else void passive.value?.refresh()
 }

@@ -8,10 +8,10 @@
 import { ref } from 'vue'
 import type { AdminGroup, AccountListItem } from '@/types'
 import GroupQualityTargetsPanel from './GroupQualityTargetsPanel.vue'
-defineProps<{ groups: AdminGroup[]; accounts: AccountListItem[]; targetPolicyId?: number; advancedPolicy?: boolean }>()
-const emit = defineEmits<{ navigate: [tab: string, policy?: number, account?: number, phase?: string, advanced?: boolean] }>()
+defineProps<{ groups: AdminGroup[]; accounts: AccountListItem[]; targetPolicyId?: number }>()
+const emit = defineEmits<{ navigate: [tab: string, policy?: number, account?: number, phase?: string] }>()
 const targets = ref<InstanceType<typeof GroupQualityTargetsPanel> | null>(null)
-function navigate(tab: string, policy?: number, account?: number, phase?: string, advanced?: boolean) { emit('navigate', tab, policy, account, phase, advanced) }
+function navigate(tab: string, policy?: number, account?: number, phase?: string) { emit('navigate', tab, policy, account, phase) }
 async function refresh() { await targets.value?.refresh() }
 defineExpose({ refresh })
 </script>

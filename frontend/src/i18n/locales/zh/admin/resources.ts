@@ -369,11 +369,13 @@ export default {
                 "verification_requested": "已请求提前验证",
                 "waiting_for_success": "等待最新成功请求",
                 "policy_changed": "策略已修改，重新积累样本",
+                "custom_rule_retired": "旧自定义规则已移除",
                 "policy_deleted": "策略已删除"
         },
         "events": {
           "probe_deferred": "探测暂缓",
                 "policy_changed": "修改策略",
+                "custom_rule_retired": "旧自定义规则已移除",
                 "policy_deleted": "删除策略",
                 "scope_removed": "移出保护范围",
                 "verify": "请求验证",

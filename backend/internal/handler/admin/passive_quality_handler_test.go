@@ -111,27 +111,35 @@ func TestPassiveQualityAdminValidation(t *testing.T) {
 	}
 	require.Equal(t, 400, request("/policies", `{"enabled":true}`, http.MethodPost).Code)
 	require.Zero(t, repo.saved)
-	cfg := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Name: "policy", Model: "model", Enabled: true, Mode: "observe", Scope: "model", GroupIDs: []int64{8}, WindowSeconds: 600, MaxSamples: 100, MinSamples: 30, Confirmations: 2, NewSamples: 5, ErrorRate: service.PassiveQualityMetric{Enabled: true, Pause: 20, Recover: 5}, CooldownSeconds: 120, MaxCooldownSeconds: 3600, TrialSeconds: 300, TrialRequests: 50, TrialConcurrency: 1, RecoverySamples: 20}}
+	cfg := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", GroupIDs: []int64{8}, Enabled: true, Mode: "enforce", ErrorRate: service.PassiveQualityMetric{Enabled: true, Pause: 10, Recover: 5}}}
 	raw, err := json.Marshal(cfg)
-	require.NoError(t, err)
-	require.Equal(t, 200, request("/policies", string(raw), http.MethodPost).Code)
-	require.Equal(t, 1, repo.saved)
-	cfg.Model = " "
-	raw, err = json.Marshal(cfg)
 	require.NoError(t, err)
 	response := request("/policies", string(raw), http.MethodPost)
 	require.Equal(t, 200, response.Code)
-	require.Contains(t, response.Body.String(), `"model":""`)
-	require.Contains(t, response.Body.String(), `"scope":"account"`)
-	require.Equal(t, 2, repo.saved)
-	cfg.SchemaVersion, cfg.Scope = 2, ""
-	raw, err = json.Marshal(cfg)
-	require.NoError(t, err)
-	response = request("/policies", string(raw), http.MethodPost)
-	require.Equal(t, 200, response.Code)
 	require.Contains(t, response.Body.String(), `"scope":"model"`)
-	require.Contains(t, response.Body.String(), `"model":""`)
-	require.Equal(t, 3, repo.saved)
+	require.Equal(t, 1, repo.saved)
+	for _, purpose := range []string{"", "custom", "unknown"} {
+		for _, schema := range []int{0, 1, 2} {
+			retired := cfg
+			retired.Purpose, retired.SchemaVersion = purpose, schema
+			body, err := json.Marshal(retired)
+			require.NoError(t, err)
+			for method, path := range map[string]string{http.MethodPost: "/policies", http.MethodPut: "/policies/5"} {
+				response := request(path, string(body), method)
+				require.Equal(t, 400, response.Code)
+				require.Contains(t, response.Body.String(), "custom passive rules have been removed")
+			}
+		}
+	}
+	require.Equal(t, 1, repo.saved, "retired rules never reach persistence")
+	cacheTarget := cfg
+	cacheTarget.Purpose = "cache_target"
+	cacheTarget.ErrorRate = service.PassiveQualityMetric{}
+	cacheTarget.CacheRate = service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85}
+	body, err := json.Marshal(cacheTarget)
+	require.NoError(t, err)
+	require.Equal(t, 200, request("/policies", string(body), http.MethodPost).Code)
+	require.Equal(t, 2, repo.saved, "existing cache targets remain editable")
 	repo.conflict = true
 	require.Equal(t, 409, request("/policies/5", string(raw), http.MethodPut).Code)
 	for _, body := range []string{`{"action":"resume"}`, `{"action":"exempt","seconds":0}`, `{"action":"exempt","seconds":86401}`} {

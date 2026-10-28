@@ -369,11 +369,13 @@ export default {
                 "verification_requested": "Early verification requested",
                 "waiting_for_success": "Waiting for a recent success",
                 "policy_changed": "Policy changed; collecting new samples",
+                "custom_rule_retired": "Custom rule retired",
                 "policy_deleted": "Policy deleted"
         },
         "events": {
           "probe_deferred": "Probe deferred",
                 "policy_changed": "Policy edited",
+                "custom_rule_retired": "Custom rule retired",
                 "policy_deleted": "Policy deleted",
                 "scope_removed": "Target removed",
                 "verify": "Verification requested",

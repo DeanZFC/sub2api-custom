@@ -114,6 +114,48 @@ func TestGroupQualityFallbackExitsWhenHealthySupplyReturns(t *testing.T) {
 	}
 }
 
+func TestGroupQualityFallbackTreatsInsufficientSamplesAsNormalSupply(t *testing.T) {
+	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
+		for _, phase := range []string{"", "insufficient", "watching", "healthy"} {
+			for _, admit := range []bool{true, false} {
+				t.Run(mode+"/"+phase+"/"+map[bool]string{true: "normal", false: "stale-denial"}[admit], func(t *testing.T) {
+					resetOpenAIAdvancedSchedulerSettingCacheForTest()
+					defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+					groupID := int64(43)
+					accounts := []Account{groupQualityFallbackTestAccount(1, groupID, 0, true), groupQualityRoutingTestAccount(2, groupID, 100, phase)}
+					gate := &groupQualityFallbackTestGate{recovery: true, normal: map[int64]bool{2: admit}}
+					svc := groupQualityFallbackService(mode, accounts, gate)
+					ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "request", GroupID: groupID, Model: "public-model"})
+					selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "public-model", nil, OpenAIUpstreamTransportHTTPSSE, false)
+					if admit {
+						require.NoError(t, err)
+						require.Equal(t, int64(2), selection.Account.ID)
+						require.NotEqual(t, "group_quality_fallback", decision.Layer)
+						selection.ReleaseFunc()
+					} else {
+						require.ErrorIs(t, err, ErrGroupQualityTrafficBudget)
+						require.Nil(t, selection)
+					}
+					require.Empty(t, gate.calls, "insufficient or missing evidence must never trigger emergency selection")
+				})
+			}
+		}
+	}
+}
+
+func TestGroupQualityFallbackOpenTrialRemainsRecoveryCapacity(t *testing.T) {
+	groupID := int64(43)
+	account := groupQualityFallbackTestAccount(1, groupID, 0, false)
+	account.Extra["passive_quality"] = []any{map[string]any{"policy_id": float64(7), "scope": "model", "model": "public-model", "phase": "trial", "trial_ends_at": time.Now().Add(time.Hour).Format(time.RFC3339)}}
+	gate := &groupQualityFallbackTestGate{recovery: true}
+	svc := groupQualityFallbackService("legacy", []Account{account}, gate)
+	ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "request", GroupID: groupID, Model: "public-model"})
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "public-model", nil, OpenAIUpstreamTransportHTTPSSE, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection.groupQualityFallback, "exhausted trial budget still permits fallback when no normal account remains")
+	selection.ReleaseFunc()
+}
+
 func TestGroupQualityFallbackSpilloverPreservesConversationOwner(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		t.Run(mode, func(t *testing.T) {
@@ -155,13 +197,16 @@ func TestGroupQualityFallbackStillEnforcesProfitAndExactModel(t *testing.T) {
 	require.Equal(t, "quality_paused", groupQualityFallbackAccount(markerCtx, &account, "public-model").Status, "marker may only relax its exact account")
 }
 
-func TestGroupQualityFallbackHandlesBudgetDenialBeforeProjectionRefresh(t *testing.T) {
+func TestGroupQualityFallbackHandlesHoldsBeforeTargetProjectionRefresh(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		t.Run(mode, func(t *testing.T) {
 			resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			groupID := int64(43)
-			accounts := []Account{groupQualityRoutingTestAccount(1, groupID, 100, ""), groupQualityRoutingTestAccount(2, groupID, 0, "")}
+			accounts := []Account{groupQualityFallbackTestAccount(1, groupID, 100, false), groupQualityFallbackTestAccount(2, groupID, 0, true)}
+			for i := range accounts {
+				delete(accounts[i].Extra, "group_quality_targets")
+			}
 			gate := &groupQualityFallbackTestGate{recovery: true}
 			svc := groupQualityFallbackService(mode, accounts, gate)
 			ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "request", GroupID: groupID, Model: "public-model"})

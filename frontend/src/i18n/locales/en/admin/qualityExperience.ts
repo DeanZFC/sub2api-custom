@@ -1,5 +1,5 @@
 export default {
-  groupQuality: 'Group quality', capability: 'Capability checks', scoring: 'Scoring standard', legacy: 'Legacy custom rules', legacyHint: 'Group targets own their configured groups and replace overlapping legacy rules. Custom rules for other groups remain here; consolidated rules are retained for reference.', consolidated: 'Consolidated into group targets: {groups}',
+  groupQuality: 'Group quality', capability: 'Capability checks', scoring: 'Scoring standard',
   "loadedStates": "Loaded {loaded} of {total} states",
   "moreStates": "Load more states",
   "eventKind": "Event type",

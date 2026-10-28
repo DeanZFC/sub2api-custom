@@ -1,7 +1,8 @@
+import { defaultPassiveCacheProtection } from '@/test/fixtures/passiveQuality'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { describe, expect, it } from 'vitest'
-import { defaultPassiveCacheProtection, type PassiveCacheState, type PassiveCacheWindowEvidence } from '@/api/admin/passiveQuality'
+import { type PassiveCacheState, type PassiveCacheWindowEvidence } from '@/api/admin/passiveQuality'
 import resources from '@/i18n/locales/en/admin/resources'
 import PassiveCacheEvidence from '../PassiveCacheEvidence.vue'
 const window: PassiveCacheWindowEvidence = { total_samples: 50, reported_samples: 42, reusable_samples: 30, cold_samples: 7, unknown_samples: 5, missing_telemetry_samples: 8, cache_rate: 0, protection_rate: null, read_tokens: 0, input_tokens: 90000, eligible_read_tokens: 0, eligible_input_tokens: 0, sessions: 1, max_session_share_percent: 100, fresh: 0, latest: '', complete: true, window_seconds: 900, max_samples: 200, reasons: { account_switched: 3 } }

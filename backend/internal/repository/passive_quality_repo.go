@@ -59,24 +59,6 @@ func (r *passiveQualityRepository) SavePolicy(ctx context.Context, p *service.Pa
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(1937006961,1)`); err != nil {
 		return err
 	}
-	// A consolidation can touch several policies. Lock them before any account
-	// so sweeps retain their policy -> account lock order.
-	locked, err := tx.QueryContext(ctx, `SELECT id FROM passive_quality_policies ORDER BY id FOR UPDATE`)
-	if err != nil {
-		return err
-	}
-	for locked.Next() {
-		var id int64
-		if err = locked.Scan(&id); err != nil {
-			_ = locked.Close()
-			return err
-		}
-	}
-	err = locked.Err()
-	_ = locked.Close()
-	if err != nil {
-		return err
-	}
 	var count, platforms int
 	err = tx.QueryRowContext(ctx, `SELECT count(*),count(DISTINCT platform) FROM groups WHERE id=ANY($1) AND deleted_at IS NULL AND status='active' AND platform<>'composite'`, pq.Array(p.GroupIDs)).Scan(&count, &platforms)
 	if err != nil {
@@ -93,21 +75,9 @@ func (r *passiveQualityRepository) SavePolicy(ctx context.Context, p *service.Pa
 		if duplicate {
 			return fmt.Errorf("this group already has a quality target policy; edit the existing policy")
 		}
-		if err = r.consolidateGroupProtection(ctx, tx, p.GroupIDs[0]); err != nil {
-			return err
-		}
-	} else {
-		var overlap bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_policies p CROSS JOIN LATERAL jsonb_array_elements_text(p.config->'group_ids') g WHERE p.config->>'purpose' IN ('cache_target','group_quality_target') AND g::bigint=ANY($1))`, pq.Array(p.GroupIDs)).Scan(&overlap); err != nil {
-			return err
-		}
-		if overlap {
-			return fmt.Errorf("this group is managed by group quality targets; edit its existing target instead")
-		}
 	}
 	// Clients cannot reset decision identity or backdate the evidence boundary.
 	p.EvidenceStartedAt, p.EvaluationVersion = nil, 0
-	p.ConsolidatedGroupIDs = nil
 	if p.ID == 0 {
 		raw, marshalErr := json.Marshal(p.PassiveQualityConfig)
 		if marshalErr != nil {
@@ -125,7 +95,6 @@ func (r *passiveQualityRepository) SavePolicy(ctx context.Context, p *service.Pa
 		if loadErr != nil {
 			return loadErr
 		}
-		p.ConsolidatedGroupIDs = slices.Clone(old.ConsolidatedGroupIDs)
 		unchanged, metadataOnly := passivePolicyChange(old.PassiveQualityConfig, p.PassiveQualityConfig)
 		// A retry is safe even when the first successful response was lost.
 		if unchanged {
@@ -364,8 +333,8 @@ func reconcilePassiveAccount(ctx context.Context, tx sqlExecutor, aid int64) err
 	return enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &aid, nil, nil)
 }
 
-// Healthy target evidence is projected too, so production routing can prefer
-// verified supply before TopK. Admission always repeats this check in SQL.
+// Project target evidence for status reporting. Verification does not change
+// normal routing priority or turn missing samples into a quality hold.
 func reconcileGroupQualityTargets(ctx context.Context, tx sqlExecutor, aid int64) (bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT p.id,p.version,p.updated_at,p.config,s.data FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id
  WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce'
