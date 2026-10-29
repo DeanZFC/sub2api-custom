@@ -78,8 +78,11 @@ func (r *channelMonitorV2Repository) pruneChannelMonitorV2Retention(ctx context.
 	// During historical bootstrap, retain all 1m facts until the cursor reaches
 	// the oldest rollup boundary. Otherwise adjacent chunks would rebuild the
 	// same daily bucket from source rows already pruned by the prior chunk.
-	var backfillCursor time.Time
-	if err := tx.QueryRowContext(ctx, `SELECT backfill_cursor FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&backfillCursor); err == nil && backfillCursor.After(channelMonitorV2RetentionCutoff(now, channelMonitorV2RetentionMax)) {
+	bootstrap, err := channelMonitorV2BootstrapInProgress(ctx, tx, now)
+	if err != nil {
+		return err
+	}
+	if bootstrap {
 		return nil
 	}
 	for _, rule := range channelMonitorV2RetentionRules {
@@ -98,6 +101,18 @@ func (r *channelMonitorV2Repository) pruneChannelMonitorV2Retention(ctx context.
 		}
 	}
 	return nil
+}
+
+func channelMonitorV2BootstrapInProgress(ctx context.Context, tx *sql.Tx, now time.Time) (bool, error) {
+	var cursor sql.NullTime
+	err := tx.QueryRowContext(ctx, `SELECT backfill_cursor FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&cursor)
+	if err == sql.ErrNoRows {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load channel monitor v2 retention cursor: %w", err)
+	}
+	return !cursor.Valid || cursor.Time.After(channelMonitorV2RetentionCutoff(now, channelMonitorV2RetentionMax)), nil
 }
 
 func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, end time.Time) (err error) {
@@ -122,12 +137,9 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 		}
 	}()
 
-	// Idempotent window rewrite: drop existing facts/rollups in [start,end) then re-insert.
+	// Rewrite minute facts only. Rollups are replaced by their full bucket below;
+	// deleting them here can erase a daily bucket that the recent refresh skips.
 	for _, table := range []string{
-		"channel_monitor_v2_latency_histograms_rollup",
-		"channel_monitor_v2_error_metrics_rollup",
-		"channel_monitor_v2_user_metrics_rollup",
-		"channel_monitor_v2_metrics_rollup",
 		"channel_monitor_v2_latency_histograms_1m",
 		"channel_monitor_v2_error_metrics_1m",
 		"channel_monitor_v2_user_metrics_1m",
@@ -368,36 +380,43 @@ ON CONFLICT (id) DO UPDATE SET
 var channelMonitorV2FixedRollupSeconds = []int{300, 3600, 43200, 86400}
 
 func (r *channelMonitorV2Repository) recomputeFixedRollups(ctx context.Context, tx *sql.Tx, start, end time.Time) error {
+	now := time.Now().UTC().Truncate(time.Minute)
+	bootstrap, err := channelMonitorV2BootstrapInProgress(ctx, tx, now)
+	if err != nil {
+		return err
+	}
+	rollups := []struct {
+		table     string
+		query     string
+		retention time.Duration
+	}{
+		{"channel_monitor_v2_metrics_rollup", channelMonitorV2MetricsRollupSQL, channelMonitorV2RetentionMetrics1m},
+		{"channel_monitor_v2_user_metrics_rollup", channelMonitorV2UserMetricsRollupSQL, channelMonitorV2RetentionUser1m},
+		{"channel_monitor_v2_latency_histograms_rollup", channelMonitorV2HistogramRollupSQL, channelMonitorV2RetentionHistogram1m},
+		{"channel_monitor_v2_error_metrics_rollup", channelMonitorV2ErrorRollupSQL, channelMonitorV2RetentionError1m},
+	}
 	for _, seconds := range channelMonitorV2FixedRollupSeconds {
-		// Coarse buckets are immutable between boundaries during the normal
-		// trailing refresh. Historical backfills and boundary-crossing windows
-		// still rebuild them; this avoids repeatedly regrouping the full current
-		// day/user table every few minutes.
-		if seconds >= 43200 && sameFixedRollupBucket(start, end, seconds) {
+		intervalDuration := time.Duration(seconds) * time.Second
+		bucketStart := start.Truncate(intervalDuration)
+		// Avoid regrouping the open current day on every refresh. Closed historic
+		// buckets must be rebuilt even when a small backfill stays within one day.
+		if seconds >= 43200 && sameFixedRollupBucket(start, end, seconds) && bucketStart.Add(intervalDuration).After(now) {
 			continue
 		}
 		interval := fmt.Sprintf("%d seconds", seconds)
-		for _, table := range []string{
-			"channel_monitor_v2_latency_histograms_rollup",
-			"channel_monitor_v2_error_metrics_rollup",
-			"channel_monitor_v2_user_metrics_rollup",
-			"channel_monitor_v2_metrics_rollup",
-		} {
-			if _, err := tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2FixedRollupDeleteSQL, table), interval, seconds, start, end); err != nil {
+		for _, rollup := range rollups {
+			// Once bootstrap has completed, expired minute facts are intentionally
+			// pruned. A partial old replay cannot reconstruct their complete bucket;
+			// keep the retained history instead of replacing it with partial totals.
+			if !bootstrap && bucketStart.Before(channelMonitorV2RetentionCutoff(now, rollup.retention)) {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2FixedRollupDeleteSQL, rollup.table), interval, seconds, start, end); err != nil {
 				return err
 			}
-		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2MetricsRollupSQL, interval, seconds, start, end); err != nil {
-			return fmt.Errorf("roll up channel monitor v2 metrics %ds: %w", seconds, err)
-		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2UserMetricsRollupSQL, interval, seconds, start, end); err != nil {
-			return fmt.Errorf("roll up channel monitor v2 user metrics %ds: %w", seconds, err)
-		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2HistogramRollupSQL, interval, seconds, start, end); err != nil {
-			return fmt.Errorf("roll up channel monitor v2 histograms %ds: %w", seconds, err)
-		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2ErrorRollupSQL, interval, seconds, start, end); err != nil {
-			return fmt.Errorf("roll up channel monitor v2 errors %ds: %w", seconds, err)
+			if _, err := tx.ExecContext(ctx, rollup.query, interval, seconds, start, end); err != nil {
+				return fmt.Errorf("roll up channel monitor v2 %s %ds: %w", rollup.table, seconds, err)
+			}
 		}
 	}
 	return nil

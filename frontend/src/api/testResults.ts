@@ -1,8 +1,8 @@
 import { apiClient } from './client'
 import type { TestResult, TestVote, TestVoteResult } from '@/types'
 
-export async function list(limit = 3): Promise<TestResult[]> {
-  const { data } = await apiClient.get<TestResult[]>('/user/test-results', { params: { limit } })
+export async function list(limit = 3, recentHTML = 1): Promise<TestResult[]> {
+  const { data } = await apiClient.get<TestResult[]>('/user/test-results', { params: { limit, ...(recentHTML > 1 ? { recent_html: recentHTML } : {}) } })
   return data ?? []
 }
 

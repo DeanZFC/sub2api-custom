@@ -32,7 +32,7 @@ export default {
     },
     trendView: { label: 'Trend view', pulse: 'Channel cards', line: 'Line chart' },
     cards: {
-      title: 'Channel health', description: 'Passive health from real traffic · Hover for details',
+      title: 'Channel health', description: 'Totals cover the selected window; the last 20 requests are recent samples · Hover for details',
       passive: 'Passive health', availability: 'Availability',
       latestRequest: 'Latest request: {time}', past: 'Past', now: 'Latest',
       requestTime: 'Request time: {value}', requestTTFT: 'First token: {value}', requestDuration: 'Total duration: {value}',
@@ -83,7 +83,8 @@ export default {
       ttftP50: 'First token P50',
       durationP50: 'Duration P50',
       cacheRate: 'Cache rate',
-      cacheDetail: 'Read cache share',
+      cacheDetail: 'Full window · Input-token weighted',
+      cacheHint: 'Cache-read tokens ÷ all input tokens (including cache reads and writes) across the full window; this is not the average of request percentages.',
       successRate: 'Success rate',
       successRateValue: 'Success rate {value}',
       errorRateValue: 'Error rate {value}',

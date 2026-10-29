@@ -226,6 +226,7 @@ export default {
     currentScheduling: 'Account scheduling', schedulingActive: 'Active', schedulingPaused: 'Paused', failed: 'Failed', skipped: 'Skipped',
     currentModelScheduling: 'Selected model', modelSchedulingActive: 'Model available', modelSchedulingPaused: 'Model paused',
     expandPreview: 'Expand preview',
+    previewResultAt: 'Expand historical result from {time}',
     adminReview: {
       details: 'Review details',
       editDecision: 'Change decision',

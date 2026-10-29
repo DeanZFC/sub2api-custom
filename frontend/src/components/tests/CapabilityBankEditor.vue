@@ -7,7 +7,8 @@
     <div v-for="(q, index) in config.questions" :key="index" class="space-y-2 rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
       <div class="flex gap-2"><input v-model.trim="q.key" class="input min-w-0 flex-1" :placeholder="tr('questionKey')" maxlength="100" /><button type="button" class="btn btn-secondary btn-sm" @click="config.questions.splice(index, 1)">{{ t('common.delete') }}</button></div>
       <textarea v-model="q.prompt" class="input w-full" rows="3" :placeholder="tr('questionPrompt')" maxlength="8000" />
-      <div class="grid gap-2 sm:grid-cols-2"><input v-model="q.expected" class="input" :placeholder="tr('expected')" maxlength="2000" /><select v-model="q.match" class="input"><option value="exact">{{ tr('exact') }}</option><option value="number">{{ tr('number') }}</option></select></div>
+      <div class="grid gap-2 sm:grid-cols-2"><input v-if="q.match !== 'not_date'" v-model="q.expected" class="input" :placeholder="tr('expected')" maxlength="2000" data-capability-expected /><select v-model="q.match" class="input" data-capability-match><option value="exact">{{ tr('exact') }}</option><option value="number">{{ tr('number') }}</option><option value="not_date">{{ tr('notDate') }}</option></select></div>
+      <p v-if="q.match === 'not_date'" class="text-sm leading-6 text-gray-500" data-not-date-rule>{{ tr('notDateRule') }}</p>
     </div>
     <button type="button" class="btn btn-secondary btn-sm" :disabled="config.questions.length >= 50" @click="config.questions.push({ key: `question-${Date.now()}`, prompt: '', expected: '', match: 'exact' })">{{ tr('add') }}</button>
     <p v-if="!validCapabilityConfig(config)" role="alert" class="text-sm text-amber-600">{{ tr('invalid') }}</p>

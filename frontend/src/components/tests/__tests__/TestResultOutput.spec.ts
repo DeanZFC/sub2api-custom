@@ -28,6 +28,10 @@ describe('test result output', () => {
     await wrapper.setProps({ compact: true })
     expect(wrapper.find('[data-auto-review-criteria]').exists()).toBe(false)
     expect(wrapper.get('[data-auto-review-reason]').text()).toBe('Motion failed')
+    await wrapper.setProps({ thumbnail: true })
+    expect(wrapper.find('[data-auto-review-verdict]').exists()).toBe(false)
+    expect(wrapper.find('[data-auto-review-reason]').exists()).toBe(false)
+    expect(wrapper.get('iframe').attributes('sandbox')).toBe('allow-scripts')
     wrapper.unmount()
   })
 

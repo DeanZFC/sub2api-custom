@@ -869,11 +869,14 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to parse response: %s", err.Error()))
 	}
 
-	text := ""
-	if len(result.Content) > 0 {
-		text = result.Content[0].Text
+	var textContent strings.Builder
+	for _, block := range result.Content {
+		_, _ = textContent.WriteString(block.Text)
 	}
-	if text == "" {
+	text := textContent.String()
+	if text == "" && !c.GetBool(accountTestBackgroundKey) {
+		// The interactive probe may show a placeholder, but scheduled checks
+		// must evaluate only text actually returned by the model.
 		text = "(empty response)"
 	}
 
@@ -1387,7 +1390,7 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 	s.prepareGrokTestSSE(c)
 
 	var payloadBytes []byte
-	if scheduledTestContentInstructions(ctx) != "" {
+	if strings.TrimSpace(prompt) != "" || scheduledTestContentInstructions(ctx) != "" {
 		payload := createOpenAITestPayload(testModelID, false, prompt)
 		applyScheduledTestContentInstructions(ctx, payload, APIProtocolResponses)
 		applyAccountTestOutputTokenLimit(ctx, payload, "max_output_tokens")

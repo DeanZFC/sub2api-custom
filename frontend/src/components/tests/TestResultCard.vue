@@ -25,7 +25,28 @@
         <strong class="mt-1 block break-all text-3xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ test.latest.output_numeric ?? '-' }}</strong>
       </figure>
       <figure v-else :key="test.latest.id" class="min-w-0" data-result-gallery>
-        <TestResultOutput :result="test.latest" compact :max-preview-height="320" />
+        <div class="grid min-w-0 gap-3" :class="previousPreviews.length ? 'grid-cols-1 sm:grid-cols-[minmax(0,1fr)_6rem] xl:grid-cols-[minmax(0,1fr)_8rem]' : ''">
+          <div class="min-w-0" data-latest-preview>
+            <TestResultOutput :result="test.latest" compact :max-preview-height="320" />
+          </div>
+          <div v-if="previousPreviews.length" class="grid min-w-0 grid-cols-2 content-start gap-2 sm:grid-cols-1" data-recent-previews>
+            <button
+              v-for="result in previousPreviews"
+              :key="result.id"
+              type="button"
+              class="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 p-1 text-left transition-colors hover:border-primary-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 dark:border-dark-700 dark:bg-dark-800"
+              :aria-label="t('tests.previewResultAt', { time: formatDate(resultTime(result)) })"
+              :title="t('tests.previewResultAt', { time: formatDate(resultTime(result)) })"
+              :data-previous-preview="result.id"
+              @click="$emit('preview', result)"
+            >
+              <div class="pointer-events-none min-w-0" aria-hidden="true" inert>
+                <TestResultOutput :result="result" compact thumbnail :max-preview-height="104" />
+              </div>
+              <time :datetime="resultTime(result)" class="mt-1 block truncate px-0.5 text-[10px] tabular-nums text-gray-500 dark:text-gray-400">{{ formatDate(resultTime(result)) }}</time>
+            </button>
+          </div>
+        </div>
       </figure>
       <AdminTestDecision v-if="review" :review="review" compact :show-pass-rate="false" @decided="$emit('decided')" />
     </div>
@@ -76,6 +97,10 @@ defineEmits<{
 
 const { t } = useI18n()
 const test = computed(() => props.test)
+const previousPreviews = computed(() => test.value.latest.output_kind === 'html'
+  ? test.value.results.filter(result => result.id !== test.value.latest.id && ['success', 'passed'].includes(result.status)
+    && result.output_kind === 'html' && result.output_html?.trim()).slice(0, 2)
+  : [])
 const historyAnchor = computed(() => test.value.results.find(result => ['success', 'passed', 'failed', 'error'].includes(result.status)))
 const statusClass = (result: TestResult) => props.statusClass(result)
 const statusLabel = (result: TestResult) => props.statusLabel(result)

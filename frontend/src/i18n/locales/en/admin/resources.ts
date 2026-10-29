@@ -13,7 +13,7 @@ export default {
       multiModelProtectionHint: 'With quality protection enabled, a failing model pauses only that model on the account. The whole account pauses only when all monitored models are paused. Each model recovers independently after meeting the configured conditions.',
       autoReview: {
         "showAllResults": "All results",
-        "filterHint": "Automatic reviews show only unresolved results needing attention. Clear pass and fail verdicts need no manual action. Show all results to audit or override them; other tests remain visible.",
+        "filterHint": "All results are shown by default, including artwork after automatic or manual review. Uncheck All results to show only automatic reviews awaiting manual attention; other tests remain visible.",
         "title": "Pelican automatic review",
         "enableRule": "Automatic visual review with manual exception review",
         "ruleHint": "An independent judge examines several animation frames for the pelican, bicycle and cycling motion. Clear verdicts enter the pass-rate window; uncertain results await review. Administrator overrides remain available.",
@@ -231,6 +231,8 @@ export default {
         "expected": "Reference answer",
         "exact": "Exact text",
         "number": "Integer comparison",
+        "notDate": "No yyyy-MM-dd date",
+        "notDateRule": "Fail if any yyyy-MM-dd date-shaped text appears in the response; otherwise, pass a nonempty response. Only the format is checked, not calendar validity.",
         "add": "Add custom question",
         "invalid": "Check counts, unique identifiers and reference answers. A custom-only bank needs enough distinct questions.",
         "result": "Executed {tested}, passed {passed}; at most {total} questions, requiring {required} passes.",

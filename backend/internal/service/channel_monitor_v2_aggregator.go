@@ -31,8 +31,9 @@ const (
 	channelMonitorV2MaxChunkFar    = 6 * time.Hour
 
 	// Soft adaptive timing: grow only when a recompute is clearly cheap.
-	channelMonitorV2GrowChunkUnder = 15 * time.Second
-	channelMonitorV2MaxBackoff     = 10 * time.Minute
+	channelMonitorV2GrowChunkUnder  = 15 * time.Second
+	channelMonitorV2MaxBackoff      = 10 * time.Minute
+	channelMonitorV2BackfillTimeout = 20 * time.Second
 )
 
 // channelMonitorRuntimeSubscriber is the optional settings hook that lets the
@@ -57,8 +58,12 @@ type ChannelMonitorV2Aggregator struct {
 	backfillAt       time.Time
 	backfillChunk    time.Duration
 	backfillFailures int
-	// nextWaitFloor is applied after runOnce when failures require backoff.
-	nextWaitFloor time.Duration
+	// Historical retries must never delay the real-time refresh loop.
+	backfillRetryAt time.Time
+	// recentThrough tracks continuous forward progress, including across long
+	// pauses. Replay the recent UI window once per process to repair old holes.
+	recentThrough time.Time
+	recentSeeded  bool
 	// cursorLoaded is true after the first successful watermark read (or init).
 	cursorLoaded bool
 	// hasAggregated is true once any recompute in this process (or durable data) exists.
@@ -170,16 +175,15 @@ func (s *ChannelMonitorV2Aggregator) loop() {
 			}
 		}
 		cancel()
+		started := time.Now()
 		s.runOnce()
-		// Hard gate: never compress bootstrap to multi-Hz ticks. Soft gate: on
-		// repeated failures raise the wait floor (exponential backoff).
-		s.mu.Lock()
-		floor := s.nextWaitFloor
-		s.mu.Unlock()
-		if floor > interval {
-			interval = floor
+		// Account for query time instead of adding it to every refresh period.
+		// Historical failure backoff is enforced only inside the historical phase.
+		waitFor := interval - time.Since(started)
+		if waitFor < time.Second {
+			waitFor = time.Second
 		}
-		if !s.wait(interval) {
+		if !s.wait(waitFor) {
 			return
 		}
 	}
@@ -214,6 +218,10 @@ func (s *ChannelMonitorV2Aggregator) wait(interval time.Duration) bool {
 }
 
 func (s *ChannelMonitorV2Aggregator) runOnce() {
+	s.runOnceAt(time.Now().UTC().Truncate(time.Minute))
+}
+
+func (s *ChannelMonitorV2Aggregator) runOnceAt(now time.Time) {
 	s.mu.Lock()
 	parent := s.ctx
 	s.mu.Unlock()
@@ -230,7 +238,7 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 		defer release()
 	}
 
-	now := time.Now().UTC().Truncate(time.Minute)
+	now = now.UTC().Truncate(time.Minute)
 	if err := s.ensureCursor(ctx, now); err != nil {
 		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] load watermark failed: %v", err)
 		return
@@ -250,13 +258,21 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 			s.recordBackfillFailure(now, cursor)
 			return
 		}
+		s.recordRecentSuccess(now)
 		s.recordBackfillSuccess(start, time.Since(started), now)
 		return
 	}
 
-	// Always refresh the trailing overlap so late usage/error writes land in 1m facts.
-	if err := s.repo.RecomputeRange(ctx, now.Add(-channelMonitorV2RecentOverlap), now); err != nil {
+	// Keep the overlap for late writes, but never jump over a gap when a run
+	// fails, the process restarts, or the database is unavailable for >10m.
+	start, recentEnd := s.recentRange(now)
+	if err := s.repo.RecomputeRange(ctx, start, recentEnd); err != nil {
 		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] overlap aggregation failed: %v", err)
+		return
+	}
+	s.recordRecentSuccess(recentEnd)
+	if recentEnd.Before(now) {
+		// Catch up in bounded ranges before spending time on older history.
 		return
 	}
 
@@ -269,7 +285,11 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	end := cursor
 	s.mu.Lock()
 	chunk := s.backfillChunk
+	retryAt := s.backfillRetryAt
 	s.mu.Unlock()
+	if now.Before(retryAt) {
+		return
+	}
 	if chunk <= 0 {
 		chunk = channelMonitorV2BackfillChunkInit
 	}
@@ -280,15 +300,7 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	if chunk < channelMonitorV2MinBackfillChunk {
 		chunk = channelMonitorV2MinBackfillChunk
 	}
-	start := end.Add(-chunk)
-	// Once bootstrap reaches historical data, keep chunks on day boundaries so
-	// daily rollups never depend on 1m rows from two independently pruned chunks.
-	if end.Before(now.Add(-7 * 24 * time.Hour)) {
-		aligned := end.Add(-chunk).Truncate(24 * time.Hour)
-		if aligned.Before(end) {
-			start = aligned
-		}
-	}
+	start = end.Add(-chunk)
 	if start.Before(retentionCutoff) {
 		start = retentionCutoff
 	}
@@ -296,12 +308,48 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 		return
 	}
 	started := time.Now()
-	if err := s.repo.RecomputeRange(ctx, start, end); err != nil {
+	backfillCtx, cancelBackfill := context.WithTimeout(ctx, channelMonitorV2BackfillTimeout)
+	defer cancelBackfill()
+	if err := s.repo.RecomputeRange(backfillCtx, start, end); err != nil {
 		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] backfill failed %s..%s: %v", start, end, err)
 		s.recordBackfillFailure(now, end)
 		return
 	}
 	s.recordBackfillSuccess(start, time.Since(started), now)
+}
+
+func (s *ChannelMonitorV2Aggregator) recentRange(now time.Time) (time.Time, time.Time) {
+	s.mu.Lock()
+	through, seeded := s.recentThrough, s.recentSeeded
+	s.mu.Unlock()
+	start := now.Add(-channelMonitorV2RecentOverlap)
+	if !seeded {
+		start = now.Add(-channelMonitorV2BootstrapFirst)
+	}
+	// Revisit the previous batch's tail while catching up as well, so writes
+	// arriving just after that batch's snapshot are not left behind.
+	if !through.IsZero() {
+		if overlapStart := through.Add(-channelMonitorV2RecentOverlap); overlapStart.Before(start) {
+			start = overlapStart
+		}
+	}
+	if cutoff := now.Add(-channelMonitorV2RetentionMax); start.Before(cutoff) {
+		start = cutoff
+	}
+	end := now
+	if limit := start.Add(channelMonitorV2BootstrapFirst); limit.Before(end) {
+		end = limit
+	}
+	return start, end
+}
+
+func (s *ChannelMonitorV2Aggregator) recordRecentSuccess(end time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if end.After(s.recentThrough) {
+		s.recentThrough = end
+	}
+	s.recentSeeded = true
 }
 
 // channelMonitorV2MaxChunkForDepth returns the hard ceiling for a historical
@@ -324,7 +372,7 @@ func (s *ChannelMonitorV2Aggregator) recordBackfillSuccess(coveredFrom time.Time
 	s.backfillAt = coveredFrom
 	s.hasAggregated = true
 	s.backfillFailures = 0
-	s.nextWaitFloor = 0
+	s.backfillRetryAt = time.Time{}
 	maxChunk := channelMonitorV2MaxChunkForDepth(now, coveredFrom)
 	// Grow slowly only when the recompute was clearly cheap.
 	if elapsed > 0 && elapsed < channelMonitorV2GrowChunkUnder {
@@ -367,15 +415,15 @@ func (s *ChannelMonitorV2Aggregator) recordBackfillFailure(now, end time.Time) {
 	if s.backfillChunk > maxChunk {
 		s.backfillChunk = maxChunk
 	}
-	// Exponential backoff on wait floor: 1m, 2m, 4m… capped at 10m.
-	floor := time.Minute << uint(s.backfillFailures-1)
+	// Retry only historical work after 1m, 2m, 4m… capped at 10m.
+	floor := time.Minute << uint(min(s.backfillFailures-1, 4))
 	if floor > channelMonitorV2MaxBackoff {
 		floor = channelMonitorV2MaxBackoff
 	}
 	if floor < time.Minute {
 		floor = time.Minute
 	}
-	s.nextWaitFloor = floor
+	s.backfillRetryAt = now.Add(floor)
 }
 
 // ensureCursor restores durable backfill_cursor after process restart so progress
@@ -397,6 +445,7 @@ func (s *ChannelMonitorV2Aggregator) ensureCursor(ctx context.Context, now time.
 		return nil
 	}
 	if wm != nil {
+		s.recentThrough = wm.DataThrough.UTC().Truncate(time.Minute)
 		if !wm.BackfillCursor.IsZero() {
 			s.backfillAt = wm.BackfillCursor.UTC().Truncate(time.Minute)
 		}

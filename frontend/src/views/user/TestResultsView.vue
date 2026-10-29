@@ -13,9 +13,15 @@
       </div>
 
       <div v-if="displayResults.length" class="flex flex-wrap items-end justify-between gap-3 border-b border-gray-200 dark:border-dark-700">
-        <nav class="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" :aria-label="t('tests.groupFilter')">
+        <nav class="flex w-full min-w-0 gap-1 overflow-x-auto sm:w-auto sm:flex-1" role="tablist" :aria-label="t('tests.groupFilter')">
           <button v-for="group in availableGroups" :id="tabId(group.key)" :key="group.key" type="button" role="tab" :aria-selected="activeGroup === group.key" aria-controls="quality-results" :tabindex="activeGroup === group.key ? 0 : -1" class="shrink-0 border-b-2 px-4 py-3 text-base font-semibold transition-colors" :class="activeGroup === group.key ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'" @click="activeGroup = group.key" @keydown="onGroupKeydown($event, group.key)">{{ group.name }}</button>
         </nav>
+        <label v-if="availableModels.length" class="flex w-full min-w-0 max-w-full items-center gap-2 pb-2 text-sm text-gray-500 dark:text-gray-400 sm:w-auto">
+          <span class="shrink-0">{{ t('tests.modelFilter') }}</span>
+          <select v-model="selectedModel" :aria-label="t('tests.modelFilter')" class="input min-w-0 max-w-full flex-1 text-sm sm:max-w-xs" data-model-selector>
+            <option v-for="model in availableModels" :key="model" :value="model">{{ model || '—' }}</option>
+          </select>
+        </label>
       </div>
 
       <div v-if="votesLoadError" class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200" role="alert" data-votes-error>{{ votesLoadError }}<button type="button" class="ml-3 underline" :disabled="loading" @click="load(true)">{{ t('common.retry') }}</button></div>
@@ -33,10 +39,7 @@
               <div class="min-w-0" :data-account-score="account.key.startsWith('account:') ? '' : undefined" data-account-model-controls>
                 <ChannelQualityScoreEvidence v-if="account.key.startsWith('account:')" :score="account.qualityScore" compact />
                 <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400" data-score-scope>
-                  <select v-if="account.models.length > 1" :value="account.selectedModel" :aria-label="`${account.name} · ${t('tests.modelFilter')}`" class="min-w-0 max-w-full cursor-pointer rounded border border-gray-200 bg-transparent py-1 pl-1.5 pr-6 text-xs text-gray-700 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-dark-700 dark:text-gray-300" data-account-model-selector @change="selectAccountModel(account.key, ($event.target as HTMLSelectElement).value)">
-                    <option v-for="model in account.models" :key="model" :value="model">{{ model || '-' }}</option>
-                  </select>
-                  <span v-else class="min-w-0 break-all">{{ account.selectedModel || '—' }}</span>
+                  <span class="min-w-0 break-all">{{ selectedModel || '—' }}</span>
                   <span v-if="account.key.startsWith('account:')">{{ t('tests.scoreScopeSource') }}</span>
                 </div>
               </div>
@@ -148,7 +151,7 @@ const reviewError = ref('')
 const reviewIndex = computed(() => new Map(auth.isAdmin ? adminReviews.value.map(review => [review.result.id, review]) : []))
 const reviewFor = (result: TestResult) => reviewIndex.value.get(result.id)
 const resultState = (result: TestResult) => testResultState(result, reviewFor(result)?.verdict)
-const showAllReviewResults = ref(false)
+const showAllReviewResults = ref(true)
 const hasAutomaticReviews = computed(() => auth.isAdmin && regularResults.value.some(result => !!result.execution_info?.auto_review))
 const reviewNeedsAttention = (result: TestResult) => {
   if (!auth.isAdmin || showAllReviewResults.value) return true
@@ -188,7 +191,7 @@ const displayResults = computed(() => {
   return [...records.values()]
 })
 const activeGroup = ref('')
-const selectedAccountModels = ref<Record<string, string>>({})
+const selectedModel = ref('')
 const historyTarget = ref<TestSeries | null>(null)
 const previewTarget = ref<TestResult | null>(null)
 watch(displayResults, results => {
@@ -201,7 +204,7 @@ const historyBeforeId = ref<number>()
 let adminHistoryLimit = 20
 let historyRequest = 0
 const resultsPanel = ref<HTMLElement | null>(null)
-watch(activeGroup, () => {
+watch([activeGroup, selectedModel], () => {
   if (resultsPanel.value) resultsPanel.value.scrollTop = 0
 }, { flush: 'post' })
 
@@ -231,6 +234,26 @@ const availableGroups = computed(() => {
 watch(availableGroups, groups => {
   if (!groups.some(group => group.key === activeGroup.value)) activeGroup.value = groups[0]?.key || ''
 }, { immediate: true })
+const availableModels = computed(() => {
+  const models = new Map<string, number>()
+  const seenSeries = new Set<string>()
+  for (const result of sortResults(displayResults.value)) {
+    if (groupKey(result) !== activeGroup.value) continue
+    const seriesKey = `${targetKey(result)}:${testKey(result)}`
+    if (seenSeries.has(seriesKey)) continue
+    seenSeries.add(seriesKey)
+    // Historical previews must not reopen a series whose latest result was reviewed.
+    if (!reviewNeedsAttention(reviewFor(result)?.result || result)) continue
+    const model = result.model_id || ''
+    models.set(model, Math.min(models.get(model) ?? Number.MAX_SAFE_INTEGER, orderValue(result.model_order)))
+  }
+  return [...models].sort(([a, aOrder], [b, bOrder]) => aOrder - bOrder || a.localeCompare(b)).map(([model]) => model)
+})
+watch(availableModels, models => {
+  // Voting temporarily clears the projections before reloading. Keep the
+  // selection through that gap, and only fall back against a populated catalog.
+  if (models.length && !models.includes(selectedModel.value)) selectedModel.value = models[0]
+}, { immediate: true })
 const projectedVotes = computed(() => {
   const records = new Map(regularResults.value.map(result => [result.id, result]))
   return visibleVoteResults.value.map(item => {
@@ -241,14 +264,9 @@ const projectedVotes = computed(() => {
     } } : item
   })
 })
-const filteredVotes = computed(() => projectedVotes.value.filter(item => reviewNeedsAttention(reviewFor(item.result)?.result || item.result) && groupKey(item.result) === activeGroup.value))
+const filteredVotes = computed(() => projectedVotes.value.filter(item => reviewNeedsAttention(reviewFor(item.result)?.result || item.result)
+  && groupKey(item.result) === activeGroup.value && (item.result.model_id || '') === selectedModel.value))
 const filteredResults = computed(() => sortResults(regularResults.value.filter(result => groupKey(result) === activeGroup.value)))
-const accountSelectionKey = (key: string) => `${activeGroup.value}:${key}`
-const selectAccountModel = (key: string, model: string) => {
-  selectedAccountModels.value[accountSelectionKey(key)] = model
-  closeHistory()
-  previewTarget.value = null
-}
 const schedulingState = (result: TestResult) => result.account_schedulable
   ?? (isHiddenPausedAccount(result) ? false : undefined)
 const resultRank = (result: TestResult) => {
@@ -275,13 +293,7 @@ const accountResults = computed(() => {
   }
   return [...accounts.values()].map(account => {
     const visibleTests = [...account.tests.values()].filter(test => reviewNeedsAttention(test.latest))
-    const modelResults = visibleTests.map(test => test.latest).sort((a, b) => orderValue(a.plan_order) - orderValue(b.plan_order)
-      || orderValue(a.plan_id) - orderValue(b.plan_id) || orderValue(a.model_order) - orderValue(b.model_order)
-      || (a.model_id || '').localeCompare(b.model_id || ''))
-    const models = [...new Set(modelResults.map(result => result.model_id || ''))]
-    const previousModel = selectedAccountModels.value[accountSelectionKey(account.key)]
-    const selectedModel = previousModel != null && models.includes(previousModel) ? previousModel : models[0] || ''
-    const tests = visibleTests.filter(test => (test.latest.model_id || '') === selectedModel)
+    const tests = visibleTests.filter(test => (test.latest.model_id || '') === selectedModel.value)
       .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
     const states = visibleTests.map(test => schedulingState(test.latest))
     const schedulable = states.includes(false) ? false : states.includes(true) ? true : undefined
@@ -289,7 +301,7 @@ const accountResults = computed(() => {
     const selectedModelSchedulable = modelStates.includes(false) ? false : modelStates.includes(true) ? true : undefined
     const qualityScore = tests.find(test => test.latest.quality_score)?.latest.quality_score ?? undefined
     const rank = schedulable === false ? 3 : Math.max(...tests.map(test => resultRank(test.latest)))
-    return { ...account, models, selectedModel, tests, schedulable, selectedModelSchedulable, qualityScore, rank }
+    return { ...account, tests, schedulable, selectedModelSchedulable, qualityScore, rank }
   }).filter(account => account.tests.length > 0).sort((a, b) => a.rank - b.rank || a.order - b.order)
 })
 
@@ -303,6 +315,10 @@ const closeHistory = () => {
   historyError.value = ''
   historyLoading.value = false
 }
+watch([activeGroup, selectedModel], () => {
+  closeHistory()
+  previewTarget.value = null
+})
 const loadHistory = async () => {
   const anchor = historyTarget.value && historyAnchor(historyTarget.value)
   if (!anchor || historyLoading.value) return
@@ -424,7 +440,7 @@ const load = (force = false): Promise<void> => {
   const revision = ++dataRevision
   const administrator = auth.isAdmin
   const request = Promise.allSettled([
-    testResultsAPI.list(3),
+    testResultsAPI.list(3, 3),
     testResultsAPI.votes(),
     administrator ? listReviews() : Promise.resolve<TestAdminReview[]>([]),
   ]).then(([results, votes, reviews]) => {

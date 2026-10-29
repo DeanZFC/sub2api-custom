@@ -451,6 +451,23 @@ func (s *ScheduledTestService) ListVisibleResults(ctx context.Context, userID in
 	return results, nil
 }
 
+// ListVisibleResultsWithRecentHTML includes a bounded artwork history while
+// retaining the ordinary list's current-execution anchors and public fields.
+func (s *ScheduledTestService) ListVisibleResultsWithRecentHTML(ctx context.Context, userID int64, total int) ([]*ScheduledTestResult, error) {
+	repo, ok := s.resultRepo.(interface {
+		ListVisibleWithRecentHTML(context.Context, int64, int) ([]*ScheduledTestResult, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("recent test artwork unavailable")
+	}
+	results, err := repo.ListVisibleWithRecentHTML(ctx, userID, total)
+	if err != nil {
+		return nil, err
+	}
+	normalizePublicTestResults(results)
+	return results, nil
+}
+
 // ListVisibleGroupResults projects existing checks to every authorized current group.
 func (s *ScheduledTestService) ListVisibleGroupResults(ctx context.Context, userID int64) ([]*ScheduledTestResult, error) {
 	repo, ok := s.resultRepo.(interface {

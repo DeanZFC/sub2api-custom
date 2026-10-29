@@ -35,7 +35,7 @@
             </header>
             <dl class="my-3 grid grid-cols-2 gap-2">
               <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">
-                <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.cacheRate')">{{ t('channelMonitorV2.metrics.cacheRate') }}</dt>
+                <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.cacheHint')">{{ t('channelMonitorV2.metrics.cacheRate') }}</dt>
                 <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl">{{ formatMonitorCacheRate(row.metrics) }}</dd>
               </div>
               <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">

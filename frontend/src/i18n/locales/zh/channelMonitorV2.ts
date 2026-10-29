@@ -32,7 +32,7 @@ export default {
     },
     trendView: { label: '趋势视图', pulse: '渠道卡片', line: '折线图' },
     cards: {
-      title: '渠道健康', description: '基于真实调用的被动健康 · 悬停色块查看详情',
+      title: '渠道健康', description: '汇总覆盖所选窗口，近 20 次仅为近期样本 · 悬停色块查看详情',
       passive: '被动健康', availability: '可用率',
       latestRequest: '最近请求：{time}', past: '过去', now: '最近',
       requestTime: '请求时间：{value}', requestTTFT: '首字：{value}', requestDuration: '总耗时：{value}',
@@ -83,7 +83,8 @@ export default {
       ttftP50: '首 Token P50',
       durationP50: '请求时长 P50',
       cacheRate: '缓存率',
-      cacheDetail: '读缓存占比',
+      cacheDetail: '整个窗口 · 输入 Token 加权',
+      cacheHint: '整个统计窗口的缓存读取 Token ÷ 全部输入 Token（含缓存读取与写入）；不是逐请求百分比的平均值。',
       successRate: '成功率',
       successRateValue: '成功率 {value}',
       errorRateValue: '错误率 {value}',

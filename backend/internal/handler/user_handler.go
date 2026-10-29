@@ -50,6 +50,13 @@ func (h *UserHandler) ListTestResults(c *gin.Context) {
 	var err error
 	if c.Query("group_view") == "all" {
 		rows, err = h.scheduledTestSvc.ListVisibleGroupResults(c.Request.Context(), subject.UserID)
+	} else if raw, provided := c.GetQuery("recent_html"); provided {
+		total, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || total < 1 || total > 5 {
+			response.BadRequest(c, "recent_html must be between 1 and 5")
+			return
+		}
+		rows, err = h.scheduledTestSvc.ListVisibleResultsWithRecentHTML(c.Request.Context(), subject.UserID, total)
 	} else {
 		rows, err = h.scheduledTestSvc.ListVisibleResults(c.Request.Context(), subject.UserID, limit)
 	}

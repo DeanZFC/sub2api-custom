@@ -125,7 +125,7 @@ func TestScheduledContentInstructionsOnGrokPreserveConnectivityProbe(t *testing.
 	require.EqualValues(t, 32768, gjson.GetBytes(body, "max_output_tokens").Int())
 	require.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String())
 
-	result, err = svc.RunTestBackgroundWithPromptAndReasoning(context.Background(), account.ID, "grok-4.5", "pelican", "")
+	result, err = svc.RunTestBackgroundWithPromptAndReasoning(context.Background(), account.ID, "grok-4.5", "", "")
 	require.NoError(t, err)
 	require.Equal(t, "success", result.Status, result.ErrorMessage)
 	require.Len(t, upstream.requests, 2)
