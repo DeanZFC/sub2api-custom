@@ -9,7 +9,7 @@ const types: TestType[] = [
   { id: 1, name: 'Model consistency', key: 'model', output_kind: 'model_check', prompt: '', enabled: true },
   { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: 'Count', enabled: true },
   { id: 3, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw', enabled: true },
-  { id: 4, name: 'Statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true },
+  { id: 4, name: 'Text', key: 'text', output_kind: 'text', prompt: '', enabled: true },
 ]
 const groups = [{ id: 8, name: 'A' }, { id: 9, name: 'B' }] as AdminGroup[]
 const leaf = (id = 1): TestCombinationCondition => ({ operator: 'test', test_definition_id: id, verdict: 'pass' })
@@ -99,78 +99,8 @@ describe('combined quality rules', () => {
     wrapper.unmount()
   })
 
-  it('keeps cache recovery settings and independent pause/resume explicit in combined mode', async () => {
-    const config = combined()
-    const statistics = config.rules[3]
-    statistics.thresholds = [{ metric: 'cache_rate', operator: 'lt', value: 80 }]
-    statistics.on_pass = { scheduling: 'resume', group_mode: 'assign', group_ids: [8] }
-    statistics.on_fail = { scheduling: 'pause', group_mode: 'assign', group_ids: [9] }
-    statistics.recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 80 }
-    const wrapper = mountEditor(config)
-    expect(wrapper.find('[data-independent-recovery]').exists()).toBe(true)
-    expect(wrapper.find('[data-recovery-cooldown]').exists()).toBe(true)
-    await wrapper.get('[data-recovery-cooldown]').setValue(600)
-    expect(wrapper.props('modelValue').rules[3].on_pass).toEqual(statistics.on_pass)
-    expect(wrapper.props('modelValue').rules[3].on_fail).toEqual(statistics.on_fail)
-    expect(statistics.recovery.cooldown_seconds).toBe(300)
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
-    wrapper.unmount()
-  })
 
-  it('rejects a combined pause that would prevent its referenced cache recovery trial', async () => {
-    const config = combined()
-    config.rules[3].thresholds = [{ metric: 'cache_rate', operator: 'lt', value: 80 }]
-    config.rules[3].recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 80 }
-    config.combinations![0].condition.conditions![1].conditions!.push(leaf(4))
-    config.combinations![0].action.scheduling = 'pause'
-    expect(validTestProtection(config, types, groups)).toBe(false)
-    const wrapper = mountEditor(config)
-    expect(wrapper.find('[data-combination-recovery-conflict]').exists()).toBe(true)
-    await wrapper.get('[data-action-scheduling]').setValue('keep')
-    expect(wrapper.find('[data-combination-recovery-conflict]').exists()).toBe(false)
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
-    await wrapper.get('[data-action-scheduling]').setValue('resume')
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
-    await wrapper.get('[data-action-scheduling]').setValue('pause')
-    await wrapper.get('[data-recovery-enabled]').setValue(false)
-    expect(wrapper.find('[data-combination-recovery-conflict]').exists()).toBe(false)
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
-    wrapper.unmount()
-  })
 
-  it('rejects a candy-only pause when a separate resume rule waits for cache recovery', async () => {
-    const config = combined()
-    config.rules[3].thresholds = [{ metric: 'cache_rate', operator: 'lt', value: 80 }]
-    config.rules[3].recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 80 }
-    config.combinations = [
-      { id: 'pause-candy', name: 'Pause when candy fails', priority: 1,
-        condition: { operator: 'test', test_definition_id: 2, verdict: 'fail' },
-        action: { scheduling: 'pause', group_mode: 'keep' } },
-      { id: 'resume-healthy', name: 'Resume after candy and cache pass', priority: 1,
-        condition: { operator: 'all', conditions: [leaf(2), { operator: 'any', conditions: [leaf(4)] }] },
-        action: { scheduling: 'resume', group_mode: 'keep' } },
-    ]
-    expect(validTestProtection(config, types, groups)).toBe(false)
-    const wrapper = mountEditor(config)
-    expect(wrapper.get('[data-combination-rule="pause-candy"]').find('[data-combination-recovery-conflict]').exists()).toBe(false)
-    expect(wrapper.get('[data-combination-rule="resume-healthy"]').find('[data-combination-recovery-conflict]').exists()).toBe(true)
-    await wrapper.get('[data-combination-rule="pause-candy"] [data-action-scheduling]').setValue('keep')
-    await wrapper.get('[data-combination-rule="pause-candy"] [data-action-group-mode]').setValue('assign')
-    await wrapper.get('[data-combination-rule="pause-candy"] [data-action-group="9"]').setValue(true)
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
-    await wrapper.get('[data-combination-rule="pause-candy"] [data-action-scheduling]').setValue('pause')
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(false)
-    const resume = wrapper.get('[data-combination-rule="resume-healthy"]')
-    await resume.findAll('[data-condition-test]')[1].setValue('1')
-    expect(wrapper.find('[data-combination-recovery-conflict]').exists()).toBe(false)
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
-    await resume.findAll('[data-condition-test]')[1].setValue('4')
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(false)
-    await wrapper.get('[data-recovery-enabled]').setValue(false)
-    expect(wrapper.find('[data-combination-recovery-conflict]').exists()).toBe(false)
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
-    wrapper.unmount()
-  })
 
   it('deep copies nested conditions and actions when editing or copying a strategy', () => {
     const original = combined()
@@ -220,14 +150,4 @@ describe('combined quality rules', () => {
     expect(validTestProtection(config, types, groups)).toBe(false)
   })
 
-  it('ignores dormant per-test routing fields while still validating enabled cache protection', () => {
-    const config = combined()
-    config.rules[0].priority = -1
-    config.rules[1].required_pass = true
-    config.rules[1].vote = { enabled: true, reject_above: 3, pass_at_least: 3 }
-    config.rules[0].on_pass = { scheduling: 'keep', group_mode: 'assign', group_ids: [99] }
-    expect(validTestProtection(config, types, groups)).toBe(true)
-    config.rules[3].recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 80 }
-    expect(validTestProtection(config, types, groups)).toBe(false)
-  })
 })

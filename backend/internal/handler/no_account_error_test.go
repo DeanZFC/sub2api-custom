@@ -322,3 +322,13 @@ func TestGPT55RetirementEmptyListingDoesNotUseDefaults(t *testing.T) {
 	require.Empty(t, modelListingSource(service.PlatformOpenAI, []string{}, []string{"gpt-5.5"}))
 	require.Equal(t, []string{"gpt-5.5"}, modelListingSource(service.PlatformOpenAI, nil, []string{"gpt-5.5"}))
 }
+
+func TestStrictFailoverSelectionErrorClassification(t *testing.T) {
+	fallback := noAccountErrorClassification{Status: 404, ModelNotFound: true}
+	owner := classifySelectionFailureError(service.ErrStrictFailoverOwnerBound, fallback)
+	require.Equal(t, 409, owner.Status)
+	require.Equal(t, "strict_failover_owner_bound", owner.ErrType)
+	unknown := classifySelectionFailureError(service.ErrStrictFailoverUnconfirmed, fallback)
+	require.Equal(t, 503, unknown.Status)
+	require.Equal(t, "strict_failover_unconfirmed", unknown.ErrType)
+}

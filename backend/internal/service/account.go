@@ -22,23 +22,21 @@ import (
 )
 
 type Account struct {
-	qualitySchedulingAdjusted bool
-	qualityConcurrencyLimit   int
-	ID                        int64
-	Name                      string
-	Notes                     *string
-	Platform                  string
-	Type                      string
-	Credentials               map[string]any
-	Extra                     map[string]any
-	ProxyID                   *int64
-	ProxyIDs                  []int64 // ordered proxy pool; empty means legacy single proxy
-	Proxies                   []*Proxy
-	ProxyPoolChanged          bool  `json:"-"` // explicit admin edit; persist atomically with the account
-	SelectedProxyID           int64 `json:"-"` // request-local route, never persisted in a scheduler snapshot
-	ProxyFallbackOriginID     *int64
-	ProxyFallbackOriginName   *string // 仅展示用
-	Concurrency               int
+	ID                      int64
+	Name                    string
+	Notes                   *string
+	Platform                string
+	Type                    string
+	Credentials             map[string]any
+	Extra                   map[string]any
+	ProxyID                 *int64
+	ProxyIDs                []int64 // ordered proxy pool; empty means legacy single proxy
+	Proxies                 []*Proxy
+	ProxyPoolChanged        bool  `json:"-"` // explicit admin edit; persist atomically with the account
+	SelectedProxyID         int64 `json:"-"` // request-local route, never persisted in a scheduler snapshot
+	ProxyFallbackOriginID   *int64
+	ProxyFallbackOriginName *string // 仅展示用
+	Concurrency             int
 	// RateLimit429RetryCount 是已废弃的兼容字段。账号级透明 429 重试已关闭，
 	// 保留该字段仅用于读取旧数据库/调度缓存，当前不会影响请求行为。
 	RateLimit429RetryCount *int
@@ -204,7 +202,7 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
-	if !a.IsActive() || !a.Schedulable || a.PassiveQualityBlocked("") {
+	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
 	now := time.Now()

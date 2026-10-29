@@ -99,7 +99,6 @@ func TestScheduledTestReviewJudgeWireCarriesImagesAndUsesQualityBudget(t *testin
 				require.Positive(t, tokens)
 				require.True(t, automatic)
 				require.NotEqual(t, "measured-account-session", session)
-				require.Equal(t, "regular", QualityProbePurpose(ctx))
 				return &QualityProbeReservation{ID: 1, AccountID: id}, nil
 			}}
 			var requestPayload map[string]any
@@ -110,7 +109,7 @@ func TestScheduledTestReviewJudgeWireCarriesImagesAndUsesQualityBudget(t *testin
 				require.NoError(t, json.NewDecoder(body).Decode(&requestPayload))
 			}}
 			testSvc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, cfg: &config.Config{}, qualityOperations: ops}
-			ctx := context.WithValue(WithQualityRecoveryProbe(context.Background()), qualityRunKey{}, "measured-account-session")
+			ctx := context.WithValue(context.Background(), qualityRunKey{}, "measured-account-session")
 			verdict, err := NewScheduledTestReviewJudge(testSvc, repo).Judge(ctx, 42, "judge-model", reviewTestFrames(t))
 			require.NoError(t, err)
 			require.Equal(t, "pass", verdict.Verdict)

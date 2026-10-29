@@ -254,7 +254,6 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
-	capturePassiveQualityCacheHTTPRequest(c, account, req)
 	return req, body, nil
 }
 

@@ -86,7 +86,7 @@ func TestLockAndMergeAccountPreservesQualityAndManualSchedulingState(t *testing.
 	}
 }
 
-func TestPreserveQualityTrialAcrossStaleAccountWrites(t *testing.T) {
+func TestRetiredQualityTrialCannotReturnThroughStaleAccountWrites(t *testing.T) {
 	for _, tt := range []struct {
 		name           string
 		currentStatus  string
@@ -112,8 +112,17 @@ func TestPreserveQualityTrialAcrossStaleAccountWrites(t *testing.T) {
 			preserveLockedAccountSchedulingState(account, accountSchedulingState{status: tt.currentStatus, schedulable: true}, currentExtra, incomingExtra)
 			require.Equal(t, tt.currentStatus, account.Status)
 			_, hasTrial := incomingExtra["quality_protection_trial"]
-			require.Equal(t, tt.currentTrial, hasTrial)
+			require.False(t, hasTrial)
 			require.Equal(t, "kept", incomingExtra["unrelated"])
 		})
 	}
+}
+
+func TestAccountWriteDropsRetiredPassiveMetadata(t *testing.T) {
+	extra := map[string]any{"passive_quality": []any{"old hold"}, "group_quality_targets": []any{"old target"}, "unrelated": "kept"}
+	account := &service.Account{Status: service.StatusActive, Schedulable: true, Extra: extra}
+	preserveLockedAccountSchedulingState(account, accountSchedulingState{status: service.StatusActive, schedulable: true}, extra, extra)
+	require.NotContains(t, extra, "passive_quality")
+	require.NotContains(t, extra, "group_quality_targets")
+	require.Equal(t, "kept", extra["unrelated"])
 }

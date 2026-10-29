@@ -12,7 +12,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 27 // v27: digest-only credential storage.
+const apiKeyAuthSnapshotVersion = 28 // v28: strict failover group routing configuration.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -384,6 +384,7 @@ func apiKeyAuthGroupSnapshotFromGroup(group *Group) *APIKeyAuthGroupSnapshot {
 		DefaultMappedModel:              group.DefaultMappedModel,
 		MessagesDispatchModelConfig:     group.MessagesDispatchModelConfig,
 		ModelAllowlist:                  group.ModelAllowlist,
+		StrictFailover:                  CloneStrictFailoverConfig(group.StrictFailover),
 		RPMLimit:                        group.RPMLimit,
 		UserConcurrencyLimit:            group.UserConcurrencyLimit,
 		MaxReasoningEffort:              group.MaxReasoningEffort,
@@ -456,6 +457,7 @@ func apiKeyAuthGroupFromSnapshot(snapshot *APIKeyAuthGroupSnapshot) *Group {
 		DefaultMappedModel:              snapshot.DefaultMappedModel,
 		MessagesDispatchModelConfig:     snapshot.MessagesDispatchModelConfig,
 		ModelAllowlist:                  snapshot.ModelAllowlist,
+		StrictFailover:                  CloneStrictFailoverConfig(snapshot.StrictFailover),
 		RPMLimit:                        snapshot.RPMLimit,
 		UserConcurrencyLimit:            snapshot.UserConcurrencyLimit,
 		MaxReasoningEffort:              snapshot.MaxReasoningEffort,
@@ -572,6 +574,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelAllowlist:                  apiKey.Group.ModelAllowlist,
 			CodexModelsManifestConfig:       apiKey.Group.CodexModelsManifestConfig,
+			StrictFailover:                  CloneStrictFailoverConfig(apiKey.Group.StrictFailover),
 			RPMLimit:                        apiKey.Group.RPMLimit,
 			UserConcurrencyLimit:            apiKey.Group.UserConcurrencyLimit,
 			MaxReasoningEffort:              apiKey.Group.MaxReasoningEffort,
@@ -690,6 +693,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelAllowlist:                  snapshot.Group.ModelAllowlist,
 			CodexModelsManifestConfig:       snapshot.Group.CodexModelsManifestConfig,
+			StrictFailover:                  CloneStrictFailoverConfig(snapshot.Group.StrictFailover),
 			RPMLimit:                        snapshot.Group.RPMLimit,
 			UserConcurrencyLimit:            snapshot.Group.UserConcurrencyLimit,
 			MaxReasoningEffort:              snapshot.Group.MaxReasoningEffort,

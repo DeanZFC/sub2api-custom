@@ -220,6 +220,9 @@ func (Group) Fields() []ent.Field {
 			Comment("模型路由配置：模型模式 -> 优先账号ID列表"),
 
 		// 模型路由开关 (added by migration 041)
+		field.JSON("strict_failover", domain.StrictFailoverConfig{}).
+			Default(domain.StrictFailoverConfig{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.Bool("model_routing_enabled").
 			Default(false).
 			Comment("是否启用模型路由配置"),

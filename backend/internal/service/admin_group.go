@@ -400,9 +400,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		normalizeCreateGroupInputForSimpleMode(input)
-	if input != nil && input.UserConcurrencyLimit < 0 {
-		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_USER_CONCURRENCY_LIMIT", "user_concurrency_limit must be non-negative")
-	}
+		if input != nil && input.UserConcurrencyLimit < 0 {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_USER_CONCURRENCY_LIMIT", "user_concurrency_limit must be non-negative")
+		}
 	}
 	if input.RateMultiplier <= 0 {
 		return nil, errors.New("rate_multiplier must be > 0")
@@ -413,6 +413,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
+	if input.StrictFailover.Enabled || len(input.StrictFailover.Tiers) > 0 {
+		return nil, invalidStrictFailover("configure strict failover after creating and binding group accounts")
+	}
 	// 固定账号 manifest 配置：账号绑定发生在创建之后，创建时无法校验成员关系，
 	// 拒绝开启并在创建后的编辑里配置。
 	if normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig).Enabled {
@@ -1041,6 +1044,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.CodexModelsManifestConfig != nil {
 		group.CodexModelsManifestConfig = *input.CodexModelsManifestConfig
+	}
+	if input.StrictFailover != nil {
+		if err := s.validateStrictFailover(ctx, id, *input.StrictFailover); err != nil {
+			return nil, err
+		}
+		group.StrictFailover = CloneStrictFailoverConfig(*input.StrictFailover)
 	}
 	if input.RPMLimit != nil {
 		group.RPMLimit = *input.RPMLimit

@@ -22,18 +22,10 @@ func TestScheduledTestExclusionsSkipAllChecksAndRetries(t *testing.T) {
 		}
 		return &Account{ID: id, Extra: map[string]any{"synthetic_ui_test": true}}, nil
 	}}
-	var statisticsCalls atomic.Int32
-	repo.collect = func(_ context.Context, filter ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error) {
-		if filter.AccountID == nil || *filter.AccountID != 13 {
-			excludedCalls.Add(1)
-		}
-		statisticsCalls.Add(1)
-		return &ScheduledTestStatistics{TotalRequests: 10, SuccessRequests: 10}, nil
-	}
 	runner := newSnapshotRunner(repo, accounts)
 	plan := scheduledTestExecutionPlan()
 	plan.AccountID, plan.GroupID, plan.TargetMode = nil, scheduledTestPtrInt64(8), "all_accounts"
-	plan.TestDefinitionIDs = []int64{1, 2, 3}
+	plan.TestDefinitionIDs = []int64{1, 2}
 	plan.ExcludedAccountIDs = []int64{12}
 	runner.RunPlanNow(context.Background(), plan)
 	close(repo.updated)
@@ -44,7 +36,6 @@ func TestScheduledTestExclusionsSkipAllChecksAndRetries(t *testing.T) {
 	require.Equal(t, map[int64]bool{13: true}, repo.frozenMembers)
 	require.Zero(t, excludedCalls.Load())
 	require.Positive(t, includedCalls.Load())
-	require.EqualValues(t, 1, statisticsCalls.Load())
 	previous := &ScheduledTestResult{ID: 100, PlanID: plan.ID, AccountID: scheduledTestPtrInt64(12), Status: "failed", RunID: repo.latestRun}
 	_, err := runner.RetryAccount(context.Background(), plan, previous)
 	require.ErrorContains(t, err, "not enabled for detection")

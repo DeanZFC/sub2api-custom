@@ -1169,6 +1169,24 @@ export default {
           duplicate: 'This entry already exists'
         }
       },
+      strictFailover: {
+        title: "Strict primary / backup",
+        hint: "Use account tiers in order. Advance only when every account in the current tier is explicitly unavailable. Busy slots, queues, low scores and unknown state never trigger fallback. Unlisted accounts receive no traffic.",
+        enable: "Enable strict failover",
+        tier: "Priority tier {tier}",
+        add: "Add backup tier",
+        remove: "Remove tier",
+        account: "Search accounts in this group",
+        removeAccount: "Remove account",
+        empty: "Every tier needs at least one unique account. Maximum 10 tiers and 1000 accounts.",
+        loading: "Loading accounts…",
+        loadError: "Could not load accounts. Please retry.",
+        retry: "Retry",
+        moveUp: "Move up",
+        moveDown: "Move down",
+        recovery: "New requests return to the primary tier after recovery. Non-movable continuations must restart with full context.",
+        noResults: "No matching accounts",
+      },
       codexModelsManifest: {
         title: 'Pinned Accounts for Model Lists',
         hint: 'When enabled, ordinary model lists and Codex Model Manifest are discovered from the pinned accounts first, then merged and filtered using account mappings and the group model list. Rate-limited or overloaded pinned accounts are still used.',

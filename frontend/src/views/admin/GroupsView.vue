@@ -3140,6 +3140,8 @@
         </div>
 
         <!-- 固定账号获取 Codex Model Manifest（仅 openai 平台，仅编辑对话框） -->
+        <StrictFailoverFields v-if="editingGroup" ref="editStrictFailoverRef" :group-id="editingGroup.id" v-model="editStrictFailover" />
+
         <CodexManifestAccountsField
           v-if="editForm.platform === 'openai' && editingGroup"
           ref="editCodexManifestRef"
@@ -4298,6 +4300,7 @@ import { adminAPI } from "@/api/admin";
 import type {
   AdminGroup,
   CodexModelsManifestConfig,
+  StrictFailoverConfig,
   CompositeModelRoute,
   CompositeModelRouteInput,
   CompositeRouteDecision,
@@ -4317,6 +4320,7 @@ import TablePageLayout from "@/components/layout/TablePageLayout.vue";
 import DataTable from "@/components/common/DataTable.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import Toggle from "@/components/common/Toggle.vue";
+import StrictFailoverFields from "@/components/admin/group/StrictFailoverFields.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -4928,6 +4932,8 @@ const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
   fallback_to_scheduler: false,
 });
 const editCodexManifestConfig = ref<CodexModelsManifestConfig>(createCodexManifestDefaults());
+const editStrictFailover = ref<StrictFailoverConfig>({ enabled: false, tiers: [] });
+const editStrictFailoverRef = ref<{ validate: () => boolean } | null>(null);
 const editCodexManifestAccountNames = ref<Record<number, string>>({});
 const modelAllowlistCandidatesTracker = createModelAllowlistCandidatesTracker();
 const createModelAllowlistSelectedCount = computed(
@@ -6178,6 +6184,7 @@ const handleEdit = async (group: AdminGroup) => {
   );
   resetModelAllowlistState(editModelAllowlistState, group.model_allowlist);
   // 固定账号 manifest 配置：回显配置并异步解析已存账号名称（失败显示 #<id>）
+  editStrictFailover.value = { enabled: group.strict_failover?.enabled ?? false, tiers: (group.strict_failover?.tiers ?? []).map(tier => [...tier]) };
   const savedCodexManifestConfig =
     group.codex_models_manifest_config ?? createCodexManifestDefaults();
   editCodexManifestConfig.value = {
@@ -6246,12 +6253,14 @@ const closeEditModal = () => {
   editForm.allow_live = false;
   resetModelAllowlistState(editModelAllowlistState);
   editCodexManifestConfig.value = createCodexManifestDefaults();
+  editStrictFailover.value = { enabled: false, tiers: [] };
   editCodexManifestAccountNames.value = {};
   editCodexManifestRef.value?.resetValidation?.();
 };
 
 const handleUpdateGroup = async () => {
   if (!editingGroup.value) return;
+  if (editStrictFailoverRef.value && !editStrictFailoverRef.value.validate()) return;
   if (!editForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
@@ -6325,6 +6334,7 @@ const handleUpdateGroup = async () => {
         editModelRoutingRules.value,
       ),
       model_allowlist: buildModelAllowlistConfig(editModelAllowlistState),
+      strict_failover: { enabled: editStrictFailover.value.enabled, tiers: editStrictFailover.value.tiers.map(tier => [...tier]) },
       // 非 openai 平台提交关闭状态，与后端归一化一致
       codex_models_manifest_config:
         editForm.platform === "openai"

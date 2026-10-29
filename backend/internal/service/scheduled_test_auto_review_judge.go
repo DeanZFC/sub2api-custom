@@ -122,8 +122,6 @@ func (j *scheduledTestReviewJudge) Judge(ctx context.Context, accountID int64, m
 	// Each independent assessment reserves and settles its own normal quality
 	// probe. It cannot inherit the measured account's run/session identity.
 	ctx = context.WithValue(ctx, qualityRunKey{}, uuid.NewString())
-	ctx = context.WithValue(ctx, qualityProbePurposeKey{}, "regular")
-	ctx = context.WithValue(ctx, passiveQualityProbeKey{}, false)
 	ctx = context.WithValue(ctx, scheduledTestAutomaticRunKey{}, true)
 	ctx = withAccountTestMaxOutputTokens(ctx, 2048)
 	result, err := j.test.RunTestBackgroundWithPromptAndReasoning(ctx, accountID, strings.TrimSpace(model), prompt, "low")

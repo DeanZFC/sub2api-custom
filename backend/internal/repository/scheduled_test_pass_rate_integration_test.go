@@ -244,8 +244,12 @@ func TestScheduledTestPassRateIntegration(t *testing.T) {
 			want  bool
 		}{{"model-a", false}, {"model-b", true}, {"", false}} {
 			ctx := context.WithValue(f.ctx, ctxkey.Model, test.model)
-			allowed, err := repo.AcquireCacheRecoveryRequest(ctx, 62)
-			require.NoError(t, err)
+			allowed, err := repo.CheckAccountAdmission(ctx, 62)
+			if test.want {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, service.ErrAccountQualityHeld)
+			}
 			require.Equal(t, test.want, allowed, test.model)
 		}
 	})
@@ -301,7 +305,7 @@ func TestScheduledTestPassRateIntegration(t *testing.T) {
 				require.Zero(t, holds)
 				require.NoError(t, f.db.QueryRowContext(f.ctx, `SELECT extra ? 'active_pass_rate_holds' FROM accounts WHERE id=62`).Scan(&projection))
 				require.False(t, projection)
-				allowed, err := (&accountRepository{sql: f.db}).AcquireCacheRecoveryRequest(context.WithValue(f.ctx, ctxkey.Model, "model-a"), 62)
+				allowed, err := (&accountRepository{sql: f.db}).CheckAccountAdmission(context.WithValue(f.ctx, ctxkey.Model, "model-a"), 62)
 				require.NoError(t, err)
 				require.True(t, allowed)
 			})
@@ -318,8 +322,8 @@ func TestScheduledTestPassRateIntegration(t *testing.T) {
 		f.plan, err = f.plans.Update(f.ctx, f.plan)
 		require.NoError(t, err)
 		require.True(t, f.summary("model-a").Blocked)
-		allowed, err := (&accountRepository{sql: f.db}).AcquireCacheRecoveryRequest(context.WithValue(f.ctx, ctxkey.Model, "model-a"), 62)
-		require.NoError(t, err)
+		allowed, err := (&accountRepository{sql: f.db}).CheckAccountAdmission(context.WithValue(f.ctx, ctxkey.Model, "model-a"), 62)
+		require.ErrorIs(t, err, service.ErrAccountQualityHeld)
 		require.False(t, allowed)
 	})
 	t.Run("an in-flight result cannot be assigned to a revised test definition", func(t *testing.T) {
@@ -348,11 +352,11 @@ func TestScheduledTestPassRateIntegration(t *testing.T) {
 		require.NoError(t, f.plans.Delete(f.ctx, f.plan.ID))
 		ctx := context.WithValue(f.ctx, ctxkey.Model, "model-a")
 		repo := &accountRepository{sql: f.db}
-		allowed, err := repo.AcquireCacheRecoveryRequest(ctx, 62)
-		require.NoError(t, err)
+		allowed, err := repo.CheckAccountAdmission(ctx, 62)
+		require.ErrorIs(t, err, service.ErrAccountQualityHeld)
 		require.False(t, allowed, "the remaining plan still owns its model hold")
 		require.NoError(t, f.plans.Delete(f.ctx, first.ID))
-		allowed, err = repo.AcquireCacheRecoveryRequest(ctx, 62)
+		allowed, err = repo.CheckAccountAdmission(ctx, 62)
 		require.NoError(t, err)
 		require.True(t, allowed)
 	})

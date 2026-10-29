@@ -58,7 +58,10 @@ func ValidateScheduledTestDefinitionInput(d *ScheduledTestDefinition) error {
 	if d.Name == "" || len([]rune(d.Name)) > 200 {
 		return fmt.Errorf("name is required and must be at most 200 characters")
 	}
-	if d.Prompt == "" && d.OutputKind != "statistics" {
+	if d.OutputKind == "statistics" {
+		return fmt.Errorf("statistics tests have been retired; select an active capability test")
+	}
+	if d.Prompt == "" {
 		return fmt.Errorf("prompt is required")
 	}
 	if d.OutputKind == "" {
@@ -307,7 +310,17 @@ func (s *ScheduledTestService) ListDefinitions(ctx context.Context, enabledOnly 
 	if s.definitionRepo == nil {
 		return nil, fmt.Errorf("test definitions unavailable")
 	}
-	return s.definitionRepo.List(ctx, enabledOnly)
+	definitions, err := s.definitionRepo.List(ctx, enabledOnly)
+	if err != nil {
+		return nil, err
+	}
+	active := make([]*ScheduledTestDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		if definition != nil && strings.TrimSpace(strings.ToLower(definition.OutputKind)) != "statistics" {
+			active = append(active, definition)
+		}
+	}
+	return active, nil
 }
 func (s *ScheduledTestService) GetDefinition(ctx context.Context, id int64) (*ScheduledTestDefinition, error) {
 	if s.definitionRepo == nil {
@@ -403,6 +416,9 @@ func (s *ScheduledTestService) validateDefinitionForPlan(ctx context.Context, pl
 		d, err := s.definitionRepo.GetByID(ctx, id)
 		if err != nil || d == nil {
 			return fmt.Errorf("test definition %d not found", id)
+		}
+		if strings.ToLower(strings.TrimSpace(d.OutputKind)) == "statistics" {
+			return fmt.Errorf("statistics tests have been retired")
 		}
 		hasEnabled = hasEnabled || d.Enabled
 		if plan.Protection.Enabled {

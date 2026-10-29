@@ -993,11 +993,6 @@ func prepareCodexFingerprintTestIDs(c *gin.Context, account *Account) *codexFing
 	headers := make(http.Header)
 	headers.Set("User-Agent", resolveCodexOutboundIdentity("").userAgent)
 	headers.Set("session-id", uuid.NewString())
-	if c.Request != nil {
-		if session := passiveRecoverySession(c.Request.Context()); session != "" {
-			headers.Set("session-id", session)
-		}
-	}
 	ids := resolveCodexFingerprintIDsFromRequest(account, headers)
 	stageCodexFingerprintIDs(c, ids)
 	return ids

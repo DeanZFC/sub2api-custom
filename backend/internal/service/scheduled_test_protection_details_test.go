@@ -1,22 +1,11 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
-
-type protectionDetailsRepoStub struct {
-	ScheduledTestResultRepository
-	sources []ScheduledTestProtectionHoldSource
-}
-
-func (r protectionDetailsRepoStub) ListProtectionHolds(context.Context, int64) ([]ScheduledTestProtectionHoldSource, error) {
-	return r.sources, nil
-}
 
 func TestProtectionDetailsRetainsHitButNeverReusesPreviousRoundEvidence(t *testing.T) {
 	now := time.Now()
@@ -48,30 +37,6 @@ func TestProtectionDetailsRetainsHitButNeverReusesPreviousRoundEvidence(t *testi
 	require.True(t, hold.PriorRound)
 	require.Equal(t, "fail", hold.Rules[0].CurrentMatch)
 	require.Equal(t, source.Reason, hold.Reason)
-}
-
-func TestProtectionDetailsNormalizesStatisticsAndPreservesThresholdSemantics(t *testing.T) {
-	now := time.Now()
-	snapshot := ScheduledTestStatistics{WindowStart: now.Add(-time.Hour), WindowEnd: now, TotalRequests: 10, CacheSamples: 10, CacheInputTokens: 100, CacheRate: protectionFloat(0.29)}
-	raw, err := json.Marshal(snapshot)
-	require.NoError(t, err)
-	state := ScheduledTestProtectionStateSource{DefinitionID: 2, Current: true, Automated: "pass", Verdict: "fail", AdminVerdict: "fail", Reason: "管理员判定渠道质量检测结果",
-		Rule:   ScheduledTestProtectionRule{MinSamples: 2, Thresholds: []ScheduledTestThreshold{{Metric: "cache_rate", Operator: "lt", Value: 29}}},
-		Result: &ScheduledTestResult{ID: 8, Status: "success", OutputKind: "statistics", ResponseText: string(raw)}}
-	svc := NewScheduledTestService(nil, protectionDetailsRepoStub{sources: []ScheduledTestProtectionHoldSource{{DefinitionID: 2, States: []ScheduledTestProtectionStateSource{state}}}})
-	holds, err := svc.AccountProtectionDetails(context.Background(), 62)
-	require.NoError(t, err)
-	evidence := holds[0].Tests[0]
-	require.InDelta(t, 29, *evidence.Thresholds[0].Observed, 0.000001)
-	require.Empty(t, evidence.AutomaticReason, "equality must not be presented as an automatic threshold failure")
-	require.Equal(t, "fail", evidence.AdminVerdict)
-	encoded, err := json.Marshal(holds)
-	require.NoError(t, err)
-	require.NotContains(t, string(encoded), "response_text")
-
-	state.Rule.MinSamples = 20
-	hold := buildScheduledTestProtectionHold(ScheduledTestProtectionHoldSource{DefinitionID: 2, States: []ScheduledTestProtectionStateSource{state}})
-	require.Nil(t, hold.Tests[0].Thresholds[0].Observed, "insufficient samples must not be reported as zero")
 }
 
 func TestProtectionDetailsMissingRuleDoesNotInventConditions(t *testing.T) {

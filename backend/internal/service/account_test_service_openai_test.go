@@ -706,15 +706,3 @@ func TestAccountTestService_OpenAIChatCompletionsPathRejectsNonJSONStream(t *tes
 	require.Contains(t, recorder.Body.String(), "/v1/chat/completions")
 	require.NotContains(t, recorder.Body.String(), `"success":true`)
 }
-
-func TestAccountTestService_PassiveProbeNeverClearsConcurrentError(t *testing.T) {
-	repo := &openAIAccountTestRepo{}
-	svc := &AccountTestService{accountRepo: repo}
-	account := &Account{ID: 78, Status: StatusError, ErrorMessage: "independent hold"}
-	ctx := context.WithValue(context.Background(), passiveQualityProbeKey{}, true)
-	svc.reconcileOpenAI429State(ctx, account, nil, []byte(`{"error":{"type":"usage_limit_reached","resets_in_seconds":3600}}`))
-	require.Equal(t, account.ID, repo.rateLimitedID)
-	require.Zero(t, repo.clearedErrorID)
-	require.Equal(t, StatusError, account.Status)
-	require.Equal(t, "independent hold", account.ErrorMessage)
-}

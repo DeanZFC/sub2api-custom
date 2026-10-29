@@ -163,6 +163,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		MessagesDispatchModelConfig: g.MessagesDispatchModelConfig,
 		ModelAllowlist:              g.ModelAllowlist,
 		CodexModelsManifestConfig:   g.CodexModelsManifestConfig,
+		StrictFailover:              service.CloneStrictFailoverConfig(g.StrictFailover),
 		SupportedModelScopes:        g.SupportedModelScopes,
 		AccountCount:                g.AccountCount,
 		ActiveAccountCount:          g.ActiveAccountCount,

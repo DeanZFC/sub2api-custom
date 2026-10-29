@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,23 +18,6 @@ import (
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
-
-type protectionRunnerStatisticsRepo struct {
-	*scheduledTestResultRepository
-	cacheRate float64
-	requests  int64
-	calls     atomic.Int32
-}
-
-func (r *protectionRunnerStatisticsRepo) CollectStatistics(_ context.Context, filter service.ScheduledTestStatisticsFilter) (*service.ScheduledTestStatistics, error) {
-	r.calls.Add(1)
-	rate := r.cacheRate
-	return &service.ScheduledTestStatistics{
-		WindowStart: filter.WindowStart, WindowEnd: filter.WindowEnd,
-		TotalRequests: r.requests, SuccessRequests: r.requests, CacheSamples: r.requests,
-		CacheInputTokens: r.requests * 100, CacheReadTokens: int64(float64(r.requests*100) * rate), CacheRate: &rate,
-	}, nil
-}
 
 func TestScheduledTestProtectionIntegration(t *testing.T) {
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
@@ -430,44 +412,6 @@ INSERT INTO account_groups VALUES(62,8),(62,9),(63,8);`)
 		require.Equal(t, "error", status())
 		_, err = repo.CastTestVote(ctx, 1, r.ID, "pass")
 		require.ErrorIs(t, err, service.ErrScheduledTestVoteUnavailable)
-	})
-	t.Run("runner persists metrics and pauses then retests and recovers without enabling manual stops", func(t *testing.T) {
-		reset()
-		exec(`UPDATE accounts SET schedulable=FALSE WHERE id=63`)
-		definitions := NewScheduledTestDefinitionRepository(db)
-		stats, err := definitions.GetByKey(ctx, "hourly_stats")
-		require.NoError(t, err)
-		rule := service.ScheduledTestProtectionRule{TestDefinitionID: stats.ID, MinSamples: 10, OnPass: &service.ScheduledTestOutcomeAction{Scheduling: "resume"}, OnFail: &service.ScheduledTestOutcomeAction{Scheduling: "pause"}, Thresholds: []service.ScheduledTestThreshold{{Metric: "cache_rate", Operator: "lt", Value: 80}}}
-		p := newPlan(rule)
-		results := &protectionRunnerStatisticsRepo{scheduledTestResultRepository: repo, cacheRate: .5, requests: 20}
-		svc := service.NewScheduledTestService(plans, results)
-		svc.SetDefinitionRepository(definitions)
-		runner := service.NewScheduledTestRunnerService(plans, svc, nil, nil, nil, nil)
-		defer runner.Stop()
-		runner.RunPlanNow(ctx, p)
-		require.Equal(t, "quality_paused", status())
-		var resultID int64
-		var blocked, completed bool
-		require.NoError(t, db.QueryRowContext(ctx, `SELECT result_id,blocked,completed FROM scheduled_test_protection_states WHERE plan_id=$1`, p.ID).Scan(&resultID, &blocked, &completed))
-		require.True(t, blocked)
-		require.True(t, completed, "nanosecond timestamps must not lose protection completion")
-		stored, err := repo.GetByID(ctx, resultID)
-		require.NoError(t, err)
-		require.Equal(t, "success", stored.Status)
-
-		results.requests = 0
-		runner.RunPlanNow(ctx, p)
-		require.Equal(t, "quality_paused", status(), "empty traffic must not release a hold")
-		results.requests, results.cacheRate = 20, .95
-		runner.RunPlanNow(ctx, p)
-		require.Equal(t, "active", status())
-		require.Equal(t, int32(3), results.calls.Load())
-		exec(`UPDATE accounts SET schedulable=FALSE WHERE id=62`)
-		runner.RunPlanNow(ctx, p)
-		require.Equal(t, int32(3), results.calls.Load(), "manual stops must never execute statistics for the account")
-		var schedulable bool
-		require.NoError(t, db.QueryRowContext(ctx, `SELECT schedulable FROM accounts WHERE id=62`).Scan(&schedulable))
-		require.False(t, schedulable)
 	})
 	t.Run("concurrent votes are unique and threshold checks are serialized", func(t *testing.T) {
 		reset()

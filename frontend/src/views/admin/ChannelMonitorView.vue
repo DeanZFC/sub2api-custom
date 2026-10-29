@@ -17,7 +17,7 @@
               : t('channelMonitorV2.admin.descriptionV2')
           }}
         </p>
-        <RouterLink to="/admin/tests?tab=overview" class="mt-3 inline-block text-sm text-primary-600 hover:underline dark:text-primary-400">{{ t('admin.tests.quality.overview') }}</RouterLink>
+        <RouterLink to="/admin/tests?tab=plans" class="mt-3 inline-block text-sm text-primary-600 hover:underline dark:text-primary-400">{{ t('admin.tests.experience.scheduled') }}</RouterLink>
         <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
           <div
             class="tabs inline-flex w-full max-w-xl flex-wrap sm:w-auto"

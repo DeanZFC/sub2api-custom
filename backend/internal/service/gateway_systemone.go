@@ -153,6 +153,7 @@ func (s *GatewayService) handleSystemOneErrorResponse(ctx context.Context, c *gi
 	event.Kind = "failover"
 	appendOpsUpstreamError(c, event)
 	failoverErr := &UpstreamFailoverError{
+		ObservedUpstreamStatus: resp.StatusCode,
 		StatusCode:             resp.StatusCode,
 		ResponseBody:           respBody,
 		ResponseHeaders:        resp.Header.Clone(),

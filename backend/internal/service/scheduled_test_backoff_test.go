@@ -97,7 +97,7 @@ func TestScheduledTestCostBackoffIsPerAccountAndManualBypasses(t *testing.T) {
 	require.Equal(t, 7, calls[12])
 	require.Equal(t, 1, repo.states[12].ConsecutiveFailures)
 }
-func TestScheduledTestCostBackoffStepsAndNoSamples(t *testing.T) {
+func TestScheduledTestCostBackoffStepsAndPendingEvidence(t *testing.T) {
 	for i, minutes := range []int{5, 15, 30, 60, 60, 60} {
 		require.Equal(t, time.Duration(minutes)*time.Minute, ScheduledTestBackoffDelay(i+1))
 	}
@@ -106,32 +106,17 @@ func TestScheduledTestCostBackoffStepsAndNoSamples(t *testing.T) {
 	runner.scheduledSvc.resultRepo = repo
 	defer runner.Stop()
 	plan := automaticRetryTestPlan()
-	id := int64(12)
-	queue := []*scheduledTestExecutionTarget{{plan: plan, accountID: &id, kind: "statistics"}}
-	result := &ScheduledTestResult{AccountID: &id, Status: "success", OutputKind: "statistics", OutputStatistics: &ScheduledTestStatistics{}}
-	runner.recordAccountQueueBackoff(context.Background(), queue, "policy", []*ScheduledTestResult{result}, false, true)
-	require.Zero(t, repo.writes, "no samples does not claim recovery")
-	result.Status = "failed"
-	result.OutputStatistics = nil
-	runner.recordAccountQueueBackoff(context.Background(), queue, "policy", []*ScheduledTestResult{result}, true, true)
-	require.Zero(t, repo.writes, "database failures do not penalize the account")
-	runner.recordAccountQueueBackoff(context.Background(), queue, "policy", []*ScheduledTestResult{nil}, true, true)
-	require.Zero(t, repo.writes, "skipped or failed persistence is not quality evidence")
 	plan.TestDefinitionID = scheduledTestPtrInt64(1)
 	plan.Enabled = true
-	plan.Protection = ScheduledTestProtectionConfig{Enabled: true, Mode: "all_pass", Rules: []ScheduledTestProtectionRule{{
-		TestDefinitionID: 1, MinSamples: 10,
-		Thresholds: []ScheduledTestThreshold{{Metric: "success_rate", Operator: "lt", Value: 95}},
-	}}}
-	rate := 1.0
-	result.Status = "success"
-	result.OutputStatistics = &ScheduledTestStatistics{TotalRequests: 3, SuccessRate: &rate}
+	plan.Protection = ScheduledTestProtectionConfig{Enabled: true, Mode: "all_pass", Rules: []ScheduledTestProtectionRule{{TestDefinitionID: 1, Thresholds: []ScheduledTestThreshold{{Metric: "output_numeric", Operator: "lt", Value: 95}}}}}
+	id := int64(12)
+	queue := []*scheduledTestExecutionTarget{{plan: plan, accountID: &id, kind: "number"}}
+	result := &ScheduledTestResult{AccountID: &id, Status: "success", OutputKind: "number"}
 	runner.recordAccountQueueBackoff(context.Background(), queue, "policy", []*ScheduledTestResult{result}, false, true)
-	require.Zero(t, repo.writes, "insufficient samples cannot reset an existing failure streak")
-	result.OutputStatistics.TotalRequests = 10
-	rate = 0.5
+	require.Zero(t, repo.writes, "missing numeric evidence cannot claim recovery")
+	result.OutputNumeric = protectionFloat(50)
 	runner.recordAccountQueueBackoff(context.Background(), queue, "policy", []*ScheduledTestResult{result}, true, false)
-	require.Equal(t, 1, repo.states[id].ConsecutiveFailures, "a measured quality failure increases cooldown even when execution succeeded")
+	require.Equal(t, 1, repo.states[id].ConsecutiveFailures)
 }
 
 func TestScheduledTestCostBackoffRespectsPassingORBranch(t *testing.T) {

@@ -10,17 +10,15 @@ import (
 // Existing pass-rate holds survive disabling the schedule, as before.
 const activeTestProtectionProjectionSQL = `WITH all_holds AS (
  SELECT s.model_key,s.reason,s.updated_at,
-        (d.output_kind='statistics' OR s.model_key='') AS account_wide,
-        (s.recovery_phase='trial' AND s.rule_config->'recovery'->>'enabled'='true'
-         AND s.recovery_trial_started_at<=NOW() AND s.recovery_trial_ends_at>NOW()) AS trial
+        (s.model_key='') AS account_wide
  FROM scheduled_test_protection_states s
  JOIN scheduled_test_definitions d ON d.id=s.test_definition_id
  WHERE s.account_id=$1 AND s.blocked
  UNION ALL
- SELECT model_key,reason,updated_at,(account_wide OR model_key=''),FALSE
+ SELECT model_key,reason,updated_at,(account_wide OR model_key='')
  FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked
  UNION ALL
- SELECT model_key,COALESCE(summary->>'reason','智力检测最近通过率低于要求'),updated_at,(model_key=''),FALSE
+ SELECT model_key,COALESCE(summary->>'reason','智力检测最近通过率低于要求'),updated_at,(model_key='')
  FROM scheduled_test_pass_rate_states WHERE account_id=$1 AND blocked
 ), model_holds AS (
  SELECT DISTINCT ON(model_key) model_key,reason FROM all_holds
@@ -44,7 +42,6 @@ SELECT COALESCE((SELECT jsonb_object_agg(model_key,reason) FROM model_holds),'{}
  EXISTS(SELECT 1 FROM monitored_models) AND NOT EXISTS(
    SELECT 1 FROM monitored_models m WHERE NOT EXISTS(SELECT 1 FROM model_holds h WHERE h.model_key=m.model_key OR h.model_key='')),
  EXISTS(SELECT 1 FROM all_holds WHERE account_wide),
- COALESCE((SELECT bool_and(COALESCE(trial,FALSE)) FROM all_holds WHERE account_wide),FALSE),
  COALESCE((SELECT reason FROM all_holds WHERE account_wide ORDER BY updated_at DESC LIMIT 1),
           (SELECT reason FROM model_holds ORDER BY model_key LIMIT 1),'渠道质量检测保护')`
 
@@ -52,13 +49,12 @@ type activeTestProtectionProjection struct {
 	modelHolds       json.RawMessage
 	allModelsBlocked bool
 	accountWide      bool
-	trial            bool
 	reason           string
 }
 
 func readActiveTestProtection(ctx context.Context, tx sqlExecutor, accountID int64) (*activeTestProtectionProjection, error) {
 	out := &activeTestProtectionProjection{}
-	err := scanSingleRow(ctx, tx, activeTestProtectionProjectionSQL, []any{accountID}, &out.modelHolds, &out.allModelsBlocked, &out.accountWide, &out.trial, &out.reason)
+	err := scanSingleRow(ctx, tx, activeTestProtectionProjectionSQL, []any{accountID}, &out.modelHolds, &out.allModelsBlocked, &out.accountWide, &out.reason)
 	return out, err
 }
 
@@ -67,24 +63,22 @@ func reconcileProtectionAccount(ctx context.Context, tx sqlExecutor, accountID i
 	if err != nil {
 		return err
 	}
-	paused := projection.allModelsBlocked || (projection.accountWide && !projection.trial)
-	trial := projection.accountWide && projection.trial && !projection.allModelsBlocked
+	paused := projection.allModelsBlocked || projection.accountWide
 	// Keep manual account state/scheduling switches intact while refreshing the
 	// model projection, so later administrative re-enablement still sees it.
 	changed, err := tx.ExecContext(ctx, `WITH desired AS (
  SELECT CASE WHEN $2 THEN 'quality_paused' ELSE 'active' END AS status,
- CASE WHEN $3 THEN jsonb_set(jsonb_set(base,'{quality_protection_trial}','true'::jsonb),'{quality_protection_reason}',to_jsonb($4::text))
-      WHEN $2 THEN jsonb_set(base,'{quality_protection_reason}',to_jsonb($4::text))
+ CASE WHEN $2 THEN jsonb_set(base,'{quality_protection_reason}',to_jsonb($3::text))
       ELSE base END AS extra
- FROM (SELECT CASE WHEN $6 THEN jsonb_set(models,'{active_test_all_models_paused}','true'::jsonb) ELSE models END AS base
- FROM (SELECT CASE WHEN $5::jsonb='{}'::jsonb THEN COALESCE(extra,'{}'::jsonb)-'active_test_model_holds'-'active_test_all_models_paused'-'quality_protection_reason'-'quality_protection_trial'
-       ELSE jsonb_set(COALESCE(extra,'{}'::jsonb)-'active_test_all_models_paused'-'quality_protection_reason'-'quality_protection_trial','{active_test_model_holds}',$5::jsonb) END AS models
+ FROM (SELECT CASE WHEN $5 THEN jsonb_set(models,'{active_test_all_models_paused}','true'::jsonb) ELSE models END AS base
+ FROM (SELECT CASE WHEN $4::jsonb='{}'::jsonb THEN COALESCE(extra,'{}'::jsonb)-'active_test_model_holds'-'active_test_all_models_paused'-'quality_protection_reason'-'quality_protection_trial'
+       ELSE jsonb_set(COALESCE(extra,'{}'::jsonb)-'active_test_all_models_paused'-'quality_protection_reason'-'quality_protection_trial','{active_test_model_holds}',$4::jsonb) END AS models
        FROM accounts WHERE id=$1) model_projection) clean
  ) UPDATE accounts a SET
  status=CASE WHEN a.schedulable AND a.status IN ('active','quality_paused') THEN d.status ELSE a.status END,
  extra=d.extra,updated_at=clock_timestamp()
  FROM desired d WHERE a.id=$1 AND a.deleted_at IS NULL
- AND (a.extra IS DISTINCT FROM d.extra OR (a.schedulable AND a.status IN ('active','quality_paused') AND a.status<>d.status))`, accountID, paused, trial, projection.reason, []byte(projection.modelHolds), projection.allModelsBlocked)
+ AND (a.extra IS DISTINCT FROM d.extra OR (a.schedulable AND a.status IN ('active','quality_paused') AND a.status<>d.status))`, accountID, paused, projection.reason, []byte(projection.modelHolds), projection.allModelsBlocked)
 	if err != nil {
 		return err
 	}

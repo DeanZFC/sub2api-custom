@@ -171,7 +171,7 @@ export default {
     usage: 'Usage',
     callErrors: 'Call Errors',
     testResults: 'Channel Quality Checks',
-    tests: 'Channel Quality Management',
+    tests: 'Intelligence Test Management',
     redeem: 'Redeem',
     affiliate: 'Affiliate Rebates',
     affiliateManagement: 'Affiliate Rebates',

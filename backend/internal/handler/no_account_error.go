@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -41,6 +42,12 @@ var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited
 func classifySelectionFailureError(err error, fallback noAccountErrorClassification) noAccountErrorClassification {
 	if err == nil {
 		return fallback
+	}
+	if errors.Is(err, service.ErrStrictFailoverOwnerBound) {
+		return noAccountErrorClassification{Status: http.StatusConflict, ErrType: "strict_failover_owner_bound", Message: "This continuation belongs to an account outside the active priority tier. Start a new request with full conversation context."}
+	}
+	if errors.Is(err, service.ErrStrictFailoverUnconfirmed) {
+		return noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "strict_failover_unconfirmed", Message: "The primary priority tier has not been confirmed unavailable. Backup routing was not activated; retry later."}
 	}
 	// A 404 model_not_found fallback is authoritative and must not be downgraded
 	// to a rate-limit verdict. classifyNoAccountError only reaches it through

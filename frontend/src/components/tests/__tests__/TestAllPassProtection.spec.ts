@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import TestProtectionEditor from '../TestProtectionEditor.vue'
 import type { AdminGroup, TestProtectionConfig, TestType } from '@/types'
-import { copyTestProtection, defaultProtectionRule, defaultTestProtectionRecovery, validTestProtection } from '@/utils/testProtection'
+import { copyTestProtection, defaultProtectionRule, validTestProtection } from '@/utils/testProtection'
 import { defaultTestPassRate } from '@/utils/testPassRate'
 
 const types: TestType[] = [
   { id: 1, name: 'Model', key: 'model_check', output_kind: 'model_check', prompt: '', enabled: true },
   { id: 2, name: 'Candy', key: 'candy', output_kind: 'number', prompt: '', enabled: true },
-  { id: 3, name: 'Statistics', key: 'hourly_stats', output_kind: 'statistics', prompt: '', enabled: true },
+  { id: 3, name: 'Text', key: 'text', output_kind: 'text', prompt: '', enabled: true },
   { id: 4, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: '', enabled: true },
 ]
 const groups = [{ id: 8, name: 'Default' }, { id: 10, name: 'Passed' }] as AdminGroup[]
@@ -22,14 +22,13 @@ const mountEditor = (config: TestProtectionConfig, selectedTypes = types) => {
 }
 
 describe('all automatic checks pass', () => {
-  it('preserves thresholds, answers, and recovery while replacing conflicting advanced actions', async () => {
+  it('preserves thresholds and answers while replacing conflicting advanced actions', async () => {
     const original: TestProtectionConfig = { enabled: true, mode: 'per_test', rules: types.map(defaultProtectionRule) }
     original.rules[0].priority = 999
     original.rules[1].expected_answer = '21'
     original.rules[1].pass_rate = { ...defaultTestPassRate(), window_size: 20 }
     original.rules[1].on_pass = { scheduling: 'pause', group_mode: 'assign', group_ids: [8] }
-    original.rules[2].thresholds = [{ metric: 'cache_rate', operator: 'lt', value: 80 }]
-    original.rules[2].recovery = { ...defaultTestProtectionRecovery(original.rules[2]), enabled: true }
+    original.rules[2].thresholds = [{ metric: 'latency_ms', operator: 'gt', value: 80000 }]
     original.rules[3].vote = { enabled: true, public_enabled: true, pass_at_least: 3, reject_above: 0 }
     const wrapper = mountEditor(original)
     await wrapper.get('[data-protection-mode]').setValue('all_pass')
@@ -45,7 +44,6 @@ describe('all automatic checks pass', () => {
     expect(original.rules[1].pass_rate?.window_size).toBe(20)
     expect(value.rules[1].on_pass).toEqual({ scheduling: 'resume', group_mode: 'keep' })
     expect(value.rules[2].thresholds).toEqual(original.rules[2].thresholds)
-    expect(value.rules[2].recovery).toEqual(original.rules[2].recovery)
     expect(value.rules[3].vote?.public_enabled).toBe(false)
     expect(validTestProtection(value, types, groups)).toBe(true)
     expect(original.rules[1].on_pass?.scheduling).toBe('pause')
@@ -103,26 +101,13 @@ describe('all automatic checks pass', () => {
     reopened.unmount()
   })
 
-  it('requires compatible scheduling for enabled statistics recovery without discarding its settings', async () => {
-    const config: TestProtectionConfig = { enabled: true, mode: 'all_pass', rules: types.map(defaultProtectionRule) }
-    config.rules[2].thresholds = [{ metric: 'cache_rate', operator: 'lt', value: 80 }]
-    config.rules[2].recovery = { ...defaultTestProtectionRecovery(config.rules[2]), enabled: true }
-    const wrapper = mountEditor(config)
-    await wrapper.get('[data-all-pass-policy] [data-outcome="fail"] [data-action-scheduling]').setValue('resume')
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(false)
-    expect(wrapper.props('modelValue').rules[2].recovery?.enabled).toBe(true)
-    await wrapper.get('[data-protection-type="3"] [data-recovery-enabled]').setValue(false)
-    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
-    expect(wrapper.props('modelValue').on_fail?.scheduling).toBe('resume')
-    wrapper.unmount()
-  })
 
   it('lets administrators choose roles without special defaults for built-in check names', async () => {
     const wrapper = mountEditor({ enabled: false, mode: 'all_pass', rules: [] })
     await wrapper.get('[data-protection-enabled]').setValue(true)
     expect(wrapper.props('modelValue').rules.filter(rule => !rule.vote?.enabled)).toHaveLength(4)
     expect(wrapper.find('[data-rule-vote]').exists()).toBe(false)
-    for (const id of [1, 3]) {
+    for (const id of [1]) {
       expect(wrapper.get(`[data-protection-type="${id}"] [data-rule-role]`).find('option[value="review"]').exists()).toBe(false)
     }
     await wrapper.get('[data-protection-type="4"] [data-rule-role]').setValue('review')

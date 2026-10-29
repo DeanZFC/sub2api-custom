@@ -73,7 +73,6 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
-	ctx = CapturePassiveQualityCacheRequest(ctx, c, account, body, passiveQualityRequestSession(c, body), gjson.GetBytes(body, "model").String())
 	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)

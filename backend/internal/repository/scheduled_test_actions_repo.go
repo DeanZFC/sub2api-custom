@@ -284,14 +284,11 @@ func sortedProtectionIDs(ids map[int64]bool) []int64 {
 // Expressions are evaluated inside one model only. Group memberships belong
 // to the account, so their final assignment is resolved across those decisions.
 type protectionModelRouting struct {
-	verdicts            map[int64]string
-	recovering          map[int64]bool
-	held                bool
-	accountWide         bool
-	statisticsUnhealthy bool
-	statisticsFailed    bool
-	decision            service.ScheduledTestCombinationDecision
-	reason              string
+	verdicts    map[int64]string
+	held        bool
+	accountWide bool
+	decision    service.ScheduledTestCombinationDecision
+	reason      string
 }
 
 func protectionModelGroupChanges(config service.ScheduledTestProtectionConfig, models map[string]*protectionModelRouting, current map[int64]bool) []protectionRoutingChange {
@@ -311,9 +308,6 @@ func protectionModelGroupChanges(config service.ScheduledTestProtectionConfig, m
 		pending := action == nil
 		if config.UsesAllPass() {
 			for _, rule := range config.Rules {
-				if model.recovering[rule.TestDefinitionID] {
-					continue
-				}
 				if (rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold() || rule.UsesAutoReview()) && model.verdicts[rule.TestDefinitionID] != "pass" && model.verdicts[rule.TestDefinitionID] != "fail" {
 					pending = true
 				}
@@ -390,8 +384,7 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 	if err := json.Unmarshal(configRaw, &config); err != nil {
 		return err
 	}
-	// The recovery sweep may run before the new statistics result is attached.
-	// All-pass still needs to inspect this round's other checks before admission.
+	// All-pass inspects every current-round check before admission.
 	if !config.UsesAllPass() {
 		current, err := protectionResultCurrent(ctx, tx, state.resultID)
 		if err != nil || !current {
@@ -402,7 +395,6 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
  s.completed AND s.result_started_at>=s.round_started_at AND EXISTS (
  SELECT 1 FROM scheduled_test_results evidence WHERE evidence.id=s.result_id
  AND evidence.started_at=s.result_started_at AND evidence.run_id<>'' AND evidence.run_id=p.latest_run_id),
- s.blocked AND s.recovery_phase<>'',
  (SELECT latency_ms FROM scheduled_test_results WHERE id=s.result_id),
  (SELECT status FROM scheduled_test_results WHERE id=s.result_id),d.output_kind
  FROM scheduled_test_protection_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
@@ -421,10 +413,9 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		var modelKey, outputKind string
 		var raw []byte
 		var evidenceCurrent bool
-		var inRecovery bool
 		var latency sql.NullInt64
 		var resultStatus sql.NullString
-		if err := rows.Scan(&modelKey, &raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &evidenceCurrent, &inRecovery, &latency, &resultStatus, &outputKind); err != nil {
+		if err := rows.Scan(&modelKey, &raw, &entry.currentVerdict, &entry.automated, &entry.adminVerdict, &evidenceCurrent, &latency, &resultStatus, &outputKind); err != nil {
 			rows.Close()
 			return err
 		}
@@ -437,18 +428,13 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 		}
 		model := models[modelKey]
 		if model == nil {
-			model = &protectionModelRouting{verdicts: map[int64]string{}, recovering: map[int64]bool{}}
+			model = &protectionModelRouting{verdicts: map[int64]string{}}
 			models[modelKey] = model
 		}
-		model.recovering[entry.rule.TestDefinitionID] = inRecovery
 		if !evidenceCurrent {
 			entry.currentVerdict, entry.automated, entry.adminVerdict = "pending", "pending", ""
 		}
 		rules = append(rules, entry)
-		if outputKind == "statistics" {
-			model.statisticsUnhealthy = model.statisticsUnhealthy || entry.currentVerdict != "pass"
-			model.statisticsFailed = model.statisticsFailed || entry.currentVerdict == "fail"
-		}
 		if evidenceCurrent {
 			model.verdicts[entry.rule.TestDefinitionID] = entry.currentVerdict
 			if config.UsesAllPass() && entry.rule.Vote != nil && entry.rule.Vote.Enabled && !entry.rule.UsesAutoReview() {
@@ -513,12 +499,9 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 			if config.UsesAllPass() {
 				held := model.held
 				if key == state.modelKey {
-					held = held || state.blocked || state.recoveryPhase != ""
+					held = held || state.blocked
 				}
-				for _, active := range model.recovering {
-					held = held || active
-				}
-				model.decision, model.reason = service.EvaluateScheduledTestAllPass(config, model.verdicts, model.recovering, held)
+				model.decision, model.reason = service.EvaluateScheduledTestAllPass(config, model.verdicts, nil, held)
 			} else {
 				model.decision = service.EvaluateScheduledTestCombinations(config, model.verdicts)
 				labels := make([]string, 0, len(model.decision.RuleIDs))
@@ -536,7 +519,7 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 			}
 			if key == state.modelKey {
 				state.actionReason = model.reason
-				if err := applyCombinationScheduling(ctx, tx, state, model.decision, model.statisticsFailed || (model.accountWide && model.statisticsUnhealthy)); err != nil {
+				if err := applyCombinationScheduling(ctx, tx, state, model.decision, model.accountWide); err != nil {
 					return err
 				}
 			}

@@ -35,11 +35,6 @@ func RegisterGatewayRoutes(
 	clientRequestID := middleware.ClientRequestID()
 	upstreamErrorMessage := handler.UpstreamErrorMessageMiddleware(settingService)
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
-	if h.Admin != nil && h.Admin.PassiveQuality != nil {
-		install := h.Admin.PassiveQuality.Capture()
-		ops := opsErrorLogger
-		opsErrorLogger = func(c *gin.Context) { install(c); ops(c) }
-	}
 
 	endpointNorm := handler.InboundEndpointMiddleware()
 	upstreamErrorRetry := middleware.UpstreamErrorRetry(settingService)

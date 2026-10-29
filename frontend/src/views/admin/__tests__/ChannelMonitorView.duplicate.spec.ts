@@ -108,6 +108,7 @@ function mountView() {
   return mount(ChannelMonitorView, {
     global: {
       stubs: {
+        RouterLink: { template: '<a><slot /></a>' },
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,
         DataTable: DataTableStub,

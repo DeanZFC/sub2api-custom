@@ -906,6 +906,20 @@ func (_u *GroupUpdate) ClearModelRouting() *GroupUpdate {
 	return _u
 }
 
+// SetStrictFailover sets the "strict_failover" field.
+func (_u *GroupUpdate) SetStrictFailover(v domain.StrictFailoverConfig) *GroupUpdate {
+	_u.mutation.SetStrictFailover(v)
+	return _u
+}
+
+// SetNillableStrictFailover sets the "strict_failover" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableStrictFailover(v *domain.StrictFailoverConfig) *GroupUpdate {
+	if v != nil {
+		_u.SetStrictFailover(*v)
+	}
+	return _u
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_u *GroupUpdate) SetModelRoutingEnabled(v bool) *GroupUpdate {
 	_u.mutation.SetModelRoutingEnabled(v)
@@ -1897,6 +1911,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ModelRoutingCleared() {
 		_spec.ClearField(group.FieldModelRouting, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.StrictFailover(); ok {
+		_spec.SetField(group.FieldStrictFailover, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)
@@ -3217,6 +3234,20 @@ func (_u *GroupUpdateOne) ClearModelRouting() *GroupUpdateOne {
 	return _u
 }
 
+// SetStrictFailover sets the "strict_failover" field.
+func (_u *GroupUpdateOne) SetStrictFailover(v domain.StrictFailoverConfig) *GroupUpdateOne {
+	_u.mutation.SetStrictFailover(v)
+	return _u
+}
+
+// SetNillableStrictFailover sets the "strict_failover" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableStrictFailover(v *domain.StrictFailoverConfig) *GroupUpdateOne {
+	if v != nil {
+		_u.SetStrictFailover(*v)
+	}
+	return _u
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_u *GroupUpdateOne) SetModelRoutingEnabled(v bool) *GroupUpdateOne {
 	_u.mutation.SetModelRoutingEnabled(v)
@@ -4238,6 +4269,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.ModelRoutingCleared() {
 		_spec.ClearField(group.FieldModelRouting, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.StrictFailover(); ok {
+		_spec.SetField(group.FieldStrictFailover, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)

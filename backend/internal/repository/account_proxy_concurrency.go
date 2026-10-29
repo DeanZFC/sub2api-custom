@@ -19,7 +19,6 @@ var acquireProxyPoolScript = redis.NewScript(`
 redis.replicate_commands()
 local limit, ttl, request = tonumber(ARGV[1]), tonumber(ARGV[2]), ARGV[3]
 local pinned = tonumber(ARGV[4])
-local qualityLimit = tonumber(ARGV[5])
 local now = tonumber(redis.call('TIME')[1])
 local n = #KEYS - 3
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now-ttl)
@@ -33,35 +32,31 @@ for i=1,n do
         redis.call('EXPIRE', KEYS[i+3], ttl)
         redis.call('ZADD', KEYS[1], now, request)
         redis.call('EXPIRE', KEYS[1], ttl)
-        return {tonumber(ARGV[i+5]), now}
+        return {tonumber(ARGV[i+4]), now}
     end
-    if last == ARGV[i+5] then start = i % n + 1 end
+    if last == ARGV[i+4] then start = i % n + 1 end
 end
 -- Also account for sessions acquired before the pool was changed.
 local count = redis.call('ZCARD', KEYS[1]) + redis.call('ZCARD', KEYS[2])
-if (limit > 0 and count >= limit*n) or (qualityLimit > 0 and count >= qualityLimit) then
+if limit > 0 and count >= limit*n then
     return {0, now}
 end
 for offset=0,n-1 do
     local i = (start+offset-1) % n + 1
     local key = KEYS[i+3]
-    if (pinned == 0 or pinned == tonumber(ARGV[i+5])) and (limit <= 0 or redis.call('ZCARD', key) < limit) then
+    if (pinned == 0 or pinned == tonumber(ARGV[i+4])) and (limit <= 0 or redis.call('ZCARD', key) < limit) then
         redis.call('ZADD', key, now, request)
         redis.call('EXPIRE', key, ttl)
         redis.call('ZADD', KEYS[1], now, request)
         redis.call('EXPIRE', KEYS[1], ttl)
-        redis.call('SET', KEYS[3], ARGV[i+5], 'EX', ttl)
-        return {tonumber(ARGV[i+5]), now}
+        redis.call('SET', KEYS[3], ARGV[i+4], 'EX', ttl)
+        return {tonumber(ARGV[i+4]), now}
     end
 end
 return {0, now}
 `)
 
 func (c *concurrencyCache) AcquireAccountProxyPoolSlot(ctx context.Context, accountID int64, proxyIDs []int64, maxConcurrency int, requestID string, pinnedProxyIDs ...int64) (int64, error) {
-	return c.AcquireAccountProxyPoolSlotLimited(ctx, accountID, proxyIDs, maxConcurrency, requestID, 0, pinnedProxyIDs...)
-}
-
-func (c *concurrencyCache) AcquireAccountProxyPoolSlotLimited(ctx context.Context, accountID int64, proxyIDs []int64, maxConcurrency int, requestID string, qualityLimit int, pinnedProxyIDs ...int64) (int64, error) {
 	if len(proxyIDs) == 0 {
 		return 0, fmt.Errorf("proxy pool requires an available proxy")
 	}
@@ -70,7 +65,7 @@ func (c *concurrencyCache) AcquireAccountProxyPoolSlotLimited(ctx context.Contex
 	if len(pinnedProxyIDs) > 0 {
 		pinned = pinnedProxyIDs[0]
 	}
-	args := []any{maxConcurrency, c.slotTTLSeconds, requestID, pinned, qualityLimit}
+	args := []any{maxConcurrency, c.slotTTLSeconds, requestID, pinned}
 	seen := make(map[int64]bool, len(proxyIDs))
 	for _, id := range proxyIDs {
 		if id <= 0 || seen[id] {

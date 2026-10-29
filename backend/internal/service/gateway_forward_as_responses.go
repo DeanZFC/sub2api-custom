@@ -35,11 +35,6 @@ func (s *GatewayService) ForwardAsResponses(
 	body []byte,
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
-	model := ""
-	if parsed != nil {
-		model = parsed.Model
-	}
-	ctx = CapturePassiveQualityCacheRequest(ctx, c, account, body, passiveQualityRequestSession(c, body), model)
 	startTime := time.Now()
 
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngressWithConfig(s.cfg, body)
@@ -194,6 +189,7 @@ func (s *GatewayService) ForwardAsResponses(
 				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
 			}
 			return nil, &UpstreamFailoverError{
+				ObservedUpstreamStatus: resp.StatusCode,
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
 				ResponseHeaders:        resp.Header.Clone(),

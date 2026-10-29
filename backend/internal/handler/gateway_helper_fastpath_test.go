@@ -14,7 +14,7 @@ import (
 
 type denyAccountAdmission struct{ calls int }
 
-func (g *denyAccountAdmission) AcquireCacheRecoveryRequest(context.Context, int64) (bool, error) {
+func (g *denyAccountAdmission) CheckAccountAdmission(context.Context, int64) (bool, error) {
 	g.calls++
 	return false, nil
 }
@@ -23,7 +23,7 @@ func TestConcurrencyHelper_AdmissionDenialDoesNotWait(t *testing.T) {
 	cache := &concurrencyCacheMock{acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }}
 	svc := service.NewConcurrencyService(cache)
 	gate := &denyAccountAdmission{}
-	svc.SetCacheRecoveryGate(gate)
+	svc.SetAccountAdmissionGate(gate)
 	helper := NewConcurrencyHelper(svc, SSEPingFormatNone, time.Second)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/v1/images/generations", nil)

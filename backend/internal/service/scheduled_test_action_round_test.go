@@ -55,9 +55,6 @@ func actionRoundPlan() *ScheduledTestPlan {
 func TestScheduledTestActionRoundPrecedesEveryDefinition(t *testing.T) {
 	base := &protectionRepositoryStub{eligible: true}
 	repo := &actionRoundResultRepo{protectionRepositoryStub: base}
-	base.collect = func(_ context.Context, _ ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error) {
-		return &ScheduledTestStatistics{}, nil
-	}
 	var upstreamCalls atomic.Int32
 	accounts := scheduledTestExecutionAccountRepo{get: func(_ context.Context, id int64) (*Account, error) {
 		upstreamCalls.Add(1)
@@ -68,7 +65,7 @@ func TestScheduledTestActionRoundPrecedesEveryDefinition(t *testing.T) {
 	svc := NewScheduledTestService(plans, repo)
 	svc.SetDefinitionRepository(actionRoundDefinitionRepo{
 		multiDefinitionRepoStub: multiDefinitionRepoStub{definitions: map[int64]*ScheduledTestDefinition{
-			1: {ID: 1, Enabled: true, OutputKind: "statistics"},
+			1: {ID: 1, Enabled: true, OutputKind: "text", Prompt: "active check"},
 			2: {ID: 2, Enabled: true, OutputKind: "text", Prompt: "model check"},
 		}},
 		observe: func(id int64) { base.record(fmt.Sprintf("definition:%d", id)) },
@@ -84,10 +81,9 @@ func TestScheduledTestActionRoundPrecedesEveryDefinition(t *testing.T) {
 	require.Greater(t, repo.roundDeadline.Sub(repo.roundStart), time.Duration(0))
 	require.LessOrEqual(t, repo.roundDeadline.Sub(repo.roundStart), scheduledTestPersistenceTimeout)
 	require.ErrorIs(t, repo.roundContext.Err(), context.Canceled, "release the initialization timer immediately")
-	require.Equal(t, "round", base.events[0], "neither local statistics nor upstream definition lookup may run first")
-	require.Contains(t, base.events, "collect")
+	require.Equal(t, "round", base.events[0], "neither definition lookup nor upstream execution may run first")
 	require.Contains(t, base.events, "upstream")
-	require.Equal(t, int32(1), upstreamCalls.Load())
+	require.Equal(t, int32(2), upstreamCalls.Load())
 	require.Equal(t, 1, plans.updated)
 
 	base.events = nil

@@ -34,6 +34,16 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('configurable test management', () => {
+  it('hides retired statistics definitions and offers only active output kinds', async () => {
+    api.listTypes.mockResolvedValue([{ id: 7, name: 'Retired traffic statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true }])
+    const wrapper = makeWrapper(); await flushPromises()
+    expect(wrapper.text()).not.toContain('Retired traffic statistics')
+    const create = wrapper.findAll('button').find(button => button.text().includes('common.create'))!
+    await create.trigger('click')
+    expect(wrapper.findAll('[data-type-kind] option').map(option => option.attributes('value'))).toEqual(['html', 'number', 'text', 'model_check', 'capability'])
+    wrapper.unmount()
+  })
+
   it('edits and copies independent output limits and rejects invalid token counts', async () => {
     api.listTypes.mockResolvedValue([
       { id: 1, name: 'Pelican', key: 'pelican', output_kind: 'html', prompt: 'Draw a pelican', enabled: true, max_output_tokens: 32768 },
@@ -185,37 +195,7 @@ describe('configurable test management', () => {
     wrapper.unmount()
   })
 
-  it('creates a statistics definition without a prompt and still requires prompts for model tests', async () => {
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.findAll('button').find(button => button.text().includes('common.create'))!.trigger('click')
-    const dialog = wrapper.get('[data-dialog]')
-    const inputs = dialog.findAll('input')
-    await inputs[0].setValue('Hourly metrics')
-    await inputs[1].setValue('hourly-metrics')
-    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
-    expect(save.attributes('disabled')).toBeDefined()
-    await dialog.get('[data-type-kind]').setValue('statistics')
-    expect(dialog.find('textarea').exists()).toBe(false)
-    expect(dialog.find('[data-statistics-hint]').exists()).toBe(true)
-    expect(save.attributes('disabled')).toBeUndefined()
-    await save.trigger('click'); await flushPromises()
-    expect(api.createType).toHaveBeenCalledWith(expect.objectContaining({ output_kind: 'statistics', prompt: '', name: 'Hourly metrics' }))
-    wrapper.unmount()
-  })
 
-  it('edits and copies statistics definitions with empty prompts', async () => {
-    const statistics = { id: 7, name: 'Hourly statistics', key: 'hourly_stats', output_kind: 'statistics', prompt: '', enabled: true }
-    api.listTypes.mockResolvedValue([statistics])
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('article button[aria-label="common.copy"]').trigger('click'); await flushPromises()
-    expect(api.createType).toHaveBeenCalledWith(expect.objectContaining({ name: 'Hourly statistics（Copy）', key: 'hourly_stats-copy', output_kind: 'statistics', prompt: '' }))
-    await wrapper.get('article button[aria-label="common.edit"]').trigger('click')
-    const dialog = wrapper.get('[data-dialog]')
-    expect(dialog.find('textarea').exists()).toBe(false)
-    await dialog.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
-    expect(api.updateType).toHaveBeenCalledWith(7, expect.objectContaining({ output_kind: 'statistics', prompt: '' }))
-    wrapper.unmount()
-  })
 
 
 
@@ -534,29 +514,6 @@ describe('automatic protection plan integration', () => {
     wrapper.unmount()
   })
 
-  it('saves and copies cache recovery settings without mutating the loaded plan', async () => {
-    const recovery = { enabled: true, cooldown_seconds: 300, trial_seconds: 300, max_requests: 20, min_samples: 10, recover_rate: 85 }
-    const cacheProtection = { enabled: true, rules: [{ test_definition_id: 7, priority: 0, required_pass: false, thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80 }], on_pass: { scheduling: 'resume', group_mode: 'keep' }, on_fail: { scheduling: 'pause', group_mode: 'keep' }, recovery }] }
-    api.listTypes.mockResolvedValue([{ id: 7, name: 'Statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true }])
-    api.listPlans.mockResolvedValue([{ ...plan, test_definition_id: 7, test_definition_ids: [7], target_mode: 'account', account_id: 3, protection: cacheProtection }])
-    const wrapper = makeWrapper(); await flushPromises()
-    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
-    const dialog = wrapper.get('[data-dialog]')
-    await dialog.get('[data-recovery-rate]').setValue(90)
-    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
-    expect(save.attributes('disabled')).toBeUndefined()
-    await dialog.get('[data-recovery-min-samples]').setValue(21)
-    expect(save.attributes('disabled')).toBeDefined()
-    await dialog.get('[data-recovery-min-samples]').setValue(10)
-    await save.trigger('click'); await flushPromises()
-    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ protection: expect.objectContaining({ rules: [expect.objectContaining({ recovery: { ...recovery, recover_rate: 90 } })] }) }))
-    expect(recovery.recover_rate).toBe(85)
-    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
-    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ protection: cacheProtection }))
-    api.createPlan.mock.calls[0][0].protection.rules[0].recovery.cooldown_seconds = 600
-    expect(recovery.cooldown_seconds).toBe(300)
-    wrapper.unmount()
-  })
 
   it('saves multiple action targets from the source platform and preserves the loaded plan on edits', async () => {
     const actions = {

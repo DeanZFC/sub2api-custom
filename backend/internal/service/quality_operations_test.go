@@ -121,55 +121,6 @@ func TestQualityOperationsDynamicBoundaries(t *testing.T) {
 	require.Error(t, c.Validate())
 }
 
-func TestQualityOperationsRecoveryReserveBoundaries(t *testing.T) {
-	for _, tc := range []struct {
-		limit, recoverySpent int64
-		percent              int
-		purpose              string
-		want                 int64
-	}{
-		{10, 0, 20, "regular", 8}, {3, 0, 20, "regular", 2}, {10, 1, 20, "regular", 9},
-		{10, 3, 20, "regular", 10}, {10, 0, 20, "recovery", 10}, {0, 0, 20, "regular", 0}, {10, 0, 0, "regular", 10},
-	} {
-		require.Equal(t, tc.want, QualityBudgetAdmissionLimit(tc.limit, tc.recoverySpent, tc.percent, tc.purpose))
-	}
-	c := DefaultQualityOperationsConfig()
-	require.Zero(t, c.RecoveryReservePercent, "existing budgets preserve their behavior until explicitly configured")
-	c.RecoveryReservePercent = 51
-	require.Error(t, c.Validate())
-	for _, tc := range []struct {
-		name, status string
-		ctx          context.Context
-		want         string
-		hold         string
-	}{
-		{"ordinary", "active", context.Background(), "regular", ""},
-		{"active recovery", "quality_paused", context.Background(), "recovery", ""},
-		{"capability recovery", "active", context.Background(), "recovery", "model"},
-		{"other model capability hold", "active", context.Background(), "regular", "other"},
-		{"statistics recovery", "active", WithQualityRecoveryProbe(context.Background()), "recovery", ""},
-		{"passive recovery", "active", context.WithValue(context.Background(), passiveQualityProbeKey{}, true), "recovery", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			account := &Account{ID: 42, Status: tc.status, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
-			if tc.hold != "" {
-				account.Extra["active_pass_rate_holds"] = map[string]any{tc.hold: "pass_rate_low"}
-			}
-			calls := 0
-			repo := &qualityOperationsStub{reserve: func(ctx context.Context, _ int64, _ int64, _ bool, _ string) (*QualityProbeReservation, error) {
-				calls++
-				require.Equal(t, tc.want, QualityProbePurpose(ctx))
-				return nil, &QualityDeferredError{Reason: "budget", Until: time.Now().Add(time.Hour)}
-			}}
-			svc := &AccountTestService{accountRepo: &modelIdentityAccountRepo{account: account}, httpUpstream: &modelIdentityHTTPUpstream{}, cfg: &config.Config{}, qualityOperations: repo}
-			result, err := svc.RunTestBackground(tc.ctx, 42, "model")
-			require.NoError(t, err)
-			require.Equal(t, 1, calls)
-			require.True(t, QualityResultDeferred(result))
-		})
-	}
-}
-
 func (s *qualityOperationsStub) QualityFrequencyDue(context.Context, int64, int64, string) (*time.Time, error) {
 	next := time.Now().Add(time.Hour)
 	return &next, nil
@@ -177,14 +128,10 @@ func (s *qualityOperationsStub) QualityFrequencyDue(context.Context, int64, int6
 func (s *qualityOperationsStub) RecordQualityFrequency(context.Context, *ScheduledTestPlan, *ScheduledTestResult, string, bool) error {
 	return nil
 }
-func TestQualityOperationsDynamicFrequencyPreservesStatisticsAndManualRuns(t *testing.T) {
+func TestQualityOperationsDynamicFrequencyPreservesManualRuns(t *testing.T) {
 	base := &snapshotResultRepoStub{retryResultRepoStub: &retryResultRepoStub{}, targets: []int64{12}}
 	repo := &costBackoffRepo{snapshotResultRepoStub: base, states: map[int64]*ScheduledTestBackoff{}, policy: map[int64]string{}}
-	stats, upstream := 0, 0
-	base.collect = func(context.Context, ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error) {
-		stats++
-		return &ScheduledTestStatistics{TotalRequests: 10, SuccessRequests: 10}, nil
-	}
+	upstream := 0
 	accounts := scheduledTestExecutionAccountRepo{get: func(context.Context, int64) (*Account, error) {
 		upstream++
 		return &Account{ID: 12, Extra: map[string]any{"synthetic_ui_test": true}}, nil
@@ -202,22 +149,20 @@ func TestQualityOperationsDynamicFrequencyPreservesStatisticsAndManualRuns(t *te
 	base.latestRun = "run"
 	base.frozenMembers = map[int64]bool{12: true}
 	queue := []*scheduledTestExecutionTarget{}
-	for i, kind := range []string{"statistics", "text"} {
+	for i, kind := range []string{"text", "text"} {
 		copy := *plan
 		def := int64(i + 1)
 		copy.TestDefinitionID = &def
 		queue = append(queue, &scheduledTestExecutionTarget{plan: &copy, kind: kind, accountID: &id, pending: &ScheduledTestResult{ID: int64(i + 1), AccountID: &id, RunID: "run", StartedAt: started}})
 	}
 	runner.runExecutionTargetQueues(context.WithValue(context.Background(), scheduledTestAutomaticRunKey{}, true), queue, started, map[int64]*scheduledTestAccountProgress{})
-	require.Equal(t, 1, stats)
-	require.Zero(t, upstream, "healthy frequency skips generation but preserves free statistics")
+	require.Zero(t, upstream, "healthy frequency skips automatic generation")
 	require.Zero(t, repo.writes, "partial round must not extend health or failure streak")
 	runner.runExecutionTargetQueues(context.Background(), queue, started, map[int64]*scheduledTestAccountProgress{})
-	require.Equal(t, 2, stats)
 	require.Positive(t, upstream, "manual run bypasses adaptive frequency")
 }
 
-func TestQualityOperationsSupplierUsesFinalStreamVerdict(t *testing.T) {
+func TestQualityOperationsUsesFinalStreamVerdict(t *testing.T) {
 	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
 	resp := costJSONResponse(200, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")
 	resp.Header.Set("Content-Type", "text/event-stream")
@@ -235,14 +180,29 @@ func TestQualityOperationsSupplierUsesFinalStreamVerdict(t *testing.T) {
 	require.Nil(t, repo.outcomes[0].Tokens)
 }
 
-func TestQualityOperationsSupplierUnknownDoesNotDiluteEvidence(t *testing.T) {
+type qualityMaintenanceStub struct {
+	QualityOperationsRepository
+	calls int
+	err   error
+}
+
+func (s *qualityMaintenanceStub) PruneQualityOperations(context.Context) error {
+	s.calls++
+	return s.err
+}
+func TestQualityOperationsMaintenanceRetainsHourlyCleanupWithoutPassiveService(t *testing.T) {
+	repo := &qualityMaintenanceStub{}
+	runner := &ScheduledTestRunnerService{accountTestSvc: &AccountTestService{qualityOperations: repo}}
 	now := time.Now()
-	s := QualitySupplier{Enabled: true, MinAccounts: 2, FailurePercent: 60, Members: []QualitySupplierMember{{Kind: "network", ObservedAt: &now}, {Kind: "server", ObservedAt: &now}, {Kind: "unknown", ObservedAt: &now}, {Kind: "canceled", ObservedAt: &now}}}
-	s.Summarize()
-	require.Equal(t, 2, s.Observed)
-	require.Equal(t, 2, s.Affected)
-	require.True(t, s.Incident)
-	s.Members = append(s.Members, QualitySupplierMember{Kind: "healthy", ObservedAt: &now}, QualitySupplierMember{Kind: "healthy", ObservedAt: &now})
-	s.Summarize()
-	require.False(t, s.Incident)
+	runner.pruneQualityOperations(context.Background(), now)
+	runner.pruneQualityOperations(context.Background(), now.Add(time.Minute))
+	require.Equal(t, 1, repo.calls)
+	runner.pruneQualityOperations(context.Background(), now.Add(time.Hour))
+	require.Equal(t, 2, repo.calls)
+	repo.err = errors.New("temporary cleanup failure")
+	runner.pruneQualityOperations(context.Background(), now.Add(2*time.Hour))
+	require.Equal(t, 3, repo.calls)
+	repo.err = nil
+	runner.pruneQualityOperations(context.Background(), now.Add(2*time.Hour+time.Minute))
+	require.Equal(t, 4, repo.calls, "failed cleanup retries on the next scheduler sweep")
 }

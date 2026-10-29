@@ -182,8 +182,8 @@ func TestOpenAIUserAffinitySeedsAllSchedulersAndMigratesConfirmedHold(t *testing
 				defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				group := int64(43)
 				cache := &userAffinityTestCache{}
-				accounts := []Account{groupQualityRoutingTestAccount(1, group, 100, "healthy"), groupQualityRoutingTestAccount(2, group, 0, "healthy")}
-				svc := groupQualityRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
+				accounts := []Account{activeRoutingTestAccount(1, group, 100), activeRoutingTestAccount(2, group, 0)}
+				svc := activeRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
 				svc.cache = cache
 				auth := WithAPIKeyForUsageContext(context.Background(), &APIKey{ID: 101, UserID: 7})
 				key := openAIUserAffinityKey(7, group, "public-model")
@@ -231,12 +231,12 @@ func TestOpenAIUserAffinityCapacityAndQualitySpilloverPreserveOwner(t *testing.T
 				defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				group := int64(43)
 				cache := &userAffinityTestCache{}
-				accounts := []Account{groupQualityRoutingTestAccount(1, group, 100, "healthy"), groupQualityRoutingTestAccount(2, group, 0, "healthy")}
+				accounts := []Account{activeRoutingTestAccount(1, group, 100), activeRoutingTestAccount(2, group, 0)}
 				concurrency := schedulerTestConcurrencyCache{acquireResults: map[int64]bool{1: false, 2: true}, waitCounts: map[int64]int{1: 999}, loadMap: map[int64]*AccountLoadInfo{1: {AccountID: 1, LoadRate: 100}, 2: {AccountID: 2}}}
 				if qualityHeld {
 					concurrency.acquireResults[1] = true
 				}
-				svc := groupQualityRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, concurrency)
+				svc := activeRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, concurrency)
 				svc.cache = cache
 				svc.cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 				svc.cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.5
@@ -244,8 +244,7 @@ func TestOpenAIUserAffinityCapacityAndQualitySpilloverPreserveOwner(t *testing.T
 				svc.cfg.Gateway.Scheduling.StickySessionMaxWaiting = 1
 				auth := WithAPIKeyForUsageContext(context.Background(), &APIKey{ID: 101, UserID: 7})
 				if qualityHeld {
-					svc.concurrencyService.passiveQualityGate = &qualityHoldTestGate{normal: map[int64]bool{2: true}}
-					auth = GroupQualityTrafficContext(auth, GroupQualityTrafficRequest{Key: "user-spillover", GroupID: group, Model: "public-model"})
+					svc.concurrencyService.SetAccountAdmissionGate(&activeHoldTestGate{normal: map[int64]bool{2: true}})
 				}
 				key := openAIUserAffinityKey(7, group, "public-model")
 				for _, k := range []string{key, "openai:conversation"} {
@@ -277,46 +276,6 @@ func TestOpenAIUserAffinityCapacityAndQualitySpilloverPreserveOwner(t *testing.T
 	}
 }
 
-func TestOpenAIUserAffinityManagedTTFTIsSoftButErrorsStillMigrate(t *testing.T) {
-	for _, failed := range []bool{false, true} {
-		t.Run(fmt.Sprint(failed), func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			group := int64(43)
-			cache := &userAffinityTestCache{}
-			accounts := []Account{groupQualityRoutingTestAccount(1, group, 100, "healthy"), groupQualityRoutingTestAccount(2, group, 0, "healthy")}
-			svc := groupQualityRoutingTestService("advanced", accounts, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
-			svc.cache = cache
-			svc.openaiAccountStats = newOpenAIAccountRuntimeStats()
-			slow := 60000
-			for range 6 {
-				svc.openaiAccountStats.report(1, !failed, &slow)
-			}
-			auth := WithAPIKeyForUsageContext(context.Background(), &APIKey{ID: 101, UserID: 7})
-			key := openAIUserAffinityKey(7, group, "public-model")
-			for _, k := range []string{key, "openai:conversation"} {
-				require.NoError(t, cache.SetSessionAccountID(auth, group, k, 1, time.Hour))
-			}
-			sel, _, err := svc.SelectAccountWithScheduler(auth, &group, "", "conversation", "public-model", nil, OpenAIUpstreamTransportHTTPSSE, false)
-			require.NoError(t, err)
-			require.NotNil(t, sel)
-			want := int64(1)
-			if failed {
-				want = 2
-			}
-			require.Equal(t, want, sel.Account.ID)
-			require.False(t, sel.PreserveStickyBinding)
-			require.NoError(t, svc.BindStickySessionAfterProfitAdmission(ContextWithSelectionProfitGate(auth, sel), &group, "conversation", sel.Account.ID))
-			id, err := cache.GetSessionAccountID(auth, group, key)
-			require.NoError(t, err)
-			require.Equal(t, want, id)
-			if sel.ReleaseFunc != nil {
-				sel.ReleaseFunc()
-			}
-		})
-	}
-}
-
 func TestOpenAIUserAffinityDoesNotOverrideImmovableResponseOrLeakOnReselection(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		t.Run(mode, func(t *testing.T) {
@@ -324,11 +283,11 @@ func TestOpenAIUserAffinityDoesNotOverrideImmovableResponseOrLeakOnReselection(t
 			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			group := int64(43)
 			cache := &userAffinityTestCache{}
-			accounts := []Account{groupQualityRoutingTestAccount(1, group, 100, "healthy"), groupQualityRoutingTestAccount(2, group, 0, "healthy")}
+			accounts := []Account{activeRoutingTestAccount(1, group, 100), activeRoutingTestAccount(2, group, 0)}
 			for i := range accounts {
 				accounts[i].Extra["openai_apikey_responses_websockets_v2_enabled"] = true
 			}
-			svc := groupQualityRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
+			svc := activeRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
 			svc.cache = cache
 			svc.cfg.Gateway.OpenAIWS = newSchedulerTestOpenAIWSV2Config().Gateway.OpenAIWS
 			auth := WithAPIKeyForUsageContext(context.Background(), &APIKey{ID: 101, UserID: 7})
@@ -381,10 +340,10 @@ func TestOpenAIUserAffinityCompactCapabilityCannotMigrateOrdinaryOwner(t *testin
 			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			group := int64(43)
 			cache := &userAffinityTestCache{}
-			accounts := []Account{groupQualityRoutingTestAccount(1, group, 100, "healthy"), groupQualityRoutingTestAccount(2, group, 0, "healthy")}
+			accounts := []Account{activeRoutingTestAccount(1, group, 100), activeRoutingTestAccount(2, group, 0)}
 			accounts[0].Extra["openai_compact_supported"] = false
 			accounts[1].Extra["openai_compact_supported"] = true
-			svc := groupQualityRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
+			svc := activeRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
 			svc.cache = cache
 			auth := WithAPIKeyForUsageContext(context.Background(), &APIKey{ID: 101, UserID: 7})
 			key := openAIUserAffinityKey(7, group, "public-model")

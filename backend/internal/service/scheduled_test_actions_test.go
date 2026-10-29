@@ -102,34 +102,19 @@ func TestScheduledTestActionsValidation(t *testing.T) {
 }
 
 func TestScheduledTestActionsPreserveVerdictGates(t *testing.T) {
-	rule := ScheduledTestProtectionRule{
-		Thresholds: []ScheduledTestThreshold{{Metric: "cache_rate", Operator: "lt", Value: 80}},
-		MinSamples: 10,
-		OnPass:     &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{2, 3}},
-		OnFail:     &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{4}},
-	}
+	rule := ScheduledTestProtectionRule{Thresholds: []ScheduledTestThreshold{{Metric: "output_numeric", Operator: "lt", Value: 80}}, OnPass: &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{2, 3}}, OnFail: &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{4}}}
 	for _, tc := range []struct {
-		name      string
-		samples   int64
-		cacheRate float64
-		verdict   string
-		groupIDs  []int64
-	}{
-		{name: "qualifying cache promotes", samples: 10, cacheRate: .8, verdict: "pass", groupIDs: []int64{2, 3}},
-		{name: "low cache demotes", samples: 10, cacheRate: .79, verdict: "fail", groupIDs: []int64{4}},
-		{name: "insufficient data cannot move", samples: 9, cacheRate: .9, verdict: "pending"},
-	} {
+		name     string
+		value    *float64
+		verdict  string
+		groupIDs []int64
+	}{{"passing answer", protectionFloat(80), "pass", []int64{2, 3}}, {"failing answer", protectionFloat(79), "fail", []int64{4}}, {"missing answer", nil, "pending", nil}} {
 		t.Run(tc.name, func(t *testing.T) {
-			verdict, _ := evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "success", OutputStatistics: &ScheduledTestStatistics{
-				TotalRequests: tc.samples, CacheSamples: tc.samples, CacheInputTokens: 100, CacheRate: protectionFloat(tc.cacheRate),
-			}})
+			verdict, _ := evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "success", OutputKind: "number", OutputNumeric: tc.value})
 			require.Equal(t, tc.verdict, verdict)
 			action := rule.OutcomeAction(verdict)
 			require.Equal(t, tc.groupIDs, action.GroupIDs)
 			require.Equal(t, "keep", action.Scheduling)
-			if tc.verdict == "pending" {
-				require.Equal(t, "keep", action.GroupMode)
-			}
 		})
 	}
 

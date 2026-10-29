@@ -1166,6 +1166,24 @@ export default {
           duplicate: '该条目已存在'
         }
       },
+      strictFailover: {
+        title: "严格主备",
+        hint: "按层级顺序使用账号。仅当前层全部明确不可用时进入下一层；并发忙、排队、评分低或状态未知不会降级。未列入任何层级的账号不参与调度。",
+        enable: "启用严格主备",
+        tier: "第 {tier} 优先级",
+        add: "添加备用层级",
+        remove: "删除层级",
+        account: "搜索本分组账号",
+        removeAccount: "移除账号",
+        empty: "每一层至少选择一个账号，同一账号不能重复。最多 10 层、1000 个账号。",
+        loading: "正在读取账号…",
+        loadError: "账号读取失败，请重试",
+        retry: "重试",
+        moveUp: "上移一层",
+        moveDown: "下移一层",
+        recovery: "主层恢复后新请求自动回主层；不可迁移的续接请求需要携带完整上下文重新发起。",
+        noResults: "没有匹配账号",
+      },
       codexModelsManifest: {
         title: '固定账号获取模型列表',
         hint: '开启后，普通模型列表与 Codex Model Manifest 均优先从选定账号获取并合并，再应用账号映射和分组列表过滤；限流/过载中的选定账号仍会被使用。',

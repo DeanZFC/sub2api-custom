@@ -445,6 +445,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					}
 				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
+				service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {

@@ -185,7 +185,7 @@ func TestScheduledTestPassRateRequiresCapabilityCondition(t *testing.T) {
 	}{
 		{"pause on execution failure is not capability", "number", ScheduledTestProtectionRule{PauseOnFailure: true}, false},
 		{"latency alone is not capability", "html", ScheduledTestProtectionRule{Thresholds: []ScheduledTestThreshold{{Metric: "latency_ms", Operator: "gt", Value: 100}}}, false},
-		{"statistics use passive protection", "statistics", ScheduledTestProtectionRule{}, false},
+		{"statistics protection is retired", "statistics", ScheduledTestProtectionRule{}, false},
 		{"expected answer", "number", ScheduledTestProtectionRule{ExpectedAnswer: "21", AnswerMatch: "numeric"}, true},
 		{"numeric threshold", "number", ScheduledTestProtectionRule{Thresholds: []ScheduledTestThreshold{{Metric: "output_numeric", Operator: "lt", Value: 21}}}, true},
 		{"reviewed html", "html", ScheduledTestProtectionRule{Vote: &ScheduledTestVoteConfig{Enabled: true, PassAtLeast: 1}}, true},
@@ -197,6 +197,8 @@ func TestScheduledTestPassRateRequiresCapabilityCondition(t *testing.T) {
 			err := validateProtectionOutputKind(&test.rule, test.kind)
 			if test.allowed {
 				require.NoError(t, err)
+			} else if test.kind == "statistics" {
+				require.ErrorContains(t, err, "retired")
 			} else {
 				require.ErrorContains(t, err, "pass_rate")
 			}

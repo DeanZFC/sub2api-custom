@@ -171,7 +171,7 @@ export default {
     usage: '使用记录',
     callErrors: '调用错误',
     testResults: '渠道质量检测',
-    tests: '渠道质量管理',
+    tests: '智力检测管理',
     redeem: '兑换',
     affiliate: '邀请返利',
     affiliateManagement: '邀请返利',

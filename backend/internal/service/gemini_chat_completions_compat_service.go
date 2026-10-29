@@ -243,6 +243,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				Message:            upstreamMsg,
 			})
 			return nil, &UpstreamFailoverError{
+				ObservedUpstreamStatus: resp.StatusCode,
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           evBody,
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),

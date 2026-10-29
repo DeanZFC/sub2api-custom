@@ -243,6 +243,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 			if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
 				retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
 				return nil, &UpstreamFailoverError{
+					ObservedUpstreamStatus:   resp.StatusCode,
 					StatusCode:               resp.StatusCode,
 					ResponseBody:             respBody,
 					ResponseHeaders:          resp.Header.Clone(),

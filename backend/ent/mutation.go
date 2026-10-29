@@ -22947,6 +22947,7 @@ type GroupMutation struct {
 	fallback_group_id_on_invalid_request    *int64
 	addfallback_group_id_on_invalid_request *int64
 	model_routing                           *map[string][]int64
+	strict_failover                         *domain.StrictFailoverConfig
 	model_routing_enabled                   *bool
 	mcp_xml_inject                          *bool
 	supported_model_scopes                  *[]string
@@ -25535,6 +25536,42 @@ func (m *GroupMutation) ResetModelRouting() {
 	delete(m.clearedFields, group.FieldModelRouting)
 }
 
+// SetStrictFailover sets the "strict_failover" field.
+func (m *GroupMutation) SetStrictFailover(dfc domain.StrictFailoverConfig) {
+	m.strict_failover = &dfc
+}
+
+// StrictFailover returns the value of the "strict_failover" field in the mutation.
+func (m *GroupMutation) StrictFailover() (r domain.StrictFailoverConfig, exists bool) {
+	v := m.strict_failover
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStrictFailover returns the old "strict_failover" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldStrictFailover(ctx context.Context) (v domain.StrictFailoverConfig, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStrictFailover is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStrictFailover requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStrictFailover: %w", err)
+	}
+	return oldValue.StrictFailover, nil
+}
+
+// ResetStrictFailover resets all changes to the "strict_failover" field.
+func (m *GroupMutation) ResetStrictFailover() {
+	m.strict_failover = nil
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (m *GroupMutation) SetModelRoutingEnabled(b bool) {
 	m.model_routing_enabled = &b
@@ -26869,7 +26906,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 68)
+	fields := make([]string, 0, 69)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -27007,6 +27044,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.model_routing != nil {
 		fields = append(fields, group.FieldModelRouting)
+	}
+	if m.strict_failover != nil {
+		fields = append(fields, group.FieldStrictFailover)
 	}
 	if m.model_routing_enabled != nil {
 		fields = append(fields, group.FieldModelRoutingEnabled)
@@ -27174,6 +27214,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.FallbackGroupIDOnInvalidRequest()
 	case group.FieldModelRouting:
 		return m.ModelRouting()
+	case group.FieldStrictFailover:
+		return m.StrictFailover()
 	case group.FieldModelRoutingEnabled:
 		return m.ModelRoutingEnabled()
 	case group.FieldMcpXMLInject:
@@ -27319,6 +27361,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldFallbackGroupIDOnInvalidRequest(ctx)
 	case group.FieldModelRouting:
 		return m.OldModelRouting(ctx)
+	case group.FieldStrictFailover:
+		return m.OldStrictFailover(ctx)
 	case group.FieldModelRoutingEnabled:
 		return m.OldModelRoutingEnabled(ctx)
 	case group.FieldMcpXMLInject:
@@ -27693,6 +27737,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetModelRouting(v)
+		return nil
+	case group.FieldStrictFailover:
+		v, ok := value.(domain.StrictFailoverConfig)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStrictFailover(v)
 		return nil
 	case group.FieldModelRoutingEnabled:
 		v, ok := value.(bool)
@@ -28508,6 +28559,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldModelRouting:
 		m.ResetModelRouting()
+		return nil
+	case group.FieldStrictFailover:
+		m.ResetStrictFailover()
 		return nil
 	case group.FieldModelRoutingEnabled:
 		m.ResetModelRoutingEnabled()

@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
@@ -61,11 +60,10 @@ type accountProxyConcurrencyCache interface {
 	ReleaseAccountProxyPoolSlot(context.Context, int64, int64, string) error
 }
 
-// AccountCacheRecoveryGate checks live account protection and atomically reserves
-// one request from every active recovery trial. Scheduler snapshots alone cannot
-// enforce a trial budget shared by multiple gateway instances.
-type AccountCacheRecoveryGate interface {
-	AcquireCacheRecoveryRequest(ctx context.Context, accountID int64) (bool, error)
+// AccountAdmissionGate checks live account status and active intelligence
+// protection after a slot reservation, independently of scheduler snapshots.
+type AccountAdmissionGate interface {
+	CheckAccountAdmission(ctx context.Context, accountID int64) (bool, error)
 }
 
 // UserGroupConcurrencyCache is an optional cache extension that atomically
@@ -250,9 +248,8 @@ const (
 
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
-	cache              ConcurrencyCache
-	cacheRecoveryGate  AccountCacheRecoveryGate
-	passiveQualityGate PassiveQualityRepository
+	cache                ConcurrencyCache
+	accountAdmissionGate AccountAdmissionGate
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -275,9 +272,9 @@ func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
 	return svc
 }
 
-// SetCacheRecoveryGate installs the shared admission check before traffic starts.
-func (s *ConcurrencyService) SetCacheRecoveryGate(gate AccountCacheRecoveryGate) {
-	s.cacheRecoveryGate = gate
+// SetAccountAdmissionGate installs the shared admission check before traffic starts.
+func (s *ConcurrencyService) SetAccountAdmissionGate(gate AccountAdmissionGate) {
+	s.accountAdmissionGate = gate
 }
 
 // ErrAccountAdmissionDenied means the live account state rejected a reserved
@@ -286,71 +283,24 @@ var ErrAccountAdmissionDenied = errors.New("account admission denied by live sch
 
 // Reserve ordinary concurrency before checking live account protection. A denied
 // quality check must never become a customer-traffic recovery probe.
-func (s *ConcurrencyService) admitCacheRecoveryRequest(ctx context.Context, accountID int64, result *AcquireResult) (*AcquireResult, error) {
-	if result == nil || !result.Acquired {
+func (s *ConcurrencyService) admitAccountRequest(ctx context.Context, accountID int64, result *AcquireResult) (*AcquireResult, error) {
+	if result == nil || !result.Acquired || s.accountAdmissionGate == nil {
 		return result, nil
 	}
-	allowed := true
-	var err error
-	lease := ""
-	model, _ := ctx.Value(ctxkey.Model).(string)
-	if public, ok := RequestedPublicModelFromContext(ctx); ok && public != "" {
-		model = public
-	}
-	if traffic, ok := GroupQualityTrafficRequestFromContext(ctx); ok && traffic.Model != "" {
-		model = traffic.Model
-	}
-	if s.passiveQualityGate != nil {
-		lease = generateRequestID()
-		var reserved bool
-		allowed, reserved, err = s.passiveQualityGate.AcquirePassiveQuality(ctx, accountID, model, lease)
-		if !reserved && err == nil {
-			lease = ""
-		}
-		if err == nil && !allowed {
-			err = ErrAccountQualityHeld
-		}
-	}
-	if err == nil && allowed && s.cacheRecoveryGate != nil {
-		allowed, err = s.cacheRecoveryGate.AcquireCacheRecoveryRequest(ctx, accountID)
-	}
-	releasePassive := func(unused bool) {
-		if lease == "" {
-			return
-		}
-		release, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		if e := s.passiveQualityGate.ReleasePassiveQuality(release, lease, unused); e != nil {
-			logger.LegacyPrintf("service.passive_quality", "release lease failed: %v", e)
-		}
-	}
+	allowed, err := s.accountAdmissionGate.CheckAccountAdmission(ctx, accountID)
 	if err != nil || !allowed {
 		if result.ReleaseFunc != nil {
 			result.ReleaseFunc()
 		}
-		releasePassive(true)
 		if err == nil {
 			err = ErrAccountAdmissionDenied
 		}
 		return &AcquireResult{}, err
 	}
-	if lease != "" {
-		previous := result.ReleaseFunc
-		var once sync.Once
-		result.ReleaseFunc = func() {
-			once.Do(func() {
-				if previous != nil {
-					previous()
-				}
-				releasePassive(false)
-			})
-		}
-	}
 	return result, nil
 }
 
-// AcquireOpenAIWSIngressLease atomically reserves one live ingress connection
-// for an API key. A non-positive limit explicitly disables this protection.
+// AcquireOpenAIWSIngressLease atomically reserves one live ingress connection.
 func (s *ConcurrencyService) AcquireOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, maxConnections int) (*OpenAIWSIngressLease, bool, error) {
 	if maxConnections <= 0 {
 		return nil, true, nil
@@ -441,18 +391,9 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 	if len(proxyIDs) > 1 {
 		return s.acquireAccountProxyPoolSlot(ctx, accountID, maxConcurrency, proxyIDs)
 	}
-	if gate, ok := s.passiveQualityGate.(PassiveQualityConcurrencyGate); ok {
-		limit, err := gate.PassiveQualityConcurrencyLimit(ctx, accountID, qualityRequestModel(ctx))
-		if err != nil {
-			return nil, err
-		}
-		if limit > 0 && (maxConcurrency <= 0 || limit < maxConcurrency) {
-			maxConcurrency = limit
-		}
-	}
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
-		return s.admitCacheRecoveryRequest(ctx, accountID, &AcquireResult{
+		return s.admitAccountRequest(ctx, accountID, &AcquireResult{
 			Acquired:    true,
 			ReleaseFunc: func() {}, // no-op
 		})
@@ -468,7 +409,7 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 
 	if acquired {
 		var once sync.Once
-		return s.admitCacheRecoveryRequest(ctx, accountID, &AcquireResult{
+		return s.admitAccountRequest(ctx, accountID, &AcquireResult{
 			Acquired: true,
 			ReleaseFunc: func() {
 				once.Do(func() {

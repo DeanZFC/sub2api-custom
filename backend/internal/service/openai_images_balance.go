@@ -82,12 +82,13 @@ func (s *OpenAIGatewayService) coolOpenAIImagesInsufficientBalance(ctx context.C
 
 func newOpenAIImagesInsufficientBalanceFailoverError(statusCode int, headers http.Header, body []byte) *UpstreamFailoverError {
 	return &UpstreamFailoverError{
-		StatusCode:        statusCode,
-		ResponseHeaders:   headers.Clone(),
-		ResponseBody:      body,
-		Reason:            OpenAIImagesInsufficientBalanceReason,
-		ClientStatusCode:  402,
-		ClientMessage:     OpenAIImagesInsufficientBalanceMessage,
-		NextAccountAction: NextAccountRetry,
+		ObservedUpstreamStatus: statusCode,
+		StatusCode:             statusCode,
+		ResponseHeaders:        headers.Clone(),
+		ResponseBody:           body,
+		Reason:                 OpenAIImagesInsufficientBalanceReason,
+		ClientStatusCode:       402,
+		ClientMessage:          OpenAIImagesInsufficientBalanceMessage,
+		NextAccountAction:      NextAccountRetry,
 	}
 }

@@ -246,6 +246,7 @@ func (s *FailoverState) HandleFailoverError(
 	}
 
 	// 加入失败列表
+	service.RecordStrictFailoverFailure(ctx, accountID, failoverErr)
 	s.FailedAccountIDs[accountID] = struct{}{}
 
 	// 检查是否耗尽

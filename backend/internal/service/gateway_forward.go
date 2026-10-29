@@ -99,7 +99,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
-	ctx = CapturePassiveQualityCacheRequest(ctx, c, account, parsed.Body.Bytes(), passiveQualityRequestSession(c, parsed.Body.Bytes()), parsed.Model)
 	// API-key mappings and OAuth native IDs are resolved before mimicry.
 	validationModel := parsed.Model
 	if account != nil {
@@ -744,6 +743,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
 			}
 			return nil, &UpstreamFailoverError{
+				ObservedUpstreamStatus: resp.StatusCode,
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
 				ResponseHeaders:        resp.Header.Clone(),
@@ -784,6 +784,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
 		}
 		return nil, &UpstreamFailoverError{
+			ObservedUpstreamStatus: resp.StatusCode,
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,
 			ResponseHeaders:        resp.Header.Clone(),
@@ -855,7 +856,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					logger.LegacyPrintf("service.gateway", "Account %d: 400 error, attempting failover", account.ID)
 				}
 				s.handleFailoverSideEffects(ctx, resp, account, reqModel)
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+					StatusCode: resp.StatusCode, ResponseBody: respBody}
 			}
 		}
 		return s.handleErrorResponse(ctx, resp, c, account, reqModel)

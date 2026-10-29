@@ -733,12 +733,13 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, respBody, false)
 			}
 			if account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests {
-				return nil, s.newOpenAIAccountFailoverError(account, resp.StatusCode, resp.Header, respBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
+				return nil, s.newOpenAIAccountFailoverError(account, resp.StatusCode, resp.Header, respBody, upstreamMsg, shouldDisable, retryableOnSameAccount, resp.StatusCode)
 			}
 			if isOpenAIHTTPUpstreamAccessStateError(resp.StatusCode, upstreamMsg, respBody) {
-				return nil, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMsg, retryableOnSameAccount)
+				return nil, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMsg, retryableOnSameAccount, resp.StatusCode)
 			}
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: retryableOnSameAccount}
+			return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+				StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: retryableOnSameAccount}
 		}
 		return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
 	}

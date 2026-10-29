@@ -14,7 +14,7 @@ import (
 // Called under the existing plan/account locks, in the same transaction as the
 // decision. New holds get an immutable trigger; subsequent rounds keep it.
 func recordProtectionEvidence(ctx context.Context, tx *sql.Tx, state *protectionState, before, after *protectionAccountSnapshot, decision service.ScheduledTestProtectionDecision) error {
-	if !state.newHold && !state.newCombinedHold && decision.Status != "applied" && state.evidenceSource != "recovery" {
+	if !state.newHold && !state.newCombinedHold && decision.Status != "applied" {
 		return nil
 	}
 	source := service.ScheduledTestProtectionHoldSource{PlanID: state.planID, ModelID: state.modelKey, DefinitionID: state.definitionID, Reason: decision.Reason, UpdatedAt: time.Now().UTC()}
@@ -51,24 +51,6 @@ func recordProtectionEvidence(ctx context.Context, tx *sql.Tx, state *protection
 	}
 	if err = json.Unmarshal(statesRaw, &source.States); err != nil {
 		return err
-	}
-	if state.evidenceSource == "recovery" {
-		for i := range source.States {
-			s := &source.States[i]
-			if s.DefinitionID != state.definitionID {
-				continue
-			}
-			// Trial statistics come from their own bounded observation window;
-			// the original failed result must never stand in for that evidence.
-			s.Current = state.recoveryEvidence != nil
-			s.Verdict, s.Automated, s.Reason = decision.Verdict, decision.Verdict, decision.Reason
-			if state.rule.Recovery != nil {
-				s.Rule.MinSamples = int64(state.rule.Recovery.MinSamples)
-			}
-			if s.Current {
-				s.Result = &service.ScheduledTestResult{ID: state.resultID, ModelID: state.modelKey, StartedAt: state.recoveryEvidence.WindowEnd, Status: "success", OutputStatistics: state.recoveryEvidence}
-			}
-		}
 	}
 	var actor *int64
 	eventSource := state.evidenceSource

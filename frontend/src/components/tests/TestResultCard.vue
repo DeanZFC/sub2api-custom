@@ -3,8 +3,7 @@
     class="flex min-w-0 flex-col overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700"
     data-test-section
     :data-numeric-test="test.latest.output_kind === 'number' ? '' : undefined"
-    :data-statistics-test="test.latest.output_kind === 'statistics' ? '' : undefined"
-    :data-content-test="!['number', 'statistics'].includes(test.latest.output_kind) ? '' : undefined"
+    :data-content-test="test.latest.output_kind !== 'number' ? '' : undefined"
   >
     <div class="space-y-2 px-4 pt-4">
       <div class="flex flex-wrap items-start justify-between gap-2">
@@ -14,13 +13,12 @@
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span class="min-w-0 break-all text-xs text-gray-600 dark:text-gray-300">{{ test.latest.model_id || '-' }}</span>
         <span v-if="test.latest.reasoning_effort" class="text-xs text-gray-500 dark:text-gray-400">{{ t('tests.reasoningEffort') }}: {{ test.latest.reasoning_effort }}</span>
-        <span v-if="test.latest.output_kind !== 'statistics' && test.latest.latency_ms != null" class="text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ test.latest.latency_ms }}ms</span>
+        <span v-if="test.latest.latency_ms != null" class="text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ test.latest.latency_ms }}ms</span>
       </div>
       <p v-if="test.latest.model_schedulable != null" class="mt-1 text-xs font-medium" :class="test.latest.model_schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'" data-model-scheduling-status>{{ t(test.latest.model_schedulable ? 'tests.modelSchedulingActive' : 'tests.modelSchedulingPaused') }}</p>
     </div>
     <div class="min-w-0 p-4">
-      <TestResultOutput v-if="test.latest.output_kind === 'statistics'" :result="test.latest" compact />
-      <figure v-else-if="test.latest.output_kind === 'number'" :key="test.latest.id" class="min-w-0 [container-type:inline-size]" data-numeric-gallery>
+      <figure v-if="test.latest.output_kind === 'number'" :key="test.latest.id" class="min-w-0 [container-type:inline-size]" data-numeric-gallery>
         <div class="grid gap-2" :class="previousPreviews.length ? 'numeric-result-grid grid-cols-2' : 'grid-cols-1'" :style="{ '--numeric-result-count': previousPreviews.length + 1 }">
           <div class="flex min-w-0 flex-col items-center rounded-xl border border-primary-200 bg-primary-50/60 px-2 py-3 text-center dark:border-primary-800 dark:bg-primary-950/20" data-latest-preview>
             <p class="text-[11px] font-medium leading-4 text-primary-700 dark:text-primary-300">{{ t('tests.currentResult') }}</p>
@@ -75,7 +73,7 @@
       <AdminTestDecision v-if="review" :review="review" compact :show-pass-rate="false" @decided="$emit('decided')" />
     </div>
     <footer class="mt-auto space-y-3 border-t border-gray-100 p-3 dark:border-dark-800" data-test-footer>
-      <TestRecentPassRate v-if="test.latest.output_kind !== 'statistics'" :evidence="test.latest.pass_rate" />
+      <TestRecentPassRate :evidence="test.latest.pass_rate" />
       <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-xs text-gray-500 dark:text-gray-400">
         <time :datetime="resultTime(test.latest)">{{ formatDate(resultTime(test.latest)) }}</time>
         <div class="flex flex-wrap items-center gap-3" data-test-actions>

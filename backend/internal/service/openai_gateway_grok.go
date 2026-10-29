@@ -190,6 +190,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
 			retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
 			return nil, &UpstreamFailoverError{
+				ObservedUpstreamStatus:   resp.StatusCode,
 				StatusCode:               resp.StatusCode,
 				ResponseBody:             respBody,
 				ResponseHeaders:          resp.Header.Clone(),
@@ -1437,6 +1438,7 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
 			retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
 			return "", OpenAIUsage{}, &UpstreamFailoverError{
+				ObservedUpstreamStatus:   resp.StatusCode,
 				StatusCode:               resp.StatusCode,
 				ResponseBody:             respBody,
 				ResponseHeaders:          resp.Header.Clone(),

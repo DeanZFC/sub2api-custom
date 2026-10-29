@@ -43,6 +43,8 @@ type ScheduledTestRunnerService struct {
 	cron                    *cron.Cron
 	startOnce               sync.Once
 	stopOnce                sync.Once
+	maintenanceMu           sync.Mutex
+	lastMaintenance         time.Time
 	runMu                   sync.Mutex
 	lifecycleMu             sync.Mutex
 	lifecycleCtx            context.Context
@@ -61,7 +63,6 @@ type ScheduledTestRunnerService struct {
 	runningPlans      map[int64]struct{}
 	workerMu          sync.Mutex
 	workerSem         chan struct{}
-	statisticsSem     chan struct{}
 	accountRunMu      sync.Mutex
 	runningAccounts   map[scheduledTestRunKey]struct{}
 	accountExecutions map[int64]*scheduledTestAccountExecution
@@ -204,7 +205,6 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	case <-ctx.Done():
 		return
 	}
-	s.advanceCacheRecovery(ctx, time.Now().UTC())
 	s.runDuePlans(ctx)
 }
 
@@ -213,6 +213,7 @@ func (s *ScheduledTestRunnerService) runDuePlans(ctx context.Context) {
 }
 
 func (s *ScheduledTestRunnerService) runDuePlansAt(ctx context.Context, now time.Time) {
+	s.pruneQualityOperations(ctx, now)
 	queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 	plans, err := s.planRepo.ListDue(queryCtx, now)
 	cancel()
@@ -312,22 +313,8 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 		}
 	}
 	executions := scheduledTestExecutionPlans(plan)
-	// Keep local statistics ahead of upstream calls, as in the snapshot path.
-	// Other definitions retain their configured order. Each account's verdicts
-	// then carry across definitions so a failed check skips its remaining work.
-	var local, upstream []*ScheduledTestPlan
-	for _, execution := range executions {
-		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
-		_, kind, _, err := s.resolveDefinition(queryCtx, execution)
-		cancel()
-		if err == nil && kind == "statistics" {
-			local = append(local, execution)
-		} else {
-			upstream = append(upstream, execution)
-		}
-	}
 	progress := make(map[int64]*scheduledTestAccountProgress)
-	for _, execution := range append(local, upstream...) {
+	for _, execution := range executions {
 		s.runPlanDefinitionWithProgress(ctx, execution, progress)
 		if ctx.Err() != nil {
 			break
@@ -391,11 +378,6 @@ func (s *ScheduledTestRunnerService) runPlanDefinitionWithProgress(ctx context.C
 			return
 		}
 		s.savePlanFailure(ctx, plan, "text", definitionErr)
-		return
-	}
-	if outputKind == "statistics" {
-		cancel()
-		s.runStatisticsDefinitionWithProgress(ctx, plan, progress)
 		return
 	}
 
@@ -479,6 +461,9 @@ func (s *ScheduledTestRunnerService) resolveDefinition(ctx context.Context, plan
 	outputKind := strings.ToLower(strings.TrimSpace(d.OutputKind))
 	if outputKind == "" {
 		outputKind = "text"
+	}
+	if outputKind == "statistics" {
+		return "", "", 0, fmt.Errorf("statistics tests have been retired")
 	}
 	if outputKind == "model_check" {
 		return scheduledTestModelCheckPrompt, outputKind, d.MaxOutputTokens, nil
@@ -622,9 +607,6 @@ func (s *ScheduledTestRunnerService) startAccountResult(ctx context.Context, pla
 
 func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, plan *ScheduledTestPlan, accountID int64, prompt, outputKind string, pending *ScheduledTestResult) *ScheduledTestResult {
 	ctx = withScheduledTestOutputKind(ctx, outputKind)
-	if outputKind == "statistics" {
-		return s.runStatisticsResult(ctx, plan, &accountID, pending, time.Now().UTC())
-	}
 	if release, acquired := s.acquireAccountExecution(ctx, accountID); acquired {
 		defer release()
 	}
@@ -1112,9 +1094,6 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if err != nil {
 		return nil, err
 	}
-	if outputKind == "statistics" {
-		plan.ReasoningEffort = ""
-	}
 	if s.scheduledSvc == nil {
 		return nil, fmt.Errorf("scheduled test service unavailable")
 	}
@@ -1305,4 +1284,28 @@ func (s *ScheduledTestRunnerService) tryRecoverAccount(ctx context.Context, acco
 	if recovery.ClearedRateLimit {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d auto-recover: account=%d cleared rate-limit/runtime state", planID, accountID)
 	}
+}
+
+// Budget ledgers outlive individual test results and need their own bounded
+// maintenance even when no plans are due.
+func (s *ScheduledTestRunnerService) pruneQualityOperations(ctx context.Context, now time.Time) {
+	if s.accountTestSvc == nil {
+		return
+	}
+	repo, ok := s.accountTestSvc.qualityOperations.(interface{ PruneQualityOperations(context.Context) error })
+	if !ok {
+		return
+	}
+	s.maintenanceMu.Lock()
+	defer s.maintenanceMu.Unlock()
+	if !s.lastMaintenance.IsZero() && now.Sub(s.lastMaintenance) < time.Hour {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
+	defer cancel()
+	if err := repo.PruneQualityOperations(cleanupCtx); err != nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] quality ledger cleanup: %v", err)
+		return
+	}
+	s.lastMaintenance = now
 }

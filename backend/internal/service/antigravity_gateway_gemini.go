@@ -378,7 +378,8 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true}
+			return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+				StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true}
 		}
 
 		if s.shouldFailoverUpstreamError(resp.StatusCode) || IsUpstreamBillingError(resp.StatusCode, unwrappedForOps) {
@@ -397,7 +398,8 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			if IsUpstreamBillingError(resp.StatusCode, unwrappedForOps) {
 				return nil, newUpstreamBillingFailoverError(resp.StatusCode, resp.Header, unwrappedForOps, false)
 			}
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, ResponseHeaders: resp.Header.Clone()}
+			return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+				StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, ResponseHeaders: resp.Header.Clone()}
 		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),

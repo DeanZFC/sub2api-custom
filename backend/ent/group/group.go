@@ -108,6 +108,8 @@ const (
 	FieldFallbackGroupIDOnInvalidRequest = "fallback_group_id_on_invalid_request"
 	// FieldModelRouting holds the string denoting the model_routing field in the database.
 	FieldModelRouting = "model_routing"
+	// FieldStrictFailover holds the string denoting the strict_failover field in the database.
+	FieldStrictFailover = "strict_failover"
 	// FieldModelRoutingEnabled holds the string denoting the model_routing_enabled field in the database.
 	FieldModelRoutingEnabled = "model_routing_enabled"
 	// FieldMcpXMLInject holds the string denoting the mcp_xml_inject field in the database.
@@ -282,6 +284,7 @@ var Columns = []string{
 	FieldFallbackGroupID,
 	FieldFallbackGroupIDOnInvalidRequest,
 	FieldModelRouting,
+	FieldStrictFailover,
 	FieldModelRoutingEnabled,
 	FieldMcpXMLInject,
 	FieldSupportedModelScopes,
@@ -403,6 +406,8 @@ var (
 	DefaultLongContextPricingEnabled bool
 	// DefaultClaudeCodeOnly holds the default value on creation for the "claude_code_only" field.
 	DefaultClaudeCodeOnly bool
+	// DefaultStrictFailover holds the default value on creation for the "strict_failover" field.
+	DefaultStrictFailover domain.StrictFailoverConfig
 	// DefaultModelRoutingEnabled holds the default value on creation for the "model_routing_enabled" field.
 	DefaultModelRoutingEnabled bool
 	// DefaultMcpXMLInject holds the default value on creation for the "mcp_xml_inject" field.

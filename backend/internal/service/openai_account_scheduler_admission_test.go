@@ -21,7 +21,7 @@ func TestOpenAISchedulerSkipsAdmissionDeniedAccounts(t *testing.T) {
 				cache.acquireResults = map[int64]bool{backup.ID: false}
 			}
 			concurrency := NewConcurrencyService(cache)
-			concurrency.SetCacheRecoveryGate(cacheRecoveryGateFunc(func(_ context.Context, id int64) (bool, error) {
+			concurrency.SetAccountAdmissionGate(accountAdmissionGateFunc(func(_ context.Context, id int64) (bool, error) {
 				return id == backup.ID && scenario != "all denied", nil
 			}))
 			svc := &OpenAIGatewayService{

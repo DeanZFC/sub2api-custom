@@ -24,10 +24,6 @@ func TestActivePassRateRoutingScopesPublicModelAndUnknownRequest(t *testing.T) {
 	require.Equal(t, "public-a", ActivePassRateRequestModel(ctx))
 	require.False(t, a.IsSchedulableForModelWithContext(ctx, "provider-a"))
 	require.True(t, shouldClearStickySessionWithContext(ctx, a, "provider-a"))
-	traffic := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "request", GroupID: 8, Model: "public-a"})
-	traffic = context.WithValue(traffic, ctxkey.Model, "provider-a")
-	require.Equal(t, "public-a", ActivePassRateRequestModel(traffic))
-	require.False(t, a.IsSchedulableForModelWithContext(traffic, "provider-a"))
 	require.Equal(t, "", ActivePassRateRequestModel(nil)) //nolint:staticcheck // Intentionally exercise the nil-context defensive branch.
 }
 
@@ -56,13 +52,12 @@ func TestActiveTestModelHoldAcrossProvidersAndRecovery(t *testing.T) {
 
 func TestQualityProtectionNeverRelaxesActiveModelHolds(t *testing.T) {
 	groupID := int64(43)
-	a := qualityHoldTestAccount(1, groupID, 0, true)
+	a := Account{ID: 1, Status: "quality_paused", Schedulable: true, GroupIDs: []int64{groupID}, Extra: map[string]any{}}
 	a.Extra["active_test_model_holds"] = map[string]any{"model-a": "failed", "model-b": "failed"}
 	a.Extra["active_pass_rate_holds"] = map[string]any{"model-c": "pass rate low"}
 	a.Extra["active_test_all_models_paused"] = true
 	for _, model := range []string{"model-a", "model-b", "model-c", "unmonitored-model", ""} {
-		ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "request", GroupID: groupID, Model: model})
-		require.True(t, groupQualityAutomaticHold(ctx, &a, &groupID, model))
+		ctx := context.WithValue(context.Background(), ctxkey.RequestedPublicModel, model)
 		require.False(t, a.IsSchedulableForModelWithContext(ctx, model))
 		require.Equal(t, "quality_paused", a.Status)
 	}

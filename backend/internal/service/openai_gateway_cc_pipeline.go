@@ -125,7 +125,6 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		upstreamDetail = truncateString(string(respBody), maxBytes)
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		upstreamHTTPResponseObserved: true,
 
 		ProxyID:            opsUpstreamProxyID(account),
 		ProxyName:          opsUpstreamProxyName(account),
@@ -150,6 +149,7 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		upstreamMsg,
 		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
+		resp.StatusCode,
 	)
 }
 
@@ -253,7 +253,6 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	capturePassiveQualityCacheHTTPRequest(c, account, upstreamReq)
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)

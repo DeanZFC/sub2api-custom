@@ -50,12 +50,12 @@ describe('public recent check counts', () => {
     api.list.mockResolvedValue([
       { ...baseResult, id: 1, pass_rate: artworkEvidence },
       { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29, pass_rate: candyEvidence },
-      { ...baseResult, id: 3, test_definition_id: 3, test_name: 'Statistics', output_kind: 'statistics', pass_rate: passRate(10, 10) },
+      { ...baseResult, id: 3, test_definition_id: 3, test_name: 'Retired statistics', output_kind: 'statistics', pass_rate: passRate(10, 10) },
     ])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.get('[data-content-test] [data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 8 passed · 80%')
     expect(wrapper.get('[data-numeric-test] [data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 20 checks · 19 passed · 95%')
-    expect(wrapper.find('[data-statistics-test] [data-recent-pass-rate]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Retired statistics')
     expect(wrapper.findAllComponents(TestRecentPassRate).map(component => component.props('evidence'))).toEqual([candyEvidence, artworkEvidence])
     expect(api.reviews).not.toHaveBeenCalled()
     expect(api.adminResults).not.toHaveBeenCalled()
@@ -706,7 +706,7 @@ describe('channel quality result series', () => {
     wrapper.unmount()
   })
 
-  it('switches all accounts, checks and statistics together using the configured model order', async () => {
+  it('switches all accounts and active checks together using the configured model order', async () => {
     const primary = { ...baseResult, id: 101, model_id: 'model-z', model_order: 0, created_at: '2026-09-14T12:00:00Z', pass_rate: passRate(10, 9, { model: 'model-z' }) }
     const secondary = { ...baseResult, id: 102, model_id: 'model-a', model_order: 1, created_at: '2026-09-16T12:00:00Z', pass_rate: passRate(10, 4, { model: 'model-a' }) }
     const otherPrimary = { ...baseResult, id: 201, account_id: 4, model_id: 'model-z', model_order: 0 }
@@ -714,10 +714,10 @@ describe('channel quality result series', () => {
     api.list.mockResolvedValue([
       secondary, otherSecondary,
       { ...secondary, id: 104, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 30 },
-      { ...secondary, id: 106, test_definition_id: 3, test_name: 'Statistics', output_kind: 'statistics' },
+      { ...secondary, id: 106, test_definition_id: 3, test_name: 'Text', output_kind: 'text' },
       primary, otherPrimary,
       { ...primary, id: 103, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29 },
-      { ...primary, id: 105, test_definition_id: 3, test_name: 'Statistics', output_kind: 'statistics' },
+      { ...primary, id: 105, test_definition_id: 3, test_name: 'Text', output_kind: 'text' },
     ])
     const wrapper = mountResults(); await flushPromises()
     const accounts = wrapper.findAll('[data-account-result]')
@@ -726,7 +726,7 @@ describe('channel quality result series', () => {
     expect(outputIDs(accounts[0])).toEqual(['101', '105'])
     expect(accounts[0].get('[data-numeric-gallery] strong').text()).toBe('29')
     expect(accounts[0].findAll('[data-recent-pass-rate-counts]').map(counts => counts.text())).toEqual([
-      'Within 7 days, last 10 checks · 9 passed · 90%', 'Within 7 days, last 10 checks · 9 passed · 90%',
+      'Within 7 days, last 10 checks · 9 passed · 90%', 'Within 7 days, last 10 checks · 9 passed · 90%', 'Within 7 days, last 10 checks · 9 passed · 90%',
     ])
     expect(outputIDs(accounts[1])).toEqual(['201'])
     expect(wrapper.findAll('[data-model-selector]')).toHaveLength(1)
@@ -738,7 +738,7 @@ describe('channel quality result series', () => {
     expect(outputIDs(accounts[0])).toEqual(['102', '106'])
     expect(accounts[0].get('[data-numeric-gallery] strong').text()).toBe('30')
     expect(accounts[0].findAll('[data-recent-pass-rate-counts]').map(counts => counts.text())).toEqual([
-      'Within 7 days, last 10 checks · 4 passed · 40%', 'Within 7 days, last 10 checks · 4 passed · 40%',
+      'Within 7 days, last 10 checks · 4 passed · 40%', 'Within 7 days, last 10 checks · 4 passed · 40%', 'Within 7 days, last 10 checks · 4 passed · 40%',
     ])
     expect(accounts[0].findAll('[data-test-section]').every(card => card.text().includes('model-a'))).toBe(true)
     expect(wrapper.get<HTMLSelectElement>('[data-model-selector]').element.value).toBe('model-a')
@@ -799,36 +799,22 @@ describe('channel quality result series', () => {
     wrapper.unmount()
   })
 
-  it('preserves configured order across statistics, numeric, and HTML sections', async () => {
+  it('preserves configured order across text, numeric, and HTML sections', async () => {
     api.list.mockResolvedValue([
       { ...baseResult, id: 1, test_name: 'Pelican', test_order: 0 },
       { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29, test_order: 20 },
-      { ...baseResult, id: 3, test_definition_id: 3, test_name: 'Last hour', output_kind: 'statistics', test_order: 10 },
+      { ...baseResult, id: 3, test_definition_id: 3, test_name: 'Text', output_kind: 'text', test_order: 10 },
     ])
     const wrapper = mountResults()
     await flushPromises()
-    expect(wrapper.findAll('[data-short-test-stack] [data-test-section] h4').map(heading => heading.text())).toEqual(['Last hour', 'Candy'])
+    expect(wrapper.findAll('[data-short-test-stack] [data-test-section] h4').map(heading => heading.text())).toEqual(['Text', 'Candy'])
     expect(wrapper.findAll('[data-preview-test-stack] [data-test-section] h4').map(heading => heading.text())).toEqual(['Pelican'])
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-statistics-test]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-content-test]')).toHaveLength(2)
     expect(wrapper.get('[data-numeric-test] strong').text()).toBe('29')
     wrapper.unmount()
   })
 
-  it('shows the latest statistics snapshot and loads previous snapshots through history', async () => {
-    const results = [1, 2, 3].map(id => ({ ...baseResult, id, test_name: 'Last hour', output_kind: 'statistics', latency_ms: 8 }))
-    api.list.mockResolvedValue(results)
-    api.history.mockResolvedValue({ items: results })
-    const wrapper = mountResults()
-    await flushPromises()
-    expect(wrapper.findAll('[data-statistics-test] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['3'])
-    expect(wrapper.get('[data-statistics-test]').text()).not.toContain('8ms')
-    await wrapper.get('[data-statistics-test] [data-view-history]').trigger('click')
-    await flushPromises()
-    expect(api.history).toHaveBeenCalledWith(3, undefined)
-    expect(wrapper.findAll('[data-dialog] [data-output]').map(output => output.attributes('data-result-id'))).toEqual(['3', '2', '1'])
-    wrapper.unmount()
-  })
 
   it('shows the latest failed output and retains successful history', async () => {
     const results = [
@@ -1425,8 +1411,8 @@ describe('current scheduling and passing result order', () => {
     wrapper.unmount()
   })
 
-  it('does not invent an account scheduling state for group statistics', async () => {
-    api.list.mockResolvedValue([{ ...baseResult, id: 1, account_id: null, target_mode: 'group', output_kind: 'statistics' }])
+  it('does not invent an account scheduling state for group checks', async () => {
+    api.list.mockResolvedValue([{ ...baseResult, id: 1, account_id: null, target_mode: 'group', output_kind: 'text' }])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.find('[data-scheduling-status]').exists()).toBe(false)
     wrapper.unmount()

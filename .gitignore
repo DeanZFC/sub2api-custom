@@ -136,6 +136,7 @@ deploy/docker-compose.override.yml
 vite.config.js
 docs/*
 !docs/upstream-error-message.md
+!docs/strict-failover.md
 !docs/channel-quality-experience.md
 !docs/passive-quality.md
 !docs/codex-fingerprint.md

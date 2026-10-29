@@ -89,7 +89,7 @@
 
     <BaseDialog :show="!!historyTarget" :title="historyTarget ? `${targetName(historyTarget.latest)} · ${historyTarget.name}` : ''" width="extra-wide" @close="closeHistory">
       <div v-if="historyTarget" class="space-y-4">
-        <div class="divide-y divide-gray-200 dark:divide-dark-700"><article v-for="result in historyResults" :key="result.id" class="py-5 first:pt-0"><div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ modelLabel(result) }}<span v-if="result.output_kind !== 'statistics' && result.latency_ms != null"> · {{ result.latency_ms }}ms</span> · {{ formatDate(resultTime(result)) }}</span><span :class="statusClass(result)">{{ statusLabel(result) }}</span></div><TestResultOutput :result="result" /></article></div>
+        <div class="divide-y divide-gray-200 dark:divide-dark-700"><article v-for="result in historyResults" :key="result.id" class="py-5 first:pt-0"><div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400"><span>{{ modelLabel(result) }}<span v-if="result.latency_ms != null"> · {{ result.latency_ms }}ms</span> · {{ formatDate(resultTime(result)) }}</span><span :class="statusClass(result)">{{ statusLabel(result) }}</span></div><TestResultOutput :result="result" /></article></div>
         <p v-if="historyLoading" class="py-4 text-center text-sm text-gray-500" role="status">{{ t('common.loading') }}</p>
         <div v-else-if="historyError" class="flex flex-wrap items-center justify-center gap-3 py-4 text-sm"><p class="text-red-600 dark:text-red-400" role="alert">{{ historyError }}</p><button type="button" class="btn btn-secondary" @click="loadHistory"><Icon name="refresh" size="sm" />{{ t('common.retry') }}</button></div>
         <p v-else-if="!historyResults.length" class="py-4 text-center text-sm text-gray-500">{{ t('tests.empty') }}</p>
@@ -444,7 +444,7 @@ const load = (force = false): Promise<void> => {
     // Publish one complete refresh together. An old voting or review response
     // must never keep the previous group's tab alongside freshly moved results.
     allResults.value = results.status === 'fulfilled'
-      ? sortResults(results.value.filter(result => ['success', 'passed', 'failed', 'error', 'pending', 'running'].includes(result.status))) : []
+      ? sortResults(results.value.filter(result => result.output_kind !== 'statistics' && ['success', 'passed', 'failed', 'error', 'pending', 'running'].includes(result.status))) : []
     voteResults.value = votes.status === 'fulfilled' ? votes.value.filter(visibleVote) : []
     adminReviews.value = administrator && auth.isAdmin && reviews.status === 'fulfilled' ? reviews.value : []
     votesLoadError.value = votes.status === 'rejected' ? extractApiErrorMessage(votes.reason, t('tests.voting.loadFailed')) : ''

@@ -110,7 +110,8 @@ type ScheduledTestDecisionRepository interface {
 	RecordDecision(context.Context, *ScheduledTestResult, ScheduledTestProtectionDecision) error
 }
 
-// ScheduledTestStatistics is a local snapshot, never an upstream model output.
+// ScheduledTestStatistics decodes retained historical results only. It is no
+// longer collected, scheduled, or accepted as a protection rule.
 type ScheduledTestStatistics struct {
 	WindowStart       time.Time                    `json:"window_start"`
 	WindowEnd         time.Time                    `json:"window_end"`
@@ -127,29 +128,12 @@ type ScheduledTestStatistics struct {
 	CacheInputTokens  int64                        `json:"cache_input_tokens"`
 	CacheSamples      int64                        `json:"cache_samples"`
 	RecentRequests    []ScheduledTestRecentRequest `json:"recent_requests"`
-	RecoveryProbe     *ScheduledTestRecoveryProbe  `json:"recovery_probe,omitempty"`
 }
 
 // ScheduledTestRecentRequest deliberately contains no request or account details.
 type ScheduledTestRecentRequest struct {
 	Success   bool      `json:"success"`
 	CreatedAt time.Time `json:"created_at"`
-}
-
-type ScheduledTestStatisticsFilter struct {
-	GroupID             *int64
-	AccountID           *int64
-	Model               string
-	WindowStart         time.Time
-	WindowEnd           time.Time
-	RequestStartedAfter *time.Time
-}
-
-// Optional capability implemented by the SQL result repository. Existing test
-// adapters and upstream execution wiring do not need a new dependency.
-type ScheduledTestStatisticsRepository interface {
-	CollectStatistics(context.Context, ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error)
-	ListStatisticsAccountIDs(context.Context, int64) ([]int64, error)
 }
 
 type ScheduledTestResultHistory struct {

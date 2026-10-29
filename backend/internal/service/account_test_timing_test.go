@@ -78,8 +78,5 @@ func TestAccountTestTimingBufferedSSEDoesNotInventGenerationDuration(t *testing.
 	a := collector.snapshot().Attempts[0]
 	require.NotNil(t, a.FirstTokenMS)
 	require.Equal(t, *a.FirstTokenMS, *a.DurationMS)
-	r := &ScheduledTestResult{Status: "success", ResponseText: "answer", ExecutionInfo: collector.snapshot()}
-	samples, reason := passiveRecoverySamples(r, nil, "model", "private", false, time.Now())
-	require.Empty(t, reason)
-	require.Nil(t, summarizeActiveRecovery(samples).OutputTPS)
+	require.Nil(t, OutputTokensPerSecond(200, *a.DurationMS-*a.FirstTokenMS))
 }

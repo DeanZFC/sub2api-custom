@@ -13,7 +13,6 @@
       </div>
       <TestCombinationConditionEditor :model-value="rule.condition" :types="types" :remaining-nodes="128 - combinationNodeCount(rule.condition)" @update:model-value="patchRule(index, { condition: $event })" />
       <TestOutcomeActionEditor :model-value="rule.action" outcome="pass" :groups="groups" :title="t('admin.tests.protection.combined.action')" :resume-label="t('admin.tests.protection.combined.resume')" @update:model-value="patchRule(index, { action: $event })" />
-      <p v-if="combinationConflictsWithRecovery(rule, recoveryTestIds, modelValue)" class="text-xs text-red-600 dark:text-red-400" role="alert" data-combination-recovery-conflict>{{ t(rule.action.scheduling === 'resume' ? 'admin.tests.protection.combined.recoveryResumeConflict' : 'admin.tests.protection.combined.recoveryConflict') }}</p>
     </section>
     <p v-if="!modelValue.length" class="text-xs text-amber-700 dark:text-amber-300" data-no-combinations>{{ t('admin.tests.protection.combined.emptyRules') }}</p>
     <button type="button" class="btn btn-secondary btn-sm" :disabled="modelValue.length >= 32 || !types.length" data-add-combination @click="addRule">+ {{ t('admin.tests.protection.combined.addRule') }}</button>
@@ -24,11 +23,11 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import type { AdminGroup, TestCombinationRule, TestType } from '@/types'
-import { combinationConflictsWithRecovery, combinationNodeCount, newTestCombinationID } from '@/utils/testProtection'
+import { combinationNodeCount, newTestCombinationID } from '@/utils/testProtection'
 import TestCombinationConditionEditor from './TestCombinationConditionEditor.vue'
 import TestOutcomeActionEditor from './TestOutcomeActionEditor.vue'
 
-const props = withDefaults(defineProps<{ modelValue: TestCombinationRule[]; types: TestType[]; groups: AdminGroup[]; recoveryTestIds?: number[] }>(), { recoveryTestIds: () => [] })
+const props = defineProps<{ modelValue: TestCombinationRule[]; types: TestType[]; groups: AdminGroup[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: TestCombinationRule[]] }>()
 const { t } = useI18n()
 const patchRule = (index: number, patch: Partial<TestCombinationRule>) => emit('update:modelValue', props.modelValue.map((rule, i) => i === index ? { ...rule, ...patch } : rule))

@@ -422,7 +422,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		// Keep the image cache split in the existing usage_logs JSONB payload.
 		imageSizeBreakdown["image_cache_read_tokens"] = result.Usage.ImageCacheReadTokens
 	}
-	recordPassiveQualityCache(ctx, account.ID, requestID, result.Usage.CacheUsageReported || result.Usage.CacheReadInputTokens > 0)
 	usageLog := &UsageLog{
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,

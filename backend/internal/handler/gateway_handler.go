@@ -1011,7 +1011,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Any("fallback_group_id", fallbackGroupID),
 						zap.Bool("fallback_used", fallbackUsed),
 					)
-					if !fallbackUsed && fallbackGroupID != nil && *fallbackGroupID > 0 {
+					if !fallbackUsed && fallbackGroupID != nil && *fallbackGroupID > 0 && (currentAPIKey.Group == nil || !currentAPIKey.Group.StrictFailover.Enabled) {
 						fallbackGroup, err := h.gatewayService.ResolveGroupByID(c.Request.Context(), *fallbackGroupID)
 						if err != nil {
 							reqLog.Warn("gateway.resolve_fallback_group_failed", zap.Int64("fallback_group_id", *fallbackGroupID), zap.Error(err))
@@ -1042,7 +1042,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackAPIKey
-						service.SetPassiveQualityAttemptGroup(c, fallbackGroup.ID)
 						currentSubscription = nil
 						fallbackUsed = true
 						retryWithFallback = true

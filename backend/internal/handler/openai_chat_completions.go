@@ -104,10 +104,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	setOpsRequestContext(c, reqModel, reqStream)
-	if apiKey.GroupID != nil {
-		service.SetGroupQualityTrafficGroup(c, *apiKey.GroupID)
-	}
-	service.PrepareGroupQualityTrafficBody(c.Request.Context(), body)
+
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIChat, reqModel, body); decision != nil && !decision.AllowNextStage {
@@ -385,6 +382,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						}
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
+					service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {

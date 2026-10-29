@@ -13,7 +13,7 @@ import (
 )
 
 func qualityOperationsError(c *gin.Context, err error) {
-	if errors.Is(err, service.ErrPassiveQualityConflict) {
+	if errors.Is(err, service.ErrQualityOperationsConflict) {
 		c.JSON(http.StatusConflict, gin.H{"error": "configuration changed; refresh and retry"})
 		return
 	}
@@ -48,53 +48,4 @@ func (h *ChannelQualityHandler) SaveOperations(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, cfg)
-}
-func (h *ChannelQualityHandler) SaveSupplier(c *gin.Context) {
-	var supplier service.QualitySupplier
-	if err := c.ShouldBindJSON(&supplier); err != nil {
-		response.BadRequest(c, "invalid supplier")
-		return
-	}
-	if c.Param("id") != "" {
-		id, ok := passiveID(c, "id")
-		if !ok {
-			return
-		}
-		supplier.ID = id
-	} else {
-		supplier.ID = 0
-		supplier.Version = 0
-	}
-	if err := supplier.Validate(); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if err := h.operations.SaveSupplier(c.Request.Context(), &supplier); err != nil {
-		if errors.Is(err, service.ErrPassiveQualityConflict) {
-			qualityOperationsError(c, err)
-		} else {
-			response.BadRequest(c, "supplier save failed: check account membership and refresh")
-		}
-		return
-	}
-	c.JSON(http.StatusOK, supplier)
-}
-func (h *ChannelQualityHandler) DeleteSupplier(c *gin.Context) {
-	id, ok := passiveID(c, "id")
-	if !ok {
-		return
-	}
-	version, ok := passiveQuery(c, "version")
-	if !ok {
-		return
-	}
-	if version <= 0 {
-		response.BadRequest(c, "version is required")
-		return
-	}
-	if err := h.operations.DeleteSupplier(c.Request.Context(), id, version); err != nil {
-		qualityOperationsError(c, err)
-		return
-	}
-	c.Status(http.StatusNoContent)
 }

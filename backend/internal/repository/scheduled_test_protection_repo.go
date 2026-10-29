@@ -51,7 +51,7 @@ func protectionResultCurrent(ctx context.Context, tx *sql.Tx, resultID int64) (b
 	 SELECT 1 FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
 	 WHERE r.id=$1 AND r.model_id=ANY(CASE WHEN cardinality(p.model_ids)>0 THEN p.model_ids ELSE ARRAY[p.model_id] END)
 	 AND r.target_mode=p.target_mode AND (p.account_id IS NULL OR p.account_id=r.account_id)
-	 AND (r.output_kind='statistics' OR r.reasoning_effort=p.reasoning_effort)
+	 AND r.reasoning_effort=p.reasoning_effort
 	 AND (r.test_definition_id=ANY(p.test_definition_ids) OR r.test_definition_id=p.test_definition_id)
 	 AND `+protectionSourceMembershipSQL+`
 	)`, resultID).Scan(&current)
@@ -159,24 +159,20 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 }
 
 type protectionState struct {
-	modelKey                                                       string
-	latencyMs                                                      sql.NullInt64
-	resultStatus                                                   sql.NullString
-	recoveryPhase                                                  string
-	recoveryCooldownUntil, recoveryTrialStarted, recoveryTrialEnds sql.NullTime
-	recoveryTrialRequests                                          int64
-	adminVerdict                                                   string
-	roundStarted                                                   time.Time
-	planID, accountID, definitionID, resultID, generation          int64
-	started                                                        time.Time
-	automated, verdict, reason                                     string
-	actionReason                                                   string
-	newHold, newCombinedHold                                       bool
-	evidenceSource                                                 string
-	evidenceActor                                                  *int64
-	recoveryEvidence                                               *service.ScheduledTestStatistics
-	blocked, completed                                             bool
-	rule                                                           service.ScheduledTestProtectionRule
+	modelKey                                              string
+	latencyMs                                             sql.NullInt64
+	resultStatus                                          sql.NullString
+	adminVerdict                                          string
+	roundStarted                                          time.Time
+	planID, accountID, definitionID, resultID, generation int64
+	started                                               time.Time
+	automated, verdict, reason                            string
+	actionReason                                          string
+	newHold, newCombinedHold                              bool
+	evidenceSource                                        string
+	evidenceActor                                         *int64
+	blocked, completed                                    bool
+	rule                                                  service.ScheduledTestProtectionRule
 }
 
 func loadProtectionState(ctx context.Context, tx *sql.Tx, resultID int64) (*protectionState, error) {
@@ -184,12 +180,11 @@ func loadProtectionState(ctx context.Context, tx *sql.Tx, resultID int64) (*prot
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT plan_id,account_id,test_definition_id,result_id,generation,result_started_at,
 		automated_verdict,verdict,reason,blocked,completed,rule_config,round_started_at,admin_verdict,
-		recovery_phase,recovery_cooldown_until,recovery_trial_started_at,recovery_trial_ends_at,recovery_trial_requests,
 		(SELECT latency_ms FROM scheduled_test_results WHERE id=$1),
 		(SELECT status FROM scheduled_test_results WHERE id=$1),model_key
 		FROM scheduled_test_protection_states WHERE result_id=$1 FOR UPDATE`, resultID).Scan(
 		&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started, &s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw, &s.roundStarted, &s.adminVerdict,
-		&s.recoveryPhase, &s.recoveryCooldownUntil, &s.recoveryTrialStarted, &s.recoveryTrialEnds, &s.recoveryTrialRequests, &s.latencyMs, &s.resultStatus, &s.modelKey)
+		&s.latencyMs, &s.resultStatus, &s.modelKey)
 	if err != nil {
 		return nil, err
 	}
@@ -268,8 +263,8 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 	blocked := state.blocked
 	scheduling := state.rule.OutcomeAction(verdict).Scheduling
 	// Combined mode consumes the original check verdicts without executing its
-	// legacy actions. Cache recovery remains an independent bounded safeguard.
-	if (config.UsesCombinations() || config.UsesAllPass()) && (state.rule.Recovery == nil || !state.rule.Recovery.Enabled) {
+	// legacy actions.
+	if config.UsesCombinations() || config.UsesAllPass() {
 		scheduling = "keep"
 	}
 	switch scheduling {
@@ -290,12 +285,6 @@ func saveProtectionVerdict(ctx context.Context, tx *sql.Tx, state *protectionSta
 		WHERE result_id=$1 AND generation=$7`, state.resultID, state.automated, verdict, reason, blocked, state.completed, state.generation)
 	if err != nil {
 		return err
-	}
-	if blocked && verdict == "fail" && state.rule.Recovery != nil && state.rule.Recovery.Enabled && state.recoveryPhase == "" {
-		if err := startCacheRecoveryCooldown(ctx, tx, state, time.Now().UTC(), reason); err != nil {
-			return err
-		}
-		reason = state.reason
 	}
 	if err := reconcileProtectionGroups(ctx, tx, state); err != nil {
 		return err
@@ -344,44 +333,6 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 	current, err := protectionResultCurrent(ctx, tx, result.ID)
 	if err != nil || !current {
 		return err
-	}
-	// A new statistics execution can explicitly prove connectivity when usage
-	// samples are missing. It resolves this check and reconciles the policy
-	// under the same locks and current-result checks as normal decisions.
-	if handled, err := completeStatisticsRecoveryProbe(ctx, tx, config, state, result); handled || err != nil {
-		if err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
-	// Recovery otherwise owns the hold until a fresh trial has been evaluated.
-	// Ordinary hourly completions must neither release it nor restart its clock.
-	if state.blocked && state.recoveryPhase != "" {
-		_, err := tx.ExecContext(ctx, `UPDATE scheduled_test_protection_states SET completed=TRUE,automated_verdict='fail',verdict='fail' WHERE result_id=$1 AND generation=$2`, result.ID, state.generation)
-		if err != nil {
-			return err
-		}
-		before, err := readProtectionAccountSnapshot(ctx, tx, state.accountID)
-		if err != nil {
-			return err
-		}
-		if config.UsesCombinations() || config.UsesAllPass() {
-			if err := reconcileProtectionGroups(ctx, tx, state); err != nil {
-				return err
-			}
-			if err := reconcileProtectionAccount(ctx, tx, state.accountID); err != nil {
-				return err
-			}
-		}
-		if err := recordProtectionAction(ctx, tx, state, before, "fail", state.reason); err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
-	// An hourly query started before a successful trial must not re-pause the
-	// account with samples that the new recovery window deliberately excluded.
-	if state.recoveryTrialStarted.Valid && (result.OutputStatistics == nil || result.OutputStatistics.WindowStart.Before(state.recoveryTrialStarted.Time)) {
-		return tx.Commit()
 	}
 	// Keep the actual judge identity stable through the state commit. A change
 	// during a long vision call must not apply stale evidence to the account.

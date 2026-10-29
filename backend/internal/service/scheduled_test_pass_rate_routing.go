@@ -16,9 +16,6 @@ func ActivePassRateRequestModel(ctx context.Context) string {
 	if public, ok := RequestedPublicModelFromContext(ctx); ok {
 		return public
 	}
-	if traffic, ok := GroupQualityTrafficRequestFromContext(ctx); ok && strings.TrimSpace(traffic.Model) != "" {
-		return strings.TrimSpace(traffic.Model)
-	}
 	model, _ := ctx.Value(ctxkey.Model).(string)
 	return strings.TrimSpace(model)
 }
@@ -30,8 +27,8 @@ func activePassRateRoutingModel(ctx context.Context, requestedModel string) stri
 	return strings.TrimSpace(requestedModel)
 }
 
-// ActivePassRateBlocked is independent of account-wide and passive quality
-// protection. Customer requests cannot relax a capability hold.
+// ActivePassRateBlocked is independent of account-wide capability protection.
+// Customer requests cannot relax a capability hold.
 // The projection contains only blocked entries; live database admission is the
 // final authority if this scheduler snapshot is stale.
 func (a *Account) ActivePassRateBlocked(model string) bool {

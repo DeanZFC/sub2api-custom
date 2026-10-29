@@ -117,13 +117,8 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 			}
 		}
 		if result.Status == "failed" {
-			if result.OutputKind == "statistics" {
-				return
-			} // A failed SQL query is not an account failure.
+
 			failed = true
-		}
-		if result.OutputKind == "statistics" && result.OutputStatistics != nil && result.OutputStatistics.TotalRequests == 0 && result.OutputStatistics.RecoveryProbe == nil {
-			conclusive = false
 		}
 		if i < len(queue) {
 			plan := queue[i].plan
@@ -133,9 +128,6 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 					verdict, _ := evaluateScheduledTestProtection(*rule, result)
 					if plan.Protection.UsesAllPass() && rule.Vote != nil && rule.Vote.Enabled && !rule.UsesAutoReview() {
 						verdict, _ = EvaluateScheduledTestDuration(*rule, result)
-					}
-					if probeVerdict, _, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
-						verdict = probeVerdict
 					}
 					if plan.TestDefinitionID != nil {
 						if modelVerdicts[plan.ModelID] == nil {

@@ -45,19 +45,8 @@ func validateScheduledTestCombinations(plan *ScheduledTestPlan) error {
 		return fmt.Errorf("combined protection requires between 1 and 32 combination rules")
 	}
 	definitions := map[int64]bool{}
-	recoveryDefinitions := map[int64]bool{}
 	for _, rule := range c.Rules {
 		definitions[rule.TestDefinitionID] = true
-		if rule.Recovery != nil && rule.Recovery.Enabled {
-			recoveryDefinitions[rule.TestDefinitionID] = true
-		}
-	}
-	hasCombinationPause := false
-	for _, rule := range c.Combinations {
-		if rule.Action.Scheduling == "pause" {
-			hasCombinationPause = true
-			break
-		}
 	}
 	ids := map[string]bool{}
 	for i := range c.Combinations {
@@ -80,21 +69,6 @@ func validateScheduledTestCombinations(plan *ScheduledTestPlan) error {
 		if err := validateScheduledTestActions(&ScheduledTestProtectionRule{OnPass: &rule.Action}); err != nil {
 			return fmt.Errorf("combination %s: %w", rule.ID, err)
 		}
-		// A second hold derived from a recovering source would prevent its
-		// bounded trial from starting, so that source could never pass to
-		// release the combination hold. Keep its recovery state authoritative.
-		if rule.Action.Scheduling == "pause" {
-			if id := scheduledTestCombinationRecoveryReference(rule.Condition, recoveryDefinitions); id != 0 {
-				return fmt.Errorf("组合规则「%s」的暂停动作不能引用已启用自动试运行的检测 #%d：该检测已独立负责暂停和恢复；请将组合动作改为仅调整分组，或关闭该检测的自动试运行后再由组合控制调度", rule.Name, id)
-			}
-		}
-		// A pause from an unrelated source is safe only when its matching
-		// release can be resolved without waiting for the blocked trial.
-		if hasCombinationPause && rule.Action.Scheduling == "resume" {
-			if id := scheduledTestCombinationRecoveryReference(rule.Condition, recoveryDefinitions); id != 0 {
-				return fmt.Errorf("组合规则「%s」的恢复动作不能依赖已启用自动试运行的检测 #%d：本策略配置了组合暂停，会阻止该检测试运行，造成相互等待；请将解除组合暂停与统计达标后的分组规则拆开，或关闭该检测的自动试运行", rule.Name, id)
-			}
-		}
 		for _, id := range rule.Action.GroupIDs {
 			if !slices.Contains(plan.GroupIDs, id) {
 				return fmt.Errorf("combination action group %d must be selected in group_ids", id)
@@ -102,18 +76,6 @@ func validateScheduledTestCombinations(plan *ScheduledTestPlan) error {
 		}
 	}
 	return nil
-}
-
-func scheduledTestCombinationRecoveryReference(condition ScheduledTestCombinationCondition, recoveryDefinitions map[int64]bool) int64 {
-	if condition.Operator == "test" && recoveryDefinitions[condition.TestDefinitionID] {
-		return condition.TestDefinitionID
-	}
-	for _, child := range condition.Conditions {
-		if id := scheduledTestCombinationRecoveryReference(child, recoveryDefinitions); id != 0 {
-			return id
-		}
-	}
-	return 0
 }
 
 func validateScheduledTestCombinationCondition(c ScheduledTestCombinationCondition, definitions map[int64]bool, depth int, nodes *int) error {

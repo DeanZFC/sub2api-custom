@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
@@ -121,10 +120,6 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 			})
 		}
 	})
-	t.Run("multiple models keep statistics account protection independent", func(t *testing.T) {
-		reset(t)
-		testScheduledTestMultiModelStatisticsProtection(t, ctx, db, plans, repo, candyID)
-	})
 	t.Run("multiple models keep administrator reviews and pass rate isolated", func(t *testing.T) {
 		reset(t)
 		testScheduledTestMultiModelAdministratorReview(t, ctx, db, plans, repo, pelicanID)
@@ -141,10 +136,6 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		reset(t)
 		testScheduledTestAllPassCustomActions(t, ctx, db, plans, repo)
 	})
-	t.Run("all pass custom recovery groups", func(t *testing.T) {
-		reset(t)
-		testScheduledTestAllPassCustomRecoveryGroups(t, ctx, db, plans, repo)
-	})
 	t.Run("excluded accounts and policy edits", func(t *testing.T) {
 		reset(t)
 		testScheduledTestExcludedAccounts(t, ctx, db, plans, repo, candyID)
@@ -157,37 +148,9 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 			})
 		}
 	})
-	t.Run("all pass policy hold statistics probe", func(t *testing.T) {
-		for _, origin := range []int{0, 1, 3} {
-			t.Run([]string{"candy", "model", "statistics", "manual veto"}[origin], func(t *testing.T) {
-				reset(t)
-				testScheduledTestAllPassPolicyHoldProbe(t, ctx, db, plans, repo, origin)
-			})
-		}
-	})
-	t.Run("all pass policy probe safeguards", func(t *testing.T) {
-		for _, scenario := range []string{"failed probe", "recovery disabled", "manual disable", "plan disable", "hold released", "other account hold", "other plan hold", "current manual veto", "current model failure"} {
-			t.Run(scenario, func(t *testing.T) {
-				reset(t)
-				testScheduledTestAllPassPolicyProbeSafeguards(t, ctx, db, plans, repo, scenario)
-			})
-		}
-	})
 	t.Run("time period persistence and concurrent schedule edits", func(t *testing.T) {
 		reset(t)
 		testScheduledTestTimePeriodsPersistence(t, ctx, db, plans, candyID)
-	})
-	t.Run("all pass bounded statistics recovery", func(t *testing.T) {
-		for _, threshold := range []service.ScheduledTestThreshold{
-			{Metric: "cache_rate", Operator: "lt", Value: 80},
-			{Metric: "success_rate", Operator: "lt", Value: 90},
-			{Metric: "avg_first_token_ms", Operator: "gt", Value: 1000},
-		} {
-			t.Run(threshold.Metric, func(t *testing.T) {
-				reset(t)
-				testScheduledTestAllPassRecovery(t, ctx, db, plans, repo, threshold)
-			})
-		}
 	})
 	t.Run("public switch preserves round and decisions", func(t *testing.T) { reset(t); testScheduledTestPublicVotingSwitch(t, ctx, db, plans, repo, pelicanID) })
 	t.Run("generic priorities public review and administrator override", func(t *testing.T) {

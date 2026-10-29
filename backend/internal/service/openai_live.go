@@ -262,6 +262,10 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			if !s.shouldFailoverLiveCreateError(account, createErr) {
 				return nil, createErr
 			}
+			var failure *UpstreamFailoverError
+			if errors.As(createErr, &failure) {
+				RecordStrictFailoverFailure(ctx, account.ID, failure)
+			}
 			excluded[account.ID] = struct{}{}
 			lastErr = createErr
 			continue
@@ -330,17 +334,6 @@ func (s *OpenAIGatewayService) acquireLiveLease(
 	leaseID string,
 	replacingRegularSlots bool,
 ) (bool, error) {
-	if s.concurrencyService != nil {
-		if gate, ok := s.concurrencyService.passiveQualityGate.(PassiveQualityConcurrencyGate); ok {
-			limit, err := gate.PassiveQualityConcurrencyLimit(ctx, accountID, qualityRequestModel(ctx))
-			if err != nil {
-				return false, err
-			}
-			if limit > 0 && (accountMax <= 0 || limit < accountMax) {
-				accountMax = limit
-			}
-		}
-	}
 	groupID := liveGroupID(identity.GroupID)
 	if groupID > 0 && groupMax > 0 {
 		if grouped, ok := cache.(LiveUserGroupConcurrencyCache); ok {
@@ -432,9 +425,10 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logLiveUpstreamFailure(ctx, account.ID, resp.StatusCode, resp.Header, responseBody)
 		return nil, &UpstreamFailoverError{
-			StatusCode:      resp.StatusCode,
-			ResponseBody:    responseBody,
-			ResponseHeaders: resp.Header.Clone(),
+			ObservedUpstreamStatus: resp.StatusCode,
+			StatusCode:             resp.StatusCode,
+			ResponseBody:           responseBody,
+			ResponseHeaders:        resp.Header.Clone(),
 		}
 	}
 	callID, err := liveCallIDFromLocation(resp.Header.Get("Location"))

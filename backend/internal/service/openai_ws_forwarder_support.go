@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -502,8 +503,30 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 ) (*AccountSelectionResult, error) {
 	// 分组利润控制：公共入口装门，保证不经 selectAccountWithScheduler
 	// 的调用方也无法绕过利润准入（scheduler 内部路径已在唯一调度入口装门）。
+	var err error
+	ctx, err = s.prepareOpenAIStrictFailover(ctx, groupID, excludedIDs, requestedModel, PlatformOpenAI, "", "", requireCompact)
+	if err != nil {
+		if strings.TrimSpace(previousResponseID) != "" && errors.Is(err, errStrictFailoverAllUnavailable) {
+			return nil, ErrStrictFailoverOwnerBound
+		}
+		return nil, err
+	}
+	if strictFailoverStateFrom(ctx) != nil && strings.TrimSpace(previousResponseID) != "" {
+		owner, ownerErr := s.getOpenAIWSStateStore().GetResponseAccount(ctx, derefGroupID(groupID), strings.TrimSpace(previousResponseID))
+		if ownerErr != nil {
+			return nil, fmt.Errorf("%w: response owner lookup: %v", ErrStrictFailoverUnconfirmed, ownerErr)
+		}
+		ctx, err = pinStrictFailoverOwner(ctx, owner)
+		if err != nil {
+			return nil, err
+		}
+	}
 	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
-	return s.selectAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, "", requireCompact)
+	selected, err := s.selectAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, "", requireCompact)
+	if err == nil && selected == nil && strictFailoverStateFrom(ctx) != nil && strings.TrimSpace(previousResponseID) != "" {
+		return nil, ErrStrictFailoverUnconfirmed
+	}
+	return selected, strictFailoverSelectionError(ctx, err)
 }
 
 func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
@@ -518,14 +541,13 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	if s == nil {
 		return nil, nil
 	}
-	SetGroupQualityTrafficGroupContext(ctx, derefGroupID(groupID))
 	accountID, account, responseID, store := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	if accountID <= 0 || account == nil || store == nil {
 		return nil, nil
 	}
 	// Automatic protection is temporary. Preserve response ownership while active
 	// checks recover this credential; never send customer traffic to a held owner.
-	if groupQualityAutomaticHold(ctx, account, groupID, requestedModel) {
+	if activeIntelligenceHold(ctx, account, groupID, requestedModel) {
 		return nil, ErrAccountQualityHeld
 	}
 
@@ -620,7 +642,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	if !account.IsOpenAIApiKey() && s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		return 0, nil, "", nil
 	}
-	if groupQualityAutomaticHold(ctx, account, groupID, requestedModel) {
+	if activeIntelligenceHold(ctx, account, groupID, requestedModel) {
 		return accountID, account, responseID, store
 	}
 	if shouldClearStickySessionWithContext(ctx, account, requestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
@@ -656,7 +678,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
-		if groupQualityAutomaticHold(ctx, latest, groupID, requestedModel) {
+		if activeIntelligenceHold(ctx, latest, groupID, requestedModel) {
 			return accountID, latest, responseID, store
 		}
 		if shouldClearStickySessionWithContext(ctx, latest, requestedModel) || !latest.IsOpenAI() || !latest.IsSchedulable() {
@@ -785,7 +807,7 @@ func openAIWSSemantic429Headers(account *Account, model string, headers http.Hea
 }
 
 func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Account, headers http.Header, responseBody []byte, message string) *UpstreamFailoverError {
-	return s.newOpenAIAccountFailoverError(
+	failure := s.newOpenAIAccountFailoverError(
 		account,
 		http.StatusTooManyRequests,
 		headers,
@@ -794,6 +816,13 @@ func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Accoun
 		false,
 		false,
 	)
+	if len(responseBody) == 0 {
+		failure.ObservedUpstreamStatus = http.StatusTooManyRequests // HTTP handshake rejection.
+	} else {
+		failure.strictFailoverReason = "upstream_rate_limit_event"
+	}
+	return failure
+
 }
 
 func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (string, bool) {

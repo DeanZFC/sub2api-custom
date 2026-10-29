@@ -222,10 +222,6 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 	if c == nil || turn <= 0 {
 		return
 	}
-	if c.GetInt("passive_quality_turn_number") != turn {
-		PassiveQualityBeginTurn(c)
-		c.Set("passive_quality_turn_number", turn)
-	}
 	c.Set(OpsStreamTurnKey, turn)
 	// Rule and attempt state is turn-scoped on a long-lived WS connection.
 	c.Set(OpsSkipPassthroughKey, false)
@@ -241,9 +237,6 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 func ResumeOpsStreamTurn(c *gin.Context, turn int) {
 	if c == nil || turn <= 0 {
 		return
-	}
-	if _, exists := c.Get(passiveQualityTurnKey); exists {
-		c.Set("passive_quality_turn_number", turn)
 	}
 	BeginOpsStreamTurn(c, turn)
 }
@@ -293,13 +286,6 @@ func markOpsStreamError(c *gin.Context, streamErr OpsStreamError) {
 		streamErr.SkipMonitoring = currentOpsFailureSkipMonitoring(c)
 	}
 	snapshotOpsStreamErrorContext(c, &streamErr)
-	if !streamErr.RequestScoped && streamErr.CountTowardsSLA && streamErr.AccountID > 0 {
-		code := streamErr.UpstreamStatus
-		if code == 0 {
-			code = streamErr.IntendedStatus
-		}
-		RecordPassiveQualityAttempt(c, OpsUpstreamErrorEvent{AccountID: streamErr.AccountID, UpstreamStatusCode: code, Kind: "http_error"})
-	}
 
 	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		if value, ok := c.Get(OpsStreamTurnKey); ok {
@@ -473,11 +459,6 @@ type OpsUpstreamErrorEvent struct {
 	UpstreamStatusCode int    `json:"upstream_status_code,omitempty"`
 	UpstreamRequestID  string `json:"upstream_request_id,omitempty"`
 
-	// upstreamHTTPResponseObserved is set only where an actual HTTP error
-	// response was received. Logical SSE/WS statuses and local transport errors
-	// must not use it to survive downstream cancellation in passive capture.
-	upstreamHTTPResponseObserved bool
-
 	// UpstreamURL is the actual upstream URL that was called (host + path, query/fragment stripped).
 	// Helps debug 404/routing errors by showing which endpoint was targeted.
 	UpstreamURL string `json:"upstream_url,omitempty"`
@@ -540,7 +521,6 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 		}
 	}
 
-	RecordPassiveQualityAttempt(c, ev)
 	evCopy := ev
 	existing = append(existing, &evCopy)
 	c.Set(OpsUpstreamErrorsKey, existing)

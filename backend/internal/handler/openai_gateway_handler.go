@@ -263,7 +263,7 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if snapshot, ok := service.APIKeyUsageSnapshotFromContext(parent); ok {
 		base = service.WithAPIKeyUsageSnapshot(base, snapshot)
 	}
-	return service.PassiveQualityUsageContext(parent, base)
+	return base
 }
 
 // wrapUsageRecordTaskContext 包装计费任务：复制请求级 context 值，并接管请求的在途余额预留引用。
@@ -554,10 +554,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	service.SetOpenAIHTTPResponseOwner(c, subject.UserID, apiKey.ID)
 
 	setOpsRequestContext(c, reqModel, reqStream)
-	if apiKey.GroupID != nil {
-		service.SetGroupQualityTrafficGroup(c, *apiKey.GroupID)
-	}
-	service.PrepareGroupQualityTrafficBody(c.Request.Context(), body)
+
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
@@ -569,9 +566,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// Codex 在所有请求中被动声明 image_gen namespace，宽泛检测会导致禁了生图的
 	// 分组中所有 Codex 请求被 403（#4447），并误占生图并发槽位。
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, body)
-	if imageIntent {
-		service.ExcludeGroupQualityTraffic(c.Request.Context())
-	}
+
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
@@ -963,6 +958,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						}
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
+					service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {
@@ -1254,10 +1250,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	setOpsRequestContext(c, reqModel, reqStream)
-	if apiKey.GroupID != nil {
-		service.SetGroupQualityTrafficGroup(c, *apiKey.GroupID)
-	}
-	service.PrepareGroupQualityTrafficBody(c.Request.Context(), body)
+
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
@@ -1544,6 +1537,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						}
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
+					service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {
@@ -2647,10 +2641,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// replace the key of the reservation already acquired by this handler.
 	service.BeginOpsStreamTurn(c, 1)
 	setOpsRequestContext(c, reqModel, true)
-	if apiKey.GroupID != nil {
-		service.SetGroupQualityTrafficGroup(c, *apiKey.GroupID)
-	}
-	service.PrepareGroupQualityTrafficBody(c.Request.Context(), firstMessage)
+
 	ctx = c.Request.Context()
 	setOpsEndpointContext(c, "", int16(service.RequestTypeWSV2))
 
@@ -2661,9 +2652,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage)
-	if imageIntent {
-		service.ExcludeGroupQualityTraffic(c.Request.Context())
-	}
+
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
 		return
@@ -2839,6 +2828,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return false
 		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
+		service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
 		if switchCount >= maxAccountSwitches {
@@ -3063,7 +3053,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
 			return
 		}
-		service.CapturePassiveQualityCacheRequest(c.Request.Context(), c, account, wsAttemptMessage, sessionHash, reqModel)
 		hooks := &service.OpenAIWSIngressHooks{
 			ClientLifecycleContext:      clientLifecycleCtx,
 			InitialRequestModel:         reqModel,
@@ -3087,14 +3076,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					model = reqModel
 				}
 				setOpsRequestContext(c, model, true)
-				// Keep the effective routing group selected for this connection.
-				// begin retains it across turns, including fallback-group routing.
-				service.PrepareGroupQualityTrafficBody(c.Request.Context(), payload)
-				service.SetGroupQualityTrafficModel(c.Request.Context(), model)
-				if service.IsExplicitImageGenerationIntent("/v1/responses", model, payload) {
-					service.ExcludeGroupQualityTraffic(c.Request.Context())
-				}
-				service.CapturePassiveQualityCacheRequest(c.Request.Context(), c, account, payload, sessionHash, originalModel)
+
 				setCyberTurnBody(turn, payload)
 				// 连接级 cyber session gate 也在 BeforeRequest 先执行，使 native 与
 				// passthrough ingress 都能在 BeforeTurn 及上游写入前无副作用地拒绝。
@@ -3118,6 +3100,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), nil)
+				}
+				strictModel := model
+				if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
+					strictModel = wsRouteModel
+				}
+				if err := h.gatewayService.ValidateStrictFailoverBoundAccount(ctx, apiKey.GroupID, account, strictModel, requiredCapability, requiredTransport); err != nil {
+					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "strict priority tier changed or unavailable; reconnect with full conversation context", err)
 				}
 				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
@@ -3303,7 +3292,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				turnRecordPricingAt := turnPricing.currentOr(turnStart)
 				turnBillingAPIKey := turnBillingAPIKeys.forTurn(turn, apiKey)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-				turnUsageCtx := service.PassiveQualityUsageContext(c.Request.Context(), ctx)
+				turnUsageCtx := ctx
 				h.submitOpenAIUsageRecordTask(turnUsageCtx, result, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 						Result:             result,

@@ -1227,7 +1227,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2PassthroughWithVMRoute(
 						return out, nil, fmt.Errorf("apply codex fingerprint to ws frame: %w", fingerprintErr)
 					}
 				}
-				capturePassiveQualityCacheWire(c, account, out, wsURL, headers)
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
@@ -1253,7 +1252,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2PassthroughWithVMRoute(
 	}
 	upstreamFirstMessageSent := false
 	firstWriteCtx, cancelFirstWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-	capturePassiveQualityCacheWire(c, account, firstClientMessage, wsURL, headers)
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()
 	if firstWriteErr != nil {

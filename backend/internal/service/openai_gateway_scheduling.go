@@ -397,6 +397,9 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 	if account == nil {
 		return "account_nil"
 	}
+	if !strictFailoverAllows(ctx, account.ID) {
+		return "strict_failover_tier"
+	}
 	// account_model composite routes publish an alias that only accounts with an
 	// explicit model mapping own. Both scheduler modes (advanced and legacy) must
 	// enforce ownership before any priority/sticky/transport consideration; a
@@ -911,9 +914,16 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 
 // selectAccountForModelWithExclusionsStickyHit 与 selectAccountForModelWithExclusions 相同，
 // 另返回账号是否来自粘性会话命中。
-func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, bool, error) {
-	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
-	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
+func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (selected *Account, sticky bool, selectionErr error) {
+	if strictFailoverStateFrom(ctx) == nil {
+		var err error
+		ctx, err = s.prepareOpenAIStrictFailover(ctx, groupID, excludedIDs, requestedModel, platform, requiredCapability, "", requireCompact)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	defer func() { selectionErr = strictFailoverSelectionError(ctx, selectionErr) }()
+	ctx = withRequestedRoutingModel(ctx, requestedModel)
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
@@ -950,9 +960,8 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx 
 
 	// 4. 设置粘性会话绑定（利润门下推迟到 handler 终检通过后再绑定，
 	// 终检否决的账号不得成为新的粘性目标；无门保持既有 eager 绑定与 TTL）
-	// Defer binding until live admission for quality-tracked requests and profit gates.
-	_, hasQualityIdentity := GroupQualityTrafficRequestFromContext(ctx)
-	if sessionHash != "" && !gatewayProfitControlGateActive(ctx) && !hasQualityIdentity {
+	// Defer binding while a profit gate is active.
+	if sessionHash != "" && !gatewayProfitControlGateActive(ctx) {
 		_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, selected.ID, openaiStickySessionTTL)
 	}
 
@@ -987,7 +996,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if err != nil {
 		return nil
 	}
-	if groupQualityAutomaticHold(ctx, account, groupID, requestedModel) {
+	if activeIntelligenceHold(ctx, account, groupID, requestedModel) {
 		markOpenAIUserAffinityMigration(ctx, accountID)
 		return nil
 	}
@@ -1098,9 +1107,6 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 	if len(eligible) == 0 {
 		return nil, compactBlocked, filterStats
 	}
-	// Verified and insufficient-sample group targets share the normal scheduler
-	// order. Explicit cache-allocation limits and live admission still apply.
-	eligible = passiveQualityNewSessionCandidates(ctx, eligible, requestedModel)
 	rateOrder := openAILegacyUpstreamRateOrder{}
 	if preferLowUpstreamRate {
 		rateOrder = newOpenAILegacyUpstreamRateOrder(eligible, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
@@ -1176,10 +1182,16 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwarenessForAPIKeyGroup(ctx 
 	return selection, err
 }
 
-func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {
-	SetGroupQualityTrafficGroupContext(ctx, derefGroupID(groupID))
-	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
-	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
+func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
+	if strictFailoverStateFrom(ctx) == nil {
+		var err error
+		ctx, err = s.prepareOpenAIStrictFailover(ctx, groupID, excludedIDs, requestedModel, platform, requiredCapability, "", requireCompact)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer func() { selectionErr = strictFailoverSelectionError(ctx, selectionErr) }()
+	ctx = withRequestedRoutingModel(ctx, requestedModel)
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
@@ -1223,8 +1235,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return markStickySessionHit(selection, stickyHit), selectErr
 			}
 		}
-		if !stickyHit || qualityDenied {
-			fallback, fallbackErr := s.tryAcquireCacheRoutingFallback(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, account.ID, requireCompact, requiredCapability, preferLowUpstreamRate, qualityDenied, stickyHit)
+		if qualityDenied {
+			fallback, fallbackErr := s.tryAcquireAdmissionFallback(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, account.ID, requireCompact, requiredCapability, preferLowUpstreamRate, stickyHit)
 			if fallbackErr != nil || fallback != nil {
 				return fallback, fallbackErr
 			}
@@ -1269,7 +1281,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if accountID > 0 && !isExcluded(accountID) {
 			account, err := s.getSchedulableAccount(ctx, accountID)
 			if err == nil {
-				automaticHold := groupQualityAutomaticHold(ctx, account, groupID, requestedModel)
+				automaticHold := activeIntelligenceHold(ctx, account, groupID, requestedModel)
 				if automaticHold && openAIUserAffinityFromContext(ctx) != nil {
 					markOpenAIUserAffinityMigration(ctx, accountID)
 				} else {
@@ -1454,7 +1466,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			selectionOrder = append(selectionOrder, available...)
 		}
 
-		passiveQualityOrderNewSessionLoads(ctx, selectionOrder, requestedModel, stickyAccountID)
 		for _, item := range selectionOrder {
 			if qualityHeld[item.account.ID] {
 				continue
@@ -1502,7 +1513,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if requireCompact {
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
-		passiveQualityOrderNewSessionCandidates(ctx, ordered, requestedModel, stickyAccountID)
 		for _, acc := range ordered {
 			if qualityHeld[acc.ID] {
 				continue
@@ -1561,7 +1571,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if requireCompact {
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
-	passiveQualityOrderNewSessionCandidates(ctx, candidates, requestedModel, stickyAccountID)
 	for _, acc := range candidates {
 		if qualityHeld[acc.ID] {
 			continue
@@ -1599,6 +1608,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
+	if accounts, strict := strictFailoverAccounts(ctx, groupID); strict {
+		return accounts, nil
+	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)
@@ -1630,35 +1642,19 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	return accounts, nil
 }
 
-// Nonbatch scheduling normally returns a wait plan after one acquisition. Cache
-// allocation may defer peers, so try that deferred tier before waiting on a new
-// placement. selectBestAccount retains all live eligibility and policy checks.
-func (s *OpenAIGatewayService) tryAcquireCacheRoutingFallback(ctx context.Context, groupID *int64, platform, sessionHash, model string, excludedIDs map[int64]struct{}, attemptedID int64, requireCompact bool, capability OpenAIEndpointCapability, preferLowRate, includeAll, preserveBinding bool) (*AccountSelectionResult, error) {
-	// Only replace the primary wait plan if its live traffic budget denied it.
-	// A merely busy primary still owns the preferred wait position.
-	allowFallbackWait := includeAll
+// Retry eligible peers when a live admission check rejects the selected account.
+func (s *OpenAIGatewayService) tryAcquireAdmissionFallback(ctx context.Context, groupID *int64, platform, sessionHash, model string, excludedIDs map[int64]struct{}, attemptedID int64, requireCompact bool, capability OpenAIEndpointCapability, preferLowRate, preserveBinding bool) (*AccountSelectionResult, error) {
 	var waiting *AccountSelectionResult
 	accounts, err := s.listSchedulableAccounts(ctx, groupID, platform)
 	if err != nil {
 		return nil, nil
 	}
-	fallback := make([]Account, 0, len(accounts))
+	fallback := accounts
 	excluded := make(map[int64]struct{}, len(excludedIDs)+1)
 	for id := range excludedIDs {
 		excluded[id] = struct{}{}
 	}
 	excluded[attemptedID] = struct{}{}
-	for _, account := range accounts {
-		if _, managed := groupQualityRoutingState(&account, groupID, passiveQualityRoutingModel(ctx, model)); managed {
-			includeAll = true
-			break
-		}
-	}
-	for _, account := range accounts {
-		if includeAll || !passiveQualityAllowsNewSession(ctx, &account, model) {
-			fallback = append(fallback, account)
-		}
-	}
 	for attempts := 0; attempts < len(fallback) && attempts < openAIAccountSelectionProbeLimit; attempts++ {
 		account, _, _ := s.selectBestAccount(ctx, groupID, platform, fallback, model, excluded, requireCompact, capability, preferLowRate)
 		if account == nil {
@@ -1670,7 +1666,7 @@ func (s *OpenAIGatewayService) tryAcquireCacheRoutingFallback(ctx context.Contex
 			continue
 		}
 		if !slot.Acquired {
-			if allowFallbackWait && waiting == nil && s.concurrencyService != nil {
+			if waiting == nil && s.concurrencyService != nil {
 				cfg := s.schedulingConfig()
 				waiting, err = s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 					AccountID: account.ID, MaxConcurrency: account.Concurrency,
@@ -1697,6 +1693,9 @@ func (s *OpenAIGatewayService) tryAcquireCacheRoutingFallback(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, accounts ...**Account) (*AcquireResult, error) {
+	if !strictFailoverAllows(ctx, accountID) {
+		return nil, ErrStrictFailoverOwnerBound
+	}
 	if s.concurrencyService == nil {
 		if len(accounts) > 0 && accounts[0] != nil && *accounts[0] != nil && len((*accounts[0]).ProxyIDs) > 1 {
 			return nil, fmt.Errorf("proxy pool concurrency unavailable")
@@ -1750,7 +1749,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 	if s.isOpenAIProxyStreamQuarantined(ctx, fresh) {
 		return nil
 	}
-	return passiveQualitySchedulingAccount(ctx, fresh, requestedModel)
+	return fresh
 }
 
 // parentAccountLookup 返回供 parentHealthyForShadow 使用的母账号解析闭包:经 accountRepo
@@ -1799,7 +1798,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		if s.isOpenAIProxyStreamQuarantined(ctx, account) {
 			return nil
 		}
-		return passiveQualitySchedulingAccount(ctx, account, requestedModel)
+		return account
 	}
 
 	latest, err := s.accountRepo.GetByID(ctx, account.ID)
@@ -1827,7 +1826,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if s.isOpenAIProxyStreamQuarantined(ctx, latest) {
 		return nil
 	}
-	return passiveQualitySchedulingAccount(ctx, latest, requestedModel)
+	return latest
 }
 
 func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Account, groupID *int64) bool {
@@ -1838,6 +1837,9 @@ func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Acco
 }
 
 func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
+	if !strictFailoverAllows(ctx, accountID) {
+		return nil, nil
+	}
 	var (
 		account *Account
 		err     error
@@ -1859,7 +1861,7 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 			return nil, nil
 		}
 	}
-	return passiveQualitySchedulingAccount(ctx, account, ""), nil
+	return account, nil
 }
 
 // filterGrokFreeQuotaAccountsForOpenAI applies the same local free soft-gate as
@@ -1881,7 +1883,7 @@ func (s *OpenAIGatewayService) filterOpenAIAccountsBySchedulingThreshold(ctx con
 		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, &accounts[i]) {
 			continue
 		}
-		filtered = append(filtered, qualitySchedulingAccount(accounts[i], qualityRequestModel(ctx)))
+		filtered = append(filtered, accounts[i])
 	}
 	return filtered
 }

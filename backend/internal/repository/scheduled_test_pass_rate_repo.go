@@ -25,7 +25,6 @@ func scheduledTestPassRateVersion(ctx context.Context, tx *sql.Tx, planID int64,
 	}
 	semantic := protectionRuleWithoutPublicVote(rule)
 	semantic.PassRate = nil
-	semantic.Recovery = nil
 	semantic.OnPass = nil
 	semantic.OnFail = nil
 	semantic.Priority = 0

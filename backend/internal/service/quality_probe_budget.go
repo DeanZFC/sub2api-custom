@@ -20,18 +20,6 @@ type qualitySettlementKey struct{}
 // qualityOperationsKey and never touches this budget.
 func executeQualityTestHTTP(req *http.Request, account int64, send func(*http.Request) (*http.Response, error)) (*http.Response, error) {
 	ctx := req.Context()
-	if active, ok := ctx.Value(passiveRecoveryRequestKey{}).(*passiveRecoveryRequest); ok && active != nil {
-		if active.attempts == nil || active.attempts.Add(1) > passiveRecoveryMaxRequests {
-			deferred := &QualityDeferredError{Reason: "recovery_attempt_limit", Until: time.Now().Add(time.Minute)}
-			if collector, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
-				collector.deferred = deferred
-			}
-			return nil, deferred
-		}
-		if err := applyPassiveRecoveryRequestIdentity(req, active.session); err != nil {
-			return nil, err
-		}
-	}
 	repo, _ := ctx.Value(qualityOperationsKey{}).(QualityOperationsRepository)
 	if repo != nil {
 		collector, _ := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector)
@@ -39,11 +27,10 @@ func executeQualityTestHTTP(req *http.Request, account int64, send func(*http.Re
 			return nil, collector.deferred
 		}
 		automatic, _ := ctx.Value(scheduledTestAutomaticRunKey{}).(bool)
-		recovery := QualityProbePurpose(ctx) == "recovery"
 		session, _ := ctx.Value(qualityRunKey{}).(string)
 		estimate := qualityProbeTokenEstimate(req)
 		reserveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		res, err := repo.ReserveQualityProbe(reserveCtx, account, estimate, automatic || recovery, session)
+		res, err := repo.ReserveQualityProbe(reserveCtx, account, estimate, automatic, session)
 		cancel()
 		if err != nil {
 			var deferred *QualityDeferredError

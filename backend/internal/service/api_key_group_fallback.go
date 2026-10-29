@@ -50,6 +50,7 @@ func WithAPIKeyGroupFallbackRouting(ctx context.Context, apiKey *APIKey) context
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx = withStrictFailoverFailures(ctx)
 	if apiKey == nil || apiKey.GroupID == nil || apiKey.FallbackGroupID == nil ||
 		apiKey.Group == nil || apiKey.FallbackGroup == nil ||
 		*apiKey.GroupID <= 0 || *apiKey.FallbackGroupID <= 0 ||
@@ -120,6 +121,9 @@ func ActivateAPIKeyFallbackRouting(ctx context.Context, fallbackGroupID int64) b
 
 func apiKeyFallbackGroupForSelection(ctx context.Context, groupID *int64, selectionErr error) (*Group, context.Context, bool) {
 	if ctx == nil || ctx.Err() != nil || groupID == nil || *groupID <= 0 {
+		return nil, ctx, false
+	}
+	if g := strictGroupFromContext(ctx, groupID); g != nil && g.StrictFailover.Enabled && !errors.Is(selectionErr, errStrictFailoverAllUnavailable) {
 		return nil, ctx, false
 	}
 	// A protected primary group may use a configured healthy fallback group.

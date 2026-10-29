@@ -2,7 +2,6 @@
   <div ref="outputContainer" class="min-w-0">
     <PelicanReviewOutput v-if="!thumbnail && result.execution_info?.auto_review" :review="result.execution_info.auto_review" :compact="compact" />
     <CapabilityResultOutput v-if="result.output_kind === 'capability' && result.execution_info?.capability" :result="result.execution_info.capability" />
-    <TestStatisticsOutput v-else-if="result.output_kind === 'statistics' && result.output_statistics" :statistics="result.output_statistics" :updated-at="result.finished_at || result.created_at" :compact="compact" />
     <TestModelCheckOutput v-else-if="result.output_kind === 'model_check' && result.output_model_check" :result="result.output_model_check" :compact="compact" />
     <template v-else-if="result.output_kind === 'html' && result.output_html">
       <div class="relative w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700" :style="{ height: `${Math.ceil(htmlFrameHeight * previewScale)}px` }">
@@ -43,7 +42,6 @@ import type { TestResult } from '@/types'
 import { buildTestPreviewHTML } from '@/utils/testPreview'
 import PelicanReviewOutput from '@/components/tests/PelicanReviewOutput.vue'
 import CapabilityResultOutput from '@/components/tests/CapabilityResultOutput.vue'
-import TestStatisticsOutput from '@/components/tests/TestStatisticsOutput.vue'
 import TestModelCheckOutput from '@/components/tests/TestModelCheckOutput.vue'
 
 const props = withDefaults(defineProps<{ result: TestResult; compact?: boolean; thumbnail?: boolean; maxPreviewHeight?: number }>(), { compact: false, thumbnail: false })

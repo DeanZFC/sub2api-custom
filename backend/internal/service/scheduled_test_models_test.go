@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"net/http"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -37,24 +40,29 @@ func TestScheduledTestMultipleModelsSnapshotFailureIsIsolated(t *testing.T) {
 		retryResultRepoStub: &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 30)},
 		targets:             []int64{12}, published: make(chan []*ScheduledTestResult, 1),
 	}
-	repo.collect = func(_ context.Context, filter ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error) {
-		if filter.Model == "model-a" {
-			return nil, errors.New("model-a statistics unavailable")
-		}
-		return &ScheduledTestStatistics{TotalRequests: 10, SuccessRequests: 10}, nil
-	}
 	var upstreamCalls atomic.Int32
-	accounts := scheduledTestExecutionAccountRepo{get: func(_ context.Context, id int64) (*Account, error) {
+	accounts := scheduledTestExecutionAccountRepo{get: func(ctx context.Context, id int64) (*Account, error) {
 		upstreamCalls.Add(1)
-		return &Account{ID: id, Extra: map[string]any{"synthetic_ui_test": true}}, nil
+		return &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}, nil
 	}}
 	runner := newSnapshotRunner(repo, accounts)
+	runner.automaticRetryBaseDelay = time.Millisecond
+	upstream := &modelIdentityHTTPUpstream{}
+	upstream.beforeReturn = func(_ *http.Request, _ int) {
+		if upstream.requestModel == "model-a" {
+			upstream.responses = []*http.Response{costJSONResponse(400, "invalid model")}
+		} else {
+			upstream.responses = []*http.Response{costJSONResponse(200, `{"model":"model-b","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"PASS"}]}]}`)}
+		}
+	}
+	runner.accountTestSvc.httpUpstream = upstream
+	runner.accountTestSvc.cfg = &config.Config{}
 	plan := scheduledTestExecutionPlan()
 	plan.AccountID, plan.GroupID, plan.TargetMode = nil, scheduledTestPtrInt64(8), "all_accounts"
 	plan.ModelID, plan.ModelIDs = "model-a", []string{"model-a", "model-b"}
-	plan.TestDefinitionIDs = []int64{1, 2, 3}
+	plan.TestDefinitionIDs = []int64{1, 2}
 	runner.RunPlanNow(context.Background(), plan)
-	require.Len(t, <-repo.published, 6, "freeze each account/type/model before execution")
+	require.Len(t, <-repo.published, 4, "freeze each account/type/model before execution")
 	close(repo.updated)
 	finals := map[string]*ScheduledTestResult{}
 	for result := range repo.updated {
@@ -62,12 +70,12 @@ func TestScheduledTestMultipleModelsSnapshotFailureIsIsolated(t *testing.T) {
 			finals[fmt.Sprintf("%s/%d", result.ModelID, *result.TestDefinitionID)] = result
 		}
 	}
-	require.Len(t, finals, 6)
+	require.Len(t, finals, 4)
 	for _, id := range plan.TestDefinitionIDs {
 		require.Equal(t, "failed", finals[fmt.Sprintf("model-a/%d", id)].Status)
-		require.Equal(t, "success", finals[fmt.Sprintf("model-b/%d", id)].Status)
+		require.Equal(t, "success", finals[fmt.Sprintf("model-b/%d", id)].Status, finals[fmt.Sprintf("model-b/%d", id)].ErrorMessage)
 	}
-	require.EqualValues(t, 2, upstreamCalls.Load(), "failure of model-a must not suppress model-b's checks")
+	require.GreaterOrEqual(t, upstreamCalls.Load(), int32(3), "active failure of model-a must not suppress model-b checks")
 }
 
 func TestScheduledTestRetryAccountGuardIsModelScoped(t *testing.T) {

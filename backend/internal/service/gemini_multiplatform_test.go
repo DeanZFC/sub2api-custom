@@ -399,6 +399,8 @@ func TestGeminiMessagesCompatService_GroupResolution_ReusesContextGroup(t *testi
 func TestGeminiMessagesCompatService_GroupResolution_UsesLiteFetch(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(7)
+	// A partial context snapshot must not bypass the authoritative group read.
+	ctx = context.WithValue(ctx, ctxkey.Group, &Group{ID: groupID})
 
 	repo := &mockAccountRepoForGemini{
 		accounts: []Account{
@@ -669,7 +671,9 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_ForcePl
 	}
 
 	cache := &mockGatewayCacheForGemini{}
-	groupRepo := &mockGroupRepoForGemini{groups: map[int64]*Group{}}
+	groupRepo := &mockGroupRepoForGemini{groups: map[int64]*Group{
+		groupID: {ID: groupID, Platform: PlatformGemini},
+	}}
 
 	svc := &GeminiMessagesCompatService{
 		accountRepo: repo,
@@ -681,6 +685,14 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_ForcePl
 	require.NoError(t, err)
 	require.NotNil(t, acc)
 	require.Equal(t, int64(1), acc.ID)
+	require.Equal(t, 1, groupRepo.getByIDLiteCalls)
+
+	// An unknown group must not turn the force-platform fallback into a
+	// bypass of a strict configuration that could not be loaded.
+	delete(groupRepo.groups, groupID)
+	acc, err = svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "gemini-2.5-flash", nil)
+	require.Nil(t, acc)
+	require.ErrorIs(t, err, ErrStrictFailoverUnconfirmed)
 }
 
 func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_NoModelSupport(t *testing.T) {

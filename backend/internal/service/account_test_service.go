@@ -418,6 +418,13 @@ func createTestPayload(modelID string, customPrompt ...string) (map[string]any, 
 	}, nil
 }
 
+func (s *AccountTestService) setAccountTestError(ctx context.Context, accountID int64, message string) error {
+	if s.accountRepo == nil {
+		return nil
+	}
+	return s.accountRepo.SetError(ctx, accountID, message)
+}
+
 // TestAccountConnection tests an account's connection by sending a test request
 // All account types use full Claude Code client characteristics, only auth header differs
 // modelID is optional - if empty, defaults to claude.DefaultTestModel
@@ -435,33 +442,6 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	bindAccountTestPlatform(c, account)
-	if passiveRecoverySession(ctx) != "" {
-		mappedModel, deferred := s.passiveRecoveryModel(ctx, account, modelID, time.Now())
-		if deferred != nil {
-			if collector, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
-				collector.deferred = deferred
-			}
-			return s.sendErrorAndEnd(c, deferred.Error())
-		}
-		modelID = mappedModel
-		if deferred := passiveRecoveryEligibility(account, modelID, time.Now()); deferred != nil {
-			if collector, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
-				collector.deferred = deferred
-			}
-			return s.sendErrorAndEnd(c, deferred.Error())
-		}
-		if deferred := passiveRecoveryUnsupportedMetrics(ctx, account, time.Now()); deferred != nil {
-			if collector, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
-				collector.deferred = deferred
-			}
-			return s.sendErrorAndEnd(c, deferred.Error())
-		}
-	}
-	if ctx.Value(qualityOperationsKey{}) != nil && (account.Status == "quality_paused" || account.ActiveTestModelBlocked(modelID)) {
-		ctx = WithQualityRecoveryProbe(c.Request.Context())
-		c.Request = c.Request.WithContext(ctx)
-	}
-
 	// Synthetic UI load-test accounts exercise the real SSE parsing and modal
 	// interactions, but intentionally do not send their placeholder credentials
 	// to an upstream provider.
@@ -2591,7 +2571,7 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 	account.RateLimitedAt = &now
 	account.RateLimitResetAt = resetAt
 
-	if account.Status == StatusError && ctx.Value(passiveQualityProbeKey{}) != true {
+	if account.Status == StatusError {
 		if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
 			return
 		}
@@ -3752,12 +3732,6 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
 	ginCtx.Request = (&http.Request{}).WithContext(withAccountTestReasoningEffort(ctx, reasoningEffort))
-	if session := passiveRecoverySession(ctx); session != "" {
-		ginCtx.Request.Header = make(http.Header)
-		ginCtx.Request.Header.Set("session-id", session)
-		ginCtx.Request.Header.Set("session_id", session)
-		ginCtx.Request.Header.Set("x-opencode-session", session)
-	}
 	ginCtx.Set(accountTestBackgroundKey, true)
 
 	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, prompt, AccountTestModeDefault)

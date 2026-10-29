@@ -634,6 +634,20 @@ func (_c *GroupCreate) SetModelRouting(v map[string][]int64) *GroupCreate {
 	return _c
 }
 
+// SetStrictFailover sets the "strict_failover" field.
+func (_c *GroupCreate) SetStrictFailover(v domain.StrictFailoverConfig) *GroupCreate {
+	_c.mutation.SetStrictFailover(v)
+	return _c
+}
+
+// SetNillableStrictFailover sets the "strict_failover" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableStrictFailover(v *domain.StrictFailoverConfig) *GroupCreate {
+	if v != nil {
+		_c.SetStrictFailover(*v)
+	}
+	return _c
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_c *GroupCreate) SetModelRoutingEnabled(v bool) *GroupCreate {
 	_c.mutation.SetModelRoutingEnabled(v)
@@ -1166,6 +1180,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultClaudeCodeOnly
 		_c.mutation.SetClaudeCodeOnly(v)
 	}
+	if _, ok := _c.mutation.StrictFailover(); !ok {
+		v := group.DefaultStrictFailover
+		_c.mutation.SetStrictFailover(v)
+	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		v := group.DefaultModelRoutingEnabled
 		_c.mutation.SetModelRoutingEnabled(v)
@@ -1385,6 +1403,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.ClaudeCodeOnly(); !ok {
 		return &ValidationError{Name: "claude_code_only", err: errors.New(`ent: missing required field "Group.claude_code_only"`)}
+	}
+	if _, ok := _c.mutation.StrictFailover(); !ok {
+		return &ValidationError{Name: "strict_failover", err: errors.New(`ent: missing required field "Group.strict_failover"`)}
 	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		return &ValidationError{Name: "model_routing_enabled", err: errors.New(`ent: missing required field "Group.model_routing_enabled"`)}
@@ -1677,6 +1698,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ModelRouting(); ok {
 		_spec.SetField(group.FieldModelRouting, field.TypeJSON, value)
 		_node.ModelRouting = value
+	}
+	if value, ok := _c.mutation.StrictFailover(); ok {
+		_spec.SetField(group.FieldStrictFailover, field.TypeJSON, value)
+		_node.StrictFailover = value
 	}
 	if value, ok := _c.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)
@@ -2727,6 +2752,18 @@ func (u *GroupUpsert) UpdateModelRouting() *GroupUpsert {
 // ClearModelRouting clears the value of the "model_routing" field.
 func (u *GroupUpsert) ClearModelRouting() *GroupUpsert {
 	u.SetNull(group.FieldModelRouting)
+	return u
+}
+
+// SetStrictFailover sets the "strict_failover" field.
+func (u *GroupUpsert) SetStrictFailover(v domain.StrictFailoverConfig) *GroupUpsert {
+	u.Set(group.FieldStrictFailover, v)
+	return u
+}
+
+// UpdateStrictFailover sets the "strict_failover" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateStrictFailover() *GroupUpsert {
+	u.SetExcluded(group.FieldStrictFailover)
 	return u
 }
 
@@ -3993,6 +4030,20 @@ func (u *GroupUpsertOne) UpdateModelRouting() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearModelRouting() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearModelRouting()
+	})
+}
+
+// SetStrictFailover sets the "strict_failover" field.
+func (u *GroupUpsertOne) SetStrictFailover(v domain.StrictFailoverConfig) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetStrictFailover(v)
+	})
+}
+
+// UpdateStrictFailover sets the "strict_failover" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateStrictFailover() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateStrictFailover()
 	})
 }
 
@@ -5474,6 +5525,20 @@ func (u *GroupUpsertBulk) UpdateModelRouting() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearModelRouting() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearModelRouting()
+	})
+}
+
+// SetStrictFailover sets the "strict_failover" field.
+func (u *GroupUpsertBulk) SetStrictFailover(v domain.StrictFailoverConfig) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetStrictFailover(v)
+	})
+}
+
+// UpdateStrictFailover sets the "strict_failover" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateStrictFailover() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateStrictFailover()
 	})
 }
 

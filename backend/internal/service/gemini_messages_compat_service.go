@@ -114,16 +114,37 @@ func (s *GeminiMessagesCompatService) SelectAccountForModel(ctx context.Context,
 	return s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, nil)
 }
 
-func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
-	ctx = withPassiveQualityRoutingModel(ctx, requestedModel)
-	ctx = withPassiveQualityAllocationSeed(ctx, sessionHash)
-	// 1. 确定目标平台和调度模式
-	// Determine target platform and scheduling mode
-	platform, useMixedScheduling, hasForcePlatform, err := s.resolvePlatformAndSchedulingMode(ctx, groupID)
+func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (result *Account, selectionErr error) {
+	defer func() { selectionErr = strictFailoverSelectionError(ctx, selectionErr) }()
+	ctx = withRequestedRoutingModel(ctx, requestedModel)
+	// Resolve the group once for both platform selection and strict tiers.
+	var err error
+	g := strictGroupFromContext(ctx, groupID)
+	if groupID != nil && !IsGroupContextValid(g) {
+		if s.groupRepo == nil {
+			return nil, fmt.Errorf("%w: group repository unavailable", ErrStrictFailoverUnconfirmed)
+		}
+		g, err = s.groupRepo.GetByIDLite(ctx, *groupID)
+		if err != nil || g == nil {
+			return nil, fmt.Errorf("%w: load group: %v", ErrStrictFailoverUnconfirmed, err)
+		}
+	}
+	platform, useMixedScheduling, hasForcePlatform := s.resolvePlatformAndSchedulingMode(ctx, g)
+	ctx, err = prepareStrictFailover(ctx, g, s.accountRepo, excludedIDs, requestedModel, func(a *Account) (string, error) {
+		if !s.isAccountValidForPlatform(a, platform, useMixedScheduling) {
+			return "platform_mismatch", nil
+		}
+		if requestedModel != "" && !s.isModelSupportedByAccount(a, requestedModel) {
+			return "model_not_supported", nil
+		}
+		if g.RequirePrivacySet && !a.IsPrivacySet() {
+			return "privacy_required", nil
+		}
+		return "", nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
 	cacheKey := "gemini:" + sessionHash
 
 	// 2. 尝试粘性会话命中
@@ -139,7 +160,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
 	// 强制平台模式下，分组中找不到账户时回退查询全部
-	if len(accounts) == 0 && groupID != nil && hasForcePlatform {
+	if len(accounts) == 0 && groupID != nil && hasForcePlatform && strictFailoverStateFrom(ctx) == nil {
 		accounts, err = s.listSchedulableAccountsOnce(ctx, nil, platform, hasForcePlatform)
 		if err != nil {
 			return nil, fmt.Errorf("query accounts failed: %w", err)
@@ -151,6 +172,9 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 	selected := s.selectBestGeminiAccount(ctx, accounts, requestedModel, excludedIDs, platform, useMixedScheduling)
 
 	if selected == nil {
+		if strictFailoverStateFrom(ctx) != nil {
+			return nil, ErrStrictFailoverUnconfirmed
+		}
 		if requestedModel != "" {
 			return nil, fmt.Errorf("no available Gemini accounts supporting model: %s", requestedModel)
 		}
@@ -167,34 +191,24 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 }
 
 // resolvePlatformAndSchedulingMode 解析目标平台和调度模式。
-// 返回：平台名称、是否使用混合调度、是否强制平台、错误。
+// 返回：平台名称、是否使用混合调度、是否强制平台。
 //
 // resolvePlatformAndSchedulingMode resolves target platform and scheduling mode.
-// Returns: platform name, whether to use mixed scheduling, whether force platform, error.
-func (s *GeminiMessagesCompatService) resolvePlatformAndSchedulingMode(ctx context.Context, groupID *int64) (platform string, useMixedScheduling bool, hasForcePlatform bool, err error) {
+// Returns: platform name, whether to use mixed scheduling, whether force platform.
+func (s *GeminiMessagesCompatService) resolvePlatformAndSchedulingMode(ctx context.Context, group *Group) (platform string, useMixedScheduling bool, hasForcePlatform bool) {
 	// 优先检查 context 中的强制平台（/antigravity 路由）
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
 	if hasForcePlatform && forcePlatform != "" {
-		return forcePlatform, false, true, nil
+		return forcePlatform, false, true
 	}
 
-	if groupID != nil {
-		// 根据分组 platform 决定查询哪种账号
-		var group *Group
-		if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) && ctxGroup.ID == *groupID {
-			group = ctxGroup
-		} else {
-			group, err = s.groupRepo.GetByIDLite(ctx, *groupID)
-			if err != nil {
-				return "", false, false, fmt.Errorf("get group failed: %w", err)
-			}
-		}
+	if group != nil {
 		// gemini 分组支持混合调度（包含启用了 mixed_scheduling 的 antigravity 账户）
-		return group.Platform, group.Platform == PlatformGemini, false, nil
+		return group.Platform, group.Platform == PlatformGemini, false
 	}
 
 	// 无分组时只使用原生 gemini 平台
-	return PlatformGemini, true, false, nil
+	return PlatformGemini, true, false
 }
 
 // tryStickySessionHit 尝试从粘性会话获取账号。
@@ -270,7 +284,7 @@ func (s *GeminiMessagesCompatService) isAccountUsableForRequestWithPrecheck(
 ) bool {
 	// 检查模型调度能力
 	// Check model scheduling capability
-	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
+	if account == nil || !strictFailoverAllows(ctx, account.ID) || !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
 		return false
 	}
 
@@ -345,7 +359,7 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 	precheckResult := s.buildPreCheckUsageResultMap(ctx, accounts, requestedModel)
 
 	for i := range accounts {
-		acc := passiveQualitySchedulingAccount(ctx, &accounts[i], requestedModel)
+		acc := &accounts[i]
 
 		// 跳过被排除的账号
 		if _, excluded := excludedIDs[acc.ID]; excluded {
@@ -358,12 +372,6 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 		}
 
 		// 选择最佳账号
-		if prefer, decided := passiveQualityPreferNewSession(ctx, acc, selected, requestedModel); decided {
-			if prefer {
-				selected = acc
-			}
-			continue
-		}
 		if selected == nil {
 			selected = acc
 			continue
@@ -442,6 +450,9 @@ func (s *GeminiMessagesCompatService) GetAntigravityGatewayService() *Antigravit
 }
 
 func (s *GeminiMessagesCompatService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
+	if !strictFailoverAllows(ctx, accountID) {
+		return nil, nil
+	}
 	if s.schedulerSnapshot != nil {
 		return s.schedulerSnapshot.GetAccount(ctx, accountID)
 	}
@@ -469,6 +480,9 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 }
 
 func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, error) {
+	if accounts, strict := strictFailoverAccounts(ctx, groupID); strict {
+		return accounts, nil
+	}
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 		return accounts, err
@@ -950,7 +964,8 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+					StatusCode: resp.StatusCode, ResponseBody: respBody}
 			}
 		}
 
@@ -986,7 +1001,8 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true}
+				return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+					StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true}
 			}
 		}
 		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
@@ -1016,7 +1032,8 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+			return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+				StatusCode: resp.StatusCode, ResponseBody: respBody}
 		}
 		upstreamReqID := resp.Header.Get(requestIDHeader)
 		if upstreamReqID == "" {
@@ -1444,7 +1461,8 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		// 上游网关的限流 / 不可用只针对其持有缓存的账号：不改本账号状态，交由绑定请求的耗尽处理透传。
 		if isGeminiBoundCacheUpstreamPassthrough(ctx, account, resp.StatusCode) {
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, BoundUpstreamPassthrough: true}
+			return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+				StatusCode: resp.StatusCode, ResponseBody: respBody, BoundUpstreamPassthrough: true}
 		}
 		if IsUpstreamBillingError(resp.StatusCode, respBody) {
 			return nil, s.newGeminiUpstreamBillingFailoverError(ctx, c, account, resp.StatusCode, resp.Header, respBody, requestID, mappedModel)
@@ -1509,7 +1527,8 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+					StatusCode: resp.StatusCode, ResponseBody: respBody}
 			}
 		}
 
@@ -1542,7 +1561,8 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, RetryableOnSameAccount: true}
+				return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+					StatusCode: resp.StatusCode, ResponseBody: evBody, RetryableOnSameAccount: true}
 			}
 		}
 		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
@@ -1569,7 +1589,8 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody}
+			return nil, &UpstreamFailoverError{ObservedUpstreamStatus: resp.StatusCode,
+				StatusCode: resp.StatusCode, ResponseBody: evBody}
 		}
 
 		return nil, s.writeGeminiNativeUpstreamError(c, account, resp, respBody, requestID, isOAuth)
@@ -1763,6 +1784,7 @@ func (s *GeminiMessagesCompatService) skippedErrorPolicyFailoverError(c *gin.Con
 		Detail:             upstreamDetail,
 	})
 	return &UpstreamFailoverError{
+		ObservedUpstreamStatus: statusCode,
 		StatusCode:             statusCode,
 		ResponseBody:           respBody,
 		RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode),

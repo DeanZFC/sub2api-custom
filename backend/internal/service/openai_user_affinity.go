@@ -83,7 +83,7 @@ func (s *OpenAIGatewayService) withOpenAIUserAffinity(ctx context.Context, group
 	if _, ok := s.cache.(SessionAccountCompareAndSetter); !ok {
 		return ctx, sessionHash
 	}
-	model := strings.TrimSpace(passiveQualityRoutingModel(ctx, requestedModel))
+	model := strings.TrimSpace(requestedRoutingModel(ctx, requestedModel))
 	key := openAIUserAffinityKey(openAIAuthenticatedUserID(ctx), derefGroupID(groupID), model)
 	if key == "" {
 		return ctx, sessionHash

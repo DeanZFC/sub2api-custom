@@ -63,9 +63,6 @@ func (p *scheduledTestAccountProgress) allowsNext(plan *ScheduledTestPlan, resul
 	if plan.TestDefinitionID != nil {
 		if rule := plan.ProtectionRule(plan.TestDefinitionID); rule != nil {
 			verdict, _ := evaluateScheduledTestProtection(*rule, result)
-			if probeVerdict, _, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
-				verdict = probeVerdict
-			}
 			if p.verdicts == nil {
 				p.verdicts = make(map[int64]string)
 			}
@@ -90,8 +87,7 @@ func (p *scheduledTestAccountProgress) allowsNext(plan *ScheduledTestPlan, resul
 // scheduledTestResultSatisfies is the gate between two checks for one
 // account. A successful HTTP/upstream response is not enough when the plan
 // has a configured answer, threshold, or model-consistency rule: the quality
-// verdict must also be pass. A completed statistics snapshot with insufficient
-// samples may continue the queue, but stays pending for quality actions.
+// verdict must also be pass.
 // Unknown model identity and failed automatic observations still stop the
 // account queue; display-only and manual-review checks remain informational
 // in the all-pass strategy.
@@ -133,11 +129,7 @@ func scheduledTestResultSatisfies(plan *ScheduledTestPlan, result *ScheduledTest
 		return true
 	}
 	verdict, _ := evaluateScheduledTestProtection(*rule, result)
-	if probeVerdict, _, ok := EvaluateScheduledTestRecoveryProbe(*rule, result); ok {
-		verdict = probeVerdict
-	}
-	return verdict == "pass" ||
-		(verdict == "pending" && result.OutputKind == "statistics" && result.OutputStatistics != nil)
+	return verdict == "pass"
 }
 
 func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, plan *ScheduledTestPlan, repo ScheduledTestRunRepository) {
@@ -148,18 +140,13 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 	// Freeze and deduplicate before building any per-type rows. Repositories
 	// already use DISTINCT; keeping this boundary explicit protects adapters.
 	accountIDs = scheduledTestUniqueAccountIDs(accountIDs)
-	var local, upstream []*scheduledTestExecutionTarget
+	var targets []*scheduledTestExecutionTarget
 	for _, execution := range scheduledTestExecutionPlans(plan) {
 		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 		prompt, kind, maxOutputTokens, definitionErr := s.resolveDefinition(queryCtx, execution)
 		cancel()
 		if kind == "" {
 			kind = "text"
-		}
-		if kind == "statistics" {
-			executionCopy := *execution
-			executionCopy.ReasoningEffort = ""
-			execution = &executionCopy
 		}
 		var accountTargets []*int64
 		if len(accountIDs) > 0 && targetErr == nil {
@@ -182,14 +169,9 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 				AccountID: id, GroupID: plan.GroupID, ModelID: execution.ModelID, ReasoningEffort: execution.ReasoningEffort,
 				OutputKind: kind, Status: "pending", StartedAt: started, FinishedAt: started,
 			}
-			if kind == "statistics" {
-				local = append(local, target)
-			} else {
-				upstream = append(upstream, target)
-			}
+			targets = append(targets, target)
 		}
 	}
-	targets := append(local, upstream...)
 	inputs := make([]*ScheduledTestResult, 0, len(targets))
 	for _, target := range targets {
 		inputs = append(inputs, target.pending)
@@ -217,8 +199,6 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 			}
 		}
 	}
-	// Put low-cost statistics first within each account queue. A fast account
-	// can advance to upstream work while another account's statistics are slow.
 	progress := make(map[int64]*scheduledTestAccountProgress, len(accountIDs))
 	s.runExecutionTargetQueues(ctx, targets, started, progress)
 }
@@ -298,7 +278,7 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 					s.skipExecutionTarget(target)
 					continue
 				}
-				if target.kind != "statistics" && !dynamicChecked {
+				if !dynamicChecked {
 					dynamicChecked = true
 					localHealthy := true
 					for i, observation := range observations {
@@ -410,9 +390,7 @@ func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, tar
 		return nil, false
 	}
 	var result *ScheduledTestResult
-	if target.kind == "statistics" {
-		result = s.runStatisticsResult(ctx, target.plan, target.accountID, target.pending, windowEnd)
-	} else if target.accountID != nil {
+	if target.accountID != nil {
 		result = s.runAccountWithResult(withAccountTestMaxOutputTokens(ctx, target.maxOutputTokens), target.plan, id, target.prompt, target.kind, target.pending)
 	} else {
 		s.failExecutionTarget(target, fmt.Errorf("test account is unavailable"))

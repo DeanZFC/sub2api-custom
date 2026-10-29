@@ -23,106 +23,6 @@ func protectionPlan() *ScheduledTestPlan {
 	}
 }
 
-func TestScheduledTestProtectionThresholdsAndSamples(t *testing.T) {
-	for _, tc := range []struct {
-		name, metric, operator                         string
-		threshold, observed                            float64
-		samples, firstSamples, inputTokens, minSamples int64
-		want                                           string
-	}{
-		{"success ratio converted to percent", "success_rate", "lt", 85, .9, 10, 0, 0, 0, "pass"},
-		{"success equality is not below", "success_rate", "lt", 90, .9, 10, 0, 0, 0, "pass"},
-		{"percentage equality resists binary rounding", "success_rate", "lt", 29, .29, 100, 0, 0, 0, "pass"},
-		{"decimal percentage equality lt", "success_rate", "lt", 1.1, 11.0 / 1000.0, 1000, 0, 0, 0, "pass"},
-		{"decimal percentage equality gt", "success_rate", "gt", 1.1, 11.0 / 1000.0, 1000, 0, 0, 0, "pass"},
-		{"near percentage remains strictly below", "success_rate", "lt", 1.1, .01099999999, 1000, 0, 0, 0, "fail"},
-		{"near percentage remains strictly above", "success_rate", "gt", 1.1, .01100000001, 1000, 0, 0, 0, "fail"},
-		{"success below", "success_rate", "lt", 90, .89, 10, 0, 0, 0, "fail"},
-		{"cache ratio converted to percent", "cache_rate", "lt", 85, .9, 10, 0, 100, 0, "pass"},
-		{"cache equality is not above", "cache_rate", "gt", 90, .9, 10, 0, 100, 0, "pass"},
-		{"cache above", "cache_rate", "gt", 90, .91, 10, 0, 100, 0, "fail"},
-		{"latency equality lt", "latency_ms", "lt", 200, 200, 0, 0, 0, 0, "pass"},
-		{"latency equality gt", "latency_ms", "gt", 200, 200, 0, 0, 0, 0, "pass"},
-		{"latency above", "latency_ms", "gt", 200, 201, 0, 0, 0, 0, "fail"},
-		{"numeric below", "output_numeric", "lt", 29, 28, 0, 0, 0, 0, "fail"},
-		{"numeric equality", "output_numeric", "gt", 29, 29, 0, 0, 0, 0, "pass"},
-		{"zero requests never recover", "success_rate", "lt", 90, 1, 0, 0, 0, 0, "pending"},
-		{"too few requests", "success_rate", "lt", 90, 1, 4, 0, 0, 5, "pending"},
-		{"minimum request boundary", "success_rate", "lt", 90, 1, 5, 0, 0, 5, "pass"},
-		{"cache input absent", "cache_rate", "lt", 90, 1, 10, 0, 0, 0, "pending"},
-		{"first token sample count independently enforced", "avg_first_token_ms", "gt", 200, 100, 100, 4, 0, 5, "pending"},
-		{"first token exact sample minimum", "avg_first_token_ms", "gt", 200, 100, 100, 5, 0, 5, "pass"},
-		{"missing first token samples", "avg_first_token_ms", "gt", 200, 100, 100, 0, 0, 0, "pending"},
-		{"bad ratio is not a fabricated failure", "success_rate", "lt", 90, -1, 10, 0, 0, 0, "pending"},
-		{"percent stored instead of ratio rejected", "cache_rate", "lt", 90, 90, 10, 0, 100, 0, "pending"},
-		{"nonfinite metric rejected", "output_numeric", "gt", 29, math.Inf(1), 0, 0, 0, 0, "pending"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rule := ScheduledTestProtectionRule{MinSamples: tc.minSamples, Thresholds: []ScheduledTestThreshold{{Metric: tc.metric, Operator: tc.operator, Value: tc.threshold}}}
-			result := &ScheduledTestResult{Status: "success", LatencyMs: int64(tc.observed), OutputNumeric: protectionFloat(tc.observed), OutputStatistics: &ScheduledTestStatistics{
-				TotalRequests: tc.samples, CacheSamples: tc.samples, FirstTokenSamples: tc.firstSamples, CacheInputTokens: tc.inputTokens,
-				SuccessRate: protectionFloat(tc.observed), CacheRate: protectionFloat(tc.observed), AvgFirstTokenMs: protectionFloat(tc.observed),
-			}}
-			verdict, reason := evaluateScheduledTestProtection(rule, result)
-			require.Equal(t, tc.want, verdict, reason)
-			if tc.want != "pass" {
-				require.NotEmpty(t, reason)
-			}
-		})
-	}
-	for _, result := range []*ScheduledTestResult{
-		{Status: "success"},
-		{Status: "success", OutputStatistics: &ScheduledTestStatistics{TotalRequests: 10}},
-	} {
-		verdict, _ := evaluateScheduledTestProtection(ScheduledTestProtectionRule{Thresholds: []ScheduledTestThreshold{{Metric: "success_rate", Operator: "lt", Value: 90}}}, result)
-		require.Equal(t, "pending", verdict)
-	}
-}
-
-func TestScheduledTestProtectionObservedViolationWinsOverMissingMetric(t *testing.T) {
-	rule := ScheduledTestProtectionRule{Thresholds: []ScheduledTestThreshold{
-		{Metric: "cache_rate", Operator: "lt", Value: 90},
-		{Metric: "success_rate", Operator: "lt", Value: 80},
-	}}
-	verdict, reason := evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "success", OutputStatistics: &ScheduledTestStatistics{TotalRequests: 10, SuccessRate: protectionFloat(.5)}})
-	require.Equal(t, "fail", verdict)
-	require.Contains(t, reason, "成功率小于80%")
-}
-
-func TestScheduledTestOutputTPSThresholdRequiresIndependentSamples(t *testing.T) {
-	rule := ScheduledTestProtectionRule{MinSamples: 5, Thresholds: []ScheduledTestThreshold{{Metric: "output_tps", Operator: "lt", Value: 20}}}
-	plan := protectionPlan()
-	plan.Protection.Rules[0] = rule
-	plan.Protection.Rules[0].TestDefinitionID = 1
-	require.NoError(t, validateScheduledTestProtection(plan))
-	for _, tc := range []struct {
-		name    string
-		value   *float64
-		samples int64
-		want    string
-	}{
-		{"missing timing stays unknown", nil, 5, "pending"},
-		{"unrelated requests cannot meet sample floor", protectionFloat(100), 4, "pending"},
-		{"threshold equality passes", protectionFloat(20), 5, "pass"},
-		{"slow output fails", protectionFloat(19.9), 5, "fail"},
-		{"fast output passes", protectionFloat(40), 5, "pass"},
-		{"negative speed is invalid", protectionFloat(-1), 5, "pending"},
-		{"nonfinite speed is invalid", protectionFloat(math.Inf(1)), 5, "pending"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			result := &ScheduledTestResult{Status: "success", OutputKind: "statistics", OutputStatistics: &ScheduledTestStatistics{
-				TotalRequests: 100, FirstTokenSamples: 100, TPSSamples: tc.samples, OutputTPS: tc.value,
-			}}
-			verdict, reason := evaluateScheduledTestProtection(rule, result)
-			require.Equal(t, tc.want, verdict)
-			require.EqualValues(t, tc.samples, *scheduledTestMetricSamples(result, "output_tps"))
-			if verdict == "fail" {
-				require.Contains(t, reason, "输出速度小于20tokens/s")
-			}
-		})
-	}
-}
-
 func TestScheduledTestProtectionAnswersAndExecutionFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name, match, expected, actual, status, want string
@@ -238,9 +138,9 @@ func TestScheduledTestProtectionOutputKindAndSelectedDefinition(t *testing.T) {
 		metric, kind string
 		valid        bool
 	}{
-		{"success_rate", "statistics", true}, {"cache_rate", "text", false}, {"success_rate", "number", false},
-		{"avg_first_token_ms", "statistics", true}, {"avg_first_token_ms", "html", false},
-		{"output_tps", "statistics", true}, {"output_tps", "text", false},
+		{"success_rate", "statistics", false}, {"cache_rate", "text", false}, {"success_rate", "number", false},
+		{"avg_first_token_ms", "statistics", false}, {"avg_first_token_ms", "html", false},
+		{"output_tps", "statistics", false}, {"output_tps", "text", false},
 		{"output_numeric", "number", true}, {"output_numeric", "text", false},
 		{"latency_ms", "statistics", false}, {"latency_ms", "html", true},
 	} {
@@ -278,7 +178,6 @@ type protectionRepositoryStub struct {
 	beginErr           error
 	created, completed *ScheduledTestResult
 	verdict            string
-	collect            func(context.Context, ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error)
 	rows               []*ScheduledTestVoteResult
 	voteErr            error
 	userID, resultID   int64
@@ -331,13 +230,6 @@ func (r *protectionRepositoryStub) CompleteProtection(_ context.Context, result 
 	r.verdict = verdict
 	return nil
 }
-func (r *protectionRepositoryStub) CollectStatistics(ctx context.Context, filter ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error) {
-	r.record("collect")
-	return r.collect(ctx, filter)
-}
-func (r *protectionRepositoryStub) ListStatisticsAccountIDs(context.Context, int64) ([]int64, error) {
-	panic("must use detection eligibility, including quality-paused accounts")
-}
 func (r *protectionRepositoryStub) ListVotingResults(_ context.Context, userID int64) ([]*ScheduledTestVoteResult, error) {
 	r.userID = userID
 	return r.rows, r.voteErr
@@ -348,27 +240,6 @@ func (r *protectionRepositoryStub) CastTestVote(_ context.Context, userID, resul
 		return nil, r.voteErr
 	}
 	return r.rows[0], nil
-}
-
-func TestScheduledTestProtectionRunnerStatisticsWiring(t *testing.T) {
-	repo := &protectionRepositoryStub{eligible: true}
-	repo.collect = func(_ context.Context, filter ScheduledTestStatisticsFilter) (*ScheduledTestStatistics, error) {
-		require.Equal(t, []string{"create", "begin", "collect"}, repo.events)
-		require.Equal(t, int64(42), *filter.AccountID)
-		return &ScheduledTestStatistics{WindowStart: filter.WindowStart, WindowEnd: filter.WindowEnd, TotalRequests: 10, CacheSamples: 10, CacheInputTokens: 100, CacheReadTokens: 90, CacheRate: protectionFloat(.9)}, nil
-	}
-	plan := protectionPlan()
-	plan.TargetMode = "all_accounts"
-	plan.AccountID = nil
-	plan.GroupID = scheduledTestPtrInt64(8)
-	plan.Protection.Rules[0].Thresholds = []ScheduledTestThreshold{{Metric: "cache_rate", Operator: "lt", Value: 90}}
-	runner := NewScheduledTestRunnerService(nil, NewScheduledTestService(nil, repo), nil, nil, nil, nil)
-	runner.runStatisticsDefinition(context.Background(), plan)
-	require.Equal(t, []string{"create", "begin", "collect", "update", "complete"}, repo.events)
-	require.Equal(t, "pass", repo.verdict)
-	require.Equal(t, repo.created.ID, repo.completed.ID)
-	require.Equal(t, "running", repo.created.Status)
-	require.Equal(t, "success", repo.completed.Status)
 }
 
 func TestScheduledTestProtectionRunnerModelWiringAndEligibility(t *testing.T) {

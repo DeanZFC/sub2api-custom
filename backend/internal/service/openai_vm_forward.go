@@ -111,8 +111,7 @@ func (s *OpenAIGatewayService) forwardOpenAIVMResponses(ctx context.Context, c *
 	c.Set("openai_passthrough", true)
 	c.Set("openai_ws_transport_reason", "account_vm_bridge")
 	// vm2api rewrites the final kernel request; this intermediate body cannot
-	// prove an OpenAI cache prefix or scope for passive quality protection.
-	capturePassiveQualityCacheWire(c, account, body, "", req.Header)
+	// establish any additional OpenAI cache-prefix or routing identity.
 	upstreamStarted := time.Now()
 	resp, handled, err := s.openaiVM.RoundTrip(req, account)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStarted).Milliseconds())

@@ -71,27 +71,16 @@ func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 	return nil
 }
 
-// Recovering checks retain their independent hold and request budget. Releasing
-// the policy hold only permits a bounded trial; it never grants full recovery.
 // Pending checks preserve active accounts, but cannot release an existing pause.
 // Review verdicts also include any explicitly configured duration condition.
-func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts map[int64]string, recovering map[int64]bool, held bool) (ScheduledTestCombinationDecision, string) {
+func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts map[int64]string, _ map[int64]bool, held bool) (ScheduledTestCombinationDecision, string) {
 	decision := ScheduledTestCombinationDecision{Action: &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "keep"}}
 	if !config.Enabled || !config.UsesAllPass() {
 		return decision, ""
 	}
-	// Recovery may temporarily release scheduling for bounded trial traffic, but
-	// an unresolved statistics failure must still use the configured fail groups.
-	failure := config.AllPassOutcomeAction("fail")
-	recoveryFailed := false
-	pending, trial, automatic := false, false, 0
+	pending, automatic := false, 0
 	for _, rule := range config.Rules {
 		id := rule.TestDefinitionID
-		if rule.Recovery != nil && rule.Recovery.Enabled && recovering[id] {
-			trial = true
-			recoveryFailed = recoveryFailed || verdicts[id] == "fail"
-			continue
-		}
 		if verdicts[id] == "fail" {
 			action := config.AllPassOutcomeAction("fail")
 			decision.Action = &action
@@ -102,10 +91,7 @@ func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts
 			pending = pending || verdicts[id] != "pass"
 		}
 	}
-	if pending || (automatic == 0 && !trial) {
-		if recoveryFailed {
-			decision.Action.GroupMode, decision.Action.GroupIDs = failure.GroupMode, failure.GroupIDs
-		}
+	if pending || automatic == 0 {
 		if held {
 			decision.Action.Scheduling = "pause"
 		}
@@ -113,9 +99,5 @@ func EvaluateScheduledTestAllPass(config ScheduledTestProtectionConfig, verdicts
 	}
 	action := config.AllPassOutcomeAction("pass")
 	decision.Action = &action
-	if trial {
-		decision.Action.GroupMode, decision.Action.GroupIDs = failure.GroupMode, failure.GroupIDs
-		return decision, "其他自动检测已通过，等待统计限量试运行达标"
-	}
 	return decision, "全部自动检测通过，且无本轮人工否决"
 }

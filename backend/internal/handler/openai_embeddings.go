@@ -243,6 +243,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 					continue
 				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
+				service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {

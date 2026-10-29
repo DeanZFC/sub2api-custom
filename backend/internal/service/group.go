@@ -14,8 +14,10 @@ import (
 type OpenAIMessagesDispatchModelConfig = domain.OpenAIMessagesDispatchModelConfig
 type GroupCodexModelsManifestConfig = domain.GroupCodexModelsManifestConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
+type StrictFailoverConfig = domain.StrictFailoverConfig
 
 type Group struct {
+	StrictFailover StrictFailoverConfig
 	ID             int64
 	Name           string
 	Description    string

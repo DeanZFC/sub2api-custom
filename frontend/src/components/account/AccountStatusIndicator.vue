@@ -1,6 +1,5 @@
 <template>
   <div class="flex items-center gap-2">
-    <RouterLink v-if="passiveHolds.length" :to="{ path: '/admin/tests', query: { tab: 'overview', account_id: account.id } }" class="badge badge-warning text-xs" :title="passiveHolds.map(h => `${h.policy_name}: ${h.model} (${t(`admin.tests.passive.phases.${h.phase}`)})`).join('\n')" @click.stop>{{ t('admin.tests.passive.title') }} · {{ passiveHolds.length }}</RouterLink>
 
     <QualityProtectionStatus v-if="isQualityPaused" :account="account" />
 
@@ -166,7 +165,6 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { RouterLink } from 'vue-router'
 import QualityProtectionStatus from './QualityProtectionStatus.vue'
 import type { Account } from '@/types'
 import { formatCountdown, formatDateTime, formatDateTimeToMinute, formatCountdownWithSuffix, formatTime } from '@/utils/format'
@@ -181,7 +179,6 @@ const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
 
-const passiveHolds = computed(() => Array.isArray(props.account.extra?.passive_quality) ? props.account.extra.passive_quality as Array<{ policy_name: string; model: string; phase: string }> : [])
 const isQualityPaused = computed(() => props.account.status === 'quality_paused')
 
 // Computed: is rate limited (429)

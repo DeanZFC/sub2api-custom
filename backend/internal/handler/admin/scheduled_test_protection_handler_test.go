@@ -19,7 +19,10 @@ type protectionDefinitionHandlerRepo struct {
 
 func (protectionDefinitionHandlerRepo) GetByID(_ context.Context, id int64) (*service.ScheduledTestDefinition, error) {
 	kind := "html"
-	if id == 1 {
+	switch id {
+	case 1:
+		kind = "number"
+	case 3:
 		kind = "statistics"
 	}
 	return &service.ScheduledTestDefinition{ID: id, Enabled: true, OutputKind: kind}, nil
@@ -41,13 +44,14 @@ func TestScheduledTestProtectionHandlerCreateAndUpdate(t *testing.T) {
 		router.ServeHTTP(response, req)
 		return response
 	}
-	created := send(http.MethodPost, "/plans", `{"name":"quality","group_ids":[3,4],"test_definition_ids":[1,2],"model_id":"model","cron_expression":"* * * * *","protection":{"enabled":true,"rules":[{"test_definition_id":1,"min_samples":10,"thresholds":[{"metric":"cache_rate","operator":"lt","value":80}]},{"test_definition_id":2,"expected_answer":"pelican riding a bicycle","vote":{"enabled":true,"reject_above":2,"pass_at_least":3}}]}}`)
+	created := send(http.MethodPost, "/plans", `{"name":"quality","group_ids":[3,4],"test_definition_ids":[1,2],"model_id":"model","cron_expression":"* * * * *","protection":{"enabled":true,"rules":[{"test_definition_id":1,"thresholds":[{"metric":"latency_ms","operator":"gt","value":8000}]},{"test_definition_id":2,"expected_answer":"pelican riding a bicycle","vote":{"enabled":true,"reject_above":2,"pass_at_least":3}}]}}`)
 	require.Equal(t, http.StatusOK, created.Code, created.Body.String())
 	var plan service.ScheduledTestPlan
 	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &plan))
 	require.True(t, plan.Protection.Enabled)
 	require.Len(t, plan.Protection.Rules, 2)
-	require.Equal(t, 80.0, plan.Protection.Rules[0].Thresholds[0].Value)
+	require.Equal(t, "latency_ms", plan.Protection.Rules[0].Thresholds[0].Metric)
+	require.Equal(t, 8000.0, plan.Protection.Rules[0].Thresholds[0].Value)
 	require.Equal(t, 2, plan.Protection.Rules[1].Vote.RejectAbove)
 
 	updated := send(http.MethodPut, "/plans/7", `{"name":"renamed"}`)
@@ -63,7 +67,7 @@ func TestScheduledTestProtectionHandlerCreateAndUpdate(t *testing.T) {
 func TestScheduledTestProtectionHandlerRejectsInvalidConfiguration(t *testing.T) {
 	for _, tc := range []struct{ name, rules string }{
 		{"unknown selected type", `[{"test_definition_id":5,"pause_on_failure":true}]`},
-		{"statistics cannot vote", `[{"test_definition_id":1,"vote":{"enabled":true,"reject_above":1,"pass_at_least":2}}]`},
+		{"passive success rate is retired", `[{"test_definition_id":1,"thresholds":[{"metric":"success_rate","operator":"lt","value":80}]}]`},
 		{"HTML cannot have cache rate", `[{"test_definition_id":2,"thresholds":[{"metric":"cache_rate","operator":"lt","value":80}]}]`},
 		{"invalid vote threshold", `[{"test_definition_id":2,"vote":{"enabled":true,"reject_above":-1,"pass_at_least":0}}]`},
 	} {
@@ -82,4 +86,20 @@ func TestScheduledTestProtectionHandlerRejectsInvalidConfiguration(t *testing.T)
 			require.Zero(t, repo.writes)
 		})
 	}
+}
+
+func TestScheduledTestHandlerRejectsRetiredStatisticsWithProtectionDisabled(t *testing.T) {
+	repo := &qualityPlanHandlerRepo{}
+	svc := service.NewScheduledTestService(repo, nil)
+	svc.SetDefinitionRepository(protectionDefinitionHandlerRepo{})
+	router := gin.New()
+	router.POST("/plans", NewScheduledTestHandler(svc).Create)
+	body := `{"group_ids":[3,4],"test_definition_ids":[3],"model_id":"model","cron_expression":"* * * * *","protection":{"enabled":false}}`
+	request := httptest.NewRequest(http.MethodPost, "/plans", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), "statistics tests have been retired")
+	require.Zero(t, repo.writes)
 }

@@ -8,7 +8,6 @@ import (
 // AdminHandlers contains all admin-related HTTP handlers
 type AdminHandlers struct {
 	ChannelQuality         *admin.ChannelQualityHandler
-	PassiveQuality         *admin.PassiveQualityHandler
 	Dashboard              *admin.DashboardHandler
 	User                   *admin.UserHandler
 	Group                  *admin.GroupHandler

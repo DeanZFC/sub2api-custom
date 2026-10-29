@@ -32,7 +32,7 @@ func TestScheduledTestCombinationHandlerPreservesNestedConditionsAndActions(t *t
  "name":"Combined quality","group_ids":[3,4],"test_definition_ids":[1,2],
  "model_id":"model","cron_expression":"0 * * * *",
  "protection":{"enabled":true,"mode":"combined",
- "rules":[{"test_definition_id":1,"pause_on_failure":true,"min_samples":10,"thresholds":[{"metric":"cache_rate","operator":"lt","value":80}]},
+ "rules":[{"test_definition_id":1,"pause_on_failure":true,"thresholds":[{"metric":"latency_ms","operator":"gt","value":8000}]},
           {"test_definition_id":2,"pause_on_failure":true,"vote":{"enabled":true,"reject_above":3,"pass_at_least":3}}],
  "combinations":[{"id":"reject","name":"Either check fails","priority":10,
  "condition":{"operator":"any","conditions":[
