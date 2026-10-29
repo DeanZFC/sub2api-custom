@@ -109,24 +109,17 @@ func TestChannelQualityOverviewIndependentOwnersAndPagination(t *testing.T) {
 	require.Empty(t, page.Items)
 }
 
-func TestChannelQualityOverviewIncludesIndependentRealTrafficScore(t *testing.T) {
+func TestChannelQualityOverviewDiscoversRealPublicModelTraffic(t *testing.T) {
 	ctx, db, _ := passiveDB(t)
 	prepareChannelQualitySchema(t, db)
 	_, err := db.Exec(`INSERT INTO usage_logs(account_id,request_id,created_at,model,requested_model,first_token_ms,duration_ms)
- SELECT 62,'score-'||i,now()-i*INTERVAL '1 second','upstream-model','public-model',2000,10000 FROM generate_series(1,20) i`)
+ SELECT 62,'traffic-'||i,now()-i*INTERVAL '1 second','upstream-model','public-model',2000,10000 FROM generate_series(1,20) i`)
 	require.NoError(t, err)
-	seedScoreFixtureReports(t, db, time.Now().Add(-time.Minute))
 	// No active plan or passive policy exists; real public-model traffic still
-	// makes this account discoverable and independently scoreable.
+	// makes this account discoverable.
 	page, err := NewChannelQualityRepository(db).ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "public-model"})
 	require.NoError(t, err)
 	require.Len(t, page.Items, 1)
-	score := page.Items[0].QualityScore
-	require.NotNil(t, score)
-	require.NotNil(t, score.Value)
-	require.Equal(t, 100., *score.Value)
-	require.Equal(t, "partial", score.Status)
-	require.Equal(t, 20, score.Samples)
 	page, err = NewChannelQualityRepository(db).ListQualityAccounts(ctx, service.ChannelQualityFilter{AccountID: 62, Model: "upstream-model"})
 	require.NoError(t, err)
 	require.Empty(t, page.Items)

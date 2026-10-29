@@ -86,9 +86,6 @@ func (r *AcquireResult) RouteAccount(a *Account) (*Account, error) {
 		return a, nil
 	}
 	account, err := a.WithProxyRoute(r.ProxyID)
-	if err != nil && r.refundUnusedTraffic != nil {
-		r.refundUnusedTraffic()
-	}
 	if err != nil && r.ReleaseFunc != nil {
 		r.ReleaseFunc()
 	}

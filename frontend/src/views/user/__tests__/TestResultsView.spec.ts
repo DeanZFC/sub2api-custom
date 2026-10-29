@@ -4,8 +4,6 @@ import { createI18n } from 'vue-i18n'
 import TestResultsView from '../TestResultsView.vue'
 import TestVoteCard from '@/components/tests/TestVoteCard.vue'
 import TestRecentPassRate from '@/components/tests/TestRecentPassRate.vue'
-import ChannelQualityScoreEvidence from '@/components/tests/ChannelQualityScoreEvidence.vue'
-import type { ChannelQualityScore } from '@/api/admin/channelQuality'
 import type { TestPassRateSummary } from '@/types'
 
 const api = vi.hoisted(() => ({ list: vi.fn(), history: vi.fn(), votes: vi.fn(), vote: vi.fn(), error: vi.fn(), reviews: vi.fn(), decide: vi.fn(), adminResults: vi.fn(), isAdmin: false }))
@@ -21,17 +19,13 @@ const passRate = (samples: number, passed: number, overrides: Partial<TestPassRa
   blocked: false, ready: samples >= 10, stale: false, reason: samples >= 10 ? 'healthy' : 'insufficient_samples',
   latest_verdict: 'pass', rule_version: 'v1', model: 'gpt-6-astra', ...overrides,
 })
-const qualityScore = (value: number | null, model: string, overrides: Partial<ChannelQualityScore> = {}): ChannelQualityScore => ({
-  value, status: 'ready', samples: 40, models: 1, latest_at: '2026-10-28T10:00:00Z', model,
-  window_seconds: 900, max_requests: 100, min_samples: 20, confidence: 1, coverage_percent: 100, dimensions: [], ...overrides,
-})
 const mountResults = () => mount(TestResultsView, { global: {
   plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: { tests: { protection: { passRate: {
     recentCounts: 'Within {window}, last {count} checks · {passed} passed · {rate}',
     recentWindowDays: '{count} days', recentWindowHours: '{count} hours', recentWindowMinutes: '{count} minutes', recentWindowSeconds: '{count} seconds',
     recentProgress: 'Collecting {samples}/{count}',
     recentUnavailable: 'Recent pass-rate statistics unavailable',
-  } } } }, tests: { scoreScopeSource: '· Real request quality' } } } })],
+  } } } }, tests: {} } } })],
   stubs: {
     AppLayout: { template: '<main><slot /></main>' }, Icon: true,
     TestResultOutput: { props: ['result', 'compact'], template: '<div data-output :data-result-id="result.id" :data-compact="compact" />' },
@@ -49,27 +43,24 @@ beforeEach(() => {
 })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
-describe('public recent check counts and account quality scores', () => {
-  it('shows each check\'s own counts and one account score without requesting administrator APIs', async () => {
-    const score = qualityScore(86, 'gpt-6-astra')
+describe('public recent check counts', () => {
+  it('shows each check\'s own counts without requesting administrator APIs', async () => {
     const artworkEvidence = passRate(10, 8)
     const candyEvidence = passRate(20, 19, { window_size: 20 })
     api.list.mockResolvedValue([
-      { ...baseResult, id: 1, pass_rate: artworkEvidence, quality_score: score },
-      { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29, pass_rate: candyEvidence, quality_score: score },
-      { ...baseResult, id: 3, test_definition_id: 3, test_name: 'Statistics', output_kind: 'statistics', pass_rate: passRate(10, 10), quality_score: score },
+      { ...baseResult, id: 1, pass_rate: artworkEvidence },
+      { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29, pass_rate: candyEvidence },
+      { ...baseResult, id: 3, test_definition_id: 3, test_name: 'Statistics', output_kind: 'statistics', pass_rate: passRate(10, 10) },
     ])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.get('[data-content-test] [data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 8 passed · 80%')
     expect(wrapper.get('[data-numeric-test] [data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 20 checks · 19 passed · 95%')
     expect(wrapper.find('[data-statistics-test] [data-recent-pass-rate]').exists()).toBe(false)
     expect(wrapper.findAllComponents(TestRecentPassRate).map(component => component.props('evidence'))).toEqual([candyEvidence, artworkEvidence])
-    expect(wrapper.findAll('[data-quality-score]')).toHaveLength(1)
-    expect(wrapper.get('[data-account-info] [data-quality-score] strong').text()).toBe('86')
-    expect(wrapper.getComponent(ChannelQualityScoreEvidence).props()).toMatchObject({ score, compact: true })
     expect(api.reviews).not.toHaveBeenCalled()
     expect(api.adminResults).not.toHaveBeenCalled()
     expect(wrapper.find('[data-admin-decision]').exists()).toBe(false)
+    expect(wrapper.find('[data-quality-score]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -77,7 +68,7 @@ describe('public recent check counts and account quality scores', () => {
     api.list.mockResolvedValue([
       { ...baseResult, id: 1 },
       { ...baseResult, id: 2, test_definition_id: 2, test_name: 'Candy', output_kind: 'number', output_numeric: 29,
-        pass_rate: passRate(2, 1, { pass_rate: null }), quality_score: qualityScore(null, 'gpt-6-astra', { status: 'insufficient', samples: 2 }) },
+        pass_rate: passRate(2, 1, { pass_rate: null }) },
     ])
     const wrapper = mountResults(); await flushPromises()
     const artwork = wrapper.get('[data-content-test]')
@@ -85,40 +76,26 @@ describe('public recent check counts and account quality scores', () => {
     expect(artwork.find('[data-recent-pass-rate-counts]').exists()).toBe(false)
     expect(wrapper.get('[data-numeric-test] [data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 1 passed · —')
     expect(wrapper.get('[data-numeric-test] [data-recent-pass-rate-state]').text()).toBe('Collecting 2/10')
-    expect(wrapper.get('[data-account-info] [data-quality-score] strong').text()).toBe('—')
-    expect(wrapper.get('[data-account-info] [data-score-status]').text()).toContain('status.insufficient')
     wrapper.unmount()
   })
 
-  it('switches every account score and check count from the single top-level model selector', async () => {
-    const scoreA = qualityScore(91, 'model-a')
-    const scoreB = qualityScore(43, 'model-b')
-    const otherScore = qualityScore(75, 'model-a')
-    const otherScoreB = qualityScore(66, 'model-b')
+  it('switches every account check count from the single top-level model selector', async () => {
     api.list.mockResolvedValue([
-      { ...baseResult, id: 1, model_id: 'model-a', model_order: 0, pass_rate: passRate(10, 9, { model: 'model-a' }), quality_score: scoreA },
-      { ...baseResult, id: 2, model_id: 'model-b', model_order: 1, pass_rate: passRate(10, 4, { model: 'model-b' }), quality_score: scoreB },
-      { ...baseResult, id: 3, account_id: 4, model_id: 'model-a', model_order: 0, pass_rate: passRate(10, 7, { model: 'model-a' }), quality_score: otherScore },
-      { ...baseResult, id: 4, account_id: 4, model_id: 'model-b', model_order: 1, pass_rate: passRate(10, 6, { model: 'model-b' }), quality_score: otherScoreB },
+      { ...baseResult, id: 1, model_id: 'model-a', model_order: 0, pass_rate: passRate(10, 9, { model: 'model-a' }) },
+      { ...baseResult, id: 2, model_id: 'model-b', model_order: 1, pass_rate: passRate(10, 4, { model: 'model-b' }) },
+      { ...baseResult, id: 3, account_id: 4, model_id: 'model-a', model_order: 0, pass_rate: passRate(10, 7, { model: 'model-a' }) },
+      { ...baseResult, id: 4, account_id: 4, model_id: 'model-b', model_order: 1, pass_rate: passRate(10, 6, { model: 'model-b' }) },
     ])
     const wrapper = mountResults(); await flushPromises()
     const accounts = wrapper.findAll('[data-account-result]')
-    expect(accounts[0].get('[data-quality-score] strong').text()).toBe('91')
     expect(wrapper.findAll('[data-model-selector]')).toHaveLength(1)
     expect(wrapper.find('[data-account-model-selector]').exists()).toBe(false)
     expect(wrapper.get('[data-model-selector]').element.closest('[data-account-result]')).toBeNull()
     expect(wrapper.get<HTMLSelectElement>('[data-model-selector]').element.value).toBe('model-a')
-    expect(accounts[0].get('[data-score-scope]').text()).toContain('Real request quality')
-    expect(accounts[1].get('[data-quality-score] strong').text()).toBe('75')
     await wrapper.get('[data-model-selector]').setValue('model-b')
     expect(accounts[0].get('[data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 4 passed · 40%')
-    expect(accounts[0].getComponent(ChannelQualityScoreEvidence).props('score')).toEqual(scoreB)
-    expect(accounts[0].get('[data-quality-score] strong').text()).toBe('43')
     expect(wrapper.get<HTMLSelectElement>('[data-model-selector]').element.value).toBe('model-b')
     expect(accounts[1].get('[data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 6 passed · 60%')
-    expect(accounts[1].getComponent(ChannelQualityScoreEvidence).props('score')).toEqual(otherScoreB)
-    expect(accounts[1].get('[data-quality-score] strong').text()).toBe('66')
-    expect(wrapper.findAll('[data-quality-score]')).toHaveLength(2)
     wrapper.unmount()
   })
 
@@ -137,18 +114,15 @@ describe('public recent check counts and account quality scores', () => {
     wrapper.unmount()
   })
 
-  it('refreshes rolling evidence and removes a score that is no longer available', async () => {
+  it('refreshes rolling pass-rate evidence', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const result = { ...baseResult, id: 1 }
-    api.list.mockResolvedValueOnce([{ ...result, pass_rate: passRate(10, 8), quality_score: qualityScore(80, 'gpt-6-astra') }])
-      .mockResolvedValue([{ ...result, pass_rate: passRate(10, 9), quality_score: null }])
+    api.list.mockResolvedValueOnce([{ ...result, pass_rate: passRate(10, 8) }])
+      .mockResolvedValue([{ ...result, pass_rate: passRate(10, 9) }])
     const wrapper = mountResults(); await flushPromises()
     expect(wrapper.get('[data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 8 passed · 80%')
-    expect(wrapper.get('[data-quality-score] strong').text()).toBe('80')
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect(wrapper.get('[data-recent-pass-rate-counts]').text()).toBe('Within 7 days, last 10 checks · 9 passed · 90%')
-    expect(wrapper.get('[data-quality-score] strong').text()).toBe('—')
-    expect(wrapper.getComponent(ChannelQualityScoreEvidence).props('score')).toBeUndefined()
     wrapper.unmount()
   })
 })
@@ -733,8 +707,8 @@ describe('channel quality result series', () => {
   })
 
   it('switches all accounts, checks and statistics together using the configured model order', async () => {
-    const primary = { ...baseResult, id: 101, model_id: 'model-z', model_order: 0, created_at: '2026-09-14T12:00:00Z', quality_score: qualityScore(91, 'model-z'), pass_rate: passRate(10, 9, { model: 'model-z' }) }
-    const secondary = { ...baseResult, id: 102, model_id: 'model-a', model_order: 1, created_at: '2026-09-16T12:00:00Z', quality_score: qualityScore(43, 'model-a'), pass_rate: passRate(10, 4, { model: 'model-a' }) }
+    const primary = { ...baseResult, id: 101, model_id: 'model-z', model_order: 0, created_at: '2026-09-14T12:00:00Z', pass_rate: passRate(10, 9, { model: 'model-z' }) }
+    const secondary = { ...baseResult, id: 102, model_id: 'model-a', model_order: 1, created_at: '2026-09-16T12:00:00Z', pass_rate: passRate(10, 4, { model: 'model-a' }) }
     const otherPrimary = { ...baseResult, id: 201, account_id: 4, model_id: 'model-z', model_order: 0 }
     const otherSecondary = { ...baseResult, id: 202, account_id: 4, model_id: 'model-a', model_order: 1 }
     api.list.mockResolvedValue([
@@ -751,7 +725,6 @@ describe('channel quality result series', () => {
     expect(accounts).toHaveLength(2)
     expect(outputIDs(accounts[0])).toEqual(['101', '105'])
     expect(accounts[0].get('[data-numeric-gallery] strong').text()).toBe('29')
-    expect(accounts[0].get('[data-quality-score] strong').text()).toBe('91')
     expect(accounts[0].findAll('[data-recent-pass-rate-counts]').map(counts => counts.text())).toEqual([
       'Within 7 days, last 10 checks · 9 passed · 90%', 'Within 7 days, last 10 checks · 9 passed · 90%',
     ])
@@ -764,7 +737,6 @@ describe('channel quality result series', () => {
     await wrapper.get('[data-model-selector]').setValue('model-a')
     expect(outputIDs(accounts[0])).toEqual(['102', '106'])
     expect(accounts[0].get('[data-numeric-gallery] strong').text()).toBe('30')
-    expect(accounts[0].get('[data-quality-score] strong').text()).toBe('43')
     expect(accounts[0].findAll('[data-recent-pass-rate-counts]').map(counts => counts.text())).toEqual([
       'Within 7 days, last 10 checks · 4 passed · 40%', 'Within 7 days, last 10 checks · 4 passed · 40%',
     ])

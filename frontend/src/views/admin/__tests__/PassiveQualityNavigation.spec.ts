@@ -21,7 +21,7 @@ async function mountView(path: string) {
     stubs: {
       AppLayout: { template: '<main><slot /></main>' }, Icon: true,
       ActiveQualityPanel: true, ChannelQualityOverview: true, QualityOperationsPanel: true,
-      ChannelQualityScoreSettings: true, GroupQualityTargetsPanel: true,
+      GroupQualityTargetsPanel: true,
       BaseDialog: true,
     },
   } })
@@ -51,7 +51,7 @@ describe('passive management and records navigation', () => {
 
   it.each([
     ['pausedAccounts', 'paused'], ['limitedAccounts', 'limited'],
-    ['trialAccounts', 'trial'], ['observedAccounts', 'observed'],
+    ['observedAccounts', 'observed'],
   ] as const)('preserves the %s summary filter across component replacement', async (key, phase) => {
     const { wrapper, router } = await mountView('/admin/tests?tab=records')
     await wrapper.get('[data-passive-quality]').findAll('button').find(button => button.text().includes(resources.tests.passive[key]))!.trigger('click')
@@ -75,8 +75,10 @@ describe('passive management and records navigation', () => {
   it('updates record phases from route changes and rejects unsupported values', async () => {
     const { wrapper, router } = await mountView('/admin/tests?tab=records&phase=paused')
     expect(api.statePage).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'paused' }))
+    await router.replace('/admin/tests?tab=records&phase=probing'); await flushPromises()
+    expect(api.statePage).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'probing' }))
     await router.replace('/admin/tests?tab=records&phase=trial'); await flushPromises()
-    expect(api.statePage).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'trial' }))
+    expect(api.statePage).toHaveBeenLastCalledWith(expect.objectContaining({ phase: undefined }))
     await router.replace('/admin/tests?tab=records&phase=unexpected'); await flushPromises()
     expect((wrapper.get('[data-record-phase]').element as HTMLSelectElement).value).toBe('')
     expect(api.statePage).toHaveBeenLastCalledWith(expect.objectContaining({ phase: undefined }))

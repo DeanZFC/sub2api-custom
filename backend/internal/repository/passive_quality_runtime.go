@@ -131,7 +131,7 @@ func (r *passiveQualityRepository) Sweep(ctx context.Context, now time.Time, pro
 				probes = append(probes, *s)
 			}
 		}
-		if err = r.refreshGroupQualityTrafficSnapshot(ctx, p, now); err != nil {
+		if err = r.refreshGroupQualityReportSnapshot(ctx, p, now); err != nil {
 			return probes, err
 		}
 	}
@@ -176,6 +176,11 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 	}
 	oldPhase := s.Phase
 	oldReason := s.Reason
+	if p.IsGroupQualityTarget() && (s.Phase == "limited" || s.CacheAllocationReduced) {
+		s.Phase, s.Reason, s.NextAt = "paused", "active_recovery_pending: customer_recovery_retired", now
+		s.CacheAllocationReduced = false
+		s.Generation++
+	}
 	if s.UpdatedAt.IsZero() {
 		s.ObserveAfter = p.EvidenceSince()
 	}
@@ -231,12 +236,6 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 					s.Generation++
 					s.ProbeStartedAt, s.NextAt = now, now.Add(12*time.Minute)
 				}
-			}
-			break
-		}
-		if p.IsGroupQualityTarget() {
-			if !now.Before(s.NextAt) && !s.OtherHold {
-				beginPassiveTrial(p, &s, now, "group_target_trial")
 			}
 			break
 		}
@@ -373,13 +372,6 @@ func (r *passiveQualityRepository) FinishProbe(ctx context.Context, probe servic
 // Every applicable hold must approve. Account locking serializes all policies,
 // all gateway instances, membership edits, and trial lease reservations.
 func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, aid int64, model, lease string) (bool, bool, error) {
-	// This only defers automatic-quality holds to the following durable emergency
-	// gate. That gate fails closed without a matching policy and exact lease.
-	if groupQualityFallbackMatches(ctx, aid, model) {
-		var activeHold bool
-		err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND p.config->>'recovery_mode'='active' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2 OR $2=''))`, aid, model).Scan(&activeHold)
-		return err == nil && !activeHold, false, err
-	}
 	var held bool
 	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2 OR $2=''))`, aid, model).Scan(&held); err != nil || !held {
 		return !held, false, err
@@ -431,7 +423,7 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 		matches := model != "" && (c.Model == "" || model == c.Model)
 		filteredTrial = filteredTrial || c.Model != ""
 		matchedFilter = matchedFilter || (c.Model != "" && matches)
-		if c.IsActiveRecovery() || s.Phase != "trial" || now.Before(s.TrialStartedAt) || !now.Before(s.TrialEndsAt) || (matches && (s.Used >= c.TrialRequests || inflight >= c.TrialConcurrency || !passiveTrialAdmissionReady(c, s, now))) {
+		if c.IsGroupQualityTarget() || s.Phase != "trial" || now.Before(s.TrialStartedAt) || !now.Before(s.TrialEndsAt) || (matches && (s.Used >= c.TrialRequests || inflight >= c.TrialConcurrency)) {
 			allowed = false
 		}
 		if !matches {
@@ -439,9 +431,6 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 		}
 		matched = true
 		s.Used++
-		if c.IsGroupQualityTarget() {
-			s.LastTrialAdmissionAt = now
-		}
 		s.Inflight = inflight + 1
 		states = append(states, s)
 	}

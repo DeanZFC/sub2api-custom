@@ -566,7 +566,6 @@ type AccountSelectionResult struct {
 	// replacing the conversation owner when a handler later acquires a slot.
 	PreserveStickyBinding bool
 	userAffinity          *openAIUserAffinity
-	groupQualityFallback  *GroupQualityFallbackRequest
 	// RoutedGroupID is set when API-key fallback routing selected an account from
 	// a group other than the API key's original group. That routed group becomes
 	// the effective billing and usage-attribution group for this request.

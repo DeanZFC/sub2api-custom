@@ -221,7 +221,7 @@ export default {
   },
 
   tests: {
-    currentResult: '本次结果', scoreScopeSource: '· 真实流量', executionFailed: '执行失败',
+    currentResult: '本次结果', executionFailed: '执行失败',
     verdicts: { pass: '通过', fail: '未通过', pending: '待判定' },
     currentScheduling: '账号调度', schedulingActive: '参与调度', schedulingPaused: '暂停调度', failed: '未通过', skipped: '检测跳过',
     currentModelScheduling: '所选模型', modelSchedulingActive: '模型可调用', modelSchedulingPaused: '模型已暂停',

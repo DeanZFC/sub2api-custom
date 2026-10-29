@@ -12,10 +12,10 @@
     <p v-if="!loading && !loadError && !targets.length" class="rounded-xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500 dark:border-dark-600">{{ tr('empty') }}</p>
     <article v-for="policy in targets" :key="policy.id" :data-group-target="policy.id" class="space-y-4 rounded-xl border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-900">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-2"><h4 class="text-lg font-semibold">{{ groupName(policy.group_ids[0]) }}</h4><span class="badge" :class="statusClass(policy)">{{ tr(targetStatus(policy)) }}</span><span v-if="policy.mode === 'observe'" class="badge badge-gray">{{ t('admin.tests.passive.observe') }}</span><span v-if="policy.model" class="badge badge-gray">{{ policy.model }}</span><span v-if="policy.enabled && policy.mode === 'enforce'" class="text-xs text-gray-500">{{ tr(isActiveQualityRecovery(policy) ? 'activeRecovery' : 'recovery') }}</span></div>
+        <div class="flex flex-wrap items-center gap-2"><h4 class="text-lg font-semibold">{{ groupName(policy.group_ids[0]) }}</h4><span class="badge" :class="statusClass(policy)">{{ tr(targetStatus(policy)) }}</span><span v-if="policy.mode === 'observe'" class="badge badge-gray">{{ t('admin.tests.passive.observe') }}</span><span v-if="policy.model" class="badge badge-gray">{{ policy.model }}</span><span v-if="policy.enabled && policy.mode === 'enforce'" class="text-xs text-gray-500">{{ tr('activeRecovery') }}</span></div>
         <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-secondary btn-sm" :data-target-toggle="policy.id" :disabled="busy || loading" @click="toggle(policy)">{{ tr(policy.enabled ? 'disable' : 'enable') }}</button><button type="button" class="btn btn-secondary btn-sm" :data-target-edit="policy.id" :disabled="busy" @click="edit(policy)">{{ tr('edit') }}</button><button type="button" class="btn btn-secondary btn-sm" @click="emit('navigate', 'records', policy.id)">{{ tr('records') }}</button><button type="button" class="btn btn-danger btn-sm" :data-target-delete="policy.id" :disabled="busy || loading" @click="deleting = policy">{{ tr('delete') }}</button></div>
       </div>
-      <p v-if="isActiveQualityRecovery(policy)" class="text-xs leading-5 text-gray-500" data-target-full-window>{{ tr('activeSampling', { min: policy.min_samples || 20, confirmations: policy.confirmations || 2, fresh: policy.new_samples || 5 }) }}</p>
+      <p class="text-xs leading-5 text-gray-500" data-target-full-window>{{ tr('activeSampling', { min: policy.min_samples || 20, confirmations: policy.confirmations || 2, fresh: policy.new_samples || 5 }) }}</p>
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div v-for="row in metricRows(policy)" :key="row.key" :data-target-metric="row.key" class="rounded-lg bg-gray-50 p-4 dark:bg-dark-800">
           <p class="text-xs text-gray-500">{{ tr(row.key) }} · {{ tr('target') }} {{ row.target }}</p>
@@ -32,36 +32,10 @@
         <p v-if="summaryFor(policy)?.contributors_truncated" class="mt-2 text-xs text-amber-700">{{ tr('contributorsTruncated', { shown: summaryFor(policy)?.contributors?.length || 0, total: summaryFor(policy)?.contributor_total || 0 }) }}</p>
       </details>
       <p v-if="summaryFor(policy) && !summaryFor(policy)?.telemetry_complete" class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p>
-      <p v-if="(fallbackFor(policy)?.in_flight || 0) > 0" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-300" data-target-fallback-active>{{ tr('fallbackActiveNotice', { count: fallbackFor(policy)?.in_flight }) }}</p>
-      <details v-if="!isActiveQualityRecovery(policy)" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-target-traffic-details><summary class="cursor-pointer text-sm font-medium">{{ tr('trafficDetails') }}</summary>
-      <section v-if="trafficControlFor(policy)" class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-700" data-target-traffic-control>
-        <div class="flex flex-wrap items-center justify-between gap-2"><h5 class="text-sm font-semibold">{{ tr('trafficTitle') }}</h5><span class="badge" :class="trafficControlFor(policy)?.mode === 'normal' ? 'badge-gray' : 'badge-warning'" data-target-traffic-mode>{{ tr('trafficModes.' + trafficControlFor(policy)?.mode) }}</span></div>
-        <p v-if="trafficControlFor(policy)?.mode === 'bootstrap'" role="status" class="rounded-lg bg-amber-50 p-3 text-sm font-medium leading-6 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200" data-target-bootstrap>{{ tr('trafficBootstrap') }}</p>
-        <p v-else-if="trafficControlFor(policy)?.mode === 'conserving'" class="text-xs leading-5 text-amber-700 dark:text-amber-300">{{ tr('trafficConserving') }}</p>
-        <div class="grid gap-4 sm:grid-cols-3">
-          <div data-target-validation-share><p class="text-xs text-gray-500">{{ tr('trafficShare') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ percent(trafficControlFor(policy)?.validation_share_percent) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('trafficInputs', { validation: tokenCount(trafficControlFor(policy)?.validation_input_tokens), total: tokenCount(trafficControlFor(policy)?.total_input_tokens) }) }}</p></div>
-          <div data-target-budget-remaining><p class="text-xs text-gray-500">{{ tr('trafficRemaining') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(trafficControlFor(policy)?.remaining_tokens) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('trafficBudget', { reserved: tokenCount(trafficControlFor(policy)?.reserved_input_tokens), budget: tokenCount(trafficControlFor(policy)?.budget_tokens) }) }}</p></div>
-          <div data-target-limited-requests><p class="text-xs text-gray-500">{{ tr('trafficLimited') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(trafficControlFor(policy)?.limited_requests) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('trafficVerified', { count: tokenCount(trafficControlFor(policy)?.verified_accounts) }) }}</p></div>
-        </div>
-        <p class="text-xs leading-5 text-gray-500">{{ tr('trafficBudgetHint') }}</p>
-        <p class="text-xs leading-5 text-gray-500">{{ tr('trafficModelHint') }}</p>
-      </section>
-      <section v-if="fallbackFor(policy)" class="space-y-3 rounded-lg border border-amber-200 p-4 dark:border-amber-900" data-target-fallback>
-        <div class="flex flex-wrap items-center justify-between gap-2"><h5 class="text-sm font-semibold">{{ tr('fallbackTitle') }}</h5><span class="badge" :class="fallbackFor(policy)!.in_flight > 0 ? 'badge-warning' : 'badge-gray'" data-target-fallback-status>{{ tr(fallbackFor(policy)!.in_flight > 0 ? 'fallbackActive' : 'fallbackReady') }}</span></div>
-        <p class="text-sm leading-6 text-gray-600 dark:text-gray-300">{{ tr('fallbackHint') }}</p>
-        <div class="grid gap-3 sm:grid-cols-3">
-          <div data-target-fallback-inflight><p class="text-xs text-gray-500">{{ tr('fallbackInFlight') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.in_flight) }}</p></div>
-          <div data-target-fallback-requests><p class="text-xs text-gray-500">{{ tr('fallbackRequests') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.requests) }}</p></div>
-          <div data-target-fallback-input><p class="text-xs text-gray-500">{{ tr('fallbackInput') }}</p><p class="mt-1 text-xl font-semibold tabular-nums">{{ tokenCount(fallbackFor(policy)?.input_tokens) }}</p><p class="mt-1 text-xs text-gray-500">{{ tr('fallbackReserved', { count: tokenCount(fallbackFor(policy)?.reserved_input_tokens) }) }}</p></div>
-        </div>
-        <p v-if="fallbackFor(policy)?.last_used_at && fallbackFor(policy)?.last_account_id" class="text-xs text-gray-500" data-target-fallback-last>{{ tr('fallbackLast', { account: fallbackFor(policy)?.last_account_id, date: date(fallbackFor(policy)?.last_used_at) }) }}</p>
-        <p class="text-xs leading-5 text-amber-700 dark:text-amber-300">{{ tr('fallbackCaveat') }}</p>
-      </section>
-      </details>
-      <div class="flex flex-wrap gap-2 text-xs"><span class="badge badge-gray">{{ tr('scopeCount', { count: policyCounts(policy)?.total || 0 }) }}</span><span v-if="countPhase(policy, ['paused', 'probing'])" class="badge badge-warning">{{ tr('pausedCount', { count: countPhase(policy, ['paused', 'probing']) }) }}</span><span v-if="countPhase(policy, ['trial'])" class="badge badge-gray">{{ tr('trialCount', { count: countPhase(policy, ['trial']) }) }}</span><span v-if="countPhase(policy, ['insufficient', 'suspect', 'observed'])" class="badge badge-gray">{{ tr('pendingCount', { count: countPhase(policy, ['insufficient', 'suspect', 'observed']) }) }}</span><span v-if="!policyCounts(policy)?.total" class="text-gray-500">{{ tr('noStates') }}</span></div>
+      <div class="flex flex-wrap gap-2 text-xs"><span class="badge badge-gray">{{ tr('scopeCount', { count: policyCounts(policy)?.total || 0 }) }}</span><span v-if="countPhase(policy, ['paused', 'probing'])" class="badge badge-warning">{{ tr('pausedCount', { count: countPhase(policy, ['paused', 'probing']) }) }}</span><span v-if="countPhase(policy, ['insufficient', 'suspect', 'observed'])" class="badge badge-gray">{{ tr('pendingCount', { count: countPhase(policy, ['insufficient', 'suspect', 'observed']) }) }}</span><span v-if="!policyCounts(policy)?.total" class="text-gray-500">{{ tr('noStates') }}</span></div>
       <div v-if="policy.enabled && policy.mode === 'enforce'" class="space-y-2">
         <p class="text-sm font-medium" data-target-verified>{{ tr('verifiedCount', { count: verifiedCount(policy) }) }}</p>
-        <p v-if="verifiedCount(policy) === 0 && trafficControlFor(policy)?.mode !== 'bootstrap'" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium leading-6 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-target-no-verified>{{ tr(fallbackFor(policy) ? 'noVerifiedFallback' : 'noVerified') }}</p>
+        <p v-if="verifiedCount(policy) === 0" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium leading-6 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-target-no-verified>{{ tr('noVerified') }}</p>
         <p class="text-xs text-gray-500">{{ tr('verifiedCaveat') }}</p>
       </div>
       <details v-if="policyStates(policy).length" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
@@ -69,8 +43,8 @@
         <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-700"><th class="p-2">{{ tr('accountModel') }}</th><th class="p-2">{{ tr('phase') }}</th><th class="p-2">{{ tr('latestEvidence') }}</th><th class="p-2">{{ tr('reason') }}</th></tr></thead><tbody>
           <tr v-for="state in policyStates(policy)" :key="`${state.account_id}-${state.model}`" class="border-b border-gray-100 align-top last:border-0 dark:border-dark-800" :data-target-state="`${state.account_id}-${state.model}`">
             <td class="p-2"><strong>{{ state.account_name || `#${state.account_id}` }}</strong><p class="mt-1 text-xs text-gray-500">#{{ state.account_id }} · {{ state.model || t('admin.tests.passive.allModels') }}</p></td>
-            <td class="p-2 text-xs"><span class="badge" :class="['paused', 'probing'].includes(state.phase) ? 'badge-warning' : 'badge-gray'">{{ phaseLabel(state, policy) }}</span><p class="mt-2">{{ confirmationProgress(policy, state) }}</p><p v-if="state.phase === 'suspect' && state.suspicion_since && !state.suspicion_since.startsWith('0001')" class="mt-1" data-target-suspicion-since>{{ tr('suspicionSince', { date: date(state.suspicion_since) }) }}</p><p v-if="['trial', 'suspect'].includes(state.phase) && state.recovery_since && !state.recovery_since.startsWith('0001')" class="mt-1" data-target-recovery-since>{{ tr('recoverySince', { date: date(state.recovery_since) }) }}</p><p v-if="state.phase === 'paused'" class="mt-2">{{ tr(isActiveQualityRecovery(policy) ? 'nextActiveRecovery' : 'nextTrial', { date: date(state.next_at) }) }}</p><template v-if="state.phase === 'trial' && !isActiveQualityRecovery(policy)"><p class="mt-2">{{ tr('trialProgress', { used: state.used, max: policy.trial_requests || 20, samples: stateSampleCount(policy, state), required: policy.recovery_samples || 5 }) }}</p><p v-if="trialWaiting(state)" class="mt-1" data-target-trial-waiting>{{ tr('trialRetryAfter', { date: date(state.next_at) }) }}</p><p v-else class="mt-1">{{ tr('trialDeadline', { date: date(state.trial_ends_at) }) }}</p></template></td>
-            <td class="space-y-1 p-2 text-xs"><p v-if="policy.cache_rate.enabled">{{ tr('cache') }}: {{ percent(state.evidence.cache_rate) }} · {{ tr('samples', { count: state.evidence.cache_samples }) }}</p><p v-if="policy.error_rate.enabled">{{ tr('availability') }}: {{ percent(state.evidence.error_rate == null ? null : 100 - state.evidence.error_rate) }} · {{ tr('samples', { count: state.evidence.samples }) }}</p><p v-if="policy.ttft.enabled">{{ tr('ttft') }}: {{ seconds(state.evidence.ttft) }} · {{ tr('samples', { count: state.evidence.ttft_samples }) }}</p><p v-if="stateSampleCount(policy, state) < stateMinimum(policy, state)" class="text-amber-700 dark:text-amber-300">{{ tr('remaining', { count: stateMinimum(policy, state) - stateSampleCount(policy, state) }) }}</p><p v-if="policy.tps?.enabled" data-target-state-tps>{{ tr('tps') }}: {{ formatMonitorOutputTps(state.evidence.output_tps) }} · {{ tr('samples', { count: state.evidence.tps_samples ?? 0 }) }}</p><PassiveFreshEvidence :evidence="state.evidence" /><ActiveRecoveryEvidence v-if="state.active_recovery" :result="state.active_recovery" :recovered-at="state.recovered_at" /><p class="text-gray-500">{{ date(state.updated_at) }}</p></td>
+            <td class="p-2 text-xs"><span class="badge" :class="['paused', 'probing'].includes(state.phase) ? 'badge-warning' : 'badge-gray'">{{ phaseLabel(state) }}</span><p class="mt-2">{{ confirmationProgress(policy, state) }}</p><p v-if="state.phase === 'suspect' && state.suspicion_since && !state.suspicion_since.startsWith('0001')" class="mt-1" data-target-suspicion-since>{{ tr('suspicionSince', { date: date(state.suspicion_since) }) }}</p><p v-if="state.phase === 'suspect' && state.recovery_since && !state.recovery_since.startsWith('0001')" class="mt-1" data-target-recovery-since>{{ tr('recoverySince', { date: date(state.recovery_since) }) }}</p><p v-if="state.phase === 'paused'" class="mt-2">{{ tr('nextActiveRecovery', { date: date(state.next_at) }) }}</p></td>
+            <td class="space-y-1 p-2 text-xs"><p v-if="policy.cache_rate.enabled">{{ tr('cache') }}: {{ percent(state.evidence.cache_rate) }} · {{ tr('samples', { count: state.evidence.cache_samples }) }}</p><p v-if="policy.error_rate.enabled">{{ tr('availability') }}: {{ percent(state.evidence.error_rate == null ? null : 100 - state.evidence.error_rate) }} · {{ tr('samples', { count: state.evidence.samples }) }}</p><p v-if="policy.ttft.enabled">{{ tr('ttft') }}: {{ seconds(state.evidence.ttft) }} · {{ tr('samples', { count: state.evidence.ttft_samples }) }}</p><p v-if="stateSampleCount(policy, state) < minimum(policy)" class="text-amber-700 dark:text-amber-300">{{ tr('remaining', { count: minimum(policy) - stateSampleCount(policy, state) }) }}</p><p v-if="policy.tps?.enabled" data-target-state-tps>{{ tr('tps') }}: {{ formatMonitorOutputTps(state.evidence.output_tps) }} · {{ tr('samples', { count: state.evidence.tps_samples ?? 0 }) }}</p><PassiveFreshEvidence :evidence="state.evidence" /><ActiveRecoveryEvidence v-if="state.active_recovery" :result="state.active_recovery" :recovered-at="state.recovered_at" /><p class="text-gray-500">{{ date(state.updated_at) }}</p></td>
             <td class="max-w-80 break-words p-2 text-xs"><p>{{ reason(state.reason) || '—' }}</p><p v-if="!state.evidence.complete" class="mt-2 text-amber-700 dark:text-amber-300">{{ t('admin.tests.passive.telemetryIncomplete') }}</p><p v-if="state.other_hold" class="mt-2 text-amber-700 dark:text-amber-300">{{ tr('otherHold') }}</p></td>
           </tr>
         </tbody></table></div>
@@ -92,8 +66,8 @@
 
         <div v-if="editing.mode === 'observe'" class="rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/20"><p>{{ tr('observationRetained') }}</p><button type="button" class="btn btn-secondary btn-sm mt-2" data-target-enforce @click="editing.mode = 'enforce'">{{ tr('switchToEnforce') }}</button></div>
         <p v-if="editing.model" class="text-xs text-gray-500">{{ tr('modelRetained', { model: editing.model }) }}</p>
-        <div class="rounded-lg bg-primary-50 p-4 dark:bg-primary-950/20"><strong class="text-sm">{{ tr('recovery') }}</strong><p class="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ tr(isActiveQualityRecovery(editing) ? 'activeRecoveryHint' : 'recoveryHint') }}</p><p class="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ tr(isActiveQualityRecovery(editing) ? 'activeBudgetHint' : 'trafficDefault') }}</p><p class="mt-2 text-xs">{{ tr('recoveryTargets') }}: {{ recoveryLabels(editing).join(' · ') }}</p></div>
-        <details v-if="isActiveQualityRecovery(editing)" class="rounded-lg border border-gray-200 p-4 text-xs leading-5 dark:border-dark-700" data-active-recovery-settings>
+        <div class="rounded-lg bg-primary-50 p-4 dark:bg-primary-950/20"><strong class="text-sm">{{ tr('recovery') }}</strong><p class="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ tr('activeRecoveryHint') }}</p><p class="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">{{ tr('activeBudgetHint') }}</p><p class="mt-2 text-xs">{{ tr('recoveryTargets') }}: {{ recoveryLabels(editing).join(' · ') }}</p></div>
+        <details class="rounded-lg border border-gray-200 p-4 text-xs leading-5 dark:border-dark-700" data-active-recovery-settings>
           <summary class="cursor-pointer text-sm font-medium">{{ tr('details') }}</summary>
           <p class="mt-3">{{ tr('activeSampling', { min: editing.min_samples || 20, confirmations: editing.confirmations || 2, fresh: editing.new_samples || 5 }) }}</p>
           <p class="mt-2">{{ tr('activeStability', { availability: editing.stability.availability_pause_seconds, performance: editing.stability.performance_pause_seconds, recovery: Math.max(120, editing.stability.recovery_seconds) }) }}</p>
@@ -102,7 +76,7 @@
           <p class="mt-2">{{ tr('sharedScope') }}</p>
           <p v-if="editing.excluded_account_ids.length" class="mt-2">{{ tr('exclusionsRetained', { count: editing.excluded_account_ids.length }) }}</p>
         </details>
-        <details v-else class="rounded-lg border border-gray-200 p-4 text-xs leading-5 dark:border-dark-700"><summary class="cursor-pointer text-sm font-medium">{{ tr('details') }}</summary><label class="input-label block"><span>{{ tr('trafficMode') }}</span><select v-model="editing.traffic_mode" class="input mt-2 w-full" data-target-traffic-mode-select><option value="strict">{{ tr('trafficModeStrict') }}</option><option value="availability">{{ tr('trafficModeAvailability') }}</option></select><span class="mt-2 block text-xs font-normal text-gray-500">{{ tr(editing.traffic_mode === 'availability' ? 'trafficModeAvailabilityHint' : 'trafficModeStrictHint') }}</span></label><div class="mt-4 grid gap-3 sm:grid-cols-2" data-target-stability><label class="input-label block"><span>{{ tr('availabilityDebounce') }}</span><input v-model.number="editing.stability.availability_pause_seconds" type="number" min="0" max="3600" step="1" class="input mt-2 w-full" data-target-availability-debounce /></label><label class="input-label block"><span>{{ tr('performanceDebounce') }}</span><input v-model.number="editing.stability.performance_pause_seconds" type="number" min="0" max="3600" step="1" class="input mt-2 w-full" data-target-performance-debounce /></label><label class="input-label block"><span>{{ tr('recoveryStable') }}</span><input v-model.number="editing.stability.recovery_seconds" type="number" min="0" max="3600" step="1" class="input mt-2 w-full" data-target-recovery-stable /></label><label class="input-label block"><span>{{ tr('newSessionShare') }}</span><input v-model.number="editing.stability.new_session_percent" type="number" min="1" max="100" step="1" class="input mt-2 w-full" data-target-new-session-share /></label></div><p class="mt-2 text-gray-500">{{ tr('stabilityHint') }}</p><p class="mt-3">{{ tr('sampling', { max: editing.max_samples || 100, minutes: (editing.window_seconds || 3600) / 60, min: editing.min_samples || 5, confirmations: editing.confirmations || 2, fresh: editing.new_samples || 2 }) }}</p><p class="mt-2">{{ tr('trialDefaults', { minutes: (editing.cooldown_seconds || 300) / 60, requests: editing.trial_requests || 20, concurrency: editing.trial_concurrency || 1, duration: Math.max(editing.trial_seconds || 900, Math.max(editing.stability.recovery_seconds, recoveryConfirmations(editing) * 30) + 120) / 60, samples: editing.recovery_samples || 5 }) }}</p><p class="mt-2">{{ tr('sharedScope') }}</p><p v-if="editing.excluded_account_ids.length" class="mt-2">{{ tr('exclusionsRetained', { count: editing.excluded_account_ids.length }) }}</p></details>
+
         <p class="text-xs leading-5 text-gray-500">{{ tr('limitations') }}</p><p v-if="editing.id" class="text-xs text-amber-700 dark:text-amber-300">{{ tr('resetHint') }}</p><p v-if="validationError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">{{ validationError }}</p>
       </form>
       <template #footer><button type="button" class="btn btn-secondary" :disabled="busy" @click="editing = null">{{ t('common.cancel') }}</button><button type="button" class="btn btn-primary" data-target-save :disabled="busy || !!validationError" @click="save">{{ t('common.save') }}</button></template>
@@ -121,7 +95,7 @@ import { formatMonitorOutputTps } from '@/features/channel-monitor-v2/monitorFor
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import PassiveFreshEvidence from './PassiveFreshEvidence.vue'
 import ActiveRecoveryEvidence from './ActiveRecoveryEvidence.vue'
-import { passiveQualityAPI as api, groupQualityTargetDraft, isGroupQualityTarget, isActiveQualityRecovery, emptyPassiveSummary, type GroupQualityTargetDraft, type GroupQualityTargetSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
+import { passiveQualityAPI as api, groupQualityTargetDraft, isGroupQualityTarget, emptyPassiveSummary, type GroupQualityTargetDraft, type GroupQualityTargetSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
 import { useQualityLabels } from '@/composables/useQualityLabels'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -143,32 +117,21 @@ const seconds = (value: number | null | undefined) => value == null || !Number.i
 const tokenCount = (value: number | undefined) => value == null || !Number.isFinite(value) ? tr('unknown') : new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }).format(value)
 const groupName = (id?: number) => props.groups.find(g => g.id === id)?.name || `#${id}`
 const summaryFor = (p: PassivePolicy) => summaries.value.find(s => s.policy_id === p.id && s.group_id === p.group_ids[0])
-const trafficControlFor = (p: PassivePolicy) => !isActiveQualityRecovery(p) && p.enabled && p.mode === 'enforce' && summaryFor(p)?.traffic_control?.enabled ? summaryFor(p)?.traffic_control : undefined
-const fallbackFor = (p: PassivePolicy) => !isActiveQualityRecovery(p) && p.enabled && p.mode === 'enforce' && summaryFor(p)?.fallback?.enabled ? summaryFor(p)?.fallback : undefined
 const policyStates = (p: PassivePolicy) => states.value.filter(s => s.policy_id === p.id)
 const policyCounts = (p: PassivePolicy) => stateSummary.value.by_policy.find(s => s.policy_id === p.id)
 const countPhase = (p: PassivePolicy, phases: string[]) => phases.reduce((sum, phase) => sum + (policyCounts(p)?.phases[phase] || 0), 0)
-const minimum = (p: PassivePolicy) => p.min_samples || (isActiveQualityRecovery(p) ? 20 : 5)
-const stateMinimum = (p: PassivePolicy, s: PassiveState) => s.phase === 'trial' ? p.recovery_samples || 5 : minimum(p)
-function verifiedCount(p: PassivePolicy) {
-  const traffic = trafficControlFor(p)
-  if (traffic) return traffic.verified_accounts
-  return policyCounts(p)?.verified || 0
-}
+const minimum = (p: PassivePolicy) => p.min_samples || 20
+function verifiedCount(p: PassivePolicy) { return policyCounts(p)?.verified || 0 }
 function stateSampleCount(p: PassivePolicy, s: PassiveState) {
-  const counts = [p.cache_rate.enabled && s.phase !== 'trial' ? s.evidence.cache_samples : undefined, p.error_rate.enabled ? s.evidence.samples : undefined, p.ttft.enabled ? s.evidence.ttft_samples : undefined, p.tps?.enabled ? s.evidence.tps_samples ?? 0 : undefined].filter((v): v is number => v !== undefined)
+  const counts = [p.cache_rate.enabled ? s.evidence.cache_samples : undefined, p.error_rate.enabled ? s.evidence.samples : undefined, p.ttft.enabled ? s.evidence.ttft_samples : undefined, p.tps?.enabled ? s.evidence.tps_samples ?? 0 : undefined].filter((v): v is number => v !== undefined)
   return counts.length ? Math.min(...counts) : s.evidence.samples
 }
-function trialWaiting(s: PassiveState) {
-  return s.phase === 'trial' && s.reason.startsWith('waiting_for_recovery: ') && new Date(s.next_at).getTime() > new Date(s.trial_ends_at).getTime()
-}
-function recoveryConfirmations(p: Partial<Pick<PassivePolicy, 'confirmations' | 'trial_requests'>>) { return Math.min(Math.max(2, p.confirmations || 2), Math.max(2, p.trial_requests || 20)) }
 function confirmationProgress(p: PassivePolicy, s: PassiveState) {
-  if (isActiveQualityRecovery(p) && ['paused', 'probing', 'trial'].includes(s.phase)) return tr('activeRecovery')
-  const recovering = s.phase === 'trial' || (s.phase === 'suspect' && s.recovery_since && !s.recovery_since.startsWith('0001'))
-  return tr(recovering ? 'recoveryConfirmations' : 'confirmations', { count: recovering && s.phase === 'suspect' ? s.recovery_hits || 0 : s.hits, required: s.phase === 'trial' ? recoveryConfirmations(p) : recovering ? Math.max(2, p.confirmations || 2) : p.confirmations || 2 })
+  if (['paused', 'probing'].includes(s.phase)) return tr('activeRecovery')
+  const recovering = s.phase === 'suspect' && s.recovery_since && !s.recovery_since.startsWith('0001')
+  return tr(recovering ? 'recoveryConfirmations' : 'confirmations', { count: recovering ? s.recovery_hits || 0 : s.hits, required: p.confirmations || 2 })
 }
-function phaseLabel(s: PassiveState, p: PassivePolicy) { if (isActiveQualityRecovery(p) && ['probing', 'trial'].includes(s.phase)) return tr('activeProbing'); if (s.cache_allocation_reduced && !['paused', 'probing', 'trial'].includes(s.phase)) return tr('cacheAllocationReduced'); if (s.phase === 'healthy' && !s.evidence.complete) return tr('insufficient'); if (trialWaiting(s)) return tr('trialWaiting'); return s.phase === 'probing' ? tr('trialPreparing') : t('admin.tests.passive.phases.' + s.phase) }
+function phaseLabel(s: PassiveState) { if (s.phase === 'probing') return tr('activeProbing'); if (s.phase === 'healthy' && !s.evidence.complete) return tr('insufficient'); return t('admin.tests.passive.phases.' + s.phase) }
 function metricRows(p: PassivePolicy) {
   const s = summaryFor(p)
   return [
@@ -184,7 +147,7 @@ function targetStatus(p: PassivePolicy) {
   const rows = metricRows(p)
   if (rows.some(row => row.known && row.samples >= minimum(p) && row.breach)) return 'belowTarget'
   if (!rows.length || rows.some(row => !row.known || row.samples < minimum(p) || row.unknown > 0)) return 'insufficient'
-  if (countPhase(p, ['paused', 'probing', 'trial']) > 0) return 'protecting'
+  if (countPhase(p, ['paused', 'probing']) > 0) return 'protecting'
   return 'atTarget'
 }
 function statusClass(p: PassivePolicy) { const status = targetStatus(p); return status === 'atTarget' ? 'badge-success' : ['belowTarget', 'protecting'].includes(status) ? 'badge-warning' : 'badge-gray' }
@@ -196,7 +159,7 @@ const validationError = computed(() => {
   if (p.error_rate.enabled && (!Number.isFinite(p.error_rate.pause) || p.error_rate.pause < .1 - 1e-9 || p.error_rate.pause > 100)) return tr('invalid')
   if (p.ttft.enabled && (!Number.isFinite(p.ttft.pause) || p.ttft.pause < 1 || p.ttft.pause > 600000)) return tr('invalid')
   if (p.tps.enabled && (!Number.isFinite(p.tps.pause) || p.tps.pause <= 0 || p.tps.pause >= 1000000 || !Number.isFinite(p.tps.recover) || p.tps.recover <= p.tps.pause || p.tps.recover > 1000000)) return tr('invalid')
-  if (![p.stability.availability_pause_seconds, p.stability.performance_pause_seconds, p.stability.recovery_seconds].every(v => Number.isInteger(v) && v >= 0 && v <= 3600) || !Number.isInteger(p.stability.new_session_percent) || p.stability.new_session_percent < 1 || p.stability.new_session_percent > 100) return tr('invalidStability')
+  if (![p.stability.availability_pause_seconds, p.stability.performance_pause_seconds, p.stability.recovery_seconds].every(v => Number.isInteger(v) && v >= 0 && v <= 3600)) return tr('invalidStability')
   return ''
 })
 function edit(p?: PassivePolicy) { editing.value = groupQualityTargetDraft(p); baseline.value = JSON.stringify(editing.value) }

@@ -21,6 +21,47 @@ func (r *passiveProbeTestRepo) FinishProbe(_ context.Context, probe PassiveQuali
 	return nil
 }
 
+type passiveActiveProbeDispatchTestRepo struct {
+	passiveProbeTestRepo
+	activeCalls int
+	activeProbe PassiveQualityState
+	result      PassiveQualityActiveRecoveryResult
+}
+
+func (r *passiveActiveProbeDispatchTestRepo) FinishActiveRecovery(_ context.Context, probe PassiveQualityState, result PassiveQualityActiveRecoveryResult, _ time.Time) error {
+	r.activeCalls++
+	r.activeProbe, r.result = probe, result
+	return nil
+}
+
+func TestPassiveQualityGroupProbeCannotUseConnectivityRecovery(t *testing.T) {
+	for _, purpose := range []string{"group_quality_target", "cache_target"} {
+		for _, mode := range []string{"missing", "traffic"} {
+			t.Run(purpose+"/"+mode, func(t *testing.T) {
+				account := &Account{ID: 62, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Concurrency: 1,
+					Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"},
+					Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: false}}
+				upstream := &modelIdentityHTTPUpstream{body: `{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}]}`}
+				accountTest := &AccountTestService{accountRepo: &modelIdentityAccountRepo{account: account}, httpUpstream: upstream, cfg: &config.Config{}}
+				repo := &passiveActiveProbeDispatchTestRepo{}
+				s := NewPassiveQualityService(repo, accountTest)
+				defer s.cancel()
+				probe := PassiveQualityState{Purpose: purpose, AccountID: 62, PolicyID: 1, Version: 2, Generation: 3, Model: "model"}
+				if mode != "missing" {
+					probe.ActiveRecoveryConfig = &PassiveQualityConfig{Purpose: purpose, RecoveryMode: mode}
+				}
+				s.probe(probe)
+				require.Equal(t, 1, repo.activeCalls)
+				require.Equal(t, probe, repo.activeProbe)
+				require.Equal(t, "pending", repo.result.Verdict)
+				require.False(t, repo.result.Passed)
+				require.Zero(t, repo.probe.PolicyID, "a connectivity callback cannot recover a group target")
+				require.Empty(t, upstream.requestModel, "unavailable active recovery must not send a connectivity-only request")
+			})
+		}
+	}
+}
+
 func TestPassiveQualityProbeUsesObservedOrConfiguredModel(t *testing.T) {
 	for _, model := range []string{"", "configured-model"} {
 		t.Run("filter="+model, func(t *testing.T) {

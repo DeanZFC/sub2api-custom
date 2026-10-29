@@ -1,5 +1,4 @@
 import qualityExperience from './qualityExperience'
-import qualityScoring from './qualityScoring'
 import passiveQualityV2 from './passiveQualityV2'
 import groupQualityTargets from './groupQualityTargets'
 
@@ -7,7 +6,6 @@ export default {
     tests: {
       groupTargets: groupQualityTargets,
       experience: qualityExperience,
-      scoring: qualityScoring,
       multiModelHint: 'Select up to 16 models. Each round tests every selected model and records results and pass rates separately. All strategy groups must support each model.',
       multiModelRunHint: '{count} models selected. Each round will make more test requests.',
       multiModelProtectionHint: 'With quality protection enabled, a failing model pauses only that model on the account. The whole account pauses only when all monitored models are paused. Each model recovers independently after meeting the configured conditions.',
@@ -170,11 +168,6 @@ export default {
         "search": "Account name or ID",
         "problemsOnly": "Only anomalies and restricted accounts",
         "coverageHint": "Current account states and collected evidence. No quality hold does not prove capability; missing metrics appear as —.",
-        "qualityScore": "Quality score",
-        "qualityScoreHint": "Scores real-request errors, cache rate, first-token latency and duration using independent standards; missing metrics are identified separately.",
-        "qualityScoreSamples": "{models} models · {samples} samples",
-        "qualityScoreAccountSamples": "Account scope · {samples} samples",
-        "qualityScoreUnavailable": "No valid samples",
         "coverage": "{active} active policies · {passive} passive policies",
         "restricted": "Scheduling restricted",
         "limited": "Concurrency and priority reduced",

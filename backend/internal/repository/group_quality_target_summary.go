@@ -36,12 +36,6 @@ func (r *passiveQualityRepository) GroupQualityTargetSummaries(ctx context.Conte
 				return nil, err
 			}
 			s.Stale = now.Sub(s.GeneratedAt) > 2*time.Minute
-			if s.Fallback != nil {
-				err = r.db.QueryRowContext(ctx, `SELECT count(*) FROM group_quality_traffic_leases WHERE group_id=$1 AND fallback AND NOT unused AND released_at IS NULL AND fallback_expires_at>$2`, s.GroupID, now).Scan(&s.Fallback.InFlight)
-				if err != nil {
-					return nil, err
-				}
-			}
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -64,7 +58,7 @@ func (r *passiveQualityRepository) groupQualityTargetSummary(ctx context.Context
 }
 
 // Delayed usage and telemetry writes cannot change the population between the
-// headline metrics, traffic accounting, and contributor queries.
+// headline metrics and contributor queries.
 func readGroupQualityTargetSummary(ctx context.Context, reader groupQualitySummaryReader, p service.PassiveQualityPolicy, now time.Time) (service.GroupQualityTargetSummary, error) {
 	groupID := p.GroupIDs[0]
 	s := service.GroupQualityTargetSummary{PolicyID: p.ID, GroupID: groupID, WindowSeconds: 3600, WindowStartedAt: now.Add(-time.Hour), GeneratedAt: now, SnapshotReady: true, Contributors: []service.GroupQualityContributor{}}
@@ -122,14 +116,8 @@ func readGroupQualityTargetSummary(ctx context.Context, reader groupQualitySumma
 		s.OutputTPS = service.OutputTokensPerSecond(tpsOutputTokens, tpsGenerationMS)
 	}
 	s.TotalInputTokens = totalInput
-	s.TrafficControl, err = readGroupQualityTrafficSummary(ctx, reader, p, now, totalInput, s.CacheReadTokens, s.TelemetryComplete)
-	if err == nil {
-		s.Fallback, err = readGroupQualityFallbackSummary(ctx, reader, p, now)
-	}
-	if err == nil {
-		s.Contributors, s.ContributorTotal, err = groupQualityContributors(ctx, reader, p, now)
-		s.ContributorsTruncated = s.ContributorTotal > len(s.Contributors)
-	}
+	s.Contributors, s.ContributorTotal, err = groupQualityContributors(ctx, reader, p, now)
+	s.ContributorsTruncated = s.ContributorTotal > len(s.Contributors)
 	return s, err
 }
 

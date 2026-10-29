@@ -18,7 +18,6 @@
       <PassiveQualityManagementPanel v-if="passiveTab" ref="management" :groups="groups" :accounts="accounts" :target-policy-id="activeTab === 'group-targets' ? Number(route.query.policy_id) || undefined : undefined" @navigate="navigate" />
       <ActiveQualityPanel v-show="activeTab === 'plans' || activeTab === 'types'" ref="active" :tab="activeTab" @catalog="setCatalog" />
       <PassiveQualityPanel v-if="activeTab === 'records'" ref="passive" @tab="navigate" />
-      <ChannelQualityScoreSettings v-if="activeTab === 'scoring'" ref="scoring" />
       <QualityOperationsPanel v-if="activeTab === 'operations'" ref="operations" :visible="true" :accounts="accounts" />
     </div>
   </AppLayout>
@@ -33,13 +32,11 @@ import ActiveQualityPanel from '@/components/tests/ActiveQualityPanel.vue'
 import PassiveQualityPanel from '@/components/tests/PassiveQualityPanel.vue'
 import ChannelQualityOverview from '@/components/tests/ChannelQualityOverview.vue'
 import PassiveQualityManagementPanel from '@/components/tests/PassiveQualityManagementPanel.vue'
-import ChannelQualityScoreSettings from '@/components/tests/ChannelQualityScoreSettings.vue'
 import QualityOperationsPanel from '@/components/tests/QualityOperationsPanel.vue'
 import type { AdminGroup, AccountListItem } from '@/types'
 const { t } = useI18n()
 const route = useRoute(), router = useRouter()
 const tabs = [
-  { key: 'scoring', label: 'admin.tests.experience.scoring' },
   { key: 'overview', label: 'admin.tests.quality.overview' },
   { key: 'group-targets', label: 'admin.tests.groupTargets.title' },
   { key: 'plans', label: 'admin.tests.quality.active' },
@@ -51,9 +48,9 @@ const primaryTabs = [
   { key: 'group-targets', target: 'group-targets', label: 'admin.tests.experience.groupQuality' },
   { key: 'plans', target: 'plans', label: 'admin.tests.experience.capability' },
   { key: 'records', target: 'records', label: 'admin.tests.experience.records' },
-  { key: 'settings', target: 'scoring', label: 'admin.tests.experience.settings' },
+  { key: 'settings', target: 'types', label: 'admin.tests.experience.settings' },
 ]
-const settingsTabs = tabs.filter(tab => ['scoring', 'types', 'operations', 'overview'].includes(tab.key))
+const settingsTabs = tabs.filter(tab => ['types', 'operations', 'overview'].includes(tab.key))
 const activeTab = computed(() => {
   if (route.query.tab === 'passive') return 'group-targets'
   return tabs.some(tab => tab.key === route.query.tab) ? String(route.query.tab) : 'group-targets'
@@ -66,7 +63,6 @@ const active = ref<InstanceType<typeof ActiveQualityPanel> | null>(null)
 const passive = ref<InstanceType<typeof PassiveQualityPanel> | null>(null)
 const overview = ref<InstanceType<typeof ChannelQualityOverview> | null>(null)
 const management = ref<InstanceType<typeof PassiveQualityManagementPanel> | null>(null)
-const scoring = ref<InstanceType<typeof ChannelQualityScoreSettings> | null>(null)
 const operations = ref<InstanceType<typeof QualityOperationsPanel> | null>(null)
 function setCatalog(g: AdminGroup[], a: AccountListItem[]) { groups.value = g; accounts.value = a }
 function navigate(tab: string, policy?: number, account?: number, phase?: string) {
@@ -76,7 +72,6 @@ function refresh() {
   if (activeTab.value === 'overview') void overview.value?.refresh()
   else if (passiveTab.value) void management.value?.refresh()
   else if (activeTab.value === 'plans' || activeTab.value === 'types') void active.value?.refresh()
-  else if (activeTab.value === 'scoring') void scoring.value?.refresh()
   else if (activeTab.value === 'operations') void operations.value?.refresh()
   else void passive.value?.refresh()
 }

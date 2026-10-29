@@ -133,17 +133,6 @@ func (r *channelQualityRepository) ListQualityAccounts(ctx context.Context, f se
 		page.Items = page.Items[:limit]
 		page.NextAfter = page.Items[limit-1].ID
 	}
-	accountIDs := make([]int64, 0, len(page.Items))
-	for _, account := range page.Items {
-		accountIDs = append(accountIDs, account.ID)
-	}
-	scores, err := r.ChannelQualityScores(ctx, accountIDs, f.Model)
-	if err != nil {
-		return nil, err
-	}
-	for i := range page.Items {
-		page.Items[i].QualityScore = scores[page.Items[i].ID]
-	}
 	// Expired observations change the displayed window, never the live hold.
 	// Close the page cursor first so this also works with one DB connection.
 	for ai := range page.Items {

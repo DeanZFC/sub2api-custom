@@ -83,9 +83,6 @@ func passiveDBSchema(t *testing.T, modelStates bool) (context.Context, *sql.DB, 
 		require.NoError(t, err)
 		exec(string(migration))
 	}
-	// Most scenarios model an installation with continuous telemetry history.
-	// The score-specific migration-boundary test restores the real start time.
-	exec(`UPDATE channel_quality_score_config SET collect_since=now()-INTERVAL '2 days'`)
 	exec(`ALTER TABLE usage_logs ADD COLUMN group_id BIGINT DEFAULT 8`)
 	if modelStates {
 		migration, err = os.ReadFile("../../migrations/303_passive_quality_model_states.sql")

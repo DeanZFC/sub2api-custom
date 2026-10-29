@@ -21,10 +21,8 @@ type PassiveQualityConfig struct {
 	EvaluationVersion int64      `json:"evaluation_version,omitempty"`
 	Purpose           string     `json:"purpose,omitempty"`
 	RecoveryMode      string     `json:"recovery_mode,omitempty"`
-	// TrafficMode controls what happens after the shared group validation budget
-	// is exhausted. Strict keeps the historical fail-closed behavior; availability
-	// lets otherwise eligible accounts carry normal traffic without a validation
-	// lease while fresh evidence is collected separately.
+	// Retained only to reject requests for the retired customer-traffic mode.
+	// Group targets always use strict holds with dedicated active recovery.
 	TrafficMode          string                     `json:"traffic_mode,omitempty"`
 	SchemaVersion        int                        `json:"schema_version,omitempty"`
 	TPSAction            string                     `json:"tps_action,omitempty"`
@@ -230,14 +228,6 @@ func (c *PassiveQualityConfig) Validate() error {
 	if err := c.validateGroupTargetStability(); err != nil {
 		return err
 	}
-	if c.IsGroupQualityTarget() {
-		if c.TrafficMode == "" {
-			c.TrafficMode = "strict"
-		}
-		if c.TrafficMode != "strict" && c.TrafficMode != "availability" {
-			return fmt.Errorf("traffic mode must be strict or availability")
-		}
-	}
 	if err := c.validateIsolatedMetrics(); err != nil {
 		return err
 	}
@@ -332,7 +322,10 @@ func (c *PassiveQualityConfig) Validate() error {
 			return fmt.Errorf("active recovery must fit its 20-request and 10-minute budget")
 		}
 	}
-	if c.Action != "limit" && (c.CooldownSeconds < 30 || c.MaxCooldownSeconds < c.CooldownSeconds || c.MaxCooldownSeconds > 86400 || c.TrialSeconds < 60 || c.TrialSeconds > 3600 || c.TrialRequests < 5 || c.TrialRequests > 2000 || c.TrialConcurrency < 1 || c.TrialConcurrency > 20 || c.TrialConcurrency > c.TrialRequests || c.RecoverySamples < 5 || c.RecoverySamples > c.TrialRequests || c.RecoverySamples > sampleLimit) {
+	if c.Action != "limit" && (c.CooldownSeconds < 30 || c.MaxCooldownSeconds < c.CooldownSeconds || c.MaxCooldownSeconds > 86400) {
+		return fmt.Errorf("invalid recovery cooldown: require 30..86400 seconds and maximum at least initial cooldown")
+	}
+	if !c.IsActiveRecovery() && c.Action != "limit" && (c.TrialSeconds < 60 || c.TrialSeconds > 3600 || c.TrialRequests < 5 || c.TrialRequests > 2000 || c.TrialConcurrency < 1 || c.TrialConcurrency > 20 || c.TrialConcurrency > c.TrialRequests || c.RecoverySamples < 5 || c.RecoverySamples > c.TrialRequests || c.RecoverySamples > sampleLimit) {
 		return fmt.Errorf("invalid recovery limits: cooldown 30..86400s, trial 60..3600s, requests 5..2000, concurrency 1..20, minimum 5..min(requests,max_samples)")
 	}
 	return nil
@@ -528,6 +521,9 @@ func (a *Account) PassiveQualityBlocked(model string) bool {
 			continue
 		}
 		phase, _ := v["phase"].(string)
+		if v["purpose"] == "group_quality_target" || v["purpose"] == "cache_target" || v["recovery_mode"] == "active" {
+			return true
+		}
 		if phase == "limited" || phase == "cache_limited" {
 			continue
 		}

@@ -1577,7 +1577,7 @@ func TestOpenAIResponsesWebSocket_TurnAdmissionUsesFrozenMappedModel(t *testing.
 	for _, ingress := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
 		for _, nextPublic := range []string{"sol", "terra"} {
 			t.Run(ingress+"/"+nextPublic, func(t *testing.T) {
-				type admission struct{ public, forwarded string }
+				type admission struct{ public string }
 				admissions := make(chan admission, 4)
 				var calls atomic.Int64
 				updateMapping := func(channelSvc *service.ChannelService, target string) error {
@@ -1601,7 +1601,7 @@ func TestOpenAIResponsesWebSocket_TurnAdmissionUsesFrozenMappedModel(t *testing.
 					},
 					beforeAccountSlot: func(ctx context.Context, channelSvc *service.ChannelService) error {
 						public, _ := ctx.Value(ctxkey.Model).(string)
-						admissions <- admission{public: public, forwarded: service.GroupQualityFallbackAdmissionModel(ctx, public)}
+						admissions <- admission{public: public}
 						if calls.Add(1) == 1 {
 							// A channel refresh after admission must not change this turn's
 							// forwarded model, regardless of ingress callback ordering.
@@ -1613,9 +1613,8 @@ func TestOpenAIResponsesWebSocket_TurnAdmissionUsesFrozenMappedModel(t *testing.
 				require.Len(t, admissions, 1, "this fixture acquires its first turn during selection")
 				second := <-admissions
 				require.Equal(t, nextPublic, second.public, "quality holds keep the public model")
-				require.Equal(t, "gpt-5.6-terra", second.forwarded, "admission uses this turn's forwarded model")
 				require.Len(t, got.upstreamPayloads, 2)
-				require.Equal(t, second.forwarded, gjson.GetBytes(got.upstreamPayloads[1], "model").String())
+				require.Equal(t, "gpt-5.6-terra", gjson.GetBytes(got.upstreamPayloads[1], "model").String(), "forwarding uses this turn's mapping snapshot")
 				require.Equal(t, nextPublic, got.logs[1].RequestedModel)
 			})
 		}

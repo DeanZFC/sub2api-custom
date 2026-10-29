@@ -13,6 +13,17 @@ import (
 // other. The displayed hour remains intact after recovery, while fresh traffic
 // must establish a new failure episode.
 func advanceActiveGroupTarget(p service.PassiveQualityPolicy, s *service.PassiveQualityState, e service.PassiveQualityEvidence, now time.Time) {
+	// Recorded customer completions never authorize recovery, including a state
+	// written by a retired instance before the migration fenced its leases.
+	switch s.Phase {
+	case "paused", "probing":
+		return
+	case "trial", "limited":
+		s.Phase, s.Reason, s.NextAt = "paused", "active_recovery_pending: customer_recovery_retired", now
+		s.Generation++
+		return
+	}
+
 	s.CacheAllocationReduced = false
 	if s.ActiveConfirmations == nil {
 		s.ActiveConfirmations = map[string]service.PassiveQualityConfirmation{}

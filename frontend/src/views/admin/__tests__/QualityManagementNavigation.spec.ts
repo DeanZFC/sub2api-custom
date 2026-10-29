@@ -10,7 +10,7 @@ const mountView = () => mount(TestManagementView, { global: {
   plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en: { admin: resources } } })],
   stubs: {
     AppLayout: { template: '<div><slot /></div>' }, Icon: true,
-    ActiveQualityPanel: true, PassiveQualityPanel: true, ChannelQualityScoreSettings: true, ChannelQualityOverview: true, QualityOperationsPanel: true,
+    ActiveQualityPanel: true, PassiveQualityPanel: true, ChannelQualityOverview: true, QualityOperationsPanel: true,
     PassiveQualityManagementPanel: { props: ['targetPolicyId'], template: '<div data-management :data-policy="targetPolicyId" />' },
   },
 } })

@@ -202,7 +202,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				reqLog.Info("openai_chat_completions.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
-			if h.handleGroupQualityBudgetError(c, err, streamStarted) {
+			if h.handleAccountQualityHeldError(c, err, streamStarted) {
 				return
 			}
 			reqLog.Warn("openai_chat_completions.account_select_failed",

@@ -30,8 +30,8 @@ func activePassRateRoutingModel(ctx context.Context, requestedModel string) stri
 	return strings.TrimSpace(requestedModel)
 }
 
-// ActivePassRateBlocked is independent of legacy active protection and passive
-// quality. Emergency fallback uses a request-local copy after durable admission.
+// ActivePassRateBlocked is independent of account-wide and passive quality
+// protection. Customer requests cannot relax a capability hold.
 // The projection contains only blocked entries; live database admission is the
 // final authority if this scheduler snapshot is stale.
 func (a *Account) ActivePassRateBlocked(model string) bool {

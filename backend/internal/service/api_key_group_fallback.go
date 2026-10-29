@@ -122,13 +122,12 @@ func apiKeyFallbackGroupForSelection(ctx context.Context, groupID *int64, select
 	if ctx == nil || ctx.Err() != nil || groupID == nil || *groupID <= 0 {
 		return nil, ctx, false
 	}
-	// Quality validation capacity is group-scoped. Once the primary group's
-	// normal and recovery admission are exhausted, the configured fallback can
-	// still admit this request under its own budget and scheduling restrictions.
-	// Do not treat arbitrary admission or infrastructure failures as exhaustion.
+	// A protected primary group may use a configured healthy fallback group.
+	// Every fallback candidate still passes normal hard admission. Arbitrary
+	// account admission and infrastructure failures do not authorize fallback.
 	if !errors.Is(selectionErr, ErrNoAvailableAccounts) &&
 		!errors.Is(selectionErr, ErrNoAvailableCompactAccounts) &&
-		!errors.Is(selectionErr, ErrGroupQualityTrafficBudget) {
+		!errors.Is(selectionErr, ErrAccountQualityHeld) {
 		return nil, ctx, false
 	}
 	if attempted, _ := ctx.Value(apiKeyGroupFallbackAttemptContextKey{}).(bool); attempted {

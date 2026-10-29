@@ -62,20 +62,3 @@ func TestPassiveQualityTPSIndependentProtectionAndRecovery(t *testing.T) {
 	c.TPS.Recover = 5
 	require.Error(t, c.Validate())
 }
-
-func TestChannelQualityScoreTPSOptionalIndependentScale(t *testing.T) {
-	c := DefaultChannelQualityScoreConfig()
-	c.TPS.Weight = 100
-	c.ErrorRate.Weight, c.CacheRate.Weight, c.TTFT.Weight, c.Duration.Weight = 0, 0, 0, 0
-	now := time.Now()
-	var rows []ChannelQualityScoreObservation
-	for i := 0; i < c.MinSamples; i++ {
-		rows = append(rows, ChannelQualityScoreObservation{Key: string(rune('a' + i)), At: now, OutputTokens: 50, GenerationMS: 1000})
-	}
-	s := SummarizeChannelQualityScore(c, rows, "", true, now)
-	require.Equal(t, "ready", s.Status)
-	require.Equal(t, 100.0, *s.Value)
-	rows[0].GenerationMS = 0
-	s = SummarizeChannelQualityScore(c, rows, "", true, now)
-	require.Nil(t, s.Value, "TPS needs its own minimum sample floor")
-}

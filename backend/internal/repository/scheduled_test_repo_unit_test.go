@@ -63,7 +63,6 @@ func TestScheduledTestResultRepositoryListIncludesDisplayNames(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT r.id,s.plan_id.*JOIN scheduled_test_pass_rate_states.*WHERE r.id=ANY`).
 		WithArgs("{1}").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "plan_id", "account_id", "test_definition_id", "model_key", "summary", "blocked"}))
-	mock.ExpectQuery(`SELECT config,version,updated_at,collect_since FROM channel_quality_score_config`).WillReturnError(errors.New("optional quality score unavailable"))
 
 	results, err := repo.ListByPlanID(context.Background(), 10, 20)
 	require.NoError(t, err)
@@ -120,7 +119,6 @@ func TestScheduledTestResultRepositoryVisibleUsesResultReasoningEffort(t *testin
 			"id", "plan_id", "plan_name", "test_name", "test_order", "group_name", "plan_order", "target_mode", "status", "response_text", "output_kind", "output_html", "output_numeric", "account_id", "model_id", "reasoning_effort", "group_id", "error_message", "latency_ms", "started_at", "finished_at", "created_at", "test_definition_id", "group_order", "account_schedulable", "test_key", "quality_verdict", "model_schedulable", "model_order", "execution_skipped",
 		}).AddRow(1, 10, "nightly candy", "糖果数字测试", 0, "公开组", 12, "all_accounts", "success", "29", "number", "", 29.0, 7, "model", "medium", 3, "", 42, now, now, now, 2, 0, true, "candy", "fail", false, 1, false))
 	mock.ExpectQuery(`SELECT r.id,s.plan_id.*scheduled_test_pass_rate_states`).WithArgs("{1}").WillReturnError(errors.New("optional pass-rate unavailable"))
-	mock.ExpectQuery(`SELECT config,version,updated_at,collect_since FROM channel_quality_score_config`).WillReturnError(errors.New("optional quality score unavailable"))
 	results, err := repo.ListVisible(context.Background(), 5, 20)
 	require.NoError(t, err)
 	require.Len(t, results, 1)

@@ -75,20 +75,4 @@ describe('quality overview', () => {
     w.unmount()
   })
 
-  it('shows a recent account quality score and sample confidence', async () => {
-    api.overview.mockResolvedValue({ ...page([]), items: [{ ...account(1), quality_score: { value: 82.4, samples: 16, models: 2, latest_at: '2026-10-22T12:00:00Z' } }] })
-    const w = mountView(); await flushPromises()
-    expect(w.get('[data-quality-score]').text()).toContain('Quality score')
-    expect(w.get('[data-quality-score]').text()).toContain('82')
-    expect(w.get('[data-quality-score]').text()).toContain('2 models · 16 samples')
-    w.unmount()
-  })
-
-  it('labels missing account scores as unavailable instead of zero', async () => {
-    const w = mountView(); await flushPromises()
-    expect(w.get('[data-quality-score]').text()).toContain('—')
-    expect(w.get('[data-quality-score]').text()).toContain('No valid samples')
-    w.unmount()
-  })
-
 })

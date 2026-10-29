@@ -1,5 +1,4 @@
 import qualityExperience from './qualityExperience'
-import qualityScoring from './qualityScoring'
 import passiveQualityV2 from './passiveQualityV2'
 import groupQualityTargets from './groupQualityTargets'
 
@@ -7,7 +6,6 @@ export default {
     tests: {
       groupTargets: groupQualityTargets,
       experience: qualityExperience,
-      scoring: qualityScoring,
       multiModelHint: '最多选择 16 个模型。每轮会分别执行所选模型的检测，结果与通过率按模型独立记录。模型必须由所有策略分组共同支持。',
       multiModelRunHint: '已选择 {count} 个模型，每轮检测调用量会相应增加。',
       multiModelProtectionHint: '启用质量保护后，某个模型不达标只暂停该账号的该模型；所有受监测模型都被暂停时，才暂停整个账号。各模型达标后独立恢复。',
@@ -170,11 +168,6 @@ export default {
         "search": "账号名称或 ID",
         "problemsOnly": "只看异常与受限账号",
         "coverageHint": "以下为当前账号状态与已采集证据。无保护限制不代表能力已验证；指标缺失显示为 —。",
-        "qualityScore": "质量分",
-        "qualityScoreHint": "使用独立标准，对真实请求的错误率、缓存率、首字和总耗时评分；缺失指标单独标记。",
-        "qualityScoreSamples": "{models} 个模型 · {samples} 个样本",
-        "qualityScoreAccountSamples": "账号范围 · {samples} 个样本",
-        "qualityScoreUnavailable": "暂无有效样本",
         "coverage": "主动策略 {active} 个 · 被动策略 {passive} 个",
         "restricted": "存在调度限制",
         "limited": "限流降权中",

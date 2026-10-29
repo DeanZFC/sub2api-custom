@@ -223,17 +223,17 @@ func TestOpenAIUserAffinitySeedsAllSchedulersAndMigratesConfirmedHold(t *testing
 	}
 }
 
-func TestOpenAIUserAffinityCapacityAndBudgetSpilloverPreserveOwner(t *testing.T) {
+func TestOpenAIUserAffinityCapacityAndQualitySpilloverPreserveOwner(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
-		for _, budgetDenied := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/budget=%v", mode, budgetDenied), func(t *testing.T) {
+		for _, qualityHeld := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/quality_held=%v", mode, qualityHeld), func(t *testing.T) {
 				resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				group := int64(43)
 				cache := &userAffinityTestCache{}
 				accounts := []Account{groupQualityRoutingTestAccount(1, group, 100, "healthy"), groupQualityRoutingTestAccount(2, group, 0, "healthy")}
 				concurrency := schedulerTestConcurrencyCache{acquireResults: map[int64]bool{1: false, 2: true}, waitCounts: map[int64]int{1: 999}, loadMap: map[int64]*AccountLoadInfo{1: {AccountID: 1, LoadRate: 100}, 2: {AccountID: 2}}}
-				if budgetDenied {
+				if qualityHeld {
 					concurrency.acquireResults[1] = true
 				}
 				svc := groupQualityRoutingTestService(mode, accounts, &schedulerTestGatewayCache{}, concurrency)
@@ -243,8 +243,8 @@ func TestOpenAIUserAffinityCapacityAndBudgetSpilloverPreserveOwner(t *testing.T)
 				svc.cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
 				svc.cfg.Gateway.Scheduling.StickySessionMaxWaiting = 1
 				auth := WithAPIKeyForUsageContext(context.Background(), &APIKey{ID: 101, UserID: 7})
-				if budgetDenied {
-					svc.concurrencyService.passiveQualityGate = &groupQualityFallbackTestGate{normal: map[int64]bool{2: true}}
+				if qualityHeld {
+					svc.concurrencyService.passiveQualityGate = &qualityHoldTestGate{normal: map[int64]bool{2: true}}
 					auth = GroupQualityTrafficContext(auth, GroupQualityTrafficRequest{Key: "user-spillover", GroupID: group, Model: "public-model"})
 				}
 				key := openAIUserAffinityKey(7, group, "public-model")
@@ -255,7 +255,7 @@ func TestOpenAIUserAffinityCapacityAndBudgetSpilloverPreserveOwner(t *testing.T)
 				require.NoError(t, err)
 				require.NotNil(t, sel)
 				want := int64(2)
-				if mode == "legacy_nonbatch" && !budgetDenied {
+				if mode == "legacy_nonbatch" && !qualityHeld {
 					// The bounded non-batch sticky wait remains the owner.
 					want = 1
 					require.False(t, sel.Acquired)
@@ -307,50 +307,6 @@ func TestOpenAIUserAffinityManagedTTFTIsSoftButErrorsStillMigrate(t *testing.T) 
 			require.Equal(t, want, sel.Account.ID)
 			require.False(t, sel.PreserveStickyBinding)
 			require.NoError(t, svc.BindStickySessionAfterProfitAdmission(ContextWithSelectionProfitGate(auth, sel), &group, "conversation", sel.Account.ID))
-			id, err := cache.GetSessionAccountID(auth, group, key)
-			require.NoError(t, err)
-			require.Equal(t, want, id)
-			if sel.ReleaseFunc != nil {
-				sel.ReleaseFunc()
-			}
-		})
-	}
-}
-
-func TestOpenAIUserAffinityFallbackKeepsTTFTSoftButMigratesRealErrors(t *testing.T) {
-	for _, failed := range []bool{false, true} {
-		t.Run(fmt.Sprint(failed), func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			group := int64(43)
-			cache := &userAffinityTestCache{}
-			accounts := []Account{groupQualityFallbackTestAccount(1, group, 100, true), groupQualityFallbackTestAccount(2, group, 0, true)}
-			svc := groupQualityFallbackService("advanced", accounts, &groupQualityFallbackTestGate{recovery: true})
-			svc.cache = cache
-			svc.openaiAccountStats = newOpenAIAccountRuntimeStats()
-			slow := 60000
-			for range 6 {
-				svc.openaiAccountStats.report(1, !failed, &slow)
-			}
-			auth, req := groupQualityAffinityRequest(&group, "public-model", "conversation")
-			auth = WithAPIKeyForUsageContext(auth, &APIKey{ID: 101, UserID: 7})
-			key := openAIUserAffinityKey(7, group, "public-model")
-			for _, k := range []string{key, "openai:conversation"} {
-				require.NoError(t, cache.SetSessionAccountID(auth, group, k, 1, time.Hour))
-			}
-			auth, _ = svc.withOpenAIUserAffinity(auth, &group, "conversation", "public-model")
-			sel, err := svc.selectGroupQualityFallback(auth, req, ErrNoAvailableAccounts)
-			require.NoError(t, err)
-			require.NotNil(t, sel)
-			want := int64(1)
-			if failed {
-				want = 2
-			}
-			require.Equal(t, want, sel.Account.ID)
-			if failed {
-				require.False(t, sel.PreserveStickyBinding)
-				require.NoError(t, svc.BindStickySessionAfterProfitAdmission(ContextWithSelectionProfitGate(auth, sel), &group, "conversation", sel.Account.ID))
-			}
 			id, err := cache.GetSessionAccountID(auth, group, key)
 			require.NoError(t, err)
 			require.Equal(t, want, id)

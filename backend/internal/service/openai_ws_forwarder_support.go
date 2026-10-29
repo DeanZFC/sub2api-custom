@@ -523,16 +523,16 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	if accountID <= 0 || account == nil || store == nil {
 		return nil, nil
 	}
-	// Automatic protection is temporary. Preserve response ownership and let the
-	// bounded recovery pass try this exact credential; never replay elsewhere.
+	// Automatic protection is temporary. Preserve response ownership while active
+	// checks recover this credential; never send customer traffic to a held owner.
 	if groupQualityAutomaticHold(ctx, account, groupID, requestedModel) {
-		return nil, ErrGroupQualityTrafficBudget
+		return nil, ErrAccountQualityHeld
 	}
 
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, &account)
-	if errors.Is(acquireErr, ErrGroupQualityTrafficBudget) {
+	if acquireErr != nil {
 		// Incremental previous_response requests cannot be replayed on another
-		// account. Keep response ownership and propagate the temporary denial.
+		// account. A final admission rejection is not concurrency to wait for.
 		return nil, acquireErr
 	}
 	if acquireErr == nil && result.Acquired {

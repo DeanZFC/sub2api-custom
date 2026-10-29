@@ -14,7 +14,7 @@ func (c PassiveQualityConfig) IsGroupQualityTarget() bool {
 func (c PassiveQualityConfig) IsCacheTarget() bool { return c.Purpose == "cache_target" }
 
 func (c PassiveQualityConfig) IsActiveRecovery() bool {
-	return c.IsGroupQualityTarget() && c.RecoveryMode == "active"
+	return c.IsGroupQualityTarget()
 }
 
 func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
@@ -51,8 +51,8 @@ func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	if c.RecoveryMode == "" {
 		c.RecoveryMode = "active"
 	}
-	if c.RecoveryMode != "active" && c.RecoveryMode != "traffic" {
-		return fmt.Errorf("unsupported recovery mode")
+	if c.RecoveryMode != "active" {
+		return fmt.Errorf("unsupported recovery mode: group quality targets require active recovery")
 	}
 	c.SchemaVersion, c.Scope, c.Action = 2, "model", "pause"
 	if c.Mode == "" {
@@ -61,33 +61,25 @@ func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	if c.TrafficMode == "" {
 		c.TrafficMode = "strict"
 	}
-	if c.TrafficMode != "strict" && c.TrafficMode != "availability" {
-		return fmt.Errorf("traffic mode must be strict or availability")
+	if c.TrafficMode != "strict" {
+		return fmt.Errorf("group quality targets do not support customer recovery traffic")
 	}
 	if c.Name == "" {
 		c.Name = "Group quality target"
-	}
-	minimum, fresh, maxCooldown := 5, 2, 1800
-	if c.IsActiveRecovery() {
-		minimum, fresh, maxCooldown = 20, 5, 3600
 	}
 	for _, field := range []struct {
 		value    *int
 		fallback int
 	}{
-		{&c.WindowSeconds, 3600}, {&c.MaxSamples, 100}, {&c.MinSamples, minimum},
-		{&c.Confirmations, 2}, {&c.NewSamples, fresh}, {&c.CooldownSeconds, 300},
-		{&c.MaxCooldownSeconds, maxCooldown}, {&c.TrialSeconds, 900}, {&c.TrialRequests, 20},
-		{&c.TrialConcurrency, 1}, {&c.RecoverySamples, 5},
+		{&c.MinSamples, 20}, {&c.Confirmations, 2}, {&c.NewSamples, 5},
+		{&c.CooldownSeconds, 300}, {&c.MaxCooldownSeconds, 3600}, {&c.RecoverySamples, 5},
 	} {
 		if *field.value == 0 {
 			*field.value = field.fallback
 		}
 	}
-	if c.IsActiveRecovery() {
-		c.WindowSeconds, c.MaxSamples = 3600, 0
-		c.TrafficMode = "strict"
-	}
+	c.WindowSeconds, c.MaxSamples = 3600, 0
+	c.TrialSeconds, c.TrialRequests, c.TrialConcurrency = 0, 0, 0
 	if c.CacheRate.Enabled && c.CacheRate.Recover == 0 {
 		c.CacheRate.Recover = math.Min(100, c.CacheRate.Pause+5)
 	}

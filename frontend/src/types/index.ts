@@ -2,7 +2,6 @@
  * Core Type Definitions for Sub2API Frontend
  */
 
-import type { ChannelQualityScore } from '@/api/admin/channelQuality'
 
 // ==================== Common Types ====================
 
@@ -2784,8 +2783,6 @@ export interface TestProtectionDecision {
 }
 
 export interface TestResult {
-  /** Current quality score for the authorized account and this result's requested model. */
-  quality_score?: ChannelQualityScore | null
   /** Current rolling evidence, not a historical snapshot at this result's time. */
   pass_rate?: TestPassRateSummary | null
   test_key?: string

@@ -55,9 +55,9 @@ func TestGroupQualityRoutingProjectionIsExactAndConservative(t *testing.T) {
 	verified, managed = groupQualityRoutingState(&account, &otherGroup, "public-model")
 	require.False(t, verified)
 	require.False(t, managed)
-	account.Extra["group_quality_targets"] = append(entries, map[string]any{"group_id": groupID, "model": "public-model", "phase": "trial", "verified": false})
+	account.Extra["group_quality_targets"] = append(entries, map[string]any{"group_id": groupID, "model": "public-model", "phase": "probing", "verified": false})
 	verified, managed = groupQualityRoutingState(&account, &groupID, "public-model")
-	require.False(t, verified, "overlapping unverified policy must remain in validation")
+	require.False(t, verified, "overlapping unverified policy must not claim healthy")
 	require.True(t, managed)
 }
 
@@ -107,7 +107,7 @@ func TestGroupQualityRoutingVerifiedStatusDoesNotOverrideCacheAllocation(t *test
 	}
 }
 
-func TestGroupQualityBudgetDeniedOwnerSpillsToWaitWithoutRebinding(t *testing.T) {
+func TestGroupQualityHeldOwnerSpillsToWaitWithoutRebinding(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		t.Run(mode, func(t *testing.T) {
 			resetOpenAIAdvancedSchedulerSettingCacheForTest()
@@ -130,7 +130,7 @@ func TestGroupQualityBudgetDeniedOwnerSpillsToWaitWithoutRebinding(t *testing.T)
 	}
 }
 
-func TestGroupQualityBudgetDenialPreviousResponseNeverMigrates(t *testing.T) {
+func TestGroupQualityHoldPreviousResponseNeverMigrates(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		t.Run(mode, func(t *testing.T) {
 			resetOpenAIAdvancedSchedulerSettingCacheForTest()
@@ -143,14 +143,14 @@ func TestGroupQualityBudgetDenialPreviousResponseNeverMigrates(t *testing.T) {
 			cc := groupQualityRoutingDeniedCache{denied: map[int64]bool{1: true}, schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{acquiredIDs: &acquired}}
 			svc := groupQualityRoutingTestService(mode, accounts, cache, cc)
 			store := svc.getOpenAIWSStateStore()
-			require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_budget_owner", 1, time.Hour))
-			selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_budget_owner", "public-model", nil, false)
-			require.ErrorIs(t, err, ErrGroupQualityTrafficBudget)
+			require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_held_owner", 1, time.Hour))
+			selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_held_owner", "public-model", nil, false)
+			require.ErrorIs(t, err, ErrAccountQualityHeld)
 			require.Nil(t, selection)
-			selection, _, err = svc.SelectAccountWithScheduler(ctx, &groupID, "resp_budget_owner", "existing", "public-model", nil, OpenAIUpstreamTransportAny, false)
-			require.ErrorIs(t, err, ErrGroupQualityTrafficBudget)
+			selection, _, err = svc.SelectAccountWithScheduler(ctx, &groupID, "resp_held_owner", "existing", "public-model", nil, OpenAIUpstreamTransportAny, false)
+			require.ErrorIs(t, err, ErrAccountQualityHeld)
 			require.Nil(t, selection)
-			owner, err := store.GetResponseAccount(ctx, groupID, "resp_budget_owner")
+			owner, err := store.GetResponseAccount(ctx, groupID, "resp_held_owner")
 			require.NoError(t, err)
 			require.Equal(t, int64(1), owner)
 			require.NotContains(t, acquired, int64(2), "non-replayable incremental input must not reach a fallback")
@@ -266,8 +266,8 @@ func TestGroupQualityRoutingPreservesSessionOwnerIncludingWeightedMode(t *testin
 func TestGroupQualityRoutingRetainsCapacityBeyondTopKAfterLiveDenial(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		for _, verifiedPeer := range []bool{true, false} {
-			for _, budgetDenied := range []bool{true, false} {
-				t.Run(fmt.Sprintf("%s/verified_peer_%t/budget_denied_%t", mode, verifiedPeer, budgetDenied), func(t *testing.T) {
+			for _, qualityHeld := range []bool{true, false} {
+				t.Run(fmt.Sprintf("%s/verified_peer_%t/quality_held_%t", mode, verifiedPeer, qualityHeld), func(t *testing.T) {
 					resetOpenAIAdvancedSchedulerSettingCacheForTest()
 					defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 					groupID := int64(47057)
@@ -281,7 +281,7 @@ func TestGroupQualityRoutingRetainsCapacityBeyondTopKAfterLiveDenial(t *testing.
 					}
 					cc := groupQualityRoutingDeniedCache{denied: map[int64]bool{}, schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{acquireResults: map[int64]bool{}}}
 					for _, id := range blocked {
-						if budgetDenied {
+						if qualityHeld {
 							cc.denied[id] = true
 						} else {
 							cc.acquireResults[id] = false
@@ -307,12 +307,12 @@ type groupQualityRoutingDeniedCache struct {
 
 func (c groupQualityRoutingDeniedCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
 	if c.denied[accountID] {
-		return false, ErrGroupQualityTrafficBudget
+		return false, ErrAccountQualityHeld
 	}
 	return c.schedulerTestConcurrencyCache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
 }
 
-func TestGroupQualityBudgetDenialPreservesOwnerAndTriesOtherAccounts(t *testing.T) {
+func TestGroupQualityQualityHoldPreservesOwnerAndTriesOtherAccounts(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		for _, allDenied := range []bool{false, true} {
 			t.Run(mode+map[bool]string{false: "/fallback", true: "/all_denied"}[allDenied], func(t *testing.T) {
@@ -328,7 +328,7 @@ func TestGroupQualityBudgetDenialPreservesOwnerAndTriesOtherAccounts(t *testing.
 				svc := groupQualityRoutingTestService(mode, accounts, cache, groupQualityRoutingDeniedCache{denied: denied})
 				selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "existing", "public-model", nil, OpenAIUpstreamTransportAny, false)
 				if allDenied {
-					require.ErrorIs(t, err, ErrGroupQualityTrafficBudget)
+					require.ErrorIs(t, err, ErrAccountQualityHeld)
 					require.Nil(t, selection)
 				} else {
 					require.NoError(t, err)
@@ -346,15 +346,12 @@ func TestGroupQualityBudgetDenialPreservesOwnerAndTriesOtherAccounts(t *testing.
 	}
 }
 
-func TestGroupQualityRoutingHydrationFailureRefundsBeforeSlotRelease(t *testing.T) {
-	gate := &groupTrafficTestGate{allow: true}
+func TestGroupQualityRoutingHydrationFailureReleasesSlot(t *testing.T) {
 	ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "turn", GroupID: 43})
-	bindGroupQualityTrafficLease(ctx, gate, 1001, "public-model", "lease-hydration")
 	cache := &openAISnapshotCacheStub{accountsByID: map[int64]*Account{}}
 	svc := &OpenAIGatewayService{schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, stubOpenAIAccountRepo{}, nil, nil)}
 	released := false
 	selection, err := svc.newAcquiredSelectionResult(ctx, &Account{ID: 1001}, func() {
-		require.Equal(t, []bool{true}, gate.trafficReleases, "refund must precede generic release")
 		released = true
 	})
 	require.Error(t, err)
@@ -362,12 +359,13 @@ func TestGroupQualityRoutingHydrationFailureRefundsBeforeSlotRelease(t *testing.
 	require.True(t, released)
 }
 
-func TestGroupQualityRoutingPostAcquireMismatchRefundsBeforeSlotRelease(t *testing.T) {
+func TestGroupQualityRoutingPostAcquireMismatchReleasesSlot(t *testing.T) {
 	groupID := int64(43)
 	account := groupQualityRoutingTestAccount(1001, groupID, 0, "healthy")
-	gate := &groupTrafficTestGate{allow: true}
+	gate := &qualityAdmissionTestGate{allow: true, reserved: true}
 	ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "turn", GroupID: groupID, Model: "public-model"})
-	svc := groupQualityRoutingTestService("advanced", []Account{account}, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{})
+	var released []int64
+	svc := groupQualityRoutingTestService("advanced", []Account{account}, &schedulerTestGatewayCache{}, schedulerTestConcurrencyCache{releasedIDs: &released})
 	svc.concurrencyService.passiveQualityGate = gate
 	scheduler := &defaultOpenAIAccountScheduler{service: svc, stats: newOpenAIAccountRuntimeStats()}
 	selection, _, err := scheduler.tryAcquireOpenAISelectionOrder(ctx, OpenAIAccountScheduleRequest{
@@ -375,5 +373,6 @@ func TestGroupQualityRoutingPostAcquireMismatchRefundsBeforeSlotRelease(t *testi
 	}, []openAIAccountCandidateScore{{account: &account}})
 	require.NoError(t, err)
 	require.Nil(t, selection, "account does not support required WS transport")
-	require.Equal(t, []bool{true, false}, gate.trafficReleases, "unused refund must happen before release freezes debit")
+	require.Equal(t, []int64{1001}, released)
+	require.Equal(t, []bool{false}, gate.releases)
 }

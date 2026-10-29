@@ -115,11 +115,6 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
-	if GroupQualityFallbackActive(ctx) && errors.Is(context.Cause(ctx), ErrGroupQualityFallbackLeaseLost) && (errors.Is(err, ErrGroupQualityFallbackLeaseLost) || errors.Is(err, context.Canceled)) {
-		// net/http may return the cancellation cause rather than ctx.Err(). The
-		// lost local lease must remain cancellation, never an upstream failure.
-		return errors.Join(ctx.Err(), context.Cause(ctx))
-	}
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}

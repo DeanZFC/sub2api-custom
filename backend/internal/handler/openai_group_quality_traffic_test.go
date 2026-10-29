@@ -28,34 +28,21 @@ type handlerGroupTrafficGate struct {
 	mu       sync.Mutex
 	allow    bool
 	acquired []service.GroupQualityTrafficRequest
-	settled  chan service.GroupQualityTrafficRequest
 }
 
-func (g *handlerGroupTrafficGate) AcquirePassiveQuality(context.Context, int64, string, string) (bool, bool, error) {
-	return true, false, nil
-}
-func (g *handlerGroupTrafficGate) ReleasePassiveQuality(context.Context, string, bool) error {
-	return nil
-}
-func (g *handlerGroupTrafficGate) AcquireGroupQualityTraffic(ctx context.Context, aid int64, model, lease string) (bool, bool, error) {
+func (g *handlerGroupTrafficGate) AcquirePassiveQuality(ctx context.Context, _ int64, model, _ string) (bool, bool, error) {
 	r, ok := service.GroupQualityTrafficRequestFromContext(ctx)
 	if !ok {
-		return false, false, fmt.Errorf("missing group traffic request")
+		return false, false, fmt.Errorf("missing quality evidence identity")
 	}
-	r.AccountID, r.LeaseID, r.Model = aid, lease, model
+	r.Model = model
 	g.mu.Lock()
 	g.acquired = append(g.acquired, r)
 	allow := g.allow
 	g.mu.Unlock()
-	return allow, allow, nil
+	return allow, false, nil
 }
-func (g *handlerGroupTrafficGate) ReleaseGroupQualityTraffic(context.Context, string, bool) error {
-	return nil
-}
-func (g *handlerGroupTrafficGate) SettleGroupQualityTraffic(_ context.Context, r service.GroupQualityTrafficRequest, _ int64, _ int64, _ int64, _ bool) error {
-	if g.settled != nil {
-		g.settled <- r
-	}
+func (*handlerGroupTrafficGate) ReleasePassiveQuality(context.Context, string, bool) error {
 	return nil
 }
 func (g *handlerGroupTrafficGate) requests() []service.GroupQualityTrafficRequest {
@@ -98,7 +85,7 @@ func (r groupTrafficAccountRepo) ListByGroup(ctx context.Context, groupID int64)
 	return r.ListSchedulableByGroupIDAndPlatform(ctx, groupID, service.PlatformOpenAI)
 }
 
-func TestOpenAIGroupTrafficHTTPBudgetDenialDoesNotForward(t *testing.T) {
+func TestOpenAIGroupTrafficHTTPQualityDenialDoesNotForward(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, path := range []string{"/v1/responses", "/v1/messages", "/v1/chat/completions"} {
 		t.Run(path, func(t *testing.T) {
@@ -119,15 +106,14 @@ func TestOpenAIGroupTrafficHTTPBudgetDenialDoesNotForward(t *testing.T) {
 				h.ChatCompletions(c)
 			}
 			require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
-			require.Equal(t, "5", w.Header().Get("Retry-After"))
-			require.Equal(t, groupQualityBudgetErrorCode, gjson.Get(w.Body.String(), "error.code").String())
+			require.Empty(t, w.Header().Get("Retry-After"))
+			require.Equal(t, accountQualityHeldErrorCode, gjson.Get(w.Body.String(), "error.code").String())
 			require.Empty(t, upstream.calls())
 			requests := gate.requests()
 			require.NotEmpty(t, requests)
 			for _, r := range requests {
 				require.EqualValues(t, 3131, r.GroupID)
 				require.Equal(t, "gpt-5.1", r.Model)
-				require.GreaterOrEqual(t, r.EstimatedInput, int64(4096))
 			}
 			require.Empty(t, c.GetString(service.OpsUpstreamErrorMessageKey))
 		})
@@ -185,7 +171,7 @@ func startGroupTrafficWS(t *testing.T, h *OpenAIGatewayHandler, groupChanges ...
 	return conn, done
 }
 
-func TestOpenAIGroupTrafficWSBudgetDenialDoesNotForward(t *testing.T) {
+func TestOpenAIGroupTrafficWSQualityDenialDoesNotForward(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	reached := make(chan struct{}, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,8 +187,8 @@ func TestOpenAIGroupTrafficWSBudgetDenialDoesNotForward(t *testing.T) {
 	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte("{\"type\":\"response.create\",\"model\":\"gpt-5.1\",\"input\":\"hello\"}")))
 	_, payload, err := conn.Read(ctx)
 	require.NoError(t, err)
-	require.Equal(t, groupQualityBudgetErrorCode, gjson.GetBytes(payload, "error.code").String())
-	require.Equal(t, int64(5), gjson.GetBytes(payload, "error.retry_after").Int())
+	require.Equal(t, accountQualityHeldErrorCode, gjson.GetBytes(payload, "error.code").String())
+	require.False(t, gjson.GetBytes(payload, "error.retry_after").Exists())
 	_, _, err = conn.Read(ctx)
 	require.Equal(t, coderws.StatusTryAgainLater, coderws.CloseStatus(err))
 	select {
@@ -214,7 +200,7 @@ func TestOpenAIGroupTrafficWSBudgetDenialDoesNotForward(t *testing.T) {
 	require.NotEmpty(t, gate.requests())
 }
 
-func TestOpenAIGroupTrafficWSTurnsFreezeAsyncUsage(t *testing.T) {
+func TestOpenAIGroupTrafficWSTurnsPreserveAdmissionIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
@@ -236,17 +222,8 @@ func TestOpenAIGroupTrafficWSTurnsFreezeAsyncUsage(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	pool := service.NewUsageRecordWorkerPoolWithOptions(service.UsageRecordWorkerPoolOptions{WorkerCount: 1, QueueSize: 4, TaskTimeout: 5 * time.Second})
-	t.Cleanup(pool.Stop)
-	blocked := make(chan struct{})
-	unblock := make(chan struct{})
-	var once sync.Once
-	releaseWorker := func() { once.Do(func() { close(unblock) }) }
-	t.Cleanup(releaseWorker)
-	pool.Submit(func(context.Context) { close(blocked); <-unblock })
-	<-blocked
-	gate := &handlerGroupTrafficGate{allow: true, settled: make(chan service.GroupQualityTrafficRequest, 4)}
-	h := newGroupTrafficHandler(t, gate, upstream.URL, nil, pool)
+	gate := &handlerGroupTrafficGate{allow: true}
+	h := newGroupTrafficHandler(t, gate, upstream.URL, nil, nil)
 	conn, _ := startGroupTrafficWS(t, h)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -257,21 +234,9 @@ func TestOpenAIGroupTrafficWSTurnsFreezeAsyncUsage(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "response.completed", gjson.GetBytes(response, "type").String())
 	}
-	require.Eventually(t, func() bool { return pool.Stats().SubmittedTasks >= 3 }, time.Second, 5*time.Millisecond)
 	admissions := gate.requests()
 	require.Len(t, admissions, 2)
 	require.NotEqual(t, admissions[0].Key, admissions[1].Key)
 	require.Equal(t, "gpt-5.1", admissions[0].Model)
 	require.Equal(t, "gpt-5.2", admissions[1].Model)
-	releaseWorker()
-	for turn := 0; turn < 2; turn++ {
-		select {
-		case settled := <-gate.settled:
-			require.Equal(t, admissions[turn].Key, settled.Key)
-			require.Equal(t, admissions[turn].LeaseID, settled.LeaseID)
-			require.Equal(t, admissions[turn].Model, settled.Model)
-		case <-ctx.Done():
-			t.Fatal("usage did not settle with frozen turn identity")
-		}
-	}
 }

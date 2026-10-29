@@ -80,7 +80,7 @@ func TestGroupQualityTargetLiveSummaryIntegration(t *testing.T) {
 	// A paused state's old evidence must not leak into the current window.
 	_, err = db.Exec(`INSERT INTO passive_quality_states(policy_id,account_id,model_key,data) VALUES($1,62,'model',$2::jsonb)`, p.ID, `{"phase":"paused","evidence":{"cache_rate":99,"ttft_p90":1,"samples":100}}`)
 	require.NoError(t, err)
-	require.NoError(t, r.refreshGroupQualityTrafficSnapshot(ctx, p, now.Add(2*time.Hour)))
+	require.NoError(t, r.refreshGroupQualityReportSnapshot(ctx, p, now.Add(2*time.Hour)))
 	newer, err := r.GroupQualityTargetSummaries(ctx, now.Add(2*time.Hour))
 	require.NoError(t, err)
 	require.Len(t, newer, 1)

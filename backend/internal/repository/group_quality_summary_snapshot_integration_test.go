@@ -42,11 +42,6 @@ func TestGroupQualitySummaryConsistentSnapshotIntegration(t *testing.T) {
 		// after its first query has established the database snapshot.
 		require.NoError(t, r.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: 62, GroupID: 8, Model: "A", RequestKey: "first", StartedAt: at, At: at}}, nil))
 		insertGroupTargetUsage(t, db, r, "late", "A", 8, at, 50, true)
-		_, err := db.ExecContext(ctx, `INSERT INTO group_quality_traffic_leases(lease_id,policy_id,policy_version,account_id,group_id,model,request_key,validation,fallback,reserved_input,created_at,fallback_expires_at)
- VALUES('late',$1,$2,62,8,'A','late',true,true,1000,$3,$4)`, p.ID, p.Version, at.Add(-time.Second), now.Add(time.Minute))
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `INSERT INTO group_quality_traffic_denials(policy_id,minute,requests) VALUES($1,$2,7)`, p.ID, at.Truncate(time.Minute))
-		require.NoError(t, err)
 		gap := at
 		require.NoError(t, r.RecordFailures(ctx, nil, &gap))
 	}}
@@ -63,10 +58,6 @@ func TestGroupQualitySummaryConsistentSnapshotIntegration(t *testing.T) {
 	require.Equal(t, snapshot.FailureSamples, snapshot.Contributors[0].FailureSamples)
 	require.Equal(t, snapshot.CacheInputTokens, snapshot.Contributors[0].CacheInputTokens)
 	require.Equal(t, snapshot.CacheReadTokens, snapshot.Contributors[0].CacheReadTokens)
-	require.Zero(t, snapshot.TrafficControl.ReservedInputTokens)
-	require.Zero(t, snapshot.TrafficControl.LimitedRequests)
-	require.Zero(t, snapshot.Fallback.Requests)
-	require.Nil(t, snapshot.Fallback.LastUsedAt)
 
 	later, err := r.groupQualityTargetSummary(ctx, p, now)
 	require.NoError(t, err)
@@ -74,10 +65,6 @@ func TestGroupQualitySummaryConsistentSnapshotIntegration(t *testing.T) {
 	require.EqualValues(t, 1, later.FailureSamples)
 	require.False(t, later.TelemetryComplete)
 	require.EqualValues(t, 50, later.CacheReadTokens)
-	require.EqualValues(t, 1000, later.TrafficControl.ReservedInputTokens)
-	require.EqualValues(t, 7, later.TrafficControl.LimitedRequests)
-	require.EqualValues(t, 1, later.Fallback.Requests)
-	require.NotNil(t, later.Fallback.LastUsedAt)
 	var successes, failures, input, read int64
 	for _, contributor := range later.Contributors {
 		successes += contributor.SuccessSamples

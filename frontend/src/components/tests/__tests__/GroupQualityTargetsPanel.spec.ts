@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import GroupQualityTargetsPanel from '../GroupQualityTargetsPanel.vue'
-import { emptyPassiveSummary, type GroupQualityContributor, type GroupQualityTargetSummary, type GroupQualityTrafficControl, type GroupQualityFallbackSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
+import { emptyPassiveSummary, type GroupQualityContributor, type GroupQualityTargetSummary, type PassivePolicy, type PassiveState } from '@/api/admin/passiveQuality'
 import resources from '@/i18n/locales/en/admin/resources'
 import zhResources from '@/i18n/locales/zh/admin/resources'
 import type { AdminGroup } from '@/types'
@@ -19,30 +19,22 @@ const groups = [
 ] as AdminGroup[]
 const policy = (overrides: Partial<PassivePolicy> = {}): PassivePolicy => ({
   ...defaultPassivePolicy(), id: 11, version: 3, purpose: 'group_quality_target', name: 'Pro target', group_ids: [3],
-  mode: 'enforce', min_samples: 5, window_seconds: 3600, max_samples: 100, confirmations: 2, new_samples: 2,
+  mode: 'enforce', recovery_mode: 'active', min_samples: 20, window_seconds: 3600, max_samples: 0, confirmations: 2, new_samples: 5,
   cooldown_seconds: 300, max_cooldown_seconds: 1800, trial_seconds: 900, trial_requests: 20, trial_concurrency: 1, recovery_samples: 5,
   error_rate: { enabled: true, pause: 20, recover: 15 }, ttft: { enabled: true, pause: 10000, recover: 8000 }, cache_rate: { enabled: true, pause: 80, recover: 85 },
   cache_protection: undefined, ttft_action: undefined, ttft_concurrency_limit: undefined, ttft_priority_penalty: undefined, ...overrides,
 })
 const summary = (overrides: Partial<GroupQualityTargetSummary> = {}): GroupQualityTargetSummary => ({
-  policy_id: 11, group_id: 3, window_seconds: 3600, actual_cache_rate: 90, cache_samples: 10, cache_read_tokens: 900, cache_input_tokens: 1000, cache_unknown_samples: 0,
-  actual_availability: 100, success_samples: 10, failure_samples: 0, failure_unknown_samples: 0, ttft_p90_ms: 1000, ttft_samples: 10,
+  policy_id: 11, group_id: 3, window_seconds: 3600, actual_cache_rate: 90, cache_samples: 30, cache_read_tokens: 900, cache_input_tokens: 1000, cache_unknown_samples: 0,
+  actual_availability: 100, success_samples: 30, failure_samples: 0, failure_unknown_samples: 0, ttft_p90_ms: 1000, ttft_samples: 30,
   generated_at: '2026-10-24T00:00:00Z', telemetry_complete: true, ...overrides,
-})
-const trafficControl = (overrides: Partial<GroupQualityTrafficControl> = {}): GroupQualityTrafficControl => ({
-  enabled: true, mode: 'normal', verified_accounts: 3, validation_input_tokens: 12500, total_input_tokens: 500000,
-  validation_share_percent: 2.5, reserved_input_tokens: 5000, budget_tokens: 25000, remaining_tokens: 7500, limited_requests: 12,
-  ...overrides,
 })
 const state = (overrides: Partial<PassiveState> = {}): PassiveState => ({
   policy_id: 11, policy_name: 'Pro target', purpose: 'group_quality_target', account_id: 62, account_name: 'Provider', model: 'model-a', scope: 'model', mode: 'enforce',
-  phase: 'trial', reason: 'group_target_trial', hits: 0, backoff: 0, used: 3, inflight: 0, generation: 1,
+  phase: 'probing', reason: 'active_recovery_running', hits: 0, backoff: 0, used: 3, inflight: 0, generation: 1,
   next_at: '', trial_started_at: '2026-10-24T00:00:00Z', trial_ends_at: '2026-10-24T00:15:00Z', updated_at: '2026-10-24T00:01:00Z', other_hold: false,
   evidence: { samples: 3, failures: 0, consecutive_failures: 0, error_rate: 0, ttft: 500, ttft_samples: 3, cache_rate: 0, cache_samples: 2, fresh: 2, complete: true, latest: '' },
   ...overrides,
-})
-const fallback = (overrides: Partial<GroupQualityFallbackSummary> = {}): GroupQualityFallbackSummary => ({
-  enabled: true, in_flight: 0, requests: 0, input_tokens: 0, reserved_input_tokens: 0, lease_seconds: 120, pacing_seconds: 0, ...overrides,
 })
 function makeWrapper(policyId?: number, locale = 'en') {
   return mount(GroupQualityTargetsPanel, { props: { groups, visible: true, policyId }, global: {
@@ -134,58 +126,13 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
-  it('shows automatic fallback independently of a disabled cache metric', async () => {
-    api.policies.mockResolvedValue([policy({ cache_rate: { enabled: false, pause: 80, recover: 85 } })])
-    api.groupTargets.mockResolvedValue([summary({ fallback: fallback() })])
-    const w = makeWrapper(); await flushPromises()
-    expect(w.find('[data-target-traffic-control]').exists()).toBe(false)
-    expect(w.get('[data-target-fallback-status]').text()).toBe('Enabled · Standby')
-    expect(w.get('[data-target-fallback-inflight] .text-xl').text()).toBe('0')
-    expect(w.get('[data-target-fallback]').text()).toContain('Fallback adds no concurrency cap or delay between request starts')
-    expect(w.get('[data-target-fallback]').text()).toContain('normal account concurrency limits still apply')
-    expect(w.get('[data-target-no-verified]').text()).toContain('scored fallback is used only when normal supply is exhausted')
-    expect(w.find('[data-target-fallback-last]').exists()).toBe(false)
-    w.unmount()
-  })
-
-  it('distinguishes active fallback from recent history and shows real usage', async () => {
-    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ in_flight: 3, requests: 7, input_tokens: 32000, reserved_input_tokens: 4096, last_used_at: '2026-10-24T01:00:00Z', last_account_id: 62 }) })])
-    const w = makeWrapper(); await flushPromises()
-    expect(w.get('[data-target-fallback-status]').text()).toBe('Serving fallback traffic')
-    expect(w.get('[data-target-fallback-inflight] .text-xl').text()).toBe('3')
-    expect(w.get('[data-target-fallback-requests]').text()).toContain('7')
-    expect(w.get('[data-target-fallback-input]').text()).toContain('32,000')
-    expect(w.get('[data-target-fallback-input]').text()).toContain('4,096')
-    expect(w.get('[data-target-fallback-last]').text()).toContain('account #62')
-    expect(w.get('[data-target-fallback]').text()).toContain('Manual stops, credentials, quotas and normal concurrency still apply')
-    w.unmount()
-    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ requests: 7 }) })])
-    const idle = makeWrapper(); await flushPromises()
-    expect(idle.get('[data-target-fallback-status]').text()).toBe('Enabled · Standby')
-    idle.unmount()
-  })
-
-  it('shows uncapped fallback in Chinese even when a legacy pacing field is present', async () => {
-    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ in_flight: 3, pacing_seconds: 2 }) })])
-    const w = makeWrapper(undefined, 'zh'); await flushPromises()
-    expect(w.get('[data-target-fallback-inflight] .text-xl').text()).toBe('3')
-    expect(w.get('[data-target-fallback]').text()).toContain('兜底不额外限制并发或请求启动间隔，仍遵守账号原有并发设置')
-    expect(w.get('[data-target-fallback]').text()).not.toContain('最多 1 个')
-    expect(w.get('[data-target-fallback]').text()).not.toContain('间隔 2 秒')
-    expect(w.get('[data-target-no-verified]').text()).toContain('未暂停账号继续正常调用，只有正常供给耗尽时才按评分兜底')
-    w.unmount()
-  })
-
-  it.each([
-    { value: undefined, policy: {} },
-    { value: fallback({ enabled: false }), policy: {} },
-    { value: fallback(), policy: { enabled: false } },
-    { value: fallback(), policy: { mode: 'observe' as const } },
-  ])('does not invent fallback support or enablement: %j', async values => {
-    api.policies.mockResolvedValue([policy(values.policy)])
-    api.groupTargets.mockResolvedValue([summary({ fallback: values.value })])
+  it('does not render retired fallback or customer validation controls even when audit fields exist', async () => {
+    api.groupTargets.mockResolvedValue([{ ...summary(), fallback: { enabled: true, in_flight: 3 }, traffic_control: { enabled: true, mode: 'availability' } }])
     const w = makeWrapper(); await flushPromises()
     expect(w.find('[data-target-fallback]').exists()).toBe(false)
+    expect(w.find('[data-target-fallback-active]').exists()).toBe(false)
+    expect(w.find('[data-target-traffic-details]').exists()).toBe(false)
+    expect(w.get('[data-target-full-window]').text()).toContain('no request-count cap')
     w.unmount()
   })
 
@@ -199,7 +146,7 @@ describe('simple group quality targets', () => {
     expect(w.text()).toContain('Cold starts')
     await w.get('[data-target-save]').trigger('click'); await flushPromises()
     expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ id: 0, purpose: 'group_quality_target', recovery_mode: 'active', window_seconds: 3600, max_samples: 0, min_samples: 20, new_samples: 5, confirmations: 2, group_ids: [4], mode: 'enforce', enabled: true, model: '',
-      cache_rate: { enabled: true, pause: 80, recover: 85 }, error_rate: { enabled: true, pause: 10, recover: 5 }, ttft: { enabled: true, pause: 15000, recover: 12000 }, tps: { enabled: true, pause: 30, recover: 36 }, stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 120, new_session_percent: 100 } }))
+      cache_rate: { enabled: true, pause: 80, recover: 85 }, error_rate: { enabled: true, pause: 10, recover: 5 }, ttft: { enabled: true, pause: 15000, recover: 12000 }, tps: { enabled: true, pause: 30, recover: 36 }, stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 120 } }))
     expect(api.saveGroupQualityTarget.mock.calls[0][0]).not.toHaveProperty('cache_protection')
     expect(api.saveGroupQualityTarget.mock.calls[0][0]).not.toHaveProperty('ttft_action')
     w.unmount()
@@ -212,16 +159,16 @@ describe('simple group quality targets', () => {
     expect(rules.text()).toContain('per account and model')
     expect(rules.text()).toContain('no request-count cap')
     expect(rules.text()).toContain('20 valid samples')
-    expect(rules.text()).toContain('including scored fallback')
+    expect(rules.text()).toContain('including emergency fallback')
     expect(w.find('[data-target-traffic-mode-select]').exists()).toBe(false)
     expect(w.find('[data-target-performance-debounce]').exists()).toBe(false)
     expect(w.text()).toContain('Customer traffic is not used for recovery trials')
     w.unmount()
   })
 
-  it('shows active recovery separately and hides customer trials and scored fallback for active targets', async () => {
+  it('shows active recovery separately and hides customer trials and emergency fallback for active targets', async () => {
     api.policies.mockResolvedValue([policy({ recovery_mode: 'active', min_samples: 20, max_samples: 0, new_samples: 5 })])
-    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ in_flight: 3 }), traffic_control: trafficControl() })])
+    api.groupTargets.mockResolvedValue([summary()])
     api.states.mockResolvedValue([state({ phase: 'probing', reason: 'active_recovery_started', active_recovery: {
       verdict: 'pending', passed: false, requests: 6, warmup_requests: 1, batches: 1,
       started_at: '2026-10-24T00:02:00Z', finished_at: '2026-10-24T00:02:01Z', reason: 'insufficient_active_recovery_batches',
@@ -238,58 +185,30 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
-  it('preserves legacy stability controls while editing an existing legacy target', async () => {
+  it('edits existing targets with only active recovery settings and keeps independent exclusions', async () => {
+    api.policies.mockResolvedValue([policy({ excluded_account_ids: [62] })])
     const w = makeWrapper(); await flushPromises(); await w.get('[data-target-edit]').trigger('click')
-    expect((w.get('[data-target-performance-debounce]').element as HTMLInputElement).value).toBe('300')
-    await w.get('[data-target-new-session-share]').setValue('0')
-    expect(w.get('[data-target-save]').attributes('disabled')).toBeDefined()
-    await w.get('[data-target-new-session-share]').setValue('30')
-    await w.get('[data-target-performance-debounce]').setValue('1.5')
-    expect(w.get('[data-target-save]').attributes('disabled')).toBeDefined()
-    await w.get('[data-target-performance-debounce]').setValue('600')
-    await w.get('[data-target-availability-debounce]').setValue('0')
-    await w.get('[data-target-recovery-stable]').setValue('180')
+    expect(w.find('[data-target-traffic-mode-select]').exists()).toBe(false)
+    expect(w.find('[data-target-new-session-share]').exists()).toBe(false)
+    expect(w.get('[data-active-recovery-settings]').text()).toContain('20 valid samples')
+    expect(w.text()).toContain('1 account exclusions are preserved')
+    await w.get('[data-target-cache]').setValue('82')
     await w.get('[data-target-save]').trigger('click'); await flushPromises()
-    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ stability: { availability_pause_seconds: 0, performance_pause_seconds: 600, recovery_seconds: 180, new_session_percent: 30 } }))
+    const saved = api.saveGroupQualityTarget.mock.calls[0][0]
+    expect(saved).toMatchObject({ recovery_mode: 'active', window_seconds: 3600, max_samples: 0, excluded_account_ids: [62] })
+    for (const field of ['traffic_mode', 'trial_seconds', 'trial_requests', 'trial_concurrency', 'recovery_samples']) expect(saved).not.toHaveProperty(field)
+    expect(saved.stability).not.toHaveProperty('new_session_percent')
     w.unmount()
   })
 
-  it('shows evidence timestamps and translates nested recovery stability reasons', async () => {
-    api.states.mockResolvedValue([state({ reason: 'waiting_for_recovery: stability_confirmation', recovery_since: '2026-10-24T00:00:30Z' }), state({ model: 'model-b', phase: 'suspect', cache_allocation_reduced: true, suspicion_since: '2026-10-24T00:00:00Z', reason: 'waiting_for_fresh_failure: cache_rate: 50 / 80 (5)' })])
+  it('shows evidence timestamps and active recovery separately from new breach confirmations', async () => {
+    api.states.mockResolvedValue([state({ phase: 'suspect', reason: 'waiting_for_recovery: stability_confirmation', recovery_since: '2026-10-24T00:00:30Z' }), state({ model: 'model-b', phase: 'suspect', suspicion_since: '2026-10-24T00:00:00Z', reason: 'waiting_for_fresh_failure: cache_rate: 50 / 80 (5)' })])
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-target-recovery-since]').text()).toContain('Continuous healthy recovery evidence since')
     expect(w.get('[data-target-suspicion-since]').text()).toContain('Continuous breach evidence since')
     expect(w.text()).toContain('Waiting for sustained healthy evidence and fresh confirmations')
     expect(w.text()).toContain('Old window remains below target; waiting for new failing evidence')
-    expect(w.text()).toContain('Reduced new assignments')
-    expect(w.text()).not.toContain('waiting_for_recovery: stability_confirmation')
-    w.unmount()
-  })
-
-  it('shows the effective recovery window for a short legacy trial with many confirmations', async () => {
-    api.policies.mockResolvedValue([policy({ trial_seconds: 60, confirmations: 10, stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 0, new_session_percent: 20 } })])
-    const w = makeWrapper(); await flushPromises(); await w.get('[data-target-edit]').trigger('click')
-    expect(w.text()).toContain('trial up to 20 requests, concurrency 1, 7 minutes')
-    w.unmount()
-  })
-
-  it('distinguishes recovery confirmations and their two-batch minimum from breach confirmations', async () => {
-    api.policies.mockResolvedValue([policy({ confirmations: 1 })])
-    api.states.mockResolvedValue([state({ hits: 1 }), state({ model: 'model-b', phase: 'suspect', cache_allocation_reduced: true, hits: 5, recovery_hits: 1, recovery_since: '2026-10-24T00:00:30Z' })])
-    const w = makeWrapper(); await flushPromises()
-    const rows = w.findAll('[data-target-state]')
-    expect(rows).toHaveLength(2)
-    for (const row of rows) expect(row.text()).toContain('Recovery confirmations 1/2')
-    w.unmount()
-  })
-
-  it('caps legacy trial confirmations by its finite budget without capping cache recovery', async () => {
-    api.policies.mockResolvedValue([policy({ confirmations: 10, trial_requests: 5 })])
-    api.states.mockResolvedValue([state({ hits: 1 }), state({ model: 'model-b', phase: 'suspect', cache_allocation_reduced: true, recovery_hits: 1, recovery_since: '2026-10-24T00:00:30Z' })])
-    const w = makeWrapper(); await flushPromises()
-    const rows = w.findAll('[data-target-state]')
-    expect(rows[0].text()).toContain('Recovery confirmations 1/5')
-    expect(rows[1].text()).toContain('Recovery confirmations 1/10')
+    expect(w.text()).not.toContain('Reduced new assignments')
     w.unmount()
   })
 
@@ -335,10 +254,11 @@ describe('simple group quality targets', () => {
   })
 
   it('preserves exclusions, model, observation mode and custom recovery parameters when toggled or edited', async () => {
-    const stability = { availability_pause_seconds: 0, performance_pause_seconds: 600, recovery_seconds: 180, new_session_percent: 30 }
-    api.policies.mockResolvedValue([policy({ model: 'only-model', mode: 'observe', excluded_account_ids: [3, 2280, 2283], cooldown_seconds: 600, trial_requests: 30, stability })])
+    const stability = { availability_pause_seconds: 0, performance_pause_seconds: 600, recovery_seconds: 180 }
+    api.policies.mockResolvedValue([policy({ model: 'only-model', mode: 'observe', excluded_account_ids: [3, 2280, 2283], cooldown_seconds: 600, stability: { ...stability } })])
     const w = makeWrapper(); await flushPromises(); await w.get('[data-target-toggle="11"]').trigger('click'); await flushPromises()
-    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, mode: 'observe', model: 'only-model', excluded_account_ids: [3, 2280, 2283], cooldown_seconds: 600, trial_requests: 30, stability }))
+    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, mode: 'observe', model: 'only-model', excluded_account_ids: [3, 2280, 2283], cooldown_seconds: 600, stability }))
+    expect(api.saveGroupQualityTarget.mock.calls[0][0].stability).not.toHaveProperty('new_session_percent')
     await w.get('[data-target-edit="11"]').trigger('click')
     expect(w.get('[data-dialog]').text()).toContain('Existing model filter preserved: only-model')
     expect(w.get('[data-dialog]').text()).toContain('3 account exclusions are preserved')
@@ -363,7 +283,7 @@ describe('simple group quality targets', () => {
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-target-metric="cache"]').text()).toContain('0%')
     expect(w.get('[data-target-metric="availability"]').text()).toContain('Unknown')
-    expect(w.get('[data-target-metric="ttft"]').text()).toContain('Needs 5 more')
+    expect(w.get('[data-target-metric="ttft"]').text()).toContain('Needs 20 more')
     expect(w.get('[data-group-target]').text()).toContain('Target not met')
     expect(w.text()).not.toContain('Measured targets met')
     w.unmount()
@@ -383,14 +303,14 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
-  it('uses strict target boundaries and keeps account trial evidence separate from the group metric', async () => {
+  it('uses strict target boundaries and keeps account active evidence separate from the group metric', async () => {
     api.groupTargets.mockResolvedValue([summary({ actual_cache_rate: 80 })]); api.states.mockResolvedValue([state()])
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-group-target]').text()).toContain('Some accounts protected')
     expect(w.get('[data-target-metric="cache"]').text()).toContain('≥ 80%')
-    expect(w.get('[data-target-state="62-model-a"]').text()).toContain('Trial attempts 3/20 · 3/5 valid samples')
+    expect(w.get('[data-target-state="62-model-a"]').text()).toContain('Running active recovery checks')
     expect(w.get('[data-target-state="62-model-a"]').text()).toContain('Actual cache usage: 0%')
-    expect(w.get('[data-target-state="62-model-a"]').text()).toContain('verifying recovery with limited fresh production traffic')
+    expect(w.get('[data-target-state="62-model-a"]').text()).toContain('Active recovery checks are running')
     expect(w.get('[data-target-metric="cache"]').text()).toContain('80%')
     w.unmount()
   })
@@ -404,74 +324,14 @@ describe('simple group quality targets', () => {
     w.unmount()
   })
 
-  it('distinguishes deferred recovery from an open trial without claiming another failure', async () => {
-    const waiting = state({ reason: 'waiting_for_recovery: insufficient_samples', next_at: '2026-10-24T00:20:00Z' })
-    api.states.mockResolvedValue([waiting])
+  it('keeps deferred active recovery paused and shows its next attempt without customer trials', async () => {
+    api.states.mockResolvedValue([state({ phase: 'paused', reason: 'active_recovery_pending: insufficient_metric_samples', next_at: '2026-10-24T00:20:00Z' })])
     const w = makeWrapper(); await flushPromises()
     const row = w.get('[data-target-state="62-model-a"]')
-    expect(row.text()).toContain('Waiting for recovery evidence')
-    expect(row.get('[data-target-trial-waiting]').text()).toContain('Missing evidence is not a new failure')
+    expect(row.text()).toContain('Waiting for active recovery checks')
+    expect(row.text()).toContain('Next active check:')
+    expect(row.text()).not.toContain('Trial attempts')
     expect(row.text()).not.toContain('Trial ends:')
-    expect(row.text()).not.toContain('Trial failed again')
-    w.unmount()
-
-    api.states.mockResolvedValue([state({ ...waiting, next_at: '0001-01-01T00:00:00Z', trial_ends_at: '2026-10-24T00:35:00Z' })])
-    const resumed = makeWrapper(); await flushPromises()
-    expect(resumed.find('[data-target-trial-waiting]').exists()).toBe(false)
-    expect(resumed.get('[data-target-state="62-model-a"]').text()).toContain('Trial ends:')
-    resumed.unmount()
-  })
-
-  it('shows the server token budget separately from request and account evidence', async () => {
-    api.groupTargets.mockResolvedValue([summary({ traffic_control: trafficControl() })])
-    const w = makeWrapper(); await flushPromises()
-    expect(w.get('[data-target-traffic-mode]').text()).toBe('Normal validation')
-    expect(w.get('[data-target-validation-share]').text()).toContain('2.5%')
-    expect(w.get('[data-target-validation-share]').text()).toContain('Validation input 12,500 / group input 500,000 tokens')
-    expect(w.get('[data-target-budget-remaining]').text()).toContain('7,500')
-    expect(w.get('[data-target-budget-remaining]').text()).toContain('Reserved 5,000 / total budget 25,000 tokens')
-    expect(w.get('[data-target-limited-requests]').text()).toContain('12')
-    expect(w.get('[data-target-limited-requests]').text()).toContain('Verified account/model pairs: 3')
-    expect(w.get('[data-target-verified]').text()).toContain('3 account/models verified')
-    expect(w.find('[data-target-no-verified]').exists()).toBe(false)
-    expect(w.get('[data-target-traffic-control]').text()).toContain('reservations remain when usage is missing')
-    expect(w.get('[data-target-traffic-control]').text()).toContain('does not mean every model has verified supply')
-    expect(w.find('[data-target-bootstrap]').exists()).toBe(false)
-    w.unmount()
-  })
-
-  it('explains normal sample collection independently of recovery allowance', async () => {
-    api.groupTargets.mockResolvedValue([summary({ traffic_control: trafficControl({ mode: 'bootstrap', verified_accounts: 0 }) })])
-    const w = makeWrapper(); await flushPromises()
-    expect(w.get('[data-group-target]').text()).toContain('Measured targets met')
-    expect(w.get('[data-target-bootstrap]').attributes('role')).toBe('status')
-    expect(w.get('[data-target-bootstrap]').text()).toContain('Unpaused accounts keep serving and collecting samples')
-    expect(w.find('[data-target-no-verified]').exists()).toBe(false)
-    w.unmount()
-  })
-
-  it('shows an exhausted budget as zero and explains conserving mode', async () => {
-    api.groupTargets.mockResolvedValue([summary({ traffic_control: trafficControl({ mode: 'conserving', remaining_tokens: 0, validation_share_percent: 0, validation_input_tokens: 0 }) })])
-    const w = makeWrapper(); await flushPromises()
-    expect(w.get('[data-target-traffic-mode]').text()).toBe('Conserving validation traffic')
-    expect(w.get('[data-target-budget-remaining]').find('.text-xl').text()).toBe('0')
-    expect(w.get('[data-target-validation-share]').text()).toContain('0%')
-    expect(w.get('[data-target-traffic-control]').text()).toContain('Normal traffic on unpaused accounts is unaffected by this budget')
-    expect(w.get('[data-target-traffic-control]').text()).not.toContain('Unknown')
-    w.unmount()
-  })
-
-  it.each([
-    { control: undefined, policy: {} },
-    { control: trafficControl({ enabled: false }), policy: {} },
-    { control: trafficControl(), policy: { enabled: false } },
-    { control: trafficControl(), policy: { mode: 'observe' as const } },
-  ])('does not claim an active budget for old servers or inactive enforcement: %j', async values => {
-    api.policies.mockResolvedValue([policy(values.policy)])
-    api.groupTargets.mockResolvedValue([summary({ traffic_control: values.control })])
-    const w = makeWrapper(); await flushPromises()
-    expect(w.find('[data-target-traffic-control]').exists()).toBe(false)
-    expect(w.get('[data-target-metric="cache"]').text()).toContain('90%')
     w.unmount()
   })
 
@@ -484,7 +344,7 @@ describe('simple group quality targets', () => {
       state({ account_id: 64, phase: 'healthy', evidence: { ...evidence, cache_samples: 4 } }),
       state({ account_id: 65, phase: 'healthy', evidence, other_hold: true }),
       state({ account_id: 66, phase: 'healthy', evidence: { ...evidence, cache_rate: 80 } }),
-      state({ account_id: 67, phase: 'trial', evidence }),
+      state({ account_id: 67, phase: 'probing', evidence }),
     ])
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-target-verified]').text()).toContain('1 account/models verified')
@@ -495,14 +355,13 @@ describe('simple group quality targets', () => {
 
   it('keeps independent policy counts and appended state pages through automatic refreshes', async () => {
     vi.useFakeTimers()
-    api.stateSummary.mockResolvedValue({ ...emptyPassiveSummary(), total: 51, by_policy: [{ policy_id: 11, total: 51, phases: { paused: 40, trial: 10, healthy: 1 }, verified: 1 }] })
+    api.stateSummary.mockResolvedValue({ ...emptyPassiveSummary(), total: 51, by_policy: [{ policy_id: 11, total: 51, phases: { paused: 40, probing: 10, healthy: 1 }, verified: 1 }] })
     api.statePage.mockResolvedValueOnce({ items: [state()], total: 51, has_more: true, next_cursor: 'policy-page-2' })
     let resolveNext!: (value: { items: PassiveState[]; total: number; has_more: boolean }) => void
     api.statePage.mockImplementationOnce(() => new Promise(resolve => { resolveNext = resolve }))
     const w = makeWrapper(); await flushPromises()
     expect(w.get('[data-group-target]').text()).toContain('51 account/model states')
-    expect(w.get('[data-group-target]').text()).toContain('40 paused')
-    expect(w.get('[data-group-target]').text()).toContain('10 in recovery trial')
+    expect(w.get('[data-group-target]').text()).toContain('50 paused')
     expect(w.text()).toContain('Loaded 1 of 51 states')
     await w.get('[data-target-more-states="11"]').trigger('click')
     await vi.advanceTimersByTimeAsync(15000); await flushPromises()
@@ -549,7 +408,7 @@ describe('simple group quality targets', () => {
     const contributors = w.get('[data-target-contributors]')
     expect(contributors.findAll('tbody tr')).toHaveLength(4)
     const text = contributors.text()
-    for (const value of ['Provider · model-a', 'Normal', 'Recovery / validation', 'Fallback', 'Unattributed', '#63', '8,000', '2 / 10', '3 / 10', '1.5 s', 'Unknown', '4 requests without usable cache telemetry', 'Showing 4 of 9 contributors']) expect(text).toContain(value)
+    for (const value of ['Provider · model-a', 'Normal', 'Historical customer validation', 'Historical emergency fallback', 'Unattributed', '#63', '8,000', '2 / 10', '3 / 10', '1.5 s', 'Unknown', '4 requests without usable cache telemetry', 'Showing 4 of 9 contributors']) expect(text).toContain(value)
     expect(w.findAll('[data-target-state]')).toHaveLength(0)
     w.unmount()
   })

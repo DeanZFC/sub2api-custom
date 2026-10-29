@@ -274,7 +274,6 @@ func TestActiveRecoveryNoOpSavePreservesHoldAndEvidenceIntegration(t *testing.T)
 	saveActiveStateForTest(t, ctx, db, state)
 	oldVersion := p.Version
 	stability := p.GroupTargetStability()
-	stability.NewSessionPercent = 100
 	p.Stability = &stability
 	require.NoError(t, r.SavePolicy(ctx, &p))
 	require.Equal(t, oldVersion, p.Version)

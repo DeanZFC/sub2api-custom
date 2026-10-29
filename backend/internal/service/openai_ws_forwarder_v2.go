@@ -39,18 +39,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
-	fallbackActive := GroupQualityFallbackActive(ctx)
-	fallbackCancellationError := func() error {
-		if !fallbackActive || ctx.Err() == nil {
-			return nil
-		}
-		// Preserve both ordinary cancellation classification and the local lease
-		// loss cause. Neither is evidence of an upstream account failure.
-		return errors.Join(ctx.Err(), context.Cause(ctx))
-	}
-	if err := fallbackCancellationError(); err != nil {
-		return nil, err
-	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -239,9 +227,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}(),
 	})
 	if err != nil {
-		if cancelErr := fallbackCancellationError(); cancelErr != nil {
-			return nil, cancelErr
-		}
 		var agentDialErr *openAIWSDialError
 		if s.isAgentIdentityAccount(ctx, account) && errors.As(err, &agentDialErr) && isAgentIdentityTaskInvalidWSDialError(agentDialErr) && agentTaskRecoveryTried != nil && !*agentTaskRecoveryTried {
 			*agentTaskRecoveryTried = true
@@ -362,17 +347,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		stateStore,
 		groupID,
 	); err != nil {
-		if cancelErr := fallbackCancellationError(); cancelErr != nil {
-			return nil, cancelErr
-		}
 		return nil, err
 	}
 
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
-		if cancelErr := fallbackCancellationError(); cancelErr != nil {
-			return nil, cancelErr
-		}
 		logOpenAIWSModeInfo(
 			"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",
 			account.ID,
@@ -428,7 +407,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 		clientDisconnected = true
 		clientDisconnectDrainStartedAt = time.Now()
-		if !fallbackActive && !upstreamReadDetached {
+		if !upstreamReadDetached {
 			upstreamReadCtx = context.WithoutCancel(ctx)
 			upstreamReadDetached = true
 		}
@@ -442,7 +421,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		)
 	}
 	markClientRequestCanceled := func() {
-		if clientRequestCanceled() && !errors.Is(context.Cause(ctx), ErrGroupQualityFallbackLeaseLost) {
+		if clientRequestCanceled() {
 			markClientDisconnected("request_context_canceled")
 		}
 	}
@@ -518,7 +497,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			return
 		}
 		markClientDisconnected("downstream_write_error")
-		logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode] client disconnected: account=%d drain_upstream=%v", account.ID, !fallbackActive)
+		logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode] client disconnected: account=%d drain_upstream=%v", account.ID, true)
 	}
 	flushBufferedStreamEvents := func(reason string) {
 		if len(bufferedStreamEvents) == 0 {
@@ -551,12 +530,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 readLoop:
 	for {
 		markClientRequestCanceled()
-		if cancelErr := fallbackCancellationError(); cancelErr != nil {
-			return resultWithUsage(), cancelErr
-		}
-		if fallbackActive && clientDisconnected {
-			return resultWithUsage(), context.Canceled
-		}
 		var message []byte
 		var readErr error
 		readUsedDetachedContext := upstreamReadDetached
@@ -591,9 +564,6 @@ readLoop:
 			}
 		}
 		markClientRequestCanceled()
-		if cancelErr := fallbackCancellationError(); cancelErr != nil {
-			return resultWithUsage(), cancelErr
-		}
 		if readErr == nil && !json.Valid(message) {
 			eventType, _, _ := parseOpenAIWSEventEnvelope(message)
 			if eventType == "" {
@@ -633,7 +603,7 @@ readLoop:
 				truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
 			)
 			if clientDisconnected {
-				if !fallbackActive && !readUsedDetachedContext && errors.Is(readErr, context.Canceled) && clientRequestCanceled() {
+				if !readUsedDetachedContext && errors.Is(readErr, context.Canceled) && clientRequestCanceled() {
 					continue
 				}
 				break

@@ -21,7 +21,6 @@
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-800">
           <div><strong>{{ account.name }}</strong><span class="ml-2 text-xs text-gray-500">#{{ account.id }} · {{ account.platform }}</span><p class="mt-1 text-xs text-gray-500">{{ tr('coverage', { active: account.active_plans, passive: account.passive_policies }) }}</p></div>
           <div class="flex flex-wrap items-center gap-3">
-            <ChannelQualityScoreEvidence :score="account.quality_score" />
             <span class="badge" :class="account.controls.some(c => c.blocking) ? 'badge-warning' : 'badge-gray'">{{ tr(account.controls.some(c => c.blocking) ? 'restricted' : account.controls.some(c => c.phase === 'limited') ? 'limited' : account.controls.some(c => c.phase === 'cache_limited') ? 'cacheLimited' : 'noHold') }}</span>
           </div>
         </div>
@@ -47,7 +46,6 @@ import { useQualityLabels } from '@/composables/useQualityLabels'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import type { AdminGroup } from '@/types'
 import TestPassRateEvidence from './TestPassRateEvidence.vue'
-import ChannelQualityScoreEvidence from './ChannelQualityScoreEvidence.vue'
 const props = defineProps<{ groups: AdminGroup[]; accountId?: number; visible: boolean }>()
 defineEmits<{ navigate: [tab: string, policy?: number, account?: number] }>()
 const { t } = useI18n()

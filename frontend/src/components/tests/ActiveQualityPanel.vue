@@ -17,7 +17,7 @@
         <div class="mb-4 flex items-center justify-between"><h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.plans') }}</h3><button data-testid="plan-create" class="btn btn-primary btn-sm" @click="openPlan()"><Icon name="plus" size="sm" /> {{ t('common.create') }}</button></div>
         <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-700"><th class="px-2 py-2">{{ t('admin.tests.name') }}</th><th class="px-2 py-2">{{ t('admin.tests.type') }}</th><th class="px-2 py-2">{{ t('admin.tests.target') }}</th><th class="px-2 py-2">{{ t('admin.tests.model') }}</th><th class="px-2 py-2">{{ t('admin.tests.schedule') }}</th><th class="px-2 py-2">{{ t('common.status') }}</th><th class="px-2 py-2 text-right">{{ t('common.actions') }}</th></tr></thead><tbody>
           <tr v-for="plan in orderedPlans" :key="plan.id" class="border-b border-gray-100 dark:border-dark-800">
-            <td class="min-w-32 px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}<div class="mt-1 text-xs font-normal text-gray-500">{{ t('admin.tests.sortOrder') }}: {{ plan.sort_order ?? 0 }}</div><p v-if="plan.migration_note" class="mt-2 text-xs font-normal text-amber-700 dark:text-amber-300" data-migration-note>{{ plan.migration_note }}</p></td>
+            <td class="min-w-32 px-2 py-3 font-medium text-gray-900 dark:text-white">{{ plan.name || `#${plan.id}` }}<div><button type="button" class="mt-1 inline-flex items-center gap-1 text-xs font-normal text-gray-500 hover:text-primary-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:hover:text-primary-400" :title="t('common.edit')" :aria-label="`${t('common.edit')} · ${t('admin.tests.sortOrder')}`" data-edit-plan-order @click="openPlan(plan)">{{ t('admin.tests.sortOrder') }}: {{ plan.sort_order ?? 0 }}<Icon name="edit" size="sm" /></button></div><p v-if="plan.migration_note" class="mt-2 text-xs font-normal text-amber-700 dark:text-amber-300" data-migration-note>{{ plan.migration_note }}</p></td>
             <td class="min-w-32 px-2 py-3"><div class="flex flex-wrap gap-1"><span v-for="type in planTypes(plan)" :key="type.id" class="badge badge-gray">{{ type.name }}</span><span v-if="!planTypes(plan).length">-</span></div></td>
             <td class="min-w-32 px-2 py-3">{{ groupName(plan) }}<div class="mt-1 text-xs text-gray-500">{{ targetName() }}</div></td>
             <td class="min-w-32 px-2 py-3 font-mono text-xs"><span v-if="modelIDs(plan).length">{{ modelIDs(plan).join(', ') }}</span><span v-else>-</span><span v-if="plan.reasoning_effort" class="ml-1 text-gray-500">({{ plan.reasoning_effort }})</span></td>
@@ -43,6 +43,7 @@
       <div v-if="editingPlan" class="grid gap-4 sm:grid-cols-2">
         <p class="text-sm text-gray-500 sm:col-span-2">{{ t('admin.tests.experience.activeHint') }}</p>
         <label class="input-label">{{ t('admin.tests.name') }}<input v-model.trim="editingPlan.name" class="input mt-1 w-full" /></label>
+        <label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingPlan.sort_order" min="0" type="number" class="input mt-1 w-full" data-plan-sort-order /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.planSortOrderHint') }}</span></label>
         <p v-if="editingPlan.migration_note" class="text-sm text-amber-700 dark:text-amber-300 sm:col-span-2" data-plan-migration-note>{{ editingPlan.migration_note }}</p>
         <fieldset class="sm:col-span-2">
           <legend class="input-label">{{ t('admin.tests.types') }}</legend>
@@ -101,7 +102,6 @@
         <details class="rounded-lg border border-gray-200 p-4 dark:border-dark-700 sm:col-span-2" data-plan-advanced>
           <summary class="cursor-pointer text-sm font-medium">{{ t('admin.tests.experience.activeAdvanced') }}</summary>
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
-        <label class="input-label">{{ t('admin.tests.sortOrder') }}<input v-model.number="editingPlan.sort_order" min="0" type="number" class="input mt-1 w-full" /><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.planSortOrderHint') }}</span></label>
         <label class="input-label">{{ t('admin.tests.maxResults') }}<input v-model.number="editingPlan.max_results" min="1" type="number" class="input mt-1 w-full" /></label>
         <label v-if="reasoningEffortOptions.length" class="input-label">{{ t('admin.tests.reasoningEffort') }}<select v-model="editingPlan.reasoning_effort" class="input mt-1 w-full"><option :value="null">{{ t('admin.tests.reasoningEffortDefault') }}</option><option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort">{{ effort }}</option></select><span class="mt-1 block text-xs font-normal text-gray-500">{{ t('admin.tests.reasoningEffortHint') }}</span></label>
           </div>

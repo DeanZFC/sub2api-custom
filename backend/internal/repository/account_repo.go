@@ -1416,13 +1416,6 @@ func (r *accountRepository) ListByGroup(ctx context.Context, groupID int64) ([]s
 	return accounts, nil
 }
 
-// ListGroupQualityFallbackCandidates includes automatic quality pauses so the
-// recovery pass can evaluate them. It grants no admission: service filters and
-// live gates still enforce manual stops, credentials, membership and capacity.
-func (r *accountRepository) ListGroupQualityFallbackCandidates(ctx context.Context, groupID int64) ([]service.Account, error) {
-	return r.queryAccountsByGroup(ctx, groupID, accountGroupQueryOptions{})
-}
-
 func (r *accountRepository) ListActive(ctx context.Context) ([]service.Account, error) {
 	accounts, err := r.client.Account.Query().
 		Where(dbaccount.StatusEQ(service.StatusActive)).

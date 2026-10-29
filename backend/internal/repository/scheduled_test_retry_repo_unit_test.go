@@ -32,7 +32,6 @@ func TestScheduledTestResultRepositoryGetByIDLoadsActualTestedAccount(t *testing
 	mock.ExpectQuery(`(?s)SELECT r.id,s.plan_id.*JOIN scheduled_test_pass_rate_states.*WHERE r.id=ANY`).
 		WithArgs("{9}").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "plan_id", "account_id", "test_definition_id", "model_key", "summary", "blocked"}))
-	mock.ExpectQuery(`SELECT config,version,updated_at,collect_since FROM channel_quality_score_config`).WillReturnError(errors.New("optional quality score unavailable"))
 	result, err := repo.GetByID(context.Background(), 9)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), result.PlanID)

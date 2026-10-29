@@ -15,7 +15,7 @@ import (
 
 func newGroupTargetPolicy(t *testing.T, ctx context.Context, db *sql.DB, r *passiveQualityRepository) service.PassiveQualityPolicy {
 	t.Helper()
-	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", RecoveryMode: "traffic", Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85}}}
+	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", RecoveryMode: "active", Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85}}}
 	require.NoError(t, r.SavePolicy(ctx, &p))
 	p.UpdatedAt = time.Now().Add(-time.Minute)
 	_, err := db.Exec(`UPDATE passive_quality_policies SET updated_at=$2 WHERE id=$1`, p.ID, p.UpdatedAt)
@@ -48,78 +48,47 @@ func targetStates(t *testing.T, ctx context.Context, r *passiveQualityRepository
 func TestGroupQualityTargetMeasuredCacheLifecycleIntegration(t *testing.T) {
 	ctx, db, r := passiveDB(t)
 	p := newGroupTargetPolicy(t, ctx, db, r)
-	p.WindowSeconds = 60
-	require.NoError(t, r.SavePolicy(ctx, &p))
 	base := time.Now().Add(-10 * time.Minute)
 	_, err := db.Exec(`UPDATE passive_quality_policies SET updated_at=$2 WHERE id=$1`, p.ID, base.Add(-time.Second))
 	require.NoError(t, err)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 20; i++ {
 		at := base.Add(time.Duration(i) * time.Millisecond)
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("a-%d", i), "A", 8, at, 0, true)
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("b-%d", i), "B", 8, at, 90, true)
+		insertGroupTargetUsage(t, db, r, fmt.Sprintf("bad-%d", i), "A", 8, at, 0, true)
+		insertGroupTargetUsage(t, db, r, fmt.Sprintf("healthy-%d", i), "B", 8, at, 90, true)
 		insertGroupTargetUsage(t, db, r, fmt.Sprintf("unknown-%d", i), "unknown", 8, at, 0, false)
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("other-group-%d", i), "other-group", 9, at, 0, true)
+		insertGroupTargetUsage(t, db, r, fmt.Sprintf("other-%d", i), "other-group", 9, at, 0, true)
 	}
 	_, err = r.Sweep(ctx, base.Add(time.Second), 0)
 	require.NoError(t, err)
 	states := targetStates(t, ctx, r)
 	require.Len(t, states, 3)
 	require.Equal(t, "suspect", states["A"].Phase)
-	require.Equal(t, 1, states["A"].Hits)
-	require.Equal(t, 5, states["A"].Evidence.CacheSamples, "explicit zero from nonstreaming upstream is measured evidence")
+	require.Equal(t, 20, states["A"].Evidence.CacheSamples)
 	require.Equal(t, "healthy", states["B"].Phase)
 	require.Equal(t, "insufficient", states["unknown"].Phase)
-	require.Nil(t, states["unknown"].Evidence.CacheRate)
-	for i := 0; i < 2; i++ {
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("a-missing-%d", i), "A", 8, base.Add(2*time.Second+time.Duration(i)*time.Millisecond), 0, false)
+	// Sustain a full fresh batch each minute for the configured five-minute gate.
+	for batch := 1; batch <= 6; batch++ {
+		for i := 0; i < 5; i++ {
+			insertGroupTargetUsage(t, db, r, fmt.Sprintf("bad-next-%d-%d", batch, i), "A", 8, base.Add(time.Duration(batch)*time.Minute+time.Duration(i)*time.Millisecond), 0, true)
+		}
+		_, err = r.advance(ctx, p.ID, 62, base.Add(time.Duration(batch)*time.Minute+time.Second), false, "A")
+		require.NoError(t, err)
 	}
-	_, err = r.Sweep(ctx, base.Add(3*time.Second), 0)
+	require.Equal(t, "paused", targetStates(t, ctx, r)["A"].Phase)
+	allowed, reserved, err := r.AcquirePassiveQuality(ctx, 62, "A", "existing-owner")
 	require.NoError(t, err)
-	require.Equal(t, 1, targetStates(t, ctx, r)["A"].Hits, "unknown telemetry cannot reconfirm old bad cache evidence")
-	for i := 0; i < 2; i++ {
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("a-more-%d", i), "A", 8, base.Add(4*time.Second+time.Duration(i)*time.Millisecond), 0, true)
-	}
-	_, err = r.Sweep(ctx, base.Add(5*time.Second), 0)
-	require.NoError(t, err)
-	require.Equal(t, "suspect", targetStates(t, ctx, r)["A"].Phase, "cache-only degradation must not interrupt existing owners")
-	allowed, leased, err := r.AcquirePassiveQuality(ctx, 62, "A", "existing-owner")
-	require.NoError(t, err)
-	require.True(t, allowed)
-	require.False(t, leased, "soft cache allocation does not consume bounded recovery traffic")
+	require.False(t, allowed)
+	require.False(t, reserved)
 	allowed, _, err = r.AcquirePassiveQuality(ctx, 62, "B", "healthy-other-model")
 	require.NoError(t, err)
 	require.True(t, allowed)
-	// Passing only the pause threshold must not restore allocation. The old
-	// bad window has expired, so this specifically exercises recovery hysteresis.
-	for i := 0; i < 5; i++ {
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("between-%d", i), "A", 8, base.Add(70*time.Second+time.Duration(i)*time.Millisecond), 81, true)
+	// Recorded successes cannot emulate an active recovery result.
+	for i := 0; i < 20; i++ {
+		insertGroupTargetUsage(t, db, r, fmt.Sprintf("late-success-%d", i), "A", 8, base.Add(7*time.Minute+time.Duration(i)*time.Millisecond), 99, true)
 	}
-	_, err = r.advance(ctx, p.ID, 62, base.Add(71*time.Second), false, "A")
+	_, err = r.advance(ctx, p.ID, 62, base.Add(8*time.Minute), false, "A")
 	require.NoError(t, err)
-	require.Equal(t, "suspect", targetStates(t, ctx, r)["A"].Phase)
-	// Other-group successes cannot confirm this target's recovery.
-	for i := 0; i < 5; i++ {
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("wrong-recovery-%d", i), "A", 9, base.Add(131*time.Second+time.Duration(i)*time.Millisecond), 95, true)
-	}
-	_, err = r.advance(ctx, p.ID, 62, base.Add(132*time.Second), false, "A")
-	require.NoError(t, err)
-	require.Equal(t, "suspect", targetStates(t, ctx, r)["A"].Phase)
-	// Keep fresh >=85% cache batches throughout the recovery period. One batch
-	// and the mere passage of time cannot clear the soft allocation restriction.
-	for batch, offset := range []int{135, 175, 215, 256} {
-		for i := 0; i < 5; i++ {
-			insertGroupTargetUsage(t, db, r, fmt.Sprintf("recover-%d-%d", batch, i), "A", 8, base.Add(time.Duration(offset)*time.Second+time.Duration(i)*time.Millisecond), 95, true)
-		}
-		_, err = r.advance(ctx, p.ID, 62, base.Add(time.Duration(offset+1)*time.Second), false, "A")
-		require.NoError(t, err)
-		if batch < 3 {
-			require.Equal(t, "suspect", targetStates(t, ctx, r)["A"].Phase)
-		}
-	}
-	state := targetStates(t, ctx, r)["A"]
-	require.Equal(t, "healthy", state.Phase)
-	require.Equal(t, "cache_allocation_recovered", state.Reason)
-	require.Zero(t, state.Backoff)
+	require.Equal(t, "paused", targetStates(t, ctx, r)["A"].Phase)
 	var status string
 	var schedulable bool
 	require.NoError(t, db.QueryRow(`SELECT status,schedulable FROM accounts WHERE id=62`).Scan(&status, &schedulable))
@@ -137,7 +106,7 @@ func TestGroupQualityTargetFailureMembershipAndReplayIntegration(t *testing.T) {
 	base := time.Now().Add(-20 * time.Second)
 	_, err := db.Exec(`UPDATE passive_quality_policies SET updated_at=$2 WHERE id=$1`, p.ID, base.Add(-time.Second))
 	require.NoError(t, err)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 20; i++ {
 		at := base.Add(time.Duration(i) * time.Millisecond)
 		require.NoError(t, r.RecordFailures(ctx, []service.PassiveQualityFailure{{AccountID: 62, GroupID: 8, Model: "bad", RequestKey: fmt.Sprintf("bad-%d", i), StartedAt: at, At: at}, {AccountID: 62, GroupID: 9, Model: "other-failure", RequestKey: fmt.Sprintf("other-fail-%d", i), StartedAt: at, At: at}}, nil))
 		insertGroupTargetUsage(t, db, r, fmt.Sprintf("slow-%d", i), "slow", 8, at, 90, true)
@@ -148,7 +117,7 @@ func TestGroupQualityTargetFailureMembershipAndReplayIntegration(t *testing.T) {
 	require.NoError(t, err)
 	states := targetStates(t, ctx, r)
 	require.Len(t, states, 2)
-	require.Equal(t, "suspect", states["bad"].Phase)
+	require.Equal(t, "paused", states["bad"].Phase)
 	require.Equal(t, 100.0, *states["bad"].Evidence.ErrorRate)
 	require.Equal(t, "suspect", states["slow"].Phase)
 	require.Contains(t, states["slow"].Reason, "ttft_p90")

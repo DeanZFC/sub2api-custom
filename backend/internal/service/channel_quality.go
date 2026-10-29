@@ -46,7 +46,6 @@ type ChannelQualityAccount struct {
 	Platform        string                  `json:"platform"`
 	Status          string                  `json:"status"`
 	Schedulable     bool                    `json:"schedulable"`
-	QualityScore    *ChannelQualityScore    `json:"quality_score,omitempty"`
 	Controls        []ChannelQualityControl `json:"controls"`
 	ActivePlans     int                     `json:"active_plans"`
 	PassivePolicies int                     `json:"passive_policies"`

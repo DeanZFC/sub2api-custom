@@ -53,6 +53,7 @@ func TestScheduledTestCacheRecoveryIntegration(t *testing.T) {
 CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,extra JSONB DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT NOW(),deleted_at TIMESTAMPTZ);
 CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ,is_exclusive BOOLEAN DEFAULT FALSE,subscription_type TEXT DEFAULT 'standard');
 CREATE TABLE account_groups(account_id BIGINT,group_id BIGINT);
+CREATE TABLE passive_quality_policies(id BIGINT PRIMARY KEY,config JSONB NOT NULL DEFAULT '{}');
 CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE UNIQUE INDEX idx_recovery_outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL;
 INSERT INTO accounts(id,name) VALUES(62,'Recovery account');

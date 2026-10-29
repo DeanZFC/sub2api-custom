@@ -36,11 +36,9 @@
           <header class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-800/50" data-account-info>
             <div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 break-words"><h3 class="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{{ account.name }}</h3><p class="text-xs text-gray-500 dark:text-gray-400">{{ account.groupName }}</p></div>
             <div class="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-              <div class="min-w-0" :data-account-score="account.key.startsWith('account:') ? '' : undefined" data-account-model-controls>
-                <ChannelQualityScoreEvidence v-if="account.key.startsWith('account:')" :score="account.qualityScore" compact />
-                <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400" data-score-scope>
+              <div class="min-w-0" data-account-model-controls>
+                <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400" data-model-scope>
                   <span class="min-w-0 break-all">{{ selectedModel || '—' }}</span>
-                  <span v-if="account.key.startsWith('account:')">{{ t('tests.scoreScopeSource') }}</span>
                 </div>
               </div>
               <div v-if="account.schedulable != null" class="flex items-center gap-2" data-scheduling-status>
@@ -53,8 +51,8 @@
               </div>
             </div>
           </header>
-          <div class="min-w-0 p-3" :class="account.tests.some(test => test.latest.output_kind === 'html') ? 'grid grid-cols-1 items-start gap-3 md:grid-cols-2' : ''" data-account-tests>
-            <div v-if="account.tests.some(test => test.latest.output_kind !== 'html')" class="min-w-0 space-y-3" :class="account.tests.some(test => test.latest.output_kind === 'html') ? 'md:col-span-1' : ''" data-short-test-stack>
+          <div class="min-w-0 p-3" :class="account.tests.some(test => test.latest.output_kind === 'html') && account.tests.some(test => test.latest.output_kind !== 'html') ? ['grid grid-cols-1 items-start gap-3', account.tests.every(test => ['number', 'html'].includes(test.latest.output_kind)) ? 'xl:grid-cols-[minmax(20rem,1fr)_minmax(0,2fr)]' : 'xl:grid-cols-2'] : ''" data-account-tests>
+            <div v-if="account.tests.some(test => test.latest.output_kind !== 'html')" class="min-w-0 space-y-3" data-short-test-stack>
               <TestResultCard
                 v-for="test in account.tests.filter(test => test.latest.output_kind !== 'html')"
                 :key="test.key"
@@ -69,7 +67,7 @@
                 @decided="refreshAfterDecision"
               />
             </div>
-            <div v-if="account.tests.some(test => test.latest.output_kind === 'html')" class="min-w-0 space-y-3" :class="account.tests.some(test => test.latest.output_kind !== 'html') ? 'md:col-span-1' : 'md:col-span-2'" data-preview-test-stack>
+            <div v-if="account.tests.some(test => test.latest.output_kind === 'html')" class="min-w-0 space-y-3" data-preview-test-stack>
               <TestResultCard
                 v-for="test in account.tests.filter(test => test.latest.output_kind === 'html')"
                 :key="test.key"
@@ -120,7 +118,6 @@ import TestResultOutput from '@/components/tests/TestResultOutput.vue'
 import AdminTestDecision from '@/components/tests/AdminTestDecision.vue'
 import TestVoteCard from '@/components/tests/TestVoteCard.vue'
 import TestResultCard from '@/components/tests/TestResultCard.vue'
-import ChannelQualityScoreEvidence from '@/components/tests/ChannelQualityScoreEvidence.vue'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -299,9 +296,8 @@ const accountResults = computed(() => {
     const schedulable = states.includes(false) ? false : states.includes(true) ? true : undefined
     const modelStates = tests.map(test => test.latest.model_schedulable)
     const selectedModelSchedulable = modelStates.includes(false) ? false : modelStates.includes(true) ? true : undefined
-    const qualityScore = tests.find(test => test.latest.quality_score)?.latest.quality_score ?? undefined
     const rank = schedulable === false ? 3 : Math.max(...tests.map(test => resultRank(test.latest)))
-    return { ...account, tests, schedulable, selectedModelSchedulable, qualityScore, rank }
+    return { ...account, tests, schedulable, selectedModelSchedulable, rank }
   }).filter(account => account.tests.length > 0).sort((a, b) => a.rank - b.rank || a.order - b.order)
 })
 

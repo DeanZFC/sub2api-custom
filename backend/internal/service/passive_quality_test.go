@@ -65,19 +65,6 @@ func TestPassiveQualityValidation(t *testing.T) {
 	}
 }
 
-func TestGroupQualityTrafficModeValidation(t *testing.T) {
-	c := PassiveQualityConfig{
-		Purpose: "group_quality_target", RecoveryMode: "traffic", Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8},
-		CacheRate: PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85},
-	}
-	require.NoError(t, c.Validate())
-	require.Equal(t, "strict", c.TrafficMode, "existing group targets keep fail-closed admission by default")
-	c.TrafficMode = "availability"
-	require.NoError(t, c.Validate())
-	c.TrafficMode = "unsupported"
-	require.Error(t, c.Validate())
-}
-
 func TestPassiveQualityOptionalModel(t *testing.T) {
 	for _, scope := range []string{"", "model", "account"} {
 		c := passiveTestConfig()

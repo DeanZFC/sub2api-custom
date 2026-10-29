@@ -13,7 +13,7 @@ import (
 )
 
 func TestPassiveQualityTPSPopulationIntegration(t *testing.T) {
-	ctx, db, repo := passiveDB(t)
+	ctx, db, _ := passiveDB(t)
 	now := time.Now()
 	for _, sample := range []struct {
 		key              string
@@ -46,18 +46,6 @@ func TestPassiveQualityTPSPopulationIntegration(t *testing.T) {
 	require.NotNil(t, e.OutputTPS)
 	require.Equal(t, 20.0, *e.OutputTPS)
 	require.NoError(t, tx.Rollback())
-	seedScoreFixtureReports(t, db, now.Add(-time.Minute))
-	scores, err := repo.ChannelQualityScores(ctx, []int64{62}, "model")
-	require.NoError(t, err)
-	found := false
-	for _, dimension := range scores[62].Dimensions {
-		if dimension.Key == "tps" {
-			found = true
-			require.Equal(t, 2, dimension.Samples)
-			require.Equal(t, 20.0, *dimension.Value)
-		}
-	}
-	require.True(t, found)
 }
 
 func TestPassiveQualityTPSLimitAndRecoveryIntegration(t *testing.T) {

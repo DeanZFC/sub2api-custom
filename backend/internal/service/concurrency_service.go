@@ -284,8 +284,8 @@ func (s *ConcurrencyService) SetCacheRecoveryGate(gate AccountCacheRecoveryGate)
 // slot. Retrying the concurrency queue cannot resolve a quality/manual hold.
 var ErrAccountAdmissionDenied = errors.New("account admission denied by live scheduling or quality protection state")
 
-// Only consume trial capacity after reserving a concurrency slot. Saturated
-// queues may retry this method many times without sending an upstream request.
+// Reserve ordinary concurrency before checking live account protection. A denied
+// quality check must never become a customer-traffic recovery probe.
 func (s *ConcurrencyService) admitCacheRecoveryRequest(ctx context.Context, accountID int64, result *AcquireResult) (*AcquireResult, error) {
 	if result == nil || !result.Acquired {
 		return result, nil
@@ -297,48 +297,19 @@ func (s *ConcurrencyService) admitCacheRecoveryRequest(ctx context.Context, acco
 	if public, ok := RequestedPublicModelFromContext(ctx); ok && public != "" {
 		model = public
 	}
-	traffic, hasTraffic := GroupQualityTrafficRequestFromContext(ctx)
-	fallback, wantsFallback := GroupQualityFallbackFromContext(ctx)
-	fallbackGate, hasFallbackGate := s.passiveQualityGate.(GroupQualityFallbackLeaseGate)
-	if wantsFallback && (!hasTraffic || !hasFallbackGate || fallback.AccountID != accountID || fallback.GroupID != traffic.GroupID || fallback.Model != traffic.Model) {
-		allowed, err = false, ErrAccountAdmissionDenied
-	}
-	if hasTraffic && traffic.Model != "" {
+	if traffic, ok := GroupQualityTrafficRequestFromContext(ctx); ok && traffic.Model != "" {
 		model = traffic.Model
 	}
-	if err == nil && allowed && s.passiveQualityGate != nil {
+	if s.passiveQualityGate != nil {
 		lease = generateRequestID()
 		var reserved bool
 		allowed, reserved, err = s.passiveQualityGate.AcquirePassiveQuality(ctx, accountID, model, lease)
 		if !reserved && err == nil {
 			lease = ""
 		}
-	}
-	trafficGate, hasTrafficGate := s.passiveQualityGate.(GroupQualityTrafficGate)
-	trafficLease := ""
-	if err == nil && allowed && hasTraffic && hasTrafficGate {
-		trafficLease = generateRequestID()
-		var reserved bool
-		allowed, reserved, err = trafficGate.AcquireGroupQualityTraffic(ctx, accountID, model, trafficLease)
-		if !reserved && err == nil {
-			trafficLease = ""
-		}
 		if err == nil && !allowed {
-			err = ErrGroupQualityTrafficBudget
-			if wantsFallback {
-				// Fallback admission checks live supply and eligibility rather than
-				// the normal recovery token budget.
-				err = ErrAccountAdmissionDenied
-			}
+			err = ErrAccountQualityHeld
 		}
-	}
-	if err == nil && allowed && wantsFallback && trafficLease == "" {
-		allowed, err = false, ErrAccountAdmissionDenied
-	}
-	if err == nil && allowed && hasTraffic {
-		// The active-protection gate verifies this exact fallback lease before
-		// admitting a quality-paused account. No upstream has been sent yet.
-		bindGroupQualityTrafficLease(ctx, trafficGate, accountID, model, trafficLease)
 	}
 	if err == nil && allowed && s.cacheRecoveryGate != nil {
 		allowed, err = s.cacheRecoveryGate.AcquireCacheRecoveryRequest(ctx, accountID)
@@ -353,56 +324,25 @@ func (s *ConcurrencyService) admitCacheRecoveryRequest(ctx context.Context, acco
 			logger.LegacyPrintf("service.passive_quality", "release lease failed: %v", e)
 		}
 	}
-	releaseTraffic := func(unused bool) {
-		if trafficLease == "" {
-			return
-		}
-		release, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		if e := trafficGate.ReleaseGroupQualityTraffic(release, trafficLease, unused); e != nil {
-			logger.LegacyPrintf("service.group_quality", "release traffic lease failed: %v", e)
-		}
-	}
 	if err != nil || !allowed {
 		if result.ReleaseFunc != nil {
 			result.ReleaseFunc()
 		}
 		releasePassive(true)
-		releaseTraffic(true)
 		if err == nil {
 			err = ErrAccountAdmissionDenied
 		}
 		return &AcquireResult{}, err
 	}
-	var stopFallback func()
-	if wantsFallback {
-		stopFallback = startGroupQualityFallbackLease(ctx, fallbackGate, trafficLease, groupQualityFallbackRefreshInterval)
-		bindGroupQualityFallbackStop(ctx, trafficLease, stopFallback)
-	}
-	if trafficLease != "" {
-		var refundOnce sync.Once
-		result.refundUnusedTraffic = func() {
-			refundOnce.Do(func() {
-				if stopFallback != nil {
-					stopFallback()
-				}
-				releaseTraffic(true)
-			})
-		}
-	}
-	if lease != "" || trafficLease != "" {
+	if lease != "" {
 		previous := result.ReleaseFunc
 		var once sync.Once
 		result.ReleaseFunc = func() {
 			once.Do(func() {
-				if stopFallback != nil {
-					stopFallback()
-				}
 				if previous != nil {
 					previous()
 				}
 				releasePassive(false)
-				releaseTraffic(false)
 			})
 		}
 	}
@@ -465,12 +405,9 @@ func (s *ConcurrencyService) SetAccountLoadBatchCacheTTL(ttl time.Duration) {
 
 // AcquireResult represents the result of acquiring a concurrency slot
 type AcquireResult struct {
-	// Route validation can fail before forwarding and without a request context.
-	// Refund the exact admission before the ordinary release marks it used.
-	refundUnusedTraffic func()
-	ProxyID             int64 // Set only for a multi-proxy request; chosen atomically with its slot.
-	Acquired            bool
-	ReleaseFunc         func() // Must be called when done (typically via defer)
+	ProxyID     int64 // Set only for a multi-proxy request; chosen atomically with its slot.
+	Acquired    bool
+	ReleaseFunc func() // Must be called when done (typically via defer)
 }
 
 type AccountWithConcurrency struct {

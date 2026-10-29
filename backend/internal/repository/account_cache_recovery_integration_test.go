@@ -54,6 +54,9 @@ func TestAccountCacheRecoveryAdmissionIntegration(t *testing.T) {
 		require.NoError(t, err)
 	}
 	exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,deleted_at TIMESTAMPTZ,extra JSONB NOT NULL DEFAULT '{}');
+		CREATE TABLE groups(id BIGINT PRIMARY KEY,status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ);
+		CREATE TABLE account_groups(account_id BIGINT,group_id BIGINT);
+		CREATE TABLE passive_quality_policies(id BIGINT PRIMARY KEY,config JSONB NOT NULL DEFAULT '{}');
 		CREATE TABLE scheduled_test_protection_states(plan_id BIGINT,account_id BIGINT,test_definition_id BIGINT,blocked BOOLEAN NOT NULL DEFAULT TRUE,
 		 recovery_phase TEXT NOT NULL DEFAULT 'trial',recovery_trial_started_at TIMESTAMPTZ DEFAULT clock_timestamp()-INTERVAL '1 minute',
 		 recovery_trial_ends_at TIMESTAMPTZ DEFAULT clock_timestamp()+INTERVAL '1 hour',recovery_trial_requests BIGINT NOT NULL DEFAULT 0,rule_config JSONB NOT NULL,

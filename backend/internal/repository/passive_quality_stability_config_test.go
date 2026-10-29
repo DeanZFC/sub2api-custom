@@ -19,7 +19,7 @@ func TestGroupTargetStabilityDefaultsPreservePolicyEvidence(t *testing.T) {
 	unchanged, metadataOnly = passivePolicyChange(old, next)
 	require.False(t, unchanged)
 	require.True(t, metadataOnly)
-	for _, field := range []string{"availability", "performance", "recovery", "allocation"} {
+	for _, field := range []string{"availability", "performance", "recovery"} {
 		t.Run(field, func(t *testing.T) {
 			settings := old.GroupTargetStability()
 			switch field {
@@ -29,8 +29,6 @@ func TestGroupTargetStabilityDefaultsPreservePolicyEvidence(t *testing.T) {
 				settings.PerformancePauseSeconds++
 			case "recovery":
 				settings.RecoverySeconds++
-			case "allocation":
-				settings.NewSessionPercent++
 			}
 			changed := old
 			changed.Stability = &settings

@@ -221,7 +221,7 @@ export default {
   },
 
   tests: {
-    currentResult: 'Current result', scoreScopeSource: '· Real traffic', executionFailed: 'Execution failed',
+    currentResult: 'Current result', executionFailed: 'Execution failed',
     verdicts: { pass: 'Passed', fail: 'Failed', pending: 'Awaiting verdict' },
     currentScheduling: 'Account scheduling', schedulingActive: 'Active', schedulingPaused: 'Paused', failed: 'Failed', skipped: 'Skipped',
     currentModelScheduling: 'Selected model', modelSchedulingActive: 'Model available', modelSchedulingPaused: 'Model paused',

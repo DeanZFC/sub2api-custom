@@ -11,17 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func groupQualityBudgetTestAccount(id, groupID int64, normal bool) Account {
+func qualityAdmissionTestAccount(id, groupID int64) Account {
 	account := groupQualityRoutingTestAccount(id, groupID, 0, "insufficient")
 	account.Extra["openai_apikey_responses_websockets_v2_enabled"] = true
-	if !normal {
-		// Only an actual recovery trial can exhaust the validation allowance.
-		account.Extra["passive_quality"] = []any{map[string]any{"policy_id": float64(7), "scope": "model", "model": "public-model", "phase": "trial", "trial_ends_at": time.Now().Add(time.Hour).Format(time.RFC3339)}}
-	}
 	return account
 }
 
-func TestAPIKeyGroupFallback_QualityBudgetSelectionErrors(t *testing.T) {
+func TestAPIKeyGroupFallback_QualityHoldSelectionErrors(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		err  error
@@ -30,13 +26,13 @@ func TestAPIKeyGroupFallback_QualityBudgetSelectionErrors(t *testing.T) {
 		{"success", nil, false},
 		{"no accounts", ErrNoAvailableAccounts, true},
 		{"no compact accounts", ErrNoAvailableCompactAccounts, true},
-		{"quality budget", ErrGroupQualityTrafficBudget, true},
-		{"wrapped quality budget", fmt.Errorf("admission: %w", ErrGroupQualityTrafficBudget), true},
+		{"quality hold", ErrAccountQualityHeld, true},
+		{"wrapped quality hold", fmt.Errorf("admission: %w", ErrAccountQualityHeld), true},
 		{"live admission rejection", ErrAccountAdmissionDenied, false},
 		{"infrastructure failure", errors.New("database unavailable"), false},
 		{"cancellation", context.Canceled, false},
 		{"deadline", context.DeadlineExceeded, false},
-		{"message only", errors.New(ErrGroupQualityTrafficBudget.Error()), false},
+		{"message only", errors.New(ErrAccountQualityHeld.Error()), false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			primary, fallback := int64(43), int64(44)
@@ -67,7 +63,7 @@ func TestAPIKeyGroupFallback_QualityBudgetSelectionErrors(t *testing.T) {
 	}
 }
 
-func TestAPIKeyGroupFallback_QualityBudgetPreservesResponseOwner(t *testing.T) {
+func TestAPIKeyGroupFallback_QualityHoldPreservesResponseOwner(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		for _, transport := range []OpenAIUpstreamTransport{OpenAIUpstreamTransportHTTPSSE, OpenAIUpstreamTransportResponsesWebsocketV2} {
 			for _, canMove := range []bool{false, true} {
@@ -81,16 +77,16 @@ func TestAPIKeyGroupFallback_QualityBudgetPreservesResponseOwner(t *testing.T) {
 						FallbackGroup: &Group{ID: fallback, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true},
 					}
 					accounts := []Account{
-						groupQualityBudgetTestAccount(1, primary, false),
-						groupQualityBudgetTestAccount(2, fallback, true),
+						qualityAdmissionTestAccount(1, primary),
+						qualityAdmissionTestAccount(2, fallback),
 					}
-					gate := &groupQualityFallbackTestGate{normal: map[int64]bool{2: true}}
-					svc := groupQualityFallbackService(mode, accounts, gate)
+					gate := &qualityHoldTestGate{normal: map[int64]bool{2: true}}
+					svc := qualityHoldService(mode, accounts, gate)
 					// The shared scheduler cache fake ignores group IDs. Use the real
 					// in-memory store to keep response ownership scoped to its group.
 					svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
 					ctx := WithAPIKeyGroupFallbackRouting(GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{
-						Key: "continuation", GroupID: primary, Model: "public-model", EstimatedInput: 8192,
+						Key: "continuation", GroupID: primary, Model: "public-model",
 					}), key)
 					store := svc.getOpenAIWSStateStore()
 					require.NoError(t, store.BindResponseAccount(ctx, primary, "resp_primary_owner", 1, time.Hour))
@@ -104,7 +100,7 @@ func TestAPIKeyGroupFallback_QualityBudgetPreservesResponseOwner(t *testing.T) {
 						require.Equal(t, int64(44), *key.GroupID)
 						require.Contains(t, gate.groups, int64(44))
 					} else {
-						require.ErrorIs(t, err, ErrGroupQualityTrafficBudget)
+						require.ErrorIs(t, err, ErrAccountQualityHeld)
 						require.Nil(t, selection)
 						require.Equal(t, int64(43), *key.GroupID)
 						require.NotContains(t, gate.groups, int64(44), "incremental state must not move to a different credential")
@@ -118,24 +114,22 @@ func TestAPIKeyGroupFallback_QualityBudgetPreservesResponseOwner(t *testing.T) {
 	}
 }
 
-func TestAPIKeyGroupFallback_PrimaryQualityBudgetExhausted(t *testing.T) {
+func TestAPIKeyGroupFallback_PrimaryQualityHoldRejected(t *testing.T) {
 	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
 		for _, transport := range []OpenAIUpstreamTransport{OpenAIUpstreamTransportHTTPSSE, OpenAIUpstreamTransportResponsesWebsocketV2} {
 			for _, tt := range []struct {
 				name             string
 				primaryAllowed   bool
-				recoveryAllowed  bool
 				fallbackAllowed  bool
 				withoutFallback  bool
 				fallbackDisabled bool
 				wantAccount      int64
 				wantErr          error
 			}{
-				{name: "budget exhausted switches group", fallbackAllowed: true, wantAccount: 2},
+				{name: "quality held switches group", fallbackAllowed: true, wantAccount: 2},
 				{name: "unprotected primary wins", primaryAllowed: true, fallbackAllowed: true, wantAccount: 1},
-				{name: "primary recovery wins", recoveryAllowed: true, fallbackAllowed: true, wantAccount: 1},
-				{name: "both budgets exhausted", wantErr: ErrGroupQualityTrafficBudget},
-				{name: "no fallback configured", withoutFallback: true, fallbackAllowed: true, wantErr: ErrGroupQualityTrafficBudget},
+				{name: "both accounts held", wantErr: ErrAccountQualityHeld},
+				{name: "no fallback configured", withoutFallback: true, fallbackAllowed: true, wantErr: ErrAccountQualityHeld},
 				{name: "fallback hard gate retained", fallbackAllowed: true, fallbackDisabled: true, wantErr: ErrNoAvailableAccounts},
 			} {
 				t.Run(mode+"/"+string(transport)+"/"+tt.name, func(t *testing.T) {
@@ -152,18 +146,18 @@ func TestAPIKeyGroupFallback_PrimaryQualityBudgetExhausted(t *testing.T) {
 						key.FallbackGroup = nil
 					}
 					accounts := []Account{
-						groupQualityBudgetTestAccount(1, primary, tt.primaryAllowed),
-						groupQualityBudgetTestAccount(2, fallback, tt.fallbackAllowed),
+						qualityAdmissionTestAccount(1, primary),
+						qualityAdmissionTestAccount(2, fallback),
 					}
 					if tt.fallbackDisabled {
 						accounts[1].Status = StatusDisabled
 					}
-					gate := &groupQualityFallbackTestGate{
-						normal: map[int64]bool{1: tt.primaryAllowed, 2: tt.fallbackAllowed}, recovery: tt.recoveryAllowed,
+					gate := &qualityHoldTestGate{
+						normal: map[int64]bool{1: tt.primaryAllowed, 2: tt.fallbackAllowed},
 					}
-					svc := groupQualityFallbackService(mode, accounts, gate)
+					svc := qualityHoldService(mode, accounts, gate)
 					ctx := GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{
-						Key: "request", GroupID: primary, Model: "public-model", EstimatedInput: 8192,
+						Key: "request", GroupID: primary, Model: "public-model",
 					})
 					ctx = WithAPIKeyGroupFallbackRouting(ctx, key)
 					selection, _, err := svc.SelectAccountWithScheduler(ctx, key.GroupID, "", "", "public-model", nil, transport, false)
@@ -187,15 +181,13 @@ func TestAPIKeyGroupFallback_PrimaryQualityBudgetExhausted(t *testing.T) {
 							require.True(t, ok)
 							require.Equal(t, int64(44), traffic.GroupID)
 							require.Equal(t, "public-model", traffic.Model)
-							require.Equal(t, int64(8192), traffic.EstimatedInput)
-							require.Nil(t, selection.groupQualityFallback, "primary recovery authorization must not leak")
 						} else {
 							require.Equal(t, int64(43), *key.GroupID)
 							require.NotContains(t, gate.groups, int64(44))
 						}
 					}
 					require.Contains(t, gate.groups, int64(43))
-					if tt.wantAccount == 2 || tt.name == "both budgets exhausted" {
+					if tt.wantAccount == 2 || tt.name == "both accounts held" {
 						require.Contains(t, gate.groups, int64(44), "fallback must run its own quality admission")
 					}
 					sawFallback := false
@@ -204,6 +196,63 @@ func TestAPIKeyGroupFallback_PrimaryQualityBudgetExhausted(t *testing.T) {
 							require.Equal(t, int64(44), groupID, "must not loop back to the primary group")
 						}
 						sawFallback = sawFallback || groupID == 44
+					}
+				})
+			}
+		}
+	}
+}
+
+// A hold can be committed after passive admission but before final account
+// admission. The final gate must preserve the same routing/ownership behavior.
+func TestAPIKeyGroupFallback_FinalGateQualityHold(t *testing.T) {
+	for _, mode := range []string{"legacy", "legacy_nonbatch", "advanced"} {
+		for _, transport := range []OpenAIUpstreamTransport{OpenAIUpstreamTransportHTTPSSE, OpenAIUpstreamTransportResponsesWebsocketV2} {
+			for _, continuation := range []string{"new", "owner_bound", "replayable"} {
+				t.Run(mode+"/"+string(transport)+"/"+continuation, func(t *testing.T) {
+					resetOpenAIAdvancedSchedulerSettingCacheForTest()
+					defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+					primary, backup := int64(43), int64(44)
+					key := &APIKey{GroupID: &primary, FallbackGroupID: &backup,
+						Group:         &Group{ID: primary, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true},
+						FallbackGroup: &Group{ID: backup, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true}}
+					accounts := []Account{qualityAdmissionTestAccount(1, primary), qualityAdmissionTestAccount(2, backup)}
+					passive := &qualityHoldTestGate{normal: map[int64]bool{1: true, 2: true}}
+					gateway := qualityHoldService(mode, accounts, passive)
+					gateway.openaiWSStateStore = NewOpenAIWSStateStore(nil)
+					var checked []int64
+					gateway.concurrencyService.SetCacheRecoveryGate(cacheRecoveryGateFunc(func(_ context.Context, id int64) (bool, error) {
+						checked = append(checked, id)
+						if id == 1 {
+							return false, ErrAccountQualityHeld
+						}
+						return true, nil
+					}))
+					ctx := WithAPIKeyGroupFallbackRouting(GroupQualityTrafficContext(context.Background(), GroupQualityTrafficRequest{Key: "race", GroupID: primary, Model: "public-model"}), key)
+					previous := ""
+					if continuation != "new" {
+						previous = "resp_race_owner"
+						require.NoError(t, gateway.getOpenAIWSStateStore().BindResponseAccount(ctx, primary, previous, 1, time.Hour))
+					}
+					selection, _, err := gateway.SelectAccountWithSchedulerForCapability(ctx, &primary, previous, "", "public-model", nil, transport, OpenAIEndpointCapabilityResponses, false, continuation == "replayable", false)
+					if continuation == "owner_bound" {
+						require.ErrorIs(t, err, ErrAccountQualityHeld)
+						require.Nil(t, selection)
+						require.NotContains(t, checked, int64(2))
+						require.EqualValues(t, 43, *key.GroupID)
+					} else {
+						require.NoError(t, err)
+						require.NotNil(t, selection)
+						require.True(t, selection.Acquired)
+						require.EqualValues(t, 2, selection.Account.ID)
+						require.True(t, selection.UsedAPIKeyFallback)
+						selection.ReleaseFunc()
+					}
+					require.Contains(t, checked, int64(1), "test must reach the final gate after successful passive admission")
+					if previous != "" {
+						owner, err := gateway.getOpenAIWSStateStore().GetResponseAccount(ctx, 43, previous)
+						require.NoError(t, err)
+						require.EqualValues(t, 1, owner)
 					}
 				})
 			}

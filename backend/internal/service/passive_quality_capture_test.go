@@ -12,23 +12,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type qualityScoreCaptureRepo struct {
+type passiveQualityCaptureRepo struct {
 	PassiveQualityRepository
 	policies []PassiveQualityPolicy
 	err      error
 }
 
-func (r *qualityScoreCaptureRepo) ListPolicies(context.Context) ([]PassiveQualityPolicy, error) {
+func (r *passiveQualityCaptureRepo) ListPolicies(context.Context) ([]PassiveQualityPolicy, error) {
 	return r.policies, r.err
 }
-func (r *qualityScoreCaptureRepo) Sweep(context.Context, time.Time, int) ([]PassiveQualityState, error) {
+func (r *passiveQualityCaptureRepo) Sweep(context.Context, time.Time, int) ([]PassiveQualityState, error) {
 	return nil, nil
 }
-func (r *qualityScoreCaptureRepo) ChannelQualityScores(context.Context, []int64, string) (map[int64]*ChannelQualityScore, error) {
-	panic("telemetry collection must not depend on score calculation")
+func (r *passiveQualityCaptureRepo) RecordTelemetry(context.Context, []PassiveQualityFailure, []PassiveQualityTelemetryGap) error {
+	return nil
+}
+func (r *passiveQualityCaptureRepo) PrunePassiveQuality(context.Context) error {
+	return nil
 }
 
-func TestIndependentQualityScoringCapturesWithoutProtection(t *testing.T) {
+func TestPassiveQualityTelemetryCapturesWithoutProtection(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		policies []PassiveQualityPolicy
@@ -39,7 +42,7 @@ func TestIndependentQualityScoringCapturesWithoutProtection(t *testing.T) {
 		{name: "configuration unavailable", err: errors.New("database unavailable")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := &qualityScoreCaptureRepo{policies: tc.policies, err: tc.err}
+			repo := &passiveQualityCaptureRepo{policies: tc.policies, err: tc.err}
 			s := NewPassiveQualityService(repo, nil)
 			defer s.cancel()
 			s.sweepCycle()
@@ -63,7 +66,7 @@ func TestIndependentQualityScoringCapturesWithoutProtection(t *testing.T) {
 	}
 }
 
-func TestQualityScoreStartSurvivesAsyncUsageAcrossTurns(t *testing.T) {
+func TestPassiveQualityStartSurvivesAsyncUsageAcrossTurns(t *testing.T) {
 	for _, websocket := range []bool{false, true} {
 		name := "http"
 		if websocket {

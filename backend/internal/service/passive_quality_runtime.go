@@ -112,19 +112,19 @@ func (s *PassiveQualityService) sweepCycle() {
 	policies, err := s.Repo.ListPolicies(ctx)
 	cancel()
 	policyErr := err
-	// Independent scoring observes real traffic even when enforcement or scoring
-	// is switched off. Keeping its bounded telemetry warm avoids a false healthy
-	// window after enabling scoring, and decouples evidence from protection rules.
-	_, scoreTelemetry := s.Repo.(ChannelQualityScoreProvider)
+	// Keep bounded real-traffic evidence available for protection and recovery
+	// independently of the current policies. Collection capability belongs to the
+	// telemetry repository and does not depend on a quality calculation service.
+	_, telemetry := s.Repo.(PassiveQualityTelemetryRepository)
 	if err == nil {
-		enabled, cacheEnabled := scoreTelemetry, scoreTelemetry
+		enabled, cacheEnabled := telemetry, telemetry
 		for _, p := range policies {
 			enabled = enabled || p.Enabled
 			cacheEnabled = cacheEnabled || (p.Enabled && p.CacheRate.Enabled)
 		}
 		s.enabled.Store(enabled)
 		s.cacheEnabled.Store(cacheEnabled)
-	} else if scoreTelemetry {
+	} else if telemetry {
 		s.enabled.Store(true)
 		s.cacheEnabled.Store(true)
 	}
@@ -210,7 +210,7 @@ func (s *PassiveQualityService) maintenanceLoop() {
 	}
 }
 func (s *PassiveQualityService) probe(p PassiveQualityState) {
-	if p.ActiveRecoveryConfig != nil && p.ActiveRecoveryConfig.IsActiveRecovery() {
+	if p.Purpose == "group_quality_target" || p.Purpose == "cache_target" || (p.ActiveRecoveryConfig != nil && p.ActiveRecoveryConfig.IsActiveRecovery()) {
 		s.probeActiveRecovery(p)
 		return
 	}

@@ -129,16 +129,11 @@ func (r *passiveQualityRepository) SavePolicy(ctx context.Context, p *service.Pa
 func passivePolicyChange(old, next service.PassiveQualityConfig) (unchanged, metadataOnly bool) {
 	normalize := func(c service.PassiveQualityConfig) service.PassiveQualityConfig {
 		c.EvidenceStartedAt, c.EvaluationVersion = nil, 0
-		// traffic_mode was added after existing group-target policies. Treat an
-		// omitted value as the validated strict default so a no-op save does not
-		// reset evidence or holds merely because the field was introduced.
-		if c.IsGroupQualityTarget() && c.TrafficMode == "" {
-			c.TrafficMode = "strict"
-		}
-		if c.IsActiveRecovery() {
-			c.TrafficMode = "strict"
-		}
+		// Targets have one recovery mode. Metadata edits never reset evidence
+		// because serialized legacy routing fields were normalized.
 		if c.IsGroupQualityTarget() {
+			c.RecoveryMode, c.TrafficMode = "active", "strict"
+			c.TrialSeconds, c.TrialRequests, c.TrialConcurrency = 0, 0, 0
 			stability := c.GroupTargetStability()
 			c.Stability = &stability
 		}
@@ -303,17 +298,10 @@ func reconcilePassiveAccount(ctx context.Context, tx sqlExecutor, aid int64) err
  AND s.data->>'phase'<>'exempt' AND `+passiveMembership+`
  ), entries AS (
  SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name',
- 'scope',config->>'scope','model',COALESCE(data->>'model',config->>'model'),'phase',data->>'phase','reason',data->>'reason','recovery_mode',config->>'recovery_mode',
+ 'scope',config->>'scope','model',COALESCE(data->>'model',config->>'model'),'phase',data->>'phase','reason',data->>'reason','recovery_mode',CASE WHEN config->>'purpose' IN ('group_quality_target','cache_target') THEN 'active' ELSE config->>'recovery_mode' END,
  'trial_ends_at',data->'trial_ends_at','used',data->'used','max_requests',config->'trial_requests',
  'concurrency_limit',config->'concurrency_limit','priority_penalty',config->'priority_penalty') AS value
  FROM active WHERE data->>'phase' IN ('paused','probing','trial','limited')
- UNION ALL
- SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name','metric','performance',
- 'scope','model','model',COALESCE(data->>'model',config->>'model'),'phase','cache_limited','reason',data->>'reason',
- 'allocation_percent',COALESCE(config->'stability'->'new_session_percent','20'::jsonb))
- FROM active WHERE config->>'purpose' IN ('group_quality_target','cache_target') AND COALESCE(config->>'recovery_mode','')<>'active'
- AND (data->>'cache_allocation_reduced'='true' OR (data->>'phase'='suspect' AND COALESCE((data->>'hits')::int,0)>0
- AND data->>'confirmation_metric' IN ('cache_rate','ttft_p90','output_tps')))
  UNION ALL
  SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name','metric','ttft',
  'scope',config->>'scope','model',COALESCE(data->>'model',config->>'model'),'phase','limited','reason',data->'latency'->>'reason',
@@ -346,6 +334,19 @@ func reconcilePassiveAccount(ctx context.Context, tx sqlExecutor, aid int64) err
 		return err
 	}
 	return enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &aid, nil, nil)
+}
+
+// Verification is status evidence only and never grants a routing bypass.
+func groupQualityStateVerified(p service.PassiveQualityPolicy, s service.PassiveQualityState, now time.Time) bool {
+	if s.Version != p.DecisionVersion() || s.Phase != "healthy" || s.Model == "" || s.UpdatedAt.IsZero() || s.Evidence.Latest.IsZero() {
+		return false
+	}
+	from := now.Add(-time.Duration(p.WindowSeconds) * time.Second)
+	if s.UpdatedAt.Before(from) || s.Evidence.Latest.Before(from) {
+		return false
+	}
+	verdict, _ := service.EvaluatePassiveQuality(p.PassiveQualityConfig, s.Evidence, false)
+	return verdict == "pass"
 }
 
 // Project target evidence for status reporting. Verification does not change
@@ -383,7 +384,7 @@ func reconcileGroupQualityTargets(ctx context.Context, tx sqlExecutor, aid int64
 			until = e
 		}
 		entries = append(entries, map[string]any{"policy_id": p.ID, "group_id": p.GroupIDs[0], "model": state.Model, "phase": state.Phase,
-			"recovery_mode": p.RecoveryMode,
+			"recovery_mode": "active",
 			"verified":      groupQualityStateVerified(p, state, now), "verified_until": until.UTC().Format(time.RFC3339Nano)})
 	}
 	err = rows.Err()

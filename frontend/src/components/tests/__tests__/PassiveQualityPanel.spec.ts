@@ -24,14 +24,14 @@ const makeWrapper = () => mount(PassiveQualityPanel, { global: {
 beforeEach(() => { vi.resetAllMocks(); api.policies.mockResolvedValue([]); api.states.mockResolvedValue([]); api.events.mockResolvedValue([]); api.statePage.mockImplementation(async () => ({ items: await api.states(), total: (await api.states()).length, has_more: false })); api.eventPage.mockImplementation(async () => ({ items: await api.events(), has_more: false })); api.stateSummary.mockResolvedValue(emptyPassiveSummary()); api.models.mockResolvedValue(['model']); api.save.mockResolvedValue({}) })
 afterEach(() => vi.useRealTimers())
 describe('passive quality records', () => {
-  it('labels group target records as actual cache and starts a real-traffic trial', async () => {
-    const state = { purpose: 'group_quality_target', policy_id: 7, policy_name: 'Group targets', account_id: 62, model: 'A', scope: 'model', mode: 'enforce', phase: 'paused', reason: 'group_target_trial', used: 0, inflight: 0, other_hold: false, evidence: { samples: 10, failures: 2, error_rate: 20, ttft: 1000, ttft_samples: 10, cache_rate: 0, cache_samples: 10, complete: true } }
+  it('labels group target records as actual cache and requests system recovery without customer trial', async () => {
+    const state = { purpose: 'group_quality_target', policy_id: 7, policy_name: 'Group targets', account_id: 62, model: 'A', scope: 'model', mode: 'enforce', phase: 'paused', reason: 'active_recovery_pending', used: 0, inflight: 0, other_hold: false, evidence: { samples: 10, failures: 2, error_rate: 20, ttft: 1000, ttft_samples: 10, cache_rate: 0, cache_samples: 10, complete: true } }
     api.states.mockResolvedValue([state])
     const wrapper = makeWrapper(); await flushPromises()
     expect(wrapper.text()).toContain('Group quality protection')
     expect(wrapper.text()).toContain('Actual cache usage: 0%')
     expect(wrapper.text()).toContain('Availability: 80%')
-    await wrapper.findAll('button').find(button => button.text() === 'Start recovery trial')!.trigger('click'); await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Run active recovery checks')!.trigger('click'); await flushPromises()
     expect(api.act).toHaveBeenCalledWith(state, 'verify', 0)
     wrapper.unmount()
   })
@@ -84,7 +84,7 @@ describe('passive quality records', () => {
     expect(wrapper.text()).toContain('Another manual, active quality or rate limit hold exists');expect(wrapper.text()).toContain('—')
     expect(wrapper.text()).toContain('All models')
     expect(wrapper.text()).toContain('Recovery probe model: observed-model')
-    await wrapper.findAll('button').find(b => b.text() === 'Verify now')!.trigger('click');await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'Run active recovery checks')!.trigger('click');await flushPromises()
     expect(api.act).toHaveBeenCalledWith(state, 'verify', 0)
     await wrapper.findAll('button').find(b => b.text() === 'Temporary exemption')!.trigger('click')
     await wrapper.get('[data-dialog] input[type="number"]').setValue(15)
@@ -104,7 +104,7 @@ describe('passive quality records', () => {
     const rows = wrapper.findAll('tbody tr')
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('model-a'); expect(rows[1].text()).toContain('model-b')
-    await rows[1].findAll('button').find(button => button.text() === 'Verify now')!.trigger('click'); await flushPromises()
+    await rows[1].findAll('button').find(button => button.text() === 'Run active recovery checks')!.trigger('click'); await flushPromises()
     expect(api.act).toHaveBeenCalledWith(b, 'verify', 0)
     await wrapper.findAll('tbody tr')[0].findAll('button').find(button => button.text() === 'Temporary exemption')!.trigger('click')
     expect(wrapper.get('[data-dialog]').text()).toContain('only model “model-a”')
