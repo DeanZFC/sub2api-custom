@@ -10,7 +10,7 @@ import (
 
 func independentObservedGroupTarget(t *testing.T) service.PassiveQualityPolicy {
 	t.Helper()
-	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", Name: "independent target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85}}}
+	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", RecoveryMode: "traffic", Name: "independent target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85}}}
 	p.Stability = &service.GroupQualityStability{NewSessionPercent: 20}
 	require.NoError(t, p.Validate())
 	return p

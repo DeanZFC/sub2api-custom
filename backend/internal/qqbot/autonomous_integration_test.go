@@ -250,6 +250,100 @@ func TestAutonomousDirectNameUsesNormalQuotaAndProtocol(t *testing.T) {
 	require.Equal(t, "replied", h.job(t, "responses").DecisionReason)
 	require.Contains(t, h.sent.Load(), "qqbot-at-user")
 }
+
+func TestAutonomousNameAnywhereUsesNormalChat(t *testing.T) {
+	h := newAutoHarness(t)
+	h.c.HistoryMessages = 0
+	h.c.Autonomous.Names = []string{"CTAV", "小爱"}
+	h.c.Autonomous.DailyCalls = 0
+	h.c.Autonomous.DailyReplies = 0
+	h.c.Autonomous.HourlyReplies = 0
+	h.c.Autonomous.MinMessages = 100
+	h.c.Autonomous.StartHour = (time.Now().In(time.FixedZone("Asia/Shanghai", 8*3600)).Hour() + 12) % 24
+	h.c.Autonomous.EndHour = (h.c.Autonomous.StartHour + 1) % 24
+	h.save(t)
+	h.output.Store("普通回答")
+	for i, text := range []string{"今天CTAV不错", "这个问题想让cTaV看看", "CTAV", "小爱", "小爱", "小爱 看看 https://example.com"} {
+		id := fmt.Sprintf("name-%d", i)
+		p := h.enqueue(t, id, text, "alice")
+		require.Equal(t, "event", h.job(t, id).Kind)
+		require.Equal(t, "name", h.job(t, id).TriggerReason)
+		// Redelivery does not repeat the reply, while a new message containing
+		// exactly the same nickname is still an explicit request.
+		require.NoError(t, h.s.Enqueue(context.Background(), h.c, p))
+		h.run()
+		h.run()
+		require.EqualValues(t, i+1, h.calls.Load())
+		require.EqualValues(t, i+1, h.sends.Load())
+		require.Contains(t, h.sent.Load(), "普通回答")
+		require.Contains(t, h.sent.Load(), "qqbot-at-user")
+	}
+	var count int
+	require.NoError(t, h.db.QueryRow(`SELECT count FROM qq_bot_daily_usage WHERE scope='member:alice' AND kind='chat'`).Scan(&count))
+	require.Equal(t, 6, count)
+
+	// Name calls still consume the ordinary personal chat allowance.
+	h.c.DailyChatLimit = count
+	h.save(t)
+	h.enqueue(t, "limited", "小爱", "alice")
+	h.run()
+	require.EqualValues(t, count, h.calls.Load())
+}
+
+func TestAutonomousNameWithQuoteMentionOrAttachment(t *testing.T) {
+	for _, mode := range []string{"quote", "mention", "attachment", "elements"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newAutoHarness(t)
+			h.c.HistoryMessages = 0
+			h.save(t)
+			h.output.Store("普通回答")
+			e := Event{ID: "name", GroupID: "group", Content: "这个问题想让CTAV看看"}
+			e.Author.MemberID = "alice"
+			switch mode {
+			case "quote":
+				e.MessageReference.MessageID = "member-message"
+			case "mention":
+				e.Content = "<@other-member> 这个问题想让CTAV看看"
+				e.Mentions = []Mention{{MemberID: "other-member"}}
+			case "attachment":
+				e.Attachments = []Attachment{{ContentType: "application/pdf"}}
+			case "elements":
+				e.Content = ""
+				e.MsgElements = []MessageElement{{Content: "这个问题想让CTAV看看"}}
+			}
+			raw, err := json.Marshal(e)
+			require.NoError(t, err)
+			p := Payload{ID: e.ID, Type: groupMessageCreate, Data: raw}
+			require.NoError(t, h.s.Enqueue(context.Background(), h.c, p))
+			require.Equal(t, "name", h.job(t, e.ID).TriggerReason)
+			h.run()
+			require.EqualValues(t, 1, h.calls.Load())
+			require.EqualValues(t, 1, h.sends.Load())
+		})
+	}
+}
+
+func TestAutonomousNameStillRequiresEnabledGroup(t *testing.T) {
+	for _, mode := range []string{"disabled", "other_group"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newAutoHarness(t)
+			h.c.HistoryMessages = 0
+			if mode == "disabled" {
+				h.c.Autonomous.Enabled = false
+			} else {
+				h.c.Autonomous.Groups = []string{"other-group"}
+			}
+			h.save(t)
+			h.enqueue(t, "name", "这个问题想让CTAV看看", "alice")
+			h.run()
+			var count int
+			require.NoError(t, h.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs`).Scan(&count))
+			require.Zero(t, count)
+			require.Zero(t, h.calls.Load())
+		})
+	}
+}
+
 func TestAutonomousAtomicReservationsAndReplay(t *testing.T) {
 	h := newAutoHarness(t)
 	h.enqueue(t, "one", "这个错误怎么处理？", "alice")

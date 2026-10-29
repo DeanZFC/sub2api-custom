@@ -128,6 +128,9 @@ func groupQualityFallbackAccount(ctx context.Context, account *Account, requeste
 	if !ok || account == nil || req.AccountID != account.ID || req.Model != passiveQualityRoutingModel(ctx, requestedModel) || !openAIStickyAccountMatchesGroup(account, &req.GroupID) {
 		return account
 	}
+	if groupQualityRequiresActiveRecovery(account, req.Model) {
+		return account
+	}
 	adjusted := *account
 	adjusted.Extra = GroupQualityFallbackExtra(account.Extra, req.Model)
 	if adjusted.Schedulable && adjusted.Status == "quality_paused" {
@@ -229,6 +232,15 @@ func (s *OpenAIGatewayService) selectGroupQualityFallback(ctx context.Context, r
 		return nil, originalErr
 	}
 	ctx = withPassiveQualityRoutingModel(withoutGroupQualityFallback(ctx), req.RequestedModel)
+	if gate, ok := s.concurrencyService.passiveQualityGate.(GroupQualityActiveRecoveryGate); ok {
+		active, err := gate.GroupQualityActiveRecoveryEnabled(ctx, *req.GroupID, passiveQualityRoutingModel(ctx, req.RequestedModel))
+		if err != nil {
+			return nil, err
+		}
+		if active {
+			return nil, originalErr
+		}
+	}
 	var profitErr error
 	ctx, profitErr = s.withGroupQualityFallbackProfitControl(ctx, req.GroupID)
 	if profitErr != nil {

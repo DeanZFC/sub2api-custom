@@ -195,6 +195,9 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 		if err = s.rememberIncomingImages(ctx, c, e); err != nil {
 			return err
 		}
+		if p.Type == groupMessageCreate && c.autonomousGroup(e.GroupID) && botNameCall(c.Autonomous, e) {
+			return s.routeAutonomous(ctx, c, p, e, true)
+		}
 		if p.Type == groupMessageCreate && !unmentionedGroupCommand(e, c.CustomCommands...) && len(groupMentionIDs(e)) == 0 {
 			ref, lookupErr := s.referencedMessage(ctx, c, e.GroupID, e.referenceID())
 			if lookupErr != nil {

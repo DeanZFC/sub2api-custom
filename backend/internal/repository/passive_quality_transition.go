@@ -14,6 +14,10 @@ func advancePassiveObserved(p service.PassiveQualityPolicy, s *service.PassiveQu
 		s.ProbeModel = e.ProbeModel
 	}
 	if p.IsGroupQualityTarget() {
+		if p.IsActiveRecovery() {
+			advanceActiveGroupTarget(p, s, e, now)
+			return
+		}
 		advanceGroupTargetStable(p, s, e, now)
 		return
 	}

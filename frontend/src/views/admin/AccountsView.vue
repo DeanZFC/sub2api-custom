@@ -339,6 +339,9 @@
               :requests="recentRequestsByAccountId[String(row.id)] ?? []"
               :loading="recentRequestsLoadingByAccountId[String(row.id)] === true"
               :load-error="recentRequestsErrorByAccountId[String(row.id)] === true"
+              :statistics="recentStatisticsByAccountId[String(row.id)] ?? null"
+              :statistics-loading="recentStatisticsLoadingByAccountId[String(row.id)] === true"
+              :statistics-load-error="recentStatisticsErrorByAccountId[String(row.id)] === true"
             />
           </template>
           <template #cell-status="{ row }">
@@ -607,7 +610,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
-import type { OpsRequestDetail } from '@/api/admin/ops'
+import type { OpsAccountRequestStats, OpsRequestDetail } from '@/api/admin/ops'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const { t } = useI18n()
@@ -834,7 +837,11 @@ const usageManualRefreshToken = ref(0)
 const recentRequestsByAccountId = ref<Record<string, OpsRequestDetail[]>>({})
 const recentRequestsLoadingByAccountId = ref<Record<string, boolean>>({})
 const recentRequestsErrorByAccountId = ref<Record<string, boolean>>({})
+const recentStatisticsByAccountId = ref<Record<string, OpsAccountRequestStats>>({})
+const recentStatisticsLoadingByAccountId = ref<Record<string, boolean>>({})
+const recentStatisticsErrorByAccountId = ref<Record<string, boolean>>({})
 let recentRequestsReqSeq = 0
+let recentRequestsInFlightKey: string | null = null
 let recentRequestsRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 const desktopViewportQuery = '(min-width: 768px)'
@@ -1287,57 +1294,108 @@ const resetAutoRefreshCache = () => {
   upstreamBillingRateETag.value = null
 }
 
-const refreshRecentRequests = async () => {
-  const rows = accounts.value
-  const requestSeq = ++recentRequestsReqSeq
-  if (!isColumnVisible('recent_requests') || rows.length === 0) {
-    // Keep the last successful snapshot during background refreshes.
-    recentRequestsLoadingByAccountId.value = {}
-    return
-  }
-
-  const visibleIDs = new Set(rows.map(row => String(row.id)))
-  const initialRows = rows.filter(row => {
-    const id = String(row.id)
-    return recentRequestsByAccountId.value[id] === undefined && !recentRequestsErrorByAccountId.value[id]
-  })
-  if (initialRows.length) {
-    recentRequestsLoadingByAccountId.value = Object.fromEntries(initialRows
-      .map(row => [String(row.id), true]))
-  }
-  const results = await Promise.allSettled(rows.map(async row => {
-    const response = await adminAPI.ops.listRequestDetails({
-      account_id: row.id,
-      time_range: '24h',
-      kind: 'all',
-      sort: 'created_at_desc',
-      page: 1,
-      page_size: 20
-    })
-    return [String(row.id), response.items.slice(0, 20)] as const
+const refreshRecentStatistics = async (rows: AccountListItem[], requestSeq: number) => {
+  recentStatisticsLoadingByAccountId.value = Object.fromEntries(rows
+    .filter(row => !recentStatisticsByAccountId.value[String(row.id)])
+    .map(row => [String(row.id), true]))
+  // Aggregate the full hour on the server, including requests beyond the ten indicators.
+  const batches = Array.from({ length: Math.ceil(rows.length / 100) }, (_, index) => rows.slice(index * 100, (index + 1) * 100))
+  const results = await Promise.allSettled(batches.map(async batch => {
+    return adminAPI.ops.getAccountRequestStatsBatch(batch.map(row => row.id))
   }))
-
   if (requestSeq !== recentRequestsReqSeq) return
-  const next: Record<string, OpsRequestDetail[]> = { ...recentRequestsByAccountId.value }
-  const nextErrors: Record<string, boolean> = { ...recentRequestsErrorByAccountId.value }
+  const visibleIDs = new Set(accounts.value.map(row => String(row.id)))
+  const next = { ...recentStatisticsByAccountId.value }
+  const nextErrors = { ...recentStatisticsErrorByAccountId.value }
   results.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      next[result.value[0]] = result.value[1]
-      delete nextErrors[result.value[0]]
-    } else {
-      const rowID = String(rows[index]?.id ?? '')
-      if (rowID) nextErrors[rowID] = true
+    for (const row of batches[index] ?? []) {
+      const id = String(row.id)
+      const statistics = result.status === 'fulfilled' ? result.value?.stats?.[id] : undefined
+      if (statistics) {
+        next[id] = statistics
+        delete nextErrors[id]
+      } else {
+        nextErrors[id] = true
+      }
     }
   })
   const filtered = Object.fromEntries(Object.entries(next).filter(([key]) => visibleIDs.has(key)))
   const filteredErrors = Object.fromEntries(Object.entries(nextErrors).filter(([key]) => visibleIDs.has(key)))
-  // Vue preserves unchanged child subtrees when the array reference is stable.
-  const changed = JSON.stringify(filtered) !== JSON.stringify(recentRequestsByAccountId.value)
-  if (changed) recentRequestsByAccountId.value = filtered
-  if (JSON.stringify(filteredErrors) !== JSON.stringify(recentRequestsErrorByAccountId.value)) {
-    recentRequestsErrorByAccountId.value = filteredErrors
+  if (JSON.stringify(filtered) !== JSON.stringify(recentStatisticsByAccountId.value)) {
+    recentStatisticsByAccountId.value = filtered
   }
-  recentRequestsLoadingByAccountId.value = {}
+  if (JSON.stringify(filteredErrors) !== JSON.stringify(recentStatisticsErrorByAccountId.value)) {
+    recentStatisticsErrorByAccountId.value = filteredErrors
+  }
+  recentStatisticsLoadingByAccountId.value = {}
+}
+
+const refreshRecentRequests = async () => {
+  const rows = accounts.value
+  const visible = isColumnVisible('recent_requests') && rows.length > 0
+  const refreshKey = rows.map(row => row.id).join(',')
+  // A slow response must be allowed to finish before the next poll for the same rows.
+  // Changing the visible accounts still starts a fresh query and invalidates older results.
+  if (visible && recentRequestsInFlightKey === refreshKey) return
+  const requestSeq = ++recentRequestsReqSeq
+  if (!visible) {
+    recentRequestsInFlightKey = null
+    recentRequestsLoadingByAccountId.value = {}
+    recentStatisticsLoadingByAccountId.value = {}
+    return
+  }
+  recentRequestsInFlightKey = refreshKey
+  try {
+    const initialRows = rows.filter(row => {
+      const id = String(row.id)
+      return recentRequestsByAccountId.value[id] === undefined && !recentRequestsErrorByAccountId.value[id]
+    })
+    if (initialRows.length) {
+      recentRequestsLoadingByAccountId.value = Object.fromEntries(initialRows
+        .map(row => [String(row.id), true]))
+    }
+    // Publish either source as soon as it finishes, independently of the other.
+    const statisticsPromise = refreshRecentStatistics(rows, requestSeq)
+    const results = await Promise.allSettled(rows.map(async row => {
+      const response = await adminAPI.ops.listRequestDetails({
+        account_id: row.id,
+        time_range: '24h',
+        kind: 'all',
+        sort: 'created_at_desc',
+        page: 1,
+        page_size: 10
+      })
+      return [String(row.id), response.items.slice(0, 10)] as const
+    }))
+
+    if (requestSeq === recentRequestsReqSeq) {
+      const visibleIDs = new Set(accounts.value.map(row => String(row.id)))
+      const next: Record<string, OpsRequestDetail[]> = { ...recentRequestsByAccountId.value }
+      const nextErrors: Record<string, boolean> = { ...recentRequestsErrorByAccountId.value }
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          next[result.value[0]] = result.value[1]
+          delete nextErrors[result.value[0]]
+        } else {
+          const rowID = String(rows[index]?.id ?? '')
+          if (rowID) nextErrors[rowID] = true
+        }
+      })
+      const filtered = Object.fromEntries(Object.entries(next).filter(([key]) => visibleIDs.has(key)))
+      const filteredErrors = Object.fromEntries(Object.entries(nextErrors).filter(([key]) => visibleIDs.has(key)))
+      // Vue preserves unchanged child subtrees when the array reference is stable.
+      if (JSON.stringify(filtered) !== JSON.stringify(recentRequestsByAccountId.value)) {
+        recentRequestsByAccountId.value = filtered
+      }
+      if (JSON.stringify(filteredErrors) !== JSON.stringify(recentRequestsErrorByAccountId.value)) {
+        recentRequestsErrorByAccountId.value = filteredErrors
+      }
+      recentRequestsLoadingByAccountId.value = {}
+    }
+    await statisticsPromise
+  } finally {
+    if (requestSeq === recentRequestsReqSeq) recentRequestsInFlightKey = null
+  }
 }
 
 type AccountLoadOptions = {
@@ -1586,6 +1644,15 @@ watch(accounts, (rows) => {
   )
   recentRequestsErrorByAccountId.value = Object.fromEntries(
     Object.entries(recentRequestsErrorByAccountId.value).filter(([key]) => visibleIDs.has(key))
+  )
+  recentStatisticsByAccountId.value = Object.fromEntries(
+    Object.entries(recentStatisticsByAccountId.value).filter(([key]) => visibleIDs.has(key))
+  )
+  recentStatisticsLoadingByAccountId.value = Object.fromEntries(
+    Object.entries(recentStatisticsLoadingByAccountId.value).filter(([key]) => visibleIDs.has(key))
+  )
+  recentStatisticsErrorByAccountId.value = Object.fromEntries(
+    Object.entries(recentStatisticsErrorByAccountId.value).filter(([key]) => visibleIDs.has(key))
   )
   usageBatchByAccountId.value = Object.fromEntries(
     Object.entries(usageBatchByAccountId.value).filter(([key]) => visibleIDs.has(key))

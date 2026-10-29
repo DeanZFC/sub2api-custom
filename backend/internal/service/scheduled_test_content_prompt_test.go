@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -125,13 +127,58 @@ func TestScheduledContentInstructionsOnGrokPreserveConnectivityProbe(t *testing.
 	require.EqualValues(t, 32768, gjson.GetBytes(body, "max_output_tokens").Int())
 	require.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String())
 
-	result, err = svc.RunTestBackgroundWithPromptAndReasoning(context.Background(), account.ID, "grok-4.5", "", "")
+	result, err = svc.RunTestBackgroundWithPromptAndReasoning(withScheduledTestOutputKind(context.Background(), "capability"), account.ID, "grok-4.5", "Reply with seven.", "")
 	require.NoError(t, err)
 	require.Equal(t, "success", result.Status, result.ErrorMessage)
 	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "Reply with seven.", gjson.GetBytes(upstream.requests[1].body, "input.0.content.0.text").String())
+
+	result, err = svc.RunTestBackgroundWithPromptAndReasoning(context.Background(), account.ID, "grok-4.5", "", "")
+	require.NoError(t, err)
+	require.Equal(t, "success", result.Status, result.ErrorMessage)
+	require.Len(t, upstream.requests, 3)
 	probe, err := buildGrokQuotaProbeBody("grok-4.5")
 	require.NoError(t, err)
-	require.JSONEq(t, string(probe), string(upstream.requests[1].body))
+	require.JSONEq(t, string(probe), string(upstream.requests[2].body))
+}
+
+func TestScheduledBedrockCustomPromptUsesOnlyActualModelText(t *testing.T) {
+	const prompt = "Return two short words."
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{"empty", `[]`, ""},
+		{"multiple text blocks", `[{"type":"text","text":"hello "},{"type":"text","text":"world"}]`, "hello world"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := &Account{ID: 12, Platform: PlatformAnthropic, Type: AccountTypeBedrock, Status: StatusActive, Concurrency: 1,
+				Credentials: map[string]any{"auth_mode": "apikey", "api_key": "test", "aws_region": "us-east-1"}}
+			upstream := &outputBudgetUpstream{body: `{"content":` + tc.content + `,"stop_reason":"end_turn"}`}
+			svc := &AccountTestService{accountRepo: &modelIdentityAccountRepo{account: account}, httpUpstream: upstream, cfg: &config.Config{}}
+			result, err := svc.RunTestBackgroundWithPromptAndReasoning(withScheduledTestOutputKind(context.Background(), "capability"), account.ID, "claude-sonnet-4-6", prompt, "")
+			require.NoError(t, err)
+			require.Equal(t, "success", result.Status, result.ErrorMessage)
+			require.Equal(t, tc.want, result.ResponseText)
+			require.Equal(t, prompt, gjson.GetBytes(upstream.requests[0].body, "messages.0.content.0.text").String())
+			if tc.want == "" {
+				require.NotContains(t, result.ResponseText, "(empty response)")
+			}
+		})
+	}
+}
+
+func TestBedrockInteractiveEmptyResponseKeepsPlaceholder(t *testing.T) {
+	account := &Account{ID: 12, Platform: PlatformAnthropic, Type: AccountTypeBedrock, Status: StatusActive, Concurrency: 1,
+		Credentials: map[string]any{"auth_mode": "apikey", "api_key": "test", "aws_region": "us-east-1"}}
+	upstream := &outputBudgetUpstream{body: "{\"content\":[],\"stop_reason\":\"end_turn\"}"}
+	svc := &AccountTestService{accountRepo: &modelIdentityAccountRepo{account: account}, httpUpstream: upstream, cfg: &config.Config{}}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/test", nil)
+	require.NoError(t, svc.TestAccountConnection(c, account.ID, "claude-sonnet-4-6", "", AccountTestModeDefault))
+	text, errText := parseTestSSEOutput(recorder.Body.String())
+	require.Empty(t, errText)
+	require.Equal(t, "(empty response)", text)
 }
 
 func TestScheduledContentInstructionsOnAntigravityTransport(t *testing.T) {

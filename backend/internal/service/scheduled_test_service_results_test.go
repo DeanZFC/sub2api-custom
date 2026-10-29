@@ -23,19 +23,27 @@ func (r scheduledTestReadResultsStub) ListVisible(context.Context, int64, int) (
 	return r.rows, nil
 }
 
+func (r scheduledTestReadResultsStub) ListVisibleWithRecentResults(context.Context, int64, int) ([]*ScheduledTestResult, error) {
+	return r.rows, nil
+}
+
 func (r scheduledTestReadResultsStub) ListVisibleHistory(context.Context, int64, int64, int64, int) ([]*ScheduledTestResult, error) {
 	return r.rows, nil
 }
 
 func TestScheduledTestPublicResultsHideUpstreamErrors(t *testing.T) {
-	for _, view := range []string{"list", "history"} {
+	for _, view := range []string{"list", "history", "recent"} {
 		t.Run(view, func(t *testing.T) {
 			row := &ScheduledTestResult{ID: 1, Status: "failed", OutputKind: "text", ResponseText: "partial output", ErrorMessage: "private upstream diagnostic"}
 			svc := NewScheduledTestService(nil, scheduledTestReadResultsStub{rows: []*ScheduledTestResult{row, nil}})
 			var rows []*ScheduledTestResult
-			if view == "list" {
+			if view != "history" {
 				var err error
-				rows, err = svc.ListVisibleResults(context.Background(), 1, 20)
+				list := svc.ListVisibleResults
+				if view == "recent" {
+					list = svc.ListVisibleResultsWithRecentResults
+				}
+				rows, err = list(context.Background(), 1, 4)
 				require.NoError(t, err)
 			} else {
 				page, err := svc.ListVisibleResultHistory(context.Background(), 1, 1, 0, 20)
@@ -61,7 +69,7 @@ func TestScheduledTestResultJSONPreservesZeroSortOrder(t *testing.T) {
 }
 
 func TestScheduledTestListRepairsLegacyNumericDisplayFromResponse(t *testing.T) {
-	for _, view := range []string{"admin", "user"} {
+	for _, view := range []string{"admin", "user", "recent"} {
 		t.Run(view, func(t *testing.T) {
 			oldValue, storedOnly := 1.0, 42.0
 			body := "最少取出 **29个**。\n\n1. 第一种情况最多取出 7 个。\n2. 第二种情况最多取出 9 个。\n保证至少 1 个符合要求。"
@@ -74,8 +82,11 @@ func TestScheduledTestListRepairsLegacyNumericDisplayFromResponse(t *testing.T) 
 			}
 			svc := NewScheduledTestService(nil, scheduledTestReadResultsStub{rows: rows})
 			list := svc.ListResults
-			if view == "user" {
+			switch view {
+			case "user":
 				list = svc.ListVisibleResults
+			case "recent":
+				list = svc.ListVisibleResultsWithRecentResults
 			}
 			got, err := list(context.Background(), 1, 10)
 			require.NoError(t, err)
@@ -109,7 +120,7 @@ func TestScheduledTestListRepairsLegacyHTMLDisplay(t *testing.T) {
 	require.NoError(t, err)
 	transcript := "Creating the animation. to=terminal.exec code:\n" + command.String() + "The file is ready."
 
-	for _, view := range []string{"admin", "user"} {
+	for _, view := range []string{"admin", "user", "recent"} {
 		t.Run(view, func(t *testing.T) {
 			rows := []*ScheduledTestResult{
 				{ID: 1, Status: "success", OutputKind: "html", ResponseText: transcript, OutputHTML: escaped},
@@ -123,8 +134,11 @@ func TestScheduledTestListRepairsLegacyHTMLDisplay(t *testing.T) {
 			}
 			svc := NewScheduledTestService(nil, scheduledTestReadResultsStub{rows: rows})
 			list := svc.ListResults
-			if view == "user" {
+			switch view {
+			case "user":
 				list = svc.ListVisibleResults
+			case "recent":
+				list = svc.ListVisibleResultsWithRecentResults
 			}
 			got, err := list(context.Background(), 1, 10)
 			require.NoError(t, err)

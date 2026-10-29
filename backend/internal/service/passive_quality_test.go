@@ -67,7 +67,7 @@ func TestPassiveQualityValidation(t *testing.T) {
 
 func TestGroupQualityTrafficModeValidation(t *testing.T) {
 	c := PassiveQualityConfig{
-		Purpose: "group_quality_target", Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8},
+		Purpose: "group_quality_target", RecoveryMode: "traffic", Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8},
 		CacheRate: PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85},
 	}
 	require.NoError(t, c.Validate())

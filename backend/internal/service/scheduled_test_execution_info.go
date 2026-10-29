@@ -14,11 +14,16 @@ type ScheduledTestTokenUsage struct {
 type ScheduledTestRequestAttempt struct {
 	qualityCacheExclusive bool
 	qualityUsageFinal     bool
+	qualityStream         bool
+	qualityTerminal       bool
+	qualityMalformed      bool
 	ScheduledTestTokenUsage
-	StartedAt   time.Time  `json:"started_at"`
-	HTTPStatus  int        `json:"http_status,omitempty"`
-	FailureKind string     `json:"failure_kind,omitempty"`
-	RetryAfter  *time.Time `json:"retry_after,omitempty"`
+	FirstTokenMS *float64   `json:"first_token_ms,omitempty"`
+	DurationMS   *float64   `json:"duration_ms,omitempty"`
+	StartedAt    time.Time  `json:"started_at"`
+	HTTPStatus   int        `json:"http_status,omitempty"`
+	FailureKind  string     `json:"failure_kind,omitempty"`
+	RetryAfter   *time.Time `json:"retry_after,omitempty"`
 }
 type ScheduledTestExecutionInfo struct {
 	AutoReview *ScheduledTestAutoReviewSummary `json:"auto_review,omitempty"`

@@ -27,10 +27,19 @@ func acquireTraffic(t *testing.T, r *passiveQualityRepository, req service.Group
 }
 func healthyTrafficState(t *testing.T, ctx context.Context, db *sql.DB, r *passiveQualityRepository, p service.PassiveQualityPolicy, model string) {
 	t.Helper()
-	for i := 0; i < 5; i++ {
-		insertGroupTargetUsage(t, db, r, fmt.Sprintf("healthy-%s-%d", model, i), model, 8, time.Now(), 90, true)
+	// SavePolicy timestamps its evidence boundary in PostgreSQL. Do not let
+	// Docker/host clock skew place this supposedly fresh batch before it.
+	var batchAt time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&batchAt))
+	if since := p.EvidenceSince(); since.After(batchAt) {
+		batchAt = since
 	}
-	_, err := r.advance(ctx, p.ID, 62, time.Now(), false, model)
+	batchAt = batchAt.Add(time.Millisecond)
+	for i := 0; i < 5; i++ {
+		key := fmt.Sprintf("healthy-%s-v%d-%d-%d", model, p.Version, batchAt.UnixNano(), i)
+		insertGroupTargetUsage(t, db, r, key, model, 8, batchAt.Add(time.Duration(i)*time.Microsecond), 90, true)
+	}
+	_, err := r.advance(ctx, p.ID, 62, batchAt.Add(time.Millisecond), false, model)
 	require.NoError(t, err)
 	require.Equal(t, "healthy", targetStates(t, ctx, r)[model].Phase)
 }

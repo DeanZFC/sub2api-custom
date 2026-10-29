@@ -3,12 +3,56 @@
 package repository
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPassiveQualityVerifiedSummaryMatchesMetricsIntegration(t *testing.T) {
+	ctx, db, repo := passiveDB(t)
+	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{
+		Purpose: "group_quality_target", Name: "all metrics", Enabled: true, Mode: "enforce", GroupIDs: []int64{8},
+		CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85},
+		ErrorRate: service.PassiveQualityMetric{Enabled: true, Pause: 5, Recover: 1},
+		TTFT:      service.PassiveQualityMetric{Enabled: true, Pause: 15000, Recover: 12000},
+		TPS:       service.PassiveQualityMetric{Enabled: true, Pause: 30, Recover: 36},
+	}}
+	require.NoError(t, repo.SavePolicy(ctx, &p))
+	number := func(v float64) *float64 { return &v }
+	for _, tc := range []struct {
+		name   string
+		change func(*service.PassiveQualityEvidence)
+		want   int64
+	}{
+		{"all target equalities pass", func(*service.PassiveQualityEvidence) {}, 1},
+		{"missing TPS stays unverified", func(e *service.PassiveQualityEvidence) { e.OutputTPS = nil }, 0},
+		{"insufficient TPS stays unverified", func(e *service.PassiveQualityEvidence) { e.TPSSamples = 19 }, 0},
+		{"low TPS stays unverified", func(e *service.PassiveQualityEvidence) { e.OutputTPS = number(29) }, 0},
+		{"slow first token stays unverified", func(e *service.PassiveQualityEvidence) { e.TTFT = number(15001) }, 0},
+		{"bad availability stays unverified", func(e *service.PassiveQualityEvidence) { e.ErrorRate = number(6) }, 0},
+		{"low historical cache stays unverified after recovery", func(e *service.PassiveQualityEvidence) { e.CacheRate = number(79) }, 0},
+		{"missing cache stays unverified", func(e *service.PassiveQualityEvidence) { e.CacheRate = nil }, 0},
+		{"insufficient total stays unverified", func(e *service.PassiveQualityEvidence) { e.Samples = 19 }, 0},
+		{"incomplete evidence stays unverified", func(e *service.PassiveQualityEvidence) { e.Complete = false }, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := service.PassiveQualityEvidence{Complete: true, Samples: 20, CacheSamples: 20, TTFTSamples: 20, TPSSamples: 20, CacheRate: number(80), ErrorRate: number(5), TTFT: number(15000), OutputTPS: number(30)}
+			tc.change(&e)
+			s := service.PassiveQualityState{PolicyID: p.ID, AccountID: 62, Model: "A", Phase: "healthy", RecoveredAt: time.Now(), Evidence: e}
+			raw, err := json.Marshal(s)
+			require.NoError(t, err)
+			_, err = db.Exec(`INSERT INTO passive_quality_states(policy_id,account_id,model_key,data) VALUES($1,62,'A',$2) ON CONFLICT(policy_id,account_id,model_key) DO UPDATE SET data=EXCLUDED.data`, p.ID, string(raw))
+			require.NoError(t, err)
+			summary, err := repo.StateSummary(ctx)
+			require.NoError(t, err)
+			require.Len(t, summary.ByPolicy, 1)
+			require.Equal(t, tc.want, summary.ByPolicy[0].Verified)
+		})
+	}
+}
 
 func TestPassiveQualityFilteredQueryIntegration(t *testing.T) {
 	ctx, db, repo := passiveDB(t)

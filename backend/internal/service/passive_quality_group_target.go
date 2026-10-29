@@ -13,6 +13,10 @@ func (c PassiveQualityConfig) IsGroupQualityTarget() bool {
 
 func (c PassiveQualityConfig) IsCacheTarget() bool { return c.Purpose == "cache_target" }
 
+func (c PassiveQualityConfig) IsActiveRecovery() bool {
+	return c.IsGroupQualityTarget() && c.RecoveryMode == "active"
+}
+
 func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	if c.Purpose == "" {
 		return nil
@@ -44,6 +48,12 @@ func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	if c.TPS.Enabled && c.TPS.Pause <= 0 {
 		return fmt.Errorf("TPS target must be greater than zero")
 	}
+	if c.RecoveryMode == "" {
+		c.RecoveryMode = "active"
+	}
+	if c.RecoveryMode != "active" && c.RecoveryMode != "traffic" {
+		return fmt.Errorf("unsupported recovery mode")
+	}
 	c.SchemaVersion, c.Scope, c.Action = 2, "model", "pause"
 	if c.Mode == "" {
 		c.Mode = "observe"
@@ -51,21 +61,32 @@ func (c *PassiveQualityConfig) prepareGroupQualityTarget() error {
 	if c.TrafficMode == "" {
 		c.TrafficMode = "strict"
 	}
+	if c.TrafficMode != "strict" && c.TrafficMode != "availability" {
+		return fmt.Errorf("traffic mode must be strict or availability")
+	}
 	if c.Name == "" {
 		c.Name = "Group quality target"
+	}
+	minimum, fresh, maxCooldown := 5, 2, 1800
+	if c.IsActiveRecovery() {
+		minimum, fresh, maxCooldown = 20, 5, 3600
 	}
 	for _, field := range []struct {
 		value    *int
 		fallback int
 	}{
-		{&c.WindowSeconds, 3600}, {&c.MaxSamples, 100}, {&c.MinSamples, 5},
-		{&c.Confirmations, 2}, {&c.NewSamples, 2}, {&c.CooldownSeconds, 300},
-		{&c.MaxCooldownSeconds, 1800}, {&c.TrialSeconds, 900}, {&c.TrialRequests, 20},
+		{&c.WindowSeconds, 3600}, {&c.MaxSamples, 100}, {&c.MinSamples, minimum},
+		{&c.Confirmations, 2}, {&c.NewSamples, fresh}, {&c.CooldownSeconds, 300},
+		{&c.MaxCooldownSeconds, maxCooldown}, {&c.TrialSeconds, 900}, {&c.TrialRequests, 20},
 		{&c.TrialConcurrency, 1}, {&c.RecoverySamples, 5},
 	} {
 		if *field.value == 0 {
 			*field.value = field.fallback
 		}
+	}
+	if c.IsActiveRecovery() {
+		c.WindowSeconds, c.MaxSamples = 3600, 0
+		c.TrafficMode = "strict"
 	}
 	if c.CacheRate.Enabled && c.CacheRate.Recover == 0 {
 		c.CacheRate.Recover = math.Min(100, c.CacheRate.Pause+5)

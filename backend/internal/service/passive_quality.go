@@ -20,6 +20,7 @@ type PassiveQualityConfig struct {
 	EvidenceStartedAt *time.Time `json:"evidence_started_at,omitempty"`
 	EvaluationVersion int64      `json:"evaluation_version,omitempty"`
 	Purpose           string     `json:"purpose,omitempty"`
+	RecoveryMode      string     `json:"recovery_mode,omitempty"`
 	// TrafficMode controls what happens after the shared group validation budget
 	// is exhausted. Strict keeps the historical fail-closed behavior; availability
 	// lets otherwise eligible accounts carry normal traffic without a validation
@@ -102,72 +103,85 @@ type PassiveQualitySample struct {
 	CacheInput          int64     `json:"cache_input"`
 }
 type PassiveQualityEvidence struct {
-	OutputTPS           *float64  `json:"output_tps"`
-	TPSSamples          int       `json:"tps_samples"`
-	TPSFresh            int       `json:"tps_fresh"`
-	TPSLatest           time.Time `json:"tps_latest"`
-	FreshOutputTPS      *float64  `json:"fresh_output_tps,omitempty"`
-	FreshErrorRate      *float64  `json:"fresh_error_rate,omitempty"`
-	FreshTTFT           *float64  `json:"fresh_ttft,omitempty"`
-	FreshCacheRate      *float64  `json:"fresh_cache_rate,omitempty"`
-	CacheFresh          int       `json:"cache_fresh"`
-	CacheLatest         time.Time `json:"cache_latest"`
-	TTFTFresh           int       `json:"ttft_fresh"`
-	TTFTLatest          time.Time `json:"ttft_latest"`
-	CacheReadTokens     int64     `json:"cache_read_tokens"`
-	CacheInputTokens    int64     `json:"cache_input_tokens"`
-	ProbeModel          string    `json:"probe_model,omitempty"`
-	Samples             int       `json:"samples"`
-	Failures            int       `json:"failures"`
-	ConsecutiveFailures int       `json:"consecutive_failures"`
-	ErrorRate           *float64  `json:"error_rate"`
-	TTFT                *float64  `json:"ttft"`
-	TTFTSamples         int       `json:"ttft_samples"`
-	CacheRate           *float64  `json:"cache_rate"`
-	CacheSamples        int       `json:"cache_samples"`
-	Latest              time.Time `json:"latest"`
-	Fresh               int       `json:"fresh"`
-	Complete            bool      `json:"complete"`
+	SinceRecovery             *PassiveQualityEvidence `json:"since_recovery,omitempty"`
+	RecentConsecutiveFailures int                     `json:"recent_consecutive_failures,omitempty"`
+	OutputTPS                 *float64                `json:"output_tps"`
+	TPSSamples                int                     `json:"tps_samples"`
+	TPSFresh                  int                     `json:"tps_fresh"`
+	TPSLatest                 time.Time               `json:"tps_latest"`
+	FreshOutputTPS            *float64                `json:"fresh_output_tps,omitempty"`
+	FreshErrorRate            *float64                `json:"fresh_error_rate,omitempty"`
+	FreshTTFT                 *float64                `json:"fresh_ttft,omitempty"`
+	FreshCacheRate            *float64                `json:"fresh_cache_rate,omitempty"`
+	CacheFresh                int                     `json:"cache_fresh"`
+	CacheLatest               time.Time               `json:"cache_latest"`
+	TTFTFresh                 int                     `json:"ttft_fresh"`
+	TTFTLatest                time.Time               `json:"ttft_latest"`
+	CacheReadTokens           int64                   `json:"cache_read_tokens"`
+	CacheInputTokens          int64                   `json:"cache_input_tokens"`
+	ProbeModel                string                  `json:"probe_model,omitempty"`
+	Samples                   int                     `json:"samples"`
+	Failures                  int                     `json:"failures"`
+	ConsecutiveFailures       int                     `json:"consecutive_failures"`
+	ErrorRate                 *float64                `json:"error_rate"`
+	TTFT                      *float64                `json:"ttft"`
+	TTFTSamples               int                     `json:"ttft_samples"`
+	CacheRate                 *float64                `json:"cache_rate"`
+	CacheSamples              int                     `json:"cache_samples"`
+	Latest                    time.Time               `json:"latest"`
+	Fresh                     int                     `json:"fresh"`
+	Complete                  bool                    `json:"complete"`
 }
 type PassiveQualityState struct {
-	LastTrialAdmissionAt   time.Time                           `json:"last_trial_admission_at,omitempty"`
-	LastTrialObservedAt    time.Time                           `json:"last_trial_observed_at,omitempty"`
-	SuspicionSince         time.Time                           `json:"suspicion_since,omitempty"`
-	RecoverySince          time.Time                           `json:"recovery_since,omitempty"`
-	RecoveryHits           int                                 `json:"recovery_hits,omitempty"`
-	CacheAllocationReduced bool                                `json:"cache_allocation_reduced,omitempty"`
-	HealthySince           time.Time                           `json:"healthy_since,omitempty"`
-	StabilityEvidenceAt    time.Time                           `json:"stability_evidence_at,omitempty"`
-	ConfirmationMetric     string                              `json:"confirmation_metric,omitempty"`
-	Purpose                string                              `json:"purpose,omitempty"`
-	CacheObserveAfter      time.Time                           `json:"cache_observe_after"`
-	Speed                  *PassiveQualityMetricState          `json:"speed,omitempty"`
-	Latency                *PassiveQualityMetricState          `json:"latency,omitempty"`
-	Cache                  map[string]PassiveQualityCacheState `json:"cache,omitempty"`
-	PolicyID               int64                               `json:"policy_id"`
-	PolicyName             string                              `json:"policy_name"`
-	AccountID              int64                               `json:"account_id"`
-	AccountName            string                              `json:"account_name,omitempty"`
-	Model                  string                              `json:"model"`
-	ProbeModel             string                              `json:"probe_model,omitempty"`
-	Scope                  string                              `json:"scope"`
-	Mode                   string                              `json:"mode"`
-	Version                int64                               `json:"version"`
-	Generation             int64                               `json:"generation"`
-	Phase                  string                              `json:"phase"`
-	Reason                 string                              `json:"reason"`
-	Hits                   int                                 `json:"hits"`
-	Backoff                int                                 `json:"backoff"`
-	Used                   int                                 `json:"used"`
-	Inflight               int                                 `json:"inflight"`
-	LastEvidenceAt         time.Time                           `json:"last_evidence_at"`
-	ObserveAfter           time.Time                           `json:"observe_after"`
-	NextAt                 time.Time                           `json:"next_at"`
-	TrialStartedAt         time.Time                           `json:"trial_started_at"`
-	TrialEndsAt            time.Time                           `json:"trial_ends_at"`
-	UpdatedAt              time.Time                           `json:"updated_at"`
-	Evidence               PassiveQualityEvidence              `json:"evidence"`
-	OtherHold              bool                                `json:"other_hold"`
+	ActiveConfirmations    map[string]PassiveQualityConfirmation `json:"active_confirmations,omitempty"`
+	ActiveRecoveryConfig   *PassiveQualityConfig                 `json:"active_recovery_config,omitempty"`
+	ActiveRecovery         *PassiveQualityActiveRecoveryResult   `json:"active_recovery,omitempty"`
+	RecoveredAt            time.Time                             `json:"recovered_at,omitempty"`
+	ProbeStartedAt         time.Time                             `json:"probe_started_at,omitempty"`
+	LastTrialAdmissionAt   time.Time                             `json:"last_trial_admission_at,omitempty"`
+	LastTrialObservedAt    time.Time                             `json:"last_trial_observed_at,omitempty"`
+	SuspicionSince         time.Time                             `json:"suspicion_since,omitempty"`
+	RecoverySince          time.Time                             `json:"recovery_since,omitempty"`
+	RecoveryHits           int                                   `json:"recovery_hits,omitempty"`
+	CacheAllocationReduced bool                                  `json:"cache_allocation_reduced,omitempty"`
+	HealthySince           time.Time                             `json:"healthy_since,omitempty"`
+	StabilityEvidenceAt    time.Time                             `json:"stability_evidence_at,omitempty"`
+	ConfirmationMetric     string                                `json:"confirmation_metric,omitempty"`
+	Purpose                string                                `json:"purpose,omitempty"`
+	CacheObserveAfter      time.Time                             `json:"cache_observe_after"`
+	Speed                  *PassiveQualityMetricState            `json:"speed,omitempty"`
+	Latency                *PassiveQualityMetricState            `json:"latency,omitempty"`
+	Cache                  map[string]PassiveQualityCacheState   `json:"cache,omitempty"`
+	PolicyID               int64                                 `json:"policy_id"`
+	PolicyName             string                                `json:"policy_name"`
+	AccountID              int64                                 `json:"account_id"`
+	AccountName            string                                `json:"account_name,omitempty"`
+	Model                  string                                `json:"model"`
+	ProbeModel             string                                `json:"probe_model,omitempty"`
+	Scope                  string                                `json:"scope"`
+	Mode                   string                                `json:"mode"`
+	Version                int64                                 `json:"version"`
+	Generation             int64                                 `json:"generation"`
+	Phase                  string                                `json:"phase"`
+	Reason                 string                                `json:"reason"`
+	Hits                   int                                   `json:"hits"`
+	Backoff                int                                   `json:"backoff"`
+	Used                   int                                   `json:"used"`
+	Inflight               int                                   `json:"inflight"`
+	LastEvidenceAt         time.Time                             `json:"last_evidence_at"`
+	ObserveAfter           time.Time                             `json:"observe_after"`
+	NextAt                 time.Time                             `json:"next_at"`
+	TrialStartedAt         time.Time                             `json:"trial_started_at"`
+	TrialEndsAt            time.Time                             `json:"trial_ends_at"`
+	UpdatedAt              time.Time                             `json:"updated_at"`
+	Evidence               PassiveQualityEvidence                `json:"evidence"`
+	OtherHold              bool                                  `json:"other_hold"`
+}
+
+type PassiveQualityConfirmation struct {
+	Since  time.Time `json:"since"`
+	Latest time.Time `json:"latest"`
+	Hits   int       `json:"hits"`
 }
 type PassiveQualityEvent struct {
 	ID         int64               `json:"id"`
@@ -272,16 +286,20 @@ func (c *PassiveQualityConfig) Validate() error {
 	if len(c.GroupIDs) == 0 || !validIDs(c.GroupIDs, 100) || !validIDs(c.ExcludedAccountIDs, 10000) {
 		return fmt.Errorf("select 1..100 groups; IDs must be positive and unique")
 	}
-	if c.WindowSeconds < 60 || c.WindowSeconds > 86400 || c.MaxSamples < 5 || c.MaxSamples > 2000 || c.MinSamples < 5 || c.MinSamples > c.MaxSamples {
+	sampleLimit := c.MaxSamples
+	if c.IsActiveRecovery() {
+		sampleLimit = 2000 // Configuration bounds only; actual traffic has no cap.
+	}
+	if c.WindowSeconds < 60 || c.WindowSeconds > 86400 || sampleLimit < 5 || sampleLimit > 2000 || c.MinSamples < 5 || c.MinSamples > sampleLimit {
 		return fmt.Errorf("window must be 60..86400 seconds; samples 5..2000; minimum cannot exceed window size")
 	}
-	if c.Confirmations < 1 || c.Confirmations > 10 || c.NewSamples < 1 || c.NewSamples > c.MaxSamples {
+	if c.Confirmations < 1 || c.Confirmations > 10 || c.NewSamples < 1 || c.NewSamples > sampleLimit {
 		return fmt.Errorf("confirmations must be 1..10 and new samples 1..max_samples")
 	}
 	if !c.ErrorRate.Enabled && !c.TTFT.Enabled && !c.CacheRate.Enabled && !c.TPS.Enabled && c.ConsecutiveFailures == 0 {
 		return fmt.Errorf("enable at least one metric")
 	}
-	if c.ConsecutiveFailures < 0 || c.ConsecutiveFailures > c.MaxSamples {
+	if c.ConsecutiveFailures < 0 || c.ConsecutiveFailures > sampleLimit {
 		return fmt.Errorf("consecutive failures must be 0..max_samples")
 	}
 	for _, m := range []struct {
@@ -300,10 +318,21 @@ func (c *PassiveQualityConfig) Validate() error {
 			return fmt.Errorf("%s recovery must be strictly healthier than pause threshold", m.name)
 		}
 	}
-	if c.RecoverySamples < 5 || c.RecoverySamples > c.MaxSamples {
+	if c.RecoverySamples < 5 || c.RecoverySamples > sampleLimit {
 		return fmt.Errorf("recovery samples must be 5..max_samples")
 	}
-	if c.Action != "limit" && (c.CooldownSeconds < 30 || c.MaxCooldownSeconds < c.CooldownSeconds || c.MaxCooldownSeconds > 86400 || c.TrialSeconds < 60 || c.TrialSeconds > 3600 || c.TrialRequests < 5 || c.TrialRequests > 2000 || c.TrialConcurrency < 1 || c.TrialConcurrency > 20 || c.TrialConcurrency > c.TrialRequests || c.RecoverySamples < 5 || c.RecoverySamples > c.TrialRequests || c.RecoverySamples > c.MaxSamples) {
+	if c.IsActiveRecovery() {
+		warmups := 0
+		if c.CacheRate.Enabled {
+			warmups = 1
+		}
+		batches := max(2, c.Confirmations)
+		span := time.Duration(max(120, c.GroupTargetStability().RecoverySeconds)) * time.Second
+		if batches*(max(5, c.RecoverySamples)+warmups) > passiveRecoveryMaxRequests || time.Duration(batches-1)*span >= passiveRecoveryTimeout-time.Minute {
+			return fmt.Errorf("active recovery must fit its 20-request and 10-minute budget")
+		}
+	}
+	if c.Action != "limit" && (c.CooldownSeconds < 30 || c.MaxCooldownSeconds < c.CooldownSeconds || c.MaxCooldownSeconds > 86400 || c.TrialSeconds < 60 || c.TrialSeconds > 3600 || c.TrialRequests < 5 || c.TrialRequests > 2000 || c.TrialConcurrency < 1 || c.TrialConcurrency > 20 || c.TrialConcurrency > c.TrialRequests || c.RecoverySamples < 5 || c.RecoverySamples > c.TrialRequests || c.RecoverySamples > sampleLimit) {
 		return fmt.Errorf("invalid recovery limits: cooldown 30..86400s, trial 60..3600s, requests 5..2000, concurrency 1..20, minimum 5..min(requests,max_samples)")
 	}
 	return nil
@@ -403,7 +432,7 @@ func passiveQualitySummarize(samples []PassiveQualitySample, after time.Time, co
 }
 
 // Return fail if any configured metric fails; pass requires every metric's own
-// minimum. A probe cannot call this a pass without fresh production evidence.
+// minimum. Callers must separately fence freshness and recovery chronology.
 func EvaluatePassiveQuality(c PassiveQualityConfig, e PassiveQualityEvidence, recovery bool) (string, string) {
 	if !e.Complete {
 		return "pending", "telemetry_incomplete"

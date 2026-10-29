@@ -231,8 +231,6 @@ export default {
         "expected": "参考答案",
         "exact": "精确文本匹配",
         "number": "整数匹配",
-        "notDate": "不包含 yyyy-MM-dd 日期",
-        "notDateRule": "回答中出现 yyyy-MM-dd 形式的日期即未通过，其他非空回答通过；仅检查格式，不校验日期是否真实有效。",
         "add": "添加自定义题目",
         "invalid": "请检查题数、通过数、题目标识与参考答案；纯自定义题库不能少于每轮题数。",
         "result": "已执行 {tested} 题，通过 {passed} 题；最多 {total} 题，需要通过 {required} 题。",

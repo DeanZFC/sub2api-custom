@@ -31,12 +31,24 @@ func TestAutonomousConfigDefaultsAndValidation(t *testing.T) {
 }
 func TestAutonomousNamesAndLocalFilters(t *testing.T) {
 	a := DefaultAutonomousConfig()
-	for _, text := range []string{"CTAV，帮我看看这个问题", "ctav 请问怎么安装", "CTAV你能帮忙吗"} {
-		require.True(t, directBotName(a, text), text)
+	a.Names = append(a.Names, "小爱")
+	for _, text := range []string{"CTAV，帮我看看这个问题", "ctav 请问怎么安装", "CTAV你能帮忙吗", "今天CTAV不错", "CTAVX 帮我", "CTAV的功能怎么样", "CTAV", "这个问题想让cTaV看看", "请帮我看看，小爱", "小爱"} {
+		require.True(t, containsBotName(a, text), text)
 	}
-	for _, text := range []string{"今天CTAV不错", "CTAVX 帮我", "CTAV的功能怎么样", "CTAV"} {
-		require.False(t, directBotName(a, text), text)
+	for _, text := range []string{"", "   ", "帮我看看这个问题", "CTA", "小明"} {
+		require.False(t, containsBotName(a, text), text)
 	}
+	require.False(t, containsBotName(AutonomousConfig{Names: []string{"", " "}}, "普通消息"))
+	require.True(t, botNameCall(a, Event{Content: "小爱"}))
+	require.True(t, botNameCall(a, Event{Content: "CTAV 看看 https://example.com"}))
+	require.False(t, botNameCall(a, Event{Content: "/生图 CTAV"}))
+	bot := Event{Content: "CTAV"}
+	bot.Author.Bot = true
+	require.False(t, botNameCall(a, bot))
+	elements := []MessageElement{{MsgElements: []MessageElement{{Content: "这个问题想让小爱看看"}}}}
+	require.True(t, botNameCall(a, Event{MsgElements: elements}))
+	require.False(t, botNameCall(a, Event{MessageType: 103, MsgElements: elements}))
+	require.False(t, botNameCall(a, Event{MsgElements: []MessageElement{{MessageType: 103, Content: "CTAV", MsgElements: elements}}}))
 	for _, text := range []string{"哈哈哈哈", "嗯", "/签到", "有人知道 https://example.com 吗", "@张三 部署好了吗", "sk-secret-key", "这是验证码 12345"} {
 		_, reason := autonomousText(Event{Content: text})
 		require.NotEmpty(t, reason, text)

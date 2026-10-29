@@ -7,14 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	mathrand "math/rand"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
-
-// This checks the requested shape, not whether the date exists on a calendar.
-var qualityCapabilityDatePattern = regexp.MustCompile(`[0-9]{4}-[0-9]{2}-[0-9]{2}`)
 
 // A capability definition stores its versioned question-bank configuration in
 // the existing prompt column. The UI edits structured fields, not JSON text.
@@ -71,8 +67,8 @@ func ParseQualityCapabilityConfig(raw string) (QualityCapabilityConfig, error) {
 	for i := range c.Questions {
 		q := &c.Questions[i]
 		q.Key, q.Prompt, q.Expected = strings.TrimSpace(q.Key), strings.TrimSpace(q.Prompt), strings.TrimSpace(q.Expected)
-		if q.Key == "" || len(q.Key) > 100 || seen[q.Key] || q.Prompt == "" || len(q.Prompt) > 8000 || (q.Expected == "" && q.Match != "not_date") || len(q.Expected) > 2000 || (q.Match != "exact" && q.Match != "number" && q.Match != "not_date") {
-			return c, fmt.Errorf("invalid custom question; use a unique key, prompt and exact/number/not_date comparison; exact/number require an answer")
+		if q.Key == "" || len(q.Key) > 100 || seen[q.Key] || q.Prompt == "" || len(q.Prompt) > 8000 || q.Expected == "" || len(q.Expected) > 2000 || (q.Match != "exact" && q.Match != "number") {
+			return c, fmt.Errorf("invalid custom question; use a unique key, prompt, answer and exact/number comparison")
 		}
 		seen[q.Key] = true
 		if q.Match == "number" {
@@ -145,9 +141,6 @@ func qualityCapabilityQuestions(c QualityCapabilityConfig, seed int64) []Quality
 
 func qualityCapabilityAnswerMatches(q QualityCapabilityQuestion, answer string) bool {
 	answer = strings.TrimSpace(answer)
-	if q.Match == "not_date" {
-		return answer != "" && !qualityCapabilityDatePattern.MatchString(answer)
-	}
 	if q.Match == "number" {
 		actual, err := strconv.ParseInt(answer, 10, 64)
 		expected, e := strconv.ParseInt(q.Expected, 10, 64)
@@ -173,13 +166,6 @@ func (s *ScheduledTestRunnerService) runCapabilitySuite(ctx context.Context, pla
 		attempt := s.runWithAutomaticRetries(ctx, plan, &accountID, func(attemptCtx context.Context) *ScheduledTestResult { return execute(attemptCtx, q.Prompt) })
 		result.ExecutionInfo = mergeScheduledTestExecution(result.ExecutionInfo, attempt.ExecutionInfo)
 		a := QualityCapabilityAnswer{QualityCapabilityQuestion: q, Answer: attempt.ResponseText, Verdict: "fail"}
-		if q.Match == "not_date" && (attempt.Status == "success" || attempt.Status == "passed") && strings.TrimSpace(attempt.ResponseText) == "" {
-			// No response is missing evidence, rather than a non-date answer.
-			a.Verdict = "unknown"
-			result.Status, result.ErrorMessage = "failed", "expected non-empty text output"
-			suite.Answers = append(suite.Answers, a)
-			break
-		}
 		if attempt.Status != "success" && attempt.Status != "passed" {
 			// Transport/output-budget failures are execution failures, not proof of
 			// diminished capability. Existing availability protection owns them.

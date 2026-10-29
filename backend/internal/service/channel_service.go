@@ -101,8 +101,9 @@ type channelCache struct {
 	groupPlatform           map[int64]string                                    // groupID → platform
 
 	// 冷路径（CRUD 操作）
-	byID     map[int64]*Channel
-	loadedAt time.Time
+	byID       map[int64]*Channel
+	loadedAt   time.Time
+	loadFailed bool // Distinguish a short error cache from a genuinely unmapped group.
 }
 
 // ChannelMappingResult 渠道映射查找结果
@@ -281,6 +282,7 @@ func expandMappingToCache(cache *channelCache, ch *Channel, gid int64, platform 
 // 通过回退 loadedAt 使剩余 TTL = channelErrorTTL。
 func (s *ChannelService) storeErrorCache() {
 	errorCache := newEmptyChannelCache()
+	errorCache.loadFailed = true
 	errorCache.loadedAt = time.Now().Add(-(channelCacheTTL - channelErrorTTL))
 	s.cache.Store(errorCache)
 }

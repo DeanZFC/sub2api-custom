@@ -142,10 +142,13 @@ func (r *passiveQualityRepository) StateSummary(ctx context.Context) (*service.P
 	if err != nil {
 		return nil, err
 	}
-	verified := `data->>'phase'='healthy' AND NOT other_hold AND COALESCE((data->'evidence'->>'complete')::boolean,false)`
-	for _, m := range []struct{ config, metric, samples, comparison string }{{"cache_rate", "cache_rate", "cache_samples", ">"}, {"error_rate", "error_rate", "samples", "<"}, {"ttft", "ttft", "ttft_samples", "<"}} {
-		verified += fmt.Sprintf(` AND (NOT COALESCE((config->'%s'->>'enabled')::boolean,false) OR ((data->'evidence'->>'%s')::numeric >= COALESCE((config->>'min_samples')::int,5) AND (data->'evidence'->>'%s')::numeric %s (config->'%s'->>'pause')::numeric))`, m.config, m.samples, m.metric, m.comparison, m.config)
+	verified := `data->>'phase'='healthy' AND NOT other_hold AND COALESCE((data->'evidence'->>'complete')::boolean,false) AND (data->'evidence'->>'samples')::numeric >= COALESCE((config->>'min_samples')::int,5)`
+	for _, m := range []struct{ config, metric, samples, comparison string }{{"cache_rate", "cache_rate", "cache_samples", ">"}, {"error_rate", "error_rate", "samples", "<"}, {"ttft", "ttft", "ttft_samples", "<"}, {"tps", "output_tps", "tps_samples", ">"}} {
+		// Explicit group targets accept equality; legacy policies retain their
+		// strict threshold. Keep this aligned with EvaluatePassiveQuality.
+		verified += fmt.Sprintf(` AND (NOT COALESCE((config->'%[1]s'->>'enabled')::boolean,false) OR ((data->'evidence'->>'%[2]s')::numeric >= COALESCE((config->>'min_samples')::int,5) AND ((data->'evidence'->>'%[3]s')::numeric %[4]s (config->'%[1]s'->>'pause')::numeric OR (config->>'purpose' IN ('group_quality_target','cache_target') AND (data->'evidence'->>'%[3]s')::numeric = (config->'%[1]s'->>'pause')::numeric))))`, m.config, m.samples, m.metric, m.comparison)
 	}
+	verified += ` AND (COALESCE((config->>'consecutive_failures')::int,0)=0 OR COALESCE((data->'evidence'->>'consecutive_failures')::int,0)<(config->>'consecutive_failures')::int)`
 	rows, err := r.db.QueryContext(ctx, passiveStateReport+`SELECT policy_id,effective_phase,count(*),count(*) FILTER (WHERE `+verified+`) FROM reporting GROUP BY policy_id,effective_phase ORDER BY policy_id,effective_phase`)
 	if err != nil {
 		return nil, err

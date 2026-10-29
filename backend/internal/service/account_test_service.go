@@ -435,6 +435,28 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	bindAccountTestPlatform(c, account)
+	if passiveRecoverySession(ctx) != "" {
+		mappedModel, deferred := s.passiveRecoveryModel(ctx, account, modelID, time.Now())
+		if deferred != nil {
+			if collector, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
+				collector.deferred = deferred
+			}
+			return s.sendErrorAndEnd(c, deferred.Error())
+		}
+		modelID = mappedModel
+		if deferred := passiveRecoveryEligibility(account, modelID, time.Now()); deferred != nil {
+			if collector, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
+				collector.deferred = deferred
+			}
+			return s.sendErrorAndEnd(c, deferred.Error())
+		}
+		if deferred := passiveRecoveryUnsupportedMetrics(ctx, account, time.Now()); deferred != nil {
+			if collector, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
+				collector.deferred = deferred
+			}
+			return s.sendErrorAndEnd(c, deferred.Error())
+		}
+	}
 	if ctx.Value(qualityOperationsKey{}) != nil && (account.Status == "quality_paused" || account.ActiveTestModelBlocked(modelID)) {
 		ctx = WithQualityRecoveryProbe(c.Request.Context())
 		c.Request = c.Request.WithContext(ctx)
@@ -692,7 +714,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 		// 403 表示账号被上游封禁，标记为 error 状态
 		if resp.StatusCode == http.StatusForbidden {
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			_ = s.setAccountTestError(ctx, account.ID, errMsg)
 		}
 
 		return s.sendErrorAndEnd(c, errMsg)
@@ -765,7 +787,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode == http.StatusForbidden {
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			_ = s.setAccountTestError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
 	}
@@ -1117,7 +1139,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		// 401 Unauthorized: 标记账号为永久错误
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			_ = s.setAccountTestError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -2363,7 +2385,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		}
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			_ = s.setAccountTestError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -2529,7 +2551,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			_ = s.setAccountTestError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -3730,6 +3752,12 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
 	ginCtx.Request = (&http.Request{}).WithContext(withAccountTestReasoningEffort(ctx, reasoningEffort))
+	if session := passiveRecoverySession(ctx); session != "" {
+		ginCtx.Request.Header = make(http.Header)
+		ginCtx.Request.Header.Set("session-id", session)
+		ginCtx.Request.Header.Set("session_id", session)
+		ginCtx.Request.Header.Set("x-opencode-session", session)
+	}
 	ginCtx.Set(accountTestBackgroundKey, true)
 
 	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, prompt, AccountTestModeDefault)

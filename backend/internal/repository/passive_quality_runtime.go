@@ -194,14 +194,46 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 			s.Latency = nil
 			s.Speed = nil
 			s.Cache = nil
+			s.ActiveConfirmations = nil
 			s.Hits = 0
 			s.Generation++
 		}
 	case "probing":
 		if !now.Before(s.NextAt) {
-			service.PassiveQualityPause(p.PassiveQualityConfig, &s, now, "probe_timeout")
+			if p.IsActiveRecovery() {
+				s.Phase, s.Reason, s.NextAt = "paused", "active_recovery_pending: probe_interrupted", now.Add(time.Minute)
+				s.Generation++
+			} else {
+				service.PassiveQualityPause(p.PassiveQualityConfig, &s, now, "probe_timeout")
+			}
 		}
+	case "trial":
+		if p.IsActiveRecovery() {
+			// A state from an older instance cannot reopen customer traffic.
+			s.Phase, s.Reason, s.NextAt = "paused", "active_recovery_pending", now
+			s.Generation++
+			break
+		}
+		e, sampleErr := passiveSamples(ctx, tx, p, s, now)
+		if sampleErr != nil {
+			return nil, sampleErr
+		}
+		advancePassiveObserved(p, &s, e, now)
 	case "paused":
+		if p.IsActiveRecovery() {
+			if !now.Before(s.NextAt) && canProbe && p.Mode == "enforce" {
+				allowed, checkErr := passiveActiveRecoveryAllowed(ctx, tx, aid, s.Model, p.ID, now)
+				if checkErr != nil {
+					return nil, checkErr
+				}
+				if allowed {
+					s.Phase, s.Reason = "probing", "active_recovery_running"
+					s.Generation++
+					s.ProbeStartedAt, s.NextAt = now, now.Add(12*time.Minute)
+				}
+			}
+			break
+		}
 		if p.IsGroupQualityTarget() {
 			if !now.Before(s.NextAt) && !s.OtherHold {
 				beginPassiveTrial(p, &s, now, "group_target_trial")
@@ -226,6 +258,32 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 		e, err := passiveSamples(ctx, tx, p, s, now)
 		if err != nil {
 			return nil, err
+		}
+		initialVerification := false
+		if p.IsActiveRecovery() && p.Mode == "enforce" && s.UpdatedAt.IsZero() && e.Samples == 0 && s.Model != "" {
+			// A quiet established account must not be mass-paused after an edit or
+			// upgrade merely because its latest hour contains no requests.
+			err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM usage_logs ul WHERE account_id=$1 AND group_id=$2 AND COALESCE(NULLIF(TRIM(requested_model),''),model)=$3 AND COALESCE(request_type,0) NOT IN (4,6) AND duration_ms IS NOT NULL)
+			 AND NOT EXISTS(SELECT 1 FROM passive_quality_failures WHERE account_id=$1 AND group_id=$2 AND model=$3 AND NOT non_text)`, aid, p.GroupIDs[0], s.Model).Scan(&initialVerification)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if initialVerification {
+			s.Evidence = e
+			s.Phase, s.Reason, s.NextAt = "paused", "active_recovery_pending: initial_verification", now
+			if canProbe {
+				allowed, checkErr := passiveActiveRecoveryAllowed(ctx, tx, aid, s.Model, p.ID, now)
+				if checkErr != nil {
+					return nil, checkErr
+				}
+				if allowed {
+					s.Phase, s.Reason = "probing", "active_recovery_running: initial_verification"
+					s.Generation++
+					s.ProbeStartedAt, s.NextAt = now, now.Add(12*time.Minute)
+				}
+			}
+			break
 		}
 		if p.IsolatedMetrics() && !p.IsGroupQualityTarget() && !p.ErrorRate.Enabled && p.ConsecutiveFailures == 0 {
 			s.Evidence = e
@@ -263,6 +321,10 @@ func (r *passiveQualityRepository) advance(ctx context.Context, pid, aid int64, 
 		return nil, err
 	}
 	if s.Phase == "probing" && oldPhase != "probing" {
+		if p.IsActiveRecovery() {
+			config := p.PassiveQualityConfig
+			s.ActiveRecoveryConfig = &config
+		}
 		return &s, nil
 	}
 	return nil, nil
@@ -314,7 +376,9 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 	// This only defers automatic-quality holds to the following durable emergency
 	// gate. That gate fails closed without a matching policy and exact lease.
 	if groupQualityFallbackMatches(ctx, aid, model) {
-		return true, false, nil
+		var activeHold bool
+		err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND p.config->>'recovery_mode'='active' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2 OR $2=''))`, aid, model).Scan(&activeHold)
+		return err == nil && !activeHold, false, err
 	}
 	var held bool
 	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM passive_quality_states s JOIN passive_quality_policies p ON p.id=s.policy_id WHERE s.account_id=$1 AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce' AND s.data->>'phase' IN ('paused','probing','trial') AND `+passiveMembership+` AND (p.config->>'scope'='account' OR COALESCE(NULLIF(s.model_key,''),p.config->>'model')=$2 OR $2=''))`, aid, model).Scan(&held); err != nil || !held {
@@ -367,7 +431,7 @@ func (r *passiveQualityRepository) AcquirePassiveQuality(ctx context.Context, ai
 		matches := model != "" && (c.Model == "" || model == c.Model)
 		filteredTrial = filteredTrial || c.Model != ""
 		matchedFilter = matchedFilter || (c.Model != "" && matches)
-		if s.Phase != "trial" || now.Before(s.TrialStartedAt) || !now.Before(s.TrialEndsAt) || (matches && (s.Used >= c.TrialRequests || inflight >= c.TrialConcurrency || !passiveTrialAdmissionReady(c, s, now))) {
+		if c.IsActiveRecovery() || s.Phase != "trial" || now.Before(s.TrialStartedAt) || !now.Before(s.TrialEndsAt) || (matches && (s.Used >= c.TrialRequests || inflight >= c.TrialConcurrency || !passiveTrialAdmissionReady(c, s, now))) {
 			allowed = false
 		}
 		if !matches {

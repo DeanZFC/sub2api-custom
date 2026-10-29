@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -131,6 +132,9 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,9)`)
 		more, err := f.repo.ListVisibleWithRecentHTML(f.ctx, 1, 5)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []int64{current.ID, sameTime.ID, successful[3].ID, successful[2].ID, successful[1].ID}, recentHTMLResultIDs(more))
+		four, err := f.repo.ListVisibleWithRecentResults(f.ctx, 1, 4)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []int64{current.ID, sameTime.ID, successful[3].ID, successful[2].ID}, recentHTMLResultIDs(four), "artwork shows the current result and exactly three earlier results")
 
 		current.Status, current.OutputHTML = "failed", ""
 		require.NoError(t, f.repo.Update(f.ctx, current))
@@ -155,9 +159,11 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,9)`)
 		for _, status := range []string{"running", "pending"} {
 			current.Status = status
 			require.NoError(t, f.repo.Update(f.ctx, current))
-			rows, err := f.repo.ListVisibleWithRecentHTML(f.ctx, 1, 3)
-			require.NoError(t, err)
-			require.Empty(t, rows, "rank the current series before filtering its completion status")
+			for _, list := range []func(context.Context, int64, int) ([]*service.ScheduledTestResult, error){f.repo.ListVisibleWithRecentHTML, f.repo.ListVisibleWithRecentResults} {
+				rows, err := list(f.ctx, 1, 4)
+				require.NoError(t, err)
+				require.Empty(t, rows, "rank the current series before filtering its completion status")
+			}
 		}
 		current.Status = "failed"
 		require.NoError(t, f.repo.Update(f.ctx, current))
@@ -173,16 +179,18 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,9)`)
 		current := f.begin("permission-html-run", f.input(f.at, "success", "<html>current</html>"))
 		assertVisible := func(groupID int64, visible bool) {
 			t.Helper()
-			rows, err := f.repo.ListVisibleWithRecentHTML(f.ctx, 1, 3)
-			require.NoError(t, err)
-			if !visible {
-				require.Empty(t, rows)
-				return
-			}
-			require.ElementsMatch(t, []int64{current.ID, old.ID}, recentHTMLResultIDs(rows))
-			for _, row := range rows {
-				require.NotNil(t, row.GroupID)
-				require.Equal(t, groupID, *row.GroupID, "current and historical rows use the current membership projection")
+			for _, list := range []func(context.Context, int64, int) ([]*service.ScheduledTestResult, error){f.repo.ListVisibleWithRecentHTML, f.repo.ListVisibleWithRecentResults} {
+				rows, err := list(f.ctx, 1, 4)
+				require.NoError(t, err)
+				if !visible {
+					require.Empty(t, rows)
+					continue
+				}
+				require.ElementsMatch(t, []int64{current.ID, old.ID}, recentHTMLResultIDs(rows))
+				for _, row := range rows {
+					require.NotNil(t, row.GroupID)
+					require.Equal(t, groupID, *row.GroupID, "current and historical rows use the current membership projection")
+				}
 			}
 		}
 		assertVisible(8, true)
@@ -216,4 +224,81 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,9)`)
 DELETE FROM account_groups WHERE account_id=62`)
 		assertVisible(9, false)
 	})
+}
+
+func TestScheduledTestRecentNumericResultsIntegration(t *testing.T) {
+	f := newRecentHTMLFixture(t)
+	f.plan.TestDefinitionID = &f.definitionID
+	f.plan.TestDefinitionIDs = []int64{f.definitionID}
+	var err error
+	f.plan, err = f.plans.Update(f.ctx, f.plan)
+	require.NoError(t, err)
+	f.exec(`INSERT INTO groups(id,name) VALUES(9,'Other public group');
+INSERT INTO account_groups(account_id,group_id) VALUES(62,9)`)
+	input := func(at time.Time, status string, value *float64) *service.ScheduledTestResult {
+		row := f.input(at, status, "")
+		row.TestDefinitionID = &f.definitionID
+		row.OutputKind, row.OutputNumeric = "number", value
+		return row
+	}
+	var successful []*service.ScheduledTestResult
+	for _, age := range []time.Duration{4, 3, 2, 1} {
+		value := float64(age)
+		successful = append(successful, f.create(input(f.at.Add(-age*time.Minute), "success", &value)))
+	}
+	zero, latestValue := 0.0, 21.0
+	sameTime := f.create(input(f.at, "passed", &zero))
+	for _, mutate := range []func(*service.ScheduledTestResult){
+		func(row *service.ScheduledTestResult) { row.Status = "failed" },
+		func(row *service.ScheduledTestResult) { row.Status = "error" },
+		func(row *service.ScheduledTestResult) { row.OutputNumeric = nil },
+		func(row *service.ScheduledTestResult) {
+			row.OutputKind = "html"
+			row.OutputHTML = "<html>other kind</html>"
+		},
+		func(row *service.ScheduledTestResult) { row.AccountID = nil; row.TargetMode = "group" },
+		func(row *service.ScheduledTestResult) { other := int64(63); row.AccountID = &other },
+		func(row *service.ScheduledTestResult) { row.TestDefinitionID = &f.htmlID },
+		func(row *service.ScheduledTestResult) { row.ModelID = "other-model" },
+		func(row *service.ScheduledTestResult) { row.ReasoningEffort = "high" },
+		func(row *service.ScheduledTestResult) { other := int64(9); row.GroupID = &other },
+		func(row *service.ScheduledTestResult) { row.StartedAt = f.at.Add(time.Minute) },
+	} {
+		row := input(f.at.Add(-time.Second), "success", &latestValue)
+		mutate(row)
+		f.create(row)
+	}
+	current := f.begin("current-numeric-run", input(f.at, "success", &latestValue))
+	f.create(input(f.at, "success", &latestValue))
+	expected := []int64{current.ID, sameTime.ID, successful[3].ID, successful[2].ID}
+	rows, err := f.repo.ListVisibleWithRecentResults(f.ctx, 1, 4)
+	require.NoError(t, err)
+	require.ElementsMatch(t, expected, recentHTMLResultIDs(rows), "numeric checks show the current result and exactly three earlier results from the same series")
+	for _, row := range rows {
+		if row.ID == sameTime.ID {
+			require.NotNil(t, row.OutputNumeric)
+			require.Zero(t, *row.OutputNumeric, "zero is a valid historical numeric result")
+		}
+	}
+	for _, list := range []func(context.Context, int64, int) ([]*service.ScheduledTestResult, error){f.repo.ListVisible, f.repo.ListVisibleWithRecentHTML} {
+		latest, err := list(f.ctx, 1, 4)
+		require.NoError(t, err)
+		require.Equal(t, []int64{current.ID}, recentHTMLResultIDs(latest), "existing list modes do not add numeric history")
+	}
+	latest, err := f.repo.ListVisibleWithRecentResults(f.ctx, 1, 1)
+	require.NoError(t, err)
+	require.Equal(t, []int64{current.ID}, recentHTMLResultIDs(latest))
+
+	current.Status, current.OutputNumeric = "failed", nil
+	require.NoError(t, f.repo.Update(f.ctx, current))
+	rows, err = f.repo.ListVisibleWithRecentResults(f.ctx, 1, 4)
+	require.NoError(t, err)
+	require.ElementsMatch(t, expected, recentHTMLResultIDs(rows), "historical numeric output never replaces a failed current result")
+	for _, status := range []string{"running", "pending"} {
+		current.Status = status
+		require.NoError(t, f.repo.Update(f.ctx, current))
+		rows, err := f.repo.ListVisibleWithRecentResults(f.ctx, 1, 4)
+		require.NoError(t, err)
+		require.Empty(t, rows, "unfinished numeric checks never fall back to a previous run")
+	}
 }

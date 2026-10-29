@@ -56,7 +56,9 @@ func replayPassiveMetrics(ctx context.Context, tx *sql.Tx, p service.PassiveQual
 			}
 		}
 		if s.Phase == "paused" && len(events) == 0 {
-			if p.IsGroupQualityTarget() {
+			if p.IsActiveRecovery() {
+				events = append(events, "recovery_requires_probe")
+			} else if p.IsGroupQualityTarget() {
 				events = append(events, "recovery_requires_real_traffic")
 			} else {
 				events = append(events, "recovery_requires_probe")

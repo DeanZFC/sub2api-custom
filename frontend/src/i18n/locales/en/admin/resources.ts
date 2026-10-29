@@ -231,8 +231,6 @@ export default {
         "expected": "Reference answer",
         "exact": "Exact text",
         "number": "Integer comparison",
-        "notDate": "No yyyy-MM-dd date",
-        "notDateRule": "Fail if any yyyy-MM-dd date-shaped text appears in the response; otherwise, pass a nonempty response. Only the format is checked, not calendar validity.",
         "add": "Add custom question",
         "invalid": "Check counts, unique identifiers and reference answers. A custom-only bank needs enough distinct questions.",
         "result": "Executed {tested}, passed {passed}; at most {total} questions, requiring {required} passes.",

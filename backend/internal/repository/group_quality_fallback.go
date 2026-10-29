@@ -165,6 +165,9 @@ func groupQualityLiveAccount(ctx context.Context, raw []byte, model string, fall
 }
 
 func groupQualityFallbackCandidate(ctx context.Context, tx *sql.Tx, aid int64, model string) (bool, error) {
+	if active, err := groupQualityAccountActiveRecovery(ctx, tx, aid, model); err != nil || active {
+		return false, err
+	}
 	var raw []byte
 	var active, matching bool
 	err := tx.QueryRowContext(ctx, groupQualityActiveHolds+` SELECT to_jsonb(a),EXISTS(SELECT 1 FROM live_holds),
@@ -237,10 +240,25 @@ func (r *passiveQualityRepository) RefreshGroupQualityFallback(ctx context.Conte
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// Renewal changes only expiry, so the lease row itself is sufficient;
-	// it does not compete with admissions for the shared budget lock.
+	// A policy may switch to active recovery while this request is streaming.
+	// Recheck membership across policies before renewing the existing lease.
+	var accountID int64
+	var model string
+	err = tx.QueryRowContext(ctx, `SELECT account_id,model FROM group_quality_traffic_leases WHERE lease_id=$1 AND fallback AND released_at IS NULL AND NOT unused AND fallback_expires_at>clock_timestamp() FOR UPDATE`, lease).Scan(&accountID, &model)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if active, err := groupQualityAccountActiveRecovery(ctx, tx, accountID, model); err != nil || active {
+		return false, err
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE group_quality_traffic_leases SET fallback_expires_at=clock_timestamp()+($2*interval '1 second')
- WHERE lease_id=$1 AND fallback AND released_at IS NULL AND NOT unused AND fallback_expires_at>clock_timestamp()`, lease, int(groupQualityFallbackLease/time.Second))
+ WHERE lease_id=$1 AND fallback AND released_at IS NULL AND NOT unused AND fallback_expires_at>clock_timestamp()
+ AND EXISTS(SELECT 1 FROM passive_quality_policies p WHERE p.id=group_quality_traffic_leases.policy_id AND p.version=group_quality_traffic_leases.policy_version
+ AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce'
+ AND COALESCE(p.config->>'recovery_mode','')<>'active')`, lease, int(groupQualityFallbackLease/time.Second))
 	if err != nil {
 		return false, err
 	}
@@ -260,7 +278,7 @@ func readGroupQualityFallbackSummary(ctx context.Context, reader groupQualitySum
 	if err := reader.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM groups WHERE id=$1 AND platform='openai' AND deleted_at IS NULL AND status='active')`, p.GroupIDs[0]).Scan(&supported); err != nil {
 		return nil, err
 	}
-	s.Enabled = supported && p.Enabled && p.Mode == "enforce"
+	s.Enabled = supported && p.Enabled && p.Mode == "enforce" && !p.IsActiveRecovery()
 	err := reader.QueryRowContext(ctx, `SELECT count(*) FILTER(WHERE released_at IS NULL AND fallback_expires_at>$3),count(*) FILTER(WHERE created_at>=$2),
  COALESCE(sum(CASE WHEN cache_reported AND input_tokens>0 THEN input_tokens ELSE 0 END) FILTER(WHERE created_at>=$2),0),
  COALESCE(sum(CASE WHEN cache_reported AND input_tokens>0 THEN 0 ELSE GREATEST(reserved_input,COALESCE(input_tokens,0)) END) FILTER(WHERE created_at>=$2),0)

@@ -15,7 +15,7 @@ import (
 
 func independentGroupTargetConfig(t *testing.T, purpose string, threshold float64) PassiveQualityConfig {
 	t.Helper()
-	c := PassiveQualityConfig{Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: PassiveQualityMetric{Enabled: true, Pause: threshold}}
+	c := PassiveQualityConfig{RecoveryMode: "traffic", Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: PassiveQualityMetric{Enabled: true, Pause: threshold}}
 	// Decode the public API shape to exercise purpose dispatch independently of
 	// the editor's preset builder and avoid coupling to its implementation.
 	raw, err := json.Marshal(map[string]string{"purpose": purpose})

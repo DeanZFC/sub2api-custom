@@ -210,6 +210,10 @@ func (s *PassiveQualityService) maintenanceLoop() {
 	}
 }
 func (s *PassiveQualityService) probe(p PassiveQualityState) {
+	if p.ActiveRecoveryConfig != nil && p.ActiveRecoveryConfig.IsActiveRecovery() {
+		s.probeActiveRecovery(p)
+		return
+	}
 	if s.test == nil {
 		return
 	}

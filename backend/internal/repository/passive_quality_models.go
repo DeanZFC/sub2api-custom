@@ -15,8 +15,9 @@ type passiveModelTarget struct {
 }
 
 // Discover only concrete requested models. Retain durable lifecycle rows even
-// after traffic stops so paused models can still probe and recover. Each source
-// branch and sweep batch is bounded; the oldest state is processed first.
+// after traffic stops so paused models can still probe and recover. Legacy
+// discovery is request-bounded; active targets deduplicate the full hour in
+// PostgreSQL. The sweep remains bounded and processes the oldest state first.
 func (r *passiveQualityRepository) modelTargets(ctx context.Context, p service.PassiveQualityPolicy, now time.Time) ([]passiveModelTarget, error) {
 	window := p.WindowSeconds
 	if p.CacheProtection != nil {
@@ -30,6 +31,12 @@ func (r *passiveQualityRepository) modelTargets(ctx context.Context, p service.P
 	if p.IsGroupQualityTarget() {
 		groupID = p.GroupIDs[0]
 	}
+	discoveryTail := `ORDER BY ul.created_at DESC,ul.id DESC LIMIT 10001`
+	failureTail := `ORDER BY f.created_at DESC,f.id DESC LIMIT 10001`
+	if p.IsActiveRecovery() {
+		discoveryTail = `GROUP BY COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model)`
+		failureTail = `GROUP BY f.model`
+	}
 	rows, err := r.db.QueryContext(ctx, `SELECT a.id,m.model FROM accounts a
  CROSS JOIN LATERAL (
  SELECT $4::text AS model WHERE NOT $5 OR $4<>''
@@ -37,9 +44,9 @@ func (r *passiveQualityRepository) modelTargets(ctx context.Context, p service.P
  UNION SELECT model FROM (SELECT COALESCE(NULLIF(TRIM(ul.requested_model),''),ul.model) AS model FROM usage_logs ul
  WHERE $5 AND $4='' AND ul.account_id=a.id AND ul.created_at>=$6 AND ul.created_at<=$7 AND ($8::bigint=0 OR (ul.group_id=$8 AND `+passiveGroupTargetTextUsageSQL+`))
  AND COALESCE(ul.request_type,0) NOT IN (4,6) AND ul.duration_ms IS NOT NULL
- ORDER BY ul.created_at DESC,ul.id DESC LIMIT 10001) u WHERE COALESCE(TRIM(model),'')<>''
+ `+discoveryTail+`) u WHERE COALESCE(TRIM(model),'')<>''
  UNION SELECT model FROM (SELECT f.model FROM passive_quality_failures f WHERE $5 AND $4=''
- AND f.account_id=a.id AND f.created_at>=$6 AND f.created_at<=$7 AND ($8::bigint=0 OR (f.group_id=$8 AND NOT f.non_text)) ORDER BY f.created_at DESC,f.id DESC LIMIT 10001) f WHERE TRIM(model)<>''
+ AND f.account_id=a.id AND f.created_at>=$6 AND f.created_at<=$7 AND ($8::bigint=0 OR (f.group_id=$8 AND NOT f.non_text)) `+failureTail+`) f WHERE TRIM(model)<>''
  ) m LEFT JOIN passive_quality_states s ON s.account_id=a.id AND s.policy_id=$2 AND s.model_key=CASE WHEN $5 THEN m.model ELSE '' END
  WHERE a.deleted_at IS NULL AND ((NOT(a.id=ANY($3)) AND EXISTS(SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=a.id AND ag.group_id=ANY($1) AND g.status='active' AND g.deleted_at IS NULL)) OR s.account_id IS NOT NULL)
  ORDER BY s.data->>'updated_at' ASC NULLS FIRST,a.id,m.model LIMIT 128`, pq.Array(p.GroupIDs), p.ID, pq.Array(p.ExcludedAccountIDs), p.Model, p.PerModel(), from, now, groupID)

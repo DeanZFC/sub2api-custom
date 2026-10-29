@@ -198,17 +198,48 @@ describe('simple group quality targets', () => {
     expect((w.get('[data-target-ttft]').element as HTMLInputElement).value).toBe('15')
     expect(w.text()).toContain('Cold starts')
     await w.get('[data-target-save]').trigger('click'); await flushPromises()
-    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ id: 0, purpose: 'group_quality_target', group_ids: [4], mode: 'enforce', enabled: true, model: '',
-      cache_rate: { enabled: true, pause: 80, recover: 85 }, error_rate: { enabled: true, pause: 10, recover: 5 }, ttft: { enabled: true, pause: 15000, recover: 12000 }, tps: { enabled: true, pause: 30, recover: 36 }, stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 120, new_session_percent: 20 } }))
+    expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ id: 0, purpose: 'group_quality_target', recovery_mode: 'active', window_seconds: 3600, max_samples: 0, min_samples: 20, new_samples: 5, confirmations: 2, group_ids: [4], mode: 'enforce', enabled: true, model: '',
+      cache_rate: { enabled: true, pause: 80, recover: 85 }, error_rate: { enabled: true, pause: 10, recover: 5 }, ttft: { enabled: true, pause: 15000, recover: 12000 }, tps: { enabled: true, pause: 30, recover: 36 }, stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 120, new_session_percent: 100 } }))
     expect(api.saveGroupQualityTarget.mock.calls[0][0]).not.toHaveProperty('cache_protection')
     expect(api.saveGroupQualityTarget.mock.calls[0][0]).not.toHaveProperty('ttft_action')
     w.unmount()
   })
 
-  it('validates and saves the stability controls in the target editor', async () => {
+  it('keeps new targets minimal and makes full-hour active recovery rules visible', async () => {
     api.policies.mockResolvedValue([])
     const w = makeWrapper(); await flushPromises(); await w.get('[data-target-create]').trigger('click')
-    await w.get('[data-target-group]').setValue('4')
+    const rules = w.get('[data-active-recovery-settings]')
+    expect(rules.text()).toContain('per account and model')
+    expect(rules.text()).toContain('no request-count cap')
+    expect(rules.text()).toContain('20 valid samples')
+    expect(rules.text()).toContain('including scored fallback')
+    expect(w.find('[data-target-traffic-mode-select]').exists()).toBe(false)
+    expect(w.find('[data-target-performance-debounce]').exists()).toBe(false)
+    expect(w.text()).toContain('Customer traffic is not used for recovery trials')
+    w.unmount()
+  })
+
+  it('shows active recovery separately and hides customer trials and scored fallback for active targets', async () => {
+    api.policies.mockResolvedValue([policy({ recovery_mode: 'active', min_samples: 20, max_samples: 0, new_samples: 5 })])
+    api.groupTargets.mockResolvedValue([summary({ fallback: fallback({ in_flight: 3 }), traffic_control: trafficControl() })])
+    api.states.mockResolvedValue([state({ phase: 'probing', reason: 'active_recovery_started', active_recovery: {
+      verdict: 'pending', passed: false, requests: 6, warmup_requests: 1, batches: 1,
+      started_at: '2026-10-24T00:02:00Z', finished_at: '2026-10-24T00:02:01Z', reason: 'insufficient_active_recovery_batches',
+      evidence: { ...state().evidence, samples: 5, failures: 0, error_rate: 0, cache_rate: 90, cache_samples: 5 },
+    } })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('[data-target-full-window]').text()).toContain('no request-count cap')
+    expect(w.get('[data-target-state]').text()).toContain('Running active recovery checks')
+    expect(w.get('[data-target-state]').text()).not.toContain('Trial attempts')
+    expect(w.get('[data-active-recovery-evidence]').text()).toContain('Actual cache usage: 90%')
+    expect(w.get('[data-target-state]').text()).toContain('Actual cache usage: 0%')
+    expect(w.find('[data-target-traffic-details]').exists()).toBe(false)
+    expect(w.find('[data-target-fallback-active]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('preserves legacy stability controls while editing an existing legacy target', async () => {
+    const w = makeWrapper(); await flushPromises(); await w.get('[data-target-edit]').trigger('click')
     expect((w.get('[data-target-performance-debounce]').element as HTMLInputElement).value).toBe('300')
     await w.get('[data-target-new-session-share]').setValue('0')
     expect(w.get('[data-target-save]').attributes('disabled')).toBeDefined()
@@ -279,7 +310,7 @@ describe('simple group quality targets', () => {
     const w = makeWrapper(); await flushPromises(); await w.get('[data-target-create]').trigger('click')
     await w.get('[data-target-group]').setValue('3')
     expect((w.get('[data-target-ttft]').element as HTMLInputElement).value).toBe('15')
-    expect(w.get('[data-dialog]').text()).toContain('No extra configuration is needed')
+    expect(w.get('[data-dialog]').text()).toContain('Customer traffic is not used for recovery trials')
     await w.get('[data-target-save]').trigger('click'); await flushPromises()
     expect(api.saveGroupQualityTarget).toHaveBeenCalledWith(expect.objectContaining({ group_ids: [3],
       cache_rate: { enabled: true, pause: 80, recover: 85 }, ttft: { enabled: true, pause: 15000, recover: 12000 } }))

@@ -15,10 +15,16 @@ type GroupQualityStability struct {
 }
 
 func (c PassiveQualityConfig) GroupTargetStability() GroupQualityStability {
+	var stability GroupQualityStability
 	if c.Stability != nil {
-		return *c.Stability
+		stability = *c.Stability
+	} else {
+		stability = GroupQualityStability{AvailabilityPauseSeconds: 60, PerformancePauseSeconds: 300, RecoverySeconds: 120, NewSessionPercent: 20}
 	}
-	return GroupQualityStability{AvailabilityPauseSeconds: 60, PerformancePauseSeconds: 300, RecoverySeconds: 120, NewSessionPercent: 20}
+	if c.IsActiveRecovery() {
+		stability.NewSessionPercent = 100
+	}
+	return stability
 }
 
 func (c PassiveQualityConfig) validateGroupTargetStability() error {

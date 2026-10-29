@@ -48,6 +48,7 @@ func (r *accountRepository) AcquireCacheRecoveryRequest(ctx context.Context, acc
  AND l.fallback AND NOT l.unused AND l.released_at IS NULL AND l.fallback_expires_at>clock_timestamp()
  AND g.platform='openai' AND g.status='active' AND g.deleted_at IS NULL
  AND p.config->>'enabled'='true' AND p.config->>'mode'='enforce'
+ AND COALESCE(p.config->>'recovery_mode','')<>'active'
  AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=l.account_id AND ag.group_id=l.group_id)
  FOR SHARE OF l`, req.LeaseID, accountID, req.GroupID, req.Key, req.Model).Scan(&lease)
 		if errors.Is(err, sql.ErrNoRows) {

@@ -440,7 +440,7 @@ const load = (force = false): Promise<void> => {
   const revision = ++dataRevision
   const administrator = auth.isAdmin
   const request = Promise.allSettled([
-    testResultsAPI.list(3, 3),
+    testResultsAPI.list(3, 4),
     testResultsAPI.votes(),
     administrator ? listReviews() : Promise.resolve<TestAdminReview[]>([]),
   ]).then(([results, votes, reviews]) => {

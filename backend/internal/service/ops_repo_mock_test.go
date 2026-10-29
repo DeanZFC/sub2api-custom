@@ -10,6 +10,7 @@ type opsRepoMock struct {
 	InsertErrorLogFn              func(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error)
 	BatchInsertErrorLogsFn        func(ctx context.Context, inputs []*OpsInsertErrorLogInput) (int64, error)
 	GetErrorLogByIDFn             func(ctx context.Context, id int64) (*OpsErrorLogDetail, error)
+	GetAccountRequestStatsFn      func(ctx context.Context, accountIDs []int64, startTime, endTime time.Time) (map[string]*OpsAccountRequestStats, error)
 	BatchInsertSystemLogsFn       func(ctx context.Context, inputs []*OpsInsertSystemLogInput) (int64, error)
 	ListSystemLogsFn              func(ctx context.Context, filter *OpsSystemLogFilter) (*OpsSystemLogList, error)
 	DeleteSystemLogsFn            func(ctx context.Context, filter *OpsSystemLogCleanupFilter) (int64, error)
@@ -43,6 +44,13 @@ func (m *opsRepoMock) GetErrorLogByID(ctx context.Context, id int64) (*OpsErrorL
 
 func (m *opsRepoMock) ListRequestDetails(ctx context.Context, filter *OpsRequestDetailFilter) ([]*OpsRequestDetail, int64, error) {
 	return []*OpsRequestDetail{}, 0, nil
+}
+
+func (m *opsRepoMock) GetAccountRequestStats(ctx context.Context, accountIDs []int64, startTime, endTime time.Time) (map[string]*OpsAccountRequestStats, error) {
+	if m.GetAccountRequestStatsFn != nil {
+		return m.GetAccountRequestStatsFn(ctx, accountIDs, startTime, endTime)
+	}
+	return map[string]*OpsAccountRequestStats{}, nil
 }
 
 func (m *opsRepoMock) BatchInsertSystemLogs(ctx context.Context, inputs []*OpsInsertSystemLogInput) (int64, error) {

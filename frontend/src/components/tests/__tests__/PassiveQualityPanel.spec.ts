@@ -35,6 +35,36 @@ describe('passive quality records', () => {
     expect(api.act).toHaveBeenCalledWith(state, 'verify', 0)
     wrapper.unmount()
   })
+  it('requests an active check without opening customer trials and renders independent active evidence', async () => {
+    api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 1, purpose: 'group_quality_target', recovery_mode: 'active' }])
+    const state = recordState({ purpose: 'group_quality_target', phase: 'paused', active_recovery: {
+      verdict: 'pending', passed: false, requests: 5, warmup_requests: 1, batches: 1,
+      started_at: '2026-10-24T00:00:00Z', finished_at: '2026-10-24T00:00:10Z', reason: 'insufficient_active_recovery_batches',
+      evidence: { ...recordState().evidence, error_rate: 0, cache_rate: 0, cache_samples: 5, output_tps: null },
+    } })
+    api.states.mockResolvedValue([state])
+    api.events.mockResolvedValue([event(1, { detail: state, kind: 'active_recovery_pending' })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.findAll('[data-active-recovery-evidence]')).toHaveLength(2)
+    expect(w.get('tbody [data-active-recovery-evidence]').text()).toContain('Actual cache usage: 0%')
+    expect(w.get('tbody [data-active-recovery-evidence]').text()).toContain('Output TPS: Unknown')
+    expect(w.get('tbody [data-active-recovery-evidence]').text()).toContain('excluded from the one-hour production metrics')
+    await w.findAll('button').find(button => button.text() === 'Run active recovery checks')!.trigger('click'); await flushPromises()
+    expect(api.act).toHaveBeenCalledWith(state, 'verify', 0)
+    expect(api.success).toHaveBeenCalledWith(expect.stringContaining('no customer trial is opened'))
+    expect(w.get('tbody tr').text()).not.toContain('Start recovery trial')
+    w.unmount()
+  })
+
+  it('uses active probing labels for system recovery', async () => {
+    api.policies.mockResolvedValue([{ ...defaultPassivePolicy(), id: 1, purpose: 'group_quality_target', recovery_mode: 'active' }])
+    api.states.mockResolvedValue([recordState({ purpose: 'group_quality_target', phase: 'probing' })])
+    const w = makeWrapper(); await flushPromises()
+    expect(w.get('tbody tr').text()).toContain('Running active recovery checks')
+    expect(w.get('tbody tr').text()).not.toContain('Preparing real-traffic trial')
+    w.unmount()
+  })
+
   it('shows TPS evidence and preserves an independent speed restriction when availability is healthy', async () => {
     api.states.mockResolvedValue([recordState({
       speed: { phase: 'limited', reason: 'output_tps: 8.00 / 10.00 (20)', hits: 2, recovery_hits: 0 },

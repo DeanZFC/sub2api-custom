@@ -109,10 +109,12 @@ type accountTestUsageBody struct {
 	settle     func(*ScheduledTestRequestAttempt)
 	settleOnce sync.Once
 	eventKind  string
+	observedAt time.Time
 }
 
 func (b *accountTestUsageBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
+	b.observedAt = time.Now()
 	qualityUsageReadError(b.attempt, err)
 	if !b.overflow {
 		b.buffer = append(b.buffer, p[:n]...)
@@ -127,6 +129,7 @@ func (b *accountTestUsageBody) Read(p []byte) (int, error) {
 			b.sse = bytes.HasPrefix(prefix, []byte("data:")) || bytes.HasPrefix(prefix, []byte("event:")) || bytes.HasPrefix(prefix, []byte(":"))
 		}
 		if b.sse {
+			b.attempt.qualityStream = true
 			for {
 				end := bytes.IndexByte(b.buffer, '\n')
 				if end < 0 {
@@ -145,6 +148,9 @@ func (b *accountTestUsageBody) Read(p []byte) (int, error) {
 			b.buffer = nil
 		}
 	}
+	if err != nil {
+		b.finishTiming(time.Now())
+	}
 	return n, err
 }
 func (b *accountTestUsageBody) Close() error {
@@ -153,6 +159,7 @@ func (b *accountTestUsageBody) Close() error {
 	}
 	b.buffer = nil
 	err := b.ReadCloser.Close()
+	b.finishTiming(time.Now())
 	b.settleOnce.Do(func() {
 		if b.settle != nil {
 			b.settle(b.attempt)
@@ -169,14 +176,23 @@ func (b *accountTestUsageBody) captureLine(line []byte) {
 		b.eventKind = strings.TrimSpace(string(bytes.TrimPrefix(line, []byte("event:"))))
 	}
 	if bytes.HasPrefix(line, []byte("data:")) {
+		if bytes.Equal(bytes.TrimSpace(line[5:]), []byte("[DONE]")) {
+			b.attempt.qualityTerminal = true
+			b.finishTiming(b.observationTime())
+			return
+		}
 		b.captureJSON(bytes.TrimSpace(line[5:]))
 	}
 }
 func (b *accountTestUsageBody) captureJSON(raw []byte) {
 	var data map[string]any
 	if json.Unmarshal(raw, &data) != nil {
+		if b.sse && len(bytes.TrimSpace(raw)) > 0 {
+			b.attempt.qualityMalformed = true
+		}
 		return
 	}
+	b.captureTiming(data, b.observationTime())
 	captureAccountTestUsageMetadata(b.attempt, data)
 	// Anthropic message_start contains an initial output count, not final usage.
 	// Responses created/in-progress events are likewise not settlements.

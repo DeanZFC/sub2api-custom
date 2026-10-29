@@ -696,7 +696,7 @@ const scheduledTestVisibleResultColumns = `vr.id,vr.plan_id,vr.plan_name,vr.test
 // current execution. Rank first so a failed or running check cannot fall back
 // to an older success. History uses its own query.
 func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID int64, _ int) ([]*service.ScheduledTestResult, error) {
-	return r.listVisible(ctx, userID, scheduledTestVisibleResultsCTE, 1)
+	return r.listVisible(ctx, userID, scheduledTestVisibleResultsCTE, 1, false)
 }
 
 // Recent artwork supplements the current execution; it never supplies a
@@ -705,16 +705,25 @@ func (r *scheduledTestResultRepository) ListVisibleWithRecentHTML(ctx context.Co
 	if total < 1 || total > 5 {
 		total = 3
 	}
-	return r.listVisible(ctx, userID, scheduledTestVisibleResultsCTE, total)
+	return r.listVisible(ctx, userID, scheduledTestVisibleResultsCTE, total, false)
+}
+
+// Recent results include numeric checks and artwork from the current series.
+// They supplement the current execution without replacing its result.
+func (r *scheduledTestResultRepository) ListVisibleWithRecentResults(ctx context.Context, userID int64, total int) ([]*service.ScheduledTestResult, error) {
+	if total < 1 || total > 5 {
+		total = 4
+	}
+	return r.listVisible(ctx, userID, scheduledTestVisibleResultsCTE, total, true)
 }
 
 // Monitor cards need every current group membership, with the same per-group
 // entitlement checks. The ordinary result list keeps its single-group layout.
 func (r *scheduledTestResultRepository) ListVisibleByGroup(ctx context.Context, userID int64) ([]*service.ScheduledTestResult, error) {
-	return r.listVisible(ctx, userID, scheduledTestVisibleProjectionCTE+scheduledTestVisibleAccessCTE, 1)
+	return r.listVisible(ctx, userID, scheduledTestVisibleProjectionCTE+scheduledTestVisibleAccessCTE, 1, false)
 }
 
-func (r *scheduledTestResultRepository) listVisible(ctx context.Context, userID int64, visibilityCTE string, recentHTML int) ([]*service.ScheduledTestResult, error) {
+func (r *scheduledTestResultRepository) listVisible(ctx context.Context, userID int64, visibilityCTE string, recentTotal int, includeNumeric bool) ([]*service.ScheduledTestResult, error) {
 	query := visibilityCTE + `, ranked_results AS (
     SELECT vr.*, row_number() OVER (
         PARTITION BY vr.group_id, vr.result_target_key, vr.test_definition_id, vr.model_id, vr.reasoning_effort
@@ -730,10 +739,14 @@ func (r *scheduledTestResultRepository) listVisible(ctx context.Context, userID 
 )`
 	args := []any{userID}
 	resultSource := "current_results"
-	if recentHTML > 1 {
+	if recentTotal > 1 {
 		// Reuse the authorized projection for every historical row, and match
-		// the same series as the history endpoint. Only completed HTML with an
-		// earlier execution time can appear beside the current result.
+		// the same series as the history endpoint. Only completed output with
+		// an earlier execution time can appear beside the current result.
+		eligibleOutput := "anchor.output_kind = 'html' AND COALESCE(historical.output_html, '') ~ '[^[:space:]]'"
+		if includeNumeric {
+			eligibleOutput = "((anchor.output_kind = 'html' AND COALESCE(historical.output_html, '') ~ '[^[:space:]]') OR (anchor.output_kind = 'number' AND historical.output_numeric IS NOT NULL))"
+		}
 		query += `, recent_results AS (
     SELECT * FROM current_results
     UNION ALL
@@ -741,21 +754,20 @@ func (r *scheduledTestResultRepository) listVisible(ctx context.Context, userID 
     FROM current_results anchor
     JOIN LATERAL (
         SELECT historical.* FROM visible_results historical
-        WHERE anchor.output_kind = 'html'
+        WHERE ` + eligibleOutput + `
           AND historical.group_id IS NOT DISTINCT FROM anchor.group_id
           AND historical.result_target_key = anchor.result_target_key
           AND historical.test_definition_id IS NOT DISTINCT FROM anchor.test_definition_id
           AND historical.model_id = anchor.model_id
           AND historical.reasoning_effort = anchor.reasoning_effort
-          AND historical.output_kind = 'html'
+          AND historical.output_kind = anchor.output_kind
           AND historical.status IN ('success', 'passed')
-          AND COALESCE(historical.output_html, '') ~ '[^[:space:]]'
           AND (historical.started_at, historical.id) < (anchor.started_at, anchor.id)
         ORDER BY historical.started_at DESC, historical.id DESC
         LIMIT $2
     ) history ON TRUE
 )`
-		args = append(args, recentHTML-1)
+		args = append(args, recentTotal-1)
 		resultSource = "recent_results"
 	}
 	query += `

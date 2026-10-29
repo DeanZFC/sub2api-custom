@@ -405,7 +405,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	if err != nil {
 		return err
 	}
-	named := j.TriggerReason == "name" && c.autonomousGroup(j.GroupID) && directBotName(c.Autonomous, e.Content)
+	named := j.TriggerReason == "name" && c.autonomousGroup(j.GroupID) && botNameCall(c.Autonomous, e)
 	addressed := j.EventType == groupAtMessageCreate
 	if j.EventType == groupMessageCreate && !named && !unmentionedGroupCommand(e, c.CustomCommands...) {
 		addressed, err = s.groupMessageMentionsBot(ctx, c, e)

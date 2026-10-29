@@ -135,6 +135,9 @@ func passivePolicyChange(old, next service.PassiveQualityConfig) (unchanged, met
 		if c.IsGroupQualityTarget() && c.TrafficMode == "" {
 			c.TrafficMode = "strict"
 		}
+		if c.IsActiveRecovery() {
+			c.TrafficMode = "strict"
+		}
 		if c.IsGroupQualityTarget() {
 			stability := c.GroupTargetStability()
 			c.Stability = &stability
@@ -276,6 +279,7 @@ func passiveEvent(ctx context.Context, tx *sql.Tx, s service.PassiveQualityState
 	return err
 }
 func savePassiveState(ctx context.Context, tx *sql.Tx, s service.PassiveQualityState) error {
+	s.ActiveRecoveryConfig = nil
 	raw, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -299,7 +303,7 @@ func reconcilePassiveAccount(ctx context.Context, tx sqlExecutor, aid int64) err
  AND s.data->>'phase'<>'exempt' AND `+passiveMembership+`
  ), entries AS (
  SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name',
- 'scope',config->>'scope','model',COALESCE(data->>'model',config->>'model'),'phase',data->>'phase','reason',data->>'reason',
+ 'scope',config->>'scope','model',COALESCE(data->>'model',config->>'model'),'phase',data->>'phase','reason',data->>'reason','recovery_mode',config->>'recovery_mode',
  'trial_ends_at',data->'trial_ends_at','used',data->'used','max_requests',config->'trial_requests',
  'concurrency_limit',config->'concurrency_limit','priority_penalty',config->'priority_penalty') AS value
  FROM active WHERE data->>'phase' IN ('paused','probing','trial','limited')
@@ -307,7 +311,7 @@ func reconcilePassiveAccount(ctx context.Context, tx sqlExecutor, aid int64) err
  SELECT id,jsonb_build_object('policy_id',id,'policy_name',config->>'name','metric','performance',
  'scope','model','model',COALESCE(data->>'model',config->>'model'),'phase','cache_limited','reason',data->>'reason',
  'allocation_percent',COALESCE(config->'stability'->'new_session_percent','20'::jsonb))
- FROM active WHERE config->>'purpose' IN ('group_quality_target','cache_target')
+ FROM active WHERE config->>'purpose' IN ('group_quality_target','cache_target') AND COALESCE(config->>'recovery_mode','')<>'active'
  AND (data->>'cache_allocation_reduced'='true' OR (data->>'phase'='suspect' AND COALESCE((data->>'hits')::int,0)>0
  AND data->>'confirmation_metric' IN ('cache_rate','ttft_p90','output_tps')))
  UNION ALL
@@ -379,7 +383,8 @@ func reconcileGroupQualityTargets(ctx context.Context, tx sqlExecutor, aid int64
 			until = e
 		}
 		entries = append(entries, map[string]any{"policy_id": p.ID, "group_id": p.GroupIDs[0], "model": state.Model, "phase": state.Phase,
-			"verified": groupQualityStateVerified(p, state, now), "verified_until": until.UTC().Format(time.RFC3339Nano)})
+			"recovery_mode": p.RecoveryMode,
+			"verified":      groupQualityStateVerified(p, state, now), "verified_until": until.UTC().Format(time.RFC3339Nano)})
 	}
 	err = rows.Err()
 	_ = rows.Close()
@@ -521,6 +526,7 @@ func (r *passiveQualityRepository) Act(ctx context.Context, pid, aid int64, acti
 		s.NextAt = now
 		s.Reason = "verification_requested"
 	case "exempt":
+		s.ActiveConfirmations = nil
 		s.Latency = nil
 		s.Speed = nil
 		s.Cache = nil
@@ -533,6 +539,7 @@ func (r *passiveQualityRepository) Act(ctx context.Context, pid, aid int64, acti
 			return service.ErrPassiveQualityConflict
 		}
 		s.Phase = "insufficient"
+		s.ActiveConfirmations = nil
 		s.ObserveAfter = now
 		s.CacheObserveAfter = now
 		s.Latency = nil

@@ -1193,6 +1193,25 @@ export async function listRequestErrorUpstreamErrors(
   return data
 }
 
+export interface OpsAccountRequestStats {
+  window_start: string
+  window_end: string
+  cache_rate: number | null
+  avg_first_token_ms: number | null
+  avg_duration_ms: number | null
+  cache_samples: number
+  first_token_samples: number
+  duration_samples: number
+}
+
+export async function getAccountRequestStatsBatch(accountIDs: number[]): Promise<{ stats: Record<string, OpsAccountRequestStats> }> {
+  const { data } = await apiClient.post<{ stats: Record<string, OpsAccountRequestStats> }>(
+    '/admin/ops/account-request-stats/batch',
+    { account_ids: accountIDs }
+  )
+  return data
+}
+
 export async function listRequestDetails(params: OpsRequestDetailsParams): Promise<OpsRequestDetailsResponse> {
   const { data } = await apiClient.get<OpsRequestDetailsResponse>('/admin/ops/requests', { params })
   return data
@@ -1360,6 +1379,7 @@ export const opsAPI = {
   listRequestErrorUpstreamErrors,
 
   listRequestDetails,
+  getAccountRequestStatsBatch,
   listAlertRules,
   createAlertRule,
   updateAlertRule,

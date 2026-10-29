@@ -26,8 +26,9 @@ func passiveDBSchema(t *testing.T, modelStates bool) (context.Context, *sql.DB, 
 	t.Helper()
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("MIGRATION_TEST_DATABASE_URL is not set")
+		dsn = integrationDatabaseDSN
 	}
+	require.NotEmpty(t, dsn, "integration PostgreSQL harness must supply a database")
 	ctx := context.Background()
 	admin, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)

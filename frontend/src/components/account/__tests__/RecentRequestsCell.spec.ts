@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import type { OpsRequestDetail } from '@/api/admin/ops'
+import type { OpsAccountRequestStats, OpsRequestDetail } from '@/api/admin/ops'
 import RecentRequestsCell from '../RecentRequestsCell.vue'
 
 vi.mock('vue-i18n', async () => ({
@@ -22,13 +22,18 @@ const failure: OpsRequestDetail = {
   user_id: 53, user_email: 'customer@example.com', group_id: 10, group_name: 'GPT-Luna',
   status_code: 502, message: '<script>alert(1)</script> upstream failed', stream: false,
 }
+const statistics: OpsAccountRequestStats = {
+  window_start: '2026-09-11T09:30:00+08:00', window_end: '2026-09-11T10:30:00+08:00',
+  cache_rate: 0.8, avg_first_token_ms: 3060, avg_duration_ms: 38660,
+  cache_samples: 32, first_token_samples: 30, duration_samples: 35,
+}
 let wrapper: VueWrapper
 const dialog = () => document.querySelector('[role="dialog"]')
 const triggers = () => wrapper.findAll('[data-testid="recent-request-trigger"]')
 
 beforeEach(() => {
   vi.useFakeTimers()
-  wrapper = mount(RecentRequestsCell, { props: { requests: [success, failure] }, attachTo: document.body })
+  wrapper = mount(RecentRequestsCell, { props: { requests: [success, failure], statistics }, attachTo: document.body })
 })
 afterEach(() => {
   wrapper.unmount()
@@ -37,7 +42,7 @@ afterEach(() => {
 })
 
 describe('RecentRequestsCell', () => {
-  it('shows aggregate metrics above the timeline while keeping the latest request time', () => {
+  it('shows hourly aggregate metrics above the timeline while keeping the latest request time', () => {
     expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('80.0%')
     expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('3.06s')
     expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('38.66s')
@@ -46,55 +51,102 @@ describe('RecentRequestsCell', () => {
     expect(dialog()).toBeNull()
   })
 
-  it('weights cache rate by text prompt tokens and averages each valid latency sample separately', async () => {
-    await wrapper.setProps({ requests: [
-      { ...success, request_id: 'small', input_tokens: 200, image_input_tokens: 100, cache_read_tokens: 800, cache_creation_tokens: 100, first_token_ms: 1000, duration_ms: 4000 },
-      { ...success, request_id: 'large', input_tokens: 8500, cache_read_tokens: 0, cache_creation_tokens: 500, first_token_ms: 3000, duration_ms: 8000 },
-      { ...success, request_id: 'sync', request_type: 'sync', stream: true, input_tokens: 0, cache_read_tokens: 10000, first_token_ms: 99999, duration_ms: 12000 },
-      { ...failure, input_tokens: 0, cache_read_tokens: 10000, cache_creation_tokens: 0, request_type: 'stream', stream: true, first_token_ms: 99999, duration_ms: 99999 },
-      { ...success, request_id: 'missing', input_tokens: undefined, cache_creation_tokens: undefined, first_token_ms: undefined, duration_ms: undefined },
-    ] })
+  it('renders the complete hourly statistics independently of the timeline request telemetry', async () => {
+    await wrapper.setProps({
+      requests: [{ ...success, input_tokens: 0, cache_read_tokens: 10000, first_token_ms: 99999, duration_ms: 99999 }],
+      statistics: { ...statistics, cache_rate: 0.08, avg_first_token_ms: 2000, avg_duration_ms: 8000 },
+    })
     expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('8.0%')
     expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('2.00s')
     expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('8.00s')
   })
 
-  it('preserves measured zero, updates the summary on refresh, and excludes missing or invalid telemetry', async () => {
-    await wrapper.setProps({ requests: [
-      { ...success, stream: false, input_tokens: 100, cache_read_tokens: 0, cache_creation_tokens: 0, first_token_ms: 0, duration_ms: 0 },
-      { ...success, request_id: 'missing', input_tokens: null, first_token_ms: null, duration_ms: null },
-      { ...success, request_id: 'invalid', input_tokens: Number.NaN, first_token_ms: -1000, duration_ms: Number.POSITIVE_INFINITY },
-    ] })
+  it('preserves measured zero and updates unavailable statistics to a dash on refresh', async () => {
+    await wrapper.setProps({ statistics: {
+      ...statistics, cache_rate: 0, avg_first_token_ms: 0, avg_duration_ms: 0,
+    } })
     expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('0.0%')
     expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('0ms')
     expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('0ms')
-    await wrapper.setProps({ requests: [failure] })
+    await wrapper.setProps({ statistics: {
+      ...statistics, cache_rate: null, avg_first_token_ms: null, avg_duration_ms: null,
+      cache_samples: 0, first_token_samples: 0, duration_samples: 0,
+    } })
     expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('-')
     expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('-')
     expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('-')
   })
 
-  it('uses the same latest twenty requests for both the summary and the timeline', async () => {
+  it('limits the timeline to ten requests without truncating the hourly summary', async () => {
     const requests = Array.from({ length: 21 }, (_, index) => ({
-      ...success, request_id: `req-${index}`, input_tokens: index < 20 ? 100 : 0,
-      cache_read_tokens: index < 20 ? 0 : 100000, cache_creation_tokens: 0,
-      first_token_ms: index < 20 ? 1000 : 99000, duration_ms: index < 20 ? 2000 : 99000,
+      ...success, request_id: `req-${index}`, input_tokens: 100,
+      cache_read_tokens: 0, cache_creation_tokens: 0,
+      first_token_ms: 1000, duration_ms: 2000,
     }))
     await wrapper.setProps({ requests })
-    expect(triggers()).toHaveLength(20)
-    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('0.0%')
-    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('1.00s')
-    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('2.00s')
+    expect(triggers()).toHaveLength(10)
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('80.0%')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('3.06s')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('38.66s')
     await triggers()[0].trigger('click')
-    expect(dialog()?.textContent).toContain('req-19')
-    await triggers()[19].trigger('click')
+    expect(dialog()?.textContent).toContain('req-9')
+    await triggers()[9].trigger('click')
     expect(dialog()?.textContent).toContain('req-0')
   })
 
-  it('shows twenty loading placeholders and hides the summary when no requests have loaded', async () => {
-    await wrapper.setProps({ requests: [], loading: true })
-    expect(wrapper.findAll('.animate-pulse')).toHaveLength(20)
+  it('shows ten loading placeholders and hides the summary when neither data source has loaded', async () => {
+    await wrapper.setProps({ requests: [], statistics: undefined, loading: true, statisticsLoading: true })
+    expect(wrapper.findAll('.animate-pulse')).toHaveLength(10)
     expect(wrapper.find('[data-testid="recent-requests-metrics"]').exists()).toBe(false)
+  })
+
+  it.each([null, undefined])('keeps the timeline but does not derive hourly metrics from requests when statistics are %s', async statistics => {
+    await wrapper.setProps({ statistics })
+    expect(triggers()).toHaveLength(2)
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('-')
+  })
+
+  it('shows hourly metrics when there are no timeline requests', async () => {
+    await wrapper.setProps({ requests: [] })
+    expect(triggers()).toHaveLength(0)
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('80.0%')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('3.06s')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('38.66s')
+    expect(wrapper.text()).not.toContain('10:27:52')
+  })
+
+  it('shows dashes for an empty hourly window even when historical requests have metrics', async () => {
+    await wrapper.setProps({ statistics: {
+      ...statistics, cache_rate: null, avg_first_token_ms: null, avg_duration_ms: null,
+      cache_samples: 0, first_token_samples: 0, duration_samples: 0,
+    } })
+    expect(triggers()).toHaveLength(2)
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('-')
+  })
+
+  it('preserves a successful hourly snapshot while refreshing and clears failed statistics', async () => {
+    await wrapper.setProps({ statisticsLoading: true })
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('80.0%')
+    await wrapper.setProps({ statisticsLoadError: true })
+    expect(triggers()).toHaveLength(2)
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-metrics"]').attributes('title')).toContain('admin.accounts.recentRequests.metricsLoadFailed')
+    await wrapper.setProps({ statisticsLoadError: false, statisticsLoading: false })
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('80.0%')
+  })
+
+  it('does not derive metrics from timeline requests while the first hourly snapshot is loading', async () => {
+    await wrapper.setProps({ statistics: undefined, statisticsLoading: true })
+    expect(triggers()).toHaveLength(2)
+    expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('-')
+    expect(wrapper.get('[data-testid="recent-requests-duration"]').text()).toBe('-')
   })
 
   it('lazily opens named identities, tokens, costs and latency on hover; newest is rightmost', async () => {
@@ -178,7 +230,7 @@ describe('RecentRequestsCell', () => {
   })
 
   it('shows load failure before the loading skeleton, then preserves the normal empty state after recovery', async () => {
-    await wrapper.setProps({ requests: [], loading: true, loadError: true })
+    await wrapper.setProps({ requests: [], statistics: undefined, loading: true, loadError: true })
     expect(wrapper.text()).toContain('admin.accounts.recentRequests.loadFailed')
     expect(wrapper.find('.animate-pulse').exists()).toBe(false)
     await wrapper.setProps({ loading: false, loadError: false })

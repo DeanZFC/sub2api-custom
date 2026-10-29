@@ -32,6 +32,7 @@ export interface PassiveCacheState extends Omit<PassiveMetricState, 'evidence'> 
 }
 export interface PassivePolicy {
   purpose?: 'cache_target' | 'group_quality_target'
+  recovery_mode?: 'active' | 'traffic'
   stability?: GroupQualityStability
   traffic_mode?: 'strict' | 'availability'
   schema_version?: number; ttft_action?: 'observe' | 'limit'; ttft_concurrency_limit?: number; ttft_priority_penalty?: number
@@ -53,8 +54,17 @@ export interface PassiveEvidence {
   samples: number; failures: number; consecutive_failures: number; error_rate: number | null; ttft: number | null
   ttft_samples: number; cache_rate: number | null; cache_samples: number; fresh: number; complete: boolean; latest: string
 }
+export interface PassiveActiveRecoveryResult {
+  evidence: PassiveEvidence
+  started_at: string; finished_at: string; deferred_until?: string
+  reason: string; verdict: 'pass' | 'fail' | 'pending' | 'deferred'; passed: boolean
+  requests: number; warmup_requests: number; batches: number
+  evidence_batches?: PassiveEvidence[]
+}
 export interface PassiveState {
   purpose?: 'cache_target' | 'group_quality_target'
+  active_recovery?: PassiveActiveRecoveryResult
+  recovered_at?: string
   suspicion_since?: string; recovery_since?: string; recovery_hits?: number; cache_allocation_reduced?: boolean; stability_evidence_at?: string; confirmation_metric?: string
   speed?: PassiveMetricState; latency?: PassiveMetricState; cache?: Record<string, PassiveCacheState>; allocation_percent?: number
   policy_id: number; policy_name: string; account_id: number; account_name?: string; model: string; probe_model?: string; scope: string; mode: string
@@ -64,6 +74,7 @@ export interface PassiveState {
 export interface PassiveEvent { id: number; policy_id: number; account_id: number; policy_name: string; kind: string; detail: PassiveState; created_at: string }
 export interface GroupQualityTargetDraft {
   id: number; version: number; purpose: 'group_quality_target'; name: string; enabled: boolean; mode: 'observe' | 'enforce'; model: string
+  recovery_mode?: 'active' | 'traffic'
   traffic_mode: 'strict' | 'availability'
   stability: GroupQualityStability
   group_ids: number[]; cache_rate: PassiveMetric; error_rate: PassiveMetric; ttft: PassiveMetric; tps: PassiveMetric
@@ -128,11 +139,15 @@ function passiveTPSDraft(metric?: PassiveMetric): PassiveMetric {
 export function isGroupQualityTarget(policy: Pick<PassivePolicy, 'purpose'>): boolean {
   return policy.purpose === 'group_quality_target' || policy.purpose === 'cache_target'
 }
+export function isActiveQualityRecovery(policy?: Pick<PassivePolicy, 'recovery_mode'>): boolean {
+  return policy?.recovery_mode === 'active'
+}
 export function groupQualityTargetDraft(policy?: PassivePolicy, _groupName = ''): GroupQualityTargetDraft {
   const percentage = 80
   const ttft = 15000
   const draft: GroupQualityTargetDraft = {
     id: policy?.id || 0, version: policy?.version || 0, purpose: 'group_quality_target', name: policy?.name || '',
+    ...(!policy || policy.recovery_mode ? { recovery_mode: policy?.recovery_mode || 'active' } : {}),
     enabled: policy?.enabled ?? true, mode: policy?.mode || 'enforce', traffic_mode: policy?.traffic_mode || 'strict', model: policy?.model || '', group_ids: policy ? [...policy.group_ids] : [],
     stability: { availability_pause_seconds: 60, performance_pause_seconds: 300, recovery_seconds: 120, new_session_percent: 20, ...policy?.stability },
     excluded_account_ids: [...(policy?.excluded_account_ids || [])],
@@ -145,6 +160,15 @@ export function groupQualityTargetDraft(policy?: PassivePolicy, _groupName = '')
     for (const key of ['window_seconds', 'max_samples', 'min_samples', 'confirmations', 'new_samples', 'cooldown_seconds', 'max_cooldown_seconds', 'trial_seconds', 'trial_requests', 'trial_concurrency', 'recovery_samples'] as const) {
       if (policy[key] !== undefined) draft[key] = policy[key]
     }
+  }
+  if (isActiveQualityRecovery(draft)) {
+    draft.traffic_mode = 'strict'
+    draft.window_seconds = 3600
+    draft.max_samples = 0
+    draft.min_samples = policy?.min_samples || 20
+    draft.new_samples = policy?.new_samples || 5
+    draft.confirmations = policy?.confirmations || 2
+    draft.stability.new_session_percent = policy?.stability?.new_session_percent ?? 100
   }
   return draft
 }

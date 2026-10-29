@@ -87,26 +87,47 @@ func autonomousActive(a AutonomousConfig, now time.Time) bool {
 	}
 	return hour >= a.StartHour || hour < a.EndHour
 }
-func directBotName(a AutonomousConfig, text string) bool {
-	text = strings.TrimSpace(text)
+func containsBotName(a AutonomousConfig, text string) bool {
+	text = strings.ToLower(text)
 	for _, name := range a.Names {
-		r := []rune(text)
-		n := len([]rune(name))
-		if len(r) <= n || !strings.EqualFold(string(r[:n]), name) {
-			continue
-		}
-		rest := string(r[n:])
-		first := r[n]
-		if unicode.IsSpace(first) || strings.ContainsRune("，,:：!！?？、", first) {
-			return strings.Trim(strings.TrimSpace(rest), "，,:：!！?？、") != ""
-		}
-		for _, prefix := range []string{"帮我", "请问", "你能", "你会", "在吗", "你好", "解释", "怎么看"} {
-			if strings.HasPrefix(rest, prefix) {
-				return true
-			}
+		if name = strings.TrimSpace(name); name != "" && strings.Contains(text, strings.ToLower(name)) {
+			return true
 		}
 	}
 	return false
+}
+
+func botNameCall(a AutonomousConfig, e Event) bool {
+	cmd, _ := command(e.Content)
+	if e.Author.Bot || cmd != "" {
+		return false
+	}
+	if containsBotName(a, e.Content) {
+		return true
+	}
+	// Parallel text/image messages can put the sender's text in elements.
+	// Quoted text belongs to another message and cannot call the bot by itself.
+	remaining := 32
+	var visit func([]MessageElement, int) bool
+	visit = func(elements []MessageElement, depth int) bool {
+		if depth > 4 {
+			return false
+		}
+		for _, element := range elements {
+			if remaining == 0 {
+				return false
+			}
+			remaining--
+			if element.MessageType == 103 {
+				continue
+			}
+			if containsBotName(a, element.Content) || visit(element.MsgElements, depth+1) {
+				return true
+			}
+		}
+		return false
+	}
+	return e.MessageType != 103 && visit(e.MsgElements, 0)
 }
 func autonomousText(e Event) (string, string) {
 	text := strings.TrimSpace(e.Content)
@@ -224,6 +245,12 @@ func (s *Service) routeAutonomous(ctx context.Context, c Config, p Payload, e Ev
 		return nil
 	}
 	text, skip := autonomousText(e)
+	named := botNameCall(c.Autonomous, e)
+	if named {
+		// A configured name explicitly addresses the bot, even in a short message,
+		// a quote, or a message with attachments. Ambient filters only gate interjections.
+		text, skip = strings.TrimSpace(e.Content), ""
+	}
 	valid := skip == ""
 	hash := codeHash(strings.ToLower(strings.Join(strings.Fields(text), "")))
 	duplicate := valid && st.TextHash == hash && st.LastMessage.Valid && time.Since(st.LastMessage.Time) < 5*time.Minute
@@ -250,11 +277,11 @@ func (s *Service) routeAutonomous(ctx context.Context, c Config, p Payload, e Ev
 	if skip != "" {
 		return finish(skip)
 	}
-	if duplicate {
+	if duplicate && !named {
 		return finish("repeat")
 	}
 	trigger := ""
-	if directBotName(c.Autonomous, text) {
+	if named {
 		trigger = "name"
 	} else {
 		if !autonomousActive(c.Autonomous, time.Now()) {

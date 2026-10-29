@@ -45,12 +45,17 @@ func (r *passiveQualityRepository) AcquireGroupQualityTraffic(ctx context.Contex
  AND config->'group_ids' @> to_jsonb(ARRAY[$1::bigint])
  AND EXISTS(SELECT 1 FROM groups g WHERE g.id=$1 AND g.platform='openai' AND g.deleted_at IS NULL AND g.status='active')
  AND (COALESCE(config->>'model','')='' OR config->>'model'=$2)
- ORDER BY id LIMIT 1 FOR SHARE`, req.GroupID, model))
+ ORDER BY (config->>'recovery_mode'='active') DESC NULLS LAST,id LIMIT 1 FOR SHARE`, req.GroupID, model))
 	if errors.Is(err, sql.ErrNoRows) {
 		return !fallback, false, nil
 	}
 	if err != nil {
 		return false, false, err
+	}
+	if p.IsActiveRecovery() {
+		// Normal requests still pass the independent live account/model gates.
+		// Active probes consume the detection budget, never customer leases.
+		return !fallback, false, nil
 	}
 	if !p.CacheRate.Enabled && !fallback {
 		return true, false, nil
@@ -362,7 +367,7 @@ func readGroupQualityTrafficSummary(ctx context.Context, reader groupQualitySumm
 	if err := reader.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM groups WHERE id=$1 AND platform='openai' AND deleted_at IS NULL AND status='active')`, p.GroupIDs[0]).Scan(&supported); err != nil {
 		return nil, err
 	}
-	s := &service.GroupQualityTrafficSummary{Enabled: supported && p.Enabled && p.Mode == "enforce" && p.CacheRate.Enabled, TotalInputTokens: input}
+	s := &service.GroupQualityTrafficSummary{Enabled: supported && p.Enabled && p.Mode == "enforce" && p.CacheRate.Enabled && !p.IsActiveRecovery(), TotalInputTokens: input}
 	_, verified, err := groupQualityVerified(ctx, reader, p, 0, "", now)
 	if err != nil {
 		return nil, err

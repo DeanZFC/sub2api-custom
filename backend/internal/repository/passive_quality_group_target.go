@@ -19,6 +19,9 @@ const passiveGroupTargetTextUsageSQL = `COALESCE(ul.image_count,0)=0
 // explicit reported counters (including zero) or positive reads are evidence.
 // Non-streaming requests may report real counters too; TTFT still needs a stream.
 func passiveGroupTargetSamples(ctx context.Context, tx *sql.Tx, p service.PassiveQualityPolicy, s service.PassiveQualityState, now time.Time) (service.PassiveQualityEvidence, error) {
+	if p.IsActiveRecovery() {
+		return passiveActiveGroupTargetSamples(ctx, tx, p, s, now)
+	}
 	window := time.Duration(p.WindowSeconds) * time.Second
 	if s.Phase == "trial" {
 		// Keep the bounded trial's earlier batches while its paced recovery

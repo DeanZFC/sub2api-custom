@@ -532,7 +532,7 @@ describe('channel quality result groups', () => {
     const wrapper = mountResults()
     await flushPromises()
 
-    expect(api.list).toHaveBeenCalledWith(3, 3)
+    expect(api.list).toHaveBeenCalledWith(3, 4)
     expect(api.history).not.toHaveBeenCalled()
     expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['Group Eight', 'Next Group'])
     expect(wrapper.findAll('[data-account-result]')).toHaveLength(1)
@@ -630,14 +630,15 @@ describe('channel quality result series', () => {
     wrapper.unmount()
   })
 
-  it('shows the latest artwork with two recent thumbnails and fetches complete history on demand', async () => {
+  it('shows the latest artwork with three recent thumbnails and fetches complete history on demand', async () => {
     const results = [1, 2, 3, 4, 5].map(id => ({ ...baseResult, id, output_html: `<svg><text>${id}</text></svg>`, created_at: `2026-09-15T${10 + id}:00:00Z` }))
     api.list.mockResolvedValue(results)
     api.history.mockResolvedValue({ items: results })
     const wrapper = mountResults()
     await flushPromises()
+    expect(api.list).toHaveBeenCalledWith(3, 4)
     expect(wrapper.get('[data-latest-preview] [data-output]').attributes('data-result-id')).toBe('5')
-    expect(wrapper.findAll('[data-previous-preview]').map(output => output.attributes('data-previous-preview'))).toEqual(['4', '3'])
+    expect(wrapper.findAll('[data-previous-preview]').map(output => output.attributes('data-previous-preview'))).toEqual(['4', '3', '2'])
     expect(wrapper.get('[data-previous-preview="4"] time').attributes('datetime')).toBe(results[3].created_at)
     expect(wrapper.findAll('[data-result-gallery] [data-output]').every(output => output.attributes('data-compact') === '')).toBe(true)
     expect(api.history).not.toHaveBeenCalled()
@@ -899,7 +900,7 @@ describe('channel quality result series', () => {
     wrapper.unmount()
   })
 
-  it.each(['number', 'text'])('shows only the latest %s result and opens older results through history', async outputKind => {
+  it.each(['number', 'text'])('shows recent %s results and opens complete history on demand', async outputKind => {
     const results = [1, 2, 3, 4].map(id => ({ ...baseResult, id, output_kind: outputKind, output_numeric: id }))
     api.list.mockResolvedValue(results)
     api.history.mockResolvedValue({ items: results })
@@ -907,14 +908,36 @@ describe('channel quality result series', () => {
     await flushPromises()
     if (outputKind === 'number') {
       expect(wrapper.findAll('[data-numeric-gallery] strong').map(item => item.text())).toEqual(['4'])
+      expect(wrapper.findAll('[data-previous-numeric-result]').map(item => item.text())).toEqual(['3', '2', '1'])
+      expect(wrapper.findAll('[data-previous-preview]').map(item => item.attributes('data-previous-preview'))).toEqual(['3', '2', '1'])
+      await wrapper.get('[data-previous-preview="3"]').trigger('click')
+      expect(wrapper.get('[data-dialog] [data-output]').attributes('data-result-id')).toBe('3')
+      expect(wrapper.get('[data-numeric-gallery] strong').text()).toBe('4')
+      await wrapper.get('[data-dialog] [data-close]').trigger('click')
     } else {
       expect(wrapper.findAll('[data-result-gallery] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['4'])
+      expect(wrapper.find('[data-previous-preview]').exists()).toBe(false)
     }
     expect(api.history).not.toHaveBeenCalled()
     await wrapper.get('[data-test-section] [data-view-history]').trigger('click')
     await flushPromises()
     expect(api.history).toHaveBeenCalledWith(4, undefined)
     expect(wrapper.findAll('[data-dialog] [data-output]').map(item => item.attributes('data-result-id'))).toEqual(['4', '3', '2', '1'])
+    wrapper.unmount()
+  })
+
+  it('limits candy history to three valid numbers, includes zero and keeps a failed current result visible', async () => {
+    const results = [1, 2, 3, 4, 5, 6, 7].map(id => ({ ...baseResult, id, output_kind: 'number', output_numeric: id === 4 ? 0 : id,
+      created_at: `2026-09-15T${10 + id}:00:00Z` }))
+    api.list.mockResolvedValue(results.map(result => result.id === 7 || result.id === 6 ? { ...result, status: 'failed' }
+      : result.id === 5 ? { ...result, output_numeric: null } : result))
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-numeric-gallery] strong').text()).toBe('7')
+    expect(wrapper.get('[data-current-verdict]').text()).toBe('tests.executionFailed')
+    expect(wrapper.findAll('[data-previous-preview]').map(item => item.attributes('data-previous-preview'))).toEqual(['4', '3', '2'])
+    expect(wrapper.findAll('[data-previous-numeric-result]').map(item => item.text())).toEqual(['0', '3', '2'])
+    expect(wrapper.get('[data-previous-preview="4"]').attributes('aria-label')).toContain('0 · ')
+    expect(wrapper.get('[data-previous-preview="4"] time').attributes('datetime')).toBe(results[3].created_at)
     wrapper.unmount()
   })
 

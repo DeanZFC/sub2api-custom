@@ -15,7 +15,7 @@ import (
 
 func newGroupTargetPolicy(t *testing.T, ctx context.Context, db *sql.DB, r *passiveQualityRepository) service.PassiveQualityPolicy {
 	t.Helper()
-	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85}}}
+	p := service.PassiveQualityPolicy{PassiveQualityConfig: service.PassiveQualityConfig{Purpose: "group_quality_target", RecoveryMode: "traffic", Name: "group target", Enabled: true, Mode: "enforce", GroupIDs: []int64{8}, CacheRate: service.PassiveQualityMetric{Enabled: true, Pause: 80, Recover: 85}}}
 	require.NoError(t, r.SavePolicy(ctx, &p))
 	p.UpdatedAt = time.Now().Add(-time.Minute)
 	_, err := db.Exec(`UPDATE passive_quality_policies SET updated_at=$2 WHERE id=$1`, p.ID, p.UpdatedAt)
