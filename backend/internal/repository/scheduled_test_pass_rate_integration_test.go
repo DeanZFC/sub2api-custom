@@ -61,7 +61,6 @@ func newPassRateFixture(t *testing.T, window int) *passRateFixture {
 CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,extra JSONB DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT NOW(),deleted_at TIMESTAMPTZ);
 CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ,is_exclusive BOOLEAN DEFAULT FALSE,subscription_type TEXT DEFAULT 'standard');
 CREATE TABLE account_groups(account_id BIGINT,group_id BIGINT);
-CREATE TABLE passive_quality_policies(id BIGINT PRIMARY KEY,config JSONB NOT NULL DEFAULT '{}');
 CREATE TABLE user_allowed_groups(user_id BIGINT,group_id BIGINT);
 CREATE TABLE user_subscriptions(user_id BIGINT,group_id BIGINT,deleted_at TIMESTAMPTZ,status TEXT,starts_at TIMESTAMPTZ,expires_at TIMESTAMPTZ);
 CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT NOW());
@@ -79,6 +78,7 @@ INSERT INTO account_groups VALUES(62,8),(63,8);`)
 		"262_scheduled_test_execution_snapshot.sql", "281_scheduled_test_membership_revocation.sql", "264_scheduled_test_cache_recovery.sql",
 		"265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql",
 		"282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql", "284_scheduled_test_output_tokens.sql",
+		"291_passive_quality.sql", "303_passive_quality_model_states.sql",
 		"309_quality_recovery_budget_evidence.sql", "312_scheduled_test_pass_rate.sql", "315_scheduled_test_multi_model.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)

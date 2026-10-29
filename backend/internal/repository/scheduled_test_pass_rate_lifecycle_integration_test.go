@@ -11,7 +11,6 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -175,11 +174,6 @@ func TestScheduledTestPassRateLifecycleIntegration(t *testing.T) {
 
 	t.Run("manual account detach revokes late completion and clears projection", func(t *testing.T) {
 		f := passRateLifecycleHeldFixture(t)
-		for _, name := range []string{"291_passive_quality.sql", "303_passive_quality_model_states.sql"} {
-			raw, err := migrations.FS.ReadFile(name)
-			require.NoError(t, err)
-			f.exec(string(raw))
-		}
 		tx, err := f.db.BeginTx(f.ctx, nil)
 		require.NoError(t, err)
 		defer tx.Rollback()
