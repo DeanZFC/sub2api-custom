@@ -1,6 +1,7 @@
 import gptDirect from './gptDirect'
 import qqbot from './qqbot'
 import adminAccessKeys from './adminAccessKeys'
+import mcp from './mcp'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -13,6 +14,7 @@ export default {
   gptDirect,
   ...qqbot,
   adminAccessKeys,
+  mcp,
   ...landing,
   ...common,
   ...dashboard,

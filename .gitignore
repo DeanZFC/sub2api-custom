@@ -144,6 +144,7 @@ docs/*
 !docs/channel-test-strategies.md
 !docs/ANTIGRAVITY_ATTRIBUTION_429.md
 !docs/admin-api-keys.md
+!docs/mcp.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/GPT_DIRECT_CN.md
