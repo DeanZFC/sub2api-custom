@@ -54,8 +54,6 @@ type Account struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
-	UpstreamBillingRateLimitChanged bool `json:"-"` // explicit admin edit, including clearing the ceiling
-
 	Schedulable bool
 
 	RateLimitedAt    *time.Time
@@ -219,9 +217,6 @@ func (a *Account) IsSchedulable() bool {
 		return false
 	}
 	if a.SupportsAccountQuota() && a.IsQuotaExceeded() {
-		return false
-	}
-	if a.IsUpstreamBillingRateLimitedAt(now) {
 		return false
 	}
 	return true

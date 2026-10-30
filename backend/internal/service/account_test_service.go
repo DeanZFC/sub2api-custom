@@ -433,7 +433,6 @@ func (s *AccountTestService) setAccountTestError(ctx context.Context, accountID 
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
 	initAccountTestLogger(c, accountID, modelID, mode)
 	ctx := c.Request.Context()
-	defer releaseStagedCodexFingerprintLease(c)
 	testOpts := firstAccountTestOptions(opts)
 
 	// Get account
@@ -984,7 +983,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt)
 	applyAccountTestOutputTokenLimit(ctx, payload, "max_output_tokens")
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
-	applyCodexFingerprintTestPayload(c, account, payload)
 	applyScheduledTestContentInstructions(ctx, payload, APIProtocolResponses)
 	applyAccountTestVisionInput(ctx, payload, false)
 	payloadBytes, _ := json.Marshal(payload)
@@ -1041,7 +1039,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	credentialAccount.ApplyHeaderOverrides(req.Header)
-	applyStagedCodexFingerprintHeaders(c, account, req.Header)
 
 	// Get proxy URL
 	proxyURL := ""
@@ -2431,10 +2428,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		testModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID, isOAuth))
-	payloadBytes, fingerprintErr := applyCodexFingerprintTestPayloadRaw(c, account, payloadBytes)
-	if fingerprintErr != nil {
-		return s.sendErrorAndEnd(c, fingerprintErr.Error())
-	}
+
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
@@ -2476,14 +2470,13 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		// 指纹收敛：探测与真实转发走同一个 /responses 端点，身份也必须同构，
 		// 否则探测流量会以「缺 x-codex-installation-id + 非收敛 session」的
 		// 形态暴露在上游眼里。账号关闭收敛（off）时返回 nil，探测保持原样。
-		if fpIDs := resolveCodexFingerprintIDsFromRequest(account, req.Header); fpIDs != nil && stagedCodexFingerprintIDs(c, account) == nil {
+		if fpIDs := resolveCodexFingerprintIDsFromRequest(account, req.Header); fpIDs != nil {
 			applyCodexFingerprintHeaders(req.Header, fpIDs)
 		}
 	}
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
-	applyStagedCodexFingerprintHeaders(c, account, req.Header)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -3568,11 +3561,6 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
 	}
 
-	responsesBody, err = applyCodexFingerprintTestPayloadRaw(c, account, responsesBody)
-	if err != nil {
-		return s.sendErrorAndEnd(c, err.Error())
-	}
-
 	direct := usesCodexDirectImages(upstreamModel)
 	if direct {
 		s.sendEvent(c, TestEvent{Type: "content", Text: fmt.Sprintf("Calling Codex /images/generations; image model: %s\n", upstreamModel)})
@@ -3616,7 +3604,6 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	// 与真实转发一致：账号级自定义 UA 同样作为管理员显式配置传入，否则测试用的身份
 	// 与该账号真实出站的身份不是同一个（issue #3901 的配对不变式由收口保证）。
 	enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
-	applyStagedCodexFingerprintHeaders(c, account, req.Header)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

@@ -20,7 +20,6 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
-	defer releaseStagedCodexFingerprintLease(c)
 	// Internal callers can bypass HTTP ingress validation. Reject ambiguous model
 	// fields before normalization can collapse them or select a different model.
 	if err := requestmodel.ValidateJSONModelFields(body); err != nil {

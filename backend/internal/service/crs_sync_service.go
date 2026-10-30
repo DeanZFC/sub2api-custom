@@ -1161,7 +1161,6 @@ func reconcileCRSUpstreamBillingProbeExtra(
 	extra map[string]any,
 ) {
 	for _, key := range []string{
-		UpstreamBillingRateLimitExtraKey,
 		UpstreamBillingProbeEnabledExtraKey,
 		UpstreamBillingRateSyncEnabledExtraKey,
 		UpstreamBillingProbeExtraKey,
@@ -1177,16 +1176,9 @@ func reconcileCRSUpstreamBillingProbeExtra(
 	target := &Account{Platform: targetPlatform, Type: targetType, Credentials: targetCredentials}
 	if IsUpstreamBillingProbeIdentity(targetPlatform, targetType) {
 		probeEnabled := false
-		if limit, configured := existing.UpstreamBillingRateLimit(); configured {
-			extra[UpstreamBillingRateLimitExtraKey] = limit
-		}
 		if enabled, ok := existing.Extra[UpstreamBillingProbeEnabledExtraKey]; ok {
 			extra[UpstreamBillingProbeEnabledExtraKey] = enabled
 			probeEnabled, _ = enabled.(bool)
-		}
-		if _, configured := upstreamBillingRateLimitValue(extra); configured {
-			extra[UpstreamBillingProbeEnabledExtraKey] = true
-			probeEnabled = true
 		}
 		if enabled, ok := existing.Extra[UpstreamBillingRateSyncEnabledExtraKey].(bool); ok {
 			extra[UpstreamBillingRateSyncEnabledExtraKey] = enabled && probeEnabled

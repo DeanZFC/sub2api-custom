@@ -353,8 +353,6 @@ func strictAccountUnavailableReason(ctx context.Context, a *Account, model strin
 		return "account_cooldown"
 	case a.SupportsAccountQuota() && a.IsQuotaExceeded():
 		return "account_quota_exhausted"
-	case a.IsUpstreamBillingRateLimitedAt(now):
-		return "upstream_billing_exhausted"
 	case a.ActiveTestModelBlocked(activePassRateRoutingModel(ctx, model)):
 		return "active_test_model_blocked"
 	default:

@@ -834,9 +834,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2PassthroughWithVMRoute(
 		}
 		vmImageConfig.Store(imageConfig)
 	}
-	if !vmBound {
-		ensureStagedCodexFingerprintIDs(c, account)
-	}
 	if fingerprintIDs := stagedCodexFingerprintIDs(c, account); fingerprintIDs != nil {
 		var fingerprintErr error
 		firstClientMessage, _, fingerprintErr = applyCodexFingerprintClientMetadataRaw(firstClientMessage, fingerprintIDs)
@@ -931,10 +928,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2PassthroughWithVMRoute(
 	if dialer == nil {
 		return errors.New("openai ws passthrough dialer is nil")
 	}
-	tlsProfile := resolveCodexMacTLSProfile(account)
-	if vmBound {
-		tlsProfile = nil
-	}
 
 	agentTaskRecoveryTried := false
 	var upstreamConn openAIWSClientConn
@@ -948,7 +941,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2PassthroughWithVMRoute(
 			}
 		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
-		dialCtx = withOpenAIWSTLSProfile(dialCtx, tlsProfile)
 		if vmBound {
 			dialCtx = withOpenAIVMWSHTTPClient(dialCtx, vmRoute.client)
 		}

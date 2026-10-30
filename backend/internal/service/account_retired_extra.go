@@ -11,7 +11,8 @@ import (
 func IsRetiredAccountExtraKey(key string) bool {
 	return strings.HasPrefix(key, "codex_turn_ticket:") ||
 		strings.HasPrefix(key, "codex_ticket_") ||
-		key == "codex_turn_cookies" || key == "codex_harvest_proxy_url"
+		key == "codex_turn_cookies" || key == "codex_harvest_proxy_url" ||
+		key == "upstream_billing_rate_limit"
 }
 
 // StripRetiredAccountExtra returns a copy without obsolete account material.
@@ -22,6 +23,9 @@ func StripRetiredAccountExtra(extra map[string]any) map[string]any {
 		if IsRetiredAccountExtraKey(key) {
 			delete(clean, key)
 		}
+	}
+	if mode, _ := clean["codex_fingerprint_mode"].(string); strings.TrimSpace(mode) == "single_machine_multi_window" {
+		clean["codex_fingerprint_mode"] = "off"
 	}
 	return clean
 }

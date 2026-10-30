@@ -87,7 +87,6 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
-	tlsProfile          string
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -2253,7 +2252,6 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	dialCtx, cancelDial := context.WithTimeout(ctx, p.dialTimeout())
 	defer cancelDial()
-	dialCtx = withOpenAIWSTLSProfile(dialCtx, resolveCodexMacTLSProfile(req.Account))
 	conn, status, handshakeHeaders, err := p.clientDialer.Dial(dialCtx, req.WSURL, headers, req.ProxyURL)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
@@ -2497,40 +2495,30 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 	key := openAIWSHandshakeCompatibilityKey{
 		betaFeatures: normalizeOpenAIWSBetaFeatures(headers),
 	}
-	// Even identical application headers cannot reuse a socket established
-	// with another TLS identity after the account's fingerprint mode changes.
-	if profile := resolveCodexMacTLSProfile(account); profile != nil {
-		key.tlsProfile = profile.Name
-	}
-	mode, allowDerivedSeed := resolveCodexFingerprintMode(account)
+	mode := activeCodexFingerprintMode(account)
 	if mode == codexFingerprintOff {
 		return key
 	}
-	if !allowDerivedSeed {
-		if _, ok := codexFingerprintSeed(account.Extra); !ok {
-			return key
-		}
-	}
-	if allowDerivedSeed {
-		seed := deriveAccountCodexFingerprintSeed(account)
-		if persisted, ok := codexFingerprintSeed(account.Extra); ok {
-			seed = persisted
-		}
-		key.codexInstallationID = resolveConvergedInstallationID(account, seed)
-	} else {
-		key.codexInstallationID = normalizeOpenAIWSStableIdentityHeader(headers, "x-codex-installation-id")
-	}
+	key.codexInstallationID = normalizeOpenAIWSStableIdentityHeader(headers, "x-codex-installation-id")
 	if mode == codexFingerprintDevice {
 		return key
 	}
 	key.sessionIDHyphen = normalizeOpenAIWSStableIdentityHeader(headers, "session-id")
-	if mode != codexFingerprintSingleMachineMultiWindow {
-		key.sessionIDUnderscore = normalizeOpenAIWSStableIdentityHeader(headers, "session_id")
-	}
+	key.sessionIDUnderscore = normalizeOpenAIWSStableIdentityHeader(headers, "session_id")
 	key.threadID = normalizeOpenAIWSStableIdentityHeader(headers, "thread-id")
 	key.clientRequestID = normalizeOpenAIWSStableIdentityHeader(headers, "x-client-request-id")
 	key.codexWindowID = normalizeOpenAIWSStableIdentityHeader(headers, "x-codex-window-id")
 	return key
+}
+
+func activeCodexFingerprintMode(account *Account) codexFingerprintMode {
+	if account == nil || account.GetCodexFingerprintMode() == codexFingerprintOff {
+		return codexFingerprintOff
+	}
+	if _, ok := codexFingerprintSeed(account.Extra); !ok {
+		return codexFingerprintOff
+	}
+	return account.GetCodexFingerprintMode()
 }
 
 func normalizeOpenAIWSStableIdentityHeader(headers http.Header, name string) string {

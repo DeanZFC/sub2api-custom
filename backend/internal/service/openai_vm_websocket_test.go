@@ -20,10 +20,9 @@ import (
 )
 
 type vmCapturedDial struct {
-	url        string
-	headers    http.Header
-	proxy      string
-	tlsProfile bool
+	url     string
+	headers http.Header
+	proxy   string
 }
 
 type vmCapturingWSDialer struct {
@@ -32,7 +31,7 @@ type vmCapturingWSDialer struct {
 }
 
 func (d *vmCapturingWSDialer) Dial(ctx context.Context, endpoint string, headers http.Header, proxy string) (openAIWSClientConn, int, http.Header, error) {
-	d.calls <- vmCapturedDial{url: endpoint, headers: headers.Clone(), proxy: proxy, tlsProfile: openAIWSTLSProfileFromContext(ctx) != nil}
+	d.calls <- vmCapturedDial{url: endpoint, headers: headers.Clone(), proxy: proxy}
 	return d.conn, http.StatusSwitchingProtocols, http.Header{"X-Request-Id": {"ws-handshake"}}, nil
 }
 
@@ -117,7 +116,6 @@ func TestOpenAIVMWebSocketNativeInterruptContinuationUsageAndAuthorization(t *te
 	call := <-dialer.calls
 	require.Equal(t, "ws"+strings.TrimPrefix(bridge.URL, "http")+"/v1/accounts/7/responses", call.url)
 	require.Empty(t, call.proxy)
-	require.False(t, call.tlsProfile)
 	require.Equal(t, "Bearer "+vmTestSecret, call.headers.Get("Authorization"))
 	require.Equal(t, "sk-test", call.headers.Get("X-VM2API-Access-Token"))
 	require.Equal(t, "true", call.headers.Get("X-OpenAI-Internal-Codex-Responses-Lite"))

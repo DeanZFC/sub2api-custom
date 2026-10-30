@@ -1343,7 +1343,6 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		service.OpenAIAutoResetCreditStateExtraKey,
 		"model_rate_limits",
 		service.UpstreamBillingProbeExtraKey,
-		service.UpstreamBillingRateLimitExtraKey,
 		service.GrokMediaEligibleExtraKey,
 		"grok_billing_snapshot",
 	}

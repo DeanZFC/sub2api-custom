@@ -392,14 +392,6 @@ export default {
         }
       },
       upstreamBilling: {
-        rateLimit: 'Upstream rate limit',
-        rateLimitPlaceholder: 'Leave blank for no limit',
-        rateLimitHint: 'Requires automatic probing. Scheduling pauses when the current effective upstream rate (including peak rates) exceeds this limit and resumes when it returns within the limit. Manually disabled accounts stay disabled. This does not change the account billing rate.',
-        rateLimitLocksProbe: 'Clear the upstream rate limit before disabling automatic probing',
-        rateLimitInvalid: 'The upstream rate limit must be a finite number greater than or equal to 0',
-        rateLimitValue: 'Upstream rate limit: {value}x',
-        rateLimited: 'Upstream rate exceeded',
-        rateLimitPaused: 'Scheduling paused until the upstream rate returns within the limit',
         trustWarning: 'This rate is declared by the upstream site for the current API key. Sub2API cannot verify that it matches actual charges. The upstream site or an intermediary may return forged, stale, or modified data. Verify it against bills, balance changes, and actual usage.',
         autoProbe: 'Automatically probe upstream declared rate',
         autoProbeHint: 'Refresh the upstream declared rate on the global interval. This switch alone does not change the account rate.',
@@ -823,12 +815,11 @@ export default {
         codexCLIOnlyAppServerDesc:
           "Effective only when the switch above is on. When enabled, this account also allows third-party clients that embed the Codex engine over the app-server protocol (e.g. Claude Code's codex plugin); they still pass the global engine-fingerprint gate. OR-combined with the global app-server toggle.",
         codexFingerprintMode: 'Codex fingerprint convergence',
-        codexFingerprintModeDesc: 'New accounts default to single-machine mode; existing accounts without a configured mode stay off. Official device, session and full modes remain available. Single-machine mode adds stable windows and a Mac TLS profile, preserves conversation caches, and does not change concurrency or isolate accounts.',
-        codexFingerprintOff: 'Off (passthrough)',
+        codexFingerprintModeDesc: 'When multiple users share the same OAuth account, converge device/session identifiers to account-level stable values to reduce upstream-visible device and session count. Off by default (client identifiers pass through as-is); opt in explicitly when needed. Some accounts reported quota shrinkage after enabling convergence, so choose based on your own measurements.',
+        codexFingerprintOff: 'Off (passthrough, default)',
         codexFingerprintDevice: 'Device only',
         codexFingerprintSession: 'Device + Session',
         codexFingerprintFull: 'Full convergence',
-        codexFingerprintSingleMachineMultiWindow: 'Single machine, multiple windows (chats + subagents)',
         codexImageTool: 'Codex image bridge policy',
         codexImageToolDesc:
           'Controls the hosted image_generation bridge and client-declared image tools on Codex /responses text requests. Hosted auto-injection applies only to non-Responses Lite requests. Account policy takes precedence over channel and global settings; standalone image-generation endpoints are unaffected.',

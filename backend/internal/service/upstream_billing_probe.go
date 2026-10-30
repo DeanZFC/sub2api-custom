@@ -133,9 +133,8 @@ type UpstreamBillingProbeResult struct {
 // account table's background refresh. It intentionally excludes credentials,
 // runtime counters, and usage data from the response.
 type UpstreamBillingRateSnapshotItem struct {
-	AccountID                  int64                         `json:"account_id"`
-	Snapshot                   *UpstreamBillingProbeSnapshot `json:"snapshot"`
-	UpstreamBillingRateLimited bool                          `json:"upstream_billing_rate_limited,omitempty"`
+	AccountID int64                         `json:"account_id"`
+	Snapshot  *UpstreamBillingProbeSnapshot `json:"snapshot"`
 }
 
 // BuildUpstreamBillingRateSnapshotItems projects account rows into the
@@ -152,9 +151,8 @@ func BuildUpstreamBillingRateSnapshotItems(accounts []Account) []UpstreamBilling
 			snapshot = decodeUpstreamBillingProbeSnapshot(account.Extra)
 		}
 		items = append(items, UpstreamBillingRateSnapshotItem{
-			AccountID:                  account.ID,
-			Snapshot:                   snapshot,
-			UpstreamBillingRateLimited: account.IsUpstreamBillingRateLimited(),
+			AccountID: account.ID,
+			Snapshot:  snapshot,
 		})
 	}
 	return items
@@ -268,10 +266,6 @@ type upstreamBillingProbeDueAccountLister interface {
 	ListDueUpstreamBillingProbeAccounts(context.Context, time.Time, int) ([]Account, error)
 }
 
-type upstreamBillingRateLimitedProbeDueAccountLister interface {
-	ListDueUpstreamBillingRateLimitedProbeAccounts(context.Context, time.Time, int) ([]Account, error)
-}
-
 func NewUpstreamBillingProbeService(
 	accountRepo AccountRepository,
 	accountTestService *AccountTestService,
@@ -371,6 +365,9 @@ func (s *UpstreamBillingProbeService) RunDue(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if !settings.Enabled {
+		return nil
+	}
 	runRelease, acquired, lockErr := s.tryAcquireLeaderLock(ctx, upstreamBillingProbeLeaderLockKey)
 	if lockErr != nil {
 		return fmt.Errorf("acquire upstream billing probe leader lock: %w", lockErr)
@@ -391,12 +388,7 @@ func (s *UpstreamBillingProbeService) RunDue(ctx context.Context) error {
 	defer releaseUpstreamBillingProbeLeaderLock(cadenceRelease, lockNow.Truncate(upstreamBillingProbeCycleInterval).Add(upstreamBillingProbeCycleInterval))
 
 	now := s.currentTime()
-	var accounts []Account
-	if settings.Enabled {
-		accounts, err = s.listDueAccounts(ctx, now)
-	} else {
-		accounts, err = s.listDueRateLimitedAccounts(ctx, now)
-	}
+	accounts, err := s.listDueAccounts(ctx, now)
 	if err != nil {
 		return fmt.Errorf("list enabled upstream billing probes: %w", err)
 	}
@@ -404,9 +396,6 @@ func (s *UpstreamBillingProbeService) RunDue(ctx context.Context) error {
 	for i := range accounts {
 		account := accounts[i]
 		if !isUpstreamBillingProbeAccount(&account) || !account.IsActive() || !upstreamBillingProbeEnabled(&account) {
-			continue
-		}
-		if _, limited := account.UpstreamBillingRateLimit(); !settings.Enabled && !limited {
 			continue
 		}
 		snapshot := decodeUpstreamBillingProbeSnapshot(account.Extra)
@@ -439,7 +428,7 @@ func (s *UpstreamBillingProbeService) RunDue(ctx context.Context) error {
 	for i := range due {
 		accountID := due[i].ID
 		group.Go(func() error {
-			if _, probeErr := s.probeAccountWithPolicy(ctx, accountID, settings.IntervalMinutes, true, !settings.Enabled); probeErr != nil {
+			if _, probeErr := s.probeScheduledAccount(ctx, accountID, settings.IntervalMinutes); probeErr != nil {
 				logger.LegacyPrintf("service.upstream_billing_probe", "probe_due_failed: account_id=%d err=%v", accountID, probeErr)
 			}
 			return nil
@@ -454,15 +443,6 @@ func (s *UpstreamBillingProbeService) listDueAccounts(ctx context.Context, now t
 	}
 	// Non-production repositories and older adapters keep the generic path. The
 	// runner still truncates before issuing network requests.
-	return s.accountRepo.FindByExtraField(ctx, UpstreamBillingProbeEnabledExtraKey, true)
-}
-
-func (s *UpstreamBillingProbeService) listDueRateLimitedAccounts(ctx context.Context, now time.Time) ([]Account, error) {
-	if lister, ok := s.accountRepo.(upstreamBillingRateLimitedProbeDueAccountLister); ok {
-		return lister.ListDueUpstreamBillingRateLimitedProbeAccounts(ctx, now, upstreamBillingProbeMaxPerCycle)
-	}
-	// Compatibility adapters persist the forced probe flag with the ceiling.
-	// Filter the whole result before applying the bounded runner batch.
 	return s.accountRepo.FindByExtraField(ctx, UpstreamBillingProbeEnabledExtraKey, true)
 }
 
@@ -505,10 +485,6 @@ func (s *UpstreamBillingProbeService) probeScheduledAccount(ctx context.Context,
 }
 
 func (s *UpstreamBillingProbeService) probeAccountWithMode(ctx context.Context, accountID int64, intervalMinutes int, requireEnabled bool) (*UpstreamBillingProbeSnapshot, error) {
-	return s.probeAccountWithPolicy(ctx, accountID, intervalMinutes, requireEnabled, false)
-}
-
-func (s *UpstreamBillingProbeService) probeAccountWithPolicy(ctx context.Context, accountID int64, intervalMinutes int, requireEnabled, requireRateLimit bool) (*UpstreamBillingProbeSnapshot, error) {
 	key := strconv.FormatInt(accountID, 10)
 	value, err, _ := s.probeGroup.Do(key, func() (any, error) {
 		select {
@@ -526,9 +502,6 @@ func (s *UpstreamBillingProbeService) probeAccountWithPolicy(ctx context.Context
 		}
 		if requireEnabled {
 			if !account.IsActive() || !upstreamBillingProbeEnabled(account) {
-				return nil, nil
-			}
-			if _, limited := account.UpstreamBillingRateLimit(); requireRateLimit && !limited {
 				return nil, nil
 			}
 			if snapshot := decodeUpstreamBillingProbeSnapshot(account.Extra); snapshot != nil &&
@@ -634,9 +607,6 @@ func (s *UpstreamBillingProbeService) SetAccountEnabled(ctx context.Context, acc
 	}
 	if !isUpstreamBillingProbeAccount(account) {
 		return ErrUpstreamBillingProbeAccountInvalid
-	}
-	if _, limited := account.UpstreamBillingRateLimit(); !enabled && limited {
-		return ErrUpstreamBillingRateLimitRequiresProbe
 	}
 	updates := map[string]any{UpstreamBillingProbeEnabledExtraKey: enabled}
 	if !enabled {
@@ -1103,9 +1073,6 @@ func upstreamBillingProbeTargetIsOfficialAPI(baseURL string) bool {
 func upstreamBillingProbeEnabled(account *Account) bool {
 	if account == nil || account.Extra == nil {
 		return false
-	}
-	if _, configured := account.UpstreamBillingRateLimit(); configured {
-		return true
 	}
 	enabled, ok := account.Extra[UpstreamBillingProbeEnabledExtraKey].(bool)
 	return ok && enabled

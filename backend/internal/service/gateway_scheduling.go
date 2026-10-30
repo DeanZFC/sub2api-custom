@@ -1630,9 +1630,6 @@ func (s *GatewayService) isAccountBlockedBySchedulingThreshold(ctx context.Conte
 }
 
 func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
-	if account != nil && account.IsUpstreamBillingRateLimited() {
-		return nil, ErrNoAvailableAccounts
-	}
 	if account == nil || s.schedulerSnapshot == nil {
 		return account, nil
 	}
@@ -1642,9 +1639,6 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	}
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gateway account %d not found during hydration", account.ID)
-	}
-	if hydrated.IsUpstreamBillingRateLimited() {
-		return nil, ErrNoAvailableAccounts
 	}
 
 	if account.SelectedProxyID > 0 {
@@ -2620,9 +2614,6 @@ func (s *GatewayService) diagnoseSelectionFailure(
 		return selectionFailureDiagnosis{Category: "excluded"}
 	}
 	if !s.isAccountSchedulableForSelection(acc) {
-		if acc.IsUpstreamBillingRateLimited() {
-			return selectionFailureDiagnosis{Category: "unschedulable", Detail: "upstream_billing_rate_limit"}
-		}
 		return selectionFailureDiagnosis{Category: "unschedulable", Detail: "generic_unschedulable"}
 	}
 	if isPlatformFilteredForSelection(acc, platform, allowMixedScheduling) {

@@ -420,11 +420,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		req.RequirePrivacySet = true
 	}
 	start := time.Now()
-	// Scores determine new placement; a valid conversation owner remains a
-	// first-class sticky candidate even when weighted scheduling is enabled.
-	if req.StickyAccountID > 0 && openAIUserAffinityFromContext(ctx) != nil {
-		req.StickyWeighted = false
-	}
+
 	// 命名返回值保证 defer 写入的耗时同时返回给调用方。
 	defer func() {
 		if selection != nil {
@@ -544,19 +540,19 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, bool, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
-	if (sessionHash == "" && openAIUserAffinityFromContext(ctx) == nil) || s == nil || s.service == nil || s.service.cache == nil {
+	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
 		return nil, false, nil
 	}
 
 	accountID := req.StickyAccountID
 	clearBinding := func() {
 		if !req.PreserveStickyBinding {
-			_ = s.service.clearOpenAIStickySessionForRouting(ctx, req.GroupID, sessionHash)
+			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		}
 	}
 	if accountID <= 0 {
 		var err error
-		accountID, err = s.service.stickySessionAccountIDForRouting(ctx, req.GroupID, sessionHash)
+		accountID, err = s.service.getStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		if err != nil || accountID <= 0 {
 			return nil, false, nil
 		}
@@ -576,10 +572,6 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, false, nil
 	}
 	if activeIntelligenceHold(ctx, account, req.GroupID, req.RequestedModel) {
-		if openAIUserAffinityFromContext(ctx) != nil {
-			markOpenAIUserAffinityMigration(ctx, accountID)
-			return nil, false, nil
-		}
 		return nil, true, nil
 	}
 	if shouldClearStickySessionWithContext(ctx, account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
@@ -631,10 +623,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 			"error_rate", errorRate,
 			"ttft", ttft,
 		)
-		if reason == "error_rate" && openAIUserAffinityFromContext(ctx) != nil {
-			markOpenAIUserAffinityMigration(ctx, accountID)
-			return nil, false, nil
-		}
+
 		return nil, true, nil
 	}
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, &account)
@@ -2549,19 +2538,9 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		}
 	}
 
-	if openAIUserAffinityFromContext(ctx) != nil {
-		ctx = context.WithValue(ctx, openAIUserAffinityContextKey{}, (*openAIUserAffinity)(nil))
-	}
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
-	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && requiredImageCapability == "" && !requireCompact && (strings.TrimSpace(previousResponseID) == "" || previousResponseCanMove) && !preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
-		ctx, sessionHash = s.withOpenAIUserAffinity(ctx, groupID, sessionHash, requestedModel)
-	}
-	defer func() {
-		if selection != nil {
-			selection.userAffinity = openAIUserAffinityFromContext(ctx)
-		}
-	}()
+
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	decision = OpenAIAccountScheduleDecision{}
 	guardianParentAccountID := int64(0)
@@ -2683,8 +2662,8 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 
 	var stickyAccountID int64
-	if (sessionHash != "" || openAIUserAffinityFromContext(ctx) != nil) && s.cache != nil {
-		if accountID, err := s.stickySessionAccountIDForRouting(ctx, groupID, sessionHash); err == nil && accountID > 0 {
+	if sessionHash != "" && s.cache != nil {
+		if accountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); err == nil && accountID > 0 {
 			stickyAccountID = accountID
 		}
 	}

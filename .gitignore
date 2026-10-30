@@ -140,7 +140,6 @@ docs/*
 !docs/channel-quality-experience.md
 !docs/passive-quality.md
 !docs/codex-fingerprint.md
-!docs/upstream-billing-rate-limit.md
 !docs/channel-quality-protection.md
 !docs/channel-test-strategies.md
 !docs/ANTIGRAVITY_ATTRIBUTION_429.md

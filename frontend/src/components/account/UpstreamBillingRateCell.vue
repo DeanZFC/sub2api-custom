@@ -43,14 +43,8 @@
           </p>
         </template>
         <p v-else>{{ statusLabel || '-' }}</p>
-        <p v-if="account.extra?.upstream_billing_rate_limit != null" data-testid="upstream-billing-limit-value">
-          {{ t('admin.accounts.upstreamBilling.rateLimitValue', { value: account.extra.upstream_billing_rate_limit }) }}
-        </p>
-        <p v-if="account.upstream_billing_rate_limited" class="text-amber-400">
-          {{ t('admin.accounts.upstreamBilling.rateLimitPaused') }}
-        </p>
         <p
-          v-if="probeEnabled && (globalProbeEnabled !== false || hasRateLimit) && nextProbeAt"
+          v-if="probeEnabled && globalProbeEnabled !== false && nextProbeAt"
           data-testid="upstream-billing-next-probe"
         >
           {{ t('admin.accounts.upstreamBilling.nextProbeAt', { value: formatDate(nextProbeAt) }) }}
@@ -62,7 +56,7 @@
           </span>
         </p>
         <p
-          v-if="globalProbeEnabled === false && !hasRateLimit"
+          v-if="globalProbeEnabled === false"
           class="mt-1"
           data-testid="upstream-billing-global-probe-state"
         >
@@ -116,8 +110,7 @@ const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000
 const eligible = computed(() => props.account.type === 'apikey')
 const snapshot = computed<UpstreamBillingProbeSnapshot | undefined>(() => props.account.extra?.upstream_billing_probe)
 const data = computed(() => snapshot.value?.data)
-const hasRateLimit = computed(() => props.account.extra?.upstream_billing_rate_limit != null)
-const probeEnabled = computed(() => hasRateLimit.value || props.account.extra?.upstream_billing_probe_enabled === true)
+const probeEnabled = computed(() => props.account.extra?.upstream_billing_probe_enabled === true)
 const nextProbeAt = computed(() => {
   const value = snapshot.value?.next_probe_at
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : ''

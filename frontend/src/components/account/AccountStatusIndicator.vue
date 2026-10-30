@@ -339,9 +339,6 @@ const statusClass = computed(() => {
   if (!props.account.schedulable) {
     return 'badge-gray'
   }
-  if (props.account.upstream_billing_rate_limited) {
-    return 'badge-warning'
-  }
   return 'badge-success'
 })
 
@@ -361,9 +358,6 @@ const statusText = computed(() => {
   }
   if (!props.account.schedulable) {
     return t('admin.accounts.status.paused')
-  }
-  if (props.account.upstream_billing_rate_limited) {
-    return t('admin.accounts.upstreamBilling.rateLimited')
   }
   return t(`admin.accounts.status.${props.account.status}`)
 })

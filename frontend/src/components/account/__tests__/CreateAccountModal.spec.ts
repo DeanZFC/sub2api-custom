@@ -458,41 +458,22 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     )
   })
 
+  it('defaults to the four official fingerprint modes and exposes no retired ceiling', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const select = wrapper.getComponent('[data-testid="create-codex-fingerprint-mode-select"]')
+    expect(select.props('modelValue')).toBe('off')
+    expect(select.props('options').map((option: { value: string }) => option.value)).toEqual(['off', 'device', 'session', 'full'])
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.find('[data-testid="upstream-billing-rate-limit"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="upstream-billing-auto-probe"]').attributes('disabled')).toBeUndefined()
+  })
+
   it('enables upstream billing probes by default for new OpenAI API key accounts', async () => {
     await submitApiKeyAccount('openai')
 
     expect(createAccountMock.mock.calls[0]?.[0]?.upstream_billing_probe_enabled).toBe(true)
   })
-
-  it.each(['openai', 'anthropic', 'antigravity'])(
-    'creates %s API-key accounts with a zero limit and mandatory probing', async (platform) => {
-      const wrapper = mountModal()
-      if (platform === 'antigravity') {
-        await selectButtonByText(wrapper, 'Antigravity')
-        await selectButtonByText(wrapper, 'admin.accounts.types.antigravityApikey')
-        await wrapper.get('input[placeholder="https://cloudcode-pa.googleapis.com"]').setValue('https://relay.example')
-      } else {
-        await selectButtonByText(wrapper, platform === 'openai' ? 'OpenAI' : 'admin.accounts.claudeConsole')
-        if (platform === 'openai') await selectButtonByText(wrapper, 'API Key')
-      }
-      await wrapper.get('form#create-account-form input[type="text"]').setValue('limited upstream')
-      await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
-      const testID = platform === 'antigravity' ? 'upstream-billing-auto-probe-antigravity' : 'upstream-billing-auto-probe'
-      const probe = wrapper.get<HTMLButtonElement>(`[data-testid="${testID}"]`)
-      await probe.trigger('click')
-      expect(probe.attributes('aria-checked')).toBe('false')
-      await wrapper.get('[data-testid="upstream-billing-rate-limit"]').setValue('0')
-      expect(probe.element.disabled).toBe(true)
-      expect(probe.attributes('aria-checked')).toBe('true')
-      await wrapper.get('form#create-account-form').trigger('submit.prevent')
-      await flushPromises()
-      const payload = createAccountMock.mock.calls[0]?.[0]
-      expect(payload?.type).toBe('apikey')
-      expect(payload?.extra?.upstream_billing_rate_limit).toBe(0)
-      expect(payload?.upstream_billing_probe_enabled).toBe(true)
-      expect(payload?.upstream_billing_rate_sync_enabled).not.toBe(true)
-    }
-  )
 
   it('waits for the initial upstream billing probe before refreshing the account list', async () => {
     let resolveProbe: (() => void) | undefined

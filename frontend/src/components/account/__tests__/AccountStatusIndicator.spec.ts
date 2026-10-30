@@ -74,22 +74,7 @@ describe('AccountStatusIndicator', () => {
     expect(wrapper.text()).toContain('admin.accounts.status.qualityPausedManualStop')
   })
 
-  it('shows upstream rate protection and returns to active when it clears', async () => {
-    const wrapper = mount(AccountStatusIndicator, {
-      props: { account: makeAccount({ upstream_billing_rate_limited: true }) }
-    })
-    expect(wrapper.text()).toContain('admin.accounts.upstreamBilling.rateLimited')
-    await wrapper.setProps({ account: makeAccount({ upstream_billing_rate_limited: false }) })
-    expect(wrapper.text()).not.toContain('admin.accounts.upstreamBilling.rateLimited')
-    expect(wrapper.text()).toContain('admin.accounts.status.active')
-  })
 
-  it('keeps a manual scheduling pause visible while upstream rate protection is active', () => {
-    const wrapper = mount(AccountStatusIndicator, {
-      props: { account: makeAccount({ schedulable: false, upstream_billing_rate_limited: true }) }
-    })
-    expect(wrapper.text()).toContain('admin.accounts.status.paused')
-  })
   it('Claude 5 系列模型限流时显示 Opus 和 Sonnet 的短别名', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {

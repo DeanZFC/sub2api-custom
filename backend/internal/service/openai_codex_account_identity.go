@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -143,18 +142,6 @@ func applyCodexAccountIdentityFields(values map[string]any, account *Account, ap
 	return changed
 }
 
-func hasCodexIdentityPayload(values map[string]any) bool {
-	if values == nil {
-		return false
-	}
-	for _, key := range []string{"x-codex-installation-id", "x-codex-window-id", "thread_id", "thread-id", "turn_id", "turn-id", "x-codex-turn-metadata"} {
-		if raw, ok := values[key].(string); ok && strings.TrimSpace(raw) != "" {
-			return true
-		}
-	}
-	return false
-}
-
 func applyCodexAccountIdentityEmbeddedMetadata(values map[string]any, account *Account, apiKeyID int64) bool {
 	raw, ok := values[openAIWSTurnMetadataHeader].(string)
 	if !ok || strings.TrimSpace(raw) == "" {
@@ -184,10 +171,10 @@ func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, acco
 	originalBodySessionID := ""
 	if clientMetadata != nil {
 		originalBodySessionID, _ = clientMetadata["session_id"].(string)
-		if hasCodexIdentityPayload(clientMetadata) && applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID) {
+		if applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID) {
 			changed = true
 		}
-		if hasCodexIdentityPayload(clientMetadata) && applyCodexAccountIdentityEmbeddedMetadata(clientMetadata, account, apiKeyID) {
+		if applyCodexAccountIdentityEmbeddedMetadata(clientMetadata, account, apiKeyID) {
 			changed = true
 		}
 	}
@@ -226,8 +213,8 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 			return body, false, fmt.Errorf("decode client_metadata for account identity: %w", err)
 		}
 		originalBodySessionID, _ = clientMetadata["session_id"].(string)
-		metadataChanged := hasCodexIdentityPayload(clientMetadata) && applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID)
-		if hasCodexIdentityPayload(clientMetadata) && applyCodexAccountIdentityEmbeddedMetadata(clientMetadata, account, apiKeyID) {
+		metadataChanged := applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID)
+		if applyCodexAccountIdentityEmbeddedMetadata(clientMetadata, account, apiKeyID) {
 			metadataChanged = true
 		}
 		if metadataChanged {
@@ -264,12 +251,6 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 
 func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, apiKeyID int64) {
 	if headers == nil || codexAccountIdentityNamespace(account) == "" {
-		return
-	}
-	if !openai.IsCodexOfficialClientByHeaders(headers.Get("User-Agent"), headers.Get("originator")) &&
-		strings.TrimSpace(headers.Get("x-codex-installation-id")) == "" &&
-		strings.TrimSpace(headers.Get("x-codex-window-id")) == "" &&
-		strings.TrimSpace(headers.Get("thread-id")) == "" {
 		return
 	}
 	for _, field := range codexAccountIdentityFields {

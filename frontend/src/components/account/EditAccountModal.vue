@@ -2251,12 +2251,23 @@
         </button>
       </div>
 
-      <UpstreamBillingProbeSettings
+      <div
         v-if="account?.type === 'apikey'"
-        :auto-probe-enabled="upstreamBillingAutoProbeEnabled"
-        v-model:rate-limit="upstreamBillingRateLimit"
-        @update:auto-probe-enabled="handleUpstreamBillingAutoProbeChange"
-      />
+        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div>
+          <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.upstreamBilling.autoProbeHint') }}
+          </p>
+        </div>
+        <Toggle
+          :model-value="upstreamBillingAutoProbeEnabled"
+          data-testid="upstream-billing-auto-probe"
+          :aria-label="t('admin.accounts.upstreamBilling.autoProbe')"
+          @update:model-value="handleUpstreamBillingAutoProbeChange"
+        />
+      </div>
 
       <OllamaCloudUsageSettings
         v-if="account?.ollama_cloud_usage?.eligible"
@@ -3405,7 +3416,6 @@ import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import UpstreamBillingProbeSettings from './UpstreamBillingProbeSettings.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
@@ -4079,7 +4089,6 @@ const autoResetCreditEnabled = ref(false)
 const autoResetCredit5hThreshold = ref(100)
 const autoResetCredit7dThreshold = ref(100)
 const upstreamBillingAutoProbeEnabled = ref(false)
-const upstreamBillingRateLimit = ref<number | null>(null)
 const upstreamBillingRateSyncEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
@@ -4158,7 +4167,7 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
-type CodexFingerprintMode = 'off' | 'single_machine_multi_window' | 'device' | 'session' | 'full'
+type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
@@ -4193,7 +4202,6 @@ const editWeeklyResetHour = ref<number | null>(null)
 const editResetTimezone = ref<string | null>(null)
 const codexFingerprintModeOptions = computed(() => [
   { value: 'off' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintOff') },
-  { value: 'single_machine_multi_window' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintSingleMachineMultiWindow') },
   { value: 'device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintDevice') },
   { value: 'session' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintSession') },
   { value: 'full' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintFull') },
@@ -4508,8 +4516,8 @@ const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
 }
 
 const handleUpstreamBillingAutoProbeChange = (enabled: boolean) => {
-  upstreamBillingAutoProbeEnabled.value = upstreamBillingRateLimit.value != null || enabled
-  if (!upstreamBillingAutoProbeEnabled.value) {
+  upstreamBillingAutoProbeEnabled.value = enabled
+  if (!enabled) {
     upstreamBillingRateSyncEnabled.value = false
   }
 }
@@ -4645,9 +4653,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 		typeof extra?.auto_reset_credit_5h_threshold === 'number' ? extra.auto_reset_credit_5h_threshold * 100 : 100
 	autoResetCredit7dThreshold.value =
 		typeof extra?.auto_reset_credit_7d_threshold === 'number' ? extra.auto_reset_credit_7d_threshold * 100 : 100
-  upstreamBillingRateLimit.value = typeof extra?.upstream_billing_rate_limit === 'number'
-    ? extra.upstream_billing_rate_limit : null
-	upstreamBillingAutoProbeEnabled.value = upstreamBillingRateLimit.value != null || extra?.upstream_billing_probe_enabled === true
+	upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
   upstreamBillingRateSyncEnabled.value =
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
 
@@ -4720,7 +4726,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       const storedFPMode = extra?.codex_fingerprint_mode as string | undefined
       const fpMode = storedFPMode === 'account_device' ? 'device' : storedFPMode
       // 缺省/非法值按 off 呈现，与后端 GetCodexFingerprintMode 的 opt-in 语义一致（#5610）
-      codexFingerprintMode.value = (['off', 'single_machine_multi_window', 'device', 'session', 'full'].includes(fpMode || '')
+      codexFingerprintMode.value = (['off', 'device', 'session', 'full'].includes(fpMode || '')
         ? fpMode as CodexFingerprintMode
         : 'off')
     }
@@ -5635,11 +5641,6 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 
 const handleSubmit = async () => {
   if (!props.account) return
-  if (props.account.type === 'apikey' && upstreamBillingRateLimit.value != null &&
-    (!Number.isFinite(upstreamBillingRateLimit.value) || upstreamBillingRateLimit.value < 0)) {
-    appStore.showError(t('admin.accounts.upstreamBilling.rateLimitInvalid'))
-    return
-  }
   const accountID = props.account.id
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error' && form.status !== 'quality_paused') {
@@ -5677,7 +5678,7 @@ const handleSubmit = async () => {
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
     if (props.account.type === 'apikey') {
-      updatePayload.upstream_billing_probe_enabled = upstreamBillingRateLimit.value != null || upstreamBillingAutoProbeEnabled.value
+      updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
       if (upstreamBillingRateSyncEnabled.value) {
         delete updatePayload.rate_multiplier
@@ -6333,7 +6334,6 @@ const handleSubmit = async () => {
         }
       }
 
-
       updatePayload.extra = newExtra
     }
 
@@ -6347,7 +6347,6 @@ const handleSubmit = async () => {
       if (props.account.type === 'apikey') {
         delete newExtra.upstream_billing_probe_enabled
         delete newExtra.upstream_billing_rate_sync_enabled
-        newExtra.upstream_billing_rate_limit = upstreamBillingRateLimit.value
       }
       // Total quota
       if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {

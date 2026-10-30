@@ -1148,7 +1148,6 @@ export interface UpstreamBillingProbeResult {
 export interface UpstreamBillingRateSnapshotItem {
   account_id: number
   snapshot?: UpstreamBillingProbeSnapshot | null
-  upstream_billing_rate_limited?: boolean
 }
 
 export interface UpstreamBillingRatesResponse {
@@ -1292,7 +1291,6 @@ export interface Account {
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
   ollama_cloud_usage?: OllamaCloudUsageState
-  upstream_billing_rate_limited?: boolean
   opencode_go_usage?: OpenCodeGoUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
@@ -1300,7 +1298,6 @@ export interface Account {
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
-    upstream_billing_rate_limit?: number | null
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
     codex_reset_credit_snapshot?: {
       available_count?: number
