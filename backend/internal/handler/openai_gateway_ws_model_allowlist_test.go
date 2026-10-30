@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -97,57 +98,59 @@ func TestOpenAIResponsesWebSocket_DisabledAllowlistDoesNotInterfere(t *testing.T
 	}
 }
 
-// 首帧含重复 model 键（首个在白名单、末个不在）：passthrough 会原样转发两个字段，
-// 上游按末值绑定时得到禁用模型，必须在入口拒绝。
-func TestOpenAIResponsesWebSocket_FirstFrameDuplicateModelKeysRejected(t *testing.T) {
-	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeDedicated} {
-		t.Run(mode, func(t *testing.T) {
-			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-				firstPayload:            `{"type":"response.create","model":"gpt-5.4","model":"gpt-4.1","stream":false}`,
-				group:                   wsAllowlistGroup(true, "gpt-5.4"),
-				ingressMode:             mode,
-				firstFrameCloseExpected: true,
-			})
-		})
+// Model ambiguity is invalid independently of group allowlist configuration.
+// Test both ingress implementations before the first turn and after a valid turn.
+func TestOpenAIResponsesWebSocket_DuplicateModelFieldsRejected(t *testing.T) {
+	fields := []struct {
+		name string
+		json string
+	}{
+		{"different values", `"model":"gpt-5.4","model":"gpt-4.1"`},
+		{"identical values", `"model":"gpt-5.4","model":"gpt-5.4"`},
+		{"case variant", `"model":"gpt-5.4","Model":"gpt-4.1"`},
+		{"escaped key", `"model":"gpt-5.4","m\u006fdel":"gpt-4.1"`},
+		{"null duplicate", `"model":"gpt-5.4","model":null`},
+		{"non-string duplicate", `"model":"gpt-5.4","model":123`},
+		{"legacy messages", `"model":"gpt-5.4","model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]`},
 	}
-}
-
-// 首帧混用大小写变体键（{"model":"allowed","Model":"blocked"}）：绑定系上游
-// 大小写不敏感且末值生效会绑定 blocked，必须在入口拒绝。仅含变体键的帧则会在
-// 「model is required」处更早被关闭。
-func TestOpenAIResponsesWebSocket_FirstFrameCaseVariantModelKeyRejected(t *testing.T) {
-	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:            `{"type":"response.create","model":"gpt-5.4","Model":"gpt-4.1","stream":false}`,
-		group:                   wsAllowlistGroup(true, "gpt-5.4"),
-		ingressMode:             service.OpenAIWSIngressModePassthrough,
-		firstFrameCloseExpected: true,
-	})
-}
-
-// 后续 turn 含重复 model 键（首个在白名单、末个不在）：拒绝并关闭连接。
-func TestOpenAIResponsesWebSocket_SubsequentTurnDuplicateModelKeysRejected(t *testing.T) {
-	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeDedicated} {
-		t.Run(mode, func(t *testing.T) {
-			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-				firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-				secondPayload:           `{"type":"response.create","model":"gpt-5.4","model":"gpt-4.1","stream":false}`,
-				group:                   wsAllowlistGroup(true, "gpt-5.4"),
-				ingressMode:             mode,
-				secondTurnCloseExpected: true,
-			})
-		})
+	groups := []struct {
+		name  string
+		group *service.Group
+	}{
+		{"allowlist disabled", wsAllowlistGroup(false)},
+		{"both models allowed", wsAllowlistGroup(true, "gpt-5.4", "gpt-4.1")},
 	}
-}
-
-// 重复但同值的 model 键不误伤，连接正常完成两个 turn。
-func TestOpenAIResponsesWebSocket_DuplicateIdenticalModelKeysAllowed(t *testing.T) {
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:  `{"type":"response.create","model":"gpt-5.4","model":"gpt-5.4","stream":false}`,
-		secondPayload: `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-		group:         wsAllowlistGroup(true, "gpt-5.4"),
-	})
-	if len(got.clientEvents) != 2 {
-		t.Fatalf("expected two completed events, got %d", len(got.clientEvents))
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeDedicated} {
+		for _, group := range groups {
+			for _, field := range fields {
+				for _, subsequent := range []bool{false, true} {
+					stage := "first frame"
+					if subsequent {
+						stage = "subsequent turn"
+					}
+					t.Run(mode+"/"+group.name+"/"+field.name+"/"+stage, func(t *testing.T) {
+						tc := openAIResponsesWSUsageLogCase{
+							firstPayload:            `{"type":"response.create",` + field.json + `,"stream":false}`,
+							group:                   group.group,
+							ingressMode:             mode,
+							firstFrameCloseExpected: true,
+							closeReason:             "duplicate or case-conflicting model fields are not allowed",
+						}
+						if subsequent {
+							tc.secondPayload = tc.firstPayload
+							tc.firstPayload = `{"type":"response.create","model":"gpt-5.4","stream":false}`
+							tc.firstFrameCloseExpected = false
+							tc.secondTurnCloseExpected = true
+							tc.checkFirstTurnUsage = true
+						}
+						got := runOpenAIResponsesWebSocketUsageLogCase(t, tc)
+						if subsequent && got.log.Model != "gpt-5.4" {
+							t.Fatalf("accepted first turn model changed: got %q", got.log.Model)
+						}
+					})
+				}
+			}
+		}
 	}
 }
 
@@ -175,5 +178,42 @@ func TestOpenAIResponsesWebSocket_SessionUpdateToAllowedModelStillWorks(t *testi
 	})
 	if len(got.clientEvents) < 2 {
 		t.Fatalf("expected at least two completed events, got %d", len(got.clientEvents))
+	}
+}
+
+func TestOpenAIResponsesWebSocket_AmbiguousSessionUpdateRejected(t *testing.T) {
+	payloads := []struct {
+		name string
+		body string
+	}{
+		{"duplicate model", `{"type":"session.update","session":{"model":"gpt-5.4","model":"gpt-4.1"}}`},
+		{"identical model", `{"type":"session.update","session":{"model":"gpt-5.4","model":"gpt-5.4"}}`},
+		{"case model", `{"type":"session.update","session":{"model":"gpt-5.4","Model":"gpt-4.1"}}`},
+		{"null model", `{"type":"session.update","session":{"model":"gpt-5.4","model":null}}`},
+		{"duplicate session", `{"type":"session.update","session":{"model":"gpt-5.4"},"session":{"model":"gpt-4.1"}}`},
+		{"case session", `{"type":"session.update","session":{"model":"gpt-5.4"},"Session":{"model":"gpt-4.1"}}`},
+		{"null session", `{"type":"session.update","session":{"model":"gpt-5.4"},"session":null}`},
+	}
+	for _, tt := range payloads {
+		t.Run(tt.name, func(t *testing.T) {
+			field := "model"
+			if strings.HasSuffix(tt.name, "session") {
+				field = "session"
+			}
+			// The session.update is the second incoming frame and must be closed
+			// immediately; no following response.create is needed to reject it.
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false}`,
+				secondPayload:           tt.body,
+				group:                   wsAllowlistGroup(false),
+				ingressMode:             service.OpenAIWSIngressModePassthrough,
+				secondTurnCloseExpected: true,
+				checkFirstTurnUsage:     true,
+				closeReason:             "duplicate or case-conflicting " + field + " fields are not allowed",
+			})
+			if got.log.Model != "gpt-5.4" {
+				t.Fatalf("accepted first turn model changed: got %q", got.log.Model)
+			}
+		})
 	}
 }

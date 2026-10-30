@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -20,6 +21,20 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	defer releaseStagedCodexFingerprintLease(c)
+	// Internal callers can bypass HTTP ingress validation. Reject ambiguous model
+	// fields before normalization can collapse them or select a different model.
+	if err := requestmodel.ValidateJSONModelFields(body); err != nil {
+		if c != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"type":    "invalid_request_error",
+					"message": err.Error(),
+					"param":   "model",
+				},
+			})
+		}
+		return nil, err
+	}
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if s.openaiVM != nil {

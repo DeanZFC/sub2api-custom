@@ -80,7 +80,11 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 }
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !service.IsOpenAIWSSessionPreemptedError(err)
+	return err != nil &&
+		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
+		!errors.Is(err, requestmodel.ErrDuplicateModelFields) &&
+		!errors.Is(err, requestmodel.ErrDuplicateSessionFields) &&
+		!service.IsOpenAIWSSessionPreemptedError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
@@ -2584,6 +2588,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
 	}
+	if err := requestmodel.ValidateWebSocketModelFields(firstMessage); err != nil {
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, err.Error())
+		return
+	}
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
 	if reqModel == "" {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
@@ -3066,6 +3074,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			ReasoningEffortMappings:     reasoningEffortMappings,
 			TurnStarted:                 recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
+				if err := requestmodel.ValidateWebSocketModelFields(payload); err != nil {
+					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+				}
 				c.Set(securityAuditWSTurnContextKey, turn)
 				if turn == 1 {
 					service.ResumeOpsStreamTurn(c, turn)

@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -1808,6 +1809,16 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
+	for _, cause := range []error{requestmodel.ErrDuplicateModelFields, requestmodel.ErrDuplicateSessionFields} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			closeErr := service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cause.Error(), cause)
+			for _, err := range []error{cause, closeErr, fmt.Errorf("wrapped ingress turn: %w", closeErr)} {
+				require.ErrorIs(t, err, cause)
+				require.False(t, shouldReportOpenAIWSProxyAccountFailure(err), "invalid client model fields must not penalize the upstream account")
+			}
+		})
+	}
+
 	t.Run("unsupported client model switch does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", newOpenAIWSUnsupportedModelSwitchError("gpt-unsupported"))
 		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
@@ -2008,6 +2019,8 @@ type openAIResponsesWSUsageLogCase struct {
 	firstFrameCloseExpected bool
 	// secondTurnCloseExpected：第二个 turn 被拒（连接被 1008 关闭）。
 	secondTurnCloseExpected bool
+	// checkFirstTurnUsage verifies a rejected follow-up preserves the accepted turn's usage.
+	checkFirstTurnUsage bool
 }
 
 type openAIResponsesWSUsageLogResult struct {
@@ -3227,6 +3240,15 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			require.Contains(t, closeErr.Reason, reason)
 			require.Len(t, upstreamPayloadCh, turnCount-1, "rejected turn must not reach upstream")
 			_ = clientConn.CloseNow()
+			if tc.checkFirstTurnUsage {
+				select {
+				case usageLog := <-usageRepo.created:
+					require.NotNil(t, usageLog)
+					return openAIResponsesWSUsageLogResult{log: usageLog, logs: []*service.UsageLog{usageLog}}
+				case <-time.After(3 * time.Second):
+					t.Fatal("rejected follow-up must preserve the accepted first turn's usage")
+				}
+			}
 			return openAIResponsesWSUsageLogResult{}
 		}
 		readCompleted()
