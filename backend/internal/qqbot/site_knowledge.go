@@ -230,7 +230,7 @@ func containsKnowledgePhrase(question, term string) bool {
 
 func containsKnowledgeWord(question, word string) bool {
 	for _, token := range strings.FieldsFunc(question, func(r rune) bool {
-		return !(r <= unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-'))
+		return r > unicode.MaxASCII || (!unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-')
 	}) {
 		if token == word {
 			return true

@@ -48,7 +48,7 @@ func TestChatPreviewConfigPolicyAndConcurrentTrials(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			c := previewTestConfig()
 			switch reason {
 			case "disabled":
@@ -79,7 +79,7 @@ func TestChatPreviewMenuAndReadOnlyToolsAcrossProtocols(t *testing.T) {
 			t.Run(protocol+"/"+scenario, func(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
-				defer db.Close()
+				defer func() { _ = db.Close() }()
 				calls := 0
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					calls++
@@ -163,7 +163,7 @@ func TestChatPreviewMenuAndReadOnlyToolsAcrossProtocols(t *testing.T) {
 func TestChatPreviewHelpRemainsAvailableWithChatDisabled(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	c := previewTestConfig()
 	c.ChatDisabled, c.TotalDailyChatLimit, c.DailyChatLimit = true, 0, 0
 	c.BaseURL, c.APIKey, c.ChatModel = "", "", ""
