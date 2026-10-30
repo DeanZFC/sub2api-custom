@@ -21,6 +21,9 @@ import (
 func TestScheduledTestQualityIntegration(t *testing.T) {
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
+		dsn = integrationDatabaseDSN
+	}
+	if dsn == "" {
 		t.Skip("MIGRATION_TEST_DATABASE_URL is not set")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -462,6 +465,10 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, latest, 1)
 		require.Equal(t, newer[0].ID, latest[0].ID, "failed snapshot publication rolls back both rows and the latest-run pointer")
+	})
+
+	t.Run("latest execution hides deleted accounts while history retains them", func(t *testing.T) {
+		testScheduledTestDeletedAccountResults(t, ctx, db, plans, results, candyID)
 	})
 
 	t.Run("group-mode retention keeps every actual account and type", func(t *testing.T) {

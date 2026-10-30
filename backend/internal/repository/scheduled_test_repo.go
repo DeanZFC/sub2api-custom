@@ -451,7 +451,8 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 // its original ID/created_at while refreshing started_at. Apply the history
 // limit to each account/type series, not the entire plan: otherwise a later
 // test type can hide every result of earlier types. Latest view is restricted
-// to the last full execution snapshot when one has been recorded.
+// to the last full execution snapshot when one has been recorded, excluding
+// deleted accounts. History retains their results and display names for audit.
 func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID int64, limit int) ([]*service.ScheduledTestResult, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		WITH ranked_results AS (
@@ -474,6 +475,7 @@ func (r *scheduledTestResultRepository) ListByPlanID(ctx context.Context, planID
 		LEFT JOIN groups g ON g.id = r.group_id
 		LEFT JOIN accounts a ON a.id = r.account_id
 		WHERE ranked.history_rank <= $2
+		  AND ($2 > 1 OR r.account_id IS NULL OR (a.id IS NOT NULL AND a.deleted_at IS NULL))
 		ORDER BY r.started_at DESC, r.id DESC
 	`, planID, limit)
 	if err != nil {
