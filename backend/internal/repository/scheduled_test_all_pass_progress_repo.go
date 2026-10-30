@@ -99,7 +99,7 @@ func reconcileScheduledTestAllPassProgress(ctx context.Context, tx *sql.Tx, stat
 	if err != nil {
 		return progress, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	first := true
 	for rows.Next() {
 		var saved, savedVersion string
