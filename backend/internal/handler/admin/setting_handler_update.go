@@ -31,11 +31,12 @@ type UpdateSettingsRequest struct {
 	PasswordResetEnabled                bool                         `json:"password_reset_enabled"`
 	FrontendURL                         string                       `json:"frontend_url"`
 	InvitationCodeEnabled               bool                         `json:"invitation_code_enabled"`
-	TotpEnabled                         bool                         `json:"totp_enabled"`             // TOTP 双因素认证
-	PasskeyEnabled                      *bool                        `json:"passkey_enabled"`          // Passkey 登录（省略=保持现值）
-	SessionBindingEnabled               *bool                        `json:"session_binding_enabled"`  // 会话 IP/UA 绑定（省略=保持现值）
-	StepUpEnabled                       *bool                        `json:"step_up_enabled"`          // 敏感操作 step-up 2FA（省略=保持现值）
-	AuditLogRetentionDays               int                          `json:"audit_log_retention_days"` // 审计日志保留天数
+	TotpEnabled                         bool                         `json:"totp_enabled"`               // TOTP 双因素认证
+	PasskeyEnabled                      *bool                        `json:"passkey_enabled"`            // Passkey 登录（省略=保持现值）
+	MainlandWebBlockEnabled             *bool                        `json:"mainland_web_block_enabled"` // 省略=保持现值
+	SessionBindingEnabled               *bool                        `json:"session_binding_enabled"`    // 会话 IP/UA 绑定（省略=保持现值）
+	StepUpEnabled                       *bool                        `json:"step_up_enabled"`            // 敏感操作 step-up 2FA（省略=保持现值）
+	AuditLogRetentionDays               int                          `json:"audit_log_retention_days"`   // 审计日志保留天数
 	LoginAgreementEnabled               bool                         `json:"login_agreement_enabled"`
 	LoginAgreementMode                  string                       `json:"login_agreement_mode"`
 	LoginAgreementUpdatedAt             string                       `json:"login_agreement_updated_at"`
@@ -506,6 +507,15 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
+	// Commit this switch last: later payment/refresh failures must not activate
+	// a restriction after the UI reports the settings save as failed.
+	omitted[service.SettingKeyMainlandWebBlockEnabled] = struct{}{}
+	if req.MainlandWebBlockEnabled != nil {
+		if err := h.settingService.ValidateMainlandWebBlockEnabled(*req.MainlandWebBlockEnabled); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 
 	previousSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {
@@ -520,6 +530,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 	// 两个安全开关的请求字段为指针：省略字段=保持现值，避免旧客户端/脚本
 	// 用不含新字段的全量 payload 保存设置时把安全开关静默重置。
+	mainlandWebBlockEnabled := previousSettings.MainlandWebBlockEnabled
+	if req.MainlandWebBlockEnabled != nil {
+		mainlandWebBlockEnabled = *req.MainlandWebBlockEnabled
+	}
 	sessionBindingEnabled := previousSettings.SessionBindingEnabled
 	if req.SessionBindingEnabled != nil {
 		sessionBindingEnabled = *req.SessionBindingEnabled
@@ -1539,6 +1553,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		InvitationCodeEnabled:               req.InvitationCodeEnabled,
 		TotpEnabled:                         req.TotpEnabled,
 		PasskeyEnabled:                      passkeyEnabled,
+		MainlandWebBlockEnabled:             mainlandWebBlockEnabled,
 		SessionBindingEnabled:               sessionBindingEnabled,
 		StepUpEnabled:                       stepUpEnabled,
 		AuditLogRetentionDays:               req.AuditLogRetentionDays,
@@ -2173,8 +2188,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
-	h.auditSettingsUpdate(c, previousSettings, settings, previousAuthSourceDefaults, authSourceDefaults, auditReq)
-
 	// 重新获取设置返回
 	updatedSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {
@@ -2220,6 +2233,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PasskeyConfigured:                                      passkeyConfigured,
 		PasskeyRPID:                                            passkeyRPID,
 		PasskeyRPOrigins:                                       passkeyRPOrigins,
+		MainlandWebBlockEnabled:                                updatedSettings.MainlandWebBlockEnabled,
 		SessionBindingEnabled:                                  updatedSettings.SessionBindingEnabled,
 		StepUpEnabled:                                          updatedSettings.StepUpEnabled,
 		AuditLogRetentionDays:                                  updatedSettings.AuditLogRetentionDays,
@@ -2487,6 +2501,15 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	} else {
 		payload.DefaultPlatformQuotas = platformQuotas
 	}
+	if req.MainlandWebBlockEnabled != nil {
+		if err := h.settingService.SetMainlandWebBlockEnabled(c.Request.Context(), *req.MainlandWebBlockEnabled); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		updatedSettings.MainlandWebBlockEnabled = *req.MainlandWebBlockEnabled
+		payload.MainlandWebBlockEnabled = *req.MainlandWebBlockEnabled
+	}
+	h.auditSettingsUpdate(c, previousSettings, settings, previousAuthSourceDefaults, authSourceDefaults, auditReq)
 	response.Success(c, systemSettingsResponseData(payload, updatedAuthSourceDefaults))
 }
 

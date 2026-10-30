@@ -197,6 +197,9 @@ export default {
         stepUpEnableRequiresTotp: '开启敏感操作二次验证前，请先在个人资料中为当前账号启用 2FA (TOTP)。',
         sessionBinding: '会话 IP/UA 绑定',
         sessionBindingHint: '将登录会话与客户端 IP 和 User-Agent 绑定，任一变化即强制该会话失效并需重新登录（提升被盗凭证的利用门槛）。',
+        mainlandWebBlock: '中国大陆网页访问限制',
+        mainlandWebBlockHint: '开启后，中国大陆 IP 访问 /、/login、/home 时显示地区限制页面；其他页面和 API 不受影响。保存后立即生效。',
+        mainlandWebBlockProxyHint: '准确识别访客 IP 依赖服务器的可信反向代理设置。',
         auditRetention: '操作日志保留天数',
         auditRetentionHint: '超过该天数的操作日志将被自动清理；填 0 表示永久保留（仅支持手动清空）。'
       },

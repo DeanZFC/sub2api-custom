@@ -40,13 +40,13 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			s, replies := helpTestSender(t)
 			c := DefaultConfig()
-			want := []string{"/签到", "/我的余额", "/今日用量", "/我的奖励", "/抽奖", "/抽奖次数", "/抽奖活动", "/成长任务", "/邀请奖励", "/我的邀请", "/今日排行榜", "/渠道状态", "/生图 图片描述", "/价格 模型名", "/绑定 邮箱或绑定码", "/转账 金额 邮箱", "/举报垃圾信息"}
+			want := []string{"/签到", "/我的余额", "/今日用量", "/我的奖励", "/抽奖", "/抽奖次数", "/抽奖活动", "/成长任务", "/邀请奖励", "/我的邀请", "/今日排行榜", "/渠道状态", "/生图 图片描述", "/价格 模型名", "/绑定 邮箱或绑定码", "/转账 金额 邮箱"}
 			for i := 0; i < count; i++ {
 				name := "/" + strings.Repeat("长", 30) + fmt.Sprintf("%02d", i)
 				c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: name, Reply: "reply", Enabled: true})
 				want = append(want, name)
 			}
-			c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: "/disabled"}, CustomCommand{Command: "/我的余额", Enabled: true}, CustomCommand{Command: "/我的", Enabled: true})
+			c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: "/disabled"}, CustomCommand{Command: "/我的余额", Enabled: true}, CustomCommand{Command: "/我的", Enabled: true}, CustomCommand{Command: "/举报垃圾信息", Enabled: true})
 			j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: strings.Repeat("m", 128), MessageID: "help", CreatedAt: time.Now()}
 			require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 			require.Len(t, *replies, 1, "all commands must fit one message without truncation")
@@ -74,23 +74,25 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 						break
 					}
 				}
-				require.Equal(t, 1, displayed[replyPlainLabel(usage)], cmd)
+				require.Equal(t, 1, displayed[usage], cmd)
 			}
 			for _, item := range helpSystemItems() {
-				description := replyPlainLabel(item.description)
+				description := item.description
 				usage := item.command
 				if item.usage != "" {
 					usage = item.usage
 				}
-				require.Contains(t, reply.text(), replyPlainLabel(usage)+"："+description)
+				require.Contains(t, reply.text(), usage+"："+description)
 			}
 			for i := 0; i < count; i++ {
 				name := "/" + strings.Repeat("长", 30) + fmt.Sprintf("%02d", i)
 				require.Contains(t, reply.text(), replyPlainLabel(name)+"：自定义回复")
 			}
-			for _, absent := range []string{"/disabled", "/福利", "兑换", "翻页", "下一页", "上一页", "更多服务", "第 1/"} {
+			for _, absent := range []string{"/disabled", "/福利", "兑换", "翻页", "下一页", "上一页", "更多服务", "第 1/", "/举报垃圾信息"} {
 				require.NotContains(t, reply.text(), absent)
 			}
+			require.Contains(t, reply.text(), "/抽奖 [次数]：")
+			require.NotContains(t, reply.text(), `\[次数\]`)
 			require.Contains(t, reply.text(), "聊天请 @机器人 + 问题。", "the final line must not be truncated")
 			require.LessOrEqual(t, utf8.RuneCountInString(reply.text()), 1800)
 			require.NotNil(t, reply.Keyboard)
@@ -123,7 +125,7 @@ func TestHelpRejectsArgumentsAndPageCallbacks(t *testing.T) {
 		require.Nil(t, (*replies)[len(*replies)-1].Keyboard)
 		require.Equal(t, "用法：/帮助", (*replies)[len(*replies)-1].text())
 	}
-	for _, action := range []string{"", "checkin\n/抽奖", "bind", "redeem", "image", "transfer", "custom:/disabled", "custom:/签到", "page:0", "page:01", "page:1", "page:2", "page:4", "prices", "growth_claim", "/转账 1 someone@example.com"} {
+	for _, action := range []string{"", "checkin\n/抽奖", "bind", "redeem", "image", "transfer", "report_spam", "custom:/举报垃圾信息", "custom:/disabled", "custom:/签到", "page:0", "page:01", "page:1", "page:2", "page:4", "prices", "growth_claim", "/转账 1 someone@example.com"} {
 		_, ok := helpActionCommand(c, action)
 		require.False(t, ok, action)
 	}

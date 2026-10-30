@@ -147,6 +147,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PasskeyConfigured:                                      passkeyConfigured,
 		PasskeyRPID:                                            passkeyRPID,
 		PasskeyRPOrigins:                                       passkeyRPOrigins,
+		MainlandWebBlockEnabled:                                settings.MainlandWebBlockEnabled,
 		SessionBindingEnabled:                                  settings.SessionBindingEnabled,
 		StepUpEnabled:                                          settings.StepUpEnabled,
 		AuditLogRetentionDays:                                  settings.AuditLogRetentionDays,

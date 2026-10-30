@@ -311,114 +311,12 @@ type spamReportQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func (s *Service) spamReportSource(ctx context.Context, c Config, group, reference string) (*spamReportSource, error) {
-	return s.loadSpamReportSource(ctx, s.db, c, group, reference)
-}
-
-func (s *Service) loadSpamReportSource(ctx context.Context, db spamReportQueryer, c Config, group, reference string) (*spamReportSource, error) {
-	source, _, err := s.inspectSpamReportSource(ctx, db, c, group, reference)
-	return source, err
-}
-
 func (s *Service) loadSpamReportEvidence(ctx context.Context, db spamReportQueryer, c Config, group, reference, reportID string) (*spamReportSource, error) {
 	if reportID == "" {
 		return nil, nil
 	}
 	source, _, err := s.inspectSpamReportSourceForReport(ctx, db, c, group, reference, reportID)
 	return source, err
-}
-
-func (s *Service) confirmSpamReport(ctx context.Context, snapshot Config, reportID string, source spamReportSource, category, reason string) (bool, error) {
-	queued, _, err := s.confirmSpamReportWithReason(ctx, snapshot, reportID, source, category, reason)
-	return queued, err
-}
-
-func (s *Service) confirmSpamReportWithReason(ctx context.Context, snapshot Config, reportID string, source spamReportSource, category, reason string) (bool, spamReportSourceReason, error) {
-	if category != "advertising" && category != "phishing" && category != "scam" {
-		return false, spamSourceUnverified, nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, spamSourceUnverified, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	c, err := s.lockConfig(ctx, tx)
-	if err != nil {
-		return false, spamSourceUnverified, err
-	}
-	if c.AppID != snapshot.AppID || c.Sandbox != snapshot.Sandbox {
-		return false, spamSourcePolicyChanged, nil
-	}
-	var group, status, policy, message, member, recordedReason string
-	var created time.Time
-	err = tx.QueryRowContext(ctx, `SELECT group_id,status,policy_hash,message_id,member_id,created_at,reason FROM qq_bot_spam_reports
- WHERE id=$1 AND app_id=$2 AND sandbox=$3 FOR UPDATE`, reportID, c.AppID, c.Sandbox).Scan(&group, &status, &policy, &message, &member, &created, &recordedReason)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, spamSourceReportMissing, nil
-	}
-	if err != nil {
-		return false, spamSourceUnverified, err
-	}
-	if message != source.MessageID || member != source.MemberID {
-		return false, spamSourceChanged, nil
-	}
-	if status == "cancelled" || (status == "failed" && spamReportCancellationReason(recordedReason) == spamSourceProcessingExpired) {
-		return false, spamReportCancellationReason(recordedReason), nil
-	}
-	if rejection := spamReportConfigReason(c, snapshot, group, member); rejection != spamSourceOK {
-		return false, rejection, nil
-	}
-	if status != "evaluating" {
-		return false, spamSourceReportInvalid, nil
-	}
-	if policy != spamReportPolicy(c) {
-		return false, spamSourcePolicyChanged, nil
-	}
-	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,306))`, c.AppID+":"+group); err != nil {
-		return false, spamSourceUnverified, err
-	}
-	var now time.Time
-	if err = tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-		return false, spamSourceUnverified, err
-	}
-	if !created.Add(spamReportProcessingWindow).After(now) {
-		return false, spamSourceProcessingExpired, nil
-	}
-	if created.Add(spamReportProcessingWindow).Sub(now) < 5*time.Second {
-		return false, spamSourceProcessingInsufficient, nil
-	}
-	current, rejection, err := s.inspectSpamReportSourceForReport(ctx, tx, c, group, message, reportID)
-	if err != nil {
-		return false, spamSourceUnverified, err
-	}
-	if current == nil {
-		return false, rejection, nil
-	}
-	if current.MemberID != source.MemberID || current.Content != source.Content || !current.SentAt.Equal(source.SentAt) {
-		return false, spamSourceChanged, nil
-	}
-	incident := randomID()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_moderation_incidents
- (id,app_id,sandbox,group_id,member_id,policy_hash,reason,mute_seconds) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-		incident, c.AppID, c.Sandbox, group, member, policy, "spam_"+category, c.Moderation.ReportMuteMinutes*60); err != nil {
-		return false, spamSourceUnverified, err
-	}
-	// Decide the action once. A fresh recall that fails or becomes unknown must
-	// never turn into the explicitly authorized old-message mute-only path.
-	recallExpires := source.SentAt.Add(spamReportRecallWindow)
-	recallStatus, recallReason := "queued", ""
-	if time.Until(recallExpires) < 5*time.Second {
-		recallStatus, recallReason = "skipped", spamReportRecallSkippedReason
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_moderation_operations(incident_id,kind,message_id,expires_at,status,error,finished_at)
- VALUES($1,'recall',$2,$3,$4,$5,CASE WHEN $4='skipped' THEN clock_timestamp() END),
- ($1,'mute','',$6,'queued','',NULL)`, incident, message, recallExpires, recallStatus, recallReason, created.Add(spamReportProcessingWindow)); err != nil {
-		return false, spamSourceUnverified, err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE qq_bot_spam_reports SET status='queued',category=$2,reason=$3,incident_id=$4,finished_at=NOW() WHERE id=$1`, reportID, category, limitText(reason, 250), incident); err != nil {
-		return false, spamSourceUnverified, err
-	}
-	return true, spamSourceOK, tx.Commit()
 }
 
 func (s *Service) maintainSpamReports(ctx context.Context) {

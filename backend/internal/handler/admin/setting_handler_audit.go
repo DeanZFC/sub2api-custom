@@ -63,6 +63,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.PasskeyEnabled != after.PasskeyEnabled {
 		changed = append(changed, "passkey_enabled")
 	}
+	if before.MainlandWebBlockEnabled != after.MainlandWebBlockEnabled {
+		changed = append(changed, "mainland_web_block_enabled")
+	}
 	if before.SessionBindingEnabled != after.SessionBindingEnabled {
 		changed = append(changed, "session_binding_enabled")
 	}

@@ -147,7 +147,11 @@ func chatPreviewHelp(c Config) string {
 		if item.usage != "" {
 			usage = item.usage
 		}
-		text += "\n" + replyPlainLabel(usage) + "：" + replyPlainLabel(item.description)
+		if strings.HasPrefix(item.action, "custom:") {
+			text += "\n" + replyPlainLabel(usage) + "：" + replyPlainLabel(item.description)
+		} else {
+			text += "\n" + usage + "：" + item.description
+		}
 	}
 	return text + "\n\n按钮填入指令后发送；聊天请 @机器人 + 问题。"
 }

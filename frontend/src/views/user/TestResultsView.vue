@@ -178,7 +178,7 @@ const regularResults = computed(() => {
   // source group until the next poll.
   if (auth.isAdmin) for (const review of adminReviews.value) {
     const current = records.get(review.result.id)
-    records.set(review.result.id, current ? { ...review.result, ...current, account_name: review.result.account_name, ...(review.result.execution_info ? { execution_info: { ...current.execution_info, ...review.result.execution_info } } : {}) } : review.result)
+    records.set(review.result.id, current ? { ...review.result, ...current, account_name: current.account_name || review.result.account_name, ...(review.result.execution_info ? { execution_info: { ...current.execution_info, ...review.result.execution_info } } : {}) } : review.result)
   }
   return [...records.values()]
 })

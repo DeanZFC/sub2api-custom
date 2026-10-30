@@ -784,16 +784,23 @@ type ForwardedClientIPSettings struct {
 }
 
 type SecurityConfig struct {
-	URLAllowlist    URLAllowlistConfig   `mapstructure:"url_allowlist"`
-	ResponseHeaders ResponseHeaderConfig `mapstructure:"response_headers"`
-	CSP             CSPConfig            `mapstructure:"csp"`
-	ProxyFallback   ProxyFallbackConfig  `mapstructure:"proxy_fallback"`
-	ProxyProbe      ProxyProbeConfig     `mapstructure:"proxy_probe"`
+	MainlandWebBlock MainlandWebBlockConfig `mapstructure:"mainland_web_block"`
+	URLAllowlist     URLAllowlistConfig     `mapstructure:"url_allowlist"`
+	ResponseHeaders  ResponseHeaderConfig   `mapstructure:"response_headers"`
+	CSP              CSPConfig              `mapstructure:"csp"`
+	ProxyFallback    ProxyFallbackConfig    `mapstructure:"proxy_fallback"`
+	ProxyProbe       ProxyProbeConfig       `mapstructure:"proxy_probe"`
 	// TrustForwardedIPForAPIKeyACL enables legacy raw forwarded-header takeover.
 	// When disabled, server.trusted_proxies is authoritative for all client-IP consumers.
 	TrustForwardedIPForAPIKeyACL  bool                                       `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
 	ForwardedClientIPHeaders      []string                                   `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
+}
+
+// MainlandWebBlockConfig controls mainland-IP restrictions on /, /login and /home only.
+type MainlandWebBlockConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	CIDRFile string `mapstructure:"cidr_file"` // empty uses bundled IPv4 + IPv6 data
 }
 
 func NormalizeForwardedClientIPHeaders(headers []string) ([]string, error) {
@@ -2145,6 +2152,8 @@ func setDefaults() {
 	viper.SetDefault("webauthn.rp_origins", []string{})
 
 	// Security
+	viper.SetDefault("security.mainland_web_block.enabled", false)
+	viper.SetDefault("security.mainland_web_block.cidr_file", "")
 	viper.SetDefault("security.url_allowlist.enabled", false)
 	viper.SetDefault("security.url_allowlist.upstream_hosts", []string{
 		"api.openai.com",

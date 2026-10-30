@@ -7,10 +7,6 @@
       <article v-for="command in items" :key="command.command" class="rounded border p-3 text-sm dark:border-dark-700" data-testid="qq-command-inventory-item">
         <code>{{ command.usage || command.command }}</code>
         <p>{{ command.description }} · {{ t(command.builtin ? 'qqbot.workspace.builtin' : 'qqbot.workspace.custom') }}</p>
-        <template v-if="command.builtin && command.command === '/举报垃圾信息'">
-          <p class="mt-2 text-xs text-gray-500" data-testid="qq-report-command-help">{{ t('qqbot.moderation.reportCommandHelp') }}</p>
-          <p class="mt-2 text-xs text-gray-500">{{ t('qqbot.moderation.reportSafetyHelp') }}</p>
-        </template>
         <p v-if="command.reply" class="mt-2 whitespace-pre-wrap break-words rounded bg-gray-50 p-2 dark:bg-dark-800">{{ command.reply }}</p>
       </article>
     </div>

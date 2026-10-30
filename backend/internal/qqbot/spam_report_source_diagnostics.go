@@ -161,13 +161,6 @@ func spamReportCancellationReason(reason string) spamReportSourceReason {
 	}
 }
 
-// Inspect preserves every enforcement gate while explaining the first verified
-// rejection. Retained expired records remain useful for diagnosis; a missing
-// record alone never proves that a callback was absent or permission was denied.
-func (s *Service) inspectSpamReportSource(ctx context.Context, db spamReportQueryer, c Config, group, reference string) (*spamReportSource, spamReportSourceReason, error) {
-	return s.inspectSpamReportSourceForReport(ctx, db, c, group, reference, "")
-}
-
 // Only a matching, durably admitted report may use the processing grace. New
 // reports cannot use the longer encrypted-source retention as an admission window.
 func (s *Service) inspectSpamReportSourceForReport(ctx context.Context, db spamReportQueryer, c Config, group, reference, reportID string) (*spamReportSource, spamReportSourceReason, error) {

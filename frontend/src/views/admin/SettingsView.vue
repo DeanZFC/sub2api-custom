@@ -1715,6 +1715,29 @@
                 <Toggle v-model="form.session_binding_enabled" />
               </div>
 
+              <!-- 中国大陆网页访问限制 -->
+              <div
+                class="flex items-start justify-between gap-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+                data-testid="mainland-web-block-settings"
+              >
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{
+                    t("admin.settings.security.mainlandWebBlock")
+                  }}</label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.security.mainlandWebBlockHint") }}
+                  </p>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.security.mainlandWebBlockProxyHint") }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.mainland_web_block_enabled"
+                  data-testid="mainland-web-block-toggle"
+                  :aria-label="t('admin.settings.security.mainlandWebBlock')"
+                />
+              </div>
+
               <!-- 审计日志保留天数 -->
               <div
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
@@ -9831,6 +9854,7 @@ const form = reactive<SettingsForm>({
   passkey_rp_id: "",
   passkey_rp_origins: [],
   session_binding_enabled: false,
+  mainland_web_block_enabled: false,
   step_up_enabled: false,
   audit_log_retention_days: 180,
   login_agreement_enabled: false,
@@ -11100,6 +11124,7 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    form.mainland_web_block_enabled = settings.mainland_web_block_enabled === true;
     // For this optional override, null explicitly selects per-account rates.
     if (settings.openai_oauth_scheduling_rate_multiplier === null) {
       form.openai_oauth_scheduling_rate_multiplier = null;
@@ -11551,6 +11576,7 @@ async function saveSettings() {
       totp_enabled: form.totp_enabled,
       passkey_enabled: form.passkey_enabled,
       session_binding_enabled: form.session_binding_enabled,
+      mainland_web_block_enabled: form.mainland_web_block_enabled,
       step_up_enabled: form.step_up_enabled,
       // 清空数字框时 v-model.number 会得到空串，后端 int 字段解析空串会 400 拒绝整次保存；
       // 空/非法值回退默认 180（与后端 parseAuditLogRetentionDays("") 语义一致，0 仍表示永久保留）。

@@ -42,6 +42,7 @@ type SystemSettings struct {
 	PasskeyConfigured                   bool                     `json:"passkey_configured"`
 	PasskeyRPID                         string                   `json:"passkey_rp_id"`
 	PasskeyRPOrigins                    []string                 `json:"passkey_rp_origins"`
+	MainlandWebBlockEnabled             bool                     `json:"mainland_web_block_enabled"`
 	SessionBindingEnabled               bool                     `json:"session_binding_enabled"`  // 会话 IP/UA 绑定
 	StepUpEnabled                       bool                     `json:"step_up_enabled"`          // 敏感操作 step-up 2FA
 	AuditLogRetentionDays               int                      `json:"audit_log_retention_days"` // 审计日志保留天数

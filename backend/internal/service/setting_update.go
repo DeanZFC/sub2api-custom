@@ -38,6 +38,11 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 // UpdateSettingsOmitting persists system settings, leaving the keys in omitted
 // at their stored value.
 func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) error {
+	if _, skipped := omitted[SettingKeyMainlandWebBlockEnabled]; !skipped {
+		if err := s.ValidateMainlandWebBlockEnabled(settings.MainlandWebBlockEnabled); err != nil {
+			return err
+		}
+	}
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -46,6 +51,9 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
+	}
+	if _, skipped := omitted[SettingKeyMainlandWebBlockEnabled]; !skipped {
+		s.publishMainlandWebBlockEnabled(settings.MainlandWebBlockEnabled)
 	}
 	if _, skipped := omitted[SettingKeyUpstreamErrorMessage]; !skipped {
 		s.publishUpstreamErrorMessage(settings.UpstreamErrorMessage)
@@ -63,6 +71,11 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Contex
 // auth-source defaults in a single write, leaving the keys in omitted at their
 // stored value.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, omitted OmittedSettingKeys) error {
+	if _, skipped := omitted[SettingKeyMainlandWebBlockEnabled]; !skipped {
+		if err := s.ValidateMainlandWebBlockEnabled(settings.MainlandWebBlockEnabled); err != nil {
+			return err
+		}
+	}
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -79,6 +92,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
+	}
+	if _, skipped := omitted[SettingKeyMainlandWebBlockEnabled]; !skipped {
+		s.publishMainlandWebBlockEnabled(settings.MainlandWebBlockEnabled)
 	}
 	if _, skipped := omitted[SettingKeyUpstreamErrorMessage]; !skipped {
 		s.publishUpstreamErrorMessage(settings.UpstreamErrorMessage)
@@ -182,6 +198,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyInvitationCodeEnabled] = strconv.FormatBool(settings.InvitationCodeEnabled)
 	updates[SettingKeyTotpEnabled] = strconv.FormatBool(settings.TotpEnabled)
 	updates[SettingKeyPasskeyEnabled] = strconv.FormatBool(settings.PasskeyEnabled)
+	updates[SettingKeyMainlandWebBlockEnabled] = strconv.FormatBool(settings.MainlandWebBlockEnabled)
 	updates[SettingKeySessionBindingEnabled] = strconv.FormatBool(settings.SessionBindingEnabled)
 	updates[SettingKeyStepUpEnabled] = strconv.FormatBool(settings.StepUpEnabled)
 	updates[SettingKeyAuditLogRetentionDays] = strconv.Itoa(settings.AuditLogRetentionDays)

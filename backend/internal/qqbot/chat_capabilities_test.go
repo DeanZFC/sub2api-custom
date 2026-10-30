@@ -25,6 +25,7 @@ func TestChatCapabilitiesUsesCurrentInventoryAndDoesNotMutateHistory(t *testing.
 		{Command: "/停用", Enabled: false},
 		{Command: "/我的", Enabled: true},
 		{Command: "/帮助", Enabled: true},
+		{Command: "/举报垃圾信息", Reply: "retired", Enabled: true},
 	}
 	messages := []Message{{Role: "system", Content: "persona"}, {Role: "developer", Content: "trusted"}, {Role: "user", Content: "history"}, {Role: "assistant", Content: "reply"}}
 	result := withChatCapabilities(messages, c, Job{GroupID: "group"})
@@ -49,7 +50,7 @@ func TestChatCapabilitiesUsesCurrentInventoryAndDoesNotMutateHistory(t *testing.
 		require.Equal(t, item.description, byCommand[usage].Description)
 	}
 	require.Contains(t, byCommand, "/教程")
-	for _, absent := range []string{"/停用", "/我的", "/福利", "/help", "/奖励兑换", "/新对话", "/清空"} {
+	for _, absent := range []string{"/停用", "/我的", "/福利", "/help", "/奖励兑换", "/新对话", "/清空", "/举报垃圾信息"} {
 		require.NotContains(t, byCommand, absent)
 	}
 	require.NotContains(t, result[2].Content, "do not inline all fixed replies")
@@ -62,7 +63,6 @@ func TestChatCapabilitiesReportsKnownFeatureRestrictions(t *testing.T) {
 	j := Job{GroupID: "group"}
 	require.Contains(t, chatCommandStatus(c, j, "image"), "停用")
 	require.Contains(t, chatCommandStatus(c, j, "transfer"), "停用")
-	require.Contains(t, chatCommandStatus(c, j, "report_spam"), "未开启")
 	c.ImageEnabled, c.TransferEnabled = true, true
 	require.Contains(t, chatCommandStatus(c, j, "image"), "入口可用")
 	require.Contains(t, chatCommandStatus(c, j, "transfer"), "独立邮件确认")

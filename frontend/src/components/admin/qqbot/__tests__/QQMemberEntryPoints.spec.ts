@@ -73,7 +73,7 @@ describe('QQ member selection entry points', () => {
   })
 
   it('keeps whitelist selection scoped and clears its identity on group or app changes', async () => {
-    const config = reactive({ ...defaultModerationConfig(), report_enabled: true, groups: ['first', 'second'], exemptions: [{ group_id: 'first', member_id: 'first-member', nickname: 'Alice' }] })
+    const config = reactive({ ...defaultModerationConfig(), enabled: true, groups: ['first', 'second'], exemptions: [{ group_id: 'first', member_id: 'first-member', nickname: 'Alice' }] })
     const wrapper = mount(QQBotModerationSettings, { props: { modelValue: config, groups: ['first', 'second'], appId: 'app', groupLabels: { second: 'Second group' }, runtime: null, disabled: false }, global: global() })
     wrappers.push(wrapper); await flushPromises()
     expect(wrapper.get('[data-testid="moderation-exempt-group"]').text()).toContain('Second group')
@@ -83,11 +83,11 @@ describe('QQ member selection entry points', () => {
     expect(config.exemptions[0]).toEqual({ group_id: 'second', member_id: 'second-member', nickname: 'bob@example.com' })
     await wrapper.setProps({ appId: 'replacement-app' }); await flushPromises()
     expect(config.exemptions[0]).toEqual({ group_id: 'second', member_id: '', nickname: '' })
-    expect(config.report_enabled).toBe(true)
+    expect(config.enabled).toBe(true)
   })
 
   it('keeps a manually entered whitelist label without persisting the temporary message preview', async () => {
-    const config = reactive({ ...defaultModerationConfig(), report_enabled: true, groups: ['first'], exemptions: [{ group_id: 'first', member_id: '', nickname: '' }] })
+    const config = reactive({ ...defaultModerationConfig(), enabled: true, groups: ['first'], exemptions: [{ group_id: 'first', member_id: '', nickname: '' }] })
     const props = { modelValue: config, groups: ['first'], appId: 'app', runtime: null, disabled: false }
     let wrapper = mount(QQBotModerationSettings, { props, global: global() })
     wrappers.push(wrapper); await flushPromises()

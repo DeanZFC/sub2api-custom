@@ -31,6 +31,41 @@ func expectPreviewConfig(t *testing.T, mock sqlmock.Sqlmock, c Config) {
 	mock.ExpectQuery("SELECT value FROM settings").WithArgs(configKey).WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(raw)))
 }
 
+func TestChatPreviewHelpKeepsOptionalArgumentsAndExcludesRetiredCommands(t *testing.T) {
+	c := DefaultConfig()
+	c.CustomCommands = []CustomCommand{
+		{Command: "/举报垃圾信息", Enabled: true},
+		{Command: "/faq_test", Enabled: true},
+	}
+	help := chatPreviewHelp(c)
+	require.Contains(t, help, "/抽奖 [次数]：")
+	require.NotContains(t, help, `\[次数\]`)
+	require.NotContains(t, help, "/举报垃圾信息")
+	require.Contains(t, help, `/faq\_test：自定义回复`, "operator-defined command labels remain escaped")
+}
+
+func TestCommandInventoryExcludesRetiredCustomCommands(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	c := previewTestConfig()
+	c.CustomCommands = []CustomCommand{
+		{Command: "/举报垃圾信息", Reply: "retired", Enabled: true},
+		{Command: "/faq", Reply: "current", Enabled: true},
+	}
+	expectPreviewConfig(t, mock, c)
+	commands, err := New(db, previewEncryptor{}, true, nil).Commands(context.Background())
+	require.NoError(t, err)
+	byCommand := make(map[string]CommandInfo, len(commands))
+	for _, item := range commands {
+		byCommand[item.Command] = item
+	}
+	require.NotContains(t, byCommand, "/举报垃圾信息")
+	require.Equal(t, "/抽奖 [次数]", byCommand["/抽奖"].Usage)
+	require.Equal(t, "current", byCommand["/faq"].Reply)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestChatPreviewRequestValidationPrecedesAllIO(t *testing.T) {
 	s := New(nil, nil, false, nil)
 	for _, req := range []ChatPreviewRequest{

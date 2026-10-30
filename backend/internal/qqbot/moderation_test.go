@@ -38,6 +38,24 @@ func TestModerationConfigCompatibilityAndValidation(t *testing.T) {
 	}
 }
 
+func TestRetiredSpamReportSettingsAreIgnored(t *testing.T) {
+	c := DefaultConfig()
+	raw, err := json.Marshal(c)
+	require.NoError(t, err)
+	var legacy map[string]any
+	require.NoError(t, json.Unmarshal(raw, &legacy))
+	moderation, ok := legacy["moderation"].(map[string]any)
+	require.True(t, ok)
+	moderation["report_enabled"] = true
+	moderation["report_mute_minutes"] = 0
+	raw, err = json.Marshal(legacy)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &c))
+	require.False(t, c.Moderation.ReportEnabled)
+	require.False(t, c.reportsSpam("group"))
+	require.NoError(t, validateConfig(c), "legacy report fields must not require a model or moderation group")
+}
+
 func TestModerationWindowsAndFingerprints(t *testing.T) {
 	c := DefaultConfig()
 	c.AppSecret = "secret"

@@ -138,6 +138,16 @@ mcp:
 # 安全配置
 # =============================================================================
 security:
+  # Restrict mainland China IPs on exactly /, /login and /home (one domain).
+  # Only those paths return the built-in 403 page; APIs and other paths are unchanged.
+  # Uses local bundled IPv4 + IPv6 CIDRs; no external calls during requests.
+  # Requires accurate server.trusted_proxies and rewritten forwarding headers.
+  # Optional CIDR file must contain both IPv4 and IPv6. Restart after changing it.
+  # SECURITY_MAINLAND_WEB_BLOCK_ENABLED / SECURITY_MAINLAND_WEB_BLOCK_CIDR_FILE
+  # Administrator website saves override enabled immediately without restarting.
+  mainland_web_block:
+    enabled: false
+    cidr_file: ""
   # Legacy compatibility switch. When true, raw forwarded headers take over
   # server.trusted_proxies. Set false to enforce the trusted proxy chain above.
   # 旧版兼容开关。开启时原始转发头会接管 server.trusted_proxies；关闭后严格

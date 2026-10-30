@@ -15,17 +15,6 @@
         </fieldset>
         <p class="text-sm text-gray-500">{{ t('qqbot.moderation.ruleHelp') }}</p>
       </div>
-      <div class="space-y-3 rounded-lg border p-3 dark:border-dark-700">
-        <label class="flex items-center gap-2 font-medium"><input v-model="value.report_enabled" data-testid="moderation-report-enabled" type="checkbox" />{{ t('qqbot.moderation.reportEnabled') }}</label>
-        <p class="text-sm text-gray-500">{{ t('qqbot.moderation.reportCommandHelp') }}</p>
-        <p class="text-sm text-gray-500">{{ t('qqbot.moderation.reportSafetyHelp') }}</p>
-        <label class="block space-y-1">
-          {{ t('qqbot.moderation.report_mute_minutes') }}
-          <input v-model.number="value.report_mute_minutes" :disabled="!value.report_enabled" data-testid="moderation-report-mute-minutes" type="number" min="1" max="60" step="1" required class="input" />
-        </label>
-        <p class="text-xs text-gray-500">{{ t('qqbot.moderation.reportLimitsHelp') }}</p>
-        <p class="text-xs text-gray-500">{{ t('qqbot.moderation.reportCostHelp') }}</p>
-      </div>
       <fieldset :disabled="!moderationEnabled" class="space-y-2 rounded-lg border p-3 dark:border-dark-700" data-testid="moderation-shared-groups">
         <legend class="px-1 text-sm font-medium">{{ t('qqbot.moderation.groups') }}</legend>
         <p class="text-xs text-gray-500">{{ t('qqbot.moderation.sharedHelp') }}</p>
@@ -76,7 +65,7 @@ const value = defineModel<QQModerationConfig>({ required: true })
 const props = defineProps<{ groups: string[]; groupLabels?: Record<string, string>; appId?: string; runtime: QQBotRuntime | null; disabled: boolean }>()
 const { t, te } = useI18n()
 const allGroups = computed(() => [...new Set([...props.groups, ...value.value.groups])])
-const moderationEnabled = computed(() => value.value.enabled || value.value.report_enabled)
+const moderationEnabled = computed(() => value.value.enabled)
 function addExemption() {
   const group = value.value.groups[0]
   if (group && value.value.exemptions.length < 100) value.value.exemptions.push({ group_id: group, member_id: '' })

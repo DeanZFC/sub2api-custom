@@ -77,11 +77,6 @@ func chatCommandStatus(c Config, j Job, action string) string {
 			return "转账已停用"
 		}
 		return "需绑定有效账号，并通过独立邮件确认"
-	case "report_spam":
-		if !c.reportsSpam(j.GroupID) {
-			return "本群未开启垃圾信息举报"
-		}
-		return "需明确引用符合条件的原消息，后端独立审核"
 	case "checkin", "lottery", "lottery_count", "lottery_info", "growth", "invite_rewards", "invites":
 		if c.groupPolicy(j.GroupID).DisableActivities {
 			return "本群活动奖励已停用，规则查询不代表可以参与"

@@ -70,6 +70,11 @@ func SetupRouter(
 		return nil
 	}))
 	r.Use(middleware2.ServerTiming(cfg.Server.EnableServerTiming))
+	mainlandWebBlock, err := middleware2.NewMainlandWebBlock(cfg.Security.MainlandWebBlock, settingService.IsMainlandWebBlockEnabled)
+	if err != nil {
+		log.Panicf("Failed to initialize mainland web restriction: %v", err)
+	}
+	r.Use(mainlandWebBlock)
 
 	// Serve embedded frontend with settings injection if available
 	if web.HasEmbeddedFrontend() {

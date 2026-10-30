@@ -406,6 +406,7 @@ const baseSettingsResponse = {
   passkey_configured: true,
   passkey_rp_id: "sub3.nebula-spaces.com",
   passkey_rp_origins: ["https://sub3.nebula-spaces.com"],
+  mainland_web_block_enabled: false,
   default_balance: 0,
   default_concurrency: 1,
   default_subscriptions: [],
@@ -1080,6 +1081,55 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(status.text()).toContain("webauthn.rp_id");
     expect(status.text()).toContain("webauthn.rp_origins");
     expect(status.text()).toContain("然后重启服务");
+  });
+
+  it.each([false, true])("loads, saves, and reloads mainland web restriction from %s", async (enabled) => {
+    let saved = { ...baseSettingsResponse, mainland_web_block_enabled: enabled };
+    getSettings.mockImplementation(async () => ({ ...saved }));
+    updateSettings.mockImplementation(async (payload) => {
+      saved = { ...saved, ...payload };
+      return { ...saved };
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="mainland-web-block-toggle"]');
+    expect(toggle.element.checked).toBe(enabled);
+    expect(toggle.attributes("disabled")).toBeUndefined();
+    const section = wrapper.get('[data-testid="mainland-web-block-settings"]');
+    expect(section.text()).toContain("admin.settings.security.mainlandWebBlockHint");
+    expect(section.text()).toContain("admin.settings.security.mainlandWebBlockProxyHint");
+
+    await toggle.setValue(!enabled);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ mainland_web_block_enabled: !enabled }),
+    );
+    expect(toggle.element.checked).toBe(!enabled);
+    wrapper.unmount();
+
+    const reloaded = mountView();
+    await flushPromises();
+    await openSecurityTab(reloaded);
+    expect(reloaded.get<HTMLInputElement>('[data-testid="mainland-web-block-toggle"]').element.checked).toBe(!enabled);
+    reloaded.unmount();
+  });
+
+  it("defaults mainland web restriction to off for older settings responses", async () => {
+    const { mainland_web_block_enabled: _omitted, ...olderSettings } = baseSettingsResponse;
+    getSettings.mockResolvedValueOnce(olderSettings);
+    const wrapper = mountView();
+    await flushPromises();
+    await openSecurityTab(wrapper);
+    expect(wrapper.get<HTMLInputElement>('[data-testid="mainland-web-block-toggle"]').element.checked).toBe(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ mainland_web_block_enabled: false }),
+    );
+    wrapper.unmount();
   });
 
   it("loads, edits, validates, and saves forwarded client-IP headers", async () => {

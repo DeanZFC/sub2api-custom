@@ -12,21 +12,21 @@ const wrappers: VueWrapper[] = []
 describe('QQ command inventory', () => {
   beforeEach(() => {
     commands.mockResolvedValue([
-      { command: '/举报垃圾信息', usage: '/举报垃圾信息', description: '举报引用的垃圾消息', builtin: true },
+      { command: '/签到', usage: '/签到', description: '每日签到', builtin: true },
       { command: '/faq', usage: '/faq', description: 'Custom reply', builtin: false, reply: '<img src="bad" />' }
     ])
   })
   afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); vi.clearAllMocks() })
 
-  it.each(['zh', 'en'] as const)('%s explains quoted reports and conservative review without duplicating API commands', async locale => {
+  it.each(['zh', 'en'] as const)('%s displays the API command inventory and escapes custom reply previews', async locale => {
     const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
     const wrapper = mount(QQCommandInventory, { global: { plugins: [i18n] } })
     wrappers.push(wrapper)
     await flushPromises()
     expect(wrapper.findAll('[data-testid="qq-command-inventory-item"]')).toHaveLength(2)
-    expect(wrapper.get('[data-testid="qq-report-command-help"]').text()).toBe(i18n.global.t('qqbot.moderation.reportCommandHelp'))
-    expect(wrapper.get('[data-testid="qq-report-command-help"]').text()).toContain('已收到举报，正在评估。')
-    expect(wrapper.text()).toContain(i18n.global.t('qqbot.moderation.reportSafetyHelp'))
+    expect(wrapper.text()).toContain('/签到')
+    expect(wrapper.text()).not.toContain('/举报垃圾信息')
+    expect(wrapper.find('[data-testid="qq-report-command-help"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('<img src="bad" />')
     expect(wrapper.find('img').exists()).toBe(false)
     expect(commands).toHaveBeenCalledOnce()

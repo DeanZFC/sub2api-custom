@@ -461,8 +461,6 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		seq++
 	}
 	switch cmd {
-	case "举报垃圾信息":
-		return s.reportSpam(ctx, c, j, e, arg)
 	case "帮助":
 		return s.sendHelp(ctx, c, *j, arg)
 	case "价格":

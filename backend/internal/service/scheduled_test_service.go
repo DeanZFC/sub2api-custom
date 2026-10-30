@@ -458,6 +458,45 @@ func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, li
 	normalizeStoredTestResults(results)
 	return results, nil
 }
+
+// PopulateAdminResultAccountNames enriches an already-authorized result projection.
+// Callers must verify the authenticated administrator role before invoking it.
+// Keeping the lookup separate leaves ordinary public result queries name-free.
+func (s *ScheduledTestService) PopulateAdminResultAccountNames(ctx context.Context, results []*ScheduledTestResult) error {
+	ids := make([]int64, 0, len(results))
+	seen := make(map[int64]bool, len(results))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		result.AccountName = ""
+		if result.TargetMode == "group" || result.AccountID == nil || *result.AccountID <= 0 || seen[*result.AccountID] {
+			continue
+		}
+		seen[*result.AccountID] = true
+		ids = append(ids, *result.AccountID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	repo, ok := s.resultRepo.(interface {
+		GetAdminResultAccountNames(context.Context, []int64) (map[int64]string, error)
+	})
+	if !ok {
+		return fmt.Errorf("administrator test account names unavailable")
+	}
+	names, err := repo.GetAdminResultAccountNames(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for _, result := range results {
+		if result != nil && result.TargetMode != "group" && result.AccountID != nil {
+			result.AccountName = names[*result.AccountID]
+		}
+	}
+	return nil
+}
+
 func (s *ScheduledTestService) ListVisibleResults(ctx context.Context, userID int64, limit int) ([]*ScheduledTestResult, error) {
 	results, err := s.resultRepo.ListVisible(ctx, userID, limit)
 	if err != nil {
@@ -544,6 +583,7 @@ func normalizePublicTestResults(results []*ScheduledTestResult) {
 	normalizeStoredTestResults(results)
 	for _, result := range results {
 		if result != nil {
+			result.AccountName = ""
 			result.ExecutionSkipped = result.ExecutionSkipped || QualityResultDeferred(result) ||
 				(result.ProtectionDecision != nil && result.ProtectionDecision.Status == "skipped") ||
 				(result.Status == "failed" && strings.HasPrefix(result.ErrorMessage, "检测跳过："))

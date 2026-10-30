@@ -63,7 +63,6 @@ func helpSystemItems() []helpItem {
 		{action: "prices", label: "模型价格", description: "查询模型价格", command: "/价格", usage: "/价格 模型名", input: true},
 		{action: "bind", label: "绑定账号", description: "绑定网站账号", command: "/绑定", usage: "/绑定 邮箱或绑定码", input: true},
 		{action: "transfer", label: "余额转账", description: "申请余额转账", command: "/转账", usage: "/转账 金额 邮箱", input: true},
-		{action: "report_spam", label: "举报垃圾信息", description: "引用30分钟内原消息举报；证据不足不处罚", command: "/举报垃圾信息", input: true},
 	}
 }
 
@@ -121,7 +120,9 @@ func (s *Service) sendHelp(ctx context.Context, c Config, j Job, arg string) err
 			if item.usage != "" {
 				usage = item.usage
 			}
-			text += "\n" + replyPlainLabel(usage) + "：" + replyPlainLabel(item.description)
+			// Built-in usages are trusted literals. Escaping their optional-argument
+			// brackets makes QQ display the backslashes in the help message.
+			text += "\n" + usage + "：" + item.description
 		}
 		if i < helpQuickActions {
 			button := helpCommandButton(item.label, item.action, item.command)

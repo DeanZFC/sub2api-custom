@@ -197,6 +197,9 @@ export default {
         stepUpEnableRequiresTotp: 'Enable 2FA (TOTP) for your own account in Profile before turning on step-up verification.',
         sessionBinding: 'Session IP/UA Binding',
         sessionBindingHint: 'Bind login sessions to the client IP and User-Agent. Any change immediately invalidates the session and forces re-login, raising the bar for stolen-credential reuse.',
+        mainlandWebBlock: 'Mainland China Web Access Restriction',
+        mainlandWebBlockHint: 'Show a regional access notice for mainland China IPs visiting /, /login, or /home. Other pages and APIs are unaffected. Changes take effect immediately after saving.',
+        mainlandWebBlockProxyHint: 'Accurate visitor IP detection requires the server’s trusted reverse proxy configuration.',
         auditRetention: 'Audit Log Retention (days)',
         auditRetentionHint: 'Audit logs older than this are cleaned up automatically. Set to 0 to keep them forever (manual clear only).'
       },

@@ -426,6 +426,7 @@ export interface SystemSettings {
   passkey_rp_id: string;
   passkey_rp_origins: string[];
   session_binding_enabled: boolean; // 会话 IP/UA 绑定
+  mainland_web_block_enabled: boolean; // 中国大陆网页访问限制，仅 /、/login、/home
   step_up_enabled: boolean; // 敏感操作 step-up 2FA
   audit_log_retention_days: number; // 审计日志保留天数
   login_agreement_enabled: boolean;
@@ -782,6 +783,7 @@ export interface UpdateSettingsRequest {
   totp_enabled?: boolean; // TOTP 双因素认证
   passkey_enabled?: boolean;
   session_binding_enabled?: boolean; // 会话 IP/UA 绑定
+  mainland_web_block_enabled?: boolean;
   step_up_enabled?: boolean; // 敏感操作 step-up 2FA
   audit_log_retention_days?: number; // 审计日志保留天数
   login_agreement_enabled?: boolean;

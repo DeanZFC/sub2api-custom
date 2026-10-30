@@ -212,6 +212,9 @@ func (s *Service) Commands(ctx context.Context) ([]CommandInfo, error) {
 		out = append(out, CommandInfo{Command: item.command, Description: item.description, Usage: item.usage, Builtin: true, Enabled: true})
 	}
 	for _, item := range c.CustomCommands {
+		if isRetiredCommand(strings.TrimPrefix(item.Command, "/")) {
+			continue
+		}
 		out = append(out, CommandInfo{Command: item.Command, Description: "自定义固定回复", Enabled: item.Enabled, Reply: item.Reply})
 	}
 	return out, nil

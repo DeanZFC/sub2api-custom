@@ -78,6 +78,37 @@ describe('test result output', () => {
     expect(frame.attributes('srcdoc')).toContain("default-src 'none'")
   })
 
+  it.each([undefined, null, '', ' \n '])('collapses the raw response when a failed HTML result has no preview (%s)', outputHTML => {
+    const response = '<!DOCTYPE html>\n<html lang="zh-CN"><head><style>body { margin: 0; }'
+    const wrapper = mount(TestResultOutput, { global, props: { compact: true, result: { id: 2296, status: 'failed', output_kind: 'html', output_html: outputHTML, response_text: response } } })
+    expect(wrapper.get('[data-html-preview-unavailable]').text()).toBe('tests.htmlPreviewUnavailable')
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.find('pre:not(details pre)').exists()).toBe(false)
+    expect(wrapper.get('details').attributes('open')).toBeUndefined()
+    expect(wrapper.get('details pre').text()).toBe(response)
+    expect(wrapper.props('result').status).toBe('failed')
+    wrapper.unmount()
+  })
+
+  it('keeps a failed HTML result previewable when a complete document is available', () => {
+    const wrapper = mount(TestResultOutput, { global, props: { compact: true, result: { id: 9, status: 'failed', output_kind: 'html', output_html: '<svg><circle r="20" /></svg>', response_text: 'Original response' } } })
+    expect(wrapper.get('iframe').attributes('srcdoc')).toContain('<circle')
+    expect(wrapper.find('[data-html-preview-unavailable]').exists()).toBe(false)
+    expect(wrapper.find('details').exists()).toBe(false)
+    expect(wrapper.props('result').status).toBe('failed')
+    wrapper.unmount()
+  })
+
+  it.each(['running', 'pending'])('keeps %s HTML output in progress while retaining collapsed diagnostics', status => {
+    const wrapper = mount(TestResultOutput, { global, props: { compact: true, result: { id: 10, status, output_kind: 'html', response_text: '<html><body>Still generating' } } })
+    expect(wrapper.text()).toContain('tests.running')
+    expect(wrapper.find('[data-html-preview-unavailable]').exists()).toBe(false)
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.get('details').attributes('open')).toBeUndefined()
+    expect(wrapper.find('pre:not(details pre)').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('renders unknown future output kinds as escaped text', () => {
     const wrapper = mount(TestResultOutput, { global, props: { result: { id: 3, status: 'success', output_kind: 'future-json', response_text: '<img src=x onerror=alert(1)>' } } })
     expect(wrapper.get('pre').text()).toBe('<img src=x onerror=alert(1)>')

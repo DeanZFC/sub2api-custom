@@ -34,7 +34,7 @@ func (r scheduledTestReadResultsStub) ListVisibleHistory(context.Context, int64,
 func TestScheduledTestPublicResultsHideUpstreamErrors(t *testing.T) {
 	for _, view := range []string{"list", "history", "recent"} {
 		t.Run(view, func(t *testing.T) {
-			row := &ScheduledTestResult{ID: 1, Status: "failed", OutputKind: "text", ResponseText: "partial output", ErrorMessage: "private upstream diagnostic"}
+			row := &ScheduledTestResult{ID: 1, Status: "failed", OutputKind: "text", ResponseText: "partial output", AccountName: "private account name", ErrorMessage: "private upstream diagnostic"}
 			svc := NewScheduledTestService(nil, scheduledTestReadResultsStub{rows: []*ScheduledTestResult{row, nil}})
 			var rows []*ScheduledTestResult
 			if view != "history" {
@@ -54,6 +54,7 @@ func TestScheduledTestPublicResultsHideUpstreamErrors(t *testing.T) {
 			require.Equal(t, "failed", rows[0].Status)
 			require.Equal(t, "partial output", rows[0].ResponseText)
 			require.Empty(t, rows[0].ErrorMessage)
+			require.Empty(t, rows[0].AccountName, "ordinary result views must strip names even if a repository supplies them")
 			require.Nil(t, rows[1])
 		})
 	}

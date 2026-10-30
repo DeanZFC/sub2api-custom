@@ -212,7 +212,7 @@ describe('QQ module settings', () => {
   await w.get('form').trigger('submit'); await flushPromises()
   expect(server.moderation).toMatchObject({ enabled: true, groups: ['group'] })
  })
- it('merges report defaults into a legacy moderation config without changing rules or exemptions', async () => {
+ it('preserves legacy moderation rules and exemptions without exposing report controls', async () => {
   api.config.mockResolvedValue({ ...cloneConfig(server), moderation: {
    enabled: true, groups: ['group'], repeat_window_seconds: 12, repeat_count: 6,
    burst_window_seconds: 8, burst_count: 9, mute_minutes: 7,
@@ -221,65 +221,49 @@ describe('QQ module settings', () => {
   } })
   const w = await mountView('zh', '/admin/qqbot/groups')
   await w.get('#qqbot-settings-tab-moderation').trigger('click')
-  expect((w.get('[data-testid="moderation-report-enabled"]').element as HTMLInputElement).checked).toBe(false)
-  expect((w.get('[data-testid="moderation-report-mute-minutes"]').element as HTMLInputElement).value).toBe('5')
+  expect(w.find('[data-testid="moderation-report-enabled"]').exists()).toBe(false)
+  expect(w.find('[data-testid="moderation-report-mute-minutes"]').exists()).toBe(false)
   expect((w.get('[data-testid="moderation-repeat_count"]').element as HTMLInputElement).value).toBe('6')
   expect(w.get('[data-testid="moderation-exempt-member"]').text()).toContain('existing-member')
-  await w.get('[data-testid="moderation-report-enabled"]').setValue(true)
   await w.get('form').trigger('submit'); await flushPromises()
-  expect(server.moderation).toMatchObject({ enabled: true, report_enabled: true, report_mute_minutes: 5,
+  expect(server.moderation).toMatchObject({ enabled: true, report_enabled: false, report_mute_minutes: 5,
    repeat_window_seconds: 12, repeat_count: 6, burst_window_seconds: 8, burst_count: 9,
    mute_minutes: 7, repeat_offense_minutes: 45, escalated_mute_minutes: 60,
    groups: ['group'], exemptions: [{ group_id: 'group', member_id: 'existing-member' }]
   })
  })
- it.each(['zh', 'en'] as const)('%s saves reports independently of chat and flooding while preserving shared exemptions', async locale => {
+ it.each(['zh', 'en'] as const)('%s saves flood control independently of chat while preserving exemptions', async locale => {
   server.chat_disabled = true
   const w = await mountView(locale, '/admin/qqbot/groups')
   await w.get('#qqbot-settings-tab-moderation').trigger('click')
   expect(w.get('[data-testid="moderation-shared-groups"]').attributes('disabled')).toBeDefined()
-  await w.get('[data-testid="moderation-report-enabled"]').setValue(true)
+  await w.get('[data-testid="moderation-enabled"]').setValue(true)
   expect(w.get('[data-testid="moderation-shared-groups"]').attributes('disabled')).toBeUndefined()
-  expect(w.get('[data-testid="moderation-flood-fields"]').attributes('disabled')).toBeDefined()
+  expect(w.get('[data-testid="moderation-flood-fields"]').attributes('disabled')).toBeUndefined()
   await w.findAll('[data-testid="moderation-group"]')[0]!.setValue(true)
   await w.get('[data-testid="moderation-add-exemption"]').trigger('click')
   await flushPromises()
   await w.get('[data-testid="moderation-exempt-member"] [data-testid="qq-member-select"]').setValue(memberKey('group', 'trusted-member'))
-  await w.get('[data-testid="moderation-report-mute-minutes"]').setValue(8)
   await w.get('form').trigger('submit'); await flushPromises()
-  expect(server.moderation).toMatchObject({ enabled: false, report_enabled: true, report_mute_minutes: 8,
+  expect(server.moderation).toMatchObject({ enabled: true, report_enabled: false,
    groups: ['group'], exemptions: [{ group_id: 'group', member_id: 'trusted-member', nickname: 'Trusted member' }]
   })
   expect(server.chat_disabled).toBe(true)
-  await w.get('[data-testid="moderation-enabled"]').setValue(true)
-  await w.get('[data-testid="moderation-report-enabled"]').setValue(false)
-  expect(w.get('[data-testid="moderation-shared-groups"]').attributes('disabled')).toBeUndefined()
-  expect(w.get('[data-testid="moderation-report-mute-minutes"]').attributes('disabled')).toBeDefined()
-  await w.get('form').trigger('submit'); await flushPromises()
-  expect(server.moderation).toMatchObject({ enabled: true, report_enabled: false, report_mute_minutes: 8,
-   groups: ['group'], exemptions: [{ group_id: 'group', member_id: 'trusted-member', nickname: 'Trusted member' }]
-  })
   await w.get('[data-testid="moderation-enabled"]').setValue(false)
   expect(w.get('[data-testid="moderation-shared-exemptions"]').attributes('disabled')).toBeDefined()
   await w.get('form').trigger('submit'); await flushPromises()
   expect(server.moderation?.exemptions).toEqual([{ group_id: 'group', member_id: 'trusted-member', nickname: 'Trusted member' }])
   expect(server.moderation?.groups).toEqual(['group'])
  })
- it('validates the report mute duration as an integer from one to sixty minutes', async () => {
+ it('does not expose retired report settings or enable flood controls for old report-only configs', async () => {
   server.moderation = { ...defaultModerationConfig(), report_enabled: true, groups: ['group'] }
   const w = await mountView('zh', '/admin/qqbot/groups')
   await w.get('#qqbot-settings-tab-moderation').trigger('click')
-  const input = w.get('[data-testid="moderation-report-mute-minutes"]')
-  const reportValidity = vi.spyOn(input.element as HTMLInputElement, 'reportValidity')
-  for (const value of [0, 61, 1.5]) {
-   await input.setValue(value)
-   await w.get('form').trigger('submit'); await flushPromises()
-   expect(api.saveSection).not.toHaveBeenCalled()
-  }
-  expect(reportValidity).toHaveBeenCalledTimes(3)
-  await input.setValue(60)
-  await w.get('form').trigger('submit'); await flushPromises()
-  expect(server.moderation?.report_mute_minutes).toBe(60)
+  expect(w.find('[data-testid="moderation-report-enabled"]').exists()).toBe(false)
+  expect(w.find('[data-testid="moderation-report-mute-minutes"]').exists()).toBe(false)
+  expect(w.get('[data-testid="moderation-flood-fields"]').attributes('disabled')).toBeDefined()
+  expect(w.get('[data-testid="moderation-shared-groups"]').attributes('disabled')).toBeDefined()
+  expect(w.get('[data-testid="moderation-shared-exemptions"]').attributes('disabled')).toBeDefined()
  })
   it.each(['zh', 'en'] as const)('%s selects group admins by recent messages and bound identity and supports removal', async locale => {
     server.allowed_groups = ['group', 'second-group']

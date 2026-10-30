@@ -11,9 +11,10 @@ import (
 func TestRetiredCommandsNeverExecuteOrCallModels(t *testing.T) {
 	s, replies := helpTestSender(t) // No database or model endpoint.
 	c := DefaultConfig()
-	for _, name := range []string{"help", "我的", "福利", "领取任务", "画图", "奖励兑换"} {
+	for _, name := range []string{"help", "我的", "福利", "领取任务", "画图", "奖励兑换", "举报垃圾信息"} {
 		t.Run(name, func(t *testing.T) {
 			require.False(t, isBuiltinCommand(name))
+			require.Error(t, validateCustomCommands([]CustomCommand{{Command: "/" + name, Reply: "must not run", Enabled: true}}))
 			c.CustomCommands = []CustomCommand{{Command: "/" + name, Reply: "must not run", Enabled: true}}
 			for _, eventType := range []string{groupMessageCreate, groupAtMessageCreate} {
 				j := Job{EventType: eventType, GroupID: "group", MessageID: name, CreatedAt: time.Now()}

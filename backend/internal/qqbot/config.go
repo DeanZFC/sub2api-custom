@@ -26,6 +26,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
+	// Spam reporting is retired. Ignore the old switch in saved settings and
+	// requests so it cannot collect evidence or authorize queued punishments.
+	decoded.Moderation.ReportEnabled = false
 	var history struct {
 		Messages *int `json:"history_messages"`
 		Turns    *int `json:"history_turns"`
@@ -249,6 +252,7 @@ func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Co
 		return c, err
 	}
 	c.SectionVersions = nil
+	c.Moderation.ReportEnabled = false
 	c.CustomCommands = normalizeCustomCommands(c.CustomCommands)
 	c.SiteKnowledge = normalizeSiteKnowledge(old.SiteKnowledge, c.SiteKnowledge)
 	c.AppID = strings.TrimSpace(c.AppID)

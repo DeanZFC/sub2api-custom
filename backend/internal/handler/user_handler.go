@@ -71,6 +71,10 @@ func (h *UserHandler) ListTestResults(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
+	if err := h.populateAdminTestResultAccountNames(c, rows); err != nil {
+		response.InternalError(c, "test account names unavailable")
+		return
+	}
 	c.JSON(http.StatusOK, rows)
 }
 
@@ -114,7 +118,22 @@ func (h *UserHandler) ListTestResultHistory(c *gin.Context) {
 		response.InternalError(c, "test result history unavailable")
 		return
 	}
+	if err := h.populateAdminTestResultAccountNames(c, page.Items); err != nil {
+		response.InternalError(c, "test account names unavailable")
+		return
+	}
 	c.JSON(http.StatusOK, page)
+}
+
+// Names are added only after the public visibility and sanitization path succeeds.
+// The role comes from authentication middleware, never request parameters.
+func (h *UserHandler) populateAdminTestResultAccountNames(c *gin.Context, rows []*service.ScheduledTestResult) error {
+	role, ok := middleware2.GetUserRoleFromContext(c)
+	if !ok || role != service.RoleAdmin {
+		return nil
+	}
+	c.Header("Cache-Control", "private, no-store")
+	return h.scheduledTestSvc.PopulateAdminResultAccountNames(c.Request.Context(), rows)
 }
 
 // NewUserHandler creates a new UserHandler

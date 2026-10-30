@@ -3,7 +3,7 @@
     <PelicanReviewOutput v-if="!thumbnail && result.execution_info?.auto_review" :review="result.execution_info.auto_review" :compact="compact" />
     <CapabilityResultOutput v-if="result.output_kind === 'capability' && result.execution_info?.capability" :result="result.execution_info.capability" />
     <TestModelCheckOutput v-else-if="result.output_kind === 'model_check' && result.output_model_check" :result="result.output_model_check" :compact="compact" />
-    <template v-else-if="result.output_kind === 'html' && result.output_html">
+    <template v-else-if="hasHTMLPreview">
       <div class="relative w-full overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700" :style="{ height: `${Math.ceil(htmlFrameHeight * previewScale)}px` }">
       <iframe
         :key="previewRevision"
@@ -22,13 +22,14 @@
     <div v-else-if="result.output_kind === 'number' && result.output_numeric != null" class="rounded-lg bg-gray-50 p-5 text-center text-3xl font-semibold text-gray-900 dark:bg-dark-800 dark:text-white">
       {{ result.output_numeric }}
     </div>
-    <pre v-else-if="!['statistics', 'model_check'].includes(result.output_kind) && result.response_text" class="whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-800">{{ result.response_text }}</pre>
+    <pre v-else-if="!['statistics', 'model_check', 'html'].includes(result.output_kind) && result.response_text" class="whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-800">{{ result.response_text }}</pre>
     <p v-else-if="result.status === 'running' || result.status === 'pending'" class="flex items-center gap-2 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
       <span class="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
       {{ t('tests.running') }}
     </p>
+    <p v-else-if="result.output_kind === 'html' && result.response_text" class="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-500 dark:bg-dark-800" data-html-preview-unavailable>{{ t('tests.htmlPreviewUnavailable') }}</p>
     <p v-else class="text-sm text-gray-500">{{ t('tests.noOutput') }}</p>
-    <details v-if="!compact && result.response_text && ['html', 'number'].includes(result.output_kind)" class="mt-3 text-sm text-gray-500">
+    <details v-if="result.response_text && ['html', 'number'].includes(result.output_kind) && (!compact || (result.output_kind === 'html' && !hasHTMLPreview))" class="mt-3 text-sm text-gray-500">
       <summary class="cursor-pointer">{{ t('tests.rawOutput') }}</summary>
       <pre class="mt-2 whitespace-pre-wrap break-words">{{ result.response_text }}</pre>
     </details>
@@ -46,6 +47,7 @@ import TestModelCheckOutput from '@/components/tests/TestModelCheckOutput.vue'
 
 const props = withDefaults(defineProps<{ result: TestResult; compact?: boolean; thumbnail?: boolean; maxPreviewHeight?: number }>(), { compact: false, thumbnail: false })
 const { t } = useI18n()
+const hasHTMLPreview = computed(() => props.result.output_kind === 'html' && Boolean(props.result.output_html?.trim()))
 const outputContainer = ref<HTMLElement | null>(null)
 const containerWidth = ref(960)
 const htmlFrame = ref<HTMLIFrameElement | null>(null)

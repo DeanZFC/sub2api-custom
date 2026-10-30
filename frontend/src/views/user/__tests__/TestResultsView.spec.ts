@@ -466,6 +466,57 @@ describe('channel quality result groups', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    ['number', 'passed'],
+    ['html', 'success'],
+    ['model_check', 'failed'],
+    ['text', 'error'],
+  ])('shows administrator account names for %s results without review records', async (output_kind, status) => {
+    api.isAdmin = true
+    api.list.mockResolvedValue([{ ...baseResult, id: 91, output_kind, status, account_name: 'GPT-SN-1' }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(api.reviews).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-account-info]').text()).toContain('#3 · GPT-SN-1')
+    expect(wrapper.find('[data-admin-decision]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each(['', 'Previous account name'])('prefers the current administrator account name over a review name of %s', async account_name => {
+    api.isAdmin = true
+    const current = { ...baseResult, id: 91, account_name: 'Current account name' }
+    api.list.mockResolvedValue([current])
+    api.reviews.mockResolvedValue([{ result: { ...current, account_name }, generation: 7, verdict: 'pass', admin_verdict: 'pass', account_paused: false }])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-account-info]').text()).toContain('Current account name')
+    expect(wrapper.get('[data-account-info]').text()).not.toContain('Previous account name')
+    wrapper.unmount()
+  })
+
+  it('keeps administrator account names after review records disappear on refresh', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.isAdmin = true
+    const result = { ...baseResult, id: 91, account_name: 'GPT-SN-1' }
+    api.list.mockResolvedValue([result])
+    api.reviews.mockResolvedValueOnce([{ result, generation: 7, verdict: 'pass', admin_verdict: 'pass', account_paused: false }]).mockResolvedValue([])
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-account-info]').text()).toContain('GPT-SN-1')
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(2)
+    expect(api.reviews).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-account-info]').text()).toContain('GPT-SN-1')
+    wrapper.unmount()
+  })
+
+  it('shows administrator account names when the review request fails', async () => {
+    api.isAdmin = true
+    api.list.mockResolvedValue([{ ...baseResult, id: 91, account_name: 'GPT-SN-1' }])
+    api.reviews.mockRejectedValue(new Error('Review service unavailable'))
+    const wrapper = mountResults(); await flushPromises()
+    expect(wrapper.get('[data-account-info]').text()).toContain('GPT-SN-1')
+    expect(wrapper.get('[role="alert"]').text()).toBeTruthy()
+    wrapper.unmount()
+  })
+
   it('never exposes administrator review controls or requests to ordinary users', async () => {
     api.list.mockResolvedValue([{ ...baseResult, id: 1 }])
     const wrapper = mountResults(); await flushPromises()

@@ -37,8 +37,8 @@ func normalizeModerationExemptions(exemptions []ModerationExemption) []Moderatio
 
 type ModerationConfig struct {
 	Enabled              bool                  `json:"enabled"`
-	ReportEnabled        bool                  `json:"report_enabled"`
-	ReportMuteMinutes    int                   `json:"report_mute_minutes"`
+	ReportEnabled        bool                  `json:"report_enabled"`      // Legacy field; ignored when loading or saving.
+	ReportMuteMinutes    int                   `json:"report_mute_minutes"` // Retained for historical configuration compatibility.
 	Groups               []string              `json:"groups"`
 	RepeatWindowSeconds  int                   `json:"repeat_window_seconds"`
 	RepeatCount          int                   `json:"repeat_count"`
@@ -58,12 +58,6 @@ func DefaultModerationConfig() ModerationConfig {
 
 func validateModeration(c Config) error {
 	m := c.Moderation
-	if m.ReportMuteMinutes < 1 || m.ReportMuteMinutes > 60 {
-		return errors.New("举报确认后的禁言须为 1～60 分钟")
-	}
-	if m.ReportEnabled && (c.BaseURL == "" || c.APIKey == "" || c.ChatModel == "") {
-		return errors.New("启用垃圾信息举报前，请先配置聊天接口、API Key 和审核使用的模型")
-	}
 	if m.RepeatWindowSeconds < 1 || m.RepeatWindowSeconds > 60 || m.BurstWindowSeconds < 1 || m.BurstWindowSeconds > 60 ||
 		m.RepeatCount < 2 || m.RepeatCount > 100 || m.BurstCount < 2 || m.BurstCount > 100 {
 		return errors.New("防刷屏统计窗口须为 1～60 秒，条数须为 2～100")
@@ -71,7 +65,7 @@ func validateModeration(c Config) error {
 	if m.MuteMinutes < 1 || m.MuteMinutes > 43200 || m.EscalatedMuteMinutes < m.MuteMinutes || m.EscalatedMuteMinutes > 43200 || m.RepeatOffenseMinutes < 1 || m.RepeatOffenseMinutes > 1440 {
 		return errors.New("禁言须为 1～43200 分钟，再犯禁言不能短于首次禁言，再犯窗口须为 1～1440 分钟")
 	}
-	if len(m.Groups) > 100 || len(m.Exemptions) > 100 || ((m.Enabled || m.ReportEnabled) && (c.AppID == "" || len(m.Groups) == 0)) {
+	if len(m.Groups) > 100 || len(m.Exemptions) > 100 || (m.Enabled && (c.AppID == "" || len(m.Groups) == 0)) {
 		return errors.New("请填写机器人 AppID 和消息治理群；群与白名单各最多 100 条")
 	}
 	groups := make(map[string]bool)
