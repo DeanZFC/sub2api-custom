@@ -263,9 +263,10 @@ func newOpenAISilentRefusalFailoverError(c *gin.Context, account *Account, upstr
 		headers.Set("x-request-id", strings.TrimSpace(upstreamRequestID))
 	}
 	return &UpstreamFailoverError{
-		StatusCode:      http.StatusBadGateway,
-		ResponseBody:    openAISilentRefusalErrorBody(),
-		ResponseHeaders: headers,
+		strictFailoverReason: "upstream_silent_refusal",
+		StatusCode:           http.StatusBadGateway,
+		ResponseBody:         openAISilentRefusalErrorBody(),
+		ResponseHeaders:      headers,
 	}
 }
 
@@ -302,9 +303,10 @@ func newOpenAIResponsesEmptyCompletedFailoverError(c *gin.Context, account *Acco
 		headers.Set("x-request-id", strings.TrimSpace(upstreamRequestID))
 	}
 	return &UpstreamFailoverError{
-		StatusCode:      http.StatusBadGateway,
-		ResponseBody:    openAISilentRefusalErrorBody(),
-		ResponseHeaders: headers,
+		strictFailoverReason: "upstream_empty_completed",
+		StatusCode:           http.StatusBadGateway,
+		ResponseBody:         openAISilentRefusalErrorBody(),
+		ResponseHeaders:      headers,
 	}
 }
 

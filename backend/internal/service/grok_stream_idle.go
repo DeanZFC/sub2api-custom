@@ -29,6 +29,7 @@ func resolveGrokStreamIdleTimeout(cfgStreamIntervalSec int) time.Duration {
 func grokStreamIdleFailoverError(account *Account, idle time.Duration) *UpstreamFailoverError {
 	msg := fmt.Sprintf("Grok stream idle timeout after %s with no upstream data", idle.Round(time.Second))
 	return &UpstreamFailoverError{
+		strictFailoverReason:     "upstream_stream_idle_timeout",
 		StatusCode:               502,
 		ResponseBody:             []byte(`{"error":{"code":"empty_upstream","message":"` + strings.ReplaceAll(msg, `"`, `'`) + `"}}`),
 		SafeToFailoverAfterWrite: true,

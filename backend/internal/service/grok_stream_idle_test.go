@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -26,6 +27,9 @@ func TestGrokStreamIdleFailoverError(t *testing.T) {
 	require.Equal(t, 1, err.SameAccountRetryMax)
 	require.Contains(t, string(err.ResponseBody), "empty_upstream")
 	require.WithinDuration(t, time.Now().Add(180*time.Second), err.SameAccountRetryDeadline, 2*time.Second)
+	ctx := withStrictFailoverFailures(context.Background())
+	RecordStrictFailoverFailure(ctx, account.ID, err)
+	require.Equal(t, "upstream_stream_idle_timeout", strictFailureReason(ctx, account.ID))
 }
 
 func TestGrokStreamIdleFailoverErrorRequiresGrokAccount(t *testing.T) {

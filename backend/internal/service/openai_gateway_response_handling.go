@@ -393,13 +393,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			s.clearOpenAIProxyStreamDisconnect(account)
 		}
 		if !sawTerminalEvent && !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
-			return resultWithUsage(), s.newOpenAIStreamFailoverError(
+			return resultWithUsage(), s.newOpenAIStreamReadFailoverError(
 				c,
 				account,
 				false,
 				upstreamRequestID,
-				nil,
 				"OpenAI stream ended before a terminal event",
+				resp.Header,
 			)
 		}
 		flushPending("Client disconnected during final flush, returning collected usage")
@@ -463,7 +463,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if errText := strings.TrimSpace(scanErr.Error()); errText != "" {
 				msg += ": " + errText
 			}
-			return resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, false, upstreamRequestID, nil, msg), true
+			return resultWithUsage(), s.newOpenAIStreamReadFailoverError(c, account, false, upstreamRequestID, msg, resp.Header), true
 		}
 		// 客户端已断开时，上游出错仅影响体验，不影响计费；返回已收集 usage
 		if clientDisconnected {

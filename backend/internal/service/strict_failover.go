@@ -33,6 +33,7 @@ type strictFailoverState struct {
 type strictFailoverFailures struct {
 	sync.RWMutex
 	reasons map[int64]string
+	active  bool
 }
 
 func CloneStrictFailoverConfig(cfg StrictFailoverConfig) StrictFailoverConfig {
@@ -108,23 +109,35 @@ func withStrictFailoverFailures(ctx context.Context) context.Context {
 	return context.WithValue(ctx, strictFailoverFailuresKey{}, &strictFailoverFailures{reasons: map[int64]string{}})
 }
 
-// RecordStrictFailoverFailure records evidence only after same-account retries
-// are exhausted. Generic exclusions, client errors and local timeouts never
-// authorize a tier transition. Provider/request-scoped failures are not proof
-// that another credential is unavailable.
-func RecordStrictFailoverFailure(ctx context.Context, accountID int64, failure *UpstreamFailoverError) {
-	if ctx == nil || ctx.Err() != nil || failure == nil || !failure.ShouldRetryNextAccount() || failure.RequestScopedTransient {
-		return
+// StrictFailoverRequestActive lets forwarding loops exhaust the finite pool of
+// untried accounts before stopping. The shared request state survives selection's
+// local contexts and follows the actual scheduled group during group fallback.
+func StrictFailoverRequestActive(ctx context.Context) bool {
+	if ctx != nil {
+		if state, ok := ctx.Value(strictFailoverFailuresKey{}).(*strictFailoverFailures); ok {
+			state.RLock()
+			defer state.RUnlock()
+			return state.active
+		}
 	}
-	if failure.Scope != "" && failure.Scope != GatewayFailureScopeAccount {
+	return false
+}
+
+// RecordStrictFailoverFailure records a failed attempt only after same-account
+// retries are exhausted. A real upstream response or a typed transport/stream
+// failure proves this account could not serve this request, including transient
+// provider capacity failures. It does not change persistent account health or
+// prove that other accounts are unavailable. Generic exclusions do neither.
+func RecordStrictFailoverFailure(ctx context.Context, accountID int64, failure *UpstreamFailoverError) {
+	if ctx == nil || ctx.Err() != nil || failure == nil || !failure.ShouldRetryNextAccount() {
 		return
 	}
 	reason := failure.strictFailoverReason
-	if failure.ObservedUpstreamStatus >= 400 {
-		switch failure.ObservedUpstreamStatus {
-		case 401, 402, 403, 429, 500, 502, 503, 504, 529:
-			reason = fmt.Sprintf("upstream_http_%d", failure.ObservedUpstreamStatus)
-		}
+	// The forwarding service has already decided whether another account can
+	// safely serve this error (ShouldRetryNextAccount). Preserve that decision
+	// for provider-specific statuses and account-specific body limits too.
+	if failure.ObservedUpstreamStatus >= 400 && failure.ObservedUpstreamStatus < 600 {
+		reason = fmt.Sprintf("upstream_http_%d", failure.ObservedUpstreamStatus)
 	}
 	// Typed billing failures also originate from explicit upstream stream events.
 	if failure.Reason == UpstreamBillingExhaustedReason && failure.Scope == GatewayFailureScopeAccount {
@@ -199,10 +212,16 @@ func strictFailoverSelectionError(ctx context.Context, err error) error {
 	return err
 }
 
-// prepareStrictFailover reads every explicitly configured account from the DB,
-// including inactive/limited accounts omitted by scheduler snapshots. Only
-// explicit per-account reasons can exhaust a tier. Concurrency is not read here.
+// prepareStrictFailover reads configured accounts from the DB, including inactive
+// accounts omitted by scheduler snapshots. Unassigned group members form a final
+// tier. Availability and the request's existing profit gate apply to every tier;
+// concurrency is not a reason to advance.
 func prepareStrictFailover(ctx context.Context, group *Group, repo AccountRepository, excluded map[int64]struct{}, model string, unavailable func(*Account) (string, error)) (context.Context, error) {
+	if state, ok := ctx.Value(strictFailoverFailuresKey{}).(*strictFailoverFailures); ok {
+		state.Lock()
+		state.active = group != nil && group.StrictFailover.Enabled
+		state.Unlock()
+	}
 	if group == nil || !group.StrictFailover.Enabled {
 		return context.WithValue(ctx, strictFailoverContextKey{}, (*strictFailoverState)(nil)), nil
 	}
@@ -213,8 +232,12 @@ func prepareStrictFailover(ctx context.Context, group *Group, repo AccountReposi
 		return ctx, fmt.Errorf("%w: account repository unavailable", ErrStrictFailoverUnconfirmed)
 	}
 	ids := []int64{}
+	assigned := map[int64]struct{}{}
 	for _, tier := range group.StrictFailover.Tiers {
 		ids = append(ids, tier...)
+		for _, id := range tier {
+			assigned[id] = struct{}{}
+		}
 	}
 	rows, err := repo.GetByIDs(ctx, ids)
 	if err != nil {
@@ -230,7 +253,30 @@ func prepareStrictFailover(ctx context.Context, group *Group, repo AccountReposi
 		}
 	}
 	evidence := map[int64]string{}
-	for i, tier := range group.StrictFailover.Tiers {
+	for i := 0; i <= len(group.StrictFailover.Tiers); i++ {
+		var tier []int64
+		if i < len(group.StrictFailover.Tiers) {
+			tier = group.StrictFailover.Tiers[i]
+		} else {
+			// Only load the implicit tier when all explicit tiers are exhausted.
+			// ListByGroup omits inactive members, which are already unavailable.
+			members, loadErr := repo.ListByGroup(ctx, group.ID)
+			if loadErr != nil {
+				return ctx, fmt.Errorf("%w: load unassigned group accounts: %v", ErrStrictFailoverUnconfirmed, loadErr)
+			}
+			for j := range members {
+				a := &members[j]
+				if _, configured := assigned[a.ID]; configured || !openAIStickyAccountMatchesGroup(a, &group.ID) {
+					continue
+				}
+				assigned[a.ID] = struct{}{}
+				byID[a.ID] = a
+				tier = append(tier, a.ID)
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return ctx, err
+		}
 		state := &strictFailoverState{groupID: group.ID, tier: i + 1, allowed: map[int64]struct{}{}}
 		uncertain := false
 		for _, id := range tier {
@@ -241,6 +287,12 @@ func prepareStrictFailover(ctx context.Context, group *Group, repo AccountReposi
 			// exhaust that account for this request.
 			if _, wasExcluded := excluded[id]; wasExcluded {
 				reason = strictFailureReason(ctx, id)
+				// A terminal profit veto is also a deterministic request-local
+				// exclusion. Re-evaluate fresh DB data instead of treating it as
+				// unknown upstream health or persisting a health restriction.
+				if reason == "" && a != nil && openAIStickyAccountMatchesGroup(a, &group.ID) {
+					_, reason = openAIProfitControlVetoReason(ctx, a)
+				}
 				if reason == "" {
 					uncertain = true
 					continue
@@ -259,6 +311,9 @@ func prepareStrictFailover(ctx context.Context, group *Group, repo AccountReposi
 						return ctx, fmt.Errorf("%w: account %d: %v", ErrStrictFailoverUnconfirmed, id, err)
 					}
 				}
+			}
+			if reason == "" {
+				_, reason = openAIProfitControlVetoReason(ctx, a)
 			}
 			if reason != "" {
 				evidence[id] = reason

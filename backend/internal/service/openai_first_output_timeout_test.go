@@ -72,7 +72,8 @@ func TestOpenAIForwardFirstOutputTimeoutIncludesResponseHeaderWait(t *testing.T)
 	}
 
 	started := time.Now()
-	_, err := svc.Forward(context.Background(), c, account, body)
+	ctx := withStrictFailoverFailures(context.Background())
+	_, err := svc.Forward(ctx, c, account, body)
 
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
@@ -82,11 +83,23 @@ func TestOpenAIForwardFirstOutputTimeoutIncludesResponseHeaderWait(t *testing.T)
 	require.True(t, failoverErr.SafeToFailoverAfterWrite)
 	require.Less(t, time.Since(started), 1300*time.Millisecond)
 	require.Empty(t, rec.Body.String())
+	RecordStrictFailoverFailure(ctx, account.ID, failoverErr)
+	require.Equal(t, "upstream_first_output_timeout", strictFailureReason(ctx, account.ID))
 	select {
 	case <-upstream.canceled:
 	default:
 		t.Fatal("response-header timeout did not cancel the upstream request context")
 	}
+}
+
+func TestOpenAIFirstOutputTimeoutCannotAuthorizeCanceledRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(withStrictFailoverFailures(context.Background()))
+	cancel()
+	account := &Account{ID: 1, Platform: PlatformOpenAI}
+	failure := (&OpenAIGatewayService{}).newOpenAIFirstOutputTimeoutError(ctx, nil, account,
+		nil, "", time.Now(), "gpt-5.5", "", time.Second, "response_headers", nil)
+	RecordStrictFailoverFailure(ctx, account.ID, failure)
+	require.Empty(t, strictFailureReason(ctx, account.ID))
 }
 
 func TestOpenAINativeFirstOutputTimeoutDisabledPreservesSynchronousStream(t *testing.T) {

@@ -40,12 +40,15 @@ func TestOpenAIResponsesEmptyCompletedFailsOver(t *testing.T) {
 		"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]
 	}`)
 
-	_, err := svc.Forward(context.Background(), c, account, body)
+	ctx := withStrictFailoverFailures(context.Background())
+	_, err := svc.Forward(ctx, c, account, body)
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
 	require.True(t, errors.As(err, &failoverErr), "empty completed must produce UpstreamFailoverError, got: %v", err)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.Empty(t, recorder.Body.String(), "no empty success stream may reach the client")
+	RecordStrictFailoverFailure(ctx, account.ID, failoverErr)
+	require.Equal(t, "upstream_empty_completed", strictFailureReason(ctx, account.ID))
 }
 
 // TestOpenAIResponsesEmptyCompletedWithOutputSucceeds ensures streams with real

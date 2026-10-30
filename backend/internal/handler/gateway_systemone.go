@@ -184,7 +184,7 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 				accountRelease()
 			}
 			reqLog.Debug("systemone.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
-			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
+			if fs.RecordProfitVeto(account.ID, c.Request.Context()) == FailoverExhausted {
 				reqLog.Warn("systemone.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage)
 				return

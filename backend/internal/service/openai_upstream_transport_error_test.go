@@ -5,10 +5,16 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"syscall"
 	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 // TestClassifyUpstreamTransportError pins which transport-level upstream failures
@@ -89,4 +95,109 @@ func errString(err error) string {
 		return "<nil>"
 	}
 	return err.Error()
+}
+
+// Exercise the real transport-error constructors rather than manufacturing a
+// 502: only an attempted account's failure should permit the next strict tier.
+func TestStrictFailoverTransportErrorsRequireWholeTierFailure(t *testing.T) {
+	for _, handler := range strictTransportErrorTestHandlers() {
+		for _, transportErr := range []error{io.EOF, context.DeadlineExceeded} {
+			t.Run(handler.name+"/"+transportErr.Error(), func(t *testing.T) {
+				g, repo := strictFixture()
+				ctx := strictContext(g)
+				excluded := map[int64]struct{}{}
+				selected, err := prepareStrictFailover(ctx, g, repo, excluded, "gpt-5.1", strictNoExtraGate)
+				require.NoError(t, err)
+				require.Equal(t, 1, strictFailoverStateFrom(selected).tier)
+
+				for i, accountID := range []int64{1, 2} {
+					account := &repo.accounts[i]
+					c := newTransportErrorTestGin(t)
+					c.Request = c.Request.WithContext(ctx)
+					failure := handler.handle(ctx, c, account, transportErr)
+					var failoverErr *UpstreamFailoverError
+					require.ErrorAs(t, failure, &failoverErr)
+					require.Zero(t, failoverErr.ObservedUpstreamStatus, "transport failure has no HTTP response")
+					RecordStrictFailoverFailure(ctx, accountID, failoverErr)
+					require.NotEmpty(t, strictFailureReason(ctx, accountID))
+					excluded[accountID] = struct{}{}
+					selected, err = prepareStrictFailover(ctx, g, repo, excluded, "gpt-5.1", strictNoExtraGate)
+					require.NoError(t, err)
+					if i == 0 {
+						require.Equal(t, 1, strictFailoverStateFrom(selected).tier, "the healthy primary peer must be tried first")
+						require.True(t, strictFailoverAllows(selected, 2))
+						require.False(t, strictFailoverAllows(selected, 3))
+					} else {
+						require.Equal(t, 2, strictFailoverStateFrom(selected).tier)
+						require.True(t, strictFailoverAllows(selected, 3))
+					}
+					require.False(t, c.Writer.Written(), "transport helper must leave replay to the handler")
+				}
+			})
+		}
+	}
+}
+
+func TestStrictFailoverTransportErrorsPreserveRequestCancellation(t *testing.T) {
+	for _, handler := range strictTransportErrorTestHandlers() {
+		for _, deadline := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/deadline=%t", handler.name, deadline), func(t *testing.T) {
+				ctx := withStrictFailoverFailures(context.Background())
+				var cancel context.CancelFunc
+				if deadline {
+					ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				} else {
+					ctx, cancel = context.WithCancel(ctx)
+					cancel()
+				}
+				defer cancel()
+				c := newTransportErrorTestGin(t)
+				c.Request = c.Request.WithContext(ctx)
+				account := &Account{ID: 1, Platform: PlatformOpenAI}
+				failure := handler.handle(ctx, c, account, fmt.Errorf("round trip: %w", ctx.Err()))
+				require.ErrorIs(t, failure, ctx.Err())
+				var failoverErr *UpstreamFailoverError
+				require.False(t, errors.As(failure, &failoverErr), "an ended request must not trigger replay")
+				RecordStrictFailoverFailure(ctx, account.ID, failoverErr)
+				require.Empty(t, strictFailureReason(ctx, account.ID))
+				require.False(t, c.Writer.Written())
+			})
+		}
+	}
+}
+
+func TestStrictFailoverOpenAITransportErrorPreservesPluginRequestSent(t *testing.T) {
+	ctx := withStrictFailoverFailures(context.Background())
+	c := newTransportErrorTestGin(t)
+	c.Request = c.Request.WithContext(ctx)
+	account := &Account{ID: 1, Platform: PlatformOpenAI}
+	upstreamErr := &PluginTransportError{Code: "UPSTREAM_EOF", Message: "connection lost", RequestSent: true}
+	svc := &OpenAIGatewayService{}
+	failure := svc.handleOpenAIUpstreamTransportError(ctx, c, account, fmt.Errorf("plugin: %w", upstreamErr), false)
+	require.ErrorIs(t, failure, upstreamErr)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(failure, &failoverErr), "a plugin request already sent must not be replayed")
+	RecordStrictFailoverFailure(ctx, account.ID, failoverErr)
+	require.Empty(t, strictFailureReason(ctx, account.ID))
+	require.False(t, c.Writer.Written())
+}
+
+func strictTransportErrorTestHandlers() []struct {
+	name   string
+	handle func(context.Context, *gin.Context, *Account, error) error
+} {
+	return []struct {
+		name   string
+		handle func(context.Context, *gin.Context, *Account, error) error
+	}{
+		{"openai", func(ctx context.Context, c *gin.Context, account *Account, err error) error {
+			return (&OpenAIGatewayService{}).handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+		}},
+		{"anthropic", func(ctx context.Context, c *gin.Context, account *Account, err error) error {
+			return (&GatewayService{}).handleUpstreamTransportError(ctx, c, account, err, OpsUpstreamErrorEvent{})
+		}},
+		{"gemini", func(ctx context.Context, c *gin.Context, account *Account, err error) error {
+			return (&GeminiMessagesCompatService{}).handleUpstreamTransportError(ctx, c, account, err)
+		}},
+	}
 }

@@ -1087,6 +1087,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 						},
 					})
 					return nil, &UpstreamFailoverError{
+						strictFailoverReason:   "upstream_stream_read_failure",
 						StatusCode:             http.StatusBadGateway,
 						ResponseBody:           body,
 						RetryableOnSameAccount: true,

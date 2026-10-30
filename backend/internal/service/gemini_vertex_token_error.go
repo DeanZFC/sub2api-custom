@@ -56,5 +56,8 @@ func (s *GeminiMessagesCompatService) handleVertexServiceAccountNotFound(ctx con
 	return &UpstreamFailoverError{
 		StatusCode:   http.StatusUnauthorized,
 		ResponseBody: geminiVertexCredentialFailoverBody,
+		Stage:        GatewayFailureStageAccountAuth,
+		Scope:        GatewayFailureScopeAccount,
+		Reason:       vertexServiceAccountNotFoundReason,
 	}
 }

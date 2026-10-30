@@ -36,6 +36,11 @@
         </div>
       </div>
       <button type="button" class="btn btn-secondary" :disabled="modelValue.tiers.length >= 10" data-testid="strict-add-tier" @click="addTier">{{ t('admin.groups.strictFailover.add') }}</button>
+      <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-800" data-testid="strict-automatic-tier">
+        <h5 class="text-sm font-medium">{{ t('admin.groups.strictFailover.automaticTier') }}</h5>
+        <p v-if="!loading && !loadFailed" class="mt-1 text-xs text-gray-500" data-testid="strict-automatic-count">{{ t('admin.groups.strictFailover.automaticCount', { count: unassignedAccounts.length }) }}</p>
+        <p class="mt-1 text-xs text-gray-500">{{ t('admin.groups.strictFailover.automaticHint') }}</p>
+      </div>
       <p v-if="invalid" class="text-sm text-red-600" role="alert">{{ t('admin.groups.strictFailover.empty') }}</p>
     </div>
   </section>
@@ -53,6 +58,8 @@ const emit = defineEmits<{ 'update:modelValue': [value: StrictFailoverConfig] }>
 const { t } = useI18n()
 const accounts = ref<Array<{ id: number; name: string }>>([])
 const names = computed(() => new Map(accounts.value.map(a => [a.id, a.name])))
+const assignedAccounts = computed(() => new Set(props.modelValue.tiers.flat()))
+const unassignedAccounts = computed(() => accounts.value.filter(account => !assignedAccounts.value.has(account.id)))
 const search = ref<string[]>([])
 const activeTier = ref<number | null>(null)
 const invalid = ref(false)
@@ -81,9 +88,8 @@ const addAccount = (index: number, id: number) => {
 }
 const removeAccount = (index: number, id: number) => publish(props.modelValue.tiers.map((tier, i) => i === index ? tier.filter(value => value !== id) : tier))
 const matches = (index: number) => {
-  const assigned = new Set(props.modelValue.tiers.flat())
   const query = (search.value[index] || '').trim().toLowerCase()
-  return accounts.value.filter(a => !assigned.has(a.id) && (!query || a.name.toLowerCase().includes(query) || String(a.id).includes(query))).slice(0, 50)
+  return unassignedAccounts.value.filter(a => !query || a.name.toLowerCase().includes(query) || String(a.id).includes(query)).slice(0, 50)
 }
 const loadAccounts = async () => {
   controller?.abort()

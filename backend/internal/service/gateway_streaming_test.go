@@ -237,7 +237,8 @@ func TestHandleStreamingResponse_StreamReadErrorBeforeOutput_TriggersFailover(t 
 		Body:       &streamReadCloser{err: io.ErrUnexpectedEOF},
 	}
 
-	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
+	ctx := withStrictFailoverFailures(context.Background())
+	result, err := svc.handleStreamingResponse(ctx, resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
 
 	require.Error(t, err)
 	require.Nil(t, result, "失败移交场景下不应返回 streamingResult")
@@ -258,6 +259,8 @@ func TestHandleStreamingResponse_StreamReadErrorBeforeOutput_TriggersFailover(t 
 
 	// 客户端应收不到任何 stream_read_error 事件，由 handler 层根据 failover 结果再决定
 	require.NotContains(t, rec.Body.String(), "stream_read_error")
+	RecordStrictFailoverFailure(ctx, 1, failoverErr)
+	require.Equal(t, "upstream_stream_read_failure", strictFailureReason(ctx, 1))
 }
 
 // 上游已经发送过事件（c.Writer 已写过字节）后再发生读错误：

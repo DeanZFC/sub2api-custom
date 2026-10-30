@@ -489,7 +489,9 @@ func TestForwardAsRawChatCompletions_SilentRefusalTriggersFailover(t *testing.T)
 		httpUpstream: upstream,
 	}
 
-	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	ctx := withStrictFailoverFailures(context.Background())
+	account := rawChatCompletionsTestAccount()
+	result, err := svc.forwardAsRawChatCompletions(ctx, c, account, body, "")
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
 	require.True(t, errors.As(err, &failoverErr))
@@ -497,6 +499,8 @@ func TestForwardAsRawChatCompletions_SilentRefusalTriggersFailover(t *testing.T)
 	require.True(t, IsOpenAISilentRefusalErrorBody(failoverErr.ResponseBody))
 	require.False(t, c.Writer.Written(), "silent refusal must not commit a 200 response before failover")
 	require.Empty(t, rec.Body.String())
+	RecordStrictFailoverFailure(ctx, account.ID, failoverErr)
+	require.Equal(t, "upstream_silent_refusal", strictFailureReason(ctx, account.ID))
 }
 
 func TestForwardAsRawChatCompletions_SilentRefusalToolCallsExempt(t *testing.T) {
@@ -798,7 +802,9 @@ func TestForwardAsRawChatCompletions_EmptyStreamBeforeOutputTriggersFailover(t *
 		httpUpstream: upstream,
 	}
 
-	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	ctx := withStrictFailoverFailures(context.Background())
+	account := rawChatCompletionsTestAccount()
+	result, err := svc.forwardAsRawChatCompletions(ctx, c, account, body, "")
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
 	require.True(t, errors.As(err, &failoverErr))
@@ -808,6 +814,8 @@ func TestForwardAsRawChatCompletions_EmptyStreamBeforeOutputTriggersFailover(t *
 	require.True(t, failoverErr.ShouldRetryNextAccount())
 	require.False(t, c.Writer.Written(), "换号重试前不得提交 200 响应头")
 	require.Empty(t, rec.Body.String())
+	RecordStrictFailoverFailure(ctx, account.ID, failoverErr)
+	require.Equal(t, "upstream_stream_truncated", strictFailureReason(ctx, account.ID))
 }
 
 // 传输层错误（Cloudflare edge reset 等）在写出后同样不能记成功，且分类要区别于

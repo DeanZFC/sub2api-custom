@@ -201,7 +201,10 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	// 防御性装门按文本 D 过滤 Live 账号池且门与计费时刻不同源。
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
 	var lastErr error
-	for attempt := 0; attempt <= 3; attempt++ {
+	for attempt := 0; attempt <= 3 || StrictFailoverRequestActive(ctx); attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		selection, _, selectErr := s.SelectAccountWithSchedulerForCapability(
 			ctx,
 			identity.GroupID,
@@ -229,6 +232,10 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		account := selection.Account
+		if _, alreadyFailed := excluded[account.ID]; alreadyFailed {
+			selection.ReleaseFunc()
+			return nil, ErrStrictFailoverUnconfirmed
+		}
 		effectiveSubscriptionID, subscriptionErr := s.resolveLiveSubscriptionID(ctx, identity)
 		if subscriptionErr != nil {
 			selection.ReleaseFunc()
@@ -311,10 +318,20 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 }
 
 func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(account *Account, err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var pluginErr *PluginTransportError
+	if errors.As(err, &pluginErr) && pluginErr.RequestSent {
+		return false
+	}
 	var upstreamErr *UpstreamFailoverError
 	if !errors.As(err, &upstreamErr) {
 		// 凭证读取和网络传输错误都可能只影响当前账号或代理。
 		return true
+	}
+	if !upstreamErr.ShouldRetryNextAccount() {
+		return false
 	}
 	return s.shouldFailoverOpenAIUpstreamResponse(account,
 		upstreamErr.StatusCode,
@@ -412,7 +429,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "upstream_transport", err)
-		return nil, err
+		return nil, s.handleOpenAIUpstreamTransportError(ctx, nil, account, err, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, liveUpstreamBodyLimit+1))

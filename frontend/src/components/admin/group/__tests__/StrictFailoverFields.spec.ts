@@ -6,7 +6,7 @@ import type { StrictFailoverConfig } from '@/types'
 
 const { list } = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { list } } }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { count?: number }) => params?.count === undefined ? key : `${key}: ${params.count}` }) }))
 const Toggle = defineComponent({ props: ['modelValue'], emits: ['update:modelValue'], setup: (props, { emit }) => () => h('button', { onClick: () => emit('update:modelValue', !props.modelValue) }, 'toggle') })
 function render(config: StrictFailoverConfig = { enabled: false, tiers: [] }) {
   const wrapper = mount(StrictFailoverFields, { props: { groupId: 75, modelValue: config }, global: { stubs: { Toggle } } })
@@ -31,6 +31,23 @@ describe('StrictFailoverFields', () => {
     await wrapper.find('input').trigger('focus')
     expect(wrapper.text()).toContain('admin.groups.strictFailover.noResults')
     expect((wrapper.vm as unknown as { validate: () => boolean }).validate()).toBe(true)
+  })
+  it('keeps unassigned group accounts in an automatic final tier as assignments change', async () => {
+    const wrapper = render({ enabled: true, tiers: [[1, 2]] }); await flushPromises()
+    expect(wrapper.find('[data-testid="strict-automatic-tier"]').text()).toContain('admin.groups.strictFailover.automaticTier')
+    expect(wrapper.find('[data-testid="strict-automatic-count"]').text()).toBe('admin.groups.strictFailover.automaticCount: 1')
+    await wrapper.find('button[aria-label="admin.groups.strictFailover.removeAccount 2"]').trigger('click')
+    const removed = wrapper.emitted('update:modelValue')!.at(-1)![0] as StrictFailoverConfig
+    expect(removed).toEqual({ enabled: true, tiers: [[1]] })
+    await wrapper.setProps({ modelValue: removed })
+    expect(wrapper.find('[data-testid="strict-automatic-count"]').text()).toBe('admin.groups.strictFailover.automaticCount: 2')
+    await wrapper.find('input').trigger('focus')
+    await wrapper.findAll('button').find(button => button.text() === 'Backup · #3')!.trigger('click')
+    const assigned = wrapper.emitted('update:modelValue')!.at(-1)![0] as StrictFailoverConfig
+    expect(assigned).toEqual({ enabled: true, tiers: [[1, 3]] })
+    await wrapper.setProps({ modelValue: assigned })
+    expect(wrapper.find('[data-testid="strict-automatic-count"]').text()).toBe('admin.groups.strictFailover.automaticCount: 1')
+    expect(wrapper.findAll('[data-testid="strict-tier"]')).toHaveLength(1)
   })
   it('rejects empty and duplicated tiers without losing the entered configuration', async () => {
     const cfg = { enabled: true, tiers: [[1], []] }
@@ -58,8 +75,19 @@ describe('StrictFailoverFields', () => {
     list.mockRejectedValueOnce(new Error('offline'))
     await wrapper.setProps({ groupId: 76 }); await flushPromises()
     expect(wrapper.text()).toContain('admin.groups.strictFailover.loadError')
+    expect(wrapper.find('[data-testid="strict-automatic-count"]').exists()).toBe(false)
     await wrapper.setProps({ groupId: 75 }); await flushPromises()
     expect(list).toHaveBeenCalledTimes(4)
     expect(wrapper.text()).toContain('Primary A')
+  })
+  it('counts accounts from every page only after the complete group load succeeds', async () => {
+    let resolveLastPage!: (value: { items: Array<{ id: number; name: string }>; total: number }) => void
+    list.mockResolvedValueOnce({ items: [{ id: 1, name: 'first' }], total: 3 })
+      .mockReturnValueOnce(new Promise(resolve => { resolveLastPage = resolve }))
+    const wrapper = render({ enabled: true, tiers: [[1]] }); await flushPromises()
+    expect(wrapper.find('[data-testid="strict-automatic-count"]').exists()).toBe(false)
+    resolveLastPage({ items: [{ id: 2, name: 'last A' }, { id: 3, name: 'last B' }], total: 3 })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="strict-automatic-count"]').text()).toBe('admin.groups.strictFailover.automaticCount: 2')
   })
 })

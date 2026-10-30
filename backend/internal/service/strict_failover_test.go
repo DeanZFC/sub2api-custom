@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -15,7 +16,21 @@ import (
 
 type strictAccountRepo struct {
 	schedulerTestOpenAIAccountRepo
-	err error
+	err      error
+	groupErr error
+}
+
+func (r *strictAccountRepo) ListByGroup(_ context.Context, groupID int64) ([]Account, error) {
+	if r.groupErr != nil {
+		return nil, r.groupErr
+	}
+	var out []Account
+	for _, a := range r.accounts {
+		if a.IsActive() && openAIStickyAccountMatchesGroup(&a, &groupID) {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 func (r *strictAccountRepo) GetByIDs(_ context.Context, ids []int64) ([]*Account, error) {
@@ -124,8 +139,15 @@ func TestStrictFailoverFailureEvidence(t *testing.T) {
 		{"explicit_billing_event", newUpstreamBillingFailoverError(402, nil, []byte("insufficient quota"), false), true},
 		{"synthetic_timeout", &UpstreamFailoverError{StatusCode: 504}, false},
 		{"client_400", &UpstreamFailoverError{StatusCode: 400}, false},
+		{"retryable_upstream_400", &UpstreamFailoverError{StatusCode: 400, ObservedUpstreamStatus: 400}, true},
+		{"account_body_limit", &UpstreamFailoverError{StatusCode: 413, ObservedUpstreamStatus: 413}, true},
+		{"provider_520", &UpstreamFailoverError{StatusCode: 520, ObservedUpstreamStatus: 520}, true},
+		{"upstream_400_stop", &UpstreamFailoverError{StatusCode: 400, ObservedUpstreamStatus: 400, NextAccountAction: NextAccountStop}, false},
 		{"request_scoped", &UpstreamFailoverError{StatusCode: 429, RequestScopedTransient: true}, false},
 		{"provider_scoped", &UpstreamFailoverError{StatusCode: 503, Scope: GatewayFailureScopeProvider}, false},
+		{"request_capacity_response", &UpstreamFailoverError{StatusCode: 429, ObservedUpstreamStatus: 429, RequestScopedTransient: true}, true},
+		{"provider_capacity_response", &UpstreamFailoverError{StatusCode: 503, ObservedUpstreamStatus: 503, Scope: GatewayFailureScopeProvider}, true},
+		{"provider_credential_stop", &UpstreamFailoverError{StatusCode: 401, Stage: GatewayFailureStageAccountAuth, Scope: GatewayFailureScopeProvider, NextAccountAction: NextAccountStop}, false},
 		{"canceled_request", &UpstreamFailoverError{StatusCode: 499}, false},
 		{"stop", &UpstreamFailoverError{StatusCode: 401, NextAccountAction: NextAccountStop}, false},
 	} {
@@ -139,6 +161,135 @@ func TestStrictFailoverFailureEvidence(t *testing.T) {
 	cancel()
 	RecordStrictFailoverFailure(ctx, 1, &UpstreamFailoverError{StatusCode: 429, ObservedUpstreamStatus: 429})
 	require.Empty(t, strictFailureReason(ctx, 1))
+}
+
+func TestStrictFailoverImplicitFinalTier(t *testing.T) {
+	g, r := strictFixture()
+	g.StrictFailover.Tiers = [][]int64{{1}}
+	r.accounts[0].Schedulable = false
+	// A repository returning another group's account must not expand the pool.
+	r.accounts[3].GroupIDs = []int64{76}
+	r.accounts[3].AccountGroups = []AccountGroup{{AccountID: 4, GroupID: 76}}
+	ctx, err := prepareStrictFailover(strictContext(g), g, r, nil, "gpt-5.1", strictNoExtraGate)
+	require.NoError(t, err)
+	require.Equal(t, 2, strictFailoverStateFrom(ctx).tier)
+	require.True(t, strictFailoverAllows(ctx, 2))
+	require.True(t, strictFailoverAllows(ctx, 3))
+	require.False(t, strictFailoverAllows(ctx, 1))
+	require.False(t, strictFailoverAllows(ctx, 4))
+
+	r.groupErr = errors.New("group membership unavailable")
+	_, err = prepareStrictFailover(strictContext(g), g, r, nil, "gpt-5.1", strictNoExtraGate)
+	require.ErrorIs(t, err, ErrStrictFailoverUnconfirmed)
+	require.NotErrorIs(t, err, ErrNoAvailableAccounts)
+	// The implicit tier need not be loaded when an explicit tier can serve.
+	r.accounts[0].Schedulable = true
+	ctx, err = prepareStrictFailover(strictContext(g), g, r, nil, "gpt-5.1", strictNoExtraGate)
+	require.NoError(t, err)
+	require.Equal(t, 1, strictFailoverStateFrom(ctx).tier)
+}
+
+func TestStrictFailoverRequestActiveFollowsScheduledGroup(t *testing.T) {
+	g, r := strictFixture()
+	ctx := strictContext(g)
+	require.False(t, StrictFailoverRequestActive(ctx))
+	_, err := prepareStrictFailover(ctx, g, r, nil, "gpt-5.1", strictNoExtraGate)
+	require.NoError(t, err)
+	require.True(t, StrictFailoverRequestActive(ctx))
+	_, err = prepareStrictFailover(ctx, &Group{ID: 76}, r, nil, "gpt-5.1", strictNoExtraGate)
+	require.NoError(t, err)
+	require.False(t, StrictFailoverRequestActive(ctx))
+	require.False(t, StrictFailoverRequestActive(nil))
+}
+
+func TestStrictFailoverProfitAcrossTiers(t *testing.T) {
+	for _, advanced := range []string{"false", "true"} {
+		for _, eligible := range []int64{1, 2, 3, 4, 0} {
+			t.Run(advanced+"/"+fmt.Sprint(eligible), func(t *testing.T) {
+				g, r := strictFixture()
+				g.ProfitControlEnabled = true
+				g.RateMultiplier = 1
+				g.ProfitMinMargin = 0.3
+				g.ProfitSafetyBuffer = 0.1 // All tiers use the same 0.6 threshold.
+				for i := range r.accounts {
+					rate := 0.8
+					if r.accounts[i].ID == eligible {
+						rate = 0.5
+					}
+					r.accounts[i].RateMultiplier = &rate
+				}
+				svc := &OpenAIGatewayService{accountRepo: r, cache: &schedulerTestGatewayCache{}, cfg: &config.Config{}, rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(advanced)}
+				selected, _, err := svc.SelectAccountWithScheduler(strictContext(g), &g.ID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+				if eligible == 0 {
+					require.ErrorIs(t, err, errStrictFailoverAllUnavailable)
+					require.Nil(t, selected)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, eligible, selected.Account.ID)
+					require.NotNil(t, selected.profitGate)
+					require.InDelta(t, 0.6, selected.profitGate.threshold, 1e-12)
+				}
+			})
+		}
+	}
+}
+
+func TestStrictFailoverProfitExclusionsAndRequestScope(t *testing.T) {
+	g, r := strictFixture()
+	g.ProfitControlEnabled = true
+	g.RateMultiplier = 0.5
+	for i := range r.accounts {
+		rate := 0.8
+		r.accounts[i].RateMultiplier = &rate
+	}
+	rate := 0.4
+	r.accounts[2].RateMultiplier = &rate
+	svc := &OpenAIGatewayService{accountRepo: r, cache: &schedulerTestGatewayCache{}, cfg: &config.Config{}}
+	// Post-slot profit vetoes have no upstream failure; fresh profit data still
+	// proves that the excluded tier cannot serve this request.
+	selected, _, err := svc.SelectAccountWithScheduler(strictContext(g), &g.ID, "", "", "gpt-5.1", map[int64]struct{}{1: {}, 2: {}}, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), selected.Account.ID)
+	// Existing media/metadata suppression continues to bypass the profit gate.
+	selected, _, err = svc.SelectAccountWithScheduler(WithOpenAIProfitControlSuppressed(strictContext(g)), &g.ID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Contains(t, []int64{1, 2}, selected.Account.ID)
+	g.ProfitControlEnabled = false
+	selected, _, err = svc.SelectAccountWithScheduler(strictContext(g), &g.ID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Contains(t, []int64{1, 2}, selected.Account.ID)
+}
+
+func TestStrictFailoverGatewayProfitAcrossTiers(t *testing.T) {
+	for _, platform := range []string{PlatformAnthropic, PlatformGemini} {
+		for _, load := range []bool{false, true} {
+			t.Run(platform+"/load="+fmt.Sprint(load), func(t *testing.T) {
+				g, r := strictFixture()
+				g.Platform = platform
+				g.ProfitControlEnabled = true
+				g.RateMultiplier = 0.5
+				for i := range r.accounts {
+					r.accounts[i].Platform = platform
+					r.accounts[i].Credentials = map[string]any{}
+					rate := 0.8
+					r.accounts[i].RateMultiplier = &rate
+				}
+				rate := 0.4
+				r.accounts[3].RateMultiplier = &rate
+				ctx, _ := WithGatewayTokenRequestPricing(strictContext(g))
+				svc := &GatewayService{accountRepo: r, cache: &schedulerTestGatewayCache{}}
+				if load {
+					selected, err := svc.SelectAccountWithLoadAwareness(ctx, &g.ID, "", "", nil, "", 0)
+					require.NoError(t, err)
+					require.Equal(t, int64(4), selected.Account.ID)
+				} else {
+					selected, err := svc.SelectAccountForModelWithExclusions(ctx, &g.ID, "", "", nil)
+					require.NoError(t, err)
+					require.Equal(t, int64(4), selected.ID)
+				}
+			})
+		}
+	}
 }
 
 func TestStrictFailoverOpenAIScheduler(t *testing.T) {
@@ -191,6 +342,15 @@ func TestStrictFailoverOpenAIRecoveryAndRetry(t *testing.T) {
 	selected, _, err = svc.SelectAccountWithScheduler(ctx, &g.ID, "", "", "gpt-5.1", excluded, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), selected.Account.ID)
+	excluded[3] = struct{}{}
+	RecordStrictFailoverFailure(ctx, 3, &UpstreamFailoverError{StatusCode: 503, ObservedUpstreamStatus: 503})
+	selected, _, err = svc.SelectAccountWithScheduler(ctx, &g.ID, "", "", "gpt-5.1", excluded, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), selected.Account.ID)
+	excluded[4] = struct{}{}
+	RecordStrictFailoverFailure(ctx, 4, &UpstreamFailoverError{StatusCode: 429, ObservedUpstreamStatus: 429})
+	_, _, err = svc.SelectAccountWithScheduler(ctx, &g.ID, "", "", "gpt-5.1", excluded, OpenAIUpstreamTransportAny, false)
+	require.ErrorIs(t, err, errStrictFailoverAllUnavailable)
 	selected, _, err = svc.SelectAccountWithScheduler(strictContext(g), &g.ID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)
 	require.Contains(t, []int64{1, 2}, selected.Account.ID)
@@ -299,6 +459,10 @@ func TestStrictFailoverGatewayAndGemini(t *testing.T) {
 				selected, err = selectAccount(nil)
 				require.NoError(t, err)
 				require.Equal(t, int64(3), selected.ID)
+				r.accounts[2].Schedulable = false
+				selected, err = selectAccount(nil)
+				require.NoError(t, err)
+				require.Equal(t, int64(4), selected.ID)
 			})
 		}
 	}
@@ -370,7 +534,46 @@ func TestStrictFailoverUpstreamEventEvidence(t *testing.T) {
 	require.Equal(t, "upstream_rate_limit_event", strictFailureReason(ctx, 1))
 	failure.RequestScopedTransient = true
 	RecordStrictFailoverFailure(ctx, 2, failure)
-	require.Empty(t, strictFailureReason(ctx, 2))
+	require.Equal(t, "upstream_rate_limit_event", strictFailureReason(ctx, 2))
+}
+
+func TestStrictFailoverRequestScopedStreamCapacityAdvancesTier(t *testing.T) {
+	for _, code := range []string{"rate_limit_exceeded", "overloaded_error"} {
+		t.Run(code, func(t *testing.T) {
+			g, repo := strictFixture()
+			ctx := strictContext(g)
+			svc := &OpenAIGatewayService{accountRepo: repo}
+			payload := []byte(fmt.Sprintf(`{"type":"response.failed","response":{"error":{"code":%q,"message":"Servers are currently overloaded"}}}`, code))
+			excluded := map[int64]struct{}{}
+			for _, id := range []int64{1, 2} {
+				failure := svc.newOpenAIStreamFailoverErrorWithModel(nil, &repo.accounts[id-1], false, "", payload, "Servers are currently overloaded", "gpt-5.1")
+				require.True(t, failure.RequestScopedTransient, "capacity is request-local, not a persistent account fault")
+				require.Zero(t, failure.ObservedUpstreamStatus, "the failure came from an HTTP 200 stream event")
+				RecordStrictFailoverFailure(ctx, id, failure)
+				excluded[id] = struct{}{}
+				selected, err := prepareStrictFailover(ctx, g, repo, excluded, "gpt-5.1", strictNoExtraGate)
+				require.NoError(t, err)
+				require.Equal(t, int(id), strictFailoverStateFrom(selected).tier, "try the remaining primary before moving to the backup")
+			}
+		})
+	}
+}
+
+func TestStrictFailoverStructuredStreamErrorAdvancesTier(t *testing.T) {
+	g, repo := strictFixture()
+	ctx := strictContext(g)
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	excluded := map[int64]struct{}{}
+	for _, id := range []int64{1, 2} {
+		failure := svc.newOpenAIStreamFailoverErrorWithModel(nil, &repo.accounts[id-1], false, "",
+			[]byte(`{"type":"response.failed","response":{"error":{"code":"internal_error","message":"Upstream failed"}}}`), "Upstream failed", "gpt-5.1")
+		require.Zero(t, failure.ObservedUpstreamStatus)
+		RecordStrictFailoverFailure(ctx, id, failure)
+		excluded[id] = struct{}{}
+		selected, err := prepareStrictFailover(ctx, g, repo, excluded, "gpt-5.1", strictNoExtraGate)
+		require.NoError(t, err)
+		require.Equal(t, int(id), strictFailoverStateFrom(selected).tier)
+	}
 }
 
 func TestStrictFailoverExternalFallbackRequiresCompleteEvidence(t *testing.T) {

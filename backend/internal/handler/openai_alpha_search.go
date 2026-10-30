@@ -177,7 +177,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		accountRelease, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
-			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount, c.Request.Context()) {
 				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
 				return
 			}
@@ -262,12 +262,12 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
-		if switchCount >= h.maxAccountSwitches {
+		if accountSwitchBudgetExhausted(c.Request.Context(), switchCount, h.maxAccountSwitches) {
 			h.handleFailoverExhausted(c, failoverErr, false)
 			return
 		}
 		switchCount++
-		if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+		if !service.StrictFailoverRequestActive(c.Request.Context()) && h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 			h.handleFailoverExhausted(c, failoverErr, false)
 			return
 		}

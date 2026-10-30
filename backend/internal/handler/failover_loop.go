@@ -43,7 +43,7 @@ const (
 	// Service 层在 SingleAccountRetry 模式下已做充分原地重试（最多 3 次、总等待 30s），
 	// Handler 层只需短暂间隔后重新进入 Service 层即可。
 	singleAccountBackoffDelay = 2 * time.Second
-	// maxProfitVetoAttempts 单次请求内允许的分组利润门终检否决次数上限。
+	// maxProfitVetoAttempts 普通模式单次请求内允许的分组利润门终检否决次数上限。
 	// 利润否决不产生上游请求，因此不会推进 SwitchCount；没有独立上限的话，
 	// 「选号 → 终检否决 → 重选」在候选池与账号快照短暂不一致时可以空转很久。
 	// 取值与 maxAccountSwitches 默认值一致：混合定价的大分组仍有充分重选机会，
@@ -130,6 +130,7 @@ type FailoverState struct {
 	LastFailoverErr       *service.UpstreamFailoverError
 	ForceCacheBilling     bool
 	hasBoundSession       bool
+	accountSwitchPinned   bool // Cached content belongs to one credential even in strict mode.
 
 	// profitVetoedAccountIDs 记录被分组利润门终检否决的账号，是 FailedAccountIDs
 	// 的子集。之所以单独维护：HandleSelectionExhausted 的 503 退避分支会清空
@@ -137,7 +138,8 @@ type FailoverState struct {
 	// 请求开始冻结），被清空的账号会被立即重选并再次否决，形成没有任何上游请求、
 	// SwitchCount 也不前进的活锁。清空后必须把它们放回排除集。
 	profitVetoedAccountIDs map[int64]struct{}
-	// profitVetoCount 本次请求累计的利润否决次数，用于 maxProfitVetoAttempts 上限。
+	// profitVetoCount 本次请求累计的利润否决次数；普通模式使用固定上限，
+	// 严格模式遍历有限候选集，避免在进入下一层前被截断。
 	profitVetoCount int
 }
 
@@ -156,19 +158,41 @@ func NewFailoverState(maxSwitches int, hasBoundSession bool) *FailoverState {
 // 利润否决集，使其不被 503 退避分支清掉）并递增否决计数。
 //
 // 返回 FailoverContinue 表示调用方可以继续重选下一个账号；返回 FailoverExhausted
-// 表示本次请求的利润否决次数已达上限，调用方应按「无可用账号」终止，
+// 表示普通模式本次请求的利润否决次数已达上限，调用方应按「无可用账号」终止，
 // 不得继续 continue。
-func (s *FailoverState) RecordProfitVeto(accountID int64) FailoverAction {
+func (s *FailoverState) RecordProfitVeto(accountID int64, requestCtx ...context.Context) FailoverAction {
+	if _, excluded := s.FailedAccountIDs[accountID]; excluded && strictFailoverTraversal(requestCtx...) {
+		return FailoverExhausted
+	}
 	s.FailedAccountIDs[accountID] = struct{}{}
 	if s.profitVetoedAccountIDs == nil {
 		s.profitVetoedAccountIDs = make(map[int64]struct{})
 	}
 	s.profitVetoedAccountIDs[accountID] = struct{}{}
 	s.profitVetoCount++
-	if s.profitVetoCount >= maxProfitVetoAttempts {
+	if s.profitVetoCount >= maxProfitVetoAttempts && !strictFailoverTraversal(requestCtx...) {
 		return FailoverExhausted
 	}
 	return FailoverContinue
+}
+
+// Strict routing traverses the finite group candidate set: every rejected or
+// failed account remains excluded for the request. Ordinary numeric budgets
+// must not stop traversal before it reaches a lower tier.
+func strictFailoverTraversal(requestCtx ...context.Context) bool {
+	return len(requestCtx) > 0 && service.StrictFailoverRequestActive(requestCtx[0])
+}
+
+func accountSwitchBudgetExhausted(ctx context.Context, switches, maximum int) bool {
+	return switches >= maximum && !service.StrictFailoverRequestActive(ctx)
+}
+
+func antigravityAccountSwitchDelay(ctx context.Context, switches int) time.Duration {
+	delay := time.Duration(switches-1) * time.Second
+	if service.StrictFailoverRequestActive(ctx) && delay > maxRequestScopedRetryDelay {
+		return maxRequestScopedRetryDelay
+	}
+	return delay
 }
 
 // ProfitVetoCount 返回本次请求累计的利润否决次数（供日志使用）。
@@ -250,7 +274,7 @@ func (s *FailoverState) HandleFailoverError(
 	s.FailedAccountIDs[accountID] = struct{}{}
 
 	// 检查是否耗尽
-	if s.SwitchCount >= s.MaxSwitches {
+	if s.accountSwitchPinned || accountSwitchBudgetExhausted(ctx, s.SwitchCount, s.MaxSwitches) {
 		return FailoverExhausted
 	}
 
@@ -265,8 +289,7 @@ func (s *FailoverState) HandleFailoverError(
 
 	// Antigravity 平台换号线性递增延时
 	if platform == service.PlatformAntigravity {
-		delay := time.Duration(s.SwitchCount-1) * time.Second
-		if !sleepWithContext(ctx, delay) {
+		if !sleepWithContext(ctx, antigravityAccountSwitchDelay(ctx, s.SwitchCount)) {
 			return FailoverCanceled
 		}
 	}
@@ -286,6 +309,11 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 	// 不代表账号耗尽，直接按取消终止。
 	if ctx.Err() != nil {
 		return FailoverCanceled
+	}
+	// Strict mode never revives failed accounts: clearing exclusions would retry
+	// an already exhausted tier instead of completing one finite traversal.
+	if service.StrictFailoverRequestActive(ctx) {
+		return FailoverExhausted
 	}
 
 	if s.LastFailoverErr != nil &&

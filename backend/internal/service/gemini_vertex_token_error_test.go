@@ -92,6 +92,12 @@ func requireVertexAccountNotFoundHandled(t *testing.T, c *gin.Context, err error
 	require.Equal(t, string(geminiVertexCredentialFailoverBody), string(failoverErr.ResponseBody))
 	require.True(t, failoverErr.ShouldRetryNextAccount())
 	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.Equal(t, GatewayFailureStageAccountAuth, failoverErr.Stage)
+	require.Equal(t, GatewayFailureScopeAccount, failoverErr.Scope)
+	require.Equal(t, vertexServiceAccountNotFoundReason, failoverErr.Reason)
+	ctx := withStrictFailoverFailures(context.Background())
+	RecordStrictFailoverFailure(ctx, 820, failoverErr)
+	require.Equal(t, "credential_failure", strictFailureReason(ctx, 820))
 
 	require.Equal(t, 1, repo.setErrCalls, "SA 不存在应把账号置为 error")
 	require.Equal(t, "Service account token rejected (400): Invalid grant: account not found", repo.lastErrorMsg)
@@ -109,6 +115,28 @@ func requireVertexAccountNotFoundHandled(t *testing.T, c *gin.Context, err error
 	require.Equal(t, string(vertexServiceAccountNotFoundReason), events[0].Reason)
 	require.Zero(t, events[0].UpstreamStatusCode, "换 token 失败不占用上游状态码")
 	require.Contains(t, events[0].Message, "service account token request returned 400: Invalid grant: account not found")
+}
+
+func TestVertexServiceAccountNotFoundAllowsStrictTierFallback(t *testing.T) {
+	g, accountRepo := strictFixture()
+	ctx := strictContext(g)
+	svc := &GeminiMessagesCompatService{accountRepo: &errorPolicyRepoStub{}}
+	excluded := map[int64]struct{}{}
+	for i, accountID := range []int64{1, 2} {
+		failure := svc.handleVertexServiceAccountNotFound(ctx, nil, &accountRepo.accounts[i], &vertexTokenRequestError{
+			StatusCode: http.StatusBadRequest, Code: "invalid_grant", Description: "Invalid grant: account not found",
+		})
+		require.NotNil(t, failure)
+		RecordStrictFailoverFailure(ctx, accountID, failure)
+		excluded[accountID] = struct{}{}
+		selected, err := prepareStrictFailover(ctx, g, accountRepo, excluded, "gpt-5.1", strictNoExtraGate)
+		require.NoError(t, err)
+		if i == 0 {
+			require.Equal(t, 1, strictFailoverStateFrom(selected).tier)
+		} else {
+			require.Equal(t, 2, strictFailoverStateFrom(selected).tier)
+		}
+	}
 }
 
 func TestExchangeVertexServiceAccountToken_AccountNotFoundIsRecognized(t *testing.T) {

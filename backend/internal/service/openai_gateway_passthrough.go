@@ -1770,6 +1770,22 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 	return message
 }
 
+// newOpenAIStreamReadFailoverError is reserved for an actual upstream EOF/read
+// failure before client output. Local staging and scanner limits keep using the
+// generic constructor and cannot authorize a strict-tier transition.
+func (s *OpenAIGatewayService) newOpenAIStreamReadFailoverError(
+	c *gin.Context,
+	account *Account,
+	passthrough bool,
+	upstreamRequestID string,
+	message string,
+	responseHeaders ...http.Header,
+) *UpstreamFailoverError {
+	failure := s.newOpenAIStreamFailoverError(c, account, passthrough, upstreamRequestID, nil, message, responseHeaders...)
+	failure.strictFailoverReason = "upstream_stream_read_failure"
+	return failure
+}
+
 func (s *OpenAIGatewayService) newOpenAIStreamFailoverError(
 	c *gin.Context,
 	account *Account,
@@ -1823,10 +1839,16 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
-	if statusCode == http.StatusTooManyRequests && !failoverErr.RequestScopedTransient {
+	if statusCode == http.StatusTooManyRequests {
 		failoverErr.strictFailoverReason = "upstream_rate_limit_event"
-	} else if statusCode == 529 && !failoverErr.RequestScopedTransient {
+	} else if statusCode == 529 {
 		failoverErr.strictFailoverReason = "upstream_overload_event"
+	} else if failoverErr.RequestScopedTransient {
+		failoverErr.strictFailoverReason = "upstream_capacity_event"
+	} else if gjson.GetBytes(payload, "error").IsObject() || gjson.GetBytes(payload, "response.error").IsObject() {
+		// A structured terminal error is an observed upstream failure even
+		// when its provider-specific code has no HTTP-status mapping.
+		failoverErr.strictFailoverReason = "upstream_error_event"
 	}
 	failoverErr.ConfiguredRetryUnsafe = upstreamErrorRetryHasUsage(payload)
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient {
@@ -2350,7 +2372,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				msg += ": " + errText
 			}
 			return resultWithUsage(),
-				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, msg)
+				s.newOpenAIStreamReadFailoverError(c, account, true, upstreamRequestID, msg, resp.Header)
 		}
 		if clientDisconnected {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete after disconnect: %w", err)
@@ -2375,7 +2397,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		).Info("OpenAI passthrough 上游流在未收到 [DONE] 时结束，疑似断流")
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			return resultWithUsage(),
-				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
+				s.newOpenAIStreamReadFailoverError(c, account, true, upstreamRequestID, "OpenAI stream ended before a terminal event", resp.Header)
 		}
 		s.recordOpenAIProxyStreamDisconnect(account, errors.New("stream ended before terminal event"), upstreamRequestID)
 		return resultWithUsage(), errors.New("stream usage incomplete: missing terminal event")

@@ -2524,6 +2524,12 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	// Install the same request profit gate before tier selection so a tier
+	// containing only unprofitable accounts can advance immediately. Images
+	// retain their existing suppression and request scope.
+	if requiredImageCapability == "" {
+		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+	}
 	ctx, err = s.prepareOpenAIStrictFailover(ctx, groupID, excludedIDs, requestedModel, platform, requiredCapability, requiredImageCapability, requireCompact, requiredTransport)
 	if err != nil {
 		if strings.TrimSpace(previousResponseID) != "" && !previousResponseCanMove && errors.Is(err, errStrictFailoverAllUnavailable) {
@@ -2556,15 +2562,6 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 			selection.userAffinity = openAIUserAffinityFromContext(ctx)
 		}
 	}()
-	// 分组利润控制：唯一文本调度入口的防御性装门。handler 文本
-	// 入口已在请求开始经 WithOpenAIRequestPricingContext 装门并固定 pricingAt，
-	// 此处对同分组门直接复用（failover 重入阈值稳定），仅为不经 handler 装配的
-	// 内部调用兜底。图片/视频调度不在利润门范围：requiredImageCapability 非空的
-	// Images 调度不装门；其他使用 Responses 能力的文本请求（包括原生远程压缩）
-	// 仍须装门。其余媒体路径通过 WithOpenAIProfitControlSuppressed 显式跳过。
-	if requiredImageCapability == "" {
-		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
-	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	decision = OpenAIAccountScheduleDecision{}
 	guardianParentAccountID := int64(0)

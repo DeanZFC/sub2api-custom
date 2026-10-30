@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -1230,14 +1231,21 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		return resultWithUsage(), nil
 	}
 
-	// handleScanErr logs scanner errors if meaningful.
-	handleScanErr := func(err error) {
+	// Only actual upstream read failures before output can move to another
+	// strict tier; request cancellation and local scanner limits cannot.
+	handleScanErr := func(err error) error {
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("openai messages stream: read error",
 				zap.Error(err),
 				zap.String("request_id", requestID),
 			)
 		}
+		if StrictFailoverRequestActive(c.Request.Context()) && !clientDisconnected && !clientOutputStarted && !errors.Is(err, context.Canceled) &&
+			!errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, bufio.ErrTooLong) {
+			return s.newOpenAIStreamReadFailoverError(c, account, false, requestID,
+				"OpenAI messages stream disconnected before completion: "+err.Error(), resp.Header)
+		}
+		return fmt.Errorf("stream usage incomplete: %w", err)
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
 		result := resultWithUsage()
@@ -1246,7 +1254,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 		message := "OpenAI messages stream ended before a terminal event"
 		if !clientOutputStarted {
-			return result, s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message)
+			return result, s.newOpenAIStreamReadFailoverError(c, account, false, requestID, message, resp.Header)
 		}
 		s.recordOpenAIMessagesStreamUpstreamError(c, account, requestID, "stream_missing_terminal", message)
 		return result, fmt.Errorf("stream usage incomplete: missing terminal event")
@@ -1279,8 +1287,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			handleScanErr(err)
-			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err)
+			return resultWithUsage(), handleScanErr(err)
 		}
 		if frame, ok := parser.Finish(); ok {
 			if strings.TrimSpace(frame.Data) == "[DONE]" {
@@ -1352,8 +1359,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
-				handleScanErr(ev.err)
-				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
+				return resultWithUsage(), handleScanErr(ev.err)
 			}
 			lastDataAt = time.Now()
 			line := ev.line

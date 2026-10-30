@@ -11,10 +11,113 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+type strictLiveTestStore struct{ liveTestStore }
+
+func (*strictLiveTestStore) ClaimLiveController(context.Context, string, string, string) (bool, error) {
+	return false, nil // The test covers call creation; no observer connection is needed.
+}
+
+type strictLiveTestConcurrencyCache struct {
+	schedulerTestConcurrencyCache
+	liveReleases []int64
+}
+
+func (*strictLiveTestConcurrencyCache) AcquireLiveLease(context.Context, int64, int, int64, int, int64, string, bool) (bool, error) {
+	return true, nil
+}
+
+func (*strictLiveTestConcurrencyCache) RefreshLiveLease(context.Context, int64, int64, int64, string) (bool, error) {
+	return true, nil
+}
+
+func (c *strictLiveTestConcurrencyCache) ReleaseLiveLease(_ context.Context, accountID, _ int64, _ int64, _ string) error {
+	c.liveReleases = append(c.liveReleases, accountID)
+	return nil
+}
+
+type strictLiveSequenceUpstream struct {
+	accountIDs []int64
+	succeedID  int64
+	err        error
+}
+
+func (s *strictLiveSequenceUpstream) Do(request *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	s.accountIDs = append(s.accountIDs, accountID)
+	if s.err != nil {
+		return nil, s.err
+	}
+	if accountID == s.succeedID {
+		return &http.Response{StatusCode: http.StatusCreated, Header: http.Header{"Location": {"/backend-api/codex/call_strict"}}, Body: io.NopCloser(strings.NewReader("v=0\r\n"))}, nil
+	}
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"upstream unavailable"}}`)), Request: request}, nil
+}
+
+func (s *strictLiveSequenceUpstream) DoWithTLS(request *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return s.Do(request, proxyURL, accountID, concurrency)
+}
+
+func TestCreateLiveCallStrictFailoverTraversesAllPrimaryAccounts(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary_budget", true: "strict_tiers"}[strict], func(t *testing.T) {
+			g, repo := strictFixture()
+			g.StrictFailover.Enabled = strict
+			g.StrictFailover.Tiers = [][]int64{{1, 2, 3, 4, 5}}
+			repo.accounts = nil
+			for id := int64(1); id <= 6; id++ {
+				repo.accounts = append(repo.accounts, Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+					Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: int(id), GroupIDs: []int64{g.ID},
+					Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}})
+			}
+			upstream := &strictLiveSequenceUpstream{succeedID: 6}
+			if !strict {
+				upstream.succeedID = 0 // Exhaust the ordinary retry budget regardless of pool order.
+			}
+			cache := &strictLiveTestConcurrencyCache{}
+			store := &strictLiveTestStore{liveTestStore: liveTestStore{GatewayCache: &schedulerTestGatewayCache{}}}
+			cfg := &config.Config{JWT: config.JWTConfig{Secret: "live-strict-test-secret"}}
+			svc := &OpenAIGatewayService{accountRepo: repo, cache: store, cfg: cfg, concurrencyService: NewConcurrencyService(cache), httpUpstream: upstream,
+				liveAttestation: liveAttestationStub{header: `{"v":1}`}, liveAttestationCipher: newLiveAttestationCipher(cfg)}
+			ctx := strictContext(g)
+			created, err := svc.CreateLiveCall(ctx, &LiveCallRequest{SDP: "v=offer\r\n", Session: json.RawMessage(`{"model":"gpt-live"}`)},
+				LiveCallIdentity{GroupID: &g.ID, UserID: 1, APIKeyID: 1}, 1)
+			if strict {
+				require.NoError(t, err)
+				require.Equal(t, int64(6), created.Account.ID)
+				require.Len(t, upstream.accountIDs, 6)
+				require.ElementsMatch(t, []int64{1, 2, 3, 4, 5}, upstream.accountIDs[:5])
+				require.Equal(t, int64(6), upstream.accountIDs[5])
+				require.Len(t, cache.liveReleases, 5, "every failed call must release its live lease")
+			} else {
+				require.Error(t, err)
+				require.Nil(t, created)
+				require.Len(t, upstream.accountIDs, 4, "ordinary Live retries retain the existing limit")
+			}
+		})
+	}
+}
+
+func TestCreateLiveCallStrictFailoverStopsOnClientCancellation(t *testing.T) {
+	g, repo := strictFixture()
+	repo.accounts[0].Type = AccountTypeOAuth
+	repo.accounts[0].Credentials = map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}
+	upstream := &strictLiveSequenceUpstream{err: context.Canceled}
+	store := &strictLiveTestStore{liveTestStore: liveTestStore{GatewayCache: &schedulerTestGatewayCache{}}}
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "live-strict-test-secret"}}
+	svc := &OpenAIGatewayService{accountRepo: repo, cache: store, cfg: cfg, concurrencyService: NewConcurrencyService(&strictLiveTestConcurrencyCache{}), httpUpstream: upstream,
+		liveAttestation: liveAttestationStub{header: `{"v":1}`}, liveAttestationCipher: newLiveAttestationCipher(cfg)}
+	ctx := withStrictFailoverFailures(context.WithValue(context.Background(), ctxkey.Group, g))
+	_, err := svc.CreateLiveCall(ctx, &LiveCallRequest{SDP: "v=offer\r\n", Session: json.RawMessage(`{"model":"gpt-live"}`)},
+		LiveCallIdentity{GroupID: &g.ID, UserID: 1, APIKeyID: 1}, 1)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, upstream.accountIDs, 1)
+	require.Empty(t, strictFailureReason(ctx, 1))
+}
 
 type liveHTTPUpstreamStub struct {
 	request *http.Request

@@ -68,8 +68,9 @@ func (s *GatewayService) handleUpstreamTransportError(ctx context.Context, c *gi
 	}
 
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
-		ResponseBody: gatewayTransportFailoverBody,
+		strictFailoverReason: "upstream_transport_failure",
+		StatusCode:           http.StatusBadGateway,
+		ResponseBody:         gatewayTransportFailoverBody,
 	}
 }
 

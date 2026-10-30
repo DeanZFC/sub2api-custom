@@ -583,6 +583,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 	}
 	fs := NewFailoverState(maxAccountSwitches, hasBoundSession)
+	fs.accountSwitchPinned = cachedContentBinding != nil
 
 	// 单账号分组首次 503 就不设模型限流标记，避免设 29s 限流导致后续请求连续快速失败；
 	// 是否单账号分组在 antigravity 账号遇到 503 或模型限流预检查时才判定。
@@ -733,7 +734,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				googleError(c, http.StatusServiceUnavailable, geminiCachedContentUnavailableMessage)
 				return
 			}
-			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
+			if fs.RecordProfitVeto(account.ID, c.Request.Context()) == FailoverExhausted {
 				reqLog.Warn("gemini.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
 				markOpsRoutingCapacityLimited(c)
 				googleError(c, http.StatusServiceUnavailable, profitVetoExhaustedMessage)
