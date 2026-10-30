@@ -199,7 +199,7 @@ func TestStrictFailoverRequestActiveFollowsScheduledGroup(t *testing.T) {
 	_, err = prepareStrictFailover(ctx, &Group{ID: 76}, r, nil, "gpt-5.1", strictNoExtraGate)
 	require.NoError(t, err)
 	require.False(t, StrictFailoverRequestActive(ctx))
-	require.False(t, StrictFailoverRequestActive(nil))
+	require.False(t, StrictFailoverRequestActive(nil)) //nolint:staticcheck // Intentionally exercise the nil-context defensive branch.
 }
 
 func TestStrictFailoverProfitAcrossTiers(t *testing.T) {

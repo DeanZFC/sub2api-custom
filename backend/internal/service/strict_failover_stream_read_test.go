@@ -31,7 +31,7 @@ func TestStrictFailoverStreamReadFailuresExhaustOnlyCurrentTier(t *testing.T) {
 					_, err := prepareStrictFailover(ctx, g, repo, excluded, "gpt-5.1", strictNoExtraGate)
 					require.NoError(t, err)
 					for i, id := range []int64{1, 2} {
-						failure, c := runStrictStreamReadTest(t, ctx, protocol, async, &repo.accounts[i], errReadCloser{err: cause})
+						c, failure := runStrictStreamReadTest(t, ctx, protocol, async, &repo.accounts[i], errReadCloser{err: cause})
 						var failoverErr *UpstreamFailoverError
 						require.ErrorAs(t, failure, &failoverErr)
 						require.False(t, c.Writer.Written(), "a replayable failure must not commit client output")
@@ -78,7 +78,7 @@ func TestStrictFailoverStreamReadFailuresPreserveNonReplayableBoundaries(t *test
 					ctx := strictContext(g)
 					_, err := prepareStrictFailover(ctx, g, repo, nil, "gpt-5.1", strictNoExtraGate)
 					require.NoError(t, err)
-					failure, _ := runStrictStreamReadTest(t, ctx, protocol, async, &Account{ID: 1, Platform: PlatformOpenAI}, tc.body)
+					_, failure := runStrictStreamReadTest(t, ctx, protocol, async, &Account{ID: 1, Platform: PlatformOpenAI}, tc.body)
 					require.Error(t, failure)
 					var failoverErr *UpstreamFailoverError
 					if tc.name == "scanner_limit" {
@@ -95,14 +95,14 @@ func TestStrictFailoverStreamReadFailuresPreserveNonReplayableBoundaries(t *test
 }
 
 func TestOpenAIMessagesOrdinaryReadErrorKeepsExistingBehavior(t *testing.T) {
-	failure, _ := runStrictStreamReadTest(t, context.Background(), "messages", false,
+	_, failure := runStrictStreamReadTest(t, context.Background(), "messages", false,
 		&Account{ID: 1, Platform: PlatformOpenAI}, errReadCloser{err: io.ErrUnexpectedEOF})
 	require.ErrorIs(t, failure, io.ErrUnexpectedEOF)
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(failure, &failoverErr))
 }
 
-func runStrictStreamReadTest(t *testing.T, ctx context.Context, protocol string, async bool, account *Account, body io.ReadCloser) (error, *gin.Context) {
+func runStrictStreamReadTest(t *testing.T, ctx context.Context, protocol string, async bool, account *Account, body io.ReadCloser) (*gin.Context, error) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -124,5 +124,5 @@ func runStrictStreamReadTest(t *testing.T, ctx context.Context, protocol string,
 	default:
 		t.Fatalf("unsupported test protocol %s", protocol)
 	}
-	return err, c
+	return c, err
 }
