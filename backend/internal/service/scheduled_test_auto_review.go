@@ -36,14 +36,19 @@ func (s *ScheduledTestReviewSettings) Validate() error {
 }
 
 type ScheduledTestAutoReviewSummary struct {
-	Verdict        string                         `json:"verdict"`
-	Reason         string                         `json:"reason"`
-	JudgeAccountID int64                          `json:"judge_account_id,omitempty"`
-	JudgeModel     string                         `json:"judge_model,omitempty"`
-	Attempts       int                            `json:"attempts"`
-	ReviewedAt     time.Time                      `json:"reviewed_at"`
-	RubricVersion  string                         `json:"rubric_version"`
-	Criteria       []ScheduledTestVisualCriterion `json:"criteria,omitempty"`
+	Verdict          string                         `json:"verdict"`
+	Reason           string                         `json:"reason"`
+	JudgeAccountID   int64                          `json:"judge_account_id,omitempty"`
+	JudgeModel       string                         `json:"judge_model,omitempty"`
+	Attempts         int                            `json:"attempts"`
+	ReviewedAt       time.Time                      `json:"reviewed_at"`
+	RubricVersion    string                         `json:"rubric_version"`
+	Criteria         []ScheduledTestVisualCriterion `json:"criteria,omitempty"`
+	FailureStage     string                         `json:"failure_stage,omitempty"`
+	ErrorCode        string                         `json:"error_code,omitempty"`
+	RenderAttempts   int                            `json:"render_attempts,omitempty"`
+	RenderDurationMs int64                          `json:"render_duration_ms,omitempty"`
+	RenderRetryable  bool                           `json:"render_retryable,omitempty"`
 }
 
 // Reservation is atomic across processes and includes confirmation calls.
@@ -54,6 +59,9 @@ type ScheduledTestAutoReviewRepository interface {
 }
 
 func (s *ScheduledTestRunnerService) runAutomaticVisualReview(ctx context.Context, plan *ScheduledTestPlan, result *ScheduledTestResult) {
+	if plan == nil || result == nil {
+		return
+	}
 	rule := plan.ProtectionRule(plan.TestDefinitionID)
 	if rule == nil || !rule.UsesAutoReview() || result == nil || result.OutputKind != "html" || result.Status != "success" || ctx.Err() != nil {
 		return
@@ -65,11 +73,13 @@ func (s *ScheduledTestRunnerService) runAutomaticVisualReview(ctx context.Contex
 	result.ExecutionInfo.AutoReview = review
 	defer func() { review.ReviewedAt = time.Now().UTC() }()
 	if s.scheduledSvc == nil {
+		review.FailureStage = "configuration"
 		review.Reason = "自动评审配置不可用，等待人工复核或下一轮检测"
 		return
 	}
 	repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestAutoReviewRepository)
 	if !ok {
+		review.FailureStage = "configuration"
 		review.Reason = "自动评审配置不可用，等待人工复核或下一轮检测"
 		return
 	}
@@ -82,42 +92,53 @@ func (s *ScheduledTestRunnerService) runAutomaticVisualReview(ctx context.Contex
 		case s.reviewSem <- struct{}{}:
 			defer func() { <-s.reviewSem }()
 		case <-reviewCtx.Done():
+			review.FailureStage = "queue"
 			review.Reason = "自动评审排队超时，等待人工复核或下一轮检测"
 			return
 		}
 	}
 	settings, err := repo.LoadReviewSettings(reviewCtx)
 	if err != nil || settings == nil || !settings.Enabled || settings.Validate() != nil {
+		review.FailureStage = "configuration"
 		review.Reason = "请先在检测运营中启用并配置可信视觉裁判"
 		return
 	}
 	review.JudgeAccountID, review.JudgeModel = settings.JudgeAccountID, strings.TrimSpace(settings.JudgeModel)
 	if !s.reviewAccountsIndependent(reviewCtx, result.AccountID, settings.JudgeAccountID) {
+		review.FailureStage = "independence"
 		review.Reason = "被测账号与裁判账号相同或无法确认独立，请选择独立裁判或人工复核"
 		return
 	}
-	if s.reviewRenderer == nil || s.reviewJudge == nil {
+	if s.reviewRenderer == nil {
+		review.FailureStage, review.ErrorCode = "render", "renderer_unavailable"
+		review.Reason = "后台截图服务未配置，请检查渲染器部署或人工复核"
+		return
+	}
+	if s.reviewJudge == nil {
+		review.FailureStage = "judge"
 		review.Reason = "自动评审服务不可用，等待人工复核或下一轮检测"
 		return
 	}
-	frames, err := s.reviewRenderer.Render(reviewCtx, result.OutputHTML)
-	if err != nil || len(frames) != 4 {
-		review.Reason = "作品渲染未完成，等待人工复核或下一轮检测"
+	frames := s.renderAutomaticReview(reviewCtx, plan.ID, result, review, 2*time.Second)
+	if frames == nil {
 		return
 	}
 	judge := func() *ScheduledTestVisualVerdict {
 		reserved, err := repo.ReserveReview(reviewCtx, *settings)
 		if err != nil || !reserved {
+			review.FailureStage = "budget"
 			review.Reason = "自动评审每日预算已用完或配置已变更，等待人工复核或下一轮检测"
 			return nil
 		}
 		review.Attempts++
 		verdict, err := s.reviewJudge.Judge(reviewCtx, settings.JudgeAccountID, review.JudgeModel, frames)
 		if err != nil || verdict == nil {
+			review.FailureStage = "judge"
 			review.Reason = "视觉裁判调用未完成，等待人工复核或下一轮检测"
 			return nil
 		}
 		if verdict.Confidence < .85 || verdict.Verdict != "pass" && verdict.Verdict != "fail" {
+			review.FailureStage = "judge"
 			review.Reason = "视觉裁判结论不确定，等待人工复核"
 			review.Criteria = verdict.Criteria
 			return nil
@@ -140,6 +161,7 @@ func (s *ScheduledTestRunnerService) runAutomaticVisualReview(ctx context.Contex
 		return
 	}
 	if second.Verdict != "fail" || !scheduledTestReviewsShareFailure(first, second) {
+		review.FailureStage = "judge"
 		review.Reason = "两次视觉评审结论有分歧，等待人工复核"
 		review.Criteria = second.Criteria
 		return

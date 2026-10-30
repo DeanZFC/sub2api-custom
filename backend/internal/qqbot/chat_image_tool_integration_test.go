@@ -51,7 +51,10 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 						require.Contains(t, string(input), "蓝紫色霓虹的猫咪海报")
 						require.Contains(t, string(input), "就这个吧")
 						if scenario == "disabled" {
-							require.NotContains(t, request, "tools")
+							require.Equal(t, "auto", request["tool_choice"])
+							tools, _ := json.Marshal(request["tools"])
+							require.Contains(t, string(tools), siteQueryToolName)
+							require.NotContains(t, string(tools), chatImageToolName)
 						} else {
 							require.Equal(t, "required", request["tool_choice"])
 						}
@@ -152,7 +155,9 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 				var in, out int64
 				require.NoError(t, db.QueryRow(`SELECT kind,status,result_text,input_tokens,output_tokens FROM qq_bot_jobs WHERE message_id='current'`).Scan(&kind, &status, &text, &in, &out))
 				wantIn, wantOut := int64(11), int64(7)
-				if scenario != "text" && scenario != "disabled" && scenario != "invalid-tool" && scenario != "empty-promise" {
+				if scenario == "empty-promise" {
+					wantIn, wantOut = 33, 21
+				} else if scenario != "text" && scenario != "disabled" && scenario != "invalid-tool" {
 					wantIn, wantOut = 22, 14
 				}
 				require.Equal(t, wantIn, in)
@@ -196,7 +201,11 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 				// including after a model failure or failed image delivery.
 				enqueueSharedTestEvent(t, s, c, e, groupAtMessageCreate)
 				s.runOne(ctx)
-				require.EqualValues(t, 1, chats.Load())
+				wantChats := 1
+				if scenario == "empty-promise" {
+					wantChats = 3
+				}
+				require.EqualValues(t, wantChats, chats.Load())
 				require.EqualValues(t, wantImages, images.Load())
 			})
 		}

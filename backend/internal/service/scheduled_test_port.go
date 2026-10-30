@@ -38,6 +38,7 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
+	AllPassProgress  *ScheduledTestAllPassProgress `json:"all_pass_progress,omitempty"`
 	PassRate         *ScheduledTestPassRateSummary `json:"pass_rate,omitempty"`
 	ExecutionInfo    *ScheduledTestExecutionInfo   `json:"execution_info,omitempty"`
 	RunID            string                        `json:"-"`

@@ -16,13 +16,14 @@ var (
 )
 
 type ScheduledTestProtectionConfig struct {
-	Enabled      bool                           `json:"enabled"`
-	Rules        []ScheduledTestProtectionRule  `json:"rules"`
-	Mode         string                         `json:"mode,omitempty"`
-	Combinations []ScheduledTestCombinationRule `json:"combinations,omitempty"`
-	PassGroupIDs []int64                        `json:"pass_group_ids,omitempty"`
-	OnPass       *ScheduledTestOutcomeAction    `json:"on_pass,omitempty"`
-	OnFail       *ScheduledTestOutcomeAction    `json:"on_fail,omitempty"`
+	RequiredConsecutivePasses int                            `json:"required_consecutive_passes,omitempty"`
+	Enabled                   bool                           `json:"enabled"`
+	Rules                     []ScheduledTestProtectionRule  `json:"rules"`
+	Mode                      string                         `json:"mode,omitempty"`
+	Combinations              []ScheduledTestCombinationRule `json:"combinations,omitempty"`
+	PassGroupIDs              []int64                        `json:"pass_group_ids,omitempty"`
+	OnPass                    *ScheduledTestOutcomeAction    `json:"on_pass,omitempty"`
+	OnFail                    *ScheduledTestOutcomeAction    `json:"on_fail,omitempty"`
 }
 
 type ScheduledTestProtectionRule struct {

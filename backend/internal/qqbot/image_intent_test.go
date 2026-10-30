@@ -38,6 +38,7 @@ func TestImageIntentReviewIsolatedFromPersonaAndHistory(t *testing.T) {
 				require.Equal(t, imageIntentInstructions, instructions["content"])
 				raw, _ := json.Marshal(body)
 				require.NotContains(t, string(raw), "PERSONA_SECRET")
+				require.NotContains(t, string(raw), "SITE_KNOWLEDGE_SHOULD_NOT_APPEAR")
 				require.NotContains(t, string(raw), "data:image")
 				require.Equal(t, "required", body["tool_choice"])
 				require.Equal(t, false, body["parallel_tool_calls"])
@@ -48,6 +49,7 @@ func TestImageIntentReviewIsolatedFromPersonaAndHistory(t *testing.T) {
 			s := New(nil, nil, false, nil)
 			c := DefaultConfig()
 			c.BaseURL, c.ChatProtocol, c.SystemPrompt = server.URL, protocol, "PERSONA_SECRET"
+			c.SiteKnowledge = SiteKnowledgeConfig{Enabled: true, Content: "SITE_KNOWLEDGE_SHOULD_NOT_APPEAR"}
 			r, usage, err := s.reviewImageIntent(context.Background(), c, Event{}, "下午好🌹", Message{Images: []string{"data:image/png;base64,AAAA"}}, nil, nil, chatImageToolName, "自作主张画玫瑰", 0)
 			require.NoError(t, err)
 			require.Equal(t, "text", r.Disposition)

@@ -67,6 +67,7 @@ func RegisterAdminRoutes(
 			bot.GET("/bindings", h.QQBot.ListBindings)
 			bot.DELETE("/bindings/:user_id", h.QQBot.Unbind)
 			bot.POST("/test/:kind", h.QQBot.Probe)
+			bot.POST("/chat-preview", h.QQBot.PreviewChat)
 		}
 		if h.GPTDirect != nil {
 			admin.GET("/gpt-direct/settings", h.GPTDirect.GetSettings)

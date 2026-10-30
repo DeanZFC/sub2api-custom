@@ -255,7 +255,8 @@ func TestQQBotPendingImagePlanOwnershipExpiryAndSingleUse(t *testing.T) {
 						return
 					}
 					if scenario == "disabled-cancel" {
-						require.NotContains(t, body, "tools")
+						require.Contains(t, string(body["tools"]), siteQueryToolName)
+						require.NotContains(t, string(body["tools"]), chatImageToolName)
 						fmt.Fprint(w, `{"choices":[{"message":{"content":"好的，不生成。"}}]}`)
 						return
 					}

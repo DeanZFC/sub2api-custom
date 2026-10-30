@@ -20,6 +20,7 @@ func TestScheduledTestDisplayEvidencePassRateFailurePreservesResults(t *testing.
 	id := int64(62)
 	result := &service.ScheduledTestResult{ID: 9, AccountID: &id, ModelID: "model-a", Status: "success"}
 	mock.ExpectQuery(`SELECT r.id,s.plan_id.*scheduled_test_pass_rate_states`).WithArgs("{9}").WillReturnError(errors.New("pass-rate unavailable"))
+	mock.ExpectQuery(`(?s)SELECT r.id,GREATEST.*scheduled_test_all_pass_rounds`).WithArgs("{9}").WillReturnError(errors.New("all-pass progress unavailable"))
 	repo.hydrateDisplayEvidence(context.Background(), []*service.ScheduledTestResult{result})
 	require.Equal(t, "success", result.Status)
 	require.Nil(t, result.PassRate)

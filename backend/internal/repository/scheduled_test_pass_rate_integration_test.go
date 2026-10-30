@@ -79,7 +79,7 @@ INSERT INTO account_groups VALUES(62,8),(63,8);`)
 		"265_scheduled_test_generic_policy.sql", "268_scheduled_test_combination_states.sql", "270_scheduled_test_time_periods.sql",
 		"282_scheduled_test_excluded_accounts.sql", "276_scheduled_test_cost_control.sql", "284_scheduled_test_output_tokens.sql",
 		"291_passive_quality.sql", "303_passive_quality_model_states.sql",
-		"309_quality_recovery_budget_evidence.sql", "312_scheduled_test_pass_rate.sql", "315_scheduled_test_multi_model.sql",
+		"309_quality_recovery_budget_evidence.sql", "312_scheduled_test_pass_rate.sql", "315_scheduled_test_multi_model.sql", "326_scheduled_test_all_pass_rounds.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)

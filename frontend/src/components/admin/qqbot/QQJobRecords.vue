@@ -5,6 +5,8 @@
       <QQMemberPicker v-model="filters.member_id" :group-id="filters.group_id" :app-id="appId" :disabled="loading" @select="selectMember" />
       <label class="text-sm">{{ t('qqbot.workspace.jobKind') }}<select v-model="filters.kind" class="input" data-testid="qq-job-kind"><option value="">{{ t('qqbot.workspace.all') }}</option><option v-for="kind in kinds" :key="kind" :value="kind">{{ kindLabel(kind) }}</option></select></label>
       <label class="text-sm">{{ t('common.status') }}<select v-model="filters.status" class="input"><option value="">{{ t('qqbot.workspace.all') }}</option><option v-for="status in statuses" :key="status" :value="status">{{ status }}</option></select></label>
+      <label class="text-sm">{{ t('qqbot.siteQuery.kindFilter') }}<select v-model="filters.query_kind" class="input" data-testid="qq-job-query-kind"><option value="">{{ t('qqbot.workspace.all') }}</option><option v-for="kind in queryKinds" :key="kind" :value="kind">{{ t(`qqbot.siteQuery.kinds.${kind}`) }}</option></select></label>
+      <label class="text-sm">{{ t('qqbot.siteQuery.statusFilter') }}<select v-model="filters.query_status" class="input" data-testid="qq-job-query-status"><option value="">{{ t('qqbot.workspace.all') }}</option><option v-for="status in queryStatuses" :key="status" :value="status">{{ t(`qqbot.siteQuery.statuses.${status}`) }}</option></select></label>
       <label class="text-sm">{{ t('qqbot.workspace.from') }}<input v-model="filters.from" class="input" type="datetime-local" /></label>
       <label class="text-sm">{{ t('qqbot.workspace.to') }}<input v-model="filters.to" class="input" type="datetime-local" /></label>
       <button class="btn btn-primary self-end" :disabled="loading">{{ t('common.search') }}</button>
@@ -20,7 +22,18 @@
         <p>{{ t('qqbot.workspace.imageReason') }}: {{ job.image_decision.reason }} · {{ job.image_decision.basis || 'none' }}</p>
         <p>{{ t('qqbot.workspace.imageMessageRef') }}: {{ job.image_decision.message_ref }}<span v-if="job.image_decision.plan_ref"> · {{ t('qqbot.workspace.imagePlanRef') }}: {{ job.image_decision.plan_ref }}</span></p>
       </div>
-      <p>Tokens: {{ job.input_tokens }} / {{ job.output_tokens }}</p>
+      <div v-if="job.site_query?.kind" class="space-y-1 rounded bg-gray-50 p-3 text-xs dark:bg-dark-800" data-testid="qq-job-site-query">
+        <p>{{ t('qqbot.siteQuery.title') }}: {{ queryLabel('kinds', job.site_query.kind) }} · {{ queryLabel('statuses', job.site_query.status) }}</p>
+        <p><span v-if="job.site_query.model">{{ job.site_query.model }} · </span>{{ t('qqbot.siteQuery.page', { page: job.site_query.page }) }} · {{ t('qqbot.siteQuery.duration', { ms: job.site_query.duration_ms }) }}</p>
+        <p v-if="job.site_query.error_code">{{ t('qqbot.siteQuery.code') }}: {{ job.site_query.error_code }}</p>
+        <p class="text-gray-500">{{ t('qqbot.siteQuery.help') }}</p>
+      </div>
+      <div v-if="job.chat_execution?.attempts" class="space-y-1 text-xs" data-testid="qq-job-chat-execution">
+        <p>{{ t('qqbot.chatExecution.attempts', { attempts: job.chat_execution.attempts, retries: job.chat_execution.retries }) }}</p>
+        <p v-if="job.chat_execution.last_error_code">{{ t('qqbot.chatExecution.lastError') }}: {{ job.chat_execution.last_error_code }}</p>
+      </div>
+      <p>{{ t(job.chat_execution?.usage_complete === false ? 'qqbot.chatExecution.knownTokens' : 'qqbot.chatExecution.tokens') }}: {{ job.input_tokens }} / {{ job.output_tokens }}</p>
+      <p v-if="job.chat_execution?.usage_complete === false" class="text-xs text-amber-700 dark:text-amber-300" data-testid="qq-job-usage-incomplete">{{ t('qqbot.chatExecution.incompleteUsage') }}</p>
       <p v-if="job.kind === 'spam_report'" class="text-xs text-gray-500">{{ t('qqbot.workspace.reportReviewHelp') }}</p>
       <p v-if="job.error" class="break-all text-red-600">{{ job.error }}</p>
     </article>
@@ -35,7 +48,7 @@ import { qqbotAPI, type QQJobPage, type QQMemberOption } from '@/api/qqbot'
 import QQMemberPicker from './QQMemberPicker.vue'
 const props = defineProps<{ notifications?: boolean; appId?: string }>()
 const { t, te } = useI18n()
-const filters = reactive({ group_id: '', member_id: '', kind: props.notifications ? 'notifications' : '', status: '', from: '', to: '' })
+const filters = reactive({ group_id: '', member_id: '', kind: props.notifications ? 'notifications' : '', status: '', query_kind: '', query_status: '', from: '', to: '' })
 watch(() => filters.group_id, () => { filters.member_id = '' }, { flush: 'sync' })
 function selectMember(member: QQMemberOption) { filters.group_id = member.group_id; filters.member_id = member.member_id }
 let applied = { ...filters }
@@ -43,6 +56,9 @@ function search() { applied = { ...filters }; void load(1) }
 const kinds = ['chat', 'image', 'ambient_chat', 'spam_report', 'notifications', 'price_notification', 'health_notification', 'ranking_notification']
 function kindLabel(kind: string) { const key = `qqbot.workspace.jobKinds.${kind}`; return te(key) ? t(key) : kind }
 const statuses = ['queued', 'running', 'completed', 'skipped', 'failed', 'delivery_failed', 'expired', 'interrupted', 'cancelled']
+const queryKinds = ['model_price', 'channel_status', 'activity_rules']
+const queryStatuses = ['succeeded', 'not_found', 'unavailable', 'failed']
+function queryLabel(group: 'kinds' | 'statuses', value: string) { const key = `qqbot.siteQuery.${group}.${value}`; return te(key) ? t(key) : value }
 const loading = ref(false), error = ref('')
 const data = ref<QQJobPage>({ items: [], total: 0, page: 1, page_size: 20 })
 const pages = computed(() => Math.max(1, Math.ceil(data.value.total / data.value.page_size)))
@@ -60,7 +76,7 @@ async function load(page: number) {
 watch([() => props.appId, () => props.notifications], ([appId, notifications], [previousAppId]) => {
  if (appId !== previousAppId) {
   ++request
-  Object.assign(filters, { group_id: '', member_id: '', status: '', from: '', to: '' })
+  Object.assign(filters, { group_id: '', member_id: '', status: '', query_kind: '', query_status: '', from: '', to: '' })
   data.value = { items: [], total: 0, page: 1, page_size: 20 }
  }
  filters.kind = notifications ? 'notifications' : ''

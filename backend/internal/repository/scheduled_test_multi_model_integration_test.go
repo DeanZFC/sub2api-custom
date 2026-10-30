@@ -45,6 +45,34 @@ func completeMultiModelProtection(t *testing.T, ctx context.Context, repo *sched
 	require.NoError(t, repo.CompleteProtection(ctx, row, verdict, "fixture "+verdict))
 }
 
+func testScheduledTestAllPassMultiModelConsecutive(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, candyID int64) {
+	plan := genericRoutingPlan(candyID, 8, 10)
+	plan.ModelID, plan.ModelIDs = "model-a", []string{"model-a", "model-b"}
+	plan.Protection.Mode = "all_pass"
+	plan.Protection.RequiredConsecutivePasses = 2
+	plan.Protection.OnPass = &service.ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "assign", GroupIDs: []int64{10}}
+	var err error
+	plan, err = plans.Create(ctx, plan)
+	require.NoError(t, err)
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	first := multiModelProtectionRound(t, ctx, repo, plan, "streak-model-first", at)
+	completeMultiModelProtection(t, ctx, repo, first["model-a"][0], "pass")
+	completeMultiModelProtection(t, ctx, repo, first["model-b"][0], "fail")
+	second := multiModelProtectionRound(t, ctx, repo, plan, "streak-model-second", at.Add(time.Minute))
+	completeMultiModelProtection(t, ctx, repo, second["model-a"][0], "pass")
+	completeMultiModelProtection(t, ctx, repo, second["model-b"][0], "pass")
+	var groups pq.Int64Array
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT array_agg(group_id ORDER BY group_id) FROM account_groups WHERE account_id=62`).Scan(&groups))
+	require.Equal(t, []int64{8, 9}, []int64(groups), "model-b's one pass cannot borrow model-a's two passes")
+	third := multiModelProtectionRound(t, ctx, repo, plan, "streak-model-third", at.Add(2*time.Minute))
+	completeMultiModelProtection(t, ctx, repo, third["model-b"][0], "pass")
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT array_agg(group_id ORDER BY group_id) FROM account_groups WHERE account_id=62`).Scan(&groups))
+	require.Equal(t, []int64{8, 9}, []int64(groups), "the current model-a round must also complete")
+	completeMultiModelProtection(t, ctx, repo, third["model-a"][0], "pass")
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT array_agg(group_id ORDER BY group_id) FROM account_groups WHERE account_id=62`).Scan(&groups))
+	require.Equal(t, []int64{10}, []int64(groups))
+}
+
 func testScheduledTestMultiModelProtection(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, candyID, _ int64, mode string) {
 	t.Helper()
 	plan := genericRoutingPlan(candyID, 8, 10)

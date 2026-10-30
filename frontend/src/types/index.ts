@@ -2564,6 +2564,11 @@ export interface TestAutoReview {
   judge_model: string
   attempts: number
   reviewed_at: string
+  failure_stage?: 'configuration' | 'queue' | 'render' | 'judge' | 'budget' | 'independence'
+  error_code?: string
+  render_attempts?: number
+  render_duration_ms?: number
+  render_retryable?: boolean
   criteria?: { key: string; passed: boolean; reason: string }[]
 }
 export interface TestExecutionInfo extends TestTokenUsage {
@@ -2728,9 +2733,18 @@ export interface TestProtectionRule {
   on_fail?: TestOutcomeAction
   pass_rate?: TestPassRateConfig
 }
+export interface TestAllPassProgress {
+  required: number
+  consecutive_passes: number
+  round_verdict: 'pass' | 'fail' | 'pending'
+  blocked: boolean
+}
+
 export interface TestProtectionConfig {
   enabled: boolean
   mode?: 'per_test' | 'combined' | 'all_pass'
+  /** Complete successful rounds required before the all-pass action runs; defaults to 1. */
+  required_consecutive_passes?: number
   pass_group_ids?: number[]
   on_pass?: TestOutcomeAction
   on_fail?: TestOutcomeAction
@@ -2786,6 +2800,8 @@ export interface TestProtectionDecision {
 }
 
 export interface TestResult {
+  /** Current plan/account/model round streak, independent of individual check pass rates. */
+  all_pass_progress?: TestAllPassProgress | null
   /** Current rolling evidence, not a historical snapshot at this result's time. */
   pass_rate?: TestPassRateSummary | null
   test_key?: string

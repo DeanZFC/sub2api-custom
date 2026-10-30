@@ -424,6 +424,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	parts, attachments := eventParts(e)
 	hasImages := len(imageAttachments(attachments)) > 0
 	cmd, arg := command(e.Content)
+	if cmd == "" && (addressed || named || ref != nil) && !hasImages && parts == "" && len(attachments) == 0 && naturalHelpRequest(e.Content) {
+		cmd = "帮助"
+	}
 	if strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(e.Content), "")) == "" && !hasImages && parts == "" && e.referenceID() == "" {
 		cmd = "帮助"
 	}
@@ -645,8 +648,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 				}
 			}
 		} else {
-			messages := s.history(ctx, c, *j)
+			messages := s.historyForQuestion(ctx, c, *j, prompt)
 			messages = withGroupAdminChatInstructions(messages, c, *j, addressed)
+			messages = withChatCapabilities(messages, c, *j)
 			var input Message
 			input, err = s.chatMessageWithImageProgress(ctx, c, e, prompt, ref, func() {
 				sendImageProgress("正在处理图片，请稍候。")
@@ -663,7 +667,26 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 				turnConfig := c
 				turnConfig.ImageEnabled = c.ImageEnabled && !c.groupPolicy(j.GroupID).DisableImages
 				if err == nil {
-					turn, err = s.chatTurn(ctx, turnConfig, messages)
+					var followup *siteQuery
+					if ref == nil && e.referenceID() == "" && !hasImages && parts == "" && len(attachments) == 0 {
+						followup, err = s.resolveSiteQueryFollowup(ctx, c, *j, prompt)
+					}
+					if err == nil && followup != nil {
+						turn.SiteQuery = followup
+					} else if err == nil {
+						turn, err = s.siteChatTurn(ctx, turnConfig, messages)
+					}
+				}
+				if err == nil && turn.SiteQuery != nil {
+					// Return the read-only backend result directly. Personal quotes
+					// must not be copied into conversational or shared history.
+					j.ShareHistory = false
+					var result SiteQueryResult
+					result, err = s.querySiteInfoDetailed(ctx, c, *j, *turn.SiteQuery)
+					if err == nil {
+						turn.Text = result.Text
+						err = s.recordSiteQuery(ctx, j, result.Decision)
+					}
 				}
 				if err == nil && (turn.ImagePrompt != "" || turn.ImagePlan != nil) {
 					turn, err = s.reviewImageTurn(ctx, turnConfig, j, e, prompt, input, ref, pending, turn)
@@ -673,6 +696,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 					err = s.clearPendingImagePlan(ctx, c, *j)
 				}
 				text, j.InputTokens, j.OutputTokens = turn.Text, turn.InputTokens, turn.OutputTokens
+				if turn.ChatExecution.Attempts > 0 {
+					j.ChatExecution, _ = json.Marshal(turn.ChatExecution)
+				}
 				if err == nil && turn.ImagePrompt != "" {
 					// The independent review approved; recheck policy and reserve
 					// image usage separately from chat and review token usage.
@@ -724,14 +750,14 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 				}
 			}
 			j.Error = err.Error()
-			_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET error=$2,input_tokens=$3,output_tokens=$4 WHERE id=$1`, j.ID, j.Error, j.InputTokens, j.OutputTokens)
+			_, _ = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET error=$2,input_tokens=$3,output_tokens=$4,chat_execution=$5 WHERE id=$1`, j.ID, j.Error, j.InputTokens, j.OutputTokens, nullableChatExecution(j.ChatExecution))
 			if sendErr := s.send(ctx, c, *j, text, nil, seq); sendErr != nil {
 				return sendErr
 			}
 			return fmt.Errorf("模型调用失败：%s", j.Error)
 		}
 		// Persist before sending to QQ. Delivery retries only reuse this saved result.
-		if _, err = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_text=$2,result_image=$3,image_type=$4,input_tokens=$5,output_tokens=$6 WHERE id=$1`, j.ID, text, img, "image/jpeg", j.InputTokens, j.OutputTokens); err != nil {
+		if _, err = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_text=$2,result_image=$3,image_type=$4,input_tokens=$5,output_tokens=$6,chat_execution=$7 WHERE id=$1`, j.ID, text, img, "image/jpeg", j.InputTokens, j.OutputTokens, nullableChatExecution(j.ChatExecution)); err != nil {
 			return errors.New("生成成功但结果保存失败；未自动重新生成")
 		}
 	}

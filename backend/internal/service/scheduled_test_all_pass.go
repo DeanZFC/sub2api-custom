@@ -7,6 +7,20 @@ import (
 
 func (c ScheduledTestProtectionConfig) UsesAllPass() bool { return c.Mode == "all_pass" }
 
+type ScheduledTestAllPassProgress struct {
+	Required          int    `json:"required"`
+	ConsecutivePasses int    `json:"consecutive_passes"`
+	RoundVerdict      string `json:"round_verdict"`
+	Blocked           bool   `json:"blocked"`
+}
+
+func (c ScheduledTestProtectionConfig) AllPassRequiredConsecutivePasses() int {
+	if c.RequiredConsecutivePasses == 0 {
+		return 1
+	}
+	return c.RequiredConsecutivePasses
+}
+
 // AllPassOutcomeAction preserves the defaults and group targets of older plans.
 // Explicit outcome actions take precedence over the legacy pass_group_ids field.
 func (c ScheduledTestProtectionConfig) AllPassOutcomeAction(verdict string) ScheduledTestOutcomeAction {
@@ -26,7 +40,13 @@ func (c ScheduledTestProtectionConfig) AllPassOutcomeAction(verdict string) Sche
 // Actions are evaluated once for the whole policy, after its requirements resolve.
 func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 	c := &plan.Protection
+	if c.RequiredConsecutivePasses < 0 || c.RequiredConsecutivePasses > 100 {
+		return fmt.Errorf("required_consecutive_passes must be between 1 and 100")
+	}
 	if !c.UsesAllPass() {
+		if c.RequiredConsecutivePasses != 0 {
+			return fmt.Errorf("required_consecutive_passes requires all_pass protection mode")
+		}
 		if len(c.PassGroupIDs) > 0 || c.OnPass != nil || c.OnFail != nil {
 			return fmt.Errorf("policy outcome actions require all_pass protection mode")
 		}
@@ -69,6 +89,27 @@ func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 		return fmt.Errorf("all_pass requires at least one automatic check")
 	}
 	return nil
+}
+
+// A round succeeds only after every automatic condition passes; reviews retain
+// their current-round veto semantics. Pending rounds never count as passes.
+func ScheduledTestAllPassRoundVerdict(config ScheduledTestProtectionConfig, verdicts map[int64]string) string {
+	automatic := 0
+	pending := false
+	for _, rule := range config.Rules {
+		verdict := verdicts[rule.TestDefinitionID]
+		if verdict == "fail" {
+			return "fail"
+		}
+		if rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold() || rule.UsesAutoReview() {
+			automatic++
+			pending = pending || verdict != "pass"
+		}
+	}
+	if automatic == 0 || pending {
+		return "pending"
+	}
+	return "pass"
 }
 
 // Pending checks preserve active accounts, but cannot release an existing pause.

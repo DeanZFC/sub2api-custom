@@ -22,6 +22,7 @@ export function allPassOutcomeAction(value: TestProtectionConfig, outcome: 'pass
 
 export const copyTestProtection = (value?: TestProtectionConfig): TestProtectionConfig => value
   ? { enabled: value.enabled, ...(value.mode ? { mode: value.mode } : {}), ...(value.pass_group_ids ? { pass_group_ids: [...value.pass_group_ids] } : {}),
+    ...(value.required_consecutive_passes !== undefined ? { required_consecutive_passes: value.required_consecutive_passes } : {}),
     ...(value.on_pass ? { on_pass: copyAction(value.on_pass) } : {}), ...(value.on_fail ? { on_fail: copyAction(value.on_fail) } : {}),
     ...(value.combinations ? { combinations: value.combinations.map(copyTestCombination) } : {}), rules: (value.rules || []).map(rule => ({ ...rule, priority: rule.priority ?? 0, required_pass: rule.required_pass ?? false, thresholds: rule.thresholds?.map(item => ({ ...item })), vote: rule.vote ? { ...rule.vote } : undefined, auto_review: rule.auto_review ? { ...rule.auto_review } : undefined, on_pass: copyAction(rule.on_pass), on_fail: copyAction(rule.on_fail), pass_rate: rule.pass_rate ? { ...rule.pass_rate } : undefined })) }
   : { enabled: false, rules: [] }
@@ -89,6 +90,7 @@ export function validTestProtection(value: TestProtectionConfig | undefined, typ
   if (!value?.enabled) return true
   const combined = value.mode === 'combined'
   const allPass = value.mode === 'all_pass'
+  if (value.required_consecutive_passes !== undefined && (!allPass || !Number.isInteger(value.required_consecutive_passes) || value.required_consecutive_passes < 1 || value.required_consecutive_passes > 100)) return false
   if (!allPass && (value.pass_group_ids !== undefined || value.on_pass || value.on_fail)) return false
   if (allPass && (!validAction(allPassOutcomeAction(value, 'pass'), groups) || !validAction(allPassOutcomeAction(value, 'fail'), groups))) return false
   if (allPass && (!value.rules.some(rule => !rule.vote?.enabled || rule.auto_review?.enabled || rule.thresholds?.some(item => item.metric === 'latency_ms')) || value.rules.some(rule => rule.vote?.public_enabled))) return false

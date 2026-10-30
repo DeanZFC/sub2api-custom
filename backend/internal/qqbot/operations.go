@@ -3,20 +3,23 @@ package qqbot
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
 )
 
 type JobFilter struct {
-	GroupID  string `form:"group_id" json:"group_id"`
-	MemberID string `form:"member_id" json:"member_id"`
-	Kind     string `form:"kind" json:"kind"`
-	Status   string `form:"status" json:"status"`
-	From     string `form:"from" json:"from"`
-	To       string `form:"to" json:"to"`
-	Page     int    `form:"page" json:"page"`
-	PageSize int    `form:"page_size" json:"page_size"`
+	QueryKind   string `form:"query_kind" json:"query_kind"`
+	QueryStatus string `form:"query_status" json:"query_status"`
+	GroupID     string `form:"group_id" json:"group_id"`
+	MemberID    string `form:"member_id" json:"member_id"`
+	Kind        string `form:"kind" json:"kind"`
+	Status      string `form:"status" json:"status"`
+	From        string `form:"from" json:"from"`
+	To          string `form:"to" json:"to"`
+	Page        int    `form:"page" json:"page"`
+	PageSize    int    `form:"page_size" json:"page_size"`
 }
 type JobPage struct {
 	Items    []Job `json:"items"`
@@ -35,6 +38,16 @@ func (s *Service) ListJobs(ctx context.Context, f JobFilter) (JobPage, error) {
 			return out, errors.New("筛选条件过长")
 		}
 	}
+	switch f.QueryKind {
+	case "", "model_price", "channel_status", "activity_rules":
+	default:
+		return out, errors.New("查询类型不正确")
+	}
+	switch f.QueryStatus {
+	case "", "succeeded", "not_found", "unavailable", "failed":
+	default:
+		return out, errors.New("查询状态不正确")
+	}
 	from, to, err := recordTimeRange(f.From, f.To)
 	if err != nil {
 		return out, err
@@ -43,8 +56,8 @@ func (s *Service) ListJobs(ctx context.Context, f JobFilter) (JobPage, error) {
 	if err != nil {
 		return out, err
 	}
-	where := ` FROM qq_bot_jobs WHERE app_id=$1 AND ($2='' OR group_id=$2) AND ($3='' OR member_id=$3) AND ($4='' OR kind=$4 OR ($4='notifications' AND kind IN ('price_notification','health_notification','ranking_notification'))) AND ($5='' OR status=$5) AND ($6::timestamptz IS NULL OR created_at >= $6) AND ($7::timestamptz IS NULL OR created_at <= $7)`
-	args := []any{c.AppID, f.GroupID, f.MemberID, f.Kind, f.Status, from, to}
+	where := ` FROM qq_bot_jobs WHERE app_id=$1 AND ($2='' OR group_id=$2) AND ($3='' OR member_id=$3) AND ($4='' OR kind=$4 OR ($4='notifications' AND kind IN ('price_notification','health_notification','ranking_notification'))) AND ($5='' OR status=$5) AND ($6::timestamptz IS NULL OR created_at >= $6) AND ($7::timestamptz IS NULL OR created_at <= $7) AND ($8='' OR site_query->>'kind'=$8) AND ($9='' OR site_query->>'status'=$9)`
+	args := []any{c.AppID, f.GroupID, f.MemberID, f.Kind, f.Status, from, to, f.QueryKind, f.QueryStatus}
 	// Count and page share one snapshot even while workers finish jobs.
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
@@ -54,16 +67,18 @@ func (s *Service) ListJobs(ctx context.Context, f JobFilter) (JobPage, error) {
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*)`+where, args...).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,app_id,event_type,group_id,member_id,kind,status,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason,image_decision`+where+` ORDER BY created_at DESC,id DESC LIMIT $8 OFFSET $9`, append(args, f.PageSize, (f.Page-1)*f.PageSize)...)
+	rows, err := tx.QueryContext(ctx, `SELECT id,app_id,event_type,group_id,member_id,kind,status,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason,image_decision,site_query,chat_execution`+where+` ORDER BY created_at DESC,id DESC LIMIT $10 OFFSET $11`, append(args, f.PageSize, (f.Page-1)*f.PageSize)...)
 	if err != nil {
 		return out, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var j Job
-		if err = rows.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.Kind, &j.Status, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason, &j.ImageDecision); err != nil {
+		var chatExecution []byte
+		if err = rows.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.Kind, &j.Status, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason, &j.ImageDecision, &j.SiteQuery, &chatExecution); err != nil {
 			return out, err
 		}
+		j.ChatExecution = json.RawMessage(chatExecution)
 		out.Items = append(out.Items, j)
 	}
 	if err = rows.Err(); err != nil {

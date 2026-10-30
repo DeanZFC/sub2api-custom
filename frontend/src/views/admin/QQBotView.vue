@@ -128,6 +128,10 @@
         <div v-show="activeTab === 'autonomous'" id="qqbot-settings-panel-autonomous" role="tabpanel" aria-labelledby="qqbot-settings-tab-autonomous">
           <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" :groups="allowedGroups" :policies="groupPolicies" />
         </div>
+        <div v-show="activeTab === 'knowledge'" id="qqbot-settings-panel-knowledge" role="tabpanel" aria-labelledby="qqbot-settings-tab-knowledge">
+          <QQBotKnowledgeSettings v-model="siteKnowledge" />
+          <QQBotChatPreview v-if="baseline && activeTab === 'knowledge'" :config="baseline" />
+        </div>
         <div v-show="activeTab === 'moderation'" id="qqbot-settings-panel-moderation" role="tabpanel" aria-labelledby="qqbot-settings-tab-moderation">
           <QQBotModerationSettings v-model="moderation" :app-id="form.app_id" :group-labels="groupLabels" :groups="allowedGroups" :runtime="form.app_id === savedAppId ? runtime : null" :disabled="busy" />
         </div>
@@ -181,11 +185,13 @@ import type { QQConfigChange } from '@/api/qqbot'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import QQBotAutonomousSettings from '@/components/admin/qqbot/QQBotAutonomousSettings.vue'
+import QQBotKnowledgeSettings from '@/components/admin/qqbot/QQBotKnowledgeSettings.vue'
+import QQBotChatPreview from '@/components/admin/qqbot/QQBotChatPreview.vue'
 import QQBotGroupAdminSettings from '@/components/admin/qqbot/QQBotGroupAdminSettings.vue'
 import QQBotModerationSettings from '@/components/admin/qqbot/QQBotModerationSettings.vue'
 import { defaultModerationConfig } from '@/api/qqbot'
 import { defaultAutonomousConfig } from '@/api/qqbot'
-import { defaultHealthNotificationConfig, qqbotAPI, type QQBotConfig, type QQBotRuntime } from '@/api/qqbot'
+import { defaultHealthNotificationConfig, defaultSiteKnowledgeConfig, qqbotAPI, type QQBotConfig, type QQBotRuntime } from '@/api/qqbot'
 const { t } = useI18n()
 const tabs = [
   { key: 'connection', label: 'qqbot.connection' },
@@ -196,6 +202,7 @@ const tabs = [
   { key: 'autonomous', label: 'qqbot.autonomous.title' },
   { key: 'images', label: 'qqbot.images' },
   { key: 'commands', label: 'qqbot.customCommands' },
+  { key: 'knowledge', label: 'qqbot.knowledge.title' },
   { key: 'notifications', label: 'qqbot.priceNotifications.title' },
   { key: 'limits', label: 'qqbot.limits' }
 ] as const
@@ -206,7 +213,7 @@ const groupMode = computed(() => route?.path === '/admin/qqbot/groups')
 const activeTab = ref<SettingsTab>((tabs.find(tab => tab.key === route?.query.tab)?.key) || (groupMode.value ? 'groups' : 'connection'))
 const categories = computed(() => groupMode.value ? [{ key: 'groups', label: 'qqbot.workspace.groups', tabs: ['groups', 'group-admins', 'moderation'] }] : [
   { key: 'connect', label: 'qqbot.workspace.connectCategory', tabs: ['connection', 'chat', 'images'] },
-  { key: 'behavior', label: 'qqbot.workspace.behaviorCategory', tabs: ['autonomous', 'commands'] },
+  { key: 'behavior', label: 'qqbot.workspace.behaviorCategory', tabs: ['autonomous', 'commands', 'knowledge'] },
   { key: 'operations', label: 'qqbot.workspace.operationsCategory', tabs: ['notifications', 'limits'] }
 ])
 const activeCategory = computed(() => categories.value.find(c => c.tabs.includes(activeTab.value))?.key || categories.value[0]!.key)
@@ -217,6 +224,10 @@ watch(() => route?.path, async () => { activeTab.value = tabs.find(tab => tab.ke
 watch(() => route?.query.tab, value => { const tab = tabs.find(tab => tab.key === value); if (tab) activeTab.value = tab.key })
 const settingsForm = ref<HTMLFormElement | null>(null)
 const form = ref<QQBotConfig | null>(null)
+const siteKnowledge = computed({
+  get: () => form.value?.site_knowledge ?? defaultSiteKnowledgeConfig(),
+  set: value => { if (form.value) form.value.site_knowledge = value }
+})
 const groupAdmins = computed({
   get: () => form.value?.group_admins ?? [],
   set: value => { if (form.value) form.value.group_admins = value }
@@ -295,7 +306,7 @@ function secretHint(set: boolean) { return t(set ? 'qqbot.secretStored' : 'qqbot
 function message(e: unknown) { return (e as {message?: string})?.message || t('common.error') }
 function apply(c: QQBotConfig, updateBaseline = true) {
   if (updateBaseline) savedAppId.value = c.app_id
-  form.value = cloneConfig({ ...c, notification_quiet_hours: c.notification_quiet_hours ?? { enabled: false, start_hour: 23, end_hour: 8 }, chat_disabled: c.chat_disabled ?? false, group_policies: c.group_policies ?? [], reward_alert_daily: c.reward_alert_daily ?? 0, custom_commands: c.custom_commands ?? [] })
+  form.value = cloneConfig({ ...c, notification_quiet_hours: c.notification_quiet_hours ?? { enabled: false, start_hour: 23, end_hour: 8 }, chat_disabled: c.chat_disabled ?? false, group_policies: c.group_policies ?? [], reward_alert_daily: c.reward_alert_daily ?? 0, custom_commands: c.custom_commands ?? [], site_knowledge: { ...defaultSiteKnowledgeConfig(), ...c.site_knowledge } })
   autonomous.value = { ...defaultAutonomousConfig(), ...c.autonomous }
   moderation.value = { ...defaultModerationConfig(), ...c.moderation }
   healthNotifications.value = { ...defaultHealthNotificationConfig(), ...c.health_notifications }

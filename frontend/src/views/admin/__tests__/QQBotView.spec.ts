@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import QQBotView from '../QQBotView.vue'
+import QQBotChatPreview from '@/components/admin/qqbot/QQBotChatPreview.vue'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { configSections, pickSection, cloneConfig } from '@/components/admin/qqbot/configSections'
 import { defaultModerationConfig, type QQBotConfig, type QQMemberOption } from '@/api/qqbot'
-const api = vi.hoisted(() => ({ config: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn() }))
+const api = vi.hoisted(() => ({ config: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn(), chatPreview: vi.fn() }))
 vi.mock('@/api/qqbot', async original => ({ ...await original<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 const wrappers: VueWrapper[] = []
@@ -122,6 +123,85 @@ describe('QQ module settings', () => {
   expect(w.get('[role="alert"]').text()).toContain('重名')
   await panel.get('input[placeholder="/a"]').setValue('/faq'); await w.get('form').trigger('submit'); await flushPromises()
   expect(server.custom_commands).toEqual([{ command: '/faq', reply: '固定回复', enabled: true }])
+ })
+ it.each(['zh', 'en'] as const)('%s supports missing legacy knowledge and saves it independently of chat drafts', async locale => {
+  const w = await mountView(locale)
+  await w.get('#qqbot-settings-tab-chat').trigger('click')
+  await w.get('#qqbot-settings-panel-chat textarea').setValue('Unsaved persona')
+  await category(w, locale === 'zh' ? '对话与指令' : 'Conversations & commands')
+  await w.get('#qqbot-settings-tab-knowledge').trigger('click')
+  expect(w.get('#qqbot-settings-panel-knowledge').isVisible()).toBe(true)
+  expect((w.get('[data-testid="knowledge-enabled"]').element as HTMLInputElement).checked).toBe(false)
+  expect((w.get('[data-testid="knowledge-content"]').element as HTMLTextAreaElement).value).toBe('')
+  await w.get('[data-testid="knowledge-content"]').setValue('官网：https://example.com\n接入教程：在控制台创建 API Key。')
+  await w.get('[data-testid="knowledge-enabled"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSection).toHaveBeenLastCalledWith('knowledge', 'knowledge-1', expect.objectContaining({ site_knowledge: { enabled: true, content: '官网：https://example.com\n接入教程：在控制台创建 API Key。' } }))
+  expect(server.system_prompt).toBe('Helpful')
+  expect(server.site_knowledge?.enabled).toBe(true)
+  await category(w, locale === 'zh' ? '连接与模型' : 'Connections & models')
+  await w.get('#qqbot-settings-tab-chat').trigger('click')
+  expect((w.get('#qqbot-settings-panel-chat textarea').element as HTMLTextAreaElement).value).toBe('Unsaved persona')
+ })
+ it('validates enabled knowledge and counts supplementary characters once', async () => {
+  const w = await mountView('zh', '/admin/qqbot/config?tab=knowledge')
+  const content = w.get('[data-testid="knowledge-content"]')
+  await w.get('[data-testid="knowledge-enabled"]').setValue(true)
+  await content.setValue(' \n\t')
+  const reportValidity = vi.spyOn(content.element as HTMLTextAreaElement, 'reportValidity')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(reportValidity).toHaveBeenCalledOnce()
+  expect(api.saveSection).not.toHaveBeenCalled()
+  await content.setValue('𠮷'.repeat(12001))
+  expect(w.get('[data-testid="knowledge-count"]').text()).toContain('12001 / 12000 字')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSection).not.toHaveBeenCalled()
+  await content.setValue('𠮷'.repeat(12000))
+  expect(w.get('[data-testid="knowledge-count"]').text()).toContain('12000 / 12000 字')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.site_knowledge?.content).toBe('𠮷'.repeat(12000))
+ })
+ it('tries questions independently with saved configuration and retains knowledge drafts', async () => {
+  server.site_knowledge = { enabled: true, content: 'Saved knowledge' }
+  api.chatPreview.mockResolvedValue({ text: '试问回答', action: 'chat', input_tokens: 1, output_tokens: 1, duration_ms: 1, knowledge_sources: [] })
+  const w = await mountView('zh', '/admin/qqbot/config?tab=knowledge')
+  await w.get('[data-testid="knowledge-content"]').setValue('Unsaved knowledge')
+  const preview = w.getComponent(QQBotChatPreview)
+  expect(preview.props('config').site_knowledge.content).toBe('Saved knowledge')
+  await w.get('[data-testid="qq-preview-group"]').setValue('group')
+  await w.get('[data-testid="qq-preview-question"]').setValue('API 怎么接入？')
+  await w.get('[data-testid="qq-preview-run"]').trigger('click'); await flushPromises()
+  expect(api.chatPreview).toHaveBeenCalledWith({ group_id: 'group', member_id: undefined, question: 'API 怎么接入？' })
+  expect(api.saveSection).not.toHaveBeenCalled()
+  expect((w.get('[data-testid="knowledge-content"]').element as HTMLTextAreaElement).value).toBe('Unsaved knowledge')
+  expect(w.get('[data-testid="qq-preview-result"]').text()).toContain('试问回答')
+ })
+ it('retains knowledge text when disabled and keeps the draft on version conflicts', async () => {
+  server.site_knowledge = { enabled: true, content: 'Existing site guide' }
+  const w = await mountView('zh', '/admin/qqbot/config?tab=knowledge')
+  await w.get('[data-testid="knowledge-enabled"]').setValue(false)
+  api.saveSection.mockRejectedValueOnce(new Error('此模块已被其他页面更新'))
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toContain('其他页面')
+  expect((w.get('[data-testid="knowledge-content"]').element as HTMLTextAreaElement).value).toBe('Existing site guide')
+  expect((w.get('[data-testid="knowledge-enabled"]').element as HTMLInputElement).checked).toBe(false)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSection).toHaveBeenLastCalledWith('knowledge', 'knowledge-1', expect.anything())
+  expect(server.site_knowledge).toEqual({ enabled: false, content: 'Existing site guide' })
+ })
+ it('restores knowledge history as an unsaved draft', async () => {
+  server.site_knowledge = { enabled: true, content: 'Current site guide' }
+  api.configHistory.mockResolvedValue([{ at: '2026-10-30T10:00:00+08:00', section: 'knowledge', before: { site_knowledge: { enabled: false, content: 'Previous site guide' } }, after: { site_knowledge: server.site_knowledge } }])
+  const w = await mountView('zh', '/admin/qqbot/config?tab=knowledge')
+  const history = w.findAll('details').find(details => details.get('summary').text() === '最近 30 次配置变更')!
+  history.element.open = true; await history.trigger('toggle'); await flushPromises()
+  await history.find('button').trigger('click'); await flushPromises()
+  expect((w.get('[data-testid="knowledge-content"]').element as HTMLTextAreaElement).value).toBe('Previous site guide')
+  expect(server.site_knowledge?.content).toBe('Current site guide')
+  expect(api.saveSection).not.toHaveBeenCalled()
+  expect(w.get('#qqbot-settings-tab-knowledge').text()).toContain('•')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.site_knowledge).toEqual({ enabled: false, content: 'Previous site guide' })
  })
  it('shows and saves moderation only on the group page', async () => {
   const w = await mountView('zh', '/admin/qqbot/groups')

@@ -9,6 +9,11 @@ async function versionedPut<T extends { _version?: string; _section?: string }>(
 
 
 export interface QQBotCustomCommand { command: string; reply: string; enabled: boolean }
+export interface QQSiteKnowledgeEntry { id: string; title: string; category: string; content: string; url: string; keywords: string[]; enabled: boolean; updated_at: string }
+export interface QQSiteKnowledgeConfig { enabled: boolean; content: string; entries?: QQSiteKnowledgeEntry[] }
+export function defaultSiteKnowledgeConfig(): QQSiteKnowledgeConfig {
+  return { enabled: false, content: '' }
+}
 export interface QQGroupAdmin { app_id: string; group_id: string; member_id: string; nickname: string }
 export interface QQModerationConfig {
   enabled: boolean; groups: string[]; repeat_window_seconds: number; repeat_count: number
@@ -63,6 +68,7 @@ export interface QQBotConfig {
   enabled: boolean; app_id: string; app_secret: string; app_secret_set: boolean; sandbox: boolean
   allowed_groups: string[]; base_url: string; api_key: string; api_key_set: boolean
   custom_commands: QQBotCustomCommand[]
+  site_knowledge?: QQSiteKnowledgeConfig
   group_admins?: QQGroupAdmin[]
   price_notifications?: { enabled: boolean; scheduled: boolean; groups: string[] }
   chat_model: string; chat_protocol: 'chat_completions' | 'responses'
@@ -80,13 +86,32 @@ export interface QQRecentMember {
 }
 export interface QQMemberOption extends QQRecentMember { group_label: string }
 export interface QQMemberPage { app_id: string; items: QQMemberOption[]; total: number; page: number; page_size: number }
+export type QQSiteQueryKind = 'model_price' | 'channel_status' | 'activity_rules'
+export type QQSiteQueryStatus = 'succeeded' | 'not_found' | 'unavailable' | 'failed'
+export interface QQSiteQueryDecision {
+  kind: QQSiteQueryKind; model: string; activity: string; page: number
+  status: QQSiteQueryStatus; error_code: string; duration_ms: number
+}
+export interface QQChatExecution {
+  attempts: number
+  retries: number
+  usage_complete: boolean
+  last_error_code?: string
+}
+export interface QQChatPreviewRequest { group_id: string; member_id?: string; question: string }
+export interface QQChatPreviewResult {
+  text: string; action: string; input_tokens: number; output_tokens: number; duration_ms: number
+  knowledge_sources: { id: string; title: string; url: string; updated_at: string }[]
+  query?: QQSiteQueryDecision
+  chat_execution?: QQChatExecution
+}
 export interface QQBotRuntime {
   recent_members?: QQRecentMember[]
   moderation_records?: QQModerationRecord[]
   autonomous_stats?: { group_id: string; reason: string; count: number }[]
   encryption_ready: boolean; bindings: number
   groups: { id: string; last_event: string; last_seen_at: string }[]
-  jobs: { image_decision?: { tool?: string; review?: string; basis?: string; reason?: string; execution?: string; message_ref?: string; plan_ref?: string }; trigger_reason?: string; decision_reason?: string; id: string; group_id: string; member_id: string; kind: string; status: string; error: string; input_tokens: number; output_tokens: number; created_at: string }[]
+  jobs: { site_query?: QQSiteQueryDecision; chat_execution?: QQChatExecution; image_decision?: { tool?: string; review?: string; basis?: string; reason?: string; execution?: string; message_ref?: string; plan_ref?: string }; trigger_reason?: string; decision_reason?: string; id: string; group_id: string; member_id: string; kind: string; status: string; error: string; input_tokens: number; output_tokens: number; created_at: string }[]
   rewards: { id: number; user_id: number; kind: string; amount: number; created_at: string }[]
 }
 export interface QQBindingRequest { code?: string; member_id: string; group_id: string; nickname: string; expires_at: string }
@@ -188,6 +213,7 @@ export interface QQActivityPreview {
 }
 export interface QQTransferHistory { items: { id: number; from_user_id: number; to_user_id: number; from_email: string; to_email: string; amount: string; fee: string; net_amount: string; created_at: string }[]; total: number; page: number; page_size: number }
 export const qqbotAPI = {
+ chatPreview: async (params: QQChatPreviewRequest) => (await apiClient.post<QQChatPreviewResult>('/admin/qqbot/chat-preview', params, { timeout: 180000 })).data,
  members: async (params: { app_id?: string; group_id?: string; member_id?: string; search?: string; page?: number; page_size?: number }) => (await apiClient.get<QQMemberPage>('/admin/qqbot/members', { params })).data,
  moderationRecords: async (params: Record<string, string | number>) => (await apiClient.get<{ items: QQModerationRecord[]; total: number; page: number; page_size: number }>('/admin/qqbot/moderation-records', { params })).data,
  transferHistory: async (search: string, page: number) => (await apiClient.get<QQTransferHistory>('/admin/qqbot/transfers', { params: { search, page } })).data,

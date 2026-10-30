@@ -16,7 +16,7 @@ import (
 
 // Version only evaluation semantics: changing allocation/actions, a label or
 // pass-rate limits must not rewrite historical ability results.
-func scheduledTestPassRateVersion(ctx context.Context, tx *sql.Tx, planID int64, rule service.ScheduledTestProtectionRule) (string, error) {
+func scheduledTestPassRateVersion(ctx context.Context, tx qualityQuery, planID int64, rule service.ScheduledTestProtectionRule) (string, error) {
 	var prompt, kind, reasoning string
 	var maxTokens int
 	if err := tx.QueryRowContext(ctx, `SELECT d.prompt,d.output_kind,d.max_output_tokens,p.reasoning_effort

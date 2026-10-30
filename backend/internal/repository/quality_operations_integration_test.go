@@ -43,9 +43,11 @@ func qualityOperationsDB(t *testing.T) (context.Context, *sql.DB, *qualityOperat
 		require.NoError(t, err)
 		admin.Close()
 	})
-	_, err = db.Exec("CREATE TABLE accounts(id bigint PRIMARY KEY,name text,status text DEFAULT 'active',schedulable boolean DEFAULT true,deleted_at timestamptz,extra jsonb DEFAULT '{}',updated_at timestamptz DEFAULT now()); INSERT INTO accounts(id,name) VALUES(62,'A'),(63,'B'); CREATE TABLE scheduled_test_plans(id bigint PRIMARY KEY,latest_run_id text,updated_at timestamptz NOT NULL DEFAULT now()); INSERT INTO scheduled_test_plans(id,latest_run_id)VALUES(1,'run'); CREATE TABLE scheduled_test_pass_rate_states(plan_id bigint,account_id bigint,test_definition_id bigint,model_key text,blocked boolean DEFAULT false)")
+	_, err = db.Exec("CREATE TABLE accounts(id bigint PRIMARY KEY,name text,status text DEFAULT 'active',schedulable boolean DEFAULT true,deleted_at timestamptz,extra jsonb DEFAULT '{}',updated_at timestamptz DEFAULT now()); INSERT INTO accounts(id,name) VALUES(62,'A'),(63,'B'); CREATE TABLE scheduled_test_plans(id bigint PRIMARY KEY,latest_run_id text,protection jsonb DEFAULT '{}',model_id text DEFAULT 'model',model_ids text[] DEFAULT '{}',updated_at timestamptz NOT NULL DEFAULT now()); INSERT INTO scheduled_test_plans(id,latest_run_id)VALUES(1,'run'); CREATE TABLE scheduled_test_pass_rate_states(plan_id bigint,account_id bigint,test_definition_id bigint,model_key text,blocked boolean DEFAULT false)")
 	require.NoError(t, err)
-	for _, name := range []string{"294_quality_operations.sql", "309_quality_recovery_budget_evidence.sql"} {
+	_, err = db.Exec(`CREATE TABLE scheduled_test_combination_states(plan_id bigint,account_id bigint,model_key text,blocked boolean DEFAULT false)`)
+	require.NoError(t, err)
+	for _, name := range []string{"294_quality_operations.sql", "309_quality_recovery_budget_evidence.sql", "326_scheduled_test_all_pass_rounds.sql"} {
 		raw, err := os.ReadFile("../../migrations/" + name)
 		require.NoError(t, err)
 		_, err = db.Exec(string(raw))
@@ -169,6 +171,39 @@ func TestQualityOperationsHealthyFrequencyFencingIntegration(t *testing.T) {
 	next, err = r.QualityFrequencyDue(ctx, 1, id, "policy")
 	require.NoError(t, err)
 	require.NotNil(t, next)
+}
+
+func TestQualityOperationsAllPassConsecutivePreventsHealthyFrequencyIntegration(t *testing.T) {
+	ctx, db, r, _ := qualityOperationsDB(t)
+	c := service.DefaultQualityOperationsConfig()
+	c.DynamicEnabled, c.HealthyRounds, c.HealthyBaseSeconds, c.HealthyMaxSeconds = true, 3, 600, 1200
+	require.NoError(t, r.SaveOperationsConfig(ctx, &c))
+	_, err := db.Exec(`UPDATE scheduled_test_plans SET protection='{"enabled":true,"mode":"all_pass","required_consecutive_passes":5}'`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO quality_healthy_frequency(plan_id,account_id,policy_key,config_version,streak,next_at,observed_at) VALUES(1,62,'policy',$1,3,now()+interval '10 minutes',now())`, c.Version)
+	require.NoError(t, err)
+	for i := 0; i < 5; i++ {
+		_, err = db.Exec(`INSERT INTO scheduled_test_all_pass_rounds(plan_id,account_id,model_key,run_id,started_at,rule_version,verdict) VALUES(1,62,'model',$1,$2,'v1','pass')`, fmt.Sprintf("frequency-%d", i), time.Now().Add(time.Duration(i-10)*time.Minute))
+		require.NoError(t, err)
+		next, err := r.QualityFrequencyDue(ctx, 1, 62, "policy")
+		require.NoError(t, err)
+		if i < 4 {
+			require.Nil(t, next, "cron probes must continue before five actual successful rounds")
+		} else {
+			require.NotNil(t, next)
+		}
+	}
+	// A pending cron round can be deferred only after the preceding streak met N.
+	_, err = db.Exec(`INSERT INTO scheduled_test_all_pass_rounds(plan_id,account_id,model_key,run_id,started_at,rule_version) VALUES(1,62,'model','current',now(),'v1')`)
+	require.NoError(t, err)
+	next, err := r.QualityFrequencyDue(ctx, 1, 62, "policy")
+	require.NoError(t, err)
+	require.NotNil(t, next)
+	_, err = db.Exec(`INSERT INTO scheduled_test_combination_states VALUES(1,62,'model',true)`)
+	require.NoError(t, err)
+	next, err = r.QualityFrequencyDue(ctx, 1, 62, "policy")
+	require.NoError(t, err)
+	require.Nil(t, next, "an outstanding all-pass hold needs fresh recovery probes")
 }
 
 func TestQualityOperationsCapabilityHoldPreventsHealthyFrequencyIntegration(t *testing.T) {

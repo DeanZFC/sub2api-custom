@@ -73,7 +73,7 @@
       <AdminTestDecision v-if="review" :review="review" compact :show-pass-rate="false" @decided="$emit('decided')" />
     </div>
     <footer class="mt-auto space-y-3 border-t border-gray-100 p-3 dark:border-dark-800" data-test-footer>
-      <TestRecentPassRate :evidence="test.latest.pass_rate" />
+      <TestRecentPassRate :evidence="test.latest.pass_rate" :all-pass-progress="test.latest.all_pass_progress" />
       <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-xs text-gray-500 dark:text-gray-400">
         <time :datetime="resultTime(test.latest)">{{ formatDate(resultTime(test.latest)) }}</time>
         <div class="flex flex-wrap items-center gap-3" data-test-actions>

@@ -1,5 +1,9 @@
 <template>
   <div class="rounded-md bg-gray-50 p-2.5 text-xs dark:bg-dark-800/60" data-recent-pass-rate>
+    <div v-if="allPassProgress && allPassProgress.required > 1" class="mb-2 flex flex-wrap items-center gap-2" data-all-pass-progress>
+      <p class="font-medium tabular-nums text-gray-700 dark:text-gray-200">{{ t('admin.tests.protection.allPass.consecutiveProgress', { current: allPassProgress.consecutive_passes, required: allPassProgress.required }) }}</p>
+      <span class="rounded px-1.5 py-0.5 font-medium" :class="allPassProgress.round_verdict === 'fail' ? 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300' : 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'">{{ t(`admin.tests.protection.allPass.progressStates.${roundProgressState}`) }}</span>
+    </div>
     <template v-if="evidence">
       <div class="flex flex-wrap items-center gap-2">
         <p class="font-medium tabular-nums text-gray-700 dark:text-gray-200" data-recent-pass-rate-counts>{{ tr('recentCounts', { count: evidence.window_size, window, passed: evidence.passed, rate }) }}</p>
@@ -19,17 +23,20 @@
         </div>
       </details>
     </template>
-    <p v-else class="text-gray-500 dark:text-gray-400" data-recent-pass-rate-unavailable>{{ tr('recentUnavailable') }}</p>
+    <p v-else-if="!allPassProgress || allPassProgress.required <= 1" class="text-gray-500 dark:text-gray-400" data-recent-pass-rate-unavailable>{{ tr('recentUnavailable') }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { TestPassRateSummary } from '@/types'
+import type { TestAllPassProgress, TestPassRateSummary } from '@/types'
 
-const props = defineProps<{ evidence?: TestPassRateSummary | null }>()
+const props = defineProps<{ evidence?: TestPassRateSummary | null; allPassProgress?: TestAllPassProgress | null }>()
 const { t } = useI18n()
+const roundProgressState = computed(() => props.allPassProgress?.round_verdict === 'fail' ? 'failed'
+  : props.allPassProgress?.round_verdict !== 'pass' ? 'pending'
+    : props.allPassProgress.consecutive_passes >= props.allPassProgress.required ? 'ready' : 'collecting')
 const tr = (key: string, values: Record<string, unknown> = {}) => t(`admin.tests.protection.passRate.${key}`, values)
 const rate = computed(() => {
   const value = props.evidence?.pass_rate

@@ -393,7 +393,8 @@ func resetPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64) error 
 		return err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT account_id FROM scheduled_test_protection_states WHERE plan_id=$1
- UNION SELECT account_id FROM scheduled_test_combination_states WHERE plan_id=$1 ORDER BY account_id`, planID)
+ UNION SELECT account_id FROM scheduled_test_combination_states WHERE plan_id=$1
+ UNION SELECT account_id FROM scheduled_test_all_pass_rounds WHERE plan_id=$1 ORDER BY account_id`, planID)
 	if err != nil {
 		return err
 	}
@@ -419,6 +420,9 @@ func resetPlanProtectionTx(ctx context.Context, tx *sql.Tx, planID int64) error 
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_combination_states WHERE plan_id=$1 AND account_id=$2`, planID, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_all_pass_rounds WHERE plan_id=$1 AND account_id=$2`, planID, id); err != nil {
 			return err
 		}
 		if err := reconcileProtectionAccount(ctx, tx, id); err != nil {

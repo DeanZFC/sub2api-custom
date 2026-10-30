@@ -9,6 +9,52 @@ const api = vi.hoisted(() => ({ jobs: vi.fn(), members: vi.fn().mockResolvedValu
 vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
 
 describe('image intent receipts', () => {
+  it.each(['zh', 'en'])('shows retry diagnostics without treating missing usage as confirmed zero in %s', async locale => {
+    api.jobs.mockResolvedValue({ items: [{
+      id: 'retry-job', group_id: 'group', member_id: 'member', kind: 'chat', status: 'completed', error: '',
+      input_tokens: 0, output_tokens: 0, created_at: '2026-10-30T08:00:00Z',
+      chat_execution: { attempts: 3, retries: 2, usage_complete: false, last_error_code: 'http_503' }
+    }, {
+      id: 'known-job', group_id: 'group', member_id: 'member', kind: 'chat', status: 'completed', error: '',
+      input_tokens: 40, output_tokens: 20, created_at: '2026-10-30T07:00:00Z',
+      chat_execution: { attempts: 2, retries: 1, usage_complete: true, last_error_code: 'no_action' }
+    }, {
+      id: 'legacy-job', group_id: 'group', member_id: 'member', kind: 'chat', status: 'completed', error: '',
+      input_tokens: 10, output_tokens: 5, created_at: '2026-10-29T07:00:00Z'
+    }], total: 3, page: 1, page_size: 20 })
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
+    const w = mount(QQJobRecords, { global: { plugins: [i18n] } }); await flushPromises()
+    const [incomplete, complete, legacy] = w.findAll('article')
+    expect(incomplete.get('[data-testid="qq-job-chat-execution"]').text()).toContain(i18n.global.t('qqbot.chatExecution.attempts', { attempts: 3, retries: 2 }))
+    expect(incomplete.text()).toContain('http_503')
+    expect(incomplete.text()).toContain(`${i18n.global.t('qqbot.chatExecution.knownTokens')}: 0 / 0`)
+    expect(incomplete.get('[data-testid="qq-job-usage-incomplete"]').text()).toBe(i18n.global.t('qqbot.chatExecution.incompleteUsage'))
+    expect(complete.text()).toContain('Tokens: 40 / 20')
+    expect(complete.find('[data-testid="qq-job-usage-incomplete"]').exists()).toBe(false)
+    expect(legacy.find('[data-testid="qq-job-chat-execution"]').exists()).toBe(false)
+    expect(legacy.find('[data-testid="qq-job-usage-incomplete"]').exists()).toBe(false)
+    w.unmount()
+  })
+  it.each(['zh', 'en'])('filters and separates site query outcome from delivery state in %s', async locale => {
+    api.jobs.mockResolvedValue({ items: [{
+      id: 'query-job', group_id: 'group', member_id: 'member', kind: 'chat', status: 'completed', error: '',
+      input_tokens: 22, output_tokens: 14, created_at: '2026-10-30T08:00:00Z',
+      site_query: { kind: 'model_price', model: 'model-test', activity: '', page: 2, status: 'failed', error_code: 'provider_error', duration_ms: 15 }
+    }], total: 1, page: 1, page_size: 20 })
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
+    const w = mount(QQJobRecords, { global: { plugins: [i18n] } }); await flushPromises()
+    await w.get('[data-testid="qq-job-query-kind"]').setValue('model_price')
+    await w.get('[data-testid="qq-job-query-status"]').setValue('failed')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.jobs).toHaveBeenLastCalledWith(expect.objectContaining({ query_kind: 'model_price', query_status: 'failed', page: 1 }))
+    expect(w.get('article strong').text()).toContain('completed')
+    const query = w.get('[data-testid="qq-job-site-query"]')
+    expect(query.text()).toContain(i18n.global.t('qqbot.siteQuery.statuses.failed'))
+    expect(query.text()).toContain('model-test')
+    expect(query.text()).toContain('provider_error')
+    expect(query.text()).toContain(i18n.global.t('qqbot.siteQuery.help'))
+    w.unmount()
+  })
   it.each(['zh', 'en'])('renders review, execution and scoped references in %s', async locale => {
     api.jobs.mockResolvedValue({ items: [{
       id: 'job-id', group_id: 'group', member_id: 'member', kind: 'chat', status: 'completed',

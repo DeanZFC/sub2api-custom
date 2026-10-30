@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,6 +20,100 @@ type allPassFixture struct {
 	complete func(*service.ScheduledTestResult, string)
 	check    func(string, bool, ...int64)
 	review   func(*service.ScheduledTestResult, string)
+}
+
+func testScheduledTestAllPassConsecutiveRounds(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository) {
+	f := newAllPassFixture(t, ctx, db, plans, repo, false)
+	f.plan.Protection.RequiredConsecutivePasses = 2
+	_, err := plans.Update(ctx, f.plan)
+	require.NoError(t, err)
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	progress := func(row *service.ScheduledTestResult, count int, verdict string) {
+		t.Helper()
+		require.NoError(t, repo.hydrateAllPassProgress(ctx, []*service.ScheduledTestResult{row}))
+		require.NotNil(t, row.AllPassProgress)
+		require.Equal(t, 2, row.AllPassProgress.Required)
+		require.Equal(t, count, row.AllPassProgress.ConsecutivePasses)
+		require.Equal(t, verdict, row.AllPassProgress.RoundVerdict)
+	}
+	complete := func(rows []*service.ScheduledTestResult) {
+		for i := 0; i < 3; i++ {
+			f.complete(rows[i], "pass")
+		}
+	}
+	failed := f.round("consecutive-fail", at)
+	f.complete(failed[0], "fail")
+	f.check("quality_paused", false, 8, 9)
+	progress(failed[0], 0, "fail")
+	complete(failed)
+	f.complete(failed[3], "pass")
+	progress(failed[0], 0, "fail")
+	f.check("quality_paused", false, 8, 9)
+	first := f.round("consecutive-first", at.Add(time.Minute))
+	complete(first)
+	f.check("quality_paused", false, 8, 9)
+	progress(first[0], 1, "pass")
+	// Completion/review reentry cannot manufacture another successful round.
+	f.complete(first[0], "pass")
+	f.complete(first[3], "pass")
+	f.review(first[3], "pass")
+	f.review(first[3], "pass")
+	progress(first[0], 1, "pass")
+	f.check("quality_paused", false, 8, 9)
+	second := f.round("consecutive-second", at.Add(2*time.Minute))
+	progress(second[0], 1, "pending")
+	complete(second)
+	progress(second[0], 2, "pass")
+	f.check("active", false, 10)
+	f.complete(second[3], "pass")
+	f.review(second[3], "fail")
+	progress(second[0], 0, "fail")
+	f.check("quality_paused", false, 10)
+	f.review(second[3], "pass")
+	progress(second[0], 2, "pass")
+	f.check("active", false, 10)
+	// Altering the question cannot consume successes from the previous prompt.
+	var originalPrompt string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT prompt FROM scheduled_test_definitions WHERE id=$1`, f.plan.Protection.Rules[0].TestDefinitionID).Scan(&originalPrompt))
+	_, err = db.ExecContext(ctx, `UPDATE scheduled_test_definitions SET prompt=prompt || ' changed' WHERE id=$1`, f.plan.Protection.Rules[0].TestDefinitionID)
+	require.NoError(t, err)
+	changed := f.round("consecutive-changed-prompt", at.Add(150*time.Second))
+	complete(changed)
+	progress(changed[0], 1, "pass")
+	_, err = db.ExecContext(ctx, `UPDATE scheduled_test_definitions SET prompt=$2 WHERE id=$1`, f.plan.Protection.Rules[0].TestDefinitionID, originalPrompt)
+	require.NoError(t, err)
+	reverted := f.round("consecutive-reverted-prompt", at.Add(160*time.Second))
+	complete(reverted)
+	progress(reverted[0], 1, "pass")
+	// An unresolved abandoned round is a real break, even if later rounds pass.
+	abandoned := f.round("consecutive-abandoned", at.Add(3*time.Minute))
+	f.complete(abandoned[0], "pass")
+	third := f.round("consecutive-after-pending", at.Add(4*time.Minute))
+	complete(third)
+	progress(third[0], 1, "pass")
+	// A later explicit failure always pauses immediately and resets progress.
+	f.complete(third[3], "pass")
+	f.review(third[3], "fail")
+	progress(third[0], 0, "fail")
+	f.check("quality_paused", false, 10)
+	// Editing the required count invalidates both stale approval and streaks.
+	f.plan.Protection.RequiredConsecutivePasses = 3
+	_, err = plans.Update(ctx, f.plan)
+	require.NoError(t, err)
+	var saved int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scheduled_test_all_pass_rounds WHERE plan_id=$1`, f.plan.ID).Scan(&saved))
+	require.Zero(t, saved)
+	var generation int64
+	_ = db.QueryRowContext(ctx, `SELECT generation FROM scheduled_test_protection_states WHERE result_id=$1`, third[3].ID).Scan(&generation)
+	require.ErrorIs(t, repo.DecideTestResult(ctx, 1, third[3].ID, generation, "pass"), service.ErrScheduledTestVoteUnavailable)
+	// Retention is bounded independently of whether individual results survive.
+	for i := 0; i < 105; i++ {
+		_, err = db.ExecContext(ctx, `INSERT INTO scheduled_test_all_pass_rounds(plan_id,account_id,model_key,run_id,started_at,rule_version,verdict) VALUES($1,62,$2,$3,$4,'old','pass')`, f.plan.ID, f.plan.ModelID, fmt.Sprintf("retention-%d", i), at.Add(time.Duration(i-200)*time.Minute))
+		require.NoError(t, err)
+	}
+	_ = f.round("retention-current", at.Add(5*time.Minute))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scheduled_test_all_pass_rounds WHERE plan_id=$1`, f.plan.ID).Scan(&saved))
+	require.Equal(t, 101, saved)
 }
 
 func testScheduledTestPelicanDuration(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository) {

@@ -284,11 +284,13 @@ func sortedProtectionIDs(ids map[int64]bool) []int64 {
 // Expressions are evaluated inside one model only. Group memberships belong
 // to the account, so their final assignment is resolved across those decisions.
 type protectionModelRouting struct {
-	verdicts    map[int64]string
-	held        bool
-	accountWide bool
-	decision    service.ScheduledTestCombinationDecision
-	reason      string
+	verdicts      map[int64]string
+	streakPending bool
+	streakFailed  bool
+	held          bool
+	accountWide   bool
+	decision      service.ScheduledTestCombinationDecision
+	reason        string
 }
 
 func protectionModelGroupChanges(config service.ScheduledTestProtectionConfig, models map[string]*protectionModelRouting, current map[int64]bool) []protectionRoutingChange {
@@ -301,11 +303,11 @@ func protectionModelGroupChanges(config service.ScheduledTestProtectionConfig, m
 	unresolved, unsafe := false, false
 	for _, model := range models {
 		action := model.decision.Action
-		failed := false
+		failed := model.streakFailed
 		for _, verdict := range model.verdicts {
 			failed = failed || verdict == "fail"
 		}
-		pending := action == nil
+		pending := action == nil || model.streakPending
 		if config.UsesAllPass() {
 			for _, rule := range config.Rules {
 				if (rule.Vote == nil || !rule.Vote.Enabled || rule.HasDurationThreshold() || rule.UsesAutoReview()) && model.verdicts[rule.TestDefinitionID] != "pass" && model.verdicts[rule.TestDefinitionID] != "fail" {
@@ -494,6 +496,13 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
+		var allPassVersion string
+		if config.UsesAllPass() {
+			allPassVersion, err = scheduledTestAllPassVersion(ctx, tx, state.planID, config)
+			if err != nil {
+				return err
+			}
+		}
 		for _, key := range keys {
 			model := models[key]
 			if config.UsesAllPass() {
@@ -502,6 +511,25 @@ func reconcileProtectionGroups(ctx context.Context, tx *sql.Tx, state *protectio
 					held = held || state.blocked
 				}
 				model.decision, model.reason = service.EvaluateScheduledTestAllPass(config, model.verdicts, nil, held)
+				roundVerdict := service.ScheduledTestAllPassRoundVerdict(config, model.verdicts)
+				progress, err := reconcileScheduledTestAllPassProgress(ctx, tx, state, key, config, allPassVersion, roundVerdict, model.verdicts, key == state.modelKey)
+				if err != nil {
+					return err
+				}
+				if progress.RoundVerdict == "fail" {
+					model.streakFailed = true
+					action := config.AllPassOutcomeAction("fail")
+					model.decision.Action = &action
+					model.reason = "本轮已有明确不通过，等待新的连续成功轮次"
+				} else if progress.RoundVerdict == "pending" || roundVerdict == "pass" && progress.ConsecutivePasses < progress.Required {
+					model.streakPending = true
+					scheduling := "keep"
+					if held {
+						scheduling = "pause"
+					}
+					model.decision.Action = &service.ScheduledTestOutcomeAction{Scheduling: scheduling, GroupMode: "keep"}
+					model.reason = fmt.Sprintf("等待连续 %d 轮全部自动检测通过（当前 %d 轮）", progress.Required, progress.ConsecutivePasses)
+				}
 			} else {
 				model.decision = service.EvaluateScheduledTestCombinations(config, model.verdicts)
 				labels := make([]string, 0, len(model.decision.RuleIDs))
@@ -650,12 +678,34 @@ func (r *scheduledTestResultRepository) BeginProtectionRun(ctx context.Context, 
 	if err != nil {
 		return err
 	}
+	var allPassVersion string
+	if config.UsesAllPass() {
+		allPassVersion, err = scheduledTestAllPassVersion(ctx, tx, plan.ID, *config)
+		if err != nil {
+			return err
+		}
+	}
 	for _, target := range targets {
 		eligible, err := lockProtectionAccount(ctx, tx, target.accountID)
 		if err != nil {
 			return err
 		}
 		if eligible {
+			if config.UsesAllPass() {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_test_all_pass_rounds(plan_id,account_id,model_key,run_id,started_at,rule_version)
+ SELECT p.id,$2,$3,p.latest_run_id,$4,$5 FROM scheduled_test_plans p
+ WHERE p.id=$1 AND p.latest_run_id<>'' ON CONFLICT(plan_id,account_id,model_key,run_id) DO NOTHING`, plan.ID, target.accountID, target.modelKey, started.Round(time.Microsecond), allPassVersion); err != nil {
+					return err
+				}
+				// The maximum configured streak is 100; retain that many prior
+				// rounds plus the pending current round, independent of result pruning.
+				if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_all_pass_rounds h WHERE h.plan_id=$1 AND h.account_id=$2 AND h.model_key=$3
+ AND h.id IN (SELECT history.id FROM scheduled_test_all_pass_rounds history JOIN scheduled_test_plans p ON p.id=history.plan_id
+ WHERE history.plan_id=$1 AND history.account_id=$2 AND history.model_key=$3 AND history.run_id<>p.latest_run_id
+ ORDER BY history.started_at DESC,history.id DESC OFFSET 100)`, plan.ID, target.accountID, target.modelKey); err != nil {
+					return err
+				}
+			}
 			if err := initializeProtectionActionStates(ctx, tx, plan.ID, target.accountID, target.modelKey, config); err != nil {
 				return err
 			}

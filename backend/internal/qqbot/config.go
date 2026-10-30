@@ -132,6 +132,9 @@ func validateConfig(c Config) error {
 	if err := validateGroupAdmins(c); err != nil {
 		return err
 	}
+	if err := validateSiteKnowledge(c.SiteKnowledge); err != nil {
+		return err
+	}
 	if c.ChatProtocol != "responses" && c.ChatProtocol != "chat_completions" {
 		return errors.New("聊天接口模式不正确")
 	}
@@ -206,6 +209,9 @@ func (s *Service) SaveBasicConfig(ctx context.Context, c Config) (Config, error)
 		if err := checkConfigVersion(ctx, old); err != nil {
 			return old, err
 		}
+		// Knowledge has its own independently versioned module. Legacy clients
+		// saving the full basic configuration must not erase or overwrite it.
+		c.SiteKnowledge = old.SiteKnowledge
 		c.InviteReward = old.InviteReward
 		c.InviteDailyLimit = old.InviteDailyLimit
 		c.InviteMinRechargeTotal = old.InviteMinRechargeTotal
@@ -244,6 +250,7 @@ func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Co
 	}
 	c.SectionVersions = nil
 	c.CustomCommands = normalizeCustomCommands(c.CustomCommands)
+	c.SiteKnowledge = normalizeSiteKnowledge(old.SiteKnowledge, c.SiteKnowledge)
 	c.AppID = strings.TrimSpace(c.AppID)
 	c.GroupAdmins = normalizeGroupAdmins(c.GroupAdmins)
 	c.Moderation.Exemptions = normalizeModerationExemptions(c.Moderation.Exemptions)

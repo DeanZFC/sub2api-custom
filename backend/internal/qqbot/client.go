@@ -78,6 +78,19 @@ func Challenge(secret string, data json.RawMessage) (map[string]string, error) {
 }
 
 func noRedirect(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+
+// Preserve retry evidence without exposing upstream bodies, URLs or credentials.
+// Callers decide whether their operation is safe to retry.
+type requestFailure struct {
+	StatusCode int
+	RetryAfter string
+	cause      error
+	message    string
+}
+
+func (e *requestFailure) Error() string { return e.message }
+func (e *requestFailure) Unwrap() error { return e.cause }
+
 func (s *Service) request(ctx context.Context, method, endpoint, key string, body any, limit int64) ([]byte, string, error) {
 	var reader io.Reader
 	if body != nil {
@@ -101,15 +114,15 @@ func (s *Service) requestBody(ctx context.Context, method, endpoint, key string,
 	req.Header.Set("Content-Type", contentType)
 	resp, err := s.http.Do(req)
 	if err != nil {
-		return nil, "", errors.New("服务连接失败或超时；未自动重试，请查看用量后再操作")
+		return nil, "", &requestFailure{cause: err, message: "服务连接失败或超时，请查看调用记录"}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", fmt.Errorf("服务返回 HTTP %d，请管理员检查接口、模型和凭据", resp.StatusCode)
+		return nil, "", &requestFailure{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After"), message: fmt.Sprintf("服务返回 HTTP %d，请管理员检查接口、模型和凭据", resp.StatusCode)}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, "", errors.New("响应读取失败")
+		return raw, resp.Header.Get("Content-Type"), &requestFailure{cause: err, message: "响应读取失败"}
 	}
 	if int64(len(raw)) > limit {
 		return nil, "", errors.New("响应超过大小限制")
@@ -139,6 +152,10 @@ func (s *Service) chatRequest(ctx context.Context, c Config, messages []Message,
 }
 
 func (s *Service) chatRequestWithTools(ctx context.Context, c Config, messages []Message, tools []any) ([]byte, string, error) {
+	return s.chatRequestWithToolChoice(ctx, c, messages, tools, "required")
+}
+
+func (s *Service) chatRequestWithToolChoice(ctx context.Context, c Config, messages []Message, tools []any, choice string) ([]byte, string, error) {
 	path := "/chat/completions"
 	body := map[string]any{"model": c.ChatModel, "messages": messages, "stream": false, "max_completion_tokens": c.MaxOutputTokens}
 	if c.ChatProtocol == "responses" {
@@ -147,7 +164,7 @@ func (s *Service) chatRequestWithTools(ctx context.Context, c Config, messages [
 	}
 	if len(tools) > 0 {
 		body["tools"] = tools
-		body["tool_choice"] = "required"
+		body["tool_choice"] = choice
 		body["parallel_tool_calls"] = false
 	}
 	return s.request(ctx, "POST", endpoint(c.BaseURL, path), c.APIKey, body, 4<<20)
@@ -193,10 +210,13 @@ func parseChat(raw []byte, ct string) (string, int64, int64, error) {
 				continue
 			}
 			var v struct {
-				Type    string `json:"type"`
-				Delta   string `json:"delta"`
+				Type    string          `json:"type"`
+				Code    string          `json:"code"`
+				Error   json.RawMessage `json:"error"`
+				Delta   string          `json:"delta"`
 				Choices []struct {
-					Delta struct {
+					FinishReason string `json:"finish_reason"`
+					Delta        struct {
 						Content string `json:"content"`
 					} `json:"delta"`
 				} `json:"choices"`
@@ -209,13 +229,25 @@ func parseChat(raw []byte, ct string) (string, int64, int64, error) {
 			if json.Unmarshal([]byte(data), &v) != nil {
 				continue
 			}
-			if v.Type == "error" || v.Type == "response.failed" || v.Type == "response.incomplete" {
-				return "", 0, 0, errors.New("模型未完成回复，请查看调用记录")
+			if v.Type == "error" || v.Type == "response.failed" || v.Type == "response.incomplete" || (len(v.Error) > 0 && string(v.Error) != "null") {
+				rawError := v.Error
+				if len(rawError) == 0 && v.Code != "" {
+					rawError, _ = json.Marshal(map[string]string{"code": v.Code})
+				}
+				status := ""
+				if v.Type == "response.incomplete" {
+					status = "incomplete"
+				}
+				return "", 0, 0, chatCompletionFailure(status, rawError, nil)
 			}
 			if v.Type == "response.output_text.delta" {
 				_, _ = out.WriteString(v.Delta)
 			}
 			for _, ch := range v.Choices {
+				if ch.FinishReason == "length" || ch.FinishReason == "content_filter" {
+					details, _ := json.Marshal(map[string]string{"reason": ch.FinishReason})
+					return "", 0, 0, chatCompletionFailure("incomplete", nil, details)
+				}
 				_, _ = out.WriteString(ch.Delta.Content)
 			}
 			if v.Usage.Prompt > 0 {
@@ -240,10 +272,13 @@ func parseChat(raw []byte, ct string) (string, int64, int64, error) {
 		return out.String(), in, output, nil
 	}
 	var v struct {
-		Status     string `json:"status"`
-		OutputText string `json:"output_text"`
-		Choices    []struct {
-			Message struct {
+		Status            string          `json:"status"`
+		Error             json.RawMessage `json:"error"`
+		IncompleteDetails json.RawMessage `json:"incomplete_details"`
+		OutputText        string          `json:"output_text"`
+		Choices           []struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -261,13 +296,17 @@ func parseChat(raw []byte, ct string) (string, int64, int64, error) {
 		} `json:"usage"`
 	}
 	if json.Unmarshal(raw, &v) != nil {
-		return "", 0, 0, errors.New("模型响应格式不兼容")
+		return "", 0, 0, chatResponseError{Code: "malformed_response", Message: "模型响应格式不兼容", Retryable: true}
 	}
-	if v.Status == "failed" || v.Status == "incomplete" {
-		return "", 0, 0, errors.New("模型未完成回复")
+	if v.Status == "failed" || v.Status == "incomplete" || (len(v.Error) > 0 && string(v.Error) != "null") {
+		return "", 0, 0, chatCompletionFailure(v.Status, v.Error, v.IncompleteDetails)
 	}
 	text := v.OutputText
 	if len(v.Choices) > 0 {
+		if finish := v.Choices[0].FinishReason; finish == "length" || finish == "content_filter" {
+			details, _ := json.Marshal(map[string]string{"reason": finish})
+			return "", 0, 0, chatCompletionFailure("incomplete", nil, details)
+		}
 		text = v.Choices[0].Message.Content
 	}
 	if text == "" {
@@ -280,7 +319,7 @@ func parseChat(raw []byte, ct string) (string, int64, int64, error) {
 		}
 	}
 	if strings.TrimSpace(text) == "" {
-		return "", 0, 0, errors.New("模型没有返回文本")
+		return "", 0, 0, chatResponseError{Code: "empty_response", Message: "模型没有返回文本", Retryable: true}
 	}
 	if v.Usage.Input == 0 {
 		v.Usage.Input = v.Usage.Prompt

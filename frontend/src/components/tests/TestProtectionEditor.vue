@@ -18,6 +18,10 @@
       </details>
       <div v-if="allPass" class="space-y-3" data-all-pass-policy>
         <p class="rounded-lg bg-blue-50 p-3 text-sm leading-relaxed text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">{{ t('admin.tests.protection.allPass.modeHint') }}</p>
+        <label class="input-label block">{{ t('admin.tests.protection.allPass.requiredConsecutivePasses') }}
+          <input :value="modelValue.required_consecutive_passes ?? 1" type="number" min="1" max="100" step="1" class="input mt-1 w-32" data-all-pass-consecutive @input="update(next => { next.required_consecutive_passes = ($event.target as HTMLInputElement).valueAsNumber })" />
+        </label>
+        <p class="text-xs text-gray-500 dark:text-gray-400" data-all-pass-consecutive-hint>{{ t('admin.tests.protection.allPass.consecutiveHint') }}</p>
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.tests.protection.allPass.newChecksHint') }}</p>
         <p class="text-sm text-gray-600 dark:text-gray-300" data-all-pass-action-summary>{{ t(defaultActions ? 'admin.tests.experience.actionDefaults' : 'admin.tests.experience.customActions') }}</p>
         <details :open="!defaultActions" class="rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-all-pass-action-details><summary class="mb-3 cursor-pointer text-sm font-medium">{{ t('admin.tests.experience.actionAdvanced') }}</summary>
@@ -178,6 +182,7 @@ const setMode = (mode: NonNullable<TestProtectionConfig['mode']>) => update(next
     delete next.combinations
   }
   if (mode !== 'all_pass') {
+    delete next.required_consecutive_passes
     delete next.pass_group_ids
     delete next.on_pass
     delete next.on_fail

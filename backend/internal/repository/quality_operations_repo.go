@@ -160,8 +160,15 @@ func (r *qualityOperationsRepository) SettleQualityProbe(ctx context.Context, re
 	return tx.Commit()
 }
 func (r *qualityOperationsRepository) QualityFrequencyDue(ctx context.Context, plan, account int64, key string) (*time.Time, error) {
+	needed, err := scheduledTestAllPassNeedsFreshRound(ctx, r.db, plan, account)
+	if err != nil {
+		return nil, err
+	}
+	if needed {
+		return nil, nil
+	}
 	var next time.Time
-	err := r.db.QueryRowContext(ctx, `SELECT f.next_at FROM quality_healthy_frequency f JOIN quality_operations_config c ON c.id=1 AND c.version=f.config_version AND c.config->>'dynamic_enabled'='true'
+	err = r.db.QueryRowContext(ctx, `SELECT f.next_at FROM quality_healthy_frequency f JOIN quality_operations_config c ON c.id=1 AND c.version=f.config_version AND c.config->>'dynamic_enabled'='true'
  WHERE f.plan_id=$1 AND f.account_id=$2 AND f.policy_key=$3 AND f.streak>=(c.config->>'healthy_rounds')::integer AND f.next_at>now()
  AND NOT EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.account_id=$2 AND s.blocked)`, plan, account, key).Scan(&next)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -221,6 +228,13 @@ func (r *qualityOperationsRepository) RecordQualityFrequency(ctx context.Context
 		return err
 	}
 	if anomaly {
+		streak = 0
+	}
+	needed, err := scheduledTestAllPassNeedsFreshRound(ctx, tx, plan.ID, *result.AccountID)
+	if err != nil {
+		return err
+	}
+	if needed {
 		streak = 0
 	}
 	next := time.Now().UTC().Add(c.HealthyDelay(streak))

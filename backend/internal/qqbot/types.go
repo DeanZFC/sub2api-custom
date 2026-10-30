@@ -40,6 +40,7 @@ type Config struct {
 	ImageModel               string                   `json:"image_model"`
 	ImageSize                string                   `json:"image_size"`
 	SystemPrompt             string                   `json:"system_prompt"`
+	SiteKnowledge            SiteKnowledgeConfig      `json:"site_knowledge"`
 	MaxOutputTokens          int                      `json:"max_output_tokens"`
 	HistoryMessages          int                      `json:"history_messages"`
 	DailyChatLimit           int                      `json:"daily_chat_limit"`
@@ -146,6 +147,15 @@ type Message struct {
 	Images  []string `json:"-"`
 }
 
+// ChatExecution records bounded upstream chat attempts. UsageComplete is false
+// when one or more attempts did not provide reliable token usage.
+type ChatExecution struct {
+	Attempts      int    `json:"attempts"`
+	Retries       int    `json:"retries"`
+	UsageComplete bool   `json:"usage_complete"`
+	LastErrorCode string `json:"last_error_code,omitempty"`
+}
+
 // MarshalJSON keeps ordinary turns compatible with the existing API payload,
 // while turning image-bearing turns into the Chat Completions multimodal shape.
 // Responses requests use responsesMessages in client.go because that protocol
@@ -173,7 +183,9 @@ func (m Message) MarshalJSON() ([]byte, error) {
 }
 
 type Job struct {
+	SiteQuery       json.RawMessage `json:"site_query,omitempty"`
 	ImageDecision   json.RawMessage `json:"image_decision,omitempty"`
+	ChatExecution   json.RawMessage `json:"chat_execution,omitempty"`
 	TransientReply  bool            `json:"-"`
 	TriggerReason   string          `json:"trigger_reason"`
 	DecisionReason  string          `json:"decision_reason"`

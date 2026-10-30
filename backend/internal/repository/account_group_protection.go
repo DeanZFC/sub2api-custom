@@ -16,6 +16,7 @@ func lockAccountMembershipProtection(ctx context.Context, tx sqlExecutor, accoun
  WHERE EXISTS (SELECT 1 FROM scheduled_test_protection_states s WHERE s.plan_id=p.id AND s.account_id=$1)
  OR EXISTS (SELECT 1 FROM scheduled_test_combination_states s WHERE s.plan_id=p.id AND s.account_id=$1)
  OR EXISTS (SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.plan_id=p.id AND s.account_id=$1)
+ OR EXISTS (SELECT 1 FROM scheduled_test_all_pass_rounds s WHERE s.plan_id=p.id AND s.account_id=$1)
  OR EXISTS (SELECT 1 FROM scheduled_test_results r WHERE r.plan_id=p.id AND r.account_id=$1
             AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked)
  ORDER BY p.id FOR NO KEY UPDATE`, accountID)
@@ -76,7 +77,7 @@ func releaseDetachedAccountProtection(ctx context.Context, tx sqlExecutor, accou
  AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked`, accountID, pq.Array(detached)); err != nil {
 		return err
 	}
-	for _, table := range []string{"scheduled_test_protection_states", "scheduled_test_combination_states", "scheduled_test_pass_rate_states"} {
+	for _, table := range []string{"scheduled_test_protection_states", "scheduled_test_combination_states", "scheduled_test_pass_rate_states", "scheduled_test_all_pass_rounds"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE account_id=$1 AND plan_id=ANY($2)`, accountID, pq.Array(detached)); err != nil {
 			return err
 		}

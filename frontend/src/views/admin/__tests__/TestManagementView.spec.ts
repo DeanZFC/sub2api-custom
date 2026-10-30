@@ -34,6 +34,28 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('configurable test management', () => {
+  it('loads, validates, saves and copies consecutive whole-round requirements', async () => {
+    const protection = { enabled: true, mode: 'all_pass', required_consecutive_passes: 3, rules: [{
+      test_definition_id: 2, priority: 0, required_pass: false, pause_on_failure: true, expected_answer: '21', answer_match: 'numeric',
+    }] }
+    api.listPlans.mockResolvedValue([{ ...plan, protection }])
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('tbody button[aria-label="common.edit"]').trigger('click'); await flushPromises()
+    const dialog = wrapper.get('[data-dialog]')
+    expect(dialog.get<HTMLInputElement>('[data-all-pass-consecutive]').element.value).toBe('3')
+    const save = dialog.findAll('button').find(button => button.text() === 'common.save')!
+    await dialog.get('[data-all-pass-consecutive]').setValue('0')
+    expect(save.attributes('disabled')).toBeDefined()
+    await dialog.get('[data-all-pass-consecutive]').setValue('5')
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click'); await flushPromises()
+    expect(api.updatePlan).toHaveBeenCalledWith(10, expect.objectContaining({ protection: expect.objectContaining({ required_consecutive_passes: 5 }) }))
+    expect(protection.required_consecutive_passes).toBe(3)
+    await wrapper.get('tbody button[aria-label="common.copy"]').trigger('click'); await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, protection: expect.objectContaining({ required_consecutive_passes: 3 }) }))
+    wrapper.unmount()
+  })
+
   it('hides retired statistics definitions and offers only active output kinds', async () => {
     api.listTypes.mockResolvedValue([{ id: 7, name: 'Retired traffic statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true }])
     const wrapper = makeWrapper(); await flushPromises()

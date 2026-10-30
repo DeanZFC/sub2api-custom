@@ -56,6 +56,7 @@ func newSpamReportHarness(t *testing.T) *spamReportHarness {
 			require.Equal(t, "system", messages[0].Role)
 			require.Equal(t, "user", messages[1].Role)
 			require.NotContains(t, string(rawMessages), "OPERATOR_CHAT_PROMPT_SHOULD_NOT_APPEAR")
+			require.NotContains(t, string(rawMessages), "SITE_KNOWLEDGE_SHOULD_NOT_APPEAR")
 			require.NotContains(t, string(rawMessages), "PERSONAL_HISTORY_SHOULD_NOT_APPEAR")
 			h.mu.Lock()
 			h.requests = append(h.requests, messages)
@@ -90,6 +91,7 @@ func newSpamReportHarness(t *testing.T) *spamReportHarness {
 	require.NoError(t, err)
 	c.BaseURL = server.URL + "/v1"
 	c.SystemPrompt = "OPERATOR_CHAT_PROMPT_SHOULD_NOT_APPEAR"
+	c.SiteKnowledge = SiteKnowledgeConfig{Enabled: true, Content: "SITE_KNOWLEDGE_SHOULD_NOT_APPEAR"}
 	c.Moderation.ReportEnabled = true
 	c.Moderation.Groups = []string{"group", "other-group"}
 	h.c = c

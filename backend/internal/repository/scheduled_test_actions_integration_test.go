@@ -21,7 +21,7 @@ import (
 func TestScheduledTestActionsIntegration(t *testing.T) {
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("MIGRATION_TEST_DATABASE_URL is not set")
+		dsn = integrationDatabaseDSN
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -77,7 +77,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 		"309_quality_recovery_budget_evidence.sql",
 		"312_scheduled_test_pass_rate.sql",
 		"314_scheduled_test_auto_review.sql",
-		"315_scheduled_test_multi_model.sql",
+		"315_scheduled_test_multi_model.sql", "326_scheduled_test_all_pass_rounds.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -107,6 +107,14 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 	t.Run("all pass scheduling and manual veto", func(t *testing.T) {
 		reset(t)
 		testScheduledTestAllPassLifecycle(t, ctx, db, plans, repo)
+	})
+	t.Run("all pass requires consecutive whole rounds", func(t *testing.T) {
+		reset(t)
+		testScheduledTestAllPassConsecutiveRounds(t, ctx, db, plans, repo)
+	})
+	t.Run("all pass consecutive rounds keep model promotion independent", func(t *testing.T) {
+		reset(t)
+		testScheduledTestAllPassMultiModelConsecutive(t, ctx, db, plans, repo, candyID)
 	})
 	t.Run("pelican duration limits coexist with review", func(t *testing.T) {
 		reset(t)

@@ -23,11 +23,13 @@ const chatActionInstructions = `默认使用 reply_text 文字回答。闲聊、
 
 type chatTurnResult struct {
 	Text           string
+	SiteQuery      *siteQuery
 	ImagePlan      *pendingImagePlan
 	ImagePrompt    string
 	EditImageIndex int
 	InputTokens    int64
 	OutputTokens   int64
+	ChatExecution  ChatExecution
 }
 
 func chatImageTool(protocol string) map[string]any {
@@ -70,11 +72,19 @@ func chatEditImageTool(protocol string) map[string]any {
 }
 
 func chatTextTool(protocol string) map[string]any {
+	return chatTextToolWithPlans(protocol, true)
+}
+
+func chatTextToolWithPlans(protocol string, allowPlans bool) map[string]any {
+	plan := imagePlanSchema()
+	if !allowPlans {
+		plan = map[string]any{"type": "null"}
+	}
 	return wrapChatImageTool(protocol, map[string]any{
 		"name": chatTextToolName, "description": "发送正常文字回复、追问、拒绝或图片分析。不能用口头承诺代替生成或修改图片操作。", "strict": true,
 		"parameters": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"text", "image_plan"},
-			"properties": map[string]any{"text": map[string]any{"type": "string", "minLength": 1, "maxLength": 32000}, "image_plan": imagePlanSchema()},
+			"properties": map[string]any{"text": map[string]any{"type": "string", "minLength": 1, "maxLength": 32000}, "image_plan": plan},
 		},
 	})
 }
@@ -127,9 +137,10 @@ type chatToolCall struct {
 }
 
 type chatToolResponse struct {
-	Status  string          `json:"status"`
-	Error   json.RawMessage `json:"error"`
-	Choices []struct {
+	Status            string          `json:"status"`
+	Error             json.RawMessage `json:"error"`
+	IncompleteDetails json.RawMessage `json:"incomplete_details"`
+	Choices           []struct {
 		FinishReason string `json:"finish_reason"`
 		Message      struct {
 			ToolCalls []chatToolCall `json:"tool_calls"`
@@ -158,7 +169,7 @@ func parseChatTurnWith(raw []byte, ct string, validate func(chatTurnResult, []ch
 	}
 	var v chatToolResponse
 	if json.Unmarshal(raw, &v) != nil {
-		return chatTurnResult{}, errors.New("模型响应格式不兼容")
+		return chatTurnResult{}, chatResponseError{Code: "malformed_response", Message: "模型响应格式不兼容", Retryable: true}
 	}
 	in, out := v.Usage.Input, v.Usage.Output
 	if in == 0 {
@@ -169,23 +180,24 @@ func parseChatTurnWith(raw []byte, ct string, validate func(chatTurnResult, []ch
 	}
 	result := chatTurnResult{InputTokens: in, OutputTokens: out}
 	if v.Status == "failed" || v.Status == "incomplete" || (len(v.Error) > 0 && string(v.Error) != "null") {
-		return result, errors.New("模型未完成回复")
+		return result, chatCompletionFailure(v.Status, v.Error, v.IncompleteDetails)
 	}
 	var calls []chatToolCall
 	if len(v.Choices) > 0 {
 		choice := v.Choices[0]
 		if choice.FinishReason == "length" || choice.FinishReason == "content_filter" {
-			return result, errors.New("模型未完成回复")
+			details, _ := json.Marshal(map[string]string{"reason": choice.FinishReason})
+			return result, chatCompletionFailure("incomplete", nil, details)
 		}
 		if len(choice.Message.ToolCalls) > 0 && choice.FinishReason != "tool_calls" {
-			return result, errors.New("模型工具调用未完成")
+			return result, incompleteChatResponse("模型工具调用未完成")
 		}
 		calls = append(calls, choice.Message.ToolCalls...)
 	}
 	for _, item := range v.Output {
 		if item.Type == "function_call" {
 			if v.Status != "completed" {
-				return result, errors.New("模型工具调用未完成")
+				return result, incompleteChatResponse("模型工具调用未完成")
 			}
 			call := chatToolCall{Type: "function"}
 			call.Function.Name, call.Function.Arguments = item.Name, item.Arguments
@@ -196,7 +208,8 @@ func parseChatTurnWith(raw []byte, ct string, validate func(chatTurnResult, []ch
 		return validate(result, calls)
 	}
 	// Do not deliver an unstructured promise as a successful operation when
-	// the upstream ignored tool_choice=required. No automatic paid retry.
+	// the upstream ignored tool_choice=required. Explicit chat may retry this
+	// response within its bounded model-only retry boundary.
 	return result, errChatActionMissing
 }
 
@@ -269,7 +282,7 @@ func parseChatToolStreamWith(raw []byte, validate func(chatTurnResult, []chatToo
 	var calls []chatToolCall
 	var completed json.RawMessage
 	var result chatTurnResult
-	done, toolFinished, responseTool := false, false, false
+	done, toolFinished, responseTool, responseStream := false, false, false, false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -282,6 +295,7 @@ func parseChatToolStreamWith(raw []byte, validate func(chatTurnResult, []chatToo
 		}
 		var event struct {
 			Type     string                `json:"type"`
+			Code     string                `json:"code"`
 			Error    json.RawMessage       `json:"error"`
 			Response json.RawMessage       `json:"response"`
 			Item     struct{ Type string } `json:"item"`
@@ -298,13 +312,31 @@ func parseChatToolStreamWith(raw []byte, validate func(chatTurnResult, []chatToo
 			} `json:"usage"`
 		}
 		if json.Unmarshal([]byte(data), &event) != nil {
-			return result, errors.New("模型流式响应格式不兼容")
+			return result, chatResponseError{Code: "malformed_response", Message: "模型流式响应格式不兼容", Retryable: true}
 		}
 		if event.Type == "error" || event.Type == "response.failed" || event.Type == "response.incomplete" || (len(event.Error) > 0 && string(event.Error) != "null") {
-			return result, errors.New("模型未完成回复")
+			var response struct {
+				Status  string          `json:"status"`
+				Error   json.RawMessage `json:"error"`
+				Details json.RawMessage `json:"incomplete_details"`
+			}
+			_ = json.Unmarshal(event.Response, &response)
+			if len(response.Error) == 0 {
+				response.Error = event.Error
+			}
+			if (len(response.Error) == 0 || string(response.Error) == "null") && event.Code != "" {
+				response.Error, _ = json.Marshal(map[string]string{"code": event.Code})
+			}
+			if response.Status == "" && event.Type == "response.incomplete" {
+				response.Status = "incomplete"
+			}
+			return result, chatCompletionFailure(response.Status, response.Error, response.Details)
 		}
 		if event.Type == "response.completed" {
 			completed = event.Response
+		}
+		if strings.HasPrefix(event.Type, "response.") {
+			responseStream = true
 		}
 		if event.Item.Type == "function_call" || strings.HasPrefix(event.Type, "response.function_call_arguments.") {
 			responseTool = true
@@ -317,7 +349,8 @@ func parseChatToolStreamWith(raw []byte, validate func(chatTurnResult, []chatToo
 				continue
 			}
 			if choice.FinishReason == "length" || choice.FinishReason == "content_filter" {
-				return result, errors.New("模型未完成回复")
+				details, _ := json.Marshal(map[string]string{"reason": choice.FinishReason})
+				return result, chatCompletionFailure("incomplete", nil, details)
 			}
 			if choice.FinishReason == "tool_calls" {
 				toolFinished = true
@@ -341,13 +374,13 @@ func parseChatToolStreamWith(raw []byte, validate func(chatTurnResult, []chatToo
 		}
 	}
 	if scanner.Err() != nil {
-		return result, errors.New("模型流式响应不完整")
+		return result, incompleteChatResponse("模型流式响应不完整")
 	}
 	if len(completed) > 0 {
 		return parseChatTurnWith(completed, "application/json", validate)
 	}
-	if responseTool || (len(calls) > 0 && (!done || !toolFinished)) {
-		return result, errors.New("模型工具调用未完成")
+	if responseTool || responseStream || !done || (len(calls) > 0 && !toolFinished) {
+		return result, incompleteChatResponse("模型工具调用未完成")
 	}
 	if len(calls) > 0 {
 		return validate(result, calls)

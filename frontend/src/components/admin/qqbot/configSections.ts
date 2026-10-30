@@ -3,6 +3,7 @@ export const configSections = {
   connection: ['enabled', 'app_id', 'app_secret', 'sandbox', 'clear_app_secret'],
   groups: ['allowed_groups', 'group_policies'],
   chat: ['chat_disabled', 'base_url', 'api_key', 'chat_model', 'chat_protocol', 'system_prompt', 'max_output_tokens', 'history_messages', 'clear_api_key'],
+  knowledge: ['site_knowledge'],
   images: ['image_enabled', 'image_base_url', 'image_api_key', 'image_model', 'image_size', 'clear_image_api_key'],
   'group-admins': ['group_admins'], moderation: ['moderation'], autonomous: ['autonomous'], commands: ['custom_commands'],
   notifications: ['price_notifications', 'health_notifications', 'notification_quiet_hours'],

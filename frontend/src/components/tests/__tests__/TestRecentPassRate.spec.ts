@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
-import type { TestPassRateSummary } from '@/types'
+import type { TestAllPassProgress, TestPassRateSummary } from '@/types'
 import resources from '@/i18n/locales/en/admin/resources'
 import zhResources from '@/i18n/locales/zh/admin/resources'
 import TestRecentPassRate from '../TestRecentPassRate.vue'
@@ -18,6 +18,31 @@ const mountRecentRate = (value?: TestPassRateSummary | null, locale = 'en') => m
 })
 
 describe('recent pass-rate card summary', () => {
+  it.each([
+    [{ required: 3, consecutive_passes: 1, round_verdict: 'pass', blocked: true }, 'More successful rounds required'],
+    [{ required: 3, consecutive_passes: 2, round_verdict: 'pending', blocked: true }, 'Current round pending'],
+    [{ required: 3, consecutive_passes: 0, round_verdict: 'fail', blocked: true }, 'Current round failed'],
+    [{ required: 3, consecutive_passes: 3, round_verdict: 'pass', blocked: false }, 'Consecutive pass requirement met'],
+  ] as [TestAllPassProgress, string][])('shows full-round progress independently of a single check passing: %s', async (allPassProgress, state) => {
+    const wrapper = mountRecentRate(evidence({ samples: 1, passed: 1, pass_rate: 100, window_size: 1, ready: true }))
+    await wrapper.setProps({ allPassProgress })
+    expect(wrapper.get('[data-all-pass-progress]').text()).toContain(`Consecutive successful rounds: ${allPassProgress.consecutive_passes}/3`)
+    expect(wrapper.get('[data-all-pass-progress]').text()).toContain(state)
+    expect(wrapper.get('[data-recent-pass-rate-counts]').text()).toContain('100%')
+    wrapper.unmount()
+  })
+
+  it('shows round progress without requiring individual rate protection and keeps default cards unchanged', async () => {
+    const wrapper = mountRecentRate(undefined, 'zh')
+    await wrapper.setProps({ allPassProgress: { required: 3, consecutive_passes: 1, round_verdict: 'pass', blocked: true } })
+    expect(wrapper.get('[data-all-pass-progress]').text()).toContain('整轮连续通过 1/3 轮')
+    expect(wrapper.find('[data-recent-pass-rate-unavailable]').exists()).toBe(false)
+    await wrapper.setProps({ allPassProgress: { required: 1, consecutive_passes: 1, round_verdict: 'pass', blocked: false } })
+    expect(wrapper.find('[data-all-pass-progress]').exists()).toBe(false)
+    expect(wrapper.find('[data-recent-pass-rate-unavailable]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('keeps the configured window, counts and collection progress visible before opening details', () => {
     const wrapper = mountRecentRate(evidence())
     expect(wrapper.get('[data-recent-pass-rate-counts]').text()).toBe('Last 20 checks within 36 hours · 8 passed · 66.7%')

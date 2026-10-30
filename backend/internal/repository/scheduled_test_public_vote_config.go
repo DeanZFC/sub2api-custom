@@ -18,6 +18,9 @@ func protectionRuleWithoutPublicVote(rule service.ScheduledTestProtectionRule) s
 }
 
 func protectionConfigWithoutPublicVote(config service.ScheduledTestProtectionConfig) service.ScheduledTestProtectionConfig {
+	if config.UsesAllPass() && config.RequiredConsecutivePasses == 0 {
+		config.RequiredConsecutivePasses = 1
+	}
 	if config.Rules != nil {
 		rules := make([]service.ScheduledTestProtectionRule, len(config.Rules))
 		for i, rule := range config.Rules {

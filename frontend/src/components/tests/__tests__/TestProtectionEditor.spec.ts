@@ -22,6 +22,51 @@ const mountEditor = (config: TestProtectionConfig = { enabled: false, rules: [] 
 }
 
 describe('quality protection settings', () => {
+  it('configures consecutive successful rounds without changing individual sample windows', async () => {
+    const original: TestProtectionConfig = { enabled: true, mode: 'all_pass', rules: [{
+      test_definition_id: 3, priority: 0, required_pass: false, expected_answer: '21',
+      pass_rate: defaultTestPassRate(),
+    }] }
+    const wrapper = mountEditor(original)
+    expect(wrapper.get<HTMLInputElement>('[data-all-pass-consecutive]').element.value).toBe('1')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.get('[data-all-pass-consecutive]').setValue('3')
+    expect(wrapper.props('modelValue').required_consecutive_passes).toBe(3)
+    expect(wrapper.props('modelValue').rules[0].pass_rate).toMatchObject({ window_size: 1, recover_consecutive: 1 })
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
+    const copied = copyTestProtection(wrapper.props('modelValue'))
+    expect(copied.required_consecutive_passes).toBe(3)
+    await wrapper.get('[data-protection-type="3"] [data-rule-role]').setValue('observe')
+    await wrapper.get('[data-protection-type="3"] [data-rule-role]').setValue('automatic')
+    expect(wrapper.props('modelValue').required_consecutive_passes).toBe(3)
+    expect(original.required_consecutive_passes).toBeUndefined()
+    await wrapper.get('[data-protection-mode]').setValue('per_test')
+    expect(wrapper.props('modelValue').required_consecutive_passes).toBeUndefined()
+    expect(wrapper.find('[data-all-pass-consecutive]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('validates consecutive successful round counts and retains invalid values for correction', async () => {
+    const config: TestProtectionConfig = { enabled: true, mode: 'all_pass', required_consecutive_passes: 3, rules: [{
+      test_definition_id: 3, priority: 0, required_pass: false, expected_answer: '21',
+    }] }
+    const wrapper = mountEditor(config)
+    expect(wrapper.get<HTMLInputElement>('[data-all-pass-consecutive]').element.value).toBe('3')
+    for (const required_consecutive_passes of [1, 3, 100]) {
+      expect(validTestProtection({ ...config, required_consecutive_passes }, types, groups)).toBe(true)
+    }
+    for (const required_consecutive_passes of [-1, 0, 1.5, 101, NaN, Infinity]) {
+      expect(validTestProtection({ ...config, required_consecutive_passes }, types, groups)).toBe(false)
+    }
+    expect(validTestProtection({ ...config, mode: 'per_test' }, types, groups)).toBe(false)
+    await wrapper.get('[data-all-pass-consecutive]').setValue('')
+    expect(Number.isNaN(wrapper.props('modelValue').required_consecutive_passes)).toBe(true)
+    expect(wrapper.get('[role="alert"]').text()).toContain('integer from 1 to 100')
+    await wrapper.get('[data-all-pass-consecutive]').setValue('2')
+    expect(validTestProtection(wrapper.props('modelValue'), types, groups)).toBe(true)
+    wrapper.unmount()
+  })
+
   it('rejects retired statistics rules and exposes only active measurement criteria', () => {
     const retired = { id: 99, name: 'Retired statistics', key: 'stats', output_kind: 'statistics', prompt: '', enabled: true }
     const config: TestProtectionConfig = { enabled: true, rules: [{ test_definition_id: 99, priority: 0, required_pass: false, pause_on_failure: true }] }

@@ -60,6 +60,18 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	_, err = db.Exec(string(raw))
 	require.NoError(t, err)
+	querySQL, err := migrations.FS.ReadFile("327_qq_bot_site_queries.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(querySQL))
+		require.NoError(t, err)
+	}
+	executionSQL, err := migrations.FS.ReadFile("328_qq_bot_chat_execution.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(executionSQL))
+		require.NoError(t, err)
+	}
 	historySQL, err := migrations.FS.ReadFile("299_qq_bot_transfer_history.sql")
 	require.NoError(t, err)
 	for range 2 {

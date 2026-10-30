@@ -53,6 +53,41 @@ func TestScheduledTestAllPassConfigurableChecks(t *testing.T) {
 	}
 }
 
+func TestScheduledTestAllPassConsecutiveConfiguration(t *testing.T) {
+	for _, count := range []int{0, 1, 2, 100} {
+		p := allPassTestPlan()
+		p.Protection.RequiredConsecutivePasses = count
+		require.NoError(t, validateScheduledTestProtection(p))
+		want := count
+		if want == 0 {
+			want = 1
+		}
+		require.Equal(t, want, p.Protection.AllPassRequiredConsecutivePasses())
+	}
+	for _, count := range []int{-1, 101} {
+		p := allPassTestPlan()
+		p.Protection.RequiredConsecutivePasses = count
+		require.ErrorContains(t, validateScheduledTestProtection(p), "required_consecutive_passes")
+	}
+	p := allPassTestPlan()
+	p.Protection.Mode = "per_test"
+	p.Protection.RequiredConsecutivePasses = 2
+	require.ErrorContains(t, validateScheduledTestProtection(p), "all_pass")
+}
+
+func TestScheduledTestAllPassRoundVerdict(t *testing.T) {
+	p := allPassTestPlan()
+	verdicts := map[int64]string{1: "pass", 2: "pass", 3: "pass"}
+	require.Equal(t, "pass", ScheduledTestAllPassRoundVerdict(p.Protection, verdicts))
+	verdicts[4] = "fail"
+	require.Equal(t, "fail", ScheduledTestAllPassRoundVerdict(p.Protection, verdicts))
+	delete(verdicts, 4)
+	verdicts[3] = "pending"
+	require.Equal(t, "pending", ScheduledTestAllPassRoundVerdict(p.Protection, verdicts))
+	verdicts[2] = "fail"
+	require.Equal(t, "fail", ScheduledTestAllPassRoundVerdict(p.Protection, verdicts))
+}
+
 func allPassTestPlan() *ScheduledTestPlan {
 	p := combinationTestPlan()
 	p.Protection.Mode, p.Protection.Combinations = "all_pass", nil

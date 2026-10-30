@@ -201,6 +201,24 @@ func (s *Service) history(ctx context.Context, c Config, j Job) []Message {
 	return s.loadHistory(ctx, c, j, false)
 }
 
+// Keep member isolation while selecting knowledge relevant to this question.
+func (s *Service) historyForQuestion(ctx context.Context, c Config, j Job, question string) []Message {
+	knowledge := c.SiteKnowledge
+	c.SiteKnowledge = SiteKnowledgeConfig{}
+	messages := s.loadHistory(ctx, c, j, false)
+	if message, ok := siteKnowledgeMessageForQuestion(knowledge, question); ok {
+		boundary := 0
+		for boundary < len(messages) && (messages[boundary].Role == "system" || messages[boundary].Role == "developer") {
+			boundary++
+		}
+		result := make([]Message, 0, len(messages)+1)
+		result = append(result, messages[:boundary]...)
+		result = append(result, message)
+		messages = append(result, messages[boundary:]...)
+	}
+	return messages
+}
+
 func (s *Service) sharedHistory(ctx context.Context, c Config, j Job) []Message {
 	return s.loadHistory(ctx, c, j, true)
 }
@@ -211,6 +229,9 @@ func (s *Service) loadHistory(ctx context.Context, c Config, j Job, shared bool)
 		instructions = sharedGroupHistoryInstructions
 	}
 	messages := []Message{{Role: "system", Content: c.SystemPrompt}, {Role: "system", Content: instructions}}
+	if knowledge, ok := siteKnowledgeMessage(c.SiteKnowledge); ok {
+		messages = append(messages, knowledge)
+	}
 	if c.HistoryMessages == 0 || (!shared && j.MemberID == "") {
 		return messages
 	}
