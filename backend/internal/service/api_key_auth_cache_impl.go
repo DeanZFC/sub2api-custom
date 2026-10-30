@@ -12,7 +12,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 28 // v28: strict failover group routing configuration.
+const apiKeyAuthSnapshotVersion = 29 // v29: image-count billing, retaining strict failover group routing configuration.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -347,6 +347,7 @@ func apiKeyAuthGroupSnapshotFromGroup(group *Group) *APIKeyAuthGroupSnapshot {
 		DefaultValidityDays:             group.DefaultValidityDays,
 		AllowImageGeneration:            group.AllowImageGeneration,
 		AllowBatchImageGeneration:       group.AllowBatchImageGeneration,
+		ImageCountBilling:               group.ImageCountBilling,
 		ImageRateIndependent:            group.ImageRateIndependent,
 		ImageRateMultiplier:             group.ImageRateMultiplier,
 		ImagePrice1K:                    group.ImagePrice1K,
@@ -420,6 +421,7 @@ func apiKeyAuthGroupFromSnapshot(snapshot *APIKeyAuthGroupSnapshot) *Group {
 		DefaultValidityDays:             snapshot.DefaultValidityDays,
 		AllowImageGeneration:            snapshot.AllowImageGeneration,
 		AllowBatchImageGeneration:       snapshot.AllowBatchImageGeneration,
+		ImageCountBilling:               snapshot.ImageCountBilling,
 		ImageRateIndependent:            snapshot.ImageRateIndependent,
 		ImageRateMultiplier:             snapshot.ImageRateMultiplier,
 		ImagePrice1K:                    snapshot.ImagePrice1K,
@@ -536,6 +538,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			DefaultValidityDays:             apiKey.Group.DefaultValidityDays,
 			AllowImageGeneration:            apiKey.Group.AllowImageGeneration,
 			AllowBatchImageGeneration:       apiKey.Group.AllowBatchImageGeneration,
+			ImageCountBilling:               apiKey.Group.ImageCountBilling,
 			ImageRateIndependent:            apiKey.Group.ImageRateIndependent,
 			ImageRateMultiplier:             apiKey.Group.ImageRateMultiplier,
 			ImagePrice1K:                    apiKey.Group.ImagePrice1K,
@@ -655,6 +658,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			DefaultValidityDays:             snapshot.Group.DefaultValidityDays,
 			AllowImageGeneration:            snapshot.Group.AllowImageGeneration,
 			AllowBatchImageGeneration:       snapshot.Group.AllowBatchImageGeneration,
+			ImageCountBilling:               snapshot.Group.ImageCountBilling,
 			ImageRateIndependent:            snapshot.Group.ImageRateIndependent,
 			ImageRateMultiplier:             snapshot.Group.ImageRateMultiplier,
 			ImagePrice1K:                    snapshot.Group.ImagePrice1K,

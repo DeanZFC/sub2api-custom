@@ -403,6 +403,7 @@ func TestStrictFailoverClientRestrictionDoesNotBypassTiers(t *testing.T) {
 
 func TestStrictFailoverFallbackGroupCacheRoundTrip(t *testing.T) {
 	g, _ := strictFixture()
+	g.ImageCountBilling = true
 	snapshot := apiKeyAuthGroupSnapshotFromGroup(g)
 	require.Equal(t, g.StrictFailover, snapshot.StrictFailover)
 	g.StrictFailover.Tiers[0][0] = 999
@@ -412,6 +413,7 @@ func TestStrictFailoverFallbackGroupCacheRoundTrip(t *testing.T) {
 	var restored APIKeyAuthGroupSnapshot
 	require.NoError(t, json.Unmarshal(serialized, &restored))
 	got := apiKeyAuthGroupFromSnapshot(&restored)
+	require.True(t, got.ImageCountBilling)
 	require.True(t, got.StrictFailover.Enabled)
 	require.Equal(t, [][]int64{{1, 2}, {3}}, got.StrictFailover.Tiers)
 	got.StrictFailover.Tiers[0][0] = 777

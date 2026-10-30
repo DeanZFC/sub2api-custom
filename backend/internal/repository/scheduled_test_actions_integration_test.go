@@ -141,7 +141,7 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 		testScheduledTestExcludedAccounts(t, ctx, db, plans, repo, candyID)
 	})
 	t.Run("manual membership revokes detached protection", func(t *testing.T) {
-		for _, scenario := range []string{"detach", "same policy", "remove one source", "remove last source", "clear all", "manual disabled", "manual unschedulable", "other policy", "outbox rollback", "late begin", "stale discovery", "concurrent completion"} {
+		for _, scenario := range []string{"detach", "same policy", "remove one source", "remove last source", "clear all", "manual disabled", "manual unschedulable", "other policy", "outbox rollback", "late begin", "stale discovery", "concurrent completion", "scoped detach", "scoped concurrent completion"} {
 			t.Run(scenario, func(t *testing.T) {
 				reset(t)
 				testManualMembershipProtection(t, ctx, db, plans, repo, candyID, scenario)

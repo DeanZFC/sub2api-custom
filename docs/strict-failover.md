@@ -45,4 +45,4 @@
 
 日志 strict_failover_tier_selected 记录 group_id、model、tier 和前层逐账号不可用原因；strict_failover_all_tiers_unavailable 表示所有配置层均已确认不可用。strict_failover_unconfirmed 表示证据不足，请求没有启用备用路由。
 
-迁移 325_group_strict_failover.sql 添加 JSONB 列，默认关闭；认证缓存快照版本升级至 28，配置进入认证投影且切片独立复制。账号层级 ID 仅在管理员 DTO 暴露，不在普通用户分组 DTO 暴露。部署时须使用包含该迁移的新服务端与对应前端；本地实现和测试不代表已发布或已安装到生产环境。
+迁移 325_group_strict_failover.sql 添加 JSONB 列，默认关闭；认证缓存快照版本升级至 29，同时保留按张计费配置；严格主备配置进入认证投影且切片独立复制。账号层级 ID 仅在管理员 DTO 暴露，不在普通用户分组 DTO 暴露。部署时须使用包含该迁移的新服务端与对应前端；本地实现和测试不代表已发布或已安装到生产环境。
