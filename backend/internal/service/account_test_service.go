@@ -422,6 +422,11 @@ func (s *AccountTestService) setAccountTestError(ctx context.Context, accountID 
 	if s.accountRepo == nil {
 		return nil
 	}
+	// A scheduled check must be able to retry authentication failures before
+	// permanent account state makes it ineligible for its remaining attempt.
+	if retryPending, _ := ctx.Value(scheduledTestRetryPendingKey{}).(bool); retryPending {
+		return nil
+	}
 	return s.accountRepo.SetError(ctx, accountID, message)
 }
 

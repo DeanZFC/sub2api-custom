@@ -518,6 +518,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		return nil, err
 	}
 
+	fallbackOnUnavailable := input.FallbackGroupIDOnUnavailable
+	if fallbackOnUnavailable != nil && *fallbackOnUnavailable <= 0 {
+		fallbackOnUnavailable = nil
+	}
+	if err := s.validateUnavailableFallback(ctx, 0, platform, fallbackOnUnavailable); err != nil {
+		return nil, err
+	}
 	// 校验降级分组
 	if input.FallbackGroupID != nil {
 		if err := s.validateFallbackGroup(ctx, 0, *input.FallbackGroupID); err != nil {
@@ -629,6 +636,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
+		FallbackGroupIDOnUnavailable:    fallbackOnUnavailable,
 		ModelRouting:                    input.ModelRouting,
 		MCPXMLInject:                    mcpXMLInject,
 		SupportedModelScopes:            input.SupportedModelScopes,
@@ -987,6 +995,15 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			// 传入 0 或负数表示清除降级分组
 			group.FallbackGroupID = nil
 		}
+	}
+	if input.FallbackGroupIDOnUnavailable != nil {
+		group.FallbackGroupIDOnUnavailable = input.FallbackGroupIDOnUnavailable
+		if *input.FallbackGroupIDOnUnavailable <= 0 {
+			group.FallbackGroupIDOnUnavailable = nil
+		}
+	}
+	if err := s.validateUnavailableFallback(ctx, id, group.Platform, group.FallbackGroupIDOnUnavailable); err != nil {
+		return nil, err
 	}
 	fallbackOnInvalidRequest := group.FallbackGroupIDOnInvalidRequest
 	if input.FallbackGroupIDOnInvalidRequest != nil {

@@ -944,6 +944,30 @@ func (s *BatchImagePublicService) selectProviderAndAccount(ctx context.Context, 
 	if err == nil {
 		return provider, account, cloneBatchImageInt64Ptr(owner.GroupID), nil
 	}
+	if errors.Is(err, ErrBatchImageNoAccountAvailable) && owner.GroupID != nil && s.GroupRepo != nil {
+		source, loadErr := s.GroupRepo.GetByIDLite(ctx, *owner.GroupID)
+		if loadErr != nil {
+			return nil, nil, nil, loadErr
+		}
+		if source != nil && source.FallbackGroupIDOnUnavailable != nil && *source.FallbackGroupIDOnUnavailable != source.ID {
+			targetID := *source.FallbackGroupIDOnUnavailable
+			target, loadErr := s.GroupRepo.GetByIDLite(ctx, targetID)
+			if loadErr != nil {
+				return nil, nil, nil, loadErr
+			}
+			if target != nil && target.IsActive() && target.Platform == source.Platform && target.AllowBatchImageGeneration {
+				provider, account, err = s.selectProviderAndAccountInGroup(withAccountFallbackGroup(ctx, source, target), &targetID, requestedProvider, model)
+				if err == nil {
+					// This persisted group is also used by deferred settlement: keep
+					// it on the source billing group even though the account moved.
+					return provider, account, cloneBatchImageInt64Ptr(owner.GroupID), nil
+				}
+				if !errors.Is(err, ErrBatchImageNoAccountAvailable) {
+					return nil, nil, nil, err
+				}
+			}
+		}
+	}
 	// API-key fallback is intentionally limited to the same availability error
 	// used by the regular scheduler. Repository/configuration failures must still
 	// surface instead of silently moving traffic to another billing group.
@@ -967,13 +991,40 @@ func (s *BatchImagePublicService) selectProviderAndAccount(ctx context.Context, 
 }
 
 func (s *BatchImagePublicService) selectProviderAndAccountInGroup(ctx context.Context, groupID *int64, requestedProvider, model string) (BatchImageProvider, *Account, error) {
+	var group *Group
+	if groupID != nil && s.GroupRepo != nil {
+		var err error
+		group, err = s.GroupRepo.GetByIDLite(ctx, *groupID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	providers := batchImageProviderSelectionOrder(requestedProvider)
 	for _, providerName := range providers {
 		provider, ok := s.ProviderRegistry.Get(providerName)
 		if !ok || provider == nil {
 			continue
 		}
-		accounts, err := s.listCandidateAccounts(ctx, groupID, batchImageProviderPlatform(providerName))
+		strictRepo, _ := s.AccountRepo.(AccountRepository)
+		selectionCtx, err := prepareStrictFailover(ctx, group, strictRepo, nil, model, func(account *Account) (string, error) {
+			if account.Platform != batchImageProviderPlatform(providerName) {
+				return "platform_mismatch", nil
+			}
+			if !account.IsModelSupported(model) || !provider.SupportsAccount(account) {
+				return "capability_not_supported", nil
+			}
+			return "", nil
+		})
+		if errors.Is(err, errStrictFailoverAllUnavailable) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		accounts, strict := strictFailoverAccounts(selectionCtx, groupID)
+		if !strict {
+			accounts, err = s.listCandidateAccounts(selectionCtx, groupID, batchImageProviderPlatform(providerName))
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -986,7 +1037,7 @@ func (s *BatchImagePublicService) selectProviderAndAccountInGroup(ctx context.Co
 		})
 		for i := range accounts {
 			account := accounts[i]
-			if !account.IsSchedulable() || !account.IsModelSupported(model) {
+			if !account.IsSchedulable() || !account.IsModelSupported(model) || account.ActiveTestModelBlocked(model) {
 				continue
 			}
 			if provider.SupportsAccount(&account) {

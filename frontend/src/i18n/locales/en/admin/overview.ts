@@ -1170,6 +1170,12 @@ export default {
           duplicate: 'This entry already exists'
         }
       },
+      unavailableFallback: {
+        title: 'Fallback group when accounts are unavailable',
+        hint: 'When this group has no available accounts, use accounts from the fallback group while keeping this group’s prices, multipliers, quotas, and subscription billing. Order: this group → group fallback → API key fallback. API key fallback uses its own group for billing. Only one group fallback hop is attempted.',
+        none: 'No group fallback',
+        loadFailed: 'Failed to load groups. Please retry.',
+      },
       strictFailover: {
         title: "Strict primary / backup",
         hint: "Try account tiers in order within the same request. Every tier follows the group's existing profit controls. Advance when every account in a tier explicitly cannot serve this request or fails its profit requirement. Busy slots, queues, low scores and unknown state never trigger fallback.",

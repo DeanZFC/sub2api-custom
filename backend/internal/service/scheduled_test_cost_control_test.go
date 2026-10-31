@@ -24,12 +24,15 @@ func TestScheduledTestCostRetryClassification(t *testing.T) {
 		message, kind string
 		calls         int
 	}{
-		{"API returned 401: invalid key", "auth", 1}, {"API returned 403: forbidden", "auth", 1},
-		{"API returned 402: payment required", "quota", 1}, {"API returned 429: insufficient_quota", "quota", 1},
-		{"API returned 429: too many requests", "rate_limit", 1}, {"API returned 400: bad input", "request", 1},
-		{"API returned 503: unavailable", "server", 2}, {"connection reset by peer", "network", 2},
-		{"context deadline exceeded", "network", 2}, {"OpenAI response incomplete (max_output_tokens)", "output_limit", 1},
-		{"expected HTML/SVG output", "output_invalid", 1}, {"unrecognized error", "unknown", 1},
+		{"API returned 401: invalid key", "auth", 4}, {"API returned 403: forbidden", "auth", 4},
+		{"API returned 402: payment required", "quota", 4}, {"API returned 429: insufficient_quota", "quota", 4},
+		{"API returned 429: too many requests", "rate_limit", 4}, {"API returned 400: bad input", "request", 4},
+		{"API returned 408: request timed out", "network", 4}, {"API returned 422: invalid request", "request", 4},
+		{"API returned 503: unavailable", "server", 4}, {"connection reset by peer", "network", 4},
+		{"context deadline exceeded", "network", 4}, {"context canceled", "canceled", 4},
+		{"OpenAI response incomplete (max_output_tokens)", "output_limit", 4},
+		{"expected HTML/SVG output", "output_invalid", 4}, {"expected numeric output", "output_invalid", 4},
+		{"unrecognized error", "unknown", 4},
 	} {
 		t.Run(tc.kind+tc.message, func(t *testing.T) {
 			runner := &ScheduledTestRunnerService{automaticRetryBaseDelay: time.Millisecond}
@@ -44,26 +47,36 @@ func TestScheduledTestCostRetryClassification(t *testing.T) {
 	}
 }
 func TestScheduledTestCostRealUpstreamRetryKeepsFailedUsage(t *testing.T) {
-	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
-	upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{
-		costJSONResponse(503, `{"error":{"type":"server_error"},"usage":{"input_tokens":10,"output_tokens":2,"output_tokens_details":{"reasoning_tokens":1}}}`),
-		costJSONResponse(200, `{"model":"test-model","status":"completed","usage":{"input_tokens":20,"output_tokens":8,"output_tokens_details":{"reasoning_tokens":3}},"output":[]}`),
-	}}
-	svc := &AccountTestService{accountRepo: &modelIdentityAccountRepo{account: account}, httpUpstream: upstream, cfg: &config.Config{}}
-	runner := &ScheduledTestRunnerService{automaticRetryBaseDelay: time.Millisecond}
-	result := runner.runWithAutomaticRetries(context.Background(), &ScheduledTestPlan{}, nil, func(ctx context.Context) *ScheduledTestResult {
-		r, err := svc.RunTestBackground(ctx, 42, "test-model")
-		require.NoError(t, err)
-		return r
-	})
-	require.Equal(t, "success", result.Status)
-	require.Equal(t, 2, upstream.requests)
-	require.Len(t, result.ExecutionInfo.Attempts, 2)
-	require.EqualValues(t, 30, *result.ExecutionInfo.InputTokens)
-	require.EqualValues(t, 10, *result.ExecutionInfo.OutputTokens)
-	require.EqualValues(t, 4, *result.ExecutionInfo.ReasoningTokens)
-	require.Equal(t, "server", result.ExecutionInfo.Attempts[0].FailureKind)
-	require.Empty(t, result.ExecutionInfo.FailureKind)
+	for _, tc := range []struct {
+		status int
+		kind   string
+	}{{401, "auth"}, {403, "auth"}, {402, "quota"}, {429, "rate_limit"}, {400, "request"}, {503, "server"}} {
+		t.Run(fmt.Sprint(tc.status), func(t *testing.T) {
+			account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
+			upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{
+				costJSONResponse(tc.status, `{"error":{"type":"upstream_error"},"usage":{"input_tokens":10,"output_tokens":2,"output_tokens_details":{"reasoning_tokens":1}}}`),
+				costJSONResponse(200, `{"model":"test-model","status":"completed","usage":{"input_tokens":20,"output_tokens":8,"output_tokens_details":{"reasoning_tokens":3}},"output":[]}`),
+			}}
+			accounts := &scheduledTestRetryStateAccountRepo{account: account}
+			svc := &AccountTestService{accountRepo: accounts, httpUpstream: upstream, cfg: &config.Config{}}
+			runner := &ScheduledTestRunnerService{automaticRetryBaseDelay: time.Millisecond}
+			result := runner.runWithAutomaticRetries(context.Background(), &ScheduledTestPlan{}, nil, func(ctx context.Context) *ScheduledTestResult {
+				r, err := svc.RunTestBackground(ctx, 42, "test-model")
+				require.NoError(t, err)
+				return r
+			})
+			require.Equal(t, "success", result.Status)
+			require.Equal(t, 2, upstream.requests)
+			require.Len(t, result.ExecutionInfo.Attempts, 2)
+			require.EqualValues(t, 30, *result.ExecutionInfo.InputTokens)
+			require.EqualValues(t, 10, *result.ExecutionInfo.OutputTokens)
+			require.EqualValues(t, 4, *result.ExecutionInfo.ReasoningTokens)
+			require.Equal(t, tc.kind, result.ExecutionInfo.Attempts[0].FailureKind)
+			require.Equal(t, tc.status, result.ExecutionInfo.Attempts[0].HTTPStatus)
+			require.Empty(t, result.ExecutionInfo.FailureKind)
+			require.Empty(t, accounts.errorCalls, "a recovered failure must not persist an account error")
+		})
+	}
 }
 func TestScheduledTestCostMetadataStreamingAndUnknown(t *testing.T) {
 	cases := []struct {
@@ -200,9 +213,11 @@ func TestScheduledTestCostChatUsageCompatibility(t *testing.T) {
 
 func TestScheduledTestCostAntigravityHasNoNestedRetries(t *testing.T) {
 	t.Setenv(antigravityForwardBaseURLEnv, "https://antigravity.example.com")
-	for _, tc := range []struct{ status, requests int }{{503, 2}, {429, 1}, {401, 1}} {
+	for _, tc := range []struct{ status, requests int }{{503, 4}, {429, 4}, {401, 4}} {
 		t.Run(fmt.Sprint(tc.status), func(t *testing.T) {
 			upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{
+				costJSONResponse(tc.status, `{"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}`),
+				costJSONResponse(tc.status, `{"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}`),
 				costJSONResponse(tc.status, `{"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}`),
 				costJSONResponse(tc.status, `{"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}`),
 			}}
@@ -254,14 +269,20 @@ func TestScheduledTestCostManualRetryRetainsPreviousUsage(t *testing.T) {
 	require.EqualValues(t, 5, *completed.ExecutionInfo.OutputTokens)
 }
 
-func TestScheduledTestCostServerRetryAfterDefersInsteadOfResending(t *testing.T) {
+func TestScheduledTestCostRetryAfterDoesNotSkipAutomaticRetry(t *testing.T) {
 	next := time.Now().Add(time.Hour)
 	calls := 0
 	runner := &ScheduledTestRunnerService{automaticRetryBaseDelay: time.Millisecond}
 	result := runner.runWithAutomaticRetries(context.Background(), &ScheduledTestPlan{}, nil, func(context.Context) *ScheduledTestResult {
 		calls++
-		return &ScheduledTestResult{Status: "failed", ExecutionInfo: &ScheduledTestExecutionInfo{FailureKind: "server", RetryAfter: &next}}
+		return &ScheduledTestResult{Status: "failed", ExecutionInfo: &ScheduledTestExecutionInfo{FailureKind: "rate_limit", RetryAfter: &next, Attempts: []ScheduledTestRequestAttempt{{HTTPStatus: 429, RetryAfter: &next}}}}
 	})
-	require.Equal(t, 1, calls)
+	require.Equal(t, 4, calls, "Retry-After must not suppress the three automatic retries")
 	require.Equal(t, &next, result.ExecutionInfo.RetryAfter)
+	require.Len(t, result.ExecutionInfo.Attempts, 4)
+	for _, attempt := range result.ExecutionInfo.Attempts {
+		require.Equal(t, 429, attempt.HTTPStatus)
+		require.Equal(t, &next, attempt.RetryAfter)
+		require.Equal(t, "rate_limit", attempt.FailureKind)
+	}
 }

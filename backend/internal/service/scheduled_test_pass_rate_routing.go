@@ -54,7 +54,8 @@ func (a *Account) ActiveTestModelBlocked(model string) bool {
 }
 
 // An all-model failure suspends the account, including models outside the
-// monitored selection. Only fresh capability recovery may clear this marker.
+// monitored selection. Fresh capability recovery or explicit administrator
+// state recovery may clear this marker.
 func (a *Account) ActiveTestAllModelsPaused() bool {
 	if a == nil {
 		return false

@@ -265,6 +265,11 @@ func FallbackGroupID(v int64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFallbackGroupID, v))
 }
 
+// FallbackGroupIDOnUnavailable applies equality check predicate on the "fallback_group_id_on_unavailable" field. It's identical to FallbackGroupIDOnUnavailableEQ.
+func FallbackGroupIDOnUnavailable(v int64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldFallbackGroupIDOnUnavailable, v))
+}
+
 // FallbackGroupIDOnInvalidRequest applies equality check predicate on the "fallback_group_id_on_invalid_request" field. It's identical to FallbackGroupIDOnInvalidRequestEQ.
 func FallbackGroupIDOnInvalidRequest(v int64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFallbackGroupIDOnInvalidRequest, v))
@@ -2163,6 +2168,56 @@ func FallbackGroupIDIsNil() predicate.Group {
 // FallbackGroupIDNotNil applies the NotNil predicate on the "fallback_group_id" field.
 func FallbackGroupIDNotNil() predicate.Group {
 	return predicate.Group(sql.FieldNotNull(FieldFallbackGroupID))
+}
+
+// FallbackGroupIDOnUnavailableEQ applies the EQ predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableEQ(v int64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldFallbackGroupIDOnUnavailable, v))
+}
+
+// FallbackGroupIDOnUnavailableNEQ applies the NEQ predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableNEQ(v int64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldFallbackGroupIDOnUnavailable, v))
+}
+
+// FallbackGroupIDOnUnavailableIn applies the In predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableIn(vs ...int64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldFallbackGroupIDOnUnavailable, vs...))
+}
+
+// FallbackGroupIDOnUnavailableNotIn applies the NotIn predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableNotIn(vs ...int64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldFallbackGroupIDOnUnavailable, vs...))
+}
+
+// FallbackGroupIDOnUnavailableGT applies the GT predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableGT(v int64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldFallbackGroupIDOnUnavailable, v))
+}
+
+// FallbackGroupIDOnUnavailableGTE applies the GTE predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableGTE(v int64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldFallbackGroupIDOnUnavailable, v))
+}
+
+// FallbackGroupIDOnUnavailableLT applies the LT predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableLT(v int64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldFallbackGroupIDOnUnavailable, v))
+}
+
+// FallbackGroupIDOnUnavailableLTE applies the LTE predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableLTE(v int64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldFallbackGroupIDOnUnavailable, v))
+}
+
+// FallbackGroupIDOnUnavailableIsNil applies the IsNil predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldFallbackGroupIDOnUnavailable))
+}
+
+// FallbackGroupIDOnUnavailableNotNil applies the NotNil predicate on the "fallback_group_id_on_unavailable" field.
+func FallbackGroupIDOnUnavailableNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldFallbackGroupIDOnUnavailable))
 }
 
 // FallbackGroupIDOnInvalidRequestEQ applies the EQ predicate on the "fallback_group_id_on_invalid_request" field.

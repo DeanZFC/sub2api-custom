@@ -229,7 +229,7 @@ func TestScheduledTestModelCheckManualRunRetriesOverloadBeforeApplyingActions(t 
 				require.Equal(t, "pass", repo.verdict)
 				require.Empty(t, repo.completed.ErrorMessage)
 			} else {
-				require.Equal(t, 2, upstream.requests)
+				require.Equal(t, 4, upstream.requests)
 				require.Equal(t, "failed", repo.completed.Status)
 				require.Equal(t, "unknown", repo.completed.OutputModelCheck.Verdict)
 				require.Equal(t, "upstream_error", repo.completed.OutputModelCheck.Reason)

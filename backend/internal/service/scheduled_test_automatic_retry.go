@@ -11,13 +11,14 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
-const scheduledTestAutomaticRetries = 1
+const scheduledTestAutomaticRetries = 3
+
+type scheduledTestRetryPendingKey struct{}
 
 var scheduledTestHTTPError = regexp.MustCompile(`(?i)(?:returned|status[=: ]+)\s*([45][0-9]{2})`)
 
-// Only transient transport/server failures may spend one additional request.
-// Rate limits are deferred by the scheduler; unknown, permanent and output
-// validation failures never trigger repeated generation.
+// Classify failures for execution history and scheduler cooldowns. Every
+// execution error may spend up to three additional requests, regardless of category.
 func scheduledTestFailureKind(result *ScheduledTestResult) string {
 	if result == nil {
 		return "unknown"
@@ -111,7 +112,8 @@ func (s *ScheduledTestRunnerService) runWithAutomaticRetries(ctx context.Context
 			return finishCanceled()
 		}
 		attemptStarted := time.Now()
-		result := execute(ctx)
+		attemptCtx := context.WithValue(ctx, scheduledTestRetryPendingKey{}, attempt < scheduledTestAutomaticRetries)
+		result := execute(attemptCtx)
 		if result == nil {
 			result = scheduledTestFailedAttempt(attemptStarted, fmt.Errorf("test returned no result"))
 		}
@@ -137,13 +139,13 @@ func (s *ScheduledTestRunnerService) runWithAutomaticRetries(ctx context.Context
 		if ctx.Err() != nil {
 			return finishCanceled()
 		}
-		if kind == "" || attempt >= scheduledTestAutomaticRetries || (kind != "network" && kind != "server") {
+		// A deferred result means admission blocked the request (for example,
+		// because the detection budget is exhausted), rather than an execution
+		// error. Actual cancellation is handled by ctx.Err() above.
+		if kind == "" || attempt >= scheduledTestAutomaticRetries || QualityResultDeferred(result) {
 			return result
 		}
-		if history.RetryAfter != nil && history.RetryAfter.After(time.Now()) {
-			return result // The next automatic round will respect the upstream deadline.
-		}
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d automatic_retry=1/1 kind=%s", plan.ID, kind)
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d automatic_retry=%d/%d kind=%s", plan.ID, attempt+1, scheduledTestAutomaticRetries, kind)
 		waitStarted := time.Now()
 		timer := time.NewTimer(delay)
 		select {

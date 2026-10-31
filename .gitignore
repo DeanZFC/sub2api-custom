@@ -137,6 +137,7 @@ vite.config.js
 docs/*
 !docs/upstream-error-message.md
 !docs/strict-failover.md
+!docs/group-unavailable-fallback.md
 !docs/channel-quality-experience.md
 !docs/passive-quality.md
 !docs/codex-fingerprint.md

@@ -565,11 +565,11 @@ type AccountSelectionResult struct {
 	// PreserveStickyBinding keeps temporary capacity or budget spillover from
 	// replacing the conversation owner when a handler later acquires a slot.
 	PreserveStickyBinding bool
-	// RoutedGroupID is set when API-key fallback routing selected an account from
-	// a group other than the API key's original group. That routed group becomes
-	// the effective billing and usage-attribution group for this request.
+	// RoutedGroupID identifies the account pool used by fallback. Only
+	// UsedAPIKeyFallback changes the billing group; UsedGroupFallback does not.
 	RoutedGroupID      int64
 	UsedAPIKeyFallback bool
+	UsedGroupFallback  bool
 	// stickySessionHit 标记账号来自会话粘性绑定命中，供非高级调度路径回填决策标签。
 	stickySessionHit bool
 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的

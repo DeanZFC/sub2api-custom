@@ -473,6 +473,22 @@ func (s *OpenAIGatewayService) ValidateStrictFailoverBoundAccount(ctx context.Co
 		return ErrStrictFailoverUnconfirmed
 	}
 	selectedCtx, err := s.prepareOpenAIStrictFailover(ctx, groupID, nil, model, account.Platform, capability, "", false, transport)
+	// A connection selected from group fallback keeps the original billing ID.
+	// Recheck primary availability on every turn: a recovered strict primary
+	// requires reconnection, while an exhausted primary may retain its fallback.
+	source := strictGroupFromContext(ctx, groupID)
+	if source != nil && source.FallbackGroupIDOnUnavailable != nil && !openAIStickyAccountMatchesGroup(account, groupID) {
+		if err == nil && source.StrictFailover.Enabled {
+			return ErrStrictFailoverOwnerBound
+		}
+		if err == nil || errors.Is(err, errStrictFailoverAllUnavailable) {
+			target, loadErr := s.loadFallbackGroup(ctx, *source.FallbackGroupIDOnUnavailable)
+			if loadErr != nil || target == nil || !target.IsActive() || target.Platform != source.Platform || !openAIStickyAccountMatchesGroup(account, &target.ID) {
+				return ErrStrictFailoverUnconfirmed
+			}
+			selectedCtx, err = s.prepareOpenAIStrictFailover(withAccountFallbackGroup(ctx, source, target), &target.ID, nil, model, account.Platform, capability, "", false, transport)
+		}
+	}
 	if err != nil {
 		return err
 	}

@@ -2266,17 +2266,14 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	excludedIDs map[int64]struct{},
 	requiredCapability OpenAIImagesCapability,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	selection, decision, err := s.selectAccountForImagesInGroup(ctx, groupID, sessionHash, requestedModel, excludedIDs, requiredCapability)
-	fallbackGroup, fallbackCtx, ok := apiKeyFallbackGroupForSelection(ctx, groupID, err)
-	if !ok {
-		return selection, decision, err
-	}
-	fallbackGroupID := fallbackGroup.ID
-	selection, decision, err = s.selectAccountForImagesInGroup(fallbackCtx, &fallbackGroupID, sessionHash, requestedModel, excludedIDs, requiredCapability)
-	if err == nil {
-		markAPIKeyFallbackSelection(ctx, selection, fallbackGroupID)
-		s.logAPIKeyGroupFallbackSelected(groupID, fallbackGroupID, requestedModel, selection)
-	}
+	var decision OpenAIAccountScheduleDecision
+	selection, err := selectWithGroupFallback(ctx, groupID, requestedModel, s.loadFallbackGroup,
+		func(selectionCtx context.Context, id *int64) (*AccountSelectionResult, error) {
+			var selected *AccountSelectionResult
+			var err error
+			selected, decision, err = s.selectAccountForImagesInGroup(selectionCtx, id, sessionHash, requestedModel, excludedIDs, requiredCapability)
+			return selected, err
+		}, markGroupFallbackSelection)
 	return selection, decision, err
 }
 
@@ -2314,40 +2311,21 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerAndAPIKeyFallback(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	selection, decision, err := s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
-	// A quality-protection rejection preserves the credential that
-	// owns incremental response state. Only complete, replayable requests may
-	// move to another group; keep the original denial for owner-bound requests.
-	if errors.Is(err, ErrAccountQualityHeld) && strings.TrimSpace(previousResponseID) != "" && !previousResponseCanMove {
-		return selection, decision, err
-	}
-	fallbackGroup, fallbackCtx, ok := apiKeyFallbackGroupForSelection(ctx, groupID, err)
-	if !ok {
-		return selection, decision, err
-	}
-	fallbackGroupID := fallbackGroup.ID
-	slog.Info("api_key_group_fallback_attempt",
-		"primary_group_id", derefGroupID(groupID),
-		"fallback_group_id", fallbackGroupID,
-		"model", requestedModel)
-	selection, decision, err = s.selectAccountWithScheduler(fallbackCtx, &fallbackGroupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
-	if err == nil {
-		markAPIKeyFallbackSelection(ctx, selection, fallbackGroupID)
-		s.logAPIKeyGroupFallbackSelected(groupID, fallbackGroupID, requestedModel, selection)
+	var decision OpenAIAccountScheduleDecision
+	selection, err := selectWithGroupFallback(ctx, groupID, requestedModel, s.loadFallbackGroup,
+		func(selectionCtx context.Context, id *int64) (*AccountSelectionResult, error) {
+			selected, selectedDecision, err := s.selectAccountWithScheduler(selectionCtx, id, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+			decision = selectedDecision
+			if errors.Is(err, ErrAccountQualityHeld) && strings.TrimSpace(previousResponseID) != "" && !previousResponseCanMove {
+				// Keep the original quality error observable without permitting fallback.
+				return selected, &ownerBoundQualityError{err}
+			}
+			return selected, err
+		}, markGroupFallbackSelection)
+	if bound, ok := err.(*ownerBoundQualityError); ok {
+		err = bound.err
 	}
 	return selection, decision, err
-}
-
-func (s *OpenAIGatewayService) logAPIKeyGroupFallbackSelected(primaryGroupID *int64, fallbackGroupID int64, requestedModel string, selection *AccountSelectionResult) {
-	accountID := int64(0)
-	if selection != nil && selection.Account != nil {
-		accountID = selection.Account.ID
-	}
-	slog.Info("api_key_group_fallback_selected",
-		"primary_group_id", derefGroupID(primaryGroupID),
-		"fallback_group_id", fallbackGroupID,
-		"account_id", accountID,
-		"model", requestedModel)
 }
 
 // selectAccountWithScheduler wraps selectAccountWithSchedulerOnce with a

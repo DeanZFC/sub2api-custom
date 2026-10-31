@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"log/slog"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
@@ -51,6 +50,7 @@ func WithAPIKeyGroupFallbackRouting(ctx context.Context, apiKey *APIKey) context
 		ctx = context.Background()
 	}
 	ctx = withStrictFailoverFailures(ctx)
+	ctx = WithAPIKeyForUsageContext(ctx, apiKey)
 	if apiKey == nil || apiKey.GroupID == nil || apiKey.FallbackGroupID == nil ||
 		apiKey.Group == nil || apiKey.FallbackGroup == nil ||
 		*apiKey.GroupID <= 0 || *apiKey.FallbackGroupID <= 0 ||
@@ -65,10 +65,7 @@ func WithAPIKeyGroupFallbackRouting(ctx context.Context, apiKey *APIKey) context
 		fallbackGroup:  apiKey.FallbackGroup,
 		apiKey:         apiKey,
 	})
-	// Also expose the pointer through the usage-task context hook. This covers
-	// internal callers/tests that install fallback routing directly instead of
-	// passing through the HTTP middleware.
-	return WithAPIKeyForUsageContext(ctx, apiKey)
+	return ctx
 }
 
 func activateAPIKeyFallbackRouting(ctx context.Context, fallbackGroupID int64) bool {
@@ -148,41 +145,16 @@ func apiKeyFallbackGroupForSelection(ctx context.Context, groupID *int64, select
 	return routing.fallbackGroup, fallbackCtx, true
 }
 
-func markAPIKeyFallbackSelection(ctx context.Context, selection *AccountSelectionResult, fallbackGroupID int64) *AccountSelectionResult {
-	if selection != nil && selection.Account != nil {
-		selection.RoutedGroupID = fallbackGroupID
-		selection.UsedAPIKeyFallback = true
-		activateAPIKeyFallbackRouting(ctx, fallbackGroupID)
-	}
-	return selection
-}
-
 func selectAccountWithAPIKeyGroupFallback(
 	ctx context.Context,
 	groupID *int64,
 	requestedModel string,
 	selectInGroup func(context.Context, *int64) (*Account, error),
+	loaders ...fallbackGroupLoader,
 ) (*Account, error) {
-	primaryGroupID := derefGroupID(groupID)
-	account, err := selectInGroup(ctx, groupID)
-	fallbackGroup, fallbackCtx, ok := apiKeyFallbackGroupForSelection(ctx, groupID, err)
-	if !ok {
-		return account, err
+	var load fallbackGroupLoader
+	if len(loaders) > 0 {
+		load = loaders[0]
 	}
-
-	fallbackGroupID := fallbackGroup.ID
-	slog.Info("api_key_group_fallback_attempt",
-		"primary_group_id", primaryGroupID,
-		"fallback_group_id", fallbackGroupID,
-		"model", requestedModel)
-	account, err = selectInGroup(fallbackCtx, &fallbackGroupID)
-	if err == nil && account != nil {
-		activateAPIKeyFallbackRouting(ctx, fallbackGroupID)
-		slog.Info("api_key_group_fallback_selected",
-			"primary_group_id", primaryGroupID,
-			"fallback_group_id", fallbackGroupID,
-			"account_id", account.ID,
-			"model", requestedModel)
-	}
-	return account, err
+	return selectWithGroupFallback(ctx, groupID, requestedModel, load, selectInGroup, nil)
 }

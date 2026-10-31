@@ -61,7 +61,7 @@
               {{ t('admin.accounts.setPrivacy') }}
             </button>
             <div v-if="hasRecoverableState" class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
-            <button v-if="hasRecoverableState" @click="$emit('recover-state', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-emerald-600 hover:bg-gray-100 dark:hover:bg-dark-700">
+            <button v-if="hasRecoverableState" :title="t('admin.accounts.recoverStateHint')" @click="$emit('recover-state', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-emerald-600 hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="sync" size="sm" />
               {{ t('admin.accounts.recoverState') }}
             </button>
@@ -145,7 +145,17 @@ const isRateLimited = computed(() => {
 const isOverloaded = computed(() => props.account?.overload_until && new Date(props.account.overload_until) > new Date())
 const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > new Date())
 const hasRecoverableState = computed(() => {
-  return props.account?.status === 'error' || Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value)
+  const extra = props.account?.extra
+  const hasQualityHold = ['active_test_model_holds', 'active_pass_rate_holds'].some(key => {
+    const holds = extra?.[key]
+    return holds && typeof holds === 'object' && Object.values(holds).some(value => {
+      if (value === false) return false
+      return !(value && typeof value === 'object' && 'blocked' in value && value.blocked === false)
+    })
+  })
+  return props.account?.status === 'error' || props.account?.status === 'quality_paused' ||
+    extra?.active_test_all_models_paused === true || hasQualityHold ||
+    Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value)
 })
 const isAntigravityOAuth = computed(() => props.account?.platform === 'antigravity' && props.account?.type === 'oauth')
 const isOpenAIOAuth = computed(() => props.account?.platform === 'openai' && props.account?.type === 'oauth')

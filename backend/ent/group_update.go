@@ -881,6 +881,33 @@ func (_u *GroupUpdate) ClearFallbackGroupID() *GroupUpdate {
 	return _u
 }
 
+// SetFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field.
+func (_u *GroupUpdate) SetFallbackGroupIDOnUnavailable(v int64) *GroupUpdate {
+	_u.mutation.ResetFallbackGroupIDOnUnavailable()
+	_u.mutation.SetFallbackGroupIDOnUnavailable(v)
+	return _u
+}
+
+// SetNillableFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableFallbackGroupIDOnUnavailable(v *int64) *GroupUpdate {
+	if v != nil {
+		_u.SetFallbackGroupIDOnUnavailable(*v)
+	}
+	return _u
+}
+
+// AddFallbackGroupIDOnUnavailable adds value to the "fallback_group_id_on_unavailable" field.
+func (_u *GroupUpdate) AddFallbackGroupIDOnUnavailable(v int64) *GroupUpdate {
+	_u.mutation.AddFallbackGroupIDOnUnavailable(v)
+	return _u
+}
+
+// ClearFallbackGroupIDOnUnavailable clears the value of the "fallback_group_id_on_unavailable" field.
+func (_u *GroupUpdate) ClearFallbackGroupIDOnUnavailable() *GroupUpdate {
+	_u.mutation.ClearFallbackGroupIDOnUnavailable()
+	return _u
+}
+
 // SetFallbackGroupIDOnInvalidRequest sets the "fallback_group_id_on_invalid_request" field.
 func (_u *GroupUpdate) SetFallbackGroupIDOnInvalidRequest(v int64) *GroupUpdate {
 	_u.mutation.ResetFallbackGroupIDOnInvalidRequest()
@@ -1913,6 +1940,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.FallbackGroupIDCleared() {
 		_spec.ClearField(group.FieldFallbackGroupID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.FallbackGroupIDOnUnavailable(); ok {
+		_spec.SetField(group.FieldFallbackGroupIDOnUnavailable, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedFallbackGroupIDOnUnavailable(); ok {
+		_spec.AddField(group.FieldFallbackGroupIDOnUnavailable, field.TypeInt64, value)
+	}
+	if _u.mutation.FallbackGroupIDOnUnavailableCleared() {
+		_spec.ClearField(group.FieldFallbackGroupIDOnUnavailable, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.FallbackGroupIDOnInvalidRequest(); ok {
 		_spec.SetField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64, value)
@@ -3226,6 +3262,33 @@ func (_u *GroupUpdateOne) ClearFallbackGroupID() *GroupUpdateOne {
 	return _u
 }
 
+// SetFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field.
+func (_u *GroupUpdateOne) SetFallbackGroupIDOnUnavailable(v int64) *GroupUpdateOne {
+	_u.mutation.ResetFallbackGroupIDOnUnavailable()
+	_u.mutation.SetFallbackGroupIDOnUnavailable(v)
+	return _u
+}
+
+// SetNillableFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableFallbackGroupIDOnUnavailable(v *int64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetFallbackGroupIDOnUnavailable(*v)
+	}
+	return _u
+}
+
+// AddFallbackGroupIDOnUnavailable adds value to the "fallback_group_id_on_unavailable" field.
+func (_u *GroupUpdateOne) AddFallbackGroupIDOnUnavailable(v int64) *GroupUpdateOne {
+	_u.mutation.AddFallbackGroupIDOnUnavailable(v)
+	return _u
+}
+
+// ClearFallbackGroupIDOnUnavailable clears the value of the "fallback_group_id_on_unavailable" field.
+func (_u *GroupUpdateOne) ClearFallbackGroupIDOnUnavailable() *GroupUpdateOne {
+	_u.mutation.ClearFallbackGroupIDOnUnavailable()
+	return _u
+}
+
 // SetFallbackGroupIDOnInvalidRequest sets the "fallback_group_id_on_invalid_request" field.
 func (_u *GroupUpdateOne) SetFallbackGroupIDOnInvalidRequest(v int64) *GroupUpdateOne {
 	_u.mutation.ResetFallbackGroupIDOnInvalidRequest()
@@ -4288,6 +4351,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.FallbackGroupIDCleared() {
 		_spec.ClearField(group.FieldFallbackGroupID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.FallbackGroupIDOnUnavailable(); ok {
+		_spec.SetField(group.FieldFallbackGroupIDOnUnavailable, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedFallbackGroupIDOnUnavailable(); ok {
+		_spec.AddField(group.FieldFallbackGroupIDOnUnavailable, field.TypeInt64, value)
+	}
+	if _u.mutation.FallbackGroupIDOnUnavailableCleared() {
+		_spec.ClearField(group.FieldFallbackGroupIDOnUnavailable, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.FallbackGroupIDOnInvalidRequest(); ok {
 		_spec.SetField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64, value)

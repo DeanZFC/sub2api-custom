@@ -623,7 +623,7 @@ export default {
       bulkDeletePartial: 'Partially deleted: {success} succeeded, {failed} failed',
       bulkDeleteFailed: 'Bulk delete failed',
       recoverState: 'Recover State',
-      recoverStateHint: 'Used to recover error, rate-limit, and temporary unschedulable runtime state.',
+      recoverStateHint: 'Clear errors, rate limits, temporary scheduling blocks, and current quality protection (including model holds). New quality checks may trigger protection again.',
       recoverStateSuccess: 'Account state recovered successfully',
       recoverStateFailed: 'Failed to recover account state',
       fallbackActive: 'Fallback',

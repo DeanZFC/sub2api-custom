@@ -211,6 +211,10 @@ func (Group) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("非 Claude Code 请求降级使用的分组 ID"),
+		field.Int64("fallback_group_id_on_unavailable").
+			Optional().
+			Nillable().
+			Comment("账号不可用时的兜底分组，用户仍按原分组计费"),
 		field.Int64("fallback_group_id_on_invalid_request").
 			Optional().
 			Nillable().

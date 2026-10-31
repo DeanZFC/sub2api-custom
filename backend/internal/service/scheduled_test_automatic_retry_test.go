@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +14,64 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/stretchr/testify/require"
 )
+
+type scheduledTestRetryStateAccountRepo struct {
+	AccountRepository
+	mu         sync.Mutex
+	account    *Account
+	errorCalls []string
+}
+
+func (r *scheduledTestRetryStateAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.account == nil || r.account.ID != id {
+		return nil, ErrAccountNotFound
+	}
+	account := *r.account
+	return &account, nil
+}
+
+func (r *scheduledTestRetryStateAccountRepo) SetError(_ context.Context, id int64, message string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.account == nil || r.account.ID != id {
+		return ErrAccountNotFound
+	}
+	r.errorCalls = append(r.errorCalls, message)
+	r.account.Status = StatusError
+	return nil
+}
+
+func (*scheduledTestRetryStateAccountRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
+}
+
+func (r *scheduledTestRetryStateAccountRepo) stopScheduling() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.account.Schedulable = false
+}
+
+type scheduledTestRetryStateResultRepo struct {
+	*retryResultRepoStub
+	ScheduledTestProtectionRepository
+	accounts *scheduledTestRetryStateAccountRepo
+}
+
+func (r *scheduledTestRetryStateResultRepo) ListDetectionAccountIDs(ctx context.Context, _ *int64, id *int64) ([]int64, error) {
+	account, err := r.accounts.GetByID(ctx, *id)
+	if err != nil {
+		return nil, err
+	}
+	if account.Status != StatusActive || !account.Schedulable {
+		return nil, nil
+	}
+	return []int64{account.ID}, nil
+}
 
 func automaticRetryTestPlan() *ScheduledTestPlan {
 	plan := scheduledTestExecutionPlan()
@@ -64,7 +123,7 @@ func TestScheduledTestAutomaticRetrySuccessPersistsOnce(t *testing.T) {
 	requireAutomaticRetrySingleRow(t, results, completed)
 }
 
-func TestScheduledTestAutomaticRetryDoesNotRetryMissingAccount(t *testing.T) {
+func TestScheduledTestAutomaticRetryRetriesAccountLookupFailure(t *testing.T) {
 	results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
 	var calls atomic.Int32
 	accounts := scheduledTestExecutionAccountRepo{get: func(context.Context, int64) (*Account, error) {
@@ -75,13 +134,102 @@ func TestScheduledTestAutomaticRetryDoesNotRetryMissingAccount(t *testing.T) {
 	defer runner.Stop()
 	runner.runOnePlan(context.Background(), automaticRetryTestPlan())
 	completed := automaticRetryCompleted(t, results)
-	require.Equal(t, int32(1), calls.Load(), "a missing account is not retryable")
+	require.Equal(t, int32(4), calls.Load(), "account lookup errors receive three automatic retries")
 	require.Equal(t, "failed", completed.Status)
 	require.NotEmpty(t, completed.ErrorMessage)
 	requireAutomaticRetrySingleRow(t, results, completed)
 }
 
-func TestScheduledTestAutomaticRetryDoesNotRetryOutputContractFailures(t *testing.T) {
+func TestScheduledTestAutomaticRetryDefersAccountErrorUntilFinalAttempt(t *testing.T) {
+	for _, recover := range []bool{false, true} {
+		t.Run(fmt.Sprint(recover), func(t *testing.T) {
+			plan := automaticRetryTestPlan()
+			accounts := &scheduledTestRetryStateAccountRepo{account: &Account{
+				ID: *plan.AccountID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"},
+				Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: true},
+			}}
+			results := &scheduledTestRetryStateResultRepo{retryResultRepoStub: &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}, accounts: accounts}
+			final := costJSONResponse(401, `{"error":{"message":"invalid key again"}}`)
+			if recover {
+				final = costJSONResponse(200, `{"model":"model","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)
+			}
+			upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{
+				costJSONResponse(401, `{"error":{"message":"invalid key"}}`),
+				costJSONResponse(401, `{"error":{"message":"invalid key"}}`),
+				costJSONResponse(401, `{"error":{"message":"invalid key"}}`), final,
+			}, beforeReturn: func(_ *http.Request, _ int) {
+				account, err := accounts.GetByID(context.Background(), *plan.AccountID)
+				require.NoError(t, err)
+				require.Equal(t, StatusActive, account.Status, "earlier failures must not make the remaining retries ineligible")
+			}}
+			runner := automaticRetryTestRunner(results, accounts)
+			defer runner.Stop()
+			runner.accountTestSvc.httpUpstream = upstream
+			runner.accountTestSvc.cfg = &config.Config{}
+			runner.runOnePlan(context.Background(), plan)
+			completed := automaticRetryCompleted(t, results.retryResultRepoStub)
+			require.Equal(t, 4, upstream.requests, "the initial request may be followed by three retries")
+			require.Len(t, completed.ExecutionInfo.Attempts, 4)
+			for _, attempt := range completed.ExecutionInfo.Attempts[:3] {
+				require.Equal(t, 401, attempt.HTTPStatus)
+			}
+			if recover {
+				require.Equal(t, "success", completed.Status)
+				require.Empty(t, accounts.errorCalls)
+				require.Equal(t, StatusActive, accounts.account.Status)
+			} else {
+				require.Equal(t, "failed", completed.Status)
+				require.Len(t, accounts.errorCalls, 1, "only the exhausted authentication failure is persisted")
+				require.Equal(t, StatusError, accounts.account.Status)
+			}
+			requireAutomaticRetrySingleRow(t, results.retryResultRepoStub, completed)
+		})
+	}
+}
+
+func TestScheduledTestAutomaticRetryStillHonorsManualStopAndCancellation(t *testing.T) {
+	for _, interruption := range []string{"manual stop", "cancel"} {
+		t.Run(interruption, func(t *testing.T) {
+			plan := automaticRetryTestPlan()
+			accounts := &scheduledTestRetryStateAccountRepo{account: &Account{
+				ID: *plan.AccountID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"},
+				Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: true},
+			}}
+			results := &scheduledTestRetryStateResultRepo{retryResultRepoStub: &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}, accounts: accounts}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{
+				costJSONResponse(401, `{"error":{"message":"invalid key"}}`),
+			}, beforeReturn: func(_ *http.Request, _ int) {
+				if interruption == "manual stop" {
+					accounts.stopScheduling()
+				} else {
+					cancel()
+				}
+			}}
+			runner := automaticRetryTestRunner(results, accounts)
+			defer runner.Stop()
+			runner.accountTestSvc.httpUpstream = upstream
+			runner.accountTestSvc.cfg = &config.Config{}
+			runner.runOnePlan(ctx, plan)
+			completed := automaticRetryCompleted(t, results.retryResultRepoStub)
+			require.Equal(t, 1, upstream.requests, "an interruption must prevent the next upstream request")
+			require.Equal(t, "failed", completed.Status)
+			require.Empty(t, accounts.errorCalls)
+			require.Len(t, completed.ExecutionInfo.Attempts, 1)
+			if interruption == "cancel" {
+				require.Equal(t, "canceled", completed.ExecutionInfo.FailureKind)
+			} else {
+				require.Contains(t, completed.ErrorMessage, "account is no longer enabled for detection")
+			}
+			requireAutomaticRetrySingleRow(t, results.retryResultRepoStub, completed)
+		})
+	}
+}
+
+func TestScheduledTestAutomaticRetryRetriesOutputContractFailures(t *testing.T) {
 	for _, kind := range []string{"html", "number"} {
 		t.Run(kind, func(t *testing.T) {
 			results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
@@ -99,10 +247,74 @@ func TestScheduledTestAutomaticRetryDoesNotRetryOutputContractFailures(t *testin
 			}})
 			runner.runOnePlan(context.Background(), automaticRetryTestPlan())
 			completed := automaticRetryCompleted(t, results)
-			require.Equal(t, int32(1), calls.Load(), "invalid output must not trigger repeated generation")
+			require.Equal(t, int32(4), calls.Load(), "invalid output receives three automatic retries")
 			require.Equal(t, "failed", completed.Status)
 			require.Contains(t, completed.ErrorMessage, "expected")
 			requireAutomaticRetrySingleRow(t, results, completed)
+		})
+	}
+}
+
+func TestScheduledTestAutomaticRetryRecoversOutputContractAndKeepsAttempts(t *testing.T) {
+	for _, tc := range []struct {
+		kind, output string
+	}{{"html", "<html><body>complete output</body></html>"}, {"number", "21"}} {
+		t.Run(tc.kind, func(t *testing.T) {
+			results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
+			plan := automaticRetryTestPlan()
+			account := &Account{ID: *plan.AccountID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"},
+				Extra:       map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
+			accounts := &modelIdentityAccountRepo{account: account}
+			upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{
+				costJSONResponse(200, `{"model":"test-model","status":"completed","usage":{"input_tokens":3,"output_tokens":2},"output":[{"type":"message","content":[{"type":"output_text","text":"ordinary text"}]}]}`),
+				costJSONResponse(200, fmt.Sprintf(`{"model":"test-model","status":"completed","usage":{"input_tokens":5,"output_tokens":4},"output":[{"type":"message","content":[{"type":"output_text","text":%q}]}]}`, tc.output)),
+			}}
+			runner := automaticRetryTestRunner(results, accounts)
+			defer runner.Stop()
+			runner.accountTestSvc.httpUpstream = upstream
+			runner.accountTestSvc.cfg = &config.Config{}
+			runner.scheduledSvc.SetDefinitionRepository(multiDefinitionRepoStub{definitions: map[int64]*ScheduledTestDefinition{
+				1: {ID: 1, Enabled: true, Prompt: "produce structured output", OutputKind: tc.kind},
+			}})
+			runner.runOnePlan(context.Background(), plan)
+			completed := automaticRetryCompleted(t, results)
+			require.Equal(t, 2, upstream.requests)
+			require.Equal(t, "success", completed.Status)
+			require.Contains(t, completed.ResponseText, tc.output)
+			require.Empty(t, completed.ErrorMessage)
+			require.Len(t, completed.ExecutionInfo.Attempts, 2)
+			require.Equal(t, "output_invalid", completed.ExecutionInfo.Attempts[0].FailureKind)
+			require.Empty(t, completed.ExecutionInfo.Attempts[1].FailureKind)
+			require.EqualValues(t, 8, *completed.ExecutionInfo.InputTokens)
+			require.EqualValues(t, 6, *completed.ExecutionInfo.OutputTokens)
+			requireAutomaticRetrySingleRow(t, results, completed)
+		})
+	}
+}
+
+func TestScheduledTestAutomaticRetryHandlesMissingResult(t *testing.T) {
+	for _, recover := range []bool{false, true} {
+		t.Run(fmt.Sprint(recover), func(t *testing.T) {
+			calls := 0
+			runner := &ScheduledTestRunnerService{automaticRetryBaseDelay: time.Millisecond}
+			result := runner.runWithAutomaticRetries(context.Background(), &ScheduledTestPlan{}, nil, func(context.Context) *ScheduledTestResult {
+				calls++
+				if recover && calls == 2 {
+					return &ScheduledTestResult{Status: "success", ResponseText: "recovered"}
+				}
+				return nil
+			})
+			if recover {
+				require.Equal(t, 2, calls, "a successful retry stops the remaining attempts")
+				require.Equal(t, "success", result.Status)
+				require.Empty(t, result.ExecutionInfo.FailureKind)
+			} else {
+				require.Equal(t, 4, calls, "a missing result receives three automatic retries")
+				require.Equal(t, "failed", result.Status)
+				require.Equal(t, "unknown", result.ExecutionInfo.FailureKind)
+				require.Contains(t, result.ErrorMessage, "test returned no result")
+			}
 		})
 	}
 }
@@ -148,7 +360,7 @@ func TestScheduledTestAutomaticRetrySkipsLaterDefinitionsAfterExhaustion(t *test
 	runner.runOnePlan(context.Background(), plan)
 	first := automaticRetryCompleted(t, results)
 	second := automaticRetryCompleted(t, results)
-	require.Equal(t, int32(1), calls.Load(), "invalid HTML stops this account after one attempt")
+	require.Equal(t, int32(4), calls.Load(), "invalid HTML stops this account after exhausting its three retries")
 	require.Equal(t, int64(1), *first.TestDefinitionID)
 	require.Equal(t, "failed", first.Status)
 	require.Contains(t, first.ErrorMessage, "expected HTML")
@@ -329,7 +541,7 @@ func TestScheduledTestAutomaticRetryAppliesToManualRunAndSingleResultRetry(t *te
 		defer runner.Stop()
 		runner.RunPlanNow(context.Background(), automaticRetryTestPlan())
 		completed := automaticRetryCompleted(t, results)
-		require.Equal(t, int32(1), calls.Load(), "manual run also avoids retrying a missing account")
+		require.Equal(t, int32(4), calls.Load(), "manual runs receive three automatic retries after an execution error")
 		require.Equal(t, "failed", completed.Status)
 		requireAutomaticRetrySingleRow(t, results, completed)
 	})
@@ -354,7 +566,7 @@ func TestScheduledTestAutomaticRetryAppliesToManualRunAndSingleResultRetry(t *te
 		require.NoError(t, err)
 		completed := automaticRetryCompleted(t, results)
 		runner.activeRuns.Wait()
-		require.Equal(t, int32(2), calls.Load(), "one validation followed by one non-retryable attempt")
+		require.Equal(t, int32(5), calls.Load(), "one validation followed by four execution attempts")
 		require.Equal(t, previous.ID, pending.ID)
 		require.Equal(t, previous.ID, completed.ID)
 		require.Equal(t, "failed", completed.Status)
@@ -363,7 +575,7 @@ func TestScheduledTestAutomaticRetryAppliesToManualRunAndSingleResultRetry(t *te
 	})
 }
 
-func TestScheduledTestAutomaticRetryCronDiscoverySkipsPermanentRetries(t *testing.T) {
+func TestScheduledTestAutomaticRetryCronDiscoveryRetriesExecutionErrors(t *testing.T) {
 	results := &retryResultRepoStub{updated: make(chan *ScheduledTestResult, 5)}
 	var calls atomic.Int32
 	accounts := scheduledTestExecutionAccountRepo{get: func(context.Context, int64) (*Account, error) {
@@ -379,7 +591,7 @@ func TestScheduledTestAutomaticRetryCronDiscoverySkipsPermanentRetries(t *testin
 	cancel()
 	completed := automaticRetryCompleted(t, results)
 	runner.activeRuns.Wait()
-	require.Equal(t, int32(1), calls.Load(), "admitted cron work outlives discovery and avoids permanent retries")
+	require.Equal(t, int32(4), calls.Load(), "admitted cron work outlives discovery and receives three retries")
 	require.Equal(t, "failed", completed.Status)
 	requireAutomaticRetrySingleRow(t, results, completed)
 }

@@ -260,7 +260,7 @@ func refreshScheduledTestPassRateSummary(ctx context.Context, db passRateQueryer
 	return nil
 }
 
-func syncActivePassRateProjection(ctx context.Context, tx *sql.Tx, accountID int64) error {
+func syncActivePassRateProjection(ctx context.Context, tx sqlExecutor, accountID int64) error {
 	changed, err := tx.ExecContext(ctx, `WITH holds AS (SELECT COALESCE(jsonb_object_agg(model_key,reason),'{}'::jsonb) value FROM
   (SELECT DISTINCT ON(model_key) model_key,COALESCE(summary->>'reason','recovery_pending') reason FROM scheduled_test_pass_rate_states WHERE account_id=$1 AND blocked ORDER BY model_key,updated_at DESC) h)
  UPDATE accounts a SET extra=CASE WHEN h.value='{}'::jsonb THEN COALESCE(a.extra,'{}'::jsonb)-'active_pass_rate_holds' ELSE jsonb_set(COALESCE(a.extra,'{}'::jsonb),'{active_pass_rate_holds}',h.value) END,updated_at=clock_timestamp()

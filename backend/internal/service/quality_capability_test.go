@@ -86,7 +86,7 @@ func TestQualityCapabilitySuiteDecisionsAndUsage(t *testing.T) {
 		{"early pass", []string{"7", "7"}, false, "pass", 2, 2},
 		{"early fail", []string{"8", "8"}, false, "fail", 2, 0},
 		{"mixed", []string{"8", "7", "7"}, false, "pass", 3, 2},
-		{"transport unknown", []string{"7", ""}, true, "pending", 2, 1},
+		{"transport unknown", []string{"7", "", "", "", ""}, true, "pending", 5, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := QualityCapabilityConfig{Version: 1, Samples: 3, RequiredPasses: 2, Questions: []QualityCapabilityQuestion{{Key: "a", Prompt: "a", Expected: "7", Match: "number"}, {Key: "b", Prompt: "b", Expected: "7", Match: "number"}, {Key: "c", Prompt: "c", Expected: "7", Match: "number"}}}
@@ -94,11 +94,13 @@ func TestQualityCapabilitySuiteDecisionsAndUsage(t *testing.T) {
 			require.NoError(t, err)
 			runner := &ScheduledTestRunnerService{automaticRetryBaseDelay: time.Millisecond}
 			calls := 0
-			r := runner.runCapabilitySuite(context.Background(), &ScheduledTestPlan{ID: 1}, 1, string(raw), func(context.Context, string) *ScheduledTestResult {
+			var prompts []string
+			r := runner.runCapabilitySuite(context.Background(), &ScheduledTestPlan{ID: 1}, 1, string(raw), func(_ context.Context, prompt string) *ScheduledTestResult {
+				prompts = append(prompts, prompt)
 				value := int64(10)
 				status := "success"
 				code := 200
-				if tc.fail && calls == 1 {
+				if tc.fail && calls >= 1 {
 					status = "failed"
 					code = 401
 				}
@@ -116,6 +118,7 @@ func TestQualityCapabilitySuiteDecisionsAndUsage(t *testing.T) {
 			verdict, _ := evaluateScheduledTestProtection(ScheduledTestProtectionRule{}, r)
 			require.Equal(t, tc.verdict, verdict)
 			if tc.fail {
+				require.Equal(t, []string{prompts[1], prompts[1], prompts[1], prompts[1]}, prompts[1:], "all retries must use the same failing question")
 				require.Equal(t, "unknown", r.ExecutionInfo.Capability.Answers[1].Verdict)
 				require.Equal(t, "failed", r.Status)
 			}

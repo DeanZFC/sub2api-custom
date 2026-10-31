@@ -12,7 +12,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 29 // v29: image-count billing, retaining strict failover group routing configuration.
+const apiKeyAuthSnapshotVersion = 30 // v30: group account fallback, billed to the original group.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -371,6 +371,7 @@ func apiKeyAuthGroupSnapshotFromGroup(group *Group) *APIKeyAuthGroupSnapshot {
 		ClaudeCodeOnly:                  group.ClaudeCodeOnly,
 		FallbackGroupID:                 group.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: group.FallbackGroupIDOnInvalidRequest,
+		FallbackGroupIDOnUnavailable:    group.FallbackGroupIDOnUnavailable,
 		ModelRouting:                    group.ModelRouting,
 		ModelRoutingEnabled:             group.ModelRoutingEnabled,
 		MCPXMLInject:                    group.MCPXMLInject,
@@ -445,6 +446,7 @@ func apiKeyAuthGroupFromSnapshot(snapshot *APIKeyAuthGroupSnapshot) *Group {
 		ClaudeCodeOnly:                  snapshot.ClaudeCodeOnly,
 		FallbackGroupID:                 snapshot.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: snapshot.FallbackGroupIDOnInvalidRequest,
+		FallbackGroupIDOnUnavailable:    snapshot.FallbackGroupIDOnUnavailable,
 		ModelRouting:                    snapshot.ModelRouting,
 		ModelRoutingEnabled:             snapshot.ModelRoutingEnabled,
 		MCPXMLInject:                    snapshot.MCPXMLInject,
@@ -562,6 +564,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			ClaudeCodeOnly:                  apiKey.Group.ClaudeCodeOnly,
 			FallbackGroupID:                 apiKey.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: apiKey.Group.FallbackGroupIDOnInvalidRequest,
+			FallbackGroupIDOnUnavailable:    apiKey.Group.FallbackGroupIDOnUnavailable,
 			ModelRouting:                    apiKey.Group.ModelRouting,
 			ModelRoutingEnabled:             apiKey.Group.ModelRoutingEnabled,
 			MCPXMLInject:                    apiKey.Group.MCPXMLInject,
@@ -682,6 +685,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			ClaudeCodeOnly:                  snapshot.Group.ClaudeCodeOnly,
 			FallbackGroupID:                 snapshot.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: snapshot.Group.FallbackGroupIDOnInvalidRequest,
+			FallbackGroupIDOnUnavailable:    snapshot.Group.FallbackGroupIDOnUnavailable,
 			ModelRouting:                    snapshot.Group.ModelRouting,
 			ModelRoutingEnabled:             snapshot.Group.ModelRoutingEnabled,
 			MCPXMLInject:                    snapshot.Group.MCPXMLInject,

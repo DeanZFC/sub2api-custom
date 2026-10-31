@@ -1901,6 +1901,12 @@
           </div>
         </div>
 
+        <GroupUnavailableFallbackField
+          v-if="showCreateModal && createForm.platform !== 'composite'"
+          v-model="createForm.fallback_group_id_on_unavailable"
+          :platform="createForm.platform"
+        />
+
         <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
         <div
           v-if="
@@ -3578,6 +3584,13 @@
           </div>
         </div>
 
+        <GroupUnavailableFallbackField
+          v-if="showEditModal && editForm.platform !== 'composite'"
+          v-model="editForm.fallback_group_id_on_unavailable"
+          :platform="editForm.platform"
+          :group-id="editingGroup?.id"
+        />
+
         <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
         <div
           v-if="
@@ -4348,6 +4361,7 @@ import TablePageLayout from "@/components/layout/TablePageLayout.vue";
 import DataTable from "@/components/common/DataTable.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import Toggle from "@/components/common/Toggle.vue";
+import GroupUnavailableFallbackField from "@/components/admin/group/GroupUnavailableFallbackField.vue";
 import StrictFailoverFields from "@/components/admin/group/StrictFailoverFields.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
@@ -5051,6 +5065,7 @@ const createForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  fallback_group_id_on_unavailable: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -5419,6 +5434,7 @@ const editForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  fallback_group_id_on_unavailable: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -5834,6 +5850,11 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   loadGroups();
 };
 
+watch(() => createForm.platform, () => { createForm.fallback_group_id_on_unavailable = null });
+watch(() => editForm.platform, (platform, previous) => {
+  if (platform !== previous && editingGroup.value?.platform !== platform) editForm.fallback_group_id_on_unavailable = null;
+});
+
 const openCreateModal = () => {
   showCreateModal.value = true;
   loadModelAllowlistCandidates("create", 0, createForm.platform);
@@ -5889,6 +5910,7 @@ const closeCreateModal = () => {
   createForm.profit_safety_buffer_percent = 0;
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
+  createForm.fallback_group_id_on_unavailable = null;
   createForm.fallback_group_id_on_invalid_request = null;
   resetMessagesDispatchFormState(createForm);
   createForm.allow_live = false;
@@ -6189,6 +6211,7 @@ const handleEdit = async (group: AdminGroup) => {
   );
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
+  editForm.fallback_group_id_on_unavailable = group.fallback_group_id_on_unavailable ?? null;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
@@ -6368,6 +6391,7 @@ const handleUpdateGroup = async () => {
       video_model_prices: serializeVideoModelPrices(
         editForm.video_model_prices,
       ),
+      fallback_group_id_on_unavailable: editForm.fallback_group_id_on_unavailable ?? 0,
       fallback_group_id:
         editForm.fallback_group_id === null ? 0 : editForm.fallback_group_id,
       fallback_group_id_on_invalid_request:

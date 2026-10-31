@@ -742,7 +742,7 @@ export default {
       bulkDeletePartial: '部分删除成功：成功 {success} 个，失败 {failed} 个',
       bulkDeleteFailed: '批量删除失败',
       recoverState: '恢复状态',
-      recoverStateHint: '用于恢复错误、限流和临时不可调度等可恢复状态。',
+      recoverStateHint: '恢复错误、限流和临时不可调度状态，并解除当前质量保护（含模型暂停）。后续新的质量检测仍可能再次触发保护。',
       recoverStateSuccess: '账号状态已恢复',
       recoverStateFailed: '恢复账号状态失败',
       fallbackActive: '已回退',

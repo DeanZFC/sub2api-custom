@@ -73,28 +73,28 @@ func TestScheduledTestCostBackoffIsPerAccountAndManualBypasses(t *testing.T) {
 	plan.TestDefinitionIDs = []int64{1, 2}
 	automatic := context.WithValue(context.Background(), scheduledTestAutomaticRunKey{}, true)
 	runner.executePlanSnapshot(automatic, plan, repo)
-	require.Equal(t, 1, calls[12])
+	require.Equal(t, 4, calls[12], "execution errors receive three automatic retries")
 	require.Equal(t, 2, calls[13])
 	require.Equal(t, 1, repo.states[12].ConsecutiveFailures)
 	require.WithinDuration(t, time.Now().Add(5*time.Minute), repo.states[12].NextCheckAt, time.Second)
 	firstWrites := repo.writes
 	runner.executePlanSnapshot(automatic, plan, repo)
-	require.Equal(t, 1, calls[12], "cooling account must make no paid requests")
+	require.Equal(t, 4, calls[12], "cooling account must make no paid requests")
 	require.Equal(t, 4, calls[13], "other accounts keep running")
 	require.Equal(t, firstWrites+1, repo.writes, "skips must not extend cooldown or failure streak")
 	unhealthy = false
 	runner.executePlanSnapshot(context.Background(), plan, repo)
-	require.Equal(t, 3, calls[12], "manual full run bypasses cooldown and performs every check")
+	require.Equal(t, 6, calls[12], "manual full run bypasses cooldown and performs every check")
 	require.Zero(t, repo.states[12].ConsecutiveFailures)
 	runner.executePlanSnapshot(automatic, plan, repo)
-	require.Equal(t, 5, calls[12], "successful recovery resets cooldown")
+	require.Equal(t, 8, calls[12], "successful recovery resets cooldown")
 	// A model change ignores cooldown established by the old execution policy.
 	unhealthy = true
 	runner.executePlanSnapshot(automatic, plan, repo)
-	require.Equal(t, 6, calls[12])
+	require.Equal(t, 12, calls[12])
 	plan.ModelID = "changed-model"
 	runner.executePlanSnapshot(automatic, plan, repo)
-	require.Equal(t, 7, calls[12])
+	require.Equal(t, 16, calls[12])
 	require.Equal(t, 1, repo.states[12].ConsecutiveFailures)
 }
 func TestScheduledTestCostBackoffStepsAndPendingEvidence(t *testing.T) {

@@ -49,15 +49,22 @@ type AccountRuntimeBlocker interface {
 	ClearAccountSchedulingBlock(accountID int64)
 }
 
-// SuccessfulTestRecoveryResult 表示测试成功后恢复了哪些运行时状态。
+// SuccessfulTestRecoveryResult 表示测试成功或管理员操作恢复了哪些状态。
 type SuccessfulTestRecoveryResult struct {
-	ClearedError     bool
-	ClearedRateLimit bool
+	ClearedError             bool
+	ClearedRateLimit         bool
+	ClearedQualityProtection bool
 }
 
 // AccountRecoveryOptions 控制账号恢复时的附加行为。
 type AccountRecoveryOptions struct {
 	InvalidateToken bool
+	// Only an explicit administrator recovery may release quality protection.
+	ClearQualityProtection bool
+}
+
+type AccountQualityProtectionRecoverer interface {
+	ClearAccountQualityProtection(ctx context.Context, accountID int64) error
 }
 
 type geminiUsageCacheEntry struct {
@@ -2232,7 +2239,7 @@ func (s *RateLimitService) ResetOpenAI403Counter(ctx context.Context, accountID 
 	}
 }
 
-// RecoverAccountState 按需恢复账号的可恢复运行时状态。
+// RecoverAccountState 恢复运行时状态；仅显式管理员操作可同时解除质量保护。
 func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID int64, options AccountRecoveryOptions) (*SuccessfulTestRecoveryResult, error) {
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
@@ -2240,6 +2247,14 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 	}
 
 	result := &SuccessfulTestRecoveryResult{}
+	var qualityRecoverer AccountQualityProtectionRecoverer
+	if options.ClearQualityProtection {
+		var ok bool
+		qualityRecoverer, ok = s.accountRepo.(AccountQualityProtectionRecoverer)
+		if !ok {
+			return nil, fmt.Errorf("account quality protection recovery is unavailable")
+		}
+	}
 	if account.Status == StatusError {
 		if err := s.accountRepo.ClearError(ctx, accountID); err != nil {
 			return nil, err
@@ -2258,9 +2273,15 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 		}
 		result.ClearedRateLimit = true
 	}
-	if result.ClearedError || result.ClearedRateLimit {
+	if qualityRecoverer != nil {
+		if err := qualityRecoverer.ClearAccountQualityProtection(ctx, accountID); err != nil {
+			return nil, err
+		}
+		result.ClearedQualityProtection = true
+	}
+	if result.ClearedError || result.ClearedRateLimit || result.ClearedQualityProtection {
 		s.ResetOpenAI403Counter(ctx, accountID)
-		if result.ClearedError && !result.ClearedRateLimit {
+		if !result.ClearedRateLimit {
 			s.notifyAccountSchedulingBlockCleared(accountID)
 		}
 	}

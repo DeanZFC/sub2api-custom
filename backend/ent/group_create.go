@@ -628,6 +628,20 @@ func (_c *GroupCreate) SetNillableFallbackGroupID(v *int64) *GroupCreate {
 	return _c
 }
 
+// SetFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field.
+func (_c *GroupCreate) SetFallbackGroupIDOnUnavailable(v int64) *GroupCreate {
+	_c.mutation.SetFallbackGroupIDOnUnavailable(v)
+	return _c
+}
+
+// SetNillableFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableFallbackGroupIDOnUnavailable(v *int64) *GroupCreate {
+	if v != nil {
+		_c.SetFallbackGroupIDOnUnavailable(*v)
+	}
+	return _c
+}
+
 // SetFallbackGroupIDOnInvalidRequest sets the "fallback_group_id_on_invalid_request" field.
 func (_c *GroupCreate) SetFallbackGroupIDOnInvalidRequest(v int64) *GroupCreate {
 	_c.mutation.SetFallbackGroupIDOnInvalidRequest(v)
@@ -1716,6 +1730,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldFallbackGroupID, field.TypeInt64, value)
 		_node.FallbackGroupID = &value
 	}
+	if value, ok := _c.mutation.FallbackGroupIDOnUnavailable(); ok {
+		_spec.SetField(group.FieldFallbackGroupIDOnUnavailable, field.TypeInt64, value)
+		_node.FallbackGroupIDOnUnavailable = &value
+	}
 	if value, ok := _c.mutation.FallbackGroupIDOnInvalidRequest(); ok {
 		_spec.SetField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64, value)
 		_node.FallbackGroupIDOnInvalidRequest = &value
@@ -2747,6 +2765,30 @@ func (u *GroupUpsert) AddFallbackGroupID(v int64) *GroupUpsert {
 // ClearFallbackGroupID clears the value of the "fallback_group_id" field.
 func (u *GroupUpsert) ClearFallbackGroupID() *GroupUpsert {
 	u.SetNull(group.FieldFallbackGroupID)
+	return u
+}
+
+// SetFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsert) SetFallbackGroupIDOnUnavailable(v int64) *GroupUpsert {
+	u.Set(group.FieldFallbackGroupIDOnUnavailable, v)
+	return u
+}
+
+// UpdateFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateFallbackGroupIDOnUnavailable() *GroupUpsert {
+	u.SetExcluded(group.FieldFallbackGroupIDOnUnavailable)
+	return u
+}
+
+// AddFallbackGroupIDOnUnavailable adds v to the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsert) AddFallbackGroupIDOnUnavailable(v int64) *GroupUpsert {
+	u.Add(group.FieldFallbackGroupIDOnUnavailable, v)
+	return u
+}
+
+// ClearFallbackGroupIDOnUnavailable clears the value of the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsert) ClearFallbackGroupIDOnUnavailable() *GroupUpsert {
+	u.SetNull(group.FieldFallbackGroupIDOnUnavailable)
 	return u
 }
 
@@ -4032,6 +4074,34 @@ func (u *GroupUpsertOne) UpdateFallbackGroupID() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearFallbackGroupID() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearFallbackGroupID()
+	})
+}
+
+// SetFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsertOne) SetFallbackGroupIDOnUnavailable(v int64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetFallbackGroupIDOnUnavailable(v)
+	})
+}
+
+// AddFallbackGroupIDOnUnavailable adds v to the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsertOne) AddFallbackGroupIDOnUnavailable(v int64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddFallbackGroupIDOnUnavailable(v)
+	})
+}
+
+// UpdateFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateFallbackGroupIDOnUnavailable() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateFallbackGroupIDOnUnavailable()
+	})
+}
+
+// ClearFallbackGroupIDOnUnavailable clears the value of the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsertOne) ClearFallbackGroupIDOnUnavailable() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearFallbackGroupIDOnUnavailable()
 	})
 }
 
@@ -5541,6 +5611,34 @@ func (u *GroupUpsertBulk) UpdateFallbackGroupID() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearFallbackGroupID() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearFallbackGroupID()
+	})
+}
+
+// SetFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsertBulk) SetFallbackGroupIDOnUnavailable(v int64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetFallbackGroupIDOnUnavailable(v)
+	})
+}
+
+// AddFallbackGroupIDOnUnavailable adds v to the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsertBulk) AddFallbackGroupIDOnUnavailable(v int64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddFallbackGroupIDOnUnavailable(v)
+	})
+}
+
+// UpdateFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateFallbackGroupIDOnUnavailable() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateFallbackGroupIDOnUnavailable()
+	})
+}
+
+// ClearFallbackGroupIDOnUnavailable clears the value of the "fallback_group_id_on_unavailable" field.
+func (u *GroupUpsertBulk) ClearFallbackGroupIDOnUnavailable() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearFallbackGroupIDOnUnavailable()
 	})
 }
 

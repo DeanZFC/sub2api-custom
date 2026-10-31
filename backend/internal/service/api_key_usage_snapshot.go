@@ -137,6 +137,7 @@ func cloneUsageGroup(src *Group) *Group {
 	clone.AudioSTTPricePerHour = cloneUsagePointer(src.AudioSTTPricePerHour)
 	clone.FallbackGroupID = cloneUsagePointer(src.FallbackGroupID)
 	clone.FallbackGroupIDOnInvalidRequest = cloneUsagePointer(src.FallbackGroupIDOnInvalidRequest)
+	clone.FallbackGroupIDOnUnavailable = cloneUsagePointer(src.FallbackGroupIDOnUnavailable)
 	clone.VideoModelPrices = cloneUsageVideoModelPrices(src.VideoModelPrices)
 	clone.ModelRouting = cloneUsageModelRouting(src.ModelRouting)
 	clone.SupportedModelScopes = append([]string(nil), src.SupportedModelScopes...)

@@ -22945,6 +22945,8 @@ type GroupMutation struct {
 	claude_code_only                        *bool
 	fallback_group_id                       *int64
 	addfallback_group_id                    *int64
+	fallback_group_id_on_unavailable        *int64
+	addfallback_group_id_on_unavailable     *int64
 	fallback_group_id_on_invalid_request    *int64
 	addfallback_group_id_on_invalid_request *int64
 	model_routing                           *map[string][]int64
@@ -25454,6 +25456,76 @@ func (m *GroupMutation) ResetFallbackGroupID() {
 	delete(m.clearedFields, group.FieldFallbackGroupID)
 }
 
+// SetFallbackGroupIDOnUnavailable sets the "fallback_group_id_on_unavailable" field.
+func (m *GroupMutation) SetFallbackGroupIDOnUnavailable(i int64) {
+	m.fallback_group_id_on_unavailable = &i
+	m.addfallback_group_id_on_unavailable = nil
+}
+
+// FallbackGroupIDOnUnavailable returns the value of the "fallback_group_id_on_unavailable" field in the mutation.
+func (m *GroupMutation) FallbackGroupIDOnUnavailable() (r int64, exists bool) {
+	v := m.fallback_group_id_on_unavailable
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFallbackGroupIDOnUnavailable returns the old "fallback_group_id_on_unavailable" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldFallbackGroupIDOnUnavailable(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFallbackGroupIDOnUnavailable is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFallbackGroupIDOnUnavailable requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFallbackGroupIDOnUnavailable: %w", err)
+	}
+	return oldValue.FallbackGroupIDOnUnavailable, nil
+}
+
+// AddFallbackGroupIDOnUnavailable adds i to the "fallback_group_id_on_unavailable" field.
+func (m *GroupMutation) AddFallbackGroupIDOnUnavailable(i int64) {
+	if m.addfallback_group_id_on_unavailable != nil {
+		*m.addfallback_group_id_on_unavailable += i
+	} else {
+		m.addfallback_group_id_on_unavailable = &i
+	}
+}
+
+// AddedFallbackGroupIDOnUnavailable returns the value that was added to the "fallback_group_id_on_unavailable" field in this mutation.
+func (m *GroupMutation) AddedFallbackGroupIDOnUnavailable() (r int64, exists bool) {
+	v := m.addfallback_group_id_on_unavailable
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearFallbackGroupIDOnUnavailable clears the value of the "fallback_group_id_on_unavailable" field.
+func (m *GroupMutation) ClearFallbackGroupIDOnUnavailable() {
+	m.fallback_group_id_on_unavailable = nil
+	m.addfallback_group_id_on_unavailable = nil
+	m.clearedFields[group.FieldFallbackGroupIDOnUnavailable] = struct{}{}
+}
+
+// FallbackGroupIDOnUnavailableCleared returns if the "fallback_group_id_on_unavailable" field was cleared in this mutation.
+func (m *GroupMutation) FallbackGroupIDOnUnavailableCleared() bool {
+	_, ok := m.clearedFields[group.FieldFallbackGroupIDOnUnavailable]
+	return ok
+}
+
+// ResetFallbackGroupIDOnUnavailable resets all changes to the "fallback_group_id_on_unavailable" field.
+func (m *GroupMutation) ResetFallbackGroupIDOnUnavailable() {
+	m.fallback_group_id_on_unavailable = nil
+	m.addfallback_group_id_on_unavailable = nil
+	delete(m.clearedFields, group.FieldFallbackGroupIDOnUnavailable)
+}
+
 // SetFallbackGroupIDOnInvalidRequest sets the "fallback_group_id_on_invalid_request" field.
 func (m *GroupMutation) SetFallbackGroupIDOnInvalidRequest(i int64) {
 	m.fallback_group_id_on_invalid_request = &i
@@ -26943,7 +27015,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 70)
+	fields := make([]string, 0, 71)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -27078,6 +27150,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.fallback_group_id != nil {
 		fields = append(fields, group.FieldFallbackGroupID)
+	}
+	if m.fallback_group_id_on_unavailable != nil {
+		fields = append(fields, group.FieldFallbackGroupIDOnUnavailable)
 	}
 	if m.fallback_group_id_on_invalid_request != nil {
 		fields = append(fields, group.FieldFallbackGroupIDOnInvalidRequest)
@@ -27252,6 +27327,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ClaudeCodeOnly()
 	case group.FieldFallbackGroupID:
 		return m.FallbackGroupID()
+	case group.FieldFallbackGroupIDOnUnavailable:
+		return m.FallbackGroupIDOnUnavailable()
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		return m.FallbackGroupIDOnInvalidRequest()
 	case group.FieldModelRouting:
@@ -27401,6 +27478,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldClaudeCodeOnly(ctx)
 	case group.FieldFallbackGroupID:
 		return m.OldFallbackGroupID(ctx)
+	case group.FieldFallbackGroupIDOnUnavailable:
+		return m.OldFallbackGroupIDOnUnavailable(ctx)
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		return m.OldFallbackGroupIDOnInvalidRequest(ctx)
 	case group.FieldModelRouting:
@@ -27775,6 +27854,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetFallbackGroupID(v)
 		return nil
+	case group.FieldFallbackGroupIDOnUnavailable:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFallbackGroupIDOnUnavailable(v)
+		return nil
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		v, ok := value.(int64)
 		if !ok {
@@ -28024,6 +28110,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addfallback_group_id != nil {
 		fields = append(fields, group.FieldFallbackGroupID)
 	}
+	if m.addfallback_group_id_on_unavailable != nil {
+		fields = append(fields, group.FieldFallbackGroupIDOnUnavailable)
+	}
 	if m.addfallback_group_id_on_invalid_request != nil {
 		fields = append(fields, group.FieldFallbackGroupIDOnInvalidRequest)
 	}
@@ -28094,6 +28183,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedAudioSttPricePerHour()
 	case group.FieldFallbackGroupID:
 		return m.AddedFallbackGroupID()
+	case group.FieldFallbackGroupIDOnUnavailable:
+		return m.AddedFallbackGroupIDOnUnavailable()
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		return m.AddedFallbackGroupIDOnInvalidRequest()
 	case group.FieldSortOrder:
@@ -28269,6 +28360,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddFallbackGroupID(v)
 		return nil
+	case group.FieldFallbackGroupIDOnUnavailable:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFallbackGroupIDOnUnavailable(v)
+		return nil
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		v, ok := value.(int64)
 		if !ok {
@@ -28379,6 +28477,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldFallbackGroupID) {
 		fields = append(fields, group.FieldFallbackGroupID)
 	}
+	if m.FieldCleared(group.FieldFallbackGroupIDOnUnavailable) {
+		fields = append(fields, group.FieldFallbackGroupIDOnUnavailable)
+	}
 	if m.FieldCleared(group.FieldFallbackGroupIDOnInvalidRequest) {
 		fields = append(fields, group.FieldFallbackGroupIDOnInvalidRequest)
 	}
@@ -28458,6 +28559,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldFallbackGroupID:
 		m.ClearFallbackGroupID()
+		return nil
+	case group.FieldFallbackGroupIDOnUnavailable:
+		m.ClearFallbackGroupIDOnUnavailable()
 		return nil
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		m.ClearFallbackGroupIDOnInvalidRequest()
@@ -28607,6 +28711,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldFallbackGroupID:
 		m.ResetFallbackGroupID()
+		return nil
+	case group.FieldFallbackGroupIDOnUnavailable:
+		m.ResetFallbackGroupIDOnUnavailable()
 		return nil
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		m.ResetFallbackGroupIDOnInvalidRequest()

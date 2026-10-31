@@ -1355,7 +1355,7 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	}
 }
 
-// RecoverState handles unified recovery of recoverable account runtime state.
+// RecoverState explicitly releases runtime and quality protection state.
 // POST /api/v1/admin/accounts/:id/recover-state
 func (h *AccountHandler) RecoverState(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -1370,7 +1370,8 @@ func (h *AccountHandler) RecoverState(c *gin.Context) {
 	}
 
 	if _, err := h.rateLimitService.RecoverAccountState(c.Request.Context(), accountID, service.AccountRecoveryOptions{
-		InvalidateToken: true,
+		InvalidateToken:        true,
+		ClearQualityProtection: true,
 	}); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -1951,7 +1952,7 @@ func (h *AccountHandler) BatchDelete(c *gin.Context) {
 	})
 }
 
-// BatchClearError handles batch clearing account errors
+// BatchClearError is the administrator's bulk status reset, including quality holds.
 // POST /api/v1/admin/accounts/batch-clear-error
 func (h *AccountHandler) BatchClearError(c *gin.Context) {
 	var req struct {
@@ -1963,6 +1964,10 @@ func (h *AccountHandler) BatchClearError(c *gin.Context) {
 	}
 	if len(req.AccountIDs) == 0 {
 		response.BadRequest(c, "account_ids is required")
+		return
+	}
+	if h.rateLimitService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Rate limit service unavailable")
 		return
 	}
 
@@ -1981,6 +1986,11 @@ func (h *AccountHandler) BatchClearError(c *gin.Context) {
 		accountID := id // 闭包捕获
 		g.Go(func() error {
 			account, err := h.adminService.ClearAccountError(gctx, accountID)
+			if err == nil {
+				_, err = h.rateLimitService.RecoverAccountState(gctx, accountID, service.AccountRecoveryOptions{
+					ClearQualityProtection: true,
+				})
+			}
 			if err != nil {
 				mu.Lock()
 				failedCount++
