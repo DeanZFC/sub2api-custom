@@ -11,6 +11,7 @@ var _ service.ScheduledTestProtectionDetailsRepository = (*scheduledTestResultRe
 
 // One statement gives the hold, configuration, current results and ballots a
 // consistent snapshot, even if a new round starts while the tooltip is loading.
+// A model hold is visible even when healthy peers keep the account active.
 func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context, accountID int64) ([]service.ScheduledTestProtectionHoldSource, error) {
 	rows, err := r.db.QueryContext(ctx, `WITH holds AS (
  SELECT plan_id,account_id,test_definition_id,reason,updated_at,'[]'::jsonb AS rule_ids,trigger_event_id,model_key
@@ -40,7 +41,7 @@ func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context,
  (SELECT snapshot || jsonb_build_object('id',id) FROM scheduled_test_protection_events e WHERE e.id=h.trigger_event_id AND e.account_id=h.account_id AND e.plan_id=h.plan_id),h.model_key
  FROM holds h JOIN scheduled_test_plans p ON p.id=h.plan_id
  JOIN accounts a ON a.id=h.account_id
- WHERE a.deleted_at IS NULL AND a.status='quality_paused'
+ WHERE a.deleted_at IS NULL
  ORDER BY (h.test_definition_id=0) DESC,h.updated_at DESC,h.plan_id,h.test_definition_id`, accountID)
 	if err != nil {
 		return nil, err

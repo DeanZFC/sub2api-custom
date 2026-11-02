@@ -267,6 +267,7 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if snapshot, ok := service.APIKeyUsageSnapshotFromContext(parent); ok {
 		base = service.WithAPIKeyUsageSnapshot(base, snapshot)
 	}
+	base = service.CopyAPIKeyFallbackSubscription(parent, base)
 	return base
 }
 

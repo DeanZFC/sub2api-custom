@@ -5,9 +5,9 @@
     <label class="flex items-center gap-2"><input v-model="value.enabled" data-testid="autonomous-enabled" type="checkbox" />{{ t('qqbot.autonomous.enabled') }}</label>
     <div class="flex flex-wrap gap-2"><button v-for="preset in presets" :key="preset.key" type="button" class="btn btn-secondary" @click="applyPreset(preset)">{{ t(`qqbot.workspace.${preset.key}`) }}</button></div>
     <p class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">{{ t('qqbot.workspace.behaviorSummary', { sample: value.sample_percent, cooldown: value.cooldown_seconds, messages: value.min_messages, hourly: value.hourly_replies, daily: value.daily_replies, calls: value.daily_calls, start: value.start_hour, end: value.end_hour }) }}</p>
-    <QQGroupPicker v-model="value.groups" :groups="groups || []" :policies="policies" :label="t('qqbot.autonomous.groups')" />
+    <QQGroupPicker v-model="value.groups" :groups="groups || []" :policies="policies" :names="props.names" :label="t('qqbot.autonomous.groups')" />
     <details><summary class="cursor-pointer text-sm">{{ t('qqbot.workspace.advanced') }}</summary><div class="mt-3 grid gap-4 md:grid-cols-2">
-      <label class="space-y-1">{{ t('qqbot.autonomous.names') }}<textarea v-model="names" data-testid="autonomous-names" class="input" rows="2" /></label>
+      <label class="space-y-1">{{ t('qqbot.autonomous.names') }}<textarea v-model="botNames" data-testid="autonomous-names" class="input" rows="2" /></label>
       <label class="space-y-1 md:col-span-2">{{ t('qqbot.autonomous.topics') }}<textarea v-model="topics" data-testid="autonomous-topics" class="input" rows="2" /></label>
       <label v-for="field in fields" :key="field.key" class="space-y-1">{{ t('qqbot.autonomous.' + field.key) }}<input v-model.number="value[field.key]" :data-testid="'autonomous-' + field.key" type="number" :min="field.min" :max="field.max" step="1" required class="input" /></label>
     </div></details>
@@ -36,13 +36,13 @@ import { useI18n } from 'vue-i18n'
 import QQGroupPicker from './QQGroupPicker.vue'
 import type { QQAutonomousConfig, QQBotRuntime, QQGroupPolicy } from '@/api/qqbot'
 const value = defineModel<QQAutonomousConfig>({ required: true })
-const props = defineProps<{ runtime: QQBotRuntime | null; groups?: string[]; policies?: QQGroupPolicy[] }>()
+const props = defineProps<{ runtime: QQBotRuntime | null; groups?: string[]; policies?: QQGroupPolicy[]; names?: Record<string, string> }>()
 const { t, te } = useI18n()
 const list = (key: 'groups' | 'names' | 'topics') => computed({
   get: () => (value.value[key] ?? []).join('\n'),
   set: (text: string) => { value.value[key] = [...new Set(text.split(/[\n,，]+/).map(s => s.trim()).filter(Boolean))] }
 })
-const names = list('names'), topics = list('topics')
+const botNames = list('names'), topics = list('topics')
 const jobs = computed(() => props.runtime?.jobs.filter(job => job.kind === 'ambient_chat' || job.trigger_reason === 'name') ?? [])
 function reasonLabel(reason: string) { const key = 'qqbot.autonomous.reasons.' + reason; return te(key) ? t(key) : reason }
 const presets = [

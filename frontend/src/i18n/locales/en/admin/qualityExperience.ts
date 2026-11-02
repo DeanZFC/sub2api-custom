@@ -6,7 +6,7 @@ export default {
   triggerSamples: "Valid samples {samples} / required {minimum}",
   scheduled: 'Active intelligence tests',
   activeAdvanced: 'Display and retained history',
-  activeHint: 'Choose tests, groups and models, then set a schedule. New plans pause on failure and recover when the next round fully passes. Turn automation off to record results only.',
+  activeHint: 'Choose tests, groups and models, then set a schedule. Models are disabled and recovered independently; the account pauses only when all configured models fail. Turn automation off to record results only.',
   activeRecoveryHint: 'By default, failure pauses routing and the configured number of consecutive successful rounds releases this test’s hold; the default is 1 round. Other policies and manual stops still apply.',
   budgetAdvanced: 'Per-account limits and token reservation',
   budgetOff: 'Quality testing budgets are currently unlimited. Enable limits to configure request and token caps.',

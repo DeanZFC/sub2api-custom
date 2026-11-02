@@ -48,6 +48,7 @@ func RegisterAdminRoutes(
 			bot.GET("/commands", h.QQBot.Commands)
 			bot.GET("/activity-preview", h.QQBot.PreviewActivities)
 			bot.DELETE("/groups", h.QQBot.DeleteDiscoveredGroup)
+			bot.GET("/groups/:group_id/info", h.QQBot.GroupInfo)
 			bot.GET("/records/:kind", h.QQBot.ListActivityRecords)
 			bot.GET("/checkin", h.QQBot.GetCheckinConfig)
 			bot.PUT("/checkin", h.QQBot.SaveCheckinConfig)

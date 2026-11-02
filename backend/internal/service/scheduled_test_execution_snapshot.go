@@ -176,7 +176,7 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 	for _, target := range targets {
 		inputs = append(inputs, target.pending)
 	}
-	persistCtx, cancel := scheduledTestPersistenceContext()
+	persistCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 	results, err := repo.BeginRun(persistCtx, plan, uuid.NewString(), inputs)
 	cancel()
 	if err != nil || len(results) != len(targets) {
@@ -185,6 +185,7 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 	}
 	for i, target := range targets {
 		target.pending = results[i]
+		target.pending.ExecutionLeaseOwner, target.pending.ExecutionLeaseScope = plan.ExecutionLeaseOwner, plan.ExecutionLeaseScope
 	}
 	if plan.Protection.Enabled {
 		if protection, ok := s.scheduledSvc.resultRepo.(ScheduledTestActionRoundRepository); ok {

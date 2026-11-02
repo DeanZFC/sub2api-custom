@@ -42,6 +42,7 @@ func WithAPIKeyUsageSnapshot(ctx context.Context, apiKey *APIKey) context.Contex
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx = CopyAPIKeyFallbackSubscription(ctx, ctx)
 	return context.WithValue(ctx, apiKeyUsageSnapshotContextKey{}, CloneAPIKeyForUsage(apiKey))
 }
 

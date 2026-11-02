@@ -63,12 +63,10 @@ func validateMemberDirectoryFilter(f MemberDirectoryFilter) error {
 	return nil
 }
 
-func memberDirectoryPreview(text string) string {
+func memberDirectoryPreview(text string, customCommands ...CustomCommand) string {
 	// Never reintroduce private command arguments through a legacy history row.
-	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(line), "")), "/") {
-			return ""
-		}
+	if privateCommandText(text, customCommands...) {
+		return ""
 	}
 	if containsRewardCode(text) {
 		return ""
@@ -106,7 +104,7 @@ func (s *Service) memberDirectoryHistory(ctx context.Context, tx *sql.Tx, c Conf
 		if json.Unmarshal([]byte(raw), &entry) == nil && entry.Speaker == groupSpeaker(c.AppID, hint.GroupID, hint.MemberID) {
 			hint.Nickname = memberHintText(entry.Nickname, 100)
 			if entry.ReplyTo == "" {
-				hint.MessagePreview = memberDirectoryPreview(entry.Text)
+				hint.MessagePreview = memberDirectoryPreview(entry.Text, c.CustomCommands...)
 			}
 		}
 		hints = append(hints, hint)
@@ -221,7 +219,7 @@ func (s *Service) ListMembers(ctx context.Context, f MemberDirectoryFilter) (Mem
 		}
 		item := DirectoryMember{GroupID: group.String, MemberID: member.String,
 			Nickname: memberHintText(nickname.String, 100), Email: email.String,
-			MessagePreview: memberDirectoryPreview(preview.String), GroupLabel: memberHintText(c.groupPolicy(group.String).Label, 60)}
+			MessagePreview: memberDirectoryPreview(preview.String, c.CustomCommands...), GroupLabel: memberHintText(c.groupPolicy(group.String).Label, 60)}
 		if seen.Valid {
 			item.LastSeenAt = seen.Time.UTC().Format(time.RFC3339Nano)
 		}

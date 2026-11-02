@@ -248,7 +248,7 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	}
 	var nickname, preview string
 	if isGroupMessageEvent(p.Type) {
-		nickname, preview = groupMemberHint(e)
+		nickname, preview = groupMemberHint(e, c.CustomCommands...)
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,member_nickname,message_preview) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(app_id,event_key) DO UPDATE SET event_type=EXCLUDED.event_type,payload=EXCLUDED.payload,member_nickname=EXCLUDED.member_nickname,message_preview=EXCLUDED.message_preview,kind='event',trigger_reason='',decision_reason=''
  WHERE EXCLUDED.event_type='GROUP_AT_MESSAGE_CREATE' AND qq_bot_jobs.kind='ambient_chat' AND qq_bot_jobs.status='queued' AND qq_bot_jobs.model_reserved_at IS NULL`, jobID, c.AppID, eventKey, p.Type, e.GroupID, member, e.ID, string(p.Data), nickname, preview)
@@ -333,6 +333,13 @@ var (
 // Explicit chat may retry transient failures inside siteChatTurn; those retries
 // do not reserve an additional member quota.
 func (s *Service) reserveUsage(ctx context.Context, c Config, j Job, kind string) error {
+	minimum := minimumModelBudget
+	if kind == "image" {
+		minimum = minimumImageBudget
+	}
+	if err := checkModelBudget(ctx, minimum); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -454,7 +461,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	var userID int64
 	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先使用 /绑定 绑定网站账号。", nil
+		return "请先发送“绑定 邮箱或绑定码”绑定网站账号。", nil
 	}
 	if err != nil {
 		return "", err

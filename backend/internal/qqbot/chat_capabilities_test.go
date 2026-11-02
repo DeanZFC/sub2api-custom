@@ -41,7 +41,7 @@ func TestChatCapabilitiesUsesCurrentInventoryAndDoesNotMutateHistory(t *testing.
 	for _, item := range commands {
 		byCommand[item.Command] = item
 	}
-	require.Contains(t, byCommand, "/帮助")
+	require.Contains(t, byCommand, "帮助")
 	for _, item := range helpItems(c) {
 		usage := item.command
 		if item.usage != "" {
@@ -49,12 +49,14 @@ func TestChatCapabilitiesUsesCurrentInventoryAndDoesNotMutateHistory(t *testing.
 		}
 		require.Equal(t, item.description, byCommand[usage].Description)
 	}
-	require.Contains(t, byCommand, "/教程")
-	for _, absent := range []string{"/停用", "/我的", "/福利", "/help", "/奖励兑换", "/新对话", "/清空", "/举报垃圾信息"} {
+	require.Contains(t, byCommand, "教程")
+	for _, absent := range []string{"停用", "我的", "福利", "help", "奖励兑换", "新对话", "清空", "举报垃圾信息"} {
 		require.NotContains(t, byCommand, absent)
 	}
 	require.NotContains(t, result[2].Content, "do not inline all fixed replies")
 	require.Contains(t, result[2].Content, "只读查询")
+	require.Contains(t, result[2].Content, "本人余额、今日用量和抽奖次数")
+	require.Contains(t, result[2].Content, "不要求用户再次发送固定查询指令")
 }
 
 func TestChatCapabilitiesReportsKnownFeatureRestrictions(t *testing.T) {

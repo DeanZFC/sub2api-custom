@@ -14,6 +14,14 @@ import (
 // The model selects only a numbered, validated image from the current input.
 // It cannot choose a download URL, filesystem path, API key or upstream model.
 func (s *Service) editImage(ctx context.Context, c Config, prompt, dataURL string) ([]byte, error) {
+	if err := checkModelBudget(ctx, minimumImageBudget); err != nil {
+		return nil, err
+	}
+	ctx, cancel, budgetErr := modelContext(ctx)
+	if budgetErr != nil {
+		return nil, budgetErr
+	}
+	defer cancel()
 	header, encoded, ok := strings.Cut(dataURL, ",")
 	if !ok || !strings.HasPrefix(header, "data:image/") || !strings.HasSuffix(header, ";base64") || len(encoded) > base64.StdEncoding.EncodedLen(10<<20) {
 		return nil, errors.New("编辑原图无效，请重新发送图片。")

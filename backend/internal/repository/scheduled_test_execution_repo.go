@@ -19,7 +19,7 @@ func (r *scheduledTestResultRepository) RecordDecision(ctx context.Context, resu
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `UPDATE scheduled_test_results SET protection_decision=$2::jsonb WHERE id=$1 AND started_at=$3`, result.ID, raw, result.StartedAt.Round(time.Microsecond))
+	_, err = execScheduledTestResultUnderLease(ctx, r.db, result, `UPDATE scheduled_test_results SET protection_decision=$2::jsonb WHERE id=$1 AND started_at=$3`, result.ID, raw, result.StartedAt.Round(time.Microsecond))
 	return err
 }
 
@@ -41,6 +41,15 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *serv
 	}
 	if !scheduledTestSameExecutionPolicy(current, plan) {
 		return nil, fmt.Errorf("test policy changed before execution")
+	}
+	if plan.ExecutionLeaseOwner != "" {
+		var owned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduled_test_execution_leases WHERE plan_id=$1 AND scope=$2 AND owner=$3 AND expires_at>clock_timestamp())`, plan.ID, plan.ExecutionLeaseScope, plan.ExecutionLeaseOwner).Scan(&owned); err != nil {
+			return nil, err
+		}
+		if !owned {
+			return nil, fmt.Errorf("test execution lease lost")
+		}
 	}
 	if err := validateScheduledTestPlanConflicts(ctx, tx, current); err != nil {
 		return nil, err
@@ -89,6 +98,11 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *serv
 			return nil, err
 		}
 		results = append(results, result)
+	}
+	if current.Protection.Enabled {
+		if err := reconcileScheduledTestProjectionAccounts(ctx, tx, sortedProtectionIDs(accountIDs)); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

@@ -38,10 +38,10 @@ func TestChatPreviewHelpKeepsOptionalArgumentsAndExcludesRetiredCommands(t *test
 		{Command: "/faq_test", Enabled: true},
 	}
 	help := chatPreviewHelp(c)
-	require.Contains(t, help, "/抽奖 [次数]：")
+	require.Contains(t, help, "抽奖 [次数]：")
 	require.NotContains(t, help, `\[次数\]`)
-	require.NotContains(t, help, "/举报垃圾信息")
-	require.Contains(t, help, `/faq\_test：自定义回复`, "operator-defined command labels remain escaped")
+	require.NotContains(t, help, "举报垃圾信息")
+	require.Contains(t, help, `faq\_test：自定义回复`, "operator-defined command labels remain escaped")
 }
 
 func TestCommandInventoryExcludesRetiredCustomCommands(t *testing.T) {
@@ -58,11 +58,12 @@ func TestCommandInventoryExcludesRetiredCustomCommands(t *testing.T) {
 	require.NoError(t, err)
 	byCommand := make(map[string]CommandInfo, len(commands))
 	for _, item := range commands {
+		require.False(t, strings.HasPrefix(item.Command, "/"))
 		byCommand[item.Command] = item
 	}
-	require.NotContains(t, byCommand, "/举报垃圾信息")
-	require.Equal(t, "/抽奖 [次数]", byCommand["/抽奖"].Usage)
-	require.Equal(t, "current", byCommand["/faq"].Reply)
+	require.NotContains(t, byCommand, "举报垃圾信息")
+	require.Equal(t, "抽奖 [次数]", byCommand["抽奖"].Usage)
+	require.Equal(t, "current", byCommand["faq"].Reply)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -169,7 +170,7 @@ func TestChatPreviewMenuAndReadOnlyToolsAcrossProtocols(t *testing.T) {
 					switch scenario {
 					case "menu":
 						require.Equal(t, "menu", out.Action)
-						require.Contains(t, out.Text, "/价格 模型名")
+						require.Contains(t, out.Text, "价格 模型名")
 						require.Zero(t, calls)
 						require.Nil(t, out.ChatExecution)
 					case "chat":
@@ -206,7 +207,7 @@ func TestChatPreviewHelpRemainsAvailableWithChatDisabled(t *testing.T) {
 	out, err := New(db, previewEncryptor{}, true, nil).PreviewChat(context.Background(), ChatPreviewRequest{GroupID: "group", Question: "/帮助"})
 	require.NoError(t, err)
 	require.Equal(t, "menu", out.Action)
-	require.Contains(t, out.Text, "/签到")
+	require.Contains(t, out.Text, "签到")
 	require.Zero(t, out.InputTokens)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

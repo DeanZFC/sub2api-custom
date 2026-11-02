@@ -152,6 +152,9 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			service.PlatformOpenAI,
 		)
 		if err != nil || selection == nil || selection.Account == nil {
+			if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
+				return
+			}
 			if failoverClientGone(c) {
 				reqLog.Info("openai_alpha_search.account_select_aborted_client_disconnected", zap.Error(err))
 				return

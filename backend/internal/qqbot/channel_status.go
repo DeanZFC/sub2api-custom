@@ -54,7 +54,7 @@ func (s *Service) sendChannelStatus(ctx context.Context, c Config, j Job, arg st
 		var err error
 		page, err = strconv.Atoi(arg)
 		if err != nil || page < 1 {
-			return s.send(ctx, c, j, "用法：/渠道状态 [页码]", nil, 1)
+			return s.send(ctx, c, j, "用法：渠道状态 [页码]", nil, 1)
 		}
 	}
 	if s.channelStatus == nil {
@@ -79,7 +79,7 @@ func (s *Service) sendChannelStatus(ctx context.Context, c Config, j Job, arg st
 	const perPage = 5
 	pages := (len(chunks) + perPage - 1) / perPage
 	if page > pages {
-		return s.send(ctx, c, j, fmt.Sprintf("共 %d 页\n翻页：/渠道状态 [页码]", pages), nil, 1)
+		return s.send(ctx, c, j, fmt.Sprintf("共 %d 页\n翻页：渠道状态 [页码]", pages), nil, 1)
 	}
 	start, end := (page-1)*perPage, min(page*perPage, len(chunks))
 	for i := start; i < end; i++ {
@@ -87,7 +87,7 @@ func (s *Service) sendChannelStatus(ctx context.Context, c Config, j Job, arg st
 		if pages > 1 && i == end-1 {
 			text += fmt.Sprintf("\n\n第 %d/%d 页", page, pages)
 			if page < pages {
-				text += fmt.Sprintf("\n下一页：/渠道状态 %d", page+1)
+				text += fmt.Sprintf("\n下一页：渠道状态 %d", page+1)
 			}
 		}
 		if err := s.send(ctx, c, j, text, nil, i-start+1); err != nil {

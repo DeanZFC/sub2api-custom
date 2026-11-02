@@ -1342,6 +1342,11 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		service.OpenAIAutoResetCredit7dThresholdExtraKey,
 		service.OpenAIAutoResetCreditStateExtraKey,
 		"model_rate_limits",
+		// Model protection must survive the metadata projection used by candidate
+		// and sticky filters; display-only model states stay outside this cache.
+		"active_test_model_holds",
+		"active_pass_rate_holds",
+		"active_test_all_models_paused",
 		service.UpstreamBillingProbeExtraKey,
 		service.GrokMediaEligibleExtraKey,
 		"grok_billing_snapshot",

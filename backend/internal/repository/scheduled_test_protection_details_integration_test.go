@@ -71,10 +71,26 @@ func testScheduledTestProtectionDetails(t *testing.T, ctx context.Context, db *s
 	require.NoError(t, err)
 	require.Zero(t, holds[0].Tests[0].ResultID)
 	require.Equal(t, "不通过", holds[0].Rules[0].Name)
-	exec(`UPDATE accounts SET status='active' WHERE id=901`)
+	// A partial model hold does not pause the whole account, but its original
+	// policy and evidence must remain available from the account list.
+	exec(`UPDATE scheduled_test_protection_states SET model_key='model-a' WHERE account_id=901`)
+	exec(`UPDATE scheduled_test_combination_states SET model_key='model-a' WHERE account_id=901`)
+	exec(`UPDATE accounts SET status='active',schedulable=true WHERE id=901`)
 	holds, err = svc.AccountProtectionDetails(ctx, 901)
 	require.NoError(t, err)
-	require.Empty(t, holds)
+	require.Len(t, holds, 2, "active accounts still expose their model-specific holds")
+	for _, hold := range holds {
+		require.Equal(t, "model-a", hold.ModelID)
+		require.Equal(t, int64(0), hold.Tests[0].ResultID, "pruned evidence is not recreated")
+	}
+	exec(`UPDATE accounts SET status='inactive',schedulable=false WHERE id=901`)
+	holds, err = svc.AccountProtectionDetails(ctx, 901)
+	require.NoError(t, err)
+	require.Len(t, holds, 2, "manual disabling does not hide model holds")
+	exec(`UPDATE accounts SET deleted_at=NOW() WHERE id=901`)
+	holds, err = svc.AccountProtectionDetails(ctx, 901)
+	require.NoError(t, err)
+	require.Empty(t, holds, "deleted accounts do not expose quality details")
 	holds, err = svc.AccountProtectionDetails(ctx, 902)
 	require.NoError(t, err)
 	require.Len(t, holds, 1, "other accounts are not affected")

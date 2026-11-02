@@ -632,6 +632,12 @@ func resolveUsageSubscription(
 	if !isAPIKeyFallbackActive(apiKey) {
 		return candidate, nil
 	}
+	if snapshot, ok := ctx.Value(admittedFallbackSubscriptionKey{}).(admittedFallbackSubscription); ok && snapshot.groupID == apiKey.Group.ID {
+		return snapshot.subscription, nil
+	}
+	if r := fallbackRouting(ctx); r != nil && r.billingAdmitted && r.fallbackGroup.ID == apiKey.Group.ID {
+		return r.subscription, nil
+	}
 	groupID := apiKey.Group.ID
 	if apiKey.GroupID != nil && *apiKey.GroupID > 0 {
 		groupID = *apiKey.GroupID

@@ -46,7 +46,7 @@ func validateChatPreviewRequest(req ChatPreviewRequest) error {
 		return errors.New("试问内容长度须为 1～6000 字")
 	}
 	if cmd, arg := command(req.Question); cmd != "" && (cmd != "帮助" || arg != "") {
-		return errors.New("试问仅支持自然语言或 /帮助，不执行签到、抽奖、绑定、转账等指令")
+		return errors.New("试问仅支持自然语言或“帮助”，不执行签到、抽奖、绑定、转账等指令")
 	}
 	return nil
 }

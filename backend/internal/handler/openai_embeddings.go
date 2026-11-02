@@ -149,6 +149,9 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			true,
 		)
 		if err != nil {
+			if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
+				return
+			}
 			if failoverClientGone(c) {
 				reqLog.Info("openai_embeddings.account_select_aborted_client_disconnected", zap.Error(err))
 				return

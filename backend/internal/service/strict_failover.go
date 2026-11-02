@@ -364,7 +364,7 @@ func strictGroupFromContext(ctx context.Context, groupID *int64) *Group {
 	if g, ok := ctx.Value(ctxkey.Group).(*Group); ok && g != nil && g.ID == derefGroupID(groupID) {
 		return g
 	}
-	if r, ok := ctx.Value(apiKeyGroupFallbackContextKey{}).(apiKeyGroupFallbackRouting); ok {
+	if r, ok := ctx.Value(apiKeyGroupFallbackContextKey{}).(*apiKeyGroupFallbackRouting); ok {
 		for _, g := range []*Group{r.primaryGroup, r.fallbackGroup} {
 			if g != nil && g.ID == derefGroupID(groupID) {
 				return g

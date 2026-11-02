@@ -193,8 +193,8 @@ type inflightReservationCtxKey struct{}
 
 // WithInflightReservation 把预留句柄挂到 context 上，供计费任务提交时交接。
 func WithInflightReservation(ctx context.Context, r *InflightReservation) context.Context {
-	if r == nil {
-		return ctx
+	if routing := fallbackRouting(ctx); routing != nil && isAPIKeyFallbackActive(routing.apiKey) {
+		routing.reservation = r
 	}
 	return context.WithValue(ctx, inflightReservationCtxKey{}, r)
 }
@@ -203,6 +203,9 @@ func WithInflightReservation(ctx context.Context, r *InflightReservation) contex
 func InflightReservationFromContext(ctx context.Context) *InflightReservation {
 	if ctx == nil {
 		return nil
+	}
+	if r := fallbackRouting(ctx); r != nil && isAPIKeyFallbackActive(r.apiKey) && r.reservationAdmission != nil {
+		return r.reservation
 	}
 	r, _ := ctx.Value(inflightReservationCtxKey{}).(*InflightReservation)
 	return r

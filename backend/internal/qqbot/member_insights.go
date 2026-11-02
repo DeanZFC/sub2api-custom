@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const bindFirst = "请先使用 /绑定 绑定网站账号。"
+const bindFirst = "请先发送“绑定 邮箱或绑定码”绑定网站账号。"
 
 func formatUsageTokens(tokens int64) string {
 	switch {
@@ -87,7 +87,7 @@ func (s *Service) SetModelPriceProvider(p ModelPriceProvider) { s.modelPrices = 
 func (s *Service) sendModelPrice(ctx context.Context, c Config, j Job, arg string) error {
 	parts := strings.Fields(arg)
 	if len(parts) < 1 || len(parts) > 2 || len(parts[0]) > 200 {
-		return s.send(ctx, c, j, "用法：/价格 模型名 [页码]", nil, 1)
+		return s.send(ctx, c, j, "用法：价格 模型名 [页码]", nil, 1)
 	}
 	page := 1
 	if len(parts) == 2 {
@@ -123,7 +123,7 @@ func (s *Service) sendModelPrice(ctx context.Context, c Config, j Job, arg strin
 		if pages > 1 {
 			body += fmt.Sprintf("\n\n第 %d/%d 页", page, pages)
 			if page < pages {
-				body += fmt.Sprintf("\n下一页：/价格 %s %d", replyPlainLabel(parts[0]), page+1)
+				body += fmt.Sprintf("\n下一页：价格 %s %d", replyPlainLabel(parts[0]), page+1)
 			}
 		}
 		if err = s.send(ctx, c, j, body, nil, i-(page-1)*5+1); err != nil {

@@ -8,6 +8,9 @@ import (
 )
 
 func (s *ScheduledTestRunnerService) runAccountEligible(ctx context.Context, plan *ScheduledTestPlan, result *ScheduledTestResult, accountID int64) (bool, error) {
+	if valid, err := s.executionLeaseCurrent(ctx, plan); err != nil || !valid {
+		return false, err
+	}
 	if plan.ExcludesAccount(accountID) {
 		return false, nil
 	}

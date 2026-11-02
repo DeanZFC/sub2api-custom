@@ -24,7 +24,7 @@ describe('QQ command inventory', () => {
     wrappers.push(wrapper)
     await flushPromises()
     expect(wrapper.findAll('[data-testid="qq-command-inventory-item"]')).toHaveLength(2)
-    expect(wrapper.text()).toContain('/签到')
+    expect(wrapper.findAll('code').map(code => code.text())).toEqual(['签到', 'faq'])
     expect(wrapper.text()).not.toContain('/举报垃圾信息')
     expect(wrapper.find('[data-testid="qq-report-command-help"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('<img src="bad" />')

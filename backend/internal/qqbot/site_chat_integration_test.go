@@ -40,7 +40,7 @@ func TestQQSiteChatMenuAndDirectQueryDelivery(t *testing.T) {
 							key = "input"
 						}
 						require.Contains(t, string(body[key]), "真实指令清单 JSON")
-						require.Contains(t, string(body[key]), "/价格 模型名")
+						require.Contains(t, string(body[key]), "价格 模型名")
 						if scenario == "quoted-how-to" {
 							if protocol == "responses" {
 								fmt.Fprint(w, `{"status":"completed","output_text":"这里解释示例的用法。"}`)
@@ -101,7 +101,7 @@ func TestQQSiteChatMenuAndDirectQueryDelivery(t *testing.T) {
 					require.Zero(t, chats.Load())
 					require.Zero(t, queries.Load())
 					require.Contains(t, text, "指令帮助")
-					require.Contains(t, text, "/价格 模型名")
+					require.Contains(t, text, "价格 模型名")
 				case "quoted-how-to":
 					require.EqualValues(t, 1, chats.Load())
 					require.Zero(t, queries.Load())

@@ -59,7 +59,7 @@ func TestCustomCommandsPersistAndQueueOnce(t *testing.T) {
 		require.NoError(t, s.Enqueue(ctx, config, p))
 		return p
 	}
-	p := enqueue(c, "custom", "/a", "group")
+	p := enqueue(c, "custom", "a", "group")
 	p.ID, p.Type = "mention-delivery", groupAtMessageCreate
 	require.NoError(t, s.Enqueue(ctx, c, p))
 	enqueue(c, "disabled-command", "/关闭", "group")
@@ -78,7 +78,7 @@ func TestCustomCommandsPersistAndQueueOnce(t *testing.T) {
 	require.Zero(t, count)
 
 	// A command disabled while queued must not send its old reply.
-	enqueue(c, "queued-before-disable", "/a", "group")
+	enqueue(c, "queued-before-disable", "a", "group")
 	c.CustomCommands[0].Enabled = false
 	_, err = s.SaveBasicConfig(ctx, c.Public())
 	require.NoError(t, err)

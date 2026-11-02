@@ -138,6 +138,10 @@ func (h *ScheduledTestHandler) DeleteDefinition(c *gin.Context) {
 		return
 	}
 	if e = h.scheduledTestSvc.DeleteDefinition(c.Request.Context(), id); e != nil {
+		if errors.Is(e, service.ErrScheduledTestDefinitionInUse) {
+			response.Error(c, http.StatusConflict, e.Error())
+			return
+		}
 		response.InternalError(c, e.Error())
 		return
 	}

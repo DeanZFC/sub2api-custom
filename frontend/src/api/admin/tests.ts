@@ -18,8 +18,6 @@ export interface QualityProtectionEvidence {
   result_id?: number
   run_id?: string
   min_samples?: number
-  window_start?: string
-  window_end?: string
   started_at?: string
   current: boolean
   verdict: string

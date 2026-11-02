@@ -43,6 +43,14 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 	if err == nil {
 		return fallback
 	}
+	var admission *service.APIKeyFallbackAdmissionError
+	if errors.As(err, &admission) {
+		if errors.Is(err, service.ErrFallbackGroupConcurrency) {
+			return noAccountErrorClassification{Status: http.StatusTooManyRequests, ErrType: "rate_limit_error", Message: "Fallback group concurrency limit reached. Please retry later."}
+		}
+		status, code, message, _ := billingErrorDetails(admission.Cause)
+		return noAccountErrorClassification{Status: status, ErrType: code, Message: message}
+	}
 	if errors.Is(err, service.ErrStrictFailoverOwnerBound) {
 		return noAccountErrorClassification{Status: http.StatusConflict, ErrType: "strict_failover_owner_bound", Message: "This continuation belongs to an account outside the active priority tier. Start a new request with full conversation context."}
 	}

@@ -17,7 +17,7 @@ var ErrTransferInvalid = errors.New("转账链接无效、已过期或已使用�
 
 const transferExpiry = 15 * time.Minute
 
-const transferUsage = "用法：/转账 金额 收款方邮箱"
+const transferUsage = "用法：转账 金额 收款方邮箱"
 
 type preparedTransferEmail struct {
 	recipient string // sender's email — they must click to confirm
@@ -77,7 +77,7 @@ func transferNotifyBody(fromEmail string, amount, netAmount decimal.Decimal) str
 		html.EscapeString(fromEmail), netAmount.StringFixed(4))
 }
 
-// parseTransferArgs parses "/转账 <amount> <email>" from the command arg.
+// parseTransferArgs parses "转账 <amount> <email>" from the command arg.
 func parseTransferArgs(arg string) (decimal.Decimal, string, error) {
 	parts := strings.Fields(arg)
 	if len(parts) != 2 {
@@ -144,7 +144,7 @@ func (s *Service) prepareTransfer(ctx context.Context, c Config, e Event, arg st
 		   AND u.status='active' AND u.deleted_at IS NULL`,
 		c.AppID, e.Author.MemberID).Scan(&fromUID, &fromEmail)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先使用 /绑定 绑定网站账号。", nil
+		return "请先发送“绑定 邮箱或绑定码”绑定网站账号。", nil
 	}
 	if err != nil {
 		return "账户信息查询失败，请稍后重试。", nil

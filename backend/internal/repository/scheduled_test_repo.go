@@ -42,6 +42,9 @@ func (r *scheduledTestPlanRepository) Create(ctx context.Context, plan *service.
 	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
 		return nil, err
 	}
+	if err := validateScheduledTestDefinitionsAvailable(ctx, tx, plan); err != nil {
+		return nil, err
+	}
 	if err := validateScheduledTestPlanConflicts(ctx, tx, plan); err != nil {
 		return nil, err
 	}
@@ -53,6 +56,15 @@ func (r *scheduledTestPlanRepository) Create(ctx context.Context, plan *service.
 	created, err := scanPlan(row)
 	if err != nil {
 		return nil, err
+	}
+	if created.Enabled && created.Protection.Enabled {
+		ids, err := scheduledTestProjectionAccountIDs(ctx, tx, created)
+		if err != nil {
+			return nil, err
+		}
+		if err := reconcileScheduledTestProjectionAccounts(ctx, tx, ids); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -118,11 +130,18 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
 		return nil, err
 	}
+	if err := validateScheduledTestDefinitionsAvailable(ctx, tx, plan); err != nil {
+		return nil, err
+	}
 	previous, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids, model_ids FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, plan.ID))
 	if err != nil {
 		return nil, err
 	}
 	if err := validateScheduledTestPlanConflicts(ctx, tx, plan); err != nil {
+		return nil, err
+	}
+	projectionIDs, err := scheduledTestProjectionAccountIDs(ctx, tx, previous, plan)
+	if err != nil {
 		return nil, err
 	}
 	if err := lockScheduledTestLifecycleAccounts(ctx, tx, plan.ID); err != nil {
@@ -153,6 +172,11 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	if err := reconcileScheduledTestPassRates(ctx, tx, updated, !slices.Equal(previousGroups, currentGroups)); err != nil {
 		return nil, err
 	}
+	if previous.Protection.Enabled || updated.Protection.Enabled {
+		if err := reconcileScheduledTestProjectionAccounts(ctx, tx, projectionIDs); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -182,6 +206,29 @@ func (r *scheduledTestPlanRepository) validateTarget(ctx context.Context, plan *
 	return r.validateProtectionGroups(ctx, plan)
 }
 
+// Recheck inside the plan-write lock: service validation may have happened
+// before another request archived one of the selected definitions.
+func validateScheduledTestDefinitionsAvailable(ctx context.Context, tx *sql.Tx, plan *service.ScheduledTestPlan) error {
+	ids := slices.Clone(plan.TestDefinitionIDs)
+	if plan.TestDefinitionID != nil {
+		ids = append(ids, *plan.TestDefinitionID)
+	}
+	var unavailable bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM unnest($1::bigint[]) AS selected(id)
+		WHERE NOT EXISTS (
+			SELECT 1 FROM scheduled_test_definitions d
+			WHERE d.id=selected.id AND d.deleted_at IS NULL
+		)
+	)`, pq.Array(ids)).Scan(&unavailable); err != nil {
+		return err
+	}
+	if unavailable {
+		return fmt.Errorf("selected test definition was deleted; refresh the plan")
+	}
+	return nil
+}
+
 func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -189,6 +236,14 @@ func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) erro
 	}
 	defer tx.Rollback()
 	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
+		return err
+	}
+	plan, err := scanPlan(tx.QueryRowContext(ctx, `SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids, model_ids FROM scheduled_test_plans WHERE id=$1 FOR NO KEY UPDATE`, id))
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	projectionIDs, err := scheduledTestProjectionAccountIDs(ctx, tx, plan)
+	if err != nil {
 		return err
 	}
 	if err := lockScheduledTestLifecycleAccounts(ctx, tx, id); err != nil {
@@ -200,6 +255,11 @@ func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) erro
 	if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_plans WHERE id = $1`, id); err != nil {
 		return err
 	}
+	if plan != nil && plan.Protection.Enabled {
+		if err := reconcileScheduledTestProjectionAccounts(ctx, tx, projectionIDs); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -210,11 +270,17 @@ func (r *scheduledTestPlanRepository) UpdateAfterRun(ctx context.Context, plan *
 	}
 	// A long-running round must not replace a newer schedule's next_run_at.
 	// Legacy SQL NULL and explicit JSON null both mean cron mode.
-	_, err = r.db.ExecContext(ctx, `
+	query := `
 		UPDATE scheduled_test_plans SET last_run_at = $2,
 		next_run_at = CASE WHEN cron_expression = $4 AND COALESCE(schedule_config, 'null'::jsonb) = $5::jsonb THEN $3 ELSE next_run_at END,
 		updated_at = NOW() WHERE id = $1
-	`, plan.ID, lastRunAt, nextRunAt, plan.CronExpression, schedule)
+	`
+	args := []any{plan.ID, lastRunAt, nextRunAt, plan.CronExpression, schedule}
+	if plan.ExecutionLeaseOwner != "" {
+		query += ` AND EXISTS(SELECT 1 FROM scheduled_test_execution_leases l WHERE l.plan_id=scheduled_test_plans.id AND l.scope=$6 AND l.owner=$7 AND l.expires_at>clock_timestamp())`
+		args = append(args, plan.ExecutionLeaseScope, plan.ExecutionLeaseOwner)
+	}
+	_, err = execScheduledTestResultUnderLease(ctx, r.db, &service.ScheduledTestResult{PlanID: plan.ID, ExecutionLeaseOwner: plan.ExecutionLeaseOwner, ExecutionLeaseScope: plan.ExecutionLeaseScope}, query, args...)
 	return err
 }
 
@@ -277,15 +343,15 @@ func (r *scheduledTestDefinitionRepository) Create(ctx context.Context, d *servi
 	return r.scan(r.db.QueryRowContext(ctx, `INSERT INTO scheduled_test_definitions (key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at`, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder, d.MaxOutputTokens))
 }
 func (r *scheduledTestDefinitionRepository) GetByID(ctx context.Context, id int64) (*service.ScheduledTestDefinition, error) {
-	return r.scan(r.db.QueryRowContext(ctx, `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions WHERE id=$1`, id))
+	return r.scan(r.db.QueryRowContext(ctx, `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions WHERE id=$1 AND deleted_at IS NULL`, id))
 }
 func (r *scheduledTestDefinitionRepository) GetByKey(ctx context.Context, key string) (*service.ScheduledTestDefinition, error) {
-	return r.scan(r.db.QueryRowContext(ctx, `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions WHERE key=$1`, key))
+	return r.scan(r.db.QueryRowContext(ctx, `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions WHERE key=$1 AND deleted_at IS NULL`, key))
 }
 func (r *scheduledTestDefinitionRepository) List(ctx context.Context, enabledOnly bool) ([]*service.ScheduledTestDefinition, error) {
-	q := `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions`
+	q := `SELECT id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at FROM scheduled_test_definitions WHERE deleted_at IS NULL`
 	if enabledOnly {
-		q += ` WHERE enabled=true`
+		q += ` AND enabled=true`
 	}
 	q += ` ORDER BY sort_order, id`
 	rows, e := r.db.QueryContext(ctx, q)
@@ -316,7 +382,7 @@ func (r *scheduledTestDefinitionRepository) Update(ctx context.Context, d *servi
 	if err != nil {
 		return nil, err
 	}
-	updated, err := r.scan(tx.QueryRowContext(ctx, `UPDATE scheduled_test_definitions SET key=$2,name=$3,description=$4,prompt=$5,output_kind=$6,enabled=$7,sort_order=$8,max_output_tokens=$9,updated_at=NOW() WHERE id=$1 RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at`, d.ID, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder, d.MaxOutputTokens))
+	updated, err := r.scan(tx.QueryRowContext(ctx, `UPDATE scheduled_test_definitions SET key=$2,name=$3,description=$4,prompt=$5,output_kind=$6,enabled=$7,sort_order=$8,max_output_tokens=$9,updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id,key,name,description,prompt,output_kind,enabled,sort_order,max_output_tokens,created_at,updated_at`, d.ID, d.Key, d.Name, d.Description, d.Prompt, d.OutputKind, d.Enabled, d.SortOrder, d.MaxOutputTokens))
 	if err != nil {
 		return nil, err
 	}
@@ -331,23 +397,48 @@ func (r *scheduledTestDefinitionRepository) Update(ctx context.Context, d *servi
 	return updated, nil
 }
 func (r *scheduledTestDefinitionRepository) Delete(ctx context.Context, id int64) error {
-	result, e := r.db.ExecContext(ctx, `DELETE FROM scheduled_test_definitions
-		WHERE id=$1 AND NOT EXISTS (
-			SELECT 1 FROM scheduled_test_plans WHERE test_definition_id=$1 OR $1=ANY(test_definition_ids)
-		) AND NOT EXISTS (SELECT 1 FROM scheduled_test_results WHERE test_definition_id=$1)`, id)
-	if e != nil {
-		return e
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	if affected, rowsErr := result.RowsAffected(); rowsErr == nil && affected == 0 {
-		var exists bool
-		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM scheduled_test_definitions WHERE id=$1)`, id).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return fmt.Errorf("test definition is used by a scheduled test plan or result; disable it instead")
-		}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockScheduledTestPlanWrites(ctx, tx); err != nil {
+		return err
 	}
-	return nil
+	// FOR UPDATE conflicts with the KEY SHARE lock taken by a concurrent plan
+	// insert's foreign key check, including direct SQL writes outside the API.
+	var lockedID int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM scheduled_test_definitions
+		WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id).Scan(&lockedID)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var inUse bool
+	err = tx.QueryRowContext(ctx, `SELECT
+		EXISTS (SELECT 1 FROM scheduled_test_plans p WHERE p.test_definition_id=$1
+			OR $1=ANY(p.test_definition_ids)
+			OR jsonb_path_exists(p.protection,
+				'$.**.test_definition_id ? (@ == $target)',
+				jsonb_build_object('target',$1::bigint)))
+		OR EXISTS (SELECT 1 FROM scheduled_test_plan_definitions WHERE test_definition_id=$1)
+		OR EXISTS (SELECT 1 FROM scheduled_test_protection_states
+			WHERE test_definition_id=$1 AND blocked)
+		OR EXISTS (SELECT 1 FROM scheduled_test_pass_rate_states
+			WHERE test_definition_id=$1 AND blocked)`, id).Scan(&inUse)
+	if err != nil {
+		return err
+	}
+	if inUse {
+		return service.ErrScheduledTestDefinitionInUse
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE scheduled_test_definitions
+		SET deleted_at=NOW(), enabled=FALSE, updated_at=NOW() WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (r *scheduledTestDefinitionRepository) scan(row scannable) (*service.ScheduledTestDefinition, error) {
 	d := &service.ScheduledTestDefinition{}
@@ -390,14 +481,20 @@ func (r *scheduledTestResultRepository) Update(ctx context.Context, result *serv
 	if err != nil {
 		return err
 	}
-	res, err := r.db.ExecContext(ctx, `
+	query := `
 		UPDATE scheduled_test_results
 		SET status = $2, response_text = $3, output_kind = $4, output_html = $5,
 		    output_numeric = $6, account_id = $7, model_id = $8, reasoning_effort = $9, group_id = $10,
 		    error_message = $11, latency_ms = $12, started_at = $13, finished_at = $14, execution_info = $15
 		WHERE id = $1
-	`, result.ID, result.Status, result.ResponseText, result.OutputKind, result.OutputHTML, result.OutputNumeric,
-		result.AccountID, result.ModelID, result.ReasoningEffort, result.GroupID, result.ErrorMessage, result.LatencyMs, result.StartedAt, result.FinishedAt, execution)
+	`
+	args := []any{result.ID, result.Status, result.ResponseText, result.OutputKind, result.OutputHTML, result.OutputNumeric,
+		result.AccountID, result.ModelID, result.ReasoningEffort, result.GroupID, result.ErrorMessage, result.LatencyMs, result.StartedAt, result.FinishedAt, execution}
+	if result.ExecutionLeaseOwner != "" {
+		query += ` AND started_at=$13 AND EXISTS(SELECT 1 FROM scheduled_test_execution_leases l WHERE l.plan_id=scheduled_test_results.plan_id AND l.scope=$16 AND l.owner=$17 AND l.expires_at>clock_timestamp())`
+		args = append(args, result.ExecutionLeaseScope, result.ExecutionLeaseOwner)
+	}
+	res, err := execScheduledTestResultUnderLease(ctx, r.db, result, query, args...)
 	if err != nil {
 		return err
 	}
@@ -426,7 +523,7 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 		return fmt.Errorf("test result account id is required")
 	}
 
-	res, err := r.db.ExecContext(ctx, `
+	res, err := execScheduledTestResultUnderLease(ctx, r.db, result, `
 		UPDATE scheduled_test_results
 		SET status = 'running', response_text = '', output_kind = $2, output_html = '',
 		    output_numeric = NULL, model_id = $3, reasoning_effort = $4, group_id = $5,
@@ -894,7 +991,8 @@ func (r *scheduledTestResultRepository) Delete(ctx context.Context, id int64) er
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := lockProtectionPlan(ctx, tx, planID); err != nil {
+	config, err := lockProtectionPlan(ctx, tx, planID)
+	if err != nil {
 		return err
 	}
 	if accountID.Valid {
@@ -912,6 +1010,11 @@ func (r *scheduledTestResultRepository) Delete(ctx context.Context, id int64) er
 	}
 	if affected == 0 {
 		return sql.ErrNoRows
+	}
+	if accountID.Valid && config.Enabled {
+		if err := reconcileProtectionAccount(ctx, tx, accountID.Int64); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

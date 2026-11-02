@@ -64,8 +64,6 @@ type ScheduledTestProtectionEvidence struct {
 	ResultID         int64                          `json:"result_id,omitempty"`
 	RunID            string                         `json:"run_id,omitempty"`
 	MinSamples       int64                          `json:"min_samples"`
-	WindowStart      *time.Time                     `json:"window_start,omitempty"`
-	WindowEnd        *time.Time                     `json:"window_end,omitempty"`
 	StartedAt        *time.Time                     `json:"started_at,omitempty"`
 	Current          bool                           `json:"current"`
 	Verdict          string                         `json:"verdict"`
@@ -147,9 +145,7 @@ func BuildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 	for i := range source.States {
 		if source.States[i].Result != nil {
 			copy := *source.States[i].Result
-			if copy.OutputStatistics == nil {
-				normalizeStoredTestResults([]*ScheduledTestResult{&copy})
-			}
+			normalizeStoredTestResults([]*ScheduledTestResult{&copy})
 			source.States[i].Result = &copy
 		}
 	}
@@ -198,9 +194,6 @@ func BuildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 		if evidence.MinSamples < 1 {
 			evidence.MinSamples = 1
 		}
-		if state.Current && state.Result != nil && state.Result.OutputStatistics != nil {
-			evidence.WindowStart, evidence.WindowEnd = &state.Result.OutputStatistics.WindowStart, &state.Result.OutputStatistics.WindowEnd
-		}
 		if state.Result != nil {
 			evidence.ResultID, evidence.StartedAt = state.Result.ID, &state.Result.StartedAt
 		}
@@ -228,18 +221,6 @@ func BuildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 }
 
 func scheduledTestMetricSamples(result *ScheduledTestResult, metric string) *int64 {
-	if stats := result.OutputStatistics; stats != nil {
-		switch metric {
-		case "success_rate":
-			return &stats.TotalRequests
-		case "cache_rate":
-			return &stats.CacheSamples
-		case "avg_first_token_ms":
-			return &stats.FirstTokenSamples
-		case "output_tps":
-			return &stats.TPSSamples
-		}
-	}
 	if metric == "latency_ms" || metric == "output_numeric" {
 		samples := int64(1)
 		return &samples

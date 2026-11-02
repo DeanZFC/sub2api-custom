@@ -28,12 +28,12 @@ func memberHintText(text string, max int) string {
 
 // Keep only the sender's short, plain chat text for operator identification.
 // Commands, quotes and attachments must not copy codes or referenced content.
-func groupMemberHint(e Event) (nickname, preview string) {
+func groupMemberHint(e Event, customCommands ...CustomCommand) (nickname, preview string) {
 	if e.Author.Bot || e.Author.MemberID == "" {
 		return "", ""
 	}
 	nickname = memberHintText(e.Author.Username, 100)
-	if e.referenceID() != "" || e.MessageType == 103 || !shareableGroupEvent(e, nil) {
+	if e.referenceID() != "" || e.MessageType == 103 || !shareableGroupEvent(e, nil, customCommands...) {
 		return nickname, ""
 	}
 	text := strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(e.Content), ""))
@@ -68,6 +68,7 @@ ORDER BY m.created_at DESC,m.id DESC LIMIT 50`, c.AppID, pq.Array(c.AllowedGroup
 		if err := rows.Scan(&member.GroupID, &member.MemberID, &member.Nickname, &member.MessagePreview, &member.LastSeenAt, &boundName, &member.Email, &history); err != nil {
 			return nil, err
 		}
+		member.MessagePreview = memberDirectoryPreview(member.MessagePreview, c.CustomCommands...)
 		// Already-retained history can identify pre-upgrade jobs without backfilling payloads.
 		var entry groupHistoryEntry
 		if json.Unmarshal([]byte(history), &entry) == nil && entry.Speaker == groupSpeaker(c.AppID, member.GroupID, member.MemberID) {
@@ -75,7 +76,7 @@ ORDER BY m.created_at DESC,m.id DESC LIMIT 50`, c.AppID, pq.Array(c.AllowedGroup
 				member.Nickname = memberHintText(entry.Nickname, 100)
 			}
 			if member.MessagePreview == "" && entry.ReplyTo == "" {
-				member.MessagePreview = memberHintText(entry.Text, 100)
+				member.MessagePreview = memberDirectoryPreview(entry.Text, c.CustomCommands...)
 			}
 		}
 		if member.Nickname == "" {

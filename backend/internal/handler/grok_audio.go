@@ -60,6 +60,11 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		return
 	}
 	defer inflightDone()
+	userRelease, admitted := acquireImmediateGatewayUserSlot(c, h.concurrencyHelper, apiKey)
+	if !admitted {
+		return
+	}
+	defer userRelease()
 
 	// Keep the HTTP response uncommitted while selecting and probing an account.
 	// Realtime is not an HTTP streaming response; using reqStream=true here would
@@ -83,6 +88,9 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 			false, false, false, service.PlatformGrok,
 		)
 		if selectErr != nil || candidate == nil || candidate.Account == nil {
+			if handleAPIKeyFallbackAdmissionError(c, selectErr, c.Writer.Written()) {
+				return
+			}
 			break
 		}
 		candidateSeen = true
@@ -235,6 +243,11 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		return
 	}
 	defer inflightDone()
+	userRelease, admitted := acquireImmediateGatewayUserSlot(c, h.concurrencyHelper, apiKey)
+	if !admitted {
+		return
+	}
+	defer userRelease()
 
 	contentType := c.GetHeader("Content-Type")
 	if strings.TrimSpace(contentType) == "" {
@@ -262,6 +275,9 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			service.PlatformGrok,
 		)
 		if selectErr != nil || selection == nil || selection.Account == nil {
+			if handleAPIKeyFallbackAdmissionError(c, selectErr, c.Writer.Written()) {
+				return
+			}
 			if last != nil {
 				h.handleFailoverExhausted(c, last, false)
 			} else {

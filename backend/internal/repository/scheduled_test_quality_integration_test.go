@@ -61,7 +61,8 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		CREATE TABLE accounts (id BIGINT PRIMARY KEY, name TEXT, platform TEXT NOT NULL DEFAULT 'openai', status TEXT NOT NULL DEFAULT 'active', schedulable BOOLEAN NOT NULL DEFAULT true, extra JSONB NOT NULL DEFAULT '{}', updated_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
 		CREATE TABLE groups (id BIGINT PRIMARY KEY, name TEXT, platform TEXT NOT NULL DEFAULT 'openai', status TEXT DEFAULT 'active', deleted_at TIMESTAMPTZ, is_exclusive BOOLEAN DEFAULT false, subscription_type TEXT DEFAULT 'standard');
 		CREATE TABLE account_groups (account_id BIGINT, group_id BIGINT);
-        CREATE TABLE scheduler_outbox(event_type TEXT,account_id BIGINT);
+        CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT NOW());
+        CREATE UNIQUE INDEX idx_quality_outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL;
 		CREATE TABLE user_allowed_groups (user_id BIGINT, group_id BIGINT);
 		CREATE TABLE user_subscriptions (user_id BIGINT, group_id BIGINT, deleted_at TIMESTAMPTZ, status TEXT, starts_at TIMESTAMPTZ, expires_at TIMESTAMPTZ);
 		INSERT INTO accounts (id, name) VALUES (62, 'Private account alpha'), (63, 'Private account beta');
@@ -105,6 +106,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	applyMigration("312_scheduled_test_pass_rate.sql")
 	applyMigration("315_scheduled_test_multi_model.sql")
 	applyMigration("326_scheduled_test_all_pass_rounds.sql")
+	applyMigration("332_archive_scheduled_test_definitions.sql")
 	var statisticsCount int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))
 	require.Equal(t, 1, statisticsCount, "the local statistics definition is seeded idempotently")
@@ -366,11 +368,92 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	require.Equal(t, 5, successCount, "types, models, efforts and groups retain separate successes")
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_results WHERE plan_id=$1 AND status='running'`, plan.ID).Scan(&runningCount))
 	require.Equal(t, 2, runningCount)
-	// A definition referenced only by historical results also remains protected.
+	// A definition used by the current plan remains protected. Historical-only
+	// archival is verified independently so candy can serve later test cases.
 	plan.TestDefinitionIDs, plan.TestDefinitionID = []int64{htmlID}, &htmlID
 	_, err = plans.Update(ctx, plan)
 	require.NoError(t, err)
-	require.Error(t, definitions.Delete(ctx, candyID))
+	archived, err := definitions.Create(ctx, &service.ScheduledTestDefinition{
+		Key: "history-only", Name: "History only", Prompt: "OK", OutputKind: "text", Enabled: true,
+	})
+	require.NoError(t, err)
+	var historicalResultID int64
+	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO scheduled_test_results
+		(plan_id,status,test_definition_id,target_mode,started_at,finished_at)
+		VALUES ($1,'success',$2,'group',NOW(),NOW()) RETURNING id`,
+		plan.ID, archived.ID).Scan(&historicalResultID))
+	require.NoError(t, definitions.Delete(ctx, archived.ID))
+	_, err = definitions.GetByID(ctx, archived.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	visibleDefinitions, err := definitions.List(ctx, false)
+	require.NoError(t, err)
+	for _, definition := range visibleDefinitions {
+		require.NotEqual(t, archived.ID, definition.ID)
+	}
+	historicalResult, err := results.GetByID(ctx, historicalResultID)
+	require.NoError(t, err)
+	require.Equal(t, "History only", historicalResult.TestName)
+	_, err = definitions.Update(ctx, archived)
+	require.ErrorIs(t, err, sql.ErrNoRows, "archived definitions cannot be edited")
+	_, err = plans.Create(ctx, &service.ScheduledTestPlan{
+		Name: "Archived test", GroupIDs: []int64{groupID}, GroupID: &groupID,
+		TestDefinitionID: &archived.ID, TestDefinitionIDs: []int64{archived.ID},
+		TargetMode: "all_accounts", CronExpression: "0 * * * *",
+	})
+	require.Error(t, err, "archived definitions cannot be selected by the repository")
+	_, err = db.ExecContext(ctx, `INSERT INTO scheduled_test_plans
+		(name,group_id,group_ids,target_mode,test_definition_id,test_definition_ids)
+		VALUES ('Archived raw plan',$1,ARRAY[$1]::bigint[],'all_accounts',$2,ARRAY[$2]::bigint[])`,
+		groupID, archived.ID)
+	require.Error(t, err, "direct SQL plan writes cannot select an archived definition")
+	auditOnly, err := definitions.Create(ctx, &service.ScheduledTestDefinition{
+		Key: "audit-only", Name: "Audit only", Prompt: "OK", OutputKind: "text", Enabled: true,
+	})
+	require.NoError(t, err)
+	var auditEventID int64
+	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO scheduled_test_protection_events
+		(plan_id,account_id,test_definition_id,result_id,snapshot)
+		VALUES (0,0,$1,0,'{}'::jsonb) RETURNING id`, auditOnly.ID).Scan(&auditEventID))
+	require.NoError(t, definitions.Delete(ctx, auditOnly.ID))
+	var auditName string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT d.name FROM scheduled_test_protection_events e
+		JOIN scheduled_test_definitions d ON d.id=e.test_definition_id WHERE e.id=$1`,
+		auditEventID).Scan(&auditName))
+	require.Equal(t, "Audit only", auditName)
+
+	t.Run("retired knowledge cutoff can leave management without losing history", func(t *testing.T) {
+		applyMigration("319_scheduled_test_knowledge_cutoff.sql")
+		knowledge, err := definitions.GetByKey(ctx, "knowledge_cutoff")
+		require.NoError(t, err)
+		var retiredPlanID, retiredResultID int64
+		require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO scheduled_test_plans
+			(name,group_id,group_ids,target_mode,test_definition_id,test_definition_ids)
+			VALUES ('Retired knowledge cutoff',8,ARRAY[8]::bigint[],'all_accounts',$1,ARRAY[$1]::bigint[])
+			RETURNING id`, knowledge.ID).Scan(&retiredPlanID))
+		require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO scheduled_test_results
+			(plan_id,status,test_definition_id,target_mode,started_at,finished_at)
+			VALUES ($1,'success',$2,'group',NOW(),NOW()) RETURNING id`,
+			retiredPlanID, knowledge.ID).Scan(&retiredResultID))
+		migrationSQL, err := migrations.FS.ReadFile("320_retire_knowledge_cutoff.sql")
+		require.NoError(t, err)
+		retireTx, err := db.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer retireTx.Rollback()
+		_, err = retireTx.ExecContext(ctx, string(migrationSQL))
+		require.NoError(t, err)
+		require.NoError(t, retireTx.Commit())
+		require.NoError(t, definitions.Delete(ctx, knowledge.ID))
+		_, err = definitions.GetByKey(ctx, "knowledge_cutoff")
+		require.ErrorIs(t, err, sql.ErrNoRows)
+		var isArchived, isDisabled bool
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT deleted_at IS NOT NULL, NOT enabled
+			FROM scheduled_test_definitions WHERE id=$1`, knowledge.ID).Scan(&isArchived, &isDisabled))
+		require.True(t, isArchived)
+		require.True(t, isDisabled)
+		retiredResult, err := results.GetByID(ctx, retiredResultID)
+		require.NoError(t, err)
+		require.Equal(t, "知识截止日期检测", retiredResult.TestName)
+	})
 
 	t.Run("admin history limit preserves every account and test type", func(t *testing.T) {
 		multiPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
@@ -514,7 +597,7 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		require.NoError(t, definitions.Delete(ctx, definition.ID), "deleting a plan releases its references")
 	})
 
-	t.Run("statistics storage survives public projection without exposing raw JSON", func(t *testing.T) {
+	t.Run("unsupported stored payload is hidden from public results", func(t *testing.T) {
 		definition, err := definitions.GetByKey(ctx, "hourly_stats")
 		require.NoError(t, err)
 		statsPlan, err := plans.Create(ctx, &service.ScheduledTestPlan{
@@ -529,19 +612,8 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 			ModelID: "model-a", OutputKind: "statistics", StartedAt: started,
 		})
 		require.NoError(t, err)
-		snapshot := &service.ScheduledTestStatistics{
-			WindowStart: started.Add(-time.Hour), WindowEnd: started, TotalRequests: 4, SuccessRequests: 3, FailedRequests: 1,
-			RecentRequests: []service.ScheduledTestRecentRequest{
-				{Success: false, CreatedAt: started.Add(-time.Minute)},
-				{Success: true, CreatedAt: started.Add(-2 * time.Minute)},
-			},
-		}
-		rate := 0.75
-		snapshot.SuccessRate = &rate
-		encoded, err := json.Marshal(snapshot)
-		require.NoError(t, err)
+		encoded := []byte("{\"private\":\"secret-obsolete-payload\"}")
 		pending.Status, pending.ResponseText, pending.FinishedAt = "success", string(encoded), started
-		pending.OutputStatistics = snapshot
 		require.NoError(t, svc.CompleteResult(ctx, 5, pending))
 		stored, err := results.GetByID(ctx, pending.ID)
 		require.NoError(t, err)
@@ -558,7 +630,10 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 			require.Nil(t, result.AccountID)
 			require.Empty(t, result.AccountName)
 			require.Empty(t, result.ReasoningEffort)
-			require.Equal(t, snapshot, result.OutputStatistics)
+			raw, err := json.Marshal(result)
+			require.NoError(t, err)
+			require.NotContains(t, string(raw), "secret-obsolete-payload")
+			require.NotContains(t, string(raw), "output_statistics")
 		}
 		require.True(t, found)
 		stored, err = results.GetByID(ctx, pending.ID)

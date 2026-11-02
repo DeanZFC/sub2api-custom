@@ -3,7 +3,7 @@
     ref="trigger"
     type="button"
     class="flex cursor-help flex-col items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-    data-testid="quality-paused-status"
+    :data-testid="isQualityPaused ? 'quality-paused-status' : 'quality-model-status'"
     aria-haspopup="dialog"
     :aria-expanded="open"
     :aria-label="t('admin.accounts.qualityDetails.title')"
@@ -13,7 +13,11 @@
     @blur="scheduleClose"
     @click.stop="togglePinned"
   >
-    <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.qualityPaused') }}</span>
+    <span :class="['badge text-xs', isQualityPaused || hasBlockedModels ? 'badge-warning' : hasPendingModels ? 'badge-gray' : 'badge-success']">{{ summaryText }}</span>
+    <span v-for="model in modelStatuses" :key="model.model" class="flex max-w-[220px] items-start gap-2 text-[11px] leading-4" data-quality-model :data-model-status="model.status">
+      <span class="break-all text-gray-600 dark:text-gray-300">{{ model.model }}</span>
+      <span class="shrink-0" :class="model.status === 'blocked' ? 'text-red-600 dark:text-red-400' : model.status === 'normal' ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400'">{{ modelStatusText(model.status) }}</span>
+    </span>
     <span v-if="!account.schedulable" class="text-[11px] text-gray-500 dark:text-gray-400">
       {{ t('admin.accounts.status.qualityPausedManualStop') }}
     </span>
@@ -40,13 +44,21 @@
       </div>
       <div class="min-h-0 space-y-3 overflow-y-auto overscroll-contain break-words p-4">
         <p v-if="reason" class="text-amber-200">{{ reason }}</p>
+        <section v-if="modelStatuses.length" class="space-y-2" data-quality-model-details>
+          <h4 class="font-semibold text-white">{{ t('admin.accounts.qualityDetails.modelsTitle') }}</h4>
+          <p class="text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.modelsHint') }}</p>
+          <div v-for="model in modelStatuses" :key="model.model" class="rounded border border-white/10 p-2">
+            <div class="flex items-start justify-between gap-3"><span class="break-all font-mono">{{ model.model }}</span><span class="shrink-0" :class="model.status === 'blocked' ? 'text-red-300' : model.status === 'normal' ? 'text-emerald-300' : 'text-gray-400'">{{ modelStatusText(model.status) }}</span></div>
+            <p v-if="model.reason" class="mt-1 text-gray-300">{{ model.reason }}</p>
+          </div>
+        </section>
         <p v-if="loading" role="status">{{ t('common.loading') }}</p>
         <div v-else-if="loadError" role="alert">
           {{ t('admin.accounts.qualityDetails.loadFailed') }}
           <button type="button" class="ml-2 text-primary-300 underline" @click.stop="loadDetails">{{ t('common.retry') }}</button>
         </div>
-        <p v-else-if="!holds.length" class="text-gray-400">{{ t('admin.accounts.qualityDetails.empty') }}</p>
-        <template v-else>
+        <p v-else-if="!holds.length && (isQualityPaused || hasBlockedModels || !modelStatuses.length)" class="text-gray-400">{{ t('admin.accounts.qualityDetails.empty') }}</p>
+        <template v-else-if="holds.length">
           <p class="text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.evidenceHint') }}</p>
           <section v-for="(hold, index) in holds" :key="`${hold.plan_id}-${index}`" class="space-y-3 rounded-lg border border-white/10 p-3">
             <div>
@@ -64,7 +76,6 @@
               <div v-for="test in hold.trigger_snapshot.tests" :key="test.test_definition_id" class="space-y-1 border-t border-white/10 pt-2">
                 <strong>{{ test.test_name || `#${test.test_definition_id}` }} · {{ verdictText(test.verdict) }}</strong>
                 <p class="text-[11px] text-gray-400">#{{ test.result_id || '—' }} · {{ formatDateTime(test.started_at) }}</p>
-                <p v-if="test.window_start || test.window_end" class="text-[11px] text-gray-400">{{ formatDateTime(test.window_start) }} — {{ formatDateTime(test.window_end) }}</p>
                 <p>{{ test.reason }}</p>
                 <div v-for="(threshold, ti) in test.thresholds" :key="ti" class="text-[11px]">
                   {{ t(`admin.accounts.qualityDetails.metrics.${threshold.metric}`) }} {{ threshold.operator === 'lt' ? '&lt;' : '&gt;' }} {{ metricValue(threshold.value, threshold.metric) }} · {{ t('admin.accounts.qualityDetails.observed') }}：{{ threshold.observed == null ? '—' : metricValue(threshold.observed, threshold.metric) }}
@@ -113,9 +124,16 @@ import { getAccountProtection, type QualityProtectionHold } from '@/api/admin/te
 import type { Account, TestCombinationCondition } from '@/types'
 import { formatDateTime } from '@/utils/format'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
+import { accountQualityModels, type AccountQualityModelStatus } from '@/utils/accountQualityModels'
 
 const props = defineProps<{ account: Account }>()
 const { t } = useI18n()
+const isQualityPaused = computed(() => props.account.status === 'quality_paused')
+const modelStatuses = computed(() => accountQualityModels(props.account.extra))
+const hasBlockedModels = computed(() => modelStatuses.value.some(model => model.status === 'blocked'))
+const hasPendingModels = computed(() => modelStatuses.value.some(model => model.status === 'pending'))
+const summaryText = computed(() => t(`admin.accounts.${isQualityPaused.value ? 'status.qualityPaused' : hasBlockedModels.value ? 'qualityDetails.modelsPartial' : hasPendingModels.value ? 'qualityDetails.modelsPending' : 'qualityDetails.modelsNormal'}`))
+const modelStatusText = (status: AccountQualityModelStatus['status']) => t(`admin.accounts.qualityDetails.modelStatus.${status}`)
 const reason = computed(() => typeof props.account.extra?.quality_protection_reason === 'string' ? props.account.extra.quality_protection_reason.trim() : '')
 const trigger = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
@@ -138,7 +156,7 @@ function conditionText(condition: TestCombinationCondition, hold: Pick<QualityPr
   return `${t(`admin.accounts.qualityDetails.${condition.operator === 'all' ? 'all' : 'any'}`)}（${(condition.conditions || []).map(child => conditionText(child, hold)).join('；')}）`
 }
 function metricValue(value: number, metric: string) {
-  const unit = metric.endsWith('_rate') ? '%' : metric.endsWith('_ms') ? ' ms' : ''
+  const unit = metric.endsWith('_ms') ? ' ms' : ''
   return `${Number(value.toPrecision(6))}${unit}`
 }
 
@@ -162,6 +180,10 @@ async function loadDetails() {
   loading.value = true
   loadError.value = false
   holds.value = []
+  if (!isQualityPaused.value && !hasBlockedModels.value) {
+    loading.value = false
+    return
+  }
   try {
     const data = await getAccountProtection(props.account.id)
     if (version === requestVersion) holds.value = data
@@ -206,6 +228,6 @@ watch(open, (value, _, onCleanup) => {
     window.removeEventListener('scroll', updatePosition, true)
   })
 })
-watch(() => [props.account.id, props.account.status, reason.value, props.account.updated_at], close)
+watch(() => [props.account.id, props.account.status, reason.value, props.account.updated_at, JSON.stringify(modelStatuses.value)], close)
 onBeforeUnmount(close)
 </script>

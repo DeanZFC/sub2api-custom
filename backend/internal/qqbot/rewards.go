@@ -11,7 +11,7 @@ func (s *Service) myRewards(ctx context.Context, c Config, j Job) (string, error
 	var uid int64
 	err := s.db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&uid)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先使用 /绑定 绑定网站账号。", nil
+		return "请先发送“绑定 邮箱或绑定码”绑定网站账号。", nil
 	}
 	if err != nil {
 		return "", err

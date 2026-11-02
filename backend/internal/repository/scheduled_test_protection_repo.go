@@ -109,6 +109,9 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 	if err != nil {
 		return err
 	}
+	if err := checkScheduledTestResultLease(ctx, tx, result); err != nil {
+		return err
+	}
 	if !protectionRuleCurrent(config, rule) {
 		return nil
 	}
@@ -153,6 +156,9 @@ func (r *scheduledTestResultRepository) BeginProtection(ctx context.Context, res
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_votes WHERE result_id=$1`, result.ID); err != nil {
+		return err
+	}
+	if err := reconcileProtectionAccount(ctx, tx, *result.AccountID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -312,6 +318,9 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 		return nil
 	}
 	if err != nil {
+		return err
+	}
+	if err := checkScheduledTestResultLease(ctx, tx, result); err != nil {
 		return err
 	}
 	eligible, err := lockProtectionAccount(ctx, tx, *result.AccountID)

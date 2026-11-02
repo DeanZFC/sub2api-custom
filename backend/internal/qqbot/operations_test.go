@@ -1,11 +1,39 @@
 package qqbot
 
 import (
+	"context"
 	"encoding/json"
-	"github.com/stretchr/testify/require"
+	"regexp"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/require"
 )
+
+func TestListJobsAcceptsPersonalQueryFilters(t *testing.T) {
+	for _, kind := range []string{"account_balance", "today_usage", "lottery_chances"} {
+		t.Run(kind, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = db.Close() })
+			c := previewTestConfig()
+			expectPreviewConfig(t, mock, c)
+			mock.ExpectBegin()
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM qq_bot_jobs")).
+				WithArgs(c.AppID, "group", "member", "", "", nil, nil, kind, "succeeded").
+				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			mock.ExpectQuery("SELECT id,app_id,event_type").
+				WithArgs(c.AppID, "group", "member", "", "", nil, nil, kind, "succeeded", 10, 0).
+				WillReturnRows(sqlmock.NewRows([]string{"id", "app_id", "event_type", "group_id", "member_id", "kind", "status", "error", "input_tokens", "output_tokens", "created_at", "finished_at", "trigger_reason", "decision_reason", "image_decision", "site_query", "chat_execution"}))
+			mock.ExpectCommit()
+			page, err := New(db, previewEncryptor{}, true, nil).ListJobs(context.Background(), JobFilter{GroupID: "group", MemberID: "member", QueryKind: kind, QueryStatus: "succeeded", Page: 1, PageSize: 10})
+			require.NoError(t, err)
+			require.Empty(t, page.Items)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
 
 func TestModuleMergeAndIndependentRevision(t *testing.T) {
 	a := DefaultConfig()

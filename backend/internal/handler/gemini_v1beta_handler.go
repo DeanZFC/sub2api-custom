@@ -98,6 +98,9 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 
 	account, err := h.geminiCompatService.SelectAccountForModelsEndpoints(c.Request.Context(), apiKey.GroupID)
 	if err != nil {
+		if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
+			return
+		}
 		if len(agModels) > 0 {
 			c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(agModels)})
 			return
@@ -293,6 +296,9 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 
 	account, err := h.geminiCompatService.SelectAccountForModelsEndpoints(c.Request.Context(), apiKey.GroupID)
 	if err != nil {
+		if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
+			return
+		}
 		// 没有 gemini 账户，检查是否有 antigravity 账户可用
 		hasAntigravity, _ := h.geminiCompatService.HasAntigravityAccounts(c.Request.Context(), apiKey.GroupID)
 		if hasAntigravity {
@@ -602,6 +608,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			err = service.ErrNoAvailableAccounts
 		}
 		if err != nil {
+			if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
+				return
+			}
 			if failoverClientGone(c) {
 				reqLog.Info("gemini.account_select_aborted_client_disconnected", zap.Error(err))
 				return

@@ -100,3 +100,61 @@ func TestSiteQueryModelPriceUsesCurrentBindingWithinApp(t *testing.T) {
 		require.Equal(t, tc.uid, received)
 	}
 }
+
+func TestSiteAccountQueriesReadOnlyAndBoundToCurrentMember(t *testing.T) {
+	ctx := context.Background()
+	db := testDB(t)
+	s := savedBot(t, db)
+	first, second := user(t, db), user(t, db)
+	bind(t, db, first, "member")
+	bind(t, db, second, "other-member")
+	_, err := db.Exec(`UPDATE users SET balance=CASE WHEN id=$1 THEN 12.50 ELSE 99.25 END WHERE id IN ($1,$2)`, first, second)
+	require.NoError(t, err)
+	insightsUsageTable(t, db)
+	c, err := s.Config(ctx)
+	require.NoError(t, err)
+	checkin, err := s.CheckinConfig(ctx)
+	require.NoError(t, err)
+	checkin.Growth.Tasks = []GrowthTask{{ID: "binding", Name: "绑定奖励", Kind: "binding", Target: 1, Chances: 5, Enabled: true}}
+	require.NoError(t, s.SaveCheckinConfig(ctx, checkin))
+	lottery := defaultLotteryConfig()
+	lottery.Enabled = true
+	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
+	before := siteQueryMutationSnapshot(t, db, first)
+	j := Job{AppID: c.AppID, GroupID: "group", MemberID: "member"}
+	for _, kind := range []string{"account_balance", "today_usage", "lottery_chances"} {
+		result, err := s.querySiteInfoDetailed(ctx, c, j, siteQuery{Kind: kind})
+		require.NoError(t, err)
+		require.Equal(t, "succeeded", result.Decision.Status, result.Text)
+		require.NotContains(t, result.Text, "99.25")
+		if kind == "account_balance" {
+			require.Contains(t, result.Text, "余额：USD 12.50")
+		}
+		if kind == "lottery_chances" {
+			require.Contains(t, result.Text, "剩余抽奖次数：0 次", "query must not settle the eligible binding reward")
+		}
+		require.Equal(t, before, siteQueryMutationSnapshot(t, db, first))
+	}
+	j.MemberID = "other-member"
+	result, err := s.querySiteInfoDetailed(ctx, c, j, siteQuery{Kind: "account_balance"})
+	require.NoError(t, err)
+	require.Contains(t, result.Text, "余额：USD 99.25")
+	j.MemberID = "unbound"
+	result, err = s.querySiteInfoDetailed(ctx, c, j, siteQuery{Kind: "account_balance"})
+	require.NoError(t, err)
+	require.Equal(t, "binding_required", result.Decision.ErrorCode)
+	j.MemberID, j.AppID = "member", "different-app"
+	result, err = s.querySiteInfoDetailed(ctx, c, j, siteQuery{Kind: "account_balance"})
+	require.NoError(t, err)
+	require.Equal(t, "identity_unavailable", result.Decision.ErrorCode)
+	j.AppID = c.AppID
+	_, err = db.Exec(`UPDATE users SET status='disabled' WHERE id=$1`, first)
+	require.NoError(t, err)
+	for _, kind := range []string{"account_balance", "today_usage", "lottery_chances"} {
+		result, err = s.querySiteInfoDetailed(ctx, c, j, siteQuery{Kind: kind})
+		require.NoError(t, err)
+		require.Equal(t, "binding_required", result.Decision.ErrorCode)
+		require.NotContains(t, result.Text, "12.50")
+	}
+	require.Equal(t, before, siteQueryMutationSnapshot(t, db, first))
+}

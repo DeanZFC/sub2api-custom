@@ -58,7 +58,7 @@ func validateCustomCommands(commands []CustomCommand) error {
 	seen := make(map[string]bool, len(commands))
 	for i, cmd := range commands {
 		if !customCommandPattern.MatchString(cmd.Command) {
-			return fmt.Errorf("第 %d 条自定义指令须以 / 开头，后接 1～32 个中文、字母、数字、下划线或短横线", i+1)
+			return fmt.Errorf("第 %d 条自定义指令名称须为 1～32 个中文、字母、数字、下划线或短横线", i+1)
 		}
 		if isBuiltinCommand(strings.TrimPrefix(cmd.Command, "/")) || isRetiredCommand(strings.TrimPrefix(cmd.Command, "/")) {
 			return fmt.Errorf("自定义指令 %s 与内置指令重名", cmd.Command)

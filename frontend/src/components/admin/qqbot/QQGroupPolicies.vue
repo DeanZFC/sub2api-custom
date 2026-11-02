@@ -2,8 +2,9 @@
   <div class="space-y-4">
     <p class="text-sm text-gray-500">{{ t('qqbot.workspace.groupPolicyHelp') }}</p>
     <article v-for="group in groups" :key="group" class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
+      <p v-if="policy(group).label || names?.[group]" class="break-all font-medium">{{ policy(group).label || names?.[group] }}</p>
       <code class="block break-all text-xs">{{ group }}</code>
-      <label class="block text-sm">{{ t('qqbot.workspace.groupLabel') }}<input class="input" :value="policy(group).label" maxlength="60" @input="update(group, { label: ($event.target as HTMLInputElement).value })" /></label>
+      <label class="block text-sm">{{ t('qqbot.workspace.groupLabel') }}<input class="input" :value="policy(group).label" :placeholder="names?.[group]" maxlength="60" @input="update(group, { label: ($event.target as HTMLInputElement).value })" /></label>
       <div class="flex flex-wrap gap-4">
         <label v-for="key in switches" :key="key" class="flex items-center gap-2 text-sm"><input type="checkbox" :checked="!policy(group)[key]" @change="update(group, { [key]: !($event.target as HTMLInputElement).checked })" />{{ t(`qqbot.workspace.${key}`) }}</label>
       </div>
@@ -17,7 +18,7 @@
 import { useI18n } from 'vue-i18n'
 import type { QQGroupPolicy } from '@/api/qqbot'
 const model = defineModel<QQGroupPolicy[]>({ required: true })
-defineProps<{ groups: string[] }>()
+defineProps<{ groups: string[]; names?: Record<string, string> }>()
 const { t } = useI18n()
 const switches = ['disable_chat', 'disable_images', 'disable_activities', 'disable_notifications'] as const
 const quotas = ['chat_daily_limit', 'image_daily_limit'] as const

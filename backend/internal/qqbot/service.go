@@ -36,6 +36,7 @@ type Service struct {
 	tokenExpires          time.Time
 	groupBotMu            sync.Mutex
 	groupBots             map[string]groupBotIdentity
+	groupInfo             groupInfoCache
 	spamSourceDiagnostics spamSourceReceptionDiagnostics
 	imageDownload         func(context.Context, string) ([]byte, error)
 	cancel                context.CancelFunc
@@ -123,8 +124,12 @@ func (s *Service) runOne(parent context.Context) {
 	if err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(parent, 260*time.Second)
+	ctx, cancel := jobContext(parent, j)
 	defer cancel()
+	if (isGroupMessageEvent(j.EventType) || j.EventType == interactionCreate) && checkModelBudget(ctx, minimumModelBudget) != nil {
+		s.finish(j, "expired", "排队超过回复时限，请重新发送")
+		return
+	}
 	c, err := s.Config(ctx)
 	if err != nil {
 		logMembershipEvent(ctx, j, nil, "process", "failed", "config_unavailable")
@@ -165,7 +170,7 @@ func (s *Service) runOne(parent context.Context) {
 		}
 		return
 	}
-	if time.Since(j.CreatedAt) > 240*time.Second {
+	if checkModelBudget(ctx, minimumModelBudget) != nil {
 		s.finish(j, "expired", "排队超过回复时限，请重新发送")
 		return
 	}
@@ -183,7 +188,7 @@ func (s *Service) runOne(parent context.Context) {
 	if j.EventType == interactionCreate {
 		cmd, valid := helpActionCommand(c, e.HelpAction)
 		if !valid {
-			s.finish(j, "skipped", "帮助按钮已失效，请重新发送 /帮助")
+			s.finish(j, "skipped", "帮助按钮已失效，请重新发送 帮助")
 			return
 		}
 		e.Content = cmd
@@ -198,6 +203,9 @@ func (s *Service) runOne(parent context.Context) {
 		status := "delivery_failed"
 		if j.Error != "" {
 			status = "failed"
+		}
+		if errors.Is(err, errReplyWindow) || errors.Is(err, context.DeadlineExceeded) {
+			status = "expired"
 		}
 		s.finish(j, status, err.Error())
 	} else {
@@ -383,11 +391,9 @@ func (s *Service) settleInvites(ctx context.Context, c Config, member string) er
 
 var mentionPrefix = regexp.MustCompile(`^<@!?[^>]+>\s*`)
 
-func command(content string) (string, string) {
+func command(content string, customCommands ...CustomCommand) (string, string) {
 	content = strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(content), ""))
-	if !strings.HasPrefix(content, "/") {
-		return "", ""
-	}
+	slash := strings.HasPrefix(content, "/")
 	content = strings.TrimPrefix(content, "/")
 	pos := strings.IndexFunc(content, unicode.IsSpace)
 	fields := []string{content}
@@ -398,7 +404,20 @@ func command(content string) (string, string) {
 	if len(fields) == 2 {
 		arg = strings.TrimSpace(fields[1])
 	}
-	return fields[0], arg
+	name := fields[0]
+	if !slash && !isBuiltinCommand(name) {
+		known := false
+		for _, custom := range customCommands {
+			if !isRetiredCommand(name) && strings.TrimPrefix(custom.Command, "/") == name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return "", ""
+		}
+	}
+	return name, arg
 }
 func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error {
 	ref, err := s.referencedMessage(ctx, c, j.GroupID, e.referenceID())
@@ -412,7 +431,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		if err != nil {
 			return err
 		}
-		// When the bot is @-mentioned and the content is a slash command, treat it
+		// When the bot is @-mentioned and the content is a known command, treat it
 		// as a command rather than routing to the AI chat path.
 		if addressed && isBuiltinOrCustomCommand(e, c.CustomCommands) {
 			// Fall through to command handling below.
@@ -423,9 +442,14 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	j.ReplyReference = e.MessageScene.value("msg_idx")
 	parts, attachments := eventParts(e)
 	hasImages := len(imageAttachments(attachments)) > 0
-	cmd, arg := command(e.Content)
+	cmd, arg := command(e.Content, c.CustomCommands...)
 	if cmd == "" && (addressed || named || ref != nil) && !hasImages && parts == "" && len(attachments) == 0 && naturalHelpRequest(e.Content) {
 		cmd = "帮助"
+	}
+	// Common personal queries are read-only and need neither a model call nor
+	// chat quota. Match only this member's current, explicitly addressed text.
+	if cmd == "" && addressed && !hasImages && parts == "" && len(attachments) == 0 && e.referenceID() == "" {
+		cmd = naturalAccountCommand(e.Content)
 	}
 	if strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(e.Content), "")) == "" && !hasImages && parts == "" && e.referenceID() == "" {
 		cmd = "帮助"
@@ -433,12 +457,12 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 	if arg != "" {
 		switch cmd {
 		case "签到", "我的余额", "今日用量", "我的奖励", "抽奖次数", "我的抽奖", "邀请奖励", "邀请活动", "我的邀请":
-			return s.send(ctx, c, *j, "用法：/"+cmd+"。", nil, 1)
+			return s.send(ctx, c, *j, "用法："+cmd+"。", nil, 1)
 		}
 	}
 	if cmd == "成长任务" || cmd == "抽奖活动" {
 		if _, ok := commandPageNumber(arg); !ok {
-			return s.send(ctx, c, *j, "用法：/"+cmd+"；翻页：/"+cmd+" 页码。", nil, 1)
+			return s.send(ctx, c, *j, "用法："+cmd+"；翻页："+cmd+" 页码。", nil, 1)
 		}
 	}
 	text := ""
@@ -506,7 +530,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			text, err = s.drawLotteryCount(ctx, c, *j, count)
 		}
 		if err != nil {
-			text = "抽奖处理异常，请发送 /抽奖次数 查询剩余次数。"
+			text = "抽奖处理异常，请发送 抽奖次数 查询剩余次数。"
 		}
 	case "抽奖次数", "我的抽奖", "抽奖活动":
 		var err error
@@ -531,7 +555,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		}
 	case "今日排行榜", "今日排行版":
 		if arg != "" {
-			text = "用法：/今日排行榜"
+			text = "用法：今日排行榜"
 			break
 		}
 		var err error
@@ -543,7 +567,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		return s.sendChannelStatus(ctx, c, *j, arg)
 	case "绑定":
 		if arg == "" {
-			text = "用法：/绑定 邮箱或绑定码"
+			text = "用法：绑定 邮箱或绑定码"
 			break
 		}
 		var bound bool
@@ -595,7 +619,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			break
 		}
 		if cmd != "" && cmd != "生图" {
-			text = "未知指令，请发送 /帮助。"
+			text = "未知指令，请发送 帮助。"
 			break
 		}
 		kind := "chat"
@@ -610,7 +634,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 				text = "生图功能未启用。"
 			}
 			if prompt == "" {
-				text = "用法：/生图 图片描述"
+				text = "用法：生图 图片描述"
 			}
 		}
 		if text != "" {
@@ -621,6 +645,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			break
 		}
 		if err := s.reserveUsage(ctx, c, *j, kind); err != nil {
+			if errors.Is(err, errReplyWindow) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			text = "服务暂时不可用，请稍后重试。"
 			if errors.Is(err, errFeatureUnavailable) || errors.Is(err, errUsageCooldown) || errors.Is(err, errUsageLimit) {
 				text = err.Error()
@@ -660,7 +687,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 				}
 				messages = withPendingImagePlan(messages, pending)
 				messages = append(messages, groupUserMessage(c, e, input))
-				j.ShareHistory = shareableGroupEvent(e, ref)
+				j.ShareHistory = shareableGroupEvent(e, ref, c.CustomCommands...)
 				var turn chatTurnResult
 				turnConfig := c
 				turnConfig.ImageEnabled = c.ImageEnabled && !c.groupPolicy(j.GroupID).DisableImages
@@ -701,6 +728,9 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 					// The independent review approved; recheck policy and reserve
 					// image usage separately from chat and review token usage.
 					if usageErr := s.reserveUsage(ctx, c, *j, "image"); usageErr != nil {
+						if errors.Is(usageErr, errReplyWindow) || errors.Is(usageErr, context.DeadlineExceeded) {
+							return usageErr
+						}
 						err = s.imageExecution(ctx, j, "quota_blocked")
 						text = "生图服务暂时不可用，请稍后重试。"
 						if errors.Is(usageErr, errFeatureUnavailable) || errors.Is(usageErr, errUsageCooldown) || errors.Is(usageErr, errUsageLimit) {
@@ -752,7 +782,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			if sendErr := s.send(ctx, c, *j, text, nil, seq); sendErr != nil {
 				return sendErr
 			}
-			return fmt.Errorf("模型调用失败：%s", j.Error)
+			return fmt.Errorf("模型调用失败：%w", err)
 		}
 		// Persist before sending to QQ. Delivery retries only reuse this saved result.
 		if _, err = s.db.ExecContext(ctx, `UPDATE qq_bot_jobs SET result_text=$2,result_image=$3,image_type=$4,input_tokens=$5,output_tokens=$6,chat_execution=$7 WHERE id=$1`, j.ID, text, img, "image/jpeg", j.InputTokens, j.OutputTokens, nullableChatExecution(j.ChatExecution)); err != nil {

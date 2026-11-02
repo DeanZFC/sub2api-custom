@@ -25,7 +25,7 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 	c := DefaultConfig()
 	c.Enabled, c.ImageEnabled = true, true
 	c.BaseURL = server.URL + "/v1"
-	for _, content := range []string{"你好", "签到", "生图 一只猫", "画图 一只猫", "/不存在", "/新对话", "/查看结果 task", "帮我解释 /签到", "@CTAV 你好"} {
+	for _, content := range []string{"你好", "签到有什么用", "帮我看一下我的余额", "画图 一只猫", "/不存在", "/新对话", "/查看结果 task", "帮我解释 /签到", "@CTAV 你好"} {
 		t.Run(content, func(t *testing.T) {
 			e := Event{ID: "ignored", GroupID: "group", Content: content}
 			e.Author.MemberID = "member"
@@ -66,11 +66,12 @@ func TestFullGroupCommandsWithoutMention(t *testing.T) {
 	s := New(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
-	for i, content := range []string{"/帮助", "/绑定", "/生图", "/抽奖 错误", "/我的余额 多余参数"} {
+	for i, content := range []string{"/帮助", "/绑定", "/生图", "/抽奖 错误", "/我的余额 多余参数", "帮助", "绑定", "生图", "抽奖 错误", "我的余额 多余参数"} {
+		require.True(t, shouldQueueGroupMessage(groupMessageCreate, Event{Content: content}))
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, Event{GroupID: "group", Content: content}))
 	}
-	require.EqualValues(t, 5, replies.Load())
+	require.EqualValues(t, 10, replies.Load())
 }
 
 func TestMentionWithoutContentRepliesWithHelp(t *testing.T) {

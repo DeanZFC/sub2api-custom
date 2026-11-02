@@ -46,7 +46,7 @@ type LotteryDrawsPage struct {
 
 const lotteryMaxDrawCount = 10
 
-const lotteryDrawUsage = "用法：/抽奖 [次数]，次数为 1–10；不填默认抽 1 次。"
+const lotteryDrawUsage = "用法：抽奖 [次数]，次数为 1–10；不填默认抽 1 次。"
 
 func lotteryDrawCount(arg string) (int, bool) {
 	if arg == "" {
@@ -209,7 +209,7 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 	var uid int64
 	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&uid)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先使用 /绑定 绑定网站账号。", nil
+		return "请先发送“绑定 邮箱或绑定码”绑定网站账号。", nil
 	}
 	if err != nil {
 		return "", err
@@ -278,7 +278,7 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 	var uid int64
 	err = tx.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&uid)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "请先使用 /绑定 绑定网站账号。", nil
+		return "请先发送“绑定 邮箱或绑定码”绑定网站账号。", nil
 	}
 	if err != nil {
 		return "", err

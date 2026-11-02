@@ -29,7 +29,7 @@ export default {
   lotteryOffer: 'Each successful recharge earns {count} QQ lottery chances for your website account. Bind QQ to use them.',
   lotteryReward: {
     pending: 'This recharge earns {count} lottery chances on success. Verification continues after you close this page.',
-    awarded: '{count} lottery chances granted. Bind QQ and send /抽奖 in the group to use them.',
+    awarded: '{count} lottery chances granted. Bind QQ and send 抽奖 in the group to use them.',
     not_eligible: 'No lottery chances granted for this recharge yet. Rewards require a successful recharge.',
   },
   loading: 'Loading…', loadFailed: 'Could not load. Please try again.', retry: 'Retry', back: 'Back', disabled: 'GPT Direct is currently unavailable.',

@@ -67,7 +67,7 @@ func (s *Service) rememberIncomingImages(ctx context.Context, c Config, e Event)
 	if !c.ImageEnabled || s.db == nil || e.Author.Bot {
 		return nil
 	}
-	if cmd, _ := command(e.Content); cmd != "" {
+	if cmd, _ := command(e.Content, c.CustomCommands...); cmd != "" {
 		return nil
 	}
 	images := ownImageAttachments(e)

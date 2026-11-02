@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,6 +13,8 @@ import (
 )
 
 var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+
+var ErrScheduledTestDefinitionInUse = errors.New("该检测类型仍被检测策略（包括已停用策略）选用，或仍有生效的保护限制；请先从策略中移除并解除保护")
 
 // Scheduled tests may generate large HTML/SVG responses (for example the
 // pelican animation). Each account/type execution gets this budget after it
@@ -612,8 +615,8 @@ func normalizePublicTestResults(results []*ScheduledTestResult) {
 }
 
 // normalizeStoredTestResults repairs derived output from older parsers when
-// results are read, without rewriting persisted data. Local statistics expose
-// their typed public payload instead of the underlying JSON storage field.
+// results are read, without rewriting persisted data. Unsupported historical
+// payloads are suppressed at the response boundary.
 func normalizeStoredTestResults(results []*ScheduledTestResult) {
 	for _, result := range results {
 		if result == nil {
@@ -623,16 +626,6 @@ func normalizeStoredTestResults(results []*ScheduledTestResult) {
 		case "model_check":
 			normalizeScheduledTestModelCheck(result)
 		case "statistics":
-			var snapshot ScheduledTestStatistics
-			result.OutputStatistics = nil
-			if json.Unmarshal([]byte(result.ResponseText), &snapshot) == nil && !snapshot.WindowStart.IsZero() && snapshot.WindowEnd.After(snapshot.WindowStart) {
-				if snapshot.RecentRequests == nil {
-					snapshot.RecentRequests = []ScheduledTestRecentRequest{}
-				} else if len(snapshot.RecentRequests) > 10 {
-					snapshot.RecentRequests = snapshot.RecentRequests[:10]
-				}
-				result.OutputStatistics = &snapshot
-			}
 			result.ResponseText = ""
 			result.OutputHTML = ""
 			result.OutputNumeric = nil

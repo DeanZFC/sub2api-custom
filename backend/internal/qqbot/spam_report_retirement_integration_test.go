@@ -135,7 +135,7 @@ func TestSpamReportRetirementQueuedCommandsNeverReviewOrCallModels(t *testing.T)
 				case "/v2/groups/group/messages":
 					messageCalls.Add(1)
 					reply := readQQTestReply(t, r)
-					require.Contains(t, reply.text(), "未知指令，请发送 /帮助。")
+					require.Contains(t, reply.text(), "未知指令，请发送 帮助。")
 					_, _ = fmt.Fprint(w, `{"id":"retired-command-reply"}`)
 				default:
 					modelCalls.Add(1)

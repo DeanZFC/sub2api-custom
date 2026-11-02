@@ -55,6 +55,28 @@ describe('image intent receipts', () => {
     expect(query.text()).toContain(i18n.global.t('qqbot.siteQuery.help'))
     w.unmount()
   })
+  it.each(['zh', 'en'])('filters and labels personal read-only query records in %s', async locale => {
+    const queryKinds = ['account_balance', 'today_usage', 'lottery_chances']
+    api.jobs.mockResolvedValue({ items: queryKinds.map(kind => ({
+      id: kind, group_id: 'group', member_id: 'member', kind: 'chat', status: 'completed', error: '',
+      input_tokens: 0, output_tokens: 0, created_at: '2026-11-02T08:00:00Z',
+      site_query: { kind, model: '', activity: '', page: 1, status: 'succeeded', error_code: '', duration_ms: 5 }
+    })), total: 3, page: 1, page_size: 20 })
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
+    const w = mount(QQJobRecords, { global: { plugins: [i18n] } }); await flushPromises()
+    const filter = w.get('[data-testid="qq-job-query-kind"]')
+    for (const [index, kind] of queryKinds.entries()) {
+      const key = 'qqbot.siteQuery.kinds.' + kind
+      const label = i18n.global.t(key)
+      expect(label).not.toBe(key)
+      expect(filter.get('option[value="' + kind + '"]').text()).toBe(label)
+      expect(w.findAll('[data-testid="qq-job-site-query"]')[index]!.text()).toContain(label)
+      await filter.setValue(kind)
+      await w.get('form').trigger('submit'); await flushPromises()
+      expect(api.jobs).toHaveBeenLastCalledWith(expect.objectContaining({ query_kind: kind, page: 1 }))
+    }
+    w.unmount()
+  })
   it.each(['zh', 'en'])('renders review, execution and scoped references in %s', async locale => {
     api.jobs.mockResolvedValue({ items: [{
       id: 'job-id', group_id: 'group', member_id: 'member', kind: 'chat', status: 'completed',

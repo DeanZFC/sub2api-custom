@@ -25,7 +25,7 @@ describe('QQ daily ranking prizes', () => {
   })
   it.each(['zh', 'en'])('%s saves independent board prizes and reloads exact reward types', async locale => {
     const { wrapper: w, t } = setup(locale); await flushPromises()
-    expect(w.text()).toContain('/今日排行榜')
+    expect(w.text()).toContain('今日排行榜')
     expect(w.text()).toContain(t('qqbot.rankings.help'))
     expect(w.get('[data-testid="token_rewards-rank-0"]').findAll('option')).toHaveLength(10)
     expect((w.get('[data-testid="rankings-rewards-enabled"]').element as HTMLInputElement).checked).toBe(false)

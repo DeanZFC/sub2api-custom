@@ -70,8 +70,8 @@ func groupUserMessage(c Config, e Event, input Message) Message {
 	return m
 }
 
-func shareableGroupEvent(e Event, ref *botMessageReference) bool {
-	// All slash commands (including unknown/custom commands) stay outside the
+func shareableGroupEvent(e Event, ref *botMessageReference, customCommands ...CustomCommand) bool {
+	// Commands and personal queries stay outside the
 	// shared conversation. Quoted command replies and unclassified nested quotes
 	// must not turn binding codes, balances or confirmation links into history.
 	remaining := 32
@@ -80,10 +80,8 @@ func shareableGroupEvent(e Event, ref *botMessageReference) bool {
 	}
 	parts, _ := eventParts(e)
 	for _, text := range []string{e.Content, parts} {
-		for _, line := range strings.Split(text, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(line), "")), "/") {
-				return false
-			}
+		if privateCommandText(text, customCommands...) {
+			return false
 		}
 	}
 	if e.referenceID() != "" || e.MessageType == 103 {
@@ -116,7 +114,7 @@ func (s *Service) recordGroupEvent(ctx context.Context, c Config, e Event) error
 	if err != nil {
 		return err
 	}
-	if !shareableGroupEvent(e, ref) {
+	if !shareableGroupEvent(e, ref, c.CustomCommands...) {
 		return nil
 	}
 	now := time.Now()

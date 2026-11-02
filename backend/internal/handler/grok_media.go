@@ -266,6 +266,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			accountReleaseFunc = selection.ReleaseFunc
 		}
 		if err != nil {
+			if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
+				return
+			}
 			if failoverClientGone(c) {
 				reqLog.Info("grok_media.account_select_aborted_client_disconnected", zap.Error(err))
 				return

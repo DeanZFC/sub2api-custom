@@ -177,7 +177,7 @@ func TestChannelStatusCommandMentionModesAndHelp(t *testing.T) {
 	require.False(t, unmentionedGroupCommand(Event{Content: "<@other> /渠道状态"}))
 	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
 	require.NoError(t, s.message(context.Background(), DefaultConfig(), &j, Event{Content: "/帮助"}))
-	require.Contains(t, (*replies)[2].Content, "/渠道状态")
+	require.Contains(t, (*replies)[2].Content, "渠道状态")
 }
 
 func TestChannelStatusCommandFailures(t *testing.T) {
@@ -186,9 +186,9 @@ func TestChannelStatusCommandFailures(t *testing.T) {
 		provider        ChannelStatusProvider
 	}{
 		{name: "not wired", want: "渠道状态暂时不可用"},
-		{name: "invalid page", arg: "0", want: "用法：/渠道状态"},
-		{name: "invalid argument", arg: "24h", want: "用法：/渠道状态"},
-		{name: "overflow", arg: strings.Repeat("9", 30), want: "用法：/渠道状态"},
+		{name: "invalid page", arg: "0", want: "用法：渠道状态"},
+		{name: "invalid argument", arg: "24h", want: "用法：渠道状态"},
+		{name: "overflow", arg: strings.Repeat("9", 30), want: "用法：渠道状态"},
 		{name: "disabled", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return nil, ErrChannelStatusDisabled }), want: "渠道监控未开启"},
 		{name: "v1", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return nil, ErrChannelStatusUnsupported }), want: "被动监控未开启"},
 		{name: "query failed", provider: channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) {
@@ -233,7 +233,7 @@ func TestChannelStatusCommandPaginationAndDeliveryFailure(t *testing.T) {
 			require.Contains(t, reply.Content, chunks[(page-1)*5+i])
 		}
 		if page < pages {
-			require.Contains(t, batch[len(batch)-1].Content, fmt.Sprintf("/渠道状态 %d", page+1))
+			require.Contains(t, batch[len(batch)-1].Content, fmt.Sprintf("渠道状态 %d", page+1))
 		}
 	}
 	require.Len(t, *replies, len(chunks))

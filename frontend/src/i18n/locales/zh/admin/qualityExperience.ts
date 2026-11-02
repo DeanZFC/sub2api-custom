@@ -6,7 +6,7 @@ export default {
   triggerSamples: "有效样本 {samples} / 最低要求 {minimum}",
   scheduled: '主动智力检测',
   activeAdvanced: '展示与历史保留',
-  activeHint: '选择检测内容、分组和模型，设置执行时间。新计划默认失败暂停、下一轮全部通过后恢复；也可关闭自动化，仅记录检测结果。',
+  activeHint: '选择检测内容、分组和模型，设置执行时间。各模型独立禁用和恢复，配置的模型全部不通过才暂停账号；也可关闭自动化，仅记录检测结果。',
   activeRecoveryHint: '默认未通过时暂停，连续达到所设通过轮数后解除本检测限制；默认只需 1 轮。解除本规则暂停后，其他规则和人工停用仍继续生效。',
   budgetAdvanced: '每账号额度与 Token 预占',
   budgetOff: '当前未限制质量检测预算。启用后再设置请求和 Token 上限。',

@@ -914,6 +914,16 @@ type accountSchedulingState struct {
 func preserveLockedAccountSchedulingState(account *service.Account, current accountSchedulingState, currentExtra, extra map[string]any) {
 	const qualityReasonKey = "quality_protection_reason"
 	const qualityTrialKey = "quality_protection_trial"
+	// These projections are owned by scheduled quality checks. A slow credential
+	// refresh carries an old Extra snapshot, so preserve the locked row's model
+	// verdicts just as we preserve its live scheduling state.
+	for _, key := range []string{"active_test_model_holds", "active_test_model_states", "active_test_all_models_paused", "active_pass_rate_holds"} {
+		value, exists := currentExtra[key]
+		delete(extra, key)
+		if exists {
+			extra[key] = value
+		}
+	}
 	_, currentHasQualityReason := currentExtra[qualityReasonKey]
 	_, incomingHasQualityReason := account.Extra[qualityReasonKey]
 	_, currentHasQualityTrial := currentExtra[qualityTrialKey]
@@ -2029,6 +2039,9 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 		SetPriority(priority).
 		Save(ctx)
 	if err != nil {
+		return err
+	}
+	if err := refreshMembershipModelProtection(ctx, client, accountID); err != nil {
 		return err
 	}
 	if tx != nil {

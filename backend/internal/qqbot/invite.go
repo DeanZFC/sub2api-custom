@@ -82,7 +82,7 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 	err := s.db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
  WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Sprintf("🎁 **邀请奖励**\n每人奖励：USD %.2f\n每日上限：%d 人\n\n%s\n%s\n\n请先 /绑定。",
+		return fmt.Sprintf("🎁 **邀请奖励**\n每人奖励：USD %.2f\n每日上限：%d 人\n\n%s\n%s\n\n请先发送“绑定 邮箱或绑定码”绑定网站账号。",
 			c.InviteReward, c.InviteDailyLimit, conditions, requirement.invite()), nil
 	}
 	if err != nil {

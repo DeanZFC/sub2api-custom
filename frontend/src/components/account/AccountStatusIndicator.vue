@@ -35,6 +35,8 @@
       </span>
     </template>
 
+    <QualityProtectionStatus v-if="!isQualityPaused && hasQualityModels" :account="account" />
+
     <!-- Error Info Indicator -->
     <div v-if="hasError && account.error_message" class="group/error relative">
       <svg
@@ -166,6 +168,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import QualityProtectionStatus from './QualityProtectionStatus.vue'
+import { accountQualityModels } from '@/utils/accountQualityModels'
 import type { Account } from '@/types'
 import { formatCountdown, formatDateTime, formatDateTimeToMinute, formatCountdownWithSuffix, formatTime } from '@/utils/format'
 
@@ -180,6 +183,7 @@ const emit = defineEmits<{
 }>()
 
 const isQualityPaused = computed(() => props.account.status === 'quality_paused')
+const hasQualityModels = computed(() => accountQualityModels(props.account.extra).length > 0)
 
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {

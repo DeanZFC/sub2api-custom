@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
@@ -43,6 +44,105 @@ func completeMultiModelProtection(t *testing.T, ctx context.Context, repo *sched
 	}
 	require.NoError(t, repo.Update(ctx, row))
 	require.NoError(t, repo.CompleteProtection(ctx, row, verdict, "fixture "+verdict))
+}
+
+func checkMultiModelProtectionStates(t *testing.T, ctx context.Context, db *sql.DB, expected map[string]string) {
+	t.Helper()
+	var raw []byte
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COALESCE(extra->'active_test_model_states','{}'::jsonb) FROM accounts WHERE id=62`).Scan(&raw))
+	var states map[string]struct {
+		Status string `json:"status"`
+		Reason string `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &states))
+	require.Len(t, states, len(expected))
+	for model, want := range expected {
+		require.Equal(t, want, states[model].Status, "model %s status", model)
+		if want == "blocked" {
+			require.NotEmpty(t, states[model].Reason)
+		}
+	}
+}
+
+func testScheduledTestModelProjectionLifecycle(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, definitionID int64) {
+	t.Helper()
+	create := func(model string) *service.ScheduledTestPlan {
+		plan := genericRoutingPlan(definitionID, 8)
+		plan.ModelID, plan.ModelIDs = model, []string{model}
+		plan.Protection.Rules[0].OnPass = &service.ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "keep"}
+		plan.Protection.Rules[0].OnFail = &service.ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "keep"}
+		created, err := plans.Create(ctx, plan)
+		require.NoError(t, err)
+		return created
+	}
+	failed, healthy := create("model-a"), create("model-b")
+	checkStatus := func(want string) {
+		t.Helper()
+		var got string
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM accounts WHERE id=62`).Scan(&got))
+		require.Equal(t, want, got)
+	}
+	rows := multiModelProtectionRound(t, ctx, repo, failed, "lifecycle-failure", time.Now().UTC().Truncate(time.Microsecond))
+	completeMultiModelProtection(t, ctx, repo, rows["model-a"][0], "fail")
+	checkStatus("active")
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "blocked", "model-b": "pending"})
+	// Upgrade a populated pre-projection database, then repeat the additive
+	// migration to verify stable data and preserved manual controls.
+	_, err := db.ExecContext(ctx, `UPDATE accounts SET extra=extra-'active_test_model_states'; UPDATE accounts SET status='inactive',schedulable=FALSE WHERE id=63`)
+	require.NoError(t, err)
+	migration, err := migrations.FS.ReadFile("333_active_test_model_states.sql")
+	require.NoError(t, err)
+	for attempt := 0; attempt < 2; attempt++ {
+		_, err = db.ExecContext(ctx, string(migration))
+		require.NoError(t, err)
+		checkStatus("active")
+		checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "blocked", "model-b": "pending"})
+		var status string
+		var schedulable bool
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT status,schedulable FROM accounts WHERE id=63`).Scan(&status, &schedulable))
+		require.Equal(t, "inactive", status)
+		require.False(t, schedulable)
+	}
+	// The healthy policy has never produced state rows. Its configuration still
+	// belongs to the monitored model set, including during enable/disable edits.
+	healthy.Enabled = false
+	healthy, err = plans.Update(ctx, healthy)
+	require.NoError(t, err)
+	checkStatus("quality_paused")
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "blocked"})
+	healthy.Enabled = true
+	healthy, err = plans.Update(ctx, healthy)
+	require.NoError(t, err)
+	checkStatus("active")
+	require.NoError(t, plans.Delete(ctx, healthy.ID))
+	checkStatus("quality_paused")
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "blocked"})
+	// A raw cascading deletion must project the same result as the Go writer.
+	_, err = db.ExecContext(ctx, `DELETE FROM scheduled_test_plans WHERE id=$1`, failed.ID)
+	require.NoError(t, err)
+	checkStatus("active")
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{})
+}
+
+func testScheduledTestAllPassModelProjectionManualVeto(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, candyID, pelicanID int64) {
+	t.Helper()
+	plan := genericRoutingPlan(candyID, 8)
+	plan.ModelID, plan.ModelIDs = "model-a", []string{"model-a"}
+	plan.TestDefinitionIDs = []int64{candyID, pelicanID}
+	plan.Protection.Mode = "all_pass"
+	plan.Protection.OnPass = &service.ScheduledTestOutcomeAction{Scheduling: "resume", GroupMode: "keep"}
+	plan.Protection.OnFail = &service.ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "keep"}
+	plan.Protection.Rules = append(plan.Protection.Rules, service.ScheduledTestProtectionRule{TestDefinitionID: pelicanID, Vote: &service.ScheduledTestVoteConfig{Enabled: true, PassAtLeast: 1}})
+	plan, err := plans.Create(ctx, plan)
+	require.NoError(t, err)
+	rows := multiModelProtectionRound(t, ctx, repo, plan, "manual-display-status", time.Now().UTC().Truncate(time.Microsecond))
+	completeMultiModelProtection(t, ctx, repo, rows["model-a"][0], "pass")
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "normal"})
+	// The manual item has no current pass, but only an explicit rejection is a
+	// veto in all-pass mode. The SQL cascade projection must use that same rule.
+	_, err = db.ExecContext(ctx, `SELECT reconcile_active_test_model_protection(62)`)
+	require.NoError(t, err)
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "normal"})
 }
 
 func testScheduledTestAllPassMultiModelConsecutive(t *testing.T, ctx context.Context, db *sql.DB, plans *scheduledTestPlanRepository, repo *scheduledTestResultRepository, candyID int64) {
@@ -93,6 +193,7 @@ func testScheduledTestMultiModelProtection(t *testing.T, ctx context.Context, db
 	var err error
 	plan, err = plans.Create(ctx, plan)
 	require.NoError(t, err)
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "pending", "model-b": "pending"})
 	started := time.Now().UTC().Truncate(time.Microsecond)
 	first := multiModelProtectionRound(t, ctx, repo, plan, "models-first", started)
 	check := func(status string, groups ...int64) {
@@ -109,8 +210,10 @@ func testScheduledTestMultiModelProtection(t *testing.T, ctx context.Context, db
 	}
 	completeMultiModelProtection(t, ctx, repo, first["model-a"][0], "fail")
 	check("active", 8, 9)
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "blocked", "model-b": "pending"})
 	completeMultiModelProtection(t, ctx, repo, first["model-b"][0], "pass")
 	check("active", 8, 9)
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "blocked", "model-b": "normal"})
 	var modelHolds map[string]string
 	var rawHolds []byte
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT extra->'active_test_model_holds' FROM accounts WHERE id=62`).Scan(&rawHolds))
@@ -146,19 +249,33 @@ func testScheduledTestMultiModelProtection(t *testing.T, ctx context.Context, db
 		require.Equal(t, anchor.ModelID, history[0].ModelID)
 	}
 	next := multiModelProtectionRound(t, ctx, repo, plan, "models-next", started.Add(time.Minute))
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "blocked", "model-b": "pending"})
 	// A healthy different model still cannot clear model-a's previous hold.
 	completeMultiModelProtection(t, ctx, repo, next["model-b"][0], "pass")
 	check("active", 8, 9)
 	completeMultiModelProtection(t, ctx, repo, next["model-a"][0], "pass")
 	check("active", 10)
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "normal", "model-b": "normal"})
 	third := multiModelProtectionRound(t, ctx, repo, plan, "models-third", started.Add(2*time.Minute))
 	completeMultiModelProtection(t, ctx, repo, third["model-b"][0], "fail")
 	check("active", 10)
 	completeMultiModelProtection(t, ctx, repo, third["model-a"][0], "fail")
 	check("quality_paused", 8)
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "blocked", "model-b": "blocked"})
 	fourth := multiModelProtectionRound(t, ctx, repo, plan, "models-fourth", started.Add(3*time.Minute))
 	completeMultiModelProtection(t, ctx, repo, fourth["model-a"][0], "pass")
 	check("active", 8)
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": "normal", "model-b": "blocked"})
+	// Removing leaf evidence makes that model pending, while a separately
+	// persisted all-pass round still supplies genuine passing evidence.
+	require.NoError(t, repo.Delete(ctx, fourth["model-a"][0].ID))
+	recoveredStatus := "pending"
+	if mode == "all_pass" {
+		recoveredStatus = "normal"
+	}
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": recoveredStatus, "model-b": "blocked"})
+	require.NoError(t, repo.Delete(ctx, fourth["model-b"][0].ID))
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{"model-a": recoveredStatus, "model-b": "blocked"})
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT extra->'active_test_model_holds' FROM accounts WHERE id=62`).Scan(&rawHolds))
 	require.NoError(t, json.Unmarshal(rawHolds, &modelHolds))
 	require.Contains(t, modelHolds, "model-b")
@@ -166,6 +283,7 @@ func testScheduledTestMultiModelProtection(t *testing.T, ctx context.Context, db
 	_, err = plans.Update(ctx, plan)
 	require.NoError(t, err)
 	check("active", 8)
+	checkMultiModelProtectionStates(t, ctx, db, map[string]string{})
 	for _, table := range []string{"scheduled_test_protection_states", "scheduled_test_combination_states"} {
 		require.NoError(t, db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE plan_id=$1", table), plan.ID).Scan(&stateCount))
 		require.Zero(t, stateCount)

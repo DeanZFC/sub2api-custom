@@ -20,7 +20,7 @@ const details: QualityProtectionHold[] = [{
     { operator: 'all', conditions: [{ operator: 'test', test_definition_id: 3, verdict: 'fail' }] }
   ] } }],
   tests: [
-    { test_definition_id: 2, test_name: '缓存检测', result_id: 88, started_at: '2026-10-13T08:00:00Z', current: true, verdict: 'fail', automated_verdict: 'fail', admin_verdict: '', reason: '缓存率低于阈值', automatic_reason: '', thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80, observed: 60 }], pass_count: 0, fail_count: 0 },
+    { test_definition_id: 2, test_name: '延迟检测', result_id: 88, started_at: '2026-10-13T08:00:00Z', current: true, verdict: 'fail', automated_verdict: 'fail', admin_verdict: '', reason: '响应耗时超过阈值', automatic_reason: '', thresholds: [{ metric: 'latency_ms', operator: 'gt', value: 800, observed: 1200 }], pass_count: 0, fail_count: 0 },
     { test_definition_id: 3, test_name: '人工审核', current: true, verdict: 'pass', automated_verdict: 'pass', admin_verdict: 'pass', reason: '', automatic_reason: '', thresholds: [], pass_count: 2, fail_count: 0, vote: { enabled: true, public_enabled: true, reject_above: 3, pass_at_least: 2 } },
   ],
 }]
@@ -41,6 +41,54 @@ afterEach(() => {
 })
 
 describe('quality pause details', () => {
+  it('shows model restrictions and healthy peers for active accounts, with reasons in details', async () => {
+    await wrapper.setProps({ account: { ...account, status: 'active', extra: {
+      active_test_model_states: {
+        'model-a': { status: 'blocked', reason: '糖果测试答案错误' },
+        'model-b': { status: 'normal' },
+        'model-c': { status: 'pending' },
+      },
+    } } })
+    const status = wrapper.get('[data-testid="quality-model-status"]')
+    expect(status.text()).toContain('部分模型已禁用')
+    expect(status.text()).toContain('model-a已禁用')
+    expect(status.text()).toContain('model-b正常')
+    expect(status.text()).toContain('model-c待判定')
+    expect(status.text()).not.toContain('检测自动暂停')
+    await status.trigger('mouseenter'); await flushPromises()
+    expect(getAccountProtection).toHaveBeenCalledWith(62)
+    const models = dialog()?.querySelector('[data-quality-model-details]')?.textContent
+    expect(models).toContain('糖果测试答案错误')
+    expect(models).toContain('配置的模型全部被禁用时')
+  })
+
+  it('keeps hold maps authoritative and does not infer normal for unknown results', async () => {
+    await wrapper.setProps({ account: { ...account, status: 'active', extra: {
+      active_test_model_states: { 'model-a': { status: 'normal' }, 'model-b': { status: 'unknown' } },
+      active_test_model_holds: { 'model-a': '保留此前暂停', 'ignored-a': false },
+      active_pass_rate_holds: { 'model-c': { blocked: true, reason: '通过率不足' }, 'ignored-b': { blocked: false } },
+    } } })
+    const status = wrapper.get('[data-testid="quality-model-status"]')
+    expect(status.findAll('[data-model-status="blocked"]')).toHaveLength(2)
+    expect(status.findAll('[data-model-status="pending"]')).toHaveLength(1)
+    expect(status.text()).not.toContain('ignored-')
+    await status.trigger('mouseenter'); await flushPromises()
+    expect(dialog()?.textContent).toContain('保留此前暂停')
+    expect(dialog()?.textContent).toContain('通过率不足')
+  })
+
+  it('shows recovered model checks without fetching nonexistent hold details', async () => {
+    await wrapper.setProps({ account: { ...account, status: 'active', extra: {
+      active_test_model_states: { 'model-a': { status: 'normal' }, 'model-b': { status: 'normal' } },
+    } } })
+    const status = wrapper.get('[data-testid="quality-model-status"]')
+    expect(status.text()).toContain('模型检测正常')
+    await status.trigger('mouseenter'); await flushPromises()
+    expect(getAccountProtection).not.toHaveBeenCalled()
+    expect(dialog()?.textContent).toContain('model-a正常')
+    expect(dialog()?.textContent).not.toContain('暂无生效中的暂停明细')
+  })
+
   it('distinguishes models when one plan has several active holds', async () => {
     vi.mocked(getAccountProtection).mockResolvedValueOnce([
       { ...details[0], model_id: 'model-a' },
@@ -60,31 +108,31 @@ describe('quality pause details', () => {
     await flushPromises()
     expect(getAccountProtection).toHaveBeenCalledWith(62)
     const text = dialog()?.textContent
-    for (const value of ['策略 A', '命中规则：不通过', '任一满足', '全部满足', '缓存检测 = 不通过', '60%', '80%', '管理员判定：通过', '通过 2 / 不通过 0']) expect(text).toContain(value)
+    for (const value of ['策略 A', '命中规则：不通过', '任一满足', '全部满足', '延迟检测 = 不通过', '1200 ms', '800 ms', '管理员判定：通过', '通过 2 / 不通过 0']) expect(text).toContain(value)
     expect(dialog()?.querySelector('[data-trigger-missing]')?.textContent).toContain('当前观察不能还原当时的判断依据')
     expect(wrapper.element.contains(dialog())).toBe(false)
   })
 
   it('keeps the historical trigger evidence and policy version separate from current passing observations', async () => {
     const value = structuredClone(details)
-    value[0].tests[0] = { ...value[0].tests[0], verdict: 'pass', automated_verdict: 'pass', reason: '当前缓存已恢复', thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 75, observed: 95 }] }
+    value[0].tests[0] = { ...value[0].tests[0], verdict: 'pass', automated_verdict: 'pass', reason: '当前延迟已恢复', thresholds: [{ metric: 'latency_ms', operator: 'gt', value: 750, observed: 300 }] }
     value[0].trigger_snapshot = {
       id: 100, occurred_at: '2026-10-12T06:00:00Z', plan_id: 3, plan_name: '触发时策略', test_definition_id: 2,
       result_id: 77, run_id: 'trigger-run-42', model_id: 'historical-model', policy_version: 'version-abc123', policy_updated_at: '2026-10-11T06:00:00Z',
-      source: 'scheduled', reason: '当时缓存指标未达标',
+      source: 'scheduled', reason: '当时延迟指标未达标',
       before: { status: 'active', schedulable: true, group_ids: [8] }, after: { status: 'quality_paused', schedulable: true, group_ids: [8] },
-      rules: [{ id: 'old-rule', name: '历史缓存规则', current_match: 'fail', condition: { operator: 'test', test_definition_id: 2, verdict: 'fail' } }],
-      tests: [{ ...details[0].tests[0], result_id: 77, test_name: '历史缓存检测', started_at: '2026-10-12T06:00:00Z', window_start: '2026-10-12T05:00:00Z', window_end: '2026-10-12T06:00:00Z', min_samples: 20, reason: '历史实测缓存率低', thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80, observed: 12, samples: 25 }] }],
+      rules: [{ id: 'old-rule', name: '历史延迟规则', current_match: 'fail', condition: { operator: 'test', test_definition_id: 2, verdict: 'fail' } }],
+      tests: [{ ...details[0].tests[0], result_id: 77, test_name: '历史延迟检测', started_at: '2026-10-12T06:00:00Z', min_samples: 1, reason: '历史实测耗时过长', thresholds: [{ metric: 'latency_ms', operator: 'gt', value: 800, observed: 2400, samples: 1 }] }],
     }
     vi.mocked(getAccountProtection).mockResolvedValueOnce(value)
     await trigger().trigger('mouseenter'); await flushPromises()
     const snapshot = dialog()?.querySelector('[data-trigger-snapshot]')?.textContent
-    for (const text of ['触发保护时的依据', 'historical-model', '当时缓存指标未达标', 'version-abc123', 'trigger-run-42', '历史缓存规则', '历史缓存检测', '#77', '12%', '80%', '有效样本 25 / 最低要求 20']) expect(snapshot).toContain(text)
-    expect(snapshot).not.toContain('95%')
-    expect(snapshot).not.toContain('当前缓存已恢复')
+    for (const text of ['触发保护时的依据', 'historical-model', '当时延迟指标未达标', 'version-abc123', 'trigger-run-42', '历史延迟规则', '历史延迟检测', '#77', '2400 ms', '800 ms', '有效样本 1 / 最低要求 1']) expect(snapshot).toContain(text)
+    expect(snapshot).not.toContain('300 ms')
+    expect(snapshot).not.toContain('当前延迟已恢复')
     expect(dialog()?.textContent).toContain('当前观察')
-    expect(dialog()?.textContent).toContain('当前缓存已恢复')
-    expect(dialog()?.textContent).toContain('95%')
+    expect(dialog()?.textContent).toContain('当前延迟已恢复')
+    expect(dialog()?.textContent).toContain('300 ms')
     expect(dialog()?.querySelector('[data-trigger-missing]')).toBeNull()
   })
 
@@ -132,7 +180,7 @@ describe('quality pause details', () => {
     expect(dialog()?.textContent).toContain('详情加载失败')
     const stale = structuredClone(details)
     stale[0].prior_round = true
-    stale[0].tests[0] = { ...stale[0].tests[0], current: false, verdict: 'pending', reason: '', thresholds: [{ metric: 'cache_rate', operator: 'lt', value: 80, observed: null }] }
+    stale[0].tests[0] = { ...stale[0].tests[0], current: false, verdict: 'pending', reason: '', thresholds: [{ metric: 'latency_ms', operator: 'gt', value: 800, observed: null }] }
     stale[0].rules[0].current_match = 'pending'
     stale[0].plan_name = '<script>alert(1)</script>'
     vi.mocked(getAccountProtection).mockResolvedValueOnce(stale)

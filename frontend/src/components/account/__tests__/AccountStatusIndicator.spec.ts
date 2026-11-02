@@ -51,6 +51,46 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('shows partial model restrictions alongside the active account badge', () => {
+    const wrapper = mount(AccountStatusIndicator, { props: { account: makeAccount({
+      extra: { active_test_model_states: {
+        'model-a': { status: 'blocked', reason: '能力检测未通过' },
+        'model-b': { status: 'normal' },
+        'model-c': { status: 'pending' },
+      } },
+    }) } })
+    expect(wrapper.get('.badge-success').text()).toBe('admin.accounts.status.active')
+    expect(wrapper.find('[data-testid="quality-paused-status"]').exists()).toBe(false)
+    const quality = wrapper.get('[data-testid="quality-model-status"]')
+    expect(quality.text()).toContain('admin.accounts.qualityDetails.modelsPartial')
+    expect(quality.findAll('[data-quality-model]').map(row => [row.text(), row.attributes('data-model-status')])).toEqual([
+      ['model-aadmin.accounts.qualityDetails.modelStatus.blocked', 'blocked'],
+      ['model-badmin.accounts.qualityDetails.modelStatus.normal', 'normal'],
+      ['model-cadmin.accounts.qualityDetails.modelStatus.pending', 'pending'],
+    ])
+  })
+
+  it('does not hide a manual stop or a cooldown behind a partial model hold', () => {
+    const account = makeAccount({ schedulable: false, extra: { active_test_model_holds: { 'model-a': 'failed' } } })
+    const wrapper = mount(AccountStatusIndicator, { props: { account } })
+    expect(wrapper.get('.badge-gray').text()).toBe('admin.accounts.status.paused')
+    expect(wrapper.get('[data-testid="quality-model-status"]').text()).toContain('model-a')
+    wrapper.unmount()
+    const limited = mount(AccountStatusIndicator, { props: { account: { ...account, schedulable: true, rate_limit_reset_at: '2099-01-01T00:00:00Z' } } })
+    expect(limited.text()).toContain('admin.accounts.status.rateLimited')
+    expect(limited.find('[data-testid="quality-model-status"]').exists()).toBe(true)
+  })
+
+  it('keeps normal model results visible after recovery and ignores disabled legacy hold entries', () => {
+    const wrapper = mount(AccountStatusIndicator, { props: { account: makeAccount({ extra: {
+      active_test_model_states: { 'model-a': { status: 'normal' }, 'model-b': { status: 'normal' } },
+      active_test_model_holds: { 'model-a': false, 'model-b': { blocked: false } },
+    } }) } })
+    const quality = wrapper.get('[data-testid="quality-model-status"]')
+    expect(quality.text()).toContain('admin.accounts.qualityDetails.modelsNormal')
+    expect(quality.findAll('[data-model-status="normal"]')).toHaveLength(2)
+  })
+
   it('shows quality protection and its reason ahead of transient cooldowns', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: { account: makeAccount({

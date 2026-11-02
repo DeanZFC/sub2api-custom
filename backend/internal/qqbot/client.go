@@ -156,6 +156,11 @@ func (s *Service) chatRequestWithTools(ctx context.Context, c Config, messages [
 }
 
 func (s *Service) chatRequestWithToolChoice(ctx context.Context, c Config, messages []Message, tools []any, choice string) ([]byte, string, error) {
+	ctx, cancel, err := modelContext(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer cancel()
 	path := "/chat/completions"
 	body := map[string]any{"model": c.ChatModel, "messages": messages, "stream": false, "max_completion_tokens": c.MaxOutputTokens}
 	if c.ChatProtocol == "responses" {
@@ -331,6 +336,14 @@ func parseChat(raw []byte, ct string) (string, int64, int64, error) {
 }
 
 func (s *Service) generateImage(ctx context.Context, c Config, prompt string) ([]byte, error) {
+	if err := checkModelBudget(ctx, minimumImageBudget); err != nil {
+		return nil, err
+	}
+	ctx, cancel, err := modelContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
 	base, key := imageConnection(c)
 	raw, _, err := s.request(ctx, "POST", endpoint(base, "/images/generations"), key, map[string]any{"model": c.ImageModel, "prompt": prompt, "n": 1, "size": c.ImageSize}, 32<<20)
 	if err != nil {
@@ -502,6 +515,15 @@ func (s *Service) qqRequestMethod(ctx context.Context, c Config, method, path st
 	return s.qqRequestMethodWithToken(ctx, c, token, method, path, body)
 }
 
+type qqRequestError struct {
+	StatusCode int
+	Code       int
+}
+
+func (e *qqRequestError) Error() string {
+	return fmt.Sprintf("QQ HTTP %d / code %d", e.StatusCode, e.Code)
+}
+
 // The caller may prepare credentials before acquiring a final authorization lock.
 func (s *Service) qqRequestMethodWithToken(ctx context.Context, c Config, token, method, path string, body any) ([]byte, error) {
 	var reader io.Reader
@@ -537,7 +559,7 @@ func (s *Service) qqRequestMethodWithToken(ctx context.Context, c Config, token,
 			Code int `json:"code"`
 		}
 		_ = json.Unmarshal(data, &v)
-		return nil, fmt.Errorf("QQ HTTP %d / code %d", resp.StatusCode, v.Code)
+		return nil, &qqRequestError{StatusCode: resp.StatusCode, Code: v.Code}
 	}
 	return data, nil
 }
@@ -562,9 +584,11 @@ func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job
 		return errors.New("防刷屏已拦截原消息，取消机器人回复")
 	}
 	// Only passive replies: no accidental proactive notification or expired retry.
-	if j.MessageID == "" || time.Since(j.CreatedAt) > 280*time.Second {
-		return errors.New("回复窗口已过期")
+	if j.MessageID == "" || time.Since(j.CreatedAt) >= passiveReplyWindow {
+		return errReplyWindow
 	}
+	ctx, cancel := context.WithDeadline(ctx, j.CreatedAt.Add(passiveReplyWindow))
+	defer cancel()
 	base := "/v2/groups/" + url.PathEscape(j.GroupID)
 	body := map[string]any{"msg_id": j.MessageID, "msg_seq": seq}
 	if j.EventType == interactionCreate {

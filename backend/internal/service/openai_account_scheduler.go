@@ -1897,6 +1897,11 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if account == nil {
 		return false, "account_nil"
 	}
+	// Drop held public models before TopK ranking, otherwise a held high-priority
+	// account can crowd out healthy alternatives before the fresh admission check.
+	if account.ActiveTestModelBlocked(activePassRateRoutingModel(ctx, req.RequestedModel)) {
+		return false, "active_test_model_held"
+	}
 	if !strictFailoverAllows(ctx, account.ID) {
 		return false, "strict_failover_tier"
 	}

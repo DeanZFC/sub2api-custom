@@ -77,7 +77,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 		"309_quality_recovery_budget_evidence.sql",
 		"312_scheduled_test_pass_rate.sql",
 		"314_scheduled_test_auto_review.sql",
-		"315_scheduled_test_multi_model.sql", "326_scheduled_test_all_pass_rounds.sql",
+		"315_scheduled_test_multi_model.sql", "326_scheduled_test_all_pass_rounds.sql", "332_archive_scheduled_test_definitions.sql", "333_active_test_model_states.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -131,6 +131,18 @@ INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,7
 	t.Run("multiple models keep administrator reviews and pass rate isolated", func(t *testing.T) {
 		reset(t)
 		testScheduledTestMultiModelAdministratorReview(t, ctx, db, plans, repo, pelicanID)
+	})
+	t.Run("model projection follows policy lifecycle", func(t *testing.T) {
+		reset(t)
+		testScheduledTestModelProjectionLifecycle(t, ctx, db, plans, repo, candyID)
+	})
+	t.Run("model projection follows manual membership changes", func(t *testing.T) {
+		reset(t)
+		testMembershipRefreshesConfiguredModelProjection(t, ctx, db, plans, repo, candyID)
+	})
+	t.Run("all pass model status ignores display only manual review", func(t *testing.T) {
+		reset(t)
+		testScheduledTestAllPassModelProjectionManualVeto(t, ctx, db, plans, repo, candyID, pelicanID)
 	})
 	t.Run("multiple models do not combine expression leaves", func(t *testing.T) {
 		reset(t)

@@ -48,7 +48,7 @@ func lockAccountMembershipProtection(ctx context.Context, tx sqlExecutor, accoun
 // retains its frozen round, including moves made by another rule in that round.
 func releaseDetachedAccountProtection(ctx context.Context, tx sqlExecutor, accountID int64, planIDs []int64) error {
 	if len(planIDs) == 0 {
-		return nil
+		return refreshMembershipModelProtection(ctx, tx, accountID)
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT p.id FROM scheduled_test_plans p
  WHERE p.id=ANY($2) AND NOT EXISTS (SELECT 1 FROM account_groups ag
@@ -67,8 +67,11 @@ func releaseDetachedAccountProtection(ctx context.Context, tx sqlExecutor, accou
 	}
 	err = rows.Err()
 	rows.Close()
-	if err != nil || len(detached) == 0 {
+	if err != nil {
 		return err
+	}
+	if len(detached) == 0 {
+		return refreshMembershipModelProtection(ctx, tx, accountID)
 	}
 	// Preserve history and run IDs. Revocation survives late result updates and
 	// moving the account back; only a newly frozen round may act again.
@@ -81,6 +84,22 @@ func releaseDetachedAccountProtection(ctx context.Context, tx sqlExecutor, accou
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE account_id=$1 AND plan_id=ANY($2)`, accountID, pq.Array(detached)); err != nil {
 			return err
 		}
+	}
+	return reconcileProtectionAccount(ctx, tx, accountID)
+}
+
+// Membership changes also affect configured models before the first run. Keep
+// that projection fresh without taking over legacy pauses or record-only plans.
+func refreshMembershipModelProtection(ctx context.Context, tx sqlExecutor, accountID int64) error {
+	var participates bool
+	if err := scanSingleRow(ctx, tx, `SELECT EXISTS(SELECT 1 FROM accounts a WHERE a.id=$1 AND (
+ COALESCE(a.extra,'{}'::jsonb) ?| ARRAY['active_test_model_states','active_test_model_holds','active_test_all_models_paused','active_pass_rate_holds']
+ OR EXISTS(SELECT 1 FROM scheduled_test_plans p WHERE p.enabled AND p.protection->>'enabled'='true'
+ AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=ANY(p.group_ids)))))`, []any{accountID}, &participates); err != nil {
+		return err
+	}
+	if !participates {
+		return nil
 	}
 	return reconcileProtectionAccount(ctx, tx, accountID)
 }

@@ -44,7 +44,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { qqbotAPI, type QQJobPage, type QQMemberOption } from '@/api/qqbot'
+import { qqbotAPI, type QQJobPage, type QQMemberOption, type QQSiteQueryKind } from '@/api/qqbot'
 import QQMemberPicker from './QQMemberPicker.vue'
 const props = defineProps<{ notifications?: boolean; appId?: string }>()
 const { t, te } = useI18n()
@@ -56,7 +56,7 @@ function search() { applied = { ...filters }; void load(1) }
 const kinds = ['chat', 'image', 'ambient_chat', 'spam_report', 'notifications', 'price_notification', 'health_notification', 'ranking_notification']
 function kindLabel(kind: string) { const key = `qqbot.workspace.jobKinds.${kind}`; return te(key) ? t(key) : kind }
 const statuses = ['queued', 'running', 'completed', 'skipped', 'failed', 'delivery_failed', 'expired', 'interrupted', 'cancelled']
-const queryKinds = ['model_price', 'channel_status', 'activity_rules']
+const queryKinds: QQSiteQueryKind[] = ['model_price', 'channel_status', 'activity_rules', 'account_balance', 'today_usage', 'lottery_chances']
 const queryStatuses = ['succeeded', 'not_found', 'unavailable', 'failed']
 function queryLabel(group: 'kinds' | 'statuses', value: string) { const key = `qqbot.siteQuery.${group}.${value}`; return te(key) ? t(key) : value }
 const loading = ref(false), error = ref('')

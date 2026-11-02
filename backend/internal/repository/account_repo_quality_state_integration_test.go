@@ -23,7 +23,7 @@ import (
 func TestAccountQualityStateConcurrentFullUpdateIntegration(t *testing.T) {
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("MIGRATION_TEST_DATABASE_URL is not set")
+		dsn = integrationDatabaseDSN
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -93,6 +93,7 @@ INSERT INTO accounts (id) VALUES (41);`)
 	}{
 		{"quality protection", `UPDATE accounts SET status='quality_paused',extra='{"quality_protection_reason":"new failure"}' WHERE id=41`, "quality_paused", true, "new failure"},
 		{"manual scheduling pause", `UPDATE accounts SET schedulable=FALSE WHERE id=41`, "active", false, ""},
+		{"partial model protection", `UPDATE accounts SET extra='{"active_test_model_holds":{"model-a":"failed"},"active_test_model_states":{"model-a":{"status":"blocked"},"model-b":{"status":"normal"}},"active_pass_rate_holds":{"model-c":"low rate"}}' WHERE id=41`, "active", true, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			exec(`UPDATE accounts SET status='active',schedulable=TRUE,extra='{}' WHERE id=41`)
@@ -114,6 +115,17 @@ INSERT INTO accounts (id) VALUES (41);`)
 			assertState(tt.status, tt.schedulable, tt.reason)
 			require.Equal(t, tt.status, staleAccount.Status)
 			require.Equal(t, tt.schedulable, staleAccount.Schedulable)
+			if tt.name == "partial model protection" {
+				var heldA, heldC, normalB bool
+				require.NoError(t, db.QueryRowContext(ctx, `SELECT
+ extra->'active_test_model_holds' ? 'model-a',
+ extra->'active_pass_rate_holds' ? 'model-c',
+ extra->'active_test_model_states'->'model-b'->>'status'='normal'
+ FROM accounts WHERE id=41`).Scan(&heldA, &heldC, &normalB))
+				require.True(t, heldA, "credential refresh must preserve a newly blocked model")
+				require.True(t, heldC, "pass-rate protection remains independent")
+				require.True(t, normalB, "healthy peer status must survive the full account write")
+			}
 		})
 	}
 	t.Run("explicit release applies once and cannot resume manual scheduling", func(t *testing.T) {

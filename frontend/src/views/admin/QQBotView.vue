@@ -3,7 +3,7 @@
     <div class="mx-auto max-w-5xl space-y-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t(groupMode ? 'qqbot.workspace.groups' : 'qqbot.basicConfig') }}</h1><p class="mt-1 text-sm text-gray-500">{{ t('qqbot.description') }}</p></div>
-        <button class="btn btn-secondary" :disabled="busy || refreshingRuntime" @click="refreshRuntime">{{ t('common.refresh') }}</button>
+        <button class="btn btn-secondary" :disabled="busy || refreshingRuntime" @click="refreshStatus">{{ t('common.refresh') }}</button>
       </div>
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
       <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
@@ -46,15 +46,18 @@
           <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800"><span>{{ t('qqbot.webhook') }}</span><code class="mt-1 block break-all select-all">{{ webhookURL }}</code><p class="mt-2 text-gray-500">{{ t('qqbot.eventsHelp') }}</p></div>
         </section>
         <section v-show="activeTab === 'groups'" id="qqbot-settings-panel-groups" role="tabpanel" aria-labelledby="qqbot-settings-tab-groups" class="card space-y-4 p-6">
-          <QQGroupPicker v-model="selectedGroups" :groups="knownGroups" :policies="groupPolicies" :label="t('qqbot.allowedGroups')" />
+          <QQGroupPicker v-model="selectedGroups" :groups="knownGroups" :policies="groupPolicies" :names="groupNames" :label="t('qqbot.allowedGroups')" />
           <details><summary class="cursor-pointer text-sm">{{ t('qqbot.workspace.manualGroups') }}</summary><textarea v-model="groupsText" rows="3" class="input mt-2 font-mono" :aria-label="t('qqbot.allowedGroups')" /></details>
-          <QQGroupPolicies v-model="groupPolicies" :groups="allowedGroups" />
+          <p class="text-xs text-gray-500">{{ t('qqbot.workspace.groupNamesHelp') }}</p>
+          <p v-if="groupNamesLoading" role="status" class="text-sm text-gray-500">{{ t('qqbot.workspace.groupNamesLoading') }}</p>
+          <p v-if="groupNamesStatus" role="status" class="text-sm text-amber-700 dark:text-amber-300">{{ t(`qqbot.workspace.groupNamesStatus.${groupNamesStatus}`) }}</p>
+          <QQGroupPolicies v-model="groupPolicies" :groups="allowedGroups" :names="groupNames" />
           <p class="text-sm text-gray-500">{{ t('qqbot.groupsHelp') }}</p>
           <div v-if="runtime?.groups.length" class="space-y-2">
             <p class="text-sm font-medium">{{ t('qqbot.discoveredGroups') }}</p>
             <p class="text-xs text-gray-500">{{ t('qqbot.discoveredGroupsHelp') }}</p>
             <div v-for="group in runtime.groups" :key="group.id" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2 dark:border-dark-700">
-              <code class="break-all text-sm">{{ group.id }}</code>
+              <div class="min-w-0 break-all"><p v-if="groupLabels[group.id]" class="text-sm font-medium">{{ groupLabels[group.id] }}</p><code class="text-xs text-gray-500">{{ group.id }}</code></div>
               <div class="flex shrink-0 gap-2">
                 <button type="button" class="btn btn-secondary text-xs" @click="addGroup(group.id)">{{ t('common.add') }}</button>
                 <button type="button" class="btn btn-secondary text-xs" :disabled="busy || refreshingRuntime" :aria-label="t('qqbot.deleteDiscoveredGroup', { id: group.id })" @click="deleteDiscoveredGroup(group.id)">{{ t('common.delete') }}</button>
@@ -68,13 +71,13 @@
           <p class="text-sm text-gray-500">{{ t('qqbot.priceNotifications.help') }}</p>
           <label class="flex items-center gap-2"><input v-model="priceNotifications.enabled" data-testid="price-notifications-enabled" type="checkbox" />{{ t('qqbot.priceNotifications.enabled') }}</label>
           <label class="flex items-center gap-2"><input v-model="priceNotifications.scheduled" data-testid="price-notifications-scheduled" type="checkbox" />{{ t('qqbot.priceNotifications.scheduled') }}</label>
-          <QQGroupPicker v-model="notificationGroups" :groups="allowedGroups" :policies="groupPolicies" :label="t('qqbot.priceNotifications.groups')" allow-all />
+          <QQGroupPicker v-model="notificationGroups" :groups="allowedGroups" :policies="groupPolicies" :names="groupNames" :label="t('qqbot.priceNotifications.groups')" allow-all />
           <p class="text-xs text-gray-500">{{ t('qqbot.priceNotifications.permission') }}</p>
           <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
             <legend class="font-medium">{{ t('qqbot.health.title') }}</legend>
             <p class="text-sm text-gray-500">{{ t('qqbot.health.help') }}</p>
             <label class="flex items-center gap-2"><input v-model="healthNotifications.enabled" data-testid="health-enabled" type="checkbox" />{{ t('qqbot.health.enabled') }}</label>
-            <QQGroupPicker v-model="healthGroups" :groups="allowedGroups" :policies="groupPolicies" :label="t('qqbot.health.groups')" allow-all />
+            <QQGroupPicker v-model="healthGroups" :groups="allowedGroups" :policies="groupPolicies" :names="groupNames" :label="t('qqbot.health.groups')" allow-all />
             <div class="grid gap-4 md:grid-cols-2">
               <label v-for="field in healthFields" :key="field.key" class="space-y-1">{{ t(`qqbot.health.${field.key}`) }}<input v-model.number="healthNotifications[field.key]" :data-testid="`health-${field.key}`" type="number" :min="field.min" :max="field.max" :step="field.step" required class="input" /></label>
             </div>
@@ -104,7 +107,7 @@
               <label class="flex items-center gap-2"><input v-model="custom.enabled" type="checkbox" />{{ t('common.enabled') }}</label>
               <button type="button" class="btn btn-secondary text-sm" @click="form.custom_commands.splice(index, 1)">{{ t('common.delete') }}</button>
             </div>
-            <label class="block space-y-1">{{ t('qqbot.customCommandName') }}<input v-model.trim="custom.command" class="input font-mono" placeholder="/a" required maxlength="33" /></label>
+            <label class="block space-y-1">{{ t('qqbot.customCommandName') }}<input v-model.trim="custom.command" class="input font-mono" placeholder="a" required maxlength="33" /></label>
             <label class="block space-y-1">{{ t('qqbot.customCommandReply') }}<textarea v-model="custom.reply" rows="4" class="input" :placeholder="t('qqbot.customReplyPlaceholder')" required /></label>
           </fieldset>
         </section>
@@ -126,7 +129,7 @@
           <p id="qq-history-help" class="text-xs text-gray-500">{{ t('qqbot.historyHelp') }}</p></details>
         </section>
         <div v-show="activeTab === 'autonomous'" id="qqbot-settings-panel-autonomous" role="tabpanel" aria-labelledby="qqbot-settings-tab-autonomous">
-          <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" :groups="allowedGroups" :policies="groupPolicies" />
+          <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" :groups="allowedGroups" :policies="groupPolicies" :names="groupNames" />
         </div>
         <div v-show="activeTab === 'knowledge'" id="qqbot-settings-panel-knowledge" role="tabpanel" aria-labelledby="qqbot-settings-tab-knowledge">
           <QQBotKnowledgeSettings v-model="siteKnowledge" />
@@ -176,6 +179,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { useQQGroupNames } from '@/composables/useQQGroupNames'
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import QQCommandInventory from '@/components/admin/qqbot/QQCommandInventory.vue'
 import QQGroupPicker from '@/components/admin/qqbot/QQGroupPicker.vue'
@@ -234,9 +238,17 @@ const groupAdmins = computed({
 })
 const runtime = ref<QQBotRuntime | null>(null)
 const savedAppId = ref('')
+const savedGroupNameSource = ref<{ appID: string; sandbox: boolean; revision: string; groups: string[] } | null>(null)
+const runtimeIdentity = ref('')
+const { names: groupNames, status: groupNamesStatus, loading: groupNamesLoading, refresh: refreshGroupNames } = useQQGroupNames(() => {
+  const saved = savedGroupNameSource.value
+  if (!saved || form.value?.app_id !== saved.appID || form.value?.sandbox !== saved.sandbox) return null
+  const discovered = runtimeIdentity.value === JSON.stringify([saved.appID, saved.sandbox]) ? runtime.value?.groups.map(g => g.id) ?? [] : []
+  return { ...saved, groups: [...new Set([...saved.groups, ...discovered])] }
+})
 const groupsText = ref('')
 const allowedGroups = computed(() => [...new Set(groupsText.value.split(/[\s,，]+/).filter(Boolean))])
-const groupLabels = computed(() => Object.fromEntries((form.value?.group_policies ?? []).filter(policy => policy.label).map(policy => [policy.group_id, policy.label])))
+const groupLabels = computed(() => ({ ...groupNames.value, ...Object.fromEntries((form.value?.group_policies ?? []).filter(policy => policy.label).map(policy => [policy.group_id, policy.label])) }))
 const autonomous = ref(defaultAutonomousConfig())
 const moderation = ref(defaultModerationConfig())
 const healthNotifications = ref(defaultHealthNotificationConfig())
@@ -276,7 +288,7 @@ const limitFields = [
   { key: 'cooldown_seconds', label: 'cooldown', max: 3600 }
 ] as const
 function draft(): QQBotConfig {
- return { ...form.value!, allowed_groups: allowedGroups.value, group_policies: groupPolicies.value.filter(p => allowedGroups.value.includes(p.group_id)), autonomous: autonomous.value, moderation: moderation.value, price_notifications: { ...priceNotifications.value, groups: notificationGroups.value }, health_notifications: { ...healthNotifications.value, groups: healthGroups.value } }
+ return { ...form.value!, custom_commands: form.value!.custom_commands.map(command => ({ ...command, command: command.command && !command.command.startsWith('/') ? `/${command.command}` : command.command })), allowed_groups: allowedGroups.value, group_policies: groupPolicies.value.filter(p => allowedGroups.value.includes(p.group_id)), autonomous: autonomous.value, moderation: moderation.value, price_notifications: { ...priceNotifications.value, groups: notificationGroups.value }, health_notifications: { ...healthNotifications.value, groups: healthGroups.value } }
 }
 const dirtySections = computed(() => !baseline.value || !form.value ? [] : (Object.keys(configSections) as ConfigSection[]).filter(section => JSON.stringify(pickSection(draft(), section)) !== JSON.stringify(pickSection(baseline.value!, section))))
 const dirty = computed(() => dirtySections.value.length > 0)
@@ -305,8 +317,11 @@ async function handleTabKeydown(event: KeyboardEvent, tab: SettingsTab) {
 function secretHint(set: boolean) { return t(set ? 'qqbot.secretStored' : 'qqbot.secretEmpty') }
 function message(e: unknown) { return (e as {message?: string})?.message || t('common.error') }
 function apply(c: QQBotConfig, updateBaseline = true) {
-  if (updateBaseline) savedAppId.value = c.app_id
-  form.value = cloneConfig({ ...c, notification_quiet_hours: c.notification_quiet_hours ?? { enabled: false, start_hour: 23, end_hour: 8 }, chat_disabled: c.chat_disabled ?? false, group_policies: c.group_policies ?? [], reward_alert_daily: c.reward_alert_daily ?? 0, custom_commands: c.custom_commands ?? [], site_knowledge: { ...defaultSiteKnowledgeConfig(), ...c.site_knowledge } })
+  if (updateBaseline) {
+    savedAppId.value = c.app_id
+    savedGroupNameSource.value = { appID: c.app_id, sandbox: c.sandbox, revision: c.section_versions?.connection || '', groups: [...c.allowed_groups] }
+  }
+  form.value = cloneConfig({ ...c, notification_quiet_hours: c.notification_quiet_hours ?? { enabled: false, start_hour: 23, end_hour: 8 }, chat_disabled: c.chat_disabled ?? false, group_policies: c.group_policies ?? [], reward_alert_daily: c.reward_alert_daily ?? 0, custom_commands: (c.custom_commands ?? []).map(command => ({ ...command, command: command.command.replace(/^\//, '') })), site_knowledge: { ...defaultSiteKnowledgeConfig(), ...c.site_knowledge } })
   autonomous.value = { ...defaultAutonomousConfig(), ...c.autonomous }
   moderation.value = { ...defaultModerationConfig(), ...c.moderation }
   healthNotifications.value = { ...defaultHealthNotificationConfig(), ...c.health_notifications }
@@ -323,8 +338,13 @@ function addCustomCommand() {
 async function refreshRuntime() {
   if (refreshingRuntime.value) return
   refreshingRuntime.value = true
-  try { runtime.value = await qqbotAPI.runtime() } catch (e) { error.value = message(e) } finally { refreshingRuntime.value = false }
+  const identity = JSON.stringify([savedGroupNameSource.value?.appID, savedGroupNameSource.value?.sandbox])
+  try {
+    const data = await qqbotAPI.runtime()
+    if (identity === JSON.stringify([savedGroupNameSource.value?.appID, savedGroupNameSource.value?.sandbox])) { runtime.value = data; runtimeIdentity.value = identity }
+  } catch (e) { error.value = message(e) } finally { refreshingRuntime.value = false }
 }
+async function refreshStatus() { await refreshRuntime(); refreshGroupNames() }
 async function deleteDiscoveredGroup(id: string) {
   if (busy.value || refreshingRuntime.value) return
   busy.value = true; error.value = ''; notice.value = ''

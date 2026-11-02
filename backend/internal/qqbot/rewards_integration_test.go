@@ -49,12 +49,12 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 
 	info, err = s.myRewards(ctx, c, Job{MemberID: "unbound"})
 	require.NoError(t, err)
-	require.Equal(t, "请先使用 /绑定 绑定网站账号。", info)
+	require.Equal(t, "请先发送“绑定 邮箱或绑定码”绑定网站账号。", info)
 	_, err = db.Exec(`UPDATE users SET status='disabled' WHERE id=$1`, uid)
 	require.NoError(t, err)
 	info, err = s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "请先使用 /绑定 绑定网站账号。", info)
+	require.Equal(t, "请先发送“绑定 邮箱或绑定码”绑定网站账号。", info)
 }
 
 func TestQQBotMyRewardsCommandSettlesInvitesWithoutDuplicatePayouts(t *testing.T) {

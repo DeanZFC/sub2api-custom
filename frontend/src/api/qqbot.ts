@@ -86,7 +86,7 @@ export interface QQRecentMember {
 }
 export interface QQMemberOption extends QQRecentMember { group_label: string }
 export interface QQMemberPage { app_id: string; items: QQMemberOption[]; total: number; page: number; page_size: number }
-export type QQSiteQueryKind = 'model_price' | 'channel_status' | 'activity_rules'
+export type QQSiteQueryKind = 'model_price' | 'channel_status' | 'activity_rules' | 'account_balance' | 'today_usage' | 'lottery_chances'
 export type QQSiteQueryStatus = 'succeeded' | 'not_found' | 'unavailable' | 'failed'
 export interface QQSiteQueryDecision {
   kind: QQSiteQueryKind; model: string; activity: string; page: number
@@ -212,7 +212,9 @@ export interface QQActivityPreview {
  tasks: { id: string; name: string; progress: string; eligible: boolean; status: string; reward: string }[]
 }
 export interface QQTransferHistory { items: { id: number; from_user_id: number; to_user_id: number; from_email: string; to_email: string; amount: string; fee: string; net_amount: string; created_at: string }[]; total: number; page: number; page_size: number }
+export interface QQGroupInfo { app_id: string; sandbox: boolean; group_id: string; name: string; status: 'available' | 'permission_required' | 'unavailable' | 'unconfigured' | 'rate_limited'; retry_after_seconds?: number }
 export const qqbotAPI = {
+ groupInfo: async (appID: string, groupID: string, signal?: AbortSignal) => (await apiClient.get<QQGroupInfo>(`/admin/qqbot/groups/${encodeURIComponent(groupID)}/info`, { params: { app_id: appID }, signal, timeout: 10000 })).data,
  chatPreview: async (params: QQChatPreviewRequest) => (await apiClient.post<QQChatPreviewResult>('/admin/qqbot/chat-preview', params, { timeout: 180000 })).data,
  members: async (params: { app_id?: string; group_id?: string; member_id?: string; search?: string; page?: number; page_size?: number }) => (await apiClient.get<QQMemberPage>('/admin/qqbot/members', { params })).data,
  moderationRecords: async (params: Record<string, string | number>) => (await apiClient.get<{ items: QQModerationRecord[]; total: number; page: number; page_size: number }>('/admin/qqbot/moderation-records', { params })).data,

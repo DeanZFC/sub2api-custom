@@ -461,6 +461,12 @@ export default {
         '1-100，达到该用量百分比后临时不可调度；100 表示禁用当前账号自动停调。',
       qualityDetails: {
         title: '质量保护 · 命中详情',
+        modelsTitle: '智力检测 · 模型状态',
+        modelsHint: '按模型独立禁用和恢复；配置的模型全部被禁用时，暂停整个账号。检测正常不代表账号已解除其他调度限制。',
+        modelsPartial: '部分模型已禁用',
+        modelsPending: '模型待判定',
+        modelsNormal: '模型检测正常',
+        modelStatus: { normal: '正常', blocked: '已禁用', pending: '待判定' },
         loadFailed: '详情加载失败',
         empty: '暂无生效中的暂停明细，账号状态可能已更新。',
         evidenceHint: '以下为已记录的暂停规则及当前检测依据；历史命中快照未保存。阈值表示判定不通过的条件。',
@@ -482,9 +488,6 @@ export default {
         votes: '投票：通过 {pass} / 不通过 {fail}（不通过票 > {reject} 则拒绝；通过票 ≥ {required} 则通过）',
         observed: '实际',
         metrics: {
-          success_rate: '成功率',
-          cache_rate: '缓存率',
-          avg_first_token_ms: '平均首字延迟',
           latency_ms: '检测耗时',
           output_numeric: '输出数值'
         }

@@ -742,14 +742,28 @@ func (s *BillingCacheService) IncrementUserPlatformQuotaUsage(userID int64, plat
 // 订阅模式：检查缓存用量未超过限额（Group限额从参数传入）
 // platform 为请求的目标平台（如 "anthropic"），传空串 "" 时跳过 user × platform quota 检查。
 func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, platform string) error {
-	// 简易模式默认跳过所有计费检查. An explicit key-window opt-in keeps
-	// balance/subscription/platform checks bypassed while enforcing the three
-	// API-key monetary windows from the database source of truth.
+	// Simple mode preserves its existing billing bypass on every route.
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		if s.cfg.SimpleModeKeyRateLimitEnabled {
 			return s.checkSimpleModeAPIKeyRateLimits(ctx, apiKey)
 		}
 		return nil
+	}
+	if isAPIKeyFallbackActive(apiKey) {
+		var err error
+		subscription, err = resolveUsageSubscription(ctx, s.subRepo, apiKey, user, subscription)
+		if err != nil {
+			return err
+		}
+	}
+	if r := fallbackRouting(ctx); r != nil && apiKey == r.apiKey && !isAPIKeyFallbackActive(apiKey) {
+		r.billingAdmission = func(admissionCtx context.Context, candidate *APIKey) (*UserSubscription, error) {
+			sub, err := resolveUsageSubscription(admissionCtx, s.subRepo, candidate, candidate.User, nil)
+			if err != nil {
+				return nil, err
+			}
+			return sub, s.CheckBillingEligibility(admissionCtx, candidate.User, candidate, candidate.Group, sub, platform)
+		}
 	}
 	if s.circuitBreaker != nil && !s.circuitBreaker.Allow() {
 		return ErrBillingServiceUnavailable
@@ -988,6 +1002,11 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 	}
 
 	// ── 第二层：用户级全局硬上限（始终生效） ──
+	// The primary admission already counted this request globally. Switching
+	// groups consumes the target group's RPM, not a second user RPM.
+	if fallback, _ := ctx.Value(fallbackBillingAdmissionKey{}).(bool); fallback {
+		return nil
+	}
 	if user.RPMLimit > 0 {
 		count, err := s.userRPMCache.IncrementUserRPM(ctx, user.ID)
 		if err != nil {

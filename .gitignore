@@ -139,7 +139,6 @@ docs/*
 !docs/strict-failover.md
 !docs/group-unavailable-fallback.md
 !docs/channel-quality-experience.md
-!docs/passive-quality.md
 !docs/codex-fingerprint.md
 !docs/channel-quality-protection.md
 !docs/channel-test-strategies.md
@@ -156,7 +155,6 @@ docs/*
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/openai-vm.md
 !docs/channel-monitor-v2-safe-defaults.md
-!docs/codex-credits.md
 !docs/qq-bot.md
 !docs/legal/
 !docs/legal/*.md
@@ -182,3 +180,6 @@ issues/
 deploy/docker-compose.updater.json
 
 !docs/channel-quality.md
+
+!docs/custom-features.md
+!docs/AUTO_UPDATE.md

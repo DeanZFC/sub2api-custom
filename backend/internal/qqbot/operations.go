@@ -39,7 +39,7 @@ func (s *Service) ListJobs(ctx context.Context, f JobFilter) (JobPage, error) {
 		}
 	}
 	switch f.QueryKind {
-	case "", "model_price", "channel_status", "activity_rules":
+	case "", "model_price", "channel_status", "activity_rules", "account_balance", "today_usage", "lottery_chances":
 	default:
 		return out, errors.New("查询类型不正确")
 	}
@@ -215,7 +215,7 @@ func (s *Service) Commands(ctx context.Context) ([]CommandInfo, error) {
 		if isRetiredCommand(strings.TrimPrefix(item.Command, "/")) {
 			continue
 		}
-		out = append(out, CommandInfo{Command: item.Command, Description: "自定义固定回复", Enabled: item.Enabled, Reply: item.Reply})
+		out = append(out, CommandInfo{Command: strings.TrimPrefix(item.Command, "/"), Description: "自定义固定回复", Enabled: item.Enabled, Reply: item.Reply})
 	}
 	return out, nil
 }

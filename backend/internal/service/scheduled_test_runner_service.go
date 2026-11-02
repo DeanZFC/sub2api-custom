@@ -254,7 +254,7 @@ func (s *ScheduledTestRunnerService) runDuePlansAt(ctx context.Context, now time
 		// goroutines for the same rule, and shutdown waits for admitted work.
 		// The scan context ends when discovery returns; executions instead
 		// inherit cancellation from the runner lifecycle.
-		runCtx, finish, admitted := s.preparePlanRun(context.Background(), plan)
+		runCtx, finish, admitted := s.preparePlanRun(context.WithValue(context.Background(), scheduledTestAutomaticRunKey{}, true), plan)
 		if !admitted {
 			continue
 		}
@@ -278,7 +278,16 @@ func (s *ScheduledTestRunnerService) preparePlanRun(ctx context.Context, plan *S
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d is already running; skipping overlapping run", plan.ID)
 		return nil, nil, false
 	}
-	return ctx, func() {
+	automatic, _ := ctx.Value(scheduledTestAutomaticRunKey{}).(bool)
+	leasedCtx, release, err := s.claimDistributedExecution(ctx, plan, "plan", automatic)
+	if err != nil {
+		s.endPlanRun(plan.ID)
+		finish()
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d claim rejected: %v", plan.ID, err)
+		return nil, nil, false
+	}
+	return leasedCtx, func() {
+		release()
 		s.endPlanRun(plan.ID)
 		finish()
 	}, true
@@ -679,6 +688,7 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	if pending != nil {
 		result.ExecutionInfo = mergeScheduledTestExecution(pending.ExecutionInfo, result.ExecutionInfo)
 		result.RunID = pending.RunID
+		result.ExecutionLeaseOwner, result.ExecutionLeaseScope = pending.ExecutionLeaseOwner, pending.ExecutionLeaseScope
 		result.ID = pending.ID
 		result.StartedAt = pending.StartedAt
 		result.CreatedAt = pending.CreatedAt
@@ -710,7 +720,9 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 	}
 	// Shutdown/cancellation is not an account-quality observation.
 	if ctx.Err() == nil {
-		s.completeResultProtection(persistCtx, plan, result)
+		if valid, err := s.executionLeaseCurrent(persistCtx, plan); err == nil && valid {
+			s.completeResultProtection(persistCtx, plan, result)
+		}
 	}
 	modelCheckPassed := outputKind != "model_check" || (result.OutputModelCheck != nil && result.OutputModelCheck.Verdict == "pass")
 	if outputKind == "capability" {
@@ -1015,6 +1027,8 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if previous.Status != "failed" {
 		return nil, ErrScheduledTestResultNotFailed
 	}
+	copyPlan := *plan
+	plan = &copyPlan
 	if previous.ModelID != "" && !plan.SelectsModel(previous.ModelID) {
 		return nil, fmt.Errorf("the result model is no longer selected by this plan")
 	}
@@ -1022,6 +1036,14 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	if err != nil {
 		return nil, err
 	}
+	leased, release, err := s.claimDistributedExecution(bg, plan, scheduledTestRetryScope(previous), false)
+	if err != nil {
+		finish()
+		return nil, err
+	}
+	bg = leased
+	finishLifecycle := finish
+	finish = func() { release(); finishLifecycle() }
 	// Validation still respects the HTTP caller, but shutdown must also
 	// interrupt it before this request can enqueue a new background retry.
 	validationCtx, cancelValidation := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
@@ -1099,6 +1121,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	}
 	started := time.Now()
 	pending := &ScheduledTestResult{
+		ExecutionLeaseOwner: plan.ExecutionLeaseOwner, ExecutionLeaseScope: plan.ExecutionLeaseScope,
 		ExecutionInfo: previous.ExecutionInfo,
 		ID:            previous.ID, RunID: previous.RunID, PlanID: plan.ID, CreatedAt: previous.CreatedAt,
 		TestDefinitionID: previous.TestDefinitionID, TargetMode: plan.TargetMode,

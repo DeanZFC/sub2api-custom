@@ -16,7 +16,7 @@ type rankingNotificationPayload struct {
 }
 
 func formatRankingRewardNotification(date, kind string, rank int, reward GrowthReward) string {
-	return fmt.Sprintf("🏆 **每日排行榜奖励**\n\n%s（北京时间）\n%s · 第 %d 名\n\n奖励：%s\n状态：%s\n\n发送 /成长任务 查看奖励记录。",
+	return fmt.Sprintf("🏆 **每日排行榜奖励**\n\n%s（北京时间）\n%s · 第 %d 名\n\n奖励：%s\n状态：%s\n\n发送 成长任务 查看奖励记录。",
 		date, rankingTitle(kind), rank, reward.description(), reward.deliveryNote())
 }
 

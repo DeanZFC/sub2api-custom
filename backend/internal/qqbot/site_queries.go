@@ -40,6 +40,10 @@ func (q siteQuery) validate() error {
 		if q.Model != "" || q.Activity != "" {
 			return errors.New("渠道状态查询不接受模型或活动参数")
 		}
+	case "account_balance", "today_usage", "lottery_chances":
+		if q.Model != "" || q.Activity != "" || q.Page > 1 {
+			return errors.New("本人账户查询不接受模型或活动参数，页码须为1")
+		}
 	case "activity_rules":
 		if q.Model != "" {
 			return errors.New("活动规则查询不能指定模型")
@@ -50,7 +54,7 @@ func (q siteQuery) validate() error {
 			return errors.New("活动类型仅支持签到、邀请、抽奖、成长任务或全部规则")
 		}
 	default:
-		return errors.New("仅支持模型价格、渠道状态和活动规则查询")
+		return errors.New("仅支持模型价格、渠道状态、活动规则、本人余额、今日用量和抽奖次数查询")
 	}
 	return nil
 }
@@ -95,6 +99,8 @@ func (s *Service) querySiteInfoDetailed(ctx context.Context, c Config, j Job, q 
 		result = s.querySiteChannelStatus(queryCtx, q)
 	case "activity_rules":
 		result = s.querySiteActivityRules(queryCtx, c, j, q)
+	case "account_balance", "today_usage", "lottery_chances":
+		result = s.querySiteAccount(queryCtx, c, j, q, now)
 	}
 	result.Decision.Kind, result.Decision.Model, result.Decision.Activity, result.Decision.Page = q.Kind, q.Model, q.Activity, q.Page
 	result.Decision.DurationMS = time.Since(now).Milliseconds()
@@ -117,7 +123,7 @@ func (s *Service) querySiteModelPrice(ctx context.Context, c Config, j Job, q si
 	if len(blocks) == 0 {
 		return siteQueryOutcome("未找到该模型价格，请核对名称或查看网站。", "not_found", "model_not_found")
 	}
-	return siteQueryPageResult(blocks, q.Page, "/价格 "+replyPlainLabel(q.Model))
+	return siteQueryPageResult(blocks, q.Page, "价格 "+replyPlainLabel(q.Model))
 }
 
 func (s *Service) querySiteChannelStatus(ctx context.Context, q siteQuery) SiteQueryResult {
@@ -135,7 +141,7 @@ func (s *Service) querySiteChannelStatus(ctx context.Context, q siteQuery) SiteQ
 			return siteQueryOutcome("渠道状态查询失败，请稍后重试。", "failed", "provider_failed")
 		}
 	}
-	return siteQueryPageResult(formatChannelStatus(report), q.Page, "/渠道状态")
+	return siteQueryPageResult(formatChannelStatus(report), q.Page, "渠道状态")
 }
 func siteQueryPageResult(blocks []string, page int, command string) SiteQueryResult {
 	status, code := "succeeded", ""
@@ -248,7 +254,7 @@ func siteCheckinRules(c CheckinConfig) string {
 	if c.MinAmount != c.MaxAmount {
 		amount += "～" + siteRuleMoney(c.MaxAmount)
 	}
-	text := "📅 **签到规则**\n每日签到一次（北京时间）\n奖励：" + amount + "\n充值条件：" + c.describe() + "\n参与：/签到"
+	text := "📅 **签到规则**\n每日签到一次（北京时间）\n奖励：" + amount + "\n充值条件：" + c.describe() + "\n参与：签到"
 	if reward := c.streakReward(); reward.enabled() {
 		text += fmt.Sprintf("\n连续签到每 %d 天奖励：%s", c.streakDays(), reward.description())
 		text += siteRuleClaimInstructions(reward)
@@ -260,14 +266,14 @@ func siteInviteRules(c Config) string {
 	if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 		return "🎁 **邀请规则**\n邀请活动未开启。"
 	}
-	return fmt.Sprintf("🎁 **邀请规则**\n每位有效受邀者奖励：%s\n每位邀请人每日上限：%d 人（北京时间）\n通过官方邀请，7 天内入群并留群；双方绑定账号，每位受邀账号限奖一次。\n%s\n查询：/邀请奖励", siteRuleMoney(c.InviteReward), c.InviteDailyLimit, c.inviteRechargeRequirement().invite())
+	return fmt.Sprintf("🎁 **邀请规则**\n每位有效受邀者奖励：%s\n每位邀请人每日上限：%d 人（北京时间）\n通过官方邀请，7 天内入群并留群；双方绑定账号，每位受邀账号限奖一次。\n%s\n查询：邀请奖励", siteRuleMoney(c.InviteReward), c.InviteDailyLimit, c.inviteRechargeRequirement().invite())
 }
 
 func siteLotteryRules(c LotteryConfig) string {
 	if !c.Enabled {
 		return "🎉 **抽奖规则**\n抽奖活动未开启。"
 	}
-	text := fmt.Sprintf("🎉 **%s**\n累计有效充值每满 %s 送 %d 次\n每次抽奖消耗 1 次；可发送 /抽奖 1～10 连抽\n需绑定网站账号。\n\n**普通奖池**", replyPlainLabel(c.Title), siteRuleMoney(c.RechargeStep), c.ChancesPerStep)
+	text := fmt.Sprintf("🎉 **%s**\n累计有效充值每满 %s 送 %d 次\n每次抽奖消耗 1 次；可发送 抽奖 1～10 连抽\n需绑定网站账号。\n\n**普通奖池**", replyPlainLabel(c.Title), siteRuleMoney(c.RechargeStep), c.ChancesPerStep)
 	for _, p := range c.Prizes {
 		text += fmt.Sprintf("\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), siteRuleMoney(p.Amount), float64(p.ProbabilityBPS)/100)
 	}
@@ -303,7 +309,7 @@ func siteGrowthRules(c GrowthConfig) string {
 	if count == 0 {
 		return text + "\n暂无已开启的成长任务。"
 	}
-	return text + "\n\n需绑定网站账号；达标自动发放，实物及自定义奖品由管理员交付。\n个人进度：/成长任务"
+	return text + "\n\n需绑定网站账号；达标自动发放，实物及自定义奖品由管理员交付。\n个人进度：成长任务"
 }
 
 func siteGrowthTarget(t GrowthTask) string {

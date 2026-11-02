@@ -73,13 +73,13 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 		require.NoError(t, s.Enqueue(ctx, c, p))
 		return p
 	}
-	for _, content := range []string{"你好", "生图 一只猫", "/不存在"} {
+	for _, content := range []string{"你好", "帮我看一下我的余额", "/不存在"} {
 		enqueue("ignored-"+content, content, "member", nil)
 	}
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs`).Scan(&count))
 	require.Zero(t, count)
-	checkin := enqueue("checkin", "/签到", "member", nil)
+	checkin := enqueue("checkin", "签到", "member", nil)
 	// QQ can deliver the same message through both event types, in either order.
 	checkin.Type, checkin.ID = groupAtMessageCreate, "other-checkin-delivery"
 	require.NoError(t, s.Enqueue(ctx, c, checkin))
@@ -96,14 +96,14 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	secondUser := user(t, db)
 	code, err := s.CreateBindingCode(ctx, secondUser)
 	require.NoError(t, err)
-	enqueue("binding", "/绑定 "+code.Code, "new-member", nil)
+	enqueue("binding", "绑定 "+code.Code, "new-member", nil)
 	s.runOne(ctx)
 	require.NoError(t, s.ConfirmBinding(ctx, secondUser, "new-member"))
 	bound, _, err := s.Binding(ctx, c.AppID, secondUser)
 	require.NoError(t, err)
 	require.Equal(t, "new-member", bound.MemberID)
 	require.Contains(t, lastReply.Load(), "<qqbot-at-user id=\"new-member\" />\n")
-	for _, content := range []string{"/帮助", "/我的余额", "/成长任务"} {
+	for _, content := range []string{"/帮助", "/我的余额", "/成长任务", "帮助", "我的余额", "成长任务"} {
 		enqueue("command-"+content, content, "member", nil)
 		s.runOne(ctx)
 		var status string
@@ -112,7 +112,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	}
 	enqueue("unbound-account", "/我的余额", "unbound-member", nil)
 	s.runOne(ctx)
-	require.Contains(t, lastReply.Load(), "请先使用 /绑定")
+	require.Contains(t, lastReply.Load(), "请先发送“绑定 邮箱或绑定码”")
 	require.Zero(t, chats.Load())
 	require.Zero(t, images.Load())
 	beforeModels := replies.Load()
@@ -154,7 +154,7 @@ func TestQQBotFullGroupCommandsAndMentionedChat(t *testing.T) {
 	// Image requests work without a mention or a bot identity lookup.
 	// Receiving the same message through both events must only generate once.
 	beforeLookups := lookups.Load()
-	for i, content := range []string{"/生图 一只猫", "/生图 一只狗"} {
+	for i, content := range []string{"生图 一只猫", "/生图 一只狗"} {
 		beforeImages, beforeReplies := images.Load(), replies.Load()
 		id := fmt.Sprintf("unmentioned-image-%d", i)
 		p := enqueue(id, content, "image-member", nil)

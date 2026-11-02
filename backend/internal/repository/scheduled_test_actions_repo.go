@@ -654,6 +654,9 @@ func (r *scheduledTestResultRepository) BeginProtectionRun(ctx context.Context, 
 	if !scheduledTestSameExecutionPolicy(current, plan) {
 		return fmt.Errorf("quality plan changed before execution")
 	}
+	if err := checkScheduledTestResultLease(ctx, tx, &service.ScheduledTestResult{PlanID: plan.ID, ExecutionLeaseOwner: plan.ExecutionLeaseOwner, ExecutionLeaseScope: plan.ExecutionLeaseScope}); err != nil {
+		return err
+	}
 	config := &current.Protection
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT r.account_id,r.model_id FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
  WHERE r.plan_id=$1 AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked AND r.account_id IS NOT NULL ORDER BY r.account_id,r.model_id`, plan.ID)
@@ -715,6 +718,13 @@ func (r *scheduledTestResultRepository) BeginProtectionRun(ctx context.Context, 
  automated_verdict='pending',verdict='pending',completed=FALSE,generation=generation+1,
  admin_verdict='',admin_user_id=NULL,admin_decided_at=NULL,updated_at=NOW()
  WHERE plan_id=$1 AND round_started_at<$2`, plan.ID, started.Round(time.Microsecond)); err != nil {
+		return err
+	}
+	accountIDs := map[int64]bool{}
+	for _, target := range targets {
+		accountIDs[target.accountID] = true
+	}
+	if err := reconcileScheduledTestProjectionAccounts(ctx, tx, sortedProtectionIDs(accountIDs)); err != nil {
 		return err
 	}
 	return tx.Commit()

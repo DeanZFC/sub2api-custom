@@ -29,7 +29,7 @@ describe('QQ binding confirmation', () => {
     await flushPromises()
     await wrapper.findAll('button')[0].trigger('click')
     await flushPromises()
-    expect(wrapper.get('code').text()).toBe('/绑定 single-use-code')
+    expect(wrapper.get('code').text()).toBe('绑定 single-use-code')
     expect(wrapper.text()).toContain(i18n.global.t('qqbot.sendCode'))
     expect(wrapper.text()).not.toContain('qqbot.sendCode')
     if (locale === 'zh') expect(wrapper.text()).toContain('在允许的群里发送：')

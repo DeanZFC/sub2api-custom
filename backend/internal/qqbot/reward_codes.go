@@ -52,7 +52,8 @@ func redactRewardCommand(e Event) Event {
 }
 
 func containsRewardCode(content string) bool {
-	cmd, arg := command(content)
+	content = strings.TrimSpace(mentionPrefix.ReplaceAllString(strings.TrimSpace(content), ""))
+	cmd, arg := command("/" + strings.TrimPrefix(content, "/"))
 	action, _ := command("/" + arg)
 	return cmd == "奖励兑换" || (cmd == "福利" && action == "兑换")
 }

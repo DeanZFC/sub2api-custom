@@ -11,10 +11,16 @@ type apiKeyGroupFallbackContextKey struct{}
 type apiKeyGroupFallbackAttemptContextKey struct{}
 
 type apiKeyGroupFallbackRouting struct {
-	primaryGroupID int64
-	primaryGroup   *Group
-	fallbackGroup  *Group
-	apiKey         *APIKey
+	primaryGroupID       int64
+	primaryGroup         *Group
+	fallbackGroup        *Group
+	apiKey               *APIKey
+	billingAdmission     func(context.Context, *APIKey) (*UserSubscription, error)
+	concurrencyAdmission func(context.Context, *Group) error
+	reservationAdmission func(context.Context, *APIKey, *UserSubscription) error
+	subscription         *UserSubscription
+	billingAdmitted      bool
+	reservation          *InflightReservation
 }
 
 func isAPIKeyFallbackActive(apiKey *APIKey) bool {
@@ -32,14 +38,14 @@ func apiKeyFallbackRoutingForGroup(ctx context.Context, groupID int64) (apiKeyGr
 	if ctx == nil || groupID <= 0 {
 		return apiKeyGroupFallbackRouting{}, false
 	}
-	routing, ok := ctx.Value(apiKeyGroupFallbackContextKey{}).(apiKeyGroupFallbackRouting)
+	routing, ok := ctx.Value(apiKeyGroupFallbackContextKey{}).(*apiKeyGroupFallbackRouting)
 	if !ok || routing.apiKey == nil || routing.fallbackGroup == nil {
 		return apiKeyGroupFallbackRouting{}, false
 	}
 	if !isAPIKeyFallbackActive(routing.apiKey) || routing.fallbackGroup.ID != groupID {
 		return apiKeyGroupFallbackRouting{}, false
 	}
-	return routing, true
+	return *routing, true
 }
 
 // WithAPIKeyGroupFallbackRouting installs API-key-level fallback routing.
@@ -59,7 +65,7 @@ func WithAPIKeyGroupFallbackRouting(ctx context.Context, apiKey *APIKey) context
 		!apiKey.FallbackGroup.IsActive() || !IsGroupContextValid(apiKey.FallbackGroup) {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, apiKeyGroupFallbackContextKey{}, apiKeyGroupFallbackRouting{
+	ctx = context.WithValue(ctx, apiKeyGroupFallbackContextKey{}, &apiKeyGroupFallbackRouting{
 		primaryGroupID: *apiKey.GroupID,
 		primaryGroup:   apiKey.Group,
 		fallbackGroup:  apiKey.FallbackGroup,
@@ -72,7 +78,7 @@ func activateAPIKeyFallbackRouting(ctx context.Context, fallbackGroupID int64) b
 	if ctx == nil || fallbackGroupID <= 0 {
 		return false
 	}
-	routing, ok := ctx.Value(apiKeyGroupFallbackContextKey{}).(apiKeyGroupFallbackRouting)
+	routing, ok := ctx.Value(apiKeyGroupFallbackContextKey{}).(*apiKeyGroupFallbackRouting)
 	if !ok || routing.apiKey == nil || routing.fallbackGroup == nil ||
 		routing.fallbackGroup.ID != fallbackGroupID {
 		return false
@@ -137,7 +143,7 @@ func apiKeyFallbackGroupForSelection(ctx context.Context, groupID *int64, select
 	if forcePlatform, _ := ctx.Value(ctxkey.ForcePlatform).(string); forcePlatform != "" {
 		return nil, ctx, false
 	}
-	routing, ok := ctx.Value(apiKeyGroupFallbackContextKey{}).(apiKeyGroupFallbackRouting)
+	routing, ok := ctx.Value(apiKeyGroupFallbackContextKey{}).(*apiKeyGroupFallbackRouting)
 	if !ok || routing.primaryGroupID != *groupID || routing.fallbackGroup == nil || !routing.fallbackGroup.IsActive() {
 		return nil, ctx, false
 	}

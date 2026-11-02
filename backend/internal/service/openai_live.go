@@ -83,6 +83,9 @@ func (s *OpenAIGatewayService) resolveLiveSubscriptionID(ctx context.Context, id
 	if routing.fallbackGroup == nil || !routing.fallbackGroup.IsSubscriptionType() {
 		return 0, nil
 	}
+	if routing.billingAdmitted && routing.subscription != nil {
+		return routing.subscription.ID, nil
+	}
 	if s == nil || s.userSubRepo == nil || identity.UserID <= 0 || groupID <= 0 {
 		return 0, ErrSubscriptionInvalid
 	}
@@ -219,6 +222,10 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			false,
 		)
 		if selectErr != nil {
+			var admission *APIKeyFallbackAdmissionError
+			if errors.As(selectErr, &admission) {
+				return nil, selectErr
+			}
 			if lastErr != nil {
 				return nil, lastErr
 			}

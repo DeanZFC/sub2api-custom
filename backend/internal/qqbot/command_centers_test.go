@@ -2,11 +2,30 @@ package qqbot
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestCommandPagesShowDirectCommandsAndPrefillButtons(t *testing.T) {
+	s, replies := helpTestSender(t)
+	c := DefaultConfig()
+	j := Job{GroupID: "group", MessageID: "pages", CreatedAt: time.Now()}
+	body := strings.Repeat("规则", 400) + "\n\n" + strings.Repeat("规则", 400)
+	require.NoError(t, s.sendCommandPage(context.Background(), c, j, "成长任务", body, ""))
+	reply := (*replies)[0]
+	require.Contains(t, reply.text(), "翻页：成长任务 页码")
+	require.NotContains(t, reply.text(), "/成长任务")
+	require.NotNil(t, reply.Keyboard)
+	require.Equal(t, "成长任务 2", reply.Keyboard.Content.Rows[0].Buttons[0].Action.Data)
+
+	require.NoError(t, s.sendCommandPage(context.Background(), c, j, "成长任务", body, "bad"))
+	require.Equal(t, "用法：成长任务；翻页：成长任务 页码。", (*replies)[1].text())
+	require.NoError(t, s.sendCommandPage(context.Background(), c, j, "成长任务", body, "3"))
+	require.Equal(t, "共 2 页，请发送 成长任务 页码。", (*replies)[2].text())
+}
 
 func TestRetiredCommandsNeverExecuteOrCallModels(t *testing.T) {
 	s, replies := helpTestSender(t) // No database or model endpoint.

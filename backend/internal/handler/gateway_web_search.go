@@ -99,6 +99,11 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		return
 	}
 	defer inflightDone()
+	userRelease, admitted := acquireImmediateGatewayUserSlot(c, h.concurrencyHelper, apiKey)
+	if !admitted {
+		return
+	}
+	defer userRelease()
 
 	subject, _ := middleware2.GetAuthSubjectFromContext(c)
 	reqLog := requestLogger(c, "handler.gateway.web_search")
@@ -155,6 +160,9 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			c.Request.Context(), groupID, "", searchModel, failedAccounts, "", 0,
 		)
 		if selectErr != nil {
+			if handleAPIKeyFallbackAdmissionError(c, selectErr, c.Writer.Written()) {
+				return
+			}
 			if attempt == 0 {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 					"type":    "scheduling_error",

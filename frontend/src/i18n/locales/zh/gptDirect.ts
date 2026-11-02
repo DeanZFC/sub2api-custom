@@ -45,7 +45,7 @@ export default {
   lotteryOffer: '每笔直充成功赠送 {count} 次 QQ 抽奖机会，计入当前网站账号；绑定 QQ 后可使用。',
   lotteryReward: {
     pending: '本笔成功后赠送 {count} 次抽奖机会，关闭页面后仍会自动核对发放。',
-    awarded: '已赠送 {count} 次抽奖机会。绑定 QQ 后可在群内发送 /抽奖 使用。',
+    awarded: '已赠送 {count} 次抽奖机会。绑定 QQ 后可在群内发送 抽奖 使用。',
     not_eligible: '本笔暂未赠送抽奖机会，成功完成直充后才会发放。',
   },
   working: '处理中…',

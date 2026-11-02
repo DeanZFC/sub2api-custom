@@ -29,6 +29,9 @@ func TestSiteQueryRejectsInvalidArgumentsBeforeReading(t *testing.T) {
 		{Kind: "channel_status", Model: "private-token"},
 		{Kind: "channel_status", Activity: "all"},
 		{Kind: "activity_rules", Model: "gpt-5"},
+		{Kind: "account_balance", Model: "private-user"},
+		{Kind: "today_usage", Activity: "all"},
+		{Kind: "lottery_chances", Page: 2},
 	} {
 		_, err := s.querySiteInfo(context.Background(), DefaultConfig(), Job{}, q)
 		require.Error(t, err, "%+v", q)
@@ -131,7 +134,7 @@ func TestSiteQueryRulesKeepRewardPrecisionAndDoNotPromiseExecution(t *testing.T)
 }
 
 func TestSiteQueryPageBoundsAndWholeBlocks(t *testing.T) {
-	require.Contains(t, siteQueryPage([]string{"one"}, 2, "/渠道状态"), "共 1 页")
-	require.Contains(t, siteQueryPage([]string{strings.Repeat("长", 10001)}, 1, "/价格 model"), "/价格 model")
+	require.Contains(t, siteQueryPage([]string{"one"}, 2, "渠道状态"), "共 1 页")
+	require.Contains(t, siteQueryPage([]string{strings.Repeat("长", 10001)}, 1, "价格 model"), "价格 model")
 	require.NotContains(t, siteQueryPage([]string{"1", "2", "3", "4", "5", "6"}, 1, ""), "指令：")
 }

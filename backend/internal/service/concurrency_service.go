@@ -434,24 +434,23 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 // If the user is at max concurrency, it waits until a slot is available or timeout.
 // Returns a release function that MUST be called when the request completes.
 func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int) (*AcquireResult, error) {
+	requestID := generateRequestID()
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
-		return &AcquireResult{
+		return s.bindFallbackConcurrency(ctx, &AcquireResult{
 			Acquired:    true,
 			ReleaseFunc: func() {}, // no-op
-		}, nil
+		}, userID, 0, maxConcurrency, requestID), nil
 	}
 
 	// Generate unique request ID for this slot
-	requestID := generateRequestID()
-
 	acquired, err := s.cache.AcquireUserSlot(ctx, userID, maxConcurrency, requestID)
 	if err != nil {
 		return nil, err
 	}
 
 	if acquired {
-		return &AcquireResult{
+		return s.bindFallbackConcurrency(ctx, &AcquireResult{
 			Acquired: true,
 			ReleaseFunc: func() {
 				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -460,7 +459,7 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 					logger.LegacyPrintf("service.concurrency", "Warning: failed to release user slot for %d (req=%s): %v", userID, requestID, err)
 				}
 			},
-		}, nil
+		}, userID, 0, maxConcurrency, requestID), nil
 	}
 
 	return &AcquireResult{
@@ -491,7 +490,7 @@ func (s *ConcurrencyService) AcquireUserGroupSlot(ctx context.Context, userID, g
 	if !acquired {
 		return &AcquireResult{Acquired: false}, nil
 	}
-	return &AcquireResult{
+	return s.bindFallbackConcurrency(ctx, &AcquireResult{
 		Acquired: true,
 		ReleaseFunc: func() {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -500,7 +499,7 @@ func (s *ConcurrencyService) AcquireUserGroupSlot(ctx context.Context, userID, g
 				logger.LegacyPrintf("service.concurrency", "Warning: failed to release user group slot for user=%d group=%d (req=%s): %v", userID, groupID, requestID, err)
 			}
 		},
-	}, nil
+	}, userID, groupID, userMax, requestID), nil
 }
 
 // TrackAPIKeySlot records one active request slot for an API key without

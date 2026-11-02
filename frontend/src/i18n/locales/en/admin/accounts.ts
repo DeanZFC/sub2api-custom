@@ -234,6 +234,12 @@ export default {
         'Use 1-100. The account becomes temporarily unschedulable after reaching this usage percent; 100 disables it for this account.',
       qualityDetails: {
         title: 'Quality protection · Match details',
+        modelsTitle: 'Intelligence checks · Model status',
+        modelsHint: 'Models are blocked and recovered independently. The account pauses when all configured models are blocked. Passing these checks does not clear other scheduling restrictions.',
+        modelsPartial: 'Some models blocked',
+        modelsPending: 'Model checks pending',
+        modelsNormal: 'Model checks passing',
+        modelStatus: { normal: 'Normal', blocked: 'Blocked', pending: 'Pending' },
         loadFailed: 'Failed to load details',
         empty: 'No active hold details. The account status may have changed.',
         evidenceHint: 'Recorded pause rules and current evidence are shown below. Historical match snapshots were not stored. Thresholds are failure conditions.',
@@ -255,9 +261,6 @@ export default {
         votes: 'Votes: {pass} pass / {fail} fail (reject if fail > {reject}; pass if pass ≥ {required})',
         observed: 'Observed',
         metrics: {
-          success_rate: 'Success rate',
-          cache_rate: 'Cache rate',
-          avg_first_token_ms: 'Average first token latency',
           latency_ms: 'Test duration',
           output_numeric: 'Numeric output'
         }

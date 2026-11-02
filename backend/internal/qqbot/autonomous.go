@@ -129,9 +129,9 @@ func botNameCall(a AutonomousConfig, e Event) bool {
 	}
 	return e.MessageType != 103 && visit(e.MsgElements, 0)
 }
-func autonomousText(e Event) (string, string) {
+func autonomousText(e Event, customCommands ...CustomCommand) (string, string) {
 	text := strings.TrimSpace(e.Content)
-	if e.Author.Bot || strings.Contains(text, "@") || len(groupMentionIDs(e)) > 0 || e.referenceID() != "" || !shareableGroupEvent(e, nil) {
+	if e.Author.Bot || strings.Contains(text, "@") || len(groupMentionIDs(e)) > 0 || e.referenceID() != "" || !shareableGroupEvent(e, nil, customCommands...) {
 		return "", "addressed_elsewhere"
 	}
 	if len(e.Attachments) > 0 || len(e.MsgElements) > 0 {
@@ -244,7 +244,7 @@ func (s *Service) routeAutonomous(ctx context.Context, c Config, p Payload, e Ev
 	if n == 0 {
 		return nil
 	}
-	text, skip := autonomousText(e)
+	text, skip := autonomousText(e, c.CustomCommands...)
 	named := botNameCall(c.Autonomous, e)
 	if named {
 		// A configured name explicitly addresses the bot, even in a short message,
@@ -336,7 +336,7 @@ func (s *Service) routeAutonomous(ctx context.Context, c Config, p Payload, e Ev
 	if trigger == "name" {
 		kind = "event"
 	}
-	nickname, preview := groupMemberHint(e)
+	nickname, preview := groupMemberHint(e, c.CustomCommands...)
 	res, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,message_id,payload,kind,trigger_reason,member_nickname,message_preview) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(app_id,event_key) DO NOTHING`, randomID(), c.AppID, groupAtMessageCreate+":"+e.ID, p.Type, e.GroupID, e.Author.MemberID, e.ID, string(p.Data), kind, trigger, nickname, preview)
 	if err != nil {
 		return err

@@ -123,7 +123,7 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	info, err = s.inviteInfo(ctx, c, Job{MemberID: "unbound"})
 	require.NoError(t, err)
 	require.Contains(t, info, "累计有效充值满 USD 50.00")
-	require.Contains(t, info, "请先 /绑定")
+	require.Contains(t, info, "请先发送“绑定 邮箱或绑定码”")
 	require.Contains(t, info, "近 60 天有效充值满 USD 10.00")
 	_, err = db.Exec(`INSERT INTO redeem_codes(code,type,value,status,used_by,used_at) VALUES('qualified','balance',10,'used',$1,NOW()-INTERVAL '45 days')`, inviter)
 	require.NoError(t, err)

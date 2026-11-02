@@ -155,6 +155,13 @@ func selectWithGroupFallback[T any](ctx context.Context, groupID *int64, model s
 	fallbackCtx = withAccountFallbackGroup(fallbackCtx, fallback, fallback)
 	value, err = selectInGroup(fallbackCtx, &id)
 	if err == nil {
+		if admissionErr := admitAPIKeyFallback(ctx); admissionErr != nil {
+			if selected, ok := any(value).(*AccountSelectionResult); ok && selected != nil && selected.ReleaseFunc != nil {
+				selected.ReleaseFunc()
+			}
+			var zero T
+			return zero, admissionErr
+		}
 		activateAPIKeyFallbackRouting(ctx, id)
 		if mark != nil {
 			mark(value, id, true)

@@ -18,6 +18,9 @@ const accountQualityHeldErrorCode = "account_quality_paused"
 const accountQualityHeldErrorMessage = "Account is temporarily paused by quality protection pending active checks"
 
 func (h *OpenAIGatewayHandler) handleAccountQualityHeldError(c *gin.Context, err error, streamStarted bool) bool {
+	if handleAPIKeyFallbackAdmissionError(c, err, streamStarted) {
+		return true
+	}
 	if !errors.Is(err, service.ErrAccountQualityHeld) {
 		return false
 	}
@@ -39,6 +42,18 @@ func (h *OpenAIGatewayHandler) handleAccountQualityHeldError(c *gin.Context, err
 }
 
 func handleAccountQualityHeldWSError(c *gin.Context, conn *coderws.Conn, err error) bool {
+	var admission *service.APIKeyFallbackAdmissionError
+	if errors.As(err, &admission) {
+		cls := classifySelectionFailureError(err, noAccountErrorClassification{})
+		if conn != nil {
+			payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"type": cls.ErrType, "message": cls.Message}})
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = conn.Write(ctx, coderws.MessageText, payload)
+			cancel()
+			closeOpenAIClientWS(conn, coderws.StatusPolicyViolation, cls.ErrType)
+		}
+		return true
+	}
 	if !errors.Is(err, service.ErrAccountQualityHeld) {
 		return false
 	}

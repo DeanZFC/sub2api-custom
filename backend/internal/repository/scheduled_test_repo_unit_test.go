@@ -27,6 +27,9 @@ func TestScheduledTestPlanRepositoryCreatePersistsName(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count", "platforms"}).AddRow(1, 1))
 	mock.ExpectBegin()
 	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)SELECT EXISTS.*FROM unnest`).
+		WithArgs("{2}").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`(?s)INSERT INTO scheduled_test_plans \(name, sort_order, account_id`).
 		WithArgs("nightly candy", 0, nil, groupID, nil, "candy", "all_accounts", "model", "", "*/5 * * * *", true, 20, false, nextRun, "{2}", sqlmock.AnyArg(), "{3}", "", sqlmock.AnyArg(), "{7}", `{"model"}`).
 		WillReturnRows(sqlmock.NewRows([]string{

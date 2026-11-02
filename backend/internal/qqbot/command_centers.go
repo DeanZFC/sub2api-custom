@@ -50,14 +50,14 @@ func paginateCommand(body string) []string {
 func (s *Service) sendCommandPage(ctx context.Context, c Config, j Job, cmd, body, arg string) error {
 	page, ok := commandPageNumber(arg)
 	if !ok {
-		return s.send(ctx, c, j, "用法：/"+cmd+"；翻页：/"+cmd+" 页码。", nil, 1)
+		return s.send(ctx, c, j, "用法："+cmd+"；翻页："+cmd+" 页码。", nil, 1)
 	}
 	pages := paginateCommand(body)
 	if len(pages) == 0 {
 		return s.send(ctx, c, j, "暂无内容。", nil, 1)
 	}
 	if page > len(pages) {
-		return s.send(ctx, c, j, fmt.Sprintf("共 %d 页，请发送 /%s 页码。", len(pages), cmd), nil, 1)
+		return s.send(ctx, c, j, fmt.Sprintf("共 %d 页，请发送 %s 页码。", len(pages), cmd), nil, 1)
 	}
 	text := pages[page-1]
 	var keyboard *messageKeyboard
@@ -71,11 +71,11 @@ func (s *Service) sendCommandPage(ctx context.Context, c Config, j Job, cmd, bod
 			if dest < page {
 				label = "上一页"
 			}
-			command := fmt.Sprintf("/%s %d", cmd, dest)
+			command := fmt.Sprintf("%s %d", cmd, dest)
 			row.Buttons = append(row.Buttons, helpCommandButton(label, command, command))
 		}
 		keyboard = &messageKeyboard{Content: keyboardContent{Rows: []keyboardRow{row}}}
-		text += fmt.Sprintf("\n\n第 %d/%d 页\n翻页：/%s 页码", page, len(pages), cmd)
+		text += fmt.Sprintf("\n\n第 %d/%d 页\n翻页：%s 页码", page, len(pages), cmd)
 	}
 	return s.sendFormattedWithKeyboard(ctx, c, j, normalizeReplyLineBreaks(text), nil, 1, keyboard)
 }

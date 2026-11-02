@@ -7,8 +7,10 @@ import (
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ExecutionLeaseOwner string `json:"-"`
+	ExecutionLeaseScope string `json:"-"`
+	ID                  int64  `json:"id"`
+	Name                string `json:"name"`
 	// SortOrder orders strategies; GroupIDs orders groups within a strategy.
 	// A round snapshots the union of these groups once, deduplicated by account.
 	GroupIDs           []int64                       `json:"group_ids"`
@@ -38,16 +40,18 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
-	AllPassProgress  *ScheduledTestAllPassProgress `json:"all_pass_progress,omitempty"`
-	PassRate         *ScheduledTestPassRateSummary `json:"pass_rate,omitempty"`
-	ExecutionInfo    *ScheduledTestExecutionInfo   `json:"execution_info,omitempty"`
-	RunID            string                        `json:"-"`
-	ID               int64                         `json:"id"`
-	PlanID           int64                         `json:"plan_id"`
-	TestDefinitionID *int64                        `json:"test_definition_id,omitempty"`
-	PlanName         string                        `json:"plan_name"`
-	TestName         string                        `json:"test_name"`
-	TestKey          string                        `json:"test_key,omitempty"`
+	ExecutionLeaseOwner string                        `json:"-"`
+	ExecutionLeaseScope string                        `json:"-"`
+	AllPassProgress     *ScheduledTestAllPassProgress `json:"all_pass_progress,omitempty"`
+	PassRate            *ScheduledTestPassRateSummary `json:"pass_rate,omitempty"`
+	ExecutionInfo       *ScheduledTestExecutionInfo   `json:"execution_info,omitempty"`
+	RunID               string                        `json:"-"`
+	ID                  int64                         `json:"id"`
+	PlanID              int64                         `json:"plan_id"`
+	TestDefinitionID    *int64                        `json:"test_definition_id,omitempty"`
+	PlanName            string                        `json:"plan_name"`
+	TestName            string                        `json:"test_name"`
+	TestKey             string                        `json:"test_key,omitempty"`
 	// QualityVerdict is the saved check verdict, without private action details.
 	QualityVerdict string `json:"quality_verdict,omitempty"`
 	TestOrder      int    `json:"test_order"`
@@ -66,7 +70,6 @@ type ScheduledTestResult struct {
 	OutputKind           string                           `json:"output_kind"`
 	OutputHTML           string                           `json:"output_html,omitempty"`
 	OutputNumeric        *float64                         `json:"output_numeric,omitempty"`
-	OutputStatistics     *ScheduledTestStatistics         `json:"output_statistics,omitempty"`
 	OutputModelCheck     *ScheduledTestModelCheck         `json:"output_model_check,omitempty"`
 	ProtectionDecision   *ScheduledTestProtectionDecision `json:"protection_decision,omitempty"`
 	UpstreamModel        string                           `json:"-"`
@@ -109,32 +112,6 @@ type ScheduledTestRunRepository interface {
 
 type ScheduledTestDecisionRepository interface {
 	RecordDecision(context.Context, *ScheduledTestResult, ScheduledTestProtectionDecision) error
-}
-
-// ScheduledTestStatistics decodes retained historical results only. It is no
-// longer collected, scheduled, or accepted as a protection rule.
-type ScheduledTestStatistics struct {
-	WindowStart       time.Time                    `json:"window_start"`
-	WindowEnd         time.Time                    `json:"window_end"`
-	TotalRequests     int64                        `json:"total_requests"`
-	SuccessRequests   int64                        `json:"success_requests"`
-	FailedRequests    int64                        `json:"failed_requests"`
-	SuccessRate       *float64                     `json:"success_rate"`
-	CacheRate         *float64                     `json:"cache_rate"`
-	AvgFirstTokenMs   *float64                     `json:"avg_first_token_ms"`
-	FirstTokenSamples int64                        `json:"first_token_samples"`
-	OutputTPS         *float64                     `json:"output_tps"`
-	TPSSamples        int64                        `json:"tps_samples"`
-	CacheReadTokens   int64                        `json:"cache_read_tokens"`
-	CacheInputTokens  int64                        `json:"cache_input_tokens"`
-	CacheSamples      int64                        `json:"cache_samples"`
-	RecentRequests    []ScheduledTestRecentRequest `json:"recent_requests"`
-}
-
-// ScheduledTestRecentRequest deliberately contains no request or account details.
-type ScheduledTestRecentRequest struct {
-	Success   bool      `json:"success"`
-	CreatedAt time.Time `json:"created_at"`
 }
 
 type ScheduledTestResultHistory struct {

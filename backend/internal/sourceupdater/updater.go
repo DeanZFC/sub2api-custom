@@ -109,6 +109,7 @@ type Job struct {
 	FinishedAt     string `json:"finished_at,omitempty"`
 	PreviousImage  string `json:"previous_image,omitempty"`
 	TargetImage    string `json:"target_image,omitempty"`
+	TargetImageID  string `json:"target_image_id,omitempty"`
 }
 
 type Runner interface {
@@ -182,10 +183,7 @@ func NewWithRunner(cfg Config, runner Runner) (*Updater, error) {
 		}
 	}
 	if interrupted != nil {
-		go func(job Job) {
-			err := u.rollbackImage(job.JobID, job.PreviousImage, errors.New("updater restarted during deployment"))
-			u.finish(job.JobID, "failed", "failed", "update interrupted", sanitizeError(err))
-		}(*interrupted)
+		go u.recoverInterrupted(*interrupted)
 	}
 	return u, nil
 }
@@ -297,10 +295,15 @@ func (u *Updater) run(jobID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
 	if err := u.workflow(ctx, jobID); err != nil {
-		u.finish(jobID, "failed", "failed", "update failed", sanitizeError(err))
+		var persistenceErr *statePersistenceError
+		if !errors.As(err, &persistenceErr) {
+			_ = u.finishDurably(ctx, jobID, "failed", "failed", "update failed", sanitizeError(err))
+		}
 		return
 	}
-	u.finish(jobID, "succeeded", "completed", "update completed", "")
+	if err := u.finishDurably(ctx, jobID, "succeeded", "completed", "update completed", ""); err != nil {
+		return
+	}
 	u.mu.RLock()
 	hook := u.onSuccessfulUpdate
 	u.mu.RUnlock()
@@ -310,7 +313,9 @@ func (u *Updater) run(jobID string) {
 }
 
 func (u *Updater) workflow(ctx context.Context, jobID string) error {
-	u.update(jobID, "running", "validating", "validating deployment")
+	if err := u.update(jobID, "running", "validating", "validating deployment"); err != nil {
+		return err
+	}
 	oldTarget, err := u.currentAppTarget(ctx)
 	if err != nil {
 		return err
@@ -322,7 +327,9 @@ func (u *Updater) workflow(ctx context.Context, jobID string) error {
 	u.mu.RLock()
 	version := u.jobs[jobID].TargetVersion
 	u.mu.RUnlock()
-	u.update(jobID, "running", "resolving", "verifying published release manifest")
+	if err := u.update(jobID, "running", "resolving", "verifying published release manifest"); err != nil {
+		return err
+	}
 	resolve := u.cfg.ResolveManifest
 	if resolve == nil {
 		resolve = updatepolicy.Fetch
@@ -344,8 +351,12 @@ func (u *Updater) workflow(ctx context.Context, jobID string) error {
 	if !ok {
 		return errors.New("release does not support host architecture")
 	}
-	u.mutate(jobID, func(job *Job) { job.PreviousImage = oldImage; job.TargetImage = image })
-	u.update(jobID, "running", "pulling", "pulling immutable release image")
+	if err := u.mutate(jobID, func(job *Job) { job.PreviousImage = oldImage; job.TargetImage = image }); err != nil {
+		return err
+	}
+	if err := u.update(jobID, "running", "pulling", "pulling immutable release image"); err != nil {
+		return err
+	}
 	if _, err = u.runOutput(ctx, "docker", "pull", image); err != nil {
 		return fmt.Errorf("image pull failed: %w", err)
 	}
@@ -357,17 +368,16 @@ func (u *Updater) workflow(ctx context.Context, jobID string) error {
 	if len(fields) != 3 || !strings.HasPrefix(fields[0], "sha256:") || strings.TrimPrefix(fields[1], "v") != strings.TrimPrefix(manifest.Version, "v") || fields[2] != manifest.Revision {
 		return errors.New("pulled image does not match release version and revision")
 	}
+	if err := u.mutate(jobID, func(job *Job) { job.TargetImageID = fields[0] }); err != nil {
+		return err
+	}
 	staged, err := u.stageUpdater(ctx, jobID, image)
 	if err != nil {
 		return fmt.Errorf("extract release updater: %w", err)
 	}
 	defer func() { _ = os.Remove(staged) }()
-	// Persist the rollback image before changing any deployment configuration.
-	if err = u.persistCurrentJob(jobID); err != nil {
-		return err
-	}
-	u.update(jobID, "running", "deploying", "recreating application container")
-	if err = u.persistCurrentJob(jobID); err != nil {
+	// update durably records the rollback image and deploy checkpoint.
+	if err := u.update(jobID, "running", "deploying", "recreating application container"); err != nil {
 		return err
 	}
 	if err = u.writeOverlay(image); err != nil {
@@ -376,7 +386,9 @@ func (u *Updater) workflow(ctx context.Context, jobID string) error {
 	if err = u.recreate(ctx); err != nil {
 		return u.rollbackImage(jobID, oldImage, fmt.Errorf("container recreation failed: %w", err))
 	}
-	u.update(jobID, "running", "health_check", "checking release image and application health")
+	if err := u.update(jobID, "running", "health_check", "checking release image and application health"); err != nil {
+		return err
+	}
 	if err = u.waitHealthy(ctx, fields[0]); err != nil {
 		return u.rollbackImage(jobID, oldImage, err)
 	}
@@ -389,7 +401,10 @@ func (u *Updater) workflow(ctx context.Context, jobID string) error {
 func (u *Updater) persistCurrentJob(id string) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return u.persistLocked(u.jobs[id])
+	if err := u.persistLocked(u.jobs[id]); err != nil {
+		return u.persistenceFailureLocked(id, err)
+	}
+	return nil
 }
 func (u *Updater) overlayPath() string {
 	return filepath.Join(u.cfg.RepoDir, "deploy", "docker-compose.updater.json")
@@ -424,7 +439,9 @@ func (u *Updater) recreate(ctx context.Context) error {
 func (u *Updater) rollbackImage(jobID, oldImage string, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	u.update(jobID, "running", "rolling_back", "restoring previous application image")
+	if err := u.update(jobID, "running", "rolling_back", "restoring previous application image"); err != nil {
+		return err
+	}
 	err := u.writeOverlay(oldImage)
 	if err == nil {
 		err = u.recreate(ctx)
@@ -571,37 +588,43 @@ func (u *Updater) runOutput(ctx context.Context, name string, args ...string) (s
 	return output, nil
 }
 
-func (u *Updater) update(jobID, status, stage, message string) {
-	u.mutate(jobID, func(job *Job) {
+func (u *Updater) update(jobID, status, stage, message string) error {
+	return u.mutate(jobID, func(job *Job) {
 		job.Status = status
 		job.Stage = stage
 		job.Message = message
 	})
 }
 
-func (u *Updater) finish(jobID, status, stage, message, errorMessage string) {
+func (u *Updater) finish(jobID, status, stage, message, errorMessage string) error {
 	u.mu.Lock()
+	defer u.mu.Unlock()
 	job := u.jobs[jobID]
 	job.Status = status
 	job.Stage = stage
 	job.Message = message
 	job.Error = errorMessage
 	job.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := u.persistLocked(job); err != nil {
+		return u.persistenceFailureLocked(jobID, err)
+	}
 	u.jobs[jobID] = job
 	if u.activeID == jobID {
 		u.activeID = ""
 	}
-	_ = u.persistLocked(job)
-	u.mu.Unlock()
+	return nil
 }
 
-func (u *Updater) mutate(jobID string, fn func(*Job)) {
+func (u *Updater) mutate(jobID string, fn func(*Job)) error {
 	u.mu.Lock()
+	defer u.mu.Unlock()
 	job := u.jobs[jobID]
 	fn(&job)
+	if err := u.persistLocked(job); err != nil {
+		return u.persistenceFailureLocked(jobID, err)
+	}
 	u.jobs[jobID] = job
-	_ = u.persistLocked(job)
-	u.mu.Unlock()
+	return nil
 }
 
 func (u *Updater) persistLocked(job Job) error {
@@ -631,7 +654,15 @@ func (u *Updater) persistLocked(job Job) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tempPath, path)
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	dir, err := os.Open(u.cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	return dir.Sync()
 }
 
 func (u *Updater) loadJobs() error {
@@ -669,7 +700,9 @@ func (u *Updater) loadJobs() error {
 	}
 	for _, job := range jobs {
 		u.jobs[job.JobID] = job
-		_ = u.persistLocked(job)
+		if err := u.persistLocked(job); err != nil {
+			return fmt.Errorf("persist recovered updater state: %w", err)
+		}
 	}
 	return nil
 }

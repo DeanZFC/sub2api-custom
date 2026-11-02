@@ -28,10 +28,10 @@ func TestCustomCommandValidation(t *testing.T) {
 		{name: "built in", commands: []CustomCommand{{Command: "/签到", Reply: "覆盖"}}, wantError: "内置指令"},
 		{name: "built in alias", commands: []CustomCommand{{Command: "/画图", Reply: "覆盖"}}, wantError: "内置指令"},
 		{name: "help alias", commands: []CustomCommand{{Command: "/help", Reply: "覆盖"}}, wantError: "内置指令"},
-		{name: "missing slash", commands: []CustomCommand{{Command: "a", Reply: "好"}}, wantError: "以 / 开头"},
-		{name: "arguments", commands: []CustomCommand{{Command: "/a 参数", Reply: "好"}}, wantError: "以 / 开头"},
-		{name: "mention markup", commands: []CustomCommand{{Command: "/<@bot>", Reply: "好"}}, wantError: "以 / 开头"},
-		{name: "long name", commands: []CustomCommand{{Command: "/" + strings.Repeat("字", 33), Reply: "好"}}, wantError: "以 / 开头"},
+		{name: "unnormalized", commands: []CustomCommand{{Command: "a", Reply: "好"}}, wantError: "名称须为"},
+		{name: "arguments", commands: []CustomCommand{{Command: "/a 参数", Reply: "好"}}, wantError: "名称须为"},
+		{name: "mention markup", commands: []CustomCommand{{Command: "/<@bot>", Reply: "好"}}, wantError: "名称须为"},
+		{name: "long name", commands: []CustomCommand{{Command: "/" + strings.Repeat("字", 33), Reply: "好"}}, wantError: "名称须为"},
 		{name: "blank reply", commands: []CustomCommand{{Command: "/a", Reply: " \n\t"}}, wantError: "回复内容"},
 		{name: "long reply", commands: []CustomCommand{{Command: "/a", Reply: strings.Repeat("字", 2001)}}, wantError: "回复内容"},
 		{name: "too many", commands: make([]CustomCommand, 21), wantError: "最多 20 条"},
@@ -93,11 +93,14 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 		{name: "prefix mismatch", eventType: groupMessageCreate, content: "/abc"},
 		{name: "arguments mismatch", eventType: groupMessageCreate, content: "/a 参数"},
 		{name: "case mismatch", eventType: groupMessageCreate, content: "/A"},
-		{name: "missing slash", eventType: groupMessageCreate, content: "a"},
+		{name: "plain command", eventType: groupMessageCreate, content: "a", wantReply: "<qqbot-at-user id=\"member\" />\n第一行\n第二行"},
+		{name: "plain mention", eventType: groupAtMessageCreate, content: "<@this-bot> a", wantReply: "第一行\n第二行"},
+		{name: "plain full stream mention", eventType: groupMessageCreate, content: "a", mentions: []Mention{{ID: "this-bot"}}, wantReply: "<qqbot-at-user id=\"member\" />\n第一行\n第二行"},
+		{name: "plain other mention", eventType: groupMessageCreate, content: "<@other> a"},
 		{name: "disabled", eventType: groupMessageCreate, content: "/停用"},
 		{name: "other mention", eventType: groupMessageCreate, content: "/a", mentions: []Mention{{ID: "another-bot"}}},
 		{name: "other inline mention", eventType: groupMessageCreate, content: "<@other> /a"},
-		{name: "disabled mentioned", eventType: groupAtMessageCreate, content: "/停用", wantReply: "未知指令，请发送 /帮助。"},
+		{name: "disabled mentioned", eventType: groupAtMessageCreate, content: "/停用", wantReply: "未知指令，请发送 帮助。"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e := Event{Content: tt.content, GroupID: "group", Mentions: tt.mentions}
@@ -138,7 +141,7 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 	before = len(replies)
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := strings.Join(replies[before:], "")
-	require.Contains(t, help, "/a")
-	require.Contains(t, help, "/长回复")
-	require.NotContains(t, help, "/停用")
+	require.Contains(t, help, "a：自定义回复")
+	require.Contains(t, help, "长回复：自定义回复")
+	require.NotContains(t, help, "停用：自定义回复")
 }

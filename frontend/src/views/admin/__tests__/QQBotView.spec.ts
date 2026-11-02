@@ -8,7 +8,7 @@ import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { configSections, pickSection, cloneConfig } from '@/components/admin/qqbot/configSections'
 import { defaultModerationConfig, type QQBotConfig, type QQMemberOption } from '@/api/qqbot'
-const api = vi.hoisted(() => ({ config: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn(), chatPreview: vi.fn() }))
+const api = vi.hoisted(() => ({ config: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), groupInfo: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn(), chatPreview: vi.fn() }))
 vi.mock('@/api/qqbot', async original => ({ ...await original<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 const wrappers: VueWrapper[] = []
@@ -37,6 +37,7 @@ describe('QQ module settings', () => {
   server = { enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, sandbox: false, allowed_groups: ['group', 'other-group'], group_policies: [], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_base_url: '', image_api_key: '', image_api_key_set: false, image_model: '', image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_messages: 12, daily_chat_limit: 30, daily_image_limit: 2, total_daily_chat_limit: 500, total_daily_image_limit: 20, cooldown_seconds: 5, checkin_reward: 0, invite_reward: 0, invite_daily_limit: 10, custom_commands: [], section_versions: Object.fromEntries(Object.keys(configSections).map(key => [key, `${key}-1`])) }
   api.config.mockImplementation(async () => cloneConfig(server))
   api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
+  api.groupInfo.mockImplementation(async (appID: string, groupID: string) => ({ app_id: appID, sandbox: server.sandbox, group_id: groupID, name: '', status: 'unavailable' }))
   api.members.mockImplementation(async (params: { group_id?: string; member_id?: string; search?: string }) => {
    const items = memberOptions.filter(member => (!params.group_id || member.group_id === params.group_id) && (!params.member_id || member.member_id === params.member_id) && (!params.search || [member.nickname, member.email, member.message_preview].join(' ').toLowerCase().includes(params.search.toLowerCase())))
    return { app_id: 'app', items, total: items.length, page: 1, page_size: 20 }
@@ -45,6 +46,49 @@ describe('QQ module settings', () => {
   api.saveSection.mockImplementation(async (section: keyof typeof configSections, _version: string, draft: QQBotConfig) => { Object.assign(server, pickSection(draft, section)); server.section_versions![section] += '-next'; return cloneConfig(server) })
  })
  afterEach(() => { wrappers.splice(0).forEach(w => w.unmount()); try { expect(console.error).not.toHaveBeenCalled() } finally { vi.restoreAllMocks() } })
+ it.each(['zh', 'en'] as const)('%s shows official group names with IDs and searches names without changing policies', async locale => {
+  api.groupInfo.mockImplementation(async (appID: string, groupID: string) => ({ app_id: appID, sandbox: false, group_id: groupID, name: groupID === 'group' ? '技术交流群' : '客户服务群', status: 'available' }))
+  api.runtime.mockResolvedValue({ groups: [{ id: 'discovered', last_event: '', last_seen_at: '' }], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
+  const w = await mountView(locale, '/admin/qqbot/groups')
+  const panel = w.get('#qqbot-settings-panel-groups')
+  const card = panel.findAll('article')[0]!
+  expect(card.text()).toContain('技术交流群')
+  expect(card.get('code').text()).toBe('group')
+  expect((card.get('input[maxlength="60"]').element as HTMLInputElement).value).toBe('')
+  expect(panel.text()).toContain('客户服务群')
+  expect(w.get('#qqbot-settings-tab-groups').text()).not.toContain('•')
+  const picker = panel.find('fieldset')
+  await picker.get('input.input').setValue('技术')
+  expect(picker.findAll('input[type="checkbox"]')).toHaveLength(1)
+  expect(picker.get('code').text()).toBe('group')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.group_policies).toEqual([])
+ })
+ it('uses the saved nickname before the official name and saves only the manual label', async () => {
+  server.group_policies = [{ group_id: 'group', label: 'VIP 客户群', disable_chat: false, disable_images: false, disable_activities: false, disable_notifications: false, chat_daily_limit: null, image_daily_limit: null }]
+  api.groupInfo.mockImplementation(async (appID: string, groupID: string) => ({ app_id: appID, sandbox: false, group_id: groupID, name: '官方群名称', status: 'available' }))
+  const w = await mountView('zh', '/admin/qqbot/groups')
+  const panel = w.get('#qqbot-settings-panel-groups')
+  const card = panel.findAll('article')[0]!
+  expect(card.get('p').text()).toBe('VIP 客户群')
+  const picker = panel.find('fieldset')
+  await picker.get('input.input').setValue('官方群名称')
+  expect(picker.text()).toContain('VIP 客户群')
+  await card.get('input[maxlength="60"]').setValue('更新的昵称')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.group_policies?.[0]?.label).toBe('更新的昵称')
+  expect(server.group_policies).toHaveLength(1)
+ })
+ it('explains missing QQ permissions while allowing manual nicknames', async () => {
+  api.groupInfo.mockImplementation(async (appID: string, groupID: string) => ({ app_id: appID, sandbox: false, group_id: groupID, name: '', status: 'permission_required' }))
+  const w = await mountView('zh', '/admin/qqbot/groups')
+  const panel = w.get('#qqbot-settings-panel-groups')
+  expect(panel.text()).toContain('QQ 尚未授予')
+  expect(api.groupInfo).toHaveBeenCalledTimes(1)
+  await panel.findAll('article')[0]!.get('input[maxlength="60"]').setValue('手填群昵称')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.group_policies?.[0]?.label).toBe('手填群昵称')
+ })
  it.each(['zh', 'en'] as const)('%s groups navigation and saves only the selected module', async locale => {
   const w = await mountView(locale)
   expect(w.findAll('[role="tab"]')).toHaveLength(3)
@@ -117,12 +161,13 @@ describe('QQ module settings', () => {
  it('saves custom replies and preserves drafts on validation failure', async () => {
   const w = await mountView(); await category(w, '对话与指令'); await w.get('#qqbot-settings-tab-commands').trigger('click')
   const panel = w.get('#qqbot-settings-panel-commands'); await panel.findAll('button')[0]!.trigger('click')
-  await panel.get('input[placeholder="/a"]').setValue('/签到'); await panel.get('textarea').setValue('固定回复')
+  await panel.get('input[placeholder="a"]').setValue('签到'); await panel.get('textarea').setValue('固定回复')
   api.saveSection.mockRejectedValueOnce(new Error('与内置指令重名'))
   await w.get('form').trigger('submit'); await flushPromises()
   expect(w.get('[role="alert"]').text()).toContain('重名')
-  await panel.get('input[placeholder="/a"]').setValue('/faq'); await w.get('form').trigger('submit'); await flushPromises()
+  await panel.get('input[placeholder="a"]').setValue('faq'); await w.get('form').trigger('submit'); await flushPromises()
   expect(server.custom_commands).toEqual([{ command: '/faq', reply: '固定回复', enabled: true }])
+  expect((panel.get('input[placeholder="a"]').element as HTMLInputElement).value).toBe('faq')
  })
  it.each(['zh', 'en'] as const)('%s supports missing legacy knowledge and saves it independently of chat drafts', async locale => {
   const w = await mountView(locale)

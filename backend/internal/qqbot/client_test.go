@@ -256,7 +256,7 @@ func TestConfigAndCommandBoundaries(t *testing.T) {
 	require.NotContains(t, strings.Join([]string{p.APIKey, p.AppSecret}, ""), "secret")
 }
 
-func TestCommandRequiresSlashPrefix(t *testing.T) {
+func TestCommandAcceptsKnownNamesAndSlashCompatibility(t *testing.T) {
 	for _, tt := range []struct {
 		content string
 		name    string
@@ -267,13 +267,25 @@ func TestCommandRequiresSlashPrefix(t *testing.T) {
 		{content: "<@!123>/生图 一只猫 在月球上", name: "生图", arg: "一只猫 在月球上"},
 		{content: "<@123> /绑定\talice@example.com  ", name: "绑定", arg: "alice@example.com"},
 		{content: "/绑定\nbinding-code", name: "绑定", arg: "binding-code"},
-		{content: "<@123> 签到"},
-		{content: "生图 一只猫"},
+		{content: "<@123> 签到", name: "签到"},
+		{content: "生图 一只猫", name: "生图", arg: "一只猫"},
+		{content: "帮助", name: "帮助"},
+		{content: "绑定\nbinding-code", name: "绑定", arg: "binding-code"},
+		{content: "转账 1.25 alice@example.com", name: "转账", arg: "1.25 alice@example.com"},
+		{content: "<@123> faq", name: "faq"},
+		{content: "<@123> 停用", name: "停用"},
+		{content: "faq 参数", name: "faq", arg: "参数"},
+		{content: "/未知 参数", name: "未知", arg: "参数"},
+		{content: "未知 参数"},
+		{content: "签到功能怎么用"},
+		{content: "我的 余额"},
+		{content: "我的 代码报错了"},
+		{content: "help me"},
 		{content: "帮我解释 /签到 的作用"},
 		{content: "<@123> "},
 	} {
 		t.Run(tt.content, func(t *testing.T) {
-			name, arg := command(tt.content)
+			name, arg := command(tt.content, CustomCommand{Command: "/faq", Enabled: true}, CustomCommand{Command: "/停用"})
 			require.Equal(t, tt.name, name)
 			require.Equal(t, tt.arg, arg)
 		})
@@ -307,14 +319,14 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 		j := Job{GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, Event{Content: content}))
 		require.Len(t, replies, i+1)
-		require.Contains(t, replies[i], "/帮助")
+		require.Contains(t, replies[i], "帮助")
 	}
 	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
 	before := len(replies)
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := strings.Join(replies[before:], "\n")
-	require.Contains(t, help, "/我的余额")
-	require.Contains(t, help, "/成长任务")
+	require.Contains(t, help, "我的余额")
+	require.Contains(t, help, "成长任务")
 	for _, removed := range []string{"/查看结果", "/新对话", "/清空"} {
 		require.NotContains(t, help, removed)
 	}
