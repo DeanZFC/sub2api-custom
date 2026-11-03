@@ -2125,7 +2125,7 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.BindGroups(ctx, accountID, groupIDs)
 	}
-	if adminaccess.FromContext(ctx) != nil {
+	if adminaccess.RestrictedFromContext(ctx) != nil {
 		if dbent.TxFromContext(ctx) == nil {
 			return errors.New("scoped membership writing requires a transaction")
 		}
