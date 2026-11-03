@@ -385,7 +385,7 @@ type GrokVideoPendingBilling struct {
 	OriginalModel        string `json:"original_model,omitempty"`
 	// CreatedAt is when the gateway accepted the async create (RFC3339Nano UTC).
 	// duration_ms for deferred billing is measured from this instant until the
-	// first official done+video.url observation (status poll or content download),
+	// first successful video.url observation (status poll or content download),
 	// not the latency of that single discovery request alone.
 	CreatedAt string `json:"created_at,omitempty"`
 }
@@ -556,24 +556,26 @@ func StableGrokVideoBillingRequestID(taskRequestID string) string {
 // Request may include resolution ("480p"|"720p"|"1080p"); completed status does not
 // document a resolution field — bill resolution from the create-time request snapshot.
 
-// IsGrokVideoStatusBillable matches official success: status == "done" AND non-empty video.url.
-// pending / expired / failed, or done without a video URL, are not billable.
+// IsGrokVideoStatusBillable matches successful async video states (done or
+// completed) when the response includes a non-empty video.url.
+// pending / expired / failed, or a success state without a video URL, are not billable.
 func IsGrokVideoStatusBillable(statusBody []byte) bool {
 	if len(statusBody) == 0 || !gjson.ValidBytes(statusBody) {
 		return false
 	}
-	if !isOfficialGrokVideoStatusDone(statusBody) {
+	if !isGrokVideoStatusSuccessful(statusBody) {
 		return false
 	}
 	return strings.TrimSpace(gjson.GetBytes(statusBody, "video.url").String()) != ""
 }
 
-func isOfficialGrokVideoStatusDone(statusBody []byte) bool {
-	// Official enum: pending | done | expired | failed.
-	return strings.EqualFold(strings.TrimSpace(gjson.GetBytes(statusBody, "status").String()), "done")
+func isGrokVideoStatusSuccessful(statusBody []byte) bool {
+	// Upstream integrations may report successful generation as either done or completed.
+	status := strings.TrimSpace(gjson.GetBytes(statusBody, "status").String())
+	return strings.EqualFold(status, "done") || strings.EqualFold(status, "completed")
 }
 
-// ExtractGrokVideoBillingFromStatusBody builds usage units from an official done status.
+// ExtractGrokVideoBillingFromStatusBody builds usage units from a successful video status.
 // Field priority (official docs):
 //   - duration: video.duration (seconds)
 //   - model: top-level model
@@ -912,7 +914,7 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 		return nil, err
 	}
 	// Content download is an alternate completion observation: when status body is
-	// official done+video.url, attach billable units so the handler can claim once
+	// successful and contains video.url, attach billable units so the handler can claim once
 	// (same path as status polling). Pending snapshot is merged in the handler.
 	result := &OpenAIForwardResult{
 		RequestID:       contentRequestID,

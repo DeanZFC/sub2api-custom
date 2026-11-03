@@ -592,6 +592,8 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        CodexTicketSettings: true,
+        ExcelBPSImageSettings: true,
         OpenAIVMSettings: { template: '<section data-testid="openai-vm-settings-stub"><form data-testid="vm-settings-form"><button type="submit">Save Bridge</button></form></section>' },
       },
     },
@@ -1491,6 +1493,8 @@ describe("admin SettingsView payment visible method controls", () => {
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
+        CodexTicketSettings: true,
+        ExcelBPSImageSettings: true,
         },
       },
     });
@@ -1907,6 +1911,8 @@ describe("admin SettingsView payment visible method controls", () => {
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
+        CodexTicketSettings: true,
+        ExcelBPSImageSettings: true,
         },
       },
     });

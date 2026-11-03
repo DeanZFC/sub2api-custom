@@ -69,5 +69,5 @@ func TestGatewayRoutesRequestModelFieldsMountedBeforeAllowlist(t *testing.T) {
 		pattern := regexp.QuoteMeta(chain+".Use(requestModelFields)") + `\s+` + regexp.QuoteMeta(chain+".Use(groupModelAllowlist)")
 		require.Regexp(t, regexp.MustCompile(pattern), string(source), chain)
 	}
-	require.Contains(t, string(source), "gin.HandlerFunc(apiKeyAuth), requestModelFields, groupModelAllowlist, compositeTarget")
+	require.Contains(t, string(source), "gin.HandlerFunc(apiKeyAuth), imageAdmission, requestModelFields, groupModelAllowlist, compositeTarget")
 }

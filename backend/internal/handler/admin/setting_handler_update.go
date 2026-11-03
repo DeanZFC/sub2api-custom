@@ -22,6 +22,27 @@ import (
 
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
+	OpenAICodexTicketHarvestScope        *service.CodexTicketHarvestScope `json:"openai_codex_ticket_harvest_scope"`
+	OpenAICodexTicketStrictResponse      *bool                            `json:"openai_codex_ticket_strict_response"`
+	OpenAICodexTicketFailClosed          *bool                            `json:"openai_codex_ticket_fail_closed"`
+	OpenAICodexTicketStrategy            *string                          `json:"openai_codex_ticket_strategy"`
+	OpenAICodexTicketEnabled             *bool                            `json:"openai_codex_ticket_enabled"`
+	OpenAICodexTicketHarvestProxyURL     string                           `json:"openai_codex_ticket_harvest_proxy_url"`
+	OpenAICodexTicketUseSavedStaticProxy bool                             `json:"openai_codex_ticket_use_saved_static_proxy"`
+	OpenAICodexTicketModels              *[]string                        `json:"openai_codex_ticket_models"`
+	ExcelBPSImageMode                    *string                          `json:"excel_bps_image_mode"`
+	ExcelBPSImageRelayEnabled            *bool                            `json:"excel_bps_image_relay_enabled"`
+	ExcelBPSImageBaseURL                 *string                          `json:"excel_bps_image_base_url"`
+	ExcelBPSImageBodyLimitMiB            *int                             `json:"excel_bps_image_body_limit_mib"`
+	ExcelBPSImageBudgetMiB               *int                             `json:"excel_bps_image_budget_mib"`
+	ExcelBPSImageMaxRequests             *int                             `json:"excel_bps_image_max_requests"`
+	ExcelBPSImageMaxImageMiB             *int                             `json:"excel_bps_image_max_image_mib"`
+	ExcelBPSImageMaxImages               *int                             `json:"excel_bps_image_max_images"`
+	ExcelBPSImageMaxTotalMiB             *int                             `json:"excel_bps_image_max_total_mib"`
+	ExcelBPSImageStorageMiB              *int                             `json:"excel_bps_image_storage_mib"`
+	ExcelBPSImageStorageEntries          *int                             `json:"excel_bps_image_storage_entries"`
+	ExcelBPSImageTTLMinutes              *int                             `json:"excel_bps_image_ttl_minutes"`
+
 	// 注册设置
 	RegistrationEnabled                 bool                         `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                         `json:"email_verify_enabled"`
@@ -503,6 +524,55 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	var req UpdateSettingsRequest
 	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if req.OpenAICodexTicketHarvestScope != nil && strings.TrimSpace(req.OpenAICodexTicketHarvestScope.Mode) == "" {
+		response.BadRequest(c, "harvest scope mode is required")
+		return
+	}
+
+	if req.ExcelBPSImageBodyLimitMiB != nil && (*req.ExcelBPSImageBodyLimitMiB < 1 || *req.ExcelBPSImageBodyLimitMiB > 128) {
+		response.BadRequest(c, "Invalid BPS image BodyLimitMiB")
+		return
+	}
+
+	if req.ExcelBPSImageBudgetMiB != nil && (*req.ExcelBPSImageBudgetMiB < 512 || *req.ExcelBPSImageBudgetMiB > 2048) {
+		response.BadRequest(c, "Invalid BPS image BudgetMiB")
+		return
+	}
+
+	if req.ExcelBPSImageMaxRequests != nil && (*req.ExcelBPSImageMaxRequests < 1 || *req.ExcelBPSImageMaxRequests > 512) {
+		response.BadRequest(c, "Invalid BPS image MaxRequests")
+		return
+	}
+
+	if req.ExcelBPSImageMaxImageMiB != nil && (*req.ExcelBPSImageMaxImageMiB < 1 || *req.ExcelBPSImageMaxImageMiB > 128) {
+		response.BadRequest(c, "Invalid BPS image MaxImageMiB")
+		return
+	}
+
+	if req.ExcelBPSImageMaxImages != nil && (*req.ExcelBPSImageMaxImages < 1 || *req.ExcelBPSImageMaxImages > 4096) {
+		response.BadRequest(c, "Invalid BPS image MaxImages")
+		return
+	}
+
+	if req.ExcelBPSImageMaxTotalMiB != nil && (*req.ExcelBPSImageMaxTotalMiB < 1 || *req.ExcelBPSImageMaxTotalMiB > 128) {
+		response.BadRequest(c, "Invalid BPS image MaxTotalMiB")
+		return
+	}
+
+	if req.ExcelBPSImageStorageMiB != nil && (*req.ExcelBPSImageStorageMiB < 1 || *req.ExcelBPSImageStorageMiB > 16384) {
+		response.BadRequest(c, "Invalid BPS image StorageMiB")
+		return
+	}
+
+	if req.ExcelBPSImageStorageEntries != nil && (*req.ExcelBPSImageStorageEntries < 1 || *req.ExcelBPSImageStorageEntries > 65536) {
+		response.BadRequest(c, "Invalid BPS image StorageEntries")
+		return
+	}
+
+	if req.ExcelBPSImageTTLMinutes != nil && (*req.ExcelBPSImageTTLMinutes < 1 || *req.ExcelBPSImageTTLMinutes > 1440) {
+		response.BadRequest(c, "Invalid BPS image TTLMinutes")
 		return
 	}
 	auditReq := settingsAuditRequest(req)
@@ -1539,6 +1609,131 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	settings := &service.SystemSettings{
+		ExcelBPSImageMode: func() string {
+			if req.ExcelBPSImageMode != nil {
+				return *req.ExcelBPSImageMode
+			}
+			return previousSettings.ExcelBPSImageMode
+		}(),
+		ExcelBPSImageRelayEnabled: func() bool {
+			if req.ExcelBPSImageRelayEnabled != nil {
+				return *req.ExcelBPSImageRelayEnabled
+			}
+			return previousSettings.ExcelBPSImageRelayEnabled
+		}(),
+		ExcelBPSImageBaseURL: func() string {
+			if req.ExcelBPSImageBaseURL != nil {
+				return *req.ExcelBPSImageBaseURL
+			}
+			return previousSettings.ExcelBPSImageBaseURL
+		}(),
+		ExcelBPSImageBodyLimitMiB: func() int {
+			if req.ExcelBPSImageBodyLimitMiB != nil {
+				return *req.ExcelBPSImageBodyLimitMiB
+			}
+			return previousSettings.ExcelBPSImageBodyLimitMiB
+		}(),
+		ExcelBPSImageBudgetMiB: func() int {
+			if req.ExcelBPSImageBudgetMiB != nil {
+				return *req.ExcelBPSImageBudgetMiB
+			}
+			return previousSettings.ExcelBPSImageBudgetMiB
+		}(),
+		ExcelBPSImageMaxImageMiB: func() int {
+			if req.ExcelBPSImageMaxImageMiB != nil {
+				return *req.ExcelBPSImageMaxImageMiB
+			}
+			return previousSettings.ExcelBPSImageMaxImageMiB
+		}(),
+		ExcelBPSImageMaxImages: func() int {
+			if req.ExcelBPSImageMaxImages != nil {
+				return *req.ExcelBPSImageMaxImages
+			}
+			return previousSettings.ExcelBPSImageMaxImages
+		}(),
+		ExcelBPSImageMaxTotalMiB: func() int {
+			if req.ExcelBPSImageMaxTotalMiB != nil {
+				return *req.ExcelBPSImageMaxTotalMiB
+			}
+			return previousSettings.ExcelBPSImageMaxTotalMiB
+		}(),
+		ExcelBPSImageStorageMiB: func() int {
+			if req.ExcelBPSImageStorageMiB != nil {
+				return *req.ExcelBPSImageStorageMiB
+			}
+			return previousSettings.ExcelBPSImageStorageMiB
+		}(),
+		ExcelBPSImageStorageEntries: func() int {
+			if req.ExcelBPSImageStorageEntries != nil {
+				return *req.ExcelBPSImageStorageEntries
+			}
+			return previousSettings.ExcelBPSImageStorageEntries
+		}(),
+		ExcelBPSImageTTLMinutes: func() int {
+			if req.ExcelBPSImageTTLMinutes != nil {
+				return *req.ExcelBPSImageTTLMinutes
+			}
+			return previousSettings.ExcelBPSImageTTLMinutes
+		}(),
+		ExcelBPSImageMaxRequests: func() int {
+			if req.ExcelBPSImageMaxRequests != nil {
+				return *req.ExcelBPSImageMaxRequests
+			}
+			return previousSettings.ExcelBPSImageMaxRequests
+		}(),
+		OpenAICodexTicketEnabled: func() bool {
+			if req.OpenAICodexTicketEnabled != nil {
+				return *req.OpenAICodexTicketEnabled
+			}
+			return previousSettings.OpenAICodexTicketEnabled
+		}(),
+		OpenAICodexTicketHarvestProxyURL: func() string {
+			next := strings.TrimSpace(req.OpenAICodexTicketHarvestProxyURL)
+			if req.OpenAICodexTicketUseSavedStaticProxy && service.IsMaskedProxyURL(next) && previousSettings.OpenAICodexTicketStaticProxyURL != "" {
+				return previousSettings.OpenAICodexTicketStaticProxyURL
+			}
+			if service.IsMaskedProxyURL(next) {
+				return previousSettings.OpenAICodexTicketHarvestProxyURL
+			}
+			return next
+		}(),
+		OpenAICodexTicketStaticProxyURL: func() string {
+			if old := previousSettings.OpenAICodexTicketHarvestProxyURL; old != "" && old != "http://127.0.0.1:3101" && old != service.OpenAICodexTicketHarvestIPPoolURL {
+				return old
+			}
+			return previousSettings.OpenAICodexTicketStaticProxyURL
+		}(),
+		OpenAICodexTicketStrictResponse: func() bool {
+			if req.OpenAICodexTicketStrictResponse != nil {
+				return *req.OpenAICodexTicketStrictResponse
+			}
+			return previousSettings.OpenAICodexTicketStrictResponse
+		}(),
+		OpenAICodexTicketFailClosed: func() bool {
+			if req.OpenAICodexTicketFailClosed != nil {
+				return *req.OpenAICodexTicketFailClosed
+			}
+			return previousSettings.OpenAICodexTicketFailClosed
+		}(),
+		OpenAICodexTicketHarvestScope: func() service.CodexTicketHarvestScope {
+			if req.OpenAICodexTicketHarvestScope != nil {
+				return *req.OpenAICodexTicketHarvestScope
+			}
+			return previousSettings.OpenAICodexTicketHarvestScope
+		}(),
+		OpenAICodexTicketStrategy: func() string {
+			if req.OpenAICodexTicketStrategy != nil {
+				return *req.OpenAICodexTicketStrategy
+			}
+			return previousSettings.OpenAICodexTicketStrategy
+		}(),
+		OpenAICodexTicketModels: func() []string {
+			if req.OpenAICodexTicketModels != nil {
+				return service.NormalizeOpenAICodexTicketModels(*req.OpenAICodexTicketModels)
+			}
+			return previousSettings.OpenAICodexTicketModels
+		}(),
+
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
@@ -2219,6 +2414,28 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		OpenAICodexTicketEnabled:                updatedSettings.OpenAICodexTicketEnabled,
+		OpenAICodexTicketHarvestProxyURL:        service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
+		OpenAICodexTicketStaticProxyURL:         service.MaskProxyURL(updatedSettings.OpenAICodexTicketStaticProxyURL),
+		OpenAICodexTicketHarvestScope:           updatedSettings.OpenAICodexTicketHarvestScope,
+		OpenAICodexTicketStrategy:               updatedSettings.OpenAICodexTicketStrategy,
+		OpenAICodexTicketStrictResponse:         updatedSettings.OpenAICodexTicketStrictResponse,
+		OpenAICodexTicketFailClosed:             updatedSettings.OpenAICodexTicketFailClosed,
+		OpenAICodexTicketHarvestProxyConfigured: strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
+		OpenAICodexTicketModels:                 updatedSettings.OpenAICodexTicketModels,
+		ExcelBPSImageMode:                       updatedSettings.ExcelBPSImageMode,
+		ExcelBPSImageRelayEnabled:               updatedSettings.ExcelBPSImageRelayEnabled,
+		ExcelBPSImageMaxImageMiB:                updatedSettings.ExcelBPSImageMaxImageMiB,
+		ExcelBPSImageMaxImages:                  updatedSettings.ExcelBPSImageMaxImages,
+		ExcelBPSImageMaxTotalMiB:                updatedSettings.ExcelBPSImageMaxTotalMiB,
+		ExcelBPSImageStorageMiB:                 updatedSettings.ExcelBPSImageStorageMiB,
+		ExcelBPSImageStorageEntries:             updatedSettings.ExcelBPSImageStorageEntries,
+		ExcelBPSImageTTLMinutes:                 updatedSettings.ExcelBPSImageTTLMinutes,
+		ExcelBPSImageBaseURL:                    updatedSettings.ExcelBPSImageBaseURL,
+		ExcelBPSImageBodyLimitMiB:               updatedSettings.ExcelBPSImageBodyLimitMiB,
+		ExcelBPSImageBudgetMiB:                  updatedSettings.ExcelBPSImageBudgetMiB,
+		ExcelBPSImageMaxRequests:                updatedSettings.ExcelBPSImageMaxRequests,
+
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,

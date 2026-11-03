@@ -3,7 +3,10 @@ package admin
 import (
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/mihomo"
+	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +21,7 @@ import (
 
 // SystemHandler handles system-related operations
 type SystemHandler struct {
+	kernel    *mihomo.Manager
 	updateSvc systemUpdateService
 	lockSvc   *service.SystemOperationLockService
 }
@@ -63,6 +67,7 @@ type sourceUpdateOperations interface {
 func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOperationLockService) *SystemHandler {
 	return &SystemHandler{
 		updateSvc: updateSvc,
+		kernel:    mihomo.New(filepath.Join(setup.GetDataDir(), "mihomo-codex")),
 		lockSvc:   lockSvc,
 	}
 }

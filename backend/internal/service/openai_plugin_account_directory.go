@@ -110,7 +110,7 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	}
 	clone := *account
 	clone.Credentials = nil
-	clone.Extra = StripRetiredAccountExtra(account.Extra)
+	clone.Extra = RedactOpenAICodexTicketExtra(StripRetiredAccountExtra(account.Extra))
 	clone.Proxies = nil
 	clone.Groups = nil
 	clone.AccountGroups = nil

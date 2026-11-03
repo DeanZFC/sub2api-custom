@@ -43,6 +43,8 @@
           </nav>
         </div>
 
+      <CodexTicketSettings v-if="activeTab === 'gateway'" />
+      <ExcelBPSImageSettings v-if="activeTab === 'features'" />
       <!-- Independently saved settings stay outside this form. -->
       <form v-show="activeTab !== 'openai-vm'" @submit.prevent="saveSettings" class="space-y-6" novalidate>
         <!-- Tab: Security — Admin API Key -->
@@ -9022,6 +9024,8 @@
 </template>
 
 <script setup lang="ts">
+import CodexTicketSettings from '@/components/admin/settings/CodexTicketSettings.vue'
+import ExcelBPSImageSettings from '@/components/admin/settings/ExcelBPSImageSettings.vue'
 import GPTDirectSettings from "@/components/admin/settings/GPTDirectSettings.vue";
 import OpenAIVMSettings from "@/components/admin/settings/OpenAIVMSettings.vue";
 import { ref, reactive, computed, onMounted, watch } from "vue";

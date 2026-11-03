@@ -11,23 +11,26 @@ import (
 
 func TestStripRetiredAccountExtraPreservesActiveFeatures(t *testing.T) {
 	retained := map[string]any{
-		"codex_fingerprint_mode": "full",
-		"codex_fingerprint_seed": "stable-device",
-		"proxy_ids":              []int64{7, 8},
-		"enable_tls_fingerprint": true,
-		"model_rate_limits":      map[string]any{"gpt-5.5": "cooldown"},
-		"codex_usage_updated_at": "2026-10-13T00:00:00Z",
+		"codex_fingerprint_mode":    "full",
+		"codex_fingerprint_seed":    "stable-device",
+		"proxy_ids":                 []int64{7, 8},
+		"enable_tls_fingerprint":    true,
+		"model_rate_limits":         map[string]any{"gpt-5.5": "cooldown"},
+		"codex_usage_updated_at":    "2026-10-13T00:00:00Z",
+		"codex_turn_ticket:gpt-5.5": map[string]any{"state": "server-managed"},
+		"codex_turn_cookies":        []string{"server-managed"},
+		"codex_harvest_proxy_url":   "http://private-proxy.invalid",
 	}
 	legacy := StripRetiredAccountExtra(retained)
 	for _, key := range []string{
-		"upstream_billing_rate_limit", "codex_turn_ticket:gpt-5.5", "codex_turn_cookies", "codex_harvest_proxy_url",
+		"upstream_billing_rate_limit",
 		"codex_ticket_enabled", "codex_ticket_fail_closed", "codex_ticket_harvest_proxy_ids",
 	} {
 		legacy[key] = "obsolete"
 	}
 	clean := StripRetiredAccountExtra(legacy)
 	require.Equal(t, retained, clean)
-	require.Len(t, legacy, len(retained)+7)
+	require.Len(t, legacy, len(retained)+4)
 	require.Equal(t, clean, StripRetiredAccountExtra(clean))
 	require.Nil(t, StripRetiredAccountExtra(nil))
 }

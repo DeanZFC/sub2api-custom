@@ -6,6 +6,10 @@
     @close="handleClose"
   >
     <form id="bulk-edit-account-form" class="space-y-5" @submit.prevent="() => handleSubmit()">
+      <div v-if="allOpenAIOAuthOnly" class="space-y-3">
+        <label class="flex items-center gap-2 text-sm"><input v-model="enableExcelBPS" type="checkbox" data-testid="bulk-enable-excel-bps" />{{ t('admin.accounts.openai.excelBPS') }}</label>
+        <ExcelBPSSettings v-if="enableExcelBPS" v-model="excelBPSConfig" :groups="groups" :allow-composite="!authStore.isSimpleMode" />
+      </div>
       <!-- Info -->
       <div class="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
         <p class="text-sm text-blue-700 dark:text-blue-400">
@@ -1475,9 +1479,12 @@
 </template>
 
 <script setup lang="ts">
+import ExcelBPSSettings from './ExcelBPSSettings.vue'
+import { hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import type {
   Proxy as ProxyConfig,
@@ -1542,6 +1549,9 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const excelBPSConfig = ref(readExcelBPSConfig())
+const enableExcelBPS = ref(false)
 // Platform awareness
 const targetMode = computed(() => props.target?.mode ?? 'selected')
 const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
@@ -1938,6 +1948,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     return updates.extra as Record<string, unknown>
   }
 
+  if (enableExcelBPS.value && allOpenAIOAuthOnly.value) {
+    Object.assign(ensureExtra(), writeExcelBPSConfig(excelBPSConfig.value, {}, true))
+  }
+
   if (enableProxy.value) {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     updates.proxy_id = proxyIds.value[0] ?? 0
@@ -2198,12 +2212,18 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
+  if (enableExcelBPS.value && allOpenAIOAuthOnly.value
+    && !hasValidExcelBPS403Target(excelBPSConfig.value, props.groups, !authStore.isSimpleMode)) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))
+    return
+  }
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
   }
 
   const hasAnyFieldEnabled =
+    (enableExcelBPS.value && allOpenAIOAuthOnly.value) ||
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
@@ -2354,6 +2374,8 @@ watch(
   () => props.show,
   (newShow) => {
     if (!newShow) {
+      enableExcelBPS.value = false
+      excelBPSConfig.value = readExcelBPSConfig()
       // Reset all enable flags
       enableBaseUrl.value = false
       enableModelRestriction.value = false

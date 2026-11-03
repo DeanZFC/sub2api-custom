@@ -28,6 +28,28 @@ type CustomEndpoint struct {
 
 // SystemSettings represents the admin settings API response payload.
 type SystemSettings struct {
+	OpenAICodexTicketHarvestScope           service.CodexTicketHarvestScope `json:"openai_codex_ticket_harvest_scope"`
+	OpenAICodexTicketStrictResponse         bool                            `json:"openai_codex_ticket_strict_response,omitempty"`
+	OpenAICodexTicketFailClosed             bool                            `json:"openai_codex_ticket_fail_closed"`
+	OpenAICodexTicketStrategy               string                          `json:"openai_codex_ticket_strategy"`
+	OpenAICodexTicketEnabled                bool                            `json:"openai_codex_ticket_enabled"`
+	OpenAICodexTicketHarvestProxyURL        string                          `json:"openai_codex_ticket_harvest_proxy_url"`
+	OpenAICodexTicketStaticProxyURL         string                          `json:"openai_codex_ticket_static_proxy_url,omitempty"`
+	OpenAICodexTicketHarvestProxyConfigured bool                            `json:"openai_codex_ticket_harvest_proxy_configured"`
+	OpenAICodexTicketModels                 []string                        `json:"openai_codex_ticket_models"`
+	ExcelBPSImageMode                       string                          `json:"excel_bps_image_mode"`
+	ExcelBPSImageRelayEnabled               bool                            `json:"excel_bps_image_relay_enabled"`
+	ExcelBPSImageBaseURL                    string                          `json:"excel_bps_image_base_url"`
+	ExcelBPSImageBodyLimitMiB               int                             `json:"excel_bps_image_body_limit_mib"`
+	ExcelBPSImageBudgetMiB                  int                             `json:"excel_bps_image_budget_mib"`
+	ExcelBPSImageMaxRequests                int                             `json:"excel_bps_image_max_requests"`
+	ExcelBPSImageMaxImageMiB                int                             `json:"excel_bps_image_max_image_mib"`
+	ExcelBPSImageMaxImages                  int                             `json:"excel_bps_image_max_images"`
+	ExcelBPSImageMaxTotalMiB                int                             `json:"excel_bps_image_max_total_mib"`
+	ExcelBPSImageStorageMiB                 int                             `json:"excel_bps_image_storage_mib"`
+	ExcelBPSImageStorageEntries             int                             `json:"excel_bps_image_storage_entries"`
+	ExcelBPSImageTTLMinutes                 int                             `json:"excel_bps_image_ttl_minutes"`
+
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                 `json:"registration_email_suffix_whitelist"`

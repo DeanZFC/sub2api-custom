@@ -38,6 +38,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
+	if err := openAIWSRejectExcelBPS(account, originalModel, mappedModel); err != nil {
+		return nil, err
+	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -167,6 +170,20 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if buildHdrErr != nil {
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	wsBinding := s.bindCodexTicketWS(ctx, account, openAIWSPayloadString(payload, "model"), wsHeaders)
+	if err := s.checkCodexTicketWS(ctx, account, wsBinding.model, wsBinding); err != nil {
+		return nil, err
+	}
+	proxyURL, releaseEgress, pinErr := s.pinCodexTicketWSAcquire(ctx, wsHeaders, account)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer releaseEgress()
+	if wsBinding.ticket != nil {
+		defer s.holdCodexTicketChat(account)()
+		pinBoundCodexTicketHarvestIdentityMaps(payload, wsBinding.ticket)
+		payloadBytes = -1
+	}
 	logOpenAIWSModeDebug(
 		"acquire_start account_id=%d account_type=%s transport=%s preferred_conn_id=%s has_previous_response_id=%v session_hash=%s has_turn_state=%v turn_state_len=%d has_turn_metadata=%v turn_metadata_len=%d store_disabled=%v store_disabled_conn_mode=%s retry_last_reason=%s force_new_conn=%v header_user_agent=%s header_openai_beta=%s header_originator=%s header_accept_language=%s header_session_id=%s header_conversation_id=%s session_id_source=%s conversation_id_source=%s has_prompt_cache_key=%v has_chatgpt_account_id=%v has_authorization=%v has_session_id=%v has_conversation_id=%v proxy_enabled=%v",
 		account.ID,
@@ -207,16 +224,19 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		WSURL:   wsURL,
 		Headers: wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
-			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
+			if err := s.checkCodexTicketWS(factoryCtx, account, wsBinding.model, wsBinding); err != nil {
+				return nil, err
+			}
+			refreshed, err := s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
+			if err != nil {
+				return nil, err
+			}
+			wsBinding.restoreHeaders(refreshed)
+			return refreshed, nil
 		},
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		ProxyURL:        proxyURL,
 		ProxyID: func() int64 {
 			if account.ProxyID != nil {
 				return *account.ProxyID
@@ -334,6 +354,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 
+	if err := s.checkCodexTicketWS(ctx, account, wsBinding.model, wsBinding); err != nil {
+		return nil, err
+	}
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
@@ -348,6 +371,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
+	if err := s.checkCodexTicketWS(ctx, account, wsBinding.model, wsBinding); err != nil {
+		return nil, err
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(

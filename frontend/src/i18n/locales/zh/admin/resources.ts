@@ -347,6 +347,12 @@ export default {
 
     // Proxies Management
     proxies: {
+      proxyList: '静态代理 / IP 代理池',
+      subscriptions: '订阅',
+      dynamicProxies: '动态代理',
+      nodes: '节点',
+      kernelRules: '内核与规则',
+      managementSections: '代理管理分类',
       title: 'IP管理',
       description: '管理代理服务器配置',
       createProxy: '添加代理',

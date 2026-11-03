@@ -347,6 +347,7 @@
           <template #cell-status="{ row }">
             <div class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+              <ExcelBPS403Badge :account="row" :groups="accountGroupsForRow(row)" />
             </div>
           </template>
           <template #cell-schedulable="{ row }">
@@ -550,6 +551,7 @@
 </template>
 
 <script setup lang="ts">
+import ExcelBPS403Badge from '@/components/account/ExcelBPS403Badge.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'

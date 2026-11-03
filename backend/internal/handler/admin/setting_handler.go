@@ -133,6 +133,28 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		OpenAICodexTicketEnabled:                settings.OpenAICodexTicketEnabled,
+		OpenAICodexTicketHarvestProxyURL:        service.MaskProxyURL(settings.OpenAICodexTicketHarvestProxyURL),
+		OpenAICodexTicketStaticProxyURL:         service.MaskProxyURL(settings.OpenAICodexTicketStaticProxyURL),
+		OpenAICodexTicketHarvestScope:           settings.OpenAICodexTicketHarvestScope,
+		OpenAICodexTicketStrategy:               settings.OpenAICodexTicketStrategy,
+		OpenAICodexTicketStrictResponse:         settings.OpenAICodexTicketStrictResponse,
+		OpenAICodexTicketFailClosed:             settings.OpenAICodexTicketFailClosed,
+		OpenAICodexTicketHarvestProxyConfigured: strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL) != "",
+		OpenAICodexTicketModels:                 settings.OpenAICodexTicketModels,
+		ExcelBPSImageMode:                       settings.ExcelBPSImageMode,
+		ExcelBPSImageRelayEnabled:               settings.ExcelBPSImageRelayEnabled,
+		ExcelBPSImageBaseURL:                    settings.ExcelBPSImageBaseURL,
+		ExcelBPSImageBodyLimitMiB:               settings.ExcelBPSImageBodyLimitMiB,
+		ExcelBPSImageBudgetMiB:                  settings.ExcelBPSImageBudgetMiB,
+		ExcelBPSImageMaxRequests:                settings.ExcelBPSImageMaxRequests,
+		ExcelBPSImageMaxImageMiB:                settings.ExcelBPSImageMaxImageMiB,
+		ExcelBPSImageMaxImages:                  settings.ExcelBPSImageMaxImages,
+		ExcelBPSImageMaxTotalMiB:                settings.ExcelBPSImageMaxTotalMiB,
+		ExcelBPSImageStorageMiB:                 settings.ExcelBPSImageStorageMiB,
+		ExcelBPSImageStorageEntries:             settings.ExcelBPSImageStorageEntries,
+		ExcelBPSImageTTLMinutes:                 settings.ExcelBPSImageTTLMinutes,
+
 		RegistrationEnabled:                                    settings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     settings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       settings.RegistrationEmailSuffixWhitelist,

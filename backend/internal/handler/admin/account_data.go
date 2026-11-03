@@ -188,7 +188,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	dataAccounts := make([]DataAccount, 0, len(accounts))
 	for i := range accounts {
 		acc := accounts[i]
-		extra := service.StripRetiredAccountExtra(acc.Extra)
+		extra := service.RedactOpenAICodexTicketExtra(service.StripRetiredAccountExtra(acc.Extra))
 		var proxyKey *string
 		if acc.ProxyID != nil {
 			if key, ok := proxyKeyByID[*acc.ProxyID]; ok {

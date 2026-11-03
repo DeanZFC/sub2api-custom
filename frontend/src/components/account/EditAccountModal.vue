@@ -11,6 +11,8 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
+      <ExcelBPSSettings v-if="account?.platform === 'openai' && account.type === 'oauth' && !isSparkShadow" v-model="excelBPSConfig" :groups="groups" :allow-composite="!authStore.isSimpleMode" />
+
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
@@ -3387,9 +3389,12 @@
 </template>
 
 <script setup lang="ts">
+import ExcelBPSSettings from './ExcelBPSSettings.vue'
+import { hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
@@ -3515,6 +3520,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const excelBPSConfig = ref(readExcelBPSConfig())
 const browserTimeZone = getBrowserTimeZone()
 
 const selectableGroups = computed(() => {
@@ -4594,6 +4601,7 @@ const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>
 }
 
 const syncFormFromAccount = (newAccount: Account | null) => {
+  excelBPSConfig.value = readExcelBPSConfig(newAccount?.extra)
   if (!newAccount) {
     return
   }
@@ -5640,6 +5648,11 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
+  if (props.account?.platform === 'openai' && props.account.type === 'oauth' && !isSparkShadow.value
+    && !hasValidExcelBPS403Target(excelBPSConfig.value, props.groups, !authStore.isSimpleMode)) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))
+    return
+  }
   if (!props.account) return
   const accountID = props.account.id
 
@@ -6215,6 +6228,11 @@ const handleSubmit = async () => {
     if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey')) {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
+      if (props.account.type === 'oauth' && !isSparkShadow.value) {
+        const policy = writeExcelBPSConfig(excelBPSConfig.value, newExtra)
+        for (const key of Object.keys(newExtra)) delete newExtra[key]
+        Object.assign(newExtra, policy)
+      }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value

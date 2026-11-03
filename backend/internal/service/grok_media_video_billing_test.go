@@ -38,19 +38,23 @@ func TestIsGrokVideoStatusBillable(t *testing.T) {
 		"model":"grok-imagine-video-1.5",
 		"video":{"url":"https://vidgen.x.ai/x.mp4","duration":8,"respect_moderation":true}
 	}`)))
+	// Some upstream integrations use completed for the same successful result.
+	require.True(t, IsGrokVideoStatusBillable([]byte(`{
+		"status":"completed",
+		"video":{"url":"https://vidgen.x.ai/x.mp4","duration":8}
+	}`)))
 
 	// Official non-success states
 	require.False(t, IsGrokVideoStatusBillable(nil))
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"pending"}`)))
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"expired"}`)))
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"failed"}`)))
-	// done without video.url is not billable
+	// A success status without video.url is not billable.
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"done"}`)))
+	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"completed"}`)))
 	// URL alone (legacy/non-official shapes) is not enough
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"url":"https://example.com/v.mp4"}`)))
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"download_url":"/v1/videos/task/content"}`)))
-	// "completed" is not the official enum value
-	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/x.mp4"}}`)))
 }
 
 func TestExtractGrokVideoBillingFromStatusBodyPrefersUpstreamParams(t *testing.T) {
@@ -97,15 +101,23 @@ func TestExtractGrokVideoBillingFromStatusBodyFallsBackToPending(t *testing.T) {
 	require.Equal(t, 10, result.VideoDurationSeconds)
 }
 
-func TestExtractGrokVideoBillingRejectsNonDoneStatus(t *testing.T) {
+func TestExtractGrokVideoBillingAcceptsCompletedStatus(t *testing.T) {
+	t.Parallel()
+	pending := &GrokVideoPendingBilling{Model: "m", VideoDurationSeconds: 8, VideoResolution: "720p"}
+	result := ExtractGrokVideoBillingFromStatusBody(
+		[]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/x.mp4","duration":8}}`),
+		pending, "req",
+	)
+	require.NotNil(t, result)
+	require.Equal(t, 1, result.VideoCount)
+	require.Equal(t, 8, result.VideoDurationSeconds)
+}
+
+func TestExtractGrokVideoBillingRejectsUnsuccessfulStatus(t *testing.T) {
 	t.Parallel()
 	pending := &GrokVideoPendingBilling{Model: "m", VideoDurationSeconds: 8, VideoResolution: "720p"}
 	require.Nil(t, ExtractGrokVideoBillingFromStatusBody(
 		[]byte(`{"status":"pending","video":{"url":"https://vidgen.x.ai/x.mp4","duration":8}}`),
-		pending, "req",
-	))
-	require.Nil(t, ExtractGrokVideoBillingFromStatusBody(
-		[]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/x.mp4","duration":8}}`),
 		pending, "req",
 	))
 }
@@ -120,16 +132,20 @@ func TestGrokMediaUsageFromResponseVideoCreateDoesNotBill(t *testing.T) {
 	require.Equal(t, VideoBillingResolution720P, meta.VideoResolution)
 }
 
-func TestGrokMediaUsageFromResponseVideoStatusBillsOnOfficialDone(t *testing.T) {
+func TestGrokMediaUsageFromResponseVideoStatusBillsOnSuccessfulStatus(t *testing.T) {
 	t.Parallel()
-	meta := grokMediaUsageFromResponse(
-		GrokMediaEndpointVideoStatus,
-		GrokMediaRequestInfo{},
-		[]byte(`{"status":"done","model":"grok-imagine-video-1.5","video":{"url":"https://vidgen.x.ai/a.mp4","duration":9}}`),
-	)
-	require.Equal(t, 1, meta.VideoCount)
-	require.Equal(t, 9, meta.VideoDurationSeconds)
-	require.Equal(t, "grok-imagine-video-1.5", meta.Model)
+	for _, status := range []string{"done", "completed"} {
+		t.Run(status, func(t *testing.T) {
+			meta := grokMediaUsageFromResponse(
+				GrokMediaEndpointVideoStatus,
+				GrokMediaRequestInfo{},
+				[]byte(`{"status":"`+status+`","model":"grok-imagine-video-1.5","video":{"url":"https://vidgen.x.ai/a.mp4","duration":9}}`),
+			)
+			require.Equal(t, 1, meta.VideoCount)
+			require.Equal(t, 9, meta.VideoDurationSeconds)
+			require.Equal(t, "grok-imagine-video-1.5", meta.Model)
+		})
+	}
 
 	// Official non-done must not set billable units.
 	pendingOnly := grokMediaUsageFromResponse(
@@ -139,11 +155,11 @@ func TestGrokMediaUsageFromResponseVideoStatusBillsOnOfficialDone(t *testing.T) 
 	)
 	require.Equal(t, 0, pendingOnly.VideoCount)
 
-	// completed is not official done.
-	completed := grokMediaUsageFromResponse(
+	// A success status without video.url is not billable.
+	completedWithoutURL := grokMediaUsageFromResponse(
 		GrokMediaEndpointVideoStatus,
 		GrokMediaRequestInfo{},
-		[]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/a.mp4","duration":9}}`),
+		[]byte(`{"status":"completed","video":{"duration":9}}`),
 	)
-	require.Equal(t, 0, completed.VideoCount)
+	require.Equal(t, 0, completedWithoutURL.VideoCount)
 }

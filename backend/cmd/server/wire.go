@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/mihomo"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/qqbot"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
@@ -352,6 +353,10 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{"CodexTicketHarvester", func() error { openAIGateway.StopOpenAICodexTicketHarvester(); return nil }},
+			{"BPSWarmPool", func() error { openAIGateway.StopBPSWarmPool(); return nil }},
+			{"BPSImages", func() error { return openAIGateway.CloseExcelBPSImages() }},
+			{"ManagedMihomo", func() error { mihomo.CloseAll(); return nil }},
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()

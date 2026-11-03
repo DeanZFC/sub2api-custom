@@ -656,6 +656,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/harvest-flow',
+    name: 'AdminHarvestFlow',
+    component: () => import('@/views/admin/HarvestFlowView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Codex ticket management', titleKey: 'admin.harvestFlow.title' }
+  },
+  {
     path: '/admin/proxies',
     name: 'AdminProxies',
     component: () => import('@/views/admin/ProxiesView.vue'),

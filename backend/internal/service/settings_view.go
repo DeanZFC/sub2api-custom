@@ -12,6 +12,27 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
+	OpenAICodexTicketHarvestScope    CodexTicketHarvestScope
+	OpenAICodexTicketStrictResponse  bool
+	OpenAICodexTicketFailClosed      bool
+	OpenAICodexTicketStrategy        string
+	OpenAICodexTicketEnabled         bool   // Codex 292 打票总开关；关闭则不打票不注入
+	OpenAICodexTicketHarvestProxyURL string // Codex 292 打票代理 URL；空则回退 yaml/env
+	OpenAICodexTicketStaticProxyURL  string
+	OpenAICodexTicketModels          []string // Codex 292 打票模型列表；缺失时回退 yaml/env
+	ExcelBPSImageMode                string
+	ExcelBPSImageRelayEnabled        bool
+	ExcelBPSImageBaseURL             string
+	ExcelBPSImageBodyLimitMiB        int
+	ExcelBPSImageBudgetMiB           int
+	ExcelBPSImageMaxRequests         int
+	ExcelBPSImageMaxImageMiB         int
+	ExcelBPSImageMaxImages           int
+	ExcelBPSImageMaxTotalMiB         int
+	ExcelBPSImageStorageMiB          int
+	ExcelBPSImageStorageEntries      int
+	ExcelBPSImageTTLMinutes          int
+
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	RegistrationEmailSuffixWhitelist    []string

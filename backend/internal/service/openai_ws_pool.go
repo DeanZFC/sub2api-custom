@@ -87,6 +87,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	codexTurnState      string
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -2493,7 +2494,8 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
-		betaFeatures: normalizeOpenAIWSBetaFeatures(headers),
+		betaFeatures:   normalizeOpenAIWSBetaFeatures(headers),
+		codexTurnState: normalizeOpenAIWSStableIdentityHeader(headers, openAICodexTurnStateHeader),
 	}
 	mode := activeCodexFingerprintMode(account)
 	if mode == codexFingerprintOff {

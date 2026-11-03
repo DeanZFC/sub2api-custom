@@ -45,6 +45,8 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
+      <ExcelBPSSettings v-if="form.platform === 'openai' && accountCategory === 'oauth-based' && form.type === 'oauth'" v-model="excelBPSConfig" :groups="groups" :allow-composite="!authStore.isSimpleMode" />
+
       <div>
         <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
         <input
@@ -4113,9 +4115,12 @@
 </template>
 
 <script setup lang="ts">
+import ExcelBPSSettings from './ExcelBPSSettings.vue'
+import { hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 import {
   claudeModels,
@@ -4326,6 +4331,8 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const excelBPSConfig = ref(readExcelBPSConfig())
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -5621,6 +5628,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  excelBPSConfig.value = readExcelBPSConfig()
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5820,7 +5828,8 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     delete extra.images_url_to_b64_json
   }
 
-  return Object.keys(extra).length > 0 ? extra : undefined
+  const result = form.type === 'oauth' ? writeExcelBPSConfig(excelBPSConfig.value, extra) : extra
+  return Object.keys(result).length > 0 ? result : undefined
 }
 
 const buildOpenAICodexImportExtra = (): Record<string, unknown> | undefined => {
@@ -5951,6 +5960,11 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (form.platform === 'openai' && form.type === 'oauth'
+    && !hasValidExcelBPS403Target(excelBPSConfig.value, props.groups, !authStore.isSimpleMode)) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {

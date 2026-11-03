@@ -9,10 +9,7 @@ import (
 // Keep this boundary for old backups, stale caches and full-account writes;
 // these keys no longer enable any gateway behavior.
 func IsRetiredAccountExtraKey(key string) bool {
-	return strings.HasPrefix(key, "codex_turn_ticket:") ||
-		strings.HasPrefix(key, "codex_ticket_") ||
-		key == "codex_turn_cookies" || key == "codex_harvest_proxy_url" ||
-		key == "upstream_billing_rate_limit"
+	return key == "upstream_billing_rate_limit" || strings.HasPrefix(key, "codex_ticket_")
 }
 
 // StripRetiredAccountExtra returns a copy without obsolete account material.

@@ -901,6 +901,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if testModelID == "" {
 		testModelID = openai.DefaultTestModel
 	}
+	// Account probes must follow the selected model's BPS route as real user
+	// requests do. Forward retains the authoritative VM binding's priority.
+	if account.IsExcelBPSEnabledForModel(testModelID) {
+		return s.testExcelBPSAccountConnection(c, account, testModelID, prompt)
+	}
 
 	// Align test routing with gateway behavior: OpenAI accounts apply normal
 	// account model mapping. Native remote compaction v2 rides the ordinary

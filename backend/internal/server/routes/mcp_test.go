@@ -178,6 +178,16 @@ func (r *mcpRouteSettingsRepo) GetValue(_ context.Context, key string) (string, 
 	return "", service.ErrSettingNotFound
 }
 
+func (r *mcpRouteSettingsRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	values := make(map[string]string)
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			values[key] = value
+		}
+	}
+	return values, nil
+}
+
 func (r *mcpRouteSettingsRepo) SetMultiple(_ context.Context, values map[string]string) error {
 	for key, value := range values {
 		r.values[key] = value

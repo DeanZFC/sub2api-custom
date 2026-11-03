@@ -45,6 +45,18 @@ func (r *upstreamRetrySettingsRepo) GetAll(context.Context) (map[string]string, 
 	return out, nil
 }
 
+func (r *upstreamRetrySettingsRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, exists := r.values[key]; exists {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 func (r *upstreamRetrySettingsRepo) SetMultiple(_ context.Context, values map[string]string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

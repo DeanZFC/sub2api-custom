@@ -434,7 +434,8 @@ func redactAccountManagedExtra(extra map[string]any) map[string]any {
 			key == service.OpenCodeGoUsageAutoRefreshExtraKey,
 			key == service.OpenCodeGoUsageSnapshotExtraKey:
 			continue
-		case service.IsRetiredAccountExtraKey(key):
+		case service.IsRetiredAccountExtraKey(key),
+			strings.HasPrefix(key, "codex_turn_ticket:"), key == "codex_turn_cookies", key == "codex_harvest_proxy_url":
 			continue
 		default:
 			redacted[key] = value

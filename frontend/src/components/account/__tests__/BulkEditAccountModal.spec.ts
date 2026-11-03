@@ -19,6 +19,10 @@ vi.mock('@/stores/app', () => ({
   })
 }))
 
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ isSimpleMode: true })
+}))
+
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
@@ -96,6 +100,60 @@ describe('BulkEditAccountModal', () => {
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockResolvedValue({
       has_risk: false
     } as any)
+  })
+
+  it('leaves BPS policy unchanged unless the batch field is explicitly selected', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    expect(wrapper.get<HTMLInputElement>('[data-testid="bulk-enable-excel-bps"]').element.checked).toBe(false)
+    await wrapper.get('#bulk-edit-concurrency-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const updates = vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1] as any
+    expect(Object.keys(updates.extra || {}).filter(key => key.startsWith('openai_excel_bps'))).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('sends explicit clearing values when BPS is disabled in a batch', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('[data-testid="bulk-enable-excel-bps"]').setValue(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="excel-bps-toggle"]').element.checked).toBe(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const updates = vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1] as any
+    expect(updates.extra).toMatchObject({ openai_excel_bps: false, openai_excel_bps_models: null, openai_excel_bps_auto_disable_on_403: false, openai_excel_bps_403_target_group_id: null })
+    wrapper.unmount()
+  })
+
+  it('serializes all-model BPS batch routing and explicit leave-all-groups policy', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('[data-testid="bulk-enable-excel-bps"]').setValue(true)
+    await wrapper.get('[data-testid="excel-bps-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="excel-bps-all-models"]').setValue(true)
+    await wrapper.get('[data-testid="excel-bps-auto-move-on-403"]').setValue(true)
+    await wrapper.get('[data-testid="excel-bps-target-group"]').setValue('0')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const updates = vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1] as any
+    expect(updates.extra).toMatchObject({ openai_excel_bps: true, openai_excel_bps_models: null, openai_excel_bps_auto_move_on_403: true, openai_excel_bps_403_target_group_id: 0 })
+    wrapper.unmount()
+  })
+
+  it('rejects a missing BPS 403 destination before building the batch payload', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('[data-testid="bulk-enable-excel-bps"]').setValue(true)
+    await wrapper.get('[data-testid="excel-bps-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="excel-bps-auto-move-on-403"]').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.openai.excelBPS403SelectTarget')
+    wrapper.unmount()
+  })
+
+  it('hides BPS batch editing for mixed account types', () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey'] })
+    expect(wrapper.find('[data-testid="bulk-enable-excel-bps"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('批量修改倍率时提示自动同步账号需要先关闭同步', async () => {

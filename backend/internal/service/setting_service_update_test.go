@@ -18,6 +18,7 @@ import (
 
 type settingUpdateRepoStub struct {
 	updates        map[string]string
+	values         map[string]string
 	setMultipleErr error
 }
 
@@ -34,13 +35,32 @@ func (s *settingUpdateRepoStub) Set(ctx context.Context, key, value string) erro
 }
 
 func (s *settingUpdateRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
-	panic("unexpected GetMultiple call")
+	values := s.values
+	if values == nil {
+		values = s.updates
+	}
+	result := make(map[string]string)
+	for _, key := range keys {
+		if value, ok := values[key]; ok {
+			result[key] = value
+		}
+	}
+	return result, nil
 }
 
 func (s *settingUpdateRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
 	s.updates = make(map[string]string, len(settings))
 	for k, v := range settings {
 		s.updates[k] = v
+	}
+	if s.setMultipleErr != nil {
+		return s.setMultipleErr
+	}
+	if s.values == nil {
+		s.values = make(map[string]string)
+	}
+	for k, v := range settings {
+		s.values[k] = v
 	}
 	return s.setMultipleErr
 }

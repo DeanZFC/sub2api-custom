@@ -115,6 +115,20 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
+	if IsOpenAITurnAdmissionError(err) || errors.Is(err, ErrOpenAICodexTicketUnavailable) {
+		if !WriteOpenAITurnAdmissionError(c, err) {
+			WriteOpenAITurnAdmissionError(c, denyOpenAITicket())
+		}
+		return err
+	}
+	if errors.Is(err, ErrCodexTicketResponseRejected) {
+		// The upstream may have billed this turn. Do not turn it into failover/replay.
+		if c != nil && !c.Writer.Written() {
+			c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "server_error", "code": "codex_ticket_response_rejected", "message": "Upstream ticket validation failed; this request was not replayed"}})
+		}
+		return err
+	}
+
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}

@@ -11,7 +11,52 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 
 // doOpenAIUpstream 只在 OpenAI OAuth 能力绑定已启用时把真实请求交给插件。
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
-func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
+func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (result *http.Response, resultErr error) {
+	// Resolve ticket policy at the final native send boundary, after request identity
+	// normalization and before opening a network connection. All HTTP aliases share it.
+	if request != nil && account != nil && account.IsOpenAIOAuthLike() && s.openAICodexTicketEnabledContext(request.Context()) {
+		raw, err := snapshotHTTPRequestBody(request)
+		if err != nil {
+			return nil, err
+		}
+		replaceHTTPRequestJSONBody(request, raw)
+		model := extractOpenAICodexTicketModel(raw)
+		account, err = s.refreshCodexTicketAccountForSend(request.Context(), account, model, request.Header.Get("Authorization"))
+		if err != nil {
+			return nil, err
+		}
+		if err := s.applyOpenAICodexTicket(request.Context(), account, model, request.Header); err != nil {
+			return nil, err
+		}
+	}
+	request = s.stickBoundCodexTicketRequest(request, account)
+	bound := s.codexTicketRequestBound(request, account)
+	releaseChat := func() {}
+	if bound {
+		releaseChat = s.holdCodexTicketChat(account)
+	}
+	pinnedProxy, release, err := s.pinCodexTicketEgress(request, account, proxyURL)
+	if err != nil {
+		releaseChat()
+		return nil, err
+	}
+	proxyURL = pinnedProxy
+	defer func() {
+		result, resultErr = attachCodexTicketEgressRelease(result, resultErr, func() { release(); releaseChat() })
+	}()
+	defer func() {
+		if resultErr == nil {
+			s.observeCodexTicketResponse(request, result, account)
+			if bound && s.settingService != nil && s.settingService.CodexTicketStrictResponse(request.Context()) && codexResponseMismatches(request, result, account) {
+				if result != nil && result.Body != nil {
+					_ = result.Body.Close()
+				}
+				result = nil
+				resultErr = ErrCodexTicketResponseRejected
+			}
+		}
+	}()
+
 	if s.openaiVM != nil {
 		if response, handled, err := s.openaiVM.RoundTrip(request, account); handled {
 			return response, err
@@ -20,7 +65,7 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
 		return nil, err
 	}
-	if s.pluginManager != nil {
+	if s.pluginManager != nil && !bound {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			return response, err
