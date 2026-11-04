@@ -81,7 +81,13 @@ func TestBulkUpdateExcelBPSExtra(t *testing.T) {
 			default:
 				for _, key := range tt.removed {
 					expression = "(" + expression + ") - '" + key + "'"
+					if key == service.ExcelBPS403DisabledAtKey {
+						expression += " - 'openai_excel_bps_403_last_probe_at'"
+					}
 				}
+			}
+			if _, changed := tt.extra["openai_excel_bps"]; changed {
+				expression = reconcileExcelAuthorizationSQL(expression, "credentials")
 			}
 			require.Equal(t, "UPDATE accounts SET extra = "+expression+", updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL", query)
 			payload, ok := exec.execArgs[0][0].([]byte)

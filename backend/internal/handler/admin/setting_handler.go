@@ -133,6 +133,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		OpenAICodexTicketCandyObservation:       settings.OpenAICodexTicketCandyObservation,
 		OpenAICodexTicketEnabled:                settings.OpenAICodexTicketEnabled,
 		OpenAICodexTicketHarvestProxyURL:        service.MaskProxyURL(settings.OpenAICodexTicketHarvestProxyURL),
 		OpenAICodexTicketStaticProxyURL:         service.MaskProxyURL(settings.OpenAICodexTicketStaticProxyURL),
@@ -143,6 +144,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpenAICodexTicketHarvestProxyConfigured: strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL) != "",
 		OpenAICodexTicketModels:                 settings.OpenAICodexTicketModels,
 		ExcelBPSImageMode:                       settings.ExcelBPSImageMode,
+		ExcelBPSEnabled:                         settings.ExcelBPSEnabled,
 		ExcelBPSImageRelayEnabled:               settings.ExcelBPSImageRelayEnabled,
 		ExcelBPSImageBaseURL:                    settings.ExcelBPSImageBaseURL,
 		ExcelBPSImageBodyLimitMiB:               settings.ExcelBPSImageBodyLimitMiB,

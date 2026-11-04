@@ -72,6 +72,8 @@ var ProviderSet = wire.NewSet(
 	NewAdminGroupRepository,
 	NewCompositeModelRouteRepository,
 	NewAccountRepository,
+	NewOpenAIOAuthReauthRepository,
+	NewOpenAICredentialEncryptor,
 	NewCodexHarvestNodeRepository,
 	NewCodexHarvestFlowRepository,
 	NewAdminAccountRepository,

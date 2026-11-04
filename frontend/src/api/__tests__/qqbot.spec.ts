@@ -44,4 +44,13 @@ describe('QQ bot config version headers', () => {
       headers: { 'If-Match': version, 'X-QQBot-Section': '' },
     })
   })
+
+  it('sends a disabled invitation switch with its saved rules and config version', async () => {
+    const config = { _version: 'invite-1', enabled: false, invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 }
+    put.mockResolvedValueOnce({ data: config, headers: { 'x-qqbot-config-version': 'invite-2' } })
+    expect(await qqbotAPI.saveInvite(config)).toEqual({ ...config, _version: 'invite-2' })
+    expect(put).toHaveBeenCalledWith('/admin/qqbot/invite', config, {
+      headers: { 'If-Match': 'invite-1', 'X-QQBot-Section': '' },
+    })
+  })
 })

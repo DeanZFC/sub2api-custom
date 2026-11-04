@@ -6,13 +6,13 @@ import (
 )
 
 // IsExcelBPSEnabled routes an existing ChatGPT OAuth account to the Excel gateway.
-// Credentials and refresh remain on the original account; no sidecar is involved.
+// The independent Excel grant must be ready before the switch changes routing.
 func (a *Account) IsExcelBPSEnabled() bool {
-	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth || a.IsShadow() || a.IsOpenAIAgentIdentity() || a.IsOpenAIPersonalAccessToken() {
+	if !ExcelBPSAuthorizationEligible(a) {
 		return false
 	}
 	enabled, _ := a.Extra["openai_excel_bps"].(bool)
-	return enabled
+	return enabled && a.Extra[ExcelBPSAuthorizationPendingKey] != true
 }
 
 const ExcelBPSIgnoreImagesKey = "openai_excel_bps_ignore_images"
@@ -147,4 +147,20 @@ type AccountExcelBPSRepository interface {
 // after rechecking the account identity, policy and current memberships.
 type AccountExcelBPSGroupRepository interface {
 	MoveExcelBPSOn403(ctx context.Context, account *Account) (bool, error)
+}
+
+// SanitizeExcelBPSAuthorizationExtra removes client-supplied authorization
+// metadata. The service derives pending from the persisted grant; only grant
+// transactions may write credential diagnostics.
+func SanitizeExcelBPSAuthorizationExtra(extra map[string]any) map[string]any {
+	if extra == nil {
+		return nil
+	}
+	clean := make(map[string]any, len(extra))
+	for key, value := range extra {
+		if key != ExcelBPSAuthorizationPendingKey && key != ExcelBPSCredentialStateExtraKey {
+			clean[key] = value
+		}
+	}
+	return clean
 }

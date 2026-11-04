@@ -28,10 +28,12 @@ type CustomEndpoint struct {
 
 // SystemSettings represents the admin settings API response payload.
 type SystemSettings struct {
+	ExcelBPSEnabled                         bool                            `json:"excel_bps_enabled"`
 	OpenAICodexTicketHarvestScope           service.CodexTicketHarvestScope `json:"openai_codex_ticket_harvest_scope"`
 	OpenAICodexTicketStrictResponse         bool                            `json:"openai_codex_ticket_strict_response,omitempty"`
 	OpenAICodexTicketFailClosed             bool                            `json:"openai_codex_ticket_fail_closed"`
 	OpenAICodexTicketStrategy               string                          `json:"openai_codex_ticket_strategy"`
+	OpenAICodexTicketCandyObservation       bool                            `json:"openai_codex_ticket_candy_observation"`
 	OpenAICodexTicketEnabled                bool                            `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL        string                          `json:"openai_codex_ticket_harvest_proxy_url"`
 	OpenAICodexTicketStaticProxyURL         string                          `json:"openai_codex_ticket_static_proxy_url,omitempty"`
@@ -391,6 +393,8 @@ type DefaultSubscriptionSetting struct {
 }
 
 type PublicSettings struct {
+	OpenAICodexTicketEnabled            bool                     `json:"openai_codex_ticket_enabled"`
+	ExcelBPSEnabled                     bool                     `json:"excel_bps_enabled"`
 	GPTDirectEnabled                    bool                     `json:"gpt_direct_enabled"`
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`

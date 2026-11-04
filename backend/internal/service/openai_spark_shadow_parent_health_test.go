@@ -55,6 +55,12 @@ func TestParentHealthyForShadow(t *testing.T) {
 		require.True(t, parentHealthyForShadow(shadow, lookup))
 	})
 
+	t.Run("excel_primary_parent_is_not_a_native_shadow_candidate", func(t *testing.T) {
+		parent := *healthyParent
+		parent.Credentials = map[string]any{"client_id": "app_fnr0pYvVwwFDocDumLG3H2Bp"}
+		require.False(t, parentHealthyForShadow(shadow, func(int64) *Account { return &parent }))
+	})
+
 	t.Run("shadow_of_unhealthy_parent_is_not_healthy", func(t *testing.T) {
 		// Parent Status=error means IsActive()==false → IsSchedulable()==false.
 		require.False(t, unhealthyParent.IsSchedulable(), "precondition: unhealthy parent must not be schedulable")

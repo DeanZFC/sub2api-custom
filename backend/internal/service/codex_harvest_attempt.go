@@ -87,11 +87,11 @@ func (s *OpenAIGatewayService) freshHarvestAccount(ctx context.Context, account 
 		}
 		account = fresh
 		scope, err := s.settingService.GetCodexTicketHarvestScope(ctx)
-		if err != nil || !scope.includes(account) || !scope.allowsAccount(account) {
+		if err != nil || !s.harvestScopeIncludesAccount(ctx, scope, account) || !s.harvestScopeAllowsAccount(ctx, scope, account) {
 			return nil, false
 		}
 	}
-	if !isOpenAICodexTicketAccount(account, model) || account.IsRateLimited() || openAICodexSkipHarvest(account) || s.codexTicketChatHeld(account.ID) || s.ticketProbeCoolingDown(account.ID, model, time.Now()) {
+	if !s.isOpenAICodexTicketAccount(ctx, account, model) || account.IsRateLimited() || openAICodexSkipHarvest(account) || s.codexTicketChatHeld(account.ID) || s.ticketProbeCoolingDown(account.ID, model, time.Now()) {
 		return nil, false
 	}
 	cfg := s.openAICodexTicketConfig()

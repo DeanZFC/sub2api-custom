@@ -110,3 +110,31 @@ func TestMergeExcelBPS403MoveMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildAccountForCreateStripsExcelBPS403Markers(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		extra := map[string]any{
+			"openai_excel_bps":                     enabled,
+			"openai_excel_bps_auto_disable_on_403": true,
+			ExcelBPSAutoRecoverOn403Key:            true,
+			ExcelBPS403RecoveryIntervalMinutesKey:  15,
+			ExcelBPS403DisabledAtKey:               "2026-11-01T00:00:00Z",
+			ExcelBPS403LastProbeAtKey:              "2099-11-01T00:00:00Z",
+			ExcelBPS403MovedAtKey:                  "2026-11-01T00:00:00Z",
+			ExcelBPS403MovedGroupIDKey:             7,
+		}
+		created, err := buildAccountForCreate(&CreateAccountInput{
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Extra:    extra,
+		}, extra)
+		require.NoError(t, err)
+		for _, key := range excelBPS403MarkerKeys {
+			require.NotContains(t, created.Extra, key)
+			require.Contains(t, extra, key, "the incoming create/import payload must remain unchanged")
+		}
+		require.Equal(t, enabled, created.Extra["openai_excel_bps"])
+		require.Equal(t, true, created.Extra[ExcelBPSAutoRecoverOn403Key])
+		require.Equal(t, 15, created.Extra[ExcelBPS403RecoveryIntervalMinutesKey])
+	}
+}

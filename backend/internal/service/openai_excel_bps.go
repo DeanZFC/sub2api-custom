@@ -27,11 +27,27 @@ import (
 var excelBPSReplay basispoints.ReplayCache
 var excelBPSCatalog basispoints.CatalogCache
 
-// BPS uses the account's OAuth credentials, so authentication failures must
-// update the same scheduling state as ordinary OpenAI requests. Keep arbitrary
-// BPS error text (which may echo request data) out of persisted account reasons.
-func (s *OpenAIGatewayService) handleExcelBPSUnauthorized(ctx context.Context, account *Account, status int, headers http.Header, raw []byte) {
-	if status != http.StatusUnauthorized || s.rateLimitService == nil {
+// Independent Excel grants reject only their own access token on 401. Primary
+// Excel accounts retain ordinary credential recovery without persisting raw errors.
+func (s *OpenAIGatewayService) handleExcelBPSUnauthorized(ctx context.Context, account *Account, status int, headers http.Header, raw []byte, tokens ...string) {
+	if status != http.StatusUnauthorized {
+		return
+	}
+	if s.excelOAuthReauth != nil && !account.IsExcelOAuth() {
+		var token string
+		if len(tokens) > 0 {
+			token = tokens[0]
+		}
+		var cache OpenAITokenCache
+		if s.openAITokenProvider != nil {
+			cache = s.openAITokenProvider.tokenCache
+		}
+		stateCtx, cancel := openAIAccountStateContext(ctx)
+		defer cancel()
+		_ = s.excelOAuthReauth.invalidateExcelAccessToken(stateCtx, account.ID, token, cache)
+		return
+	}
+	if s.rateLimitService == nil {
 		return
 	}
 	fields := map[string]string{"message": "Excel BPS authentication failed"}
@@ -299,7 +315,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 		return fail(400, "basispoints_request_invalid", err.Error())
 	}
-	token, _, err := s.GetAccessToken(ctx, account)
+	token, err := s.getExcelBPSAccessToken(ctx, account)
 	if err != nil {
 		if isExcelBPSClientCancellation(c, err) {
 			return clientCanceled()
@@ -396,6 +412,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(raw))
 		if retryBody, retry := prepareExcelBPSInvalidEncryptedRetry(upstreamBody, raw); retry && readErr == nil && len(raw) <= maxRejectionBytes && ctx.Err() == nil {
+			observeBPSTestResponse(ctx, resp, model, token, extractUpstreamErrorCode(raw))
 			retryReq, retryErr := newExcelBPSRequest(requestCtx, retryBody, token, accountID)
 			if retryErr != nil {
 				return fail(502, "basispoints_transport_error", "Excel BPS recovery request could not be prepared")
@@ -429,6 +446,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			lease.ReportUpstreamFailure()
 		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
+		observeBPSTestResponse(ctx, resp, model, token, extractUpstreamErrorCode(raw))
 		// BPS throttles its own endpoint. A BPS 429 must not write Codex
 		// quota/cooldown state or trigger account failover.
 		// Preserve the original rejection for Ops without exposing it to clients.
@@ -455,7 +473,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			Message: upstreamMessage, Detail: upstreamDetail, UpstreamResponseBody: upstreamDetail,
 		})
 		if resp.StatusCode == http.StatusUnauthorized {
-			s.handleExcelBPSUnauthorized(ctx, account, resp.StatusCode, resp.Header, raw)
+			s.handleExcelBPSUnauthorized(ctx, account, resp.StatusCode, resp.Header, raw, token)
 			return fail(resp.StatusCode, "basispoints_upstream_error", "Excel BPS authentication failed; request was not replayed")
 		}
 		code := gjson.GetBytes(raw, "error.code").String()
@@ -487,6 +505,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 		return fail(resp.StatusCode, errorCode, message)
 	}
+	observeBPSTestResponse(ctx, resp, model, token, "")
 	// BPS and Codex share quota. Refresh at the HTTP boundary even if the client
 	// disconnects or a later stream/protocol error prevents normal completion.
 	s.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, resp.Header)
@@ -511,13 +530,15 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		defer stop()
 		if repairResp.StatusCode < 200 || repairResp.StatusCode >= 300 {
 			raw, _ := io.ReadAll(io.LimitReader(repairResp.Body, 512<<10))
-			s.handleExcelBPSUnauthorized(repairCtx, account, repairResp.StatusCode, repairResp.Header, raw)
+			observeBPSTestResponse(repairCtx, repairResp, model, token, extractUpstreamErrorCode(raw))
+			s.handleExcelBPSUnauthorized(repairCtx, account, repairResp.StatusCode, repairResp.Header, raw, token)
 			if repairResp.StatusCode == http.StatusForbidden && gjson.GetBytes(raw, "error.code").String() != "basispoints_model_access_changed" {
 				s.moveExcelBPSOn403(repairCtx, account)
 				s.disableExcelBPSOn403(repairCtx, account)
 			}
 			return nil, fmt.Errorf("excel BPS correction returned HTTP %d", repairResp.StatusCode)
 		}
+		observeBPSTestResponse(repairCtx, repairResp, model, token, "")
 		s.UpdateCodexUsageSnapshotFromHeaders(repairCtx, account.ID, repairResp.Header)
 		upstreamBody = correctedBody
 		return basispoints.ReadToolRepairResponse(repairResp.Body)
@@ -536,14 +557,16 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 		if repaired.StatusCode < 200 || repaired.StatusCode >= 300 {
 			raw, _ := io.ReadAll(io.LimitReader(repaired.Body, 512<<10))
+			observeBPSTestResponse(repairCtx, repaired, model, token, extractUpstreamErrorCode(raw))
 			_ = repaired.Body.Close()
-			s.handleExcelBPSUnauthorized(repairCtx, account, repaired.StatusCode, repaired.Header, raw)
+			s.handleExcelBPSUnauthorized(repairCtx, account, repaired.StatusCode, repaired.Header, raw, token)
 			if repaired.StatusCode == http.StatusForbidden && gjson.GetBytes(raw, "error.code").String() != "basispoints_model_access_changed" {
 				s.moveExcelBPSOn403(repairCtx, account)
 				s.disableExcelBPSOn403(repairCtx, account)
 			}
 			return nil, fmt.Errorf("excel BPS tool correction returned HTTP %d", repaired.StatusCode)
 		}
+		observeBPSTestResponse(repairCtx, repaired, model, token, "")
 		s.UpdateCodexUsageSnapshotFromHeaders(repairCtx, account.ID, repaired.Header)
 		return repaired.Body, nil
 	})

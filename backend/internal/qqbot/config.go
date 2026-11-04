@@ -30,11 +30,17 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	// requests so it cannot collect evidence or authorize queued punishments.
 	decoded.Moderation.ReportEnabled = false
 	var history struct {
-		Messages *int `json:"history_messages"`
-		Turns    *int `json:"history_turns"`
+		Messages      *int  `json:"history_messages"`
+		Turns         *int  `json:"history_turns"`
+		InviteEnabled *bool `json:"invite_enabled"`
 	}
 	if err := json.Unmarshal(data, &history); err != nil {
 		return err
+	}
+	// Existing installations used the amount and limit as their activity switch.
+	// Preserve that behavior until an explicit switch has been saved.
+	if history.InviteEnabled == nil {
+		decoded.InviteEnabled = decoded.InviteReward > 0 && decoded.InviteDailyLimit > 0
 	}
 	switch {
 	case history.Messages != nil:
@@ -215,6 +221,7 @@ func (s *Service) SaveBasicConfig(ctx context.Context, c Config) (Config, error)
 		// Knowledge has its own independently versioned module. Legacy clients
 		// saving the full basic configuration must not erase or overwrite it.
 		c.SiteKnowledge = old.SiteKnowledge
+		c.InviteEnabled = old.InviteEnabled
 		c.InviteReward = old.InviteReward
 		c.InviteDailyLimit = old.InviteDailyLimit
 		c.InviteMinRechargeTotal = old.InviteMinRechargeTotal

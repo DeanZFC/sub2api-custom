@@ -334,3 +334,42 @@ func TestSettingService_GetPublicSettings_MCPEnabledFollowsExplicitPublicURL(t *
 		require.Contains(t, string(encoded), fmt.Sprintf(`"mcp_enabled":%t`, tc.want))
 	}
 }
+
+func TestSettingService_GetPublicSettings_CodexTicketSwitchMatchesInjection(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		configured  bool
+		configValue bool
+		want        bool
+	}{
+		{name: "unset defaults off"},
+		{name: "enabled", configured: true, value: "true", want: true},
+		{name: "disabled", configured: true, value: "false"},
+		{name: "explicit config fallback", configValue: true, want: true},
+		{name: "database disable overrides config", configured: true, value: "false", configValue: true},
+		{name: "empty retains config fallback", configured: true, configValue: true, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := map[string]string{}
+			if tc.configured {
+				values[SettingKeyOpenAICodexTicketEnabled] = tc.value
+			}
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAICodexTicket.Enabled = tc.configValue
+			svc := NewSettingService(&settingPublicRepoStub{values: values}, cfg)
+			settings, err := svc.GetPublicSettings(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, tc.want, settings.OpenAICodexTicketEnabled)
+			raw, err := svc.GetPublicSettingsForInjection(t.Context())
+			require.NoError(t, err)
+			payload, ok := raw.(*PublicSettingsInjectionPayload)
+			require.True(t, ok)
+			require.Equal(t, tc.want, payload.OpenAICodexTicketEnabled)
+			encoded, err := json.Marshal(payload)
+			require.NoError(t, err)
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal(encoded, &decoded))
+			require.Equal(t, tc.want, decoded["openai_codex_ticket_enabled"])
+		})
+	}
+}

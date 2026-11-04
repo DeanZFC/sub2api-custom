@@ -2,13 +2,11 @@ package qqbot
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"strings"
 )
 
@@ -30,10 +28,32 @@ type CheckinConfig struct {
 	RechargeRequirement
 }
 type InviteConfig struct {
+	Enabled          bool    `json:"enabled"`
 	InviteReward     float64 `json:"invite_reward"`
 	InviteDailyLimit int     `json:"invite_daily_limit"`
 	RechargeRequirement
+	enabledOmitted bool
 }
+
+func (c *InviteConfig) UnmarshalJSON(data []byte) error {
+	type inviteConfigJSON InviteConfig
+	decoded := inviteConfigJSON(*c)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var switchField struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(data, &switchField); err != nil {
+		return err
+	}
+	// Old clients cannot change a switch they do not send. Merge under the
+	// configuration lock so a concurrent disable cannot be undone.
+	decoded.enabledOmitted = switchField.Enabled == nil
+	*c = InviteConfig(decoded)
+	return nil
+}
+
 type LotteryPrize struct {
 	Name           string  `json:"name"`
 	Amount         float64 `json:"amount"`
@@ -104,7 +124,7 @@ func (s *Service) InviteConfig(ctx context.Context) (InviteConfig, error) {
 	requirement := c.inviteRechargeRequirement()
 	requirement.RechargeWindowDays = requirement.windowDays()
 	return InviteConfig{
-		InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit,
+		Enabled: c.InviteEnabled, InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit,
 		RechargeRequirement: requirement,
 	}, err
 }
@@ -121,6 +141,9 @@ func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 	_, err := s.saveConfigChecked(ctx, func(old Config) (Config, error) {
 		if err := checkConfigVersion(ctx, inviteConfigOf(old)); err != nil {
 			return old, err
+		}
+		if !c.enabledOmitted {
+			old.InviteEnabled = c.Enabled
 		}
 		old.InviteReward = c.InviteReward
 		old.InviteDailyLimit = c.InviteDailyLimit
@@ -262,18 +285,6 @@ func (s *Service) SaveLotteryConfig(ctx context.Context, c LotteryConfig) error 
 	return s.saveActivityConfig(ctx, lotteryConfigKey, lotteryConfigLock, c)
 }
 
-// Integer sampling preserves 8-decimal monetary precision and includes both endpoints.
-func randomCheckinAmount(c CheckinConfig) (float64, error) {
-	if err := validateCheckin(c); err != nil {
-		return 0, err
-	}
-	lo, hi := int64(math.Round(c.MinAmount*1e8)), int64(math.Round(c.MaxAmount*1e8))
-	n, err := rand.Int(rand.Reader, big.NewInt(hi-lo+1))
-	if err != nil {
-		return 0, err
-	}
-	return float64(lo+n.Int64()) / 1e8, nil
-}
 func lotteryPrizeAt(prizes []LotteryPrize, roll int64) LotteryPrize {
 	for _, p := range prizes {
 		roll -= int64(p.ProbabilityBPS)

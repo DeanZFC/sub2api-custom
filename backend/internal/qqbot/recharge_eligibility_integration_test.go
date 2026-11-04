@@ -91,7 +91,7 @@ func TestInviteRechargeChecksInviterAndReportsConditions(t *testing.T) {
 	ctx := context.Background()
 	db := testDB(t)
 	s := savedBot(t, db)
-	cfg := InviteConfig{InviteReward: 1.25, InviteDailyLimit: 10,
+	cfg := InviteConfig{Enabled: true, InviteReward: 1.25, InviteDailyLimit: 10,
 		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 50, MinRecharge30d: 10, RechargeWindowDays: 60}}
 	require.NoError(t, s.SaveInviteConfig(ctx, cfg))
 	c, err := s.Config(ctx)

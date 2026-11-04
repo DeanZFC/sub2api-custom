@@ -210,6 +210,8 @@ export interface LoginAgreementDocument {
 }
 
 export interface PublicSettings {
+  excel_bps_enabled?: boolean
+  openai_codex_ticket_enabled?: boolean
   gpt_direct_enabled?: boolean
   registration_enabled: boolean
   email_verify_enabled: boolean
@@ -982,6 +984,7 @@ export interface ClaudeModel {
 }
 
 export interface Proxy {
+  mihomo_node_id?: string
   id: number
   name: string
   protocol: ProxyProtocol
@@ -1283,7 +1286,16 @@ export interface GrokModelDiagnostics {
   mappings: GrokModelDiagnosticItem[]
 }
 
+export interface ExcelBPSCredentialState {
+  status: string
+  expires_at?: string
+  observed_at?: string
+  error_code?: string
+  requires_manual_resume?: boolean
+}
+
 export interface Account {
+  excel_bps_credential_state?: ExcelBPSCredentialState
   id: number
   name: string
   notes?: string | null

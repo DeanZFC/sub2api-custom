@@ -26,6 +26,7 @@ const appStore = vi.hoisted(() => ({
     payment_enabled?: boolean
     risk_control_enabled?: boolean
     subscription_enabled?: boolean
+    openai_codex_ticket_enabled?: boolean
     custom_menu_items?: []
   },
   fetchPublicSettings: vi.fn(),
@@ -176,6 +177,55 @@ describe('feature route guard', () => {
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith(target)
+  })
+})
+
+describe('ticket route guard (opt-in master switch)', () => {
+  beforeEach(() => {
+    authStore.isAuthenticated = true
+    authStore.isAdmin = true
+    appStore.publicSettingsLoaded = true
+    appStore.fetchPublicSettings.mockReset()
+  })
+
+  it.each([{}, { openai_codex_ticket_enabled: false }])('redirects direct links while ticket harvesting is disabled: %j', async settings => {
+    appStore.cachedPublicSettings = settings
+    const { navigation, next } = runGuard({ requiresAdmin: true, requiresCodexTicket: true }, '/admin/harvest-flow')
+    await navigation
+    expect(next).toHaveBeenCalledWith({ path: '/admin/settings', query: { tab: 'features' } })
+  })
+
+  it('allows ticket management only after settings explicitly enable it', async () => {
+    appStore.cachedPublicSettings = { openai_codex_ticket_enabled: true }
+    const { navigation, next } = runGuard({ requiresAdmin: true, requiresCodexTicket: true }, '/admin/harvest-flow')
+    await navigation
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('waits for settings before allowing a first direct navigation', async () => {
+    appStore.publicSettingsLoaded = false
+    appStore.cachedPublicSettings = null
+    const deferred = createDeferred<void>()
+    appStore.fetchPublicSettings.mockImplementation(async () => {
+      await deferred.promise
+      appStore.cachedPublicSettings = { openai_codex_ticket_enabled: true }
+      appStore.publicSettingsLoaded = true
+    })
+    const { navigation, next } = runGuard({ requiresAdmin: true, requiresCodexTicket: true }, '/admin/harvest-flow')
+    await vi.waitFor(() => expect(appStore.fetchPublicSettings).toHaveBeenCalledOnce())
+    expect(next).not.toHaveBeenCalled()
+    deferred.resolve()
+    await navigation
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('keeps ticket management unavailable if settings cannot be loaded', async () => {
+    appStore.publicSettingsLoaded = false
+    appStore.cachedPublicSettings = null
+    appStore.fetchPublicSettings.mockResolvedValue(null)
+    const { navigation, next } = runGuard({ requiresAdmin: true, requiresCodexTicket: true }, '/admin/harvest-flow')
+    await navigation
+    expect(next).toHaveBeenCalledWith({ path: '/admin/settings', query: { tab: 'features' } })
   })
 })
 

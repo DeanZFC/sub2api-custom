@@ -1,5 +1,7 @@
 # Codex 打票、Mihomo 与 Excel / Basispoints
 
+> 本文保留首次合并时的实现与验证记录。2026-11-04 后的授权方式、测试诊断、Mihomo 和打票行为请以[最新合并记录](bps-mihomo-harvest-update-20261104.md)及其使用文档为准，尤其是独立 Excel 授权与 Worker 配置。
+
 本次仅整合这三个模块，来源固定为 `a110q/ranxi2001-sub2api`
 `b40055227fcc21f571f9c727d1139bb48ecef95c`（production）。
 保留原项目与来源的 LGPL-3.0 许可，来源仓库：

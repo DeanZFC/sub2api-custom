@@ -215,6 +215,7 @@ func savedBot(t *testing.T, db *sql.DB) *Service {
 	c.AllowedGroups = []string{"group", "other-group"}
 	c.CheckinReward = .1
 	c.InviteReward = 1
+	c.InviteEnabled = true
 	c.CooldownSeconds = 0
 	_, err := s.SaveConfig(context.Background(), c)
 	require.NoError(t, err)

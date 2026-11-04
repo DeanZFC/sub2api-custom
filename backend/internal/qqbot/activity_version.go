@@ -38,7 +38,7 @@ func checkConfigVersion(ctx context.Context, value any) error {
 func inviteConfigOf(c Config) InviteConfig {
 	r := c.inviteRechargeRequirement()
 	r.RechargeWindowDays = r.windowDays()
-	return InviteConfig{InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit, RechargeRequirement: r}
+	return InviteConfig{Enabled: c.InviteEnabled, InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit, RechargeRequirement: r}
 }
 func transferConfigOf(c Config) TransferConfig {
 	return TransferConfig{TransferEnabled: c.TransferEnabled, TransferFeePercent: c.TransferFeePercent, TransferMinAmount: c.TransferMinAmount, TransferMaxAmount: c.TransferMaxAmount}

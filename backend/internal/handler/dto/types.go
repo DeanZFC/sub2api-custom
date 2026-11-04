@@ -216,6 +216,7 @@ type AdminGroup struct {
 }
 
 type Account struct {
+	ExcelBPSCredentialState *service.ExcelBPSCredentialState `json:"excel_bps_credential_state,omitempty"`
 	// Redacted ticket summaries contain no reusable turn-state, cookies or credentials.
 	CodexTurnTickets []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
 	ID               int64                             `json:"id"`
@@ -350,11 +351,12 @@ type Account struct {
 // repeated account_groups and groups object graphs. Fetch /admin/accounts/:id
 // for the complete Account DTO when editing or inspecting an account.
 type AccountListItem struct {
-	ID       int64   `json:"id"`
-	Name     string  `json:"name"`
-	Notes    *string `json:"notes"`
-	Platform string  `json:"platform"`
-	Type     string  `json:"type"`
+	ExcelBPSCredentialState *service.ExcelBPSCredentialState `json:"excel_bps_credential_state,omitempty"`
+	ID                      int64                            `json:"id"`
+	Name                    string                           `json:"name"`
+	Notes                   *string                          `json:"notes"`
+	Platform                string                           `json:"platform"`
+	Type                    string                           `json:"type"`
 
 	Credentials       map[string]any                 `json:"credentials,omitempty"`
 	CredentialsStatus map[string]bool                `json:"credentials_status,omitempty"`
@@ -453,16 +455,17 @@ type AccountGroup struct {
 }
 
 type Proxy struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Protocol  string    `json:"protocol"`
-	Host      string    `json:"host"`
-	Port      int       `json:"port"`
-	Username  string    `json:"username"`
-	Password  string    `json:"-"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	MihomoNodeID string    `json:"mihomo_node_id,omitempty"`
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	Protocol     string    `json:"protocol"`
+	Host         string    `json:"host"`
+	Port         int       `json:"port"`
+	Username     string    `json:"username"`
+	Password     string    `json:"-"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 
 	ExpiresAt      *time.Time `json:"expires_at"`
 	FallbackMode   string     `json:"fallback_mode"`

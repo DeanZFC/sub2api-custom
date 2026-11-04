@@ -18,6 +18,8 @@ declare module 'vue-router' {
      * @default false
      */
     requiresAdmin?: boolean
+    /** Opt-in ticket management; hidden and unavailable until enabled. */
+    requiresCodexTicket?: boolean
 
     /**
      * Page title for this route

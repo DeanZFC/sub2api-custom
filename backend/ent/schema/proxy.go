@@ -52,6 +52,10 @@ func (Proxy) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default("active"),
+		field.String("mihomo_node_id").
+			MaxLen(128).
+			Optional().Nillable().
+			Comment("Managed Mihomo node identity; ordinary proxies leave this unset."),
 		field.Time("expires_at").
 			Optional().Nillable().
 			Comment("Proxy expiration time (NULL means never expires)."),

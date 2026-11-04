@@ -92,3 +92,14 @@ describe('useOpenAIOAuth.exchangeAuthCode', () => {
     )
   })
 })
+
+describe('Excel OAuth client selection', () => {
+  it('requests the independent Excel client and keeps Codex default unchanged', async () => {
+    vi.mocked(adminAPI.accounts.generateAuthUrl).mockResolvedValue({ auth_url: 'https://auth.example/authorize', session_id: 'session', state: 'state' } as any)
+    const oauth = useOpenAIOAuth()
+    await oauth.generateAuthUrl(7, undefined, 'excel')
+    expect(adminAPI.accounts.generateAuthUrl).toHaveBeenLastCalledWith('/admin/openai/generate-auth-url', { proxy_id: 7, oauth_client: 'excel' })
+    await oauth.generateAuthUrl(7)
+    expect(adminAPI.accounts.generateAuthUrl).toHaveBeenLastCalledWith('/admin/openai/generate-auth-url', { proxy_id: 7 })
+  })
+})

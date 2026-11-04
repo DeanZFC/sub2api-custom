@@ -1,3 +1,4 @@
+import astraGateway from './astraGateway'
 import harvestFlow from './harvestFlow'
 import overview from './overview'
 import channels from './channels'
@@ -10,6 +11,7 @@ import promptAudit from './promptAudit'
 import plugins from './plugins'
 
 export default {
+  ...astraGateway,
   ...harvestFlow,
   ...overview,
   ...channels,

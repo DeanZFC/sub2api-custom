@@ -38702,6 +38702,7 @@ type ProxyMutation struct {
 	username               *string
 	password               *string
 	status                 *string
+	mihomo_node_id         *string
 	expires_at             *time.Time
 	fallback_mode          *string
 	expiry_warn_days       *int
@@ -39240,6 +39241,55 @@ func (m *ProxyMutation) ResetStatus() {
 	m.status = nil
 }
 
+// SetMihomoNodeID sets the "mihomo_node_id" field.
+func (m *ProxyMutation) SetMihomoNodeID(s string) {
+	m.mihomo_node_id = &s
+}
+
+// MihomoNodeID returns the value of the "mihomo_node_id" field in the mutation.
+func (m *ProxyMutation) MihomoNodeID() (r string, exists bool) {
+	v := m.mihomo_node_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMihomoNodeID returns the old "mihomo_node_id" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldMihomoNodeID(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMihomoNodeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMihomoNodeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMihomoNodeID: %w", err)
+	}
+	return oldValue.MihomoNodeID, nil
+}
+
+// ClearMihomoNodeID clears the value of the "mihomo_node_id" field.
+func (m *ProxyMutation) ClearMihomoNodeID() {
+	m.mihomo_node_id = nil
+	m.clearedFields[proxy.FieldMihomoNodeID] = struct{}{}
+}
+
+// MihomoNodeIDCleared returns if the "mihomo_node_id" field was cleared in this mutation.
+func (m *ProxyMutation) MihomoNodeIDCleared() bool {
+	_, ok := m.clearedFields[proxy.FieldMihomoNodeID]
+	return ok
+}
+
+// ResetMihomoNodeID resets all changes to the "mihomo_node_id" field.
+func (m *ProxyMutation) ResetMihomoNodeID() {
+	m.mihomo_node_id = nil
+	delete(m.clearedFields, proxy.FieldMihomoNodeID)
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (m *ProxyMutation) SetExpiresAt(t time.Time) {
 	m.expires_at = &t
@@ -39653,7 +39703,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -39683,6 +39733,9 @@ func (m *ProxyMutation) Fields() []string {
 	}
 	if m.status != nil {
 		fields = append(fields, proxy.FieldStatus)
+	}
+	if m.mihomo_node_id != nil {
+		fields = append(fields, proxy.FieldMihomoNodeID)
 	}
 	if m.expires_at != nil {
 		fields = append(fields, proxy.FieldExpiresAt)
@@ -39724,6 +39777,8 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.Password()
 	case proxy.FieldStatus:
 		return m.Status()
+	case proxy.FieldMihomoNodeID:
+		return m.MihomoNodeID()
 	case proxy.FieldExpiresAt:
 		return m.ExpiresAt()
 	case proxy.FieldFallbackMode:
@@ -39761,6 +39816,8 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPassword(ctx)
 	case proxy.FieldStatus:
 		return m.OldStatus(ctx)
+	case proxy.FieldMihomoNodeID:
+		return m.OldMihomoNodeID(ctx)
 	case proxy.FieldExpiresAt:
 		return m.OldExpiresAt(ctx)
 	case proxy.FieldFallbackMode:
@@ -39847,6 +39904,13 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStatus(v)
+		return nil
+	case proxy.FieldMihomoNodeID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMihomoNodeID(v)
 		return nil
 	case proxy.FieldExpiresAt:
 		v, ok := value.(time.Time)
@@ -39942,6 +40006,9 @@ func (m *ProxyMutation) ClearedFields() []string {
 	if m.FieldCleared(proxy.FieldPassword) {
 		fields = append(fields, proxy.FieldPassword)
 	}
+	if m.FieldCleared(proxy.FieldMihomoNodeID) {
+		fields = append(fields, proxy.FieldMihomoNodeID)
+	}
 	if m.FieldCleared(proxy.FieldExpiresAt) {
 		fields = append(fields, proxy.FieldExpiresAt)
 	}
@@ -39970,6 +40037,9 @@ func (m *ProxyMutation) ClearField(name string) error {
 		return nil
 	case proxy.FieldPassword:
 		m.ClearPassword()
+		return nil
+	case proxy.FieldMihomoNodeID:
+		m.ClearMihomoNodeID()
 		return nil
 	case proxy.FieldExpiresAt:
 		m.ClearExpiresAt()
@@ -40014,6 +40084,9 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldStatus:
 		m.ResetStatus()
+		return nil
+	case proxy.FieldMihomoNodeID:
+		m.ResetMihomoNodeID()
 		return nil
 	case proxy.FieldExpiresAt:
 		m.ResetExpiresAt()

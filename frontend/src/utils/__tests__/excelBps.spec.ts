@@ -28,4 +28,15 @@ describe('BPS account policy', () => {
     config.targetGroupId = 0
     expect(writeExcelBPSConfig(config).openai_excel_bps_403_target_group_id).toBe(0)
   })
+  it('preserves recovery policy when editing an account automatically disabled after 403', () => {
+    const base = { openai_excel_bps: false, openai_excel_bps_403_disabled_at: '2026-11-04T00:00:00Z', openai_excel_bps_auto_disable_on_403: true, openai_excel_bps_auto_recover_on_403: true, openai_excel_bps_403_recovery_interval_minutes: 15, openai_excel_bps_models: ['gpt-6-astra'], custom: true }
+    const config = readExcelBPSConfig(base)
+    expect(config.recoveryPending).toBe(true)
+    expect(writeExcelBPSConfig(config, base)).toMatchObject(base)
+    for (const interval of [0, 1.5, 10081]) {
+      config.recoveryIntervalMinutes = interval
+      expect(() => writeExcelBPSConfig(config, base)).toThrow()
+    }
+  })
+
 })

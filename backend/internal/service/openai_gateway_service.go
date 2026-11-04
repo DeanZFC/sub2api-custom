@@ -452,20 +452,29 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	excelBPSWarmMu         sync.Mutex
-	excelBPSWarmCancel     context.CancelFunc
-	excelBPSWarmDone       chan struct{}
-	excelBPSWarmStopped    bool
-	excelBPSImagesMu       sync.Mutex
-	excelBPSImages         *basispoints.ImageRelay
-	excelBPSAttachments    basispoints.AttachmentCache
-	excelBPSIPPoolMu       sync.Mutex
-	excelBPSIPPoolSyncedAt time.Time
-	harvestIPPoolMu        sync.Mutex
-	harvestIPPoolExits     []harvestIPPoolExit
-	harvestIPPoolSyncedAt  time.Time
-	harvestIPPoolCursor    atomic.Uint64
-	codexHarvestRunMu      sync.RWMutex
+	astraCandyMu            sync.Mutex
+	astraCandySeen          map[[32]byte]time.Time
+	astraCandyRunning       int
+	excelBPSModelsCache     openAIModelsCache
+	excelOAuthReauth        *OpenAIOAuthReauthService
+	excelBPSRecoveryMu      sync.Mutex
+	excelBPSRecoveryCancel  context.CancelFunc
+	excelBPSRecoveryDone    chan struct{}
+	excelBPSRecoveryStopped bool
+	excelBPSWarmMu          sync.Mutex
+	excelBPSWarmCancel      context.CancelFunc
+	excelBPSWarmDone        chan struct{}
+	excelBPSWarmStopped     bool
+	excelBPSImagesMu        sync.Mutex
+	excelBPSImages          *basispoints.ImageRelay
+	excelBPSAttachments     basispoints.AttachmentCache
+	excelBPSIPPoolMu        sync.Mutex
+	excelBPSIPPoolSyncedAt  time.Time
+	harvestIPPoolMu         sync.Mutex
+	harvestIPPoolExits      []harvestIPPoolExit
+	harvestIPPoolSyncedAt   time.Time
+	harvestIPPoolCursor     atomic.Uint64
+	codexHarvestRunMu       sync.RWMutex
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
 	openaiCodexTickets             sync.Map
 	codex780Routes                 codex780RouteCache
@@ -1272,7 +1281,9 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 		if err != nil {
 			return "", "", err
 		}
-		if bound {
+		// Keep the original shadow identity until the credential resolver below
+		// has validated its parent, including the Excel-only credential boundary.
+		if bound && !account.IsShadow() {
 			current, err := s.accountRepo.GetByID(ctx, openAIVMOwnerID(account))
 			if err != nil {
 				return "", "", err

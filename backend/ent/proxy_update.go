@@ -172,6 +172,26 @@ func (_u *ProxyUpdate) SetNillableStatus(v *string) *ProxyUpdate {
 	return _u
 }
 
+// SetMihomoNodeID sets the "mihomo_node_id" field.
+func (_u *ProxyUpdate) SetMihomoNodeID(v string) *ProxyUpdate {
+	_u.mutation.SetMihomoNodeID(v)
+	return _u
+}
+
+// SetNillableMihomoNodeID sets the "mihomo_node_id" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableMihomoNodeID(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetMihomoNodeID(*v)
+	}
+	return _u
+}
+
+// ClearMihomoNodeID clears the value of the "mihomo_node_id" field.
+func (_u *ProxyUpdate) ClearMihomoNodeID() *ProxyUpdate {
+	_u.mutation.ClearMihomoNodeID()
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *ProxyUpdate) SetExpiresAt(v time.Time) *ProxyUpdate {
 	_u.mutation.SetExpiresAt(v)
@@ -445,6 +465,11 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.MihomoNodeID(); ok {
+		if err := proxy.MihomoNodeIDValidator(v); err != nil {
+			return &ValidationError{Name: "mihomo_node_id", err: fmt.Errorf(`ent: validator failed for field "Proxy.mihomo_node_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.FallbackMode(); ok {
 		if err := proxy.FallbackModeValidator(v); err != nil {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
@@ -503,6 +528,12 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.MihomoNodeID(); ok {
+		_spec.SetField(proxy.FieldMihomoNodeID, field.TypeString, value)
+	}
+	if _u.mutation.MihomoNodeIDCleared() {
+		_spec.ClearField(proxy.FieldMihomoNodeID, field.TypeString)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
@@ -846,6 +877,26 @@ func (_u *ProxyUpdateOne) SetNillableStatus(v *string) *ProxyUpdateOne {
 	return _u
 }
 
+// SetMihomoNodeID sets the "mihomo_node_id" field.
+func (_u *ProxyUpdateOne) SetMihomoNodeID(v string) *ProxyUpdateOne {
+	_u.mutation.SetMihomoNodeID(v)
+	return _u
+}
+
+// SetNillableMihomoNodeID sets the "mihomo_node_id" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableMihomoNodeID(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetMihomoNodeID(*v)
+	}
+	return _u
+}
+
+// ClearMihomoNodeID clears the value of the "mihomo_node_id" field.
+func (_u *ProxyUpdateOne) ClearMihomoNodeID() *ProxyUpdateOne {
+	_u.mutation.ClearMihomoNodeID()
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *ProxyUpdateOne) SetExpiresAt(v time.Time) *ProxyUpdateOne {
 	_u.mutation.SetExpiresAt(v)
@@ -1132,6 +1183,11 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.MihomoNodeID(); ok {
+		if err := proxy.MihomoNodeIDValidator(v); err != nil {
+			return &ValidationError{Name: "mihomo_node_id", err: fmt.Errorf(`ent: validator failed for field "Proxy.mihomo_node_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.FallbackMode(); ok {
 		if err := proxy.FallbackModeValidator(v); err != nil {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
@@ -1207,6 +1263,12 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.MihomoNodeID(); ok {
+		_spec.SetField(proxy.FieldMihomoNodeID, field.TypeString, value)
+	}
+	if _u.mutation.MihomoNodeIDCleared() {
+		_spec.ClearField(proxy.FieldMihomoNodeID, field.TypeString)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)

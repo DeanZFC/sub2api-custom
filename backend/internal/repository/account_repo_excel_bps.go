@@ -52,7 +52,7 @@ func (r *accountRepository) disableExcelBPSOn403InTx(ctx context.Context, accoun
 	// suspected Excel ban until an admin turns the protocol back on.
 	result, err := client.ExecContext(ctx, `
 UPDATE accounts
-SET extra = jsonb_set(extra, '{openai_excel_bps}', 'false'::jsonb) || jsonb_build_object('openai_excel_bps_403_disabled_at', $3::text), updated_at = NOW()
+SET extra = jsonb_set(extra - 'openai_excel_bps_403_last_probe_at', '{openai_excel_bps}', 'false'::jsonb) || jsonb_build_object('openai_excel_bps_403_disabled_at', $3::text), updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL AND parent_account_id IS NULL
   AND platform = 'openai' AND type = 'oauth'
   AND credentials = $2::jsonb
@@ -70,4 +70,19 @@ WHERE id = $1 AND deleted_at IS NULL AND parent_account_id IS NULL
 		return false, err
 	}
 	return true, nil
+}
+
+func stripExcelBPS403MarkerUpdates(extra map[string]any) map[string]any {
+	if extra == nil {
+		return nil
+	}
+	result := make(map[string]any, len(extra))
+	for key, value := range extra {
+		switch key {
+		case service.ExcelBPS403DisabledAtKey, service.ExcelBPS403LastProbeAtKey, service.ExcelBPS403MovedAtKey, service.ExcelBPS403MovedGroupIDKey:
+		default:
+			result[key] = value
+		}
+	}
+	return result
 }

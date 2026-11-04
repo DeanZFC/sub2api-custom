@@ -12,6 +12,19 @@ vi.mock('@/api/auth', () => ({
   getPublicSettings: vi.fn(),
 }))
 
+describe('FeatureFlags.codexTicket', () => {
+  beforeEach(() => { setActivePinia(createPinia()) })
+
+  it('hides ticket menus until the master switch is explicitly enabled', () => {
+    expect(FeatureFlags.codexTicket.mode).toBe('opt-in')
+    expect(isFeatureFlagEnabled(FeatureFlags.codexTicket)).toBe(false)
+    expect(resolveFeatureFlag({}, FeatureFlags.codexTicket)).toBe(false)
+    expect(resolveFeatureFlag({ openai_codex_ticket_enabled: false }, FeatureFlags.codexTicket)).toBe(false)
+    useAppStore().cachedPublicSettings = { openai_codex_ticket_enabled: true } as PublicSettings
+    expect(makeSidebarFlag(FeatureFlags.codexTicket)()).toBe(true)
+  })
+})
+
 describe('FeatureFlags.subscription', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

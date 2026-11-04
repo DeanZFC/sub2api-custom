@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -37,7 +38,18 @@ func cachedSource(nodeName string) subscriptionCache {
 
 func waitSourceOperation(t *testing.T, m *Manager) Status {
 	t.Helper()
+	completed := false
+	defer func() {
+		if !completed {
+			// Preserve the blocked operation before manager cleanup cancels it.
+			// This distinguishes process/file/controller waits from lock failures.
+			var stacks strings.Builder
+			_ = pprof.Lookup("goroutine").WriteTo(&stacks, 2)
+			t.Logf("Mihomo source operation did not complete; goroutines:\n%s", stacks.String())
+		}
+	}()
 	require.Eventually(t, func() bool { return !m.Status().Busy }, time.Second*10, time.Millisecond*5)
+	completed = true
 	return m.Status()
 }
 

@@ -48,6 +48,9 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 	if proxyIn.Password != "" {
 		builder.SetPassword(proxyIn.Password)
 	}
+	if proxyIn.MihomoNodeID != "" {
+		builder.SetMihomoNodeID(proxyIn.MihomoNodeID)
+	}
 	if proxyIn.ExpiresAt != nil {
 		builder.SetExpiresAt(*proxyIn.ExpiresAt)
 	}
@@ -607,6 +610,9 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 	}
 	if m.Password != nil {
 		out.Password = *m.Password
+	}
+	if m.MihomoNodeID != nil {
+		out.MihomoNodeID = *m.MihomoNodeID
 	}
 	return out
 }

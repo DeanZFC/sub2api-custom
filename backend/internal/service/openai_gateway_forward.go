@@ -38,6 +38,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return nil, err
 	}
+	bpsGloballyEnabled := (account.IsExcelBPSEnabled() || account.IsExcelOAuth()) && s.excelBPSGloballyEnabled(ctx)
+	if c != nil && c.GetBool(bpsAccountProbeRequiredContextKey) && (!bpsGloballyEnabled || !account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) || gjson.GetBytes(body, `tools.#(type=="image_generation")`).Exists()) {
+		return nil, errors.New("bps probe path is unavailable")
+	}
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if s.openaiVM != nil {
@@ -46,6 +50,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, err
 		}
 		if bound {
+			if c != nil && c.GetBool(bpsAccountProbeRequiredContextKey) {
+				return nil, errors.New("BPS diagnostic is unavailable for VM-bound accounts")
+			}
 			return s.forwardOpenAIVMResponses(ctx, c, account, body)
 		}
 	}
@@ -86,7 +93,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
-	if account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) {
+	bpsRouteEnabled := bpsGloballyEnabled && account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String())
+	if account.IsExcelOAuth() && !bpsRouteEnabled {
+		return nil, writeExcelOAuthRouteError(c)
+	}
+	if bpsRouteEnabled {
 		return s.forwardExcelBPS(ctx, c, account, body, startTime)
 	}
 

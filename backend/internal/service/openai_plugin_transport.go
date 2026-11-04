@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
@@ -31,6 +32,8 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	}
 	request = s.stickBoundCodexTicketRequest(request, account)
 	bound := s.codexTicketRequestBound(request, account)
+	observationTicket := s.boundCodexTicket(request, account)
+	observationHeaders := request.Header.Clone()
 	releaseChat := func() {}
 	if bound {
 		releaseChat = s.holdCodexTicketChat(account)
@@ -42,12 +45,28 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	}
 	proxyURL = pinnedProxy
 	defer func() {
-		result, resultErr = attachCodexTicketEgressRelease(result, resultErr, func() { release(); releaseChat() })
+		observe := resultErr == nil && result != nil && result.StatusCode == http.StatusOK
+		result, resultErr = attachCodexTicketEgressRelease(result, resultErr, func() {
+			release()
+			releaseChat()
+			if observe {
+				s.observeScheduledAstraCandy(request.Context(), observationHeaders, account, observationTicket)
+			}
+		})
 	}()
 	defer func() {
 		if resultErr == nil {
-			s.observeCodexTicketResponse(request, result, account)
-			if bound && s.settingService != nil && s.settingService.CodexTicketStrictResponse(request.Context()) && codexResponseMismatches(request, result, account) {
+			observedRequest := request
+			if result != nil && result.Request != nil && s.codexTicketRequestBound(result.Request, account) {
+				observedRequest = result.Request
+			}
+			if ticket := s.boundCodexTicket(observedRequest, account); ticket != nil {
+				observationTicket = ticket
+				observationHeaders = observedRequest.Header.Clone()
+			}
+			responseBound := bound || s.codexTicketRequestBound(observedRequest, account)
+			s.observeCodexTicketResponse(observedRequest, result, account)
+			if responseBound && s.settingService != nil && s.settingService.CodexTicketStrictResponse(request.Context()) && codexResponseMismatches(observedRequest, result, account) {
 				if result != nil && result.Body != nil {
 					_ = result.Body.Close()
 				}
@@ -83,6 +102,23 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	account *Account,
 	useTLSFallback bool,
 ) (*http.Response, error) {
+	if gateway := s.openaiGatewayService; gateway != nil && request != nil && request.URL != nil && request.URL.String() == chatgptCodexURL && gateway.openAICodexTicketEnabledContext(request.Context()) {
+		raw, err := snapshotHTTPRequestBody(request)
+		if err != nil {
+			return nil, err
+		}
+		replaceHTTPRequestJSONBody(request, raw)
+		model := extractOpenAICodexTicketModel(raw)
+		if gateway.isOpenAICodexTicketAccount(request.Context(), account, model) && gateway.openAICodexTicketGatedModel(model) {
+			if err := gateway.applyOpenAICodexTicket(request.Context(), account, model, request.Header, "sse"); err != nil {
+				return nil, err
+			}
+			request = request.WithContext(context.WithValue(request.Context(), astraCandySkipObservationKey{}, true))
+			started := time.Now().UTC()
+			response, sendErr := gateway.doOpenAIUpstream(request, proxyURL, account)
+			return observeAccountTestResponse(request.Context(), started, response, sendErr)
+		}
+	}
 	if s.openaiVM != nil {
 		started := time.Now().UTC()
 		if response, handled, err := s.openaiVM.RoundTrip(request, account); handled {

@@ -145,7 +145,7 @@
             class="rounded-lg border border-blue-300 bg-white/80 p-4 dark:border-blue-600 dark:bg-gray-800/80"
           >
             <p class="mb-3 text-sm text-blue-700 dark:text-blue-300">
-              {{ t(getOAuthKey('refreshTokenDesc')) }}
+              {{ t(getOAuthKey(isExcelOAuth ? 'excelRefreshTokenDesc' : 'refreshTokenDesc')) }}
             </p>
 
             <!-- Refresh Token Input -->
@@ -930,6 +930,7 @@ interface Props {
    * pass only the email (or "email----") so the operator types the password.
    */
   initialEmailPassword?: string
+  excelOauth?: boolean
   platform?: AccountPlatform // Platform type for different UI/text
   showProjectId?: boolean // New prop to control project ID visibility
 }
@@ -956,6 +957,7 @@ const props = withDefaults(defineProps<Props>(), {
   showManualOption: true,
   initialInputMethod: 'manual',
   initialEmailPassword: '',
+  excelOauth: false,
   platform: 'anthropic',
   showProjectId: true
 })
@@ -992,19 +994,22 @@ const getOAuthKey = (key: string) => {
   return `admin.accounts.oauth.${key}`
 }
 
+const isExcelOAuth = computed(() => props.platform === 'openai' && props.excelOauth)
+
 // Computed translations for current platform
-const oauthTitle = computed(() => t(getOAuthKey('title')))
+const oauthTitle = computed(() => t(getOAuthKey(isExcelOAuth.value ? 'excelTitle' : 'title')))
 const oauthFollowSteps = computed(() => t(getOAuthKey('followSteps')))
 const oauthStep1GenerateUrl = computed(() => t(getOAuthKey('step1GenerateUrl')))
 const oauthGenerateAuthUrl = computed(() => t(getOAuthKey('generateAuthUrl')))
 const oauthStep2OpenUrl = computed(() => t(getOAuthKey('step2OpenUrl')))
 const oauthOpenUrlDesc = computed(() => t(getOAuthKey('openUrlDesc')))
 const oauthStep3EnterCode = computed(() => t(getOAuthKey('step3EnterCode')))
-const oauthAuthCodeDesc = computed(() => t(getOAuthKey('authCodeDesc')))
+const oauthAuthCodeDesc = computed(() => t(getOAuthKey(isExcelOAuth.value ? 'excelCodeHint' : 'authCodeDesc')))
 const oauthAuthCode = computed(() => t(getOAuthKey('authCode')))
-const oauthAuthCodePlaceholder = computed(() => t(getOAuthKey('authCodePlaceholder')))
-const oauthAuthCodeHint = computed(() => t(getOAuthKey('authCodeHint')))
+const oauthAuthCodePlaceholder = computed(() => t(getOAuthKey(isExcelOAuth.value ? 'excelCodePlaceholder' : 'authCodePlaceholder')))
+const oauthAuthCodeHint = computed(() => t(getOAuthKey(isExcelOAuth.value ? 'excelCodeHint' : 'authCodeHint')))
 const oauthImportantNotice = computed(() => {
+  if (isExcelOAuth.value) return t('admin.accounts.oauth.openai.excelLoginHint')
   if (props.platform === 'openai') return t('admin.accounts.oauth.openai.importantNotice')
   if (props.platform === 'antigravity') return t('admin.accounts.oauth.antigravity.importantNotice')
   if (props.platform === 'grok') return t('admin.accounts.oauth.grok.importantNotice')

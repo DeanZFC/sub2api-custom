@@ -6,6 +6,13 @@
     <p v-if="dirty" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
       <h2 class="text-lg font-semibold">{{ t('qqbot.inviteSettings') }}</h2>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between gap-4">
+          <span id="invite-enabled-label" class="font-medium">{{ t('qqbot.enableInvite') }}</span>
+          <Toggle v-model="form.enabled" data-testid="invite-enabled" aria-labelledby="invite-enabled-label" :disabled="busy" />
+        </div>
+        <p class="text-sm text-gray-500">{{ t('qqbot.inviteEnabledHelp') }}</p>
+      </div>
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="space-y-1">
           {{ t('qqbot.inviteReward') }}
@@ -42,6 +49,7 @@ import { useQQDraft } from './useQQDraft'
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { qqbotAPI, type QQInviteConfig } from '@/api/qqbot'
+import Toggle from '@/components/common/Toggle.vue'
 
 const { t } = useI18n()
 const form = ref<QQInviteConfig | null>(null)
@@ -51,7 +59,7 @@ const error = ref('')
 const notice = ref('')
 
 async function save() {
-  if (!form.value) return
+  if (!form.value || busy.value) return
   busy.value = true
   error.value = ''; notice.value = ''
   if (![form.value.min_recharge_total, form.value.min_recharge_30d].every(n => Number.isFinite(n) && n >= 0 && n <= 1_000_000_000 && Number(n.toFixed(2)) === n)) {
@@ -76,7 +84,11 @@ async function save() {
 onMounted(async () => {
   try {
     const config = await qqbotAPI.inviteConfig()
-    form.value = { ...config, recharge_window_days: config.recharge_window_days || 30 }
+    form.value = {
+      ...config,
+      enabled: typeof config.enabled === 'boolean' ? config.enabled : config.invite_reward > 0 && config.invite_daily_limit > 0,
+      recharge_window_days: config.recharge_window_days || 30
+    }
   }
   catch (e) { error.value = (e as Error).message || t('common.error') }
 })

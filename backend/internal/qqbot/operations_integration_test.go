@@ -184,7 +184,7 @@ func TestActivityPreviewCannotSettleRewards(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Bound)
 	require.True(t, result.CheckinEligible)
-	require.Equal(t, 2.0, result.CheckinExpected)
+	require.InDelta(t, 1.733333332, result.CheckinExpected, 1e-9)
 	require.NotEmpty(t, result.Tasks)
 	for _, table := range []string{"qq_bot_rewards", "qq_bot_reward_codes", "qq_bot_lottery_chance_grants"} {
 		var n int

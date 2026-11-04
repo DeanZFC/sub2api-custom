@@ -45,3 +45,34 @@ func TestGetAccessToken_SparkShadowResolvesToParent(t *testing.T) {
 	require.Equal(t, "parent-access-token", token)
 	require.Equal(t, "oauth", tokenType)
 }
+
+func TestGetAccessToken_SparkShadowVMBindingPreservesCredentialBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		clientID string
+		wantErr  bool
+	}{
+		{name: "native Codex VM shadow"},
+		{name: "Excel primary VM shadow", clientID: "app_fnr0pYvVwwFDocDumLG3H2Bp", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parentID := int64(100)
+			parent := &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+				Credentials: map[string]any{"access_token": "parent-access-token", "client_id": tc.clientID}}
+			shadow := &Account{ID: 200, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID}
+			repo := newStubCredRepo(parent)
+			vmRepo := &vmTestRepo{b: &OpenAIVMBinding{AccountID: parentID, Status: "ready"}}
+			svc := &OpenAIGatewayService{accountRepo: repo,
+				openaiVM: NewOpenAIVMService(vmRepo, repo, nil, vmTestEncryptor{})}
+			token, kind, err := svc.GetAccessToken(t.Context(), shadow)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "native Codex credentials are required")
+				require.Empty(t, token)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "parent-access-token", token)
+			require.Equal(t, "oauth", kind)
+		})
+	}
+}

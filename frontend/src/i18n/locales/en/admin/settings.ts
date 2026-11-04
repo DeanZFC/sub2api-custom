@@ -1,5 +1,9 @@
 export default {
     settings: {
+      codexTicketFeature: {
+        disabled: 'Ticket harvesting is disabled. Enable it in system feature settings.',
+        configure: 'Open feature settings',
+      },
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {

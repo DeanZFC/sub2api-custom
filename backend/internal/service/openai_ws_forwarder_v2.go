@@ -38,7 +38,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
-	if err := openAIWSRejectExcelBPS(account, originalModel, mappedModel); err != nil {
+	if err := s.rejectExcelBPSWebSocket(ctx, account, originalModel, mappedModel); err != nil {
 		return nil, err
 	}
 	responseModelObserver := &upstreamResponseModelObserver{}

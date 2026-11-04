@@ -73,7 +73,7 @@ func invitationStatusPriority(status string) int {
 }
 
 func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, error) {
-	if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+	if !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 		return "邀请活动未开启。", nil
 	}
 	requirement := c.inviteRechargeRequirement()

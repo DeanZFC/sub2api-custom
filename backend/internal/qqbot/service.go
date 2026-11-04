@@ -326,7 +326,7 @@ func (s *Service) SettleInvites(ctx context.Context, member string) error {
 }
 
 func (s *Service) settleInvites(ctx context.Context, c Config, member string) error {
-	if !c.Enabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+	if !c.Enabled || !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 		return nil
 	}
 	eligibleAsInviter := true

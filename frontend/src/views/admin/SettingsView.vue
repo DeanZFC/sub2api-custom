@@ -43,7 +43,16 @@
           </nav>
         </div>
 
-      <CodexTicketSettings v-if="activeTab === 'gateway'" />
+      <section v-if="activeTab === 'gateway' && codexTicketEnabled" class="card p-6">
+        <h3 class="text-lg font-semibold">{{ harvestSettingsText('Codex 打票与代理管理', 'Codex ticket harvesting and proxies') }}</h3>
+        <p class="mt-1 text-sm text-gray-500">{{ harvestSettingsText('在打票流程中配置策略、自动调度与账号覆盖；在 IP 管理中配置 Mihomo 和代理节点。', 'Configure ticket policy, scheduling, and account coverage in Harvest Flow. Manage Mihomo and proxy nodes in IP Management.') }}</p>
+        <div class="mt-4 flex gap-3">
+          <RouterLink to="/admin/harvest-flow" class="btn btn-primary">{{ harvestSettingsText('打票流程', 'Harvest Flow') }}</RouterLink>
+          <RouterLink to="/admin/proxies" class="btn btn-secondary">{{ harvestSettingsText('IP 管理', 'IP Management') }}</RouterLink>
+        </div>
+      </section>
+      <CodexTicketFeatureSettings v-if="activeTab === 'features'" />
+      <ExcelBPSProtocolSettings v-if="activeTab === 'features'" />
       <ExcelBPSImageSettings v-if="activeTab === 'features'" />
       <!-- Independently saved settings stay outside this form. -->
       <form v-show="activeTab !== 'openai-vm'" @submit.prevent="saveSettings" class="space-y-6" novalidate>
@@ -9024,7 +9033,9 @@
 </template>
 
 <script setup lang="ts">
-import CodexTicketSettings from '@/components/admin/settings/CodexTicketSettings.vue'
+import ExcelBPSProtocolSettings from '@/components/admin/settings/ExcelBPSProtocolSettings.vue'
+import CodexTicketFeatureSettings from '@/components/admin/settings/CodexTicketFeatureSettings.vue'
+import { FeatureFlags, resolveFeatureFlag } from '@/utils/featureFlags'
 import ExcelBPSImageSettings from '@/components/admin/settings/ExcelBPSImageSettings.vue'
 import GPTDirectSettings from "@/components/admin/settings/GPTDirectSettings.vue";
 import OpenAIVMSettings from "@/components/admin/settings/OpenAIVMSettings.vue";
@@ -9123,7 +9134,9 @@ import {
 } from "./codexFingerprintSignals";
 
 const { t, locale } = useI18n();
+const harvestSettingsText = (zh: string, en: string) => locale.value.startsWith("zh") ? zh : en;
 const appStore = useAppStore();
+const codexTicketEnabled = computed(() => resolveFeatureFlag(appStore.cachedPublicSettings, FeatureFlags.codexTicket));
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
 const adminSettingsStore = useAdminSettingsStore();

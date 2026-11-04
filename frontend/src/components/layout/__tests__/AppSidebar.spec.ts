@@ -81,6 +81,13 @@ describe('AppSidebar subscription feature flag', () => {
   })
 })
 
+describe('AppSidebar ticket feature flag', () => {
+  it('hides ticket management behind the opt-in master switch', () => {
+    expect(componentSource).toContain('const flagCodexTicket = makeSidebarFlag(FeatureFlags.codexTicket)')
+    expect(componentSource).toMatch(/path: '\/admin\/harvest-flow'[^\n]*featureFlag: flagCodexTicket/)
+  })
+})
+
 describe('AppSidebar MCP entry', () => {
   it('uses the MCP logo and shows the entry only when the deployment enables MCP', () => {
     expect(componentSource).toContain("render: () => h(Icon, { name: 'mcp' })")

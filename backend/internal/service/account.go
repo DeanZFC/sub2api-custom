@@ -974,6 +974,26 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 }
 
 func (a *Account) isModelMappingSupported(requestedModel string) bool {
+	// Apply the credential boundary before passthrough's model allowlist bypass.
+	if a.IsExcelOAuth() && !a.IsExcelBPSEnabledForModel(requestedModel) {
+		return false
+	}
+	if blocked, _ := a.Extra["astra_model_disabled"].(bool); blocked {
+		if empty, _ := a.Extra["astra_model_empty_mapping"].(bool); empty {
+			return false
+		}
+		if strings.EqualFold(strings.TrimSpace(requestedModel), "gpt-6-astra") || strings.EqualFold(a.GetMappedModel(requestedModel), "gpt-6-astra") {
+			return false
+		}
+		if keys, ok := a.Extra["astra_model_blocked_keys"].([]any); ok {
+			for _, key := range keys {
+				if k, ok := key.(string); ok && (strings.EqualFold(k, requestedModel) || (strings.HasSuffix(k, "*") && strings.HasPrefix(requestedModel, strings.TrimSuffix(k, "*")))) {
+					return false
+				}
+			}
+		}
+	}
+
 	// 透传模式仅替换认证、模型语义完全交由上游决定，因此放行所有模型。
 	// 该短路必须在 model_mapping 判定之前：账号从"白名单模式"切换到透传后，
 	// credentials 里常残留旧的非空 model_mapping，若不在此放行，透传账号会被

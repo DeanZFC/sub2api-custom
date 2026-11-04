@@ -109,8 +109,9 @@ func TestQQBotInviteActivityUnavailableStates(t *testing.T) {
 		require.Contains(t, info, "请先发送“绑定 邮箱或绑定码”绑定网站账号。")
 	}
 	for _, disabled := range []Config{
-		{InviteReward: 0, InviteDailyLimit: 10},
-		{InviteReward: 1, InviteDailyLimit: 0},
+		{InviteEnabled: true, InviteReward: 0, InviteDailyLimit: 10},
+		{InviteEnabled: true, InviteReward: 1, InviteDailyLimit: 0},
+		{InviteEnabled: false, InviteReward: 1, InviteDailyLimit: 10},
 	} {
 		info, err = s.inviteInfo(ctx, disabled, job)
 		require.NoError(t, err)

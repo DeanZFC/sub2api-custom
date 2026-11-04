@@ -787,6 +787,43 @@ func lockAndMergeAccountProbeExtra(
 	}
 	extra := service.MergeOpenAICodexTicketExtra(service.StripRetiredAccountExtra(copyJSONMap(normalizeJSONMap(account.Extra))), currentExtra)
 	extra = service.MergeExcelBPS403Marker(extra, currentExtra)
+	// A login may finish after the service validated this edit. Its callback also
+	// locks the account first, so recheck a submitted pending marker under this
+	// row lock before persisting it over the newly completed grant.
+	if _, pendingSupplied := extra[service.ExcelBPSAuthorizationPendingKey]; pendingSupplied {
+		if extra["openai_excel_bps"] != true || account.IsExcelOAuth() {
+			delete(extra, service.ExcelBPSAuthorizationPendingKey)
+		} else {
+			if err := rows.Close(); err != nil {
+				return nil, err
+			}
+			grantRows, err := client.QueryContext(ctx, `SELECT EXISTS (SELECT 1 FROM openai_excel_oauth_credentials WHERE account_id=$1 AND credentials_ciphertext<>'')`, account.ID)
+			if err != nil {
+				return nil, err
+			}
+			var exists bool
+			if !grantRows.Next() {
+				err = grantRows.Err()
+				if err == nil {
+					err = sql.ErrNoRows
+				}
+			} else {
+				err = grantRows.Scan(&exists)
+			}
+			closeErr := grantRows.Close()
+			if err != nil {
+				return nil, err
+			}
+			if closeErr != nil {
+				return nil, closeErr
+			}
+			if exists {
+				delete(extra, service.ExcelBPSAuthorizationPendingKey)
+			} else {
+				extra[service.ExcelBPSAuthorizationPendingKey] = true
+			}
+		}
+	}
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
@@ -983,6 +1020,13 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			client = tx.Client()
 		}
 	}
+	ownedAstraPause := false
+	if _, hasAccessToken := credentials["access_token"]; hasAccessToken {
+		ownedAstraPause, err = astraOwnedTokenRefreshPause(ctx, client, id, payload)
+		if err != nil {
+			return err
+		}
+	}
 	result, err := client.ExecContext(ctx, `
 		UPDATE accounts
 		SET
@@ -1062,6 +1106,11 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	}
 	if affected == 0 {
 		return service.ErrAccountNotFound
+	}
+	if ownedAstraPause {
+		if err := advanceAstraHarvestPause(ctx, client, id); err != nil {
+			return err
+		}
 	}
 	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		return err
@@ -2962,7 +3011,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.UpdateExtra(ctx, id, updates)
 	}
-	updates = stripCodexFingerprintSeedFromExtraUpdate(service.StripRetiredAccountExtra(updates))
+	updates = stripExcelBPS403MarkerUpdates(stripCodexFingerprintSeedFromExtraUpdate(service.StripRetiredAccountExtra(updates)))
 	if len(updates) == 0 {
 		return nil
 	}
@@ -2974,7 +3023,8 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 
 	clearProbeSnapshot := upstreamBillingProbeExplicitlyDisabled(updates) || upstreamBillingProbeSnapshotClearRequested(updates)
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot
+	preserveAstraPause := codexHarvestOnlyExtraUpdate(updates)
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || preserveAstraPause
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -2991,9 +3041,22 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			client = tx.Client()
 		}
 	}
+	ownedAstraPause := false
+	if preserveAstraPause {
+		ownedAstraPause, err = astraOwnedHarvestPause(ctx, client, id)
+		if err != nil {
+			return err
+		}
+	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
+	}
+	if _, requested := updates["openai_excel_bps"]; requested {
+		extraExpression = reconcileExcelAuthorizationSQL(extraExpression, "credentials")
+		if updates["openai_excel_bps"] == true {
+			extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_403_disabled_at' - 'openai_excel_bps_403_last_probe_at'"
+		}
 	}
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
@@ -3014,6 +3077,11 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 	if affected == 0 {
 		return service.ErrAccountNotFound
+	}
+	if ownedAstraPause {
+		if err := advanceAstraHarvestPause(ctx, client, id); err != nil {
+			return err
+		}
 	}
 	if durableSchedulerChange {
 		if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
@@ -3239,7 +3307,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(service.StripRetiredAccountExtra(updates.Extra))
+	updates.Extra = stripExcelBPS403MarkerUpdates(stripCodexFingerprintSeedFromExtraUpdate(service.StripRetiredAccountExtra(updates.Extra)))
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)
@@ -3359,7 +3427,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				" AND COALESCE(btrim("+credentialPlaceholder+"::jsonb ->> 'account_mode') <> 'zen', true) IS NOT TRUE")
 	}
 
-	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
+	_, reconcileExcelSwitch := updates.Extra["openai_excel_bps"]
+	reconcileExcel := reconcileExcelSwitch || len(updates.Credentials) > 0
+	if reconcileExcel || len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
 			payload, err := json.Marshal(updates.Extra)
@@ -3374,7 +3444,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			} else {
 				// Turning the protocol back on acknowledges an automatic 403 shutdown.
 				if enabled {
-					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_403_disabled_at'"
+					extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_403_disabled_at' - 'openai_excel_bps_403_last_probe_at'"
 				}
 				// JSON null is a present scope and would disable every model.
 				// Remove the key to restore the all-models routing contract.
@@ -3462,6 +3532,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 		if len(caseBranches) > 0 {
 			extraExpression = "CASE" + strings.Join(caseBranches, "") + " ELSE " + extraExpression + " END"
+		}
+		if reconcileExcel {
+			credentialsExpression := "credentials"
+			if credentialPlaceholder != "" {
+				credentialsExpression = "COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb"
+			}
+			extraExpression = reconcileExcelAuthorizationSQL(extraExpression, credentialsExpression)
 		}
 		if updates.EnsureCodexFingerprintSeed {
 			extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)

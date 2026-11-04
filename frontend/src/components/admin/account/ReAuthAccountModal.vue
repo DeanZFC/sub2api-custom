@@ -127,6 +127,7 @@
         :session-id="currentSessionId"
         :loading="currentLoading"
         :error="currentError"
+        :excel-oauth="isExcelOAuth"
         :show-help="isAnthropic"
         :show-proxy-warning="isAnthropic"
         :show-cookie-option="isAnthropic"
@@ -199,7 +200,7 @@ import {
   type AddMethod,
   type AuthInputMethod
 } from '@/composables/useAccountOAuth'
-import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
+import { useOpenAIOAuth, OPENAI_EXCEL_OAUTH_CLIENT_ID } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
@@ -249,6 +250,7 @@ const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('code_as
 
 // Computed - check platform
 const isOpenAI = computed(() => props.account?.platform === 'openai')
+const isExcelOAuth = computed(() => isOpenAI.value && props.account?.credentials?.client_id === OPENAI_EXCEL_OAUTH_CLIENT_ID)
 const isOpenAILike = computed(() => isOpenAI.value)
 const isGemini = computed(() => props.account?.platform === 'gemini')
 const isAnthropic = computed(() => props.account?.platform === 'anthropic')
@@ -370,7 +372,7 @@ const handleGenerateUrl = async () => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
-    await openaiOAuth.generateAuthUrl(props.account.proxy_id)
+    await openaiOAuth.generateAuthUrl(props.account.proxy_id, undefined, isExcelOAuth.value ? 'excel' : 'codex')
   } else if (isGemini.value) {
     const creds = (props.account.credentials || {}) as Record<string, unknown>
     const tierId = typeof creds.tier_id === 'string' ? creds.tier_id : undefined
@@ -410,6 +412,10 @@ const handleExchangeCode = async () => {
       props.account.proxy_id
     )
     if (!tokenInfo) return
+    if (isExcelOAuth.value && tokenInfo.client_id !== OPENAI_EXCEL_OAUTH_CLIENT_ID) {
+      oauthClient.error.value = t('admin.accounts.oauth.openai.excelSessionMismatch')
+      return
+    }
 
     // Build credentials and extra info
     const credentials = oauthClient.buildCredentials(tokenInfo)
@@ -644,7 +650,7 @@ const handleValidateRefreshToken = async (refreshTokenInput: string) => {
     openaiOAuth.loading.value = true
     openaiOAuth.error.value = ''
     try {
-      const tokenInfo = await openaiOAuth.validateRefreshToken(refreshToken, props.account.proxy_id)
+      const tokenInfo = await openaiOAuth.validateRefreshToken(refreshToken, props.account.proxy_id, isExcelOAuth.value ? OPENAI_EXCEL_OAUTH_CLIENT_ID : undefined)
       if (!tokenInfo) return
 
       const updatedAccount = await adminAPI.accounts.applyOAuthCredentials(props.account.id, {

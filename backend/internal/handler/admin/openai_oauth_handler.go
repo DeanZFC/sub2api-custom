@@ -108,11 +108,13 @@ func NewOpenAIOAuthHandler(
 type OpenAIGenerateAuthURLRequest struct {
 	ProxyID     *int64 `json:"proxy_id"`
 	RedirectURI string `json:"redirect_uri"`
+	OAuthClient string `json:"oauth_client"`
 }
 
 // GenerateAuthURL generates OpenAI OAuth authorization URL
 // POST /api/v1/admin/openai/generate-auth-url
 func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	var req OpenAIGenerateAuthURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// Allow empty body
@@ -124,6 +126,7 @@ func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 		req.ProxyID,
 		req.RedirectURI,
 		oauthPlatformFromPath(c),
+		req.OAuthClient,
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -145,6 +148,7 @@ type OpenAIExchangeCodeRequest struct {
 // ExchangeCode exchanges OpenAI authorization code for tokens
 // POST /api/v1/admin/openai/exchange-code
 func (h *OpenAIOAuthHandler) ExchangeCode(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	var req OpenAIExchangeCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -196,6 +200,7 @@ type OpenAICodexPATCreateRequest struct {
 // RefreshToken refreshes an OpenAI OAuth token
 // POST /api/v1/admin/openai/refresh-token
 func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	scoped := adminaccess.RestrictedFromContext(c.Request.Context()) != nil
 	if scoped && !adminaccess.RouteAllowed(adminaccess.RestrictedFromContext(c.Request.Context()).Policy, c.Request.Method, c.FullPath()) {
 		response.Error(c, 403, "调用方令牌刷新未授权")
@@ -250,6 +255,7 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 // RefreshAccountToken refreshes token for a specific OpenAI account
 // POST /api/v1/admin/openai/accounts/:id/refresh
 func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")

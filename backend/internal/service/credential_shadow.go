@@ -29,5 +29,8 @@ func resolveCredentialAccount(ctx context.Context, repo AccountRepository, accou
 	if !parent.IsOpenAIOAuth() {
 		return nil, fmt.Errorf("spark shadow parent %d is not OpenAI OAuth", parent.ID)
 	}
+	if parent.IsExcelOAuth() {
+		return nil, fmt.Errorf("spark shadow parent %d uses Excel OAuth; native Codex credentials are required", parent.ID)
+	}
 	return parent, nil
 }

@@ -141,6 +141,9 @@ docs/*
 !docs/channel-quality-experience.md
 !docs/codex-fingerprint.md
 !docs/codex-ticket-mihomo-excel-bps.md
+!docs/excel-bps-authorization-and-diagnostics.md
+!docs/mihomo-ticket-updates-20261104.md
+!docs/bps-mihomo-harvest-update-20261104.md
 !docs/channel-quality-protection.md
 !docs/channel-test-strategies.md
 !docs/ANTIGRAVITY_ATTRIBUTION_429.md

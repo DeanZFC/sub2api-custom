@@ -420,7 +420,10 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
-	accountExtra = MergeOpenAICodexTicketExtra(StripRetiredAccountExtra(accountExtra), nil)
+	accountExtra = MergeOpenAICodexTicketExtra(StripRetiredAccountExtra(SanitizeExcelBPSAuthorizationExtra(accountExtra)), nil)
+	// Create, duplicate and data import share this entry point. Recovery claims
+	// and automatic 403 actions must originate from this instance's probes.
+	accountExtra = MergeExcelBPS403Marker(accountExtra, nil)
 	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
@@ -555,7 +558,18 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := validateExcelBPS403RecoveryExtra(account.Extra); err != nil {
+		return nil, err
+	}
+	if raw, exists := account.Extra[ExcelBPSAutoRecoverOn403Key]; exists {
+		if _, ok := raw.(bool); !ok {
+			return nil, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", ExcelBPSAutoRecoverOn403Key+" must be a boolean")
+		}
+	}
 	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
+		return nil, err
+	}
+	if err := s.validateExcelBPSActivation(ctx, account); err != nil {
 		return nil, err
 	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
@@ -572,6 +586,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 	}
 
+	s.queueExcelAuthorizationAfterCommit(ctx, account)
 	AfterAccountCommit(ctx, func(_ context.Context) {
 		// OAuth 账号：创建后异步设置隐私。
 		// 使用 Ensure（幂等）而非 Force：新建账号 Extra 为空时效果相同，但更安全。
@@ -740,7 +755,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 				normalizedExtra[key] = v
 			}
 		}
-		normalizedExtra = MergeOpenAICodexTicketExtra(StripRetiredAccountExtra(normalizedExtra), account.Extra)
+		normalizedExtra = MergeOpenAICodexTicketExtra(StripRetiredAccountExtra(SanitizeExcelBPSAuthorizationExtra(normalizedExtra)), account.Extra)
 		normalizedExtra = prepareCodexFingerprintExtraForUpdate(account, normalizedExtra)
 		account.Extra = normalizedExtra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
@@ -914,7 +929,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 
 	account.Extra = StripRetiredAccountExtra(account.Extra)
 
+	if err := validateExcelBPS403RecoveryExtra(account.Extra); err != nil {
+		return nil, err
+	}
+	if raw, exists := account.Extra[ExcelBPSAutoRecoverOn403Key]; exists {
+		if _, ok := raw.(bool); !ok {
+			return nil, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", ExcelBPSAutoRecoverOn403Key+" must be a boolean")
+		}
+	}
 	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
+		return nil, err
+	}
+	if err := s.validateExcelBPSActivation(ctx, account); err != nil {
 		return nil, err
 	}
 	billingSettingsAppliedAtomically := false
@@ -956,6 +982,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	s.queueExcelAuthorizationAfterCommit(ctx, account)
 	// 将 proxy 变更传播到 spark 影子账号（同步；Update 内部已触发调度快照）。
 	// 影子自身 proxy 不可独立编辑(见上),故对影子的更新不触发传播。
 	if input.ProxyID != nil && !account.IsCredentialShadow() {
@@ -982,6 +1009,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	updates = SanitizeExcelBPSAuthorizationExtra(updates)
+	if err := validateExcelBPS403RecoveryExtra(updates); err != nil {
+		return err
+	}
+	if raw, exists := updates[ExcelBPSAutoRecoverOn403Key]; exists {
+		if _, ok := raw.(bool); !ok {
+			return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", ExcelBPSAutoRecoverOn403Key+" must be a boolean")
+		}
+	}
 	_, moveChanged := updates[ExcelBPSAutoMoveOn403Key]
 	_, targetChanged := updates[ExcelBPS403TargetGroupIDKey]
 	if moveChanged || targetChanged {
@@ -1020,7 +1056,29 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	if len(updates) == 0 {
 		return nil
 	}
-	return s.accountRepo.UpdateExtra(ctx, id, updates)
+	var activation *Account
+	if _, changed := updates["openai_excel_bps"]; changed {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		merged := *account
+		merged.Extra = maps.Clone(account.Extra)
+		if merged.Extra == nil {
+			merged.Extra = make(map[string]any)
+		}
+		maps.Copy(merged.Extra, updates)
+		if err := s.validateExcelBPSActivation(ctx, &merged); err != nil {
+			return err
+		}
+		updates[ExcelBPSAuthorizationPendingKey] = merged.Extra[ExcelBPSAuthorizationPendingKey] == true
+		activation = &merged
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, id, updates); err != nil {
+		return err
+	}
+	s.queueExcelAuthorizationAfterCommit(ctx, activation)
+	return nil
 }
 
 // BulkUpdateAccounts updates multiple accounts in one request.
@@ -1040,7 +1098,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Managed probe/session state may only enter through dedicated typed endpoints.
-	input.Extra = MergeOpenAICodexTicketExtra(StripRetiredAccountExtra(input.Extra), nil)
+	input.Extra = MergeOpenAICodexTicketExtra(StripRetiredAccountExtra(SanitizeExcelBPSAuthorizationExtra(input.Extra)), nil)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
@@ -1084,8 +1142,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
+	_, excelSwitchChanged := input.Extra["openai_excel_bps"]
+	_, excelMoveChanged := input.Extra[ExcelBPSAutoMoveOn403Key]
+	_, excelTargetChanged := input.Extra[ExcelBPS403TargetGroupIDKey]
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if excelSwitchChanged || excelMoveChanged || excelTargetChanged || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1268,11 +1329,39 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
+	// Validate each account's identity and grant before the atomic bulk write.
+	// The repository derives the actual pending marker per row while writing.
+	var excelActivationTargets []*Account
+	if excelSwitchChanged || len(input.Credentials) > 0 {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			merged := *account
+			merged.Extra = maps.Clone(account.Extra)
+			if merged.Extra == nil {
+				merged.Extra = make(map[string]any)
+			}
+			maps.Copy(merged.Extra, input.Extra)
+			merged.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+			if err := s.validateExcelBPSActivation(ctx, &merged); err != nil {
+				return nil, err
+			}
+			excelActivationTargets = append(excelActivationTargets, &merged)
+		}
+	}
+
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}
 
+	for _, account := range excelActivationTargets {
+		if account.Extra[ExcelBPSAuthorizationPendingKey] == true {
+			s.queueExcelAuthorizationAfterCommit(ctx, account)
+			break
+		}
+	}
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号
 	if repoUpdates.ProxyID != nil {
 		var effectiveProxyID *int64
@@ -1477,6 +1566,11 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 		return nil, infraerrors.New(http.StatusBadRequest, "SPARK_SHADOW_INVALID_PARENT",
 			"spark shadow requires an OpenAI OAuth parent account")
 	}
+	if parent.IsExcelOAuth() {
+		return nil, infraerrors.New(http.StatusBadRequest, "SPARK_SHADOW_EXCEL_PARENT_UNSUPPORTED",
+			"spark shadow requires native Codex credentials; Excel OAuth grants are BPS-only")
+	}
+
 	// G6:母账号本身不能是影子,否则会建出二级影子——resolveCredentialAccount 只解一层,
 	// 会解析到无凭据的一级影子,进入坏调度/上游失败。
 	if parent.IsCredentialShadow() {

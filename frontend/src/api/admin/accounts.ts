@@ -1192,11 +1192,19 @@ export interface CodexHarvestFlowTicket {
 }
 
 export interface CodexHarvestFlowAccount {
+  coverage?: {
+    started_at: string
+    updated_at: string
+    ready_seconds: number
+    missing_seconds: number
+    percent: number | null
+  }
   id: number
   name: string
   status: string
   schedulable: boolean
   skip_harvest?: boolean
+  harvest_selected?: boolean
   in_scope?: boolean
   availability?: string
   recover_at?: string
@@ -1240,7 +1248,18 @@ export interface CodexHarvestFlowEvent {
   detail?: string
 }
 
+export interface CodexHarvestCoverage {
+  started_at?: string
+  updated_at?: string
+  account_count: number
+  average_ready_seconds: number
+  average_missing_seconds: number
+  average_percent: number | null
+  sample_interval_seconds: number
+}
+
 export interface CodexHarvestFlowSnapshot {
+  coverage?: CodexHarvestCoverage
   generated_at: string
   harvest: {
     enabled: boolean

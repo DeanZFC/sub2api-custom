@@ -87,7 +87,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if err := requestmodel.ValidateWebSocketModelFields(firstClientMessage); err != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 	}
-	if err := openAIWSRejectExcelBPS(account, openAIWSPassthroughRequestModelForFrame(firstClientMessage), openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)); err != nil {
+	if err := s.rejectExcelBPSWebSocket(ctx, account, openAIWSPassthroughRequestModelForFrame(firstClientMessage), openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)); err != nil {
 		return err
 	}
 	// A handler may reuse the same gin context across account failover attempts.
@@ -324,7 +324,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 			}
 		}
-		if err := openAIWSRejectExcelBPS(account, originalModel, ""); err != nil {
+		if err := s.rejectExcelBPSWebSocket(ctx, account, originalModel, ""); err != nil {
 			return openAIWSClientPayload{}, err
 		}
 		promptCacheKey := strings.TrimSpace(values[2].String())
@@ -421,7 +421,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
-		if err := openAIWSRejectExcelBPS(account, requestModel, upstreamModel); err != nil {
+		if err := s.rejectExcelBPSWebSocket(ctx, account, requestModel, upstreamModel); err != nil {
 			return openAIWSClientPayload{}, err
 		}
 		SetOpsUpstreamModel(c, upstreamModel)
@@ -1004,7 +1004,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
-		if err := openAIWSRejectExcelBPS(account, originalModel, gjson.GetBytes(payload, "model").String()); err != nil {
+		if err := s.rejectExcelBPSWebSocket(ctx, account, originalModel, gjson.GetBytes(payload, "model").String()); err != nil {
 			return nil, err
 		}
 		if err := s.checkCodexTicketWS(ctx, account, gjson.GetBytes(payload, "model").String(), wsBinding); err != nil {

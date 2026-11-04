@@ -21,7 +21,7 @@ func parentHealthyForShadow(account *Account, lookup func(int64) *Account) bool 
 	if parent == nil {
 		return false
 	}
-	return parent.IsOpenAIOAuth() && parent.IsCredentialUsableForShadow()
+	return parent.IsOpenAIOAuth() && !parent.IsExcelOAuth() && parent.IsCredentialUsableForShadow()
 }
 
 // sparkModelVariants 返回所有归一到 spark 的模型 ID（当前仅 base：spark 无 effort 变体）。

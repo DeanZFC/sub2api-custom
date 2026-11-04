@@ -118,6 +118,8 @@ func provideCleanup(
 	subscriptionService *service.SubscriptionService,
 	oauth *service.OAuthService,
 	openaiOAuth *service.OpenAIOAuthService,
+	openaiReauth *service.OpenAIOAuthReauthService,
+	accountTests *service.AccountTestService,
 	geminiOAuth *service.GeminiOAuthService,
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
@@ -353,6 +355,9 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{"AstraScheduling", func() error { accountTests.StopAstraScheduling(); return nil }},
+			{"OpenAIReauth", func() error { openaiReauth.Stop(); return nil }},
+			{"BPS403Recovery", func() error { openAIGateway.StopBPS403Recovery(); return nil }},
 			{"CodexTicketHarvester", func() error { openAIGateway.StopOpenAICodexTicketHarvester(); return nil }},
 			{"BPSWarmPool", func() error { openAIGateway.StopBPSWarmPool(); return nil }},
 			{"BPSImages", func() error { return openAIGateway.CloseExcelBPSImages() }},

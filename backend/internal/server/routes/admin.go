@@ -413,6 +413,14 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/ollama-cloud-usage/settings", h.Admin.Account.UpdateOllamaCloudUsageSettings)
 		accounts.GET("/opencode-go-usage/settings", h.Admin.Account.GetOpenCodeGoUsageSettings)
 		accounts.PUT("/opencode-go-usage/settings", h.Admin.Account.UpdateOpenCodeGoUsageSettings)
+		if h.Admin.OpenAIReauth != nil {
+			accounts.GET("/:id/openai-reauth", h.Admin.OpenAIReauth.GetStatus)
+			accounts.POST("/:id/openai-reauth", h.Admin.OpenAIReauth.CreateTask)
+			accounts.PUT("/:id/openai-reauth/config", h.Admin.OpenAIReauth.SaveConfig)
+		}
+		accounts.GET("/astra-gateway/status", h.Admin.Account.AstraGatewayStatus)
+		accounts.GET("/astra-gateway/history", h.Admin.Account.AstraGatewayHistory)
+		accounts.POST("/astra-gateway/test", h.Admin.Account.AstraGatewayTest)
 		accounts.GET("/codex-harvest-flow", h.Admin.Account.GetCodexHarvestFlow)
 		accounts.GET("/codex-harvest-controls", h.Admin.Account.GetCodexHarvestControls)
 		accounts.PUT("/codex-harvest-controls", h.Admin.Account.UpdateCodexHarvestControls)
@@ -508,6 +516,11 @@ func registerAnnouncementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	openai := admin.Group("/openai")
 	{
+		if h.Admin.OpenAIReauth != nil {
+			openai.GET("/credential-encryption", h.Admin.OpenAIReauth.CredentialEncryption)
+			openai.POST("/credential-encryption", h.Admin.OpenAIReauth.InitializeCredentialEncryption)
+			openai.GET("/reauth-runtime", h.Admin.OpenAIReauth.WorkerStatus)
+		}
 		openai.POST("/generate-auth-url", h.Admin.OpenAIOAuth.GenerateAuthURL)
 		openai.POST("/exchange-code", h.Admin.OpenAIOAuth.ExchangeCode)
 		openai.POST("/refresh-token", h.Admin.OpenAIOAuth.RefreshToken)
@@ -621,6 +634,8 @@ func registerPromoCodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 
 func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	adminSettings := admin.Group("/settings")
+	adminSettings.GET("/astra-routing", h.Admin.Setting.GetAstraRouting)
+	adminSettings.PUT("/astra-routing", h.Admin.Setting.UpdateAstraRouting)
 	registerScopedAdminKeyRoutes(adminSettings, h, stepUpAuth)
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
@@ -724,6 +739,9 @@ func registerBackupRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	system := admin.Group("/system")
 	{
+		system.POST("/mihomo/nodes/static-proxies", h.Admin.System.AddMihomoNodesAsStaticProxies)
+		system.POST("/mihomo/nodes/:name/test", h.Admin.System.TestMihomoNode)
+		system.POST("/mihomo/nodes/:name/quality-check", h.Admin.System.CheckMihomoNodeQuality)
 		system.GET("/mihomo", h.Admin.System.GetMihomo)
 		system.POST("/mihomo", h.Admin.System.ManageMihomo)
 		system.PUT("/mihomo/download-mode", h.Admin.System.SetMihomoDownloadMode)

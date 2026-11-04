@@ -347,7 +347,10 @@ func (s *proxyRepoStub) Create(ctx context.Context, proxy *Proxy) error {
 }
 
 func (s *proxyRepoStub) GetByID(ctx context.Context, id int64) (*Proxy, error) {
-	panic("unexpected GetByID call")
+	if id == 404 {
+		return nil, ErrProxyNotFound
+	}
+	return &Proxy{ID: id}, nil
 }
 
 func (s *proxyRepoStub) ListByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {

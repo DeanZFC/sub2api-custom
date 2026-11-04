@@ -11,8 +11,10 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
-      <ExcelBPSSettings v-if="account?.platform === 'openai' && account.type === 'oauth' && !isSparkShadow" v-model="excelBPSConfig" :groups="groups" :allow-composite="!authStore.isSimpleMode" />
+      <ExcelBPSSettings v-if="account?.platform === 'openai' && account.type === 'oauth' && !isSparkShadow" v-model="excelBPSConfig" :groups="groups" :allow-composite="!authStore.isSimpleMode" :plan-type="String(account.credentials?.plan_type || '')" />
 
+      <ExcelAuthorizationPanel v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow" :account="account" :active="show" />
+      <ExcelBPSCredentialStatus v-if="account.platform === 'openai' && account.type === 'oauth'" :state="account.excel_bps_credential_state" />
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
@@ -3390,7 +3392,9 @@
 
 <script setup lang="ts">
 import ExcelBPSSettings from './ExcelBPSSettings.vue'
-import { hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
+import ExcelAuthorizationPanel from './ExcelAuthorizationPanel.vue'
+import ExcelBPSCredentialStatus from './ExcelBPSCredentialStatus.vue'
+import { validBPSRecoveryInterval, hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -5648,6 +5652,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
+  if ((excelBPSConfig.value.enabled || excelBPSConfig.value.recoveryPending) && excelBPSConfig.value.autoDisableOn403 && excelBPSConfig.value.autoRecoverOn403 && !validBPSRecoveryInterval(excelBPSConfig.value.recoveryIntervalMinutes)) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403RecoveryIntervalInvalid'))
+    return
+  }
   if (props.account?.platform === 'openai' && props.account.type === 'oauth' && !isSparkShadow.value
     && !hasValidExcelBPS403Target(excelBPSConfig.value, props.groups, !authStore.isSimpleMode)) {
     appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))

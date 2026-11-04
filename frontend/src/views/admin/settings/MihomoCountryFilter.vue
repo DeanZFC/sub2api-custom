@@ -28,7 +28,7 @@
       <p class="text-xs text-amber-700">{{ text('开启后请在供应商侧限定地区；Random 不保证排除 CN/HK。关闭时动态节点按未知地区处理。', 'When enabled, restrict regions at your provider; Random does not guarantee exclusion of CN/HK. Otherwise dynamic nodes are treated as unknown.') }}</p>
     </template>
     <p v-if="dynamicBlocked" class="text-xs text-amber-700" role="status">{{ text('动态代理未参与轮换：请启用供应商控制地区，或明确允许未知地区。重复检测不能保证下次连接的地区。', 'Dynamic proxies are excluded. Enable provider-managed regions or allow unknown regions; repeated checks cannot guarantee the next connection’s country.') }}</p>
-    <p v-if="eligible === 0 && nodes.length" class="text-xs text-amber-700 dark:text-amber-400" role="status">{{ text('应用后没有可参与打票的节点。可先检测地区或调整筛选；不会自动回退到被排除地区。', 'No eligible harvest nodes after applying. Check regions or adjust the filter; excluded regions are never a fallback.') }}</p>
+    <p v-if="eligible === 0 && nodes.length" class="text-xs text-amber-700 dark:text-amber-400" role="status">{{ text('应用后没有符合地区规则的节点。可先检测地区或调整筛选；不会自动回退到被排除地区。', 'No nodes match the region rules after applying. Check regions or adjust the filter; excluded regions are never a fallback.') }}</p>
     <div class="flex flex-wrap gap-2">
       <button type="button" class="btn btn-primary btn-sm" :disabled="busy || (draft.mode !== 'off' && !draft.codes.length)" @click="save">{{ text('保存地区规则', 'Save region rules') }}</button>
       <button type="button" class="btn btn-secondary btn-sm" :disabled="busy || !nodes.length" @click="$emit('scan')">{{ text('检测出口地区', 'Check exit regions') }}</button>

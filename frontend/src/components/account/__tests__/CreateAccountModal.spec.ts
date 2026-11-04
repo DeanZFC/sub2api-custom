@@ -84,6 +84,7 @@ const BaseDialogStub = defineComponent({
 const OAuthAuthorizationFlowStub = defineComponent({
   name: 'OAuthAuthorizationFlow',
   props: {
+    excelOauth: Boolean,
     showManualOption: Boolean,
     showCodexSessionImportOption: Boolean,
     showAgentIdentityOption: Boolean,
@@ -234,6 +235,21 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('offers a separate Excel OAuth flow with BPS scope and without Codex-only imports', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="select-excel-oauth"]').trigger('click')
+    expect((wrapper.get('[data-testid="excel-bps-toggle"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Excel account')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const flow = wrapper.findComponent(OAuthAuthorizationFlowStub)
+    expect(flow.props('excelOauth')).toBe(true)
+    expect(flow.props('showCodexSessionImportOption')).toBe(false)
+    expect(flow.props('showAgentIdentityOption')).toBe(false)
+    expect(flow.props('showCodexPatOption')).toBe(false)
+    wrapper.unmount()
+  })
 
   it('keeps BPS off by default during Codex session import', async () => {
     const wrapper = await openCodexImportStep()

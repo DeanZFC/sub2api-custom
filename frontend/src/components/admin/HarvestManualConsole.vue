@@ -1,5 +1,5 @@
 <template>
-  <section class="card overflow-visible p-5" aria-labelledby="harvest-console-title">
+  <section :class="embedded ? 'border-t border-gray-100 pt-5 dark:border-dark-700' : 'card overflow-visible p-5'" aria-labelledby="harvest-console-title">
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 id="harvest-console-title" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t(`${prefix}.title`) }}</h2>
@@ -82,7 +82,8 @@
           </label>
           <label class="text-xs text-gray-600 dark:text-gray-300">
             {{ t(`${prefix}.maxAttempts`) }}
-            <input v-model.number="form.max_attempts" type="number" min="1" max="100" :disabled="harvesting" class="input mt-1 w-full font-mono text-xs" />
+            <input v-model.number="form.max_attempts" data-testid="manual-max-attempts" type="number" min="1" step="1" :disabled="harvesting" class="input mt-1 w-full font-mono text-xs" />
+            <span class="mt-1 block text-[10px] text-gray-400">{{ t(`${prefix}.maxAttemptsHint`) }}</span>
           </label>
           <label class="text-xs text-gray-600 dark:text-gray-300">
             {{ t(`${prefix}.nodeSwitch`) }}
@@ -94,7 +95,7 @@
 
         <label class="block text-xs text-gray-600 dark:text-gray-300">
           {{ t(`${prefix}.collectLanes`) }}
-          <input v-model.number="collectLanes" data-testid="manual-collect-lanes" type="number" min="2" max="32" :disabled="harvesting" class="input mt-1 w-full font-mono text-xs" />
+          <input v-model.number="collectLanes" data-testid="manual-collect-lanes" type="number" min="2" step="1" :disabled="harvesting" class="input mt-1 w-full font-mono text-xs" />
           <span class="mt-1 block text-[10px] text-gray-400">{{ t(`${prefix}.parallelHint`) }}</span>
         </label>
 
@@ -155,11 +156,12 @@ import {
   resolveHarvestAvailability
 } from '@/utils/harvestAvailability'
 
-const props = defineProps<{ accounts: CodexHarvestFlowAccount[]; models: string[] }>()
+const props = defineProps<{ accounts: CodexHarvestFlowAccount[]; models: string[]; embedded?: boolean }>()
+const embedded = computed(() => props.embedded === true)
 const emit = defineEmits<{ running: [boolean]; finished: [] }>()
 const { t } = useI18n()
 const prefix = 'admin.harvestFlow.console'
-const nodeSwitchRules = ['312_or_2fail', 'every_request', '312_only', 'never'] as const
+const nodeSwitchRules = ['rejected_or_2fail', 'every_request', 'rejected_only', 'never'] as const
 const accountRoot = ref<HTMLElement | null>(null)
 const keyword = ref('')
 const open = ref(false)
@@ -177,7 +179,7 @@ const form = ref({
   probe_interval_seconds: 10,
   rate_limit_cooldown_seconds: 30,
   max_attempts: 20,
-  node_switch_rule: '312_or_2fail',
+  node_switch_rule: 'rejected_or_2fail',
   stop_on_success: true
 })
 let abort: AbortController | null = null
@@ -284,6 +286,11 @@ function finish(kind: 'success' | 'finished' | 'stopped' | 'auth') {
 
 async function start(parallel = false) {
   if (!selected.value || harvesting.value || !selectedModels.value.length) return
+  if (!Number.isSafeInteger(form.value.max_attempts) || form.value.max_attempts < 1
+    || (parallel && (!Number.isSafeInteger(collectLanes.value) || collectLanes.value < 2))) {
+    addLog('ERROR', t(`${prefix}.invalidBudget`))
+    return
+  }
   abort?.abort()
   abort = new AbortController()
   setRunning(true)

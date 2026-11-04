@@ -147,8 +147,11 @@ vi.mock("@/api", () => ({
   },
 }));
 
+const settingsMenuState = reactive({ cachedPublicSettings: {} as { openai_codex_ticket_enabled?: boolean } });
+
 vi.mock("@/stores", () => ({
   useAppStore: () => ({
+    get cachedPublicSettings() { return settingsMenuState.cachedPublicSettings; },
     showError,
     showSuccess,
     showWarning: vi.fn(),
@@ -593,6 +596,8 @@ function mountView() {
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
         CodexTicketSettings: true,
+        CodexTicketFeatureSettings: { template: '<section data-testid="codex-ticket-feature-settings" />' },
+        ExcelBPSProtocolSettings: true,
         ExcelBPSImageSettings: true,
         OpenAIVMSettings: { template: '<section data-testid="openai-vm-settings-stub"><form data-testid="vm-settings-form"><button type="submit">Save Bridge</button></form></section>' },
       },
@@ -664,6 +669,7 @@ describe("admin SettingsView email domain quota copy", () => {
 
 describe("admin SettingsView payment visible method controls", () => {
   beforeEach(() => {
+    settingsMenuState.cachedPublicSettings = {};
     getSettings.mockReset();
     updateSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
@@ -754,6 +760,23 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it("keeps the master switch reachable while hiding ticket links until it is enabled", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    expect(wrapper.find('[to="/admin/harvest-flow"]').exists()).toBe(false);
+    settingsMenuState.cachedPublicSettings = { openai_codex_ticket_enabled: true };
+    await flushPromises();
+    expect(wrapper.find('[to="/admin/harvest-flow"]').exists()).toBe(true);
+    settingsMenuState.cachedPublicSettings = { openai_codex_ticket_enabled: false };
+    await flushPromises();
+    expect(wrapper.find('[to="/admin/harvest-flow"]').exists()).toBe(false);
+    await wrapper.get('#settings-tab-features').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="codex-ticket-feature-settings"]').exists()).toBe(true);
+    wrapper.unmount();
   });
 
   it("opens global Bridge settings from its URL outside the shared settings form", async () => {
@@ -1494,6 +1517,8 @@ describe("admin SettingsView payment visible method controls", () => {
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
         CodexTicketSettings: true,
+        CodexTicketFeatureSettings: { template: '<section data-testid="codex-ticket-feature-settings" />' },
+        ExcelBPSProtocolSettings: true,
         ExcelBPSImageSettings: true,
         },
       },
@@ -1912,6 +1937,8 @@ describe("admin SettingsView payment visible method controls", () => {
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
         CodexTicketSettings: true,
+        CodexTicketFeatureSettings: { template: '<section data-testid="codex-ticket-feature-settings" />' },
+        ExcelBPSProtocolSettings: true,
         ExcelBPSImageSettings: true,
         },
       },

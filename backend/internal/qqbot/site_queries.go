@@ -263,7 +263,7 @@ func siteCheckinRules(c CheckinConfig) string {
 }
 
 func siteInviteRules(c Config) string {
-	if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+	if !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 		return "🎁 **邀请规则**\n邀请活动未开启。"
 	}
 	return fmt.Sprintf("🎁 **邀请规则**\n每位有效受邀者奖励：%s\n每位邀请人每日上限：%d 人（北京时间）\n通过官方邀请，7 天内入群并留群；双方绑定账号，每位受邀账号限奖一次。\n%s\n查询：邀请奖励", siteRuleMoney(c.InviteReward), c.InviteDailyLimit, c.inviteRechargeRequirement().invite())

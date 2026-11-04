@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +21,49 @@ import (
 type fakeHarvestCollection struct {
 	next   atomic.Int64
 	closed atomic.Bool
+}
+
+func TestParallelHarvest780ContinuationSharesRequestBudget(t *testing.T) {
+	for _, parallel := range []bool{false, true} {
+		for _, limit := range []int{1, 2, 7} {
+			t.Run(fmt.Sprintf("parallel=%t/budget=%d", parallel, limit), func(t *testing.T) {
+				account := ticketTestAccount(41)
+				var requests atomic.Int64
+				state := mint780State(time.Now())
+				pair := mint780Pair(time.Now().Add(time.Hour), "unified-123")
+				svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, TargetLength: 780, TTLSeconds: 240}, &codexTicketFuncUpstream{do: func(req *http.Request) (*http.Response, error) {
+					requests.Add(1)
+					h := http.Header{}
+					if req.Header.Get(openAICodexTurnStateHeader) == "" {
+						h.Set(openAICodexTurnStateHeader, state)
+						h["Set-Cookie"] = pair
+					}
+					return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(harvestProbeCompleteFixture("gpt-6-astra")))}, nil
+				}})
+				svc.accountRepo = &manualHarvestAccountRepo{account: account, persist: func(context.Context) error { return nil }}
+				var final ManualHarvestProgress
+				req := ManualHarvestRequest{AccountID: 41, CollectLanes: 10, MaxAttempts: limit, ProbeIntervalSeconds: 1, Models: []string{"gpt-6-astra"}, StopOnSuccess: true}
+				emit := func(p ManualHarvestProgress) { final = p }
+				var err error
+				if parallel {
+					err = svc.runParallelHarvest(context.Background(), req, account, emit, &fakeHarvestCollection{})
+				} else {
+					req.CollectLanes = 1
+					err = svc.ExecuteManualHarvest(context.Background(), req, emit)
+				}
+				require.NoError(t, err)
+				require.True(t, final.Done)
+				require.LessOrEqual(t, requests.Load(), int64(limit))
+				if limit == 1 {
+					require.Zero(t, final.TicketsStored)
+				} else {
+					require.Equal(t, 1, final.TicketsStored)
+					require.True(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra").ProbeVerified)
+					require.GreaterOrEqual(t, requests.Load(), int64(2))
+				}
+			})
+		}
+	}
 }
 
 func (f *fakeHarvestCollection) Next(ctx context.Context, lane int) (string, string, error) {
@@ -127,7 +172,7 @@ func TestParallelProbeBudgetIsAtomic(t *testing.T) {
 }
 
 func TestParallelRequestValidationAndMutualExclusion(t *testing.T) {
-	_, err := NormalizeManualHarvestRequest(ManualHarvestRequest{CollectLanes: 33})
+	_, err := NormalizeManualHarvestRequest(ManualHarvestRequest{CollectLanes: -1})
 	require.Error(t, err)
 	svc := &OpenAIGatewayService{accountRepo: &manualHarvestAccountRepo{}}
 	svc.codexHarvestRunMu.Lock()
@@ -164,4 +209,26 @@ func TestParallelHarvestKeepsSafeRouteDiagnostics(t *testing.T) {
 			require.Contains(t, event.Detail, "route_pair_missing")
 		}
 	}
+}
+
+func TestParallelHarvestLargeSharedBudget(t *testing.T) {
+	account := ticketTestAccount(41)
+	var requests atomic.Int64
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, TTLSeconds: 3600}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		resp := codexTicketResponse()
+		resp.Header.Set(openAICodexTurnStateHeader, fakeCodexTicketState(312))
+		return resp, nil
+	}})
+	svc.accountRepo = &manualHarvestAccountRepo{account: account}
+	collection := &fakeHarvestCollection{}
+	var final ManualHarvestProgress
+	// Zero wait is an offline test seam; public requests retain the 1s minimum.
+	err := svc.runParallelHarvest(context.Background(), ManualHarvestRequest{CollectLanes: 128, MaxAttempts: 1100, Models: []string{"gpt-6-astra", "gpt-6-sol"}}, account, func(p ManualHarvestProgress) { final = p }, collection)
+	require.NoError(t, err)
+	require.EqualValues(t, 1100, requests.Load())
+	require.EqualValues(t, 1100, collection.next.Load())
+	require.Equal(t, 1100, final.Attempt)
+	require.True(t, final.Done)
+	require.True(t, collection.closed.Load())
 }

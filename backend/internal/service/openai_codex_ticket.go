@@ -42,6 +42,9 @@ const (
 var ErrOpenAICodexTicketUnavailable = errors.New("codex turn-state ticket unavailable")
 
 type openAICodexTicket struct {
+	Acquisition         string             `json:"acquisition,omitempty"`
+	SourceAccountID     int64              `json:"source_account_id,omitempty"`
+	ProbeVerified       bool               `json:"probe_verified,omitempty"`
 	AccountID           int64              `json:"account_id"`
 	Model               string             `json:"model"`
 	State               string             `json:"state"`
@@ -503,6 +506,9 @@ func (t *openAICodexTicket) valid(now time.Time, targetLen int) bool {
 		return false
 	}
 	if t.Length == 780 {
+		if !t.ProbeVerified {
+			return false
+		}
 		shape, err := parseOpenAICodexTicketShape(t.State)
 		if err != nil || shape.IssuedAt.After(now.Add(30*time.Second)) || !now.Before(shape.IssuedAt.Add(openAICodexCredentialTTL)) || (t.Transport != "sse" && t.Transport != "websocket") || !codexTicketCookiesFresh(t, now) {
 			return false
@@ -549,7 +555,8 @@ func ticketIdentity(account *Account) string {
 	if account == nil {
 		return ""
 	}
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(account.GetCredential("chatgpt_account_id")+"\x00"+account.GetCredential("email"))))
+	identity := account.GetCredential("chatgpt_account_id") + "\x00" + account.GetCredential("email")
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
 }
 func ticketIdentityMatches(account *Account, ticket *openAICodexTicket) bool {
 	return ticket != nil && (ticket.Identity == "" || ticket.Identity == ticketIdentity(account))
@@ -580,14 +587,10 @@ func (s *OpenAIGatewayService) lookupCodexTicketLocked(account *Account, model s
 		if protocol == "" {
 			protocol = "sse"
 		}
-		gateway := controls.TargetGateway
-		if gateway == "" {
-			gateway = "unified-88"
-		}
-		if mem != nil && (mem.Transport != protocol || !codex780GatewayAllowed(mem.Gateway, gateway)) {
+		if mem != nil && mem.Transport != protocol {
 			mem = nil
 		}
-		if extra != nil && (extra.Transport != protocol || !codex780GatewayAllowed(extra.Gateway, gateway)) {
+		if extra != nil && extra.Transport != protocol {
 			extra = nil
 		}
 	}
@@ -656,6 +659,9 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 	if s == nil || account == nil || ticket == nil || account.ID <= 0 {
 		return errors.New("invalid ticket store input")
 	}
+	if ticket.Length == 780 && !ticket.valid(time.Now(), 780) {
+		return errors.New("ticket probe validation required before storage")
+	}
 	incoming := *ticket
 	standby := false
 	s.openaiCodexTicketStateMu.Lock()
@@ -688,6 +694,11 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 		return err
 	}
 	recordCodexHarvestTicketStore(account, &incoming, standby)
+	sourceID, targetID, reason := account.ID, int64(0), "qualified"
+	if incoming.Acquisition == "reuse" {
+		sourceID, targetID, reason = incoming.SourceAccountID, account.ID, "target_probe_passed"
+	}
+	s.recordStoredAstraHistory(ctx, &incoming, sourceID, targetID, true, reason)
 	return nil
 }
 
@@ -733,7 +744,7 @@ func (s *OpenAIGatewayService) harvestPinsCodexIdentity(ctx context.Context, acc
 // 请求路径只注入已捕获的有效门票，不现场打票；无票则返回
 // ErrOpenAICodexTicketUnavailable。打票由后台 harvester 完成。
 func (s *OpenAIGatewayService) applyOpenAICodexTicket(ctx context.Context, account *Account, model string, h http.Header, transport ...string) error {
-	if s == nil || h == nil || !isOpenAICodexTicketAccount(account, model) || !s.openAICodexTicketEnabledContext(ctx) {
+	if s == nil || h == nil || !s.isOpenAICodexTicketAccount(ctx, account, model) || !s.openAICodexTicketEnabledContext(ctx) {
 		return nil
 	}
 	model = normalizeOpenAICodexTicketModel(model)
@@ -784,7 +795,7 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicket(ctx context.Context, accou
 // （默认非空），此时若门控仍按客户端原始模型判定，就会把「实际出站是非门控
 // 模型、根本不需要票」的 compact 请求整片误拦成不可调度。
 func (s *OpenAIGatewayService) openAICodexTicketOutboundModel(account *Account, requestedModel string, requireCompact bool) string {
-	if account.IsExcelBPSEnabledForModel(requestedModel) {
+	if account.IsExcelBPSEnabledForModel(requestedModel) && s.excelBPSGloballyEnabled(context.Background()) {
 		return account.GetMappedModel(requestedModel)
 	}
 	model := strings.TrimSpace(requestedModel)
@@ -810,7 +821,7 @@ func (s *OpenAIGatewayService) openAICodexTicketOutboundModel(account *Account, 
 // outboundModel 必须是真正会发给上游的模型名（openAICodexTicketOutboundModel），
 // 不是客户端原始模型：注入侧读的是出站 body.model，两侧口径必须一致。
 func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, outboundModel string) bool {
-	if s == nil || !isOpenAICodexTicketAccount(account, outboundModel) || !s.openAICodexTicketEnabled() {
+	if s == nil || !s.isOpenAICodexTicketAccount(context.Background(), account, outboundModel) || !s.openAICodexTicketEnabled() {
 		return false
 	}
 	cfg := s.openAICodexTicketConfig()
@@ -832,11 +843,11 @@ func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, 
 }
 
 func (s *OpenAIGatewayService) openAICodexTicketReadyForRequest(account *Account, requestedModel string, requireCompact bool) bool {
-	if s == nil || account == nil || !isOpenAICodexTicketAccount(account) || !s.openAICodexTicketEnabled() {
+	if s == nil || account == nil || !s.isOpenAICodexTicketAccount(context.Background(), account) || !s.openAICodexTicketEnabled() {
 		return false
 	}
 	outbound := s.openAICodexTicketOutboundModel(account, requestedModel, requireCompact)
-	if !isOpenAICodexTicketAccount(account, outbound) {
+	if !s.isOpenAICodexTicketAccount(context.Background(), account, outbound) {
 		return false
 	}
 	model := normalizeOpenAICodexTicketModel(outbound)
@@ -1060,11 +1071,13 @@ func (s *OpenAIGatewayService) StartOpenAICodexTicketHarvester() {
 	s.openaiCodexTicketDone = done
 	go func() {
 		defer close(done)
+		coverageDone := make(chan struct{})
+		go func() { defer close(coverageDone); s.harvestCoverageLoop(ctx) }()
+		defer func() { cancel(); <-coverageDone }()
 		s.openAICodexTicketHarvestLoop(ctx)
 	}()
 	logger.L().Info("openai_codex_ticket harvester started",
 		zap.Int("ttl_seconds", s.openAICodexTicketConfig().TTLSeconds),
-		zap.Int("target_length", s.openAICodexTicketConfig().TargetLength),
 		zap.Strings("models", s.openAICodexTicketConfig().Models),
 	)
 }
@@ -1190,7 +1203,7 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 	tiers := map[codexHarvestTier][]Account{}
 	seen := make(map[int64]bool, len(accounts))
 	for _, account := range accounts {
-		if seen[account.ID] || openAICodexSkipHarvest(&account) || !scope.includes(&account) || !scope.allowsAccount(&account) || !isOpenAICodexTicketAccount(&account) {
+		if seen[account.ID] || openAICodexSkipHarvest(&account) || !s.harvestScopeIncludesAccount(ctx, scope, &account) || !s.harvestScopeAllowsAccount(ctx, scope, &account) || !s.isOpenAICodexTicketAccount(ctx, &account) {
 			continue
 		}
 		seen[account.ID] = true
@@ -1301,12 +1314,12 @@ func IsOpenAICodexTicketExtraKey(key string) bool {
 func MergeOpenAICodexTicketExtra(extra, current map[string]any) map[string]any {
 	result := maps.Clone(extra)
 	for key := range result {
-		if IsOpenAICodexTicketPrivateExtraKey(key) {
+		if IsOpenAICodexTicketPrivateExtraKey(key) || key == ExcelBPSCredentialStateExtraKey {
 			delete(result, key)
 		}
 	}
 	for key, value := range current {
-		if IsOpenAICodexTicketPrivateExtraKey(key) {
+		if IsOpenAICodexTicketPrivateExtraKey(key) || key == ExcelBPSCredentialStateExtraKey {
 			if result == nil {
 				result = make(map[string]any)
 			}
@@ -1383,7 +1396,7 @@ func IsMaskedProxyURL(raw string) bool {
 // instead of imposing a gate for a key the harvester never populates.
 func isOpenAICodexTicketAccount(account *Account, upstreamModels ...string) bool {
 	if account == nil || !account.IsOpenAIOAuthLike() || account.IsShadow() || account.IsOpenAIVMBound() ||
-		account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() || account.isExcelBPSAllModelsEnabled() {
+		account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() || account.IsExcelOAuth() || account.isExcelBPSAllModelsEnabled() {
 		return false
 	}
 	return len(upstreamModels) == 0 || !account.isExcelBPSUpstreamModelEnabled(upstreamModels[0])
@@ -1400,9 +1413,28 @@ func IsOpenAICodexTicketPrivateExtraKey(key string) bool {
 func RedactOpenAICodexTicketExtra(extra map[string]any) map[string]any {
 	redacted := maps.Clone(extra)
 	for key := range redacted {
-		if IsOpenAICodexTicketPrivateExtraKey(key) {
+		if IsOpenAICodexTicketPrivateExtraKey(key) || key == ExcelBPSCredentialStateExtraKey {
 			delete(redacted, key)
 		}
 	}
 	return redacted
+}
+
+// IsOpenAICodexTicketHarvestAccount validates a selected account without exposing ticket material.
+func IsOpenAICodexTicketHarvestAccount(account *Account, bpsEnabled ...bool) bool {
+	if len(bpsEnabled) > 0 && !bpsEnabled[0] {
+		return isNativeOpenAICodexTicketAccount(account)
+	}
+	return isOpenAICodexTicketAccount(account, OpenAICodexStateProbeDefaultModel)
+}
+
+func isNativeOpenAICodexTicketAccount(account *Account) bool {
+	return account != nil && account.IsOpenAIOAuthLike() && !account.IsShadow() && !account.IsOpenAIVMBound() && !account.IsOpenAIPersonalAccessToken() && !account.IsOpenAIAgentIdentity() && !account.IsExcelOAuth()
+}
+
+func (s *OpenAIGatewayService) isOpenAICodexTicketAccount(ctx context.Context, account *Account, models ...string) bool {
+	if !isNativeOpenAICodexTicketAccount(account) {
+		return false
+	}
+	return isOpenAICodexTicketAccount(account, models...) || !s.excelBPSGloballyEnabled(ctx)
 }

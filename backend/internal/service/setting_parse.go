@@ -56,6 +56,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 	// 初始化默认设置
 	defaults := map[string]string{
+		SettingKeyExcelBPSEnabled:             "true",
 		SettingKeyExcelBPSImageMode:           ExcelBPSImageModeRelay,
 		SettingKeyExcelBPSImageRelayEnabled:   "false",
 		SettingKeyExcelBPSImageBaseURL:        "",
@@ -922,6 +923,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	// Missing values intentionally stay false. Ticket harvesting remains active,
 	// while scheduling is fail-open unless an administrator explicitly opts in.
+	result.OpenAICodexTicketCandyObservation = settings[SettingKeyOpenAICodexTicketCandyObservation] == "true"
 	result.OpenAICodexTicketFailClosed = settings[SettingKeyOpenAICodexTicketFailClosed] == "true"
 	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
 	harvestScope, harvestScopeErr := parseCodexTicketHarvestScope(settings[SettingKeyOpenAICodexTicketHarvestScope])
@@ -1050,6 +1052,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	})
 
 	result.ExcelBPSImageMode = settings[SettingKeyExcelBPSImageMode]
+	result.ExcelBPSEnabled = settings[SettingKeyExcelBPSEnabled] != "false"
 	if result.ExcelBPSImageMode == "" {
 		result.ExcelBPSImageMode = ExcelBPSImageModeRelay
 	}

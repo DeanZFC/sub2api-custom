@@ -99,8 +99,8 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 		return out, err
 	}
 	out.InviteRule = invite.describe()
-	out.InviteEligible = out.Bound && c.Enabled && c.InviteReward > 0 && c.InviteDailyLimit > 0 && invite.satisfied(invEligibility)
-	out.CheckinExpected = (checkin.MinAmount + checkin.MaxAmount) / 2
+	out.InviteEligible = out.Bound && c.Enabled && c.InviteEnabled && c.InviteReward > 0 && c.InviteDailyLimit > 0 && invite.satisfied(invEligibility)
+	out.CheckinExpected = checkinExpectedAmount(checkin)
 	out.LotteryExpected = lotteryExpected(lottery)
 	out.Lottery, err = lotteryState(ctx, tx, lottery, uid, false)
 	if err != nil {

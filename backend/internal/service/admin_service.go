@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -548,6 +549,7 @@ type CreateProxyInput struct {
 	Port           int
 	Username       string
 	Password       string
+	MihomoNodeID   string
 	ExpiresAt      *time.Time
 	FallbackMode   string
 	BackupProxyID  *int64
@@ -703,6 +705,8 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
+	excelOAuthReauth     *OpenAIOAuthReauthService
+	mihomoProxyMu        sync.Mutex
 	cfg                  *config.Config
 	userRepo             UserRepository
 	groupRepo            GroupRepository
@@ -803,4 +807,11 @@ func NewAdminService(
 
 		channelCacheInvalidator: channelCacheInvalidator,
 	}
+}
+
+// Optional capability keeps narrow AdminService implementations compatible.
+type MihomoNodeAdminService interface {
+	TestMihomoNode(context.Context, MihomoNodeProber, string) (*ProxyTestResult, error)
+	CheckMihomoNodeQuality(context.Context, MihomoNodeProber, string) (*ProxyQualityCheckResult, error)
+	CreateMihomoNodeProxies(context.Context, MihomoStaticNodeBinder, []string) (*MihomoNodeProxyImportResult, error)
 }

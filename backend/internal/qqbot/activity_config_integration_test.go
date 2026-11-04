@@ -17,7 +17,7 @@ func TestActivityAndBasicConfigSavesPreserveEachOther(t *testing.T) {
 	require.NoError(t, err)
 	// An already-open basic form contains invitation settings from before the activity edit.
 	staleBasic := original.Public()
-	invite := InviteConfig{InviteReward: 2.5, InviteDailyLimit: 8,
+	invite := InviteConfig{Enabled: true, InviteReward: 2.5, InviteDailyLimit: 8,
 		RechargeRequirement: RechargeRequirement{MinRechargeTotal: 20, MinRecharge30d: 5, RechargeWindowDays: 7}}
 	require.NoError(t, s.SaveInviteConfig(ctx, invite))
 	staleBasic.ChatModel = "updated-model"
@@ -44,7 +44,7 @@ func TestActivityAndBasicConfigSavesPreserveEachOther(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		basic := got.Public()
 		basic.ChatModel = fmt.Sprintf("concurrent-model-%d", i)
-		nextInvite := InviteConfig{InviteReward: float64(i), InviteDailyLimit: i,
+		nextInvite := InviteConfig{Enabled: i%2 == 0, InviteReward: float64(i), InviteDailyLimit: i,
 			RechargeRequirement: RechargeRequirement{MinRechargeTotal: float64(i), MinRecharge30d: float64(i) + .5, RechargeWindowDays: i}}
 		errors := make(chan error, 2)
 		go func() { _, err := s.SaveBasicConfig(ctx, basic); errors <- err }()
@@ -54,6 +54,7 @@ func TestActivityAndBasicConfigSavesPreserveEachOther(t *testing.T) {
 		got, err = s.Config(ctx)
 		require.NoError(t, err)
 		require.Equal(t, basic.ChatModel, got.ChatModel)
+		require.Equal(t, nextInvite.Enabled, got.InviteEnabled)
 		require.Equal(t, nextInvite.InviteReward, got.InviteReward)
 		require.Equal(t, nextInvite.InviteDailyLimit, got.InviteDailyLimit)
 		require.Equal(t, nextInvite.MinRechargeTotal, got.InviteMinRechargeTotal)

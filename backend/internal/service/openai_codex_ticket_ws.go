@@ -20,8 +20,15 @@ type openAICodexWSBinding struct {
 }
 
 func openAIWSRejectExcelBPS(account *Account, requestedModel, upstreamModel string) error {
-	if account.IsExcelBPSEnabledForModel(requestedModel) || account.isExcelBPSUpstreamModelEnabled(upstreamModel) {
+	if account.IsExcelOAuth() || account.IsExcelBPSEnabledForModel(requestedModel) || account.isExcelBPSUpstreamModelEnabled(upstreamModel) {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Excel/BPS models require HTTP/SSE", denyOpenAITurn("excel_bps_requires_http"))
+	}
+	return nil
+}
+
+func (s *OpenAIGatewayService) rejectExcelBPSWebSocket(ctx context.Context, account *Account, requestedModel, upstreamModel string) error {
+	if account.IsExcelOAuth() || (account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx)) {
+		return openAIWSRejectExcelBPS(account, requestedModel, upstreamModel)
 	}
 	return nil
 }
@@ -40,7 +47,7 @@ func (s *OpenAIGatewayService) bindCodexTicketWS(ctx context.Context, account *A
 // credentials on an already authenticated socket. It accepts a still valid
 // primary or standby ticket, but never switches tickets on an existing socket.
 func (s *OpenAIGatewayService) checkCodexTicketWS(ctx context.Context, account *Account, model string, binding *openAICodexWSBinding) error {
-	if err := openAIWSRejectExcelBPS(account, "", model); err != nil {
+	if err := s.rejectExcelBPSWebSocket(ctx, account, "", model); err != nil {
 		return err
 	}
 	var authorization []string
@@ -51,10 +58,10 @@ func (s *OpenAIGatewayService) checkCodexTicketWS(ctx context.Context, account *
 	if err != nil {
 		return err
 	}
-	if err := openAIWSRejectExcelBPS(fresh, "", model); err != nil {
+	if err := s.rejectExcelBPSWebSocket(ctx, fresh, "", model); err != nil {
 		return err
 	}
-	if !isOpenAICodexTicketAccount(fresh, model) || !s.openAICodexTicketEnabledContext(ctx) {
+	if !s.isOpenAICodexTicketAccount(ctx, fresh, model) || !s.openAICodexTicketEnabledContext(ctx) {
 		return nil
 	}
 	if binding == nil || time.Since(binding.createdAt) >= openAIWSConnMaxAge {

@@ -20,6 +20,7 @@ func ProvideAdminHandlers(
 	backupHandler *admin.BackupHandler,
 	oauthHandler *admin.OAuthHandler,
 	openaiOAuthHandler *admin.OpenAIOAuthHandler,
+	openaiReauthHandler *admin.OpenAIOAuthReauthHandler,
 	geminiOAuthHandler *admin.GeminiOAuthHandler,
 	antigravityOAuthHandler *admin.AntigravityOAuthHandler,
 	grokOAuthHandler *admin.GrokOAuthHandler,
@@ -75,6 +76,7 @@ func ProvideAdminHandlers(
 		Backup:                 backupHandler,
 		OAuth:                  oauthHandler,
 		OpenAIOAuth:            openaiOAuthHandler,
+		OpenAIReauth:           openaiReauthHandler,
 		GeminiOAuth:            geminiOAuthHandler,
 		AntigravityOAuth:       antigravityOAuthHandler,
 		GrokOAuth:              grokOAuthHandler,
@@ -169,8 +171,12 @@ func ProvideBatchImageHandler(
 }
 
 // ProvideSystemHandler creates admin.SystemHandler with UpdateService
-func ProvideSystemHandler(updateService *service.UpdateService, lockService *service.SystemOperationLockService) *admin.SystemHandler {
-	return admin.NewSystemHandler(updateService, lockService)
+func ProvideSystemHandler(updateService *service.UpdateService, lockService *service.SystemOperationLockService, adminService service.AdminService) *admin.SystemHandler {
+	h := admin.NewSystemHandler(updateService, lockService)
+	if checker, ok := adminService.(service.MihomoNodeAdminService); ok {
+		h.SetMihomoNodeChecker(checker)
+	}
+	return h
 }
 
 // ProvideSettingHandler creates SettingHandler with version from BuildInfo
@@ -300,6 +306,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewBackupHandler,
 	admin.NewOAuthHandler,
 	admin.NewOpenAIOAuthHandler,
+	admin.NewOpenAIOAuthReauthHandler,
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
 	admin.NewGrokOAuthHandler,

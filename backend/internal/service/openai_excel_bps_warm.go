@@ -15,6 +15,13 @@ const excelBPSWarmMaxTarget = 4096
 func excelBPSWarmTargets(accounts []Account) (managed, static int) {
 	for i := range accounts {
 		a := &accounts[i]
+		if a.IsExcelBPS403RecoveryPending() {
+			probe := *a
+			probe.Extra = cloneExcelBPSRecoveryExtra(a.Extra)
+			probe.Extra["openai_excel_bps"] = true
+			probe.Concurrency = 1
+			a = &probe
+		}
 		if !a.IsActive() || !a.Schedulable || !a.IsExcelBPSMihomoEnabled() {
 			continue
 		}
@@ -74,6 +81,10 @@ func (s *OpenAIGatewayService) StopBPSWarmPool() {
 	}
 }
 func (s *OpenAIGatewayService) syncBPSWarmPool(ctx context.Context) {
+	if !s.excelBPSGloballyEnabled(ctx) {
+		mihomo.WarmBPSPools(ctx, 0, 0)
+		return
+	}
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	accounts, err := s.accountRepo.ListByPlatform(queryCtx, PlatformOpenAI)
 	cancel()

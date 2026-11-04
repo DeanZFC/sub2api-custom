@@ -1480,7 +1480,7 @@
 
 <script setup lang="ts">
 import ExcelBPSSettings from './ExcelBPSSettings.vue'
-import { hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
+import { validBPSRecoveryInterval, hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -2212,6 +2212,10 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
+  if (enableExcelBPS.value && (excelBPSConfig.value.enabled || excelBPSConfig.value.recoveryPending) && excelBPSConfig.value.autoDisableOn403 && excelBPSConfig.value.autoRecoverOn403 && !validBPSRecoveryInterval(excelBPSConfig.value.recoveryIntervalMinutes)) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403RecoveryIntervalInvalid'))
+    return
+  }
   if (enableExcelBPS.value && allOpenAIOAuthOnly.value
     && !hasValidExcelBPS403Target(excelBPSConfig.value, props.groups, !authStore.isSimpleMode)) {
     appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))

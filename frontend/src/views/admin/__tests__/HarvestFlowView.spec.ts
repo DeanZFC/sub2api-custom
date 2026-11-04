@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { reactive } from 'vue'
 import HarvestFlowView from '../HarvestFlowView.vue'
+
+const appStore = reactive({ cachedPublicSettings: { openai_codex_ticket_enabled: true } as { openai_codex_ticket_enabled?: boolean } })
+vi.mock('@/stores/app', () => ({ useAppStore: () => appStore }))
 
 const { getFlow, updateSkip } = vi.hoisted(() => ({ getFlow: vi.fn(), updateSkip: vi.fn() }))
 
@@ -8,9 +12,11 @@ vi.mock('@/api/admin/accounts', () => ({
   getCodexHarvestFlow: getFlow,
   updateCodexSkipHarvest: updateSkip
 }))
+vi.mock('@/components/admin/HarvestPolicyPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/components/admin/HarvestControlsPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/components/admin/HarvestManualConsole.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/components/admin/HarvestNodeRecords.vue', () => ({ default: { template: '<section />' } }))
+vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) => {
@@ -47,6 +53,74 @@ function response() {
 }
 
 describe('HarvestFlowView nullable API lists', () => {
+  it('shows beta candy outcomes without marking the account unschedulable', async () => {
+    getFlow.mockResolvedValue({ ...response(),
+      stages: [{ id: 'select', status: 'fail', detail: 'candy_incorrect' }],
+      events: [
+        { id: 'candy-fail', stage: 'select', kind: 'candy_fail', reason: 'candy_incorrect', account_id: 1 },
+        { id: 'candy-pass', stage: 'select', kind: 'candy_pass', reason: 'candy_passed', account_id: 1 }
+      ]
+    })
+    const wrapper = mount(HarvestFlowView, { global: { stubs: { Icon: true, LoadingSpinner: true } } })
+    try {
+      await flushPromises()
+      expect(wrapper.text()).toContain('candy_incorrect')
+      expect(wrapper.text()).toContain('candy_passed')
+      expect(wrapper.text()).toContain('admin.harvestFlow.schedulable')
+      expect(wrapper.text()).not.toContain('admin.harvestFlow.unschedulable')
+      expect(wrapper.findAll('.bg-emerald-500').length).toBeGreaterThan(0)
+    } finally { wrapper.unmount() }
+  })
+
+  it('shows Astra pool scheduling changes in the selection flow filter', async () => {
+    const data = response()
+    getFlow.mockResolvedValue({ ...data,
+      stages: [{ id: 'select', status: 'warn', detail: 'route_expired', at: '2026-10-12T01:40:39Z' }],
+      events: [
+        { id: 'leave', stage: 'select', kind: 'schedule_leave', result: 'groups', reason: 'route_expired', detail: 'route_expired', account_id: 459, account_name: 'pool-target', at: '2026-10-12T01:40:39Z' },
+        { id: 'join', stage: 'select', kind: 'schedule_join', result: 'groups', reason: 'target_probe_passed', detail: 'target_probe_passed', account_id: 459, account_name: 'pool-target', at: '2026-10-12T01:40:30Z' }
+      ],
+      counts: { ...data.counts, select_ok: 1, select_skip: 1 }
+    })
+    const wrapper = mount(HarvestFlowView, { global: { stubs: { Icon: true, LoadingSpinner: true } } })
+    try {
+      await flushPromises()
+      expect(wrapper.text()).toContain('schedule_leave')
+      expect(wrapper.text()).toContain('schedule_join')
+      expect(wrapper.text()).toContain('route_expired')
+      expect(wrapper.text()).toContain('modeGroups')
+      await wrapper.findAll('button').find(button => button.text() === 'admin.harvestFlow.stages.select')?.trigger('click')
+      expect(wrapper.findAll('ol li').length).toBeGreaterThan(0)
+    } finally { wrapper.unmount() }
+  })
+
+  it('renders stored legacy events without numeric ticket heuristics', async () => {
+    getFlow.mockResolvedValue({ ...response(),
+      harvest: { ...response().harvest, target_length: 780 },
+      stages: [{ id: 'ticket', status: 'warn', detail: 'no valid ticket', at: '2026-10-11T15:23:11Z' }],
+      events: [{ id: 'legacy', stage: 'probe', kind: 'probe_miss', result: 'invalid_state', detail: '拿到的是降智票据（312 字节 / 11 块），合规应为 292/10', length: 312, expected_length: 292 }]
+    })
+    const wrapper = mount(HarvestFlowView, { global: { stubs: { Icon: true, LoadingSpinner: true } } })
+    try {
+      await flushPromises()
+      expect(wrapper.text()).not.toMatch(/780|312|292|降智/)
+      expect(wrapper.text()).toContain('admin.harvestFlow.latestTicketEvent')
+      expect(wrapper.text()).toContain('admin.harvestFlow.idleTicket')
+    } finally { wrapper.unmount() }
+  })
+  it.each([
+    ['probe_verified', 'ok', 'admin.harvestFlow.probeVerified'],
+    ['780 / 33 blk', 'ok', 'admin.harvestFlow.probeIncomplete'],
+    ['probe_reissued', 'fail', 'probe_reissued']
+  ])('renders probe evidence for %s without treating shape as success', async (detail, status, expected) => {
+    getFlow.mockResolvedValue({ ...response(), stages: [{ id: 'shape', status, detail, length: 780, blocks: 33, expected_length: 780 }] })
+    const wrapper = mount(HarvestFlowView, { global: { stubs: { Icon: true, LoadingSpinner: true } } })
+    try {
+      await flushPromises()
+      expect(wrapper.text()).toContain(expected)
+      expect(wrapper.text()).not.toContain('admin.harvestFlow.shapeOk')
+    } finally { wrapper.unmount() }
+  })
   it('shows a route failure without claiming the 780 body is missing or malformed', async () => {
     getFlow.mockResolvedValue({
       ...response(),
@@ -56,8 +130,8 @@ describe('HarvestFlowView nullable API lists', () => {
     const wrapper = mount(HarvestFlowView, { global: { stubs: { Icon: true, LoadingSpinner: true } } })
     try {
       await flushPromises()
-      expect(wrapper.text()).toContain('admin.harvestFlow.shapeValidationIncomplete 780 33')
-      expect(wrapper.text()).toContain('route_cflb_missing')
+      expect(wrapper.text()).toContain('admin.harvestFlow.probeIncomplete')
+      expect(wrapper.text()).toContain('invalid_route')
       expect(wrapper.text()).not.toContain('admin.harvestFlow.shapeNoBody')
       expect(wrapper.text()).not.toContain('admin.harvestFlow.shapeBad')
     } finally { wrapper.unmount() }
@@ -65,6 +139,7 @@ describe('HarvestFlowView nullable API lists', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     getFlow.mockReset()
+    appStore.cachedPublicSettings = { openai_codex_ticket_enabled: true }
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -155,6 +230,7 @@ describe('HarvestFlowView request ordering', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     getFlow.mockReset()
+    appStore.cachedPublicSettings = { openai_codex_ticket_enabled: true }
     updateSkip.mockReset()
   })
   afterEach(() => {
@@ -191,6 +267,17 @@ describe('HarvestFlowView request ordering', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(5000)
     expect(getFlow).toHaveBeenCalledTimes(2)
+  })
+
+  it('enables an unselected OAuth account without toggling it off', async () => {
+    const data = response()
+    getFlow.mockResolvedValue({ ...data, accounts: [{ ...data.accounts[0], harvest_selected: false, in_scope: false }] })
+    updateSkip.mockResolvedValue({ account_id: 1, skip_harvest: false })
+    wrapper = mountFlow()
+    await flushPromises()
+    await button(wrapper, 'admin.harvestFlow.enableHarvest').trigger('click')
+    await flushPromises()
+    expect(updateSkip).toHaveBeenCalledWith(1, false)
   })
 
   it('isolates reads during a save and preserves the saved toggle when refresh fails', async () => {
@@ -276,6 +363,7 @@ describe('HarvestFlowView account cards', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-20T23:13:00+08:00'))
     getFlow.mockReset()
+    appStore.cachedPublicSettings = { openai_codex_ticket_enabled: true }
     updateSkip.mockReset()
   })
   afterEach(() => {
@@ -364,8 +452,7 @@ describe('HarvestFlowView account cards', () => {
     expect(cards[0]!.text()).toContain('success · HTTP 200')
     expect(cards[1]!.text()).toContain('admin.harvestFlow.lastProbe')
     expect(cards[1]!.text()).not.toContain('success · HTTP 200')
-    expect(cards[0]!.text()).toContain('292B')
-    expect(cards[1]!.text()).toContain('—')
+    expect(cards[0]!.text()).not.toContain('292B')
     expect(cards[1]!.text()).toContain('admin.harvestFlow.skipHarvestHint')
     expect(cards[0]!.text()).not.toContain('admin.harvestFlow.skipHarvestHint')
     expect(cards[0]!.text()).toContain('admin.harvestFlow.availability.available')
@@ -382,5 +469,38 @@ describe('HarvestFlowView account cards', () => {
     expect(wrapper.text()).toContain('39')
     expect(wrapper.text()).not.toContain('admin.harvestFlow.durationSeconds')
     expect(wrapper.text()).not.toContain('10s')
+  })
+})
+
+
+describe('HarvestFlowView master switch', () => {
+  beforeEach(() => { vi.useFakeTimers(); getFlow.mockReset() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it.each([{}, { openai_codex_ticket_enabled: false }])('does not render or poll ticket controls when disabled: %j', async settings => {
+    appStore.cachedPublicSettings = settings
+    const wrapper = mount(HarvestFlowView, { global: { stubs: { Icon: true, LoadingSpinner: true, RouterLink: true } } })
+    try {
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(wrapper.find('[data-testid="codex-ticket-disabled"]').exists()).toBe(true)
+      expect(getFlow).not.toHaveBeenCalled()
+      expect(wrapper.text()).not.toContain('admin.harvestFlow.title')
+    } finally { wrapper.unmount() }
+  })
+
+  it('hides the active page and stops polling immediately when the master switch closes', async () => {
+    appStore.cachedPublicSettings = { openai_codex_ticket_enabled: true }
+    getFlow.mockResolvedValue(response())
+    const wrapper = mount(HarvestFlowView, { global: { stubs: { Icon: true, LoadingSpinner: true, RouterLink: true } } })
+    try {
+      await flushPromises()
+      expect(getFlow).toHaveBeenCalledOnce()
+      appStore.cachedPublicSettings = { openai_codex_ticket_enabled: false }
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(wrapper.find('[data-testid="codex-ticket-disabled"]').exists()).toBe(true)
+      expect(getFlow).toHaveBeenCalledOnce()
+    } finally { wrapper.unmount() }
   })
 })

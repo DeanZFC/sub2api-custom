@@ -44,3 +44,17 @@ func TestResolveCredentialAccount(t *testing.T) {
 	_, err = resolveCredentialAccount(ctx, badRepo, shadow)
 	require.Error(t, err)
 }
+
+func TestResolveCredentialAccountPreservesCodexDualGrantAndRejectsPrimaryExcel(t *testing.T) {
+	parentID := int64(100)
+	shadow := &Account{ID: 200, ParentAccountID: &parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	parent := &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "codex-token"},
+		Extra:       map[string]any{"openai_excel_bps": true, ExcelBPSCredentialStateExtraKey: map[string]any{"status": "not_expired"}}}
+	got, err := resolveCredentialAccount(t.Context(), newStubCredRepo(parent), shadow)
+	require.NoError(t, err)
+	require.Same(t, parent, got, "a separate BPS grant must not break ordinary Codex shadows")
+	parent.Credentials["client_id"] = "app_fnr0pYvVwwFDocDumLG3H2Bp"
+	_, err = resolveCredentialAccount(t.Context(), newStubCredRepo(parent), shadow)
+	require.ErrorContains(t, err, "native Codex credentials are required")
+}

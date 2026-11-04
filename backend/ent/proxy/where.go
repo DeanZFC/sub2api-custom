@@ -105,6 +105,11 @@ func Status(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldStatus, v))
 }
 
+// MihomoNodeID applies equality check predicate on the "mihomo_node_id" field. It's identical to MihomoNodeIDEQ.
+func MihomoNodeID(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldMihomoNodeID, v))
+}
+
 // ExpiresAt applies equality check predicate on the "expires_at" field. It's identical to ExpiresAtEQ.
 func ExpiresAt(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExpiresAt, v))
@@ -703,6 +708,81 @@ func StatusEqualFold(v string) predicate.Proxy {
 // StatusContainsFold applies the ContainsFold predicate on the "status" field.
 func StatusContainsFold(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldContainsFold(FieldStatus, v))
+}
+
+// MihomoNodeIDEQ applies the EQ predicate on the "mihomo_node_id" field.
+func MihomoNodeIDEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDNEQ applies the NEQ predicate on the "mihomo_node_id" field.
+func MihomoNodeIDNEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDIn applies the In predicate on the "mihomo_node_id" field.
+func MihomoNodeIDIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldMihomoNodeID, vs...))
+}
+
+// MihomoNodeIDNotIn applies the NotIn predicate on the "mihomo_node_id" field.
+func MihomoNodeIDNotIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldMihomoNodeID, vs...))
+}
+
+// MihomoNodeIDGT applies the GT predicate on the "mihomo_node_id" field.
+func MihomoNodeIDGT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDGTE applies the GTE predicate on the "mihomo_node_id" field.
+func MihomoNodeIDGTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDLT applies the LT predicate on the "mihomo_node_id" field.
+func MihomoNodeIDLT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDLTE applies the LTE predicate on the "mihomo_node_id" field.
+func MihomoNodeIDLTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDContains applies the Contains predicate on the "mihomo_node_id" field.
+func MihomoNodeIDContains(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContains(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDHasPrefix applies the HasPrefix predicate on the "mihomo_node_id" field.
+func MihomoNodeIDHasPrefix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasPrefix(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDHasSuffix applies the HasSuffix predicate on the "mihomo_node_id" field.
+func MihomoNodeIDHasSuffix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasSuffix(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDIsNil applies the IsNil predicate on the "mihomo_node_id" field.
+func MihomoNodeIDIsNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldIsNull(FieldMihomoNodeID))
+}
+
+// MihomoNodeIDNotNil applies the NotNil predicate on the "mihomo_node_id" field.
+func MihomoNodeIDNotNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotNull(FieldMihomoNodeID))
+}
+
+// MihomoNodeIDEqualFold applies the EqualFold predicate on the "mihomo_node_id" field.
+func MihomoNodeIDEqualFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEqualFold(FieldMihomoNodeID, v))
+}
+
+// MihomoNodeIDContainsFold applies the ContainsFold predicate on the "mihomo_node_id" field.
+func MihomoNodeIDContainsFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContainsFold(FieldMihomoNodeID, v))
 }
 
 // ExpiresAtEQ applies the EQ predicate on the "expires_at" field.

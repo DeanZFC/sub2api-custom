@@ -51,7 +51,7 @@ func (s *AccountTestService) testExcelBPSAccountConnection(c *gin.Context, accou
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: upstreamModel})
 	beginAccountTestModelAttempt(c, upstreamModel)
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(s.withBPSTestEvidence(ctx, c), http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Excel BPS test request")
 	}

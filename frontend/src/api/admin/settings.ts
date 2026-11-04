@@ -410,6 +410,9 @@ export function deriveWeChatConnectStoredMode(
  * System settings interface
  */
 export interface SystemSettings {
+  openai_codex_ticket_candy_observation?: boolean
+  openai_codex_ticket_scheduled_candy_enabled?: boolean
+  excel_bps_enabled?: boolean;
   openai_codex_ticket_enabled?: boolean;
   openai_codex_ticket_fail_closed?: boolean;
   openai_codex_ticket_strategy?: 'fixed' | 'standby';
@@ -793,6 +796,9 @@ export interface SystemSettings {
 }
 
 export interface UpdateSettingsRequest {
+  openai_codex_ticket_candy_observation?: boolean
+  openai_codex_ticket_scheduled_candy_enabled?: boolean
+  excel_bps_enabled?: boolean;
   openai_codex_ticket_enabled?: boolean;
   openai_codex_ticket_fail_closed?: boolean;
   openai_codex_ticket_strategy?: 'fixed' | 'standby';

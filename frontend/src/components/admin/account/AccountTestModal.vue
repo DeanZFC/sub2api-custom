@@ -6,6 +6,15 @@
     @close="handleClose"
   >
     <div class="space-y-4">
+      <div v-if="account?.extra?.openai_excel_bps_authorization_pending === true" role="status" class="text-sm text-amber-700 dark:text-amber-300">
+        {{ t('admin.accounts.bpsAuthorizing') }}
+      </div>
+      <div v-if="modelLoadError" role="alert" class="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+        <p>{{ modelLoadError }}</p>
+        <button type="button" :disabled="loadingModels" class="mt-2 underline" @click="loadAvailableModels">{{ t('admin.accounts.retryModels') }}</button>
+      </div>
+      <ExcelAuthorizationPanel v-if="account?.platform === 'openai' && account.type === 'oauth' && account.parent_account_id == null" :account="account" :active="show" @updated="loadAvailableModels" />
+      <AccountTestEvidence v-if="upstreamEvidence" :evidence="upstreamEvidence" />
       <!-- Account Info Card -->
       <div
         v-if="account"
@@ -365,7 +374,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import ExcelAuthorizationPanel from '@/components/account/ExcelAuthorizationPanel.vue'
+import AccountTestEvidence from '@/components/account/AccountTestEvidence.vue'
+import type { AccountTestUpstreamEvidence } from '@/types/accountTestEvidence'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -397,6 +409,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'tested'): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -404,6 +417,12 @@ const status = ref<'idle' | 'connecting' | 'success' | 'error'>('idle')
 const outputLines = ref<OutputLine[]>([])
 const streamingContent = ref('')
 const errorMessage = ref('')
+const upstreamEvidence = ref<AccountTestUpstreamEvidence | null>(null)
+const modelLoadError = ref('')
+let modelLoadGeneration = 0
+let testGeneration = 0
+let testNotified = false
+const notifyTested = () => { if (!testNotified) { testNotified = true; emit('tested') } }
 const availableModels = ref<ClaudeModel[]>([])
 const selectedModelId = ref('')
 const testPrompt = ref('')
@@ -413,7 +432,7 @@ const generatedImages = ref<PreviewMedia[]>([])
 const generatedAudios = ref<PreviewMedia[]>([])
 const generatedVideos = ref<PreviewMedia[]>([])
 const previewImageUrl = ref('')
-const testMode = ref<'default' | 'compact'>('default')
+const testMode = ref<'default' | 'compact' | 'bps_tools'>('default')
 const grokTestMode = ref<'text' | 'image' | 'video' | 'search' | 'tts' | 'stt' | 'realtime'>('text')
 const uploadImageDataURL = ref('')
 const uploadImagePreview = ref('')
@@ -426,7 +445,8 @@ const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
-  { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
+  { value: 'compact', label: t('admin.accounts.openai.testModeCompact') },
+  ...(props.account?.extra?.openai_excel_bps === true ? [{ value: 'bps_tools', label: t('admin.accounts.openai.testModeBPSTools') }] : [])
 ])
 const grokTestModeOptions = computed(() => [
   { value: 'text', label: t('admin.accounts.grok.testModeText') },
@@ -734,8 +754,9 @@ const pickDefaultModelForMode = () => {
 }
 
 watch(
-  () => props.show,
-  async (newVal) => {
+  () => [props.show, props.account?.id] as const,
+  async ([newVal]) => {
+    abortStream()
     if (newVal && props.account) {
       testPrompt.value = ''
       testMode.value = 'default'
@@ -747,6 +768,8 @@ watch(
         applyDefaultPromptForMode()
       }
     } else {
+      modelLoadGeneration++
+      modelLoadError.value = ''
       abortStream()
     }
   }
@@ -763,10 +786,14 @@ watch(grokTestMode, () => {
 const loadAvailableModels = async () => {
   if (!props.account) return
 
+  const generation = ++modelLoadGeneration
+  const accountID = props.account.id
   loadingModels.value = true
+  modelLoadError.value = ''
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = await adminAPI.accounts.getAvailableModels(props.account.id)
+    const models = await adminAPI.accounts.getAvailableModels(accountID)
+    if (generation !== modelLoadGeneration || props.account?.id !== accountID) return
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
       ? sortTestModels(models)
       : models
@@ -781,12 +808,15 @@ const loadAvailableModels = async () => {
       }
     }
   } catch (error) {
-    console.error('Failed to load available models:', error)
+    if (generation !== modelLoadGeneration) return
+    const reason = typeof error === 'object' && error !== null && 'reason' in error ? String(error.reason) : ''
+    const knownReasons = ['OPENAI_EXCEL_AUTH_PENDING', 'OPENAI_EXCEL_AUTH_FAILED', 'OPENAI_EXCEL_AUTH_VERIFICATION_REQUIRED', 'OPENAI_EXCEL_AUTH_CONFIG_REQUIRED', 'OPENAI_EXCEL_AUTH_REQUIRED', 'OPENAI_EXCEL_AUTH_UNAVAILABLE']
+    modelLoadError.value = knownReasons.includes(reason) ? t('admin.accounts.excelAuthErrors.' + reason) : t('admin.accounts.modelsLoadFailed')
     // Fallback to empty list
     availableModels.value = []
     selectedModelId.value = ''
   } finally {
-    loadingModels.value = false
+    if (generation === modelLoadGeneration) loadingModels.value = false
   }
 }
 
@@ -795,6 +825,8 @@ const resetState = () => {
   outputLines.value = []
   streamingContent.value = ''
   errorMessage.value = ''
+  upstreamEvidence.value = null
+  testNotified = false
   generatedImages.value = []
   generatedAudios.value = []
   generatedVideos.value = []
@@ -807,11 +839,14 @@ const handleClose = () => {
 }
 
 const abortStream = () => {
+  testGeneration++
   if (abortController) {
     abortController.abort()
     abortController = null
   }
 }
+
+onBeforeUnmount(() => { modelLoadGeneration++; abortStream() })
 
 const addLine = (text: string, className: string = 'text-gray-300') => {
   outputLines.value.push({ text, class: className })
@@ -842,6 +877,7 @@ const startTest = async () => {
   abortStream()
 
   abortController = new AbortController()
+  const generation = testGeneration
 
   try {
     const requestBody: {
@@ -893,6 +929,7 @@ const startTest = async () => {
       signal: abortController.signal
     })
 
+    if (generation !== testGeneration) return
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
@@ -907,6 +944,7 @@ const startTest = async () => {
 
     while (true) {
       const { done, value } = await reader.read()
+      if (generation !== testGeneration) { await reader.cancel(); return }
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
@@ -928,10 +966,12 @@ const startTest = async () => {
       }
     }
   } catch (error: unknown) {
+    if (generation !== testGeneration) return
     if (error instanceof DOMException && error.name === 'AbortError') {
       status.value = 'idle'
       return
     }
+    notifyTested()
     status.value = 'error'
     const msg = error instanceof Error ? error.message : t('common.unknownError')
     errorMessage.value = msg
@@ -941,6 +981,10 @@ const startTest = async () => {
 
 const handleEvent = (event: {
   type: string
+  upstream_status?: number
+  upstream_model?: string
+  request_id?: string
+  upstream_error_code?: string
   text?: string
   model?: string
   success?: boolean
@@ -952,7 +996,7 @@ const handleEvent = (event: {
 }) => {
   switch (event.type) {
     case 'test_start':
-      addLine(t('admin.accounts.connectedToApi'), 'text-green-400')
+      addLine(t('admin.accounts.testRequestStarted'), 'text-blue-400')
       if (event.model) {
         addLine(t('admin.accounts.usingModel', { model: event.model }), 'text-cyan-400')
       }
@@ -978,6 +1022,12 @@ const handleEvent = (event: {
       )
       addLine('', 'text-gray-300')
       addLine(t('admin.accounts.response'), 'text-yellow-400')
+      break
+
+    case 'upstream_response':
+      if (event.upstream_status && event.upstream_status >= 100 && event.upstream_status <= 599) {
+        upstreamEvidence.value = { status: event.upstream_status, model: event.upstream_model, requestId: event.request_id, errorCode: event.upstream_error_code }
+      }
       break
 
     case 'content':
@@ -1024,6 +1074,7 @@ const handleEvent = (event: {
       break
 
     case 'test_complete':
+      notifyTested()
       // Move streaming content to output lines
       if (streamingContent.value) {
         addLine(streamingContent.value, 'text-green-300')
@@ -1038,6 +1089,7 @@ const handleEvent = (event: {
       break
 
     case 'error':
+      notifyTested()
       status.value = 'error'
       errorMessage.value = event.error || t('common.unknownError')
       if (streamingContent.value) {

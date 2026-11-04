@@ -7,6 +7,9 @@ export interface ExcelBPSConfig {
   proxySource: 'mihomo' | 'ip_pool'
   cacheCreationAsInput: boolean
   autoDisableOn403: boolean
+  autoRecoverOn403: boolean
+  recoveryIntervalMinutes: number
+  recoveryPending: boolean
   omitUnsupportedTools: boolean
   ignoreImages: boolean
   ignoreEncryptedContent: boolean
@@ -17,6 +20,7 @@ export interface ExcelBPSConfig {
 export const EXCEL_BPS_EXTRA_KEYS = [
   'openai_excel_bps', 'openai_excel_bps_models', 'openai_excel_bps_mihomo',
   'openai_excel_bps_proxy_source', 'openai_excel_bps_cache_creation_as_input',
+  'openai_excel_bps_auto_recover_on_403', 'openai_excel_bps_403_recovery_interval_minutes',
   'openai_excel_bps_auto_disable_on_403', 'openai_excel_bps_omit_unsupported_tools',
   'openai_excel_bps_ignore_images', 'openai_excel_bps_ignore_encrypted_content',
   'openai_excel_bps_auto_move_on_403', 'openai_excel_bps_403_target_group_id'
@@ -24,9 +28,11 @@ export const EXCEL_BPS_EXTRA_KEYS = [
 
 export function readExcelBPSConfig(extra: Record<string, unknown> = {}): ExcelBPSConfig {
   const enabled = extra.openai_excel_bps === true
+  const recoveryPending = !enabled && typeof extra.openai_excel_bps_403_disabled_at === 'string'
   return {
     enabled,
-    allModels: enabled && !Object.prototype.hasOwnProperty.call(extra, 'openai_excel_bps_models'),
+    recoveryPending,
+    allModels: (enabled || recoveryPending) && !Object.prototype.hasOwnProperty.call(extra, 'openai_excel_bps_models'),
     models: Array.isArray(extra.openai_excel_bps_models)
       ? extra.openai_excel_bps_models.filter((value): value is string => typeof value === 'string')
       : ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'],
@@ -34,6 +40,8 @@ export function readExcelBPSConfig(extra: Record<string, unknown> = {}): ExcelBP
     proxySource: extra.openai_excel_bps_proxy_source === 'ip_pool' ? 'ip_pool' : 'mihomo',
     cacheCreationAsInput: extra.openai_excel_bps_cache_creation_as_input === true,
     autoDisableOn403: extra.openai_excel_bps_auto_disable_on_403 === true,
+    autoRecoverOn403: extra.openai_excel_bps_auto_recover_on_403 === true,
+    recoveryIntervalMinutes: validBPSRecoveryInterval(extra.openai_excel_bps_403_recovery_interval_minutes) ? extra.openai_excel_bps_403_recovery_interval_minutes : 60,
     omitUnsupportedTools: extra.openai_excel_bps_omit_unsupported_tools === true,
     ignoreImages: extra.openai_excel_bps_ignore_images === true,
     ignoreEncryptedContent: extra.openai_excel_bps_ignore_encrypted_content === true,
@@ -42,6 +50,10 @@ export function readExcelBPSConfig(extra: Record<string, unknown> = {}): ExcelBP
       && Number.isSafeInteger(extra.openai_excel_bps_403_target_group_id)
       && extra.openai_excel_bps_403_target_group_id >= 0 ? extra.openai_excel_bps_403_target_group_id : ''
   }
+}
+
+export function validBPSRecoveryInterval(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10080
 }
 
 /** A 403 action may leave every group or choose a compatible, currently available group. */
@@ -62,16 +74,22 @@ export function writeExcelBPSConfig(config: ExcelBPSConfig, base: Record<string,
   }
   if (batch) {
     for (const key of EXCEL_BPS_EXTRA_KEYS) {
-      if (!['openai_excel_bps_models', 'openai_excel_bps_403_target_group_id', 'openai_excel_bps_proxy_source'].includes(key)) extra[key] = false
+      if (!['openai_excel_bps_models', 'openai_excel_bps_403_target_group_id', 'openai_excel_bps_proxy_source', 'openai_excel_bps_403_recovery_interval_minutes'].includes(key)) extra[key] = false
     }
     extra.openai_excel_bps_proxy_source = 'mihomo'
   }
-  if (!config.enabled) {
+  const preserveDisabled = !batch && base.openai_excel_bps !== true && typeof base.openai_excel_bps_403_disabled_at === 'string'
+  if (!config.enabled && !preserveDisabled) {
     if (batch) extra.openai_excel_bps = false
     return extra
   }
-  extra.openai_excel_bps = true
+  extra.openai_excel_bps = config.enabled
   if (!config.allModels) extra.openai_excel_bps_models = [...new Set(config.models.map(model => model.trim()).filter(Boolean))]
+  if (config.autoRecoverOn403 && config.autoDisableOn403 && !validBPSRecoveryInterval(config.recoveryIntervalMinutes)) {
+    throw new Error('BPS recovery interval must be an integer between 1 and 10080 minutes')
+  }
+  extra.openai_excel_bps_403_recovery_interval_minutes = validBPSRecoveryInterval(config.recoveryIntervalMinutes) ? config.recoveryIntervalMinutes : 60
+  if (config.autoDisableOn403 && config.autoRecoverOn403) extra.openai_excel_bps_auto_recover_on_403 = true
   const flags: [keyof ExcelBPSConfig, string][] = [
     ['sessionProxy', 'openai_excel_bps_mihomo'], ['cacheCreationAsInput', 'openai_excel_bps_cache_creation_as_input'],
     ['autoDisableOn403', 'openai_excel_bps_auto_disable_on_403'], ['omitUnsupportedTools', 'openai_excel_bps_omit_unsupported_tools'],

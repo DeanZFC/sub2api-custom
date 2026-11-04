@@ -51,6 +51,8 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":-1}`},
 			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":1.5}`},
 			{"PUT", "/invite", `{"invite_reward":1,"invite_daily_limit":10,"min_recharge_total":-1}`},
+			{"PUT", "/invite", `{"enabled":"false","invite_reward":1,"invite_daily_limit":10}`},
+			{"PUT", "/invite", `{"enabled":1,"invite_reward":1,"invite_daily_limit":10}`},
 			{"PUT", "/checkin", `{"recharge_window_days":0}`},
 			{"PUT", "/checkin", `{"recharge_window_days":-1}`},
 			{"PUT", "/checkin", `{"recharge_window_days":1.5}`},

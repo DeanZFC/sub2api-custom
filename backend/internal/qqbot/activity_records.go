@@ -248,7 +248,7 @@ func invitationRecordStatus(c Config, r ActivityRecord, rewardID int64, ownRewar
 		return "account_unavailable"
 	case r.Participant.UserID == r.Inviter.UserID:
 		return "self_invitation"
-	case !c.Enabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0:
+	case !c.Enabled || !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0:
 		return "disabled"
 	case !c.allows(r.GroupID):
 		return "group_disabled"

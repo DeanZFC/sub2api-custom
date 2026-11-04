@@ -22,10 +22,12 @@ import (
 
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
+	ExcelBPSEnabled                      *bool                            `json:"excel_bps_enabled"`
 	OpenAICodexTicketHarvestScope        *service.CodexTicketHarvestScope `json:"openai_codex_ticket_harvest_scope"`
 	OpenAICodexTicketStrictResponse      *bool                            `json:"openai_codex_ticket_strict_response"`
 	OpenAICodexTicketFailClosed          *bool                            `json:"openai_codex_ticket_fail_closed"`
 	OpenAICodexTicketStrategy            *string                          `json:"openai_codex_ticket_strategy"`
+	OpenAICodexTicketCandyObservation    *bool                            `json:"openai_codex_ticket_candy_observation"`
 	OpenAICodexTicketEnabled             *bool                            `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL     string                           `json:"openai_codex_ticket_harvest_proxy_url"`
 	OpenAICodexTicketUseSavedStaticProxy bool                             `json:"openai_codex_ticket_use_saved_static_proxy"`
@@ -1609,6 +1611,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	settings := &service.SystemSettings{
+		ExcelBPSEnabled: func() bool {
+			if req.ExcelBPSEnabled != nil {
+				return *req.ExcelBPSEnabled
+			}
+			return previousSettings.ExcelBPSEnabled
+		}(),
 		ExcelBPSImageMode: func() string {
 			if req.ExcelBPSImageMode != nil {
 				return *req.ExcelBPSImageMode
@@ -1680,6 +1688,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.ExcelBPSImageMaxRequests
 			}
 			return previousSettings.ExcelBPSImageMaxRequests
+		}(),
+		OpenAICodexTicketCandyObservation: func() bool {
+			if req.OpenAICodexTicketCandyObservation != nil {
+				return *req.OpenAICodexTicketCandyObservation
+			}
+			return previousSettings.OpenAICodexTicketCandyObservation
 		}(),
 		OpenAICodexTicketEnabled: func() bool {
 			if req.OpenAICodexTicketEnabled != nil {
@@ -2415,6 +2429,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 	payload := dto.SystemSettings{
 		OpenAICodexTicketEnabled:                updatedSettings.OpenAICodexTicketEnabled,
+		OpenAICodexTicketCandyObservation:       updatedSettings.OpenAICodexTicketCandyObservation,
 		OpenAICodexTicketHarvestProxyURL:        service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
 		OpenAICodexTicketStaticProxyURL:         service.MaskProxyURL(updatedSettings.OpenAICodexTicketStaticProxyURL),
 		OpenAICodexTicketHarvestScope:           updatedSettings.OpenAICodexTicketHarvestScope,

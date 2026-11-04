@@ -1,5 +1,9 @@
 export default {
     settings: {
+      codexTicketFeature: {
+        disabled: '打票功能当前关闭，请在系统设置的功能开关中开启。',
+        configure: '前往功能设置',
+      },
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {

@@ -76,7 +76,7 @@ export interface QQBotConfig {
   image_model: string; image_size: string; system_prompt: string; max_output_tokens: number
   history_messages: number; daily_chat_limit: number; daily_image_limit: number
   total_daily_chat_limit: number; total_daily_image_limit: number; cooldown_seconds: number
-  checkin_reward: number; invite_reward: number; invite_daily_limit: number
+  checkin_reward: number; invite_enabled: boolean; invite_reward: number; invite_daily_limit: number
   invite_min_recharge_total?: number; invite_min_recharge_30d?: number; invite_recharge_window_days?: number
   clear_app_secret?: boolean; clear_api_key?: boolean; clear_image_api_key?: boolean
 }
@@ -153,6 +153,7 @@ export interface QQCheckinConfig {
 }
 export interface QQInviteConfig {
   _version?: string
+  enabled: boolean
   invite_reward: number; invite_daily_limit: number
   min_recharge_total: number; min_recharge_30d: number; recharge_window_days: number
 }

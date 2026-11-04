@@ -49,6 +49,7 @@ type Config struct {
 	TotalDailyImageLimit     int                      `json:"total_daily_image_limit"`
 	CooldownSeconds          int                      `json:"cooldown_seconds"`
 	CheckinReward            float64                  `json:"checkin_reward"`
+	InviteEnabled            bool                     `json:"invite_enabled"`
 	InviteReward             float64                  `json:"invite_reward"`
 	InviteDailyLimit         int                      `json:"invite_daily_limit"`
 	InviteMinRechargeTotal   float64                  `json:"invite_min_recharge_total"`

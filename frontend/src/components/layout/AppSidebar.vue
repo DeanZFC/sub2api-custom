@@ -727,6 +727,7 @@ const purchaseNavLabel = computed(() => {
 const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
 const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
 const flagPluginManagement = makeSidebarFlag(FeatureFlags.pluginManagement)
+const flagCodexTicket = makeSidebarFlag(FeatureFlags.codexTicket)
 const flagMCP = makeSidebarFlag(FeatureFlags.mcp)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
@@ -817,7 +818,7 @@ const adminNavItems = computed((): NavItem[] => {
     // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    { path: '/admin/harvest-flow', label: t('admin.harvestFlow.title'), icon: TicketIcon },
+    { path: '/admin/harvest-flow', label: t('admin.harvestFlow.title'), icon: TicketIcon, featureFlag: flagCodexTicket },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     {
       path: '/admin/qqbot', label: t('qqbot.title'), icon: BellIcon, expandOnly: true,

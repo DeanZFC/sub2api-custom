@@ -12,7 +12,7 @@ import (
 // account must not carry a ticket to a disabled account or a changed identity,
 // protocol or proxy. Ticket refreshes themselves do not invalidate a request.
 func (s *OpenAIGatewayService) refreshCodexTicketAccountForSend(ctx context.Context, account *Account, model string, authorization ...string) (*Account, error) {
-	if s == nil || !isOpenAICodexTicketAccount(account, model) || !s.openAICodexTicketEnabledContext(ctx) || !s.openAICodexTicketGatedModel(model) {
+	if s == nil || !s.isOpenAICodexTicketAccount(ctx, account, model) || !s.openAICodexTicketEnabledContext(ctx) || !s.openAICodexTicketGatedModel(model) {
 		return account, nil
 	}
 	if s.accountRepo == nil {
@@ -22,7 +22,7 @@ func (s *OpenAIGatewayService) refreshCodexTicketAccountForSend(ctx context.Cont
 	if err != nil || fresh == nil {
 		return nil, denyOpenAITurn("account_state_unavailable")
 	}
-	if !fresh.IsSchedulableForModelWithContext(ctx, model) || s.isOpenAIAccountRequestRuntimeBlocked(fresh, model) || !isOpenAICodexTicketAccount(fresh, model) {
+	if !fresh.IsSchedulableForModelWithContext(ctx, model) || s.isOpenAIAccountRequestRuntimeBlocked(fresh, model) || !s.isOpenAICodexTicketAccount(ctx, fresh, model) {
 		return nil, denyOpenAITurn("account_no_longer_eligible")
 	}
 	if fresh.ID != account.ID || fresh.Platform != account.Platform || fresh.Type != account.Type ||

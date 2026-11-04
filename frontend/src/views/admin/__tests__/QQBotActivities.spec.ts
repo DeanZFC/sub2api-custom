@@ -34,7 +34,7 @@ describe('QQ activity pages with real translations', () => {
     let checkin = { enabled: true, min_amount: 0.1, max_amount: 0.5, min_recharge_total: 0, min_recharge_30d: 0 }
     api.checkinConfig.mockImplementation(async () => structuredClone(checkin))
     api.saveCheckin.mockImplementation(async c => { checkin = structuredClone(c); return structuredClone(checkin) })
-    api.inviteConfig.mockResolvedValue({ invite_reward: 1, invite_daily_limit: 10, min_recharge_total: 0, min_recharge_30d: 0 })
+    api.inviteConfig.mockResolvedValue({ enabled: true, invite_reward: 1, invite_daily_limit: 10, min_recharge_total: 0, min_recharge_30d: 0 })
     api.saveInvite.mockImplementation(async c => c)
     api.transferConfig.mockResolvedValue({ transfer_enabled: true, transfer_fee_percent: 1, transfer_min_amount: 0.1, transfer_max_amount: 100 })
     api.saveTransfer.mockImplementation(async c => c)
@@ -376,6 +376,53 @@ describe('QQ activity pages with real translations', () => {
     expect((w.get('[data-testid="guarantee-every"]').element as HTMLInputElement).value).toBe('5')
     w.unmount()
   })
+  it.each([
+    { enabled: false, invite_reward: 1, invite_daily_limit: 10, expected: false },
+    { enabled: true, invite_reward: 0, invite_daily_limit: 10, expected: true },
+    { invite_reward: 1, invite_daily_limit: 10, expected: true },
+    { invite_reward: 0, invite_daily_limit: 10, expected: false },
+    { invite_reward: 1, invite_daily_limit: 0, expected: false }
+  ])('loads the explicit invitation switch and infers legacy settings: %j', async ({ expected, ...config }) => {
+    api.inviteConfig.mockResolvedValue({ ...config, min_recharge_total: 0, min_recharge_30d: 0 })
+    const w = mount(QQBotInviteSettings, { global: { plugins: [i18n('zh')] } })
+    await flushPromises()
+    expect(w.get('[data-testid="invite-enabled"]').attributes('aria-checked')).toBe(String(expected))
+    expect(w.text()).not.toContain(zh.qqbot.workspace.unsaved)
+    w.unmount()
+  })
+  it.each(['zh', 'en'] as const)('%s keeps invitation rules and a disabled draft after a save failure', async locale => {
+    const translation = i18n(locale)
+    const rules = { _version: 'invite-1', enabled: true, invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 }
+    api.inviteConfig.mockResolvedValue(rules)
+    const w = mount(QQBotInviteSettings, { global: { plugins: [translation] } })
+    await flushPromises()
+    const toggle = w.get('[data-testid="invite-enabled"]')
+    expect(toggle.attributes('role')).toBe('switch')
+    expect(w.text()).toContain(translation.global.t('qqbot.enableInvite'))
+    expect(w.text()).toContain(translation.global.t('qqbot.inviteEnabledHelp'))
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(w.text()).toContain(translation.global.t('qqbot.workspace.unsaved'))
+    api.saveInvite.mockRejectedValueOnce(new Error('Configuration conflict'))
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveInvite).toHaveBeenLastCalledWith({ ...rules, enabled: false })
+    expect(w.get('[role="alert"]').text()).toBe('Configuration conflict')
+    expect(w.text()).toContain(translation.global.t('qqbot.workspace.unsaved'))
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    for (const [field, expected] of [
+      ['invite-reward', '2.5'], ['invite-daily-limit', '8'],
+      ['invite-min-recharge-total', '20'], ['invite-min-recharge-30d', '10'],
+      ['invite-recharge-window-days', '60']
+    ]) expect((w.get(`[data-testid="${field}"]`).element as HTMLInputElement).value).toBe(expected)
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(w.find('[role="alert"]').exists()).toBe(false)
+    expect(w.text()).not.toContain(translation.global.t('qqbot.workspace.unsaved'))
+    expect(w.get('[role="status"]').text()).toBe(translation.global.t('common.saved'))
+    await toggle.trigger('click')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveInvite).toHaveBeenLastCalledWith(rules)
+    w.unmount()
+  })
   it.each(['zh', 'en'] as const)('%s preserves drafts while switching tabs and saves invitations independently', async locale => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/qqbot/activities', component: QQBotActivitiesView }] })
     await router.push('/admin/qqbot/activities')
@@ -397,7 +444,7 @@ describe('QQ activity pages with real translations', () => {
     await w.get('[data-testid="invite-min-recharge-30d"]').setValue('10')
     await w.get('[data-testid="invite-recharge-window-days"]').setValue('60')
     await w.get('form').trigger('submit'); await flushPromises()
-    expect(api.saveInvite).toHaveBeenCalledWith({ invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 })
+    expect(api.saveInvite).toHaveBeenCalledWith({ enabled: true, invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 })
     expect(api.saveCheckin).not.toHaveBeenCalled()
     expect(api.saveLottery).not.toHaveBeenCalled()
     await w.get('#qqbot-tab-checkin').trigger('click'); await flushPromises()

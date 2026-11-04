@@ -194,3 +194,38 @@ func TestExcelBPSAccountTestRetainsVMRoutePriority(t *testing.T) {
 	require.Equal(t, 1, vmRequests)
 	require.Nil(t, upstream.lastReq)
 }
+
+func TestExcelBPSAccountTestGlobalSwitchAndPrimaryGrant(t *testing.T) {
+	for _, primary := range []bool{false, true} {
+		t.Run(strconv.FormatBool(primary), func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: excelBPSAccountTestResponse("gpt-6-astra")}
+			gateway := openAIClientToolsTestService(upstream)
+			gateway.settingService = &SettingService{settingRepo: &excelBPSDisabledSettingsRepo{}}
+			svc := &AccountTestService{openaiGatewayService: gateway, httpUpstream: upstream}
+			account := excelAccount()
+			if primary {
+				account.Credentials["client_id"] = "app_fnr0pYvVwwFDocDumLG3H2Bp"
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/admin/test", nil)
+			err := svc.testOpenAIAccountConnection(c, account, "gpt-6-astra", "OK", AccountTestModeDefault)
+			if primary {
+				require.ErrorContains(t, err, "native Codex is unavailable")
+				require.Nil(t, upstream.lastReq)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, "chatgpt.com", upstream.lastReq.URL.Host)
+			}
+		})
+	}
+}
+
+type excelBPSDisabledSettingsRepo struct{ SettingRepository }
+
+func (*excelBPSDisabledSettingsRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{SettingKeyExcelBPSEnabled: "false"}, nil
+}
+
+func (*excelBPSDisabledSettingsRepo) GetValue(context.Context, string) (string, error) {
+	return "false", nil
+}

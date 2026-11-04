@@ -425,7 +425,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	var streakDays int
 	var streakReward GrowthReward
 	if kind == "invite" {
-		if c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+		if !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 			return "邀请奖励未开启。", nil
 		}
 		amount = c.InviteReward

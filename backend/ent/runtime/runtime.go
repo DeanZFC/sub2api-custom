@@ -1752,14 +1752,18 @@ func init() {
 	proxy.DefaultStatus = proxyDescStatus.Default.(string)
 	// proxy.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	proxy.StatusValidator = proxyDescStatus.Validators[0].(func(string) error)
+	// proxyDescMihomoNodeID is the schema descriptor for mihomo_node_id field.
+	proxyDescMihomoNodeID := proxyFields[7].Descriptor()
+	// proxy.MihomoNodeIDValidator is a validator for the "mihomo_node_id" field. It is called by the builders before save.
+	proxy.MihomoNodeIDValidator = proxyDescMihomoNodeID.Validators[0].(func(string) error)
 	// proxyDescFallbackMode is the schema descriptor for fallback_mode field.
-	proxyDescFallbackMode := proxyFields[8].Descriptor()
+	proxyDescFallbackMode := proxyFields[9].Descriptor()
 	// proxy.DefaultFallbackMode holds the default value on creation for the fallback_mode field.
 	proxy.DefaultFallbackMode = proxyDescFallbackMode.Default.(string)
 	// proxy.FallbackModeValidator is a validator for the "fallback_mode" field. It is called by the builders before save.
 	proxy.FallbackModeValidator = proxyDescFallbackMode.Validators[0].(func(string) error)
 	// proxyDescExpiryWarnDays is the schema descriptor for expiry_warn_days field.
-	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
+	proxyDescExpiryWarnDays := proxyFields[11].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
 	redeemcodeFields := schema.RedeemCode{}.Fields()

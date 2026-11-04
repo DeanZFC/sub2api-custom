@@ -1321,6 +1321,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
 		"openai_oauth_passthrough",
+		"astra_model_disabled",
+		"astra_model_blocked_keys",
+		"astra_model_empty_mapping",
 		"openai_excel_bps",
 		"openai_excel_bps_auto_disable_on_403",
 		service.ExcelBPSAutoMoveOn403Key,

@@ -401,13 +401,13 @@
       <!-- Account Type Selection (OpenAI) -->
       <div v-if="form.platform === 'openai'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-2 gap-3" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3" data-tour="account-form-type">
           <button
             type="button"
-            @click="accountCategory = 'oauth-based'"
+            @click="selectOpenAIOAuth(false)"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
-              accountCategory === 'oauth-based'
+              accountCategory === 'oauth-based' && !openaiBPSOAuth
                 ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
                 : 'border-gray-200 hover:border-green-300 dark:border-dark-600 dark:hover:border-green-700'
             ]"
@@ -415,7 +415,7 @@
             <div
               :class="[
                 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                accountCategory === 'oauth-based'
+                accountCategory === 'oauth-based' && !openaiBPSOAuth
                   ? 'bg-green-500 text-white'
                   : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
               ]"
@@ -430,7 +430,18 @@
 
           <button
             type="button"
-            @click="accountCategory = 'apikey'"
+            data-testid="select-excel-oauth"
+            :disabled="appStore.cachedPublicSettings?.excel_bps_enabled === false"
+            @click="selectOpenAIOAuth(true)"
+            :class="['rounded-lg border-2 p-3 text-left transition-all disabled:opacity-50', isOpenAIBPSOAuth ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : 'border-gray-200 dark:border-dark-600']"
+          >
+            <span class="block text-sm font-medium">{{ t('admin.accounts.oauth.openai.excelTitle') }}</span>
+            <span class="text-xs text-gray-500">{{ t('admin.accounts.oauth.openai.excelTypeDesc') }}</span>
+          </button>
+
+          <button
+            type="button"
+            @click="accountCategory = 'apikey'; openaiBPSOAuth = false"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'apikey'
@@ -3777,17 +3788,18 @@
         :allow-multiple="form.platform === 'anthropic'"
         :show-cookie-option="form.platform === 'anthropic'"
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
-        :show-mobile-refresh-token-option="form.platform === 'openai'"
+        :show-mobile-refresh-token-option="form.platform === 'openai' && !isOpenAIBPSOAuth"
         :show-session-token-option="false"
         :show-access-token-option="false"
-        :show-codex-session-import-option="form.platform === 'openai'"
-        :show-agent-identity-option="form.platform === 'openai'"
-        :show-codex-pat-option="form.platform === 'openai'"
+        :show-codex-session-import-option="form.platform === 'openai' && !isOpenAIBPSOAuth"
+        :show-agent-identity-option="form.platform === 'openai' && !isOpenAIBPSOAuth"
+        :show-codex-pat-option="form.platform === 'openai' && !isOpenAIBPSOAuth"
         :show-sso-option="form.platform === 'grok'"
         :show-email-password-option="false"
         :show-manual-option="true"
         :initial-input-method="'manual'"
         :platform="form.platform"
+        :excel-oauth="isOpenAIBPSOAuth"
         :show-project-id="geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
@@ -4116,7 +4128,7 @@
 
 <script setup lang="ts">
 import ExcelBPSSettings from './ExcelBPSSettings.vue'
-import { hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
+import { validBPSRecoveryInterval, hasValidExcelBPS403Target, readExcelBPSConfig, writeExcelBPSConfig } from '@/utils/excelBps'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -4138,7 +4150,7 @@ import {
   type AddMethod,
   type AuthInputMethod
 } from '@/composables/useAccountOAuth'
-import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
+import { useOpenAIOAuth, OPENAI_EXCEL_OAUTH_CLIENT_ID } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
@@ -4333,6 +4345,15 @@ const emit = defineEmits<{
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const excelBPSConfig = ref(readExcelBPSConfig())
+const openaiBPSOAuth = ref(false)
+const isOpenAIBPSOAuth = computed(() => form.platform === 'openai' && accountCategory.value === 'oauth-based' && openaiBPSOAuth.value)
+const selectOpenAIOAuth = (excel: boolean) => {
+  accountCategory.value = 'oauth-based'
+  openaiBPSOAuth.value = excel
+  if (excel) excelBPSConfig.value.enabled = true
+  openaiOAuth.resetState()
+  oauthFlowRef.value?.reset()
+}
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -5152,6 +5173,7 @@ watch(
 watch(
   () => form.platform,
   (newPlatform) => {
+    openaiBPSOAuth.value = false
     // Reset base URL based on platform
     if (isMultiProtocolApiKeyPlatform(newPlatform)) {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
@@ -5628,6 +5650,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  openaiBPSOAuth.value = false
   excelBPSConfig.value = readExcelBPSConfig()
   step.value = 1
   form.name = ''
@@ -5960,6 +5983,14 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if ((excelBPSConfig.value.enabled || excelBPSConfig.value.recoveryPending) && excelBPSConfig.value.autoDisableOn403 && excelBPSConfig.value.autoRecoverOn403 && !validBPSRecoveryInterval(excelBPSConfig.value.recoveryIntervalMinutes)) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403RecoveryIntervalInvalid'))
+    return
+  }
+  if (isOpenAIBPSOAuth.value && (!excelBPSConfig.value.enabled || (!excelBPSConfig.value.allModels && !excelBPSConfig.value.models.some(model => model.trim())))) {
+    appStore.showError(t('admin.accounts.oauth.openai.excelModelsRequired'))
+    return
+  }
   if (form.platform === 'openai' && form.type === 'oauth'
     && !hasValidExcelBPS403Target(excelBPSConfig.value, props.groups, !authStore.isSimpleMode)) {
     appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))
@@ -6265,7 +6296,7 @@ const goBackToBasicInfo = () => {
 
 const handleGenerateUrl = async () => {
   if (form.platform === 'openai') {
-    await openaiOAuth.generateAuthUrl(authProxyID.value)
+    await openaiOAuth.generateAuthUrl(authProxyID.value, undefined, isOpenAIBPSOAuth.value ? 'excel' : 'codex')
   } else if (form.platform === 'gemini') {
     await geminiOAuth.generateAuthUrl(
       authProxyID.value,
@@ -6684,6 +6715,9 @@ const handleOpenAIExchange = async (authCode: string) => {
       authProxyID.value
     )
     if (!tokenInfo) return
+    if (isOpenAIBPSOAuth.value && tokenInfo.client_id !== OPENAI_EXCEL_OAUTH_CLIENT_ID) {
+      throw new Error(t('admin.accounts.oauth.openai.excelSessionMismatch'))
+    }
 
     const credentials = oauthClient.buildCredentials(tokenInfo)
     const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
@@ -6733,7 +6767,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     emit('created')
     handleClose()
   } catch (error: any) {
-    oauthClient.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    oauthClient.error.value = error.response?.data?.detail || error.message || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauthClient.error.value)
   } finally {
     oauthClient.loading.value = false
@@ -7046,7 +7080,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
 }
 
 // 手动输入 RT（Codex CLI client_id，默认）
-const handleOpenAIValidateRT = (rt: string) => handleOpenAIBatchRT(rt)
+const handleOpenAIValidateRT = (rt: string) => handleOpenAIBatchRT(rt, isOpenAIBPSOAuth.value ? OPENAI_EXCEL_OAUTH_CLIENT_ID : undefined)
 
 // 手动输入 Mobile RT
 const handleOpenAIValidateMobileRT = (rt: string) => handleOpenAIBatchRT(rt, OPENAI_MOBILE_RT_CLIENT_ID)

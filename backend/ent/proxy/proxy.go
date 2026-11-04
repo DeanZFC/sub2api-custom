@@ -35,6 +35,8 @@ const (
 	FieldPassword = "password"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
+	// FieldMihomoNodeID holds the string denoting the mihomo_node_id field in the database.
+	FieldMihomoNodeID = "mihomo_node_id"
 	// FieldExpiresAt holds the string denoting the expires_at field in the database.
 	FieldExpiresAt = "expires_at"
 	// FieldFallbackMode holds the string denoting the fallback_mode field in the database.
@@ -88,6 +90,7 @@ var Columns = []string{
 	FieldUsername,
 	FieldPassword,
 	FieldStatus,
+	FieldMihomoNodeID,
 	FieldExpiresAt,
 	FieldFallbackMode,
 	FieldBackupProxyID,
@@ -138,6 +141,8 @@ var (
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	StatusValidator func(string) error
+	// MihomoNodeIDValidator is a validator for the "mihomo_node_id" field. It is called by the builders before save.
+	MihomoNodeIDValidator func(string) error
 	// DefaultFallbackMode holds the default value on creation for the "fallback_mode" field.
 	DefaultFallbackMode string
 	// FallbackModeValidator is a validator for the "fallback_mode" field. It is called by the builders before save.
@@ -202,6 +207,11 @@ func ByPassword(opts ...sql.OrderTermOption) OrderOption {
 // ByStatus orders the results by the status field.
 func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStatus, opts...).ToFunc()
+}
+
+// ByMihomoNodeID orders the results by the mihomo_node_id field.
+func ByMihomoNodeID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMihomoNodeID, opts...).ToFunc()
 }
 
 // ByExpiresAt orders the results by the expires_at field.

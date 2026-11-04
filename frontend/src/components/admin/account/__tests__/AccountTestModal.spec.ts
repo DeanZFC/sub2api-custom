@@ -29,6 +29,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
+      locale: { value: 'zh' },
       t: (key: string, params?: Record<string, string | number>) => {
         if (key === 'admin.accounts.imageReceived' && params?.count) {
           return `received-${params.count}`

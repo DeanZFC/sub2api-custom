@@ -44,6 +44,8 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 	}
 
 	response.Success(c, dto.PublicSettings{
+		OpenAICodexTicketEnabled:            settings.OpenAICodexTicketEnabled,
+		ExcelBPSEnabled:                     settings.ExcelBPSEnabled,
 		GPTDirectEnabled:                    settings.GPTDirectEnabled,
 		RegistrationEnabled:                 settings.RegistrationEnabled,
 		EmailVerifyEnabled:                  settings.EmailVerifyEnabled,

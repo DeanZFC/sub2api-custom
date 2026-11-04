@@ -124,6 +124,14 @@ func registerRoutes(
 
 	// API v1
 	v1 := r.Group("/api/v1")
+	if h.Admin != nil && h.Admin.OpenAIReauth != nil {
+		worker := v1.Group("/internal/openai-reauth")
+		worker.POST("/runtime-settings", h.Admin.OpenAIReauth.RuntimeSettings)
+		worker.POST("/claim", h.Admin.OpenAIReauth.Claim)
+		worker.POST("/:task_id/progress", h.Admin.OpenAIReauth.Progress)
+		worker.POST("/:task_id/credentials", h.Admin.OpenAIReauth.Credentials)
+		worker.POST("/:task_id/fail", h.Admin.OpenAIReauth.Fail)
+	}
 	if h.QQBot != nil {
 		v1.POST("/qqbot/webhook", h.QQBot.Webhook)
 		limits := middleware.NewRateLimiter(redisClient)
