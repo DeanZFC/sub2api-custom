@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -15,13 +16,18 @@ import (
 
 func TestAstraAutomaticAtomicSettings(t *testing.T) {
 	ctx := t.Context()
+	cleanupCtx := context.WithoutCancel(ctx)
 	client := testEntClient(t)
 	a := mustCreateAccount(t, client, &service.Account{Name: "astra-auto", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Concurrency: 4, Schedulable: true, Credentials: map[string]any{"access_token": "keep-test-token", "refresh_token": "keep-refresh", "model_mapping": map[string]any{"gpt-5.6-sol": "gpt-5.6-sol"}}, Extra: map[string]any{"privacy_mode": "training_off", "unrelated": true}})
-	t.Cleanup(func() { _ = client.Account.DeleteOneID(a.ID).Exec(ctx) })
+	t.Cleanup(func() { _ = client.Account.DeleteOneID(a.ID).Exec(cleanupCtx) })
 	source := mustCreateAccount(t, client, &service.Account{Name: "astra-donor", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Concurrency: 2, Schedulable: true, Credentials: map[string]any{"model_mapping": map[string]any{}}, Extra: map[string]any{"unrelated": "kept"}})
-	t.Cleanup(func() { _ = client.Account.DeleteOneID(source.ID).Exec(ctx) })
+	t.Cleanup(func() { _ = client.Account.DeleteOneID(source.ID).Exec(cleanupCtx) })
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(cleanupCtx, "DELETE FROM scheduler_outbox WHERE account_id IN ($1,$2)", a.ID, source.ID)
+		require.NoError(t, err)
+	})
 	key := fmt.Sprintf("astra-auto-test-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = client.Setting.Delete().Where(setting.KeyEQ(key)).Exec(ctx) })
+	t.Cleanup(func() { _, _ = client.Setting.Delete().Where(setting.KeyEQ(key)).Exec(cleanupCtx) })
 	repo := &settingRepository{client: client}
 	value := config.AstraRoutingSettings{CookiePool: config.CodexGatewayPinConfig{Enabled: true, SourceAccountIDs: []int64{source.ID}, TargetAccountIDs: []int64{a.ID}}, Revision: "one"}
 	require.NoError(t, repo.SetAstraRoutingWithAccounts(ctx, key, value))

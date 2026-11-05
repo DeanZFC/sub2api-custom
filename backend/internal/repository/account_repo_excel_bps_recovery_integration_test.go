@@ -27,7 +27,9 @@ func newExcelBPSRecoveryFixture(t *testing.T) (*accountRepository, *service.Acco
 	a.Extra[service.ExcelBPS403MovedGroupIDKey] = float64(0)
 	require.NoError(t, repo.Create(ctx, a))
 	t.Cleanup(func() {
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id=$1", a.ID)
+		// Bulk edits store account IDs in the payload rather than account_id.
+		_, err := integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id=$1 OR payload->'account_ids' @> jsonb_build_array($1::bigint)", a.ID)
+		require.NoError(t, err)
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id=$1", a.ID)
 	})
 	a, err := repo.GetByID(ctx, a.ID)
