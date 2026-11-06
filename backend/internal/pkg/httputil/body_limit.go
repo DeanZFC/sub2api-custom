@@ -1,16 +1,11 @@
 package httputil
 
 import (
-	"bytes"
-	"compress/gzip"
-	"compress/zlib"
-	"errors"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-
-	"github.com/klauspost/compress/zstd"
 )
 
 // ReadRequestBodyWithPreallocLimit applies a caller-specific decoded body cap.
@@ -51,60 +46,30 @@ func ReadRequestBodyWithPreallocLimit(req *http.Request, maxDecodedBytes int64) 
 			capHint = int(maxDecodedBytes + 1)
 		}
 	}
-	raw, err := readRequestBodyChunks(reader, capHint, req.ContentLength)
+	raw, err := readRequestBodyChunksWithBudget(req.Context(), reader, capHint, req.ContentLength)
 	if err != nil {
 		return nil, err
 	}
 	if identity {
-		if int64(len(raw)) > maxDecodedBytes {
+		if int64(len(raw.data)) > maxDecodedBytes {
+			raw.release(req.Context())
 			return nil, &http.MaxBytesError{Limit: maxDecodedBytes}
 		}
-		return raw, nil
+		return raw.data, nil
 	}
 
-	decoded, err := decompressRequestBodyLimit(enc, raw, maxDecodedBytes)
+	defer raw.release(req.Context())
+	decoded, err := decompressRequestBodyLimitWithBudget(req.Context(), enc, raw.data, maxDecodedBytes)
 	if err != nil {
 		return nil, fmt.Errorf("decode Content-Encoding %q: %w", enc, err)
 	}
 	req.Header.Del("Content-Encoding")
 	req.Header.Del("Content-Length")
-	req.ContentLength = int64(len(decoded))
-	return decoded, nil
+	req.ContentLength = int64(len(decoded.data))
+	return decoded.data, nil
 }
 
 func decompressRequestBodyLimit(encoding string, raw []byte, maxDecodedBytes int64) ([]byte, error) {
-	var reader io.Reader
-	switch encoding {
-	case "zstd":
-		dec, err := zstd.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			return nil, err
-		}
-		defer dec.Close()
-		reader = dec
-	case "gzip", "x-gzip":
-		dec, err := gzip.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = dec.Close() }()
-		reader = dec
-	case "deflate":
-		dec, err := zlib.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = dec.Close() }()
-		reader = dec
-	default:
-		return nil, errors.New("unsupported Content-Encoding")
-	}
-	decoded, err := io.ReadAll(io.LimitReader(reader, maxDecodedBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(decoded)) > maxDecodedBytes {
-		return nil, &http.MaxBytesError{Limit: maxDecodedBytes}
-	}
-	return decoded, nil
+	decoded, err := decompressRequestBodyLimitWithBudget(context.Background(), encoding, raw, maxDecodedBytes)
+	return decoded.data, err
 }

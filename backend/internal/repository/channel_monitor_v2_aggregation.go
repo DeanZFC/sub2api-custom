@@ -268,7 +268,7 @@ ELSE 2147483647 END`
 
 // Error dedup lookback: request_id branch is bounded by chunk start minus 90
 // minutes so candidate_ids never forces a full-history scan of ops_error_logs.
-const channelMonitorV2ErrorAggregationSQL = `
+var channelMonitorV2ErrorAggregationSQL = `
 WITH dedup AS (
   WITH candidate_ids AS MATERIALIZED (
     SELECT DISTINCT request_id
@@ -288,6 +288,7 @@ WITH dedup AS (
     END) AS platform,
     COALESCE(current_error.group_id, 0) AS group_id,
     COALESCE(NULLIF(TRIM(current_error.requested_model), ''), NULLIF(TRIM(current_error.model), ''), 'unknown') AS model,
+    ` + opsClientRejectionSQL("current_error") + ` AS client_rejected,
     current_error.user_id, current_error.error_type, current_error.error_owner, COALESCE(current_error.status_code, 0) AS status_code,
     COALESCE(current_error.upstream_status_code, 0) AS upstream_status_code,
     lower(CONCAT_WS(' ', current_error.error_type, current_error.error_source, current_error.error_message, current_error.upstream_error_message, current_error.upstream_error_detail, current_error.error_body)) AS text,
@@ -329,7 +330,7 @@ WITH dedup AS (
     WHEN status_code >= 500 OR error_type = 'internal' OR error_owner = 'system' THEN 'internal'
     ELSE 'other' END AS category
   FROM dedup
-  WHERE bucket_start >= $1 AND bucket_start < $2
+  WHERE bucket_start >= $1 AND bucket_start < $2 AND NOT client_rejected
 ), metric_rows AS (
   INSERT INTO channel_monitor_v2_metrics_1m (bucket_start, platform, group_id, model, error_requests, upstream_affected_requests, upstream_attempt_count, computed_at)
   SELECT bucket_start, platform, group_id, model, COUNT(*), COUNT(*) FILTER (WHERE upstream_affected), SUM(upstream_attempts), NOW()

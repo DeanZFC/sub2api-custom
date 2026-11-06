@@ -56,7 +56,7 @@ func TestParseSSEUsageEffectiveTerminalRules(t *testing.T) {
 	require.Equal(t, OpenAIUsage{CacheUsageReported: true, InputTokens: 17, OutputTokens: 5, CacheReadInputTokens: 3}, *usage)
 
 	svc.parseSSEUsageBytesWithType([]byte(`{"response":{"usage":{"input_tokens":2,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", usage)
-	require.Equal(t, OpenAIUsage{CacheUsageReported: true, InputTokens: 2}, *usage)
+	require.Equal(t, OpenAIUsage{CacheUsageReported: true, CacheReadKnown: true, InputTokens: 2}, *usage)
 }
 
 func BenchmarkParseSSEUsageNoUsageDelta(b *testing.B) {

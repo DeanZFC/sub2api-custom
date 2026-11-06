@@ -205,7 +205,7 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 			_ = c.Request.Body.Close()
 			if err != nil {
 				switch {
-				case errors.Is(err, errBPSImageRequestBusy):
+				case errors.Is(err, errBPSImageRequestBusy), errors.Is(err, httputil.ErrRequestBodyMemoryBudget):
 					bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
 				default:
 					var maxErr *http.MaxBytesError

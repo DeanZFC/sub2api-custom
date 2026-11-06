@@ -44,6 +44,11 @@ func (s *Service) editImage(ctx context.Context, c Config, prompt, dataURL strin
 	ext := map[string]string{"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[mime]
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
+	if c.ImageOutputFormat != "" {
+		if err = writer.WriteField("output_format", c.ImageOutputFormat); err != nil {
+			return nil, err
+		}
+	}
 	for _, field := range [][2]string{{"model", c.ImageModel}, {"prompt", prompt}, {"n", "1"}, {"size", c.ImageSize}} {
 		if err = writer.WriteField(field[0], field[1]); err != nil {
 			return nil, err
@@ -64,5 +69,9 @@ func (s *Service) editImage(ctx context.Context, c Config, prompt, dataURL strin
 	if err != nil {
 		return nil, err
 	}
-	return imageResult(ctx, raw)
+	result, err := imageResult(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	return checkRequestedImageFormat(result, c.ImageOutputFormat)
 }

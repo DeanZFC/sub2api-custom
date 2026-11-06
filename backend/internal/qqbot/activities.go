@@ -18,13 +18,14 @@ const (
 )
 
 type CheckinConfig struct {
-	StreakReward  *GrowthReward `json:"streak_reward,omitempty"`
-	StreakDays    int           `json:"streak_days"`
-	StreakChances int           `json:"streak_chances"`
-	Growth        GrowthConfig  `json:"growth"`
-	Enabled       bool          `json:"enabled"`
-	MinAmount     float64       `json:"min_amount"`
-	MaxAmount     float64       `json:"max_amount"`
+	StreakReward       *GrowthReward              `json:"streak_reward,omitempty"`
+	StreakDays         int                        `json:"streak_days"`
+	StreakChances      int                        `json:"streak_chances"`
+	Growth             GrowthConfig               `json:"growth"`
+	Enabled            bool                       `json:"enabled"`
+	MinAmount          float64                    `json:"min_amount"`
+	MaxAmount          float64                    `json:"max_amount"`
+	RewardDistribution *CheckinRewardDistribution `json:"reward_distribution,omitempty"`
 	RechargeRequirement
 }
 type InviteConfig struct {
@@ -96,6 +97,10 @@ func loadCheckinConfig(ctx context.Context, db queryRower, legacy float64) (Chec
 	c := CheckinConfig{Enabled: legacy > 0, MinAmount: legacy, MaxAmount: legacy,
 		RechargeRequirement: RechargeRequirement{RechargeWindowDays: DefaultRechargeWindowDays}}
 	_, err := readActivityConfig(ctx, db, checkinConfigKey, &c)
+	if c.RewardDistribution == nil {
+		distribution := c.rewardDistribution()
+		c.RewardDistribution = &distribution
+	}
 	c.RechargeWindowDays = c.windowDays()
 	c.StreakDays = c.streakDays()
 	c.Growth.Tasks = c.Growth.tasks()
@@ -155,6 +160,9 @@ func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 	return err
 }
 func validateCheckin(c CheckinConfig) error {
+	if err := validateCheckinDistribution(c.rewardDistribution()); err != nil {
+		return err
+	}
 	if err := validateGrowth(c); err != nil {
 		return err
 	}
@@ -233,6 +241,11 @@ func (s *Service) saveActivityConfig(ctx context.Context, key string, lock int64
 		next, ok := c.(CheckinConfig)
 		if !ok {
 			return errors.New("invalid checkin configuration")
+		}
+		// Older clients cannot reset probabilities they do not send. Merge only
+		// after taking the configuration lock and checking the draft revision.
+		if next.RewardDistribution == nil {
+			next.RewardDistribution = current.RewardDistribution
 		}
 		switch section {
 		case "checkin":

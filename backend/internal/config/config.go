@@ -1059,6 +1059,12 @@ type GatewayConfig struct {
 	OpenAIHighEffortFirstOutputTimeoutSeconds int `mapstructure:"openai_high_effort_first_output_timeout_seconds"`
 	// 请求体最大字节数，用于网关请求体大小限制
 	MaxBodySize int64 `mapstructure:"max_body_size"`
+	// RequestBodyMemoryBudgetBytes bounds buffered ingress allocations per instance; 0 disables it.
+	RequestBodyMemoryBudgetBytes int64 `mapstructure:"request_body_memory_budget_bytes"`
+	// RequestBodyReadTimeoutSeconds bounds each socket read during upload; 0 disables it.
+	RequestBodyReadTimeoutSeconds int `mapstructure:"request_body_read_timeout_seconds"`
+	// DownstreamWriteTimeoutSeconds bounds each HTTP write/flush, not the lifetime of a stream.
+	DownstreamWriteTimeoutSeconds int `mapstructure:"downstream_write_timeout_seconds"`
 	// TextMaxBodySize limits endpoints that cannot carry inline image/video payloads.
 	TextMaxBodySize int64 `mapstructure:"text_max_body_size"`
 	// 非流式上游响应体读取上限（字节），用于防止无界读取导致内存放大
@@ -1137,6 +1143,12 @@ type GatewayConfig struct {
 	// ConcurrencySlotTTLMinutes: 并发槽位过期时间（分钟）
 	// 应大于最长 LLM 请求时间，防止请求完成前槽位过期
 	ConcurrencySlotTTLMinutes int `mapstructure:"concurrency_slot_ttl_minutes"`
+	// APIKeySlotTTLSeconds: 普通 API Key 并发槽位的独立过期时间（秒）。
+	// 0 表示继承 concurrency_slot_ttl_minutes 的有效值，升级默认不改变行为；
+	// 显式正值需不低于 30 秒（配置策略下限，非实测安全 SLA，见部署文档）。
+	// 仅作用于普通共享 Redis 实现的 API Key 槽位；account/user 槽位、Live
+	// 租约及 regional concurrency authority 不受影响。
+	APIKeySlotTTLSeconds int `mapstructure:"api_key_slot_ttl_seconds"`
 	// SessionIdleTimeoutMinutes: 会话空闲超时时间（分钟），默认 5 分钟
 	// 用于 Anthropic OAuth/SetupToken 账号的会话数量限制功能
 	// 空闲超过此时间的会话将被自动释放
@@ -1153,7 +1165,10 @@ type GatewayConfig struct {
 	// ImageNonstreamKeepaliveInterval: 图片非流式 JSON keepalive 间隔（秒），0表示禁用
 	ImageNonstreamKeepaliveInterval int `mapstructure:"image_nonstream_keepalive_interval"`
 	// MaxLineSize: 上游 SSE 单行最大字节数（0使用默认值）
-	MaxLineSize int `mapstructure:"max_line_size"`
+	MaxLineSize      int   `mapstructure:"max_line_size"`
+	SSEQueueMaxBytes int64 `mapstructure:"sse_queue_max_bytes"`
+	SSEEventMaxBytes int64 `mapstructure:"sse_event_max_bytes"`
+	SSEEventMaxLines int   `mapstructure:"sse_event_max_lines"`
 
 	// 是否记录上游错误响应体摘要（避免输出请求内容）
 	LogUpstreamErrorBody bool `mapstructure:"log_upstream_error_body"`
@@ -2607,6 +2622,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.antigravity_fallback_cooldown_minutes", 1)
 	viper.SetDefault("gateway.antigravity_extra_retries", 10)
 	viper.SetDefault("gateway.max_body_size", int64(256*1024*1024))
+	viper.SetDefault("gateway.request_body_memory_budget_bytes", int64(1024*1024*1024))
+	viper.SetDefault("gateway.request_body_read_timeout_seconds", 120)
+	viper.SetDefault("gateway.downstream_write_timeout_seconds", 120)
 	viper.SetDefault("gateway.text_max_body_size", int64(32*1024*1024))
 	viper.SetDefault("gateway.upstream_response_read_max_bytes", DefaultUpstreamResponseReadMaxBytes)
 	viper.SetDefault("gateway.models_list_read_max_bytes", DefaultModelsListReadMaxBytes)
@@ -2622,12 +2640,16 @@ func setDefaults() {
 	viper.SetDefault("gateway.max_upstream_clients", 5000)
 	viper.SetDefault("gateway.client_idle_ttl_seconds", 900)
 	viper.SetDefault("gateway.concurrency_slot_ttl_minutes", 30) // 并发槽位过期时间（支持超长请求）
+	viper.SetDefault("gateway.api_key_slot_ttl_seconds", 0)      // 普通 API Key 槽位独立 TTL；0=继承 concurrency_slot_ttl_minutes
 	viper.SetDefault("gateway.stream_data_interval_timeout", 180)
 	viper.SetDefault("gateway.stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.sse_queue_max_bytes", int64(8*1024*1024))
+	viper.SetDefault("gateway.sse_event_max_bytes", int64(0))
+	viper.SetDefault("gateway.sse_event_max_lines", 4096)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
@@ -3431,6 +3453,18 @@ func (c *Config) Validate() error {
 	if c.Gateway.MaxBodySize <= 0 {
 		return fmt.Errorf("gateway.max_body_size must be positive")
 	}
+	if c.Gateway.RequestBodyMemoryBudgetBytes < 0 {
+		return fmt.Errorf("gateway.request_body_memory_budget_bytes must be non-negative")
+	}
+	if c.Gateway.RequestBodyReadTimeoutSeconds < 0 || c.Gateway.RequestBodyReadTimeoutSeconds > 3600 {
+		return fmt.Errorf("gateway.request_body_read_timeout_seconds must be between 0 and 3600")
+	}
+	if c.Gateway.DownstreamWriteTimeoutSeconds < 0 || c.Gateway.DownstreamWriteTimeoutSeconds > 3600 {
+		return fmt.Errorf("gateway.downstream_write_timeout_seconds must be between 0 and 3600")
+	}
+	if c.Gateway.SSEQueueMaxBytes < 0 || c.Gateway.SSEEventMaxBytes < 0 || c.Gateway.SSEEventMaxLines < 0 {
+		return fmt.Errorf("gateway.sse_queue_max_bytes, sse_event_max_bytes and sse_event_max_lines must be non-negative")
+	}
 	if c.Gateway.TextMaxBodySize <= 0 || c.Gateway.TextMaxBodySize > c.Gateway.MaxBodySize {
 		return fmt.Errorf("gateway.text_max_body_size must be positive and no greater than gateway.max_body_size")
 	}
@@ -3512,6 +3546,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ConcurrencySlotTTLMinutes <= 0 {
 		return fmt.Errorf("gateway.concurrency_slot_ttl_minutes must be positive")
+	}
+	if c.Gateway.APIKeySlotTTLSeconds < 0 {
+		return fmt.Errorf("gateway.api_key_slot_ttl_seconds must be non-negative")
+	}
+	// 30 秒下限是配置策略：更短的租约会压缩既有 watchdog/续租超时公式的余量，
+	// 不是实测安全 SLA。
+	if c.Gateway.APIKeySlotTTLSeconds != 0 && c.Gateway.APIKeySlotTTLSeconds < 30 {
+		return fmt.Errorf("gateway.api_key_slot_ttl_seconds must be 0 (inherit concurrency_slot_ttl_minutes) or at least 30 seconds")
 	}
 	if c.Gateway.StreamDataIntervalTimeout < 0 {
 		return fmt.Errorf("gateway.stream_data_interval_timeout must be non-negative")

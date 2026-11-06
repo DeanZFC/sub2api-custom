@@ -418,8 +418,10 @@ func TestRelay_ClientDisconnect_DrainCapturesLateUsage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	var observed RelayTurnResult
 	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
 		UpstreamDrainTimeout: 400 * time.Millisecond,
+		OnTurnComplete:       func(turn RelayTurnResult) { observed = turn },
 	})
 	require.NotNil(t, relayExit)
 	require.Equal(t, "client_disconnected", relayExit.Stage)
@@ -428,6 +430,8 @@ func TestRelay_ClientDisconnect_DrainCapturesLateUsage(t *testing.T) {
 	require.Equal(t, 6, result.Usage.InputTokens)
 	require.Equal(t, 4, result.Usage.OutputTokens)
 	require.Equal(t, 1, result.Usage.CacheReadInputTokens)
+	require.Equal(t, 1, observed.Usage.CacheReadInputTokens)
+	require.False(t, observed.Usage.CacheReadKnown, "drained terminal bills usage but cannot trigger zero-cache protection")
 	require.Equal(t, int64(1), result.ClientToUpstreamFrames)
 	require.Equal(t, int64(0), result.UpstreamToClientFrames)
 	require.Equal(t, int64(1), result.DroppedDownstreamFrames)

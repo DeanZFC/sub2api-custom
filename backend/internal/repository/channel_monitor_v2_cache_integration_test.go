@@ -20,7 +20,7 @@ import (
 func TestChannelMonitorV2OfficialCacheRateIntegration(t *testing.T) {
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("MIGRATION_TEST_DATABASE_URL is not set")
+		dsn = integrationDatabaseDSN
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

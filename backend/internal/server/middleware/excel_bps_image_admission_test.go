@@ -14,10 +14,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestExcelBPSImageAdmissionSharedBodyBudgetReturnsRetryableError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(RequestBodyLimit(256<<20, httputil.NewBodyMemoryBudget(1)))
+	r.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Platform: service.PlatformOpenAI}})
+		c.Next()
+	})
+	r.Use(ExcelBPSImageAdmission(bpsImageTestSettings{enabled: true}, 256<<20))
+	r.POST("/responses", func(c *gin.Context) { t.Error("exhausted body budget reached handler") })
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"gpt-test"}`))
+	req.ContentLength = -1
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Equal(t, "1", w.Header().Get("Retry-After"))
+	require.Contains(t, w.Body.String(), "basispoints_image_request_busy")
+}
 
 type bpsImageTestSettings struct {
 	enabled      bool

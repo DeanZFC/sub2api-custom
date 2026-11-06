@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -233,7 +234,7 @@ func (s *httpUpstreamService) do(req *http.Request, proxyURL string, accountID i
 
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client)
+	client = httpClientWithGrokAccessDeniedFallback(client, accountID)
 	var bpsTrace *transportdiag.Trace
 	if profile == service.HTTPUpstreamProfileExcelBPS {
 		bpsTrace = transportdiag.FromContext(req.Context())
@@ -242,7 +243,7 @@ func (s *httpUpstreamService) do(req *http.Request, proxyURL string, accountID i
 			req = bpsTrace.Request(req)
 		}
 	}
-	resp, err := doUpstreamRequest(client, req)
+	resp, err := doUpstreamRequest(client, req, s.upstreamDrainTimeout())
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
 		s.recordBPSHTTP2Failure(req.Context(), entry.proxyKey, bpsTrace, err)
@@ -314,8 +315,8 @@ func (s *httpUpstreamService) doWithTLS(req *http.Request, proxyURL string, acco
 	}
 
 	client := s.httpClientForUpstreamRequest(entry.client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client)
-	resp, err := doUpstreamRequest(client, req)
+	client = httpClientWithGrokAccessDeniedFallback(client, accountID)
+	resp, err := doUpstreamRequest(client, req, s.upstreamDrainTimeout())
 	if err != nil {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
@@ -331,10 +332,21 @@ func (s *httpUpstreamService) doWithTLS(req *http.Request, proxyURL string, acco
 	return resp, nil
 }
 
+func (s *httpUpstreamService) upstreamDrainTimeout() time.Duration {
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		return time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	return pkghttputil.DefaultUpstreamDrainTimeout
+}
+
 // doUpstreamRequest owns cancellation for one attempt, without cancelling the
 // caller's context (which may be detached for billing or reused for retries).
-func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {
-	ctx, cancel := context.WithCancel(req.Context())
+func doUpstreamRequest(client *http.Client, req *http.Request, drainTimeouts ...time.Duration) (*http.Response, error) {
+	var drainTimeout time.Duration
+	if len(drainTimeouts) > 0 {
+		drainTimeout = drainTimeouts[0]
+	}
+	ctx, cancel := pkghttputil.NewUpstreamAttemptContext(req.Context(), drainTimeout)
 	resp, err := servertiming.Do(client, req.WithContext(ctx))
 	if err != nil {
 		cancel()
@@ -414,7 +426,7 @@ type grokAccessDeniedFallbackTransport struct {
 	base http.RoundTripper
 }
 
-func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
+func httpClientWithGrokAccessDeniedFallback(client *http.Client, accountIDs ...int64) *http.Client {
 	if client == nil {
 		return nil
 	}
@@ -423,7 +435,13 @@ func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	clone.Transport = &grokAccessDeniedFallbackTransport{base: base}
+	// Observe each physical RoundTrip before the compatibility fallback so
+	// a rejected send followed by a successful retry remains two samples.
+	var accountID int64
+	if len(accountIDs) > 0 {
+		accountID = accountIDs[0]
+	}
+	clone.Transport = &grokAccessDeniedFallbackTransport{base: &accountResponseTransport{base: base, accountID: accountID}}
 	return &clone
 }
 

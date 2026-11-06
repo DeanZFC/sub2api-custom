@@ -26,6 +26,7 @@ beforeEach(() => {
       route.query = query;
     }),
   } as unknown as ReturnType<typeof useRouter>);
+  getAccountPerformanceSettings.mockReset().mockResolvedValue({ window_minutes: 60 });
 });
 
 const {
@@ -40,6 +41,8 @@ const {
   getPanelRateLimitSettings,
   updatePanelRateLimitSettings,
   getStreamTimeoutSettings,
+  getAccountPerformanceSettings,
+  updateAccountPerformanceSettings,
   getRectifierSettings,
   getBetaPolicySettings,
   getUpstreamBillingProbeSettings,
@@ -74,6 +77,8 @@ const {
   }),
   updatePanelRateLimitSettings: vi.fn().mockImplementation(async (payload) => payload),
   getStreamTimeoutSettings: vi.fn(),
+  getAccountPerformanceSettings: vi.fn(),
+  updateAccountPerformanceSettings: vi.fn().mockImplementation(async (payload) => payload),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({
@@ -115,6 +120,8 @@ vi.mock("@/api", () => ({
       getPanelRateLimitSettings,
       updatePanelRateLimitSettings,
       getStreamTimeoutSettings,
+      getAccountPerformanceSettings,
+      updateAccountPerformanceSettings,
       getRectifierSettings,
       getBetaPolicySettings,
       getCodexPreOutputRetrySettings: vi.fn().mockResolvedValue({
@@ -125,6 +132,7 @@ vi.mock("@/api", () => ({
         keywords: ["servers are currently overloaded"],
       }),
       updateCodexPreOutputRetrySettings: vi.fn().mockImplementation(async (payload) => payload),
+      getRegistrationEmailBlacklist: vi.fn().mockResolvedValue({ emails: [], max: 20000 }),
     },
     accounts: {
       getUpstreamBillingProbeSettings,

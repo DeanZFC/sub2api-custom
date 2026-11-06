@@ -39,6 +39,7 @@ func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader) *bufio.Scanner
 		maxLineSize = s.cfg.Gateway.MaxLineSize
 	}
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
+	scanner.Split(newBoundedSSESplit(s.cfg, maxLineSize, nil))
 	return scanner
 }
 
@@ -288,6 +289,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
 	var st ccStreamScanState
+	var protectionFinished, protectionIncomplete bool
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 	for scanner.Scan() {
@@ -311,7 +313,11 @@ func (s *OpenAIGatewayService) scanCCStream(
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
 
+		finished, incomplete := openAIProtectionCCFinishState([]byte(payload))
+		protectionFinished = protectionFinished || finished
+		protectionIncomplete = protectionIncomplete || incomplete
 		if u := extractCCStreamUsage(payload); u != nil {
+			mergeOpenAIProtectionUsageEvidence(st.Usage, u)
 			st.Usage = *u
 		}
 
@@ -338,6 +344,9 @@ func (s *OpenAIGatewayService) scanCCStream(
 			)
 		}
 		st.Err = err
+	}
+	if !st.SawDone || st.Err != nil || !protectionFinished || protectionIncomplete {
+		st.Usage.CacheReadKnown = false
 	}
 	return st
 }
@@ -378,6 +387,10 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	usage := OpenAIUsage{}
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsed
+	}
+	finished, incomplete := openAIProtectionCCFinishState(respBody)
+	if !finished || incomplete {
+		usage.CacheReadKnown = false
 	}
 	return &ccResp, usage, nil
 }

@@ -250,6 +250,7 @@ const (
 type ConcurrencyService struct {
 	cache                ConcurrencyCache
 	accountAdmissionGate AccountAdmissionGate
+	performancePauses    PerformancePauseReader
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -388,6 +389,16 @@ type UserLoadInfo struct {
 // If the account is at max concurrency, it waits until a slot is available or timeout.
 // Returns a release function that MUST be called when the request completes.
 func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, proxyIDs ...int64) (*AcquireResult, error) {
+	// Recheck the independent live authority even for stale/sticky candidates.
+	if s.performancePauses != nil {
+		paused, err := s.performancePauses.PerformancePaused(ctx, []int64{accountID})
+		if err != nil {
+			return nil, err
+		}
+		if paused[accountID] {
+			return &AcquireResult{Acquired: false}, nil
+		}
+	}
 	if len(proxyIDs) > 1 {
 		return s.acquireAccountProxyPoolSlot(ctx, accountID, maxConcurrency, proxyIDs)
 	}
@@ -527,12 +538,39 @@ func (s *ConcurrencyService) TrackAPIKeySlot(ctx context.Context, apiKeyID int64
 		return func() {}
 	}
 
+	stop := make(chan struct{})
+	var once sync.Once
+	if renewable, ok := cache.(interface {
+		APIKeySlotRefreshInterval() time.Duration
+		RefreshAPIKeySlot(context.Context, int64, string) (bool, error)
+	}); ok && renewable.APIKeySlotRefreshInterval() > 0 {
+		go func() {
+			ticker := time.NewTicker(renewable.APIKeySlotRefreshInterval())
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					refreshCtx, cancel := context.WithTimeout(context.Background(), apiKeySlotTrackTimeout)
+					owned, err := renewable.RefreshAPIKeySlot(refreshCtx, apiKeyID, requestID)
+					cancel()
+					if err == nil && !owned {
+						return
+					}
+				}
+			}
+		}()
+	}
 	return func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := cache.ReleaseAPIKeySlot(bgCtx, apiKeyID, requestID); err != nil {
-			logger.LegacyPrintf("service.concurrency", "Warning: failed to release api key slot for %d (req=%s): %v", apiKeyID, requestID, err)
-		}
+		once.Do(func() {
+			close(stop)
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := cache.ReleaseAPIKeySlot(bgCtx, apiKeyID, requestID); err != nil {
+				logger.LegacyPrintf("service.concurrency", "Warning: failed to release api key slot for %d (req=%s): %v", apiKeyID, requestID, err)
+			}
+		})
 	}
 }
 

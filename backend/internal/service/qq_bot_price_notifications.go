@@ -49,7 +49,7 @@ func (p *qqBotPriceSource) listGroups(ctx context.Context) ([]Group, error) {
 }
 
 func (p *qqBotPriceSource) PriceSnapshot(ctx context.Context, now time.Time) (qqbot.PriceSnapshot, error) {
-	out := qqbot.PriceSnapshot{States: []qqbot.PriceState{}, NextCheck: now.Add(15 * time.Second)}
+	out := qqbot.PriceSnapshot{Version: 1, States: []qqbot.PriceState{}, NextCheck: now.Add(15 * time.Second)}
 	channels, err := p.channels.ListAll(ctx)
 	if err != nil {
 		return out, err
@@ -94,6 +94,25 @@ func (p *qqBotPriceSource) PriceSnapshot(ctx context.Context, now time.Time) (qq
 			{Key: "03_video", Label: "视频倍率", Value: qqIndependentRate(g.VideoRateIndependent, g.VideoRateMultiplier)},
 			{Key: "04_peak", Label: "高峰规则", Value: qqPeakRule(g)},
 			{Key: "05_current", Label: "倍率", Value: qqMultiplier(g.RateMultiplier * g.PeakMultiplierAt(now)), Scheduled: true},
+		}
+		for _, pricing := range g.ModelPricing {
+			fields := qqPriceFields(pricing, now)
+			for _, model := range pricing.Models {
+				platform := pricing.Platform
+				if platform == "" {
+					platform = g.Platform
+				}
+				key := "model/" + platform + "/" + normalizeChannelPricingModelName(model) + "/"
+				subject := model
+				if platform != "" {
+					subject += "（" + platform + "）"
+				}
+				for _, field := range fields {
+					field.Key = key + field.Key
+					field.Model = subject
+					state.Fields = append(state.Fields, field)
+				}
+			}
 		}
 		if g.IsActive() && g.IsSubscriptionType() && g.PeakRateEnabled {
 			out.NextCheck = qqNextBoundary(now, out.NextCheck, timezone.Location(), g.PeakStart, g.PeakEnd)

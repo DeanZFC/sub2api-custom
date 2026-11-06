@@ -1,10 +1,11 @@
-import { qqbotAPI, type QQCheckinConfig } from '@/api/qqbot'
+import { qqbotAPI, type QQCheckinConfig, type QQCheckinRewardDistribution } from '@/api/qqbot'
 import { normalizeGrowthReward } from './growthReward'
 
 export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
   const config = await qqbotAPI.checkinConfig()
   return {
     ...config,
+    reward_distribution: { ...(config.reward_distribution ?? { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }) },
     recharge_window_days: config.recharge_window_days || 30,
     streak_days: config.streak_days || 7,
     streak_chances: config.streak_chances ?? 0,
@@ -40,6 +41,7 @@ export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinC
     enabled: config.enabled,
     min_amount: config.min_amount,
     max_amount: config.max_amount,
+    ...(config.reward_distribution ? { reward_distribution: { ...config.reward_distribution } } : {}),
     min_recharge_total: config.min_recharge_total,
     min_recharge_30d: config.min_recharge_30d,
     recharge_window_days: config.recharge_window_days,
@@ -47,6 +49,13 @@ export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinC
     streak_chances: config.streak_reward.type === 'chances' ? config.streak_reward.quantity : 0,
     streak_reward: { ...config.streak_reward }
   })
+}
+
+export function validCheckinDistribution(distribution: QQCheckinRewardDistribution | undefined): boolean {
+  if (!distribution) return false
+  const weights = [distribution.lower_half_bps, distribution.next_quarter_bps, distribution.upper_quarter_bps]
+  return weights.every(weight => Number.isInteger(weight) && weight >= 0 && weight <= 10000)
+    && weights.reduce((sum, weight) => sum + weight, 0) === 10000
 }
 
 export function saveGrowthSettings(config: QQCheckinConfig, section: 'tasks' | 'periodic_tasks' = 'tasks'): Promise<QQCheckinConfig> {

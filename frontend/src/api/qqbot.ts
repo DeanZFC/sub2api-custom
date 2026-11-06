@@ -74,6 +74,7 @@ export interface QQBotConfig {
   chat_model: string; chat_protocol: 'chat_completions' | 'responses'
   image_enabled: boolean; image_base_url: string; image_api_key: string; image_api_key_set: boolean
   image_model: string; image_size: string; system_prompt: string; max_output_tokens: number
+  image_output_format?: '' | 'png' | 'jpeg' | 'webp' | 'gif'
   history_messages: number; daily_chat_limit: number; daily_image_limit: number
   total_daily_chat_limit: number; total_daily_image_limit: number; cooldown_seconds: number
   checkin_reward: number; invite_enabled: boolean; invite_reward: number; invite_daily_limit: number
@@ -140,7 +141,13 @@ export interface QQRankingConfig {
   enabled: boolean; rewards_enabled: boolean; effective_day: string
   token_rewards: QQRankingPrize[]; amount_rewards: QQRankingPrize[]
 }
+export interface QQCheckinRewardDistribution {
+  lower_half_bps: number
+  next_quarter_bps: number
+  upper_quarter_bps: number
+}
 export interface QQCheckinConfig {
+  reward_distribution?: QQCheckinRewardDistribution
   _sections?: Record<string, string>
   _section?: string
   _version?: string

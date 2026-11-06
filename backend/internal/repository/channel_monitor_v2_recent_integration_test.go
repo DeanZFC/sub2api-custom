@@ -19,7 +19,7 @@ import (
 func TestChannelMonitorV2RecentRequestsIntegration(t *testing.T) {
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("MIGRATION_TEST_DATABASE_URL is not set")
+		dsn = integrationDatabaseDSN
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -47,7 +47,7 @@ CREATE TABLE accounts (id bigint PRIMARY KEY, platform text);
 CREATE TABLE usage_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, api_key_id bigint DEFAULT 1, request_id text, model text, requested_model text, request_type int DEFAULT 2, actual_cost numeric DEFAULT 1, first_token_ms int DEFAULT 1000,
  duration_ms int DEFAULT 3500, output_tokens int DEFAULT 100, image_count int DEFAULT 0, video_count int DEFAULT 0, image_output_tokens int DEFAULT 0, inbound_endpoint text, upstream_endpoint text, native_compaction_v2 boolean DEFAULT false, input_tokens int DEFAULT 100, cache_creation_tokens int DEFAULT 100, cache_read_tokens int DEFAULT 800, stream boolean DEFAULT true, openai_ws_mode boolean DEFAULT false);
 CREATE TABLE ops_error_logs (id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, api_key_id bigint DEFAULT 1, request_id text, client_request_id text, request_type int DEFAULT 2, platform text DEFAULT 'openai', model text DEFAULT 'gpt-named', requested_model text, is_count_tokens boolean DEFAULT false, status_code int DEFAULT 503, upstream_status_code int, error_type text DEFAULT 'upstream', error_owner text, error_source text, error_message text, upstream_error_message text, upstream_error_detail text, error_body text,
- duration_ms int, time_to_first_token_ms bigint);
+ duration_ms int, time_to_first_token_ms bigint, error_phase text, is_business_limited boolean DEFAULT false, upstream_errors jsonb);
 INSERT INTO groups VALUES(7,'openai'),(8,'openai'),(9,'composite');
 INSERT INTO accounts VALUES(1,'openai');
 INSERT INTO usage_logs(created_at,group_id,request_id,model) SELECT '2026-10-20T00:00:00Z'::timestamptz + n*interval '1 minute',7,'seven-'||n,'gpt-named' FROM generate_series(1,25) n;

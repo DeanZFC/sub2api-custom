@@ -345,11 +345,19 @@ func (s *Service) generateImage(ctx context.Context, c Config, prompt string) ([
 	}
 	defer cancel()
 	base, key := imageConnection(c)
-	raw, _, err := s.request(ctx, "POST", endpoint(base, "/images/generations"), key, map[string]any{"model": c.ImageModel, "prompt": prompt, "n": 1, "size": c.ImageSize}, 32<<20)
+	body := map[string]any{"model": c.ImageModel, "prompt": prompt, "n": 1, "size": c.ImageSize}
+	if c.ImageOutputFormat != "" {
+		body["output_format"] = c.ImageOutputFormat
+	}
+	raw, _, err := s.request(ctx, "POST", endpoint(base, "/images/generations"), key, body, 32<<20)
 	if err != nil {
 		return nil, err
 	}
-	return imageResult(ctx, raw)
+	data, err := imageResult(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	return checkRequestedImageFormat(data, c.ImageOutputFormat)
 }
 
 func imageConnection(c Config) (string, string) {
@@ -385,7 +393,7 @@ func imageResult(ctx context.Context, raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("获取生成图片失败")
 	}
-	return normalizeImage(data)
+	return normalizeGeneratedImage(data)
 }
 func publicIP(ip net.IP) bool {
 	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
@@ -600,7 +608,7 @@ func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job
 	}
 	deliveredText := limitText(text, 1800)
 	if len(img) > 0 {
-		data, err := s.qqRequest(ctx, c, base+"/files", map[string]any{"file_type": 1, "file_name": "ctav.jpg", "file_data": base64.StdEncoding.EncodeToString(img), "srv_send_msg": false})
+		data, err := s.qqRequest(ctx, c, base+"/files", map[string]any{"file_type": 1, "file_name": generatedImageFileName(img), "file_data": base64.StdEncoding.EncodeToString(img), "srv_send_msg": false})
 		if err != nil {
 			return err
 		}

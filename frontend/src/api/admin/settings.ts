@@ -1437,6 +1437,35 @@ export async function updateCodexPreOutputRetrySettings(settings: CodexPreOutput
   return data;
 }
 
+/** Exact registration email blacklist (matched by inbox identity). */
+export interface RegistrationEmailBlacklist {
+  emails: string[];
+  max: number;
+}
+
+export interface UpdateRegistrationEmailBlacklistResponse extends RegistrationEmailBlacklist {
+  /** Entries not present in the previously saved list. */
+  added: string[];
+}
+
+export async function getRegistrationEmailBlacklist(): Promise<RegistrationEmailBlacklist> {
+  const { data } = await apiClient.get<RegistrationEmailBlacklist>(
+    "/admin/settings/registration-email-blacklist",
+  );
+  return data;
+}
+
+/** Replace the whole exact email blacklist; an empty array clears it. */
+export async function updateRegistrationEmailBlacklist(
+  emails: string[],
+): Promise<UpdateRegistrationEmailBlacklistResponse> {
+  const { data } = await apiClient.put<UpdateRegistrationEmailBlacklistResponse>(
+    "/admin/settings/registration-email-blacklist",
+    { emails },
+  );
+  return data;
+}
+
 export async function getPanelRateLimitSettings(): Promise<PanelRateLimitSettings> {
   const { data } = await apiClient.get<PanelRateLimitSettings>(
     "/admin/settings/panel-rate-limit",
@@ -1488,6 +1517,27 @@ export async function updateStreamTimeoutSettings(
 ): Promise<StreamTimeoutSettings> {
   const { data } = await apiClient.put<StreamTimeoutSettings>(
     "/admin/settings/stream-timeout",
+    settings,
+  );
+  return data;
+}
+
+export interface AccountPerformanceSettings {
+  window_minutes: number;
+}
+
+export async function getAccountPerformanceSettings(): Promise<AccountPerformanceSettings> {
+  const { data } = await apiClient.get<AccountPerformanceSettings>(
+    "/admin/settings/account-performance",
+  );
+  return data;
+}
+
+export async function updateAccountPerformanceSettings(
+  settings: AccountPerformanceSettings,
+): Promise<AccountPerformanceSettings> {
+  const { data } = await apiClient.put<AccountPerformanceSettings>(
+    "/admin/settings/account-performance",
     settings,
   );
   return data;
@@ -1681,12 +1731,16 @@ export const settingsAPI = {
   updateOverloadCooldownSettings,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
+  getRegistrationEmailBlacklist,
+  updateRegistrationEmailBlacklist,
   getPanelRateLimitSettings,
   updatePanelRateLimitSettings,
   getCodexPreOutputRetrySettings,
   updateCodexPreOutputRetrySettings,
   getStreamTimeoutSettings,
   updateStreamTimeoutSettings,
+  getAccountPerformanceSettings,
+  updateAccountPerformanceSettings,
   getRectifierSettings,
   updateRectifierSettings,
   getBetaPolicySettings,

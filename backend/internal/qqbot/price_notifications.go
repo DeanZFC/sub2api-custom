@@ -42,6 +42,7 @@ type PriceState struct {
 }
 
 type PriceSnapshot struct {
+	Version   int          `json:"version,omitempty"`
 	States    []PriceState `json:"states"`
 	NextCheck time.Time    `json:"-"`
 }
@@ -236,6 +237,11 @@ func (s *Service) checkPriceChanges(ctx context.Context, now time.Time) (time.Ti
 }
 
 func formatPriceChanges(previous, current PriceSnapshot, scheduled bool) []string {
+	// Snapshot schema changes establish a fresh baseline instead of reporting
+	// every newly tracked field as a customer-facing configuration change.
+	if previous.Version != current.Version {
+		return nil
+	}
 	old := map[string]PriceState{}
 	for _, state := range previous.States {
 		old[state.Key] = state

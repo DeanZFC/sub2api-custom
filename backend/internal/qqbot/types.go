@@ -39,6 +39,7 @@ type Config struct {
 	ImageAPIKeySet           bool                     `json:"image_api_key_set"`
 	ImageModel               string                   `json:"image_model"`
 	ImageSize                string                   `json:"image_size"`
+	ImageOutputFormat        string                   `json:"image_output_format"`
 	SystemPrompt             string                   `json:"system_prompt"`
 	SiteKnowledge            SiteKnowledgeConfig      `json:"site_knowledge"`
 	MaxOutputTokens          int                      `json:"max_output_tokens"`

@@ -130,3 +130,26 @@ func TestQQPriceSnapshotIncludesInactiveGroupsAcrossPages(t *testing.T) {
 	require.ErrorIs(t, err, repo.err)
 	require.Empty(t, got.States)
 }
+
+func TestQQPriceSnapshotIncludesGroupModelPricing(t *testing.T) {
+	input := 0.000002
+	group := Group{
+		ID:             7,
+		Name:           "group",
+		Platform:       PlatformOpenAI,
+		Status:         StatusActive,
+		RateMultiplier: 1,
+		ModelPricing: []ChannelModelPricing{{
+			Models:     []string{"gpt-5"},
+			InputPrice: &input,
+		}},
+	}
+	p := qqBotPriceSource{channels: &qqPriceChannelStub{}, groups: &qqPriceGroupStub{groups: []Group{group}}}
+
+	snapshot, err := p.PriceSnapshot(context.Background(), time.Now())
+	require.NoError(t, err)
+	require.Len(t, snapshot.States, 1)
+	field := priceField(t, snapshot.States[0].Fields, "model/openai/gpt-5/01_input")
+	require.Equal(t, "gpt-5（openai）", field.Model)
+	require.Equal(t, "USD 2", field.Value)
+}

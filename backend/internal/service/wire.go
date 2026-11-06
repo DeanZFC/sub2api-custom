@@ -496,6 +496,7 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
 func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
+	svc.performancePauses, _ = accountRepo.(PerformancePauseReader)
 	if gate, ok := accountRepo.(AccountAdmissionGate); ok {
 		svc.SetAccountAdmissionGate(gate)
 	}
@@ -895,16 +896,30 @@ func ProvideAPIKeyService(
 	return svc
 }
 
+// ProvideAPIKeyServiceWithGroupProtection keeps the existing constructor compatible.
+func ProvideAPIKeyServiceWithGroupProtection(
+	apiKeyRepo APIKeyRepository, userRepo UserRepository, groupRepo GroupRepository,
+	userSubRepo UserSubscriptionRepository, userGroupRateRepo UserGroupRateRepository,
+	cache APIKeyCache, cfg *config.Config, billingCacheService *BillingCacheService,
+	concurrencyService *ConcurrencyService, protection *GroupAntiDistillationService,
+) *APIKeyService {
+	svc := ProvideAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg, billingCacheService, concurrencyService)
+	svc.groupAntiDistillation = protection
+	return svc
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	ProvideGPTDirectService,
 	ProvideQQBotService,
+	ProvideAccountPerformanceService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
 	NewUserService,
 	NewMCPOAuthService,
-	ProvideAPIKeyService,
+	ProvideAPIKeyServiceWithGroupProtection,
+	NewGroupAntiDistillationService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	ProvideAuthCacheInvalidationWorker,
 	NewGroupService,
@@ -1133,5 +1148,11 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeTokenProvider, proxies ProxyRepository, settings *SettingService, idem *IdempotencyCoordinator, locks LeaderLockCache) *ClaudeResetCreditService {
 	s := NewClaudeResetCreditService(accounts, tokens, proxies, settings)
 	s.ConfigureRedemption(idem, locks)
+	return s
+}
+
+func ProvideAccountPerformanceService(repo AccountPerformanceRepository) *AccountPerformanceService {
+	s := NewAccountPerformanceService(repo)
+	s.Start()
 	return s
 }

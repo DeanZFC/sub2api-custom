@@ -147,10 +147,12 @@
           <div class="grid gap-4 md:grid-cols-2">
             <label class="space-y-1">{{ t('qqbot.imageModel') }}<input v-model.trim="form.image_model" class="input" /></label>
             <label class="space-y-1">{{ t('qqbot.imageSize') }}<select v-model="form.image_size" class="input"><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option><option>auto</option></select></label>
+            <label class="space-y-1">{{ t('qqbot.imageOutputFormat') }}<select v-model="form.image_output_format" data-testid="image-output-format" class="input"><option value="">{{ t('qqbot.imageOutputDefault') }}</option><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option><option value="gif">GIF</option></select></label>
             <label class="space-y-1">{{ t('qqbot.imageBase') }}<input v-model.trim="form.image_base_url" class="input" :placeholder="t('qqbot.reuseChat')" /></label>
             <label class="space-y-1">{{ t('qqbot.imageKey') }}<input v-model="form.image_api_key" type="password" class="input" autocomplete="new-password" :placeholder="secretHint(form.image_api_key_set)" /><span class="flex gap-2 text-xs"><input v-model="form.clear_image_api_key" type="checkbox" />{{ t('qqbot.clearSecret') }}</span></label>
           </div>
           <p class="text-sm text-gray-500">{{ t('qqbot.imageHelp') }}</p>
+          <p class="text-sm text-gray-500">{{ t('qqbot.imageGIFHelp') }}</p>
         </section>
         <section v-show="activeTab === 'limits'" id="qqbot-settings-panel-limits" role="tabpanel" aria-labelledby="qqbot-settings-tab-limits" class="card space-y-4 p-6">
           <label class="block space-y-1">{{ t('qqbot.workspace.rewardAlert') }}<input v-model.number="form.reward_alert_daily" class="input" type="number" min="0" max="1000000" step="0.01" /></label><p class="text-xs text-gray-500">{{ t('qqbot.workspace.rewardAlertHelp') }}</p>
@@ -321,7 +323,7 @@ function apply(c: QQBotConfig, updateBaseline = true) {
     savedAppId.value = c.app_id
     savedGroupNameSource.value = { appID: c.app_id, sandbox: c.sandbox, revision: c.section_versions?.connection || '', groups: [...c.allowed_groups] }
   }
-  form.value = cloneConfig({ ...c, notification_quiet_hours: c.notification_quiet_hours ?? { enabled: false, start_hour: 23, end_hour: 8 }, chat_disabled: c.chat_disabled ?? false, group_policies: c.group_policies ?? [], reward_alert_daily: c.reward_alert_daily ?? 0, custom_commands: (c.custom_commands ?? []).map(command => ({ ...command, command: command.command.replace(/^\//, '') })), site_knowledge: { ...defaultSiteKnowledgeConfig(), ...c.site_knowledge } })
+  form.value = cloneConfig({ ...c, image_output_format: c.image_output_format ?? '', notification_quiet_hours: c.notification_quiet_hours ?? { enabled: false, start_hour: 23, end_hour: 8 }, chat_disabled: c.chat_disabled ?? false, group_policies: c.group_policies ?? [], reward_alert_daily: c.reward_alert_daily ?? 0, custom_commands: (c.custom_commands ?? []).map(command => ({ ...command, command: command.command.replace(/^\//, '') })), site_knowledge: { ...defaultSiteKnowledgeConfig(), ...c.site_knowledge } })
   autonomous.value = { ...defaultAutonomousConfig(), ...c.autonomous }
   moderation.value = { ...defaultModerationConfig(), ...c.moderation }
   healthNotifications.value = { ...defaultHealthNotificationConfig(), ...c.health_notifications }

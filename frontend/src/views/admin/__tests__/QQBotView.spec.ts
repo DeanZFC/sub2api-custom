@@ -103,6 +103,18 @@ describe('QQ module settings', () => {
   expect((w.get('#qqbot-settings-panel-connection input[autocomplete="off"]').element as HTMLInputElement).value).toBe('unsaved-app')
   expect(w.get('#qqbot-settings-tab-connection').text()).toContain('•')
  })
+ it.each(['zh', 'en'] as const)('%s saves GIF request format only in the images module', async locale => {
+  const w = await mountView(locale)
+  await w.get('#qqbot-settings-tab-images').trigger('click')
+  expect((w.get('[data-testid="image-output-format"]').element as HTMLSelectElement).value).toBe('')
+  await w.get('[data-testid="image-output-format"]').setValue('gif')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSection).toHaveBeenCalledWith('images', 'images-1', expect.objectContaining({ image_output_format: 'gif' }))
+  expect(server.image_output_format).toBe('gif')
+  expect(server.chat_model).toBe('model')
+  expect(w.get('#qqbot-settings-panel-images').text()).toContain('--gif')
+  expect(w.get('#qqbot-settings-tab-images').text()).not.toContain('•')
+ })
  it('does not validate unrelated drafts and keeps original revisions for unsaved modules', async () => {
   const w = await mountView()
   await w.get('#qqbot-settings-tab-chat').trigger('click')

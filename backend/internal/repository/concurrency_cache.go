@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -442,15 +443,23 @@ var (
 )
 
 type concurrencyCache struct {
-	rdb                 *redis.Client
-	slotTTLSeconds      int // 槽位过期时间（秒）
-	waitQueueTTLSeconds int // 等待队列过期时间（秒）
+	rdb                  *redis.Client
+	slotTTLSeconds       int // 槽位过期时间（秒）
+	waitQueueTTLSeconds  int // 等待队列过期时间（秒）
+	apiKeySlotTTLSeconds int // 普通 API Key 槽位独立过期时间（秒）；<=0 继承 slotTTLSeconds
 }
 
 // NewConcurrencyCache 创建并发控制缓存
 // slotTTLMinutes: 槽位过期时间（分钟），0 或负数使用默认值 15 分钟
 // waitQueueTTLSeconds: 等待队列过期时间（秒），0 或负数使用 slot TTL
 func NewConcurrencyCache(rdb *redis.Client, slotTTLMinutes int, waitQueueTTLSeconds int) service.ConcurrencyCache {
+	return NewConcurrencyCacheWithAPIKeyTTL(rdb, slotTTLMinutes, waitQueueTTLSeconds, 0)
+}
+
+// NewConcurrencyCacheWithAPIKeyTTL 在 NewConcurrencyCache 的基础上，为普通
+// API Key 槽位指定独立过期时间（秒）。apiKeySlotTTLSeconds <= 0 表示继承共享
+// slot TTL，保持既有调用方（含 regional authority 的 base 缓存）行为不变。
+func NewConcurrencyCacheWithAPIKeyTTL(rdb *redis.Client, slotTTLMinutes int, waitQueueTTLSeconds int, apiKeySlotTTLSeconds int) service.ConcurrencyCache {
 	if slotTTLMinutes <= 0 {
 		slotTTLMinutes = defaultSlotTTLMinutes
 	}
@@ -458,10 +467,21 @@ func NewConcurrencyCache(rdb *redis.Client, slotTTLMinutes int, waitQueueTTLSeco
 		waitQueueTTLSeconds = slotTTLMinutes * 60
 	}
 	return &concurrencyCache{
-		rdb:                 rdb,
-		slotTTLSeconds:      slotTTLMinutes * 60,
-		waitQueueTTLSeconds: waitQueueTTLSeconds,
+		rdb:                  rdb,
+		slotTTLSeconds:       slotTTLMinutes * 60,
+		waitQueueTTLSeconds:  waitQueueTTLSeconds,
+		apiKeySlotTTLSeconds: apiKeySlotTTLSeconds,
 	}
+}
+
+// effectiveAPIKeySlotTTLSeconds 返回普通 API Key 槽位使用的有效过期时间。
+// 未配置专用值（<=0）时回退共享 slot TTL，避免把 0 传给 Redis EXPIRE。
+// 仅适用于普通 API Key 成员；account/user 与 Live 租约继续使用各自期限。
+func (c *concurrencyCache) effectiveAPIKeySlotTTLSeconds() int {
+	if c.apiKeySlotTTLSeconds > 0 {
+		return c.apiKeySlotTTLSeconds
+	}
+	return c.slotTTLSeconds
 }
 
 // Helper functions for key generation
@@ -869,7 +889,7 @@ func (c *concurrencyCache) GetUserConcurrency(ctx context.Context, userID int64)
 
 func (c *concurrencyCache) TrackAPIKeySlot(ctx context.Context, apiKeyID int64, requestID string) error {
 	key := apiKeySlotKey(apiKeyID)
-	_, err := trackSlotScript.Run(ctx, c.rdb, []string{key}, c.slotTTLSeconds, requestID).Result()
+	_, err := trackSlotScript.Run(ctx, c.rdb, []string{key}, c.effectiveAPIKeySlotTTLSeconds(), requestID).Result()
 	return err
 }
 
@@ -1037,7 +1057,7 @@ func (c *concurrencyCache) GetAPIKeyConcurrencyBatch(ctx context.Context, apiKey
 	if err != nil {
 		return nil, fmt.Errorf("redis TIME: %w", err)
 	}
-	cutoffTime := now.Unix() - int64(c.slotTTLSeconds)
+	cutoffTime := now.Unix() - int64(c.effectiveAPIKeySlotTTLSeconds())
 
 	pipe := c.rdb.Pipeline()
 	type apiKeyCmd struct {
@@ -1444,4 +1464,31 @@ func (c *concurrencyCache) cleanupStaleProcessSlotsForIndex(
 	}
 	c.removeActiveIndexMembers(ctx, spec.indexKey, staleMembers)
 	return nil
+}
+
+func (c *concurrencyCache) APIKeySlotRefreshInterval() time.Duration {
+	return time.Duration(c.effectiveAPIKeySlotTTLSeconds()) * time.Second / 3
+}
+
+func (c *concurrencyCache) APIKeySlotTTL() time.Duration {
+	return time.Duration(c.effectiveAPIKeySlotTTLSeconds()) * time.Second
+}
+
+// Refresh only an existing member, atomically with its key TTL. In particular,
+// admin deletion must not be undone by a late heartbeat.
+var refreshAPIKeySlotScript = redis.NewScript(`
+	redis.replicate_commands()
+	local now = redis.call('TIME')
+ redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', tonumber(now[1])-tonumber(ARGV[1]))
+ if redis.call('ZSCORE', KEYS[1], ARGV[2]) == false then
+		return 0
+	end
+	redis.call('ZADD', KEYS[1], 'XX', tonumber(now[1]), ARGV[2])
+	redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+	return 1
+`)
+
+func (c *concurrencyCache) RefreshAPIKeySlot(ctx context.Context, apiKeyID int64, requestID string) (bool, error) {
+	n, err := refreshAPIKeySlotScript.Run(ctx, c.rdb, []string{apiKeySlotKey(apiKeyID)}, c.effectiveAPIKeySlotTTLSeconds(), requestID).Int()
+	return n == 1, err
 }

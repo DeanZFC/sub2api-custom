@@ -61,7 +61,7 @@ CREATE TABLE usage_logs (id BIGSERIAL,created_at TIMESTAMPTZ,group_id BIGINT DEF
 CREATE TABLE ops_error_logs (id BIGSERIAL,created_at TIMESTAMPTZ,group_id BIGINT DEFAULT 8,account_id BIGINT DEFAULT 62,user_id BIGINT DEFAULT 7,api_key_id BIGINT DEFAULT 1,
  request_id TEXT,client_request_id TEXT,request_type INT DEFAULT 2,is_count_tokens BOOLEAN DEFAULT false,status_code INT DEFAULT 503,error_type TEXT DEFAULT 'upstream_error',
  platform TEXT DEFAULT 'openai',model TEXT DEFAULT 'model-a',requested_model TEXT,error_owner TEXT,error_source TEXT,upstream_status_code INT,
- error_message TEXT,upstream_error_message TEXT,upstream_error_detail TEXT,error_body TEXT,upstream_errors JSONB);
+ error_message TEXT,upstream_error_message TEXT,upstream_error_detail TEXT,error_body TEXT,upstream_errors JSONB,error_phase TEXT,is_business_limited BOOLEAN DEFAULT false);
 INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai');`)
 	repo := &channelMonitorV2Repository{db: db}
 	now := time.Now().UTC().Truncate(time.Minute)

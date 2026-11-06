@@ -110,6 +110,7 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
     LEFT JOIN groups g ON g.id = current_error.group_id
     LEFT JOIN accounts a ON a.id = current_error.account_id
     WHERE ` + scope("current_error", channelMonitorV2RecentErrorPlatform, errorModel) + `
+      AND NOT ` + opsClientRejectionSQL("current_error") + `
       AND NOT current_error.is_count_tokens
       AND (COALESCE(current_error.status_code, 0) >= 400 OR current_error.error_type = 'cyber_policy')
       AND (COALESCE(current_error.request_type,0)=3 OR NULLIF(current_error.request_id, '') IS NULL OR (

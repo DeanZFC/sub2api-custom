@@ -356,6 +356,9 @@
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
+          <template #cell-performance="{ row }">
+            <AccountPerformanceCell :metrics="performanceMetrics[row.id]" :unavailable="performanceUnavailable" :can-configure="authStore.isAdmin" :notice-user-id="authStore.isAdmin ? authStore.user?.id : null" @configure="performanceAccount = row" />
+          </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
@@ -548,6 +551,7 @@
     <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
     <TotpStepUpDialog :controller="accountExportStepUp" />
+    <AccountPerformanceDialog v-if="performanceAccount" :key="performanceAccount.id" :account-id="performanceAccount.id" :account-name="performanceAccount.name" :notice-user-id="authStore.isAdmin ? authStore.user?.id : null" @close="performanceAccount = null" @updated="refreshPerformance" />
   </AppLayout>
 </template>
 
@@ -591,6 +595,9 @@ import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
+import AccountPerformanceCell from '@/components/account/AccountPerformanceCell.vue'
+import AccountPerformanceDialog from '@/components/account/AccountPerformanceDialog.vue'
+import { performanceWindowMinutes, type AccountPerformance } from '@/types/accountPerformance'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import RecentRequestsCell from '@/components/account/RecentRequestsCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
@@ -1393,6 +1400,39 @@ const refreshRecentRequests = async () => {
   }
 }
 
+// Performance is one bounded batch per visible page, independent of account ETags.
+const performanceMetrics = ref<Record<number, AccountPerformance>>({})
+const performanceMinutes = computed(() => performanceWindowMinutes(Object.values(performanceMetrics.value)[0]))
+const performanceUnavailable = ref(false)
+const performanceAccount = ref<Account | null>(null)
+let performanceAbort: AbortController | null = null
+let performanceRequest = 0
+const refreshPerformance = async () => {
+  const ids = accounts.value.map(account => account.id)
+  if (!isColumnVisible('performance') || !ids.length) return
+  performanceAbort?.abort()
+  const request = ++performanceRequest
+  const controller = new AbortController()
+  performanceAbort = controller
+  try {
+    const next: Record<number, AccountPerformance> = {}
+    for (let start = 0; start < ids.length; start += 100) {
+      Object.assign(next, await adminAPI.accounts.getPerformance(ids.slice(start, start + 100), controller.signal))
+    }
+    if (request !== performanceRequest || controller.signal.aborted) return
+    performanceMetrics.value = next
+    performanceUnavailable.value = false
+  } catch {
+    if (request === performanceRequest && !controller.signal.aborted) {
+      performanceMetrics.value = {}
+      performanceUnavailable.value = true
+    }
+  }
+}
+watch(() => accounts.value.map(account => account.id).join(','), () => { void refreshPerformance() })
+watch(() => isColumnVisible('performance'), visible => { if (visible) void refreshPerformance() })
+useIntervalFn(() => { void refreshPerformance() }, 30_000)
+
 type AccountLoadOptions = {
   refreshTodayStats?: boolean
 }
@@ -2104,6 +2144,7 @@ const allColumns = computed(() => {
     { key: 'recent_requests', label: t('admin.accounts.columns.recentRequests'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
+    { key: 'performance', label: t('accountPerformance.column', { minutes: performanceMinutes.value }), sortable: false },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
@@ -2984,6 +3025,8 @@ onUnmounted(() => {
     clearInterval(recentRequestsRefreshTimer)
     recentRequestsRefreshTimer = null
   }
+  performanceRequest++
+  performanceAbort?.abort()
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

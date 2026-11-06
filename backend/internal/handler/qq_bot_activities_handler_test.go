@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -11,6 +12,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestQQCheckinAdminReadReturnsPrivateDistribution(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	botJSON, err := json.Marshal(qqbot.DefaultConfig())
+	require.NoError(t, err)
+	mock.ExpectQuery("SELECT value FROM settings").WithArgs("qq_bot_config").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(botJSON)))
+	mock.ExpectQuery("SELECT value FROM settings").WithArgs("qq_bot_checkin_config").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(`{"enabled":true,"min_amount":1,"max_amount":3,"reward_distribution":{"lower_half_bps":6525,"next_quarter_bps":2475,"upper_quarter_bps":1000}}`))
+	h := NewQQBotHandler(qqbot.New(db, qqTestEncryptor{}, true, nil))
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), "admin"); c.Next() })
+	r.GET("/checkin", h.GetCheckinConfig)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/checkin", nil))
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	require.NotEmpty(t, w.Header().Get("X-QQBot-checkin-Version"))
+	var result struct {
+		Data qqbot.CheckinConfig `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	require.Equal(t, &qqbot.CheckinRewardDistribution{LowerHalfBPS: 6525, NextQuarterBPS: 2475, UpperQuarterBPS: 1000}, result.Data.RewardDistribution)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 	for _, role := range []string{"", "user", "admin"} {
@@ -38,6 +64,10 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 			{"PUT", "/rankings", `{"amount_rewards":[{"rank":1,"reward":{"type":"balance","amount":1001}}]}`},
 			{"PUT", "/checkin", `{"min_amount":2,"max_amount":1}`},
 			{"PUT", "/checkin", `{"streak_days":-1}`},
+			{"PUT", "/checkin", `{"reward_distribution":{"lower_half_bps":7000,"next_quarter_bps":2000,"upper_quarter_bps":2000}}`},
+			{"PUT", "/checkin", `{"reward_distribution":{"lower_half_bps":-1,"next_quarter_bps":10000,"upper_quarter_bps":1}}`},
+			{"PUT", "/checkin", `{"reward_distribution":{"lower_half_bps":1234.5,"next_quarter_bps":4321,"upper_quarter_bps":4444.5}}`},
+			{"PUT", "/checkin", `{"reward_distribution":{}}`},
 			{"PUT", "/checkin", `{"growth":{"tasks":[{"id":"bad","name":"Invalid task","kind":"usage_count","target":1.5,"chances":1,"enabled":true}]}}`},
 			{"PUT", "/checkin", `{"growth":{"tasks":[{"id":"bad","name":"Invalid task","kind":"recharge_total","target":1.001,"chances":1,"enabled":true}]}}`},
 			{"PUT", "/checkin", `{"min_amount":0.1,"max_amount":0.5,"min_recharge_30d":0.001}`},

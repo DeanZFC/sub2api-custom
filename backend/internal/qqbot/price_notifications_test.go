@@ -101,6 +101,36 @@ func TestPriceNotificationModelRemovalAndBoundedChunks(t *testing.T) {
 	require.Contains(t, strings.Join(formatPriceChanges(before, after, true), ""), "USD 2 → 已移除")
 }
 
+func TestPriceNotificationGroupModelPricingChanges(t *testing.T) {
+	modelFields := func(input string) []PriceField {
+		return []PriceField{
+			{Key: "model/openai/gpt-5/00_mode", Model: "gpt-5（openai）", Label: "计费方式", Value: "按 Token"},
+			{Key: "model/openai/gpt-5/01_input", Model: "gpt-5（openai）", Label: "输入", Value: input, Unit: "百万 Token"},
+		}
+	}
+	snapshot := func(fields []PriceField) PriceSnapshot {
+		return PriceSnapshot{States: []PriceState{{Key: "group:1", Kind: "group", Name: "示例分组", Fields: fields}}}
+	}
+
+	before := snapshot(modelFields("USD 2"))
+	changed := snapshot(modelFields("USD 1.5"))
+	require.Equal(t, []string{"分组：示例分组\n模型：gpt-5（openai）\n输入：USD 2 → USD 1.5 / 百万 Token"}, formatPriceChanges(before, changed, true))
+
+	added := snapshot(modelFields("USD 2"))
+	require.Contains(t, strings.Join(formatPriceChanges(snapshot(nil), added, true), "\n"), "模型：gpt-5（openai）")
+
+	removed := snapshot(nil)
+	require.Contains(t, strings.Join(formatPriceChanges(before, removed, true), "\n"), "输入：USD 2 → 已移除 / 百万 Token")
+}
+
+func TestPriceNotificationSnapshotVersionEstablishesBaseline(t *testing.T) {
+	previous := PriceSnapshot{Version: 0, States: []PriceState{{Key: "group:1", Kind: "group", Name: "示例分组"}}}
+	current := PriceSnapshot{Version: 1, States: []PriceState{{Key: "group:1", Kind: "group", Name: "示例分组", Fields: []PriceField{
+		{Key: "model/openai/gpt-5/01_input", Model: "gpt-5（openai）", Label: "输入", Value: "USD 2", Unit: "百万 Token"},
+	}}}}
+	require.Empty(t, formatPriceChanges(previous, current, true))
+}
+
 func TestPriceNotificationLifecycle(t *testing.T) {
 	for _, kind := range []string{"group", "channel"} {
 		t.Run(kind, func(t *testing.T) {

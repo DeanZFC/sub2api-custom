@@ -4,13 +4,45 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"context"
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
 )
+
+func TestReadRequestBodyWithPreallocLimit_PreservesSharedBudget(t *testing.T) {
+	for _, encoding := range []string{"identity", "gzip"} {
+		t.Run(encoding, func(t *testing.T) {
+			payload := []byte(strings.Repeat("x", 4096))
+			wire := payload
+			if encoding == "gzip" {
+				var compressed bytes.Buffer
+				writer := gzip.NewWriter(&compressed)
+				if _, err := writer.Write(payload); err != nil {
+					t.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				wire = compressed.Bytes()
+			}
+			budget := NewBodyMemoryBudget(256)
+			ctx, release := WithRequestBodyMemoryBudget(context.Background(), budget)
+			defer release()
+			req := newRequestWithBody(t, wire, encoding).WithContext(ctx)
+			if _, err := ReadRequestBodyWithPreallocLimit(req, 8192); !errors.Is(err, ErrRequestBodyMemoryBudget) {
+				t.Fatalf("expected shared budget rejection, got %v", err)
+			}
+			if used := requestBodyBudgetUsed(budget); used != 0 {
+				t.Fatalf("failed read retained %d bytes", used)
+			}
+		})
+	}
+}
 
 func TestReadRequestBodyWithPreallocLimit_CompressedBody(t *testing.T) {
 	body := []byte(samplePayload)

@@ -184,8 +184,15 @@ func TestActivityPreviewCannotSettleRewards(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Bound)
 	require.True(t, result.CheckinEligible)
-	require.InDelta(t, 1.733333332, result.CheckinExpected, 1e-9)
+	require.InDelta(t, 1.7749999955, result.CheckinExpected, 1e-9)
 	require.NotEmpty(t, result.Tasks)
+	checkin, err := s.CheckinConfig(ctx)
+	require.NoError(t, err)
+	checkin.RewardDistribution = &CheckinRewardDistribution{0, 0, 10000}
+	require.NoError(t, s.SaveCheckinConfig(ctx, checkin))
+	result, err = s.PreviewActivities(ctx, uid)
+	require.NoError(t, err)
+	require.Equal(t, 2.75, result.CheckinExpected)
 	for _, table := range []string{"qq_bot_rewards", "qq_bot_reward_codes", "qq_bot_lottery_chance_grants"} {
 		var n int
 		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&n))
@@ -200,6 +207,7 @@ func TestCheckinSectionsPreserveConcurrentDrafts(t *testing.T) {
 	first := original
 	first.MinAmount = 0.2
 	first.MaxAmount = 0.3
+	first.RewardDistribution = &CheckinRewardDistribution{1234, 4321, 4445}
 	require.NoError(t, s.SaveCheckinConfig(WithCheckinSection(WithConfigVersion(ctx, CheckinSectionVersion(original, "checkin")), "checkin"), first))
 	second := original
 	second.Growth.Tasks = []GrowthTask{}
@@ -208,6 +216,7 @@ func TestCheckinSectionsPreserveConcurrentDrafts(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0.2, got.MinAmount)
 	require.Equal(t, 0.3, got.MaxAmount)
+	require.Equal(t, first.RewardDistribution, got.RewardDistribution)
 	require.Empty(t, got.Growth.Tasks)
 	require.ErrorIs(t, s.SaveCheckinConfig(WithCheckinSection(WithConfigVersion(ctx, CheckinSectionVersion(original, "checkin")), "checkin"), original), ErrConfigConflict)
 }

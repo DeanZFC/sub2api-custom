@@ -1,5 +1,7 @@
 export default {
   common: {
+    newFeature: '新功能',
+    dismissNewFeature: '关闭新功能提示',
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',
@@ -300,6 +302,7 @@ export default {
     loginFailed: '登录失败，请检查您的凭据后重试。',
     errors: {
       USER_NOT_ACTIVE: '账号已被禁用',
+      EMAIL_BLOCKED: '该邮箱不允许注册，请更换其他邮箱。',
     },
     registrationFailed: '注册失败，请重试。',
     emailDomainRegistrationLimit:

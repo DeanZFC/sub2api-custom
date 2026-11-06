@@ -54,7 +54,8 @@ type Account struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
-	Schedulable bool
+	Schedulable       bool
+	PerformancePaused bool
 
 	RateLimitedAt    *time.Time
 	RateLimitResetAt *time.Time
@@ -200,7 +201,7 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
-	if !a.IsActive() || !a.Schedulable {
+	if !a.IsActive() || !a.Schedulable || a.PerformancePaused {
 		return false
 	}
 	now := time.Now()

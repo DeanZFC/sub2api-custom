@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
@@ -25,6 +27,8 @@ type FrameConn interface {
 }
 
 type Usage struct {
+	ProtectionMediaObserved  bool
+	CacheReadKnown           bool
 	InputTokens              int
 	ImageInputTokens         int
 	OutputTokens             int
@@ -620,6 +624,11 @@ func runUpstreamToClient(
 				openAIWSRelayDiscardActiveTurnTiming(state)
 			}
 		}
+		if dropDownstreamWrites != nil && dropDownstreamWrites.Load() {
+			// Drained usage still bills the completed upstream generation, but must
+			// not create a zero-cache protection sample after client disconnect.
+			observedEvent.usage.CacheReadKnown = false
+		}
 		emitTurnComplete(onTurnComplete, state, observedEvent)
 		if dropDownstreamWrites != nil && dropDownstreamWrites.Load() {
 			if droppedFrames != nil {
@@ -803,16 +812,10 @@ func observeUpstreamMessage(
 		return finalizeObservedRelayTerminal(state, observedUpstreamEvent{eventType: eventType, responseID: activeID}, now)
 	}
 
-	if state.firstTokenMs == nil && isTokenEvent(eventType) {
+	if state.firstTokenMs == nil && openai.ResponseStartsSemanticOutput(message, eventType) {
 		ms := int(now.Sub(startAt).Milliseconds())
 		if ms >= 0 {
 			state.firstTokenMs = &ms
-		}
-		if state.activeTurn != nil && state.activeTurn.firstTokenMs == nil {
-			tms := int(now.Sub(state.activeTurn.startAt).Milliseconds())
-			if tms >= 0 {
-				state.activeTurn.firstTokenMs = &tms
-			}
 		}
 	}
 	parsedUsage := parseUsageAndAccumulate(state, message, eventType, onUsageParseFailure)
@@ -824,14 +827,15 @@ func observeUpstreamMessage(
 	var turnTiming *relayTurnTiming
 	if responseID != "" {
 		turnTiming = openAIWSRelayGetOrInitTurnTiming(state, responseID, now)
-		if turnTiming != nil && turnTiming.firstTokenMs == nil && isTokenEvent(eventType) {
-			ms := int(now.Sub(turnTiming.startAt).Milliseconds())
-			if ms >= 0 {
-				turnTiming.firstTokenMs = &ms
-			}
-		}
 	} else {
 		turnTiming = state.activeTurn
+	}
+
+	if turnTiming != nil && turnTiming.firstTokenMs == nil && openai.ResponseStartsSemanticOutput(message, eventType) {
+		ms := int(now.Sub(turnTiming.startAt).Milliseconds())
+		if ms >= 0 {
+			turnTiming.firstTokenMs = &ms
+		}
 	}
 	observeRelayTurnResponseModel(turnTiming, firstRelayResponseModel(message), isTerminalEvent(eventType))
 	if !isTerminalEvent(eventType) {
@@ -1131,7 +1135,13 @@ func parseUsageAndAccumulate(
 	eventType string,
 	onParseFailure func(eventType string, usageRaw string),
 ) Usage {
-	if state == nil || len(message) == 0 || !shouldParseUsage(eventType) || !bytes.Contains(message, []byte(`"usage"`)) {
+	if state == nil || len(message) == 0 || !shouldParseUsage(eventType) {
+		return Usage{}
+	}
+	if isTerminalEvent(strings.TrimSpace(eventType)) {
+		state.turnUsage.CacheReadKnown = false
+	}
+	if !bytes.Contains(message, []byte(`"usage"`)) {
 		return Usage{}
 	}
 	usageResult := gjson.GetBytes(message, "response.usage")
@@ -1209,9 +1219,19 @@ func parseUsageAndAccumulate(
 		OutputTokens:             outputTokens,
 		CacheCreationInputTokens: openAICacheCreationTokensFromUsage(usageResult),
 		CacheReadInputTokens:     cachedTokens,
+		CacheReadKnown:           cachedResult.Exists() && cachedResult.Type == gjson.Number && cachedResult.Num >= 0 && cachedResult.Num < float64(int(^uint(0)>>1)) && math.Trunc(cachedResult.Num) == cachedResult.Num && (eventType == "response.completed" || eventType == "response.done"),
 		ImageOutputTokens:        int(imageTokens),
 	}
 
+	parsedUsage.ProtectionMediaObserved = state.turnUsage.ProtectionMediaObserved ||
+		state.turnUsage.ImageInputTokens > 0 || state.turnUsage.ImageOutputTokens > 0 ||
+		parsedUsage.ImageInputTokens > 0 || parsedUsage.ImageOutputTokens > 0
+	if parsedUsage.ProtectionMediaObserved {
+		parsedUsage.CacheReadKnown = false
+	}
+	if status := gjson.GetBytes(message, "response.status").String(); status != "" && status != "completed" {
+		parsedUsage.CacheReadKnown = false
+	}
 	if isTerminalEvent(strings.TrimSpace(eventType)) {
 		if relayUsageHasTokens(parsedUsage) || !relayUsageHasTokens(state.turnUsage) {
 			state.turnUsage = parsedUsage
@@ -1233,6 +1253,7 @@ func mergeRelayUsageNonZero(dst *Usage, src Usage) {
 	if dst == nil {
 		return
 	}
+	dst.ProtectionMediaObserved = dst.ProtectionMediaObserved || src.ProtectionMediaObserved
 	if src.InputTokens > 0 {
 		dst.InputTokens = src.InputTokens
 	}

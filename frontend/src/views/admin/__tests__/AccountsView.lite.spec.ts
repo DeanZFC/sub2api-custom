@@ -10,6 +10,7 @@ const {
   listAccounts,
   listWithEtag,
   getById,
+  getPerformance,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
   getAllProxies,
@@ -24,6 +25,7 @@ const {
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getById: vi.fn(),
+  getPerformance: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
@@ -43,6 +45,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       list: listAccounts,
       getById,
+      getPerformance,
       listWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
@@ -78,6 +81,7 @@ const DataTableStub = defineComponent({
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-capacity" :row="row" />
         <slot name="cell-groups" :row="row" />
+        <slot name="cell-performance" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -131,6 +135,7 @@ function mountView(stubActionMenu = true) {
         EditAccountModal: EditAccountModalStub,
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
+        AccountPerformanceCell: true,
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: AccountGroupsCellStub,
@@ -172,6 +177,7 @@ describe('admin AccountsView lite account list', () => {
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
     listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
     getById.mockReset().mockResolvedValue(fullAccount)
+    getPerformance.mockReset().mockResolvedValue({})
     getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })
     getAllProxies.mockReset().mockResolvedValue([])
@@ -187,6 +193,19 @@ describe('admin AccountsView lite account list', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('refreshes performance evidence every 30 seconds independently of unchanged list ETags', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountView()
+    await flushPromises()
+    expect(getPerformance).toHaveBeenCalledWith([42], expect.any(AbortSignal))
+    getPerformance.mockClear()
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushPromises()
+    expect(getPerformance).toHaveBeenCalledTimes(1)
+    expect(getPerformance).toHaveBeenCalledWith([42], expect.any(AbortSignal))
+    wrapper.unmount()
   })
 
   it('keeps lite=1 on the initial list request', async () => {

@@ -62,6 +62,9 @@ func (s *Service) imageExecution(ctx context.Context, j *Job, status string) err
 
 func (s *Service) reviewImageTurn(ctx context.Context, c Config, j *Job, e Event, current string, input Message, ref *botMessageReference, pending *pendingImagePlan, turn chatTurnResult) (chatTurnResult, error) {
 	action, proposed := chatImageToolName, turn.ImagePrompt
+	if turn.ImagePrompt != "" && turn.ImageOutputFormat != "" && turn.ImageOutputFormat != "auto" {
+		proposed += "\n输出格式：" + turn.ImageOutputFormat
+	}
 	if turn.EditImageIndex > 0 {
 		action = chatEditImageToolName
 	}

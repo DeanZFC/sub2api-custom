@@ -34,6 +34,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if err := checkOpenAIGroupProtectionBeforeForward(ctx, c); err != nil {
+		return nil, err
+	}
+
 	// 工具 Schema 清洗必须先于所有分流：下游每条路径（原生 Anthropic 直通、
 	// Chat Completions 转换、Responses 转换）都会把 tools 原样带给上游，而
 	// xAI / Moonshot 等严格校验方会因 input_schema 里的 required:null 或
@@ -881,12 +885,17 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	}
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
+	queueBudget := newSSEQueueBudget(s.cfg)
 	go func() {
 		defer close(events)
 		for scanner.Scan() {
+			if !queueBudget.acquire(len(scanner.Bytes()), done) {
+				return
+			}
 			select {
 			case events <- scanEvent{line: scanner.Text()}:
 			case <-done:
+				queueBudget.release(len(scanner.Bytes()))
 				return
 			}
 		}
@@ -903,6 +912,9 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	for {
 		select {
 		case ev, ok := <-events:
+			if ok {
+				queueBudget.release(len(ev.line))
+			}
 			if !ok {
 				if frame, ok := parser.Finish(); ok {
 					payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
@@ -914,13 +926,13 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 						recordPrior(&event)
 						if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
 							if event.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+								usage = copyOpenAIUsageFromResponsesUsage(event.Usage, usage)
 								if response.Usage == nil {
 									response.Usage = event.Usage
 								}
 							}
 							if response.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+								usage = copyOpenAIUsageFromResponsesUsage(response.Usage, usage)
 							}
 							return response, usage, acc, prior, nil
 						}
@@ -964,13 +976,13 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 
 			if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
 				if event.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+					usage = copyOpenAIUsageFromResponsesUsage(event.Usage, usage)
 					if response.Usage == nil {
 						response.Usage = event.Usage
 					}
 				}
 				if response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+					usage = copyOpenAIUsageFromResponsesUsage(response.Usage, usage)
 				}
 				return response, usage, acc, prior, nil
 			}
@@ -1095,11 +1107,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					responseID = id
 				}
 				if event.Response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage, usage)
 				}
 			}
 			if event.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+				usage = copyOpenAIUsageFromResponsesUsage(event.Usage, usage)
 			}
 			// cyber_policy 致命不可重试：标记供 handler 事后记录；以 Anthropic SSE error 事件
 			// 回写让客户端感知并停止重试（F4），丢弃后续转换输出。
@@ -1309,11 +1321,16 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	done := make(chan struct{})
 	var lastReadAt int64
 	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
+	queueBudget := newSSEQueueBudget(s.cfg)
 	sendEvent := func(ev scanEvent) bool {
+		if !queueBudget.acquire(len(ev.line), done) {
+			return false
+		}
 		select {
 		case events <- ev:
 			return true
 		case <-done:
+			queueBudget.release(len(ev.line))
 			return false
 		}
 	}
@@ -1346,6 +1363,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	for {
 		select {
 		case ev, ok := <-events:
+			if ok {
+				queueBudget.release(len(ev.line))
+			}
 			if !ok {
 				// Upstream closed
 				if frame, ok := parser.Finish(); ok {
@@ -1441,7 +1461,7 @@ func buildAnthropicStreamErrorSSE(errType, message string) string {
 	return "event: error\ndata: " + string(payload) + "\n\n"
 }
 
-func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUsage {
+func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage, observed ...OpenAIUsage) OpenAIUsage {
 	if usage == nil {
 		return OpenAIUsage{}
 	}
@@ -1450,9 +1470,17 @@ func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUs
 		OutputTokens:             usage.OutputTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 	}
+	if len(observed) > 0 {
+		result.cacheReadMediaObserved = observed[0].cacheReadMediaObserved
+	}
 	if usage.InputTokensDetails != nil {
 		result.CacheUsageReported = usage.CacheReadUsageReported()
 		result.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens
+		// Typed compatibility usage does not retain the image breakdown. Keep
+		// those requests outside text protection even after that conversion.
+		result.CacheReadKnown = len(observed) > 0 && !result.cacheReadMediaObserved && observed[0].CacheReadKnown &&
+			observed[0].CacheReadInputTokens == result.CacheReadInputTokens &&
+			observed[0].ImageInputTokens == 0 && observed[0].ImageOutputTokens == 0 && observed[0].ImageCacheReadTokens == 0
 	}
 	return result
 }

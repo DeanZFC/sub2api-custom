@@ -5,30 +5,31 @@ import "github.com/Wei-Shaw/sub2api/internal/config"
 // The production composition root attaches optional services before starting
 // the harvest loop; no post-construction setter races with startup.
 type OpenAIGatewayDependencies struct {
-	Accounts      AccountRepository
-	Proxies       ProxyRepository
-	UsageLogs     UsageLogRepository
-	UsageBilling  UsageBillingRepository
-	Users         UserRepository
-	Subscriptions UserSubscriptionRepository
-	GroupRates    UserGroupRateRepository
-	Cache         GatewayCache
-	Config        *config.Config
-	Scheduler     *SchedulerSnapshotService
-	Concurrency   *ConcurrencyService
-	Billing       *BillingService
-	RateLimit     *RateLimitService
-	BillingCache  *BillingCacheService
-	Upstream      HTTPUpstream
-	Deferred      *DeferredService
-	OpenAITokens  *OpenAITokenProvider
-	GrokTokens    *GrokTokenProvider
-	Pricing       *ModelPricingResolver
-	Channels      *ChannelService
-	BalanceNotify *BalanceNotifyService
-	Settings      *SettingService
-	Quotas        UserPlatformQuotaRepository
-	Harvest       *CodexHarvestService
+	Accounts        AccountRepository
+	Proxies         ProxyRepository
+	UsageLogs       UsageLogRepository
+	UsageBilling    UsageBillingRepository
+	Users           UserRepository
+	Subscriptions   UserSubscriptionRepository
+	GroupRates      UserGroupRateRepository
+	Cache           GatewayCache
+	Config          *config.Config
+	Scheduler       *SchedulerSnapshotService
+	Concurrency     *ConcurrencyService
+	Billing         *BillingService
+	RateLimit       *RateLimitService
+	BillingCache    *BillingCacheService
+	Upstream        HTTPUpstream
+	Deferred        *DeferredService
+	OpenAITokens    *OpenAITokenProvider
+	GrokTokens      *GrokTokenProvider
+	Pricing         *ModelPricingResolver
+	Channels        *ChannelService
+	BalanceNotify   *BalanceNotifyService
+	Settings        *SettingService
+	Quotas          UserPlatformQuotaRepository
+	Harvest         *CodexHarvestService
+	GroupProtection *GroupAntiDistillationService
 }
 
 func ProvideOpenAIGatewayService(d OpenAIGatewayDependencies) *OpenAIGatewayService {
@@ -36,6 +37,7 @@ func ProvideOpenAIGatewayService(d OpenAIGatewayDependencies) *OpenAIGatewayServ
 		d.GroupRates, d.Cache, d.Config, d.Scheduler, d.Concurrency, d.Billing, d.RateLimit,
 		d.BillingCache, d.Upstream, d.Deferred, d.OpenAITokens, d.GrokTokens, d.Pricing,
 		d.Channels, d.BalanceNotify, d.Settings, d.Quotas)
+	s.SetGroupAntiDistillationService(d.GroupProtection)
 	s.proxyRepo = d.Proxies
 	s.codexHarvest = d.Harvest
 	s.StartOpenAICodexTicketHarvester()

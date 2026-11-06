@@ -1,5 +1,7 @@
 export default {
   common: {
+    newFeature: 'New',
+    dismissNewFeature: 'Dismiss new feature notice',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
@@ -300,6 +302,7 @@ export default {
     loginFailed: 'Login failed. Please check your credentials and try again.',
     errors: {
       USER_NOT_ACTIVE: 'Account has been disabled.',
+      EMAIL_BLOCKED: 'This email address is not allowed. Please use a different one.',
     },
     registrationFailed: 'Registration failed. Please try again.',
     emailDomainRegistrationLimit:

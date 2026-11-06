@@ -708,6 +708,7 @@ func (r *channelMonitorV2Repository) loadErrorDetails(ctx context.Context, filte
 		"current_error.created_at >= $1",
 		"current_error.created_at < $2",
 		"NOT current_error.is_count_tokens",
+		"NOT " + opsClientRejectionSQL("current_error"),
 		"(COALESCE(current_error.status_code, 0) >= 400 OR current_error.error_type = 'cyber_policy')",
 		`(NULLIF(current_error.request_id, '') IS NULL OR NOT EXISTS (
 				SELECT 1 FROM ops_error_logs newer
