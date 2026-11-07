@@ -123,8 +123,7 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 					require.Nil(t, request.CacheRate) // no input or cache tokens
 				case 22 * time.Minute, 23 * time.Minute:
 					syncRequests++
-					require.NotNil(t, request.CacheRate) // explicit and legacy synchronous requests use the same token formula
-					require.InDelta(t, 0.8, *request.CacheRate, 0.00001)
+					require.Nil(t, request.CacheRate) // explicit and legacy synchronous requests remain visible without a cache-rate sample
 				case 21 * time.Minute:
 					require.Zero(t, *request.CacheRate) // known zero is distinct from missing data
 					require.Zero(t, *request.TTFTMs)

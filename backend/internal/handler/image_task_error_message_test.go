@@ -35,7 +35,8 @@ func TestAsyncImageTaskStoresRawErrorAndWrapsPollingResponse(t *testing.T) {
 			initial, _ := gin.CreateTestContext(httptest.NewRecorder())
 			initial.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", nil).
 				WithContext(service.WithUpstreamErrorMessage(context.Background(), "统一提示"))
-			taskCtx, recorder, cancel := newAsyncImageContext(initial, nil, time.Minute)
+			taskCtx, recorder, cancel, err := newAsyncImageContext(initial, nil, time.Minute)
+			require.NoError(t, err)
 			h.run(task.ID, service.PlatformOpenAI, taskCtx, recorder, cancel)
 			stored, err := store.Get(context.Background(), task.ID)
 			require.NoError(t, err)
@@ -111,7 +112,8 @@ func TestAsyncImageTaskRecordsOriginalUpstreamError(t *testing.T) {
 			initial, _ := gin.CreateTestContext(httptest.NewRecorder())
 			initial.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", nil).WithContext(ctx)
 			initial.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: owner.APIKeyID, UserID: owner.UserID})
-			taskCtx, recorder, cancel := newAsyncImageContext(initial, nil, time.Minute)
+			taskCtx, recorder, cancel, err := newAsyncImageContext(initial, nil, time.Minute)
+			require.NoError(t, err)
 			h.run(task.ID, service.PlatformOpenAI, taskCtx, recorder, cancel)
 			require.Equal(t, 1, executions)
 

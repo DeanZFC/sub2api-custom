@@ -244,6 +244,8 @@ func (r *apiKeyRepository) getForAuth(ctx context.Context, query *dbent.APIKeyQu
 				group.FieldProfitControlEnabled,
 				group.FieldProfitMinMargin,
 				group.FieldProfitSafetyBuffer,
+				// OpenAI 选号从 ctx 分组读取隐私门，漏选会放行未设置隐私的账号。
+				group.FieldRequirePrivacySet,
 			)
 		}).
 		// The fallback group becomes the effective billing group when selected, so

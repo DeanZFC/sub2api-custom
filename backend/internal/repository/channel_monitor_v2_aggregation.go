@@ -11,8 +11,8 @@ import (
 const channelMonitorV2PlatformSQL = `lower(` + usageLogEffectivePlatformExpr + `)`
 const channelMonitorV2ModelSQL = `COALESCE(NULLIF(TRIM(ul.requested_model), ''), NULLIF(TRIM(ul.model), ''), 'unknown')`
 
-// Retain the legacy streaming/WS token subset for compatibility with existing
-// cache_eligible_* columns. Cache-rate calculations use the full token totals.
+// Cache rate includes only streaming/WS requests. Explicit synchronous and
+// cyber-billing request types are excluded even if legacy flags are set.
 const channelMonitorV2CacheEligibleUL = `(COALESCE(ul.request_type, 0) NOT IN (1, 4, 6) AND (ul.stream = TRUE OR ul.openai_ws_mode = TRUE))`
 
 // Tiered retention balances UI windows against storage:

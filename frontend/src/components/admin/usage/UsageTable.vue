@@ -201,15 +201,19 @@
               </div>
             </div>
             <!-- Token Detail Tooltip -->
-            <div
+            <button
+              type="button"
               class="group relative"
+              :aria-label="t('usage.tokenDetails')"
+              :aria-expanded="tokenTooltipVisible && tokenTooltipData === row"
               @mouseenter="showTokenTooltip($event, row)"
               @mouseleave="hideTokenTooltip"
+              @click.stop="toggleDetailsTooltip($event, row, 'token')"
             >
               <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
                 <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
               </div>
-            </div>
+            </button>
           </div>
         </template>
 
@@ -224,15 +228,19 @@
                 class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
               >{{ t('admin.usage.longContext') }}</span>
               <!-- Cost Detail Tooltip -->
-              <div
+              <button
+                type="button"
                 class="group relative"
+                :aria-label="t('usage.costDetails')"
+                :aria-expanded="tooltipVisible && tooltipData === row"
                 @mouseenter="showTooltip($event, row)"
                 @mouseleave="hideTooltip"
+                @click.stop="toggleDetailsTooltip($event, row, 'cost')"
               >
                 <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
                   <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
                 </div>
-              </div>
+              </button>
             </div>
             <div v-if="showAccountBilling && row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
               A ${{ accountBilled(row).toFixed(6) }}
@@ -324,13 +332,14 @@
   <Teleport to="body">
     <div
       v-if="tokenTooltipVisible"
-      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
-      :style="{
-        left: tokenTooltipPosition.x + 'px',
-        top: tokenTooltipPosition.y + 'px'
-      }"
+      ref="tokenTooltipElement"
+      role="tooltip"
+      data-testid="token-details-tooltip"
+      class="fixed z-[9999] overflow-y-auto overscroll-contain rounded-lg border border-gray-700 bg-gray-900 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
+      :style="tooltipStyle"
+      @mouseleave="hideTokenTooltip"
     >
-      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+      <div class="break-words px-3 py-2.5 [overflow-wrap:anywhere]">
         <div class="space-y-1.5">
           <div>
             <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.tokenDetails') }}</div>
@@ -407,7 +416,6 @@
             <span class="font-semibold text-blue-400">{{ ((tokenTooltipData?.input_tokens || 0) + (tokenTooltipData?.output_tokens || 0) + (tokenTooltipData?.cache_creation_tokens || 0) + (tokenTooltipData?.cache_read_tokens || 0)).toLocaleString() }}</span>
           </div>
         </div>
-        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
       </div>
     </div>
   </Teleport>
@@ -416,13 +424,14 @@
   <Teleport to="body">
     <div
       v-if="tooltipVisible"
-      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
-      :style="{
-        left: tooltipPosition.x + 'px',
-        top: tooltipPosition.y + 'px'
-      }"
+      ref="costTooltipElement"
+      role="tooltip"
+      data-testid="cost-details-tooltip"
+      class="fixed z-[9999] overflow-y-auto overscroll-contain rounded-lg border border-gray-700 bg-gray-900 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
+      :style="tooltipStyle"
+      @mouseleave="hideTooltip"
     >
-      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+      <div class="break-words px-3 py-2.5 [overflow-wrap:anywhere]">
         <div class="space-y-1.5">
           <!-- Cost Breakdown -->
           <div class="mb-2 border-b border-gray-700 pb-1.5">
@@ -544,14 +553,13 @@
             </div>
           </template>
         </div>
-        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
       </div>
     </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, type CSSProperties } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
@@ -560,6 +568,7 @@ import { calculateCacheHitRate, formatCacheRate, isCacheEligibleRequest } from '
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
+import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import {
   LATENCY_BAR_CLASSES,
   LATENCY_BAR_FROM_CLASSES,
@@ -709,15 +718,20 @@ const copyRequestId = (requestId: string) => copyIdentifier(requestId, t('admin.
 const copyUpstreamRequestId = (upstreamRequestId: string) =>
   copyIdentifier(upstreamRequestId, t('admin.usage.upstreamRequestIdCopied'))
 
-// Tooltip state - cost
-const tooltipVisible = ref(false)
-const tooltipPosition = ref({ x: 0, y: 0 })
-const tooltipData = ref<AdminUsageLog | null>(null)
-
-// Tooltip state - token
-const tokenTooltipVisible = ref(false)
-const tokenTooltipPosition = ref({ x: 0, y: 0 })
-const tokenTooltipData = ref<AdminUsageLog | null>(null)
+type DetailsTooltipKind = 'cost' | 'token'
+const activeTooltip = shallowRef<{
+  kind: DetailsTooltipKind
+  row: AdminUsageLog
+  target: HTMLElement
+  pinned: boolean
+} | null>(null)
+const tooltipStyle = ref<CSSProperties>({})
+const costTooltipElement = ref<HTMLElement | null>(null)
+const tokenTooltipElement = ref<HTMLElement | null>(null)
+const tooltipVisible = computed(() => activeTooltip.value?.kind === 'cost')
+const tooltipData = computed(() => tooltipVisible.value ? activeTooltip.value!.row : null)
+const tokenTooltipVisible = computed(() => activeTooltip.value?.kind === 'token')
+const tokenTooltipData = computed(() => tokenTooltipVisible.value ? activeTooltip.value!.row : null)
 
 const cacheHitRate = (row: AdminUsageLog): number | null =>
   isCacheEligibleRequest(row) ? calculateCacheHitRate(textInputTokens(row), row.cache_read_tokens, row.cache_creation_tokens) : null
@@ -763,33 +777,79 @@ const formatDuration = (ms: number | null | undefined): string => {
   return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
 }
 
-// Cost tooltip functions
-const showTooltip = (event: MouseEvent, row: AdminUsageLog) => {
+const showDetailsTooltip = (event: MouseEvent, row: AdminUsageLog, kind: DetailsTooltipKind, pinned = false) => {
   const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
-  tooltipData.value = row
-  tooltipPosition.value.x = rect.right + 8
-  tooltipPosition.value.y = rect.top + rect.height / 2
-  tooltipVisible.value = true
+  if (!pinned && activeTooltip.value?.pinned) return
+  const position = getFloatingPanelPosition(target.getBoundingClientRect(), window.innerWidth, window.innerHeight, {
+    viewportPadding: 8,
+  })
+  tooltipStyle.value = {
+    left: `${position.left}px`,
+    top: position.top == null ? undefined : `${position.top}px`,
+    bottom: position.bottom == null ? undefined : `${position.bottom}px`,
+    width: `${position.width}px`,
+    maxHeight: `${position.maxHeight}px`,
+  }
+  activeTooltip.value = { kind, row, target, pinned }
 }
 
-const hideTooltip = () => {
-  tooltipVisible.value = false
-  tooltipData.value = null
+const closeDetailsTooltip = () => {
+  activeTooltip.value = null
 }
 
-// Token tooltip functions
-const showTokenTooltip = (event: MouseEvent, row: AdminUsageLog) => {
-  const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
-  tokenTooltipData.value = row
-  tokenTooltipPosition.value.x = rect.right + 8
-  tokenTooltipPosition.value.y = rect.top + rect.height / 2
-  tokenTooltipVisible.value = true
+const currentTooltipElement = () => tooltipVisible.value ? costTooltipElement.value : tokenTooltipElement.value
+
+const hideDetailsTooltip = (event: MouseEvent) => {
+  if (activeTooltip.value?.pinned) return
+  const nextTarget = event.relatedTarget
+  if (nextTarget instanceof Node && (
+    currentTooltipElement()?.contains(nextTarget) || activeTooltip.value?.target.contains(nextTarget)
+  )) return
+  closeDetailsTooltip()
 }
 
-const hideTokenTooltip = () => {
-  tokenTooltipVisible.value = false
-  tokenTooltipData.value = null
+const showTooltip = (event: MouseEvent, row: AdminUsageLog) => showDetailsTooltip(event, row, 'cost')
+const showTokenTooltip = (event: MouseEvent, row: AdminUsageLog) => showDetailsTooltip(event, row, 'token')
+const hideTooltip = hideDetailsTooltip
+const hideTokenTooltip = hideDetailsTooltip
+
+const toggleDetailsTooltip = (event: MouseEvent, row: AdminUsageLog, kind: DetailsTooltipKind) => {
+  if (activeTooltip.value?.pinned && activeTooltip.value.target === event.currentTarget) {
+    closeDetailsTooltip()
+    return
+  }
+  showDetailsTooltip(event, row, kind, true)
 }
+
+const onDocumentClick = (event: MouseEvent) => {
+  const target = event.target
+  if (target instanceof Node && (
+    activeTooltip.value?.target.contains(target) || currentTooltipElement()?.contains(target)
+  )) return
+  closeDetailsTooltip()
+}
+
+const onDocumentKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') closeDetailsTooltip()
+}
+
+const onViewportScroll = (event: Event) => {
+  // Keep long details open while scrolling inside the panel itself.
+  if (event.target instanceof Node && currentTooltipElement()?.contains(event.target)) return
+  closeDetailsTooltip()
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick, true)
+  document.addEventListener('keydown', onDocumentKeydown)
+  window.addEventListener('resize', closeDetailsTooltip)
+  window.addEventListener('scroll', onViewportScroll, true)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocumentClick, true)
+  document.removeEventListener('keydown', onDocumentKeydown)
+  window.removeEventListener('resize', closeDetailsTooltip)
+  window.removeEventListener('scroll', onViewportScroll, true)
+})
 </script>

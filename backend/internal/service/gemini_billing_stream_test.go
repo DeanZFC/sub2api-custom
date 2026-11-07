@@ -42,6 +42,29 @@ func assertGeminiBillingFailoverBeforeWrite(t *testing.T, c *gin.Context, body s
 	require.Empty(t, c.Writer.Header().Get("X-RateLimit-Remaining-Requests"), "failed account headers must not leak into the final response")
 }
 
+func TestGeminiCollectorKeepsBillingEvidenceWithConfiguredLineLimit(t *testing.T) {
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: 1024}}
+	for _, oauth := range []bool{false, true} {
+		t.Run(map[bool]string{false: "api_key", true: "oauth"}[oauth], func(t *testing.T) {
+			payload := geminiStreamBillingError
+			if oauth {
+				payload = `{"response":` + payload + `}`
+			}
+			var observed []byte
+			_, usage, stats, err := collectGeminiSSEObserved(cfg, strings.NewReader("data: "+payload+"\n\n"), oauth, func(raw []byte) {
+				if IsUpstreamBillingError(http.StatusOK, raw) {
+					observed = append([]byte(nil), raw...)
+				}
+			})
+			require.NoError(t, err)
+			require.JSONEq(t, geminiStreamBillingError, string(observed))
+			require.Equal(t, 1, stats.dataEvents)
+			require.Equal(t, 5, usage.InputTokens)
+			require.Equal(t, 9, usage.OutputTokens)
+		})
+	}
+}
+
 func TestGeminiMessagesBillingStreamFailsOverBeforeWritingHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, rec := newGeminiNativeTestContext(t)

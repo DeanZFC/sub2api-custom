@@ -112,8 +112,8 @@ type ChannelMonitorV2Metric struct {
 	HasCacheSamples      bool     `json:"has_cache_samples"`
 	CacheRateNumerator   int64    `json:"cache_rate_numerator"`
 	CacheRateDenominator int64    `json:"cache_rate_denominator"`
-	// CacheEligibleInputTokens retains the legacy streaming/WS subset for API
-	// compatibility; cache rate uses InputTokens and all cache token totals.
+	// CacheEligibleInputTokens counts streaming/WS input tokens. Cache rate uses
+	// this subset together with its eligible cache creation and read tokens.
 	CacheEligibleInputTokens int64                   `json:"cache_eligible_input_tokens,omitempty"`
 	TTFT                     ChannelMonitorV2Latency `json:"ttft"`
 	Duration                 ChannelMonitorV2Latency `json:"duration"`

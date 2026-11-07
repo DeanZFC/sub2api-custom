@@ -149,6 +149,7 @@ docs/*
 !docs/ANTIGRAVITY_ATTRIBUTION_429.md
 !docs/agent-resource-safety.md
 !docs/openai-context-limit-errors.md
+!docs/moego-json-batching.md
 !docs/admin-api-keys.md
 !docs/mcp.md
 !docs/PAYMENT.md
@@ -194,3 +195,4 @@ deploy/docker-compose.updater.json
 !docs/group-anti-distillation.md
 !docs/scheduler-outbox-retries.md
 !docs/upstream-protection-update-20261106.md
+!docs/upstream-main-merge-20261107.md

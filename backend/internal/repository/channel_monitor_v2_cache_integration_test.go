@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestChannelMonitorV2OfficialCacheRateIntegration(t *testing.T) {
+func TestChannelMonitorV2StreamingCacheRateIntegration(t *testing.T) {
 	dsn := os.Getenv("MIGRATION_TEST_DATABASE_URL")
 	if dsn == "" {
 		dsn = integrationDatabaseDSN
@@ -107,7 +107,8 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 	start := time.Now().UTC().Truncate(time.Hour)
 	end := start.Add(time.Hour)
 	exec(`INSERT INTO usage_logs(created_at,request_id,request_type,stream,openai_ws_mode,input_tokens,cache_creation_tokens,cache_read_tokens) VALUES
- ($1,'sync',1,false,false,1000,30,50),($1,'stream',2,true,false,10,0,90),($1,'ws',3,false,true,10,0,90),($1,'legacy-sync',0,false,false,2000,0,0)`, start)
+ ($1,'sync',1,false,false,1000,30,50),($1,'stream',2,true,false,10,10,90),($1,'ws',3,false,true,10,0,90),($1,'legacy-sync',0,false,false,2000,0,0),
+ ($1,'stale-sync-flags',1,true,true,100,20,10),($1,'legacy-stream',0,true,false,0,0,100)`, start)
 	for _, query := range []string{channelMonitorV2UsageMetricsSQL, channelMonitorV2UserMetricsSQL} {
 		exec(fmt.Sprintf(query, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL), start, end)
 	}
@@ -120,28 +121,29 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 		acc := newMetricAccumulator()
 		acc.addFact(f)
 		metric := acc.metric(1, true)
-		require.Equal(t, int64(4), metric.RequestCount, table)
-		require.Equal(t, int64(3320), metric.TokenCount, table)
-		require.Equal(t, int64(230), metric.CacheReadTokens, table)
-		require.Equal(t, int64(230), metric.CacheRateNumerator, table)
-		require.Equal(t, int64(3280), metric.CacheRateDenominator, table)
+		require.Equal(t, int64(6), metric.RequestCount, table)
+		require.Equal(t, int64(3580), metric.TokenCount, table)
+		require.Equal(t, int64(340), metric.CacheReadTokens, table)
+		require.Equal(t, int64(280), metric.CacheRateNumerator, table)
+		require.Equal(t, int64(310), metric.CacheRateDenominator, table)
 		require.True(t, metric.HasCacheSamples, table)
-		require.InDelta(t, 230.0/3280.0, metric.CacheRate, .00001, table)
-		// Eligibility columns remain maintained for compatibility; they no longer
-		// supply the cache health signal for minute facts or rollups.
+		require.InDelta(t, 280.0/310.0, metric.CacheRate, .00001, table)
+		// Both minute facts and rollups retain the streaming/WS subset, including
+		// cache writes, while synchronous traffic stays in the full token totals.
 		require.Equal(t, int64(20), f.CacheEligibleInput, table)
-		require.Equal(t, int64(180), f.CacheEligibleRead, table)
+		require.Equal(t, int64(10), f.CacheEligibleCreation, table)
+		require.Equal(t, int64(280), f.CacheEligibleRead, table)
 		thresholds := service.DefaultChannelMonitorV2HealthThresholds()
 		thresholds.MinimumSample = 1
 		thresholds.WarningCacheRate, thresholds.CriticalCacheRate = 0.85, 0.60
 		health := service.ChannelMonitorV2HealthForWithThresholds(metric, thresholds)
 		require.NotNil(t, health.CacheScore, table)
 		require.NotNil(t, health.Score, table)
-		cacheScore := 100 * 230.0 / 3280.0
+		cacheScore := 100 * 280.0 / 310.0
 		require.InDelta(t, cacheScore, *health.CacheScore, .00001, table)
 		require.InDelta(t, (100*thresholds.ErrorWeight+cacheScore*thresholds.CacheWeight)/(thresholds.ErrorWeight+thresholds.CacheWeight), *health.Score, .00001, table)
-		require.Equal(t, "critical", health.Cache, table)
-		require.Equal(t, "warning", health.Overall, table)
+		require.Equal(t, "healthy", health.Cache, table)
+		require.Equal(t, "healthy", health.Overall, table)
 	}
 
 	t.Run("output TPS weights valid generation time across facts and rollups", func(t *testing.T) {
