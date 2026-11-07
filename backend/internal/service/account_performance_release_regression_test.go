@@ -72,7 +72,7 @@ func (r *performanceStartupRepo) EnabledIDs(context.Context) ([]int64, error) {
 
 func TestAccountPerformanceStartsEvaluation(t *testing.T) {
 	r := &performanceStartupRepo{called: make(chan struct{}, 1)}
-	s := ProvideAccountPerformanceService(r)
+	s := ProvideAccountPerformanceService(r, nil)
 	defer s.Stop()
 	select {
 	case <-r.called:

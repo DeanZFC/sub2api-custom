@@ -1,13 +1,24 @@
 <template>
-  <div class="min-w-[196px]">
-    <div
-      v-if="timeline.length || statistics"
+  <div class="min-w-[252px]">
+    <component
+      :is="canConfigure ? 'button' : 'div'"
+      :type="canConfigure ? 'button' : undefined"
+      v-if="canConfigure || timeline.length || statistics"
+      :aria-label="canConfigure ? t('accountPerformance.configure') : undefined"
+      :class="canConfigure ? 'w-full rounded p-1 hover:bg-gray-100 dark:hover:bg-dark-700 focus-visible:ring-2 focus-visible:ring-primary-400' : ''"
+      @click.stop="canConfigure && emit('configure')"
       class="mb-1 text-right text-[11px] leading-4 tabular-nums"
       :title="statisticsLoadError ? t('admin.accounts.recentRequests.metricsLoadFailed') : statisticsLoading && !statistics ? t('common.loading') : t('admin.accounts.recentRequests.metricsHint')"
       data-testid="recent-requests-metrics"
     >
       <div class="mb-0.5 text-[10px] text-gray-400 dark:text-gray-500">{{ t('admin.accounts.recentRequests.metricsWindow') }}</div>
-      <div class="grid grid-cols-3 gap-x-2">
+      <div v-if="performanceUnavailable || performance?.monitoring_available === false" class="text-amber-600">{{ t('accountPerformance.unavailable') }}</div>
+      <div v-else-if="performance?.paused || performance?.config.enabled" class="text-amber-600" data-testid="metric-rule-status">{{ t(performance?.trial_started_at ? 'accountPerformance.trial' : performance?.paused ? 'accountPerformance.paused' : 'accountPerformance.active') }}</div>
+      <div class="grid grid-cols-4 gap-x-2">
+        <div :title="t('admin.accounts.recentRequests.metricSamples', { count: metrics.requestSamples })">
+          <div class="text-gray-500 dark:text-gray-400">{{ t('accountPerformance.success_rate') }}</div>
+          <div class="font-medium text-emerald-600 dark:text-emerald-400" data-testid="recent-requests-success-rate">{{ formatCacheRate(metrics.successRate) }}</div>
+        </div>
         <div :title="t('admin.accounts.recentRequests.metricSamples', { count: metrics.cacheSamples })">
           <div class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.recentRequests.cacheRate') }}</div>
           <div class="font-medium text-sky-600 dark:text-sky-400" data-testid="recent-requests-cache-rate">{{ formatCacheRate(metrics.cacheRate) }}</div>
@@ -21,7 +32,7 @@
           <div class="font-medium text-gray-700 dark:text-gray-200" data-testid="recent-requests-duration">{{ formatLatency(metrics.averageDurationMs) }}</div>
         </div>
       </div>
-    </div>
+    </component>
     <div v-if="!requests.length && loading && !loadError" class="flex h-7 items-center justify-end gap-1" :aria-label="t('common.loading')">
       <span v-for="index in 10" :key="index" class="h-6 w-1.5 animate-pulse rounded-full bg-gray-200 dark:bg-dark-600" />
     </div>
@@ -90,6 +101,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type CSSProperties } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { OpsAccountRequestStats, OpsRequestDetail } from '@/api/admin/ops'
+import type { AccountPerformance } from '@/types/accountPerformance'
 import Icon from '@/components/icons/Icon.vue'
 import RecentRequestDetails from './RecentRequestDetails.vue'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
@@ -102,6 +114,9 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   loadError?: boolean
   interactive?: boolean
+  canConfigure?: boolean
+  performance?: AccountPerformance
+  performanceUnavailable?: boolean
   statistics?: OpsAccountRequestStats | null
   statisticsLoading?: boolean
   statisticsLoadError?: boolean
@@ -109,6 +124,8 @@ const props = withDefaults(defineProps<{
   loadError: false,
   interactive: true,
 })
+
+const emit = defineEmits<{ configure: [] }>()
 
 // Request indicators and the full-hour aggregate have independent sample sets.
 const recentRequests = computed(() => props.requests.slice(0, 10))
@@ -118,6 +135,8 @@ const latestCreatedAt = computed(() => recentRequests.value[0]?.created_at ?? ''
 const metrics = computed(() => {
   const statistics = props.statisticsLoadError ? null : props.statistics
   return {
+    successRate: statistics?.success_rate ?? null,
+    requestSamples: statistics?.request_samples ?? 0,
     cacheRate: statistics?.cache_rate ?? null,
     cacheSamples: statistics?.cache_samples ?? 0,
     averageFirstTokenMs: statistics?.avg_first_token_ms ?? null,

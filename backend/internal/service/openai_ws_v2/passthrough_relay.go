@@ -27,7 +27,7 @@ type FrameConn interface {
 }
 
 type Usage struct {
-	ProtectionMediaObserved  bool
+	CacheReadMediaObserved   bool
 	CacheReadKnown           bool
 	InputTokens              int
 	ImageInputTokens         int
@@ -626,7 +626,7 @@ func runUpstreamToClient(
 		}
 		if dropDownstreamWrites != nil && dropDownstreamWrites.Load() {
 			// Drained usage still bills the completed upstream generation, but must
-			// not create a zero-cache protection sample after client disconnect.
+			// not mark cache statistics as complete after client disconnect.
 			observedEvent.usage.CacheReadKnown = false
 		}
 		emitTurnComplete(onTurnComplete, state, observedEvent)
@@ -1223,10 +1223,10 @@ func parseUsageAndAccumulate(
 		ImageOutputTokens:        int(imageTokens),
 	}
 
-	parsedUsage.ProtectionMediaObserved = state.turnUsage.ProtectionMediaObserved ||
+	parsedUsage.CacheReadMediaObserved = state.turnUsage.CacheReadMediaObserved ||
 		state.turnUsage.ImageInputTokens > 0 || state.turnUsage.ImageOutputTokens > 0 ||
 		parsedUsage.ImageInputTokens > 0 || parsedUsage.ImageOutputTokens > 0
-	if parsedUsage.ProtectionMediaObserved {
+	if parsedUsage.CacheReadMediaObserved {
 		parsedUsage.CacheReadKnown = false
 	}
 	if status := gjson.GetBytes(message, "response.status").String(); status != "" && status != "completed" {
@@ -1253,7 +1253,7 @@ func mergeRelayUsageNonZero(dst *Usage, src Usage) {
 	if dst == nil {
 		return
 	}
-	dst.ProtectionMediaObserved = dst.ProtectionMediaObserved || src.ProtectionMediaObserved
+	dst.CacheReadMediaObserved = dst.CacheReadMediaObserved || src.CacheReadMediaObserved
 	if src.InputTokens > 0 {
 		dst.InputTokens = src.InputTokens
 	}

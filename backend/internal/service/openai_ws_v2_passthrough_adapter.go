@@ -1389,7 +1389,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2PassthroughWithVMRoute(
 						CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 						CacheReadKnown:           turn.Usage.CacheReadKnown,
-						cacheReadMediaObserved:   turn.Usage.ProtectionMediaObserved,
+						cacheReadMediaObserved:   turn.Usage.CacheReadMediaObserved,
 						ImageOutputTokens:        turn.Usage.ImageOutputTokens,
 					},
 					Model:                         turnRequestModel,

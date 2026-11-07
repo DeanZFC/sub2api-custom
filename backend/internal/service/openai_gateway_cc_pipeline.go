@@ -313,11 +313,11 @@ func (s *OpenAIGatewayService) scanCCStream(
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
 
-		finished, incomplete := openAIProtectionCCFinishState([]byte(payload))
+		finished, incomplete := openAICCFinishState([]byte(payload))
 		protectionFinished = protectionFinished || finished
 		protectionIncomplete = protectionIncomplete || incomplete
 		if u := extractCCStreamUsage(payload); u != nil {
-			mergeOpenAIProtectionUsageEvidence(st.Usage, u)
+			mergeOpenAICacheUsageEvidence(st.Usage, u)
 			st.Usage = *u
 		}
 
@@ -388,7 +388,7 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsed
 	}
-	finished, incomplete := openAIProtectionCCFinishState(respBody)
+	finished, incomplete := openAICCFinishState(respBody)
 	if !finished || incomplete {
 		usage.CacheReadKnown = false
 	}

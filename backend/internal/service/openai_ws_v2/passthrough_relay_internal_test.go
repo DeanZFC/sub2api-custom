@@ -367,7 +367,7 @@ func TestParseUsageAndAccumulateAcceptsChatUsageAliases(t *testing.T) {
 	require.Equal(t, 4, got.CacheReadInputTokens)
 	require.Equal(t, 2, got.ImageOutputTokens)
 	require.False(t, got.CacheReadKnown, "image usage must remain outside text protection")
-	require.True(t, got.ProtectionMediaObserved)
+	require.True(t, got.CacheReadMediaObserved)
 	// Session aggregates contain billing counters, not per-turn protection state.
 	require.Equal(t, Usage{InputTokens: 12, OutputTokens: 6, CacheReadInputTokens: 4, ImageOutputTokens: 2}, state.usage)
 }
@@ -833,10 +833,10 @@ func TestRelayUsageProtectionRetainsProgressiveMediaEvidenceUntilTurnEnds(t *tes
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", nil)
 	turn := finalizeRelayTurnUsage(state)
 	require.False(t, turn.CacheReadKnown)
-	require.True(t, turn.ProtectionMediaObserved)
+	require.True(t, turn.CacheReadMediaObserved)
 	require.Zero(t, turn.ImageInputTokens, "protection metadata must not change terminal billing counters")
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", nil)
 	next := finalizeRelayTurnUsage(state)
 	require.True(t, next.CacheReadKnown, "the next text turn must not inherit media from the prior turn")
-	require.False(t, next.ProtectionMediaObserved)
+	require.False(t, next.CacheReadMediaObserved)
 }

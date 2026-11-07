@@ -17,9 +17,9 @@ func TestOpsAccountRequestStatsReadsOneAggregateWithoutPagination(t *testing.T) 
 	start := end.Add(-time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(opsAccountRequestStatsSQL)).
 		WithArgs(start, end, "{1,2}").
-		WillReturnRows(sqlmock.NewRows([]string{"account_id", "cache_rate", "avg_first_token_ms", "avg_duration_ms", "cache_samples", "first_token_samples", "duration_samples"}).
-			AddRow(1, 0.8, 0, 0, 25, 25, 30).
-			AddRow(2, nil, nil, nil, 0, 0, 0))
+		WillReturnRows(sqlmock.NewRows([]string{"account_id", "cache_rate", "avg_first_token_ms", "avg_duration_ms", "cache_samples", "first_token_samples", "duration_samples", "success_rate", "success_requests", "error_requests", "request_samples"}).
+			AddRow(1, 0.8, 0, 0, 25, 25, 30, 0.9, 27, 3, 30).
+			AddRow(2, nil, nil, nil, 0, 0, 0, nil, 0, 0, 0))
 	stats, err := repo.GetAccountRequestStats(context.Background(), []int64{1, 2}, start, end)
 	require.NoError(t, err)
 	require.Len(t, stats, 2)

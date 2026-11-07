@@ -1,5 +1,7 @@
 # 上游账号保护与官方主线合并（2026-11-06）
 
+> 后续调整：本文记录的账号 HTTP 保护和分组零缓存保护现已退役，统一使用[账号请求指标规则](account-performance-monitor.md)。
+
 ## 合并基线
 
 - 官方 Wei-Shaw/sub2api：4a4a83ee5 → 25608d216bb7be04e4a646830cb065cd09b7d7e9，包含 24 条提交（含 merge / sponsors）。

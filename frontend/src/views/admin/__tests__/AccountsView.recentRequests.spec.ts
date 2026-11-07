@@ -53,6 +53,7 @@ const request: OpsRequestDetail = {
   first_token_ms: 1000, duration_ms: 2000,
 }
 const statistics: OpsAccountRequestStats = {
+  success_rate: 0.9, success_requests: 90, error_requests: 10, request_samples: 100,
   window_start: '2026-09-11T09:30:00+08:00', window_end: '2026-09-11T10:30:00+08:00',
   cache_rate: 0.8, avg_first_token_ms: 3000, avg_duration_ms: 8000,
   cache_samples: 32, first_token_samples: 33, duration_samples: 35,

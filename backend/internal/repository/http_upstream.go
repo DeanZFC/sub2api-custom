@@ -234,7 +234,7 @@ func (s *httpUpstreamService) do(req *http.Request, proxyURL string, accountID i
 
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client, accountID)
+	client = httpClientWithGrokAccessDeniedFallback(client)
 	var bpsTrace *transportdiag.Trace
 	if profile == service.HTTPUpstreamProfileExcelBPS {
 		bpsTrace = transportdiag.FromContext(req.Context())
@@ -315,7 +315,7 @@ func (s *httpUpstreamService) doWithTLS(req *http.Request, proxyURL string, acco
 	}
 
 	client := s.httpClientForUpstreamRequest(entry.client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client, accountID)
+	client = httpClientWithGrokAccessDeniedFallback(client)
 	resp, err := doUpstreamRequest(client, req, s.upstreamDrainTimeout())
 	if err != nil {
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -426,7 +426,7 @@ type grokAccessDeniedFallbackTransport struct {
 	base http.RoundTripper
 }
 
-func httpClientWithGrokAccessDeniedFallback(client *http.Client, accountIDs ...int64) *http.Client {
+func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
 	if client == nil {
 		return nil
 	}
@@ -435,13 +435,7 @@ func httpClientWithGrokAccessDeniedFallback(client *http.Client, accountIDs ...i
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	// Observe each physical RoundTrip before the compatibility fallback so
-	// a rejected send followed by a successful retry remains two samples.
-	var accountID int64
-	if len(accountIDs) > 0 {
-		accountID = accountIDs[0]
-	}
-	clone.Transport = &grokAccessDeniedFallbackTransport{base: &accountResponseTransport{base: base, accountID: accountID}}
+	clone.Transport = &grokAccessDeniedFallbackTransport{base: base}
 	return &clone
 }
 

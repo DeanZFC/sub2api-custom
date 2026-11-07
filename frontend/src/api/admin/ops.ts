@@ -1194,6 +1194,10 @@ export async function listRequestErrorUpstreamErrors(
 }
 
 export interface OpsAccountRequestStats {
+  success_rate: number | null
+  success_requests: number
+  error_requests: number
+  request_samples: number
   window_start: string
   window_end: string
   cache_rate: number | null

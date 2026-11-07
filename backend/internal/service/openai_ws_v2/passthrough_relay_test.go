@@ -431,7 +431,7 @@ func TestRelay_ClientDisconnect_DrainCapturesLateUsage(t *testing.T) {
 	require.Equal(t, 4, result.Usage.OutputTokens)
 	require.Equal(t, 1, result.Usage.CacheReadInputTokens)
 	require.Equal(t, 1, observed.Usage.CacheReadInputTokens)
-	require.False(t, observed.Usage.CacheReadKnown, "drained terminal bills usage but cannot trigger zero-cache protection")
+	require.False(t, observed.Usage.CacheReadKnown, "drained terminal bills usage but does not establish complete cache statistics")
 	require.Equal(t, int64(1), result.ClientToUpstreamFrames)
 	require.Equal(t, int64(0), result.UpstreamToClientFrames)
 	require.Equal(t, int64(1), result.DroppedDownstreamFrames)

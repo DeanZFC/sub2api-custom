@@ -366,14 +366,14 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
 			terminal.ObserveDataLine(trimmedPayload)
-			finished, incomplete := openAIProtectionCCFinishState([]byte(trimmedPayload))
+			finished, incomplete := openAICCFinishState([]byte(trimmedPayload))
 			protectionFinished = protectionFinished || finished
 			protectionIncomplete = protectionIncomplete || incomplete
 			if trimmedPayload != "[DONE]" {
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
 				if u := extractCCStreamUsage(payload); u != nil {
-					mergeOpenAIProtectionUsageEvidence(usage, u)
+					mergeOpenAICacheUsageEvidence(usage, u)
 					usage = *u
 				}
 				if firstTokenMs == nil && !usageOnlyChunk {
@@ -560,7 +560,7 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsedUsage
 	}
-	finished, incomplete := openAIProtectionCCFinishState(respBody)
+	finished, incomplete := openAICCFinishState(respBody)
 	if !finished || incomplete {
 		usage.CacheReadKnown = false
 	}

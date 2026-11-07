@@ -55,7 +55,7 @@ func (h *AccountHandler) AccountPerformanceBatch(c *gin.Context) {
 			return
 		}
 	}
-	data, err := h.performance.Repo.Read(c.Request.Context(), req.IDs, time.Now())
+	data, err := h.performance.Read(c.Request.Context(), req.IDs, time.Now())
 	if err != nil {
 		response.Error(c, 503, "Performance metrics unavailable")
 		return
@@ -88,6 +88,10 @@ func (h *AccountHandler) SaveAccountPerformance(c *gin.Context) {
 	}
 	if err := req.Config.Validate(); err != nil {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if req.Config.Enabled && !h.performance.MonitoringAvailable(c.Request.Context()) {
+		response.BadRequest(c, "Enable Ops monitoring before enabling metric rules")
 		return
 	}
 	performanceWriteResult(c, h.performance.Repo.Save(c.Request.Context(), id, req.Config, *req.Revision, performanceActor(c)))

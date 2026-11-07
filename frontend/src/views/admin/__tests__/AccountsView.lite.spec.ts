@@ -135,7 +135,6 @@ function mountView(stubActionMenu = true) {
         EditAccountModal: EditAccountModalStub,
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
-        AccountPerformanceCell: true,
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: AccountGroupsCellStub,

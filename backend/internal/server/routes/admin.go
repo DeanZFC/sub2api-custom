@@ -387,8 +387,6 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.POST("/:id/composite-routes/preview", h.Admin.Group.PreviewCompositeRoute)
 		groups.PUT("/:id/composite-routes/:route_id", h.Admin.Group.UpdateCompositeRoute)
 		groups.DELETE("/:id/composite-routes/:route_id", h.Admin.Group.DeleteCompositeRoute)
-		groups.GET("/:id/anti-distillation", h.Admin.Group.GetAntiDistillation)
-		groups.PUT("/:id/anti-distillation", h.Admin.Group.SaveAntiDistillation)
 		groups.GET("/:id", h.Admin.Group.GetByID)
 		groups.POST("", h.Admin.Group.Create)
 		groups.POST("/:id/duplicate", h.Admin.Group.Duplicate)
@@ -677,8 +675,6 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpA
 		// 流超时处理配置
 		adminSettings.GET("/stream-timeout", h.Admin.Setting.GetStreamTimeoutSettings)
 		adminSettings.PUT("/stream-timeout", h.Admin.Setting.UpdateStreamTimeoutSettings)
-		adminSettings.GET("/account-performance", h.Admin.Setting.GetAccountPerformanceSettings)
-		adminSettings.PUT("/account-performance", h.Admin.Setting.UpdateAccountPerformanceSettings)
 		// 请求整流器配置
 		adminSettings.GET("/rectifier", h.Admin.Setting.GetRectifierSettings)
 		adminSettings.PUT("/rectifier", h.Admin.Setting.UpdateRectifierSettings)

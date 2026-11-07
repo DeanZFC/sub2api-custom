@@ -8,9 +8,12 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-// OpsAccountRequestStats covers all recorded successful requests in one rolling
-// hour. Nullable metrics distinguish unavailable telemetry from measured zero.
+// OpsAccountRequestStats covers recorded request outcomes in one rolling hour. Nullable metrics distinguish unavailable telemetry from measured zero.
 type OpsAccountRequestStats struct {
+	SuccessRate       *float64  `json:"success_rate"`
+	SuccessRequests   int64     `json:"success_requests"`
+	ErrorRequests     int64     `json:"error_requests"`
+	RequestSamples    int64     `json:"request_samples"`
 	WindowStart       time.Time `json:"window_start"`
 	WindowEnd         time.Time `json:"window_end"`
 	CacheRate         *float64  `json:"cache_rate"`

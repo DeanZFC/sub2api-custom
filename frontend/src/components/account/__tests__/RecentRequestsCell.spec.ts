@@ -23,6 +23,7 @@ const failure: OpsRequestDetail = {
   status_code: 502, message: '<script>alert(1)</script> upstream failed', stream: false,
 }
 const statistics: OpsAccountRequestStats = {
+  success_rate: 0.9, success_requests: 90, error_requests: 10, request_samples: 100,
   window_start: '2026-09-11T09:30:00+08:00', window_end: '2026-09-11T10:30:00+08:00',
   cache_rate: 0.8, avg_first_token_ms: 3060, avg_duration_ms: 38660,
   cache_samples: 32, first_token_samples: 30, duration_samples: 35,
@@ -256,4 +257,14 @@ it.each([
   await wrapper.setProps({ requests: [{ ...success, ...request }] })
   await triggers()[0].trigger('mouseenter')
   expect(dialog()?.querySelector('[data-testid="recent-request-cache-rate"]')?.textContent).toBe(expected)
+})
+
+it('opens metric rules with no traffic and shows success before cache', async () => {
+ const w = mount(RecentRequestsCell, { props: { requests: [], statistics, canConfigure: true } })
+ expect(w.get('[data-testid="recent-requests-success-rate"]').text()).toBe('90.0%')
+ expect(w.html().indexOf('recent-requests-success-rate')).toBeLessThan(w.html().indexOf('recent-requests-cache-rate'))
+ await w.get('[data-testid="recent-requests-metrics"]').trigger('click'); expect(w.emitted('configure')).toHaveLength(1)
+ await w.setProps({ statistics: null }); expect(w.get('[data-testid="recent-requests-metrics"]').element.tagName).toBe('BUTTON')
+ await w.setProps({ canConfigure: false }); expect(w.find('[data-testid="recent-requests-metrics"]').exists()).toBe(false)
+ w.unmount()
 })

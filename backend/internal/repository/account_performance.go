@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -20,83 +20,75 @@ func NewAccountPerformanceRepository(db *sql.DB) service.AccountPerformanceRepos
 	return &accountPerformanceRepository{db: db}
 }
 
-// This custom build exposes the HTTP protection requested by administrators.
-// Detailed request/probe evidence belongs to a separate upstream subsystem;
-// absent evidence stays NULL and is never inferred from billed usage rows.
 const performanceMetricsSQL = `
-WITH source AS (SELECT unnest($1::bigint[]) AS id)
-SELECT ids.id,NULL::numeric,0::bigint,NULL::numeric,0::bigint,NULL::numeric,0::bigint,
- COALESCE(m.config,'{}'),COALESCE(m.revision,0),COALESCE(m.paused,false),COALESCE(m.pause_generation,0),m.paused_at,COALESCE(m.reason,'')
-FROM source ids
-JOIN accounts a ON a.id=ids.id AND a.deleted_at IS NULL
-LEFT JOIN account_performance_monitors m ON m.account_id=ids.id
-WHERE $2::timestamptz <= $3::timestamptz
-`
-
-func readAccountPerformanceWindowMinutes(ctx context.Context, db sqlExecutor) (int, error) {
-	rows, err := db.QueryContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyAccountPerformanceWindowMinutes)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = rows.Close() }()
-	var value string
-	if rows.Next() {
-		if err := rows.Scan(&value); err != nil {
-			return 0, err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	return service.ParseAccountPerformanceWindowMinutes(value)
-}
+SELECT a.id,COALESCE(m.config,'{}'),COALESCE(m.revision,0),COALESCE(m.paused,false),
+ COALESCE(m.pause_generation,0),m.paused_at,COALESCE(m.reason,''),m.trial_started_at,
+ COALESCE(m.trial_requests,0),m.metrics_since
+FROM accounts a LEFT JOIN account_performance_monitors m ON m.account_id=a.id
+WHERE a.id=ANY($1) AND a.deleted_at IS NULL`
 
 func readAccountPerformance(ctx context.Context, db sqlExecutor, ids []int64, now time.Time) (map[int64]service.AccountPerformance, error) {
 	out := make(map[int64]service.AccountPerformance, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	minutes, err := readAccountPerformanceWindowMinutes(ctx, db)
+	rows, err := db.QueryContext(ctx, performanceMetricsSQL, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
-	since := now.Add(-time.Duration(minutes) * time.Minute)
-	rows, err := db.QueryContext(ctx, performanceMetricsSQL, pq.Array(ids), since, now)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var m service.AccountPerformance
-		var config []byte
-		if err := rows.Scan(&m.AccountID, &m.AvgTPS, &m.TPSSamples, &m.AvgTTFTMs, &m.TTFTSamples, &m.DegradationPercent, &m.QualitySamples, &config, &m.Revision, &m.Paused, &m.PauseGeneration, &m.PausedAt, &m.Reason); err != nil {
+		m := service.AccountPerformance{Config: service.DefaultPerformanceConfig(), MonitoringAvailable: true}
+		var raw []byte
+		if err = rows.Scan(&m.AccountID, &raw, &m.Revision, &m.Paused, &m.PauseGeneration, &m.PausedAt, &m.Reason, &m.TrialStartedAt, &m.TrialRequests, &m.MetricsSince); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
-		if err := json.Unmarshal(config, &m.Config); err != nil {
+		if err = json.Unmarshal(raw, &m.Config); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
-		m.WindowStart, m.WindowEnd = since, now
 		out[m.AccountID] = m
 	}
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if closeErr := rows.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		return nil, err
 	}
-	// Read and the transactional evaluator share the exact process-local
-	// response store and configured window, including incomplete windows.
-	evidence := upstreamstats.Default.Snapshot(ids, since, now)
+	// Most accounts share the rolling hour. Trial/recovered accounts use a fresh
+	// baseline so old failures cannot immediately pause a recovered account again.
+	windows := map[time.Time][]int64{}
 	for id, m := range out {
-		m.UpstreamError = evidence[id]
-		out[id] = m
+		since := now.Add(-time.Hour)
+		if m.MetricsSince != nil && m.MetricsSince.After(since) {
+			since = *m.MetricsSince
+		}
+		windows[since] = append(windows[since], id)
+	}
+	for since, ids := range windows {
+		stats, err := readOpsAccountRequestStats(ctx, db, ids, since, now)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			m := out[id]
+			m.Metrics = service.OpsAccountRequestStats{WindowStart: since, WindowEnd: now}
+			if entry := stats[strconv.FormatInt(id, 10)]; entry != nil {
+				m.Metrics = *entry
+			}
+			out[id] = m
+		}
 	}
 	return out, nil
 }
 func (r *accountPerformanceRepository) Read(ctx context.Context, ids []int64, now time.Time) (map[int64]service.AccountPerformance, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	return readAccountPerformance(ctx, r.db, ids, now)
 }
 func (r *accountPerformanceRepository) EnabledIDs(ctx context.Context) ([]int64, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT m.account_id FROM account_performance_monitors m JOIN accounts a ON a.id=m.account_id WHERE m.config->>'enabled'='true' AND NOT m.paused AND a.deleted_at IS NULL ORDER BY m.account_id`)
+	rows, err := r.db.QueryContext(ctx, `SELECT m.account_id FROM account_performance_monitors m JOIN accounts a ON a.id=m.account_id WHERE m.config->>'enabled'='true' AND a.deleted_at IS NULL ORDER BY m.account_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +110,9 @@ func performancePaused(ctx context.Context, db sqlExecutor, ids []int64) (map[in
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := db.QueryContext(ctx, `SELECT account_id FROM account_performance_monitors WHERE paused AND account_id=ANY($1)`, pq.Array(ids))
+	rows, err := db.QueryContext(ctx, `SELECT account_id FROM account_performance_monitors WHERE paused AND account_id=ANY($1) AND
+ (trial_started_at IS NULL OR next_trial_at>NOW() OR trial_started_at+INTERVAL '10 minutes'<=NOW()
+ OR trial_requests >= (config->>'recovery_samples')::int*3)`, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +155,7 @@ func (r *accountPerformanceRepository) Save(ctx context.Context, id int64, c ser
 		return err
 	}
 	var gen int64
-	err = tx.QueryRowContext(ctx, `UPDATE account_performance_monitors SET config=$2,revision=revision+1,updated_at=NOW() WHERE account_id=$1 AND revision=$3 RETURNING pause_generation`, id, string(raw), revision).Scan(&gen)
+	err = tx.QueryRowContext(ctx, `UPDATE account_performance_monitors SET config=$2,revision=revision+1,paused=false,paused_at=NULL,reason='',trial_started_at=NULL,trial_requests=0,next_trial_at=NULL,metrics_since=NULL,updated_at=NOW() WHERE account_id=$1 AND revision=$3 RETURNING pause_generation`, id, string(raw), revision).Scan(&gen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrPerformanceConflict
 	}
@@ -202,7 +196,7 @@ func (r *accountPerformanceRepository) Release(ctx context.Context, id, revision
 		return err
 	}
 	// Explicit release disables evaluation atomically; no old evaluator can re-pause.
-	res, err := tx.ExecContext(ctx, `UPDATE account_performance_monitors SET paused=false,paused_at=NULL,reason='',config=jsonb_set(config,'{enabled}','false'),revision=revision+1,updated_at=NOW() WHERE account_id=$1 AND revision=$2 AND pause_generation=$3 AND paused`, id, revision, generation)
+	res, err := tx.ExecContext(ctx, `UPDATE account_performance_monitors SET paused=false,paused_at=NULL,reason='',trial_started_at=NULL,trial_requests=0,next_trial_at=NULL,metrics_since=NULL,config=jsonb_set(config,'{enabled}','false'),revision=revision+1,updated_at=NOW() WHERE account_id=$1 AND revision=$2 AND pause_generation=$3 AND paused`, id, revision, generation)
 	if err != nil {
 		return err
 	}
@@ -228,15 +222,15 @@ func (r *accountPerformanceRepository) Evaluate(ctx context.Context, id int64, n
 	defer func() { _ = tx.Rollback() }()
 	if err = lockPerformanceAccount(ctx, tx, id); err != nil {
 		if errors.Is(err, service.ErrPerformanceConflict) {
-			return nil // Deleted after EnabledIDs was captured.
+			return nil
 		}
 		return err
 	}
 	var raw []byte
 	var revision, gen int64
 	var paused bool
-	// Multiple instances skip claimed rows. Configuration and release use the same lock.
-	err = tx.QueryRowContext(ctx, `SELECT config,revision,paused,pause_generation FROM account_performance_monitors WHERE account_id=$1 FOR UPDATE SKIP LOCKED`, id).Scan(&raw, &revision, &paused, &gen)
+	var pausedAt, trial *time.Time
+	err = tx.QueryRowContext(ctx, `SELECT config,revision,paused,pause_generation,paused_at,trial_started_at FROM account_performance_monitors WHERE account_id=$1 FOR UPDATE SKIP LOCKED`, id).Scan(&raw, &revision, &paused, &gen, &pausedAt, &trial)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -247,22 +241,51 @@ func (r *accountPerformanceRepository) Evaluate(ctx context.Context, id int64, n
 	if err = json.Unmarshal(raw, &cfg); err != nil {
 		return err
 	}
-	if !cfg.Enabled || paused {
+	if !cfg.Enabled {
 		return nil
 	}
 	if err = cfg.Validate(); err != nil {
 		return err
 	}
+	if paused && trial == nil {
+		if !cfg.AutoRecover || pausedAt == nil || now.Before(pausedAt.Add(time.Duration(cfg.CooldownMinutes)*time.Minute)) {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE account_performance_monitors SET trial_started_at=$2,metrics_since=$2,trial_requests=0,next_trial_at=$2,updated_at=NOW() WHERE account_id=$1`, id, now)
+		if err != nil {
+			return err
+		}
+		if err = performanceAudit(ctx, tx, id, "trial", 0, revision, gen, []byte(`{}`)); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	metrics, err := readAccountPerformance(ctx, tx, []int64{id}, now)
 	if err != nil {
 		return err
 	}
-	m := metrics[id]
-	reasons := m.Breaches()
-	if len(reasons) == 0 {
+	m, ok := metrics[id]
+	if !ok {
 		return nil
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE account_performance_monitors SET paused=true,pause_generation=pause_generation+1,paused_at=$2,reason=$3,updated_at=NOW() WHERE account_id=$1`, id, now, strings.Join(reasons, ","))
+	reasons := m.Breaches()
+	action := "pause"
+	if trial != nil {
+		if len(reasons) == 0 && now.Before(trial.Add(10*time.Minute)) && m.ReadyForRecovery() {
+			_, err = tx.ExecContext(ctx, `UPDATE account_performance_monitors SET paused=false,paused_at=NULL,reason='',trial_started_at=NULL,trial_requests=0,next_trial_at=NULL,updated_at=NOW() WHERE account_id=$1`, id)
+			action = "recover"
+		} else if len(reasons) == 0 && now.Before(trial.Add(10*time.Minute)) {
+			return nil
+		} else if len(reasons) == 0 {
+			reasons = []string{"trial_timeout"}
+		}
+	} else if len(reasons) == 0 {
+		return nil
+	}
+	if action == "pause" {
+		gen++
+		_, err = tx.ExecContext(ctx, `UPDATE account_performance_monitors SET paused=true,pause_generation=pause_generation+1,paused_at=$2,reason=$3,trial_started_at=NULL,trial_requests=0,next_trial_at=NULL,updated_at=NOW() WHERE account_id=$1`, id, now, strings.Join(reasons, ","))
+	}
 	if err != nil {
 		return err
 	}
@@ -270,10 +293,64 @@ func (r *accountPerformanceRepository) Evaluate(ctx context.Context, id int64, n
 	if err != nil {
 		return err
 	}
-	if err = performanceAudit(ctx, tx, id, "pause", 0, revision, gen+1, evidence); err != nil {
+	if err = performanceAudit(ctx, tx, id, action, 0, revision, gen, evidence); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// Row locking and the persisted rate/budget gate apply to every gateway instance.
+// At most one trial request is admitted every five seconds, with a finite budget.
+const performanceTrialSQL = `WITH candidate AS MATERIALIZED (
+ SELECT * FROM account_performance_monitors WHERE account_id=$1 AND paused FOR UPDATE
+), admitted AS (
+ UPDATE account_performance_monitors m SET trial_requests=m.trial_requests+1,next_trial_at=NOW()+INTERVAL '5 seconds'
+ FROM candidate c WHERE m.account_id=c.account_id AND c.paused AND c.trial_started_at IS NOT NULL
+ AND c.trial_started_at+INTERVAL '10 minutes'>NOW() AND c.next_trial_at<=NOW()
+ AND c.trial_requests < (c.config->>'recovery_samples')::int*3
+ RETURNING m.pause_generation,m.revision
+)
+SELECT COALESCE((SELECT NOT paused FROM candidate),true) OR EXISTS(SELECT 1 FROM admitted),
+ COALESCE((SELECT pause_generation FROM admitted),-1),COALESCE((SELECT revision FROM admitted),-1)`
+
+func (r *accountRepository) AcquirePerformanceTrial(ctx context.Context, id int64) (bool, func(), error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	rows, err := r.sql.QueryContext(ctx, performanceTrialSQL, id)
+	if err != nil {
+		return false, nil, err
+	}
+	var allowed bool
+	var gen, revision int64
+	if !rows.Next() {
+		err = rows.Err()
+		_ = rows.Close()
+		if err == nil {
+			err = sql.ErrNoRows
+		}
+		return false, nil, err
+	}
+	err = rows.Scan(&allowed, &gen, &revision)
+	closeErr := rows.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return false, nil, err
+	}
+	if !allowed || gen < 0 {
+		return allowed, nil, nil
+	}
+	var once sync.Once
+	refund := func() {
+		once.Do(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			// Revision + generation prevent a late refund from modifying a newer trial.
+			_, _ = r.sql.ExecContext(ctx, `UPDATE account_performance_monitors SET trial_requests=GREATEST(trial_requests-1,0) WHERE account_id=$1 AND revision=$2 AND pause_generation=$3 AND trial_started_at IS NOT NULL`, id, revision, gen)
+		})
+	}
+	return true, refund, nil
 }
 
 func (r *accountPerformanceRepository) Events(ctx context.Context, id int64) ([]service.PerformanceEvent, error) {

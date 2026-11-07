@@ -359,7 +359,7 @@ export default {
         averageFirstToken: 'Avg TTFT',
         averageDuration: 'Avg duration',
         metricsWindow: 'Past hour',
-        metricsHint: 'All requests in the past hour, independent of the 10 requests shown below: cache rate is weighted by valid streaming/WS text prompt tokens; TTFT is averaged over successful streaming/WS requests, and duration over successful requests. Missing metrics are excluded.',
+        metricsHint: 'All requests in the past hour, independent of the 10 requests shown below: success rate is recorded successes divided by successes plus failures; cache rate is weighted by valid streaming/WS text prompt tokens; TTFT is averaged over successful streaming/WS requests, and duration over successful requests. Missing metrics are excluded.',
         metricsLoadFailed: 'Failed to load past-hour statistics',
         metricSamples: '{count} valid requests included',
         empty: 'No requests',

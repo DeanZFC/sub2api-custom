@@ -312,7 +312,6 @@ type OpenAIForwardResult struct {
 	wsReplayInputExists          bool
 	wsAccountFailoverReplayInput []json.RawMessage
 	streamReadIncomplete         bool
-	antiDistillationRequestID    string
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
@@ -459,7 +458,6 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	groupAntiDistillation   *GroupAntiDistillationService
 	astraCandyMu            sync.Mutex
 	astraCandySeen          map[[32]byte]time.Time
 	astraCandyRunning       int

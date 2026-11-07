@@ -293,7 +293,6 @@ type RateLimitCacheInvalidator interface {
 }
 
 type APIKeyService struct {
-	groupAntiDistillation     *GroupAntiDistillationService
 	apiKeyRepo                APIKeyRepository
 	userRepo                  UserRepository
 	groupRepo                 GroupRepository

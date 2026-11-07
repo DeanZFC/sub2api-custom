@@ -530,7 +530,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// 初始上游 data 的 type 只解析一次：原始值保持终止事件的精确匹配，规范化值供后续分支复用。
 			if openAIStreamEventIsTerminalWithType(data, eventType) {
 				sawTerminalEvent = true
-				protectionTerminalSuccessful = openAIProtectionSuccessfulTerminal(dataBytes, eventType)
+				protectionTerminalSuccessful = openAIUsageSuccessfulTerminal(dataBytes, eventType)
 				terminalEventType = eventType
 				if strings.TrimSpace(data) == "[DONE]" {
 					terminalEventType = "[DONE]"
@@ -1299,7 +1299,7 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	if !ok {
 		return
 	}
-	mergeOpenAIProtectionUsageEvidence(*usage, &parsedUsage)
+	mergeOpenAICacheUsageEvidence(*usage, &parsedUsage)
 	if openAIStreamEventTypeIsTerminal(terminalType) {
 		if terminalType != "response.completed" && terminalType != "response.done" {
 			parsedUsage.CacheReadKnown = false
@@ -1313,7 +1313,7 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	mergeOpenAIUsageNonZero(usage, parsedUsage)
 }
 
-func openAIProtectionSuccessfulTerminal(data []byte, eventType string) bool {
+func openAIUsageSuccessfulTerminal(data []byte, eventType string) bool {
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 		return true
 	}
@@ -1328,7 +1328,7 @@ func openAIProtectionSuccessfulTerminal(data []byte, eventType string) bool {
 	return true
 }
 
-func mergeOpenAIProtectionUsageEvidence(previous OpenAIUsage, next *OpenAIUsage) {
+func mergeOpenAICacheUsageEvidence(previous OpenAIUsage, next *OpenAIUsage) {
 	if next == nil {
 		return
 	}
@@ -1888,7 +1888,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
-			mergeOpenAIProtectionUsageEvidence(*usage, &parsedUsage)
+			mergeOpenAICacheUsageEvidence(*usage, &parsedUsage)
 			*usage = parsedUsage
 		}
 		// When the terminal event has an empty output array, reconstruct

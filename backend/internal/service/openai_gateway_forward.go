@@ -21,10 +21,6 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
-	if err := checkOpenAIGroupProtectionBeforeForward(ctx, c); err != nil {
-		return nil, err
-	}
-
 	if c != nil {
 		c.Writer.Header().Del("X-Codex2API-Basispoints-Bypass")
 		c.Writer.Header().Del("X-Codex2API-Upstream")

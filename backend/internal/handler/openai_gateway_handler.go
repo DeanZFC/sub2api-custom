@@ -1047,8 +1047,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), openAIForwardSucceededForScheduling(result), nil)
 		}
 
-		h.gatewayService.ObserveGroupAntiDistillationUsage(c.Request.Context(), apiKey, account, result, time.Time{}, sessionHashBody)
-
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		submitResponsesUsage(result)
 		reqLog.Debug("openai.request_completed",
@@ -1617,7 +1615,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), true, nil)
 		}
 
-		h.gatewayService.ObserveGroupAntiDistillationUsage(c.Request.Context(), apiKey, account, result, time.Time{}, body)
 		submitMessagesUsage(result)
 		reqLog.Debug("openai_messages.request_completed",
 			zap.Int64("account_id", account.ID),
@@ -3226,12 +3223,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 当前账号，越线即要求客户端重连重选（连接绑定单一上游账号，
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
-				checkCtx, cancelCheck := context.WithTimeout(ctx, 2*time.Second)
-				remaining, protectionErr := h.apiKeyService.CheckGroupAntiDistillation(checkCtx, turnBillingAPIKeys.forTurn(turn, apiKey))
-				cancelCheck()
-				if protectionErr == nil && remaining > 0 {
-					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "group_anti_distillation_paused: 零缓存保护已暂停此分组的新请求", nil)
-				}
 
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
 				if _, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(turnCtx, account); vetoed {
@@ -3369,9 +3360,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				turnRecordPricingAt := turnPricing.currentOr(turnStart)
 				turnBillingAPIKey := turnBillingAPIKeys.forTurn(turn, apiKey)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-				if turnErr == nil && !cyberBlocked {
-					h.gatewayService.ObserveGroupAntiDistillationUsage(ctx, turnBillingAPIKey, account, result, turnStart, cyberBlockBody)
-				}
 				turnUsageCtx := ctx
 				h.submitOpenAIUsageRecordTask(turnUsageCtx, result, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{

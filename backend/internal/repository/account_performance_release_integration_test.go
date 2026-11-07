@@ -42,7 +42,7 @@ func TestAccountPerformancePostgresSoftDeleteWinsAgainstMutations(t *testing.T) 
 			go func() {
 				switch action {
 				case "save":
-					done <- repo.Save(ctx, id, service.PerformanceConfig{Enabled: true}, 1, 0)
+					done <- repo.Save(ctx, id, service.DefaultPerformanceConfig(), 1, 0)
 				case "evaluate":
 					done <- repo.Evaluate(ctx, id, time.Now())
 				case "release":

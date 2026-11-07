@@ -170,7 +170,7 @@ export default {
         averageFirstToken: '平均首字',
         averageDuration: '平均耗时',
         metricsWindow: '近 1 小时',
-        metricsHint: '统计最近 1 小时内全部请求，不受下方 10 次请求展示数量限制：缓存率按有效流式/WS 请求的文本输入 Token 加权；首字为成功流式/WS 请求的平均首字耗时，耗时为成功请求的平均总耗时。缺失指标不参与统计。',
+        metricsHint: '统计最近 1 小时内全部请求，不受下方 10 次请求展示数量限制：成功率为已记录成功请求占成功与失败总数的比例；缓存率按有效流式/WS 请求的文本输入 Token 加权；首字为成功流式/WS 请求的平均首字耗时，耗时为成功请求的平均总耗时。缺失指标不参与统计。',
         metricsLoadFailed: '最近 1 小时统计加载失败',
         metricSamples: '统计 {count} 次有效请求',
         empty: '暂无请求',

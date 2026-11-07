@@ -22,12 +22,14 @@ func TestOpsAccountRequestStatsFullHourIntegration(t *testing.T) {
 	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE usage_logs (
  account_id BIGINT, created_at TIMESTAMPTZ, request_type SMALLINT, stream BOOLEAN,
  openai_ws_mode BOOLEAN, input_tokens BIGINT, cache_read_tokens BIGINT,
- cache_creation_tokens BIGINT, image_input_tokens BIGINT, first_token_ms BIGINT, duration_ms BIGINT)`)
+ cache_creation_tokens BIGINT, image_input_tokens BIGINT, first_token_ms BIGINT, duration_ms BIGINT,
+ id BIGSERIAL,request_id TEXT,api_key_id BIGINT,actual_cost NUMERIC DEFAULT 1,output_tokens BIGINT DEFAULT 1);
+ CREATE TEMP TABLE ops_error_logs(id BIGSERIAL,account_id BIGINT,api_key_id BIGINT,request_id TEXT,client_request_id TEXT,request_type INT,status_code INT,is_count_tokens BOOLEAN,created_at TIMESTAMPTZ)`)
 	require.NoError(t, err)
 	end := time.Date(2026, 10, 29, 9, 0, 0, 0, time.UTC)
 	start := end.Add(-time.Hour)
 	insert := func(account int64, at time.Time, requestType int, stream, ws bool, input, read, creation, image, first, duration any) {
-		_, err := db.ExecContext(ctx, `INSERT INTO usage_logs VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, account, at, requestType, stream, ws, input, read, creation, image, first, duration)
+		_, err := db.ExecContext(ctx, `INSERT INTO usage_logs(account_id,created_at,request_type,stream,openai_ws_mode,input_tokens,cache_read_tokens,cache_creation_tokens,image_input_tokens,first_token_ms,duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, account, at, requestType, stream, ws, input, read, creation, image, first, duration)
 		require.NoError(t, err)
 	}
 	for i := 0; i < 25; i++ {
@@ -64,10 +66,10 @@ func TestOpsAccountRequestStatsFullHourIntegration(t *testing.T) {
 	require.Zero(t, *stats["2"].AvgDurationMs)
 	require.EqualValues(t, 3, stats["3"].CacheSamples)
 	require.EqualValues(t, 3, stats["3"].FirstTokenSamples)
-	require.EqualValues(t, 5, stats["3"].DurationSamples)
+	require.EqualValues(t, 4, stats["3"].DurationSamples)
 	require.InDelta(t, 800.0/1200, *stats["3"].CacheRate, 1e-9)
 	require.InDelta(t, 1000, *stats["3"].AvgFirstTokenMs, 1e-9)
-	require.InDelta(t, 1500, *stats["3"].AvgDurationMs, 1e-9)
+	require.InDelta(t, 1625, *stats["3"].AvgDurationMs, 1e-9)
 	require.Zero(t, stats["4"].CacheSamples)
 	require.Nil(t, stats["4"].CacheRate)
 	require.Nil(t, stats["4"].AvgFirstTokenMs)

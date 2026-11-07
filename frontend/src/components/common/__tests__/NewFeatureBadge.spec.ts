@@ -2,7 +2,6 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import NewFeatureBadge from '../NewFeatureBadge.vue'
 import zhCommon from '@/i18n/locales/zh/common'
 import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
@@ -26,8 +25,8 @@ describe('NewFeatureBadge', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useNewFeatureNoticeStore()
-    const oldId = NEW_FEATURE_NOTICES.accountUpstreamHTTPErrorRate
-    const pricingId = NEW_FEATURE_NOTICES.accountUpstreamHTTPErrorThreshold
+    const oldId = 'older-feature-notice'
+    const pricingId = 'later-feature-notice'
     store.dismiss(41, oldId)
     const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: zhCommon } })
     const badge = () => mount(NewFeatureBadge, {

@@ -896,18 +896,6 @@ func ProvideAPIKeyService(
 	return svc
 }
 
-// ProvideAPIKeyServiceWithGroupProtection keeps the existing constructor compatible.
-func ProvideAPIKeyServiceWithGroupProtection(
-	apiKeyRepo APIKeyRepository, userRepo UserRepository, groupRepo GroupRepository,
-	userSubRepo UserSubscriptionRepository, userGroupRateRepo UserGroupRateRepository,
-	cache APIKeyCache, cfg *config.Config, billingCacheService *BillingCacheService,
-	concurrencyService *ConcurrencyService, protection *GroupAntiDistillationService,
-) *APIKeyService {
-	svc := ProvideAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg, billingCacheService, concurrencyService)
-	svc.groupAntiDistillation = protection
-	return svc
-}
-
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	ProvideGPTDirectService,
@@ -918,8 +906,7 @@ var ProviderSet = wire.NewSet(
 	NewPasskeyService,
 	NewUserService,
 	NewMCPOAuthService,
-	ProvideAPIKeyServiceWithGroupProtection,
-	NewGroupAntiDistillationService,
+	ProvideAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	ProvideAuthCacheInvalidationWorker,
 	NewGroupService,
@@ -1151,8 +1138,9 @@ func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeT
 	return s
 }
 
-func ProvideAccountPerformanceService(repo AccountPerformanceRepository) *AccountPerformanceService {
+func ProvideAccountPerformanceService(repo AccountPerformanceRepository, ops *OpsService) *AccountPerformanceService {
 	s := NewAccountPerformanceService(repo)
+	s.ops = ops
 	s.Start()
 	return s
 }

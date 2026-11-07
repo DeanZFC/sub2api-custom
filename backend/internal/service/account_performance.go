@@ -9,8 +9,6 @@ import (
 	"math"
 	"sync"
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 )
 
 var ErrPerformanceConflict = errors.New("performance monitor changed; reload before saving")
@@ -35,56 +33,143 @@ func (b PerformanceBounds) Breached(v *float64) bool {
 	return v != nil && ((b.Min != nil && *v < *b.Min) || (b.Max != nil && *v > *b.Max))
 }
 
-type PerformanceConfig struct {
-	Enabled       bool              `json:"enabled"`
-	TPS           PerformanceBounds `json:"tps"`
-	Degradation   PerformanceBounds `json:"degradation"`
-	TTFT          PerformanceBounds `json:"ttft"`
-	UpstreamError PerformanceBounds `json:"upstream_error"`
+// Empty bounds disable a metric. Percentages use 0..100; latency uses milliseconds.
+type PerformanceRule struct {
+	Pause    PerformanceBounds `json:"pause"`
+	Recovery PerformanceBounds `json:"recovery"`
 }
 
-func (c PerformanceConfig) Validate() error {
-	for _, b := range []PerformanceBounds{c.TPS, c.Degradation, c.TTFT} {
-		if b.Min != nil || b.Max != nil {
-			return fmt.Errorf("only upstream HTTP error thresholds are supported")
-		}
+func (r PerformanceRule) Enabled() bool { return r.Pause.Min != nil || r.Pause.Max != nil }
+func (r PerformanceRule) RecoveryBounds() PerformanceBounds {
+	b := r.Recovery
+	if b.Min == nil {
+		b.Min = r.Pause.Min
 	}
-	if err := c.UpstreamError.Validate(true); err != nil {
-		return err
+	if b.Max == nil {
+		b.Max = r.Pause.Max
+	}
+	return b
+}
+
+type PerformanceConfig struct {
+	Version         int             `json:"version"`
+	Enabled         bool            `json:"enabled"`
+	SuccessRate     PerformanceRule `json:"success_rate"`
+	CacheRate       PerformanceRule `json:"cache_rate"`
+	TTFT            PerformanceRule `json:"ttft"`
+	Duration        PerformanceRule `json:"duration"`
+	MinSamples      int64           `json:"min_samples"`
+	AutoRecover     bool            `json:"auto_recover"`
+	CooldownMinutes int             `json:"cooldown_minutes"`
+	RecoverySamples int64           `json:"recovery_samples"`
+}
+
+func DefaultPerformanceConfig() PerformanceConfig {
+	return PerformanceConfig{Version: 2, MinSamples: 20, AutoRecover: true, CooldownMinutes: 5, RecoverySamples: 3}
+}
+func (c PerformanceConfig) Validate() error {
+	if c.Version != 2 {
+		return fmt.Errorf("reload the metric configuration before saving")
+	}
+	if c.MinSamples < 1 || c.MinSamples > 10000 || c.RecoverySamples < 1 || c.RecoverySamples > 100 || c.CooldownMinutes < 1 || c.CooldownMinutes > 1440 {
+		return fmt.Errorf("invalid sample count or cooldown")
+	}
+	enabled := false
+	for i, r := range []PerformanceRule{c.SuccessRate, c.CacheRate, c.TTFT, c.Duration} {
+		if err := r.Pause.Validate(i < 2); err != nil {
+			return err
+		}
+		if err := r.Recovery.Validate(i < 2); err != nil {
+			return err
+		}
+		if !r.Enabled() && (r.Recovery.Min != nil || r.Recovery.Max != nil) {
+			return fmt.Errorf("recovery requires a pause threshold")
+		}
+		b := r.RecoveryBounds()
+		if err := b.Validate(i < 2); err != nil {
+			return err
+		}
+		if (r.Pause.Min != nil && b.Min != nil && *b.Min < *r.Pause.Min) || (r.Pause.Max != nil && b.Max != nil && *b.Max > *r.Pause.Max) {
+			return fmt.Errorf("recovery thresholds must be within the normal range")
+		}
+		enabled = enabled || r.Enabled()
+	}
+	if c.Enabled && !enabled {
+		return fmt.Errorf("select at least one metric")
 	}
 	return nil
 }
 
 type AccountPerformance struct {
-	UpstreamError      upstreamstats.Evidence `json:"upstream_error"`
-	AccountID          int64                  `json:"account_id"`
-	AvgTPS             *float64               `json:"avg_tps"`
-	DegradationPercent *float64               `json:"degradation_percent"`
-	AvgTTFTMs          *float64               `json:"avg_ttft_ms"`
-	TPSSamples         int                    `json:"tps_samples"`
-	TTFTSamples        int                    `json:"ttft_samples"`
-	QualitySamples     int                    `json:"quality_samples"`
-	Config             PerformanceConfig      `json:"config"`
-	Revision           int64                  `json:"revision"`
-	Paused             bool                   `json:"paused"`
-	PauseGeneration    int64                  `json:"pause_generation"`
-	PausedAt           *time.Time             `json:"paused_at"`
-	Reason             string                 `json:"reason"`
-	WindowStart        time.Time              `json:"window_start"`
-	WindowEnd          time.Time              `json:"window_end"`
+	MonitoringAvailable bool                   `json:"monitoring_available"`
+	AccountID           int64                  `json:"account_id"`
+	Metrics             OpsAccountRequestStats `json:"metrics"`
+	Config              PerformanceConfig      `json:"config"`
+	Revision            int64                  `json:"revision"`
+	Paused              bool                   `json:"paused"`
+	PauseGeneration     int64                  `json:"pause_generation"`
+	PausedAt            *time.Time             `json:"paused_at"`
+	TrialStartedAt      *time.Time             `json:"trial_started_at"`
+	TrialRequests       int64                  `json:"trial_requests"`
+	MetricsSince        *time.Time             `json:"metrics_since"`
+	Reason              string                 `json:"reason"`
+}
+type performanceMeasurement struct {
+	name    string
+	rule    PerformanceRule
+	value   *float64
+	samples int64
 }
 
+func percent(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	n := *v * 100
+	return &n
+}
+func (m AccountPerformance) measurements() []performanceMeasurement {
+	return []performanceMeasurement{
+		{"success_rate", m.Config.SuccessRate, percent(m.Metrics.SuccessRate), m.Metrics.RequestSamples},
+		{"cache_rate", m.Config.CacheRate, percent(m.Metrics.CacheRate), m.Metrics.CacheSamples},
+		{"ttft", m.Config.TTFT, m.Metrics.AvgFirstTokenMs, m.Metrics.FirstTokenSamples},
+		{"duration", m.Config.Duration, m.Metrics.AvgDurationMs, m.Metrics.DurationSamples},
+	}
+}
+func validPerformanceValue(v *float64) bool {
+	return v != nil && !math.IsNaN(*v) && !math.IsInf(*v, 0) && *v >= 0
+}
 func (m AccountPerformance) Breaches() []string {
 	var reasons []string
-	// This is process-local HTTP response evidence, not a final-request error
-	// rate. A partial process window can contain usable samples; no response
-	// samples is unknown, while zero failures among real samples is valid 0%.
-	if p := m.UpstreamError.Percent; m.UpstreamError.Total > 0 && p != nil &&
-		!math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 100 &&
-		m.Config.UpstreamError.Breached(p) {
-		reasons = append(reasons, "upstream_error")
+	minimum := m.Config.MinSamples
+	if m.TrialStartedAt != nil {
+		minimum = m.Config.RecoverySamples
+	}
+	for _, v := range m.measurements() {
+		if v.rule.Enabled() && v.samples >= minimum && validPerformanceValue(v.value) && v.rule.Pause.Breached(v.value) {
+			reasons = append(reasons, v.name)
+		}
 	}
 	return reasons
+}
+func (m AccountPerformance) ReadyForRecovery() bool {
+	enabled := false
+	for _, v := range m.measurements() {
+		if !v.rule.Enabled() {
+			continue
+		}
+		enabled = true
+		if v.samples < m.Config.RecoverySamples || !validPerformanceValue(v.value) || v.rule.RecoveryBounds().Breached(v.value) {
+			return false
+		}
+	}
+	return enabled
+}
+
+// Trial admission is persistent and atomic across instances. Cancel is called
+// only when later concurrency/admission checks reject the request.
+type PerformanceAdmission interface {
+	AcquirePerformanceTrial(context.Context, int64) (allowed bool, cancel func(), err error)
 }
 
 type PerformanceEvent struct {
@@ -108,6 +193,7 @@ type AccountPerformanceRepository interface {
 
 type AccountPerformanceService struct {
 	Repo   AccountPerformanceRepository
+	ops    *OpsService
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	// Only the evaluator goroutine owns this cursor. Advance on attempts,
@@ -117,6 +203,24 @@ type AccountPerformanceService struct {
 
 func NewAccountPerformanceService(repo AccountPerformanceRepository) *AccountPerformanceService {
 	return &AccountPerformanceService{Repo: repo}
+}
+func (s *AccountPerformanceService) MonitoringAvailable(ctx context.Context) bool {
+	return s.ops == nil || s.ops.IsMonitoringEnabled(ctx)
+}
+func (s *AccountPerformanceService) Read(ctx context.Context, ids []int64, now time.Time) (map[int64]AccountPerformance, error) {
+	rows, err := s.Repo.Read(ctx, ids, now)
+	if err != nil {
+		return nil, err
+	}
+	available := s.MonitoringAvailable(ctx)
+	for id, m := range rows {
+		m.MonitoringAvailable = available
+		if !available {
+			m.Metrics = OpsAccountRequestStats{WindowStart: m.Metrics.WindowStart, WindowEnd: m.Metrics.WindowEnd}
+		}
+		rows[id] = m
+	}
+	return rows, nil
 }
 func (s *AccountPerformanceService) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -147,6 +251,9 @@ func (s *AccountPerformanceService) Stop() {
 	s.wg.Wait()
 }
 func (s *AccountPerformanceService) evaluate(ctx context.Context) {
+	if !s.MonitoringAvailable(ctx) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 	ids, err := s.Repo.EnabledIDs(ctx)

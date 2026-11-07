@@ -1,5 +1,7 @@
 # 官方主线合并（2026-11-07）
 
+> 后续调整：本文记录的账号 HTTP 保护和分组零缓存保护现已退役，统一使用[账号请求指标规则](account-performance-monitor.md)。
+
 ## 来源与范围
 
 - 官方 Wei-Shaw/sub2api：25608d216bb7be04e4a646830cb065cd09b7d7e9 → 0eee80ba87aa4f3aff7282bf1695aa6dc0471c36。
