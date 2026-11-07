@@ -76,13 +76,23 @@ func signedThinkingHistoryBody() []byte {
 
 func TestFilterThinkingBlocksSignedHistorySkipsDecode(t *testing.T) {
 	body := signedThinkingHistoryBody()
+	// Compare both paths in the same environment. A fixed small allocation
+	// ceiling is sensitive to the compiler and background work in a full suite;
+	// decoding this large history must still be substantially more expensive.
+	decodedAllocs := testing.AllocsPerRun(5, func() {
+		got := filterThinkingBlocksDecoded(body, false)
+		if &got[0] != &body[0] {
+			t.Fatal("valid signed history must be returned unchanged by decoding")
+		}
+	})
 	allocs := testing.AllocsPerRun(5, func() {
 		got := filterThinkingBlocksInternal(body, false)
 		if &got[0] != &body[0] {
 			t.Fatal("valid signed history must be returned unchanged")
 		}
 	})
-	require.Less(t, allocs, float64(16), "allocs: %v", allocs)
+	require.Less(t, allocs, decodedAllocs/10, "precheck allocs: %v; decoded allocs: %v", allocs, decodedAllocs)
+	t.Logf("precheck allocs: %v; decoded allocs: %v", allocs, decodedAllocs)
 }
 
 func FuzzThinkingBlocksNeedFiltering(f *testing.F) {
