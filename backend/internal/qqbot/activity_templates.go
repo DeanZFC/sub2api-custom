@@ -44,7 +44,7 @@ func (s *Service) ActivityTemplates(ctx context.Context) (map[string]ActivityBun
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	c, err := s.loadConfig(ctx, tx)
 	if err != nil {
 		return nil, err

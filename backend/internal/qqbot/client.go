@@ -712,7 +712,7 @@ func (s *Service) probeConfig(ctx context.Context, c Config, kind string) (strin
 			return "", err
 		}
 		normalized := strings.ToLower(result)
-		if !(strings.Contains(normalized, "blue") || strings.Contains(normalized, "蓝")) || !(strings.Contains(normalized, "square") || strings.Contains(normalized, "方")) {
+		if (!strings.Contains(normalized, "blue") && !strings.Contains(normalized, "蓝")) || (!strings.Contains(normalized, "square") && !strings.Contains(normalized, "方")) {
 			return "", errors.New("视觉接口已响应，但未识别蓝色方块，请核对所选模型的视觉能力")
 		}
 		return "视觉样本识别通过（蓝色方块）；不保证所有图片识别准确。", nil

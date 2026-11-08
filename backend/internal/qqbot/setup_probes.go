@@ -48,7 +48,7 @@ func (s *Service) SetupProbe(ctx context.Context, kind string) (SetupProbe, erro
 	if err != nil {
 		return SetupProbe{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var acquired bool
 	if err = tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(71427107)`).Scan(&acquired); err != nil {
 		return SetupProbe{}, err

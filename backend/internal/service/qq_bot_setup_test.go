@@ -62,7 +62,7 @@ func TestQQBotManagedKeyReuseNeverResetsSpending(t *testing.T) {
 func TestQQBotManagedKeyCreatesInsideCallerTransaction(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{})
 	require.NoError(t, err)
