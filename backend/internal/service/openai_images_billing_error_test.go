@@ -206,3 +206,27 @@ func TestOpenAIImagesStreamEventBufferBounded(t *testing.T) {
 		})
 	}
 }
+
+// Native 2.6 JSON fallback must retain the custom billing error boundary before
+// synthesizing the official stream completion events.
+func TestOpenAIImagesDirectStreamJSONBillingErrorBeforeCompletion(t *testing.T) {
+	body := []byte("{\"model\":\"gpt-image-2.6\",\"prompt\":\"draw\",\"stream\":true}")
+	c, recorder := newOpenAIImagesTestContext(t, body)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader("{\"error\":{\"code\":\"insufficient_quota\",\"message\":\"credit balance is insufficient: $18\"}}")),
+	}}
+	svc := newOpenAIImagesTestService(upstream)
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	result, err := svc.ForwardImages(context.Background(), c, directImagesTestAccount(), body, parsed, "")
+	require.Nil(t, result)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.True(t, failover.IsUpstreamBillingExhausted())
+	require.Equal(t, UpstreamBillingExhaustedClientMessage, failover.ClientMessage)
+	require.Len(t, upstream.requests, 1)
+	require.False(t, c.Writer.Written())
+	require.Empty(t, recorder.Body.String())
+}

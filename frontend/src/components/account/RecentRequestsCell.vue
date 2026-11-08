@@ -65,8 +65,8 @@
         </template>
       </div>
     </div>
-    <span v-else-if="loadError" class="text-sm text-gray-400 dark:text-dark-500">{{ t('admin.accounts.recentRequests.loadFailed') }}</span>
-    <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{ t('admin.accounts.recentRequests.empty') }}</span>
+    <div v-else-if="loadError" class="text-right text-sm text-gray-400 dark:text-dark-500">{{ t('admin.accounts.recentRequests.loadFailed') }}</div>
+    <div v-else class="text-right text-sm text-gray-400 dark:text-dark-500">{{ t('admin.accounts.recentRequests.empty') }}</div>
 
     <Teleport to="body">
       <div
