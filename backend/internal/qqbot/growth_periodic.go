@@ -70,6 +70,10 @@ func settlePeriodicGrowth(ctx context.Context, tx *sql.Tx, c Config, j Job, uid 
 				key := fmt.Sprintf("qq-growth-cycle:%d:%s:%s:%d", uid, task.ID, task.Kind, cycles)
 				granted, err := grantActivityReward(ctx, tx, c, j, uid, key, "growth", "周期任务："+task.Name, reward, at)
 				if err != nil {
+					if errors.Is(err, ErrRewardBudget) {
+						cycles--
+						break
+					}
 					return "", 0, false, err
 				}
 				consumed, remaining = consumed.Add(target), remaining.Sub(target)

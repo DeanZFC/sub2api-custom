@@ -108,6 +108,14 @@ func grantActivityReward(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 	if err != nil || claimed {
 		return false, err
 	}
+	if reward.Type == "balance" {
+		if c.RewardBudgetDaily != nil {
+			at = time.Now()
+		}
+		if err = checkRewardBudget(ctx, tx, c, reward.Amount, at); err != nil {
+			return false, err
+		}
+	}
 	status := "fulfilled"
 	if reward.Type == "physical" || reward.Type == "other" {
 		status = "pending"

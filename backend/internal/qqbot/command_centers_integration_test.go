@@ -34,12 +34,16 @@ func TestSplitCommandsKeepRepliesFocusedAndDeduplicateDraw(t *testing.T) {
 		absent    []string
 	}{
 		{"/我的余额", "USD 12.50", []string{"今日用量", "累计奖励", "剩余抽奖"}},
+		{"我的余额", "USD 12.50", []string{"今日用量", "累计奖励", "剩余抽奖"}},
+		{"/余额", "USD 12.50", []string{"今日用量", "累计奖励", "剩余抽奖"}},
+		{"余额", "USD 12.50", []string{"今日用量", "累计奖励", "剩余抽奖"}},
 		{"/今日用量", "今日用量", []string{"账户额度", "累计奖励", "抽奖次数"}},
 		{"/我的奖励", "奖励", []string{"今日用量", "抽奖规则", "成长任务"}},
 		{"/抽奖次数", "剩余", []string{"今日用量", "邀请规则"}},
 		{"/我的邀请", "邀请", []string{"今日用量", "成长任务"}},
 	} {
 		enqueue(fmt.Sprint(i), tc.cmd)
+		require.Len(t, *replies, i+1)
 		reply := (*replies)[len(*replies)-1].text()
 		require.Contains(t, reply, tc.want)
 		for _, absent := range tc.absent {

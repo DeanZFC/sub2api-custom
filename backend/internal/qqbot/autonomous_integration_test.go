@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/stretchr/testify/require"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +25,7 @@ type autoHarness struct {
 	calls     atomic.Int32
 	sends     atomic.Int32
 	output    atomic.Value
+	request   atomic.Value
 	sent      atomic.Value
 	failModel atomic.Bool
 	failSend  atomic.Bool
@@ -37,6 +39,7 @@ func newAutoHarness(t *testing.T) *autoHarness {
 	h := &autoHarness{s: s, db: db}
 	h.output.Store(`{"action":"reply","text":"可以先看看错误日志。"}`)
 	h.sent.Store("")
+	h.request.Store("")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -44,6 +47,9 @@ func newAutoHarness(t *testing.T) *autoHarness {
 			fmt.Fprint(w, `{"access_token":"test-only","expires_in":7200}`)
 		case r.URL.Path == "/v1/chat/completions" || r.URL.Path == "/v1/responses":
 			h.calls.Add(1)
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			h.request.Store(string(body))
 			if h.hook != nil {
 				h.hook()
 			}
@@ -113,7 +119,7 @@ func (h *autoHarness) job(t *testing.T, id string) Job {
 	require.NoError(t, err)
 	return j
 }
-func TestAutonomousReplyAndOneFollowup(t *testing.T) {
+func TestAutonomousReplyAndBoundedFollowups(t *testing.T) {
 	h := newAutoHarness(t)
 	p := h.enqueue(t, "first", "这个错误怎么解决？", "alice")
 	for range 3 {
@@ -139,16 +145,23 @@ func TestAutonomousReplyAndOneFollowup(t *testing.T) {
 	h.run()
 	require.EqualValues(t, 2, h.calls.Load())
 	require.Equal(t, "followup", h.job(t, "follow").TriggerReason)
-	h.enqueue(t, "third", "那还有什么办法可以检查？", "alice")
+
+	h.enqueue(t, "third", "没看懂", "alice")
 	h.run()
-	require.EqualValues(t, 2, h.calls.Load())
+	require.EqualValues(t, 3, h.calls.Load())
+	h.enqueue(t, "fourth", "再说说", "alice")
+	h.run()
+	require.EqualValues(t, 4, h.calls.Load())
+	h.enqueue(t, "fifth", "那还能怎么继续检查？", "alice")
+	h.run()
+	require.EqualValues(t, 4, h.calls.Load())
 	var count int
-	require.NoError(t, h.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='third'`).Scan(&count))
+	require.NoError(t, h.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id='fifth'`).Scan(&count))
 	require.Zero(t, count)
 	runtime, err := h.s.Runtime(context.Background(), h.c)
 	require.NoError(t, err)
-	require.Contains(t, runtime.AutonomousStats, AutonomousStat{GroupID: "group", Reason: "model_calls", Count: 2})
-	require.Contains(t, runtime.AutonomousStats, AutonomousStat{GroupID: "group", Reason: "sent", Count: 2})
+	require.Contains(t, runtime.AutonomousStats, AutonomousStat{GroupID: "group", Reason: "model_calls", Count: 4})
+	require.Contains(t, runtime.AutonomousStats, AutonomousStat{GroupID: "group", Reason: "sent", Count: 4})
 }
 func TestAutonomousSilenceErrorsAndCallLimit(t *testing.T) {
 	for _, mode := range []string{"skip", "invalid", "model_error", "send_error"} {
@@ -465,7 +478,7 @@ func TestAutonomousBudgetRollbackAndPolicyChanges(t *testing.T) {
 			case "new_message":
 				h.enqueue(t, "new", "我已经找到原因了", "bob")
 			case "member_cooldown":
-				_, err := h.db.Exec(`INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,payload,kind,status,reply_reserved_at) VALUES('old','app','old','GROUP_MESSAGE_CREATE','group','alice','{}','ambient_chat','delivery_failed',NOW()-INTERVAL '3 minutes')`)
+				_, err := h.db.Exec(`INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,payload,kind,status,reply_reserved_at) VALUES('old','app','old','GROUP_MESSAGE_CREATE','group','alice','{}','ambient_chat','delivery_failed',NOW()-INTERVAL '90 seconds')`)
 				require.NoError(t, err)
 			case "failed_send_cooldown":
 				_, err := h.db.Exec(`INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,payload,kind,status,reply_reserved_at) VALUES('old','app','old','GROUP_MESSAGE_CREATE','group','bob','{}','ambient_chat','delivery_failed',NOW())`)
@@ -535,4 +548,109 @@ func TestAutonomousZeroHistoryStillRepliesWithoutFollowup(t *testing.T) {
 	var count int
 	require.NoError(t, h.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_group_messages`).Scan(&count))
 	require.Zero(t, count)
+}
+
+func TestAutonomousFollowupContextAndKnowledge(t *testing.T) {
+	h := newAutoHarness(t)
+	h.c.SiteKnowledge = SiteKnowledgeConfig{Enabled: true, Entries: []SiteKnowledgeEntry{
+		{ID: "api", Title: "API 接入", Keywords: []string{"API"}, Content: "本站使用控制台中的专用接入地址", Enabled: true},
+		{ID: "unrelated", Title: "发票", Content: "不应注入的发票资料", Enabled: true},
+	}}
+	h.save(t)
+	h.output.Store(`{"action":"reply","text":"先到控制台看看接入地址。"}`)
+	h.enqueue(t, "one", "API 接入怎么操作？", "alice")
+	h.run()
+	require.Contains(t, h.request.Load().(string), "本站使用控制台中的专用接入地址")
+	require.NotContains(t, h.request.Load().(string), "不应注入的发票资料")
+	h.enqueue(t, "bob", "这是 Bob 的其他话题", "bob")
+	h.output.Store(`{"action":"reply","text":"就在控制台的接入说明里。"}`)
+	h.enqueue(t, "two", "在哪", "alice")
+	h.run()
+	require.EqualValues(t, 2, h.calls.Load())
+	var req struct {
+		Messages []Message `json:"messages"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(h.request.Load().(string)), &req))
+	content := sharedHistoryText(req.Messages)
+	require.Contains(t, content, "API 接入怎么操作？")
+	require.Contains(t, content, "先到控制台看看接入地址。")
+	require.Contains(t, content, "本站使用控制台中的专用接入地址", "short followups retain the topic's selected knowledge")
+	require.NotContains(t, content, "Bob 的其他话题")
+	require.Less(t, strings.Index(content, "API 接入怎么操作？"), strings.Index(content, "先到控制台看看接入地址。"))
+	require.Less(t, strings.Index(content, "先到控制台看看接入地址。"), strings.LastIndex(content, "在哪"))
+	j := h.job(t, "two")
+	// Ordinary directed chat does not inherit possibly mixed ambient answers.
+	personal := sharedHistoryText(h.s.history(context.Background(), h.c, j))
+	require.NotContains(t, personal, "先到控制台看看接入地址。")
+	other := j
+	other.MemberID = "bob"
+	require.NotContains(t, sharedHistoryText(h.s.autonomousHistory(context.Background(), h.c, other, "在哪")), "先到控制台看看接入地址。")
+}
+
+func TestAutonomousFollowupStillRespectsFiltersAndBudgets(t *testing.T) {
+	for _, mode := range []string{"mention", "secret", "ack", "other_member", "quota", "failure"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newAutoHarness(t)
+			if mode == "quota" {
+				h.c.Autonomous.HourlyReplies = 1
+				h.save(t)
+			}
+			h.enqueue(t, "one", "这个问题怎么处理？", "alice")
+			h.run()
+			text, member := "不太懂", "alice"
+			switch mode {
+			case "mention":
+				text = "@Bob 真的？"
+			case "secret":
+				text = "我的密码是 12345"
+			case "ack":
+				text = "谢谢！"
+			case "other_member":
+				member = "bob"
+			case "failure":
+				h.failModel.Store(true)
+			}
+			h.enqueue(t, "two", text, member)
+			h.run()
+			if mode == "failure" {
+				require.EqualValues(t, 2, h.calls.Load())
+				h.failModel.Store(false)
+				h.enqueue(t, "three", "那怎么办？", "alice")
+				h.run()
+				require.EqualValues(t, 2, h.calls.Load())
+			} else {
+				require.EqualValues(t, 1, h.calls.Load())
+			}
+			require.EqualValues(t, 1, h.sends.Load())
+		})
+	}
+}
+
+func TestAutonomousAndKnowledgeAtomicSave(t *testing.T) {
+	h := newAutoHarness(t)
+	ctx := context.Background()
+	h.c.Autonomous.Enabled = false
+	h.save(t)
+	current, err := h.s.Config(ctx)
+	require.NoError(t, err)
+	draft := current.Public()
+	draft.Autonomous.Enabled = true
+	draft.Autonomous.Groups = nil
+	draft.SiteKnowledge = SiteKnowledgeConfig{Enabled: true, Content: "本站公开资料"}
+	versions := draft.SectionVersions
+	// A stale knowledge version must not enable chat as a partial save.
+	bad := map[string]string{"autonomous": versions["autonomous"], "knowledge": "stale"}
+	_, err = h.s.SaveSetup(ctx, 1, SetupRequest{Config: draft, Sections: []string{"autonomous", "knowledge"}, Versions: bad})
+	require.ErrorIs(t, err, ErrConfigConflict)
+	unchanged, err := h.s.Config(ctx)
+	require.NoError(t, err)
+	require.False(t, unchanged.Autonomous.Enabled)
+	_, err = h.s.SaveSetup(ctx, 1, SetupRequest{Config: draft, Sections: []string{"autonomous", "knowledge"}, Versions: versions})
+	require.NoError(t, err)
+	saved, err := h.s.Config(ctx)
+	require.NoError(t, err)
+	require.True(t, saved.Autonomous.Enabled)
+	require.True(t, saved.Autonomous.InheritGroups)
+	require.Equal(t, "本站公开资料", saved.SiteKnowledge.Content)
+	require.Equal(t, current.APIKey, saved.APIKey)
 }

@@ -66,12 +66,29 @@ func TestFullGroupCommandsWithoutMention(t *testing.T) {
 	s := New(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
-	for i, content := range []string{"/帮助", "/绑定", "/生图", "/抽奖 错误", "/我的余额 多余参数", "帮助", "绑定", "生图", "抽奖 错误", "我的余额 多余参数"} {
+	commands := []string{"/帮助", "/绑定", "/生图", "/抽奖 错误", "/我的余额 多余参数", "/余额 多余参数", "帮助", "绑定", "生图", "抽奖 错误", "我的余额 多余参数", "余额 多余参数"}
+	for i, content := range commands {
 		require.True(t, shouldQueueGroupMessage(groupMessageCreate, Event{Content: content}))
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, Event{GroupID: "group", Content: content}))
 	}
-	require.EqualValues(t, 10, replies.Load())
+	require.EqualValues(t, len(commands), replies.Load())
+}
+
+func TestBalanceAliasAndBatchLotteryRouteAsCommands(t *testing.T) {
+	for _, content := range []string{"余额", "/余额", "我的余额", "/我的余额", "抽奖 10", "/抽奖 10", "  抽奖   10  ", "抽奖\u300010"} {
+		t.Run(content, func(t *testing.T) {
+			e := Event{Content: content}
+			require.True(t, unmentionedGroupCommand(e))
+			require.True(t, shouldQueueGroupMessage(groupMessageCreate, e))
+			require.True(t, shouldQueueGroupMessage(groupAtMessageCreate, e))
+			require.True(t, privateCommandText(content))
+			e.Content = "<@this-bot> " + content
+			require.True(t, isBuiltinOrCustomCommand(e, nil))
+			e.Author.Bot = true
+			require.False(t, shouldQueueGroupMessage(groupMessageCreate, e))
+		})
+	}
 }
 
 func TestMentionWithoutContentRepliesWithHelp(t *testing.T) {

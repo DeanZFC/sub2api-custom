@@ -527,6 +527,12 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 			return "邀请人今日奖励次数已达上限。", nil
 		}
 	}
+	if err = checkRewardBudget(ctx, tx, c, amount, rewardAt); err != nil {
+		if errors.Is(err, ErrRewardBudget) {
+			return err.Error(), nil
+		}
+		return "", err
+	}
 	var rewardID int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,source_user_id,source_member_id,amount,created_at) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,0),$8,$9,$10) ON CONFLICT(reward_key) DO NOTHING RETURNING id`, key, c.AppID, j.GroupID, recipientMember, userID, kind, sourceUser, sourceMember, amount, rewardAt).Scan(&rewardID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -555,6 +561,9 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	var bonus bool
 	if kind == "checkin" {
 		streak, bonus, err = grantStreak(ctx, tx, c, j, userID, rewardAt, streakReward, streakDays)
+		if errors.Is(err, ErrRewardBudget) {
+			return err.Error(), nil
+		}
 		if err != nil {
 			return "", err
 		}

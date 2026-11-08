@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -16,14 +17,21 @@ func (h *QQBotHandler) SaveConfigSection(c *gin.Context) {
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<10)
 	var req struct {
-		Version string       `json:"version"`
-		Config  qqbot.Config `json:"config"`
+		Version string          `json:"version"`
+		Config  json.RawMessage `json:"config"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
 		response.BadRequest(c, "配置格式不正确")
 		return
 	}
-	out, err := h.bot.SaveConfigSection(c.Request.Context(), c.Param("section"), req.Version, req.Config)
+	var config qqbot.Config
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(req.Config, &config) != nil || json.Unmarshal(req.Config, &fields) != nil || fields == nil {
+		response.BadRequest(c, "配置格式不正确")
+		return
+	}
+	_, hasBudget := fields["reward_budget_daily"]
+	out, err := h.bot.SaveConfigSection(c.Request.Context(), c.Param("section"), req.Version, config, !hasBudget)
 	if errors.Is(err, qqbot.ErrConfigConflict) {
 		response.Error(c, http.StatusConflict, err.Error())
 		return

@@ -8,7 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/qqbot"
 )
 
-func ProvideQQBotService(db *sql.DB, encryptor SecretEncryptor, cfg *config.Config, invalidator APIKeyAuthCacheInvalidator, billing *BillingCacheService, email *EmailService, settings *SettingService, users UserRepository, monitor *ChannelMonitorV2Service, groups GroupRepository, channels ChannelRepository, channelService *ChannelService, priceResolver *ModelPricingResolver, billingService *BillingService, rates UserGroupRateRepository) *qqbot.Service {
+func ProvideQQBotService(db *sql.DB, encryptor SecretEncryptor, cfg *config.Config, invalidator APIKeyAuthCacheInvalidator, billing *BillingCacheService, email *EmailService, settings *SettingService, users UserRepository, monitor *ChannelMonitorV2Service, groups GroupRepository, channels ChannelRepository, channelService *ChannelService, priceResolver *ModelPricingResolver, billingService *BillingService, rates UserGroupRateRepository, keys *APIKeyService, accounts AccountRepository) *qqbot.Service {
 	s := qqbot.New(db, encryptor, cfg.Totp.EncryptionKeyConfigured, func(ctx context.Context, user int64) {
 		if invalidator != nil {
 			invalidator.InvalidateAuthCacheByUserID(ctx, user)
@@ -23,6 +23,7 @@ func ProvideQQBotService(db *sql.DB, encryptor SecretEncryptor, cfg *config.Conf
 	s.SetHealthSnapshotProvider(status)
 	s.SetModelPriceProvider(&qqBotModelPrices{groups: groups, users: users, rates: rates, channels: channelService, billing: billingService, resolver: priceResolver})
 	s.SetPriceSnapshotProvider(&qqBotPriceSource{channels: channels, groups: groups})
+	s.SetSiteAIProvider(&qqBotSiteAI{keys: keys, groups: groups, users: users, accounts: accounts, settings: settings, email: email, baseURL: qqBotInternalBaseURL(cfg.Server.Port)})
 	s.Start()
 	return s
 }

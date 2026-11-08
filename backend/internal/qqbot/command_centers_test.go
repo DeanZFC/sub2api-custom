@@ -52,7 +52,7 @@ func TestRetiredCommandsNeverExecuteOrCallModels(t *testing.T) {
 
 func TestSplitCommandsReservedAndInvalidArgumentsNeverSpend(t *testing.T) {
 	s, replies := helpTestSender(t)
-	for _, cmd := range []string{"签到", "我的余额", "今日用量", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "邀请奖励", "邀请活动", "我的邀请", "成长任务", "抽奖活动"} {
+	for _, cmd := range []string{"签到", "我的余额", "余额", "今日用量", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "邀请奖励", "邀请活动", "我的邀请", "成长任务", "抽奖活动"} {
 		require.True(t, isBuiltinCommand(cmd))
 		require.Error(t, validateCustomCommands([]CustomCommand{{Command: "/" + cmd, Reply: "override"}}))
 		j := Job{EventType: groupMessageCreate, GroupID: "group", MessageID: cmd, CreatedAt: time.Now()}

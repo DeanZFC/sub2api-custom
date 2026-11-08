@@ -459,7 +459,7 @@ describe('QQ activity pages with real translations', () => {
     await router.push('/admin/qqbot/activities')
     const w = mount(QQBotActivitiesView, { global: { plugins: [i18n(locale), router], stubs: { RouterLink: true } } })
     await flushPromises()
-    expect(w.findAll('[role="tab"]')).toHaveLength(7)
+    expect(w.findAll('[role="tab"]')).toHaveLength(8)
     expect(api.checkinConfig).toHaveBeenCalledTimes(1)
     expect(api.lotteryConfig).not.toHaveBeenCalled()
     expect(api.inviteConfig).not.toHaveBeenCalled()

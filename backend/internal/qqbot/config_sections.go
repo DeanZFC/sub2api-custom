@@ -16,12 +16,12 @@ var ErrConfigConflict = errors.New("此模块已被其他页面更新，请重�
 var configSections = map[string][]string{
 	"connection":   {"enabled", "app_id", "app_secret", "sandbox", "clear_app_secret"},
 	"groups":       {"allowed_groups", "group_policies"},
-	"chat":         {"chat_disabled", "base_url", "api_key", "chat_model", "chat_protocol", "system_prompt", "max_output_tokens", "history_messages", "clear_api_key"},
+	"chat":         {"ai_connection", "site_api_key_id", "site_group_id", "site_owner_id", "chat_disabled", "base_url", "api_key", "chat_model", "chat_protocol", "system_prompt", "max_output_tokens", "history_messages", "clear_api_key"},
 	"knowledge":    {"site_knowledge"},
 	"images":       {"image_enabled", "image_base_url", "image_api_key", "image_model", "image_size", "image_output_format", "clear_image_api_key"},
 	"group-admins": {"group_admins"}, "moderation": {"moderation"}, "autonomous": {"autonomous"},
 	"commands": {"custom_commands"}, "notifications": {"price_notifications", "health_notifications", "notification_quiet_hours"},
-	"limits": {"daily_chat_limit", "daily_image_limit", "total_daily_chat_limit", "total_daily_image_limit", "cooldown_seconds", "reward_alert_daily"},
+	"limits": {"daily_chat_limit", "daily_image_limit", "total_daily_chat_limit", "total_daily_image_limit", "cooldown_seconds", "reward_alert_daily", "reward_budget_daily"},
 }
 
 func sectionValues(c Config, section string) map[string]json.RawMessage {
@@ -76,13 +76,20 @@ func mergeConfigSection(old, draft Config, section string) (Config, error) {
 	err = json.Unmarshal(raw, &out)
 	return out, err
 }
-func (s *Service) SaveConfigSection(ctx context.Context, section, version string, draft Config) (Config, error) {
+func (s *Service) SaveConfigSection(ctx context.Context, section, version string, draft Config, preserveMissingBudget ...bool) (Config, error) {
 	return s.saveConfigChecked(ctx, func(old Config) (Config, error) {
 		if _, ok := configSections[section]; !ok {
 			return old, errors.New("未知配置模块")
 		}
 		if version == "" || version != sectionVersion(old, section) {
 			return old, ErrConfigConflict
+		}
+		if section == "limits" && len(preserveMissingBudget) > 0 && preserveMissingBudget[0] {
+			draft.RewardBudgetDaily = old.RewardBudgetDaily
+		}
+		// Older module clients do not know the managed connection metadata.
+		if section == "chat" && draft.AIConnection == "" && draft.SiteAPIKeyID == 0 && draft.SiteOwnerID == 0 && draft.SiteGroupID == 0 {
+			draft.AIConnection, draft.SiteAPIKeyID, draft.SiteOwnerID, draft.SiteGroupID = old.AIConnection, old.SiteAPIKeyID, old.SiteOwnerID, old.SiteGroupID
 		}
 		return mergeConfigSection(old, draft, section)
 	}, section)
@@ -99,7 +106,7 @@ const configHistoryKey = "qq_bot_config_history"
 
 func publicSection(c Config, section string) map[string]json.RawMessage {
 	out := sectionValues(c.Public(), section)
-	for _, key := range []string{"app_secret", "api_key", "image_api_key", "clear_app_secret", "clear_api_key", "clear_image_api_key"} {
+	for _, key := range []string{"app_secret", "api_key", "image_api_key", "clear_app_secret", "clear_api_key", "clear_image_api_key", "site_api_key_id"} {
 		delete(out, key)
 	}
 	return out
@@ -115,6 +122,8 @@ func (s *Service) ConfigHistory(ctx context.Context) ([]ConfigChange, error) {
 type GroupPolicy struct {
 	GroupID              string `json:"group_id"`
 	Label                string `json:"label"`
+	DisableAutonomous    bool   `json:"disable_autonomous"`
+	DisableModeration    bool   `json:"disable_moderation"`
 	DisableChat          bool   `json:"disable_chat"`
 	DisableImages        bool   `json:"disable_images"`
 	DisableActivities    bool   `json:"disable_activities"`

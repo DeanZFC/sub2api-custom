@@ -29,3 +29,5 @@ export function useQQDraft<T>(source: MaybeRefOrGetter<T>) {
   onBeforeUnmount(() => { registry?.delete(check); window.removeEventListener('beforeunload', beforeUnload) })
   return { dirty, markSaved }
 }
+
+export function hasQQDrafts(router: Router) { return [...(registries.get(router) || [])].some(check => check()) }

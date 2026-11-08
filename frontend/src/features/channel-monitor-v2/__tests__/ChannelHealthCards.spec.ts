@@ -31,6 +31,43 @@ const requestTime = (time: string) => new Intl.DateTimeFormat('zh', {
 }).format(new Date(time))
 
 describe('channel health cards', () => {
+  it('shows each channel’s own model metrics and switches details without changing overall metrics', async () => {
+    const modelRows: MonitorMatrixRow[] = [
+      { ...row, model: 'gpt-6.1', metrics: { ...metrics, cache_rate: 0.9 }, recent_requests: [request('error', 10)] },
+      { ...row, model: 'gpt-6', metrics: { ...metrics, cache_rate: 0, has_cache_samples: true } },
+      { ...row, model: 'gpt-5', metrics: { ...metrics, cache_rate: 0, has_cache_samples: false } },
+      { ...row, group_id: 8, model: 'gpt-6.1', metrics: { ...metrics, cache_rate: 0.5 } },
+      { ...row, platform: 'anthropic', model: 'wrong-platform' },
+      { ...row, model: 'unused', has_traffic: false },
+    ]
+    const wrapper = mount(ChannelHealthCards, {
+      props: { rows: [{ ...row, recent_requests: [request('success')] }, { ...row, group_id: 8 }], modelRows,
+        coverage, groupBy: 'platform_group', healthMode: 'overall' },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+    })
+    const cards = wrapper.findAll('[data-testid=channel-health-card]')
+    expect(cards.map(card => card.findAll('[data-testid=model-metrics-row]').length)).toEqual([3, 1])
+    const modelCells = cards[0].findAll('[data-testid=model-metrics-row]')
+    expect(modelCells.map(model => model.findAll('td')[0].text())).toEqual(['90.0%', '0.00%', '-'])
+    expect(cards[1].get('[data-testid=model-metrics-row]').text()).toContain('50.0%')
+    expect(wrapper.text()).not.toContain('wrong-platform')
+    expect(wrapper.text()).not.toContain('unused')
+
+    await modelCells[0].get('button').trigger('click')
+    expect(cards[0].get('[data-testid=card-detail-scope]').text()).toContain('gpt-6.1')
+    expect(cards[0].findAll('dd')[0].text()).toBe('70.0%')
+    expect(cards[0].get('[data-testid=recent-requests]').findAll('button[data-state]')[19].attributes('data-state')).toBe('critical')
+    expect(cards[0].get('[data-testid=latest-request-time]').text()).toBe(`最近请求：${requestTime(request('error', 10).occurred_at)}`)
+    expect(cards[1].get('[data-testid=card-detail-scope]').text()).toContain('整体')
+    await cards[0].get('[data-testid=card-detail-scope] button').trigger('click')
+    expect(cards[0].get('[data-testid=recent-requests]').findAll('button[data-state]')[19].attributes('data-state')).toBe('healthy')
+
+    await modelCells[0].get('button').trigger('click')
+    await wrapper.setProps({ modelRows: modelRows.slice(1) })
+    expect(cards[0].get('[data-testid=card-detail-scope]').text()).toContain('整体')
+    wrapper.unmount()
+  })
+
   it('keeps passive health and traffic when counts are redacted', () => {
     expect(hasMonitorTraffic(row)).toBe(true)
     expect(hasMonitorTraffic({ ...row, has_traffic: false })).toBe(false)

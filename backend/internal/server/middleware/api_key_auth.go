@@ -134,7 +134,7 @@ func authenticateLoadedAPIKey(c *gin.Context, apiKey *service.APIKey, apiKeyServ
 	// The panel session is already authenticated: a disabled key must not cause
 	// the browser to refresh or discard that valid login session.
 	keyDeniedStatus := http.StatusUnauthorized
-	if strings.HasPrefix(c.FullPath(), "/api/v1/key-image-batches/") {
+	if strings.HasPrefix(c.FullPath(), "/api/v1/key-image-batches/") || strings.HasPrefix(c.FullPath(), "/api/v1/key-tests/") {
 		keyDeniedStatus = http.StatusForbidden
 	}
 

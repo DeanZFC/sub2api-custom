@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -331,6 +332,17 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 		}
 		draws[i] = lotteryOutcome{prize: lotteryPrizeAt(pool, n.Int64()), guaranteed: guaranteed}
 	}
+	totalReward := 0.0
+	for _, draw := range draws {
+		totalReward = math.Round((totalReward+draw.prize.Amount)*1e8) / 1e8
+	}
+	rewardAt := time.Now()
+	if err = checkRewardBudget(ctx, tx, current, totalReward, rewardAt); err != nil {
+		if errors.Is(err, ErrRewardBudget) {
+			return err.Error(), nil
+		}
+		return "", err
+	}
 	result = lotteryResult(cfg, state, draws)
 	for i, draw := range draws {
 		prize, guaranteed := draw.prize, draw.guaranteed
@@ -355,7 +367,7 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 		if err != nil {
 			return "", err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount) VALUES($1,$2,$3,$4,$5,'lottery',$6)`, fmt.Sprintf("lottery:%d", drawID), c.AppID, j.GroupID, j.MemberID, uid, prize.Amount); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount,created_at) VALUES($1,$2,$3,$4,$5,'lottery',$6,$7)`, fmt.Sprintf("lottery:%d", drawID), c.AppID, j.GroupID, j.MemberID, uid, prize.Amount, rewardAt); err != nil {
 			return "", err
 		}
 		updated, err := tx.ExecContext(ctx, `UPDATE users SET balance=balance+$1,updated_at=NOW() WHERE id=$2 AND status='active' AND deleted_at IS NULL`, prize.Amount, uid)

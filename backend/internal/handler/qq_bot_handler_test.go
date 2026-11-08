@@ -43,10 +43,17 @@ func TestQQBotBindingManagementRequiresAdmin(t *testing.T) {
 		r.PUT("/config", h.SaveConfig)
 		r.GET("/runtime", h.Runtime)
 		r.POST("/probe/:kind", h.Probe)
+		r.GET("/setup/options", h.SetupOptions)
+		r.GET("/setup/checks", h.SetupChecks)
+		r.PUT("/setup", h.SaveSetup)
+		r.POST("/setup/probe/:kind", h.SetupProbe)
+		r.GET("/activity-templates", h.ActivityTemplates)
+		r.POST("/activity-templates", h.ApplyActivityTemplate)
 		for _, route := range []struct{ method, path string }{
 			{"GET", "/bindings"}, {"DELETE", "/bindings/7"},
 			{"GET", "/config"}, {"PUT", "/config"},
 			{"GET", "/runtime"}, {"POST", "/probe/qq"},
+			{"GET", "/setup/options"}, {"GET", "/setup/checks"}, {"PUT", "/setup"}, {"POST", "/setup/probe/qq"}, {"GET", "/activity-templates"}, {"POST", "/activity-templates"},
 		} {
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest(route.method, route.path, nil))

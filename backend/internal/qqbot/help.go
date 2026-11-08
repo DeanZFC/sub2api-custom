@@ -48,7 +48,7 @@ type helpItem struct {
 func helpSystemItems() []helpItem {
 	return []helpItem{
 		{action: "checkin", label: "每日签到", description: "每日签到", command: "签到"},
-		{action: "balance", label: "我的余额", description: "查询账户余额", command: "我的余额"},
+		{action: "balance", label: "我的余额", description: "查询账户余额，也可发送「余额」", command: "我的余额"},
 		{action: "today_usage", label: "今日用量", description: "查看今日用量", command: "今日用量"},
 		{action: "rewards", label: "我的奖励", description: "查看累计奖励", command: "我的奖励"},
 		{action: "lottery", label: "抽奖一次", description: "省略次数抽 1 次；可填 1–10 连抽，次数不足整批不抽", command: "抽奖", usage: "抽奖 [次数]"},

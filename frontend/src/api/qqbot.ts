@@ -16,7 +16,7 @@ export function defaultSiteKnowledgeConfig(): QQSiteKnowledgeConfig {
 }
 export interface QQGroupAdmin { app_id: string; group_id: string; member_id: string; nickname: string }
 export interface QQModerationConfig {
-  enabled: boolean; groups: string[]; repeat_window_seconds: number; repeat_count: number
+  inherit_groups?: boolean; enabled: boolean; groups: string[]; repeat_window_seconds: number; repeat_count: number
   burst_window_seconds: number; burst_count: number; mute_minutes: number
   repeat_offense_minutes: number; escalated_mute_minutes: number
   report_enabled: boolean; report_mute_minutes: number
@@ -33,15 +33,15 @@ export interface QQModerationRecord {
   created_at: string; mute_status: string; recall_total: number; recall_succeeded: number; pending: number; error: string
 }
 export interface QQAutonomousConfig {
-  enabled: boolean; groups: string[]; names: string[]; topics: string[]
+  inherit_groups?: boolean; enabled: boolean; groups: string[]; names: string[]; topics: string[]
   sample_percent: number; cooldown_seconds: number; min_messages: number
   member_cooldown_seconds: number; hourly_replies: number; daily_replies: number; daily_calls: number
   start_hour: number; end_hour: number; followup_seconds: number; max_chars: number; mention_user: boolean
 }
 export function defaultAutonomousConfig(): QQAutonomousConfig {
-  return { enabled: false, groups: [], names: ['CTAV'], topics: [], sample_percent: 15, cooldown_seconds: 120,
-    min_messages: 6, member_cooldown_seconds: 600, hourly_replies: 3, daily_replies: 20, daily_calls: 40,
-    start_hour: 9, end_hour: 23, followup_seconds: 60, max_chars: 100, mention_user: false }
+  return { enabled: false, groups: [], names: ['CTAV'], topics: [], sample_percent: 25, cooldown_seconds: 60,
+    min_messages: 2, member_cooldown_seconds: 120, hourly_replies: 12, daily_replies: 80, daily_calls: 160,
+    start_hour: 0, end_hour: 0, followup_seconds: 90, max_chars: 100, mention_user: false }
 }
 export interface QQHealthNotificationConfig {
   enabled: boolean; groups: string[]; minimum_samples: number; error_percent: number
@@ -52,15 +52,19 @@ export function defaultHealthNotificationConfig(): QQHealthNotificationConfig {
     ttft_seconds: 10, failure_minutes: 3, recovery_minutes: 2, cooldown_minutes: 30 }
 }
 export interface QQGroupPolicy {
-  group_id: string; label: string; disable_chat: boolean; disable_images: boolean
+  disable_autonomous?: boolean; disable_moderation?: boolean; group_id: string; label: string; disable_chat: boolean; disable_images: boolean
   disable_activities: boolean; disable_notifications: boolean; chat_daily_limit: number | null; image_daily_limit: number | null
 }
 export interface QQBotConfig {
+  setup_warning?: string
   _version?: string
   notification_quiet_hours?: { enabled: boolean; start_hour: number; end_hour: number }
   section_versions?: Record<string, string>
   chat_disabled?: boolean
   group_policies?: QQGroupPolicy[]
+  reward_budget_daily?: number | null
+  ai_connection?: 'site' | 'external' | ''
+  site_api_key_id?: number; site_group_id?: number; site_owner_id?: number
   reward_alert_daily?: number
   moderation?: QQModerationConfig
   health_notifications?: QQHealthNotificationConfig
@@ -221,7 +225,23 @@ export interface QQActivityPreview {
 }
 export interface QQTransferHistory { items: { id: number; from_user_id: number; to_user_id: number; from_email: string; to_email: string; amount: string; fee: string; net_amount: string; created_at: string }[]; total: number; page: number; page_size: number }
 export interface QQGroupInfo { app_id: string; sandbox: boolean; group_id: string; name: string; status: 'available' | 'permission_required' | 'unavailable' | 'unconfigured' | 'rate_limited'; retry_after_seconds?: number }
+export interface QQSetupOptions {
+  groups: { id: number; name: string; models: string[] }[]
+  frontend_url: string; email_configured: boolean; current_quota: number; current_used: number
+}
+export interface QQSetupCheck { code: string; status: 'ready' | 'blocked' | 'warning' | 'pending'; message: string; action: string }
+export interface QQSetupReadiness { checks: QQSetupCheck[]; ready: boolean; version: string }
+export interface QQSetupProbe { kind: string; status: 'ready' | 'blocked'; message: string; at: string }
+export interface QQActivityBundle { version: string; checkin: QQCheckinConfig; lottery: QQLotteryConfig; invite: QQInviteConfig; ranking: QQRankingConfig; budget: number | null }
+export interface QQSetupRequest { config: QQBotConfig; versions: Record<string, string>; sections: string[]; site_quota: number; regenerate_site_key?: boolean }
 export const qqbotAPI = {
+  setupOptions: async () => (await apiClient.get<QQSetupOptions>('/admin/qqbot/setup/options')).data,
+  setupChecks: async () => (await apiClient.get<QQSetupReadiness>('/admin/qqbot/setup/checks')).data,
+  saveSetup: async (request: QQSetupRequest) => (await apiClient.put<QQBotConfig>('/admin/qqbot/setup', request)).data,
+  setupProbe: async (kind: string) => (await apiClient.post<QQSetupProbe>('/admin/qqbot/setup/probe/' + kind, {}, { timeout: 230000 })).data,
+  activityTemplates: async () => (await apiClient.get<Record<'current' | 'light' | 'active', QQActivityBundle>>('/admin/qqbot/activity-templates')).data,
+  applyActivityTemplate: async (request: { version: string; template: 'light' | 'active'; budget: number; confirmed: boolean }) => (await apiClient.post<QQBotConfig>('/admin/qqbot/activity-templates', request)).data,
+
  groupInfo: async (appID: string, groupID: string, signal?: AbortSignal) => (await apiClient.get<QQGroupInfo>(`/admin/qqbot/groups/${encodeURIComponent(groupID)}/info`, { params: { app_id: appID }, signal, timeout: 10000 })).data,
  chatPreview: async (params: QQChatPreviewRequest) => (await apiClient.post<QQChatPreviewResult>('/admin/qqbot/chat-preview', params, { timeout: 180000 })).data,
  members: async (params: { app_id?: string; group_id?: string; member_id?: string; search?: string; page?: number; page_size?: number }) => (await apiClient.get<QQMemberPage>('/admin/qqbot/members', { params })).data,

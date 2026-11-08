@@ -172,6 +172,10 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 			reward := task.reward()
 			granted, e := grantActivityReward(ctx, tx, c, j, uid, fmt.Sprintf("qq-growth:%d:%s", uid, task.ID), "growth", "成长任务："+task.Name, reward, at)
 			if e != nil {
+				if errors.Is(e, ErrRewardBudget) {
+					status = "预算不足，等待后续结算"
+					break
+				}
 				return "", 0, false, e
 			}
 			status = "已发放"

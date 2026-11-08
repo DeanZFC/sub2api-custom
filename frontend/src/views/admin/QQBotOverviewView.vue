@@ -2,6 +2,7 @@
   <AppLayout>
     <div class="mx-auto max-w-6xl space-y-6">
       <div class="flex items-center justify-between gap-3"><h1 class="text-2xl font-semibold">{{ t('qqbot.workspace.overview') }}</h1><button class="btn btn-secondary" :disabled="loading" @click="load">{{ t('common.refresh') }}</button></div>
+      <section class="card flex flex-wrap items-center justify-between gap-4 border-primary-200 p-5"><div><h2 class="font-semibold">{{ t('qqbot.simple.setup') }}</h2><p class="mt-1 text-sm text-gray-500">{{ t('qqbot.simple.setupHelp') }}</p></div><div class="flex gap-2"><RouterLink to="/admin/qqbot/setup" class="btn btn-primary">{{ t('qqbot.simple.start') }}</RouterLink><RouterLink to="/admin/qqbot/records?tab=diagnostics" class="btn btn-secondary">{{ t('qqbot.simple.diagnostics') }}</RouterLink></div></section>
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700">{{ error }}</p>
       <template v-if="overview && config">
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('qqbot.workspace.overviewHelp', { day: overview.day }) }}</p>

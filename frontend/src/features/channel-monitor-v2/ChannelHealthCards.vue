@@ -11,7 +11,7 @@
           <span class="truncate" :title="section.title">{{ section.title }}</span>
           <span class="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ section.rows.length }}</span>
         </h3>
-        <div class="grid auto-rows-fr grid-cols-1 items-stretch gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        <div class="grid auto-rows-fr grid-cols-1 items-stretch gap-4" :class="showModelBreakdown ? 'xl:grid-cols-2' : 'lg:grid-cols-2 2xl:grid-cols-3'">
           <article
             v-for="row in section.rows"
             :key="JSON.stringify([row.platform, row.group_id, row.model])"
@@ -33,30 +33,23 @@
                 {{ healthLabel(cardHealth(row.health, healthMode)) }}
               </span>
             </header>
-            <dl class="my-3 grid grid-cols-2 gap-2">
-              <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">
-                <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.cacheHint')">{{ t('channelMonitorV2.metrics.cacheRate') }}</dt>
-                <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl">{{ formatMonitorCacheRate(row.metrics) }}</dd>
-              </div>
-              <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">
-                <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.cards.availability')">{{ t('channelMonitorV2.cards.availability') }}</dt>
-                <dd class="mt-1 font-mono text-base font-bold tabular-nums sm:text-xl" :class="textClass[row.health.error_rate]">{{ formatMonitorSuccessRateFromError(row.metrics.error_rate, row.health.error_rate) }}</dd>
-              </div>
-              <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700">
-                <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.ttft')">{{ t('channelMonitorV2.metrics.ttft') }}</dt>
-                <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl" :title="latencyDetail(row)">{{ formatMonitorMs(row.metrics.ttft.p50_ms) }}</dd>
-              </div>
-              <div class="min-w-0 rounded-xl bg-gray-50 px-2 py-2 ring-1 ring-gray-100 dark:bg-dark-900/40 dark:ring-dark-700" data-output-tps>
-                <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.outputTpsDetail')">{{ t('channelMonitorV2.metrics.outputTps') }}</dt>
-                <dd class="mt-1 font-mono text-base font-bold tabular-nums text-gray-800 dark:text-gray-100 sm:text-xl">{{ formatMonitorOutputTps(row.metrics.output_tps) }}</dd>
-              </div>
-            </dl>
+            <ChannelCardMetrics
+              :row="row"
+              :models="row.models"
+              :show-models="showModelBreakdown"
+              :selected-model="row.detail.model"
+              @select-model="selectedModels[cardKey(row)] = $event"
+            />
+            <div v-if="showModelBreakdown" class="mb-3 flex h-6 min-w-0 items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400" data-testid="card-detail-scope">
+              <span class="truncate" :title="t('channelMonitorV2.cards.currentScope', { model: row.detail.model || t('channelMonitorV2.cards.overall') })">{{ t('channelMonitorV2.cards.currentScope', { model: row.detail.model || t('channelMonitorV2.cards.overall') }) }}</span>
+              <button type="button" class="shrink-0 rounded text-emerald-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500 dark:text-emerald-400" :class="{ invisible: !row.detail.model }" :disabled="!row.detail.model" @click="selectedModels[cardKey(row)] = undefined">{{ t('channelMonitorV2.cards.backToOverall') }}</button>
+            </div>
             <div class="mb-3 border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="health-history">
               <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                 <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('channelMonitorV2.cards.healthHistory') }}</span>
                 <span>{{ t(`channelMonitorV2.healthMode.${healthMode}`) }} · {{ historyIntervalLabel }}</span>
               </div>
-              <MonitorStatusStrip :slots="historySlots(row)" :label="t('channelMonitorV2.cards.healthHistory')" compact />
+              <MonitorStatusStrip :slots="historySlots(row.detail)" :label="t('channelMonitorV2.cards.healthHistory')" compact />
               <div class="mt-1 flex justify-between text-[10px] uppercase tracking-widest text-gray-400">
                 <span>{{ t('channelMonitorV2.cards.past') }}</span><span>{{ t('channelMonitorV2.cards.now') }}</span>
               </div>
@@ -64,10 +57,10 @@
             </div>
             <div class="border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="recent-requests">
               <div class="mb-2 flex items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('channelMonitorV2.cards.recentRequests') }}</span>
-                <span class="shrink-0" data-testid="latest-request-time">{{ t('channelMonitorV2.cards.latestRequest', { time: latestRequestTime(row) }) }}</span>
+                <span class="min-w-0 truncate font-medium text-gray-700 dark:text-gray-200" :title="t('channelMonitorV2.cards.recentRequests')">{{ t('channelMonitorV2.cards.recentRequests') }}</span>
+                <span class="max-w-[65%] shrink-0 truncate" :title="t('channelMonitorV2.cards.latestRequest', { time: latestRequestTime(row.detail) })" data-testid="latest-request-time">{{ t('channelMonitorV2.cards.latestRequest', { time: latestRequestTime(row.detail) }) }}</span>
               </div>
-              <MonitorStatusStrip :slots="requestSlots(row)" :label="t('channelMonitorV2.cards.recentRequests')" compact @select="openRequestError(row, $event)" />
+              <MonitorStatusStrip :slots="requestSlots(row.detail)" :label="t('channelMonitorV2.cards.recentRequests')" compact @select="openRequestError(row.detail, $event)" />
               <div class="mt-1 flex justify-between text-[10px] uppercase tracking-widest text-gray-400">
                 <span>{{ t('channelMonitorV2.cards.past') }}</span><span>{{ t('channelMonitorV2.cards.now') }}</span>
               </div>
@@ -103,13 +96,14 @@
 
 <script setup lang="ts">
 import { formatMonitorCacheRate, formatMonitorOutputTps } from '@/features/channel-monitor-v2/monitorFormat'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { HealthState, MonitorCoverage, MonitorMatrixGroupBy, MonitorMatrixRow, MonitorRecentRequest } from '@/api/channelMonitorV2'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { platformDisplayName } from '@/constants/platformCatalog'
 import MonitorStatusStrip from './MonitorStatusStrip.vue'
+import ChannelCardMetrics from './ChannelCardMetrics.vue'
 import GroupTestFooter from './GroupTestFooter.vue'
 import GroupPelicanGallery from './GroupPelicanGallery.vue'
 import { emptyGroupTests, indexGroupTestResults, type TestResultsState } from './monitorTestResults'
@@ -120,9 +114,10 @@ import { formatLatencyPrivacy, formatMonitorMs, formatMonitorPercent, formatMoni
 
 const props = withDefaults(defineProps<{
   rows: MonitorMatrixRow[]; coverage: MonitorCoverage; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode
+  modelRows?: MonitorMatrixRow[]; modelCoverage?: MonitorCoverage
   testResults?: TestResult[]; testResultsState?: TestResultsState
   admin?: boolean
-}>(), { testResults: () => [], testResultsState: 'ready', admin: false })
+}>(), { modelRows: () => [], testResults: () => [], testResultsState: 'ready', admin: false })
 const emit = defineEmits<{ 'open-error': [id: number] }>()
 const testsByGroup = computed(() => indexGroupTestResults(props.testResults))
 const previewGroup = ref<{ id: number; name: string } | null>(null)
@@ -133,9 +128,30 @@ const historyIntervalLabel = computed(() => {
   if (minutes < 1440) return t('channelMonitorV2.bucket.hours', { count: minutes / 60 })
   return t('channelMonitorV2.bucket.days', { count: minutes / 1440 })
 })
+const showModelBreakdown = computed(() => props.groupBy === 'platform' || props.groupBy === 'platform_group')
+const selectedModels = ref<Record<string, string | undefined>>({})
+function cardKey(row: MonitorMatrixRow) { return JSON.stringify([row.platform, row.group_id ?? null, row.model ?? null]) }
+const modelsByCard = computed(() => {
+  const index = new Map<string, MonitorMatrixRow[]>()
+  for (const row of props.modelRows) {
+    if (!row.model || !hasMonitorTraffic(row)) continue
+    const key = cardKey({ ...row, model: undefined })
+    const models = index.get(key) || []
+    models.push(row)
+    index.set(key, models)
+  }
+  for (const models of index.values()) models.sort((a, b) => compareMonitorModels(a.model!, b.model!))
+  return index
+})
+watch([() => props.groupBy, modelsByCard], () => {
+  for (const [key, model] of Object.entries(selectedModels.value)) {
+    if (!showModelBreakdown.value || !modelsByCard.value.get(key)?.some(row => row.model === model)) delete selectedModels.value[key]
+  }
+})
+type HealthCardRow = MonitorMatrixRow & { models: MonitorMatrixRow[]; detail: MonitorMatrixRow }
 const sections = computed(() => {
   const byModel = props.groupBy === 'platform_model' || props.groupBy === 'platform_group_model'
-  const groups = new Map<string, { key: string; platform: string; model?: string; title: string; rows: MonitorMatrixRow[] }>()
+  const groups = new Map<string, { key: string; platform: string; model?: string; title: string; rows: HealthCardRow[] }>()
   for (const row of props.rows) {
     if (byModel && (!row.model || !hasMonitorTraffic(row))) continue
     const key = JSON.stringify([row.platform, byModel ? row.model : null])
@@ -145,26 +161,26 @@ const sections = computed(() => {
         title: byModel ? row.model! : platformDisplayName(row.platform), rows: [] }
       groups.set(key, section)
     }
-    section.rows.push(row)
+    const models = showModelBreakdown.value ? modelsByCard.value.get(cardKey(row)) || [] : []
+    const detail = models.find(model => model.model === selectedModels.value[cardKey(row)]) || row
+    section.rows.push({ ...row, models, detail })
   }
   return [...groups.values()].sort((a, b) => a.platform.localeCompare(b.platform)
     || compareMonitorModels(a.model || '', b.model || ''))
 })
 const states: HealthState[] = ['healthy', 'warning', 'critical', 'unknown']
-const textClass = { healthy: 'text-emerald-600 dark:text-emerald-400', warning: 'text-amber-600 dark:text-amber-400', critical: 'text-rose-500 dark:text-rose-400', unknown: 'text-gray-400' }
 const badgeClass = { healthy: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', warning: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300', critical: 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300', unknown: 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400' }
 const dotClass = { healthy: 'bg-emerald-400', warning: 'bg-amber-400', critical: 'bg-rose-400', unknown: 'bg-gray-300 dark:bg-dark-600' }
 function healthLabel(state: HealthState) { return t(`channelMonitorV2.cards.health.${state}`) }
 function modelName(model?: string) { return model || '-' }
 function cardTitle(row: MonitorMatrixRow) { return row.group_name || (row.group_id ? `#${row.group_id}` : platformDisplayName(row.platform)) }
-function latencyDetail(row: MonitorMatrixRow) { const m = row.metrics.ttft; return formatLatencyPrivacy(m.p50_ms, m.p90_ms, m.avg_ms, m.p95_ms) }
 function timeLabel(time: number | string) { return new Intl.DateTimeFormat(locale.value || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(time)) }
 function latestRequestTime(row: MonitorMatrixRow) {
   const latest = recentRequestsForCard(row.recent_requests)[19]
   return latest ? timeLabel(latest.occurred_at) : '-'
 }
 function historySlots(row: MonitorMatrixRow) {
-  return historyBucketsForCard(row.buckets, props.coverage).map(slot => {
+  return historyBucketsForCard(row.buckets, showModelBreakdown.value && row.model ? props.modelCoverage || props.coverage : props.coverage).map(slot => {
     if (!slot) return { state: 'unknown' as const, label: t('channelMonitorV2.cards.noHistory') }
     const range = `${timeLabel(slot.start)} – ${timeLabel(slot.end)}`
     if (!slot.bucket) return { state: 'unknown' as const, label: `${range}\n${t('channelMonitorV2.cards.noIntervalData')}` }

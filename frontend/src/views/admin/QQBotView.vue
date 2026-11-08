@@ -8,7 +8,8 @@
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
       <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
       <p v-if="!form" class="text-gray-500">{{ t('common.loading') }}</p>
-      <form v-else ref="settingsForm" novalidate @submit.prevent="save"><fieldset :disabled="busy" class="min-w-0 space-y-6">
+      <RouterLink v-if="!groupMode" to="/admin/qqbot/setup" class="btn btn-primary">{{ t('qqbot.simple.setup') }}</RouterLink>
+      <form v-if="form" ref="settingsForm" novalidate @submit.prevent="save"><fieldset :disabled="busy" class="min-w-0 space-y-6">
         <p class="rounded-xl bg-blue-50 p-3 text-sm text-blue-800 dark:bg-blue-950 dark:text-blue-200">{{ t('qqbot.workspace.scopedSaveHelp') }}</p>
         <div v-if="!groupMode" class="flex flex-wrap gap-2"><button v-for="category in categories" :key="category.key" type="button" class="btn" :class="activeCategory === category.key ? 'btn-primary' : 'btn-secondary'" @click="selectCategory(category.key)">{{ t(category.label) }}</button></div>
         <nav
@@ -32,7 +33,7 @@
             @click="activeTab = tab.key"
             @keydown="handleTabKeydown($event, tab.key)"
           >
-            {{ t(tab.label) }}{{ dirtySections.includes(tab.key) ? ' •' : '' }}
+            {{ t(tab.label) }}{{ isTabDirty(tab.key) ? ' •' : '' }}
           </button>
         </nav>
         <section v-show="activeTab === 'connection'" id="qqbot-settings-panel-connection" role="tabpanel" aria-labelledby="qqbot-settings-tab-connection" class="card space-y-4 p-6">
@@ -115,12 +116,8 @@
           <h2 class="text-lg font-semibold">{{ t('qqbot.ai') }}</h2>
           <label class="flex items-center gap-2"><input v-model="form.chat_disabled" type="checkbox" />{{ t('qqbot.workspace.chatDisabled') }}</label>
           <p class="text-xs text-gray-500">{{ t('qqbot.workspace.chatDisabledHelp') }}</p>
-          <div class="grid gap-4 md:grid-cols-2">
-            <label class="space-y-1">Base URL<input v-model.trim="form.base_url" class="input" placeholder="https://api.example.com/v1" /><span class="text-xs text-gray-500">{{ t('qqbot.baseHelp') }}</span></label>
-            <label class="space-y-1">API Key<input v-model="form.api_key" type="password" class="input" autocomplete="new-password" :placeholder="secretHint(form.api_key_set)" /><span class="flex gap-2 text-xs"><input v-model="form.clear_api_key" type="checkbox" />{{ t('qqbot.clearSecret') }}</span></label>
-            <label class="space-y-1">{{ t('qqbot.chatModel') }}<input v-model.trim="form.chat_model" class="input" /></label>
-            <label class="space-y-1">{{ t('qqbot.protocol') }}<select v-model="form.chat_protocol" class="input"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
-          </div>
+          <QQBotSiteAISettings v-if="activeTab === 'chat'" v-model="form" v-model:quota="siteQuota" v-model:regenerate="regenerateSiteKey" />
+          <details><summary class="cursor-pointer text-sm">{{ t('qqbot.workspace.advanced') }}</summary><label class="block mt-3">{{ t('qqbot.protocol') }}<select v-model="form.chat_protocol" class="input"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label></details>
           <details><summary class="cursor-pointer text-sm">{{ t('qqbot.workspace.advanced') }}</summary><label class="mt-3 block space-y-1">{{ t('qqbot.systemPrompt') }}<textarea v-model="form.system_prompt" rows="3" class="input" /></label>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="space-y-1">{{ t('qqbot.maxTokens') }}<input v-model.number="form.max_output_tokens" class="input" type="number" min="64" max="8192" /></label>
@@ -128,12 +125,11 @@
           </div>
           <p id="qq-history-help" class="text-xs text-gray-500">{{ t('qqbot.historyHelp') }}</p></details>
         </section>
-        <div v-show="activeTab === 'autonomous'" id="qqbot-settings-panel-autonomous" role="tabpanel" aria-labelledby="qqbot-settings-tab-autonomous">
+        <div v-show="activeTab === 'autonomous'" id="qqbot-settings-panel-autonomous" role="tabpanel" aria-labelledby="qqbot-settings-tab-autonomous" class="space-y-6">
           <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" :groups="allowedGroups" :policies="groupPolicies" :names="groupNames" />
-        </div>
-        <div v-show="activeTab === 'knowledge'" id="qqbot-settings-panel-knowledge" role="tabpanel" aria-labelledby="qqbot-settings-tab-knowledge">
+
           <QQBotKnowledgeSettings v-model="siteKnowledge" />
-          <QQBotChatPreview v-if="baseline && activeTab === 'knowledge'" :config="baseline" />
+          <QQBotChatPreview v-if="baseline && activeTab === 'autonomous'" :config="baseline" />
         </div>
         <div v-show="activeTab === 'moderation'" id="qqbot-settings-panel-moderation" role="tabpanel" aria-labelledby="qqbot-settings-tab-moderation">
           <QQBotModerationSettings v-model="moderation" :app-id="form.app_id" :group-labels="groupLabels" :groups="allowedGroups" :runtime="form.app_id === savedAppId ? runtime : null" :disabled="busy" />
@@ -162,8 +158,8 @@
           </div>
         </section>
         <div class="sm:sticky sm:bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl border bg-white p-4 shadow-lg dark:border-dark-700 dark:bg-dark-900">
-          <span class="text-sm">{{ t(dirtySections.includes(activeTab) ? 'qqbot.workspace.unsaved' : 'qqbot.workspace.saved') }}</span>
-          <button type="submit" :disabled="busy || !dirtySections.includes(activeTab)" class="btn btn-primary">{{ t('qqbot.workspace.saveModule', { name: t(tabs.find(tab => tab.key === activeTab)!.label) }) }}</button>
+          <span class="text-sm">{{ t(isTabDirty(activeTab) ? 'qqbot.workspace.unsaved' : 'qqbot.workspace.saved') }}</span>
+          <button type="submit" :disabled="busy || !isTabDirty(activeTab)" class="btn btn-primary">{{ t('qqbot.workspace.saveModule', { name: t(tabs.find(tab => tab.key === activeTab)!.label) }) }}</button>
           <button type="button" :disabled="busy" class="btn btn-secondary" @click="reloadModule">{{ t('qqbot.workspace.reloadModule') }}</button>
         </div>
         <details v-if="visibleProbeKinds.length" :key="activeTab" class="card p-4">
@@ -172,7 +168,7 @@
           <div class="mt-3 flex flex-wrap gap-2"><button v-for="kind in visibleProbeKinds" :key="kind" type="button" class="btn btn-secondary" :disabled="busy || dirty" @click="probe(kind)">{{ t(probeLabels[kind]) }}</button></div>
         </details>
         <details class="card p-4"><summary class="cursor-pointer">{{ t('qqbot.workspace.changes') }}</summary><ul class="mt-3 space-y-2 break-words text-sm [overflow-wrap:anywhere]"><li v-for="change in changes" :key="change">{{ change }}</li></ul></details>
-        <details class="card p-4" @toggle="loadHistory"><summary class="cursor-pointer">{{ t('qqbot.workspace.history') }}</summary><article v-for="(item, index) in history" :key="index" class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-sm"><span>{{ new Date(item.at).toLocaleString() }} · {{ t(tabs.find(tab => tab.key === item.section)?.label || item.section) }}</span><button type="button" class="btn btn-secondary" :disabled="busy" @click="restoreDraft(item)">{{ t('qqbot.workspace.restoreDraft') }}</button></article><p class="mt-2 text-xs text-gray-500">{{ t('qqbot.workspace.restoreHelp') }}</p></details>
+        <details class="card p-4" @toggle="loadHistory"><summary class="cursor-pointer">{{ t('qqbot.workspace.history') }}</summary><article v-for="(item, index) in history" :key="index" class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-sm"><span>{{ new Date(item.at).toLocaleString() }} · {{ t(item.section === 'knowledge' ? 'qqbot.knowledge.title' : tabs.find(tab => tab.key === item.section)?.label || item.section) }}</span><button type="button" class="btn btn-secondary" :disabled="busy" @click="restoreDraft(item)">{{ t('qqbot.workspace.restoreDraft') }}</button></article><p class="mt-2 text-xs text-gray-500">{{ t('qqbot.workspace.restoreHelp') }}</p></details>
       </fieldset></form>
 
     </div>
@@ -183,6 +179,7 @@
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useQQGroupNames } from '@/composables/useQQGroupNames'
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
+import QQBotSiteAISettings from '@/components/admin/qqbot/QQBotSiteAISettings.vue'
 import QQCommandInventory from '@/components/admin/qqbot/QQCommandInventory.vue'
 import QQGroupPicker from '@/components/admin/qqbot/QQGroupPicker.vue'
 import QQGroupPolicies from '@/components/admin/qqbot/QQGroupPolicies.vue'
@@ -205,10 +202,9 @@ const tabs = [
   { key: 'chat', label: 'qqbot.ai' },
   { key: 'group-admins', label: 'qqbot.groupAdmins.title' },
   { key: 'moderation', label: 'qqbot.moderation.title' },
-  { key: 'autonomous', label: 'qqbot.autonomous.title' },
+  { key: 'autonomous', label: 'qqbot.autonomous.workspaceTitle' },
   { key: 'images', label: 'qqbot.images' },
   { key: 'commands', label: 'qqbot.customCommands' },
-  { key: 'knowledge', label: 'qqbot.knowledge.title' },
   { key: 'notifications', label: 'qqbot.priceNotifications.title' },
   { key: 'limits', label: 'qqbot.limits' }
 ] as const
@@ -216,18 +212,23 @@ type SettingsTab = (typeof tabs)[number]['key']
 const route = useRoute()
 const router = useRouter()
 const groupMode = computed(() => route?.path === '/admin/qqbot/groups')
-const activeTab = ref<SettingsTab>((tabs.find(tab => tab.key === route?.query.tab)?.key) || (groupMode.value ? 'groups' : 'connection'))
+function resolveTab(value: unknown): SettingsTab {
+  return value === 'knowledge' ? 'autonomous' : tabs.find(tab => tab.key === value)?.key || (groupMode.value ? 'groups' : 'connection')
+}
+const activeTab = ref<SettingsTab>(resolveTab(route?.query.tab))
+function tabSections(tab: SettingsTab): ConfigSection[] { return tab === 'autonomous' ? ['autonomous', 'knowledge'] : [tab] }
+function isTabDirty(tab: SettingsTab) { return (tab === 'chat' && regenerateSiteKey.value) || tabSections(tab).some(section => dirtySections.value.includes(section)) }
 const categories = computed(() => groupMode.value ? [{ key: 'groups', label: 'qqbot.workspace.groups', tabs: ['groups', 'group-admins', 'moderation'] }] : [
   { key: 'connect', label: 'qqbot.workspace.connectCategory', tabs: ['connection', 'chat', 'images'] },
-  { key: 'behavior', label: 'qqbot.workspace.behaviorCategory', tabs: ['autonomous', 'commands', 'knowledge'] },
+  { key: 'behavior', label: 'qqbot.workspace.behaviorCategory', tabs: ['autonomous', 'commands'] },
   { key: 'operations', label: 'qqbot.workspace.operationsCategory', tabs: ['notifications', 'limits'] }
 ])
 const activeCategory = computed(() => categories.value.find(c => c.tabs.includes(activeTab.value))?.key || categories.value[0]!.key)
 const visibleTabs = computed(() => tabs.filter(tab => categories.value.find(c => c.key === activeCategory.value)?.tabs.includes(tab.key)))
 function selectCategory(key: string) { activeTab.value = categories.value.find(c => c.key === key)!.tabs[0] as SettingsTab }
 watch(activeTab, tab => { if (route && router && route.query.tab !== tab) void router.replace({ query: { ...route.query, tab } }) })
-watch(() => route?.path, async () => { activeTab.value = tabs.find(tab => tab.key === route?.query.tab)?.key || (groupMode.value ? 'groups' : 'connection'); busy.value = true; try { apply(await qqbotAPI.config()) } catch (e) { error.value = message(e) } finally { busy.value = false } })
-watch(() => route?.query.tab, value => { const tab = tabs.find(tab => tab.key === value); if (tab) activeTab.value = tab.key })
+watch(() => route?.path, async () => { activeTab.value = resolveTab(route?.query.tab); busy.value = true; try { apply(await qqbotAPI.config()) } catch (e) { error.value = message(e) } finally { busy.value = false } })
+watch(() => route?.query.tab, value => { if (value) activeTab.value = resolveTab(value) })
 const settingsForm = ref<HTMLFormElement | null>(null)
 const form = ref<QQBotConfig | null>(null)
 const siteKnowledge = computed({
@@ -275,6 +276,7 @@ const knownGroups = computed(() => [...new Set([...allowedGroups.value, ...(runt
 const groupPolicies = computed({ get: () => form.value?.group_policies || [], set: value => { if (form.value) form.value.group_policies = value } })
 const notificationGroups = computed({ get: () => parseGroups(notificationGroupsText.value), set: value => { notificationGroupsText.value = value.join('\n') } })
 const healthGroups = computed({ get: () => parseGroups(healthGroupsText.value), set: value => { healthGroupsText.value = value.join('\n') } })
+const siteQuota = ref(0), regenerateSiteKey = ref(false)
 const busy = ref(false)
 const refreshingRuntime = ref(false)
 const error = ref('')
@@ -293,11 +295,11 @@ function draft(): QQBotConfig {
  return { ...form.value!, custom_commands: form.value!.custom_commands.map(command => ({ ...command, command: command.command && !command.command.startsWith('/') ? `/${command.command}` : command.command })), allowed_groups: allowedGroups.value, group_policies: groupPolicies.value.filter(p => allowedGroups.value.includes(p.group_id)), autonomous: autonomous.value, moderation: moderation.value, price_notifications: { ...priceNotifications.value, groups: notificationGroups.value }, health_notifications: { ...healthNotifications.value, groups: healthGroups.value } }
 }
 const dirtySections = computed(() => !baseline.value || !form.value ? [] : (Object.keys(configSections) as ConfigSection[]).filter(section => JSON.stringify(pickSection(draft(), section)) !== JSON.stringify(pickSection(baseline.value!, section))))
-const dirty = computed(() => dirtySections.value.length > 0)
+const dirty = computed(() => dirtySections.value.length > 0 || regenerateSiteKey.value)
 const changes = computed(() => {
  if (!baseline.value || !form.value) return []
  const current = draft()
- return configSections[activeTab.value].filter(key => JSON.stringify(current[key]) !== JSON.stringify(baseline.value![key])).map(key => `${key}: ${/secret|api_key/.test(key) ? t('qqbot.workspace.secretChanged') : JSON.stringify(baseline.value![key] ?? null) + ' → ' + JSON.stringify(current[key] ?? null)}`)
+ return tabSections(activeTab.value).flatMap(section => [...configSections[section]]).filter(key => JSON.stringify(current[key]) !== JSON.stringify(baseline.value![key])).map(key => `${key}: ${/secret|api_key/.test(key) ? t('qqbot.workspace.secretChanged') : JSON.stringify(baseline.value![key] ?? null) + ' → ' + JSON.stringify(current[key] ?? null)}`)
 })
 const webhookURL = computed(() => `${window.location.origin}/api/v1/qqbot/webhook`)
 async function handleTabKeydown(event: KeyboardEvent, tab: SettingsTab) {
@@ -363,10 +365,17 @@ async function save() {
   const section = activeTab.value
   const pending = cloneConfig(draft())
   const previousBaseline = cloneConfig(baseline.value!)
-  const otherDrafts = dirtySections.value.filter(key => key !== section)
+  const sections = section === 'autonomous' ? tabSections(section).filter(key => dirtySections.value.includes(key)) : [section]
+  if (!sections.length) return
+  const otherDrafts = dirtySections.value.filter(key => !sections.includes(key))
   busy.value = true; error.value = ''; notice.value = ''
   try {
-    const saved = await qqbotAPI.saveSection(section, baseline.value?.section_versions?.[section] || '', pending)
+    const saved = sections.length > 1
+      ? await qqbotAPI.saveSetup({ config: pending, sections, versions: baseline.value?.section_versions || {}, site_quota: 0 })
+      : section === 'chat' && (pending.ai_connection === 'site' || baseline.value?.ai_connection === 'site' || pending.ai_connection !== baseline.value?.ai_connection)
+      ? await qqbotAPI.saveSetup({ config: pending, sections: [section], versions: baseline.value?.section_versions || {}, site_quota: siteQuota.value, regenerate_site_key: regenerateSiteKey.value })
+      : await qqbotAPI.saveSection(sections[0]!, baseline.value?.section_versions?.[sections[0]!] || '', pending)
+    if (section === 'chat') regenerateSiteKey.value = false
     apply(saved)
     const merged = cloneConfig(draft())
     for (const key of otherDrafts) {
@@ -375,22 +384,24 @@ async function save() {
       if (baseline.value!.section_versions && previousBaseline.section_versions) baseline.value!.section_versions[key] = previousBaseline.section_versions[key]!
     }
     apply(merged, false)
-    notice.value = t('common.saved')
+    notice.value = saved.setup_warning || t('common.saved')
     await refreshRuntime()
   } catch (e) { error.value = message(e) } finally { busy.value = false }
 }
 async function reloadModule() {
- if (dirtySections.value.includes(activeTab.value) && !window.confirm(t('qqbot.workspace.discardModule'))) return
+ if (isTabDirty(activeTab.value) && !window.confirm(t('qqbot.workspace.discardModule'))) return
  busy.value = true
  try {
   const fresh = await qqbotAPI.config()
   const merged = draft()
-  Object.assign(merged, pickSection(fresh, activeTab.value))
+  const sections = tabSections(activeTab.value)
+  for (const section of sections) Object.assign(merged, pickSection(fresh, section))
   const oldBaseline = cloneConfig(baseline.value!)
   apply(fresh)
-  Object.assign(oldBaseline, pickSection(baseline.value!, activeTab.value), { section_versions: { ...oldBaseline.section_versions, [activeTab.value]: fresh.section_versions?.[activeTab.value] || '' } })
+  for (const section of sections) Object.assign(oldBaseline, pickSection(baseline.value!, section), { section_versions: { ...oldBaseline.section_versions, [section]: fresh.section_versions?.[section] || '' } })
   baseline.value = oldBaseline
   apply(merged, false)
+  if (activeTab.value === 'chat') regenerateSiteKey.value = false
   error.value = ''
  } catch (e) { error.value = message(e) } finally { busy.value = false }
 }
@@ -402,7 +413,7 @@ function restoreDraft(item: QQConfigChange) {
  const merged = draft()
  Object.assign(merged, item.before)
  apply(merged, false)
- activeTab.value = section
+ activeTab.value = resolveTab(section)
  notice.value = t('qqbot.workspace.restoreHelp')
 }
 function confirmLeave() { return !dirty.value || window.confirm(t('qqbot.workspace.leaveConfirm')) }

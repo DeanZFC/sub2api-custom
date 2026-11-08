@@ -4,11 +4,12 @@ import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import QQBotView from '../QQBotView.vue'
 import QQBotChatPreview from '@/components/admin/qqbot/QQBotChatPreview.vue'
+import QQBotSiteAISettings from '@/components/admin/qqbot/QQBotSiteAISettings.vue'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { configSections, pickSection, cloneConfig } from '@/components/admin/qqbot/configSections'
-import { defaultModerationConfig, type QQBotConfig, type QQMemberOption } from '@/api/qqbot'
-const api = vi.hoisted(() => ({ config: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), groupInfo: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn(), chatPreview: vi.fn() }))
+import { defaultAutonomousConfig, defaultModerationConfig, type QQSetupRequest, type QQBotConfig, type QQMemberOption } from '@/api/qqbot'
+const api = vi.hoisted(() => ({ config: vi.fn(), setupOptions: vi.fn(), saveSetup: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), groupInfo: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn(), chatPreview: vi.fn() }))
 vi.mock('@/api/qqbot', async original => ({ ...await original<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 const wrappers: VueWrapper[] = []
@@ -22,7 +23,7 @@ const memberOptions: QQMemberOption[] = [
 function memberKey(group: string, member: string) { return JSON.stringify([group, member]) }
 async function mountView(locale: 'zh' | 'en' = 'zh', path = '/admin/qqbot/config') {
  const router = createRouter({ history: createMemoryHistory(), routes: [
-  { path: '/admin/qqbot/config', component: QQBotView }, { path: '/admin/qqbot/groups', component: QQBotView }, { path: '/other', component: { template: '<p>Other</p>' } }
+  { path: '/admin/qqbot/config', component: QQBotView }, { path: '/admin/qqbot/groups', component: QQBotView }, { path: '/other', component: { template: '<p>Other</p>' } }, { path: '/admin/qqbot/setup', component: { template: '<p>Setup</p>' } }
  ] })
  await router.push(path)
  const wrapper = mount({ template: '<RouterView />' }, { attachTo: document.body, global: { plugins: [createI18n({ legacy: false, locale, messages: { zh, en } }), router] } })
@@ -36,6 +37,7 @@ describe('QQ module settings', () => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
   server = { enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, sandbox: false, allowed_groups: ['group', 'other-group'], group_policies: [], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_base_url: '', image_api_key: '', image_api_key_set: false, image_model: '', image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_messages: 12, daily_chat_limit: 30, daily_image_limit: 2, total_daily_chat_limit: 500, total_daily_image_limit: 20, cooldown_seconds: 5, checkin_reward: 0, invite_enabled: false, invite_reward: 0, invite_daily_limit: 10, custom_commands: [], section_versions: Object.fromEntries(Object.keys(configSections).map(key => [key, `${key}-1`])) }
   api.config.mockImplementation(async () => cloneConfig(server))
+  api.setupOptions.mockResolvedValue({ groups: [{ id: 2, name: 'Managed group', models: ['model'] }], current_quota: 10, current_used: 1 })
   api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
   api.groupInfo.mockImplementation(async (appID: string, groupID: string) => ({ app_id: appID, sandbox: server.sandbox, group_id: groupID, name: '', status: 'unavailable' }))
   api.members.mockImplementation(async (params: { group_id?: string; member_id?: string; search?: string }) => {
@@ -44,6 +46,12 @@ describe('QQ module settings', () => {
   })
   api.commands.mockResolvedValue([]); api.configHistory.mockResolvedValue([])
   api.saveSection.mockImplementation(async (section: keyof typeof configSections, _version: string, draft: QQBotConfig) => { Object.assign(server, pickSection(draft, section)); server.section_versions![section] += '-next'; return cloneConfig(server) })
+  api.saveSetup.mockImplementation(async (req: QQSetupRequest) => {
+   for (const section of req.sections as (keyof typeof configSections)[]) {
+    Object.assign(server, pickSection(req.config, section)); server.section_versions![section] += '-next'
+   }
+   return cloneConfig(server)
+  })
  })
  afterEach(() => { wrappers.splice(0).forEach(w => w.unmount()); try { expect(console.error).not.toHaveBeenCalled() } finally { vi.restoreAllMocks() } })
  it.each(['zh', 'en'] as const)('%s shows official group names with IDs and searches names without changing policies', async locale => {
@@ -102,6 +110,33 @@ describe('QQ module settings', () => {
   await w.get('#qqbot-settings-tab-connection').trigger('click')
   expect((w.get('#qqbot-settings-panel-connection input[autocomplete="off"]').element as HTMLInputElement).value).toBe('unsaved-app')
   expect(w.get('#qqbot-settings-tab-connection').text()).toContain('•')
+ })
+ it('enables saving when managed key regeneration is the only change', async () => {
+  Object.assign(server, { ai_connection: 'site', site_api_key_id: 5, site_group_id: 2 })
+  const w = await mountView('zh', '/admin/qqbot/config?tab=chat')
+  expect(w.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+  await w.getComponent(QQBotSiteAISettings).get('input[type="checkbox"]').setValue(true)
+  expect(w.get('#qqbot-settings-tab-chat').text()).toContain('•')
+  expect(w.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSetup).toHaveBeenCalledWith(expect.objectContaining({ sections: ['chat'], regenerate_site_key: true, site_quota: 10 }))
+  expect(w.get('#qqbot-settings-tab-chat').text()).not.toContain('•')
+  expect(w.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+ })
+ it('confirms and discards pending key regeneration when reloading chat settings', async () => {
+  Object.assign(server, { ai_connection: 'site', site_api_key_id: 5, site_group_id: 2 })
+  const w = await mountView('zh', '/admin/qqbot/config?tab=chat')
+  await w.getComponent(QQBotSiteAISettings).get('input[type="checkbox"]').setValue(true)
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  const reload = w.findAll('button').find(button => button.text() === '重新加载本模块')!
+  await reload.trigger('click'); await flushPromises()
+  expect(confirm).toHaveBeenCalledOnce()
+  expect(w.get('#qqbot-settings-tab-chat').text()).toContain('•')
+  confirm.mockReturnValue(true)
+  await reload.trigger('click'); await flushPromises()
+  expect(w.get('#qqbot-settings-tab-chat').text()).not.toContain('•')
+  expect((w.getComponent(QQBotSiteAISettings).get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
+  expect(api.saveSetup).not.toHaveBeenCalled()
  })
  it.each(['zh', 'en'] as const)('%s saves GIF request format only in the images module', async locale => {
   const w = await mountView(locale)
@@ -170,6 +205,49 @@ describe('QQ module settings', () => {
   await w.get('form').trigger('submit'); await flushPromises()
   expect(server.autonomous).toMatchObject({ enabled: false, groups: [], sample_percent: 5, daily_calls: 15, daily_replies: 8 })
  })
+
+ it('enables auto chat with one switch and keeps all tuning collapsed', async () => {
+  const w = await mountView('zh', '/admin/qqbot/config?tab=autonomous')
+  expect(w.find('#qqbot-settings-tab-knowledge').exists()).toBe(false)
+  expect(w.get('[data-testid="autonomous-advanced"]').attributes('open')).toBeUndefined()
+  await w.get('[data-testid="autonomous-enabled"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.autonomous).toMatchObject({ enabled: true, inherit_groups: true, min_messages: 2, followup_seconds: 90 })
+  expect(api.saveSetup).not.toHaveBeenCalled()
+ })
+ it('saves conversation and knowledge atomically while preserving another module draft', async () => {
+  const w = await mountView('zh', '/admin/qqbot/config?tab=chat')
+  await w.get('#qqbot-settings-panel-chat textarea').setValue('Keep this persona draft')
+  await category(w, '对话与指令')
+  await w.get('[data-testid="autonomous-enabled"]').setValue(true)
+  await w.get('[data-testid="knowledge-enabled"]').setValue(true)
+  await w.get('[data-testid="knowledge-content"]').setValue('本站接入教程')
+  api.saveSetup.mockRejectedValueOnce(new Error('知识已被其他页面更新'))
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toContain('其他页面')
+  expect(server.site_knowledge).toBeUndefined()
+  expect((w.get('[data-testid="autonomous-enabled"]').element as HTMLInputElement).checked).toBe(true)
+  expect((w.get('[data-testid="knowledge-content"]').element as HTMLTextAreaElement).value).toBe('本站接入教程')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSetup).toHaveBeenLastCalledWith(expect.objectContaining({ sections: ['autonomous', 'knowledge'], versions: expect.objectContaining({ autonomous: 'autonomous-1', knowledge: 'knowledge-1' }) }))
+  expect(server.site_knowledge?.enabled).toBe(true)
+  expect(server.autonomous?.enabled).toBe(true)
+  expect(server.system_prompt).toBe('Helpful')
+  await category(w, '连接与模型'); await w.get('#qqbot-settings-tab-chat').trigger('click')
+  expect((w.get('#qqbot-settings-panel-chat textarea').element as HTMLTextAreaElement).value).toBe('Keep this persona draft')
+ })
+ it('reloads both conversation sections without discarding other drafts', async () => {
+  server.autonomous = defaultAutonomousConfig()
+  const w = await mountView('zh', '/admin/qqbot/config?tab=autonomous')
+  await w.get('[data-testid="autonomous-enabled"]').setValue(true)
+  await w.get('[data-testid="knowledge-content"]').setValue('Unsaved guide')
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  server.site_knowledge = { enabled: true, content: 'Fresh guide' }
+  await w.findAll('button').find(b => b.text().includes('重新加载本模块'))!.trigger('click'); await flushPromises()
+  expect((w.get('[data-testid="autonomous-enabled"]').element as HTMLInputElement).checked).toBe(false)
+  expect((w.get('[data-testid="knowledge-content"]').element as HTMLTextAreaElement).value).toBe('Fresh guide')
+  expect(w.get('#qqbot-settings-tab-autonomous').text()).not.toContain('•')
+ })
  it('saves custom replies and preserves drafts on validation failure', async () => {
   const w = await mountView(); await category(w, '对话与指令'); await w.get('#qqbot-settings-tab-commands').trigger('click')
   const panel = w.get('#qqbot-settings-panel-commands'); await panel.findAll('button')[0]!.trigger('click')
@@ -186,8 +264,8 @@ describe('QQ module settings', () => {
   await w.get('#qqbot-settings-tab-chat').trigger('click')
   await w.get('#qqbot-settings-panel-chat textarea').setValue('Unsaved persona')
   await category(w, locale === 'zh' ? '对话与指令' : 'Conversations & commands')
-  await w.get('#qqbot-settings-tab-knowledge').trigger('click')
-  expect(w.get('#qqbot-settings-panel-knowledge').isVisible()).toBe(true)
+  await w.get('#qqbot-settings-tab-autonomous').trigger('click')
+  expect(w.get('#qqbot-settings-panel-autonomous').isVisible()).toBe(true)
   expect((w.get('[data-testid="knowledge-enabled"]').element as HTMLInputElement).checked).toBe(false)
   expect((w.get('[data-testid="knowledge-content"]').element as HTMLTextAreaElement).value).toBe('')
   await w.get('[data-testid="knowledge-content"]').setValue('官网：https://example.com\n接入教程：在控制台创建 API Key。')
@@ -256,7 +334,7 @@ describe('QQ module settings', () => {
   expect((w.get('[data-testid="knowledge-content"]').element as HTMLTextAreaElement).value).toBe('Previous site guide')
   expect(server.site_knowledge?.content).toBe('Current site guide')
   expect(api.saveSection).not.toHaveBeenCalled()
-  expect(w.get('#qqbot-settings-tab-knowledge').text()).toContain('•')
+  expect(w.get('#qqbot-settings-tab-autonomous').text()).toContain('•')
   await w.get('form').trigger('submit'); await flushPromises()
   expect(server.site_knowledge).toEqual({ enabled: false, content: 'Previous site guide' })
  })

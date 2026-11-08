@@ -218,62 +218,75 @@ func TestLotteryBatchConcurrentRequestsAndDuplicateMessagesCannotOverspend(t *te
 }
 
 func TestLotteryBatchCommandRoutesCountAndKeepsDefaultSingleDraw(t *testing.T) {
-	ctx := context.Background()
-	s, db, c, uid, _ := lotteryFixture(t, 200)
-	var replies []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/token":
-			_, _ = w.Write([]byte(`{"access_token":"test-only","expires_in":7200}`))
-		case "/v2/groups/group/messages":
-			replies = append(replies, readQQTestReply(t, r).text())
-			_, _ = w.Write([]byte(`{"id":"sent"}`))
-		default:
-			t.Errorf("lottery command called unexpected endpoint: %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
-	enqueue := func(id, content string) Payload {
-		e := Event{ID: id, GroupID: "group", Content: content}
-		e.Author.MemberID = "member"
-		raw, err := json.Marshal(e)
-		require.NoError(t, err)
-		p := Payload{ID: id, Type: groupMessageCreate, Data: raw}
-		require.NoError(t, s.Enqueue(ctx, c, p))
-		return p
-	}
-	batch := enqueue("batch-command", "/抽奖 5")
-	s.runOne(ctx)
-	require.Len(t, replies, 1)
-	require.Contains(t, replies[0], "剩余抽奖次数：15 次")
-	var kind, persisted string
-	require.NoError(t, db.QueryRow(`SELECT kind,result_text FROM qq_bot_jobs WHERE message_id='batch-command'`).Scan(&kind, &persisted))
-	require.Equal(t, "lottery", kind)
-	require.NotEmpty(t, persisted)
-	require.Contains(t, replies[0], persisted)
-	lotteryBatchTotals(t, db, uid, 5, 5)
+	for _, tc := range []struct {
+		name, prefix, eventType string
+	}{
+		{"unmentioned plain", "", groupMessageCreate},
+		{"unmentioned slash", "/", groupMessageCreate},
+		{"mentioned plain", "<@bot> ", groupAtMessageCreate},
+		{"mentioned slash", "<@bot> /", groupAtMessageCreate},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			s, db, c, uid, _ := lotteryFixture(t, 200)
+			var replies []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/token":
+					_, _ = w.Write([]byte(`{"access_token":"test-only","expires_in":7200}`))
+				case "/v2/groups/group/messages":
+					replies = append(replies, readQQTestReply(t, r).text())
+					_, _ = w.Write([]byte(`{"id":"sent"}`))
+				default:
+					t.Errorf("lottery command called unexpected endpoint: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
+			enqueue := func(id, content string) Payload {
+				e := Event{ID: id, GroupID: "group", Content: tc.prefix + content}
+				e.Author.MemberID = "member"
+				raw, err := json.Marshal(e)
+				require.NoError(t, err)
+				p := Payload{ID: id, Type: tc.eventType, Data: raw}
+				require.NoError(t, s.Enqueue(ctx, c, p))
+				return p
+			}
+			batch := enqueue("batch-command", "抽奖 5")
+			s.runOne(ctx)
+			require.Len(t, replies, 1)
+			require.Contains(t, replies[0], "剩余抽奖次数：15 次")
+			var kind, persisted string
+			require.NoError(t, db.QueryRow(`SELECT kind,result_text FROM qq_bot_jobs WHERE message_id='batch-command'`).Scan(&kind, &persisted))
+			require.Equal(t, "lottery", kind)
+			require.NotEmpty(t, persisted)
+			require.Contains(t, replies[0], persisted)
+			lotteryBatchTotals(t, db, uid, 5, 5)
 
-	for i, command := range []string{"/抽奖 0", "/抽奖 11", "/抽奖 错误", "/抽奖 2 3"} {
-		enqueue(fmt.Sprintf("invalid-%d", i), command)
-		s.runOne(ctx)
-		require.Len(t, replies, i+2)
-		require.Contains(t, replies[len(replies)-1], "用法")
-		lotteryBatchTotals(t, db, uid, 5, 5)
-	}
-	enqueue("default-command", "/抽奖")
-	s.runOne(ctx)
-	lotteryBatchTotals(t, db, uid, 6, 6)
-	enqueue("max-command", "/抽奖 10")
-	s.runOne(ctx)
-	lotteryBatchTotals(t, db, uid, 16, 16)
+			for i, command := range []string{"抽奖 0", "抽奖 11", "抽奖 错误", "抽奖 2 3"} {
+				enqueue(fmt.Sprintf("invalid-%d", i), command)
+				s.runOne(ctx)
+				require.Len(t, replies, i+2)
+				require.Contains(t, replies[len(replies)-1], "用法")
+				lotteryBatchTotals(t, db, uid, 5, 5)
+			}
+			enqueue("default-command", "抽奖")
+			s.runOne(ctx)
+			lotteryBatchTotals(t, db, uid, 6, 6)
+			enqueue("max-command", "抽奖 10")
+			s.runOne(ctx)
+			require.Len(t, replies, 7)
+			require.Contains(t, replies[len(replies)-1], "剩余抽奖次数：4 次")
+			lotteryBatchTotals(t, db, uid, 16, 16)
 
-	// Once its job is pruned, the message still returns the original whole batch.
-	_, err := db.Exec(`DELETE FROM qq_bot_jobs WHERE message_id='batch-command'`)
-	require.NoError(t, err)
-	require.NoError(t, s.Enqueue(ctx, c, batch))
-	s.runOne(ctx)
-	require.Equal(t, replies[0], replies[len(replies)-1])
-	lotteryBatchTotals(t, db, uid, 16, 16)
+			// Once its job is pruned, the message still returns the original whole batch.
+			_, err := db.Exec(`DELETE FROM qq_bot_jobs WHERE message_id='batch-command'`)
+			require.NoError(t, err)
+			require.NoError(t, s.Enqueue(ctx, c, batch))
+			s.runOne(ctx)
+			require.Equal(t, replies[0], replies[len(replies)-1])
+			lotteryBatchTotals(t, db, uid, 16, 16)
+		})
+	}
 }

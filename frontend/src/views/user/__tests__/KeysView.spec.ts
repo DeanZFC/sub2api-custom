@@ -286,6 +286,7 @@ const mountView = async () => {
         Icon: IconStub,
         UseKeyModal: true,
         BulkEditKeysModal: true,
+        TestKeyModal: true,
         EndpointPopover: true,
         GroupBadge: GroupBadgeStub,
         GroupOptionItem: GroupOptionItemStub,
@@ -445,6 +446,36 @@ describe('user KeysView', () => {
     expect(visibleColumnKeys(wrapper)).not.toContain('last_used_at')
     expect(visibleColumnKeys(wrapper)).not.toContain('last_used_ip')
     expect(visibleColumnKeys(wrapper)).not.toContain('id')
+  })
+
+  it('opens testing for the selected key and refreshes usage after testing', async () => {
+    const key = { ...createApiKey(), group_id: 10 }
+    listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="test-key-1"]').trigger('click')
+    const dialog = wrapper.findComponent({ name: 'TestKeyModal' })
+    expect(dialog.props('show')).toBe(true)
+    expect(dialog.props('apiKey').id).toBe(1)
+    const calls = listKeys.mock.calls.length
+    dialog.vm.$emit('tested')
+    await flushPromises()
+    expect(listKeys).toHaveBeenCalledTimes(calls + 1)
+    dialog.vm.$emit('close')
+    await nextTick()
+    expect(dialog.props('show')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { status: 'inactive', group_id: 10 },
+    { status: 'quota_exhausted', group_id: 10 },
+    { status: 'expired', group_id: 10 },
+    { status: 'active', group_id: null },
+  ])('disables testing unavailable keys: %o', async config => {
+    listKeys.mockResolvedValue({ items: [{ ...createApiKey(), ...config }], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-test="test-key-1"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
   })
 
   it('opens bulk editing with only selected visible keys', async () => {
@@ -819,7 +850,7 @@ describe('user KeysView', () => {
 
     const wrapper = await mountView()
     await wrapper.get('[data-test="primary-group-trigger-1"]').trigger('click')
-    await nextTick()
+    await wrapper.get('input[name="inline-key-provider"][value="anthropic"]').setValue()
     await getButtonByText(wrapper, 'Anthropic').trigger('click')
     await flushPromises()
 
@@ -830,7 +861,7 @@ describe('user KeysView', () => {
     expect(showSuccess).toHaveBeenCalledWith('Primary group changed and fallback cleared')
   })
 
-  describe('create provider selection', () => {
+  describe('group provider selection', () => {
     const platforms = ['anthropic', 'openai', 'kimi', 'zhipu', 'deepseek', 'minimax', 'gemini', 'grok', 'antigravity', 'composite', 'opencode_go', 'typesafe']
     const availableGroups = platforms.map((platform, index) => ({
       id: index + 1,
@@ -913,7 +944,7 @@ describe('user KeysView', () => {
       expect(optionIds(wrapper)).toEqual([2])
     })
 
-    it('resets provider and group when reopening create, and preserves edit options', async () => {
+    it('resets provider and group when reopening create and classifies ungrouped edit options', async () => {
       const wrapper = await openCreate()
       await chooseProvider(wrapper, 'domestic')
       await groupSelect(wrapper).vm.$emit('update:modelValue', 5)
@@ -923,8 +954,148 @@ describe('user KeysView', () => {
       expect(groupSelect(wrapper).props('modelValue')).toBeNull()
       await wrapper.get('[data-test="close-dialog"]').trigger('click')
       await getButtonByText(wrapper, 'common.edit').trigger('click')
-      expect(wrapper.find('[data-tour="key-form-provider"]').exists()).toBe(false)
-      expect(optionIds(wrapper)).toHaveLength(12)
+      expect(wrapper.find('[data-tour="key-form-provider"]').exists()).toBe(true)
+      expect(optionIds(wrapper)).toEqual([1])
+    })
+
+    it.each([
+      { groupId: 1, provider: 'anthropic', expectedIds: [1] },
+      { groupId: 2, provider: 'openai', expectedIds: [2] },
+      { groupId: 5, provider: 'domestic', expectedIds: [3, 4, 5, 6] },
+      { groupId: 8, provider: 'other', expectedIds: [7, 8, 9, 10, 11, 12] },
+    ])('opens edit with the current $provider group selected without changing it', async ({ groupId, provider, expectedIds }) => {
+      const key = { ...createApiKey(), group_id: groupId }
+      listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView()
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+
+      expect(wrapper.get<HTMLInputElement>(`input[name="key-provider"][value="${provider}"]`).element.checked).toBe(true)
+      expect(optionIds(wrapper)).toEqual(expectedIds)
+      expect(groupSelect(wrapper).props('modelValue')).toBe(groupId)
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(updateKey).toHaveBeenCalledWith(1, expect.objectContaining({ group_id: groupId }))
+      wrapper.unmount()
+    })
+
+    it('clears primary and fallback when changing provider in edit and submits the new selection', async () => {
+      const primary = createGroup(10, 'OpenAI primary')
+      const fallback = createGroup(11, 'OpenAI fallback')
+      const domestic = createGroup(12, 'Domestic', 'deepseek')
+      getAvailableGroups.mockResolvedValue([primary, fallback, domestic])
+      const key = { ...createApiKey(), group_id: 10, fallback_group_id: 11, group: primary, fallback_group: fallback }
+      listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView()
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      expect(wrapper.findComponent('[data-test="fallback-group-select"]').props('modelValue')).toBe(11)
+      await chooseProvider(wrapper, 'domestic')
+      expect(groupSelect(wrapper).props('modelValue')).toBeNull()
+      expect(wrapper.findComponent('[data-test="fallback-group-select"]').props('modelValue')).toBeNull()
+      expect(optionIds(wrapper)).toEqual([12])
+      expect(updateKey).not.toHaveBeenCalled()
+      await wrapper.get('#key-form').trigger('submit')
+      expect(showError).toHaveBeenCalledWith('keys.groupRequired')
+      expect(updateKey).not.toHaveBeenCalled()
+      groupSelect(wrapper).vm.$emit('update:modelValue', 12)
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(updateKey).toHaveBeenCalledWith(1, expect.objectContaining({ group_id: 12, fallback_group_id: null }))
+      wrapper.unmount()
+    })
+
+    it('restores the saved provider and groups after cancelling an edit', async () => {
+      const primary = createGroup(10, 'OpenAI primary')
+      const fallback = createGroup(11, 'OpenAI fallback')
+      getAvailableGroups.mockResolvedValue([primary, fallback, createGroup(12, 'Claude', 'anthropic')])
+      const key = { ...createApiKey(), group_id: 10, fallback_group_id: 11, group: primary, fallback_group: fallback }
+      listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView()
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      await chooseProvider(wrapper, 'anthropic')
+      await wrapper.get('[data-test="close-dialog"]').trigger('click')
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      expect(wrapper.get<HTMLInputElement>('input[name="key-provider"][value="openai"]').element.checked).toBe(true)
+      expect(groupSelect(wrapper).props('modelValue')).toBe(10)
+      expect(wrapper.findComponent('[data-test="fallback-group-select"]').props('modelValue')).toBe(11)
+      expect(updateKey).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
+    it('resolves the current edit category when available groups arrive late', async () => {
+      let resolveGroups!: (value: typeof availableGroups) => void
+      getAvailableGroups.mockReturnValue(new Promise((resolve) => { resolveGroups = resolve }))
+      const key = { ...createApiKey(), group_id: 5 }
+      listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView()
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      resolveGroups(availableGroups)
+      await flushPromises()
+      expect(wrapper.get<HTMLInputElement>('input[name="key-provider"][value="domestic"]').element.checked).toBe(true)
+      expect(optionIds(wrapper)).toEqual([3, 4, 5, 6])
+      expect(groupSelect(wrapper).props('modelValue')).toBe(5)
+      wrapper.unmount()
+    })
+
+    it('filters the inline list by provider, scopes search, and saves only a group click', async () => {
+      const key = { ...createApiKey(), group_id: 2 }
+      listKeys.mockResolvedValue({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView()
+      await wrapper.get('[data-test="primary-group-trigger-1"]').trigger('click')
+      const dropdown = () => wrapper.get('[data-test="key-group-dropdown"]')
+      const names = () => dropdown().findAll('[data-test="group-option-item"]').map(option => option.text())
+      expect(dropdown().get<HTMLInputElement>('input[name="inline-key-provider"][value="openai"]').element.checked).toBe(true)
+      expect(names()).toEqual(['Shared group 2'])
+      await dropdown().get('input[type="text"]').setValue('Shared group 5')
+      expect(names()).toEqual([])
+      await dropdown().get('input[value="domestic"]').setValue()
+      expect(dropdown().get<HTMLInputElement>('input[type="text"]').element.value).toBe('')
+      expect(names()).toEqual(['Shared group 3', 'Shared group 4', 'Shared group 5', 'Shared group 6'])
+      await dropdown().get('input[type="text"]').setValue('group 5')
+      expect(names()).toEqual(['Shared group 5'])
+      expect(updateKey).not.toHaveBeenCalled()
+      await dropdown().get('[data-test="group-option-item"]').trigger('click')
+      await flushPromises()
+      expect(updateKey).toHaveBeenCalledWith(1, { group_id: 5 })
+      expect(wrapper.find('[data-test="key-group-dropdown"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('resets inline category when opening another key and keeps fallback platform restrictions', async () => {
+      const openai = createGroup(10, 'OpenAI')
+      const deepseek = createGroup(20, 'DeepSeek', 'deepseek')
+      const deepseekFallback = createGroup(21, 'DeepSeek fallback', 'deepseek')
+      getAvailableGroups.mockResolvedValue([openai, deepseek, deepseekFallback, createGroup(22, 'Kimi', 'kimi')])
+      const keys = [
+        { ...createApiKey(), group_id: 10, group: openai },
+        { ...createApiKey(), id: 2, group_id: 20, group: deepseek },
+      ]
+      listKeys.mockResolvedValue({ items: keys, total: 2, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView()
+      await wrapper.get('[data-test="primary-group-trigger-1"]').trigger('click')
+      await wrapper.get('[data-test="primary-group-trigger-2"]').trigger('click')
+      expect(wrapper.get<HTMLInputElement>('input[name="inline-key-provider"][value="domestic"]').element.checked).toBe(true)
+      await wrapper.get('[data-test="fallback-group-trigger-2"]').trigger('click')
+      const dropdown = wrapper.get('[data-test="key-group-dropdown"]')
+      expect(dropdown.find('[data-test="inline-group-provider"]').exists()).toBe(false)
+      expect(dropdown.findAll('[data-test="group-option-item"]').map(option => option.text())).toEqual(['DeepSeek fallback'])
+      await dropdown.get('[data-test="group-option-item"]').trigger('click')
+      await flushPromises()
+      expect(updateKey).toHaveBeenCalledWith(2, { fallback_group_id: 21 })
+      wrapper.unmount()
+    })
+
+    it('initializes the inline provider after late group loading and disables empty categories', async () => {
+      let resolveGroups!: (value: typeof availableGroups) => void
+      getAvailableGroups.mockReturnValue(new Promise((resolve) => { resolveGroups = resolve }))
+      const wrapper = await mountView()
+      await wrapper.get('[data-test="primary-group-trigger-1"]').trigger('click')
+      expect(wrapper.findAll<HTMLInputElement>('input[name="inline-key-provider"]').every(input => input.element.disabled)).toBe(true)
+      resolveGroups([availableGroups[1]])
+      await flushPromises()
+      expect(wrapper.get<HTMLInputElement>('input[name="inline-key-provider"][value="openai"]').element.checked).toBe(true)
+      expect(wrapper.get<HTMLInputElement>('input[name="inline-key-provider"][value="domestic"]').element.disabled).toBe(true)
+      expect(wrapper.get('[data-test="group-option-item"]').text()).toBe('Shared group 2')
+      wrapper.unmount()
     })
   })
 })

@@ -573,6 +573,16 @@
 
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
+              <button
+                :data-test="'test-key-' + row.id"
+                @click="keyForTest = row"
+                :disabled="row.status !== 'active' || !row.group_id"
+                :title="t(row.status !== 'active' || !row.group_id ? 'keys.test.requireActiveGroup' : 'keys.test.title')"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-primary-50 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
+              >
+                <Icon name="play" size="sm" />
+                <span class="text-xs">{{ t('keys.test.action') }}</span>
+              </button>
               <!-- Use Key Button -->
               <button
                 @click="openUseKeyModal(row)"
@@ -666,78 +676,19 @@
           />
         </div>
 
-        <fieldset v-if="!showEditModal" data-tour="key-form-provider">
-          <legend class="input-label">{{ t("keys.providerLabel") }}</legend>
-          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <label
-              v-for="provider in createProviderOptions"
-              :key="provider.value"
-              class="relative min-w-0"
-              :class="
-                provider.count === 0 ? 'cursor-not-allowed' : 'cursor-pointer'
-              "
-            >
-              <input
-                type="radio"
-                name="key-provider"
-                :value="provider.value"
-                :checked="createProvider === provider.value"
-                :disabled="provider.count === 0"
-                class="peer sr-only"
-                @change="selectCreateProvider(provider.value)"
-              />
-              <span
-                class="flex h-full flex-col items-center gap-2 rounded-xl border border-gray-200 bg-white px-2 py-3 text-center transition-colors peer-checked:border-primary-500 peer-checked:bg-primary-50/60 peer-checked:ring-1 peer-checked:ring-primary-500 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary-500 peer-disabled:opacity-40 dark:border-dark-600 dark:bg-dark-800 dark:peer-checked:border-primary-500 dark:peer-checked:bg-primary-500/10"
-                :class="
-                  provider.count > 0 &&
-                  'hover:border-primary-300 dark:hover:border-primary-700'
-                "
-              >
-                <span
-                  class="flex h-8 items-center justify-center gap-1.5"
-                  aria-hidden="true"
-                >
-                  <span
-                    v-for="platform in KEY_GROUP_PROVIDER_ICONS[provider.value]"
-                    :key="platform"
-                    class="flex h-8 w-8 items-center justify-center rounded-lg"
-                    :class="platformBadgeLightClass(platform)"
-                  >
-                    <PlatformIcon :platform="platform" size="lg" />
-                  </span>
-                </span>
-                <span
-                  class="text-sm font-semibold text-gray-800 dark:text-gray-100"
-                  >{{ provider.label }}</span
-                >
-              </span>
-              <span
-                v-if="createProvider === provider.value"
-                class="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary-500 text-white"
-                aria-hidden="true"
-              >
-                <Icon name="check" size="xs" :stroke-width="3" />
-              </span>
-            </label>
-          </div>
-          <p
-            class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400"
-            aria-live="polite"
-          >
-            {{
-              groups.length === 0
-                ? t("common.noGroupsAvailable")
-                : t(`keys.providerHints.${createProvider}`)
-            }}
-          </p>
-        </fieldset>
+        <KeyGroupProviderSelect
+          :model-value="formProvider"
+          :options="providerOptions"
+          data-tour="key-form-provider"
+          @update:model-value="selectFormProvider"
+        />
 
         <div>
           <label class="input-label" for="key-form-group">{{
             t("keys.groupLabel")
           }}</label>
           <Select
-            :key="showEditModal ? 'edit' : createProvider"
+            :key="formProvider"
             id="key-form-group"
             :aria-label="t('keys.groupLabel')"
             v-model="formData.group_id"
@@ -1473,6 +1424,13 @@
       </template>
     </BaseDialog>
 
+    <TestKeyModal
+      :show="keyForTest !== null"
+      :api-key="keyForTest"
+      @close="keyForTest = null"
+      @tested="loadApiKeys"
+    />
+
     <BulkEditKeysModal
       :show="showBulkEditModal"
       :selected-keys="selectedApiKeys"
@@ -1619,7 +1577,7 @@
         v-if="groupSelectorKeyId !== null && dropdownPosition"
         ref="dropdownRef"
         data-test="key-group-dropdown"
-        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-[480px] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
+        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] flex max-h-[calc(100vh-16px)] w-[480px] max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
         style="pointer-events: auto !important"
         :style="{
           top:
@@ -1631,10 +1589,21 @@
               ? dropdownPosition.bottom + 'px'
               : undefined,
           left: dropdownPosition.left + 'px',
+          maxHeight: 'calc(100vh - ' + ((dropdownPosition.top ?? dropdownPosition.bottom ?? 0) + 8) + 'px)',
         }"
       >
+        <KeyGroupProviderSelect
+          v-if="groupSelectorTarget === 'primary'"
+          :model-value="groupSelectorProvider"
+          :options="providerOptions"
+          name="inline-key-provider"
+          compact
+          class="shrink-0 border-b border-gray-100 p-3 dark:border-dark-700"
+          data-test="inline-group-provider"
+          @update:model-value="selectGroupSelectorProvider"
+        />
         <!-- Search box -->
-        <div class="border-b border-gray-100 p-2 dark:border-dark-700">
+        <div class="shrink-0 border-b border-gray-100 p-2 dark:border-dark-700">
           <div class="relative">
             <svg
               class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
@@ -1659,7 +1628,7 @@
           </div>
         </div>
         <!-- Group list -->
-        <div class="max-h-80 overflow-y-auto p-1.5">
+        <div class="min-h-0 max-h-80 overflow-y-auto p-1.5">
           <button
             v-if="groupSelectorTarget === 'fallback'"
             data-test="clear-fallback-group"
@@ -1754,6 +1723,7 @@ import { keysAPI, authAPI, usageAPI, userGroupsAPI } from "@/api";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
 import BulkEditKeysModal from "@/components/keys/BulkEditKeysModal.vue";
+import TestKeyModal from "@/components/keys/TestKeyModal.vue";
 import DataTable from "@/components/common/DataTable.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
@@ -1780,11 +1750,9 @@ import type { BatchApiKeyUsageStats } from "@/api/usage";
 import { formatDateTime } from "@/utils/format";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { useStepUp, isStepUpCancelled } from "@/composables/useStepUp";
-import PlatformIcon from "@/components/common/PlatformIcon.vue";
-import { platformBadgeLightClass } from "@/utils/platformColors";
+import KeyGroupProviderSelect from "@/components/keys/KeyGroupProviderSelect.vue";
 import {
   KEY_GROUP_PROVIDERS,
-  KEY_GROUP_PROVIDER_ICONS,
   getKeyGroupProvider,
   type KeyGroupProvider,
 } from "@/utils/keyGroupProviders";
@@ -2013,6 +1981,7 @@ const regenerateKey = async () => {
 };
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
+const keyForTest = ref<ApiKey | null>(null);
 const showDeleteDialog = ref(false);
 const showResetQuotaDialog = ref(false);
 const showResetRateLimitDialog = ref(false);
@@ -2196,7 +2165,7 @@ const fallbackGroupOptions = computed(() => {
   );
   return [
     { value: null, label: t("keys.noFallbackGroup") },
-    ...groupOptions.value.filter(
+    ...formGroupOptions.value.filter(
       (option) =>
         option.value !== formData.value.group_id &&
         (!primary || option.platform === primary.platform),
@@ -2204,9 +2173,12 @@ const fallbackGroupOptions = computed(() => {
   ];
 });
 
-const createProvider = ref<KeyGroupProvider>("anthropic");
-watch(createProvider, () => { formGroupSelectorOpen.value = false; });
-const createProviderOptions = computed(() =>
+const formProvider = ref<KeyGroupProvider>("anthropic");
+watch(formProvider, () => {
+  formGroupSelectorOpen.value = false;
+  fallbackGroupSelectorOpen.value = false;
+});
+const providerOptions = computed(() =>
   KEY_GROUP_PROVIDERS.map((value) => ({
     value,
     label: t(`keys.providers.${value}`),
@@ -2217,32 +2189,31 @@ const createProviderOptions = computed(() =>
 );
 
 const formGroupOptions = computed(() =>
-  showEditModal.value
-    ? groupOptions.value
-    : groupOptions.value.filter(
-        (group) => getKeyGroupProvider(group.platform) === createProvider.value,
-      ),
+  groupOptions.value.filter(
+    (group) => getKeyGroupProvider(group.platform) === formProvider.value,
+  ),
 );
 
-const selectCreateProvider = (provider: KeyGroupProvider) => {
-  if (createProvider.value === provider) return;
-  createProvider.value = provider;
+const selectFormProvider = (provider: KeyGroupProvider) => {
+  if (formProvider.value === provider) return;
+  formProvider.value = provider;
   formData.value.group_id = null;
+  formData.value.fallback_group_id = null;
 };
 
 // Also handles groups arriving after the create dialog has already opened.
 watch(
-  [showCreateModal, createProviderOptions],
+  [showCreateModal, providerOptions],
   ([isOpen, providers], [wasOpen]) => {
     if (!isOpen) return;
     if (
       !wasOpen ||
       !providers.some(
         (provider) =>
-          provider.value === createProvider.value && provider.count > 0,
+          provider.value === formProvider.value && provider.count > 0,
       )
     ) {
-      selectCreateProvider(
+      selectFormProvider(
         providers.find((provider) => provider.count > 0)?.value ?? "anthropic",
       );
     }
@@ -2256,11 +2227,42 @@ watch(
   },
 );
 
+// Resolve the current provider even when groups arrive after opening edit.
+watch([showEditModal, groups], ([isOpen]) => {
+  if (!isOpen) return;
+  const platform = groups.value.find(
+    (group) => group.id === formData.value.group_id,
+  )?.platform ?? (formData.value.group_id === selectedKey.value?.group_id
+    ? selectedKey.value?.group?.platform
+    : undefined);
+  if (platform) {
+    formProvider.value = getKeyGroupProvider(platform);
+  } else if (formData.value.group_id === null) {
+    formProvider.value = providerOptions.value.find((provider) => provider.count > 0)?.value ?? "anthropic";
+  }
+});
+
 // Group dropdown search
+const groupSelectorProvider = ref<KeyGroupProvider>("anthropic");
+const selectGroupSelectorProvider = (provider: KeyGroupProvider) => {
+  if (groupSelectorProvider.value === provider) return;
+  groupSelectorProvider.value = provider;
+  groupSearchQuery.value = "";
+};
+watch([groupSelectorKeyId, groupSelectorTarget, groups], () => {
+  const key = selectedKeyForGroup.value;
+  if (!key) return;
+  const platform = groups.value.find((group) => group.id === key.group_id)?.platform ?? key.group?.platform;
+  groupSelectorProvider.value = platform
+    ? getKeyGroupProvider(platform)
+    : providerOptions.value.find((provider) => provider.count > 0)?.value ?? "anthropic";
+});
 const groupSearchQuery = ref("");
 const groupSelectorOptions = computed(() => {
   if (groupSelectorTarget.value === "primary") {
-    return groupOptions.value;
+    return groupOptions.value.filter(
+      (option) => getKeyGroupProvider(option.platform) === groupSelectorProvider.value,
+    );
   }
 
   const key = selectedKeyForGroup.value;
@@ -2423,6 +2425,10 @@ const handleSort = (key: string, order: "asc" | "desc") => {
 
 const editKey = (key: ApiKey) => {
   selectedKey.value = key;
+  const platform = groups.value.find((group) => group.id === key.group_id)?.platform ?? key.group?.platform;
+  formProvider.value = platform
+    ? getKeyGroupProvider(platform)
+    : providerOptions.value.find((provider) => provider.count > 0)?.value ?? "anthropic";
   const hasIPRestriction =
     key.ip_whitelist?.length > 0 || key.ip_blacklist?.length > 0;
   const hasExpiration = !!key.expires_at;
@@ -2488,7 +2494,7 @@ const openGroupSelector = (key: ApiKey, target: GroupSelectorTarget) => {
     );
     if (buttonEl) {
       const rect = buttonEl.getBoundingClientRect();
-      const dropdownEstHeight = 400; // estimated max dropdown height
+      const dropdownEstHeight = target === "primary" ? 560 : 400;
       const dropdownEstWidth = Math.min(480, window.innerWidth - 16);
       const spaceBelow = window.innerHeight - rect.bottom;
       const spaceAbove = rect.top;

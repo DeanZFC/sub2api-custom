@@ -275,6 +275,17 @@ export async function getMatrix(filter: MonitorFilter, groupBy: MonitorMatrixGro
   const { data } = await apiClient.get<MonitorMatrixResponse>(`${base(admin)}/matrix`, requestConfig(filter, signal, { group_by: groupBy, ...(includeRecentRequests ? { include_recent_requests: true } : {}) }))
   return data
 }
+
+/** Keep server-computed totals and model metrics separate: rates and percentiles cannot be averaged. */
+export async function getCardMatrices(filter: MonitorFilter, groupBy: MonitorMatrixGroupBy, admin = false, signal?: AbortSignal) {
+  const modelGroupBy = groupBy === 'platform_group' ? 'platform_group_model' : groupBy === 'platform' ? 'platform_model' : null
+  const [matrix, modelMatrix] = await Promise.all([
+    getMatrix(filter, groupBy, admin, signal, true),
+    modelGroupBy ? getMatrix(filter, modelGroupBy, admin, signal, true) : Promise.resolve(null),
+  ])
+  return { matrix, modelMatrix }
+}
+
 export async function getModels(filter: MonitorFilter, admin = false, signal?: AbortSignal) {
   const { data } = await apiClient.get<{ coverage: MonitorCoverage; items: MonitorModelRow[] }>(`${base(admin)}/models`, requestConfig(filter, signal))
   return data

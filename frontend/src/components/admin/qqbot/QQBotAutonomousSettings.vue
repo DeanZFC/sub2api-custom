@@ -2,17 +2,29 @@
   <section class="card space-y-4 p-6" :aria-label="t('qqbot.autonomous.title')">
     <h2 class="text-lg font-semibold">{{ t('qqbot.autonomous.title') }}</h2>
     <p class="text-sm text-gray-500">{{ t('qqbot.autonomous.help') }}</p>
-    <label class="flex items-center gap-2"><input v-model="value.enabled" data-testid="autonomous-enabled" type="checkbox" />{{ t('qqbot.autonomous.enabled') }}</label>
-    <div class="flex flex-wrap gap-2"><button v-for="preset in presets" :key="preset.key" type="button" class="btn btn-secondary" @click="applyPreset(preset)">{{ t(`qqbot.workspace.${preset.key}`) }}</button></div>
-    <p class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">{{ t('qqbot.workspace.behaviorSummary', { sample: value.sample_percent, cooldown: value.cooldown_seconds, messages: value.min_messages, hourly: value.hourly_replies, daily: value.daily_replies, calls: value.daily_calls, start: value.start_hour, end: value.end_hour }) }}</p>
-    <QQGroupPicker v-model="value.groups" :groups="groups || []" :policies="policies" :names="props.names" :label="t('qqbot.autonomous.groups')" />
-    <details><summary class="cursor-pointer text-sm">{{ t('qqbot.workspace.advanced') }}</summary><div class="mt-3 grid gap-4 md:grid-cols-2">
-      <label class="space-y-1">{{ t('qqbot.autonomous.names') }}<textarea v-model="botNames" data-testid="autonomous-names" class="input" rows="2" /></label>
-      <label class="space-y-1 md:col-span-2">{{ t('qqbot.autonomous.topics') }}<textarea v-model="topics" data-testid="autonomous-topics" class="input" rows="2" /></label>
-      <label v-for="field in fields" :key="field.key" class="space-y-1">{{ t('qqbot.autonomous.' + field.key) }}<input v-model.number="value[field.key]" :data-testid="'autonomous-' + field.key" type="number" :min="field.min" :max="field.max" step="1" required class="input" /></label>
-    </div></details>
-    <label class="flex items-center gap-2"><input v-model="value.mention_user" data-testid="autonomous-mention" type="checkbox" />{{ t('qqbot.autonomous.mention') }}</label>
-    <p class="text-xs text-gray-500">{{ t('qqbot.autonomous.limitsHelp') }}</p>
+    <label class="flex items-center justify-between gap-4 rounded-xl bg-primary-50 p-4 dark:bg-primary-950/30">
+      <span class="font-medium">{{ t('qqbot.autonomous.enabled') }}</span>
+      <input v-model="enabled" data-testid="autonomous-enabled" type="checkbox" role="switch" class="h-5 w-5" />
+    </label>
+    <p class="text-sm text-gray-500">{{ t('qqbot.autonomous.simpleHelp') }}</p>
+    <p v-if="!groups?.length" class="text-sm text-amber-700 dark:text-amber-300">{{ t('qqbot.autonomous.noGroups') }}</p>
+    <details data-testid="autonomous-advanced">
+      <summary class="cursor-pointer text-sm">{{ t('qqbot.workspace.advanced') }}</summary>
+      <div class="mt-4 space-y-4">
+        <p class="text-xs text-gray-500">{{ t('qqbot.autonomous.customHelp') }}</p>
+        <div class="flex flex-wrap gap-2"><button v-for="preset in presets" :key="preset.key" type="button" class="btn btn-secondary" @click="applyPreset(preset)">{{ t('qqbot.workspace.' + preset.key) }}</button></div>
+        <p class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">{{ t('qqbot.workspace.behaviorSummary', { sample: value.sample_percent, cooldown: value.cooldown_seconds, messages: value.min_messages, hourly: value.hourly_replies, daily: value.daily_replies, calls: value.daily_calls, start: value.start_hour, end: value.end_hour }) }}</p>
+        <label class="flex items-center gap-2 text-sm"><input v-model="value.inherit_groups" type="checkbox" />{{ t('qqbot.simple.inheritGroups') }}</label>
+        <QQGroupPicker v-if="!value.inherit_groups" v-model="value.groups" :groups="groups || []" :policies="policies" :names="props.names" :label="t('qqbot.autonomous.groups')" />
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="space-y-1">{{ t('qqbot.autonomous.names') }}<textarea v-model="botNames" data-testid="autonomous-names" class="input" rows="2" /></label>
+          <label class="space-y-1 md:col-span-2">{{ t('qqbot.autonomous.topics') }}<textarea v-model="topics" data-testid="autonomous-topics" class="input" rows="2" /></label>
+          <label v-for="field in fields" :key="field.key" class="space-y-1">{{ t('qqbot.autonomous.' + field.key) }}<input v-model.number="value[field.key]" :data-testid="'autonomous-' + field.key" type="number" :min="field.min" :max="field.max" step="1" required class="input" /></label>
+        </div>
+        <label class="flex items-center gap-2"><input v-model="value.mention_user" data-testid="autonomous-mention" type="checkbox" />{{ t('qqbot.autonomous.mention') }}</label>
+        <p class="text-xs text-gray-500">{{ t('qqbot.autonomous.limitsHelp') }}</p>
+      </div>
+    </details>
     <details>
       <summary class="cursor-pointer text-sm font-medium">{{ t('qqbot.autonomous.stats') }}</summary>
       <p v-if="!runtime?.autonomous_stats?.length" class="mt-3 text-sm text-gray-500">{{ t('qqbot.autonomous.empty') }}</p>
@@ -34,10 +46,15 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import QQGroupPicker from './QQGroupPicker.vue'
+import { enableAutonomousChat } from './autonomousDefaults'
 import type { QQAutonomousConfig, QQBotRuntime, QQGroupPolicy } from '@/api/qqbot'
 const value = defineModel<QQAutonomousConfig>({ required: true })
 const props = defineProps<{ runtime: QQBotRuntime | null; groups?: string[]; policies?: QQGroupPolicy[]; names?: Record<string, string> }>()
 const { t, te } = useI18n()
+const enabled = computed({
+  get: () => value.value.enabled,
+  set: enabled => { value.value = enabled ? enableAutonomousChat(value.value) : { ...value.value, enabled: false } }
+})
 const list = (key: 'groups' | 'names' | 'topics') => computed({
   get: () => (value.value[key] ?? []).join('\n'),
   set: (text: string) => { value.value[key] = [...new Set(text.split(/[\n,，]+/).map(s => s.trim()).filter(Boolean))] }

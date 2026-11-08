@@ -222,9 +222,18 @@ func (s *Service) sharedHistory(ctx context.Context, c Config, j Job) []Message 
 }
 
 func (s *Service) loadHistory(ctx context.Context, c Config, j Job, shared bool) []Message {
+	return s.loadHistoryWithAmbient(ctx, c, j, shared, false)
+}
+
+// Only autonomous continuations can reuse ambient replies addressed to the
+// current member. Keep them in chronological order and inside the same budget.
+func (s *Service) loadHistoryWithAmbient(ctx context.Context, c Config, j Job, shared, ambient bool) []Message {
 	instructions := groupHistoryInstructions
 	if shared {
 		instructions = sharedGroupHistoryInstructions
+	}
+	if c.autonomousGroup(j.GroupID) {
+		instructions += naturalConversationInstructions
 	}
 	messages := []Message{{Role: "system", Content: c.SystemPrompt}, {Role: "system", Content: instructions}}
 	if knowledge, ok := siteKnowledgeMessage(c.SiteKnowledge); ok {
@@ -237,12 +246,18 @@ func (s *Service) loadHistory(ctx context.Context, c Config, j Job, shared bool)
 	if boundary.IsZero() {
 		boundary = time.Now()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT role,content FROM qq_bot_group_messages
+	rows, err := s.db.QueryContext(ctx, `SELECT role,content FROM qq_bot_group_messages h
  WHERE app_id=$1 AND group_id=$2 AND message_key<>$3
- AND ($6 OR member_id=$7)
+ AND ($6 OR member_id=$7 OR ($8 AND role='assistant' AND member_id='' AND EXISTS (
+ SELECT 1 FROM qq_bot_message_references r JOIN qq_bot_jobs p ON p.id=r.source_job_id
+ WHERE r.app_id=h.app_id AND r.group_id=h.group_id AND h.message_key='assistant:'||r.message_id
+ AND r.shareable AND p.member_id=$7 AND p.kind='ambient_chat' AND p.trigger_reason<>'followup'
+ AND p.reply_sent_at IS NOT NULL AND p.reply_sent_at<= $4
+ AND p.reply_sent_at> $4-($9*INTERVAL '1 second')
+)))
  AND context_at<=COALESCE((SELECT context_at FROM qq_bot_group_messages WHERE app_id=$1 AND group_id=$2 AND message_key=$3),$4)
  AND EXISTS (SELECT 1 FROM qq_bot_group_messages WHERE app_id=$1 AND group_id=$2 AND created_at>NOW()-INTERVAL '30 minutes')
- ORDER BY context_at DESC,id DESC LIMIT $5`, c.AppID, j.GroupID, "user:"+j.MessageID, boundary, c.HistoryMessages, shared, j.MemberID)
+ ORDER BY context_at DESC,id DESC LIMIT $5`, c.AppID, j.GroupID, "user:"+j.MessageID, boundary, c.HistoryMessages, shared, j.MemberID, ambient, c.Autonomous.FollowupSeconds)
 	if err != nil {
 		return messages
 	}

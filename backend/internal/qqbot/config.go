@@ -107,6 +107,12 @@ func validateURL(raw string) error {
 	return nil
 }
 func validateConfig(c Config) error {
+	if c.RewardBudgetDaily != nil && (math.IsNaN(*c.RewardBudgetDaily) || math.IsInf(*c.RewardBudgetDaily, 0) || *c.RewardBudgetDaily < 0 || *c.RewardBudgetDaily > 1000000 || math.Abs(*c.RewardBudgetDaily*1e8-math.Round(*c.RewardBudgetDaily*1e8)) > .001) {
+		return errors.New("每日奖励预算须为 0～1000000 USD，最多 8 位小数；0 暂停余额奖励，留空不限制")
+	}
+	if c.AIConnection != "" && c.AIConnection != "external" && c.AIConnection != "site" {
+		return errors.New("AI 连接类型不正确")
+	}
 	q := c.NotificationQuietHours
 	if q.StartHour < 0 || q.StartHour > 23 || q.EndHour < 0 || q.EndHour > 23 || (q.Enabled && q.StartHour == q.EndHour) {
 		return errors.New("通知静默开始与结束小时须在 0～23 之间且不能相同")
@@ -224,6 +230,8 @@ func (s *Service) SaveBasicConfig(ctx context.Context, c Config) (Config, error)
 		// Knowledge has its own independently versioned module. Legacy clients
 		// saving the full basic configuration must not erase or overwrite it.
 		c.SiteKnowledge = old.SiteKnowledge
+		c.RewardBudgetDaily = old.RewardBudgetDaily
+		c.AIConnection, c.SiteAPIKeyID, c.SiteGroupID, c.SiteOwnerID = old.AIConnection, old.SiteAPIKeyID, old.SiteGroupID, old.SiteOwnerID
 		c.InviteEnabled = old.InviteEnabled
 		c.InviteReward = old.InviteReward
 		c.InviteDailyLimit = old.InviteDailyLimit
@@ -244,6 +252,9 @@ func (s *Service) saveConfig(ctx context.Context, update func(Config) Config) (C
 }
 
 func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Config, error), section string) (Config, error) {
+	return s.saveConfigTransaction(ctx, func(_ *sql.Tx, c Config) (Config, error) { return update(c) }, section, nil)
+}
+func (s *Service) saveConfigTransaction(ctx context.Context, update func(*sql.Tx, Config) (Config, error), section string, beforeCommit func(*sql.Tx, Config) error) (Config, error) {
 	var c Config
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -257,14 +268,22 @@ func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Co
 	if err != nil {
 		return c, err
 	}
-	c, err = update(old)
+	c, err = update(tx, old)
 	if err != nil {
 		return c, err
 	}
+	if !managedSetupAllowed(ctx) && (old.AIConnection != c.AIConnection || old.SiteAPIKeyID != c.SiteAPIKeyID || old.SiteGroupID != c.SiteGroupID || old.SiteOwnerID != c.SiteOwnerID || (old.AIConnection == "site" && (old.BaseURL != c.BaseURL || (c.APIKey != "" && c.APIKey != old.APIKey) || c.ClearAPIKey))) {
+		return c, errors.New("本站 AI 凭据由快速配置管理，请通过本站 AI 连接入口修改")
+	}
+	if ConfigVersion(old.AllowedGroups) != ConfigVersion(c.AllowedGroups) {
+		reconcileRemovedGroups(&c)
+	}
 	c.SectionVersions = nil
+	c.SetupWarning = ""
 	c.Moderation.ReportEnabled = false
 	c.CustomCommands = normalizeCustomCommands(c.CustomCommands)
 	c.SiteKnowledge = normalizeSiteKnowledge(old.SiteKnowledge, c.SiteKnowledge)
+	c.Autonomous = normalizeAutonomous(old.Autonomous, c.Autonomous)
 	c.AppID = strings.TrimSpace(c.AppID)
 	c.GroupAdmins = normalizeGroupAdmins(c.GroupAdmins)
 	c.Moderation.Exemptions = normalizeModerationExemptions(c.Moderation.Exemptions)
@@ -345,7 +364,17 @@ func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Co
 		if _, err = readActivityConfig(ctx, tx, configHistoryKey, &history); err != nil {
 			return c, err
 		}
-		history = append([]ConfigChange{{At: time.Now(), Section: section, Before: publicSection(old, section), After: publicSection(c, section)}}, history...)
+		changedSections := []string{section}
+		if section == "groups" {
+			for _, dependent := range []string{"autonomous", "moderation", "notifications", "group-admins"} {
+				if sectionVersion(old, dependent) != sectionVersion(c, dependent) {
+					changedSections = append(changedSections, dependent)
+				}
+			}
+		}
+		for _, changed := range changedSections {
+			history = append([]ConfigChange{{At: time.Now(), Section: changed, Before: publicSection(old, changed), After: publicSection(c, changed)}}, history...)
+		}
 		if len(history) > 30 {
 			history = history[:30]
 		}
@@ -376,6 +405,11 @@ func (s *Service) saveConfigChecked(ctx context.Context, update func(Config) (Co
 	_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`, configKey, string(raw))
 	if err != nil {
 		return c, err
+	}
+	if beforeCommit != nil {
+		if err = beforeCommit(tx, c); err != nil {
+			return c, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return c, err

@@ -264,6 +264,8 @@
         <ChannelHealthCards
           v-else-if="matrix"
           :rows="matrixRows"
+          :model-rows="cardModelMatrix?.items || []"
+          :model-coverage="cardModelMatrix?.coverage"
           :coverage="matrix.coverage"
           :group-by="matrixGroupBy"
           :health-mode="healthMode"
@@ -593,6 +595,7 @@ const testResults = ref<TestResult[]>([])
 const testResultsState = ref<TestResultsState>('loading')
 const snapshot = ref<MonitorSnapshot | null>(null)
 const matrix = ref<MonitorMatrixResponse | null>(null)
+const cardModelMatrix = ref<MonitorMatrixResponse | null>(null)
 const modelRows = ref<MonitorModelRow[]>([])
 const errorRows = ref<MonitorErrorRow[]>([])
 const userRows = ref<MonitorUserRow[]>([])
@@ -749,13 +752,14 @@ async function loadTestResults(signal: AbortSignal, id: number) {
 }
 
 async function loadMetrics(signal?: AbortSignal, id = sequence) {
-  const [nextSnapshot, nextMatrix] = await Promise.all([
+  const [nextSnapshot, nextCards] = await Promise.all([
     api.getSnapshot(filter.value, isAdmin.value, signal),
-    api.getMatrix(filter.value, matrixGroupBy.value, isAdmin.value, signal, true),
+    api.getCardMatrices(filter.value, matrixGroupBy.value, isAdmin.value, signal),
   ])
   if (id !== sequence) return
   snapshot.value = nextSnapshot
-  matrix.value = nextMatrix
+  matrix.value = nextCards.matrix
+  cardModelMatrix.value = nextCards.modelMatrix
   scheduleAutoRefresh()
   await loadTab(signal, id)
 }

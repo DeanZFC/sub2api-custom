@@ -36,6 +36,7 @@ func normalizeModerationExemptions(exemptions []ModerationExemption) []Moderatio
 }
 
 type ModerationConfig struct {
+	InheritGroups        bool                  `json:"inherit_groups"`
 	Enabled              bool                  `json:"enabled"`
 	ReportEnabled        bool                  `json:"report_enabled"`      // Legacy field; ignored when loading or saving.
 	ReportMuteMinutes    int                   `json:"report_mute_minutes"` // Retained for historical configuration compatibility.
@@ -65,15 +66,22 @@ func validateModeration(c Config) error {
 	if m.MuteMinutes < 1 || m.MuteMinutes > 43200 || m.EscalatedMuteMinutes < m.MuteMinutes || m.EscalatedMuteMinutes > 43200 || m.RepeatOffenseMinutes < 1 || m.RepeatOffenseMinutes > 1440 {
 		return errors.New("禁言须为 1～43200 分钟，再犯禁言不能短于首次禁言，再犯窗口须为 1～1440 分钟")
 	}
-	if len(m.Groups) > 100 || len(m.Exemptions) > 100 || (m.Enabled && (c.AppID == "" || len(m.Groups) == 0)) {
+	if len(m.Groups) > 100 || len(m.Exemptions) > 100 || (m.Enabled && (c.AppID == "" || (len(m.Groups) == 0 && !m.InheritGroups))) {
 		return errors.New("请填写机器人 AppID 和消息治理群；群与白名单各最多 100 条")
 	}
 	groups := make(map[string]bool)
+	if m.InheritGroups {
+		for _, g := range c.AllowedGroups {
+			groups[g] = true
+		}
+	}
+	seenGroups := map[string]bool{}
 	for _, g := range m.Groups {
-		if !c.allows(g) || groups[g] {
+		if !c.allows(g) || seenGroups[g] {
 			return errors.New("防刷屏群须属于允许使用的群且不能重复")
 		}
 		groups[g] = true
+		seenGroups[g] = true
 	}
 	seen := make(map[[2]string]bool)
 	for _, e := range m.Exemptions {
@@ -90,8 +98,11 @@ func validateModeration(c Config) error {
 }
 
 func (c Config) moderates(group string) bool {
-	if !c.Enabled || !c.Moderation.Enabled || !c.allows(group) {
+	if !c.Enabled || !c.Moderation.Enabled || !c.allows(group) || c.groupPolicy(group).DisableModeration {
 		return false
+	}
+	if c.Moderation.InheritGroups {
+		return true
 	}
 	for _, g := range c.Moderation.Groups {
 		if g == group {
@@ -116,7 +127,7 @@ func (c Config) moderationExempt(group, member string) bool {
 }
 
 func moderationPolicy(c Config) string {
-	raw, _ := json.Marshal([]any{c.Enabled, c.AppID, c.Sandbox, c.AllowedGroups, c.Moderation, c.GroupAdmins})
+	raw, _ := json.Marshal([]any{c.Enabled, c.AppID, c.Sandbox, c.AllowedGroups, c.Moderation, c.GroupAdmins, c.GroupPolicies})
 	mac := hmac.New(sha256.New, []byte(c.AppSecret))
 	_, _ = mac.Write(raw)
 	return hex.EncodeToString(mac.Sum(nil))

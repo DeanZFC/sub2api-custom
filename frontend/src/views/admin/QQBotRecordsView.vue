@@ -7,7 +7,9 @@
       </div>
       <div class="flex flex-wrap gap-2"><RouterLink v-for="mode in recordModes" :key="mode" :to="{ query: { tab: mode } }" class="btn" :class="recordMode === mode ? 'btn-primary' : 'btn-secondary'">{{ t(`qqbot.workspace.${mode}`) }}</RouterLink></div>
       <p v-if="appError && recordMode !== 'activities'" role="alert" class="text-red-600">{{ appError }}</p>
-      <QQJobRecords v-if="recordMode === 'tasks' || recordMode === 'notifications'" :notifications="recordMode === 'notifications'" :app-id="appId" />
+      <QQBotDiagnostics v-if="recordMode === 'diagnostics'" />
+      <QQBotConfigHistory v-else-if="recordMode === 'history'" />
+      <QQJobRecords v-else-if="recordMode === 'tasks' || recordMode === 'notifications'" :notifications="recordMode === 'notifications'" :app-id="appId" />
       <QQModerationRecords v-else-if="recordMode === 'moderation'" :app-id="appId" />
       <template v-else>
       <nav role="tablist" :aria-label="t('qqbot.recordsTitle')" class="flex gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-800">
@@ -100,6 +102,8 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import QQBotDiagnostics from '@/components/admin/qqbot/QQBotDiagnostics.vue'
+import QQBotConfigHistory from '@/components/admin/qqbot/QQBotConfigHistory.vue'
 import QQJobRecords from '@/components/admin/qqbot/QQJobRecords.vue'
 import QQModerationRecords from '@/components/admin/qqbot/QQModerationRecords.vue'
 import QQBotRecordParticipant from '@/components/admin/qqbot/QQBotRecordParticipant.vue'
@@ -108,8 +112,8 @@ import { qqbotAPI, type QQActivityKind, type QQActivityRecord, type QQActivityRe
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const recordModes = ['tasks', 'notifications', 'moderation', 'activities'] as const
-const recordMode = computed(() => ['tasks', 'notifications', 'moderation'].includes(String(route.query.tab || 'tasks')) ? String(route.query.tab || 'tasks') : 'activities')
+const recordModes = ['diagnostics', 'history', 'tasks', 'notifications', 'moderation', 'activities'] as const
+const recordMode = computed(() => ['diagnostics', 'history', 'tasks', 'notifications', 'moderation'].includes(String(route.query.tab || 'tasks')) ? String(route.query.tab || 'tasks') : 'activities')
 const appId = ref(''), appLoading = ref(false), appError = ref('')
 let appRequest = 0
 async function loadApp() {

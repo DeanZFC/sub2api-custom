@@ -1,6 +1,8 @@
 package qqbot
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"github.com/stretchr/testify/require"
 	"strings"
@@ -11,7 +13,7 @@ import (
 func TestAutonomousConfigDefaultsAndValidation(t *testing.T) {
 	var c Config
 	require.NoError(t, json.Unmarshal([]byte(`{"autonomous":{"sample_percent":0,"daily_calls":0}}`), &c))
-	require.Equal(t, 120, c.Autonomous.CooldownSeconds)
+	require.Equal(t, 60, c.Autonomous.CooldownSeconds)
 	require.Zero(t, c.Autonomous.SamplePercent)
 	require.Zero(t, c.Autonomous.DailyCalls)
 	c = DefaultConfig()
@@ -68,6 +70,8 @@ func TestAutonomousNamesAndLocalFilters(t *testing.T) {
 }
 func TestAutonomousActiveBeijingWindow(t *testing.T) {
 	a := DefaultAutonomousConfig()
+	require.Equal(t, a.StartHour, a.EndHour)
+	a.StartHour, a.EndHour = 9, 23
 	at := time.Date(2026, 10, 20, 1, 0, 0, 0, time.UTC)
 	require.True(t, autonomousActive(a, at))
 	require.False(t, autonomousActive(a, at.Add(-time.Second)))
@@ -89,4 +93,69 @@ func TestAutonomousStrictOutput(t *testing.T) {
 		_, err = parseAutonomousReply(raw, 100)
 		require.Error(t, err, raw)
 	}
+}
+
+func TestAutonomousOneSwitchDefaultsPreserveOverrides(t *testing.T) {
+	old := DefaultAutonomousConfig()
+	next := old
+	next.Enabled = true
+	got := normalizeAutonomous(old, next)
+	require.True(t, got.InheritGroups)
+	require.Equal(t, 90, got.FollowupSeconds)
+	next.Groups = []string{"only-this-group"}
+	next.DailyCalls = 0
+	next.StartHour = 9
+	got = normalizeAutonomous(old, next)
+	require.False(t, got.InheritGroups)
+	require.Equal(t, next.Groups, got.Groups)
+	require.Zero(t, got.DailyCalls)
+	require.Equal(t, 9, got.StartHour)
+	legacy := AutonomousConfig{Enabled: true, Groups: []string{"group"}, Names: []string{"custom"}, SamplePercent: 15, CooldownSeconds: 120, MinMessages: 6, MemberCooldownSeconds: 600, HourlyReplies: 3, DailyReplies: 20, DailyCalls: 40, StartHour: 9, EndHour: 23, FollowupSeconds: 60, MaxChars: 100}
+	got = normalizeAutonomous(old, legacy)
+	require.Equal(t, 2, got.MinMessages)
+	require.Equal(t, legacy.Names, got.Names)
+	require.Equal(t, legacy.Groups, got.Groups)
+	require.Equal(t, legacy, normalizeAutonomous(legacy, legacy), "loading/saving an enabled profile must not silently raise budgets")
+	legacy.DailyCalls = 0
+	require.Zero(t, normalizeAutonomous(old, legacy).DailyCalls)
+}
+func TestAutonomousFollowupAdmission(t *testing.T) {
+	c := DefaultConfig()
+	now := time.Now()
+	st := autonomousState{LastReply: sql.NullTime{Time: now, Valid: true}, ReplyKind: "chat", ReplyMember: "alice"}
+	require.True(t, canAutonomousFollowup(c, st, "alice", now, false))
+	require.False(t, canAutonomousFollowup(c, st, "bob", now, false))
+	require.False(t, canAutonomousFollowup(c, st, "alice", now.Add(2*time.Minute), false))
+	st.Followups = 3
+	require.False(t, canAutonomousFollowup(c, st, "alice", now, false))
+	st.ReplyTrigger = "followup_claimed"
+	require.True(t, canAutonomousFollowup(c, st, "alice", now, true))
+	require.False(t, canAutonomousFollowup(c, st, "alice", now, false))
+	c.Autonomous.FollowupSeconds = 0
+	require.False(t, canAutonomousFollowup(c, st, "alice", now, true))
+	for _, text := range []string{"真的？", "离谱", "没看懂", "不太对吧", "是这样啊"} {
+		require.True(t, followupText(text), text)
+	}
+	for _, text := range []string{"好的", "谢谢！", "嗯", "哈哈哈", "OK", "？？", "😂😂"} {
+		require.False(t, followupText(text), text)
+	}
+}
+
+func TestAutonomousNaturalToneUsesExistingChatAndRespectsSwitch(t *testing.T) {
+	c := DefaultConfig()
+	c.Enabled = true
+	c.AllowedGroups = []string{"group"}
+	c.HistoryMessages = 0
+	c.SystemPrompt = "站长原有人设"
+	c.Autonomous.InheritGroups = true
+	s := &Service{}
+	messages := s.history(context.Background(), c, Job{GroupID: "group", MemberID: "alice"})
+	require.NotContains(t, messages[1].Content, naturalConversationInstructions)
+	c.Autonomous.Enabled = true
+	messages = s.history(context.Background(), c, Job{GroupID: "group", MemberID: "alice"})
+	require.Equal(t, c.SystemPrompt, messages[0].Content)
+	require.Contains(t, messages[1].Content, naturalConversationInstructions)
+	c.ChatDisabled = true
+	messages = s.history(context.Background(), c, Job{GroupID: "group", MemberID: "alice"})
+	require.NotContains(t, messages[1].Content, naturalConversationInstructions)
 }

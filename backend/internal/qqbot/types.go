@@ -11,6 +11,12 @@ import (
 var ErrDisabled = errors.New("QQ 机器人尚未启用")
 
 type Config struct {
+	SetupWarning             string                   `json:"setup_warning,omitempty"`
+	RewardBudgetDaily        *float64                 `json:"reward_budget_daily"`
+	AIConnection             string                   `json:"ai_connection"`
+	SiteAPIKeyID             int64                    `json:"site_api_key_id"`
+	SiteGroupID              int64                    `json:"site_group_id"`
+	SiteOwnerID              int64                    `json:"site_owner_id"`
 	NotificationQuietHours   QuietHours               `json:"notification_quiet_hours"`
 	SectionVersions          map[string]string        `json:"section_versions,omitempty"`
 	ChatDisabled             bool                     `json:"chat_disabled"`

@@ -17,6 +17,7 @@ import (
 )
 
 type Service struct {
+	siteAI                SiteAIProvider
 	db                    *sql.DB
 	encryptor             Encryptor
 	encryptionReady       bool
@@ -405,6 +406,9 @@ func command(content string, customCommands ...CustomCommand) (string, string) {
 		arg = strings.TrimSpace(fields[1])
 	}
 	name := fields[0]
+	if name == "余额" {
+		name = "我的余额"
+	}
 	if !slash && !isBuiltinCommand(name) {
 		known := false
 		for _, custom := range customCommands {

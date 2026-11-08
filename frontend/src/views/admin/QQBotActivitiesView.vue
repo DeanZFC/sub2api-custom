@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.activitiesTitle') }}</h1>
         <p class="mt-2 text-sm text-gray-500">{{ t('qqbot.activitiesHelp') }}</p></div>
-        <RouterLink v-if="!['rewards', 'growth', 'rankings', 'preview'].includes(activeTab.key)" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
+        <RouterLink v-if="!['templates', 'rewards', 'growth', 'rankings', 'preview'].includes(activeTab.key)" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
       </div>
       <nav
         role="tablist"
@@ -35,8 +35,8 @@
         role="tabpanel"
         :aria-labelledby="`qqbot-tab-${activeTab.key}`"
       >
-        <KeepAlive>
-          <component :is="activeTab.component" :key="activeTab.key" />
+        <KeepAlive :key="activityRevision">
+          <component :is="activeTab.component" :key="activeTab.key" :before-apply="beforeApply" @applied="activityRevision++" />
         </KeepAlive>
       </div>
     </div>
@@ -44,10 +44,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import QQBotActivityTemplates from '@/components/admin/qqbot/QQBotActivityTemplates.vue'
+import { hasQQDrafts } from '@/components/admin/qqbot/useQQDraft'
 import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.vue'
 import QQBotGrowthSettings from '@/components/admin/qqbot/QQBotGrowthSettings.vue'
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
@@ -60,6 +62,8 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 onMounted(() => { if (route.query.tab === 'transfer') void router.replace({ path: '/admin/qqbot/bindings', query: { tab: 'transfer' } }) })
+const activityRevision = ref(0)
+function beforeApply() { return !hasQQDrafts(router) || window.confirm(t('qqbot.simple.discardActivities')) }
 const tabs = [
   { key: 'checkin', label: 'qqbot.checkinTitle', component: QQBotCheckinSettings },
   { key: 'growth', label: 'qqbot.growth.tab', component: QQBotGrowthSettings },
@@ -67,6 +71,7 @@ const tabs = [
   { key: 'lottery', label: 'qqbot.lotteryTitle', component: QQBotLotterySettings },
   { key: 'invite', label: 'qqbot.inviteTitle', component: QQBotInviteSettings },
   { key: 'preview', label: 'qqbot.workspace.preview', component: QQActivityPreview },
+  { key: 'templates', label: 'qqbot.simple.templates', component: QQBotActivityTemplates },
   { key: 'rewards', label: 'qqbot.redemption.title', component: QQBotRewardCodes }
 ] as const
 type ActivityTab = (typeof tabs)[number]['key']

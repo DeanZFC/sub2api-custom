@@ -36,6 +36,12 @@ func RegisterAdminRoutes(
 		if h.QQBot != nil {
 			bot := admin.Group("/qqbot")
 			bot.GET("/config", h.QQBot.GetConfig)
+			bot.GET("/setup/options", h.QQBot.SetupOptions)
+			bot.GET("/activity-templates", h.QQBot.ActivityTemplates)
+			bot.POST("/activity-templates", h.QQBot.ApplyActivityTemplate)
+			bot.GET("/setup/checks", h.QQBot.SetupChecks)
+			bot.PUT("/setup", h.QQBot.SaveSetup)
+			bot.POST("/setup/probe/:kind", h.QQBot.SetupProbe)
 			bot.PUT("/config", h.QQBot.SaveConfig)
 			bot.GET("/runtime", h.QQBot.Runtime)
 			bot.GET("/members", h.QQBot.ListMembers)
