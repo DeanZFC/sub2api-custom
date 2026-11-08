@@ -28,6 +28,8 @@ const store = reactive({
   hostUpdateManaged: true,
   buildType: 'release',
   versionLoading: false,
+  versionLoaded: true,
+  versionWarning: '',
   releaseInfo: null,
   fetchVersion: vi.fn(),
   clearVersionCache: vi.fn()
@@ -45,7 +47,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.resetAllMocks()
   localStorage.clear()
-  Object.assign(store, { hasUpdate: true, sourceUpdateEnabled: true, hostUpdateManaged: true, buildType: 'release' })
+  Object.assign(store, { hasUpdate: true, sourceUpdateEnabled: true, hostUpdateManaged: true, buildType: 'release', versionLoaded: true, versionLoading: false, versionWarning: '' })
   vi.mocked(getSourceUpdateStatus).mockResolvedValue({ job_id: 'job-1', status: 'running', stage: 'pulling' })
   vi.mocked(performUpdate).mockResolvedValue({ message: 'queued', source_update: true, need_restart: false, job: { job_id: 'job-1', status: 'queued' } })
 })
@@ -58,6 +60,40 @@ afterEach(async () => {
 })
 
 describe('host image update', () => {
+  it('shows failed checks instead of claiming the installed version is latest', async () => {
+    store.hasUpdate = false
+    store.versionWarning = 'read release readiness manifest: HTTP 504'
+    await openMenu()
+    expect(wrapper.text()).toContain('version.checkFailed')
+    expect(wrapper.get('[role="alert"]').text()).toContain('HTTP 504')
+    expect(wrapper.text()).not.toContain('version.upToDate')
+    expect(wrapper.find('[data-testid="version-up-to-date"]').exists()).toBe(false)
+    expect(wrapper.get('button').attributes('title')).toBe('version.checkFailed')
+    await wrapper.get('button[title="version.refresh"]').trigger('click')
+    expect(store.fetchVersion).toHaveBeenLastCalledWith(true)
+  })
+
+  it('only confirms the latest version after a successful check', async () => {
+    store.hasUpdate = false
+    store.versionLoaded = false
+    await openMenu()
+    expect(wrapper.text()).toContain('version.notChecked')
+    expect(wrapper.find('[data-testid="version-up-to-date"]').exists()).toBe(false)
+    store.versionLoaded = true
+    await flushPromises()
+    expect(wrapper.text()).toContain('version.upToDate')
+    expect(wrapper.find('[data-testid="version-up-to-date"]').exists()).toBe(true)
+  })
+
+  it('revalidates cached status whenever the menu is opened', async () => {
+    await openMenu()
+    store.fetchVersion.mockClear()
+    await wrapper.get('button').trigger('click')
+    expect(store.fetchVersion).not.toHaveBeenCalled()
+    await wrapper.get('button').trigger('click')
+    expect(store.fetchVersion).toHaveBeenCalledWith(false)
+  })
+
   it('updates release containers through the host and keeps progress visible if version data changes', async () => {
     await openMenu()
     expect(wrapper.text()).not.toContain('version.rollback')

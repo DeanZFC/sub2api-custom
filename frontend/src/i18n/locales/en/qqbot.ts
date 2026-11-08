@@ -1,4 +1,27 @@
 export default { qqbot: {
+  "prizeChances": "Lottery chance reward",
+  "chancePrizeExample": "For “Try again”, set the amount to 0 and chances to 1. Award multiple chances or combine them with credit. Chances are credited immediately; another draw still requires a command.",
+  "expectedChanceReward": "Average chance reward per draw: {count}, including guarantees. Each draw still consumes one chance.",
+  "chanceReward": "Lottery chances awarded: +{count}",
+  "invalidLotteryPrizes": "Check prizes: credit USD 0–1000 with up to 8 decimals, chances 0–1000 whole units, and probabilities totaling 100%.",
+  "milestones": {
+    repeatLocked: 'Once saved, a milestone keeps its repeat rule. Create a new milestone to switch between one-time and repeating rewards.',
+    "total": "{count} total days",
+    "title": "Check-in milestones",
+    "help": "Add thresholds such as credit at 7 total days and lottery chances at 30 days. Missing a day does not reset the total. Existing check-in tasks are managed here.",
+    "preset": "Add {days}-day milestone",
+    "enabled": "Enable this milestone",
+    "name": "Milestone name",
+    "kind": "Progress metric",
+    "days": "Days required",
+    "repeat": "Repeat for every completed interval; carry remaining days forward",
+    "add": "Add custom milestone",
+    "empty": "No milestones yet. Start with the 7-day or 30-day shortcut above.",
+    "identityHelp": "Up to 32 milestones. New milestones start disabled. A normal milestone rewards each site account once; edits and rebinding preserve claims. Repeating milestones settle each interval and retain past claims.",
+    "remove": "Delete check-in milestone {number}",
+    "defaultName": "Check in on {days} days",
+    "invalid": "Check milestone names (1–40 characters), days (1–3650 whole days), valid rewards, and the 32-milestone limit."
+  },
   simple: {
     chatCapability: "AI chat",
     regenerateKey: "Replace dedicated key (revokes old key after saving; new key starts with zero usage)",
@@ -374,16 +397,56 @@ export default { qqbot: {
     invalid: 'Use unique positions from 1 to 10 and valid reward amounts, quantities and prize details. At least one positive prize is required before enabling daily prizes.'
   },
   growth: {
+  periodLocked: 'A saved task keeps its period. Create a new task for a different period.',
+  "playbookTitle": "Give every session a new goal",
+  "autoSettle": "Automatic rewards",
+  "addPreset": "+ Add to draft",
+  "presetAdded": "Already added",
+  "presetHelp": "Start with a playbook and edit its goal and prize. Adding creates a disabled draft and preserves existing tasks. Enable and save to activate. Manage all check-in rewards in Check-in.",
+  "period": "Task period",
+  "periodFilter": "Filter challenges by period",
+  "periods": {
+    "all": "All challenges",
+    "once": "Achievements / getting started",
+    "daily": "Daily challenges",
+    "weekly": "Weekly exploration"
+  },
+  "presets": {
+    "first_call": {
+      "name": "First launch",
+      "help": "Make your first API request and earn your first lottery chance."
+    },
+    "daily_sprint": {
+      "name": "Daily sprint",
+      "help": "Complete 3 requests today for a fresh daily reward."
+    },
+    "weekly_regular": {
+      "name": "Weekly regular",
+      "help": "Use the API on 3 different days this week."
+    },
+    "model_explorer": {
+      "name": "Model explorer",
+      "help": "Try 3 different models to unlock an exploration achievement."
+    },
+    "weekly_explorer": {
+      "name": "Weekly discoveries",
+      "help": "Try 3 models this week and discover what each can do."
+    },
+    "community_builder": {
+      "name": "Community builder",
+      "help": "Reach 3 distinct settled, eligible invitations."
+    }
+  },
   "tab": "Growth Tasks",
   "title": "Growth tasks",
-  "help": "Configure one-time and recurring growth tasks with balance, lottery chances, physical or custom prizes. Eligible rewards are granted automatically. View progress with 成长任务. Each section saves independently.",
+  "help": "Build getting-started goals, daily challenges, weekly exploration and lasting achievements. Award credit, chances or custom prizes automatically. Manage check-in rewards in Check-in.",
   "streakTitle": "Recurring check-in streak rewards",
   "streakHelp": "Configure this interval under Check-in. Rewards are granted automatically after each interval of consecutive Beijing-day check-ins. Zero amount or quantity disables the reward. Missing a day resets the streak; interval changes do not backfill rewards.",
   "streakDays": "Reward interval (consecutive days)",
   "chances": "Lottery chances (0 disables)",
-  "tasksTitle": "One-time growth tasks",
-  "periodicTitle": "Recurring growth tasks",
-  "periodicHelp": "Repeat rewards for each spending, token, request, recharge or total check-in threshold, or configure daily ranking prizes. Each section saves independently.",
+  "tasksTitle": "Challenges and achievements",
+  "periodicTitle": "Repeating challenges",
+  "periodicHelp": "Reward every completed request, token, spending or recharge interval. Unused progress carries forward. These intervals are independent of daily and weekly challenges.",
   "repeatTitle": "One reward for each completed interval",
   "periodicIdentityHelp": "For example, one chance per USD 10 spent gives two chances at USD 25, with USD 5 carried forward. Retained historical records count and rewards are granted automatically in batches. Interval edits apply to unredeemed progress. Disabling and re-enabling preserves records. Metrics keep separate ledgers; deleting and adding creates a new task.",
   "periodicTargets": {
@@ -394,7 +457,7 @@ export default { qqbot: {
     "checkin_total": "Reward for every total check-in days"
   },
   "taskSummary": "{total} tasks, {enabled} enabled",
-  "identityHelp": "Each task rewards a site account once. Bound accounts are checked in batches every minute; check-in milestones are granted immediately. Editing preserves grants. Deleting and adding a task creates a new entitlement.",
+  "identityHelp": "Achievements reward once per account. Daily challenges reset at 00:00 Beijing time; weekly challenges reset Monday at 00:00. Each period rewards once. Retained recorded history counts in its period and accounts are checked every minute. Edits within a period preserve claims. Saved periods are fixed; create a new task for another period. The current and previous calendar period settle automatically.",
   "taskNumber": "Task {number}",
   "enabled": "Enable task",
   "removeTask": "Delete task {number}",
@@ -405,8 +468,11 @@ export default { qqbot: {
   "addTask": "Add task",
   "limitHelp": "Maximum {max} tasks. New tasks start disabled; configure, enable and save to activate.",
   "invalidStreakDays": "The streak interval must be an integer from 1 to 3650.",
-  "invalidTask": "Check task name, target and reward. Request and check-in targets use whole numbers; tokens 1–1000000000000000; monetary targets USD 0.01–1000000000 with two decimals; rewards up to USD 1000 (8 decimals) or 1000 units. Physical and custom prizes require a name.",
+  "invalidTask": "Check the task name, period, target and reward. Binding and recharge use once only; active days allow 1 day daily or up to 7 days weekly. Counts must be whole numbers; amounts allow 2 decimals. Rewards allow USD 1000 or 1000 units.",
   "kinds": {
+    "usage_days": "Active API days",
+    "model_count": "Distinct models explored",
+    "invite_count": "Distinct settled invitations",
     "binding": "Bind an account",
     "usage_count": "Total successful API requests",
     "checkin_total": "Total check-in days",
@@ -416,6 +482,9 @@ export default { qqbot: {
     "usage_amount": "Cumulative API spending"
   },
   "targets": {
+    "usage_days": "Target active days",
+    "model_count": "Target distinct models",
+    "invite_count": "Target settled invitees",
     "binding": "Target (one account binding)",
     "usage_count": "Target request count",
     "checkin_total": "Target total days",
@@ -425,6 +494,9 @@ export default { qqbot: {
     "usage_amount": "Target spending (USD)"
   },
   "typeHelp": {
+    "usage_days": "Counts distinct Beijing dates with recorded API usage in the period. Multiple requests on one day count once. Daily targets allow 1 day; weekly targets allow up to 7 days.",
+    "model_count": "Counts distinct model names in retained, recorded API usage in the period. Repeated calls to a model count once.",
+    "invite_count": "Counts distinct invitee site accounts with settled invitation rewards. Unsettled or ineligible invitations do not count, and a person counts once.",
     "binding": "Completed by binding an active website account. Rebinding does not reset claims.",
     "usage_count": "Counts retained, recorded API usage for the account without calling any models. Pending, deleted and future-dated records do not count.",
     "checkin_total": "Counts distinct Beijing dates with successful check-ins; gaps are allowed. Add separate 7-, 30- and 90-day milestones.",
@@ -687,7 +759,7 @@ export default { qqbot: {
   "checkinCommand": "Send 签到 in the group. Requires account binding, enabled bot and group access, and QQ Receive all messages.",
   "invalidRange": "Enter valid amounts; the minimum cannot exceed the maximum.",
   "lotteryTitle": "Lottery",
-  "lotteryHelp": "Configure balance prizes and probabilities. Members draw using chances earned from cumulative recharges. Disabled by default.",
+  "lotteryHelp": "Configure credit, chance or combined prizes, including “Try again”. Users draw with chances earned from eligible recharge and activities.",
   "lotteryRules": "Activity rules",
   "activityName": "Activity name",
   "rechargeStep": "For each cumulative recharge (USD)",
@@ -706,18 +778,18 @@ export default { qqbot: {
   "guaranteePrizePool": "Guaranteed prize pool",
   "defaultGuaranteePrize": "Guaranteed reward",
   "guaranteeHelp": "Each website account uses the guaranteed pool on draws N, 2N, 3N, and so on, consuming one chance. Historical draws count; ordinary wins, changing groups and rebinding do not reset progress. Changing the interval recalculates progress from lifetime draws and applies only to future draws, without retroactive rewards.",
-  "guaranteePrizeHelp": "Configure 1–20 separate guaranteed prizes with probabilities totaling 100%. Each reward must be positive and at most 1,000 USD, with up to 8 decimal places. A single prize at 100% gives a fixed guaranteed reward.",
+  "guaranteePrizeHelp": "Configure 1–20 guarantee prizes with probabilities totaling 100%. Each prize must award positive credit or chances. Credit allows USD 1000 (8 decimals), chances up to 1000. One prize at 100% gives a fixed guarantee.",
   "invalidGuaranteeEvery": "The guarantee interval must be an integer from 1 to 1,000,000.",
-  "invalidGuaranteePrizes": "Enter valid guaranteed prize names, positive amounts and probabilities totaling 100%.",
+  "invalidGuaranteePrizes": "Check guarantee prizes: positive credit or chances required, and probabilities must total 100%.",
   "guaranteeProgress": "Guaranteed every {every} draws; {count} draws until the next guarantee.",
   "guaranteedDraw": "Guaranteed draw",
-  "prizeHelp": "Probabilities must total 100%, with a minimum of 0.01%. A zero amount means no prize and still consumes one chance. Rewards are credited directly and do not trigger rebates or additional chances.",
+  "prizeHelp": "Probabilities must total 100%, minimum 0.01%. Each draw consumes one chance. Credit and chances can be combined; both zero means no prize. Credit does not count as recharge. Awarded chances increase the remaining balance immediately.",
   "lotteryCommand": "Send 抽奖 [count] for 1–10 draws, for example 抽奖 5; omit the count for one draw. If you lack enough chances, the whole batch is skipped without consuming any chances. Guarantees apply to each draw and results appear in one reply. Use 抽奖次数 for chances or 抽奖活动 for rules. Requires account binding, enabled bot and group access, and QQ Receive all messages.",
   "chanceLookup": "Look up user chances",
   "userID": "Website user ID",
   "eligibleRecharge": "Eligible recharge total",
   "earnedChances": "Total entitlement",
-  "directRechargeChances": "Included direct recharge chances",
+  "directRechargeChances": "Including bonus chances",
   "usedChances": "Used chances",
   "remainingChances": "Remaining chances",
   "nextRecharge": "Recharge another ${amount} for new chances.",

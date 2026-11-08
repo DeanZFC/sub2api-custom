@@ -111,6 +111,54 @@ describe('useAppStore', () => {
     expect(store.hostUpdateManaged).toBe(false)
   })
 
+  it('preserves backend update warnings and retries instead of caching a failed check', async () => {
+    const result = { current_version: '0.2.20-custom.1', latest_version: '0.2.20-custom.1', has_update: false, cached: false, build_type: 'release' }
+    vi.mocked(checkUpdates)
+      .mockResolvedValueOnce({ ...result, warning: 'read release readiness manifest: HTTP 504' })
+      .mockResolvedValueOnce({ ...result, latest_version: '0.2.20-custom.3', has_update: true })
+    const store = useAppStore()
+    await store.fetchVersion()
+    expect(store.versionWarning).toContain('HTTP 504')
+    await store.fetchVersion()
+    expect(checkUpdates).toHaveBeenCalledTimes(2)
+    expect(store.versionWarning).toBe('')
+    expect(store.hasUpdate).toBe(true)
+  })
+
+  it('expires the browser version cache and discovers later releases', async () => {
+    const result = { current_version: '0.2.20-custom.1', latest_version: '0.2.20-custom.1', has_update: false, cached: false, build_type: 'release' }
+    vi.mocked(checkUpdates)
+      .mockResolvedValueOnce(result)
+      .mockResolvedValueOnce({ ...result, latest_version: '0.2.20-custom.3', has_update: true })
+    const store = useAppStore()
+    await store.fetchVersion()
+    await store.fetchVersion()
+    expect(checkUpdates).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(60_000)
+    await store.fetchVersion()
+    expect(checkUpdates).toHaveBeenCalledTimes(2)
+    expect(store.latestVersion).toBe('0.2.20-custom.3')
+  })
+
+  it('retains known version data while exposing request errors and clears them after recovery', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = { current_version: '0.2.20-custom.1', latest_version: '0.2.20-custom.1', has_update: false, cached: false, build_type: 'release' }
+      vi.mocked(checkUpdates).mockResolvedValueOnce(result).mockRejectedValueOnce(new Error('Network unavailable')).mockResolvedValueOnce(result)
+      const store = useAppStore()
+      await store.fetchVersion()
+      await store.fetchVersion(true)
+      expect(store.currentVersion).toBe('0.2.20-custom.1')
+      expect(store.versionWarning).toBe('Network unavailable')
+      await store.fetchVersion()
+      expect(store.versionWarning).toBe('')
+      expect(checkUpdates).toHaveBeenCalledTimes(3)
+      store.clearVersionCache()
+      expect(store.versionLoaded).toBe(false)
+      expect(store.versionWarning).toBe('')
+    } finally { log.mockRestore() }
+  })
+
   describe('Toast 消息管理', () => {
     it('showSuccess 创建 success 类型 toast', () => {
       const store = useAppStore()

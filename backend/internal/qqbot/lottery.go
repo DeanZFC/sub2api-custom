@@ -35,6 +35,7 @@ type LotteryDraw struct {
 	PrizeName    string    `json:"prize_name"`
 	IsGuaranteed bool      `json:"is_guaranteed"`
 	Amount       float64   `json:"amount"`
+	Chances      int       `json:"chances"`
 	Remaining    int64     `json:"remaining"`
 	CreatedAt    time.Time `json:"created_at"`
 }
@@ -71,7 +72,11 @@ func lotteryResult(cfg LotteryConfig, state LotteryState, draws []lotteryOutcome
 	var b strings.Builder
 	if len(draws) == 1 {
 		draw := draws[0]
-		fmt.Fprintf(&b, "🎉 **抽奖结果**\n奖品：%s\n奖励额度：USD %.2f\n剩余抽奖次数：%d 次", replyPlainLabel(draw.prize.Name), draw.prize.Amount, state.Remaining-1)
+		fmt.Fprintf(&b, "🎉 **抽奖结果**\n奖品：%s\n奖励额度：USD %.2f", replyPlainLabel(draw.prize.Name), draw.prize.Amount)
+		if draw.prize.Chances > 0 {
+			fmt.Fprintf(&b, "\n奖励抽奖次数：%d 次", draw.prize.Chances)
+		}
+		fmt.Fprintf(&b, "\n剩余抽奖次数：%d 次", state.Remaining-1+int64(draw.prize.Chances))
 		if draw.guaranteed {
 			_, _ = b.WriteString("\n本次触发保底抽奖")
 		}
@@ -80,6 +85,7 @@ func lotteryResult(cfg LotteryConfig, state LotteryState, draws []lotteryOutcome
 		names := make([]string, 0, len(draws))
 		counts := make(map[string]int, len(draws))
 		total := decimal.Zero
+		bonus := int64(0)
 		guaranteed := 0
 		for _, draw := range draws {
 			if counts[draw.prize.Name] == 0 {
@@ -87,6 +93,7 @@ func lotteryResult(cfg LotteryConfig, state LotteryState, draws []lotteryOutcome
 			}
 			counts[draw.prize.Name]++
 			total = total.Add(decimal.NewFromFloat(draw.prize.Amount))
+			bonus += int64(draw.prize.Chances)
 			if draw.guaranteed {
 				guaranteed++
 			}
@@ -94,7 +101,11 @@ func lotteryResult(cfg LotteryConfig, state LotteryState, draws []lotteryOutcome
 		for _, name := range names {
 			fmt.Fprintf(&b, "\n%s × %d", replyPlainLabel(name), counts[name])
 		}
-		fmt.Fprintf(&b, "\n合计奖励额度：USD %s\n剩余抽奖次数：%d 次", total.StringFixed(2), state.Remaining-int64(len(draws)))
+		fmt.Fprintf(&b, "\n合计奖励额度：USD %s", total.StringFixed(2))
+		if bonus > 0 {
+			fmt.Fprintf(&b, "\n合计奖励抽奖次数：%d 次", bonus)
+		}
+		fmt.Fprintf(&b, "\n剩余抽奖次数：%d 次", state.Remaining-int64(len(draws))+bonus)
 		if guaranteed > 0 {
 			fmt.Fprintf(&b, "\n本次触发保底抽奖 %d 次", guaranteed)
 		}
@@ -177,14 +188,14 @@ func (s *Service) ListLotteryDraws(ctx context.Context, search string, page, pag
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*)`+filter, search).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.user_id,u.email,d.member_id,d.prize_name,d.amount,d.remaining,d.created_at,COALESCE(d.config_snapshot->'is_guaranteed'='true'::jsonb,false)`+filter+` ORDER BY d.id DESC LIMIT $2 OFFSET $3`, search, pageSize, (page-1)*pageSize)
+	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.user_id,u.email,d.member_id,d.prize_name,d.amount,d.remaining,d.created_at,COALESCE(d.config_snapshot->'is_guaranteed'='true'::jsonb,false),COALESCE((d.config_snapshot->>'awarded_chances')::integer,0)`+filter+` ORDER BY d.id DESC LIMIT $2 OFFSET $3`, search, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return out, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var d LotteryDraw
-		if err = rows.Scan(&d.ID, &d.UserID, &d.Email, &d.MemberID, &d.PrizeName, &d.Amount, &d.Remaining, &d.CreatedAt, &d.IsGuaranteed); err != nil {
+		if err = rows.Scan(&d.ID, &d.UserID, &d.Email, &d.MemberID, &d.PrizeName, &d.Amount, &d.Remaining, &d.CreatedAt, &d.IsGuaranteed, &d.Chances); err != nil {
 			return out, err
 		}
 		out.Items = append(out.Items, d)
@@ -219,12 +230,12 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 		var b strings.Builder
 		fmt.Fprintf(&b, "🎉 **%s**\n累计有效充值每满 USD %.2f 送 %d 次\n每次抽奖消耗 1 次\n\n**普通奖池**", replyPlainLabel(cfg.Title), cfg.RechargeStep, cfg.ChancesPerStep)
 		for _, p := range cfg.Prizes {
-			fmt.Fprintf(&b, "\n\n%s\nUSD %.2f（概率 %.2f%%）", replyPlainLabel(p.Name), p.Amount, float64(p.ProbabilityBPS)/100)
+			fmt.Fprintf(&b, "\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), p.description(), float64(p.ProbabilityBPS)/100)
 		}
 		if cfg.GuaranteeEnabled {
 			fmt.Fprintf(&b, "\n\n**保底奖池**\n累计每抽 %d 次触发（含历史）\n普通中奖不重置保底进度", cfg.GuaranteeEvery)
 			for _, p := range cfg.GuaranteePrizes {
-				fmt.Fprintf(&b, "\n\n%s\nUSD %.2f（概率 %.2f%%）", replyPlainLabel(p.Name), p.Amount, float64(p.ProbabilityBPS)/100)
+				fmt.Fprintf(&b, "\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), p.description(), float64(p.ProbabilityBPS)/100)
 			}
 		}
 		return b.String(), tx.Commit()
@@ -333,8 +344,13 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 		draws[i] = lotteryOutcome{prize: lotteryPrizeAt(pool, n.Int64()), guaranteed: guaranteed}
 	}
 	totalReward := 0.0
+	totalChances := int64(0)
 	for _, draw := range draws {
 		totalReward = math.Round((totalReward+draw.prize.Amount)*1e8) / 1e8
+		totalChances += int64(draw.prize.Chances)
+	}
+	if state.Earned+totalChances > 1e12 {
+		return "", errors.New("抽奖次数超出支持范围，请联系管理员")
 	}
 	rewardAt := time.Now()
 	if err = checkRewardBudget(ctx, tx, current, totalReward, rewardAt); err != nil {
@@ -344,15 +360,18 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 		return "", err
 	}
 	result = lotteryResult(cfg, state, draws)
+	awardedChances := int64(0)
 	for i, draw := range draws {
 		prize, guaranteed := draw.prize, draw.guaranteed
+		awardedChances += int64(prize.Chances)
 		// Keep the draw's classification alongside its immutable configuration snapshot.
 		// Older records without this field remain ordinary draws, without a migration.
 		snapshot, err := json.Marshal(struct {
 			LotteryConfig
-			IsGuaranteed bool  `json:"is_guaranteed"`
-			DrawNumber   int64 `json:"draw_number"`
-		}{cfg, guaranteed, state.Used + int64(i) + 1})
+			IsGuaranteed   bool  `json:"is_guaranteed"`
+			DrawNumber     int64 `json:"draw_number"`
+			AwardedChances int   `json:"awarded_chances"`
+		}{cfg, guaranteed, state.Used + int64(i) + 1, prize.Chances})
 		if err != nil {
 			return "", err
 		}
@@ -363,9 +382,14 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 		if i > 0 {
 			drawKey = fmt.Sprintf("%s:lottery-batch:%s:%d", c.AppID, codeHash(requestKey), i+1)
 		}
-		err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_lottery_draws(request_key,app_id,member_id,group_id,user_id,prize_name,amount,config_snapshot,recharge_total,earned,remaining,result_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, drawKey, c.AppID, j.MemberID, j.GroupID, uid, prize.Name, prize.Amount, string(snapshot), state.RechargeTotal, state.Earned, state.Remaining-int64(i)-1, result).Scan(&drawID)
+		err = tx.QueryRowContext(ctx, `INSERT INTO qq_bot_lottery_draws(request_key,app_id,member_id,group_id,user_id,prize_name,amount,config_snapshot,recharge_total,earned,remaining,result_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, drawKey, c.AppID, j.MemberID, j.GroupID, uid, prize.Name, prize.Amount, string(snapshot), state.RechargeTotal, state.Earned+awardedChances, state.Remaining-int64(i)-1+awardedChances, result).Scan(&drawID)
 		if err != nil {
 			return "", err
+		}
+		if prize.Chances > 0 {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES($1,$2,$3)`, fmt.Sprintf("qq-lottery:%d", drawID), uid, prize.Chances); err != nil {
+				return "", err
+			}
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount,created_at) VALUES($1,$2,$3,$4,$5,'lottery',$6,$7)`, fmt.Sprintf("lottery:%d", drawID), c.AppID, j.GroupID, j.MemberID, uid, prize.Amount, rewardAt); err != nil {
 			return "", err

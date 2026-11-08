@@ -21,7 +21,7 @@ func TestCheckinRechargeThresholdsRejectWithoutConsumingDay(t *testing.T) {
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
 	got, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, cfg, got)
+	require.Equal(t, normalizeCheckinMilestones(cfg), got)
 	lifetime, recent := user(t, db), user(t, db)
 	bind(t, db, lifetime, "lifetime")
 	bind(t, db, recent, "recent")

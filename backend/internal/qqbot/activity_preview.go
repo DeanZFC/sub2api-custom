@@ -5,8 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/shopspring/decimal"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 type PreviewTask struct {
@@ -27,6 +28,8 @@ type ActivityPreview struct {
 	InviteRule          string        `json:"invite_rule"`
 	Lottery             LotteryState  `json:"lottery"`
 	Tasks               []PreviewTask `json:"tasks"`
+	CheckinMilestones   []PreviewTask `json:"checkin_milestones"`
+	CheckinTotal        int           `json:"checkin_total"`
 	CheckinExpected     float64       `json:"checkin_expected"`
 	LotteryExpected     float64       `json:"lottery_expected"`
 	LotteryNextExpected float64       `json:"lottery_next_expected"`
@@ -50,7 +53,7 @@ func lotteryExpected(c LotteryConfig) float64 {
 
 // Preview runs in a read-only transaction and never settles rewards or consumes chances.
 func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPreview, error) {
-	out := ActivityPreview{UserID: uid, Tasks: []PreviewTask{}}
+	out := ActivityPreview{UserID: uid, Tasks: []PreviewTask{}, CheckinMilestones: []PreviewTask{}}
 	if uid <= 0 {
 		return out, errors.New("网站用户 ID 不正确")
 	}
@@ -110,18 +113,21 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 	if out.Lottery.DrawsUntilGuarantee == 1 {
 		out.LotteryNextExpected = expectedPrize(lottery.GuaranteePrizes)
 	}
-	total, streak, err := checkinProgress(ctx, tx, uid, time.Now())
+	at := time.Now()
+	total, streak, err := checkinProgress(ctx, tx, uid, at)
 	if err != nil {
 		return out, err
 	}
-	progress := growthProgress{total: total, streak: streak, recharge: eligible.Total}
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(COALESCE(input_tokens,0)::numeric+COALESCE(output_tokens,0)::numeric+COALESCE(cache_creation_tokens,0)::numeric+COALESCE(cache_read_tokens,0)::numeric),0),COALESCE(SUM(actual_cost),0) FROM usage_logs WHERE user_id=$1`, uid).Scan(&progress.usage, &progress.tokens, &progress.spent)
+	out.CheckinTotal = total
+	allTasks := append(append([]GrowthTask{}, checkin.Growth.tasks()...), checkin.Growth.PeriodicTasks...)
+	progressByPeriod, err := loadGrowthProgress(ctx, tx, uid, allTasks, at, false)
 	if err != nil {
 		return out, err
 	}
 	for _, task := range checkin.Growth.tasks() {
+		progress := progressByPeriod[growthTaskPeriod(task)]
 		ok, description := progress.task(task)
-		snapshot, status, e := activityRewardSnapshot(ctx, tx, fmt.Sprintf("qq-growth:%d:%s", uid, task.ID))
+		snapshot, status, e := activityRewardSnapshot(ctx, tx, growthTaskRewardKey(uid, task, at))
 		if e != nil {
 			return out, e
 		}
@@ -131,6 +137,7 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 		}
 		out.Tasks = append(out.Tasks, PreviewTask{ID: task.ID, Name: task.Name, Progress: description, Eligible: out.Bound && c.Enabled && ok && task.Enabled && reward.enabled() && status == "", Status: status, Reward: reward.description()})
 	}
+	progress := progressByPeriod["once"]
 	for _, task := range checkin.Growth.PeriodicTasks {
 		consumed, cycles := decimal.Zero, int64(0)
 		err = tx.QueryRowContext(ctx, `SELECT consumed,cycles FROM qq_bot_periodic_growth_progress WHERE user_id=$1 AND task_id=$2 AND kind=$3`, uid, task.ID, task.Kind).Scan(&consumed, &cycles)
@@ -141,6 +148,34 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 		remaining := decimal.Max(decimal.Zero, progress.value(task.Kind).Sub(consumed))
 		reward := task.reward()
 		out.Tasks = append(out.Tasks, PreviewTask{ID: "periodic:" + task.ID, Name: task.Name, Progress: periodicProgressText(task.Kind, remaining, target), Eligible: out.Bound && c.Enabled && task.Enabled && reward.enabled() && target.IsPositive() && remaining.GreaterThanOrEqual(target), Status: fmt.Sprintf("已结算 %d 轮", cycles), Reward: reward.description()})
+	}
+	for _, milestone := range checkin.Milestones {
+		progress := growthProgress{total: total, streak: streak}
+		task := milestone.task()
+		ok, description := progress.task(task)
+		reward := milestone.Reward
+		status := ""
+		if milestone.Repeat {
+			consumed, cycles := decimal.Zero, int64(0)
+			e := tx.QueryRowContext(ctx, `SELECT consumed,cycles FROM qq_bot_periodic_growth_progress WHERE user_id=$1 AND task_id=$2 AND kind=$3`, uid, milestone.ID, milestone.kind()).Scan(&consumed, &cycles)
+			if e != nil && !errors.Is(e, sql.ErrNoRows) {
+				return out, e
+			}
+			target := decimal.NewFromInt(int64(milestone.Days))
+			remaining := decimal.Max(decimal.Zero, progress.value(milestone.kind()).Sub(consumed))
+			ok = target.IsPositive() && remaining.GreaterThanOrEqual(target)
+			description = periodicProgressText(milestone.kind(), remaining, target)
+			status = fmt.Sprintf("已结算 %d 轮", cycles)
+		} else {
+			snapshot, claimed, e := activityRewardSnapshot(ctx, tx, fmt.Sprintf("qq-growth:%d:%s", uid, milestone.ID))
+			if e != nil {
+				return out, e
+			}
+			if claimed != "" {
+				reward, status, ok = snapshot, claimed, false
+			}
+		}
+		out.CheckinMilestones = append(out.CheckinMilestones, PreviewTask{ID: milestone.ID, Name: milestone.Name, Progress: description, Eligible: out.Bound && c.Enabled && checkin.Enabled && ok && milestone.Enabled && reward.enabled(), Status: status, Reward: reward.description()})
 	}
 	return out, tx.Commit()
 }

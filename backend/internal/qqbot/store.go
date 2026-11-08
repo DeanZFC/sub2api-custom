@@ -424,6 +424,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	var requirement RechargeRequirement
 	var streakDays int
 	var streakReward GrowthReward
+	var checkin CheckinConfig
 	if kind == "invite" {
 		if !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
 			return "邀请奖励未开启。", nil
@@ -453,6 +454,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		requirement = cfg.RechargeRequirement
 		streakReward = cfg.streakReward()
 		streakDays = cfg.streakDays()
+		checkin = cfg
 		amount, err = randomCheckinAmount(cfg)
 		if err != nil {
 			return "", err
@@ -559,6 +561,8 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	}
 	var streak int
 	var bonus bool
+	var milestoneText string
+	var checkinTotal int
 	if kind == "checkin" {
 		streak, bonus, err = grantStreak(ctx, tx, c, j, userID, rewardAt, streakReward, streakDays)
 		if errors.Is(err, ErrRewardBudget) {
@@ -567,11 +571,16 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 		if err != nil {
 			return "", err
 		}
-		cfg, configErr := loadCheckinConfig(ctx, tx, c.CheckinReward)
-		if configErr != nil {
-			return "", configErr
+		milestoneText, _, _, err = settleCheckinMilestones(ctx, tx, c, j, userID, checkin, rewardAt)
+		if err != nil {
+			return "", err
 		}
-		if _, _, _, err = settleGrowthForUser(ctx, tx, c, j, userID, cfg, rewardAt); err != nil {
+		if checkinTotal, _, err = checkinProgress(ctx, tx, userID, rewardAt); err != nil {
+			return "", err
+		}
+		growthOnly := checkin
+		growthOnly.Milestones = nil
+		if _, _, _, err = settleGrowthForUser(ctx, tx, c, j, userID, growthOnly, rewardAt); err != nil {
 			return "", err
 		}
 	}
@@ -582,7 +591,8 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if kind == "invite" {
 		return fmt.Sprintf("🎁 邀请奖励已发放：USD %.2f", amount), nil
 	}
-	text := fmt.Sprintf("✅ **签到成功**\n到账：USD %.2f\n连签 %d 天", amount, streak)
+	text := fmt.Sprintf("✅ **签到成功**\n到账：USD %.2f\n累计签到 %d 天\n连签 %d 天", amount, checkinTotal, streak)
+	text += milestoneText
 	if bonus {
 		text += "\n\n连签奖励：" + streakReward.description() + "\n" + streakReward.deliveryNote()
 	}

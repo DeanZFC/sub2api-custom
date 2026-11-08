@@ -26,6 +26,7 @@ func TestGrowthCustomTargetsAndRetainedClaims(t *testing.T) {
 	require.Contains(t, text, "2 次")
 	cfg, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
+	cfg.Enabled = true
 	cfg.Growth.Tasks[0].Name = "Renamed binding"
 	cfg.Growth.Tasks[0].Chances = 9
 	cfg.Growth.Tasks = append(cfg.Growth.Tasks,
@@ -64,7 +65,7 @@ func TestGrowthCustomTargetsAndRetainedClaims(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT SUM(chances) FROM qq_bot_lottery_chance_grants WHERE user_id=$1`, uid).Scan(&granted))
 	require.Equal(t, 20, granted)
 	// Reordering and editing a task preserve its original grant key.
-	claimed := cfg.Growth.Tasks[3]
+	claimed := cfg.Growth.Tasks[2] // api_3; sign-in tasks are now separate milestones.
 	claimed.Name, claimed.Target, claimed.Chances = "Edited milestone", 1, 1000
 	cfg.Growth.Tasks = []GrowthTask{claimed}
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))

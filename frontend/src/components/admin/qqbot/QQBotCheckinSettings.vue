@@ -29,6 +29,30 @@
           <label class="space-y-1">{{ t('qqbot.minimumRecentRecharge', { days: form.recharge_window_days }) }}<input v-model.number="form.min_recharge_30d" data-testid="min-recharge-30d" type="number" min="0" max="1000000000" step="0.01" required class="input" /></label>
         </div>
       </div>
+      <fieldset class="min-w-0 space-y-4 rounded-xl border border-primary-200 p-4 dark:border-primary-900" :disabled="busy" data-testid="checkin-milestones">
+        <legend class="px-1 font-semibold">{{ t('qqbot.milestones.title') }}</legend>
+        <p class="text-sm text-gray-500">{{ t('qqbot.milestones.help') }}</p>
+        <div class="flex flex-wrap gap-2">
+          <button v-for="days in [7, 30]" :key="days" type="button" class="btn btn-secondary" :data-testid="'milestone-preset-' + days" :disabled="form.milestones.length >= maxMilestones" @click="addMilestone(days)">{{ t('qqbot.milestones.preset', { days }) }}</button>
+        </div>
+        <article v-for="(milestone, index) in form.milestones" :key="milestone.id" class="space-y-4 rounded-lg border bg-white p-4 dark:border-dark-700 dark:bg-dark-800" data-testid="checkin-milestone">
+          <div class="flex items-center justify-between gap-3">
+            <label class="flex items-center gap-2 text-sm"><input v-model="milestone.enabled" type="checkbox" :data-testid="'milestone-enabled-' + index" />{{ t('qqbot.milestones.enabled') }}</label>
+            <button type="button" class="text-sm text-red-600" :data-testid="'milestone-remove-' + index" :aria-label="t('qqbot.milestones.remove', { number: index + 1 })" @click="form.milestones.splice(index, 1)">{{ t('common.delete') }}</button>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-3">
+            <label class="space-y-1">{{ t('qqbot.milestones.name') }}<input v-model="milestone.name" :data-testid="'milestone-name-' + index" maxlength="40" required class="input" /></label>
+            <label class="space-y-1">{{ t('qqbot.milestones.kind') }}<select v-model="milestone.kind" class="input" :disabled="persistedMilestoneIDs.has(milestone.id) && milestone.repeat" @change="milestone.repeat = false" :data-testid="'milestone-kind-' + index"><option value="checkin_total">{{ t('qqbot.growth.kinds.checkin_total') }}</option><option value="checkin_streak">{{ t('qqbot.growth.kinds.checkin_streak') }}</option></select></label>
+            <label class="space-y-1">{{ t('qqbot.milestones.days') }}<input v-model.number="milestone.days" :data-testid="'milestone-days-' + index" type="number" min="1" max="3650" step="1" required class="input" /></label>
+          </div>
+          <label v-if="milestone.kind === 'checkin_total'" class="flex items-center gap-2 text-sm"><input v-model="milestone.repeat" type="checkbox" :disabled="persistedMilestoneIDs.has(milestone.id)" :title="persistedMilestoneIDs.has(milestone.id) ? t('qqbot.milestones.repeatLocked') : undefined" :data-testid="'milestone-repeat-' + index" />{{ t('qqbot.milestones.repeat') }}</label>
+          <QQBotGrowthRewardFields v-model="milestone.reward" prefix="milestone" :index="index" :allowed-types="milestone.reward.type === 'balance' || milestone.reward.type === 'chances' ? ['chances', 'balance'] : undefined" />
+        </article>
+        <p v-if="!form.milestones.length" class="rounded-lg border border-dashed p-4 text-sm text-gray-500 dark:border-dark-700">{{ t('qqbot.milestones.empty') }}</p>
+        <button type="button" class="btn btn-secondary" data-testid="add-checkin-milestone" :disabled="form.milestones.length >= maxMilestones" @click="addMilestone(7)">{{ t('qqbot.milestones.add') }}</button>
+        <p class="text-sm text-gray-500">{{ t('qqbot.milestones.identityHelp') }}</p>
+        <p class="text-xs text-gray-500">{{ t('qqbot.milestones.repeatLocked') }}</p>
+      </fieldset>
       <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
         <legend class="font-medium">{{ t('qqbot.growth.streakTitle') }}</legend>
         <p class="text-sm text-gray-500">{{ t('qqbot.growth.streakHelp') }}</p>
@@ -51,9 +75,11 @@ import { useI18n } from 'vue-i18n'
 import type { QQCheckinConfig, QQCheckinRewardDistribution } from '@/api/qqbot'
 import { loadCheckinConfig, saveCheckinSettings, validCheckinDistribution } from './checkinSettings'
 import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
-import { validGrowthReward } from './growthReward'
+import { normalizeGrowthReward, validGrowthReward } from './growthReward'
 const { t } = useI18n()
+const maxMilestones = 32
 const form = ref<QQCheckinConfig | null>(null)
+const persistedMilestoneIDs = ref(new Set<string>())
 const { dirty, markSaved } = useQQDraft(form)
 const busy = ref(false)
 const error = ref('')
@@ -77,6 +103,10 @@ const distributionTotal = computed(() => {
   const total = lowerHalfPercent.value + nextQuarterPercent.value + upperQuarterPercent.value
   return Number.isFinite(total) ? total.toFixed(2) : '—'
 })
+function addMilestone(days: number) {
+  if (!form.value || busy.value || form.value.milestones.length >= maxMilestones) return
+  form.value.milestones.push({ id: 'milestone_' + crypto.randomUUID().replace(/-/g, ''), name: t('qqbot.milestones.defaultName', { days }), kind: 'checkin_total', days, reward: normalizeGrowthReward(undefined, 1), enabled: false })
+}
 async function save() {
   if (!form.value || busy.value) return
   error.value = ''; notice.value = ''
@@ -92,13 +122,19 @@ async function save() {
     error.value = t('qqbot.growth.invalidReward')
     return
   }
+  if (form.value.milestones.length > maxMilestones || !form.value.milestones.every(milestone =>
+    milestone.name.trim() && [...milestone.name].length <= 40 && ![...milestone.name].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+    && ['checkin_total', 'checkin_streak'].includes(milestone.kind) && (!milestone.repeat || milestone.kind === 'checkin_total') && Number.isInteger(milestone.days) && milestone.days >= 1 && milestone.days <= 3650
+    && validGrowthReward(milestone.reward))) {
+    error.value = t('qqbot.milestones.invalid'); return
+  }
   busy.value = true
-  try { form.value = await saveCheckinSettings(form.value); markSaved(); notice.value = t('common.saved') }
+  try { form.value = await saveCheckinSettings(form.value); persistedMilestoneIDs.value = new Set(form.value.milestones.map(milestone => milestone.id)); markSaved(); notice.value = t('common.saved') }
   catch (e) { error.value = (e as Error).message || t('common.error') }
   finally { busy.value = false }
 }
 onMounted(async () => {
-  try { form.value = await loadCheckinConfig() }
+  try { form.value = await loadCheckinConfig(); persistedMilestoneIDs.value = new Set(form.value.milestones.map(milestone => milestone.id)) }
   catch (e) { error.value = (e as Error).message || t('common.error') }
 })
 </script>

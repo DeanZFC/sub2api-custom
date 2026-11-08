@@ -84,6 +84,6 @@ function latencyDetail(row: MonitorMatrixRow) { const m = row.metrics.ttft; retu
 .model-metrics-table { min-width: 21rem; }
 .model-name-column { width: 34%; }
 @container (min-width: 540px) {
-  .metrics-layout--models { height: 100%; grid-template-columns: 10rem minmax(0, 1fr); }
+  .metrics-layout--models { height: 100%; grid-template-columns: clamp(11rem, 28%, 13rem) minmax(0, 1fr); }
 }
 </style>

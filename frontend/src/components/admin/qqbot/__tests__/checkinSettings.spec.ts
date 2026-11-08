@@ -17,6 +17,7 @@ describe('check-in draft revision protection', () => {
   })
   it('defaults older configurations and saves edited probabilities with the draft revision', async () => {
     const config = await loadCheckinConfig()
+    expect(config.milestones).toEqual([])
     expect(config.reward_distribution).toEqual({ lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 })
     config.reward_distribution = { lower_half_bps: 1234, next_quarter_bps: 4321, upper_quarter_bps: 4445 }
     await saveCheckinSettings(config)
@@ -41,4 +42,20 @@ describe('check-in draft revision protection', () => {
     expect(api.saveCheckin.mock.calls[0]![0]._version).toBeUndefined()
     expect(api.saveCheckin.mock.calls[0]![0]._section).toBeUndefined()
   })
+  it('keeps milestone drafts scoped to check-in while growth saves preserve current milestones', async () => {
+    const milestone = { id: 'seven_days', name: 'Seven days', kind: 'checkin_total', days: 7, enabled: true, reward: { type: 'chances', amount: 0, quantity: 2, prize_name: '', claim_instructions: '' } }
+    api.checkinConfig.mockResolvedValue({ ...draft(), milestones: [milestone], _sections: { tasks: 'tasks-original', checkin: 'checkin-original' } })
+    const config = await loadCheckinConfig()
+    config.milestones[0]!.days = 30
+    await saveGrowthSettings(config)
+    expect(api.saveCheckin.mock.lastCall![0]).toEqual(expect.objectContaining({ milestones: [milestone], _section: 'tasks', _version: 'tasks-original' }))
+    await saveCheckinSettings(config)
+    expect(api.saveCheckin.mock.lastCall![0]).toEqual(expect.objectContaining({ milestones: [expect.objectContaining({ days: 30 })], _section: 'checkin', _version: 'checkin-original' }))
+  })
+
+  it('normalizes an omitted check-in metric to cumulative days', async () => {
+    api.checkinConfig.mockResolvedValue({ ...draft(), milestones: [{ id: 'seven_days', name: 'Seven days', days: 7, enabled: false, reward: draft().streak_reward }] })
+    expect((await loadCheckinConfig()).milestones[0]!.kind).toBe('checkin_total')
+  })
+
 })

@@ -38,6 +38,9 @@ export const useAppStore = defineStore('app', () => {
   // Version cache state
   const versionLoaded = ref<boolean>(false)
   const versionLoading = ref<boolean>(false)
+  const versionWarning = ref<string>('')
+  let versionCheckedAt = 0
+  const versionCacheTTL = 60_000
   const currentVersion = ref<string>('')
   const latestVersion = ref<string>('')
   const hasUpdate = ref<boolean>(false)
@@ -244,7 +247,7 @@ export const useAppStore = defineStore('app', () => {
    */
   async function fetchVersion(force = false): Promise<VersionInfo | null> {
     // Return cached data if available and not forcing refresh
-    if (versionLoaded.value && !force) {
+    if (versionLoaded.value && !versionWarning.value && !force && Date.now() - versionCheckedAt < versionCacheTTL) {
       return {
         current_version: currentVersion.value,
         latest_version: latestVersion.value,
@@ -272,10 +275,13 @@ export const useAppStore = defineStore('app', () => {
       hostUpdateManaged.value = data.host_update_managed === true
       buildType.value = data.build_type || 'source'
       releaseInfo.value = data.release_info || null
+      versionWarning.value = data.warning || ''
+      versionCheckedAt = Date.now()
       versionLoaded.value = true
       return data
     } catch (error) {
       console.error('Failed to fetch version:', error)
+      versionWarning.value = error instanceof Error ? error.message : String(i18n.global.t('version.checkFailed'))
       return null
     } finally {
       versionLoading.value = false
@@ -287,6 +293,8 @@ export const useAppStore = defineStore('app', () => {
    */
   function clearVersionCache(): void {
     versionLoaded.value = false
+    versionWarning.value = ''
+    versionCheckedAt = 0
     hasUpdate.value = false
     sourceUpdateEnabled.value = false
     hostUpdateManaged.value = false
@@ -466,6 +474,7 @@ export const useAppStore = defineStore('app', () => {
     // Version state
     versionLoaded,
     versionLoading,
+    versionWarning,
     currentVersion,
     latestVersion,
     hasUpdate,

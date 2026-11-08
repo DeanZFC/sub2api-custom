@@ -10,7 +10,7 @@
             ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50'
             : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-800 dark:text-dark-400 dark:hover:bg-dark-700'
         ]"
-        :title="hasUpdate ? t('version.updateAvailable') : t('version.upToDate')"
+        :title="versionStatus"
       >
         <span v-if="currentVersion" class="font-medium">v{{ currentVersion }}</span>
         <span
@@ -89,7 +89,8 @@
                   <span v-else class="text-2xl font-bold text-gray-400 dark:text-dark-500">--</span>
                   <!-- Show check mark when up to date -->
                   <span
-                    v-if="!hasUpdate"
+                    v-if="versionConfirmed && !hasUpdate"
+                    data-testid="version-up-to-date"
                     class="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30"
                   >
                     <svg
@@ -106,12 +107,12 @@
                   </span>
                 </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
-                  {{
-                    hasUpdate
-                      ? t('version.latestVersion') + ': v' + latestVersion
-                      : t('version.upToDate')
-                  }}
+                  {{ versionStatus }}
                 </p>
+              </div>
+              <div v-if="versionWarning" role="alert" class="mb-4 space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                <p>{{ t('version.checkFailedHint') }}</p>
+                <p class="break-words">{{ versionWarning }}</p>
               </div>
 
               <!-- Priority 1: Update error (must check before hasUpdate) -->
@@ -708,6 +709,14 @@ const displayVersion = (value: string) => String(value || '').replace(/^v+/i, ''
 const currentVersion = computed(() => displayVersion(appStore.currentVersion || props.version || ''))
 const latestVersion = computed(() => displayVersion(appStore.latestVersion))
 const hasUpdate = computed(() => appStore.hasUpdate)
+const versionWarning = computed(() => appStore.versionWarning)
+const versionConfirmed = computed(() => appStore.versionLoaded && !versionWarning.value && !loading.value)
+const versionStatus = computed(() => {
+  if (loading.value) return t('version.checking')
+  if (versionWarning.value) return t('version.checkFailed')
+  if (!versionConfirmed.value) return t('version.notChecked')
+  return hasUpdate.value ? t('version.latestVersion') + ': v' + latestVersion.value : t('version.upToDate')
+})
 const sourceUpdateEnabled = computed(() => appStore.sourceUpdateEnabled)
 const hostUpdateManaged = computed(() => appStore.hostUpdateManaged)
 const releaseInfo = computed(() => appStore.releaseInfo)
@@ -791,6 +800,7 @@ const isReleaseBuild = computed(() => buildType.value === 'release' && !hostUpda
 
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
+  if (dropdownOpen.value) void appStore.fetchVersion(false)
 }
 
 function closeDropdown() {

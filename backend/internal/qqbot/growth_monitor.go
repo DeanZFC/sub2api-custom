@@ -55,12 +55,19 @@ func (s *Service) settleGrowthBatch(ctx context.Context, c Config, after int64) 
 		return after, err
 	}
 	var ids []string
+	at := time.Now()
 	for _, task := range cfg.Growth.tasks() {
 		if task.Enabled && task.reward().enabled() {
-			ids = append(ids, task.ID)
+			ids = append(ids, growthTaskKeySuffix(task, at))
+			if period := growthTaskPeriod(task); period != "once" {
+				ids = append(ids, growthTaskKeySuffix(task, growthPreviousPeriodEnd(period, at)))
+			}
 		}
 	}
 	periodic := false
+	for _, milestone := range cfg.Milestones {
+		periodic = periodic || (cfg.Enabled && milestone.Enabled && milestone.reward().enabled())
+	}
 	for _, task := range cfg.Growth.PeriodicTasks {
 		periodic = periodic || (task.Enabled && task.reward().enabled())
 	}

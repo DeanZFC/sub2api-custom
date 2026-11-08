@@ -1,4 +1,27 @@
 export default { qqbot: {
+  "prizeChances": "奖励抽奖次数",
+  "chancePrizeExample": "例如“再来一次”：额度填 0、次数填 1；也可填 2 次或同时奖励额度。奖励次数立即到账，不会自动继续抽奖。",
+  "expectedChanceReward": "每次抽奖平均奖励 {count} 次机会（含保底；每次仍消耗 1 次）。",
+  "chanceReward": "奖励抽奖次数：+{count}",
+  "invalidLotteryPrizes": "请检查奖项：额度为0～1000 USD（最多8位小数），奖励次数为0～1000的整数，概率合计为100%。",
+  "milestones": {
+    repeatLocked: '保存后一次性/重复发奖方式固定；需要切换时，请新建档位。',
+    "total": "累计 {count} 天",
+    "title": "累计签到里程碑",
+    "help": "添加任意多个签到档位，例如累计7天奖励额度、累计30天奖励抽奖次数。中途断签不影响累计天数。旧签到成长任务已统一归到这里。",
+    "preset": "添加累计 {days} 天",
+    "enabled": "启用此档奖励",
+    "name": "档位名称",
+    "kind": "统计方式",
+    "days": "达标天数",
+    "repeat": "每累计满该天数重复奖励（余下天数结转）",
+    "add": "添加自定义档位",
+    "empty": "尚未配置累计奖励，可用上方7天、30天快捷添加。",
+    "identityHelp": "最多32档，新增默认关闭。普通档位每个网站账号达标奖励一次；改名称或奖励不重发，换绑不重置。重复档位按累计天数结算，历史已领取记录保留。",
+    "remove": "删除签到档位 {number}",
+    "defaultName": "累计签到 {days} 天",
+    "invalid": "请检查签到档位：名称1～40字、天数为1～3650的整数、奖励有效，最多32档。"
+  },
   simple: {
     chatCapability: "AI 聊天",
     regenerateKey: "重新生成专用 Key（保存后撤销旧 Key；新 Key 从零计算总用量）",
@@ -374,16 +397,56 @@ export default { qqbot: {
     invalid: '请检查奖励：名次须为 1～10 且不能重复；余额、数量及奖品信息须有效。开启每日奖励前至少配置一个非零奖励。'
   },
   growth: {
+  periodLocked: '已保存任务的周期固定；需要新的周期时，请新建任务。',
+  "playbookTitle": "让每一次使用都有新目标",
+  "autoSettle": "达标自动发奖",
+  "addPreset": "＋ 加入任务草稿",
+  "presetAdded": "已添加",
+  "presetHelp": "从玩法卡片开始，再调整目标与奖品。添加只创建关闭状态的草稿，不会替换已有任务；启用并保存后才生效。签到奖励统一在“签到配置”中管理。",
+  "period": "任务周期",
+  "periodFilter": "按周期筛选挑战",
+  "periods": {
+    "all": "全部挑战",
+    "once": "长期成就 / 新手",
+    "daily": "每日挑战",
+    "weekly": "每周探索"
+  },
+  "presets": {
+    "first_call": {
+      "name": "新手启程",
+      "help": "完成首次 API 调用，领取第一张抽奖券。"
+    },
+    "daily_sprint": {
+      "name": "今日小目标",
+      "help": "今天完成3次调用，每天都有新机会。"
+    },
+    "weekly_regular": {
+      "name": "本周常客",
+      "help": "本周分3天使用API，鼓励持续探索。"
+    },
+    "model_explorer": {
+      "name": "模型探险家",
+      "help": "体验3种模型，解锁探索成就。"
+    },
+    "weekly_explorer": {
+      "name": "每周尝鲜",
+      "help": "本周体验3种模型，发现不同能力。"
+    },
+    "community_builder": {
+      "name": "社群共建者",
+      "help": "累计3位已结算的有效邀请，获得共建奖励。"
+    }
+  },
   "tab": "成长任务",
   "title": "成长任务",
-  "help": "配置一次性与周期性成长任务，支持余额、抽奖次数、实物或自定义奖品。达标奖励自动发放，用户通过 成长任务 查看进度；两类配置分别保存。",
+  "help": "围绕新手启程、每日挑战、每周探索和长期成就配置玩法。可奖励额度、抽奖次数、实物或自定义奖品，后台自动结算；签到奖励集中在签到配置。",
   "streakTitle": "周期连签奖励",
   "streakHelp": "在签到配置中设置奖励周期，按北京时间每连续签到满指定天数自动发放。金额或数量为 0 表示关闭；缺签后重新累计，修改周期不补发历史奖励。",
   "streakDays": "奖励周期（连续签到天数）",
   "chances": "奖励抽奖次数（0 表示关闭）",
-  "tasksTitle": "一次性成长任务",
-  "periodicTitle": "周期性成长任务",
-  "periodicHelp": "可按消费额度、Token、调用、充值或累计签到设置重复奖励，也可配置每日排行榜奖励。各区分别保存。",
+  "tasksTitle": "挑战与成就",
+  "periodicTitle": "循环挑战",
+  "periodicHelp": "每累计完成一轮调用、Token、消费或充值目标就再奖励一次，未达一轮的进度会保留。这里的循环次数与自然日、自然周任务分别统计。",
   "repeatTitle": "每达标一次，奖励一次",
   "periodicIdentityHelp": "例如每消费 10 USD 奖励 1 次抽奖，消费 25 USD 可获 2 次，余下 5 USD 结转。现存历史记录也计入，达标后自动分批发放。修改门槛仅作用于未奖励的进度；关闭后重新开启不重置记录。切换条件分别记账，删除后重新添加视为新任务。",
   "periodicTargets": {
@@ -394,7 +457,7 @@ export default { qqbot: {
     "checkin_total": "每累计签到多少天"
   },
   "taskSummary": "共 {total} 项任务，已开启 {enabled} 项",
-  "identityHelp": "每项任务每个网站账号仅奖励一次。后台每分钟分批检查已绑定账号，签到达标时立即发放。修改名称、条件或奖励不重置发放记录；删除后重新添加会视为新任务。",
+  "identityHelp": "长期成就每账号一次；每日挑战按北京时间00:00重新计数，每周探索按周一00:00重新计数，各周期最多奖励一次。后台每分钟分批检查，历史已入库且仍保留的记录计入对应周期。同一周期内修改名称、目标或奖励不重置发奖记录。保存后周期固定；新周期请新建任务。当前及上一自然周期会自动补结算。",
   "taskNumber": "任务 {number}",
   "enabled": "开启任务",
   "removeTask": "删除任务 {number}",
@@ -405,8 +468,11 @@ export default { qqbot: {
   "addTask": "添加任务",
   "limitHelp": "最多 {max} 项。新增任务默认关闭，配置完成后勾选开启并保存。",
   "invalidStreakDays": "连签奖励周期须为 1～3650 的整数。",
-  "invalidTask": "请检查任务名称、目标和奖励。调用及签到目标为整数；Token 目标为 1～1000000000000000 的整数；金额目标为 0.01～1000000000 USD，最多两位小数；余额奖励最多 1000 USD（8 位小数），数量最多 1000，实物和自定义奖品须填写名称。",
+  "invalidTask": "请检查任务名称、周期、目标和奖励。绑定、充值仅支持长期成就；活跃天数上限为每日1天、每周7天。调用、活跃天数、模型与邀请数量须为整数；金额最多两位小数，奖励余额最多1000 USD、数量最多1000。",
   "kinds": {
+    "usage_days": "API活跃天数",
+    "model_count": "探索不同模型",
+    "invite_count": "已结算的有效邀请人数",
     "binding": "完成账号绑定",
     "usage_count": "累计成功 API 调用",
     "checkin_total": "累计签到天数",
@@ -416,6 +482,9 @@ export default { qqbot: {
     "usage_amount": "累计消费金额"
   },
   "targets": {
+    "usage_days": "目标活跃天数",
+    "model_count": "目标不同模型数",
+    "invite_count": "目标有效邀请人数",
     "binding": "目标（完成一次绑定）",
     "usage_count": "目标调用次数",
     "checkin_total": "目标累计天数",
@@ -425,6 +494,9 @@ export default { qqbot: {
     "usage_amount": "目标消费金额（USD）"
   },
   "typeHelp": {
+    "usage_days": "统计周期内有API使用记录的不同北京时间日期。同一天多次调用只算一天；每日挑战最多1天，每周挑战最多7天。",
+    "model_count": "统计周期内实际使用过的不同模型名称，同一模型多次调用只计一种；按已入库且仍保留的API使用记录判断。",
+    "invite_count": "按邀请奖励已到账记录统计不同被邀请网站账号，未结算、未达邀请规则的记录不计入；同一用户不重复计算。",
     "binding": "绑定有效网站账号即可完成；解绑重绑不重置发奖记录。",
     "usage_count": "统计该账号已入库且仍保留的 API 使用记录；不额外调用模型，未入库、已清理和未来时间记录不计入。",
     "checkin_total": "累计不同北京时间日期的成功签到，允许中间断签。可分别设置 7、30、90 天里程碑。",
@@ -687,7 +759,7 @@ export default { qqbot: {
   "checkinCommand": "群内发送：签到。需先绑定账号，并开启机器人、当前群权限和 QQ 接收所有消息。",
   "invalidRange": "请输入有效金额，最低金额不能高于最高金额。",
   "lotteryTitle": "抽奖活动",
-  "lotteryHelp": "设置余额奖品及概率，用户用累计充值赠送的次数参与群内抽奖。默认关闭。",
+  "lotteryHelp": "设置额度、抽奖次数及混合奖品；次数奖可做“再来一次”或额外抽奖券。用户使用累计充值和活动奖励获得的次数抽奖。",
   "lotteryRules": "活动规则",
   "activityName": "活动名称",
   "rechargeStep": "每累计充值（USD）",
@@ -706,18 +778,18 @@ export default { qqbot: {
   "guaranteePrizePool": "保底奖池",
   "defaultGuaranteePrize": "保底奖励",
   "guaranteeHelp": "按每个网站账号的累计抽奖次数，在第 N、2N、3N 次改用保底奖池，当次仍消耗 1 次机会。包含历史抽奖，普通中奖、跨群和重新绑定不会清零。修改周期后按累计次数重新计算，只影响后续抽奖，不补发历史保底。",
-  "guaranteePrizeHelp": "保底奖池独立配置 1～20 个奖项，概率合计必须为 100%，额度必须大于 0、最多 1000 USD，支持 8 位小数。只配置 1 个奖项并设为 100%，即固定保底奖励。",
+  "guaranteePrizeHelp": "保底奖池独立配置1～20项，概率合计100%，额度与次数至少一项大于0。额度最多1000 USD（8位小数），次数最多1000。单项100%即固定保底。",
   "invalidGuaranteeEvery": "保底周期必须为 1～1000000 的整数。",
-  "invalidGuaranteePrizes": "请填写有效的保底奖项名称、正数额度和概率，概率合计必须为 100%。",
+  "invalidGuaranteePrizes": "请填写有效的保底奖项，额度或次数至少一项大于0，概率合计100%。",
   "guaranteeProgress": "每 {every} 次触发保底，距离下次保底还需抽奖 {count} 次。",
   "guaranteedDraw": "保底抽奖",
-  "prizeHelp": "所有概率合计必须为 100%，最小 0.01%。金额为 0 表示谢谢参与，同样消耗 1 次。中奖额度直接入账，不触发返利或增加抽奖次数。",
+  "prizeHelp": "所有概率合计100%，最小0.01%。每抽消耗1次，额度和次数可同时奖励；两项均为0表示谢谢参与。额度直接入账，不计有效充值；奖励次数立即增加到剩余次数。",
   "lotteryCommand": "群内发送 抽奖 [次数]：省略为单抽，次数为 1～10 的整数，例如 抽奖 5；剩余次数不足时整批不抽、不扣次数。连抽逐次计算累计保底，结果合并回复。抽奖次数 查询机会，抽奖活动 查看规则。需先绑定账号，并开启机器人、当前群权限和 QQ 接收所有消息。",
   "chanceLookup": "查询用户抽奖次数",
   "userID": "网站用户 ID",
   "eligibleRecharge": "有效累计充值",
   "earnedChances": "累计可获次数",
-  "directRechargeChances": "其中直充赠送次数",
+  "directRechargeChances": "其中活动奖励次数",
   "usedChances": "已抽次数",
   "remainingChances": "剩余次数",
   "nextRecharge": "再充值 ${amount} 可获得新次数。",

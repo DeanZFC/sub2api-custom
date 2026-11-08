@@ -6,6 +6,10 @@
     <div v-if="data" class="space-y-3 text-sm">
       <p>{{ t('qqbot.workspace.bindingState') }}: {{ yes(data.bound) }}</p>
       <p>{{ t('qqbot.checkinTitle') }}: {{ yes(data.checkin_eligible) }} · {{ data.checkin_rule }} · {{ t('qqbot.workspace.alreadyCheckedIn') }}: {{ yes(data.checkin_done) }}</p>
+      <section v-if="data.checkin_total !== undefined || data.checkin_milestones?.length" class="space-y-2 rounded-xl bg-gray-50 p-4 dark:bg-dark-800" data-testid="preview-checkin-milestones">
+        <h3 class="font-semibold">{{ t('qqbot.milestones.title') }} · {{ t('qqbot.milestones.total', { count: data.checkin_total ?? 0 }) }}</h3>
+        <article v-for="milestone in data.checkin_milestones" :key="milestone.id" class="rounded-lg border p-3 dark:border-dark-700"><strong>{{ milestone.name }}</strong><p>{{ milestone.progress }} · {{ milestone.status || yes(milestone.eligible) }} · {{ milestone.reward }}</p></article>
+      </section>
       <p>{{ t('qqbot.inviteTitle') }}: {{ yes(data.invite_eligible) }} · {{ data.invite_rule }}</p>
       <p>{{ t('qqbot.workspace.lotteryRemaining') }}: {{ data.lottery.remaining }} · {{ t('qqbot.workspace.untilGuarantee') }}: {{ data.lottery.draws_until_guarantee }}</p>
       <p>{{ t('qqbot.workspace.expectedCheckin') }}: ${{ data.checkin_expected.toFixed(6) }} · {{ t('qqbot.workspace.expectedLottery') }}: ${{ data.lottery_expected.toFixed(6) }} · {{ t('qqbot.workspace.expectedNext') }}: ${{ data.lottery_next_expected.toFixed(6) }}</p>

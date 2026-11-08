@@ -246,6 +246,17 @@ func siteRuleMoney(amount float64) string {
 	return "USD " + decimal.NewFromFloat(amount).String()
 }
 
+func lotteryPrizeDescription(prize LotteryPrize) string {
+	if prize.Chances == 0 {
+		return siteRuleMoney(prize.Amount)
+	}
+	chances := fmt.Sprintf("抽奖次数 %d 次", prize.Chances)
+	if prize.Amount == 0 {
+		return chances
+	}
+	return siteRuleMoney(prize.Amount) + " + " + chances
+}
+
 func siteCheckinRules(c CheckinConfig) string {
 	if !c.Enabled {
 		return "📅 **签到规则**\n签到活动未开启。"
@@ -258,6 +269,21 @@ func siteCheckinRules(c CheckinConfig) string {
 	if reward := c.streakReward(); reward.enabled() {
 		text += fmt.Sprintf("\n连续签到每 %d 天奖励：%s", c.streakDays(), reward.description())
 		text += siteRuleClaimInstructions(reward)
+	}
+	for _, milestone := range c.Milestones {
+		if !milestone.Enabled || !milestone.Reward.enabled() {
+			continue
+		}
+		mode := "累计签到"
+		if milestone.kind() == "checkin_streak" {
+			mode = "连续签到"
+		}
+		frequency := "每账号限一次"
+		if milestone.Repeat {
+			mode, frequency = "每累计签到", "达标可重复获得"
+		}
+		text += fmt.Sprintf("\n\n%s：%s %d 天\n奖励：%s（%s）", replyPlainLabel(milestone.Name), mode, milestone.Days, milestone.Reward.description(), frequency)
+		text += siteRuleClaimInstructions(milestone.Reward)
 	}
 	return text
 }
@@ -275,12 +301,12 @@ func siteLotteryRules(c LotteryConfig) string {
 	}
 	text := fmt.Sprintf("🎉 **%s**\n累计有效充值每满 %s 送 %d 次\n每次抽奖消耗 1 次；可发送 抽奖 1～10 连抽\n需绑定网站账号。\n\n**普通奖池**", replyPlainLabel(c.Title), siteRuleMoney(c.RechargeStep), c.ChancesPerStep)
 	for _, p := range c.Prizes {
-		text += fmt.Sprintf("\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), siteRuleMoney(p.Amount), float64(p.ProbabilityBPS)/100)
+		text += fmt.Sprintf("\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), lotteryPrizeDescription(p), float64(p.ProbabilityBPS)/100)
 	}
 	if c.GuaranteeEnabled {
 		text += fmt.Sprintf("\n\n**保底奖池**\n累计每抽 %d 次触发（含历史）；普通中奖不重置保底进度。", c.GuaranteeEvery)
 		for _, p := range c.GuaranteePrizes {
-			text += fmt.Sprintf("\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), siteRuleMoney(p.Amount), float64(p.ProbabilityBPS)/100)
+			text += fmt.Sprintf("\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), lotteryPrizeDescription(p), float64(p.ProbabilityBPS)/100)
 		}
 	}
 	return text
@@ -299,6 +325,12 @@ func siteGrowthRules(c GrowthConfig) string {
 			}
 			count++
 			kind := "一次性"
+			switch growthTaskPeriod(task) {
+			case "daily":
+				kind = "每日挑战，仅统计本日记录，北京时间每日 00:00 重置"
+			case "weekly":
+				kind = "每周挑战，仅统计本周记录，北京时间周一 00:00 重置"
+			}
 			if set.periodic {
 				kind = "周期任务，每累计达标可再获奖励"
 			}
@@ -318,6 +350,12 @@ func siteGrowthTarget(t GrowthTask) string {
 		return "完成账号绑定"
 	case "usage_count":
 		return fmt.Sprintf("成功 API 调用累计 %.0f 次", t.Target)
+	case "usage_days":
+		return fmt.Sprintf("完成 API 调用的活跃日期达到 %.0f 天", t.Target)
+	case "model_count":
+		return fmt.Sprintf("探索 %.0f 种不同模型", t.Target)
+	case "invite_count":
+		return fmt.Sprintf("已结算的有效邀请达到 %.0f 人", t.Target)
 	case "checkin_total":
 		return fmt.Sprintf("累计签到 %.0f 天", t.Target)
 	case "checkin_streak":

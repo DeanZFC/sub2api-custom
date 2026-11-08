@@ -5,6 +5,7 @@ export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
   const config = await qqbotAPI.checkinConfig()
   return {
     ...config,
+    milestones: (config.milestones ?? []).map(milestone => ({ ...milestone, kind: milestone.kind || 'checkin_total', reward: normalizeGrowthReward(milestone.reward) })),
     reward_distribution: { ...(config.reward_distribution ?? { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }) },
     recharge_window_days: config.recharge_window_days || 30,
     streak_days: config.streak_days || 7,
@@ -17,9 +18,8 @@ export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
       periodic_tasks: (config.growth?.periodic_tasks ?? []).map(task => ({ ...task, reward: normalizeGrowthReward(task.reward, task.chances) })),
       tasks: (config.growth?.tasks ?? [
         { id: 'binding', name: '完成账号绑定', kind: 'binding', target: 1, chances: config.growth?.binding_chances ?? 0, enabled: (config.growth?.binding_chances ?? 0) > 0 },
-        { id: 'first_usage', name: '首次成功 API 调用', kind: 'usage_count', target: 1, chances: config.growth?.first_usage_chances ?? 0, enabled: (config.growth?.first_usage_chances ?? 0) > 0 },
-        { id: 'checkin_30', name: '累计签到 30 天', kind: 'checkin_total', target: 30, chances: config.growth?.checkin_30_chances ?? 0, enabled: (config.growth?.checkin_30_chances ?? 0) > 0 }
-      ]).map(task => ({ ...task, reward: normalizeGrowthReward('reward' in task ? task.reward : undefined, task.chances) }))
+        { id: 'first_usage', name: '首次成功 API 调用', kind: 'usage_count', target: 1, chances: config.growth?.first_usage_chances ?? 0, enabled: (config.growth?.first_usage_chances ?? 0) > 0 }
+      ]).map(task => ({ ...task, ...(!('period' in task) || !task.period ? { period: 'once' as const } : {}), reward: normalizeGrowthReward('reward' in task ? task.reward : undefined, task.chances) }))
     }
   }
 }
@@ -47,7 +47,8 @@ export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinC
     recharge_window_days: config.recharge_window_days,
     streak_days: config.streak_days,
     streak_chances: config.streak_reward.type === 'chances' ? config.streak_reward.quantity : 0,
-    streak_reward: { ...config.streak_reward }
+    streak_reward: { ...config.streak_reward },
+    milestones: (config.milestones ?? []).map(milestone => ({ ...milestone, reward: { ...milestone.reward } }))
   })
 }
 

@@ -102,64 +102,50 @@ func (s *Service) processGrowthTasks(ctx context.Context, c Config, j Job, at ti
 
 // Caller locks the active user row and check-in configuration before granting.
 func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid int64, cfg CheckinConfig, at time.Time) (string, int, bool, error) {
-	total, streak, err := checkinProgress(ctx, tx, uid, at)
+	_, grants, balanceChanged, err := settleCheckinMilestones(ctx, tx, c, j, uid, cfg, at)
 	if err != nil {
 		return "", 0, false, err
 	}
 	tasks := cfg.Growth.tasks()
+	previousGrants, previousChanged, err := settlePreviousGrowthPeriods(ctx, tx, c, j, uid, tasks, at)
+	if err != nil {
+		return "", 0, false, err
+	}
+	grants += previousGrants
+	balanceChanged = balanceChanged || previousChanged
 	claimed := make([]bool, len(tasks))
 	rewards := make([]GrowthReward, len(tasks))
 	statuses := make([]string, len(tasks))
-	progress := growthProgress{total: total, streak: streak}
-	var needUsage, needRecharge bool
+	var progressTasks []GrowthTask
 	for i, task := range tasks {
-		key := fmt.Sprintf("qq-growth:%d:%s", uid, task.ID)
 		rewards[i] = task.reward()
-		snapshot, status, e := activityRewardSnapshot(ctx, tx, key)
-		err = e
+		snapshot, status, err := activityRewardSnapshot(ctx, tx, growthTaskRewardKey(uid, task, at))
+		if err != nil {
+			return "", 0, false, err
+		}
 		claimed[i] = status != ""
 		if claimed[i] {
 			rewards[i], statuses[i] = snapshot, status
 		}
-		if err != nil {
-			return "", 0, false, err
+		if !claimed[i] && task.Enabled && task.reward().enabled() {
+			progressTasks = append(progressTasks, task)
 		}
-		if claimed[i] || !task.Enabled || !task.reward().enabled() {
-			continue
-		}
-		needUsage = needUsage || task.Kind == "usage_count" || task.Kind == "usage_tokens" || task.Kind == "usage_amount"
-		needRecharge = needRecharge || task.Kind == "recharge_total"
 	}
 	for _, task := range cfg.Growth.PeriodicTasks {
 		if task.Enabled && task.reward().enabled() {
-			needUsage = needUsage || task.Kind == "usage_count" || task.Kind == "usage_tokens" || task.Kind == "usage_amount"
-			needRecharge = needRecharge || task.Kind == "recharge_total"
+			progressTasks = append(progressTasks, task)
 		}
 	}
-	if needUsage {
-		err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(COALESCE(input_tokens,0)::numeric+COALESCE(output_tokens,0)::numeric+COALESCE(cache_creation_tokens,0)::numeric+COALESCE(cache_read_tokens,0)::numeric),0),COALESCE(SUM(actual_cost),0) FROM usage_logs WHERE user_id=$1 AND created_at <= $2`, uid, at).Scan(&progress.usage, &progress.tokens, &progress.spent)
-		if err != nil {
-			return "", 0, false, err
-		}
+	progress, err := loadGrowthProgress(ctx, tx, uid, progressTasks, at, true)
+	if err != nil {
+		return "", 0, false, err
 	}
-	if needRecharge {
-		progress.recharge, err = rechargeSum(ctx, tx, uid, nil, true)
-		if err != nil {
-			return "", 0, false, err
-		}
-	}
-	text := fmt.Sprintf("🌱 **成长任务**\n连续签到：%d 天\n累计签到：%d 天", streak, total)
-	if reward := cfg.streakReward(); reward.enabled() {
-		text += fmt.Sprintf("\n连签 %d 天奖励：%s", cfg.streakDays(), reward.description())
-	}
-	text += "\n\n**一次性成长任务**"
+	text := "🌱 **成长任务**\n每日挑战 00:00 重置，每周挑战周一 00:00 重置（北京时间）；自动补结算上一周期。"
 	if len(tasks) == 0 {
 		text += "\n暂无任务。"
 	}
-	grants := 0
-	balanceChanged := false
 	for i, task := range tasks {
-		eligible, status := progress.task(task)
+		eligible, status := progress[growthTaskPeriod(task)].task(task)
 		switch {
 		case claimed[i]:
 			status = "已发放"
@@ -170,7 +156,7 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 			status = "未开启"
 		case eligible:
 			reward := task.reward()
-			granted, e := grantActivityReward(ctx, tx, c, j, uid, fmt.Sprintf("qq-growth:%d:%s", uid, task.ID), "growth", "成长任务："+task.Name, reward, at)
+			granted, e := grantActivityReward(ctx, tx, c, j, uid, growthTaskRewardKey(uid, task, at), "growth", growthTaskPeriodLabel(task)+"："+task.Name, reward, at)
 			if e != nil {
 				if errors.Is(e, ErrRewardBudget) {
 					status = "预算不足，等待后续结算"
@@ -188,11 +174,11 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 				status = "待管理员发放"
 			}
 		}
-		text += fmt.Sprintf("\n\n**%d. %s**\n状态：%s\n奖励：%s", i+1, replyPlainLabel(task.Name), status, rewards[i].description())
+		text += fmt.Sprintf("\n\n**%d. %s · %s**\n状态：%s\n奖励：%s", i+1, replyPlainLabel(task.Name), growthTaskPeriodLabel(task), status, rewards[i].description())
 	}
-	text += "\n\n达标自动发放，每项每账号限一次。"
+	text += "\n\n达标自动发放；成长成就每账号限一次，每日和每周挑战每个周期限一次。"
 	if len(cfg.Growth.PeriodicTasks) > 0 {
-		periodic, n, changed, e := settlePeriodicGrowth(ctx, tx, c, j, uid, cfg.Growth.PeriodicTasks, progress, at)
+		periodic, n, changed, e := settlePeriodicGrowth(ctx, tx, c, j, uid, cfg.Growth.PeriodicTasks, progress["once"], at)
 		if e != nil {
 			return "", 0, false, e
 		}

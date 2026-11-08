@@ -20,6 +20,7 @@ type GrowthTask struct {
 	ID      string        `json:"id"`
 	Name    string        `json:"name"`
 	Kind    string        `json:"kind"`
+	Period  string        `json:"period,omitempty"`
 	Target  float64       `json:"target"`
 	Chances int           `json:"chances"`
 	Enabled bool          `json:"enabled"`
@@ -64,6 +65,9 @@ func validateGrowth(c CheckinConfig) error {
 		return fmt.Errorf("最多配置 %d 项周期任务", maxGrowthTasks)
 	}
 	for _, task := range c.Growth.PeriodicTasks {
+		if growthTaskPeriod(task) != "once" {
+			return errors.New("循环任务按累计进度结算，不能同时设置每日或每周重置")
+		}
 		switch task.Kind {
 		case "usage_count", "usage_tokens", "usage_amount", "recharge_total", "checkin_total":
 		default:
@@ -73,6 +77,13 @@ func validateGrowth(c CheckinConfig) error {
 	tasks = append(append([]GrowthTask(nil), tasks...), c.Growth.PeriodicTasks...)
 	ids := make(map[string]bool, len(tasks))
 	for _, task := range tasks {
+		period := growthTaskPeriod(task)
+		if period != "once" && period != "daily" && period != "weekly" {
+			return errors.New("成长任务周期仅支持一次性、每日或每周")
+		}
+		if period != "once" && (task.Kind == "binding" || task.Kind == "recharge_total" || task.Kind == "checkin_total" || task.Kind == "checkin_streak") {
+			return errors.New("绑定、充值和签到里程碑仅支持一次性奖励")
+		}
 		if !growthTaskIDPattern.MatchString(task.ID) || ids[task.ID] {
 			return errors.New("成长任务标识格式不正确或重复")
 		}
@@ -94,13 +105,21 @@ func validateGrowth(c CheckinConfig) error {
 			if task.Target != 1 {
 				return errors.New("绑定任务目标必须为 1")
 			}
-		case "usage_count", "checkin_total", "checkin_streak":
+		case "usage_count", "checkin_total", "checkin_streak", "usage_days", "model_count", "invite_count":
 			limit := float64(3650)
-			if task.Kind == "usage_count" {
+			if task.Kind == "usage_count" || task.Kind == "invite_count" {
 				limit = 1000000
 			}
+			if task.Kind == "model_count" {
+				limit = 10000
+			}
+			if task.Kind == "usage_days" && period == "daily" {
+				limit = 1
+			} else if task.Kind == "usage_days" && period == "weekly" {
+				limit = 7
+			}
 			if task.Target < 1 || task.Target > limit || math.Trunc(task.Target) != task.Target {
-				return errors.New("调用目标须为 1～1000000 的整数，签到目标须为 1～3650 的整数")
+				return errors.New("次数、天数和模型数目标须为范围内的正整数；每日活跃天数最多 1 天，每周最多 7 天")
 			}
 		case "usage_tokens":
 			if task.Target < 1 || task.Target > 1e15 || math.Trunc(task.Target) != task.Target {
@@ -118,9 +137,10 @@ func validateGrowth(c CheckinConfig) error {
 }
 
 type growthProgress struct {
-	total, streak, usage int
-	recharge             decimal.Decimal
-	tokens, spent        decimal.Decimal
+	total, streak, usage  int
+	days, models, invites int
+	recharge              decimal.Decimal
+	tokens, spent         decimal.Decimal
 }
 
 func (p growthProgress) task(task GrowthTask) (bool, string) {
@@ -131,6 +151,12 @@ func (p growthProgress) task(task GrowthTask) (bool, string) {
 		return true, "已完成"
 	case "usage_count":
 		current, unit = float64(p.usage), "次"
+	case "usage_days":
+		current = float64(p.days)
+	case "model_count":
+		current, unit = float64(p.models), "个模型"
+	case "invite_count":
+		current, unit = float64(p.invites), "人"
 	case "checkin_total":
 		current = float64(p.total)
 	case "checkin_streak":

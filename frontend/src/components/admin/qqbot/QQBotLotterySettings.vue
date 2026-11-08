@@ -13,14 +13,16 @@
       </div>
       <div class="space-y-2 rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-800"><p>{{ t('qqbot.historicalRechargeHelp') }}</p><p>{{ t('qqbot.lotteryRuleChangeHelp') }}</p></div>
       <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t('qqbot.prizePool') }}</h2><span :class="probabilityTotal === 10000 ? 'text-green-600' : 'text-red-600'">{{ t('qqbot.probabilityTotal', { total: (probabilityTotal / 100).toFixed(2) }) }}</span></div>
-      <div v-for="(prize, index) in form.prizes" :key="index" class="grid items-end gap-3 rounded-lg border p-4 dark:border-dark-700 sm:grid-cols-2 md:grid-cols-[2fr_1fr_1fr_auto]">
+      <div v-for="(prize, index) in form.prizes" :key="index" class="grid items-end gap-3 rounded-lg border p-4 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_1fr_auto]">
         <label class="space-y-1">{{ t('qqbot.prizeName') }}<input v-model.trim="prize.name" class="input" required maxlength="60" /></label>
         <label class="space-y-1">{{ t('qqbot.prizeAmount') }}<input v-model.number="prize.amount" class="input" type="number" min="0" max="1000" step="0.00000001" required /></label>
+        <label class="space-y-1">{{ t('qqbot.prizeChances') }}<input :value="prize.chances ?? 0" :data-testid="`prize-chances-${index}`" class="input" type="number" min="0" max="1000" step="1" required @input="setChances('prizes', index, $event)" /></label>
         <label class="space-y-1">{{ t('qqbot.probability') }}<input :value="prize.probability_bps / 100" :data-testid="`probability-${index}`" class="input" type="number" min="0.01" max="100" step="0.01" required @input="setProbability(index, $event)" /></label>
         <button type="button" class="btn btn-secondary" :disabled="form.prizes.length <= 1" @click="form.prizes.splice(index, 1)">{{ t('common.delete') }}</button>
       </div>
       <button type="button" class="btn btn-secondary" :disabled="form.prizes.length >= 20" @click="addPrize">{{ t('qqbot.addPrize') }}</button>
       <p class="text-sm text-gray-500">{{ t('qqbot.prizeHelp') }}</p>
+      <p class="rounded-lg bg-primary-50 p-3 text-sm text-primary-700 dark:bg-primary-950 dark:text-primary-300">{{ t('qqbot.chancePrizeExample') }}</p>
       <section class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-700" data-testid="guarantee-settings">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="font-semibold">{{ t('qqbot.guaranteeTitle') }}</h2>
@@ -33,9 +35,10 @@
             <h3 class="font-semibold">{{ t('qqbot.guaranteePrizePool') }}</h3>
             <span :class="guaranteeProbabilityTotal === 10000 ? 'text-green-600' : 'text-red-600'">{{ t('qqbot.probabilityTotal', { total: (guaranteeProbabilityTotal / 100).toFixed(2) }) }}</span>
           </div>
-          <div v-for="(prize, index) in form.guarantee_prizes" :key="index" class="grid items-end gap-3 rounded-lg border p-4 dark:border-dark-700 sm:grid-cols-2 md:grid-cols-[2fr_1fr_1fr_auto]">
+          <div v-for="(prize, index) in form.guarantee_prizes" :key="index" class="grid items-end gap-3 rounded-lg border p-4 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_1fr_auto]">
             <label class="space-y-1">{{ t('qqbot.prizeName') }}<input v-model.trim="prize.name" :data-testid="`guarantee-name-${index}`" class="input" required maxlength="60" /></label>
-            <label class="space-y-1">{{ t('qqbot.prizeAmount') }}<input v-model.number="prize.amount" :data-testid="`guarantee-amount-${index}`" class="input" type="number" min="0.00000001" max="1000" step="0.00000001" required /></label>
+            <label class="space-y-1">{{ t('qqbot.prizeAmount') }}<input v-model.number="prize.amount" :data-testid="`guarantee-amount-${index}`" class="input" type="number" min="0" max="1000" step="0.00000001" required /></label>
+            <label class="space-y-1">{{ t('qqbot.prizeChances') }}<input :value="prize.chances ?? 0" :data-testid="`guarantee-chances-${index}`" class="input" type="number" min="0" max="1000" step="1" required @input="setChances('guarantee_prizes', index, $event)" /></label>
             <label class="space-y-1">{{ t('qqbot.probability') }}<input :value="prize.probability_bps / 100" :data-testid="`guarantee-probability-${index}`" class="input" type="number" min="0.01" max="100" step="0.01" required @input="setGuaranteeProbability(index, $event)" /></label>
             <button type="button" class="btn btn-secondary" :disabled="form.guarantee_prizes.length <= 1" @click="form.guarantee_prizes.splice(index, 1)">{{ t('common.delete') }}</button>
           </div>
@@ -45,6 +48,7 @@
       </section>
       <p class="text-sm text-gray-500">{{ t('qqbot.lotteryCommand') }}</p>
       <p class="rounded-lg bg-blue-50 p-3 text-sm text-blue-800 dark:bg-blue-950 dark:text-blue-200">{{ t('qqbot.workspace.lotteryCost', { amount: expectedCost.toFixed(6), draws: 1000, cost: (expectedCost * 1000).toFixed(2) }) }}</p>
+      <p class="text-sm text-gray-500" data-testid="lottery-chances-expected">{{ t('qqbot.expectedChanceReward', { count: expectedChances.toFixed(3) }) }}</p>
       <button type="submit" class="btn btn-primary" :disabled="saving || probabilityTotal !== 10000 || (form.guarantee_enabled && guaranteeProbabilityTotal !== 10000)">{{ t('common.save') }}</button>
     </form>
     <p v-else-if="!error">{{ t('common.loading') }}</p>
@@ -82,6 +86,12 @@ const expectedCost = computed(() => {
   const normal = mean(form.value.prizes)
   return form.value.guarantee_enabled && form.value.guarantee_every > 0 ? (normal * (form.value.guarantee_every - 1) + mean(form.value.guarantee_prizes)) / form.value.guarantee_every : normal
 })
+const expectedChances = computed(() => {
+  if (!form.value) return 0
+  const mean = (pool: QQLotteryConfig['prizes']) => pool.reduce((sum, p) => sum + (p.chances ?? 0) * p.probability_bps / 10000, 0)
+  const normal = mean(form.value.prizes)
+  return form.value.guarantee_enabled && form.value.guarantee_every > 0 ? (normal * (form.value.guarantee_every - 1) + mean(form.value.guarantee_prizes)) / form.value.guarantee_every : normal
+})
 const probabilityTotal = computed(() => form.value?.prizes.reduce((sum, p) => sum + p.probability_bps, 0) ?? 0)
 const guaranteeProbabilityTotal = computed(() => form.value?.guarantee_prizes.reduce((sum, p) => sum + p.probability_bps, 0) ?? 0)
 const userID = ref('')
@@ -91,6 +101,17 @@ const lookupError = ref('')
 function message(e: unknown) { return (e as Error).message || t('common.error') }
 function setProbability(index: number, event: Event) {
   if (form.value) form.value.prizes[index]!.probability_bps = Math.round(Number((event.target as HTMLInputElement).value) * 100)
+}
+function setChances(pool: 'prizes' | 'guarantee_prizes', index: number, event: Event) {
+  if (form.value) form.value[pool][index]!.chances = (event.target as HTMLInputElement).valueAsNumber
+}
+function validPrize(prize: QQLotteryConfig['prizes'][number], guaranteed = false) {
+  const chances = prize.chances ?? 0
+  return Boolean(prize.name.trim()) && [...prize.name].length <= 60
+    && Number.isFinite(prize.amount) && prize.amount >= 0 && prize.amount <= 1000 && Math.abs(prize.amount * 1e8 - Math.round(prize.amount * 1e8)) <= 0.001
+    && Number.isInteger(chances) && chances >= 0 && chances <= 1000
+    && Number.isInteger(prize.probability_bps) && prize.probability_bps >= 1 && prize.probability_bps <= 10000
+    && (!guaranteed || prize.amount > 0 || chances > 0)
 }
 function addPrize() { form.value?.prizes.push({ name: '', amount: 0, probability_bps: 100 }) }
 function setGuaranteeProbability(index: number, event: Event) {
@@ -108,13 +129,12 @@ function normalizeConfig(config: QQLotteryConfig): QQLotteryConfig {
 async function save() {
   if (!form.value || saving.value || probabilityTotal.value !== 10000) return
   error.value = ''; notice.value = ''
+  if (form.value.prizes.length < 1 || form.value.prizes.length > 20 || !form.value.prizes.every(prize => validPrize(prize))) { error.value = t('qqbot.invalidLotteryPrizes'); return }
   if (form.value.guarantee_enabled) {
     if (!Number.isInteger(form.value.guarantee_every) || form.value.guarantee_every < 1 || form.value.guarantee_every > 1000000) {
       error.value = t('qqbot.invalidGuaranteeEvery'); return
     }
-    if (guaranteeProbabilityTotal.value !== 10000 || form.value.guarantee_prizes.length < 1 || form.value.guarantee_prizes.length > 20 || form.value.guarantee_prizes.some(p =>
-      !p.name.trim() || [...p.name].length > 60 || !Number.isFinite(p.amount) || p.amount <= 0 || p.amount > 1000 || Math.abs(p.amount * 1e8 - Math.round(p.amount * 1e8)) > 0.001 ||
-      !Number.isInteger(p.probability_bps) || p.probability_bps < 1 || p.probability_bps > 10000)) {
+    if (guaranteeProbabilityTotal.value !== 10000 || form.value.guarantee_prizes.length < 1 || form.value.guarantee_prizes.length > 20 || !form.value.guarantee_prizes.every(prize => validPrize(prize, true))) {
       error.value = t('qqbot.invalidGuaranteePrizes'); return
     }
   }

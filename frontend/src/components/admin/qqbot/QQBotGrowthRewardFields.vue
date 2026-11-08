@@ -3,7 +3,7 @@
     <div class="grid gap-4 sm:grid-cols-2">
       <label class="block space-y-1">{{ t('qqbot.growth.rewardType') }}
         <select v-model="reward.type" :data-testid="fieldId('reward-type')" class="input" @change="changeType">
-          <option v-for="kind in types" :key="kind" :value="kind">{{ t('qqbot.redemption.types.' + kind) }}</option>
+          <option v-for="kind in allowedTypes ?? types" :key="kind" :value="kind">{{ t('qqbot.redemption.types.' + kind) }}</option>
         </select>
       </label>
       <label v-if="reward.type === 'balance'" class="block space-y-1">{{ t('qqbot.growth.rewardAmount') }}<input v-model.number="reward.amount" :data-testid="fieldId('reward-amount')" type="number" min="0" max="1000" step="0.00000001" required class="input" /></label>
@@ -21,7 +21,7 @@ import { useI18n } from 'vue-i18n'
 import type { QQGrowthReward, QQRewardType } from '@/api/qqbot'
 const { t } = useI18n()
 const reward = defineModel<QQGrowthReward>({ required: true })
-const props = defineProps<{ prefix: string; index?: number }>()
+const props = defineProps<{ prefix: string; index?: number; allowedTypes?: QQRewardType[] }>()
 const types: QQRewardType[] = ['chances', 'balance', 'physical', 'other']
 function fieldId(name: string) { return props.prefix + '-' + name + (props.index === undefined ? '' : '-' + props.index) }
 function changeType() {

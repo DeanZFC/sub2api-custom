@@ -20,7 +20,7 @@ func TestPeriodicGrowthPrecisionAndAllMetrics(t *testing.T) {
 	insightsUsageTable(t, db)
 	c, err := s.Config(ctx)
 	require.NoError(t, err)
-	cfg := CheckinConfig{Growth: GrowthConfig{Tasks: []GrowthTask{}, PeriodicTasks: []GrowthTask{
+	cfg := CheckinConfig{Enabled: true, Growth: GrowthConfig{Tasks: []GrowthTask{}, PeriodicTasks: []GrowthTask{
 		{ID: "spend", Name: "Spend", Kind: "usage_amount", Target: 10, Enabled: true, Chances: 2},
 		{ID: "tokens", Name: "Tokens", Kind: "usage_tokens", Target: 1000, Enabled: true, Reward: &GrowthReward{Type: "balance", Amount: .25}},
 		{ID: "calls", Name: "Calls", Kind: "usage_count", Target: 2, Enabled: true, Reward: &GrowthReward{Type: "physical", Quantity: 1, PrizeName: "Cup", ClaimInstructions: "Contact admin"}},
@@ -30,7 +30,8 @@ func TestPeriodicGrowthPrecisionAndAllMetrics(t *testing.T) {
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
 	loaded, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, cfg.Growth, loaded.Growth)
+	require.Equal(t, normalizeCheckinMilestones(cfg).Growth, loaded.Growth)
+	require.Equal(t, normalizeCheckinMilestones(cfg).Milestones, loaded.Milestones)
 	_, err = db.Exec(`INSERT INTO usage_logs(user_id,model,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,actual_cost,billing_type,created_at) VALUES
  ($1,'past',600,200,100,1099,19.9999999999,1,NOW()),($1,'future',100000,0,0,0,1000,0,NOW()+INTERVAL '1 day'),($2,'other',100000,0,0,0,1000,0,NOW())`, uid, other)
 	require.NoError(t, err)
@@ -47,7 +48,12 @@ func TestPeriodicGrowthPrecisionAndAllMetrics(t *testing.T) {
 	require.Equal(t, 6, n) // spend 1, tokens 1, days 2, recharge 2
 	require.Contains(t, text, "USD 9.99/10.00")
 	require.Contains(t, text, "999/1000 Token")
-	require.Contains(t, text, "1/2 天")
+	require.NotContains(t, text, "1/2 天", "sign-in progress belongs to the sign-in section")
+	var cycles int
+	var consumed string
+	require.NoError(t, db.QueryRow(`SELECT cycles,consumed::text FROM qq_bot_periodic_growth_progress WHERE user_id=$1 AND task_id='days' AND kind='checkin_total'`, uid).Scan(&cycles, &consumed))
+	require.Equal(t, 2, cycles)
+	require.Equal(t, "4", consumed)
 	_, err = db.Exec(`INSERT INTO usage_logs(user_id,model,cache_read_tokens,actual_cost,created_at) VALUES($1,'exact',1,0.0000000001,NOW())`, uid)
 	require.NoError(t, err)
 	text, n, err = s.processGrowthTasks(ctx, c, j, time.Now(), true)
