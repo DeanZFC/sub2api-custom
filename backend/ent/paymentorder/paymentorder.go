@@ -60,6 +60,8 @@ const (
 	FieldProviderSnapshot = "provider_snapshot"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
+	// FieldInvoiceRequestID holds the string denoting the invoice_request_id field in the database.
+	FieldInvoiceRequestID = "invoice_request_id"
 	// FieldRefundAmount holds the string denoting the refund_amount field in the database.
 	FieldRefundAmount = "refund_amount"
 	// FieldRefundReason holds the string denoting the refund_reason field in the database.
@@ -133,6 +135,7 @@ var Columns = []string{
 	FieldProviderKey,
 	FieldProviderSnapshot,
 	FieldStatus,
+	FieldInvoiceRequestID,
 	FieldRefundAmount,
 	FieldRefundReason,
 	FieldRefundAt,
@@ -327,6 +330,11 @@ func ByProviderKey(opts ...sql.OrderTermOption) OrderOption {
 // ByStatus orders the results by the status field.
 func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStatus, opts...).ToFunc()
+}
+
+// ByInvoiceRequestID orders the results by the invoice_request_id field.
+func ByInvoiceRequestID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInvoiceRequestID, opts...).ToFunc()
 }
 
 // ByRefundAmount orders the results by the refund_amount field.

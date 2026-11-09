@@ -3,11 +3,17 @@
 package qqbot
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/stretchr/testify/require"
+	"image"
+	"image/color"
+	"image/gif"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +51,8 @@ func newAutoHarness(t *testing.T) *autoHarness {
 		switch {
 		case r.URL.Path == "/token":
 			fmt.Fprint(w, `{"access_token":"test-only","expires_in":7200}`)
+		case r.URL.Path == "/v2/groups/group/bot_state":
+			fmt.Fprint(w, `{"member_openid":"this-bot"}`)
 		case r.URL.Path == "/v1/chat/completions" || r.URL.Path == "/v1/responses":
 			h.calls.Add(1)
 			body, err := io.ReadAll(r.Body)
@@ -104,6 +112,14 @@ func (h *autoHarness) enqueue(t *testing.T, id, text, member string) Payload {
 	raw, err := json.Marshal(e)
 	require.NoError(t, err)
 	p := Payload{ID: id, Type: groupMessageCreate, Data: raw}
+	require.NoError(t, h.s.Enqueue(context.Background(), h.c, p))
+	return p
+}
+func (h *autoHarness) enqueueEvent(t *testing.T, e Event) Payload {
+	t.Helper()
+	raw, err := json.Marshal(e)
+	require.NoError(t, err)
+	p := Payload{ID: e.ID, Type: groupMessageCreate, Data: raw}
 	require.NoError(t, h.s.Enqueue(context.Background(), h.c, p))
 	return p
 }
@@ -653,4 +669,198 @@ func TestAutonomousAndKnowledgeAtomicSave(t *testing.T) {
 	require.True(t, saved.Autonomous.InheritGroups)
 	require.Equal(t, "本站公开资料", saved.SiteKnowledge.Content)
 	require.Equal(t, current.APIKey, saved.APIKey)
+}
+
+func TestAutonomousImageUsesVisionWithoutImageGeneration(t *testing.T) {
+	for _, protocol := range []string{"chat_completions", "responses"} {
+		for _, format := range []string{"png", "gif"} {
+			t.Run(protocol+"/"+format, func(t *testing.T) {
+				h := newAutoHarness(t)
+				h.c.ChatProtocol = protocol
+				h.c.ImageEnabled = false
+				h.c.SystemPrompt = "你是喜欢接梗的群助手，保持自然口语。"
+				h.c.Autonomous.SamplePercent = 100
+				h.save(t)
+				data := testInputPNG(t)
+				if format == "gif" {
+					palette := color.Palette{color.White, color.Black}
+					first := image.NewPaletted(image.Rect(0, 0, 8, 8), palette)
+					second := image.NewPaletted(image.Rect(0, 0, 8, 8), palette)
+					first.SetColorIndex(0, 0, 1)
+					second.SetColorIndex(1, 1, 1)
+					var encoded bytes.Buffer
+					require.NoError(t, gif.EncodeAll(&encoded, &gif.GIF{Image: []*image.Paletted{first, second}, Delay: []int{5, 5}}))
+					data = encoded.Bytes()
+				}
+				mime := "image/" + format
+				sourceURL := "https://image.example/meme." + format
+				var downloads int
+				h.s.imageDownload = func(_ context.Context, source string) ([]byte, error) {
+					downloads++
+					require.Equal(t, sourceURL, source)
+					return data, nil
+				}
+				e := Event{ID: "meme", GroupID: "group", Attachments: []Attachment{{URL: sourceURL, ContentType: mime}}}
+				e.Author.MemberID = "alice"
+				p := h.enqueueEvent(t, e)
+				require.Equal(t, "ambient_chat", h.job(t, e.ID).Kind)
+				h.run()
+				require.NoError(t, h.s.Enqueue(context.Background(), h.c, p))
+				h.run()
+				require.Equal(t, 1, downloads)
+				require.EqualValues(t, 1, h.calls.Load())
+				require.EqualValues(t, 1, h.sends.Load(), "autonomous images never send a processing notification")
+				require.Equal(t, "replied", h.job(t, e.ID).DecisionReason)
+
+				var body map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal([]byte(h.request.Load().(string)), &body))
+				require.Empty(t, body["tools"], "vision interjections must not expose image generation tools")
+				key, imageType := "messages", "image_url"
+				if protocol == "responses" {
+					key, imageType = "input", "input_image"
+				}
+				var messages []struct {
+					Role    string          `json:"role"`
+					Content json.RawMessage `json:"content"`
+				}
+				require.NoError(t, json.Unmarshal(body[key], &messages))
+				require.GreaterOrEqual(t, len(messages), 3)
+				require.JSONEq(t, `"`+h.c.SystemPrompt+`"`, string(messages[0].Content))
+				last := messages[len(messages)-1]
+				require.Equal(t, "user", last.Role)
+				var parts []map[string]any
+				require.NoError(t, json.Unmarshal(last.Content, &parts))
+				require.Len(t, parts, 2)
+				require.Equal(t, imageType, parts[1]["type"])
+				var imageURL string
+				if protocol == "responses" {
+					imageURL, _ = parts[1]["image_url"].(string)
+				} else {
+					image, ok := parts[1]["image_url"].(map[string]any)
+					require.True(t, ok)
+					imageURL, _ = image["url"].(string)
+				}
+				require.Equal(t, "data:"+mime+";base64,"+base64.StdEncoding.EncodeToString(data), imageURL, "the original GIF bytes are passed through; this does not assert animation understanding")
+				require.NotContains(t, string(body[key]), "image.example")
+				var personal, calls int
+				require.NoError(t, h.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_daily_usage WHERE scope='member:alice'`).Scan(&personal))
+				require.Zero(t, personal)
+				require.NoError(t, h.db.QueryRow(`SELECT count FROM qq_bot_daily_usage WHERE scope='all' AND kind='chat'`).Scan(&calls))
+				require.Equal(t, 1, calls)
+			})
+		}
+	}
+}
+
+func TestAutonomousImageIdentityAndNestedCaption(t *testing.T) {
+	h := newAutoHarness(t)
+	h.output.Store(`{"action":"skip"}`)
+	h.c.Autonomous.SamplePercent = 100
+	h.c.Autonomous.FollowupSeconds = 0
+	h.save(t)
+	h.s.imageDownload = func(_ context.Context, _ string) ([]byte, error) { return testInputPNG(t), nil }
+	for i, source := range []string{"one", "two", "two", "nested"} {
+		h.resetCooldown(t)
+		e := Event{ID: fmt.Sprintf("image-%d", i), GroupID: "group", Attachments: []Attachment{{URL: "https://image.example/" + source, ContentType: "image/png"}}}
+		e.Author.MemberID = "alice"
+		if source == "nested" {
+			e.MsgElements = []MessageElement{{Content: "看看", MsgElements: []MessageElement{{Attachments: e.Attachments}}}}
+			e.Attachments = nil
+		}
+		h.enqueueEvent(t, e)
+		h.run()
+		if i == 2 {
+			require.EqualValues(t, 2, h.calls.Load(), "identical image redelivery under a new message ID is still a recent repeat")
+			var count int
+			require.NoError(t, h.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE message_id=$1`, e.ID).Scan(&count))
+			require.Zero(t, count)
+		}
+	}
+	require.EqualValues(t, 3, h.calls.Load(), "different images with identical empty captions must not be deduplicated as the same text")
+	require.Zero(t, h.sends.Load())
+	require.Contains(t, h.request.Load().(string), "看看")
+}
+
+func TestAutonomousImageDownloadFailureStaysSilentAndReservesOnce(t *testing.T) {
+	h := newAutoHarness(t)
+	h.c.Autonomous.SamplePercent = 100
+	h.save(t)
+	var downloads int
+	h.s.imageDownload = func(_ context.Context, _ string) ([]byte, error) {
+		downloads++
+		return nil, errors.New("temporary download error with private signed URL")
+	}
+	e := Event{ID: "broken-image", GroupID: "group", Attachments: []Attachment{{URL: "https://image.example/broken", ContentType: "image/png"}}}
+	e.Author.MemberID = "alice"
+	p := h.enqueueEvent(t, e)
+	h.run()
+	require.NoError(t, h.s.Enqueue(context.Background(), h.c, p))
+	h.run()
+	require.Equal(t, 1, downloads)
+	require.Zero(t, h.calls.Load())
+	require.Zero(t, h.sends.Load())
+	j := h.job(t, e.ID)
+	require.Equal(t, "image_error", j.DecisionReason)
+	require.NotContains(t, j.Error, "private signed URL")
+	var calls int
+	require.NoError(t, h.db.QueryRow(`SELECT count FROM qq_bot_daily_usage WHERE scope='all' AND kind='chat'`).Scan(&calls))
+	require.Equal(t, 1, calls, "a failed image attempt cannot repeatedly reserve or invoke the model")
+}
+
+func TestAutonomousImageAdmissionPreservesFiltersAndBudgets(t *testing.T) {
+	for _, mode := range []string{"sampling", "global_quota", "disabled_group", "other_attachment", "quote", "mention", "secret"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newAutoHarness(t)
+			h.c.Autonomous.SamplePercent = 100
+			e := Event{ID: "filtered-image", GroupID: "group", Attachments: []Attachment{{URL: "https://image.example/picture", ContentType: "image/png"}}}
+			e.Author.MemberID = "alice"
+			switch mode {
+			case "sampling":
+				h.c.Autonomous.SamplePercent = 0
+			case "global_quota":
+				h.c.TotalDailyChatLimit = 0
+			case "disabled_group":
+				h.c.Autonomous.Groups = []string{"other-group"}
+			case "other_attachment":
+				e.Attachments = append(e.Attachments, Attachment{URL: "https://image.example/file", ContentType: "application/pdf"})
+			case "quote":
+				e.MsgElements = []MessageElement{{MessageType: 103, Content: "其他群友的原话"}}
+			case "mention":
+				e.Mentions = []Mention{{MemberID: "bob"}}
+			case "secret":
+				e.MsgElements = []MessageElement{{Content: "我的密码是 123456"}}
+			}
+			h.save(t)
+			var downloads int
+			h.s.imageDownload = func(_ context.Context, _ string) ([]byte, error) {
+				downloads++
+				return testInputPNG(t), nil
+			}
+			h.enqueueEvent(t, e)
+			h.run()
+			require.Zero(t, downloads)
+			require.Zero(t, h.calls.Load())
+			require.Zero(t, h.sends.Load())
+		})
+	}
+}
+
+func TestAutonomousImageFollowupsAreBounded(t *testing.T) {
+	h := newAutoHarness(t)
+	h.c.Autonomous.SamplePercent = 0
+	h.save(t)
+	h.s.imageDownload = func(_ context.Context, _ string) ([]byte, error) { return testInputPNG(t), nil }
+	h.enqueue(t, "question", "这张截图要怎么处理？", "alice")
+	h.run()
+	for i := range 4 {
+		e := Event{ID: fmt.Sprintf("followup-image-%d", i), GroupID: "group", Attachments: []Attachment{{URL: fmt.Sprintf("https://image.example/followup-%d", i), ContentType: "image/png"}}}
+		e.Author.MemberID = "alice"
+		h.enqueueEvent(t, e)
+		h.run()
+		if i < 3 {
+			require.Equal(t, "followup", h.job(t, e.ID).TriggerReason)
+		}
+	}
+	require.EqualValues(t, 4, h.calls.Load(), "three image followups can bypass sampling and cooldown, then the normal gates resume")
+	require.EqualValues(t, 4, h.sends.Load())
 }

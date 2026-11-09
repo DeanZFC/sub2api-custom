@@ -40,6 +40,10 @@ type Config struct {
 	ChatModel                string                   `json:"chat_model"`
 	ChatProtocol             string                   `json:"chat_protocol"`
 	ImageEnabled             bool                     `json:"image_enabled"`
+	ImageAIConnection        string                   `json:"image_ai_connection"`
+	ImageSiteAPIKeyID        int64                    `json:"image_site_api_key_id"`
+	ImageSiteGroupID         int64                    `json:"image_site_group_id"`
+	ImageSiteOwnerID         int64                    `json:"image_site_owner_id"`
 	ImageBaseURL             string                   `json:"image_base_url"`
 	ImageAPIKey              string                   `json:"image_api_key"`
 	ImageAPIKeySet           bool                     `json:"image_api_key_set"`

@@ -22,6 +22,8 @@ func excelBPSDownstreamUsage(payload []byte) ([]byte, error) {
 			"input_tokens_details.cache_creation_tokens", "prompt_tokens_details.cache_creation_tokens",
 			"cache_write_tokens", "cache_creation_input_tokens", "cache_write_input_tokens", "cache_creation_tokens",
 			"cache_creation.ephemeral_5m_input_tokens", "cache_creation.ephemeral_1h_input_tokens",
+			"input_tokens_details.cache_write_tokens_details.ttl_30m_tokens", "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens",
+			"prompt_tokens_details.cache_write_tokens_details.ttl_30m_tokens", "prompt_tokens_details.cache_write_tokens_details.ttl_12h_tokens",
 		} {
 			if value := usage.Get(field); !value.Exists() || value.Raw == "0" {
 				continue

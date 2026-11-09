@@ -23,7 +23,7 @@ type setupProbeState struct {
 }
 
 func probeFingerprint(c Config) string {
-	return ConfigVersion([]any{c.AppID, c.AppSecret, c.Sandbox, c.BaseURL, c.APIKey, c.ChatModel, c.ChatProtocol, c.MaxOutputTokens, c.ChatDisabled, c.ImageEnabled, c.ImageBaseURL, c.ImageAPIKey, c.ImageModel, c.ImageSize, c.ImageOutputFormat})
+	return ConfigVersion([]any{c.AppID, c.AppSecret, c.Sandbox, c.BaseURL, c.APIKey, c.ChatModel, c.ChatProtocol, c.MaxOutputTokens, c.ChatDisabled, c.ImageEnabled, c.ImageAIConnection, c.ImageBaseURL, c.ImageAPIKey, c.ImageModel, c.ImageSize, c.ImageOutputFormat})
 }
 func requiredSetupProbes(c Config) []string {
 	out := []string{"qq"}

@@ -116,8 +116,7 @@
           <h2 class="text-lg font-semibold">{{ t('qqbot.ai') }}</h2>
           <label class="flex items-center gap-2"><input v-model="form.chat_disabled" type="checkbox" />{{ t('qqbot.workspace.chatDisabled') }}</label>
           <p class="text-xs text-gray-500">{{ t('qqbot.workspace.chatDisabledHelp') }}</p>
-          <QQBotSiteAISettings v-if="activeTab === 'chat'" v-model="form" v-model:quota="siteQuota" v-model:regenerate="regenerateSiteKey" />
-          <details><summary class="cursor-pointer text-sm">{{ t('qqbot.workspace.advanced') }}</summary><label class="block mt-3">{{ t('qqbot.protocol') }}<select v-model="form.chat_protocol" class="input"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label></details>
+          <QQBotSiteAISettings v-if="activeTab === 'chat'" ref="siteAISettings" v-model="form" v-model:quota="siteQuota" v-model:regenerate="regenerateSiteKey" />
           <details><summary class="cursor-pointer text-sm">{{ t('qqbot.workspace.advanced') }}</summary><label class="mt-3 block space-y-1">{{ t('qqbot.systemPrompt') }}<textarea v-model="form.system_prompt" rows="3" class="input" /></label>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="space-y-1">{{ t('qqbot.maxTokens') }}<input v-model.number="form.max_output_tokens" class="input" type="number" min="64" max="8192" /></label>
@@ -140,12 +139,10 @@
         <section v-show="activeTab === 'images'" id="qqbot-settings-panel-images" role="tabpanel" aria-labelledby="qqbot-settings-tab-images" class="card space-y-4 p-6">
           <div class="flex items-center justify-between"><h2 class="text-lg font-semibold">{{ t('qqbot.images') }}</h2><label class="flex items-center gap-2"><input v-model="form.image_enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
           <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('qqbot.chatImageHelp') }}</p>
+          <QQBotImageAISettings v-if="activeTab === 'images'" ref="imageAISettings" v-model="form" v-model:quota="imageSiteQuota" v-model:regenerate="regenerateImageSiteKey" :saved-group-id="baseline?.image_site_group_id" />
           <div class="grid gap-4 md:grid-cols-2">
-            <label class="space-y-1">{{ t('qqbot.imageModel') }}<input v-model.trim="form.image_model" class="input" /></label>
             <label class="space-y-1">{{ t('qqbot.imageSize') }}<select v-model="form.image_size" class="input"><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option><option>auto</option></select></label>
             <label class="space-y-1">{{ t('qqbot.imageOutputFormat') }}<select v-model="form.image_output_format" data-testid="image-output-format" class="input"><option value="">{{ t('qqbot.imageOutputDefault') }}</option><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option><option value="gif">GIF</option></select></label>
-            <label class="space-y-1">{{ t('qqbot.imageBase') }}<input v-model.trim="form.image_base_url" class="input" :placeholder="t('qqbot.reuseChat')" /></label>
-            <label class="space-y-1">{{ t('qqbot.imageKey') }}<input v-model="form.image_api_key" type="password" class="input" autocomplete="new-password" :placeholder="secretHint(form.image_api_key_set)" /><span class="flex gap-2 text-xs"><input v-model="form.clear_image_api_key" type="checkbox" />{{ t('qqbot.clearSecret') }}</span></label>
           </div>
           <p class="text-sm text-gray-500">{{ t('qqbot.imageHelp') }}</p>
           <p class="text-sm text-gray-500">{{ t('qqbot.imageGIFHelp') }}</p>
@@ -180,6 +177,7 @@ import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useQQGroupNames } from '@/composables/useQQGroupNames'
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import QQBotSiteAISettings from '@/components/admin/qqbot/QQBotSiteAISettings.vue'
+import QQBotImageAISettings from '@/components/admin/qqbot/QQBotImageAISettings.vue'
 import QQCommandInventory from '@/components/admin/qqbot/QQCommandInventory.vue'
 import QQGroupPicker from '@/components/admin/qqbot/QQGroupPicker.vue'
 import QQGroupPolicies from '@/components/admin/qqbot/QQGroupPolicies.vue'
@@ -217,7 +215,7 @@ function resolveTab(value: unknown): SettingsTab {
 }
 const activeTab = ref<SettingsTab>(resolveTab(route?.query.tab))
 function tabSections(tab: SettingsTab): ConfigSection[] { return tab === 'autonomous' ? ['autonomous', 'knowledge'] : [tab] }
-function isTabDirty(tab: SettingsTab) { return (tab === 'chat' && regenerateSiteKey.value) || tabSections(tab).some(section => dirtySections.value.includes(section)) }
+function isTabDirty(tab: SettingsTab) { return (tab === 'chat' && regenerateSiteKey.value) || (tab === 'images' && regenerateImageSiteKey.value) || tabSections(tab).some(section => dirtySections.value.includes(section)) }
 const categories = computed(() => groupMode.value ? [{ key: 'groups', label: 'qqbot.workspace.groups', tabs: ['groups', 'group-admins', 'moderation'] }] : [
   { key: 'connect', label: 'qqbot.workspace.connectCategory', tabs: ['connection', 'chat', 'images'] },
   { key: 'behavior', label: 'qqbot.workspace.behaviorCategory', tabs: ['autonomous', 'commands'] },
@@ -230,6 +228,8 @@ watch(activeTab, tab => { if (route && router && route.query.tab !== tab) void r
 watch(() => route?.path, async () => { activeTab.value = resolveTab(route?.query.tab); busy.value = true; try { apply(await qqbotAPI.config()) } catch (e) { error.value = message(e) } finally { busy.value = false } })
 watch(() => route?.query.tab, value => { if (value) activeTab.value = resolveTab(value) })
 const settingsForm = ref<HTMLFormElement | null>(null)
+const siteAISettings = ref<InstanceType<typeof QQBotSiteAISettings>>()
+const imageAISettings = ref<InstanceType<typeof QQBotImageAISettings>>()
 const form = ref<QQBotConfig | null>(null)
 const siteKnowledge = computed({
   get: () => form.value?.site_knowledge ?? defaultSiteKnowledgeConfig(),
@@ -277,6 +277,7 @@ const groupPolicies = computed({ get: () => form.value?.group_policies || [], se
 const notificationGroups = computed({ get: () => parseGroups(notificationGroupsText.value), set: value => { notificationGroupsText.value = value.join('\n') } })
 const healthGroups = computed({ get: () => parseGroups(healthGroupsText.value), set: value => { healthGroupsText.value = value.join('\n') } })
 const siteQuota = ref(0), regenerateSiteKey = ref(false)
+const imageSiteQuota = ref(0), regenerateImageSiteKey = ref(false)
 const busy = ref(false)
 const refreshingRuntime = ref(false)
 const error = ref('')
@@ -295,7 +296,7 @@ function draft(): QQBotConfig {
  return { ...form.value!, custom_commands: form.value!.custom_commands.map(command => ({ ...command, command: command.command && !command.command.startsWith('/') ? `/${command.command}` : command.command })), allowed_groups: allowedGroups.value, group_policies: groupPolicies.value.filter(p => allowedGroups.value.includes(p.group_id)), autonomous: autonomous.value, moderation: moderation.value, price_notifications: { ...priceNotifications.value, groups: notificationGroups.value }, health_notifications: { ...healthNotifications.value, groups: healthGroups.value } }
 }
 const dirtySections = computed(() => !baseline.value || !form.value ? [] : (Object.keys(configSections) as ConfigSection[]).filter(section => JSON.stringify(pickSection(draft(), section)) !== JSON.stringify(pickSection(baseline.value!, section))))
-const dirty = computed(() => dirtySections.value.length > 0 || regenerateSiteKey.value)
+const dirty = computed(() => dirtySections.value.length > 0 || regenerateSiteKey.value || regenerateImageSiteKey.value)
 const changes = computed(() => {
  if (!baseline.value || !form.value) return []
  const current = draft()
@@ -360,6 +361,8 @@ async function deleteDiscoveredGroup(id: string) {
 }
 async function save() {
   if (!form.value || busy.value) return
+  if (activeTab.value === 'chat' && siteAISettings.value && !siteAISettings.value.validate()) return
+  if (activeTab.value === 'images' && imageAISettings.value && !imageAISettings.value.validate()) return
   const invalidField = settingsForm.value?.querySelector<HTMLInputElement>(`#qqbot-settings-panel-${activeTab.value} input:invalid, #qqbot-settings-panel-${activeTab.value} textarea:invalid, #qqbot-settings-panel-${activeTab.value} select:invalid`)
   if (invalidField) { invalidField.closest('details')?.setAttribute('open', ''); invalidField.reportValidity(); return }
   const section = activeTab.value
@@ -374,8 +377,11 @@ async function save() {
       ? await qqbotAPI.saveSetup({ config: pending, sections, versions: baseline.value?.section_versions || {}, site_quota: 0 })
       : section === 'chat' && (pending.ai_connection === 'site' || baseline.value?.ai_connection === 'site' || pending.ai_connection !== baseline.value?.ai_connection)
       ? await qqbotAPI.saveSetup({ config: pending, sections: [section], versions: baseline.value?.section_versions || {}, site_quota: siteQuota.value, regenerate_site_key: regenerateSiteKey.value })
+      : section === 'images' && (pending.image_ai_connection === 'site' || baseline.value?.image_ai_connection === 'site' || pending.image_ai_connection !== baseline.value?.image_ai_connection)
+      ? await qqbotAPI.saveSetup({ config: pending, sections: [section], versions: baseline.value?.section_versions || {}, site_quota: 0, image_site_quota: imageSiteQuota.value, regenerate_image_site_key: regenerateImageSiteKey.value })
       : await qqbotAPI.saveSection(sections[0]!, baseline.value?.section_versions?.[sections[0]!] || '', pending)
     if (section === 'chat') regenerateSiteKey.value = false
+    if (section === 'images') regenerateImageSiteKey.value = false
     apply(saved)
     const merged = cloneConfig(draft())
     for (const key of otherDrafts) {
@@ -402,6 +408,7 @@ async function reloadModule() {
   baseline.value = oldBaseline
   apply(merged, false)
   if (activeTab.value === 'chat') regenerateSiteKey.value = false
+  if (activeTab.value === 'images') { regenerateImageSiteKey.value = false; await imageAISettings.value?.reload() }
   error.value = ''
  } catch (e) { error.value = message(e) } finally { busy.value = false }
 }

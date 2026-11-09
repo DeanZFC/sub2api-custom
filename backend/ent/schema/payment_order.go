@@ -107,6 +107,8 @@ func (PaymentOrder) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(30).
 			Default("PENDING"),
+		// Pending/issued invoice claims block duplicate applications and refunds.
+		field.Int64("invoice_request_id").Optional().Nillable(),
 
 		// 退款信息
 		field.Float("refund_amount").

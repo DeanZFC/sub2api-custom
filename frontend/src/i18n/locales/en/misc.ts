@@ -476,6 +476,7 @@ export default {
       INVALID_STATUS: 'The current order status does not allow this operation.',
       BALANCE_NOT_ENOUGH: 'Refund amount exceeds balance.',
       REFUND_AMOUNT_EXCEEDED: 'Refund amount exceeds the recharge amount.',
+      INVOICE_ORDER_LOCKED: 'This order has a pending or issued invoice and cannot be refunded. Ask an administrator to reject a pending invoice application before requesting a refund.',
       REFUND_FAILED: 'Refund failed.',
     },
     airwallexPay: 'Airwallex Payment',

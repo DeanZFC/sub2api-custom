@@ -40,6 +40,9 @@ const (
 	SettingCancelWindowMode              = "CANCEL_RATE_LIMIT_WINDOW_MODE"
 	SettingAlipayForceQRCode             = "ALIPAY_FORCE_QRCODE"
 	SettingAlipayMobilePrecreateDeepLink = "ALIPAY_MOBILE_PRECREATE_DEEP_LINK"
+	SettingInvoiceEnabled                = "PAYMENT_INVOICE_ENABLED"
+	SettingInvoiceMinAmount              = "PAYMENT_INVOICE_MIN_AMOUNT"
+	SettingInvoiceInstructions           = "PAYMENT_INVOICE_INSTRUCTIONS"
 )
 
 // Default values for payment configuration settings.
@@ -85,11 +88,17 @@ type PaymentConfig struct {
 	// Force Alipay mobile users to use QR code instead of mobile redirect
 	AlipayForceQRCode bool `json:"alipay_force_qrcode"`
 	// Use Alipay face-to-face precreate and an app deep link on mobile clients.
-	AlipayMobilePrecreateDeepLink bool `json:"alipay_mobile_precreate_deep_link"`
+	AlipayMobilePrecreateDeepLink bool    `json:"alipay_mobile_precreate_deep_link"`
+	InvoiceEnabled                bool    `json:"invoice_enabled"`
+	InvoiceMinAmount              float64 `json:"invoice_min_amount"`
+	InvoiceInstructions           string  `json:"invoice_instructions"`
 }
 
 // UpdatePaymentConfigRequest contains fields to update payment configuration.
 type UpdatePaymentConfigRequest struct {
+	InvoiceEnabled            *bool    `json:"invoice_enabled"`
+	InvoiceMinAmount          *float64 `json:"invoice_min_amount"`
+	InvoiceInstructions       *string  `json:"invoice_instructions"`
 	Enabled                   *bool    `json:"enabled"`
 	MinAmount                 *float64 `json:"min_amount"`
 	MaxAmount                 *float64 `json:"max_amount"`
@@ -236,6 +245,7 @@ func (s *PaymentConfigService) GetPaymentConfig(ctx context.Context) (*PaymentCo
 		SettingCancelRateLimitOn, SettingCancelRateLimitMax,
 		SettingCancelWindowSize, SettingCancelWindowUnit, SettingCancelWindowMode,
 		SettingAlipayForceQRCode, SettingAlipayMobilePrecreateDeepLink,
+		SettingInvoiceEnabled, SettingInvoiceMinAmount, SettingInvoiceInstructions,
 		SettingPaymentVisibleMethodAlipayEnabled, SettingPaymentVisibleMethodAlipaySource,
 		SettingPaymentVisibleMethodWxpayEnabled, SettingPaymentVisibleMethodWxpaySource,
 	}
@@ -277,6 +287,9 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 
 		AlipayForceQRCode:             vals[SettingAlipayForceQRCode] == "true",
 		AlipayMobilePrecreateDeepLink: vals[SettingAlipayMobilePrecreateDeepLink] == "true",
+		InvoiceEnabled:                vals[SettingInvoiceEnabled] == "true",
+		InvoiceMinAmount:              normalizedInvoiceMinAmount(vals[SettingInvoiceMinAmount]),
+		InvoiceInstructions:           vals[SettingInvoiceInstructions],
 	}
 	cfg.RechargeBonusMode, _ = NormalizeRechargeBonusMode(vals[SettingRechargeBonusMode])
 	cfg.AlipayMobilePrecreateDeepLink = pcEnvBoolOverride(
@@ -336,6 +349,12 @@ func (s *PaymentConfigService) getStripePublishableKey(ctx context.Context) stri
 // nil-check before serialisation — this is inherent to patch-style update patterns
 // and cannot be meaningfully decomposed without introducing unnecessary abstraction.
 func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req UpdatePaymentConfigRequest) error {
+	if req.InvoiceMinAmount != nil && !validInvoiceMinAmount(*req.InvoiceMinAmount) {
+		return infraerrors.BadRequest("INVALID_INVOICE_MIN_AMOUNT", "minimum invoice amount must be positive, at most 1000000000, with at most 2 decimal places")
+	}
+	if req.InvoiceInstructions != nil && len([]rune(*req.InvoiceInstructions)) > 5000 {
+		return infraerrors.BadRequest("INVALID_INVOICE_INSTRUCTIONS", "invoice instructions must not exceed 5000 characters")
+	}
 	if req.BalanceRechargeMultiplier != nil {
 		if math.IsNaN(*req.BalanceRechargeMultiplier) || math.IsInf(*req.BalanceRechargeMultiplier, 0) || *req.BalanceRechargeMultiplier <= 0 {
 			return infraerrors.BadRequest("INVALID_BALANCE_RECHARGE_MULTIPLIER", "balance recharge multiplier must be greater than 0")
@@ -367,6 +386,15 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 		}
 	}
 	m := make(map[string]string)
+	if req.InvoiceEnabled != nil {
+		m[SettingInvoiceEnabled] = strconv.FormatBool(*req.InvoiceEnabled)
+	}
+	if req.InvoiceMinAmount != nil {
+		m[SettingInvoiceMinAmount] = strconv.FormatFloat(*req.InvoiceMinAmount, 'f', 2, 64)
+	}
+	if req.InvoiceInstructions != nil {
+		m[SettingInvoiceInstructions] = strings.TrimSpace(*req.InvoiceInstructions)
+	}
 	if req.Enabled != nil {
 		m[SettingPaymentEnabled] = formatBoolOrEmpty(req.Enabled)
 	}

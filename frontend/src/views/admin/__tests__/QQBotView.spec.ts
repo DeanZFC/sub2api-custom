@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import QQBotView from '../QQBotView.vue'
 import QQBotChatPreview from '@/components/admin/qqbot/QQBotChatPreview.vue'
 import QQBotSiteAISettings from '@/components/admin/qqbot/QQBotSiteAISettings.vue'
+import QQBotImageAISettings from '@/components/admin/qqbot/QQBotImageAISettings.vue'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { configSections, pickSection, cloneConfig } from '@/components/admin/qqbot/configSections'
@@ -26,7 +27,7 @@ async function mountView(locale: 'zh' | 'en' = 'zh', path = '/admin/qqbot/config
   { path: '/admin/qqbot/config', component: QQBotView }, { path: '/admin/qqbot/groups', component: QQBotView }, { path: '/other', component: { template: '<p>Other</p>' } }, { path: '/admin/qqbot/setup', component: { template: '<p>Setup</p>' } }
  ] })
  await router.push(path)
- const wrapper = mount({ template: '<RouterView />' }, { attachTo: document.body, global: { plugins: [createI18n({ legacy: false, locale, messages: { zh, en } }), router] } })
+ const wrapper = mount({ template: '<RouterView />' }, { attachTo: document.body, global: { plugins: [createI18n({ legacy: false, locale, messages: { zh, en } }), router], stubs: { teleport: true } } })
  wrappers.push(wrapper); await flushPromises(); return wrapper
 }
 async function category(w: VueWrapper, text: string) { await w.findAll('button').find(button => button.text() === text)!.trigger('click') }
@@ -37,7 +38,7 @@ describe('QQ module settings', () => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
   server = { enabled: false, app_id: 'app', app_secret: '', app_secret_set: true, sandbox: false, allowed_groups: ['group', 'other-group'], group_policies: [], base_url: 'https://example.invalid/v1', api_key: '', api_key_set: true, chat_model: 'model', chat_protocol: 'responses', image_enabled: false, image_base_url: '', image_api_key: '', image_api_key_set: false, image_model: '', image_size: '1024x1024', system_prompt: 'Helpful', max_output_tokens: 2048, history_messages: 12, daily_chat_limit: 30, daily_image_limit: 2, total_daily_chat_limit: 500, total_daily_image_limit: 20, cooldown_seconds: 5, checkin_reward: 0, invite_enabled: false, invite_reward: 0, invite_daily_limit: 10, custom_commands: [], section_versions: Object.fromEntries(Object.keys(configSections).map(key => [key, `${key}-1`])) }
   api.config.mockImplementation(async () => cloneConfig(server))
-  api.setupOptions.mockResolvedValue({ groups: [{ id: 2, name: 'Managed group', models: ['model'] }], current_quota: 10, current_used: 1 })
+  api.setupOptions.mockResolvedValue({ groups: [{ id: 2, name: 'Managed group', models: ['model'] }], image_groups: [{ id: 20, name: 'Image group', models: ['image-model'] }, { id: 21, name: 'Another image group', models: ['image-alternative'] }], current_quota: 10, current_used: 1, current_image_quota: 25, current_image_used: 4 })
   api.runtime.mockResolvedValue({ groups: [], jobs: [], rewards: [], bindings: 0, encryption_ready: true })
   api.groupInfo.mockImplementation(async (appID: string, groupID: string) => ({ app_id: appID, sandbox: server.sandbox, group_id: groupID, name: '', status: 'unavailable' }))
   api.members.mockImplementation(async (params: { group_id?: string; member_id?: string; search?: string }) => {
@@ -149,6 +150,78 @@ describe('QQ module settings', () => {
   expect(server.chat_model).toBe('model')
   expect(w.get('#qqbot-settings-panel-images').text()).toContain('--gif')
   expect(w.get('#qqbot-settings-tab-images').text()).not.toContain('•')
+ })
+ it('saves an independent managed image connection and preserves the unsaved chat draft', async () => {
+  const w = await mountView('zh', '/admin/qqbot/config?tab=chat')
+  await w.get('[data-testid="history-messages"]').setValue(25)
+  await w.get('#qqbot-settings-tab-images').trigger('click')
+  await w.get('#qqbot-settings-panel-images input[type="checkbox"]').setValue(true)
+  await w.get('[data-testid="image-ai-source"]').setValue('site')
+  await w.get('[data-testid="image-site-group"]').setValue('20')
+  await w.get('[data-testid="image-site-quota"]').setValue('40')
+  const images = w.getComponent(QQBotImageAISettings)
+  await images.get('[data-testid="image-model"] button').trigger('click'); await flushPromises()
+  await images.get('[role="option"]').trigger('click'); await flushPromises()
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSetup).toHaveBeenCalledWith(expect.objectContaining({ sections: ['images'], image_site_quota: 40, regenerate_image_site_key: false, config: expect.objectContaining({ image_ai_connection: 'site', image_site_group_id: 20, image_model: 'image-model' }) }))
+  expect(server.history_messages).toBe(12)
+  expect(server.chat_model).toBe('model')
+  expect(w.get('#qqbot-settings-tab-chat').text()).toContain('•')
+  await w.get('#qqbot-settings-tab-chat').trigger('click')
+  expect(w.get<HTMLInputElement>('[data-testid="history-messages"]').element.value).toBe('25')
+ })
+ it('tracks image key regeneration independently and discards it when reloading images', async () => {
+  Object.assign(server, { image_ai_connection: 'site', image_site_api_key_id: 88, image_site_group_id: 20, image_model: 'image-model' })
+  const w = await mountView('zh', '/admin/qqbot/config?tab=images')
+  await w.get('[data-testid="image-regenerate-key"]').setValue(true)
+  await w.get('[data-testid="image-site-quota"]').setValue('77')
+  await w.get('#qqbot-settings-tab-chat').trigger('click'); await flushPromises()
+  await w.get('#qqbot-settings-tab-images').trigger('click'); await flushPromises()
+  expect(w.get<HTMLInputElement>('[data-testid="image-site-quota"]').element.value).toBe('77')
+  expect(w.get('#qqbot-settings-tab-images').text()).toContain('•')
+  expect(w.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  await w.findAll('button').find(button => button.text() === '重新加载本模块')!.trigger('click'); await flushPromises()
+  expect(confirm).toHaveBeenCalledOnce()
+  expect(w.get('#qqbot-settings-tab-images').text()).not.toContain('•')
+  await w.get('[data-testid="image-regenerate-key"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSetup).toHaveBeenCalledWith(expect.objectContaining({ sections: ['images'], site_quota: 0, image_site_quota: 25, regenerate_image_site_key: true }))
+  expect(api.saveSetup.mock.calls[0]![0].regenerate_site_key).toBeUndefined()
+ })
+ it('preserves an unsaved image group and its editable quota across tabs', async () => {
+  Object.assign(server, { image_ai_connection: 'site', image_site_api_key_id: 88, image_site_group_id: 20, image_model: 'image-model' })
+  const w = await mountView('zh', '/admin/qqbot/config?tab=images')
+  await w.get('[data-testid="image-site-group"]').setValue('21')
+  await w.get('[data-testid="image-site-quota"]').setValue('60')
+  await w.get('#qqbot-settings-tab-chat').trigger('click'); await flushPromises()
+  await w.get('#qqbot-settings-tab-images').trigger('click'); await flushPromises()
+  expect(w.get<HTMLSelectElement>('[data-testid="image-site-group"]').element.value).toBe('21')
+  const quota = w.get<HTMLInputElement>('[data-testid="image-site-quota"]')
+  expect(quota.element.disabled).toBe(false)
+  expect(quota.element.value).toBe('60')
+  expect(w.get('#qqbot-settings-tab-images').text()).toContain('•')
+ })
+ it.each(['cancel', 'source'])('restores the saved image quota before saving after cancelling replacement (%s)', async mode => {
+  Object.assign(server, { image_ai_connection: 'site', image_site_api_key_id: 88, image_site_group_id: 20, image_model: 'image-model' })
+  const w = await mountView('zh', '/admin/qqbot/config?tab=images')
+  await w.get('[data-testid="image-regenerate-key"]').setValue(true)
+  await w.get('[data-testid="image-site-quota"]').setValue('100')
+  if (mode === 'source') {
+   await w.get('[data-testid="image-ai-source"]').setValue('reuse_chat')
+   await w.get('[data-testid="image-ai-source"]').setValue('site')
+  } else await w.get('[data-testid="image-regenerate-key"]').setValue(false)
+  await w.get('[data-testid="image-output-format"]').setValue('gif')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSetup).toHaveBeenCalledWith(expect.objectContaining({ sections: ['images'], image_site_quota: 25, regenerate_image_site_key: false }))
+ })
+ it('uses managed setup when switching away from a managed image connection', async () => {
+  Object.assign(server, { image_ai_connection: 'site', image_site_api_key_id: 88, image_site_group_id: 20, image_model: 'image-model' })
+  const w = await mountView('zh', '/admin/qqbot/config?tab=images')
+  await w.get('[data-testid="image-ai-source"]').setValue('reuse_chat')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(api.saveSetup).toHaveBeenCalledWith(expect.objectContaining({ sections: ['images'], config: expect.objectContaining({ image_ai_connection: 'reuse_chat' }) }))
+  expect(api.saveSection).not.toHaveBeenCalled()
  })
  it('does not validate unrelated drafts and keeps original revisions for unsaved modules', async () => {
   const w = await mountView()

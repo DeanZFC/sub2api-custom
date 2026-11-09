@@ -361,6 +361,18 @@ func (s *Service) generateImage(ctx context.Context, c Config, prompt string) ([
 }
 
 func imageConnection(c Config) (string, string) {
+	switch c.ImageAIConnection {
+	case "reuse_chat":
+		return c.BaseURL, c.APIKey
+	case "site":
+		return c.ImageBaseURL, c.ImageAPIKey
+	case "external":
+		base := c.ImageBaseURL
+		if base == "" {
+			base = c.BaseURL
+		}
+		return base, c.ImageAPIKey
+	}
 	base, key := c.BaseURL, c.APIKey
 	if c.ImageBaseURL != "" {
 		base = c.ImageBaseURL

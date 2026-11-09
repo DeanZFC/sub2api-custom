@@ -68,6 +68,58 @@ func TestAutonomousNamesAndLocalFilters(t *testing.T) {
 	c.Autonomous.SamplePercent = 100
 	require.True(t, sampledMessage(c, Event{ID: "a"}))
 }
+
+func TestAutonomousImageCandidatesKeepContentFilters(t *testing.T) {
+	image := Attachment{URL: "https://image.example/reaction.gif", ContentType: "image/gif"}
+	for _, tc := range []struct {
+		name string
+		e    Event
+		text string
+	}{
+		{"picture", Event{Attachments: []Attachment{image}}, ""},
+		{"short caption", Event{Content: "哈哈", Attachments: []Attachment{image}}, "哈哈"},
+		{"parallel picture", Event{MsgElements: []MessageElement{{Content: "看看", MsgElements: []MessageElement{{Attachments: []Attachment{image}}}}}}, "看看"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text, reason := autonomousText(tc.e)
+			require.Empty(t, reason)
+			require.Equal(t, tc.text, text)
+		})
+	}
+	for _, tc := range []struct {
+		name   string
+		e      Event
+		reason string
+	}{
+		{"other mention", Event{Content: "@张三", Attachments: []Attachment{image}}, "addressed_elsewhere"},
+		{"nested mention", Event{MsgElements: []MessageElement{{Content: "@张三", Attachments: []Attachment{image}}}}, "addressed_elsewhere"},
+		{"nested command", Event{MsgElements: []MessageElement{{Content: "签到", Attachments: []Attachment{image}}}}, "addressed_elsewhere"},
+		{"nested quote", Event{MsgElements: []MessageElement{{MessageType: 103, Attachments: []Attachment{image}}}}, "addressed_elsewhere"},
+		{"link caption", Event{Content: "https://example.com", Attachments: []Attachment{image}}, "filtered_content"},
+		{"nested credentials", Event{MsgElements: []MessageElement{{Content: "密码12345", Attachments: []Attachment{image}}}}, "filtered_content"},
+		{"long caption", Event{Content: strings.Repeat("字", 1001), Attachments: []Attachment{image}}, "too_long"},
+		{"non-image", Event{Content: "这个怎么处理", Attachments: []Attachment{{ContentType: "video/mp4"}}}, "non_text"},
+		{"mixed media", Event{Attachments: []Attachment{image, {ContentType: "audio/ogg"}}}, "non_text"},
+		{"too many pictures", Event{Attachments: []Attachment{image, image, image, image, image}}, "non_text"},
+		{"unavailable sticker", Event{MsgElements: []MessageElement{{MessageType: 3}}}, "non_text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, reason := autonomousText(tc.e)
+			require.Equal(t, tc.reason, reason)
+		})
+	}
+}
+
+func TestAutonomousImageRepetitionUsesAttachmentIdentity(t *testing.T) {
+	first := Event{Attachments: []Attachment{{URL: "https://image.example/first", ContentType: "image/png"}}}
+	second := Event{Attachments: []Attachment{{URL: "https://image.example/second", ContentType: "image/png"}}}
+	require.NotEqual(t, autonomousContentHash(first, "哈哈"), autonomousContentHash(second, "哈哈"))
+	require.Equal(t, autonomousContentHash(first, " 哈哈 "), autonomousContentHash(first, "哈哈"))
+	first.Attachments[0].URL = "//image.example/second"
+	require.Equal(t, autonomousContentHash(first, ""), autonomousContentHash(second, ""))
+	require.Equal(t, codeHash("hello"), autonomousContentHash(Event{}, " HELLO "))
+}
+
 func TestAutonomousActiveBeijingWindow(t *testing.T) {
 	a := DefaultAutonomousConfig()
 	require.Equal(t, a.StartHour, a.EndHour)

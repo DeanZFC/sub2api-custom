@@ -90,7 +90,7 @@ func TestExcelBPSCacheCreationAsInputBilling(t *testing.T) {
 					if tt.option != nil {
 						extra["openai_excel_bps_cache_creation_as_input"] = tt.option
 					}
-					original := OpenAIUsage{InputTokens: tt.input, CacheCreationInputTokens: tt.creation, CacheReadInputTokens: tt.read, OutputTokens: tt.output}
+					original := OpenAIUsage{InputTokens: tt.input, CacheCreationInputTokens: tt.creation, CacheCreation30mInputTokens: tt.creation / 4, CacheCreation12hInputTokens: tt.creation - tt.creation/4, CacheReadInputTokens: tt.read, OutputTokens: tt.output}
 					result := &OpenAIForwardResult{RequestID: "resp_bps_billing", UpstreamEndpoint: "/basispoints/api/responses", Usage: original, Model: "gpt-6-astra", Stream: stream, Duration: time.Second}
 					input := &OpenAIRecordUsageInput{
 						Result: result, APIKey: &APIKey{ID: 1001}, User: &User{ID: 2001},
@@ -106,12 +106,15 @@ func TestExcelBPSCacheCreationAsInputBilling(t *testing.T) {
 					log := usageRepo.lastLog
 					require.Equal(t, tt.wantInput, log.InputTokens)
 					require.Equal(t, tt.wantCreation, log.CacheCreationTokens)
+					require.Equal(t, tt.wantCreation/4, log.CacheCreation30mTokens)
+					require.Equal(t, tt.wantCreation-tt.wantCreation/4, log.CacheCreation12hTokens)
 					require.Equal(t, tt.read, log.CacheReadTokens)
 					require.Equal(t, tt.output, log.OutputTokens)
 					require.Equal(t, tt.input+tt.output, log.TotalTokens())
 					require.Equal(t, stream, log.Stream)
 					wantInputCost := float64(tt.wantInput) * 5e-6
-					wantCreationCost := float64(tt.wantCreation) * 6.25e-6
+					// Catalog pricing charges 30m writes at 1.25x input and 12h writes at 2.5x.
+					wantCreationCost := float64(tt.wantCreation/4)*6.25e-6 + float64(tt.wantCreation-tt.wantCreation/4)*12.5e-6
 					wantReadCost := float64(tt.read) * 0.5e-6
 					wantOutputCost := float64(tt.output) * 30e-6
 					wantTotal := wantInputCost + wantCreationCost + wantReadCost + wantOutputCost
@@ -150,7 +153,7 @@ func TestExcelBPSSelectedModelBillingPreservesCodexCacheCreation(t *testing.T) {
 	account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
 	account.Extra["openai_excel_bps_cache_creation_as_input"] = true
 	require.False(t, account.IsExcelBPSEnabledForModel("gpt-6-sol"))
-	original := OpenAIUsage{InputTokens: 1000, CacheCreationInputTokens: 200, CacheReadInputTokens: 100, OutputTokens: 50}
+	original := OpenAIUsage{InputTokens: 1000, CacheCreationInputTokens: 200, CacheCreation30mInputTokens: 50, CacheCreation12hInputTokens: 150, CacheReadInputTokens: 100, OutputTokens: 50}
 	result := &OpenAIForwardResult{RequestID: "resp_codex_billing", Model: "gpt-6-sol", UpstreamEndpoint: "/v1/responses", Usage: original}
 	require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: result, APIKey: &APIKey{ID: 1001}, User: &User{ID: 2001}, Account: account,
@@ -159,7 +162,9 @@ func TestExcelBPSSelectedModelBillingPreservesCodexCacheCreation(t *testing.T) {
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, 700, usageRepo.lastLog.InputTokens)
 	require.Equal(t, 200, usageRepo.lastLog.CacheCreationTokens)
+	require.Equal(t, 50, usageRepo.lastLog.CacheCreation30mTokens)
+	require.Equal(t, 150, usageRepo.lastLog.CacheCreation12hTokens)
 	require.Equal(t, 100, usageRepo.lastLog.CacheReadTokens)
-	require.InDelta(t, 200*6.25e-6, usageRepo.lastLog.CacheCreationCost, 1e-12)
+	require.InDelta(t, 50*6.25e-6+150*12.5e-6, usageRepo.lastLog.CacheCreationCost, 1e-12)
 	require.Equal(t, 200, billingRepo.lastCmd.CacheCreationTokens)
 }

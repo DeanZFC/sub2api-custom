@@ -65,6 +65,8 @@ export interface QQBotConfig {
   reward_budget_daily?: number | null
   ai_connection?: 'site' | 'external' | ''
   site_api_key_id?: number; site_group_id?: number; site_owner_id?: number
+  image_ai_connection?: '' | 'reuse_chat' | 'external' | 'site'
+  image_site_api_key_id?: number; image_site_group_id?: number; image_site_owner_id?: number
   reward_alert_daily?: number
   moderation?: QQModerationConfig
   health_notifications?: QQHealthNotificationConfig
@@ -233,14 +235,16 @@ export interface QQActivityPreview {
 export interface QQTransferHistory { items: { id: number; from_user_id: number; to_user_id: number; from_email: string; to_email: string; amount: string; fee: string; net_amount: string; created_at: string }[]; total: number; page: number; page_size: number }
 export interface QQGroupInfo { app_id: string; sandbox: boolean; group_id: string; name: string; status: 'available' | 'permission_required' | 'unavailable' | 'unconfigured' | 'rate_limited'; retry_after_seconds?: number }
 export interface QQSetupOptions {
-  groups: { id: number; name: string; models: string[] }[]
+  groups: { id: number; name: string; models: string[]; platform?: string; chat_protocols?: ('chat_completions' | 'responses')[] }[]
+  image_groups?: QQSetupOptions['groups']
+  current_image_quota?: number; current_image_used?: number
   frontend_url: string; email_configured: boolean; current_quota: number; current_used: number
 }
 export interface QQSetupCheck { code: string; status: 'ready' | 'blocked' | 'warning' | 'pending'; message: string; action: string }
 export interface QQSetupReadiness { checks: QQSetupCheck[]; ready: boolean; version: string }
 export interface QQSetupProbe { kind: string; status: 'ready' | 'blocked'; message: string; at: string }
 export interface QQActivityBundle { version: string; checkin: QQCheckinConfig; lottery: QQLotteryConfig; invite: QQInviteConfig; ranking: QQRankingConfig; budget: number | null }
-export interface QQSetupRequest { config: QQBotConfig; versions: Record<string, string>; sections: string[]; site_quota: number; regenerate_site_key?: boolean }
+export interface QQSetupRequest { config: QQBotConfig; versions: Record<string, string>; sections: string[]; site_quota: number; regenerate_site_key?: boolean; image_site_quota?: number; regenerate_image_site_key?: boolean }
 export const qqbotAPI = {
   setupOptions: async () => (await apiClient.get<QQSetupOptions>('/admin/qqbot/setup/options')).data,
   setupChecks: async () => (await apiClient.get<QQSetupReadiness>('/admin/qqbot/setup/checks')).data,

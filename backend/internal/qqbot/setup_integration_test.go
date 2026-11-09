@@ -19,6 +19,7 @@ import (
 type setupSiteFake struct {
 	prepared, revoked int
 	keyID             int64
+	chatProtocol      string
 }
 
 func (p *setupSiteFake) Options(context.Context, int64, Config) (SiteAIOptions, error) {
@@ -26,6 +27,7 @@ func (p *setupSiteFake) Options(context.Context, int64, Config) (SiteAIOptions, 
 }
 func (p *setupSiteFake) Prepare(_ context.Context, _ *sql.Tx, owner, group int64, _ float64, old Config) (SiteAIConnection, error) {
 	p.prepared++
+	p.chatProtocol = old.ChatProtocol
 	if old.AIConnection == "site" && old.SiteGroupID == group && old.SiteAPIKeyID > 0 {
 		return SiteAIConnection{BaseURL: "http://127.0.0.1:8080/v1", Key: old.APIKey, KeyID: old.SiteAPIKeyID, OwnerID: old.SiteOwnerID, GroupID: group}, nil
 	}
@@ -93,6 +95,79 @@ func TestSetupAtomicSaveAndManagedSecretLifecycle(t *testing.T) {
 	require.NotEmpty(t, history)
 	b, _ := json.Marshal(history)
 	require.NotContains(t, string(b), "secret")
+}
+
+func TestSetupManagedProviderReceivesRequestedChatProtocol(t *testing.T) {
+	ctx := context.Background()
+	s := savedBot(t, testDB(t))
+	provider := &setupSiteFake{keyID: 100}
+	s.SetSiteAIProvider(provider)
+	c, err := s.Config(ctx)
+	require.NoError(t, err)
+	c.ChatProtocol = "responses"
+	_, err = s.SaveConfig(ctx, c)
+	require.NoError(t, err)
+	for _, protocol := range []string{"chat_completions", "responses"} {
+		c, err = s.Config(ctx)
+		require.NoError(t, err)
+		req := setupRequest(c, "chat")
+		req.Config.AIConnection, req.Config.SiteGroupID, req.Config.ChatProtocol = "site", 2, protocol
+		saved, err := s.SaveSetup(ctx, 7, req)
+		require.NoError(t, err)
+		require.Equal(t, protocol, provider.chatProtocol)
+		require.Equal(t, protocol, saved.ChatProtocol)
+	}
+	require.Equal(t, int64(101), provider.keyID, "changing protocol must reuse the managed key")
+	require.Zero(t, provider.revoked)
+}
+
+func TestSetupManagedProtocolCannotBypassProviderValidation(t *testing.T) {
+	ctx := context.Background()
+	s := savedBot(t, testDB(t))
+	provider := &setupSiteFake{keyID: 100}
+	s.SetSiteAIProvider(provider)
+	c, err := s.Config(ctx)
+	require.NoError(t, err)
+	req := setupRequest(c, "chat")
+	req.Config.AIConnection, req.Config.SiteGroupID, req.Config.ChatProtocol = "site", 2, "chat_completions"
+	_, err = s.SaveSetup(ctx, 7, req)
+	require.NoError(t, err)
+	for _, mode := range []string{"section", "basic", "full"} {
+		c, err = s.Config(ctx)
+		require.NoError(t, err)
+		draft := c.Public()
+		draft.ChatProtocol = "responses"
+		switch mode {
+		case "section":
+			_, err = s.SaveConfigSection(ctx, "chat", sectionVersion(c, "chat"), draft)
+		case "basic":
+			_, err = s.SaveBasicConfig(ctx, draft)
+		case "full":
+			_, err = s.SaveConfig(ctx, draft)
+		}
+		require.ErrorContains(t, err, "本站 AI 凭据和接口由快速配置管理", mode)
+		current, err := s.Config(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "chat_completions", current.ChatProtocol)
+		require.Equal(t, c.SiteAPIKeyID, current.SiteAPIKeyID)
+		require.Equal(t, c.APIKey, current.APIKey)
+	}
+	for _, mode := range []string{"section", "basic"} {
+		c, err = s.Config(ctx)
+		require.NoError(t, err)
+		draft := c.Public()
+		draft.SystemPrompt = "只修改人设：" + mode
+		var saved Config
+		if mode == "section" {
+			saved, err = s.SaveConfigSection(ctx, "chat", sectionVersion(c, "chat"), draft)
+		} else {
+			saved, err = s.SaveBasicConfig(ctx, draft)
+		}
+		require.NoError(t, err)
+		require.Equal(t, draft.SystemPrompt, saved.SystemPrompt)
+	}
+	require.Equal(t, 1, provider.prepared)
+	require.Zero(t, provider.revoked)
 }
 func TestSetupActivationRequiresCurrentProbesButLiveEditsRemainPossible(t *testing.T) {
 	ctx := context.Background()

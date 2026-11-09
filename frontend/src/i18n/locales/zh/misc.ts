@@ -500,6 +500,7 @@ export default {
       INVALID_STATUS: '当前订单状态不允许此操作',
       BALANCE_NOT_ENOUGH: '退款金额超过余额',
       REFUND_AMOUNT_EXCEEDED: '退款金额超过充值金额',
+      INVOICE_ORDER_LOCKED: '该订单已申请或已完成开票，暂不能退款；待处理的开票申请可联系管理员驳回后再申请退款',
       REFUND_FAILED: '退款失败',
     },
     airwallexPay: 'Airwallex 支付',

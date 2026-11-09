@@ -48,6 +48,15 @@ func RegisterPaymentRoutes(
 		authenticated.GET("/plans", paymentHandler.GetPlans)
 		authenticated.GET("/limits", paymentHandler.GetLimits)
 
+		invoices := authenticated.Group("/invoices")
+		{
+			invoices.GET("/config", paymentHandler.GetInvoiceConfig)
+			invoices.GET("/orders", paymentHandler.ListInvoiceOrders)
+			invoices.GET("", paymentHandler.ListInvoiceRequests)
+			invoices.POST("", paymentHandler.CreateInvoiceRequest)
+			invoices.GET("/:id/pdf", paymentHandler.DownloadInvoicePDF)
+		}
+
 		orders := authenticated.Group("/orders")
 		{
 			orders.POST("", paymentHandler.CreateOrder)
@@ -101,6 +110,16 @@ func RegisterPaymentRoutes(
 		// Config
 		adminGroup.GET("/config", adminPaymentHandler.GetConfig)
 		adminGroup.PUT("/config", adminPaymentHandler.UpdateConfig)
+
+		invoices := adminGroup.Group("/invoices")
+		{
+			invoices.GET("/config", adminPaymentHandler.GetInvoiceConfig)
+			invoices.PUT("/config", adminPaymentHandler.UpdateInvoiceConfig)
+			invoices.GET("", adminPaymentHandler.ListInvoiceRequests)
+			invoices.POST("/:id/reject", adminPaymentHandler.RejectInvoiceRequest)
+			invoices.POST("/:id/issue", adminPaymentHandler.IssueInvoiceRequest)
+			invoices.GET("/:id/pdf", adminPaymentHandler.DownloadInvoicePDF)
+		}
 
 		// Orders
 		adminOrders := adminGroup.Group("/orders")
