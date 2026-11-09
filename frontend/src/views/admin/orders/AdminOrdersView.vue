@@ -62,6 +62,10 @@
     <!-- Order Detail Dialog -->
     <BaseDialog :show="showDetailDialog" :title="t('payment.admin.orderDetail')" width="wide" @close="showDetailDialog = false">
       <div v-if="selectedOrder" class="space-y-4">
+        <div v-if="selectedOrder.coupon" class="rounded-lg bg-primary-50 p-3 text-sm dark:bg-dark-800">
+          {{ selectedOrder.coupon.name }} · {{ t('coupon.discount') }} {{ paymentAmountSymbol(selectedOrder) }}{{ selectedOrder.coupon.discount_amount }} · {{ t('coupon.couponBonus') }} {{ selectedOrder.coupon.bonus_amount }}
+          <p v-if="selectedOrder.coupon.review_required" class="mt-2 text-amber-600">{{ t('coupon.honorConfirm') }}</p>
+        </div>
         <div class="grid grid-cols-2 gap-4">
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</p><p class="font-mono text-sm font-medium text-gray-900 dark:text-white">#{{ selectedOrder.id }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderNo') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ selectedOrder.out_trade_no }}</p></div>
@@ -233,6 +237,7 @@ async function handleCancelOrder(order: PaymentOrder) {
 }
 
 async function handleRetryOrder(order: PaymentOrder) {
+ if (order.coupon?.review_required && !window.confirm(t('coupon.honorConfirm'))) return
   try { await adminPaymentAPI.retryRecharge(order.id); appStore.showSuccess(t('payment.admin.retrySuccess')); loadOrders() }
   catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
 }

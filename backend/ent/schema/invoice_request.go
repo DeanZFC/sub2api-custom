@@ -24,6 +24,8 @@ func (InvoiceRequest) Fields() []ent.Field {
 		field.String("user_email").MaxLen(255).Immutable(),
 		field.JSON("order_ids", []int64{}).Immutable(),
 		field.Float("amount").SchemaType(map[string]string{dialect.Postgres: "decimal(20,2)"}).Immutable(),
+		field.Float("fee_amount").SchemaType(map[string]string{dialect.Postgres: "decimal(20,2)"}).Default(0).Immutable(),
+		field.Bool("fee_refunded").Default(false),
 		field.String("currency").MaxLen(3).Default("CNY").Immutable(),
 		field.String("buyer_type").MaxLen(20).Immutable(),
 		field.String("title").MaxLen(200).Immutable(),

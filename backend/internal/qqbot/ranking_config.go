@@ -92,6 +92,9 @@ func (s *Service) saveRankingConfigAt(ctx context.Context, c RankingConfig, now 
 	if err := validateRankingConfig(c); err != nil {
 		return c, err
 	}
+	if err := validateCouponRewardTemplates(ctx, s.db, c); err != nil {
+		return c, err
+	}
 	normalizeRankingPrizes(&c)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

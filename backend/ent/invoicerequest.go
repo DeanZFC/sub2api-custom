@@ -26,6 +26,10 @@ type InvoiceRequest struct {
 	OrderIds []int64 `json:"order_ids,omitempty"`
 	// Amount holds the value of the "amount" field.
 	Amount float64 `json:"amount,omitempty"`
+	// FeeAmount holds the value of the "fee_amount" field.
+	FeeAmount float64 `json:"fee_amount,omitempty"`
+	// FeeRefunded holds the value of the "fee_refunded" field.
+	FeeRefunded bool `json:"fee_refunded,omitempty"`
 	// Currency holds the value of the "currency" field.
 	Currency string `json:"currency,omitempty"`
 	// BuyerType holds the value of the "buyer_type" field.
@@ -64,7 +68,9 @@ func (*InvoiceRequest) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case invoicerequest.FieldOrderIds, invoicerequest.FieldEmails, invoicerequest.FieldPdfData:
 			values[i] = new([]byte)
-		case invoicerequest.FieldAmount:
+		case invoicerequest.FieldFeeRefunded:
+			values[i] = new(sql.NullBool)
+		case invoicerequest.FieldAmount, invoicerequest.FieldFeeAmount:
 			values[i] = new(sql.NullFloat64)
 		case invoicerequest.FieldID, invoicerequest.FieldUserID:
 			values[i] = new(sql.NullInt64)
@@ -118,6 +124,18 @@ func (_m *InvoiceRequest) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field amount", values[i])
 			} else if value.Valid {
 				_m.Amount = value.Float64
+			}
+		case invoicerequest.FieldFeeAmount:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field fee_amount", values[i])
+			} else if value.Valid {
+				_m.FeeAmount = value.Float64
+			}
+		case invoicerequest.FieldFeeRefunded:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field fee_refunded", values[i])
+			} else if value.Valid {
+				_m.FeeRefunded = value.Bool
 			}
 		case invoicerequest.FieldCurrency:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -253,6 +271,12 @@ func (_m *InvoiceRequest) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("amount=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Amount))
+	builder.WriteString(", ")
+	builder.WriteString("fee_amount=")
+	builder.WriteString(fmt.Sprintf("%v", _m.FeeAmount))
+	builder.WriteString(", ")
+	builder.WriteString("fee_refunded=")
+	builder.WriteString(fmt.Sprintf("%v", _m.FeeRefunded))
 	builder.WriteString(", ")
 	builder.WriteString("currency=")
 	builder.WriteString(_m.Currency)

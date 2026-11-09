@@ -3,6 +3,8 @@ import type { BasePaginationResponse } from '@/types'
 export interface InvoiceConfig {
   enabled: boolean
   min_amount: number
+  fee_rate: number
+  fee_min_amount: number
   instructions: string
   currency: 'CNY'
 }
@@ -26,6 +28,8 @@ export interface InvoiceRequest {
   user_email: string
   order_ids: number[]
   amount: number
+  fee_amount: number
+  fee_refunded: boolean
   currency: string
   buyer_type: 'personal' | 'company'
   title: string

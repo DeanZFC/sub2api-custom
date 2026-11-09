@@ -33,13 +33,14 @@ export interface QQModerationRecord {
   created_at: string; mute_status: string; recall_total: number; recall_succeeded: number; pending: number; error: string
 }
 export interface QQAutonomousConfig {
+  reply_mode?: 'quiet' | 'natural' | 'active' | 'always'; merge_seconds?: number; input_token_budget?: number
   inherit_groups?: boolean; enabled: boolean; groups: string[]; names: string[]; topics: string[]
   sample_percent: number; cooldown_seconds: number; min_messages: number
   member_cooldown_seconds: number; hourly_replies: number; daily_replies: number; daily_calls: number
   start_hour: number; end_hour: number; followup_seconds: number; max_chars: number; mention_user: boolean
 }
 export function defaultAutonomousConfig(): QQAutonomousConfig {
-  return { enabled: false, groups: [], names: ['CTAV'], topics: [], sample_percent: 25, cooldown_seconds: 60,
+  return { reply_mode: 'natural', merge_seconds: 0, input_token_budget: 8192, enabled: false, groups: [], names: ['CTAV'], topics: [], sample_percent: 25, cooldown_seconds: 60,
     min_messages: 2, member_cooldown_seconds: 120, hourly_replies: 12, daily_replies: 80, daily_calls: 160,
     start_hour: 0, end_hour: 0, followup_seconds: 90, max_chars: 100, mention_user: false }
 }
@@ -105,6 +106,10 @@ export interface QQChatExecution {
   usage_complete: boolean
   last_error_code?: string
 }
+export interface QQAutonomousExecution {
+  mode?: string; batch_messages?: number; model_started?: boolean; model_ms?: number
+  input_estimate?: { system: number; knowledge: number; history: number; current: number; images: number; total: number; removed: number }
+}
 export interface QQChatPreviewRequest { group_id: string; member_id?: string; question: string }
 export interface QQChatPreviewResult {
   text: string; action: string; input_tokens: number; output_tokens: number; duration_ms: number
@@ -118,7 +123,7 @@ export interface QQBotRuntime {
   autonomous_stats?: { group_id: string; reason: string; count: number }[]
   encryption_ready: boolean; bindings: number
   groups: { id: string; last_event: string; last_seen_at: string }[]
-  jobs: { site_query?: QQSiteQueryDecision; chat_execution?: QQChatExecution; image_decision?: { tool?: string; review?: string; basis?: string; reason?: string; execution?: string; message_ref?: string; plan_ref?: string }; trigger_reason?: string; decision_reason?: string; id: string; group_id: string; member_id: string; kind: string; status: string; error: string; input_tokens: number; output_tokens: number; created_at: string }[]
+  jobs: { autonomous_data?: QQAutonomousExecution; site_query?: QQSiteQueryDecision; chat_execution?: QQChatExecution; image_decision?: { tool?: string; review?: string; basis?: string; reason?: string; execution?: string; message_ref?: string; plan_ref?: string }; trigger_reason?: string; decision_reason?: string; id: string; group_id: string; member_id: string; kind: string; status: string; error: string; input_tokens: number; output_tokens: number; created_at: string }[]
   rewards: { id: number; user_id: number; kind: string; amount: number; created_at: string }[]
 }
 export interface QQBindingRequest { code?: string; member_id: string; group_id: string; nickname: string; expires_at: string }
@@ -136,6 +141,7 @@ export interface QQBindingState {
 export type QQGrowthTaskKind = 'binding' | 'usage_count' | 'checkin_total' | 'checkin_streak' | 'recharge_total' | 'usage_tokens' | 'usage_amount' | 'usage_days' | 'model_count' | 'invite_count'
 export type QQGrowthTaskPeriod = 'once' | 'daily' | 'weekly'
 export interface QQGrowthReward {
+  coupon_template_id?: number
   type: QQRewardType; amount: number; quantity: number; prize_name: string; claim_instructions: string
 }
 export interface QQGrowthTask {
@@ -158,6 +164,7 @@ export interface QQCheckinMilestone {
   id: string; name: string; kind: 'checkin_total' | 'checkin_streak'; days: number; repeat?: boolean; reward: QQGrowthReward; enabled: boolean
 }
 export interface QQCheckinConfig {
+ coupon_template_id?: number; coupon_quantity?: number
   milestones: QQCheckinMilestone[]
   reward_distribution?: QQCheckinRewardDistribution
   _sections?: Record<string, string>
@@ -171,6 +178,7 @@ export interface QQCheckinConfig {
   min_recharge_total: number; min_recharge_30d: number; recharge_window_days: number
 }
 export interface QQInviteConfig {
+ coupon_template_id?: number; coupon_quantity?: number
   _version?: string
   enabled: boolean
   invite_reward: number; invite_daily_limit: number
@@ -185,14 +193,14 @@ export interface QQTransferPreview {
   from_email: string; to_email: string; amount: string; fee: string
   net_amount: string; expires_at: string
 }
-export interface QQLotteryPrize { name: string; amount: number; chances?: number; probability_bps: number }
+export interface QQLotteryPrize { coupon_template_id?: number; coupon_quantity?: number; name: string; amount: number; chances?: number; probability_bps: number }
 export interface QQLotteryConfig {
   _version?: string
   enabled: boolean; title: string; recharge_step: number; chances_per_step: number; prizes: QQLotteryPrize[]
   guarantee_enabled: boolean; guarantee_every: number; guarantee_prizes: QQLotteryPrize[]
 }
 export interface QQLotteryState { user_id: number; recharge_total: number; earned: number; bonus_chances?: number; used: number; remaining: number; next_recharge: number; guarantee_every: number; draws_until_guarantee: number }
-export interface QQLotteryDraw { id: number; user_id: number; email: string; member_id: string; prize_name: string; amount: number; chances?: number; remaining: number; created_at: string; is_guaranteed: boolean }
+export interface QQLotteryDraw { coupon_template_id?: number; coupon_quantity?: number; id: number; user_id: number; email: string; member_id: string; prize_name: string; amount: number; chances?: number; remaining: number; created_at: string; is_guaranteed: boolean }
 export interface QQLotteryDrawsPage { items: QQLotteryDraw[]; total: number; page: number; page_size: number }
 export type QQActivityKind = 'checkin' | 'lottery' | 'invite'
 export interface QQActivityParticipant {
@@ -201,12 +209,12 @@ export interface QQActivityParticipant {
 }
 export interface QQActivityRecord {
   id: string; group_id: string; participant: QQActivityParticipant; inviter?: QQActivityParticipant
-  status: string; amount: number; chances?: number; prize_name: string; is_guaranteed?: boolean; remaining?: number; created_at: string
+  status: string; amount: number; chances?: number; coupon_template_id?: number; coupon_quantity?: number; prize_name: string; is_guaranteed?: boolean; remaining?: number; created_at: string
   invited_at?: string; joined_at?: string; left_at?: string; rewarded_at?: string
   reward_user_id: number; reward_email: string
 }
 export interface QQActivityRecordsPage { items: QQActivityRecord[]; total: number; page: number; page_size: number }
-export type QQRewardType = 'balance' | 'chances' | 'physical' | 'other'
+export type QQRewardType = 'balance' | 'chances' | 'physical' | 'other' | 'coupon'
 export interface QQRewardCode {
   batch_name: string; reward_type: QQRewardType; amount: number; quantity: number
   prize_name: string; claim_instructions: string; target_user_id: number | null; expires_at: string | null

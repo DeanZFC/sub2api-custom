@@ -11,6 +11,7 @@ import (
 var ErrRewardCodeRequest = errors.New("奖励记录参数不正确或记录状态已变化，请刷新后重试")
 
 type RewardCode struct {
+	CouponTemplateID  int64      `json:"coupon_template_id,omitempty"`
 	SourceKind        string     `json:"source_kind"`
 	ID                int64      `json:"id"`
 	AppID             string     `json:"app_id"`
@@ -80,14 +81,14 @@ func (s *Service) ListRewardCodes(ctx context.Context, search, status string, pa
 		return out, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.app_id,r.code_hint,r.batch_name,r.reward_type,r.amount,r.quantity,r.prize_name,r.claim_instructions,r.target_user_id,r.expires_at,
- CASE WHEN r.status='unused' AND r.expires_at<=NOW() THEN 'expired' ELSE r.status END,r.user_id,COALESCE(u.email,''),r.member_id,r.redeemed_at,r.fulfilled_at,r.fulfillment_note,r.created_at,r.source_kind`+from+` ORDER BY r.id DESC LIMIT 20 OFFSET $3`, search, status, (page-1)*20)
+ CASE WHEN r.status='unused' AND r.expires_at<=NOW() THEN 'expired' ELSE r.status END,r.user_id,COALESCE(u.email,''),r.member_id,r.redeemed_at,r.fulfilled_at,r.fulfillment_note,r.created_at,r.source_kind,COALESCE(r.coupon_template_id,0)`+from+` ORDER BY r.id DESC LIMIT 20 OFFSET $3`, search, status, (page-1)*20)
 	if err != nil {
 		return out, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var r RewardCode
-		if err = rows.Scan(&r.ID, &r.AppID, &r.CodeHint, &r.BatchName, &r.RewardType, &r.Amount, &r.Quantity, &r.PrizeName, &r.ClaimInstructions, &r.TargetUserID, &r.ExpiresAt, &r.Status, &r.UserID, &r.Email, &r.MemberID, &r.RedeemedAt, &r.FulfilledAt, &r.FulfillmentNote, &r.CreatedAt, &r.SourceKind); err != nil {
+		if err = rows.Scan(&r.ID, &r.AppID, &r.CodeHint, &r.BatchName, &r.RewardType, &r.Amount, &r.Quantity, &r.PrizeName, &r.ClaimInstructions, &r.TargetUserID, &r.ExpiresAt, &r.Status, &r.UserID, &r.Email, &r.MemberID, &r.RedeemedAt, &r.FulfilledAt, &r.FulfillmentNote, &r.CreatedAt, &r.SourceKind, &r.CouponTemplateID); err != nil {
 			return out, err
 		}
 		out.Items = append(out.Items, r)

@@ -13,6 +13,7 @@
       <p>{{ t('qqbot.inviteTitle') }}: {{ yes(data.invite_eligible) }} · {{ data.invite_rule }}</p>
       <p>{{ t('qqbot.workspace.lotteryRemaining') }}: {{ data.lottery.remaining }} · {{ t('qqbot.workspace.untilGuarantee') }}: {{ data.lottery.draws_until_guarantee }}</p>
       <p>{{ t('qqbot.workspace.expectedCheckin') }}: ${{ data.checkin_expected.toFixed(6) }} · {{ t('qqbot.workspace.expectedLottery') }}: ${{ data.lottery_expected.toFixed(6) }} · {{ t('qqbot.workspace.expectedNext') }}: ${{ data.lottery_next_expected.toFixed(6) }}</p>
+      <p class="text-xs text-gray-500">{{ t('coupon.costHint') }}</p>
       <article v-for="task in data.tasks" :key="task.id" class="rounded border p-3 dark:border-dark-700"><strong>{{ task.name }}</strong><p>{{ task.progress }} · {{ task.status || yes(task.eligible) }} · {{ task.reward }}</p></article>
     </div>
   </section>

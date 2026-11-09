@@ -18,6 +18,8 @@ const (
 )
 
 type CheckinConfig struct {
+	CouponTemplateID   int64                      `json:"coupon_template_id,omitempty"`
+	CouponQuantity     int                        `json:"coupon_quantity,omitempty"`
 	Milestones         []CheckinMilestone         `json:"milestones"`
 	StreakReward       *GrowthReward              `json:"streak_reward,omitempty"`
 	StreakDays         int                        `json:"streak_days"`
@@ -30,6 +32,8 @@ type CheckinConfig struct {
 	RechargeRequirement
 }
 type InviteConfig struct {
+	CouponTemplateID int64   `json:"coupon_template_id,omitempty"`
+	CouponQuantity   int     `json:"coupon_quantity,omitempty"`
 	Enabled          bool    `json:"enabled"`
 	InviteReward     float64 `json:"invite_reward"`
 	InviteDailyLimit int     `json:"invite_daily_limit"`
@@ -57,10 +61,12 @@ func (c *InviteConfig) UnmarshalJSON(data []byte) error {
 }
 
 type LotteryPrize struct {
-	Name           string  `json:"name"`
-	Amount         float64 `json:"amount"`
-	Chances        int     `json:"chances"`
-	ProbabilityBPS int     `json:"probability_bps"`
+	CouponTemplateID int64   `json:"coupon_template_id,omitempty"`
+	CouponQuantity   int     `json:"coupon_quantity,omitempty"`
+	Name             string  `json:"name"`
+	Amount           float64 `json:"amount"`
+	Chances          int     `json:"chances"`
+	ProbabilityBPS   int     `json:"probability_bps"`
 }
 type LotteryConfig struct {
 	Enabled          bool           `json:"enabled"`
@@ -130,13 +136,19 @@ func (s *Service) InviteConfig(ctx context.Context) (InviteConfig, error) {
 	requirement := c.inviteRechargeRequirement()
 	requirement.RechargeWindowDays = requirement.windowDays()
 	return InviteConfig{
-		Enabled: c.InviteEnabled, InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit,
+		Enabled: c.InviteEnabled, InviteReward: c.InviteReward, InviteDailyLimit: c.InviteDailyLimit, CouponTemplateID: c.InviteCouponTemplateID, CouponQuantity: c.InviteCouponQuantity,
 		RechargeRequirement: requirement,
 	}, err
 }
 func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
+	if err := validateOptionalCoupon(c.CouponTemplateID, c.CouponQuantity); err != nil {
+		return err
+	}
+	if err := validateCouponRewardTemplates(ctx, s.db, c); err != nil {
+		return err
+	}
 	if !validRewardAmount(c.InviteReward) {
-		return errors.New("邀请奖励需在 0 到 1000 USD 之间，最多 8 位小数；0 表示关闭")
+		return errors.New("邀请奖励需在 0 到 1000 USD 之间，最多 8 位小数；0 表示不发余额")
 	}
 	if c.InviteDailyLimit < 0 || c.InviteDailyLimit > 100000 {
 		return errors.New("每位邀请人每日奖励次数需在 0 到 100000 之间；0 表示禁止")
@@ -152,6 +164,8 @@ func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 			old.InviteEnabled = c.Enabled
 		}
 		old.InviteReward = c.InviteReward
+		old.InviteCouponTemplateID = c.CouponTemplateID
+		old.InviteCouponQuantity = c.CouponQuantity
 		old.InviteDailyLimit = c.InviteDailyLimit
 		old.InviteMinRechargeTotal = c.MinRechargeTotal
 		old.InviteMinRecharge30d = c.MinRecharge30d
@@ -161,6 +175,9 @@ func (s *Service) SaveInviteConfig(ctx context.Context, c InviteConfig) error {
 	return err
 }
 func validateCheckin(c CheckinConfig) error {
+	if err := validateOptionalCoupon(c.CouponTemplateID, c.CouponQuantity); err != nil {
+		return err
+	}
 	if err := validateCheckinMilestones(c); err != nil {
 		return err
 	}
@@ -196,7 +213,7 @@ func validateLottery(c LotteryConfig) error {
 			return fmt.Errorf("保底奖池：%w", err)
 		}
 		for _, p := range c.GuaranteePrizes {
-			if p.Amount <= 0 && p.Chances <= 0 {
+			if p.Amount <= 0 && p.Chances <= 0 && p.CouponQuantity <= 0 {
 				return errors.New("保底奖项额度或抽奖次数必须大于 0")
 			}
 		}
@@ -209,6 +226,9 @@ func validateLotteryPrizes(prizes []LotteryPrize) error {
 	}
 	sum := 0
 	for _, p := range prizes {
+		if p.CouponQuantity < 0 || p.CouponQuantity > 100 || p.CouponTemplateID < 0 || (p.CouponQuantity > 0 && p.CouponTemplateID == 0) {
+			return errors.New("优惠券奖项须选择模板，数量为 0～100")
+		}
 		if strings.TrimSpace(p.Name) == "" || len([]rune(p.Name)) > 60 || !validRewardAmount(p.Amount) || p.Chances < 0 || p.Chances > 1000 || p.ProbabilityBPS < 1 || p.ProbabilityBPS > 10000 {
 			return errors.New("奖项名称、金额、抽奖次数或概率不正确；概率最小 0.01%，金额最多 1000 USD，抽奖次数须为 0～1000")
 		}
@@ -284,6 +304,9 @@ func (s *Service) saveActivityConfig(ctx context.Context, key string, lock int64
 		if e = checkConfigVersion(ctx, current); e != nil {
 			return e
 		}
+	}
+	if err := validateCouponRewardTemplates(ctx, tx, c); err != nil {
+		return err
 	}
 	raw, err := json.Marshal(c)
 	if err != nil {

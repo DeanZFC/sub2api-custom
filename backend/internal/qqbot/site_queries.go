@@ -247,14 +247,20 @@ func siteRuleMoney(amount float64) string {
 }
 
 func lotteryPrizeDescription(prize LotteryPrize) string {
-	if prize.Chances == 0 {
-		return siteRuleMoney(prize.Amount)
+	parts := []string{}
+	if prize.Amount > 0 {
+		parts = append(parts, siteRuleMoney(prize.Amount))
 	}
-	chances := fmt.Sprintf("抽奖次数 %d 次", prize.Chances)
-	if prize.Amount == 0 {
-		return chances
+	if prize.Chances > 0 {
+		parts = append(parts, fmt.Sprintf("抽奖次数 %d 次", prize.Chances))
 	}
-	return siteRuleMoney(prize.Amount) + " + " + chances
+	if prize.CouponQuantity > 0 {
+		parts = append(parts, fmt.Sprintf("充值优惠券 × %d", prize.CouponQuantity))
+	}
+	if len(parts) == 0 {
+		return siteRuleMoney(0)
+	}
+	return strings.Join(parts, " + ")
 }
 
 func siteCheckinRules(c CheckinConfig) string {
@@ -264,6 +270,9 @@ func siteCheckinRules(c CheckinConfig) string {
 	amount := siteRuleMoney(c.MinAmount)
 	if c.MinAmount != c.MaxAmount {
 		amount += "～" + siteRuleMoney(c.MaxAmount)
+	}
+	if c.CouponQuantity > 0 {
+		amount += fmt.Sprintf(" + 充值优惠券 × %d", c.CouponQuantity)
 	}
 	text := "📅 **签到规则**\n每日签到一次（北京时间）\n奖励：" + amount + "\n充值条件：" + c.describe() + "\n参与：签到"
 	if reward := c.streakReward(); reward.enabled() {
@@ -289,10 +298,10 @@ func siteCheckinRules(c CheckinConfig) string {
 }
 
 func siteInviteRules(c Config) string {
-	if !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+	if !c.InviteEnabled || !c.inviteHasReward() || c.InviteDailyLimit <= 0 {
 		return "🎁 **邀请规则**\n邀请活动未开启。"
 	}
-	return fmt.Sprintf("🎁 **邀请规则**\n每位有效受邀者奖励：%s\n每位邀请人每日上限：%d 人（北京时间）\n通过官方邀请，7 天内入群并留群；双方绑定账号，每位受邀账号限奖一次。\n%s\n查询：邀请奖励", siteRuleMoney(c.InviteReward), c.InviteDailyLimit, c.inviteRechargeRequirement().invite())
+	return fmt.Sprintf("🎁 **邀请规则**\n每位有效受邀者奖励：%s\n每位邀请人每日上限：%d 人（北京时间）\n通过官方邀请，7 天内入群并留群；双方绑定账号，每位受邀账号限奖一次。\n%s\n查询：邀请奖励", c.inviteRewardDescription(), c.InviteDailyLimit, c.inviteRechargeRequirement().invite())
 }
 
 func siteLotteryRules(c LotteryConfig) string {

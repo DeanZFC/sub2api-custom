@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/invoicerequest"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/shopspring/decimal"
@@ -29,6 +30,8 @@ const maxInvoicePageSize = 1000
 type InvoiceConfig struct {
 	Enabled      bool    `json:"enabled"`
 	MinAmount    float64 `json:"min_amount"`
+	FeeRate      float64 `json:"fee_rate"`
+	FeeMinAmount float64 `json:"fee_min_amount"`
 	Instructions string  `json:"instructions"`
 	Currency     string  `json:"currency"`
 }
@@ -47,6 +50,8 @@ type InvoiceRequest struct {
 	UserEmail     string     `json:"user_email"`
 	OrderIDs      []int64    `json:"order_ids"`
 	Amount        float64    `json:"amount"`
+	FeeAmount     float64    `json:"fee_amount"`
+	FeeRefunded   bool       `json:"fee_refunded"`
 	Currency      string     `json:"currency"`
 	BuyerType     string     `json:"buyer_type"`
 	Title         string     `json:"title"`
@@ -76,7 +81,18 @@ func (s *PaymentService) GetInvoiceConfig(ctx context.Context) (*InvoiceConfig, 
 	if err != nil {
 		return nil, err
 	}
-	return &InvoiceConfig{Enabled: cfg.InvoiceEnabled, MinAmount: cfg.InvoiceMinAmount, Instructions: cfg.InvoiceInstructions, Currency: "CNY"}, nil
+	return &InvoiceConfig{
+		Enabled: cfg.InvoiceEnabled, MinAmount: cfg.InvoiceMinAmount,
+		FeeRate: cfg.InvoiceFeeRate, FeeMinAmount: cfg.InvoiceFeeMinAmount,
+		Instructions: cfg.InvoiceInstructions, Currency: "CNY",
+	}, nil
+}
+
+// The fee is charged in account balance units using the invoice amount's
+// numeric value; payment exchange rates and recharge bonuses do not apply.
+func invoiceFeeAmount(amount decimal.Decimal, cfg *InvoiceConfig) decimal.Decimal {
+	proportional := amount.Mul(decimal.NewFromFloat(cfg.FeeRate)).Div(decimal.NewFromInt(100))
+	return decimal.Max(proportional, decimal.NewFromFloat(cfg.FeeMinAmount)).Round(2)
 }
 
 func invoiceEligiblePredicates(userID int64) []predicate.PaymentOrder {
@@ -292,8 +308,18 @@ func (s *PaymentService) CreateInvoiceRequest(ctx context.Context, userID int64,
 	if total.LessThan(decimal.NewFromFloat(cfg.MinAmount)) {
 		return nil, infraerrors.BadRequest("INVOICE_MIN_AMOUNT", fmt.Sprintf("invoice amount must be at least CNY %.2f", cfg.MinAmount))
 	}
+	fee := invoiceFeeAmount(total, cfg).InexactFloat64()
+	if fee > 0 {
+		count, err := tx.User.Update().Where(user.IDEQ(userID), user.DeletedAtIsNil(), user.BalanceGTE(fee)).AddBalance(-fee).Save(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if count != 1 {
+			return nil, infraerrors.BadRequest("INVOICE_INSUFFICIENT_BALANCE", fmt.Sprintf("invoice application requires %.2f account balance for the fee", fee))
+		}
+	}
 	item, err := tx.InvoiceRequest.Create().SetUserID(userID).SetUserEmail(orders[0].UserEmail).
-		SetOrderIds(req.OrderIDs).SetAmount(total.InexactFloat64()).SetCurrency("CNY").
+		SetOrderIds(req.OrderIDs).SetAmount(total.InexactFloat64()).SetFeeAmount(fee).SetCurrency("CNY").
 		SetBuyerType(req.BuyerType).SetTitle(req.Title).SetTaxID(req.TaxID).SetEmails(req.Emails).SetRemark(req.Remark).Save(ctx)
 	if err != nil {
 		return nil, err
@@ -308,6 +334,9 @@ func (s *PaymentService) CreateInvoiceRequest(ctx context.Context, userID int64,
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
+	}
+	if fee > 0 {
+		s.invalidateRefundBalanceCache(ctx, userID)
 	}
 	return invoiceRequestDTO(item), nil
 }
@@ -340,18 +369,36 @@ func (s *PaymentService) RejectInvoiceRequest(ctx context.Context, id int64, rem
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := s.lockedInvoiceRequest(ctx, tx, id); err != nil {
-		return nil, err
-	}
-	item, err := tx.InvoiceRequest.UpdateOneID(id).SetStatus("rejected").SetAdminRemark(remark).Save(ctx)
+	item, err := s.lockedInvoiceRequest(ctx, tx, id)
 	if err != nil {
 		return nil, err
+	}
+	refundFee := item.FeeAmount > 0 && !item.FeeRefunded
+	count, err := tx.InvoiceRequest.Update().Where(invoicerequest.IDEQ(id), invoicerequest.StatusEQ("pending")).
+		SetStatus("rejected").SetAdminRemark(remark).SetFeeRefunded(refundFee || item.FeeRefunded).Save(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if count != 1 {
+		return nil, infraerrors.Conflict("INVOICE_ALREADY_PROCESSED", "invoice application was already processed")
+	}
+	if refundFee {
+		if err := tx.User.UpdateOneID(item.UserID).AddBalance(item.FeeAmount).Exec(ctx); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := tx.PaymentOrder.Update().Where(paymentorder.InvoiceRequestIDEQ(id)).ClearInvoiceRequestID().Save(ctx); err != nil {
 		return nil, err
 	}
+	item, err = tx.InvoiceRequest.Query().Select(invoiceMetadataFields()...).Where(invoicerequest.IDEQ(id)).Only(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
+	}
+	if refundFee {
+		s.invalidateRefundBalanceCache(ctx, item.UserID)
 	}
 	return invoiceRequestDTO(item), nil
 }
@@ -431,7 +478,8 @@ func (s *PaymentService) GetInvoicePDF(ctx context.Context, id, userID int64) ([
 func invoiceRequestDTO(item *dbent.InvoiceRequest) *InvoiceRequest {
 	return &InvoiceRequest{
 		ID: item.ID, UserID: item.UserID, UserEmail: item.UserEmail, OrderIDs: item.OrderIds,
-		Amount: item.Amount, Currency: item.Currency, BuyerType: item.BuyerType,
+		Amount: item.Amount, FeeAmount: item.FeeAmount, FeeRefunded: item.FeeRefunded,
+		Currency: item.Currency, BuyerType: item.BuyerType,
 		Title: item.Title, TaxID: item.TaxID, Emails: item.Emails, Remark: item.Remark,
 		Status: item.Status, AdminRemark: item.AdminRemark, InvoiceNumber: item.InvoiceNumber,
 		FileName: item.FileName, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, IssuedAt: item.IssuedAt,

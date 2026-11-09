@@ -55,6 +55,7 @@ func helpSystemItems() []helpItem {
 		{action: "lottery_count", label: "抽奖次数", description: "查询剩余抽奖次数", command: "抽奖次数"},
 		{action: "lottery_info", label: "抽奖活动", description: "查看抽奖活动规则", command: "抽奖活动"},
 		{action: "growth", label: "成长任务", description: "查看成长进度和奖励", command: "成长任务"},
+		{action: "coupons", label: "我的优惠券", description: "查看网站充值优惠券、门槛和有效期", command: "我的优惠券", usage: "我的优惠券 [页码]"},
 		{action: "invite_rewards", label: "邀请奖励", description: "查看邀请奖励规则", command: "邀请奖励"},
 		{action: "invites", label: "我的邀请", description: "查看邀请状态", command: "我的邀请"},
 		{action: "rankings", label: "今日排行榜", description: "查看今日排行榜", command: "今日排行榜"},

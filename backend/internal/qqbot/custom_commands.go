@@ -22,6 +22,9 @@ type CustomCommand struct {
 var customCommandPattern = regexp.MustCompile(`^/[\p{L}\p{N}_-]{1,32}$`)
 
 func isBuiltinCommand(cmd string) bool {
+	if cmd == "我的优惠券" {
+		return true
+	}
 	switch cmd {
 	case "帮助", "签到", "今日用量", "成长任务", "邀请奖励", "邀请活动", "我的邀请", "我的余额", "余额", "我的奖励", "抽奖", "抽奖次数", "我的抽奖", "抽奖活动", "渠道状态", "生图", "价格", "绑定", "转账", "今日排行榜", "今日排行版":
 		return true

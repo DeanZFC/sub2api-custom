@@ -55,6 +55,7 @@ type ResumeTokenClaims struct {
 }
 
 type WeChatPaymentResumeClaims struct {
+	CouponID    int64  `json:"cid,omitempty"`
 	TokenType   string `json:"tk,omitempty"`
 	OpenID      string `json:"openid"`
 	PaymentType string `json:"pt,omitempty"`

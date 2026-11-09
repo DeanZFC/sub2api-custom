@@ -46,14 +46,15 @@ describe('channel health cards', () => {
       global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
     })
     const cards = wrapper.findAll('[data-testid=channel-health-card]')
-    expect(cards.map(card => card.findAll('[data-testid=model-metrics-row]').length)).toEqual([3, 1])
-    const modelCells = cards[0].findAll('[data-testid=model-metrics-row]')
-    expect(modelCells.map(model => model.findAll('td')[0].text())).toEqual(['90.0%', '0.00%', '-'])
-    expect(cards[1].get('[data-testid=model-metrics-row]').text()).toContain('50.0%')
+    expect(cards.map(card => card.findAll('[data-testid=model-metrics-card]').length)).toEqual([3, 1])
+    expect(wrapper.findAll('[data-testid=model-metrics-toggle]')).toHaveLength(0)
+    const modelCells = cards[0].findAll('[data-testid=model-metrics-card]')
+    expect(modelCells.map(model => model.get('[data-testid=model-cache-rate]').text())).toEqual(['90.0%', '0.00%', '-'])
+    expect(cards[1].get('[data-testid=model-metrics-card]').text()).toContain('50.0%')
     expect(wrapper.text()).not.toContain('wrong-platform')
     expect(wrapper.text()).not.toContain('unused')
 
-    await modelCells[0].get('button').trigger('click')
+    await modelCells[0].trigger('click')
     expect(cards[0].get('[data-testid=card-detail-scope]').text()).toContain('gpt-6.1')
     expect(cards[0].findAll('dd')[0].text()).toBe('70.0%')
     expect(cards[0].get('[data-testid=recent-requests]').findAll('button[data-state]')[19].attributes('data-state')).toBe('critical')
@@ -62,9 +63,43 @@ describe('channel health cards', () => {
     await cards[0].get('[data-testid=card-detail-scope] button').trigger('click')
     expect(cards[0].get('[data-testid=recent-requests]').findAll('button[data-state]')[19].attributes('data-state')).toBe('healthy')
 
-    await modelCells[0].get('button').trigger('click')
+    await modelCells[0].trigger('click')
     await wrapper.setProps({ modelRows: modelRows.slice(1) })
     expect(cards[0].get('[data-testid=card-detail-scope]').text()).toContain('整体')
+    wrapper.unmount()
+  })
+
+  it('expands models per channel and keeps selected details when the model is collapsed', async () => {
+    const models = ['gpt-6.1', 'gpt-6', 'gpt-5', 'gpt-4']
+    const modelRows: MonitorMatrixRow[] = [7, 8].flatMap(group_id => models.map(model => ({
+      ...row, group_id, model, recent_requests: [request(model === 'gpt-4' ? 'error' : 'success')],
+    })))
+    const wrapper = mount(ChannelHealthCards, {
+      props: {
+        rows: [{ ...row, recent_requests: [request('success')] }, { ...row, group_id: 8 }],
+        modelRows, coverage, groupBy: 'platform_group', healthMode: 'overall',
+      },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+    })
+    const cards = wrapper.findAll('[data-testid=channel-health-card]')
+    expect(cards.map(card => card.findAll('[data-testid=model-metrics-card]').length)).toEqual([3, 3])
+    expect(cards.map(card => card.get('[data-testid=model-metrics-toggle]').attributes('aria-expanded'))).toEqual(['false', 'false'])
+
+    await cards[0].get('[data-testid=model-metrics-toggle]').trigger('click')
+    expect(cards.map(card => card.findAll('[data-testid=model-metrics-card]').length)).toEqual([4, 3])
+    expect(cards[0].get('[data-testid=model-metrics-toggle]').attributes('aria-expanded')).toBe('true')
+    const hiddenModel = cards[0].findAll('[data-testid=model-metrics-card]').find(model => model.text().includes('gpt-4'))!
+    await hiddenModel.trigger('click')
+    expect(hiddenModel.attributes('aria-pressed')).toBe('true')
+    expect(cards[0].get('[data-testid=card-detail-scope]').text()).toContain('gpt-4')
+    expect(cards[0].get('[data-testid=recent-requests]').findAll('button[data-state]')[19].attributes('data-state')).toBe('critical')
+
+    await cards[0].get('[data-testid=model-metrics-toggle]').trigger('click')
+    expect(cards[0].findAll('[data-testid=model-metrics-card]')).toHaveLength(3)
+    expect(cards[0].get('[data-testid=model-metrics-toggle]').attributes('aria-expanded')).toBe('false')
+    expect(cards[0].get('[data-testid=card-detail-scope]').text()).toContain('gpt-4')
+    expect(cards[0].get('[data-testid=recent-requests]').findAll('button[data-state]')[19].attributes('data-state')).toBe('critical')
+    expect(cards[1].get('[data-testid=card-detail-scope]').text()).toContain('整体')
     wrapper.unmount()
   })
 

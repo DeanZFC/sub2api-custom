@@ -21,6 +21,10 @@ const (
 	FieldOrderIds = "order_ids"
 	// FieldAmount holds the string denoting the amount field in the database.
 	FieldAmount = "amount"
+	// FieldFeeAmount holds the string denoting the fee_amount field in the database.
+	FieldFeeAmount = "fee_amount"
+	// FieldFeeRefunded holds the string denoting the fee_refunded field in the database.
+	FieldFeeRefunded = "fee_refunded"
 	// FieldCurrency holds the string denoting the currency field in the database.
 	FieldCurrency = "currency"
 	// FieldBuyerType holds the string denoting the buyer_type field in the database.
@@ -60,6 +64,8 @@ var Columns = []string{
 	FieldUserEmail,
 	FieldOrderIds,
 	FieldAmount,
+	FieldFeeAmount,
+	FieldFeeRefunded,
 	FieldCurrency,
 	FieldBuyerType,
 	FieldTitle,
@@ -89,6 +95,10 @@ func ValidColumn(column string) bool {
 var (
 	// UserEmailValidator is a validator for the "user_email" field. It is called by the builders before save.
 	UserEmailValidator func(string) error
+	// DefaultFeeAmount holds the default value on creation for the "fee_amount" field.
+	DefaultFeeAmount float64
+	// DefaultFeeRefunded holds the default value on creation for the "fee_refunded" field.
+	DefaultFeeRefunded bool
 	// DefaultCurrency holds the default value on creation for the "currency" field.
 	DefaultCurrency string
 	// CurrencyValidator is a validator for the "currency" field. It is called by the builders before save.
@@ -150,6 +160,16 @@ func ByUserEmail(opts ...sql.OrderTermOption) OrderOption {
 // ByAmount orders the results by the amount field.
 func ByAmount(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAmount, opts...).ToFunc()
+}
+
+// ByFeeAmount orders the results by the fee_amount field.
+func ByFeeAmount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFeeAmount, opts...).ToFunc()
+}
+
+// ByFeeRefunded orders the results by the fee_refunded field.
+func ByFeeRefunded(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFeeRefunded, opts...).ToFunc()
 }
 
 // ByCurrency orders the results by the currency field.

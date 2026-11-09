@@ -69,6 +69,16 @@ func Amount(v float64) predicate.InvoiceRequest {
 	return predicate.InvoiceRequest(sql.FieldEQ(FieldAmount, v))
 }
 
+// FeeAmount applies equality check predicate on the "fee_amount" field. It's identical to FeeAmountEQ.
+func FeeAmount(v float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldEQ(FieldFeeAmount, v))
+}
+
+// FeeRefunded applies equality check predicate on the "fee_refunded" field. It's identical to FeeRefundedEQ.
+func FeeRefunded(v bool) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldEQ(FieldFeeRefunded, v))
+}
+
 // Currency applies equality check predicate on the "currency" field. It's identical to CurrencyEQ.
 func Currency(v string) predicate.InvoiceRequest {
 	return predicate.InvoiceRequest(sql.FieldEQ(FieldCurrency, v))
@@ -277,6 +287,56 @@ func AmountLT(v float64) predicate.InvoiceRequest {
 // AmountLTE applies the LTE predicate on the "amount" field.
 func AmountLTE(v float64) predicate.InvoiceRequest {
 	return predicate.InvoiceRequest(sql.FieldLTE(FieldAmount, v))
+}
+
+// FeeAmountEQ applies the EQ predicate on the "fee_amount" field.
+func FeeAmountEQ(v float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldEQ(FieldFeeAmount, v))
+}
+
+// FeeAmountNEQ applies the NEQ predicate on the "fee_amount" field.
+func FeeAmountNEQ(v float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldNEQ(FieldFeeAmount, v))
+}
+
+// FeeAmountIn applies the In predicate on the "fee_amount" field.
+func FeeAmountIn(vs ...float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldIn(FieldFeeAmount, vs...))
+}
+
+// FeeAmountNotIn applies the NotIn predicate on the "fee_amount" field.
+func FeeAmountNotIn(vs ...float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldNotIn(FieldFeeAmount, vs...))
+}
+
+// FeeAmountGT applies the GT predicate on the "fee_amount" field.
+func FeeAmountGT(v float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldGT(FieldFeeAmount, v))
+}
+
+// FeeAmountGTE applies the GTE predicate on the "fee_amount" field.
+func FeeAmountGTE(v float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldGTE(FieldFeeAmount, v))
+}
+
+// FeeAmountLT applies the LT predicate on the "fee_amount" field.
+func FeeAmountLT(v float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldLT(FieldFeeAmount, v))
+}
+
+// FeeAmountLTE applies the LTE predicate on the "fee_amount" field.
+func FeeAmountLTE(v float64) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldLTE(FieldFeeAmount, v))
+}
+
+// FeeRefundedEQ applies the EQ predicate on the "fee_refunded" field.
+func FeeRefundedEQ(v bool) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldEQ(FieldFeeRefunded, v))
+}
+
+// FeeRefundedNEQ applies the NEQ predicate on the "fee_refunded" field.
+func FeeRefundedNEQ(v bool) predicate.InvoiceRequest {
+	return predicate.InvoiceRequest(sql.FieldNEQ(FieldFeeRefunded, v))
 }
 
 // CurrencyEQ applies the EQ predicate on the "currency" field.

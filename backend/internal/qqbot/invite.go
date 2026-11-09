@@ -73,7 +73,7 @@ func invitationStatusPriority(status string) int {
 }
 
 func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, error) {
-	if !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+	if !c.InviteEnabled || !c.inviteHasReward() || c.InviteDailyLimit <= 0 {
 		return "邀请活动未开启。", nil
 	}
 	requirement := c.inviteRechargeRequirement()
@@ -82,8 +82,8 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 	err := s.db.QueryRowContext(ctx, `SELECT b.user_id FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id
  WHERE b.app_id=$1 AND b.member_id=$2 AND u.status='active' AND u.deleted_at IS NULL`, c.AppID, j.MemberID).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Sprintf("🎁 **邀请奖励**\n每人奖励：USD %.2f\n每日上限：%d 人\n\n%s\n%s\n\n请先发送“绑定 邮箱或绑定码”绑定网站账号。",
-			c.InviteReward, c.InviteDailyLimit, conditions, requirement.invite()), nil
+		return fmt.Sprintf("🎁 **邀请奖励**\n每人奖励：%s\n每日上限：%d 人\n\n%s\n%s\n\n请先发送“绑定 邮箱或绑定码”绑定网站账号。",
+			c.inviteRewardDescription(), c.InviteDailyLimit, conditions, requirement.invite()), nil
 	}
 	if err != nil {
 		return "", err
@@ -101,8 +101,8 @@ func (s *Service) inviteInfo(ctx context.Context, c Config, j Job) (string, erro
 	if err != nil {
 		return "", err
 	}
-	info := fmt.Sprintf("🎁 **邀请奖励**\n每人奖励：USD %.2f\n今日入群：%d 人\n今日已奖励：%d/%d 人（北京时间）\n\n%s\n%s",
-		c.InviteReward, joined, rewarded, c.InviteDailyLimit, conditions, requirement.invite())
+	info := fmt.Sprintf("🎁 **邀请奖励**\n每人奖励：%s\n今日入群：%d 人\n今日已奖励：%d/%d 人（北京时间）\n\n%s\n%s",
+		c.inviteRewardDescription(), joined, rewarded, c.InviteDailyLimit, conditions, requirement.invite())
 	if requirement.enabled() {
 		eligibility, eligibilityErr := requirement.eligibility(ctx, s.db, userID, false)
 		if eligibilityErr != nil {

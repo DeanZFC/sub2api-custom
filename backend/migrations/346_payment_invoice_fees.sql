@@ -1,0 +1,3 @@
+ALTER TABLE payment_invoice_requests
+    ADD COLUMN IF NOT EXISTS fee_amount DECIMAL(20,2) NOT NULL DEFAULT 0 CHECK (fee_amount >= 0),
+    ADD COLUMN IF NOT EXISTS fee_refunded BOOLEAN NOT NULL DEFAULT FALSE;

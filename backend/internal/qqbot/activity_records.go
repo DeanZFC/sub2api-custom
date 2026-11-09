@@ -20,23 +20,25 @@ type ActivityParticipant struct {
 }
 
 type ActivityRecord struct {
-	ID           string               `json:"id"`
-	GroupID      string               `json:"group_id"`
-	Participant  ActivityParticipant  `json:"participant"`
-	Inviter      *ActivityParticipant `json:"inviter,omitempty"`
-	Status       string               `json:"status"`
-	Amount       float64              `json:"amount"`
-	Chances      int                  `json:"chances"`
-	PrizeName    string               `json:"prize_name"`
-	IsGuaranteed bool                 `json:"is_guaranteed"`
-	Remaining    *int64               `json:"remaining,omitempty"`
-	CreatedAt    time.Time            `json:"created_at"`
-	InvitedAt    *time.Time           `json:"invited_at,omitempty"`
-	JoinedAt     *time.Time           `json:"joined_at,omitempty"`
-	LeftAt       *time.Time           `json:"left_at,omitempty"`
-	RewardedAt   *time.Time           `json:"rewarded_at,omitempty"`
-	RewardUserID int64                `json:"reward_user_id"`
-	RewardEmail  string               `json:"reward_email"`
+	CouponTemplateID int64                `json:"coupon_template_id,omitempty"`
+	CouponQuantity   int                  `json:"coupon_quantity,omitempty"`
+	ID               string               `json:"id"`
+	GroupID          string               `json:"group_id"`
+	Participant      ActivityParticipant  `json:"participant"`
+	Inviter          *ActivityParticipant `json:"inviter,omitempty"`
+	Status           string               `json:"status"`
+	Amount           float64              `json:"amount"`
+	Chances          int                  `json:"chances"`
+	PrizeName        string               `json:"prize_name"`
+	IsGuaranteed     bool                 `json:"is_guaranteed"`
+	Remaining        *int64               `json:"remaining,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	InvitedAt        *time.Time           `json:"invited_at,omitempty"`
+	JoinedAt         *time.Time           `json:"joined_at,omitempty"`
+	LeftAt           *time.Time           `json:"left_at,omitempty"`
+	RewardedAt       *time.Time           `json:"rewarded_at,omitempty"`
+	RewardUserID     int64                `json:"reward_user_id"`
+	RewardEmail      string               `json:"reward_email"`
 }
 
 type ActivityRecordsPage struct {
@@ -85,10 +87,14 @@ func listParticipationRecords(ctx context.Context, tx *sql.Tx, appID, kind, sear
 	table, extraFilter, prize, remaining := "qq_bot_rewards", " AND r.kind='checkin'", "''", "NULL::bigint"
 	guaranteed := "false"
 	chances := "0"
+	couponID := "COALESCE((SELECT c.coupon_template_id FROM qq_bot_reward_codes c WHERE c.source_key=r.reward_key||':coupon' AND c.reward_type='coupon' AND c.user_id=r.user_id),0)"
+	couponQuantity := "COALESCE((SELECT c.quantity FROM qq_bot_reward_codes c WHERE c.source_key=r.reward_key||':coupon' AND c.reward_type='coupon' AND c.user_id=r.user_id),0)"
 	if kind == "lottery" {
 		table, extraFilter, prize, remaining = "qq_bot_lottery_draws", "", "r.prize_name", "r.remaining"
 		guaranteed = "COALESCE(r.config_snapshot->'is_guaranteed'='true'::jsonb,false)"
 		chances = "COALESCE((r.config_snapshot->>'awarded_chances')::integer,0)"
+		couponID = "COALESCE((r.config_snapshot->>'coupon_template_id')::bigint,0)"
+		couponQuantity = "COALESCE((r.config_snapshot->>'coupon_quantity')::integer,0)"
 	}
 	from := ` FROM ` + table + ` r JOIN users u ON u.id=r.user_id
  LEFT JOIN qq_bot_bindings b ON b.app_id=r.app_id AND b.member_id=r.member_id AND b.user_id=r.user_id`
@@ -100,7 +106,7 @@ func listParticipationRecords(ctx context.Context, tx *sql.Tx, appID, kind, sear
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT r.id::text,r.group_id,r.member_id,r.user_id,u.email,
  COALESCE(b.nickname,''),b.user_id IS NOT NULL,u.status,u.deleted_at IS NOT NULL,
- r.amount,`+prize+`,`+remaining+`,r.created_at,`+guaranteed+`,`+chances+from+filter+` ORDER BY r.created_at DESC,r.id DESC LIMIT $3 OFFSET $4`, appID, search, out.PageSize, (out.Page-1)*out.PageSize)
+ r.amount,`+prize+`,`+remaining+`,r.created_at,`+guaranteed+`,`+chances+","+couponID+","+couponQuantity+from+filter+` ORDER BY r.created_at DESC,r.id DESC LIMIT $3 OFFSET $4`, appID, search, out.PageSize, (out.Page-1)*out.PageSize)
 	if err != nil {
 		return err
 	}
@@ -108,11 +114,11 @@ func listParticipationRecords(ctx context.Context, tx *sql.Tx, appID, kind, sear
 	for rows.Next() {
 		r := ActivityRecord{Status: "credited"}
 		targets := append([]any{&r.ID, &r.GroupID}, participantTargets(&r.Participant)...)
-		targets = append(targets, &r.Amount, &r.PrizeName, &r.Remaining, &r.CreatedAt, &r.IsGuaranteed, &r.Chances)
+		targets = append(targets, &r.Amount, &r.PrizeName, &r.Remaining, &r.CreatedAt, &r.IsGuaranteed, &r.Chances, &r.CouponTemplateID, &r.CouponQuantity)
 		if err = rows.Scan(targets...); err != nil {
 			return err
 		}
-		if kind == "lottery" && r.Amount == 0 && r.Chances == 0 {
+		if kind == "lottery" && r.Amount == 0 && r.Chances == 0 && r.CouponQuantity == 0 {
 			r.Status = "no_prize"
 		}
 		out.Items = append(out.Items, r)
@@ -196,12 +202,14 @@ LEFT JOIN LATERAL (
  COALESCE(m.invited_at,m.first_seen_at),m.invited_at,m.joined_at,m.left_at,
  COALESCE(r.id,0),COALESCE(r.app_id=m.app_id AND r.group_id=m.group_id AND r.member_id=m.inviter_id,false),
  COALESCE(r.amount,0),r.created_at,COALESCE(r.user_id,0),COALESCE(ru.email,''),
+ COALESCE(rc.coupon_template_id,0),COALESCE(rc.quantity,0),
  (SELECT COUNT(*) FROM qq_bot_rewards daily WHERE daily.kind='invite' AND daily.user_id=m.inviter_uid
  AND (daily.created_at AT TIME ZONE 'Asia/Shanghai')::date=`+dateParam+`),`+qualificationSelect+`
  FROM relationships m`+qualificationJoins+` LEFT JOIN LATERAL (
  SELECT r.* FROM qq_bot_rewards r WHERE r.kind='invite' AND
  ((r.app_id=m.app_id AND r.source_member_id=m.member_id) OR r.source_user_id=NULLIF(m.uid,0))
  ORDER BY r.id LIMIT 1) r ON true LEFT JOIN users ru ON ru.id=r.user_id
+ LEFT JOIN qq_bot_reward_codes rc ON rc.source_key=r.reward_key||':coupon' AND rc.reward_type='coupon' AND rc.user_id=r.user_id
  ORDER BY COALESCE(m.invited_at,m.first_seen_at) DESC,m.group_id,m.member_id`, args...)
 	if err != nil {
 		return err
@@ -216,13 +224,14 @@ LEFT JOIN LATERAL (
 		targets := append([]any{&r.ID, &r.GroupID}, participantTargets(&r.Participant)...)
 		targets = append(targets, participantTargets(r.Inviter)...)
 		targets = append(targets, &r.CreatedAt, &r.InvitedAt, &r.JoinedAt, &r.LeftAt, &rewardID, &ownReward,
-			&r.Amount, &r.RewardedAt, &r.RewardUserID, &r.RewardEmail, &dailyCount, &rechargeEligible)
+			&r.Amount, &r.RewardedAt, &r.RewardUserID, &r.RewardEmail, &r.CouponTemplateID, &r.CouponQuantity, &dailyCount, &rechargeEligible)
 		if err = rows.Scan(targets...); err != nil {
 			return err
 		}
 		r.Status = invitationRecordStatus(c, r, rewardID, ownReward, dailyCount, rechargeEligible)
 		if rewardID != 0 && !ownReward {
 			r.Amount, r.RewardedAt, r.RewardUserID, r.RewardEmail = 0, nil, 0, ""
+			r.CouponTemplateID, r.CouponQuantity = 0, 0
 		}
 		visit(r)
 	}
@@ -251,7 +260,7 @@ func invitationRecordStatus(c Config, r ActivityRecord, rewardID int64, ownRewar
 		return "account_unavailable"
 	case r.Participant.UserID == r.Inviter.UserID:
 		return "self_invitation"
-	case !c.Enabled || !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0:
+	case !c.Enabled || !c.InviteEnabled || !c.inviteHasReward() || c.InviteDailyLimit <= 0:
 		return "disabled"
 	case !c.allows(r.GroupID):
 		return "group_disabled"

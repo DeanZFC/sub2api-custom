@@ -91,6 +91,9 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 		return out, err
 	}
 	out.CheckinRule = checkin.describe()
+	if checkin.CouponQuantity > 0 {
+		out.CheckinRule += fmt.Sprintf("；每次签到发放充值优惠券 × %d", checkin.CouponQuantity)
+	}
 	out.CheckinEligible = out.Bound && c.Enabled && checkin.Enabled && checkin.satisfied(eligible)
 	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_bot_rewards WHERE app_id=$1 AND user_id=$2 AND kind='checkin' AND (created_at AT TIME ZONE 'Asia/Shanghai')::date=$3::date)`, c.AppID, uid, day(time.Now())).Scan(&out.CheckinDone)
 	if err != nil {
@@ -101,8 +104,8 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 	if err != nil {
 		return out, err
 	}
-	out.InviteRule = invite.describe()
-	out.InviteEligible = out.Bound && c.Enabled && c.InviteEnabled && c.InviteReward > 0 && c.InviteDailyLimit > 0 && invite.satisfied(invEligibility)
+	out.InviteRule = invite.describe() + "；每位有效受邀者奖励：" + c.inviteRewardDescription()
+	out.InviteEligible = out.Bound && c.Enabled && c.InviteEnabled && c.inviteHasReward() && c.InviteDailyLimit > 0 && invite.satisfied(invEligibility)
 	out.CheckinExpected = checkinExpectedAmount(checkin)
 	out.LotteryExpected = lotteryExpected(lottery)
 	out.Lottery, err = lotteryState(ctx, tx, lottery, uid, false)

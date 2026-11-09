@@ -76,14 +76,15 @@
                 @select="selectedMethod = $event"
               />
             </div>
-            <div v-if="validAmount > 0" class="card p-6">
+            <RechargeCouponPicker :amount="validAmount" :method="selectedMethod" :currency="selectedCurrency" :disabled="submitting" :initial-id="Number(route.query.coupon) || undefined" @change="onCouponChange" />
+            <div v-if="validAmount > 0 && (!selectedCouponId || couponQuote)" class="card p-6">
               <div class="space-y-2 text-sm">
                 <div class="flex justify-between">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.paymentAmount') }}</span>
                   <span :class="discountAmount > 0 ? 'text-gray-400 line-through dark:text-gray-500' : 'text-gray-900 dark:text-white'">{{ formatSelectedPaymentAmount(validAmount) }}</span>
                 </div>
                 <div v-if="discountAmount > 0" class="flex justify-between" data-testid="recharge-discount-row">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.rechargeBonus.discountLabelWithPercent', { percent: formatRechargeBonusNumber(bonusQuote.percent) }) }}</span>
+                  <span class="text-gray-500 dark:text-gray-400">{{ selectedCouponId ? t('coupon.discount') : t('payment.rechargeBonus.discountLabelWithPercent', { percent: formatRechargeBonusNumber(bonusQuote.percent) }) }}</span>
                   <span class="font-medium text-red-600 dark:text-red-400">-{{ formatSelectedPaymentAmount(discountAmount) }}</span>
                 </div>
                 <div v-if="feeRate > 0" class="flex justify-between">
@@ -98,6 +99,7 @@
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.rechargeBonus.amountLabelWithPercent', { percent: formatRechargeBonusNumber(bonusQuote.percent) }) }}</span>
                   <span class="font-medium text-red-600 dark:text-red-400">+${{ bonusQuote.bonus.toFixed(2) }}</span>
                 </div>
+                <div v-if="couponQuote?.coupon_bonus" class="flex justify-between"><span>{{ t('coupon.couponBonus') }}</span><span>+USD {{ couponQuote.coupon_bonus.toFixed(2) }}</span></div>
                 <div v-if="showCreditedBalance" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': !showActualPay && !showBonusRow }" data-testid="recharge-credited-row">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
                   <span :class="bonusQuote.percent > 0 ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-900 dark:text-white'">${{ creditedAmount.toFixed(2) }}</span>
@@ -280,6 +282,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import RechargeCouponPicker from '@/components/payment/RechargeCouponPicker.vue'
+import type { CouponQuote } from '@/api/coupons'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -667,11 +671,13 @@ const bonusQuote = computed(() => quoteRechargeBonus(rechargeBonusTiers.value, v
   mode: rechargeBonusMode.value,
   currencyDigits: currencyFractionDigits(selectedCurrency.value),
 }))
-const payBaseAmount = computed(() => bonusQuote.value.payBase)
+const selectedCouponId = ref(0), couponPending = ref(false), couponQuote = ref<CouponQuote | null>(null)
+function onCouponChange(id: number, quote: CouponQuote | null, pending: boolean) { selectedCouponId.value = id; couponQuote.value = quote; couponPending.value = pending }
+const payBaseAmount = computed(() => couponQuote.value?.pay_base ?? bonusQuote.value.payBase)
 const discountAmount = computed(() => roundPaymentAmount(validAmount.value - payBaseAmount.value, selectedCurrency.value))
-const creditedAmount = computed(() => bonusQuote.value.credited)
-const showBonusRow = computed(() => bonusQuote.value.mode !== 'discount' && bonusQuote.value.bonus > 0)
-const showCreditedBalance = computed(() => balanceRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
+const creditedAmount = computed(() => couponQuote.value?.credited ?? bonusQuote.value.credited)
+const showBonusRow = computed(() => !selectedCouponId.value && bonusQuote.value.mode !== 'discount' && bonusQuote.value.bonus > 0)
+const showCreditedBalance = computed(() => !!selectedCouponId.value || balanceRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
 
 const methodOptions = computed<PaymentMethodOption[]>(() =>
   enabledMethods.value.map((type) => {
@@ -685,17 +691,18 @@ const methodOptions = computed<PaymentMethodOption[]>(() =>
   })
 )
 
-const feeRate = computed(() => checkout.value?.recharge_fee_rate ?? 0)
-const feeAmount = computed(() =>
-  feeRate.value > 0 && payBaseAmount.value > 0
+const feeRate = computed(() => couponQuote.value?.fee_rate ?? checkout.value?.recharge_fee_rate ?? 0)
+const feeAmount = computed(() => couponQuote.value
+ ? roundPaymentAmount(couponQuote.value.pay_amount - couponQuote.value.pay_base, selectedCurrency.value)
+ : feeRate.value > 0 && payBaseAmount.value > 0
     ? Math.ceil(((payBaseAmount.value * feeRate.value) / 100) * 100) / 100
     : 0
 )
-const totalAmount = computed(() =>
+const totalAmount = computed(() => couponQuote.value?.pay_amount ?? (
   feeRate.value > 0 && payBaseAmount.value > 0
     ? Math.round((payBaseAmount.value + feeAmount.value) * 100) / 100
     : payBaseAmount.value
-)
+))
 const showActualPay = computed(() => feeRate.value > 0 || discountAmount.value > 0)
 
 const amountError = computed(() => {
@@ -714,7 +721,8 @@ const amountError = computed(() => {
 })
 
 const canSubmit = computed(() =>
-  validAmount.value > 0
+  (!selectedCouponId.value || (!couponPending.value && couponQuote.value !== null))
+    && validAmount.value > 0
     && amountFitsMethod(payBaseAmount.value, selectedMethod.value)
     && selectedLimit.value?.available !== false
 )
@@ -764,7 +772,7 @@ const canSubmitSubscription = computed(() =>
 
 // Auto-switch to first available method when current selection can't handle the amount
 watch(() => [payBaseAmount.value, selectedMethod.value] as const, ([amt, method]) => {
-  if (amt <= 0 || amountFitsMethod(amt, method)) return
+  if (selectedCouponId.value || amt <= 0 || amountFitsMethod(amt, method)) return
   const available = enabledMethods.value.find((m) => amountFitsMethod(amt, m))
   if (available) selectedMethod.value = available
 })
@@ -849,6 +857,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       forceQRCode: !!(checkout.value.alipay_force_qrcode && normalizeVisibleMethod(requestType) === 'alipay'),
       mobilePrecreateDeepLink: checkout.value.alipay_mobile_precreate_deep_link === true,
     })
+    if (orderType === 'balance' && selectedCouponId.value) payload.coupon_id = selectedCouponId.value
     if (options.openid) {
       payload.openid = options.openid
     }

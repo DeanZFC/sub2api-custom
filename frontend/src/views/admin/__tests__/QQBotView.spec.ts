@@ -279,6 +279,29 @@ describe('QQ module settings', () => {
   expect(server.autonomous).toMatchObject({ enabled: false, groups: [], sample_percent: 5, daily_calls: 15, daily_replies: 8 })
  })
 
+ it.each(['zh', 'en'] as const)('%s renders autonomous funnel, costs and input breakdown', async locale => {
+  api.runtime.mockResolvedValue({ groups: [], rewards: [], bindings: 0, encryption_ready: true,
+   autonomous_stats: Object.entries({ received: 10, eligible: 8, selected: 4, model_calls: 4, generated: 2, sent: 1, input_tokens: 120, output_tokens: 30, skip_tokens: 60, discarded_tokens: 30, model_latency_ms: 500, delivery_latency_ms: 900 }).map(([reason, count]) => ({ group_id: 'group', reason, count })),
+   jobs: [{ id: 'auto-record', group_id: 'group', member_id: 'alice', kind: 'ambient_chat', status: 'skipped', error: '', trigger_reason: 'sampled', decision_reason: 'model_skip_already_answered', input_tokens: 20, output_tokens: 10, created_at: '2026-11-09T10:00:00+08:00', autonomous_data: { batch_messages: 2, model_ms: 500, input_estimate: { system: 100, knowledge: 20, history: 30, current: 40, images: 1024, total: 1214, removed: 50 } } }]
+  })
+  const w = await mountView(locale, '/admin/qqbot/config?tab=autonomous')
+  const summary = w.get('[data-testid="autonomous-summary"]')
+  expect(summary.text()).toContain('50.0%')
+  expect(summary.text()).toContain('120')
+  expect(w.get('#qqbot-settings-panel-autonomous').text()).toContain('1214')
+  expect(w.get('#qqbot-settings-panel-autonomous').text()).toContain(locale === 'zh' ? '模型跳过：已有人回答' : 'Skipped: already answered')
+ })
+ it('saves always-reply policy separately from explicit frequency changes', async () => {
+  server.autonomous = { ...defaultAutonomousConfig(), daily_calls: 0 }
+  const w = await mountView('zh', '/admin/qqbot/config?tab=autonomous')
+  await w.get('[data-testid="autonomous-mode"]').setValue('always')
+  expect((w.get('[data-testid="autonomous-daily_calls"]').element as HTMLInputElement).value).toBe('0')
+  expect(w.get('[data-testid="autonomous-sample_percent"]').attributes('disabled')).toBeDefined()
+  expect(w.get('[data-testid="autonomous-limit-warning"]').exists()).toBe(true)
+  await w.get('[data-testid="autonomous-apply-always"]').trigger('click')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.autonomous).toMatchObject({ reply_mode: 'always', sample_percent: 100, min_messages: 0, cooldown_seconds: 1, member_cooldown_seconds: 0, merge_seconds: 2, daily_calls: 3600 })
+ })
  it('enables auto chat with one switch and keeps all tuning collapsed', async () => {
   const w = await mountView('zh', '/admin/qqbot/config?tab=autonomous')
   expect(w.find('#qqbot-settings-tab-knowledge').exists()).toBe(false)

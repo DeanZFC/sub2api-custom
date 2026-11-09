@@ -1161,6 +1161,8 @@ var (
 		{Name: "user_email", Type: field.TypeString, Size: 255},
 		{Name: "order_ids", Type: field.TypeJSON},
 		{Name: "amount", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,2)"}},
+		{Name: "fee_amount", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,2)"}},
+		{Name: "fee_refunded", Type: field.TypeBool, Default: false},
 		{Name: "currency", Type: field.TypeString, Size: 3, Default: "CNY"},
 		{Name: "buyer_type", Type: field.TypeString, Size: 20},
 		{Name: "title", Type: field.TypeString, Size: 200},
@@ -1185,12 +1187,12 @@ var (
 			{
 				Name:    "invoicerequest_user_id_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentInvoiceRequestsColumns[1], PaymentInvoiceRequestsColumns[17]},
+				Columns: []*schema.Column{PaymentInvoiceRequestsColumns[1], PaymentInvoiceRequestsColumns[19]},
 			},
 			{
 				Name:    "invoicerequest_status_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentInvoiceRequestsColumns[11], PaymentInvoiceRequestsColumns[17]},
+				Columns: []*schema.Column{PaymentInvoiceRequestsColumns[13], PaymentInvoiceRequestsColumns[19]},
 			},
 		},
 	}

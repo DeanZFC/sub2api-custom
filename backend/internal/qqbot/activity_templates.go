@@ -168,7 +168,7 @@ func (s *Service) ApplyActivityTemplate(ctx context.Context, req ActivityTemplat
 			return err
 		}
 		// Patch invitation fields in the encrypted configuration already written by saveConfigTransaction.
-		rawInvite, err := json.Marshal(map[string]any{"invite_enabled": next.Invite.Enabled, "invite_reward": next.Invite.InviteReward, "invite_daily_limit": next.Invite.InviteDailyLimit, "invite_min_recharge_total": 0, "invite_min_recharge_30d": 0, "invite_recharge_window_days": DefaultRechargeWindowDays})
+		rawInvite, err := json.Marshal(map[string]any{"invite_enabled": next.Invite.Enabled, "invite_reward": next.Invite.InviteReward, "invite_coupon_template_id": next.Invite.CouponTemplateID, "invite_coupon_quantity": next.Invite.CouponQuantity, "invite_daily_limit": next.Invite.InviteDailyLimit, "invite_min_recharge_total": 0, "invite_min_recharge_30d": 0, "invite_recharge_window_days": DefaultRechargeWindowDays})
 		if err != nil {
 			return err
 		}

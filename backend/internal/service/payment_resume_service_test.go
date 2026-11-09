@@ -879,3 +879,27 @@ func mustCreateFallbackSignedToken(t *testing.T, claims any) string {
 	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	return encodedPayload + "." + signature
 }
+
+func TestCouponWeChatResumeSignedContext(t *testing.T) {
+	svc := NewPaymentResumeService([]byte("0123456789abcdef0123456789abcdef"))
+	token, err := svc.CreateWeChatPaymentResumeToken(WeChatPaymentResumeClaims{OpenID: "coupon-openid", CouponID: 123, Amount: "100", PaymentType: payment.TypeWxpay, OrderType: payment.OrderTypeBalance})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := svc.ParseWeChatPaymentResumeToken(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.CouponID != 123 {
+		t.Fatalf("coupon context lost: %+v", claims)
+	}
+	parts := strings.Split(token, ".")
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts[0] = base64.RawURLEncoding.EncodeToString([]byte(strings.Replace(string(raw), "123", "124", 1)))
+	if _, err = svc.ParseWeChatPaymentResumeToken(strings.Join(parts, ".")); err == nil {
+		t.Fatal("tampered coupon accepted")
+	}
+}

@@ -9,6 +9,8 @@
             <div class="flex items-center justify-between gap-4 rounded-xl bg-gray-50 p-4 dark:bg-dark-800"><span class="text-sm font-medium">{{ t('invoice.enabled') }}</span><Toggle v-model="config.enabled" :aria-label="t('invoice.enabled')" /></div>
             <div class="grid gap-5 md:grid-cols-2">
               <label class="block"><span class="input-label">{{ t('invoice.minAmount') }}</span><input v-model.number="config.min_amount" data-testid="invoice-min-amount" type="number" min="0.01" max="1000000000" step="0.01" required class="input mt-1" /><span class="mt-1 block text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('invoice.minAmountHint') }}</span></label>
+              <label class="block"><span class="input-label">{{ t('invoice.feeRate') }}</span><input v-model.number="config.fee_rate" data-testid="invoice-fee-rate" type="number" min="0" max="100" step="0.01" required class="input mt-1" /><span class="mt-1 block text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('invoice.feeRateHint') }}</span></label>
+              <label class="block"><span class="input-label">{{ t('invoice.feeMinAmount') }}</span><input v-model.number="config.fee_min_amount" data-testid="invoice-fee-min-amount" type="number" min="0" max="1000000000" step="0.01" required class="input mt-1" /><span class="mt-1 block text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('invoice.feeMinAmountHint') }}</span></label>
               <label class="block"><span class="input-label">{{ t('invoice.customInstructions') }}</span><textarea v-model="config.instructions" data-testid="invoice-instructions" class="input mt-1" rows="3" maxlength="5000" :placeholder="t('invoice.instructionsPlaceholder')" /></label>
             </div>
           </fieldset>
@@ -72,7 +74,7 @@ import InvoiceRequestDetails from '@/components/payment/InvoiceRequestDetails.vu
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const config = ref<InvoiceConfig>({ enabled: false, min_amount: 300, instructions: '', currency: 'CNY' })
+const config = ref<InvoiceConfig>({ enabled: false, min_amount: 300, fee_rate: 0, fee_min_amount: 0, instructions: '', currency: 'CNY' })
 const configLoading = ref(true)
 const configSaving = ref(false)
 const loading = ref(false)
@@ -103,9 +105,13 @@ async function saveConfig() {
   if (configSaving.value || configLoading.value) return
   const amount = Number(config.value.min_amount)
   if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000 || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.000001) { appStore.showError(t('invoice.errors.invalidMinAmount')); return }
+  const feeRate = Number(config.value.fee_rate)
+  if (typeof config.value.fee_rate !== 'number' || !Number.isFinite(feeRate) || feeRate < 0 || feeRate > 100 || Math.abs(feeRate * 100 - Math.round(feeRate * 100)) > 0.000001) { appStore.showError(t('invoice.errors.INVALID_INVOICE_FEE_RATE')); return }
+  const feeMinimum = Number(config.value.fee_min_amount)
+  if (typeof config.value.fee_min_amount !== 'number' || !Number.isFinite(feeMinimum) || feeMinimum < 0 || feeMinimum > 1_000_000_000 || Math.abs(feeMinimum * 100 - Math.round(feeMinimum * 100)) > 0.000001) { appStore.showError(t('invoice.errors.INVALID_INVOICE_FEE_MIN_AMOUNT')); return }
   configSaving.value = true
   try {
-    await adminInvoiceAPI.updateConfig({ enabled: config.value.enabled, min_amount: amount, instructions: config.value.instructions.trim() })
+    config.value = (await adminInvoiceAPI.updateConfig({ enabled: config.value.enabled, min_amount: amount, fee_rate: feeRate, fee_min_amount: feeMinimum, instructions: config.value.instructions.trim() })).data
     appStore.showSuccess(t('invoice.saveSuccess'))
   } catch (error) { showError(error) }
   finally { configSaving.value = false }

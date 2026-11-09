@@ -30806,6 +30806,9 @@ type InvoiceRequestMutation struct {
 	appendorder_ids []int64
 	amount          *float64
 	addamount       *float64
+	fee_amount      *float64
+	addfee_amount   *float64
+	fee_refunded    *bool
 	currency        *string
 	buyer_type      *string
 	title           *string
@@ -31122,6 +31125,98 @@ func (m *InvoiceRequestMutation) AddedAmount() (r float64, exists bool) {
 func (m *InvoiceRequestMutation) ResetAmount() {
 	m.amount = nil
 	m.addamount = nil
+}
+
+// SetFeeAmount sets the "fee_amount" field.
+func (m *InvoiceRequestMutation) SetFeeAmount(f float64) {
+	m.fee_amount = &f
+	m.addfee_amount = nil
+}
+
+// FeeAmount returns the value of the "fee_amount" field in the mutation.
+func (m *InvoiceRequestMutation) FeeAmount() (r float64, exists bool) {
+	v := m.fee_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFeeAmount returns the old "fee_amount" field's value of the InvoiceRequest entity.
+// If the InvoiceRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *InvoiceRequestMutation) OldFeeAmount(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFeeAmount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFeeAmount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFeeAmount: %w", err)
+	}
+	return oldValue.FeeAmount, nil
+}
+
+// AddFeeAmount adds f to the "fee_amount" field.
+func (m *InvoiceRequestMutation) AddFeeAmount(f float64) {
+	if m.addfee_amount != nil {
+		*m.addfee_amount += f
+	} else {
+		m.addfee_amount = &f
+	}
+}
+
+// AddedFeeAmount returns the value that was added to the "fee_amount" field in this mutation.
+func (m *InvoiceRequestMutation) AddedFeeAmount() (r float64, exists bool) {
+	v := m.addfee_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetFeeAmount resets all changes to the "fee_amount" field.
+func (m *InvoiceRequestMutation) ResetFeeAmount() {
+	m.fee_amount = nil
+	m.addfee_amount = nil
+}
+
+// SetFeeRefunded sets the "fee_refunded" field.
+func (m *InvoiceRequestMutation) SetFeeRefunded(b bool) {
+	m.fee_refunded = &b
+}
+
+// FeeRefunded returns the value of the "fee_refunded" field in the mutation.
+func (m *InvoiceRequestMutation) FeeRefunded() (r bool, exists bool) {
+	v := m.fee_refunded
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFeeRefunded returns the old "fee_refunded" field's value of the InvoiceRequest entity.
+// If the InvoiceRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *InvoiceRequestMutation) OldFeeRefunded(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFeeRefunded is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFeeRefunded requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFeeRefunded: %w", err)
+	}
+	return oldValue.FeeRefunded, nil
+}
+
+// ResetFeeRefunded resets all changes to the "fee_refunded" field.
+func (m *InvoiceRequestMutation) ResetFeeRefunded() {
+	m.fee_refunded = nil
 }
 
 // SetCurrency sets the "currency" field.
@@ -31703,7 +31798,7 @@ func (m *InvoiceRequestMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *InvoiceRequestMutation) Fields() []string {
-	fields := make([]string, 0, 18)
+	fields := make([]string, 0, 20)
 	if m.user_id != nil {
 		fields = append(fields, invoicerequest.FieldUserID)
 	}
@@ -31715,6 +31810,12 @@ func (m *InvoiceRequestMutation) Fields() []string {
 	}
 	if m.amount != nil {
 		fields = append(fields, invoicerequest.FieldAmount)
+	}
+	if m.fee_amount != nil {
+		fields = append(fields, invoicerequest.FieldFeeAmount)
+	}
+	if m.fee_refunded != nil {
+		fields = append(fields, invoicerequest.FieldFeeRefunded)
 	}
 	if m.currency != nil {
 		fields = append(fields, invoicerequest.FieldCurrency)
@@ -31774,6 +31875,10 @@ func (m *InvoiceRequestMutation) Field(name string) (ent.Value, bool) {
 		return m.OrderIds()
 	case invoicerequest.FieldAmount:
 		return m.Amount()
+	case invoicerequest.FieldFeeAmount:
+		return m.FeeAmount()
+	case invoicerequest.FieldFeeRefunded:
+		return m.FeeRefunded()
 	case invoicerequest.FieldCurrency:
 		return m.Currency()
 	case invoicerequest.FieldBuyerType:
@@ -31819,6 +31924,10 @@ func (m *InvoiceRequestMutation) OldField(ctx context.Context, name string) (ent
 		return m.OldOrderIds(ctx)
 	case invoicerequest.FieldAmount:
 		return m.OldAmount(ctx)
+	case invoicerequest.FieldFeeAmount:
+		return m.OldFeeAmount(ctx)
+	case invoicerequest.FieldFeeRefunded:
+		return m.OldFeeRefunded(ctx)
 	case invoicerequest.FieldCurrency:
 		return m.OldCurrency(ctx)
 	case invoicerequest.FieldBuyerType:
@@ -31883,6 +31992,20 @@ func (m *InvoiceRequestMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetAmount(v)
+		return nil
+	case invoicerequest.FieldFeeAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFeeAmount(v)
+		return nil
+	case invoicerequest.FieldFeeRefunded:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFeeRefunded(v)
 		return nil
 	case invoicerequest.FieldCurrency:
 		v, ok := value.(string)
@@ -31996,6 +32119,9 @@ func (m *InvoiceRequestMutation) AddedFields() []string {
 	if m.addamount != nil {
 		fields = append(fields, invoicerequest.FieldAmount)
 	}
+	if m.addfee_amount != nil {
+		fields = append(fields, invoicerequest.FieldFeeAmount)
+	}
 	return fields
 }
 
@@ -32008,6 +32134,8 @@ func (m *InvoiceRequestMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedUserID()
 	case invoicerequest.FieldAmount:
 		return m.AddedAmount()
+	case invoicerequest.FieldFeeAmount:
+		return m.AddedFeeAmount()
 	}
 	return nil, false
 }
@@ -32030,6 +32158,13 @@ func (m *InvoiceRequestMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddAmount(v)
+		return nil
+	case invoicerequest.FieldFeeAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFeeAmount(v)
 		return nil
 	}
 	return fmt.Errorf("unknown InvoiceRequest numeric field %s", name)
@@ -32084,6 +32219,12 @@ func (m *InvoiceRequestMutation) ResetField(name string) error {
 		return nil
 	case invoicerequest.FieldAmount:
 		m.ResetAmount()
+		return nil
+	case invoicerequest.FieldFeeAmount:
+		m.ResetFeeAmount()
+		return nil
+	case invoicerequest.FieldFeeRefunded:
+		m.ResetFeeRefunded()
 		return nil
 	case invoicerequest.FieldCurrency:
 		m.ResetCurrency()

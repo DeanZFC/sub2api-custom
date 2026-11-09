@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/coupon"
 	"github.com/shopspring/decimal"
 )
 
@@ -28,16 +29,18 @@ type LotteryState struct {
 	DrawsUntilGuarantee int64   `json:"draws_until_guarantee"`
 }
 type LotteryDraw struct {
-	ID           int64     `json:"id"`
-	UserID       int64     `json:"user_id"`
-	Email        string    `json:"email"`
-	MemberID     string    `json:"member_id"`
-	PrizeName    string    `json:"prize_name"`
-	IsGuaranteed bool      `json:"is_guaranteed"`
-	Amount       float64   `json:"amount"`
-	Chances      int       `json:"chances"`
-	Remaining    int64     `json:"remaining"`
-	CreatedAt    time.Time `json:"created_at"`
+	CouponTemplateID int64     `json:"coupon_template_id,omitempty"`
+	CouponQuantity   int       `json:"coupon_quantity,omitempty"`
+	ID               int64     `json:"id"`
+	UserID           int64     `json:"user_id"`
+	Email            string    `json:"email"`
+	MemberID         string    `json:"member_id"`
+	PrizeName        string    `json:"prize_name"`
+	IsGuaranteed     bool      `json:"is_guaranteed"`
+	Amount           float64   `json:"amount"`
+	Chances          int       `json:"chances"`
+	Remaining        int64     `json:"remaining"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 type LotteryDrawsPage struct {
 	Items    []LotteryDraw `json:"items"`
@@ -112,6 +115,13 @@ func lotteryResult(cfg LotteryConfig, state LotteryState, draws []lotteryOutcome
 	}
 	if cfg.GuaranteeEnabled {
 		fmt.Fprintf(&b, "\n距保底 %d 次", cfg.drawsUntilGuarantee(state.Used+int64(len(draws))))
+	}
+	couponCount := 0
+	for _, d := range draws {
+		couponCount += d.prize.CouponQuantity
+	}
+	if couponCount > 0 {
+		fmt.Fprintf(&b, "\n充值优惠券：%d 张，发送「我的优惠券」查看", couponCount)
 	}
 	return b.String()
 }
@@ -188,14 +198,14 @@ func (s *Service) ListLotteryDraws(ctx context.Context, search string, page, pag
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*)`+filter, search).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.user_id,u.email,d.member_id,d.prize_name,d.amount,d.remaining,d.created_at,COALESCE(d.config_snapshot->'is_guaranteed'='true'::jsonb,false),COALESCE((d.config_snapshot->>'awarded_chances')::integer,0)`+filter+` ORDER BY d.id DESC LIMIT $2 OFFSET $3`, search, pageSize, (page-1)*pageSize)
+	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.user_id,u.email,d.member_id,d.prize_name,d.amount,d.remaining,d.created_at,COALESCE(d.config_snapshot->'is_guaranteed'='true'::jsonb,false),COALESCE((d.config_snapshot->>'awarded_chances')::integer,0),COALESCE((d.config_snapshot->>'coupon_template_id')::bigint,0),COALESCE((d.config_snapshot->>'coupon_quantity')::integer,0)`+filter+` ORDER BY d.id DESC LIMIT $2 OFFSET $3`, search, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return out, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var d LotteryDraw
-		if err = rows.Scan(&d.ID, &d.UserID, &d.Email, &d.MemberID, &d.PrizeName, &d.Amount, &d.Remaining, &d.CreatedAt, &d.IsGuaranteed, &d.Chances); err != nil {
+		if err = rows.Scan(&d.ID, &d.UserID, &d.Email, &d.MemberID, &d.PrizeName, &d.Amount, &d.Remaining, &d.CreatedAt, &d.IsGuaranteed, &d.Chances, &d.CouponTemplateID, &d.CouponQuantity); err != nil {
 			return out, err
 		}
 		out.Items = append(out.Items, d)
@@ -363,15 +373,22 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 	awardedChances := int64(0)
 	for i, draw := range draws {
 		prize, guaranteed := draw.prize, draw.guaranteed
+		if prize.CouponQuantity > 0 {
+			if _, err = coupon.Issue(ctx, tx, prize.CouponTemplateID, uid, prize.CouponQuantity, "qq_lottery", fmt.Sprintf("lottery-coupon:%s:%d", codeHash(requestKey), i), rewardAt); err != nil {
+				return "", err
+			}
+		}
 		awardedChances += int64(prize.Chances)
 		// Keep the draw's classification alongside its immutable configuration snapshot.
 		// Older records without this field remain ordinary draws, without a migration.
 		snapshot, err := json.Marshal(struct {
 			LotteryConfig
-			IsGuaranteed   bool  `json:"is_guaranteed"`
-			DrawNumber     int64 `json:"draw_number"`
-			AwardedChances int   `json:"awarded_chances"`
-		}{cfg, guaranteed, state.Used + int64(i) + 1, prize.Chances})
+			IsGuaranteed     bool  `json:"is_guaranteed"`
+			DrawNumber       int64 `json:"draw_number"`
+			AwardedChances   int   `json:"awarded_chances"`
+			CouponTemplateID int64 `json:"coupon_template_id,omitempty"`
+			CouponQuantity   int   `json:"coupon_quantity,omitempty"`
+		}{cfg, guaranteed, state.Used + int64(i) + 1, prize.Chances, prize.CouponTemplateID, prize.CouponQuantity})
 		if err != nil {
 			return "", err
 		}

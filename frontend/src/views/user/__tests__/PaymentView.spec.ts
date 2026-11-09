@@ -4,6 +4,7 @@ import PaymentView from '../PaymentView.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
 import AmountInput from '@/components/payment/AmountInput.vue'
+import RechargeCouponPicker from '@/components/payment/RechargeCouponPicker.vue'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
@@ -886,4 +887,24 @@ describe('PaymentView subscription feature flag', () => {
     expect(wrapper.findAllComponents(SubscriptionPlanCard).length).toBeGreaterThan(0)
     wrapper.unmount()
   })
+})
+
+describe('PaymentView recharge coupons', () => {
+ it('waits for a valid quote and submits the owned coupon with original input amount', async () => {
+  vi.useRealTimers();routeState.path='/purchase';routeState.query={};window.localStorage.clear()
+  appStoreState.setPublicSettings(undefined)
+  getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
+  createOrder.mockReset().mockRejectedValue(new Error('test stops before provider redirect'))
+  const w=shallowMount(PaymentView,{global:{stubs:{AppLayout:{template:'<div><slot /></div>'},Teleport:true,Transition:false}}});await flushPromises()
+  w.getComponent(AmountInput).vm.$emit('update:modelValue',100);await flushPromises()
+  const picker=w.getComponent(RechargeCouponPicker)
+  picker.vm.$emit('change',42,null,true);await flushPromises()
+  const submit=w.findAll('button').find(b=>b.text().includes('payment.createOrder'))!
+  expect(submit.attributes()).toHaveProperty('disabled')
+  picker.vm.$emit('change',42,null,false);await flushPromises();expect(submit.attributes()).toHaveProperty('disabled')
+  picker.vm.$emit('change',42,{coupon_id:42,pay_base:90,pay_amount:90,credited:100,bonus_amount:10,coupon_bonus:0,discount_amount:10,fee_rate:0},false);await flushPromises()
+  expect(submit.attributes('disabled')).toBeUndefined()
+  await submit.trigger('click');await flushPromises()
+  expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({coupon_id:42,amount:100,order_type:'balance'}));w.unmount()
+ })
 })

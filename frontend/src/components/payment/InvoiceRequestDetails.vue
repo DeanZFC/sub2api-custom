@@ -4,6 +4,7 @@
     <div><dt class="text-gray-500 dark:text-gray-400">{{ t('invoice.status') }}</dt><dd class="mt-1"><InvoiceStatusBadge :status="request.status" /></dd></div>
     <div v-if="showUser" class="sm:col-span-2"><dt class="text-gray-500 dark:text-gray-400">{{ t('invoice.applicant') }}</dt><dd class="mt-1 break-all">{{ request.user_email }} (#{{ request.user_id }})</dd></div>
     <div><dt class="text-gray-500 dark:text-gray-400">{{ t('invoice.amount') }}</dt><dd class="mt-1 text-lg font-semibold text-primary-600 dark:text-primary-400">¥{{ request.amount.toFixed(2) }}</dd></div>
+    <div><dt class="text-gray-500 dark:text-gray-400">{{ t('invoice.feeAmount') }}</dt><dd class="mt-1" data-testid="invoice-detail-fee">{{ request.fee_amount.toFixed(2) }}<span v-if="request.fee_refunded" class="ml-2 text-green-600 dark:text-green-400">{{ t('invoice.feeRefunded') }}</span></dd></div>
     <div><dt class="text-gray-500 dark:text-gray-400">{{ t('invoice.buyerType') }}</dt><dd class="mt-1">{{ t(`invoice.${request.buyer_type}`) }}</dd></div>
     <div><dt class="text-gray-500 dark:text-gray-400">{{ t('invoice.invoiceTitle') }}</dt><dd class="mt-1 break-all">{{ request.title }}</dd></div>
     <div><dt class="text-gray-500 dark:text-gray-400">{{ t('invoice.taxId') }}</dt><dd class="mt-1 break-all">{{ request.tax_id || '—' }}</dd></div>

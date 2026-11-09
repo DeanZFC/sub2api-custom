@@ -13,6 +13,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
+	"github.com/Wei-Shaw/sub2api/internal/coupon"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/payment/provider"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -74,6 +75,23 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		bonusAmount = quote.Bonus
 		orderAmount = quote.Credited
 	}
+	if req.CouponID != 0 {
+		if req.CouponID < 0 || req.OrderType != payment.OrderTypeBalance {
+			return nil, coupon.ErrInvalid
+		}
+		c, e := coupon.ReadOwned(ctx, s.entClient, req.CouponID, req.UserID, false)
+		if e != nil {
+			return nil, e
+		}
+		q, e := couponRechargeQuote(c, cfg, req.Amount, methodCurrency)
+		if e != nil {
+			return nil, e
+		}
+		req.couponQuote = q
+		limitAmount = q.PayBase
+		orderAmount = q.Credited
+		bonusAmount = q.BonusAmount
+	}
 	payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, methodCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
 	if err != nil {
 		return nil, err
@@ -90,6 +108,9 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		selectedCurrency = paymentProviderConfigCurrency(sel.ProviderKey, sel.Config)
 	}
 	if selectedCurrency != methodCurrency {
+		if req.CouponID > 0 {
+			return nil, coupon.ErrInvalid
+		}
 		payAmountStr, payAmount, err = calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, selectedCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
 		if err != nil {
 			return nil, err
@@ -111,9 +132,15 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	}
 	resp, err := s.invokeProvider(ctx, order, req, cfg, limitAmount, payAmountStr, payAmount, plan, sel)
 	if err != nil {
-		_, _ = s.entClient.PaymentOrder.UpdateOneID(order.ID).
-			SetStatus(OrderStatusFailed).
-			Save(ctx)
+		if req.CouponID > 0 {
+			// Failure and coupon release commit together; a failed transaction
+			// leaves the order pending so normal expiry can release it later.
+			if releaseErr := s.releaseFailedOrderCoupon(ctx, order.ID); releaseErr != nil {
+				slog.Error("release failed order coupon", "orderID", order.ID, "error", releaseErr)
+			}
+		} else {
+			_, _ = s.entClient.PaymentOrder.Update().Where(paymentorder.IDEQ(order.ID), paymentorder.StatusEQ(OrderStatusPending)).SetStatus(OrderStatusFailed).Save(ctx)
+		}
 		return nil, err
 	}
 	return resp, nil
@@ -181,6 +208,17 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, err
 	}
 	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req)
+	if req.CouponID > 0 {
+		if providerSnapshot == nil {
+			providerSnapshot = map[string]any{}
+		}
+		providerSnapshot["recharge_coupon_id"] = req.CouponID
+		providerSnapshot["currency"] = req.couponQuote.Currency
+		providerSnapshot["coupon_name"] = req.couponQuote.Name
+		providerSnapshot["coupon_discount"] = req.couponQuote.DiscountAmount
+		providerSnapshot["coupon_bonus"] = req.couponQuote.CouponBonus
+		providerSnapshot["coupon_multiplier"] = cfg.BalanceRechargeMultiplier
+	}
 	selectedInstanceID := ""
 	selectedProviderKey := ""
 	if sel != nil {
@@ -223,6 +261,9 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	order, err := b.Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create order: %w", err)
+	}
+	if err := s.reserveOrderCoupon(ctx, tx, req, order, cfg); err != nil {
+		return nil, err
 	}
 	code := fmt.Sprintf("PAY-%d-%d", order.ID, time.Now().UnixNano()%100000)
 	order, err = tx.PaymentOrder.UpdateOneID(order.ID).SetRechargeCode(code).Save(ctx)
@@ -774,6 +815,9 @@ func buildWeChatPaymentOAuthStartURL(req CreateOrderRequest, scope string) (stri
 	}
 	q := u.Query()
 	q.Set("payment_type", strings.TrimSpace(req.PaymentType))
+	if req.CouponID > 0 {
+		q.Set("coupon_id", strconv.FormatInt(req.CouponID, 10))
+	}
 	if req.Amount > 0 {
 		q.Set("amount", strconv.FormatFloat(req.Amount, 'f', -1, 64))
 	}

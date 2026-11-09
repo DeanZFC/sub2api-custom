@@ -42,6 +42,8 @@ const (
 	SettingAlipayMobilePrecreateDeepLink = "ALIPAY_MOBILE_PRECREATE_DEEP_LINK"
 	SettingInvoiceEnabled                = "PAYMENT_INVOICE_ENABLED"
 	SettingInvoiceMinAmount              = "PAYMENT_INVOICE_MIN_AMOUNT"
+	SettingInvoiceFeeRate                = "PAYMENT_INVOICE_FEE_RATE"
+	SettingInvoiceFeeMinAmount           = "PAYMENT_INVOICE_FEE_MIN_AMOUNT"
 	SettingInvoiceInstructions           = "PAYMENT_INVOICE_INSTRUCTIONS"
 )
 
@@ -91,6 +93,8 @@ type PaymentConfig struct {
 	AlipayMobilePrecreateDeepLink bool    `json:"alipay_mobile_precreate_deep_link"`
 	InvoiceEnabled                bool    `json:"invoice_enabled"`
 	InvoiceMinAmount              float64 `json:"invoice_min_amount"`
+	InvoiceFeeRate                float64 `json:"invoice_fee_rate"`
+	InvoiceFeeMinAmount           float64 `json:"invoice_fee_min_amount"`
 	InvoiceInstructions           string  `json:"invoice_instructions"`
 }
 
@@ -98,6 +102,8 @@ type PaymentConfig struct {
 type UpdatePaymentConfigRequest struct {
 	InvoiceEnabled            *bool    `json:"invoice_enabled"`
 	InvoiceMinAmount          *float64 `json:"invoice_min_amount"`
+	InvoiceFeeRate            *float64 `json:"invoice_fee_rate"`
+	InvoiceFeeMinAmount       *float64 `json:"invoice_fee_min_amount"`
 	InvoiceInstructions       *string  `json:"invoice_instructions"`
 	Enabled                   *bool    `json:"enabled"`
 	MinAmount                 *float64 `json:"min_amount"`
@@ -246,6 +252,7 @@ func (s *PaymentConfigService) GetPaymentConfig(ctx context.Context) (*PaymentCo
 		SettingCancelWindowSize, SettingCancelWindowUnit, SettingCancelWindowMode,
 		SettingAlipayForceQRCode, SettingAlipayMobilePrecreateDeepLink,
 		SettingInvoiceEnabled, SettingInvoiceMinAmount, SettingInvoiceInstructions,
+		SettingInvoiceFeeRate, SettingInvoiceFeeMinAmount,
 		SettingPaymentVisibleMethodAlipayEnabled, SettingPaymentVisibleMethodAlipaySource,
 		SettingPaymentVisibleMethodWxpayEnabled, SettingPaymentVisibleMethodWxpaySource,
 	}
@@ -289,6 +296,8 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		AlipayMobilePrecreateDeepLink: vals[SettingAlipayMobilePrecreateDeepLink] == "true",
 		InvoiceEnabled:                vals[SettingInvoiceEnabled] == "true",
 		InvoiceMinAmount:              normalizedInvoiceMinAmount(vals[SettingInvoiceMinAmount]),
+		InvoiceFeeRate:                normalizedInvoiceFeeRate(vals[SettingInvoiceFeeRate]),
+		InvoiceFeeMinAmount:           normalizedInvoiceFeeMinAmount(vals[SettingInvoiceFeeMinAmount]),
 		InvoiceInstructions:           vals[SettingInvoiceInstructions],
 	}
 	cfg.RechargeBonusMode, _ = NormalizeRechargeBonusMode(vals[SettingRechargeBonusMode])
@@ -352,6 +361,12 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 	if req.InvoiceMinAmount != nil && !validInvoiceMinAmount(*req.InvoiceMinAmount) {
 		return infraerrors.BadRequest("INVALID_INVOICE_MIN_AMOUNT", "minimum invoice amount must be positive, at most 1000000000, with at most 2 decimal places")
 	}
+	if req.InvoiceFeeRate != nil && !validInvoiceFeeRate(*req.InvoiceFeeRate) {
+		return infraerrors.BadRequest("INVALID_INVOICE_FEE_RATE", "invoice fee rate must be between 0 and 100, with at most 2 decimal places")
+	}
+	if req.InvoiceFeeMinAmount != nil && !validInvoiceFeeMinAmount(*req.InvoiceFeeMinAmount) {
+		return infraerrors.BadRequest("INVALID_INVOICE_FEE_MIN_AMOUNT", "minimum invoice fee must be between 0 and 1000000000, with at most 2 decimal places")
+	}
 	if req.InvoiceInstructions != nil && len([]rune(*req.InvoiceInstructions)) > 5000 {
 		return infraerrors.BadRequest("INVALID_INVOICE_INSTRUCTIONS", "invoice instructions must not exceed 5000 characters")
 	}
@@ -391,6 +406,12 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 	}
 	if req.InvoiceMinAmount != nil {
 		m[SettingInvoiceMinAmount] = strconv.FormatFloat(*req.InvoiceMinAmount, 'f', 2, 64)
+	}
+	if req.InvoiceFeeRate != nil {
+		m[SettingInvoiceFeeRate] = strconv.FormatFloat(*req.InvoiceFeeRate, 'f', 2, 64)
+	}
+	if req.InvoiceFeeMinAmount != nil {
+		m[SettingInvoiceFeeMinAmount] = strconv.FormatFloat(*req.InvoiceFeeMinAmount, 'f', 2, 64)
 	}
 	if req.InvoiceInstructions != nil {
 		m[SettingInvoiceInstructions] = strings.TrimSpace(*req.InvoiceInstructions)

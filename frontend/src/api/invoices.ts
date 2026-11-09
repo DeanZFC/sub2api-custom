@@ -29,7 +29,7 @@ export const adminInvoiceAPI = {
   getConfig() {
     return apiClient.get<InvoiceConfig>('/admin/payment/invoices/config')
   },
-  updateConfig(data: Pick<InvoiceConfig, 'enabled' | 'min_amount' | 'instructions'>) {
+  updateConfig(data: Pick<InvoiceConfig, 'enabled' | 'min_amount' | 'fee_rate' | 'fee_min_amount' | 'instructions'>) {
     return apiClient.put<InvoiceConfig>('/admin/payment/invoices/config', data)
   },
   getRequests(params?: PaginationParams & { status?: InvoiceStatus }) {

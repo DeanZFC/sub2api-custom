@@ -753,6 +753,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/purchase', label: purchaseNavLabel.value, icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
+    { path: '/coupons', label: t('coupon.title'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/invoices', label: t('invoice.title'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/gpt-direct', label: t('gptDirect.title'), icon: GiftIcon, featureFlag: makeSidebarFlag(FeatureFlags.gptDirect) },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
@@ -870,6 +871,7 @@ const adminNavItems = computed((): NavItem[] => {
       children: [
         { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon },
         { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
+        { path: '/admin/orders/coupons', label: t('coupon.adminTitle'), icon: GiftIcon },
         { path: '/admin/orders/invoices', label: t('invoice.adminTitle'), icon: OrderListIcon },
         { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
       ],

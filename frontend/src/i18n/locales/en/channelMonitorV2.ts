@@ -33,6 +33,7 @@ export default {
     trendView: { label: 'Trend view', pulse: 'Channel cards', line: 'Line chart' },
     cards: {
       overall: 'Overall', allModels: 'All models', models: 'Models', modelCount: '{count} models',
+      expandModels: 'Show {count} more models', collapseModels: 'Show fewer models',
       noModels: 'No model traffic in this range', currentScope: 'Status: {model}', backToOverall: 'Back to overall',
       title: 'Channel health', description: 'Totals cover the selected window; the last 20 requests are recent samples · Hover for details',
       passive: 'Passive health', availability: 'Availability',

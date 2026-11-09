@@ -23,6 +23,14 @@
           <input v-model.number="form.invite_daily_limit" data-testid="invite-daily-limit" class="input" type="number" min="0" max="100000" step="1" required />
         </label>
       </div>
+      <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
+        <legend class="font-medium">{{ t('coupon.rewardTitle') }}</legend>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <CouponTemplateSelect v-model="form.coupon_template_id" />
+          <label>{{ t('coupon.quantity') }}<input v-model.number="form.coupon_quantity" type="number" min="0" max="100" step="1" class="input" /></label>
+        </div>
+        <p class="text-sm text-gray-500">{{ t('coupon.rewardHint') }}</p>
+      </fieldset>
       <div class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
         <h3 class="font-medium">{{ t('qqbot.rechargeEligibility') }}</h3>
         <p class="text-sm text-gray-500">{{ t('qqbot.inviteRechargeEligibilityHelp') }}</p>
@@ -45,6 +53,7 @@
 </template>
 
 <script setup lang="ts">
+import CouponTemplateSelect from './CouponTemplateSelect.vue'
 import { useQQDraft } from './useQQDraft'
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -86,6 +95,8 @@ onMounted(async () => {
     const config = await qqbotAPI.inviteConfig()
     form.value = {
       ...config,
+      coupon_template_id: config.coupon_template_id ?? 0,
+      coupon_quantity: config.coupon_quantity ?? 0,
       enabled: typeof config.enabled === 'boolean' ? config.enabled : config.invite_reward > 0 && config.invite_daily_limit > 0,
       recharge_window_days: config.recharge_window_days || 30
     }

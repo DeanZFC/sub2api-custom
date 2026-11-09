@@ -25,6 +25,8 @@ func (h *PaymentHandler) UpdateInvoiceConfig(c *gin.Context) {
 	var req struct {
 		Enabled      *bool    `json:"enabled"`
 		MinAmount    *float64 `json:"min_amount"`
+		FeeRate      *float64 `json:"fee_rate"`
+		FeeMinAmount *float64 `json:"fee_min_amount"`
 		Instructions *string  `json:"instructions"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -33,6 +35,7 @@ func (h *PaymentHandler) UpdateInvoiceConfig(c *gin.Context) {
 	}
 	if err := h.configService.UpdatePaymentConfig(c.Request.Context(), service.UpdatePaymentConfigRequest{
 		InvoiceEnabled: req.Enabled, InvoiceMinAmount: req.MinAmount, InvoiceInstructions: req.Instructions,
+		InvoiceFeeRate: req.FeeRate, InvoiceFeeMinAmount: req.FeeMinAmount,
 	}); response.ErrorFrom(c, err) {
 		return
 	}

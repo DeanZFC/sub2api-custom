@@ -264,6 +264,13 @@ func (s *Service) settleRankingDay(ctx context.Context, appID, date string, now 
 	}
 	// Lock accounts in a fixed order even if the two boards have different winners.
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].UserID < entries[j].UserID })
+	// Lock the full, already sorted recipient set before coupon template locks.
+	// Admin batch issuance uses the same order, preventing user/template deadlocks.
+	for _, entry := range entries {
+		if _, err = tx.ExecContext(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, entry.UserID); err != nil {
+			return err
+		}
+	}
 	grants := 0
 	var invalidations []int64
 	for _, entry := range entries {

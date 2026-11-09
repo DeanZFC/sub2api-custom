@@ -11,6 +11,15 @@ describe('check-in draft revision protection', () => {
     api.checkinConfig.mockResolvedValue({ ...draft(), _version: 'fresh-whole-config', _sections: { checkin: 'fresh-checkin' } })
     api.saveCheckin.mockImplementation(async value => value)
   })
+  it('persists base coupons and preserves them while saving growth tasks', async () => {
+    api.checkinConfig.mockResolvedValue({ ...draft(), coupon_template_id: 12, coupon_quantity: 2 })
+    const config = await loadCheckinConfig()
+    await saveGrowthSettings(config)
+    expect(api.saveCheckin.mock.lastCall![0]).toEqual(expect.objectContaining({ coupon_template_id: 12, coupon_quantity: 2 }))
+    config.coupon_quantity = 3
+    await saveCheckinSettings(config)
+    expect(api.saveCheckin.mock.lastCall![0]).toEqual(expect.objectContaining({ coupon_template_id: 12, coupon_quantity: 3 }))
+  })
   it('keeps the original section revision while refreshing unrelated fields', async () => {
     await saveCheckinSettings({ ...draft(), _version: 'old-whole-config', _sections: { checkin: 'old-checkin' } })
     expect(api.saveCheckin).toHaveBeenCalledWith(expect.objectContaining({ _version: 'old-checkin', _section: 'checkin' }))

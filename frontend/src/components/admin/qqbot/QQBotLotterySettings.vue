@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <p class="text-sm text-gray-500">{{ t('qqbot.lotteryHelp') }}</p>
+    <p class="text-sm text-gray-500">{{ t('qqbot.lotteryHelp') }}</p><p class="text-sm text-gray-500">{{ t('coupon.costHint') }}</p>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg bg-green-50 p-4 text-green-700 dark:bg-green-950">{{ notice }}</p>
     <p v-if="dirty" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
@@ -18,6 +18,8 @@
         <label class="space-y-1">{{ t('qqbot.prizeAmount') }}<input v-model.number="prize.amount" class="input" type="number" min="0" max="1000" step="0.00000001" required /></label>
         <label class="space-y-1">{{ t('qqbot.prizeChances') }}<input :value="prize.chances ?? 0" :data-testid="`prize-chances-${index}`" class="input" type="number" min="0" max="1000" step="1" required @input="setChances('prizes', index, $event)" /></label>
         <label class="space-y-1">{{ t('qqbot.probability') }}<input :value="prize.probability_bps / 100" :data-testid="`probability-${index}`" class="input" type="number" min="0.01" max="100" step="0.01" required @input="setProbability(index, $event)" /></label>
+        <label class="space-y-1">{{ t('coupon.template') }}<CouponTemplateSelect v-model="prize.coupon_template_id" /></label>
+        <label class="space-y-1">{{ t('coupon.quantity') }}<input v-model.number="prize.coupon_quantity" class="input" type="number" min="0" max="100" step="1" /></label>
         <button type="button" class="btn btn-secondary" :disabled="form.prizes.length <= 1" @click="form.prizes.splice(index, 1)">{{ t('common.delete') }}</button>
       </div>
       <button type="button" class="btn btn-secondary" :disabled="form.prizes.length >= 20" @click="addPrize">{{ t('qqbot.addPrize') }}</button>
@@ -40,6 +42,8 @@
             <label class="space-y-1">{{ t('qqbot.prizeAmount') }}<input v-model.number="prize.amount" :data-testid="`guarantee-amount-${index}`" class="input" type="number" min="0" max="1000" step="0.00000001" required /></label>
             <label class="space-y-1">{{ t('qqbot.prizeChances') }}<input :value="prize.chances ?? 0" :data-testid="`guarantee-chances-${index}`" class="input" type="number" min="0" max="1000" step="1" required @input="setChances('guarantee_prizes', index, $event)" /></label>
             <label class="space-y-1">{{ t('qqbot.probability') }}<input :value="prize.probability_bps / 100" :data-testid="`guarantee-probability-${index}`" class="input" type="number" min="0.01" max="100" step="0.01" required @input="setGuaranteeProbability(index, $event)" /></label>
+            <label class="space-y-1">{{ t('coupon.template') }}<CouponTemplateSelect v-model="prize.coupon_template_id" /></label>
+            <label class="space-y-1">{{ t('coupon.quantity') }}<input v-model.number="prize.coupon_quantity" class="input" type="number" min="0" max="100" step="1" /></label>
             <button type="button" class="btn btn-secondary" :disabled="form.guarantee_prizes.length <= 1" @click="form.guarantee_prizes.splice(index, 1)">{{ t('common.delete') }}</button>
           </div>
           <button type="button" data-testid="add-guarantee-prize" class="btn btn-secondary" :disabled="form.guarantee_prizes.length >= 20" @click="addGuaranteePrize">{{ t('qqbot.addPrize') }}</button>
@@ -70,6 +74,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import CouponTemplateSelect from './CouponTemplateSelect.vue'
 import { useQQDraft } from './useQQDraft'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -106,12 +111,14 @@ function setChances(pool: 'prizes' | 'guarantee_prizes', index: number, event: E
   if (form.value) form.value[pool][index]!.chances = (event.target as HTMLInputElement).valueAsNumber
 }
 function validPrize(prize: QQLotteryConfig['prizes'][number], guaranteed = false) {
+  const coupons = prize.coupon_quantity ?? 0
+  if (!Number.isInteger(coupons) || coupons < 0 || coupons > 100 || (coupons > 0 && (!Number.isSafeInteger(prize.coupon_template_id) || (prize.coupon_template_id ?? 0) < 1))) return false
   const chances = prize.chances ?? 0
   return Boolean(prize.name.trim()) && [...prize.name].length <= 60
     && Number.isFinite(prize.amount) && prize.amount >= 0 && prize.amount <= 1000 && Math.abs(prize.amount * 1e8 - Math.round(prize.amount * 1e8)) <= 0.001
     && Number.isInteger(chances) && chances >= 0 && chances <= 1000
     && Number.isInteger(prize.probability_bps) && prize.probability_bps >= 1 && prize.probability_bps <= 10000
-    && (!guaranteed || prize.amount > 0 || chances > 0)
+    && (!guaranteed || prize.amount > 0 || chances > 0 || coupons > 0)
 }
 function addPrize() { form.value?.prizes.push({ name: '', amount: 0, probability_bps: 100 }) }
 function setGuaranteeProbability(index: number, event: Event) {

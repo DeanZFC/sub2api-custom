@@ -18,6 +18,11 @@
         <span v-if="row.fee_rate > 0" class="ml-1 text-xs text-gray-400" :title="t('payment.orders.fee') + ': ' + row.fee_rate + '%'">
           ({{ t('payment.orders.fee') }} {{ row.fee_rate }}%)
         </span>
+        <div v-if="row.coupon" class="mt-1 text-xs text-primary-600">
+          {{ row.coupon.name }} · {{ t('coupon.discount') }} {{ paymentAmountSymbol(row) }}{{ row.coupon.discount_amount.toFixed(2) }}
+          <span v-if="row.coupon.bonus_amount"> · + USD {{ row.coupon.bonus_amount.toFixed(2) }}</span>
+          <p v-if="row.coupon.review_required" class="text-amber-600">{{ t('coupon.reviewRequired') }}</p>
+        </div>
         <div v-if="row.amount !== row.pay_amount || (row.bonus_amount ?? 0) > 0" class="text-xs text-gray-500">
           {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ row.amount.toFixed(2) }}
           <span v-if="(row.bonus_amount ?? 0) > 0" class="ml-1 text-amber-600 dark:text-amber-400">

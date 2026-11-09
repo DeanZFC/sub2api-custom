@@ -23,7 +23,7 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 	job := Job{MemberID: "member"}
 	info, err := s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "🎁 **累计奖励**\n合计：USD 0.00\n\n抽奖：USD 0.00\n邀请：USD 0.00\n签到：USD 0.00\n成长：USD 0.00\n连签：USD 0.00\n排行：USD 0.00", info)
+	require.Equal(t, "🎁 **累计奖励**\n合计：USD 0.00\n\n抽奖：USD 0.00\n邀请：USD 0.00\n签到：USD 0.00\n成长：USD 0.00\n连签：USD 0.00\n排行：USD 0.00\n\n活动优惠券：累计 0 张，当前可用 0 张\n发送「我的优惠券」查看网站券包及使用规则。", info)
 	_, err = db.Exec(`INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount,created_at) VALUES
  ('lottery-1','app','group','member',$1,'lottery',2.50,NOW()-INTERVAL '60 days'),
  ('lottery-2','app','other-group','member',$1,'lottery',0.75,NOW()),
@@ -38,7 +38,7 @@ func TestQQBotMyRewardsSummarizesHistoryByCategory(t *testing.T) {
 	require.NoError(t, err)
 	info, err = s.myRewards(ctx, c, job)
 	require.NoError(t, err)
-	require.Equal(t, "🎁 **累计奖励**\n合计：USD 8.55\n\n抽奖：USD 3.25\n邀请：USD 2.50\n签到：USD 0.30\n成长：USD 1.25\n连签：USD 0.50\n排行：USD 0.75", info)
+	require.Equal(t, "🎁 **累计奖励**\n合计：USD 8.55\n\n抽奖：USD 3.25\n邀请：USD 2.50\n签到：USD 0.30\n成长：USD 1.25\n连签：USD 0.50\n排行：USD 0.75\n\n活动优惠券：累计 0 张，当前可用 0 张\n发送「我的优惠券」查看网站券包及使用规则。", info)
 
 	_, err = db.Exec(`INSERT INTO qq_bot_rewards(reward_key,app_id,group_id,member_id,user_id,kind,amount) VALUES('historical','app','group','member',$1,'redemption',2)`, uid)
 	require.NoError(t, err)

@@ -5,6 +5,8 @@ export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
   const config = await qqbotAPI.checkinConfig()
   return {
     ...config,
+    coupon_template_id: config.coupon_template_id ?? 0,
+    coupon_quantity: config.coupon_quantity ?? 0,
     milestones: (config.milestones ?? []).map(milestone => ({ ...milestone, kind: milestone.kind || 'checkin_total', reward: normalizeGrowthReward(milestone.reward) })),
     reward_distribution: { ...(config.reward_distribution ?? { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }) },
     recharge_window_days: config.recharge_window_days || 30,
@@ -39,6 +41,8 @@ function saveConfigPatch(version: string | undefined, section: string, patch: Pa
 export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinConfig> {
   return saveConfigPatch(config._sections?.checkin || config._version, 'checkin', {
     enabled: config.enabled,
+    coupon_template_id: config.coupon_template_id ?? 0,
+    coupon_quantity: config.coupon_quantity ?? 0,
     min_amount: config.min_amount,
     max_amount: config.max_amount,
     ...(config.reward_distribution ? { reward_distribution: { ...config.reward_distribution } } : {}),

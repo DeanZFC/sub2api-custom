@@ -200,6 +200,9 @@ func (s *Service) runOne(parent context.Context) {
 	} else {
 		err = s.message(ctx, c, &j, e)
 	}
+	if err == nil && j.Status == "deferred" {
+		return
+	}
 	if err != nil {
 		status := "delivery_failed"
 		if j.Error != "" {
@@ -327,7 +330,7 @@ func (s *Service) SettleInvites(ctx context.Context, member string) error {
 }
 
 func (s *Service) settleInvites(ctx context.Context, c Config, member string) error {
-	if !c.Enabled || !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+	if !c.Enabled || !c.InviteEnabled || !c.inviteHasReward() || c.InviteDailyLimit <= 0 {
 		return nil
 	}
 	eligibleAsInviter := true
@@ -501,6 +504,15 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 		return s.sendHelp(ctx, c, *j, arg)
 	case "价格":
 		return s.sendModelPrice(ctx, c, *j, arg)
+	case "我的优惠券":
+		{
+			var err error
+			text, err = s.myCoupons(ctx, c, *j, arg)
+			if err != nil {
+				text = "优惠券查询失败，请稍后重试。"
+			}
+			break
+		}
 	case "我的余额":
 		var balance float64
 		err := s.db.QueryRowContext(ctx, `SELECT u.balance FROM qq_bot_bindings b JOIN users u ON u.id=b.user_id WHERE b.app_id=$1 AND b.member_id=$2 AND u.deleted_at IS NULL AND u.status='active'`, c.AppID, j.MemberID).Scan(&balance)

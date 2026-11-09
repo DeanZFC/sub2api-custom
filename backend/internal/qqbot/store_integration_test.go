@@ -108,6 +108,10 @@ func testDB(t *testing.T) *sql.DB {
 		_, err = db.Exec(string(raw))
 		require.NoError(t, err)
 	}
+	raw, err = migrations.FS.ReadFile("348_qq_bot_autonomous_delivery.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(raw))
+	require.NoError(t, err)
 	raw, err = migrations.FS.ReadFile("286_qq_bot_health_notifications.sql")
 	require.NoError(t, err)
 	for range 2 {
@@ -204,6 +208,12 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	for range 2 {
 		_, err = db.Exec(string(memberSQL))
+		require.NoError(t, err)
+	}
+	couponSQL, err := migrations.FS.ReadFile("349_recharge_coupons.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(couponSQL))
 		require.NoError(t, err)
 	}
 	return db

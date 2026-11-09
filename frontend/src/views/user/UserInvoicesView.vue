@@ -10,6 +10,7 @@
               <li>{{ t('invoice.eligibleHint') }}</li>
               <li>{{ t('invoice.selectionHint') }}</li>
               <li>{{ t('invoice.deliveryHint') }}</li>
+              <li v-if="config.fee_rate > 0 || config.fee_min_amount > 0">{{ t('invoice.feeRule', { rate: config.fee_rate, minimum: config.fee_min_amount.toFixed(2) }) }}</li>
             </ul>
             <p v-if="config.instructions" class="whitespace-pre-wrap break-words text-sm text-gray-600 dark:text-gray-300">{{ config.instructions }}</p>
           </div>
@@ -31,7 +32,7 @@
         <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 p-5 dark:border-dark-700 sm:p-6">
           <div><h2 class="font-semibold">{{ t('invoice.eligibleOrders') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('invoice.selectionHint') }}</p></div>
           <div class="flex flex-wrap items-center gap-4">
-            <div class="text-sm"><p class="text-gray-500 dark:text-gray-400">{{ t('invoice.selected', { count: selectedOrders.size }) }}</p><p class="mt-1 text-xl font-semibold text-primary-600 dark:text-primary-400">¥{{ selectedAmount.toFixed(2) }} <span class="text-sm font-normal text-gray-400">/ ¥{{ config.min_amount.toFixed(2) }}</span></p></div>
+            <div class="text-sm"><p class="text-gray-500 dark:text-gray-400">{{ t('invoice.selected', { count: selectedOrders.size }) }}</p><p class="mt-1 text-xl font-semibold text-primary-600 dark:text-primary-400">¥{{ selectedAmount.toFixed(2) }} <span class="text-sm font-normal text-gray-400">/ ¥{{ config.min_amount.toFixed(2) }}</span></p><p v-if="selectedOrders.size" data-testid="invoice-fee-preview" class="mt-1 text-gray-500 dark:text-gray-400">{{ t('invoice.feeAmount') }}: {{ selectedFee.toFixed(2) }}</p></div>
             <button type="button" data-testid="invoice-open-form" class="btn btn-primary" :disabled="!canApply" @click="openForm"><Icon name="document" />{{ t('invoice.openForm') }}</button>
           </div>
         </div>
@@ -74,6 +75,12 @@
     <BaseDialog :show="showForm" :title="t('invoice.openForm')" width="wide" :close-on-escape="!submitting" :show-close-button="!submitting" @close="closeForm">
       <form id="invoice-request-form" class="space-y-5" @submit.prevent="submitRequest">
         <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-primary-50 p-4 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300"><div><p class="font-medium">{{ t('invoice.selectedSummary', { count: selectedOrders.size }) }}</p><p class="mt-1 text-sm">{{ t('invoice.submitHint') }}</p></div><p class="text-2xl font-semibold">¥{{ selectedAmount.toFixed(2) }}</p></div>
+        <div class="rounded-xl bg-gray-50 p-4 text-sm dark:bg-dark-800">
+          <div class="flex items-center justify-between gap-3"><span>{{ t('invoice.feeAmount') }}</span><span data-testid="invoice-submit-fee" class="font-semibold">{{ selectedFee.toFixed(2) }}</span></div>
+          <div v-if="authStore.user" class="mt-2 flex items-center justify-between gap-3 text-gray-500 dark:text-gray-400"><span>{{ t('invoice.accountBalance') }}</span><span>{{ authStore.user.balance.toFixed(2) }}</span></div>
+          <p class="mt-2 leading-6 text-gray-500 dark:text-gray-400">{{ t('invoice.feeSubmitHint') }}</p>
+          <p v-if="insufficientBalance" role="alert" class="mt-2 text-red-600 dark:text-red-400">{{ t('invoice.errors.INVOICE_INSUFFICIENT_BALANCE') }}</p>
+        </div>
         <fieldset :disabled="submitting" class="space-y-5">
           <div><p class="input-label">{{ t('invoice.buyerType') }}</p><div class="mt-2 grid gap-3 sm:grid-cols-2">
             <label class="flex cursor-pointer items-start gap-3 rounded-xl border p-4" :class="form.buyer_type === 'personal' ? 'border-primary-500 bg-primary-50/50 dark:bg-primary-900/10' : 'border-gray-200 dark:border-dark-600'"><input v-model="form.buyer_type" type="radio" value="personal" name="buyer_type" class="mt-1 text-primary-600 focus:ring-primary-500" /><span><span class="font-medium">{{ t('invoice.personal') }}</span><span class="mt-1 block text-sm text-gray-500 dark:text-gray-400">{{ t('invoice.personalHint') }}</span></span></label>
@@ -84,7 +91,7 @@
           <label class="block"><span class="input-label">{{ t('invoice.remark') }}</span><textarea v-model="form.remark" data-testid="invoice-remark" class="input mt-1" rows="3" maxlength="2000" :placeholder="t('invoice.remarkPlaceholder')" /></label>
         </fieldset>
       </form>
-      <template #footer><div class="flex justify-end gap-3"><button type="button" class="btn btn-secondary" :disabled="submitting" @click="closeForm">{{ t('common.cancel') }}</button><button type="submit" form="invoice-request-form" data-testid="invoice-submit" class="btn btn-primary" :disabled="submitting || !canApply">{{ submitting ? t('common.processing') : t('invoice.submit') }}</button></div></template>
+      <template #footer><div class="flex justify-end gap-3"><button type="button" class="btn btn-secondary" :disabled="submitting" @click="closeForm">{{ t('common.cancel') }}</button><button type="submit" form="invoice-request-form" data-testid="invoice-submit" class="btn btn-primary" :disabled="submitting || !canApply || insufficientBalance">{{ submitting ? t('common.processing') : t('invoice.submit') }}</button></div></template>
     </BaseDialog>
 
     <BaseDialog :show="!!selectedRequest" :title="t('invoice.detail')" width="wide" @close="selectedRequest = null"><InvoiceRequestDetails v-if="selectedRequest" :request="selectedRequest" /><template #footer><div class="flex justify-end"><button v-if="selectedRequest?.status === 'issued'" class="btn btn-primary" :disabled="downloadingIds.has(selectedRequest.id)" @click="download(selectedRequest)"><Icon name="download" />{{ t('invoice.download') }}</button></div></template></BaseDialog>
@@ -96,6 +103,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoiceAPI, saveInvoicePDF } from '@/api/invoices'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import type { InvoiceConfig, InvoiceOrder, InvoiceRequest } from '@/types/invoice'
@@ -108,7 +116,8 @@ import InvoiceRequestDetails from '@/components/payment/InvoiceRequestDetails.vu
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const config = ref<InvoiceConfig>({ enabled: false, min_amount: 300, instructions: '', currency: 'CNY' })
+const authStore = useAuthStore()
+const config = ref<InvoiceConfig>({ enabled: false, min_amount: 300, fee_rate: 0, fee_min_amount: 0, instructions: '', currency: 'CNY' })
 const loading = ref(true)
 const ordersLoading = ref(false)
 const historyLoading = ref(false)
@@ -127,6 +136,8 @@ let ordersRequestId = 0
 let historyRequestId = 0
 const selectedCents = computed(() => [...selectedOrders.value.values()].reduce((sum, order) => sum + Math.round(order.pay_amount * 100), 0))
 const selectedAmount = computed(() => selectedCents.value / 100)
+const selectedFee = computed(() => Math.max(Math.round(selectedCents.value * Math.round(config.value.fee_rate * 100) / 10000), Math.round(config.value.fee_min_amount * 100)) / 100)
+const insufficientBalance = computed(() => selectedFee.value > 0 && !!authStore.user && authStore.user.balance < selectedFee.value)
 const canApply = computed(() => config.value.enabled && !loading.value && !ordersLoading.value && !submitting.value && selectedOrders.value.size > 0 && selectedCents.value >= Math.round(config.value.min_amount * 100))
 const allPageSelected = computed(() => orders.value.length > 0 && orders.value.every(order => selectedOrders.value.has(order.id)))
 
@@ -166,7 +177,7 @@ async function refresh() {
   if (submitting.value) return
   loading.value = true
   try {
-    await Promise.all([loadConfig(), loadRequests()])
+    await Promise.allSettled([loadConfig(), loadRequests(), authStore.refreshUser()])
     if (config.value.enabled) await loadOrders()
     else selectedOrders.value = new Map()
   } finally { loading.value = false }
@@ -202,6 +213,7 @@ function closeForm() { if (!submitting.value) showForm.value = false }
 
 async function submitRequest() {
   if (submitting.value || !canApply.value) return
+  if (insufficientBalance.value) { appStore.showError(t('invoice.errors.INVOICE_INSUFFICIENT_BALANCE')); return }
   const emails = [...new Set(form.emails.split(/[,，;\s]+/).map(email => email.trim()).filter(Boolean))]
   const taxId = form.tax_id.trim().toUpperCase()
   if (!form.title.trim()) { appStore.showError(t('invoice.errors.requiredTitle')); return }
@@ -217,7 +229,7 @@ async function submitRequest() {
     Object.assign(form, { buyer_type: 'personal', title: '', tax_id: '', emails: '', remark: '' })
     orderPagination.page = 1
     historyPagination.page = 1
-    await Promise.all([loadOrders(), loadRequests()])
+    await Promise.allSettled([loadOrders(), loadRequests(), authStore.refreshUser()])
   } catch (error) { showError(error) }
   finally { submitting.value = false }
 }

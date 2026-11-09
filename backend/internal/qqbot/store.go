@@ -230,6 +230,18 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(71427102)`); err != nil {
 		return err
 	}
+	// A merged batch keeps its first event key and latest reply target. QQ can
+	// redeliver any constituent as an AT event; do not split, overwrite or bill
+	// that batch twice. Single-message candidates retain normal AT promotion.
+	if isGroupMessageEvent(p.Type) {
+		var batched bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_bot_autonomous_seen s JOIN qq_bot_jobs j ON j.id=s.job_id WHERE s.app_id=$1 AND s.group_id=$2 AND s.message_id=$3 AND COALESCE((j.autonomous_data->>'batch_messages')::int,1)>1)`, c.AppID, e.GroupID, e.ID).Scan(&batched); err != nil {
+			return err
+		}
+		if batched {
+			return tx.Commit()
+		}
+	}
 	var queued int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_jobs WHERE status='queued'`).Scan(&queued); err != nil {
 		return err
@@ -271,7 +283,7 @@ func (s *Service) Enqueue(ctx context.Context, c Config, p Payload) (err error) 
 	return nil
 }
 
-const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason,image_decision,site_query,chat_execution`
+const jobColumns = `id,app_id,event_type,group_id,member_id,message_id,payload,kind,status,result_text,result_image,image_type,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason,image_decision,site_query,chat_execution,autonomous_data`
 
 type scanner interface{ Scan(...any) error }
 
@@ -285,7 +297,7 @@ func nullableChatExecution(raw json.RawMessage) any {
 func scanJob(r scanner) (Job, error) {
 	var j Job
 	var chatExecution []byte
-	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason, &j.ImageDecision, &j.SiteQuery, &chatExecution)
+	err := r.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.MessageID, &j.Payload, &j.Kind, &j.Status, &j.ResultText, &j.Image, &j.ImageType, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason, &j.ImageDecision, &j.SiteQuery, &chatExecution, &j.AutonomousData)
 	j.ChatExecution = json.RawMessage(chatExecution)
 	return j, err
 }
@@ -313,6 +325,9 @@ func (s *Service) claimJob(ctx context.Context) (Job, error) {
    NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION') AND p.status='running')
    AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION') AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
  ))
+ AND (q.kind<>'ambient_chat' OR ((q.autonomous_ready_at IS NULL OR q.autonomous_ready_at<=clock_timestamp() OR q.created_at<clock_timestamp()-INTERVAL '2 minutes')
+   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.group_id=q.group_id AND p.kind='ambient_chat' AND p.status='running')
+   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.group_id=q.group_id AND p.kind='ambient_chat' AND p.status='queued' AND (p.created_at,p.id)<(q.created_at,q.id))))
  AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs r WHERE r.status='running' AND r.app_id=q.app_id AND r.group_id=q.group_id AND r.member_id=q.member_id) ORDER BY (kind='ambient_chat'),created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
 	if err != nil {
 		return j, err
@@ -426,7 +441,7 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	var streakReward GrowthReward
 	var checkin CheckinConfig
 	if kind == "invite" {
-		if !c.InviteEnabled || c.InviteReward <= 0 || c.InviteDailyLimit <= 0 {
+		if !c.InviteEnabled || !c.inviteHasReward() || c.InviteDailyLimit <= 0 {
 			return "邀请奖励未开启。", nil
 		}
 		amount = c.InviteReward
@@ -559,6 +574,17 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	if err != nil {
 		return "", err
 	}
+	// Base awards share the same entitlement transaction as balance and attendance.
+	couponID, couponQuantity := checkin.CouponTemplateID, checkin.CouponQuantity
+	if kind == "invite" {
+		couponID, couponQuantity = c.InviteCouponTemplateID, c.InviteCouponQuantity
+	}
+	if couponQuantity > 0 {
+		_, err = grantActivityReward(ctx, tx, c, Job{GroupID: j.GroupID, MemberID: recipientMember}, userID, key+":coupon", kind, "日常活动优惠券", GrowthReward{Type: "coupon", CouponTemplateID: couponID, Quantity: couponQuantity}, rewardAt)
+		if err != nil {
+			return "", err
+		}
+	}
 	var streak int
 	var bonus bool
 	var milestoneText string
@@ -589,9 +615,12 @@ func (s *Service) reward(ctx context.Context, c Config, j Job, kind string) (str
 	}
 	s.invalidate(ctx, userID)
 	if kind == "invite" {
-		return fmt.Sprintf("🎁 邀请奖励已发放：USD %.2f", amount), nil
+		return "🎁 邀请奖励已发放：" + c.inviteRewardDescription(), nil
 	}
 	text := fmt.Sprintf("✅ **签到成功**\n到账：USD %.2f\n累计签到 %d 天\n连签 %d 天", amount, checkinTotal, streak)
+	if couponQuantity > 0 {
+		text += fmt.Sprintf("\n充值优惠券 × %d，发送「我的优惠券」查看", couponQuantity)
+	}
 	text += milestoneText
 	if bonus {
 		text += "\n\n连签奖励：" + streakReward.description() + "\n" + streakReward.deliveryNote()
@@ -626,14 +655,14 @@ func (s *Service) Runtime(ctx context.Context, c Config) (Runtime, error) {
 	if err != nil {
 		return out, err
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT id,app_id,event_type,group_id,member_id,kind,status,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason,image_decision,site_query,chat_execution FROM qq_bot_jobs WHERE app_id=$1 ORDER BY created_at DESC LIMIT 50`, c.AppID)
+	rows, err = s.db.QueryContext(ctx, `SELECT id,app_id,event_type,group_id,member_id,kind,status,error,input_tokens,output_tokens,created_at,finished_at,trigger_reason,decision_reason,image_decision,site_query,chat_execution,autonomous_data FROM qq_bot_jobs WHERE app_id=$1 ORDER BY created_at DESC LIMIT 50`, c.AppID)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
 		var j Job
 		var chatExecution []byte
-		if err = rows.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.Kind, &j.Status, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason, &j.ImageDecision, &j.SiteQuery, &chatExecution); err != nil {
+		if err = rows.Scan(&j.ID, &j.AppID, &j.EventType, &j.GroupID, &j.MemberID, &j.Kind, &j.Status, &j.Error, &j.InputTokens, &j.OutputTokens, &j.CreatedAt, &j.FinishedAt, &j.TriggerReason, &j.DecisionReason, &j.ImageDecision, &j.SiteQuery, &chatExecution, &j.AutonomousData); err != nil {
 			_ = rows.Close()
 			return out, err
 		}

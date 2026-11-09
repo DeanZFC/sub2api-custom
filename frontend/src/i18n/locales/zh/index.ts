@@ -11,6 +11,7 @@ import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
 import invoice from './invoice'
+import coupon from './coupon'
 
 export default {
   gptDirect,
@@ -26,4 +27,5 @@ export default {
   admin,
   ...misc,
   invoice,
+  coupon,
 }

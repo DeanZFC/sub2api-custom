@@ -72,5 +72,9 @@ func TestQQBotFullMigrationChain(t *testing.T) {
 	var autonomousColumns int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='qq_bot_jobs' AND column_name IN ('trigger_reason','decision_reason','model_reserved_at','reply_reserved_at','reply_sent_at')`).Scan(&autonomousColumns))
 	require.Equal(t, 5, autonomousColumns)
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='qq_bot_jobs' AND column_name IN ('autonomous_ready_at','autonomous_data')`).Scan(&autonomousColumns))
+	require.Equal(t, 2, autonomousColumns)
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='qq_bot_autonomous_seen' AND column_name IN ('member_id','job_id','ends_conversation')`).Scan(&autonomousColumns))
+	require.Equal(t, 3, autonomousColumns)
 
 }

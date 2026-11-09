@@ -9,10 +9,12 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Wei-Shaw/sub2api/internal/coupon"
 	"github.com/shopspring/decimal"
 )
 
 type GrowthReward struct {
+	CouponTemplateID  int64   `json:"coupon_template_id,omitempty"`
 	Type              string  `json:"type"`
 	Amount            float64 `json:"amount"`
 	Quantity          int     `json:"quantity"`
@@ -46,6 +48,10 @@ func (r GrowthReward) validate() error {
 		return errors.New("奖励金额须为 0～1000 USD（最多 8 位小数），数量须为 0～1000，奖品名称最多 100 字且不能换行，领取说明最多 500 字")
 	}
 	switch r.Type {
+	case "coupon":
+		if r.Amount != 0 || r.Quantity > 100 || r.CouponTemplateID <= 0 {
+			return errors.New("优惠券奖励须选择券模板，数量为 0～100")
+		}
 	case "balance":
 		if r.Quantity != 0 {
 			return errors.New("余额奖励不能同时配置奖励数量")
@@ -65,6 +71,8 @@ func (r GrowthReward) validate() error {
 
 func (r GrowthReward) description() string {
 	switch r.Type {
+	case "coupon":
+		return fmt.Sprintf("充值优惠券 × %d", r.Quantity)
 	case "balance":
 		return "余额 USD " + decimal.NewFromFloat(r.Amount).String()
 	case "chances":
@@ -76,6 +84,8 @@ func (r GrowthReward) description() string {
 
 func (r GrowthReward) deliveryNote() string {
 	switch r.Type {
+	case "coupon":
+		return "已发到网站券包，发送「我的优惠券」查看"
 	case "balance":
 		return "已到账"
 	case "chances":
@@ -131,6 +141,11 @@ func grantActivityReward(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 		return false, err
 	}
 	switch reward.Type {
+	case "coupon":
+		_, err = coupon.Issue(ctx, tx, reward.CouponTemplateID, uid, reward.Quantity, "qq_"+source, key, at)
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE qq_bot_reward_codes SET coupon_template_id=$2 WHERE id=$1`, id, reward.CouponTemplateID)
+		}
 	case "chances":
 		_, err = tx.ExecContext(ctx, `INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES($1,$2,$3)`, key, uid, reward.Quantity)
 	case "balance":
@@ -160,7 +175,7 @@ func grantActivityReward(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 func activityRewardSnapshot(ctx context.Context, tx *sql.Tx, key string) (GrowthReward, string, error) {
 	var reward GrowthReward
 	var status string
-	err := tx.QueryRowContext(ctx, `SELECT reward_type,amount,quantity,prize_name,claim_instructions,status FROM qq_bot_reward_codes WHERE source_key=$1`, key).Scan(&reward.Type, &reward.Amount, &reward.Quantity, &reward.PrizeName, &reward.ClaimInstructions, &status)
+	err := tx.QueryRowContext(ctx, `SELECT reward_type,amount,quantity,prize_name,claim_instructions,status,COALESCE(coupon_template_id,0) FROM qq_bot_reward_codes WHERE source_key=$1`, key).Scan(&reward.Type, &reward.Amount, &reward.Quantity, &reward.PrizeName, &reward.ClaimInstructions, &status, &reward.CouponTemplateID)
 	if !errors.Is(err, sql.ErrNoRows) {
 		return reward, status, err
 	}

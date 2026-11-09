@@ -202,6 +202,8 @@ func TestInvoiceConcurrentPostgresApplication(t *testing.T) {
 	})
 	order := invoiceTestOrder(t, client, user, 300)
 	svc := invoiceTestService(client, true, "300")
+	client.User.UpdateOneID(user.ID).SetBalance(50).ExecX(ctx)
+	svc.configService.settingRepo.(*paymentConfigSettingRepoStub).values[SettingInvoiceFeeRate] = "10"
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	var workers sync.WaitGroup
@@ -227,4 +229,64 @@ func TestInvoiceConcurrentPostgresApplication(t *testing.T) {
 	}
 	require.Equal(t, 1, successes)
 	require.Equal(t, 1, client.InvoiceRequest.Query().Where(invoicerequest.UserIDEQ(user.ID)).CountX(ctx))
+	require.Equal(t, 20.0, client.User.GetX(ctx, user.ID).Balance, "duplicate submissions charge only one fee")
+
+	// Different orders must also contend for the same available balance.
+	for range 2 {
+		invoiceTestOrder(t, client, user, 300)
+	}
+	available := client.PaymentOrder.Query().Where(paymentorder.UserIDEQ(user.ID), paymentorder.InvoiceRequestIDIsNil()).AllX(ctx)
+	require.Len(t, available, 2)
+	client.User.UpdateOneID(user.ID).SetBalance(30).ExecX(ctx)
+	start = make(chan struct{})
+	results = make(chan error, 2)
+	for _, nextOrder := range available {
+		workers.Add(1)
+		go func(orderID int64) {
+			defer workers.Done()
+			<-start
+			_, err := svc.CreateInvoiceRequest(ctx, user.ID, invoiceTestInput(orderID))
+			results <- err
+		}(nextOrder.ID)
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	successes = 0
+	for err := range results {
+		if err == nil {
+			successes++
+		} else {
+			require.Equal(t, "INVOICE_INSUFFICIENT_BALANCE", infraerrors.Reason(err))
+		}
+	}
+	require.Equal(t, 1, successes)
+	require.Zero(t, client.User.GetX(ctx, user.ID).Balance)
+	require.Equal(t, 2, client.InvoiceRequest.Query().Where(invoicerequest.UserIDEQ(user.ID)).CountX(ctx))
+
+	application := client.InvoiceRequest.Query().Where(invoicerequest.UserIDEQ(user.ID)).FirstX(ctx)
+	start = make(chan struct{})
+	results = make(chan error, 2)
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			_, err := svc.RejectInvoiceRequest(ctx, application.ID, "please correct the invoice title")
+			results <- err
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	successes = 0
+	for err := range results {
+		if err == nil {
+			successes++
+		} else {
+			require.Equal(t, "INVOICE_ALREADY_PROCESSED", infraerrors.Reason(err))
+		}
+	}
+	require.Equal(t, 1, successes)
+	require.Equal(t, 30.0, client.User.GetX(ctx, user.ID).Balance, "concurrent rejections refund the fee exactly once")
 }

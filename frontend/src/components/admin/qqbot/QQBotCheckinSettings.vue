@@ -11,6 +11,14 @@
         <label class="space-y-1">{{ t('qqbot.maxAmount') }}<input v-model.number="form.max_amount" data-testid="max-amount" type="number" min="0" max="1000" step="0.00000001" required class="input" /></label>
       </div>
       <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
+        <legend class="font-medium">{{ t('coupon.rewardTitle') }}</legend>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <CouponTemplateSelect v-model="form.coupon_template_id" />
+          <label>{{ t('coupon.quantity') }}<input v-model.number="form.coupon_quantity" type="number" min="0" max="100" step="1" class="input" /></label>
+        </div>
+        <p class="text-sm text-gray-500">{{ t('coupon.rewardHint') }}</p>
+      </fieldset>
+      <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
         <legend class="font-medium">{{ t('qqbot.checkinDistributionTitle') }}</legend>
         <p class="text-sm text-gray-500">{{ t('qqbot.checkinDistributionHelp') }}</p>
         <div class="grid gap-4 sm:grid-cols-3">
@@ -46,7 +54,7 @@
             <label class="space-y-1">{{ t('qqbot.milestones.days') }}<input v-model.number="milestone.days" :data-testid="'milestone-days-' + index" type="number" min="1" max="3650" step="1" required class="input" /></label>
           </div>
           <label v-if="milestone.kind === 'checkin_total'" class="flex items-center gap-2 text-sm"><input v-model="milestone.repeat" type="checkbox" :disabled="persistedMilestoneIDs.has(milestone.id)" :title="persistedMilestoneIDs.has(milestone.id) ? t('qqbot.milestones.repeatLocked') : undefined" :data-testid="'milestone-repeat-' + index" />{{ t('qqbot.milestones.repeat') }}</label>
-          <QQBotGrowthRewardFields v-model="milestone.reward" prefix="milestone" :index="index" :allowed-types="milestone.reward.type === 'balance' || milestone.reward.type === 'chances' ? ['chances', 'balance'] : undefined" />
+          <QQBotGrowthRewardFields v-model="milestone.reward" prefix="milestone" :index="index" :allowed-types="milestone.reward.type === 'balance' || milestone.reward.type === 'chances' ? ['chances', 'balance', 'coupon'] : undefined" />
         </article>
         <p v-if="!form.milestones.length" class="rounded-lg border border-dashed p-4 text-sm text-gray-500 dark:border-dark-700">{{ t('qqbot.milestones.empty') }}</p>
         <button type="button" class="btn btn-secondary" data-testid="add-checkin-milestone" :disabled="form.milestones.length >= maxMilestones" @click="addMilestone(7)">{{ t('qqbot.milestones.add') }}</button>
@@ -69,6 +77,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import CouponTemplateSelect from './CouponTemplateSelect.vue'
 import { useQQDraft } from './useQQDraft'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'

@@ -1,4 +1,4 @@
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, config } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import zh from '@/i18n/locales/zh'
@@ -14,6 +14,8 @@ import QQBotActivitiesView from '../QQBotActivitiesView.vue'
 
 const api = vi.hoisted(() => ({ activityPreview: vi.fn(), rankingConfig: vi.fn(), saveRankings: vi.fn(), rewardCodes: vi.fn(), checkinConfig: vi.fn(), saveCheckin: vi.fn(), inviteConfig: vi.fn(), saveInvite: vi.fn(), transferConfig: vi.fn(), saveTransfer: vi.fn(), lotteryConfig: vi.fn(), saveLottery: vi.fn(), lotteryDraws: vi.fn(), lotteryState: vi.fn() }))
 vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
+const couponApi = vi.hoisted(() => ({ templates: vi.fn() }))
+vi.mock('@/api/coupons', () => ({ adminCouponAPI: couponApi }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 function i18n(locale: 'zh' | 'en') { return createI18n({ legacy: false, locale, messages: { zh, en } }) }
 function rewardConfig(quantity = 0) { return { type: 'chances', amount: 0, quantity, prize_name: '', claim_instructions: '' } }
@@ -28,6 +30,8 @@ function growthConfig(chances = [0, 0, 0]) {
 describe('QQ activity pages with real translations', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    couponApi.templates.mockResolvedValue({ data: [{ id: 12, name: '满100减10', currency: 'CNY', enabled: true }] })
+    config.global.stubs.RouterLink = { template: '<a><slot /></a>' }
     vi.spyOn(console, 'error').mockImplementation(() => {})
     api.rankingConfig.mockResolvedValue({ enabled: true, rewards_enabled: false, effective_day: '', token_rewards: [], amount_rewards: [] })
     api.saveRankings.mockImplementation(async c => c)
@@ -44,7 +48,7 @@ describe('QQ activity pages with real translations', () => {
     api.lotteryDraws.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
     api.lotteryState.mockResolvedValue({ user_id: 7, recharge_total: 35, earned: 3, used: 1, remaining: 2, next_recharge: 5 })
   })
-  afterEach(() => { try { expect(console.error).not.toHaveBeenCalled() } finally { vi.restoreAllMocks() } })
+  afterEach(() => { try { expect(console.error).not.toHaveBeenCalled() } finally { delete config.global.stubs.RouterLink; vi.restoreAllMocks() } })
   it.each(['zh', 'en'] as const)('%s saves check-in range independently and rejects reversed endpoints', async locale => {
     const translation = i18n(locale)
     const w = mount(QQBotCheckinSettings, { global: { plugins: [translation] } })
@@ -67,7 +71,7 @@ describe('QQ activity pages with real translations', () => {
     expect(w.text()).toContain(translation.global.t('qqbot.minimumRecentRecharge', { days: 7 }))
     await w.get('form').trigger('submit')
     await flushPromises()
-    expect(api.saveCheckin).toHaveBeenCalledWith({ enabled: true, min_amount: 0.7, max_amount: 0.9, min_recharge_total: 12, min_recharge_30d: 5.25, recharge_window_days: 7, streak_days: 7, streak_chances: 0, streak_reward: rewardConfig(), reward_distribution: { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }, milestones: [], growth: growthConfig() })
+    expect(api.saveCheckin).toHaveBeenCalledWith({ coupon_template_id: 0, coupon_quantity: 0, enabled: true, min_amount: 0.7, max_amount: 0.9, min_recharge_total: 12, min_recharge_30d: 5.25, recharge_window_days: 7, streak_days: 7, streak_chances: 0, streak_reward: rewardConfig(), reward_distribution: { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }, milestones: [], growth: growthConfig() })
     expect(w.get('[role="status"]').text()).toBe(translation.global.t('common.saved'))
     w.unmount()
   })
@@ -128,7 +132,7 @@ describe('QQ activity pages with real translations', () => {
     expect(w.get('[role="alert"]').text()).toBe('Save failed')
     expect(w.find('[data-testid="streak-chances"]').exists()).toBe(false)
     await w.get('form').trigger('submit'); await flushPromises()
-    expect(api.saveCheckin).toHaveBeenLastCalledWith({ enabled: true, min_amount: 0.1, max_amount: 0.5, min_recharge_total: 0, min_recharge_30d: 0, recharge_window_days: 30, streak_days: 7, streak_chances: 0, streak_reward: rewardConfig(), reward_distribution: { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }, milestones: [], growth: growthConfig([1, 0, 1000]) })
+    expect(api.saveCheckin).toHaveBeenLastCalledWith({ coupon_template_id: 0, coupon_quantity: 0, enabled: true, min_amount: 0.1, max_amount: 0.5, min_recharge_total: 0, min_recharge_30d: 0, recharge_window_days: 30, streak_days: 7, streak_chances: 0, streak_reward: rewardConfig(), reward_distribution: { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }, milestones: [], growth: growthConfig([1, 0, 1000]) })
     expect(w.find('[role="alert"]').exists()).toBe(false)
     expect(w.get('[role="status"]').text()).toBe(translation.global.t('common.saved'))
     w.unmount()
@@ -425,7 +429,7 @@ describe('QQ activity pages with real translations', () => {
   })
   it.each(['zh', 'en'] as const)('%s keeps invitation rules and a disabled draft after a save failure', async locale => {
     const translation = i18n(locale)
-    const rules = { _version: 'invite-1', enabled: true, invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 }
+    const rules = { coupon_template_id: 0, coupon_quantity: 0, _version: 'invite-1', enabled: true, invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 }
     api.inviteConfig.mockResolvedValue(rules)
     const w = mount(QQBotInviteSettings, { global: { plugins: [translation] } })
     await flushPromises()
@@ -477,7 +481,7 @@ describe('QQ activity pages with real translations', () => {
     await w.get('[data-testid="invite-min-recharge-30d"]').setValue('10')
     await w.get('[data-testid="invite-recharge-window-days"]').setValue('60')
     await w.get('form').trigger('submit'); await flushPromises()
-    expect(api.saveInvite).toHaveBeenCalledWith({ enabled: true, invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 })
+    expect(api.saveInvite).toHaveBeenCalledWith({ coupon_template_id: 0, coupon_quantity: 0, enabled: true, invite_reward: 2.5, invite_daily_limit: 8, min_recharge_total: 20, min_recharge_30d: 10, recharge_window_days: 60 })
     expect(api.saveCheckin).not.toHaveBeenCalled()
     expect(api.saveLottery).not.toHaveBeenCalled()
     await w.get('#qqbot-tab-checkin').trigger('click'); await flushPromises()

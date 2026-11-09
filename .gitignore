@@ -135,6 +135,7 @@ deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/recharge-coupons.md
 !docs/upstream-error-message.md
 !docs/strict-failover.md
 !docs/group-unavailable-fallback.md

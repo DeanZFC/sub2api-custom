@@ -374,6 +374,7 @@ const routes: RouteRecordRaw[] = [
       requiresPayment: true
     }
   },
+  { path: '/coupons', name: 'UserCoupons', component: () => import('@/views/user/UserCouponsView.vue'), meta: { requiresAuth: true, requiresAdmin: false, title: 'My coupons', titleKey: 'coupon.title' } },
   {
     path: '/invoices',
     name: 'UserInvoices',
@@ -844,6 +845,7 @@ const routes: RouteRecordRaw[] = [
       requiresPayment: true
     }
   },
+  { path: '/admin/orders/coupons', name: 'AdminCoupons', component: () => import('@/views/admin/orders/AdminCouponsView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Recharge coupons', titleKey: 'coupon.adminTitle' } },
   {
     path: '/admin/orders/invoices',
     name: 'AdminInvoices',

@@ -38,5 +38,11 @@ func (s *Service) myRewards(ctx context.Context, c Config, j Job) (string, error
 	if redemption > 0 {
 		text += fmt.Sprintf("\n历史奖励：USD %.2f", redemption)
 	}
+	var couponTotal, couponAvailable int
+	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(*) FILTER (WHERE status='available' AND expires_at>NOW()) FROM user_recharge_coupons WHERE user_id=$1 AND source LIKE 'qq\_%' ESCAPE '\'`, uid).Scan(&couponTotal, &couponAvailable)
+	if err != nil {
+		return "", err
+	}
+	text += fmt.Sprintf("\n\n活动优惠券：累计 %d 张，当前可用 %d 张\n发送「我的优惠券」查看网站券包及使用规则。", couponTotal, couponAvailable)
 	return text, nil
 }

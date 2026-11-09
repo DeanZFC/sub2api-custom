@@ -107,6 +107,9 @@ func validateURL(raw string) error {
 	return nil
 }
 func validateConfig(c Config) error {
+	if err := validateOptionalCoupon(c.InviteCouponTemplateID, c.InviteCouponQuantity); err != nil {
+		return err
+	}
 	if c.RewardBudgetDaily != nil && (math.IsNaN(*c.RewardBudgetDaily) || math.IsInf(*c.RewardBudgetDaily, 0) || *c.RewardBudgetDaily < 0 || *c.RewardBudgetDaily > 1000000 || math.Abs(*c.RewardBudgetDaily*1e8-math.Round(*c.RewardBudgetDaily*1e8)) > .001) {
 		return errors.New("每日奖励预算须为 0～1000000 USD，最多 8 位小数；0 暂停余额奖励，留空不限制")
 	}
@@ -241,6 +244,8 @@ func (s *Service) SaveBasicConfig(ctx context.Context, c Config) (Config, error)
 		preserveImageConnectionMetadata(&c, old)
 		c.InviteEnabled = old.InviteEnabled
 		c.InviteReward = old.InviteReward
+		c.InviteCouponTemplateID = old.InviteCouponTemplateID
+		c.InviteCouponQuantity = old.InviteCouponQuantity
 		c.InviteDailyLimit = old.InviteDailyLimit
 		c.InviteMinRechargeTotal = old.InviteMinRechargeTotal
 		c.InviteMinRecharge30d = old.InviteMinRecharge30d

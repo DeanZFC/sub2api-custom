@@ -220,13 +220,15 @@ func TestAutonomousSilenceErrorsAndCallLimit(t *testing.T) {
 	}
 }
 func TestAutonomousRechecksConversationAndRevocation(t *testing.T) {
-	for _, mode := range []string{"new_message", "disable", "quiet_hours", "max_length"} {
+	for _, mode := range []string{"new_message", "ended", "disable", "quiet_hours", "max_length"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newAutoHarness(t)
 			h.hook = func() {
 				switch mode {
 				case "new_message":
 					h.enqueue(t, "new", "哈哈", "bob")
+				case "ended":
+					h.enqueue(t, "ended", "不用回复", "alice")
 				case "disable":
 					h.c.Autonomous.Enabled = false
 					h.save(t)
@@ -246,7 +248,11 @@ func TestAutonomousRechecksConversationAndRevocation(t *testing.T) {
 			h.enqueue(t, "one", "这个报错怎么处理？", "alice")
 			h.run()
 			require.EqualValues(t, 1, h.calls.Load())
-			require.Zero(t, h.sends.Load())
+			if mode == "new_message" {
+				require.EqualValues(t, 1, h.sends.Load())
+			} else {
+				require.Zero(t, h.sends.Load())
+			}
 		})
 	}
 }
@@ -489,10 +495,10 @@ func TestAutonomousBudgetRollbackAndPolicyChanges(t *testing.T) {
 				h.c.Autonomous.Enabled = false
 				h.save(t)
 			case "stale":
-				_, err := h.db.Exec(`UPDATE qq_bot_jobs SET created_at=NOW()-INTERVAL '1 minute' WHERE message_id='one'`)
+				_, err := h.db.Exec(`UPDATE qq_bot_jobs SET created_at=NOW()-INTERVAL '3 minutes' WHERE message_id='one'`)
 				require.NoError(t, err)
 			case "new_message":
-				h.enqueue(t, "new", "我已经找到原因了", "bob")
+				h.enqueue(t, "new", "不用回复", "alice")
 			case "member_cooldown":
 				_, err := h.db.Exec(`INSERT INTO qq_bot_jobs(id,app_id,event_key,event_type,group_id,member_id,payload,kind,status,reply_reserved_at) VALUES('old','app','old','GROUP_MESSAGE_CREATE','group','alice','{}','ambient_chat','delivery_failed',NOW()-INTERVAL '90 seconds')`)
 				require.NoError(t, err)
@@ -506,7 +512,7 @@ func TestAutonomousBudgetRollbackAndPolicyChanges(t *testing.T) {
 			var count int
 			require.NoError(t, h.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_daily_usage WHERE kind='ambient_chat'`).Scan(&count))
 			require.Zero(t, count)
-			reasons := map[string]string{"disabled": "config_changed", "stale": "stale", "new_message": "conversation_moved", "member_cooldown": "member_cooldown", "failed_send_cooldown": "group_cooldown"}
+			reasons := map[string]string{"disabled": "config_changed", "stale": "stale", "new_message": "conversation_ended", "member_cooldown": "member_cooldown", "failed_send_cooldown": "group_cooldown"}
 			require.Equal(t, reasons[mode], h.job(t, "one").DecisionReason)
 		})
 	}

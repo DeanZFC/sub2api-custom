@@ -125,7 +125,7 @@
           <p id="qq-history-help" class="text-xs text-gray-500">{{ t('qqbot.historyHelp') }}</p></details>
         </section>
         <div v-show="activeTab === 'autonomous'" id="qqbot-settings-panel-autonomous" role="tabpanel" aria-labelledby="qqbot-settings-tab-autonomous" class="space-y-6">
-          <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" :groups="allowedGroups" :policies="groupPolicies" :names="groupNames" />
+          <QQBotAutonomousSettings v-model="autonomous" :runtime="runtime" :groups="allowedGroups" :policies="groupPolicies" :names="groupNames" :total-daily-chat-limit="form.total_daily_chat_limit" :chat-disabled="form.chat_disabled" />
 
           <QQBotKnowledgeSettings v-model="siteKnowledge" />
           <QQBotChatPreview v-if="baseline && activeTab === 'autonomous'" :config="baseline" />

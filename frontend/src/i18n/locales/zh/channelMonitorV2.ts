@@ -33,6 +33,7 @@ export default {
     trendView: { label: '趋势视图', pulse: '渠道卡片', line: '折线图' },
     cards: {
       overall: '整体', allModels: '全部模型', models: '各模型', modelCount: '{count} 个模型',
+      expandModels: '展开其余 {count} 个模型', collapseModels: '收起模型',
       noModels: '当前范围内暂无模型调用', currentScope: '状态明细：{model}', backToOverall: '返回整体',
       title: '渠道健康', description: '汇总覆盖所选窗口，近 20 次仅为近期样本 · 悬停色块查看详情',
       passive: '被动健康', availability: '可用率',

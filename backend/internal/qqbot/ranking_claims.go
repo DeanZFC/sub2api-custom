@@ -106,6 +106,13 @@ func (s *Service) settlePendingRankingRewards(ctx context.Context, c Config, at 
 	if err != nil {
 		return err
 	}
+	// Lock the full, already sorted recipient set before coupon template locks.
+	// Admin batch issuance uses the same order, preventing user/template deadlocks.
+	for _, entry := range pending {
+		if _, err = tx.ExecContext(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, entry.uid); err != nil {
+			return err
+		}
+	}
 	var invalidations []int64
 	for _, r := range pending {
 		var uid int64

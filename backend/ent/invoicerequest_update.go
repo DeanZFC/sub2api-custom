@@ -28,6 +28,20 @@ func (_u *InvoiceRequestUpdate) Where(ps ...predicate.InvoiceRequest) *InvoiceRe
 	return _u
 }
 
+// SetFeeRefunded sets the "fee_refunded" field.
+func (_u *InvoiceRequestUpdate) SetFeeRefunded(v bool) *InvoiceRequestUpdate {
+	_u.mutation.SetFeeRefunded(v)
+	return _u
+}
+
+// SetNillableFeeRefunded sets the "fee_refunded" field if the given value is not nil.
+func (_u *InvoiceRequestUpdate) SetNillableFeeRefunded(v *bool) *InvoiceRequestUpdate {
+	if v != nil {
+		_u.SetFeeRefunded(*v)
+	}
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *InvoiceRequestUpdate) SetStatus(v string) *InvoiceRequestUpdate {
 	_u.mutation.SetStatus(v)
@@ -200,6 +214,9 @@ func (_u *InvoiceRequestUpdate) sqlSave(ctx context.Context) (_node int, err err
 			}
 		}
 	}
+	if value, ok := _u.mutation.FeeRefunded(); ok {
+		_spec.SetField(invoicerequest.FieldFeeRefunded, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(invoicerequest.FieldStatus, field.TypeString, value)
 	}
@@ -245,6 +262,20 @@ type InvoiceRequestUpdateOne struct {
 	fields   []string
 	hooks    []Hook
 	mutation *InvoiceRequestMutation
+}
+
+// SetFeeRefunded sets the "fee_refunded" field.
+func (_u *InvoiceRequestUpdateOne) SetFeeRefunded(v bool) *InvoiceRequestUpdateOne {
+	_u.mutation.SetFeeRefunded(v)
+	return _u
+}
+
+// SetNillableFeeRefunded sets the "fee_refunded" field if the given value is not nil.
+func (_u *InvoiceRequestUpdateOne) SetNillableFeeRefunded(v *bool) *InvoiceRequestUpdateOne {
+	if v != nil {
+		_u.SetFeeRefunded(*v)
+	}
+	return _u
 }
 
 // SetStatus sets the "status" field.
@@ -448,6 +479,9 @@ func (_u *InvoiceRequestUpdateOne) sqlSave(ctx context.Context) (_node *InvoiceR
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.FeeRefunded(); ok {
+		_spec.SetField(invoicerequest.FieldFeeRefunded, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(invoicerequest.FieldStatus, field.TypeString, value)

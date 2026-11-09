@@ -46,6 +46,34 @@ func (_c *InvoiceRequestCreate) SetAmount(v float64) *InvoiceRequestCreate {
 	return _c
 }
 
+// SetFeeAmount sets the "fee_amount" field.
+func (_c *InvoiceRequestCreate) SetFeeAmount(v float64) *InvoiceRequestCreate {
+	_c.mutation.SetFeeAmount(v)
+	return _c
+}
+
+// SetNillableFeeAmount sets the "fee_amount" field if the given value is not nil.
+func (_c *InvoiceRequestCreate) SetNillableFeeAmount(v *float64) *InvoiceRequestCreate {
+	if v != nil {
+		_c.SetFeeAmount(*v)
+	}
+	return _c
+}
+
+// SetFeeRefunded sets the "fee_refunded" field.
+func (_c *InvoiceRequestCreate) SetFeeRefunded(v bool) *InvoiceRequestCreate {
+	_c.mutation.SetFeeRefunded(v)
+	return _c
+}
+
+// SetNillableFeeRefunded sets the "fee_refunded" field if the given value is not nil.
+func (_c *InvoiceRequestCreate) SetNillableFeeRefunded(v *bool) *InvoiceRequestCreate {
+	if v != nil {
+		_c.SetFeeRefunded(*v)
+	}
+	return _c
+}
+
 // SetCurrency sets the "currency" field.
 func (_c *InvoiceRequestCreate) SetCurrency(v string) *InvoiceRequestCreate {
 	_c.mutation.SetCurrency(v)
@@ -245,6 +273,14 @@ func (_c *InvoiceRequestCreate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (_c *InvoiceRequestCreate) defaults() {
+	if _, ok := _c.mutation.FeeAmount(); !ok {
+		v := invoicerequest.DefaultFeeAmount
+		_c.mutation.SetFeeAmount(v)
+	}
+	if _, ok := _c.mutation.FeeRefunded(); !ok {
+		v := invoicerequest.DefaultFeeRefunded
+		_c.mutation.SetFeeRefunded(v)
+	}
 	if _, ok := _c.mutation.Currency(); !ok {
 		v := invoicerequest.DefaultCurrency
 		_c.mutation.SetCurrency(v)
@@ -301,6 +337,12 @@ func (_c *InvoiceRequestCreate) check() error {
 	}
 	if _, ok := _c.mutation.Amount(); !ok {
 		return &ValidationError{Name: "amount", err: errors.New(`ent: missing required field "InvoiceRequest.amount"`)}
+	}
+	if _, ok := _c.mutation.FeeAmount(); !ok {
+		return &ValidationError{Name: "fee_amount", err: errors.New(`ent: missing required field "InvoiceRequest.fee_amount"`)}
+	}
+	if _, ok := _c.mutation.FeeRefunded(); !ok {
+		return &ValidationError{Name: "fee_refunded", err: errors.New(`ent: missing required field "InvoiceRequest.fee_refunded"`)}
 	}
 	if _, ok := _c.mutation.Currency(); !ok {
 		return &ValidationError{Name: "currency", err: errors.New(`ent: missing required field "InvoiceRequest.currency"`)}
@@ -426,6 +468,14 @@ func (_c *InvoiceRequestCreate) createSpec() (*InvoiceRequest, *sqlgraph.CreateS
 		_spec.SetField(invoicerequest.FieldAmount, field.TypeFloat64, value)
 		_node.Amount = value
 	}
+	if value, ok := _c.mutation.FeeAmount(); ok {
+		_spec.SetField(invoicerequest.FieldFeeAmount, field.TypeFloat64, value)
+		_node.FeeAmount = value
+	}
+	if value, ok := _c.mutation.FeeRefunded(); ok {
+		_spec.SetField(invoicerequest.FieldFeeRefunded, field.TypeBool, value)
+		_node.FeeRefunded = value
+	}
 	if value, ok := _c.mutation.Currency(); ok {
 		_spec.SetField(invoicerequest.FieldCurrency, field.TypeString, value)
 		_node.Currency = value
@@ -533,6 +583,18 @@ type (
 		*sql.UpdateSet
 	}
 )
+
+// SetFeeRefunded sets the "fee_refunded" field.
+func (u *InvoiceRequestUpsert) SetFeeRefunded(v bool) *InvoiceRequestUpsert {
+	u.Set(invoicerequest.FieldFeeRefunded, v)
+	return u
+}
+
+// UpdateFeeRefunded sets the "fee_refunded" field to the value that was provided on create.
+func (u *InvoiceRequestUpsert) UpdateFeeRefunded() *InvoiceRequestUpsert {
+	u.SetExcluded(invoicerequest.FieldFeeRefunded)
+	return u
+}
 
 // SetStatus sets the "status" field.
 func (u *InvoiceRequestUpsert) SetStatus(v string) *InvoiceRequestUpsert {
@@ -653,6 +715,9 @@ func (u *InvoiceRequestUpsertOne) UpdateNewValues() *InvoiceRequestUpsertOne {
 		if _, exists := u.create.mutation.Amount(); exists {
 			s.SetIgnore(invoicerequest.FieldAmount)
 		}
+		if _, exists := u.create.mutation.FeeAmount(); exists {
+			s.SetIgnore(invoicerequest.FieldFeeAmount)
+		}
 		if _, exists := u.create.mutation.Currency(); exists {
 			s.SetIgnore(invoicerequest.FieldCurrency)
 		}
@@ -703,6 +768,20 @@ func (u *InvoiceRequestUpsertOne) Update(set func(*InvoiceRequestUpsert)) *Invoi
 		set(&InvoiceRequestUpsert{UpdateSet: update})
 	}))
 	return u
+}
+
+// SetFeeRefunded sets the "fee_refunded" field.
+func (u *InvoiceRequestUpsertOne) SetFeeRefunded(v bool) *InvoiceRequestUpsertOne {
+	return u.Update(func(s *InvoiceRequestUpsert) {
+		s.SetFeeRefunded(v)
+	})
+}
+
+// UpdateFeeRefunded sets the "fee_refunded" field to the value that was provided on create.
+func (u *InvoiceRequestUpsertOne) UpdateFeeRefunded() *InvoiceRequestUpsertOne {
+	return u.Update(func(s *InvoiceRequestUpsert) {
+		s.UpdateFeeRefunded()
+	})
 }
 
 // SetStatus sets the "status" field.
@@ -1005,6 +1084,9 @@ func (u *InvoiceRequestUpsertBulk) UpdateNewValues() *InvoiceRequestUpsertBulk {
 			if _, exists := b.mutation.Amount(); exists {
 				s.SetIgnore(invoicerequest.FieldAmount)
 			}
+			if _, exists := b.mutation.FeeAmount(); exists {
+				s.SetIgnore(invoicerequest.FieldFeeAmount)
+			}
 			if _, exists := b.mutation.Currency(); exists {
 				s.SetIgnore(invoicerequest.FieldCurrency)
 			}
@@ -1056,6 +1138,20 @@ func (u *InvoiceRequestUpsertBulk) Update(set func(*InvoiceRequestUpsert)) *Invo
 		set(&InvoiceRequestUpsert{UpdateSet: update})
 	}))
 	return u
+}
+
+// SetFeeRefunded sets the "fee_refunded" field.
+func (u *InvoiceRequestUpsertBulk) SetFeeRefunded(v bool) *InvoiceRequestUpsertBulk {
+	return u.Update(func(s *InvoiceRequestUpsert) {
+		s.SetFeeRefunded(v)
+	})
+}
+
+// UpdateFeeRefunded sets the "fee_refunded" field to the value that was provided on create.
+func (u *InvoiceRequestUpsertBulk) UpdateFeeRefunded() *InvoiceRequestUpsertBulk {
+	return u.Update(func(s *InvoiceRequestUpsert) {
+		s.UpdateFeeRefunded()
+	})
 }
 
 // SetStatus sets the "status" field.
