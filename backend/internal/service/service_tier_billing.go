@@ -15,10 +15,11 @@ type ServiceTierBillingResolution struct {
 	Downgraded bool   // Billing is cheaper than Requested
 }
 
-// ResolveBillingServiceTier picks the tier to bill. The upstream declaration is
-// trusted only to lower the bill: a request served below the tier it asked for
-// (OpenAI "priority" answered with service_tier "default", Anthropic speed=fast
-// answered with usage.speed "standard") is billed at the cheaper tier. A response
+// ResolveBillingServiceTier applies the generic response-tier contract. The
+// upstream declaration is trusted only to lower the bill: a request served below
+// the tier it asked for (e.g. Anthropic speed=fast answered with usage.speed
+// "standard") is billed at the cheaper tier. OpenAI Fast uses the specialized
+// contract in ResolveOpenAIServiceTierBilling instead. A response
 // that claims a more expensive tier, an unknown one, or none at all leaves the
 // requested tier in place, which is also the behaviour for upstreams that never
 // declare a tier.
@@ -60,17 +61,24 @@ func serviceTierCostRank(tier string) (rank int, known bool) {
 	}
 }
 
-// ResolveOpenAIServiceTierBilling applies the response-tier contract for the
-// selected credential. Public OpenAI API responses declare the actual tier and
-// may lower billing. The private ChatGPT Codex endpoint does not: it commonly
-// reports default for effective Fast turns, so OAuth-like credentials retain
-// the final outbound tier while still exposing the observed value.
+// ResolveOpenAIServiceTierBilling bills OpenAI Fast at the final outbound
+// request tier for every credential type, including API-key relays. A relay may
+// charge Fast while returning default (or another tier), so its declaration
+// must not lower the requested Fast price. Request policies have already run:
+// a filtered Fast tier is absent here and cannot be restored by the response.
+// Other tiers retain the existing response contract, including the private
+// Codex OAuth default-echo exception. The observed tier stays separate.
 func ResolveOpenAIServiceTierBilling(account *Account, requested, observed string) ServiceTierBillingResolution {
+	requested = normalizeBillingServiceTier(requested)
+	observed = normalizeBillingServiceTier(observed)
+	if account != nil && account.IsOpenAI() && (requested == OpenAIFastTierPriority || requested == "fast") {
+		return ServiceTierBillingResolution{Requested: requested, Observed: observed, Billing: requested}
+	}
 	if account != nil && account.IsOpenAIOAuthLike() && codexOAuthResponseTierIsNonAuthoritative(observed) {
 		return ServiceTierBillingResolution{
-			Requested: normalizeBillingServiceTier(requested),
-			Observed:  normalizeBillingServiceTier(observed),
-			Billing:   normalizeBillingServiceTier(requested),
+			Requested: requested,
+			Observed:  observed,
+			Billing:   requested,
 		}
 	}
 	return ResolveBillingServiceTier(requested, observed)
@@ -85,8 +93,8 @@ func codexOAuthResponseTierIsNonAuthoritative(observed string) bool {
 	}
 }
 
-// ApplyOpenAIServiceTierBillingResolution lowers result.ServiceTier only when
-// the selected credential's upstream response tier is authoritative.
+// ApplyOpenAIServiceTierBillingResolution preserves outbound OpenAI Fast and
+// otherwise lowers result.ServiceTier when the response contract permits it.
 func ApplyOpenAIServiceTierBillingResolution(account *Account, result *OpenAIForwardResult) ServiceTierBillingResolution {
 	if result == nil {
 		return ServiceTierBillingResolution{}
