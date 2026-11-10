@@ -20,7 +20,9 @@ import (
 )
 
 // Forward forwards request to OpenAI API
-func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (_ *OpenAIForwardResult, smartWSError error) {
+	ctx, smartWSAttempt := beginGroupSmartWSAttempt(ctx, c)
+	defer func() { smartWSError = finishGroupSmartWSAttempt(smartWSAttempt, smartWSError) }()
 	if c != nil {
 		c.Writer.Header().Del("X-Codex2API-Basispoints-Bypass")
 		c.Writer.Header().Del("X-Codex2API-Upstream")

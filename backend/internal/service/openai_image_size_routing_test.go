@@ -340,7 +340,7 @@ func TestSelectAccountWithSchedulerForImages_SpilloverReplacesClearedStaleBindin
 	}
 }
 
-func TestSelectAccountWithSchedulerForImages_AllPassesQueuedKeepBindingOnReturnedAccount(t *testing.T) {
+func TestSelectAccountWithSchedulerForImages_AllPassesQueuedBindOnlyAfterAdmission(t *testing.T) {
 	for _, mode := range openAIImageSizeSchedulerModes {
 		t.Run(mode.name, func(t *testing.T) {
 			groupID := int64(93015)
@@ -367,12 +367,30 @@ func TestSelectAccountWithSchedulerForImages_AllPassesQueuedKeepBindingOnReturne
 			require.NoError(t, err)
 			require.Equal(t, int64(81171), selection.Account.ID)
 			require.NotNil(t, selection.WaitPlan)
-			bound, ok := cache.sessionBindings["openai:"+sessionHash]
-			if mode.loadBatch {
-				require.False(t, ok, "a queued selection does not bind the session")
-			} else {
-				require.Equal(t, int64(81171), bound, "eager sequential binding stays on the returned queued account")
+			require.False(t, selection.Acquired)
+			require.False(t, selection.PreserveStickyBinding)
+			_, ok := cache.sessionBindings["openai:"+sessionHash]
+			require.False(t, ok, "every scheduler defers a queued binding until slot admission")
+
+			// Replay the selection context at the handler's post-wait bind point.
+			admissionCtx := ContextWithSelectionProfitGate(context.Background(), selection)
+			concurrency.acquireResults[selection.Account.ID] = true
+			account := selection.Account
+			acquired, err := svc.tryAcquireAccountSlot(admissionCtx, account.ID, account.Concurrency, &account)
+			require.NoError(t, err)
+			require.NotNil(t, acquired)
+			require.True(t, acquired.Acquired)
+			if acquired.ReleaseFunc != nil {
+				t.Cleanup(acquired.ReleaseFunc)
 			}
+			require.NoError(t, svc.BindStickySessionAfterProfitAdmission(admissionCtx, &groupID, sessionHash, account.ID))
+			require.Equal(t, int64(81171), cache.sessionBindings["openai:"+sessionHash])
+
+			// A later request has since moved the session; the old waiter's
+			// snapshot must survive all image-size passes and cannot undo it.
+			require.NoError(t, cache.SetSessionAccountID(context.Background(), groupID, "openai:"+sessionHash, 81172, time.Hour))
+			require.NoError(t, svc.BindStickySessionAfterProfitAdmission(admissionCtx, &groupID, sessionHash, account.ID))
+			require.Equal(t, int64(81172), cache.sessionBindings["openai:"+sessionHash])
 		})
 	}
 }

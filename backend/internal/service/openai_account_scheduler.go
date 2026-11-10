@@ -420,6 +420,16 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	if s != nil && s.service != nil && s.service.openAIGroupRequiresPrivacySet(ctx, req.GroupID) {
 		req.RequirePrivacySet = true
 	}
+	stickyKnown := req.StickyAccountID > 0
+	if !stickyKnown && strings.TrimSpace(req.SessionHash) != "" && s.service.cache != nil {
+		accountID, readErr := s.service.getStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
+		stickyKnown = readErr == nil || errors.Is(readErr, ErrStickySessionNotFound)
+		if readErr == nil {
+			req.StickyAccountID = accountID
+		}
+	}
+	ctx = withOpenAIStickyBindingSnapshot(ctx, req.GroupID, req.SessionHash, req.StickyAccountID, stickyKnown)
+
 	ctx = withOpenAIImageSizeStickyAccount(withOpenAIImageSizeStickyAccount(ctx, req.StickyAccountID), req.StickyPreviousAccountID)
 	start := time.Now()
 
@@ -498,7 +508,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	}
 
 	if !req.StickyWeighted {
-		selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
+		selection, _, err := s.selectBySessionHash(ctx, req)
 		if err != nil {
 			return nil, decision, err
 		}
@@ -509,7 +519,8 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			decision.SelectedAccountType = selection.Account.Type
 			return selection, decision, nil
 		}
-		if escapedSticky {
+		// Successful ordinary escapes advance affinity only after slot admission.
+		if snapshot := openAIStickyBindingSnapshotFromContext(ctx, req.GroupID, req.SessionHash); snapshot != nil && snapshot.preserveForQualityHold {
 			req.PreserveStickyBinding = true
 		}
 	}
@@ -555,6 +566,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	if accountID <= 0 {
 		var err error
 		accountID, err = s.service.getStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		observeOpenAIStickyBinding(ctx, req.GroupID, sessionHash, accountID, err)
 		if err != nil || accountID <= 0 {
 			return nil, false, nil
 		}
@@ -575,6 +587,9 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, false, nil
 	}
 	if activeIntelligenceHold(ctx, account, req.GroupID, req.RequestedModel) {
+		if snapshot := openAIStickyBindingSnapshotFromContext(ctx, req.GroupID, sessionHash); snapshot != nil {
+			snapshot.preserveForQualityHold = true
+		}
 		return nil, true, nil
 	}
 	if shouldClearStickySessionWithContext(ctx, account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
@@ -638,6 +653,9 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency, &account)
 	if errors.Is(acquireErr, ErrAccountQualityHeld) && !req.DisableStickyEscape {
 		// Temporary protection keeps ownership until active recovery completes.
+		if snapshot := openAIStickyBindingSnapshotFromContext(ctx, req.GroupID, sessionHash); snapshot != nil {
+			snapshot.preserveForQualityHold = true
+		}
 		return nil, true, nil
 	}
 	if acquireErr != nil && req.DisableStickyEscape {
@@ -2609,6 +2627,12 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	if strings.TrimSpace(previousResponseID) == "" {
 		guardianParentAccountID = s.resolveOpenAIGuardianParentAccountID(ctx, groupID)
 	}
+	var stickyAccountID int64
+	var stickyReadErr error
+	if sessionHash != "" && s.cache != nil {
+		stickyAccountID, stickyReadErr = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+	}
+	ctx = withOpenAIStickyBindingSnapshot(ctx, groupID, sessionHash, stickyAccountID, stickyReadErr == nil || errors.Is(stickyReadErr, ErrStickySessionNotFound))
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
@@ -2655,10 +2679,14 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		if preserveStickyBinding {
 			legacySessionHash = ""
 		}
+		acceptLegacyAccount := func(account *Account) bool {
+			return s.isOpenAIAccountTransportCompatible(account, requiredTransport, requestedModel) &&
+				accountSupportsOpenAICapabilitiesForRequest(account, requestedModel, requiredCapability, requiredImageCapability)
+		}
 		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 			effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 			for {
-				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, acceptLegacyAccount)
 				if selection != nil {
 					selection.PreserveStickyBinding = selection.PreserveStickyBinding || preserveGuardianParentBinding
 				}
@@ -2668,7 +2696,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				if selection == nil || selection.Account == nil {
 					return selection, decision, nil
 				}
-				if accountSupportsOpenAICapabilitiesForRequest(selection.Account, requestedModel, requiredCapability, requiredImageCapability) {
+				if acceptLegacyAccount(selection.Account) {
 					applyLegacySelectionDecision(&decision, selection)
 					return selection, decision, nil
 				}
@@ -2687,7 +2715,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 
 		effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 		for {
-			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, acceptLegacyAccount)
 			if selection != nil {
 				selection.PreserveStickyBinding = selection.PreserveStickyBinding || preserveGuardianParentBinding
 			}
@@ -2697,8 +2725,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 			if selection == nil || selection.Account == nil {
 				return selection, decision, nil
 			}
-			if s.isOpenAIAccountTransportCompatible(selection.Account, requiredTransport, requestedModel) &&
-				accountSupportsOpenAICapabilitiesForRequest(selection.Account, requestedModel, requiredCapability, requiredImageCapability) {
+			if acceptLegacyAccount(selection.Account) {
 				applyLegacySelectionDecision(&decision, selection)
 				return selection, decision, nil
 			}
@@ -2722,12 +2749,6 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		return nil, decision, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
 
-	var stickyAccountID int64
-	if sessionHash != "" && s.cache != nil {
-		if accountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); err == nil && accountID > 0 {
-			stickyAccountID = accountID
-		}
-	}
 	stickyWeighted := s.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx)
 	subscriptionPriority := s.isOpenAIAdvancedSchedulerSubscriptionPriorityEnabled(ctx)
 	stickyPreviousAccountID := int64(0)

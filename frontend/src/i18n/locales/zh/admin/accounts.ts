@@ -782,6 +782,20 @@ export default {
       revertProxy: '切回原代理',
       revertProxySuccess: '已成功切回原代理',
       revertProxyFailed: '切回原代理失败',
+      openaiIPv6: {
+        "title": "固定 IPv6 出口",
+        "description": "为这个 OpenAI OAuth 账号分配固定 IPv6，影子账号共享该出口。SmartWS 连接复用仍使用此代理。",
+        "drain": "操作前请停用母账号及全部影子账号，等待在途请求结束；完成后手动启用。",
+        "notConfigured": "请先部署 IPv6 出口服务，并设置控制地址、代理地址和令牌文件环境变量。",
+        "ineligible": "仅支持未绑定 VM、未启用 Agent Identity 或 Excel BPS 的 OpenAI OAuth 母账号。",
+        "restore": "解绑会撤销租约并恢复绑定前的代理与代理池；原代理必须仍可用。",
+        "unbound": "尚未绑定固定 IPv6。",
+        "confirmDetach": "确认撤销此 IPv6 租约并恢复原出口？旧出口票据可能需要重新采集。",
+        "detach": "解绑并恢复",
+        "retry": "重试绑定",
+        "bind": "绑定固定 IPv6",
+        "failed": "IPv6 操作失败，请刷新后重试。"
+},
       openaiVm: {
         title: '专属槽位',
         description: '为当前 OpenAI OAuth 母账号创建独立的运行槽位和路由。影子账号不支持此操作。',

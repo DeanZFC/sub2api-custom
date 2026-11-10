@@ -6,28 +6,20 @@
     <p v-if="dirty" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
       <label class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" />{{ t('qqbot.enableCheckin') }}</label>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="space-y-1">{{ t('qqbot.minAmount') }}<input v-model.number="form.min_amount" data-testid="min-amount" type="number" min="0" max="1000" step="0.00000001" required class="input" /></label>
-        <label class="space-y-1">{{ t('qqbot.maxAmount') }}<input v-model.number="form.max_amount" data-testid="max-amount" type="number" min="0" max="1000" step="0.00000001" required class="input" /></label>
-      </div>
-      <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
-        <legend class="font-medium">{{ t('coupon.rewardTitle') }}</legend>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <CouponTemplateSelect v-model="form.coupon_template_id" />
-          <label>{{ t('coupon.quantity') }}<input v-model.number="form.coupon_quantity" type="number" min="0" max="100" step="1" class="input" /></label>
-        </div>
-        <p class="text-sm text-gray-500">{{ t('coupon.rewardHint') }}</p>
-      </fieldset>
-      <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
-        <legend class="font-medium">{{ t('qqbot.checkinDistributionTitle') }}</legend>
-        <p class="text-sm text-gray-500">{{ t('qqbot.checkinDistributionHelp') }}</p>
-        <div class="grid gap-4 sm:grid-cols-3">
-          <label class="space-y-1">{{ t('qqbot.checkinLowerHalf') }}<input v-model.number="lowerHalfPercent" data-testid="lower-half-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
-          <label class="space-y-1">{{ t('qqbot.checkinNextQuarter') }}<input v-model.number="nextQuarterPercent" data-testid="next-quarter-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
-          <label class="space-y-1">{{ t('qqbot.checkinUpperQuarter') }}<input v-model.number="upperQuarterPercent" data-testid="upper-quarter-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
-        </div>
-        <p class="text-sm" :class="distributionValid ? 'text-gray-500' : 'text-red-600'" data-testid="probability-total">{{ t('qqbot.checkinDistributionTotal', { total: distributionTotal }) }}</p>
-      </fieldset>
+      <QQBotRewardItems :model-value="form" prefix="checkin" :allowed-types="['balance', 'coupon']" amount-field="min_amount" range amount-test-id="min-amount" max-amount-test-id="max-amount" @remove="resetDistribution">
+        <template #balance-extra>
+          <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
+            <legend class="font-medium">{{ t('qqbot.checkinDistributionTitle') }}</legend>
+            <p class="text-sm text-gray-500">{{ t('qqbot.checkinDistributionHelp') }}</p>
+            <div class="grid gap-4 sm:grid-cols-3">
+              <label class="space-y-1">{{ t('qqbot.checkinLowerHalf') }}<input v-model.number="lowerHalfPercent" data-testid="lower-half-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
+              <label class="space-y-1">{{ t('qqbot.checkinNextQuarter') }}<input v-model.number="nextQuarterPercent" data-testid="next-quarter-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
+              <label class="space-y-1">{{ t('qqbot.checkinUpperQuarter') }}<input v-model.number="upperQuarterPercent" data-testid="upper-quarter-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
+            </div>
+            <p class="text-sm" :class="distributionValid ? 'text-gray-500' : 'text-red-600'" data-testid="probability-total">{{ t('qqbot.checkinDistributionTotal', { total: distributionTotal }) }}</p>
+          </fieldset>
+        </template>
+      </QQBotRewardItems>
       <div class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
         <h2 class="font-medium">{{ t('qqbot.rechargeEligibility') }}</h2>
         <p class="text-sm text-gray-500">{{ t('qqbot.rechargeEligibilityHelp') }}</p>
@@ -77,7 +69,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import CouponTemplateSelect from './CouponTemplateSelect.vue'
+import QQBotRewardItems from './QQBotRewardItems.vue'
 import { useQQDraft } from './useQQDraft'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -85,6 +77,7 @@ import type { QQCheckinConfig, QQCheckinRewardDistribution } from '@/api/qqbot'
 import { loadCheckinConfig, saveCheckinSettings, validCheckinDistribution } from './checkinSettings'
 import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
 import { normalizeGrowthReward, validGrowthReward } from './growthReward'
+import { validCouponReward, validRewardAmount, type RewardKind } from './rewardItems'
 const { t } = useI18n()
 const maxMilestones = 32
 const form = ref<QQCheckinConfig | null>(null)
@@ -93,6 +86,9 @@ const { dirty, markSaved } = useQQDraft(form)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
+function resetDistribution(kind: RewardKind) {
+  if (kind === 'balance' && form.value) form.value.reward_distribution = { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }
+}
 function probabilityPercent(key: keyof QQCheckinRewardDistribution) {
   return computed({
     get: () => (form.value?.reward_distribution?.[key] ?? 0) / 100,
@@ -120,7 +116,8 @@ async function save() {
   if (!form.value || busy.value) return
   error.value = ''; notice.value = ''
   if (!distributionValid.value) { error.value = t('qqbot.invalidCheckinDistribution'); return }
-  if (!Number.isFinite(form.value.min_amount) || !Number.isFinite(form.value.max_amount) || form.value.min_amount > form.value.max_amount) { error.value = t('qqbot.invalidRange'); return }
+  if (!validRewardAmount(form.value.min_amount) || !validRewardAmount(form.value.max_amount) || form.value.min_amount > form.value.max_amount) { error.value = t('qqbot.invalidRange'); return }
+  if (!validCouponReward(form.value)) { error.value = t('qqbot.rewardEditor.invalidCoupon'); return }
   if (![form.value.min_recharge_total, form.value.min_recharge_30d].every(n => Number.isFinite(n) && n >= 0 && n <= 1_000_000_000 && Number(n.toFixed(2)) === n)) { error.value = t('qqbot.invalidRechargeThreshold'); return }
   if (!Number.isInteger(form.value.recharge_window_days) || form.value.recharge_window_days < 1 || form.value.recharge_window_days > 3650) { error.value = t('qqbot.invalidRechargeWindow'); return }
   if (!Number.isInteger(form.value.streak_days) || form.value.streak_days < 1 || form.value.streak_days > 3650) {

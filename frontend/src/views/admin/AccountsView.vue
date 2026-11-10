@@ -524,9 +524,10 @@
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" @tested="reload" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
+    <OpenAIIPv6Modal :show="showOpenAIIPv6" :account="openaiIPv6Acc" @close="closeOpenAIIPv6Modal" @updated="reload" />
     <OpenAIVMModal :show="showOpenAIVM" :account="openaiVMAcc" @close="closeOpenAIVMModal" @updated="reload" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :syncing-upstream-models="menu.acc ? syncingUpstreamModelIds[menu.acc.id] === true : false" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @openai-vm="handleOpenAIVM" @sync-models="handleSyncUpstreamModels" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :syncing-upstream-models="menu.acc ? syncingUpstreamModelIds[menu.acc.id] === true : false" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @openai-vm="handleOpenAIVM" @openai-ipv6="handleOpenAIIPv6" @sync-models="handleSyncUpstreamModels" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -588,6 +589,7 @@ import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
+import OpenAIIPv6Modal from '@/components/admin/account/OpenAIIPv6Modal.vue'
 import OpenAIVMModal from '@/components/admin/account/OpenAIVMModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
@@ -684,6 +686,8 @@ const showCreateShadowDialog = ref(false)
 const showReAuth = ref(false)
 const showTest = ref(false)
 const showStats = ref(false)
+const showOpenAIIPv6 = ref(false)
+const openaiIPv6Acc = ref<Account | null>(null)
 const showOpenAIVM = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
@@ -1712,6 +1716,7 @@ const isAnyModalOpen = computed(() => {
     showReAuth.value ||
     showTest.value ||
     showStats.value ||
+    showOpenAIIPv6.value ||
     showOpenAIVM.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
@@ -2725,6 +2730,8 @@ const handleExportData = async () => {
 const accountExportStepUp = useStepUp()
 const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
+const closeOpenAIIPv6Modal = () => { showOpenAIIPv6.value = false; openaiIPv6Acc.value = null }
+const handleOpenAIIPv6 = (account: Account) => { menu.show = false; openaiIPv6Acc.value = account; showOpenAIIPv6.value = true }
 const closeOpenAIVMModal = () => { showOpenAIVM.value = false; openaiVMAcc.value = null }
 const handleOpenAIVM = (account: Account) => {
   if (account.platform !== 'openai' || account.type !== 'oauth' || account.parent_account_id != null) return

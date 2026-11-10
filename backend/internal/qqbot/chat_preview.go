@@ -88,7 +88,7 @@ func (s *Service) PreviewChat(ctx context.Context, req ChatPreviewRequest) (Chat
 	}
 	cmd, _ := command(req.Question)
 	if naturalHelpRequest(req.Question) || cmd == "帮助" {
-		out.Action, out.Text = "menu", chatPreviewHelp(c)
+		out.Action, out.Text = "menu", helpText(c)
 		out.DurationMS = time.Since(started).Milliseconds()
 		return out, nil
 	}
@@ -133,25 +133,4 @@ func (s *Service) PreviewChat(ctx context.Context, req ChatPreviewRequest) (Chat
 	}
 	out.DurationMS = time.Since(started).Milliseconds()
 	return out, nil
-}
-
-func chatPreviewHelp(c Config) string {
-	text := "📖 **指令帮助**"
-	customHeading := false
-	for _, item := range helpItems(c) {
-		if strings.HasPrefix(item.action, "custom:") && !customHeading {
-			text += "\n\n**自定义指令**"
-			customHeading = true
-		}
-		usage := item.command
-		if item.usage != "" {
-			usage = item.usage
-		}
-		if strings.HasPrefix(item.action, "custom:") {
-			text += "\n" + replyPlainLabel(usage) + "：" + replyPlainLabel(item.description)
-		} else {
-			text += "\n" + usage + "：" + item.description
-		}
-	}
-	return text + "\n\n按钮填入指令后发送；聊天请 @机器人 + 问题。"
 }

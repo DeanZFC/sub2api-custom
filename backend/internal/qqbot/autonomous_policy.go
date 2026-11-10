@@ -49,9 +49,9 @@ func autonomousPolicyInstructions(a AutonomousConfig, followup bool) string {
 	case "active":
 		policy = "积极参与：优先接住日常分享、短句、情绪和图片；不因内容简单就沉默，仅在明确结束、与别人对话或重复内容时跳过。"
 	case "always":
-		policy = "尽量回复：本条消息已通过本地筛选，请直接给出自然简短的回应。短句、笑声、感谢和情绪表达也应接住；信息不足时说明不确定或简短澄清，不能因没有新内容而沉默。"
+		policy = "尽量回复：本条消息已通过本地筛选，请直接给出符合已设置人设和语气的回应。短句、笑声、感谢和情绪表达也应接住；信息不足时说明不确定或澄清，不能因没有新内容而沉默。"
 	}
-	protocol := `只输出一个 JSON 对象：{"action":"reply","text":"简短自然的回复"} 或 {"action":"skip","reason":"原因枚举"}。跳过原因只能是 conversation_ended、addressed_elsewhere、repeated_topic、already_answered、insufficient_context、no_value；不输出思考过程、解释或代码围栏。`
+	protocol := `只输出一个 JSON 对象：{"action":"reply","text":"回复正文"} 或 {"action":"skip","reason":"原因枚举"}。跳过原因只能是 conversation_ended、addressed_elsewhere、repeated_topic、already_answered、insufficient_context、no_value；不输出思考过程、解释或代码围栏。`
 	if replyMode(a) == "always" {
 		protocol = "直接输出自然语言回复正文，不输出 JSON、action、skip、思考过程或代码围栏，不得选择沉默。"
 	}

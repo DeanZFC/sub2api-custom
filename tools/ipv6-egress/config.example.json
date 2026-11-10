@@ -1,0 +1,12 @@
+{
+  "listen": "172.18.0.1:18080",
+  "control_listen": "172.18.0.1:18081",
+  "control_token": "GENERATE-A-DEDICATED-RANDOM-SECRET-AT-INSTALLATION",
+  "prefix": "2001:db8:1000::/64",
+  "interface": "bond0",
+  "state_file": "/var/lib/sub2api-ipv6/leases.json",
+  "allowed_hosts": ["chatgpt.com", "auth.openai.com", "api.openai.com"],
+  "allowed_clients": ["172.18.0.0/16", "127.0.0.1/32"],
+  "max_leases": 10000,
+  "max_tunnels": 20000
+}

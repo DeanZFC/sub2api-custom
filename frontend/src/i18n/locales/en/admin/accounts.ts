@@ -657,6 +657,20 @@ export default {
       revertProxy: 'Revert proxy',
       revertProxySuccess: 'Successfully reverted to original proxy',
       revertProxyFailed: 'Failed to revert proxy',
+      openaiIPv6: {
+        "title": "Fixed IPv6 egress",
+        "description": "Assign a fixed IPv6 address to this OpenAI OAuth account and its shadows. SmartWS reuses connections through this proxy.",
+        "drain": "Disable the parent and all shadows and wait for active requests to finish before changing the route. Enable them manually afterwards.",
+        "notConfigured": "Deploy the IPv6 egress service and configure the control URL, proxy address and token file environment variables first.",
+        "ineligible": "Only OpenAI OAuth parent accounts without VM, Agent Identity, or Excel BPS are supported.",
+        "restore": "Detach revokes the lease and restores the original proxy and pool. The original proxies must remain usable.",
+        "unbound": "No fixed IPv6 binding.",
+        "confirmDetach": "Revoke this IPv6 lease and restore the original route? Tickets collected on another exit may need refreshing.",
+        "detach": "Detach and restore",
+        "retry": "Retry binding",
+        "bind": "Bind fixed IPv6",
+        "failed": "IPv6 operation failed. Refresh and retry."
+},
       openaiVm: {
         title: 'Dedicated Slot',
         description: 'Create an isolated runtime slot and route for this OpenAI OAuth parent account. Shadow accounts are not supported.',

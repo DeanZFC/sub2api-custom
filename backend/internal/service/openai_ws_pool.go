@@ -1131,6 +1131,9 @@ type openAIWSAcquireQueueWait struct {
 }
 
 func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireRequest) (*openAIWSConnLease, error) {
+	if err := validateOpenAIIPv6Route(req.Account, req.ProxyURL); err != nil {
+		return nil, err
+	}
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
 	}

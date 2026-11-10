@@ -172,6 +172,17 @@ func (s *OpenAIGatewayService) requestCodex780Probe(ctx context.Context, account
 }
 
 func (s *OpenAIGatewayService) requestCodex780Shot(ctx context.Context, account *Account, token, model, proxy string, reserve func() bool, session, state string, seed []string, controls CodexHarvestControls) (out codexHarvestProbeResult) {
+	if s.openaiIPv6 != nil {
+		if err := s.openaiIPv6.CheckRoute(ctx, account, proxy); err != nil {
+			out.Err = err
+			return
+		}
+	}
+	if err := validateOpenAIIPv6Route(account, proxy); err != nil {
+		out.Err = err
+		return
+	}
+
 	ctx = context.WithValue(ctx, openAICodexStateProbeContextKey{}, true)
 	if edge, ok := ctx.Value(codexMintEdgeContextKey{}).(string); ok {
 		controls.EdgeIP = edge

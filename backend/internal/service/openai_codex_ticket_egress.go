@@ -256,14 +256,28 @@ func (s *OpenAIGatewayService) pinCodexTicketEgress(req *http.Request, account *
 }
 
 func (s *OpenAIGatewayService) pinCodexTicketWSAcquire(ctx context.Context, headers http.Header, account *Account) (string, func(), error) {
+	if s.openaiIPv6 != nil {
+		if err := s.openaiIPv6.CheckRoute(ctx, account, openAIAccountProxyURL(account)); err != nil {
+			return "", func() {}, err
+		}
+	}
 	s.restoreBoundCodexTicketHarvestIdentity(ctx, headers, account)
 	return s.pinCodexTicketEgressFromHeader(ctx, headers, account, openAIAccountProxyURL(account))
 }
 
 func (s *OpenAIGatewayService) pinCodexTicketEgressFromHeader(ctx context.Context, h http.Header, account *Account, proxyURL string) (string, func(), error) {
 	noop := func() {}
+	if err := validateOpenAIIPv6Route(account, proxyURL); err != nil {
+		return "", noop, err
+	}
 	ticket := s.boundCodexTicketFromHeader(ctx, h, account)
 	if ticket == nil {
+		return proxyURL, noop, nil
+	}
+	if account.IsOpenAIIPv6Bound() {
+		if ticket.HarvestProxyURL != proxyURL || ticket.HarvestNodeID != "" || ticket.HarvestNodeName != "" {
+			return "", noop, ErrOpenAICodexTicketUnavailable
+		}
 		return proxyURL, noop, nil
 	}
 	return s.pinStoredCodexTicketEgress(ctx, ticket, proxyURL)
@@ -272,6 +286,31 @@ func (s *OpenAIGatewayService) pinCodexTicketEgressFromHeader(ctx context.Contex
 // A single complete ticket determines the egress for self and reuse acquisition.
 func (s *OpenAIGatewayService) pinStoredCodexTicketEgress(ctx context.Context, ticket *openAICodexTicket, proxyURL string) (string, func(), error) {
 	noop := func() {}
+	if s.accountRepo != nil && ticket != nil && ticket.AccountID > 0 {
+		a, err := s.accountRepo.GetByID(ctx, ticket.AccountID)
+		if err != nil {
+			return "", noop, err
+		}
+		if s.openaiIPv6 != nil {
+			if err := s.openaiIPv6.CheckRoute(ctx, a, openAIAccountProxyURL(a)); err != nil {
+				return "", noop, err
+			}
+		}
+		if !codexTicketMatchesIPv6Route(a, ticket) {
+			return "", noop, ErrOpenAICodexTicketUnavailable
+		}
+		if a.IsOpenAIIPv6Bound() {
+			fixed, err := resolveOpenAIAccountProxyURL(ctx, s.proxyRepo, a)
+			if err != nil {
+				return "", noop, err
+			}
+			if ticket.HarvestProxyURL != fixed || ticket.HarvestNodeID != "" || ticket.HarvestNodeName != "" {
+				return "", noop, ErrOpenAICodexTicketUnavailable
+			}
+			return fixed, noop, nil
+		}
+	}
+
 	pinned := strings.TrimSpace(ticket.HarvestProxyURL)
 	if pinned == "" {
 		pinned = s.openAICodexTicketHarvestFixedProxyURL(ctx)

@@ -383,6 +383,7 @@ describe('QQ activity pages with real translations', () => {
     await w.get('[data-testid="guarantee-amount-0"]').setValue('2.12345678')
     await w.get('[data-testid="add-guarantee-prize"]').trigger('click')
     await w.get('[data-testid="guarantee-name-1"]').setValue('Big guarantee')
+    await w.get('[data-testid="guarantee-1-add-reward"]').trigger('click')
     await w.get('[data-testid="guarantee-amount-1"]').setValue('10')
     await w.get('[data-testid="guarantee-probability-0"]').setValue('75.25')
     expect(form.get('button[type="submit"]').attributes('disabled')).toBeDefined()
@@ -789,6 +790,7 @@ describe('QQ activity pages with real translations', () => {
   it.each(['zh', 'en'] as const)('%s saves try-again prizes and pure chance guarantees', async locale => {
     const w = mount(QQBotLotterySettings, { global: { plugins: [i18n(locale)] } })
     await flushPromises()
+    await w.get('[data-testid="prize-0-add-reward"]').trigger('click')
     for (const invalid of ['', '-1', '1.5', '1001']) {
       await w.get('[data-testid="prize-chances-0"]').setValue(invalid)
       await w.get('form').trigger('submit'); await flushPromises()
@@ -796,7 +798,7 @@ describe('QQ activity pages with real translations', () => {
     }
     await w.get('[data-testid="prize-chances-0"]').setValue('1')
     await w.get('[data-testid="guarantee-enabled"]').setValue(true)
-    await w.get('[data-testid="guarantee-amount-0"]').setValue('0')
+    await w.get('[data-testid="guarantee-0-reward-type-0"]').setValue('chances')
     await w.get('[data-testid="guarantee-chances-0"]').setValue('2')
     await w.get('form').trigger('submit'); await flushPromises()
     expect(api.saveLottery.mock.lastCall![0]).toEqual(expect.objectContaining({
@@ -804,6 +806,107 @@ describe('QQ activity pages with real translations', () => {
       guarantee_prizes: [expect.objectContaining({ amount: 0, chances: 2 })]
     }))
     expect(w.text()).not.toMatch(/qqbot\./)
+    w.unmount()
+  })
+
+  it.each(['zh', 'en'] as const)('%s preserves every prize in existing bundles on save and reload', async locale => {
+    const prizes = [
+      { name: 'Bundle', amount: 1.12345678, chances: 2, coupon_template_id: 12, coupon_quantity: 3, probability_bps: 1000 },
+      { name: 'Thanks', amount: 0, probability_bps: 9000 }
+    ]
+    api.lotteryConfig.mockResolvedValue({ enabled: true, title: 'Lottery', recharge_step: 10, chances_per_step: 1, prizes })
+    const w = mount(QQBotLotterySettings, { global: { plugins: [i18n(locale)] } })
+    await flushPromises()
+    const types = () => w.findAll('[data-testid^="prize-0-reward-type-"]').map(select => (select.element as HTMLSelectElement).value)
+    expect(types()).toEqual(['balance', 'chances', 'coupon'])
+    expect(w.findAll('[data-testid^="prize-1-reward-type-"]')).toHaveLength(0)
+    expect(w.get('[data-testid="prize-0-add-reward"]').attributes('disabled')).toBeDefined()
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery.mock.lastCall![0].prizes).toEqual(prizes)
+    expect(types()).toEqual(['balance', 'chances', 'coupon'])
+    await w.get('[data-testid="prize-0-remove-reward-2"]').trigger('click')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery.mock.lastCall![0].prizes[0]).toEqual({ ...prizes[0], coupon_template_id: 0, coupon_quantity: 0 })
+    expect(types()).toEqual(['balance', 'chances'])
+    expect(w.text()).not.toMatch(/qqbot\./)
+    w.unmount()
+  })
+
+  it.each(['zh', 'en'] as const)('%s adds outcomes and clears removed or replaced prize types', async locale => {
+    const w = mount(QQBotLotterySettings, { global: { plugins: [i18n(locale)] } })
+    await flushPromises()
+    await w.get('[data-testid="add-lottery-prize"]').trigger('click')
+    expect(w.findAll('[data-testid^="prize-2-reward-type-"]')).toHaveLength(0)
+    await w.get('[data-testid="prize-name-2"]').setValue('Coupon')
+    await w.get('[data-testid="prize-2-add-reward"]').trigger('click')
+    await w.get('[data-testid="prize-2-reward-type-0"]').setValue('coupon')
+    await w.get('[data-testid="probability-1"]').setValue('89.99')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery).not.toHaveBeenCalled()
+    await w.get('[data-testid="prize-2-rewards"] select[required]').setValue('12')
+    await w.get('[data-testid="prize-2-coupon-quantity"]').setValue('2')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery.mock.lastCall![0].prizes[2]).toEqual({ name: 'Coupon', amount: 0, probability_bps: 1, coupon_template_id: 12, coupon_quantity: 2 })
+    await w.get('[data-testid="prize-2-reward-type-0"]').setValue('chances')
+    expect(w.find('[data-testid="prize-2-coupon-quantity"]').exists()).toBe(false)
+    await w.get('[data-testid="prize-chances-2"]').setValue('3')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery.mock.lastCall![0].prizes[2]).toEqual({ name: 'Coupon', amount: 0, probability_bps: 1, coupon_template_id: 0, coupon_quantity: 0, chances: 3 })
+    await w.get('[data-testid="prize-2-remove-reward-0"]').trigger('click')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery.mock.lastCall![0].prizes[2].chances).toBe(0)
+    w.unmount()
+  })
+
+  it.each(['zh', 'en'] as const)('%s saves coupon-only guarantees and rejects empty guarantees', async locale => {
+    const w = mount(QQBotLotterySettings, { global: { plugins: [i18n(locale)] } })
+    await flushPromises()
+    await w.get('[data-testid="guarantee-enabled"]').setValue(true)
+    await w.get('[data-testid="guarantee-0-reward-type-0"]').setValue('coupon')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery).not.toHaveBeenCalled()
+    await w.get('[data-testid="guarantee-0-rewards"] select[required]').setValue('12')
+    await w.get('[data-testid="guarantee-0-coupon-quantity"]').setValue('2')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery.mock.lastCall![0].guarantee_prizes).toEqual([
+      expect.objectContaining({ amount: 0, coupon_template_id: 12, coupon_quantity: 2, probability_bps: 10000 })
+    ])
+    api.saveLottery.mockClear()
+    await w.get('[data-testid="guarantee-0-remove-reward-0"]').trigger('click')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery).not.toHaveBeenCalled()
+    expect(w.get('[role="alert"]').text()).toBe(i18n(locale).global.t('qqbot.invalidGuaranteePrizes'))
+    w.unmount()
+  })
+
+  it.each(['zh', 'en'] as const)('%s rejects empty or over-precise lottery probabilities', async locale => {
+    const w = mount(QQBotLotterySettings, { global: { plugins: [i18n(locale)] } })
+    await flushPromises()
+    for (const invalid of ['', '10.001']) {
+      await w.get('[data-testid="probability-0"]').setValue(invalid)
+      await w.get('form').trigger('submit'); await flushPromises()
+      expect(api.saveLottery).not.toHaveBeenCalled()
+    }
+    await w.get('[data-testid="probability-0"]').setValue('10')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveLottery).toHaveBeenCalledOnce()
+    w.unmount()
+  })
+
+  it.each(['checkin', 'invite'] as const)('%s adds coupon rewards and removes the old balance reward', async kind => {
+    const w = mount(kind === 'checkin' ? QQBotCheckinSettings : QQBotInviteSettings, { global: { plugins: [i18n('zh')] } })
+    await flushPromises()
+    const prefix = '[data-testid="' + kind
+    await w.get(prefix + '-reward-type-0"]').setValue('coupon')
+    expect(w.find(prefix + '-rewards"]').findAll('option').map(option => option.attributes('value'))).not.toContain('chances')
+    const saveAPI = kind === 'checkin' ? api.saveCheckin : api.saveInvite
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(saveAPI).not.toHaveBeenCalled()
+    await w.get(prefix + '-rewards"] select[required]').setValue('12')
+    await w.get(prefix + '-coupon-quantity"]').setValue('3')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(saveAPI.mock.lastCall![0]).toEqual(expect.objectContaining({ coupon_template_id: 12, coupon_quantity: 3, ...(kind === 'checkin' ? { min_amount: 0, max_amount: 0 } : { invite_reward: 0 }) }))
+    expect(w.find(prefix + '-coupon-quantity"]').exists()).toBe(true)
     w.unmount()
   })
 

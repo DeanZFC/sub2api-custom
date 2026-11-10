@@ -40,7 +40,7 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			s, replies := helpTestSender(t)
 			c := DefaultConfig()
-			want := []string{"签到", "我的余额", "今日用量", "我的奖励", "抽奖", "抽奖次数", "抽奖活动", "成长任务", "邀请奖励", "我的邀请", "今日排行榜", "渠道状态", "生图 图片描述", "价格 模型名", "绑定 邮箱或绑定码", "转账 金额 邮箱"}
+			want := []string{"签到", "我的余额", "今日用量", "我的奖励", "抽奖", "抽奖次数", "抽奖活动", "成长任务", "我的优惠券", "邀请奖励", "我的邀请", "今日排行榜", "渠道状态", "生图 图片描述", "价格 模型名", "绑定 邮箱或绑定码", "转账 金额 邮箱"}
 			for i := 0; i < count; i++ {
 				name := "/" + strings.Repeat("长", 30) + fmt.Sprintf("%02d", i)
 				c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: name, Reply: "reply", Enabled: true})
@@ -63,9 +63,11 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 				}
 				command, _, ok := strings.Cut(line, "：")
 				require.True(t, ok, "help entries must include a description: %q", line)
+				require.True(t, strings.HasPrefix(command, "- **") && strings.HasSuffix(command, "**"), "help commands must be bold list items: %q", line)
+				command = strings.TrimSuffix(strings.TrimPrefix(command, "- **"), "**")
 				displayed[command]++
 				require.NotContains(t, line, " · ", "help entries must use one command per line")
-				require.False(t, strings.HasPrefix(line, "/"), "help displays commands directly")
+				require.False(t, strings.HasPrefix(command, "/"), "help displays commands directly")
 			}
 			for _, cmd := range want {
 				usage := cmd
@@ -83,17 +85,22 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 				if item.usage != "" {
 					usage = item.usage
 				}
-				require.Contains(t, reply.text(), usage+"："+description)
+				require.Contains(t, reply.text(), "- **"+usage+"**："+description)
 			}
 			for i := 0; i < count; i++ {
 				name := "/" + strings.Repeat("长", 30) + fmt.Sprintf("%02d", i)
-				require.Contains(t, reply.text(), replyPlainLabel(strings.TrimPrefix(name, "/"))+"：自定义回复")
+				require.Contains(t, reply.text(), "- **"+replyPlainLabel(strings.TrimPrefix(name, "/"))+"**：自定义回复")
 			}
 			for _, absent := range []string{"disabled", "福利", "兑换", "翻页", "下一页", "上一页", "更多服务", "第 1/", "举报垃圾信息"} {
 				require.NotContains(t, reply.text(), absent)
 			}
-			require.Contains(t, reply.text(), "抽奖 [次数]：")
+			for _, section := range []string{"账户与签到", "活动与奖励", "查询与工具", "账号与转账"} {
+				require.Contains(t, reply.text(), "\n\n**"+section+"**\n\n- **")
+			}
+			require.Equal(t, count > 0, strings.Contains(reply.text(), "**自定义指令**"))
+			require.Contains(t, reply.text(), "**抽奖 [次数]**：")
 			require.NotContains(t, reply.text(), `\[次数\]`)
+			require.Contains(t, reply.text(), helpText(c), "QQ and the admin preview must use the same complete help text")
 			require.Contains(t, reply.text(), "聊天请 @机器人 + 问题。", "the final line must not be truncated")
 			require.LessOrEqual(t, utf8.RuneCountInString(reply.text()), 1800)
 			require.NotNil(t, reply.Keyboard)

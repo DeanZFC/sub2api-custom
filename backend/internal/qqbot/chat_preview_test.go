@@ -37,11 +37,11 @@ func TestChatPreviewHelpKeepsOptionalArgumentsAndExcludesRetiredCommands(t *test
 		{Command: "/举报垃圾信息", Enabled: true},
 		{Command: "/faq_test", Enabled: true},
 	}
-	help := chatPreviewHelp(c)
-	require.Contains(t, help, "抽奖 [次数]：")
+	help := helpText(c)
+	require.Contains(t, help, "**抽奖 [次数]**：")
 	require.NotContains(t, help, `\[次数\]`)
 	require.NotContains(t, help, "举报垃圾信息")
-	require.Contains(t, help, `faq\_test：自定义回复`, "operator-defined command labels remain escaped")
+	require.Contains(t, help, `**faq\_test**：自定义回复`, "operator-defined command labels remain escaped")
 }
 
 func TestCommandInventoryExcludesRetiredCustomCommands(t *testing.T) {

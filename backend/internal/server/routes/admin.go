@@ -95,6 +95,7 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
 		registerOpenAIVMRoutes(admin, h, stepUpAuth)
+		registerOpenAIIPv6Routes(admin, h, stepUpAuth)
 
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
@@ -394,6 +395,8 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.PUT("/:id/composite-routes/:route_id", h.Admin.Group.UpdateCompositeRoute)
 		groups.DELETE("/:id/composite-routes/:route_id", h.Admin.Group.DeleteCompositeRoute)
 		groups.GET("/:id", h.Admin.Group.GetByID)
+		groups.GET("/:id/smart-ws", h.Admin.Setting.GetGroupSmartWS)
+		groups.PUT("/:id/smart-ws", h.Admin.Setting.UpdateGroupSmartWS)
 		groups.POST("", h.Admin.Group.Create)
 		groups.POST("/:id/duplicate", h.Admin.Group.Duplicate)
 		groups.PUT("/:id", h.Admin.Group.Update)
@@ -1032,4 +1035,13 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 		}
 		c.Next()
 	}
+}
+
+func registerOpenAIIPv6Routes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	if h.Admin.OpenAIIPv6 == nil {
+		return
+	}
+	admin.GET("/accounts/:id/ipv6-egress", h.Admin.OpenAIIPv6.Status)
+	admin.POST("/accounts/:id/ipv6-egress", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIIPv6.Bind)
+	admin.DELETE("/accounts/:id/ipv6-egress", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIIPv6.Detach)
 }

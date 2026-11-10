@@ -121,6 +121,17 @@ func (s *OpenAIGatewayService) executeCodexHarvestProbe(ctx context.Context, acc
 }
 
 func (s *OpenAIGatewayService) requestCodexHarvestProbe(ctx context.Context, account *Account, token, model, proxy string, reserve func() bool, sessionID string) (out codexHarvestProbeResult) {
+	if s.openaiIPv6 != nil {
+		if err := s.openaiIPv6.CheckRoute(ctx, account, proxy); err != nil {
+			out.Err = err
+			return
+		}
+	}
+	if err := validateOpenAIIPv6Route(account, proxy); err != nil {
+		out.Err = err
+		return
+	}
+
 	if openAICodexTicketTargetLength(account, s.openAICodexTicketConfig()) == 780 {
 		return s.requestCodex780Probe(ctx, account, token, model, proxy, reserve, sessionID)
 	}

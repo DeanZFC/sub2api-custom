@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -13,6 +14,12 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // doOpenAIUpstream 只在 OpenAI OAuth 能力绑定已启用时把真实请求交给插件。
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (result *http.Response, resultErr error) {
+	if request == nil || account == nil {
+		return nil, errors.New("OpenAI request or account is missing")
+	}
+	if attempt, _ := request.Context().Value(groupSmartWSAttemptKey{}).(*groupSmartWSAttempt); attempt != nil && attempt.sent.Load() {
+		return nil, finishGroupSmartWSAttempt(attempt, errSmartWSAlreadyDispatched)
+	}
 	// Resolve ticket policy at the final native send boundary, after request identity
 	// normalization and before opening a network connection. All HTTP aliases share it.
 	if request != nil && account != nil && account.IsOpenAIOAuthLike() && s.openAICodexTicketEnabledContext(request.Context()) {
@@ -44,6 +51,18 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 		return nil, err
 	}
 	proxyURL = pinnedProxy
+	if s.openaiIPv6 != nil {
+		if err := s.openaiIPv6.CheckRoute(request.Context(), account, proxyURL); err != nil {
+			release()
+			releaseChat()
+			return nil, err
+		}
+	}
+	if err := validateOpenAIIPv6Route(account, proxyURL); err != nil {
+		release()
+		releaseChat()
+		return nil, err
+	}
 	defer func() {
 		observe := resultErr == nil && result != nil && result.StatusCode == http.StatusOK
 		result, resultErr = attachCodexTicketEgressRelease(result, resultErr, func() {
@@ -84,13 +103,16 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
 		return nil, err
 	}
-	if s.pluginManager != nil && !bound {
+	if s.pluginManager != nil && !bound && !account.IsOpenAIIPv6Bound() {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			return response, err
 		}
 	}
 
+	if response, handled, err := s.tryGroupSmartWS(request, proxyURL, account); handled {
+		return response, err
+	}
 	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 }
 
@@ -119,6 +141,11 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 			return observeAccountTestResponse(request.Context(), started, response, sendErr)
 		}
 	}
+	if s.openaiGatewayService != nil && s.openaiGatewayService.openaiIPv6 != nil {
+		if err := s.openaiGatewayService.openaiIPv6.CheckRoute(request.Context(), account, proxyURL); err != nil {
+			return nil, err
+		}
+	}
 	if s.openaiVM != nil {
 		started := time.Now().UTC()
 		if response, handled, err := s.openaiVM.RoundTrip(request, account); handled {
@@ -128,7 +155,10 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
 		return nil, err
 	}
-	if s.pluginManager != nil {
+	if err := validateOpenAIIPv6Route(account, proxyURL); err != nil {
+		return nil, err
+	}
+	if s.pluginManager != nil && !account.IsOpenAIIPv6Bound() {
 		started := time.Now().UTC()
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {

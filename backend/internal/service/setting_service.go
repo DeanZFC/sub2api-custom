@@ -118,6 +118,9 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 
 // SettingService 系统设置服务
 type SettingService struct {
+	groupSmartWSMu                     sync.Mutex
+	groupSmartWSGeneration             uint64
+	groupSmartWSCache                  map[int64]groupSmartWSCacheEntry
 	astraRoutingMu                     sync.Mutex
 	astraRoutingOnSaved                func(config.AstraRoutingSettings)
 	astraRoutingCache                  *config.AstraRoutingSettings

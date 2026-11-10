@@ -1013,6 +1013,7 @@ var ProviderSet = wire.NewSet(
 	NewTLSFingerprintProfileService,
 	ProvidePluginManager,
 	ProvideOpenAIVMService,
+	ProvideOpenAIIPv6Service,
 	NewDigestSessionStore,
 	ProvideIdempotencyCoordinator,
 	ProvideSystemOperationLockService,
@@ -1143,4 +1144,10 @@ func ProvideAccountPerformanceService(repo AccountPerformanceRepository, ops *Op
 	s.ops = ops
 	s.Start()
 	return s
+}
+
+func ProvideOpenAIIPv6Service(repo OpenAIIPv6Repository, accounts AccountRepository, concurrency *ConcurrencyService, scheduler SchedulerCache, proxies ProxyRepository, gateway *OpenAIGatewayService) *OpenAIIPv6Service {
+	svc := NewOpenAIIPv6Service(repo, accounts, concurrency, scheduler, proxies)
+	gateway.openaiIPv6 = svc
+	return svc
 }

@@ -1,0 +1,32 @@
+[Unit]
+Description=Sub2API per-account IPv6 CONNECT egress
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sub2api-egress
+Group=sub2api-egress
+ExecStart=/usr/local/libexec/sub2api-ipv6-egress -config /etc/sub2api-ipv6/config.json
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=70
+LimitNOFILE=131072
+UMask=0077
+StateDirectory=sub2api-ipv6
+StateDirectoryMode=0700
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+ReadWritePaths=/var/lib/sub2api-ipv6
+
+[Install]
+WantedBy=multi-user.target

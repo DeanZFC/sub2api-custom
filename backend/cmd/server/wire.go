@@ -380,6 +380,7 @@ func provideCleanup(
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
+					service.CloseGroupSmartWSPool()
 				}
 				return nil
 			}},

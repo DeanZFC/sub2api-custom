@@ -460,6 +460,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	openaiIPv6              *OpenAIIPv6Service
 	astraCandyMu            sync.Mutex
 	astraCandySeen          map[[32]byte]time.Time
 	astraCandyRunning       int

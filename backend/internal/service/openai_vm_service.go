@@ -221,7 +221,7 @@ type OpenAIVMAccountStatus struct {
 }
 
 func openAIVMEligible(a *Account) bool {
-	return a != nil && a.IsOpenAIOAuth() && !a.IsShadow() && !a.IsOpenAIAgentIdentity()
+	return a != nil && a.IsOpenAIOAuth() && !a.IsShadow() && !a.IsOpenAIAgentIdentity() && !a.IsOpenAIIPv6Bound()
 }
 func (s *OpenAIVMService) Status(ctx context.Context, id int64) (*OpenAIVMAccountStatus, error) {
 	a, err := s.accounts.GetByID(ctx, id)
@@ -542,6 +542,9 @@ func (s *OpenAIVMService) RoundTrip(req *http.Request, a *Account) (*http.Respon
 // validateOpenAIVMProxy prevents legacy best-effort proxy lookups from turning a
 // managed account into a direct connection when a proxy row cannot be loaded.
 func validateOpenAIVMProxy(a *Account, p *Proxy) error {
+	if err := validateOpenAIIPv6Proxy(a, p); err != nil {
+		return err
+	}
 	if !a.IsOpenAIVMBound() {
 		return nil
 	}
@@ -559,7 +562,7 @@ func resolveOpenAIAccountProxyURL(ctx context.Context, repo ProxyRepository, a *
 			loaded, err := repo.GetByID(ctx, *a.ProxyID)
 			if err == nil {
 				p = loaded
-			} else if a.IsOpenAIVMBound() {
+			} else if a.IsOpenAIVMBound() || a.IsOpenAIIPv6Bound() {
 				return "", errors.New("OpenAI VM proxy lookup failed; direct fallback is disabled")
 			}
 		}

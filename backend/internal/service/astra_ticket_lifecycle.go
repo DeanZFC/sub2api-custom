@@ -56,7 +56,7 @@ func (s *OpenAIGatewayService) storedAstraDonor(ctx context.Context, targetID in
 			continue
 		}
 		a, err := s.accountRepo.GetByID(ctx, id)
-		if err != nil || !s.astraTicketAccountEligible(ctx, a) {
+		if err != nil || a.IsOpenAIIPv6Bound() || !s.astraTicketAccountEligible(ctx, a) {
 			continue
 		}
 		ticket := s.lookupOpenAICodexTicket(a, OpenAICodexStateProbeDefaultModel)
@@ -102,6 +102,10 @@ func (s *OpenAIGatewayService) PrepareStoredAstraSources(ctx context.Context) er
 // tryBorrowStoredAstraTicket runs at most one donor candidate. The caller owns
 // the harvest lock and request budget; failure may fall back to self collection.
 func (s *OpenAIGatewayService) tryBorrowStoredAstraTicket(ctx context.Context, account *Account, model string, timeout time.Duration, reserve func() bool) (attempted bool, result codexHarvestProbeResult) {
+	if account.IsOpenAIIPv6Bound() {
+		return false, result
+	}
+
 	if !s.UnifiedAstraTicketsEnabled(ctx) || model != OpenAICodexStateProbeDefaultModel ||
 		!slices.Contains(s.cfg.AstraRouting(ctx).CookiePool.TargetAccountIDs, account.ID) {
 		return false, result
